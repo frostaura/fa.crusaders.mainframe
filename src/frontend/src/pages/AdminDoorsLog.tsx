@@ -8,14 +8,15 @@ import { DoorFeedRow } from "../components/doors/DoorFeedRow";
 import { useTicker } from "../lib/useTicker";
 import {
   LOG_EMPTY_FILTERED, LOG_EMPTY_FILTERED_HINT, LOG_EMPTY_NOTHING, LOG_OLDER_FAILED,
-  LOG_READ_FAILED, doorCsvDownloaded, doorCsvNotice, doorExhaustedNotice, doorLogEmptyOneDoor,
-  doorLogHowToRead, doorRetentionNotice,
+  LOG_READ_FAILED, doorCsvDownloaded, doorCsvNotice, doorDisplayName, doorExhaustedNotice,
+  doorLogEmptyOneDoor, doorLogHowToRead, doorPickerLabel, doorRetentionNotice, doorRowIdentity,
+  doorRowName,
 } from "../lib/doorsCopy";
 import { clubClock, clubDayAndClock } from "../lib/clubClock";
 import { isOnline, offlineAfterSecondsFor } from "../lib/deviceLiveness";
 import { DOOR_OUTCOME_CHIPS, isDoorScan } from "../lib/deviceActivity";
-import { UNNAMED_GATE } from "../lib/gateCopy";
 import { describeDeviceError } from "../lib/deviceErrors";
+import { withDoorsBoundary } from "../components/doors/DoorsErrorBoundary";
 import {
   doorEndpoints, type DoorLogEntry, type DoorLogFilters, type DoorsView,
 } from "../lib/api";
@@ -103,15 +104,23 @@ type PickerDoor = { id: string; name: string; gate_key: string | null };
  * </p>
  */
 function doorOptions(view: DoorsView | null, rows: DoorLogEntry[] | null): PickerDoor[] {
-  if (view) return view.doors.map(({ device }) => ({ id: device.id, name: device.name, gate_key: device.gate_key }));
+  if (view) {
+    return view.doors.map(({ device }) => ({
+      id: device.id, name: doorDisplayName(device), gate_key: device.gate_key,
+    }));
+  }
   const seen = new Map<string, PickerDoor>();
   for (const row of rows ?? []) {
-    if (!seen.has(row.door.id)) seen.set(row.door.id, row.door);
+    // A1: a row whose door is gone has no id to key on and no page to offer. It is named in
+    // the rows and in the "Removed doors" group below, never as a live door to filter to.
+    const id = row.door?.id;
+    if (!id || seen.has(id)) continue;
+    seen.set(id, { id, name: doorRowIdentity(row.door).label, gate_key: row.door?.gate_key ?? null });
   }
   return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function AdminDoorsLogPage() {
+function AdminDoorsLogPageBody() {
   const toast = useToast();
   const now = useTicker(true);
   const [params, setParams] = useSearchParams();
@@ -278,9 +287,7 @@ export function AdminDoorsLogPage() {
                     which silently looked like a club with one door — so the chosen door keeps
                     its own option, and the picker says why it is short. */}
                 {pickerDoors.map((device) => (
-                  <option key={device.id} value={device.id}>
-                    {device.gate_key ? `${device.name} (${device.gate_key})` : `${device.name} — ${UNNAMED_GATE}`}
-                  </option>
+                  <option key={device.id} value={device.id}>{doorPickerLabel(device)}</option>
                 ))}
               </Select>
               {doors === null && (
@@ -381,7 +388,10 @@ export function AdminDoorsLogPage() {
                       // B17 / A5: the door's DISPLAY name, which is what an admin calls it.
                       // This printed the slug, so a log read after an incident named every
                       // row "front-door" where the club says "Front door".
-                      doorName={entry.door.name}
+                      // A1: and it is `doorRowName` rather than `.name`, because a row whose
+                      // board has been deleted carries nulls — reading `.name` off that is
+                      // the blank white page three reviewers found.
+                      doorName={doorRowName(entry.door)}
                       innerRef={i > 0 && i === appendedFrom ? appendedRef : undefined}
                     />
                   ))}
@@ -413,3 +423,10 @@ export function AdminDoorsLogPage() {
     </div>
   );
 }
+
+/**
+ * A1 / E-C1 / C1: THE page the critical was found on. Exported through the doors error
+ * boundary, so a rendering fault shows a heading, a sentence and a way back instead of the
+ * blank white document a deleted door produced for the whole club.
+ */
+export const AdminDoorsLogPage = withDoorsBoundary(AdminDoorsLogPageBody);

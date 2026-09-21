@@ -19,6 +19,7 @@ import { DOORS_READ_FAILED, doorStateNotice } from "../lib/doorsCopy";
 import { UNNAMED_GATE, gateDeleteConfirm, gateDeleteStandingNotice } from "../lib/gateCopy";
 import { ACTIVITY_READ_FAILED } from "../lib/deviceActivity";
 import { describeDeviceError } from "../lib/deviceErrors";
+import { withDoorsBoundary } from "../components/doors/DoorsErrorBoundary";
 import {
   doorEndpoints, endpoints, type AdminDoorDevice, type AdminSettings, type DeviceActivityEntry,
   type DoorEventEntry, type DoorsView,
@@ -179,7 +180,7 @@ function DoorControls({ door, actions, online, shutAt }: {
   );
 }
 
-export function AdminDoorsDetailPage() {
+function AdminDoorsDetailPageBody() {
   const { id = "" } = useParams();
   const nav = useNavigate();
   const now = useTicker(true);
@@ -276,3 +277,6 @@ export function AdminDoorsDetailPage() {
     </div>
   );
 }
+
+/** A1: see {@link AdminDoorsLogPage}. Every doors route is exported through the boundary. */
+export const AdminDoorsDetailPage = withDoorsBoundary(AdminDoorsDetailPageBody);

@@ -409,12 +409,25 @@ describe("the club door log", () => {
     expect(rows.textContent).not.toContain("front-door");
   });
 
-  it("labels an unnamed door by its display name rather than its board code", async () => {
+  /**
+   * <b>A11 reverses half of this.</b> The option used to read "Door gate — no door name yet",
+   * which presents the auto-registration placeholder as the club's own word for the board and
+   * then contradicts it in the same option. "Door gate" is what every unnamed door in the club
+   * is called, so it names none of them.
+   */
+  it("labels an unnamed door as an unnamed scanner with its board code", async () => {
     open([], { doors: [doorFixture({ name: "Door gate", gate_key: null })] });
 
     const picker = await screen.findByLabelText("Door");
-    expect(picker).toHaveTextContent("Door gate — no door name yet");
-    expect(picker.textContent).not.toContain("gate-0a1b2c —");
+    expect(picker).toHaveTextContent("Unnamed scanner (gate-0a1b2c)");
+    expect(picker.textContent).not.toContain("Door gate");
+  });
+
+  /** A door the club HAS named keeps its name, whether or not it has a key. */
+  it("keeps a named door's own name in the picker", async () => {
+    open([], { doors: [doorFixture({ name: "Front door", gate_key: null })] });
+
+    expect(await screen.findByLabelText("Door")).toHaveTextContent("Front door — no door name yet");
   });
 
   /**
@@ -439,6 +452,72 @@ describe("the club door log", () => {
     expect(picker).toHaveTextContent("Side door");
     expect(screen.getByText(/this list may be short/))
       .toHaveTextContent("The scans below are unaffected");
+  });
+
+  // --- A1 / E-C1 / C1: the door that is gone ---------------------------------------
+
+  /**
+   * <b>The critical of this round, found independently by three reviewers.</b>
+   *
+   * A reviewer deleted a door and `/admin/doors/log` became a blank white page for the whole
+   * club: rows arrived with `door: null`, the page read `.name` off it, and the whole
+   * document unmounted. It was reachable four ways — a `?door=<deleted id>` link, the Outcome
+   * filter, the range, and "Load older scans" with no warning at all.
+   *
+   * <p>
+   * The ruling (A2) is that the history is NOT destroyed: deleting a door deletes no scan
+   * rows, and the row carries what it stored at write time.
+   * </p>
+   */
+  it("renders a row whose door was deleted, under the name the row stored", async () => {
+    open([doorLogFixture({
+      door: { id: null, name: "Side door", gate_key: "side-door", removed: true },
+    })]);
+
+    const rows = await screen.findByRole("list");
+    expect(rows).toHaveTextContent("Side door");
+    expect(rows).toHaveTextContent(/since been removed/i);
+    expect(document.body.textContent).not.toBe("");
+  });
+
+  /** And the shape the wire says can never happen, which is the shape that shipped. */
+  it("survives a row with no door at all rather than blanking the page", async () => {
+    open([doorLogFixture({ door: null })]);
+
+    expect(await screen.findByText(/scans?, newest first/)).toBeInTheDocument();
+    expect(screen.getByRole("list")).toHaveTextContent(/since been removed/i);
+  });
+
+  /**
+   * <b>The suite guard.</b> A finding the tests could not see is also a test-suite defect:
+   * nothing fed the log renderer a row with a null in it. This feeds it every nullable field
+   * nulled at once — the row the API is not supposed to be able to send.
+   */
+  it("renders a row with every nullable field null", async () => {
+    open([doorLogFixture({
+      door: { id: null, name: null, gate_key: null, removed: true },
+      reason: null, member: null, fingerprint: null, delivered_at: null,
+      action: "gate.denied_no_booking",
+    })]);
+
+    expect(await screen.findByText(/scans?, newest first/)).toBeInTheDocument();
+    expect(screen.getByRole("list")).toHaveTextContent(/door that has since been removed/i);
+  });
+
+  /** E-C1: "Load older scans" reached a removed door's rows and the page went white. */
+  it("survives a removed door arriving only on the SECOND page", async () => {
+    open([
+      doorLogFixture(),
+      doorLogFixture({ at: ago(60) }),
+      doorLogFixture({ at: ago(120), door: null }),
+      doorLogFixture({ at: ago(180), door: { id: null, name: null, gate_key: null, removed: true } }),
+    ], { pageSize: 2 });
+
+    await screen.findByText(/2 scans/);
+    fireEvent.click(screen.getByRole("button", { name: "Load older scans" }));
+
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(4));
+    expect(screen.getByRole("list")).toHaveTextContent(/since been removed/i);
   });
 
   // --- staleness ------------------------------------------------------------------

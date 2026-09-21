@@ -13,6 +13,7 @@ import {
   DOORS_EMPTY_HINT, DOORS_EMPTY_NOTICE, DOORS_READ_FAILED, doorAttentionReason,
   doorStaleChecksNotice, doorsAttentionSummary,
 } from "../lib/doorsCopy";
+import { withDoorsBoundary } from "../components/doors/DoorsErrorBoundary";
 import { doorEndpoints, endpoints, type DoorRow, type DoorsView } from "../lib/api";
 
 /**
@@ -76,7 +77,7 @@ function sortRows(rows: DoorRow[], tenantHeartbeat: number | null, now: number):
   });
 }
 
-export function AdminDoorsPage() {
+function AdminDoorsPageBody() {
   const [view, setView] = useState<DoorsView | null>(null);
   const [chrome, setChrome] = useState<DoorsChrome | null>(null);
   const [tenantHeartbeat, setTenantHeartbeat] = useState<number | null>(null);
@@ -250,3 +251,10 @@ export function AdminDoorsPage() {
     </div>
   );
 }
+
+/**
+ * A1: exported through the doors error boundary, so a rendering fault here shows a heading,
+ * a sentence and a way back rather than a blank white document. The routes live in `App.tsx`,
+ * which this lane does not own, so the wrapping happens at the page's own export.
+ */
+export const AdminDoorsPage = withDoorsBoundary(AdminDoorsPageBody);

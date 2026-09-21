@@ -4,10 +4,10 @@ import {
 } from "./deviceActivity";
 // A13 — one club-locale formatter for the whole surface. See lib/clubClock.ts.
 import { clubClock, clubDayAndClock, clubInstant } from "./clubClock";
-import { POWER_LOSS_LABELS, doorShutNotice } from "./gateCopy";
+import { POWER_LOSS_LABELS, UNNAMED_GATE, doorShutNotice } from "./gateCopy";
 import {
-  type AdminDoorDevice, type DeviceActivityEntry, type DoorEventEntry, type DoorSignal,
-  type DoorToday,
+  type AdminDoorDevice, type DeviceActivityEntry, type DoorEventEntry, type DoorLogDoor,
+  type DoorSignal, type DoorToday,
 } from "./api";
 
 /**
@@ -53,6 +53,106 @@ export function spellAge(ago: string): string {
 
 /** A chip is a word and a tone. Colour is never the signal; the word is. */
 export type DoorChip = { label: string; tone: "success" | "danger" | "muted" | "warning" };
+
+// --- who a door is, on a row and in a heading -------------------------------------
+
+/**
+ * The name `DeviceRegistryService` gives a gate the moment it registers itself.
+ *
+ * <p>
+ * <b>A11: it is a placeholder, not a name, and the screens presented it as one.</b> A door
+ * nobody had named rendered as the heading "Door gate", the identity line "no door name yet"
+ * and the chip "Needs a door name" — three different vocabularies for one state, the loudest
+ * of which was a word the club never chose and cannot tell apart from the other four doors
+ * in the same state.
+ * </p>
+ */
+export const GATE_PLACEHOLDER_NAME = "Door gate";
+
+/**
+ * What to call a door on screen — its own name, or what it actually is (A11).
+ *
+ * `Unnamed scanner (gate-44c103)` names exactly one board and says the naming is outstanding
+ * in the same breath, which is what "Door gate" could do neither of.
+ */
+export function doorDisplayName(device: { name?: string | null; device_code?: string | null }): string {
+  const name = (device.name ?? "").trim();
+  if (name !== "" && name !== GATE_PLACEHOLDER_NAME) return name;
+  const code = (device.device_code ?? "").trim();
+  return code === "" ? "Unnamed scanner" : `Unnamed scanner (${code})`;
+}
+
+/**
+ * What a log row says about the door it happened at, including a door that is GONE.
+ *
+ * <p>
+ * <b>A1 / A2 / E-C1 / C1.</b> The page read `entry.door.name` and a deleted door turned the
+ * whole club log white. The ruling is that the history survives the board: the row carries
+ * what it stored at write time, and the screen names it and says it has been removed rather
+ * than either crashing or silently dropping the rows.
+ * </p>
+ *
+ * <p>
+ * Four arms and no guessing. A stored display name is the best answer; a stored `gate_key`
+ * is the next; a row that has neither says only that the door is gone; and `door` missing
+ * altogether is treated as removed, because a scan that happened at no door is not a state
+ * this product can produce and "removed" is the only honest reading of it.
+ * </p>
+ */
+export type DoorRowIdentity = {
+  /** What to print. Never empty, never `undefined`, never the word "null". */
+  label: string;
+  /** Said once beside the name, so a reader is not left wondering why it has no link. */
+  removed: boolean;
+  /** The door's own page, or null — a removed door has none, and a dead link is worse. */
+  id: string | null;
+};
+
+/** Said beside a removed door's name. A row is not dropped and is not left unexplained. */
+export const REMOVED_DOOR_NOTE = "a door that has since been removed";
+
+/** When the row stored no name and no key either — all that is left is that it is gone. */
+export const REMOVED_DOOR_UNNAMED = "A door that has since been removed";
+
+export function doorRowIdentity(door: DoorLogDoor | null | undefined): DoorRowIdentity {
+  // `door` absent is the shape WIRE-R2 §1 says cannot happen, and it is the shape that
+  // shipped. Trusting that promise is the defect, not the mitigation.
+  const removed = door == null || door.removed === true;
+  const name = (door?.name ?? "").trim();
+  const key = (door?.gate_key ?? "").trim();
+  const id = door?.id ?? null;
+  if (name !== "" && name !== GATE_PLACEHOLDER_NAME) return { label: name, removed, id };
+  if (key !== "") return { label: key, removed, id };
+  if (removed) return { label: REMOVED_DOOR_UNNAMED, removed, id: null };
+  return { label: "An unnamed door", removed, id };
+}
+
+/** True of the name {@link doorDisplayName} builds for a door nobody has named. */
+function isUnnamedScanner(name: string): boolean {
+  return name.startsWith("Unnamed scanner");
+}
+
+/**
+ * One option in the log's door picker.
+ *
+ * A11: a door nobody has named reads "Unnamed scanner (gate-0a1b2c)" and stops there. The
+ * old label — "Door gate — no door name yet" — presented the placeholder as the club's word
+ * for the board AND then contradicted it, in one option, on the control an admin picks a
+ * door with.
+ */
+export function doorPickerLabel(device: { name: string; gate_key: string | null }): string {
+  if (device.gate_key) return `${device.name} (${device.gate_key})`;
+  if (isUnnamedScanner(device.name)) return device.name;
+  return `${device.name} — ${UNNAMED_GATE}`;
+}
+
+/** The row's whole door clause — the name, and the removal said once after it. */
+export function doorRowName(door: DoorLogDoor | null | undefined): string {
+  const identity = doorRowIdentity(door);
+  if (!identity.removed) return identity.label;
+  if (identity.label === REMOVED_DOOR_UNNAMED) return REMOVED_DOOR_UNNAMED;
+  return `${identity.label} — ${REMOVED_DOOR_NOTE}`;
+}
 
 /** How long a cached roster lives on a board. Mirrors the firmware's `ROSTER_MAX_AGE_MS`. */
 const ROSTER_MAX_AGE_MS = 6 * 3_600_000;
