@@ -143,9 +143,9 @@ bool overlayFrameFromSpec(const corpus::FrameSpec& s, Frame& out) {
   } else if (eq(v, "IDLE")) {
     out = Frame::idle(static_cast<uint8_t>(toU32(s.args[0])), s.args[1]);
   } else if (eq(v, "MAP")) {
-    const int16_t numbers[4] = {static_cast<int16_t>(toU32(s.args[0])), static_cast<int16_t>(toU32(s.args[1])),
-                                static_cast<int16_t>(toU32(s.args[2])),
-                                static_cast<int16_t>(toU32(s.args[3]))};
+    const int16_t numbers[4] = {
+        static_cast<int16_t>(toU32(s.args[0])), static_cast<int16_t>(toU32(s.args[1])),
+        static_cast<int16_t>(toU32(s.args[2])), static_cast<int16_t>(toU32(s.args[3]))};
     out = Frame::map(numbers);
   } else {
     return false;
@@ -182,9 +182,9 @@ bool frameFromSpec(const corpus::FrameSpec& s, Frame& out) {
     const uint16_t remaining[4] = {toU16(s.args[1]), toU16(s.args[2]), toU16(s.args[3]), toU16(s.args[4])};
     out = Frame::state(static_cast<uint8_t>(toU32(s.args[0])), remaining);
   } else if (eq(v, "PONG")) {
-    out = s.argCount >= 5U ? Frame::pong(s.args[0], toU32(s.args[1]), toU16(s.args[2]), toU16(s.args[3]),
-                                         toU16(s.args[4]))
-                           : Frame::pong(s.args[0], toU32(s.args[1]));
+    out = s.argCount >= 5U
+              ? Frame::pong(s.args[0], toU32(s.args[1]), toU16(s.args[2]), toU16(s.args[3]), toU16(s.args[4]))
+              : Frame::pong(s.args[0], toU32(s.args[1]));
   } else if (eq(v, "EVT")) {
     out = Frame::evt(s.args[0], s.args[1]);
   } else if (eq(v, "ERR")) {
@@ -387,9 +387,8 @@ void test_no_wire_form_produces_an_unbounded_on(void) {
 /// configuration. So no wire form of `!SHOW` may yield a hold outside the
 /// bounds, and in particular none may yield zero.
 void test_no_wire_form_produces_a_permanent_screen(void) {
-  const char* bodies[] = {"SHOW,0,0",     "SHOW,0,1",  "SHOW,1,0",    "SHOW,120,0",
-                          "SHOW,121,0",   "SHOW,-1,0", "SHOW,NEVER,0", "SHOW,99999999999,0",
-                          "SHOW,4294967295,0"};
+  const char* bodies[] = {"SHOW,0,0",  "SHOW,0,1",     "SHOW,1,0",           "SHOW,120,0",       "SHOW,121,0",
+                          "SHOW,-1,0", "SHOW,NEVER,0", "SHOW,99999999999,0", "SHOW,4294967295,0"};
   bool sawFrame = false;
   for (size_t i = 0; i < sizeof(bodies) / sizeof(bodies[0]); ++i) {
     char line[kScratch];

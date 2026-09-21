@@ -29,10 +29,8 @@ static_assert(static_cast<uint8_t>(proto::Key::Slot4) + 1U == hal::kButtonCount,
 // well-formed frame on a box built for a 1602 rather than a protocol error. The
 // assertion lives HERE, on the device side that knows about both, for the same
 // reason bridgelogic/RosterTokenFits.h does.
-static_assert(hal::kDisplayRows <= proto::kMaxRows,
-              "the panel has more rows than the protocol can address");
-static_assert(hal::kDisplayCols <= proto::kMaxArgLen,
-              "a full-width row would not fit a !ROW argument");
+static_assert(hal::kDisplayRows <= proto::kMaxRows, "the panel has more rows than the protocol can address");
+static_assert(hal::kDisplayCols <= proto::kMaxArgLen, "a full-width row would not fit a !ROW argument");
 
 /// Decimal parse of an argument the decoder has already validated and clamped.
 ///
@@ -62,8 +60,8 @@ uint32_t parseU32(const char* text) {
 CourtBox::CourtBox(const CourtPorts& ports, proto::LegacyDialect legacy)
     : scanner_(ports.scanner), bridge_(ports.bridge), clock_(ports.clock), relays_(ports.relay),
       screens_(ports.display), panel_(ports.buttons), scan_(), auth_(), rx_(proto::Link::Downlink, legacy),
-      uptime_(), stateDue_(), lastMask_(0U), overrunPending_(false), txBuf_(), txDropped_(0U),
-      rxErrors_(0U), unauthorised_(0U), oversizeScans_(0U) {
+      uptime_(), stateDue_(), lastMask_(0U), overrunPending_(false), txBuf_(), txDropped_(0U), rxErrors_(0U),
+      unauthorised_(0U), oversizeScans_(0U) {
 }
 
 void CourtBox::begin() {
@@ -409,6 +407,5 @@ void CourtBox::sendCourtEvent(const char* name, proto::Court court) {
   const char detail[2] = {proto::courtChar(court), '\0'};
   static_cast<void>(sendFrame(proto::Frame::evt(name, detail)));
 }
-
 
 } // namespace courtlogic

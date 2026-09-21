@@ -23,11 +23,15 @@
 //
 // WHY EVERY REFUSAL SAYS SOMETHING DIFFERENT
 // ------------------------------------------
-// The display is 16x2 and the member is standing in a corridor. "DENIED" sends
-// them to the desk for every one of five unrelated reasons; "COURT B NOT C"
-// sends them ten metres down the corridor and "TOO EARLY" tells them to wait.
-// The verdict enum exists so the box can be specific, and the strings are here
-// rather than in main.cpp so the host suite can assert on them.
+// The display is a character LCD and the member is standing in a corridor.
+// "DENIED" sends them to the desk for every one of five unrelated reasons;
+// "COURT B NOT C" sends them ten metres down the corridor and "TOO EARLY" tells
+// them to wait. The verdict enum exists so the box can be specific, and the
+// strings are here rather than in main.cpp so the host suite can assert on them.
+//
+// The panel is twenty columns by four rows, with a sixteen-by-two SAFE SUBSET —
+// see kLineLen below. Rows 0-1 clipped at sixteen must still read as a whole
+// message, so the extra room buys enrichment and never carries the verdict.
 //
 // No Arduino headers, no heap, no String. Compiles for AVR, Xtensa and the host.
 
@@ -37,9 +41,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "hal/Display.h"
+
 #include "eventq/Event.h"
 #include "eventq/EventQueue.h"
-#include "hal/Display.h"
 #include "protocol/Protocol.h"
 #include "roster/Roster.h"
 

@@ -1204,19 +1204,19 @@ void test_box_the_action_row_says_which_thing_is_missing(void) {
     const char* hhmm;
     const char* expectLeft;
   };
+
   const Case cases[] = {
       {courtlogic::kLinkWifiUp | courtlogic::kLinkApiUp, proto::kNoClock, "READY"},
       {courtlogic::kLinkWifiUp, proto::kNoClock, "READY NO SERVER"},
       {0U, proto::kNoClock, "READY NO WIFI"},
-      {courtlogic::kLinkWifiUp | courtlogic::kLinkApiUp | courtlogic::kLinkRestorePending,
-       proto::kNoClock, "STARTING UP"},
+      {courtlogic::kLinkWifiUp | courtlogic::kLinkApiUp | courtlogic::kLinkRestorePending, proto::kNoClock,
+       "STARTING UP"},
   };
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
     feedFrame(b.bridge, proto::Frame::idle(cases[i].flags, cases[i].hhmm));
     at += 1100U;
     b.step(at);
-    TEST_ASSERT_EQUAL_STRING_MESSAGE(padded(cases[i].expectLeft), b.display.row(3U),
-                                     cases[i].expectLeft);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(padded(cases[i].expectLeft), b.display.row(3U), cases[i].expectLeft);
   }
 }
 
