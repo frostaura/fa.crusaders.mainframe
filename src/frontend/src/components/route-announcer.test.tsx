@@ -178,7 +178,16 @@ describe("RouteAnnouncer", () => {
       return (
         <>
           <RouteAnnouncer />
-          <Nav to="/admin/doors/log?outcome=refused" />
+          {/*
+            A PATHNAME change, where this used to be a query-string one.
+
+            The retry is the behaviour under test and it is unchanged. The scenario had to
+            move because a search-only change is now silent by design — it stopped being a
+            navigation at all, so a test that drove one would have been asserting the retry
+            against a code path that no longer runs. Back out of a filtered log to the doors
+            page is the same journey reviewer C took, one segment further.
+          */}
+          <Nav to="/admin/doors" />
           <button type="button" onClick={() => setGone(true)}>Replace the filter</button>
           <Page title="Door log" extra={<Filter gone={gone} />} />
         </>
@@ -198,6 +207,57 @@ describe("RouteAnnouncer", () => {
 
     await waitFor(() => expect(screen.getByRole("heading", { name: "Door log" })).toHaveFocus());
     expect(document.activeElement).not.toBe(document.body);
+  });
+
+  /**
+   * A filter is not a navigation.
+   *
+   * <p>
+   * The effect ran on `location.search`, so every filter change on the door log announced the
+   * page name again and pulled focus to the `&lt;h1&gt;`. An admin narrowing a filter three
+   * times heard "Door log" three times, over whatever they were reading, and lost the keyboard
+   * off the control they were using each time. The log's own `role="status"` carries the
+   * result count, which is the thing that actually changed.
+   * </p>
+   */
+  it("says nothing and takes nothing when only the query string moves", async () => {
+    render(
+      <MemoryRouter initialEntries={["/admin/doors/log"]}>
+        <RouteAnnouncer />
+        <Nav to="/admin/doors/log?outcome=refused" />
+        <Page title="Door log" />
+      </MemoryRouter>,
+    );
+
+    const heading = screen.getByRole("heading", { name: "Door log" });
+    const go = screen.getByRole("button", { name: "Go" });
+    act(() => { go.focus(); });
+    act(() => { go.click(); });
+
+    // Give the retry loop every chance to fire if it were going to.
+    await act(async () => { await new Promise((r) => setTimeout(r, 400)); });
+
+    expect(screen.getByTestId("route-announcer").textContent).toBe("");
+    expect(heading).not.toHaveFocus();
+    expect(go).toHaveFocus();
+    // The title is still right — it is derived from the path, which has not moved.
+    expect(document.title).toBe("Door log — Crusaders Mainframe");
+  });
+
+  it("still announces when the path moves, filter or no filter", async () => {
+    render(
+      <MemoryRouter initialEntries={["/admin/doors/log?outcome=refused"]}>
+        <RouteAnnouncer />
+        <Nav to="/admin/doors?outcome=refused" />
+        <Routes>
+          <Route path="/admin/doors/log" element={<Page title="Door log" />} />
+          <Route path="/admin/doors" element={<Page title="Doors" />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    act(() => { screen.getByRole("button", { name: "Go" }).click(); });
+    await waitFor(() => expect(screen.getByTestId("route-announcer").textContent).toBe("Doors"));
   });
 
   /**

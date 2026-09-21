@@ -1,6 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { ApiError, endpoints, STREAM_SILENCE_MS, tokenStore } from "./api";
+import { createContext, useContext } from "react";
 import { useAuth } from "./auth";
+import { useLiveBalance, type BalanceDelta, type BalanceTransport, type LiveState } from "./liveBalance";
 
 /** How low a balance has to be before the chip warns, in credits. Mirrors the amber threshold. */
 export const LOW_BALANCE_CREDITS = 50;
@@ -10,31 +10,75 @@ export const LOW_BALANCE_CREDITS = 50;
  *
  * <p>
  * Spelled out rather than reusing `formatCredits`, whose "cr" is an abbreviation a screen
- * reader reads as letters. And the amber low-balance state is spoken, because it is otherwise
+ * reader reads as letters. And the low-balance state is spoken, because it is otherwise
  * carried entirely by the chip's colour.
  * </p>
+ *
+ * <p>
+ * <b>Zero got its own arm, and its absence was a measured defect.</b> There were two arms, and
+ * at exactly 0.00 a member was told their balance was "running low". It is not low, it is
+ * empty, and they cannot book anything at all — while the grid went on offering them 31 green
+ * "Available" cells. The same two-arm reading made 0.00 and 49.99 the identical amber.
+ * </p>
+ *
+ * <p>
+ * <b>The signature is additive.</b> `walletLabel(balance, loading)` is what a dozen callers and
+ * `wallet-chip-a11y.test.tsx` already pass; the third argument carries the honesty suffix and
+ * defaults to saying nothing.
+ * </p>
  */
-export function walletLabel(balance: number | null, loading: boolean): string {
+export function walletLabel(balance: number | null, loading: boolean, state?: LiveState): string {
   if (balance === null) return loading ? "Wallet balance, loading" : "Wallet balance unavailable";
   const amount = `${balance.toFixed(2)} credits`;
-  return balance < LOW_BALANCE_CREDITS
-    ? `Wallet balance ${amount}, running low. Tap to top up.`
-    : `Wallet balance ${amount}. Tap to top up.`;
+  // Never claim a figure is live when the stream has gone and a 30-second poll is standing in
+  // for it. A confident stale number is the defect the degraded state exists to close.
+  const stale = state === "degraded" ? " This figure is checked every 30 seconds." : "";
+  if (balance <= 0) return `Wallet balance 0 credits. You can't book until you top up. Tap to top up.${stale}`;
+  if (balance < LOW_BALANCE_CREDITS) return `Wallet balance ${amount}, running low. Tap to top up.${stale}`;
+  return `Wallet balance ${amount}. Tap to top up.${stale}`;
+}
+
+/**
+ * Where the chip goes when it is tapped — and at zero this is NOT `/wallet`.
+ *
+ * At zero the ledger is empty or one row and the only useful control is one more tap away, so
+ * the chip that says "you cannot book" led to a screen that does nothing about it.
+ */
+export function walletHref(balance: number | null): string {
+  return balance !== null && balance <= 0 ? "/wallet/topup" : "/wallet";
+}
+
+/** Which of the three looks the chip wears. Three states, three looks — not two. */
+export function walletTone(balance: number | null): "zero" | "low" | "fine" {
+  if (balance !== null && balance <= 0) return "zero";
+  if (balance !== null && balance < LOW_BALANCE_CREDITS) return "low";
+  return "fine";
 }
 
 type BalanceState = {
   balance: number | null;
   loading: boolean;
+  /** Four states, not two. `loading` != `degraded` != `unavailable`. */
+  state: LiveState;
+  lastConfirmedAt: number | null;
+  /** The most recent movement, for the chip's count-up and flyout. */
+  delta: BalanceDelta | null;
+  clearDelta: () => void;
   refresh: () => Promise<void>;
   /**
    * Take a balance the server has just stated, without asking it again.
    *
    * <p>
-   * The booking response carries <code>balance_after_credits</code>, so the wallet GET
-   * that used to follow every booking asked a question already answered and put a second
-   * round trip on the path between a member's tap and the screen changing. This is not an
-   * optimistic guess — it is the server's own figure from the response that committed the
-   * charge; the wallet stream and the next wallet read still reconcile it.
+   * The booking response carries <code>balance_after_credits</code>, so the wallet GET that
+   * used to follow every booking asked a question already answered and put a second round trip
+   * between a member's tap and the screen changing. This is not an optimistic guess — it is
+   * the server's own figure from the response that committed the charge; the wallet stream and
+   * the next wallet read still reconcile it.
+   * </p>
+   *
+   * <p>
+   * It also marks the next movement as this tab's own, so the chip does not raise a toast
+   * about a booking the member has already been told about.
    * </p>
    */
   apply: (balanceCredits: number) => void;
@@ -48,189 +92,50 @@ export function useBalance(): BalanceState {
   return ctx;
 }
 
-export function BalanceProvider({ children }: { children: React.ReactNode }) {
+export function BalanceProvider({ children, transport }: {
+  children: React.ReactNode;
+  /** For tests. Production uses the SSE transport, which is the programme's settled choice. */
+  transport?: BalanceTransport;
+}) {
   const auth = useAuth();
-  const [balance, setBalance] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
-  const inflight = useRef(false);
   /**
    * The forced-password-change gate is armed, so the API refuses `/wallet` and the stream
    * ticket with `403 password_change_required`.
    *
    * <p>
-   * A session holding an admin-issued temporary password may reach nothing but the screen
-   * that replaces it — `PasswordChangeGate` answers every other route `403
-   * password_change_required`. The wallet is one of those routes, and the balance stream is
-   * the one the client asks for again on a backoff, so the forced-change screen sat there
-   * re-requesting a stream ticket against a refusal that is permanent by policy, printing a
-   * console error each time on the one screen where a member can do nothing about it.
-   * Nothing here runs until the gate clears; the effects re-run when it does.
+   * A session holding an admin-issued temporary password may reach nothing but the screen that
+   * replaces it. The wallet is one of those routes, and the balance stream is the one the
+   * client asks for again on a backoff, so the forced-change screen sat there re-requesting a
+   * stream ticket against a refusal that is permanent by policy, printing a console error each
+   * time on the one screen where a member can do nothing about it.
    * </p>
    *
    * <p>
    * Carried as a DEPENDENCY for the same reason as in `profile.tsx`: `auth.status` stays
-   * `"authenticated"` right through the forced change, so an effect keyed on it alone never
+   * `"authenticated"` right through the forced change, so a hook keyed on it alone never
    * re-ran once the member had chosen their own password, and the header pill sat on "— cr"
-   * until a manual reload. Keying on the flag also stops the wallet-stream ticket being retried
-   * against a refusal that is permanent by policy while the gate is up.
+   * until a manual reload.
    * </p>
    */
   const gated = auth.status === "authenticated" && auth.mustChangePassword;
-
-  const refresh = useCallback(async () => {
-    if (auth.status !== "authenticated" || gated) return;
-    if (inflight.current) return;
-    inflight.current = true;
-    setLoading(true);
-    try {
-      const w = await endpoints.wallet();
-      setBalance(w.balance_credits);
-    } catch {
-      // Silent — header pill simply won't update on transient failure.
-    } finally {
-      inflight.current = false;
-      setLoading(false);
-    }
-  }, [auth.status, gated]);
-
-  // Initial fetch + refresh on auth flip, and on the forced-change gate coming down.
-  useEffect(() => {
-    if (auth.status !== "authenticated") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale balance on sign-out
-      setBalance(null);
-      return;
-    }
-    if (!gated) refresh();
-  }, [auth.status, gated, refresh]);
-
-  // Refresh when the tab comes back — a manual top-up in another tab, a phone waking up in
-  // a squash club. `visibilitychange` as well as `focus`, because a backgrounded PWA that is
-  // brought forward never fires `focus` and is exactly the session most likely to have missed
-  // a push while it was asleep.
-  useEffect(() => {
-    if (auth.status !== "authenticated" || gated) return;
-    const onFocus = () => refresh();
-    const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [auth.status, gated, refresh]);
-
-  // Live push: subscribe to /api/v1/wallet/stream so admin top-ups and other ledger movements
-  // reflect immediately.
-  //
-  // Two things about this connection were wrong at once, and they compounded.
-  //
-  // The credential was the full access JWT, in the query string — `?access_token=…` — which
-  // nginx's `location /api/` writes to its access log verbatim, on the first connect and again
-  // on every reconnect. A fifteen-minute credential for the entire API, in a log file that
-  // outlives it by months. It is a one-minute stream-only ticket now, minted by a POST.
-  //
-  // And the token was captured ONCE, outside `connect`, with `[auth.status]` as the only
-  // dependency. `auth.status` does not change when the access token is refreshed, so every
-  // reconnect re-used the token captured at sign-in; once that had expired the retry loop
-  // settled into a permanent 30s poll of an endpoint answering 401, and the header pill froze
-  // for the life of the tab. Any session older than the token lifetime that suffered a single
-  // network blip — a phone waking up in a squash club — lost its live balance for good.
-  // Minting the ticket inside `connect` is what fixes it: every attempt, including every
-  // reconnect, authenticates with whatever the session holds *now*.
-  //
-  // The third thing wrong with it was that a stream can stop delivering WITHOUT failing.
-  // The server's loop used to abandon its pending read on every keep-alive, so from ~25s
-  // into a page's life every published balance was swallowed while the socket stayed open —
-  // no `onerror`, no `requestfailed`, nothing for the backoff above to react to, and a
-  // member watching a stale figure until they reloaded. The server is fixed, but a client
-  // whose only liveness signal is `onerror` is trusting the other end to fail loudly, and
-  // this one did not. The keep-alive is a named `ping` event now, so silence is observable:
-  // if nothing arrives for STREAM_SILENCE_MS the connection is dropped, the balance is
-  // re-read over plain HTTP, and the stream is reopened — which also re-syncs on connect.
-  useEffect(() => {
-    // Nothing to subscribe to while the forced-change gate is up: the ticket endpoint answers
-    // 403 by policy, so retrying it is a loop that can never succeed. The gate coming down is
-    // a dependency, so the stream opens the moment the member has their own password.
-    if (auth.status !== "authenticated" || gated) return;
-    if (!tokenStore.get()) return;
-    let es: EventSource | null = null;
-    let cancelled = false;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let silenceTimer: ReturnType<typeof setTimeout> | null = null;
-    let backoffMs = 1000;
-
-    const clearSilenceTimer = () => {
-      if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
-    };
-
-    const retryLater = () => {
-      if (cancelled) return;
-      reconnectTimer = setTimeout(() => { void connect(); }, backoffMs);
-      backoffMs = Math.min(backoffMs * 2, 30_000);
-    };
-
-    const dropAndRetry = () => {
-      clearSilenceTimer();
-      es?.close();
-      es = null;
-      // Exponential backoff capped at 30s — covers network blips + container restarts.
-      retryLater();
-    };
-
-    /** Restarted by every byte the stream delivers; firing means the stream has gone quiet. */
-    const heardFrom = () => {
-      clearSilenceTimer();
-      silenceTimer = setTimeout(() => {
-        void refresh();
-        dropAndRetry();
-      }, STREAM_SILENCE_MS);
-    };
-
-    const connect = async () => {
-      if (cancelled) return;
-      let ticket: string;
-      try {
-        ({ ticket } = await endpoints.walletStreamTicket());
-      } catch (err) {
-        // A 403 is a policy, not a blip — the forced-password-change gate answers every
-        // route but its own, and no amount of backing off changes that answer. Stop asking;
-        // this effect re-runs by itself the moment the gate clears.
-        if (err instanceof ApiError && err.status === 403) return;
-        // Otherwise: no ticket means no stream. A 401 has already been turned into a
-        // session-expired by the api client; anything else is the club being unreachable.
-        retryLater();
-        return;
-      }
-      if (cancelled) return;
-      es = new EventSource(`/api/v1/wallet/stream?ticket=${encodeURIComponent(ticket)}`);
-      heardFrom();
-      es.onopen = () => { backoffMs = 1000; heardFrom(); };
-      es.onmessage = (e) => {
-        heardFrom();
-        try {
-          const msg = JSON.parse(e.data) as { balance_credits: number };
-          if (typeof msg.balance_credits === "number") setBalance(msg.balance_credits);
-          backoffMs = 1000; // reset backoff on successful message
-        } catch { /* malformed payloads are ignored */ }
-      };
-      // The keep-alive carries no balance; all it proves is that the stream is still ours.
-      es.addEventListener("ping", heardFrom);
-      es.onerror = dropAndRetry;
-    };
-
-    void connect();
-    return () => {
-      cancelled = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      clearSilenceTimer();
-      es?.close();
-    };
-  }, [auth.status, gated, refresh]);
-
-  const apply = useCallback((balanceCredits: number) => setBalance(balanceCredits), []);
+  const live = useLiveBalance({
+    enabled: auth.status === "authenticated" && !gated,
+    transport,
+  });
 
   return (
-    <BalanceContext.Provider value={{ balance, loading, refresh, apply }}>
+    <BalanceContext.Provider
+      value={{
+        balance: live.balance,
+        loading: live.loading,
+        state: live.state,
+        lastConfirmedAt: live.lastConfirmedAt,
+        delta: live.delta,
+        clearDelta: live.clearDelta,
+        refresh: live.refresh,
+        apply: live.apply,
+      }}
+    >
       {children}
     </BalanceContext.Provider>
   );

@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { DoorClosed, LogOut, Settings as SettingsIcon, Wallet as WalletIcon, Webhook as WebhookIcon, Cpu } from "lucide-react";
+import { DoorClosed, LogOut, Settings as SettingsIcon, Webhook as WebhookIcon, Cpu } from "lucide-react";
 import { ShutDoorsBanner } from "./doors/ShutDoorsBanner";
 import { useDoorsChrome } from "./doors/useDoorsChrome";
 import { endpoints } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { tokenStore } from "../lib/api";
-import { LOW_BALANCE_CREDITS, useBalance, walletLabel } from "../lib/balance";
+import { CreditsBadge } from "./CreditsBadge";
 import { useProfile } from "../lib/profile";
 import { ScrollArea } from "./ScrollArea";
 import { pendingApplicationsVersion, subscribePendingApplications } from "../lib/pendingApplications";
-import { cn, formatCredits } from "../lib/utils";
+import { cn } from "../lib/utils";
 
 /**
  * How many membership applications are sitting unreviewed — the in-app half of §2.3's
@@ -58,7 +58,6 @@ export default function Layout() {
   const auth = useAuth();
   const nav = useNavigate();
   const location = useLocation();
-  const { balance, loading } = useBalance();
   const { profile } = useProfile();
   const pendingApplications = usePendingApplicationCount(
     auth.status === "authenticated" && auth.isAdmin,
@@ -318,55 +317,17 @@ export default function Layout() {
             the club name may truncate and the wallet chip may wrap, the gear may not vanish.
           */}
           <div className="ml-auto flex flex-wrap justify-end items-center gap-[8px] min-w-0">
-            {auth.status === "authenticated" && (
-              <NavLink
-                to="/wallet"
-                className={({ isActive }) => cn(
-                  // C16 — 36 px is not a touch target. `h-11` (44 px) on a coarse pointer
-                  // only: the constraint is a fingertip, and a 44 px chip in a desktop
-                  // header is a chip that has stopped being a chip.
-                  //
-                  // B12 — the cap and the truncation both GO, and the box is sized in
-                  // pixels like everything else in this row.
-                  //
-                  // `max-w-[35vw]` with `truncate` on the figure was the D6 fix, and at a
-                  // 32 px root font size reviewer B measured what it actually produced: a
-                  // balance of 0 rendered as "0…". A wallet chip that abbreviates the one
-                  // number it exists to show has stopped being a wallet chip — and the
-                  // reason it needed a cap was that its own height and padding were rem,
-                  // so it grew with the text and squeezed the gear off the row. With the
-                  // box in pixels the chip is about as wide as its digits, and `shrink-0`
-                  // lets the cluster WRAP it onto a line of its own rather than compress
-                  // it. The whole number, always, on one line, whatever the text size.
-                  "inline-flex shrink-0 items-center gap-[6px] min-h-[36px] [@media(pointer:coarse)]:min-h-[44px] px-[12px] rounded-lg text-sm font-medium tabular-nums whitespace-nowrap transition-colors max-w-[calc(100vw-32px)]",
-                  balance !== null && balance < LOW_BALANCE_CREDITS
-                    ? "bg-warning-soft text-warning-strong hover:bg-warning-soft/80"
-                    : "bg-success-soft text-success-strong hover:bg-success-soft/80",
-                  isActive && "ring-1 ring-accent-strong/30",
-                )}
-                /*
-                  The NUMBER, in the name.
+            {/*
+              The wallet chip is its own component now (item 8).
 
-                  This was `aria-label="Wallet balance"`, and an aria-label REPLACES an
-                  element's contents as its accessible name — so a screen reader announced
-                  "Wallet balance, link" and the balance itself, the only reason the chip
-                  exists, was never read out at all. It is also the only place in the chrome
-                  that says whether a member can afford to book.
-
-                  The low-balance state goes in too. It is carried visually by the chip turning
-                  amber, and a colour is not an announcement.
-                */
-                aria-label={walletLabel(balance, loading)}
-                title={loading ? "Refreshing balance…" : "Wallet balance — tap to top up"}
-              >
-                <WalletIcon size={14} strokeWidth={2.25} className="shrink-0" />
-                {/* aria-hidden: the label above already says the number, and the visible text
-                    abbreviates it to "cr", which is not a word. No `truncate`: B12 — it cut
-                    a balance of 0 down to "0…", which is the one thing this chip must never
-                    do. The cluster wraps instead. */}
-                <span aria-hidden="true">{balance === null ? "— cr" : formatCredits(balance)}</span>
-              </NavLink>
-            )}
+              It stopped being a `NavLink` with a class on it: it counts up, it crosses three
+              colour states rather than two, it breathes a finite number of times at zero, it
+              raises exactly one toast when the club pays a member, and it says so when the
+              figure it shows is no longer live. A hundred lines of that inside the header is a
+              hundred lines nobody can test on its own — `CreditsBadge.tsx` carries the whole
+              of the reasoning, including the B12 measurements this markup used to hold.
+            */}
+            {auth.status === "authenticated" && <CreditsBadge />}
             {auth.status === "authenticated" && (
               <NavLink
                 to="/profile"

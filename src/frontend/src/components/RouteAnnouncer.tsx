@@ -44,27 +44,60 @@ export function RouteAnnouncer() {
    * </p>
    */
   const firstKey = useRef(location.key);
+  /**
+   * What counts as HAVING NAVIGATED — and the query string does not.
+   *
+   * <p>
+   * <b>The finding.</b> This effect ran on `location.search`, so every filter change on the
+   * door log was treated as a navigation: the page name was announced again — "Door log",
+   * over whatever the person was reading — and focus was pulled to the `&lt;h1&gt;`. An admin
+   * narrowing a filter three times heard the page name three times and had the keyboard taken
+   * off the control they were using, three times. The log's own `role="status"` already
+   * carries the result count, which is the thing that actually changed.
+   * </p>
+   *
+   * <p>
+   * A HASH change is still a navigation for focus purposes and not for announcement purposes:
+   * a fragment names a place on the page the person asked to be taken to (D9), and the heading
+   * it lands on announces itself.
+   * </p>
+   */
+  const lastPathname = useRef(location.pathname);
+  const lastHash = useRef(location.hash);
 
   useEffect(() => {
+    // Always, even on a query-string change: the title is derived from the path, so this is a
+    // no-op there, and a route that arrives by any means has its name in the tab.
     const name = routePageName(location.pathname);
     document.title = routeTitle(location.pathname);
+
+    const initial = location.key === firstKey.current;
+    const pathChanged = location.pathname !== lastPathname.current;
+    const hashChanged = location.hash !== lastHash.current;
+    lastPathname.current = location.pathname;
+    lastHash.current = location.hash;
+
+    // A filter, a date field or a search box writing to the query string. Silent here.
+    if (!initial && !pathChanged && !hashChanged) return;
 
     // R3-26 — arriving somewhere is an occasion to be told what is standing there.
     //
     // `lib/announce` remembers what has already been said so that a banner behind a 15-second
-    // poll says it once rather than twelve times. That memory has to end at the page boundary,
+    // poll says it once rather than twelve times. That memory has to end at the PAGE boundary,
     // or a screen-reader user who navigates away and back is told nothing about the screen
-    // they are now on. Cleared on every route change, including the first paint's hash case.
-    resetStandingAnnouncements();
+    // they are now on — and it must NOT end at a filter change, or narrowing a door log
+    // re-speaks every standing advisory on it.
+    if (pathChanged || initial) resetStandingAnnouncements();
 
     // A first paint is a real page load: the browser has already announced the document and
     // put focus at the top of it, and moving focus there again is a second announcement of
     // something that just happened. A HASH on a first paint is different — a pasted or
     // emailed deep link has a target, and landing at the top of the page is the D9 failure.
-    const initial = location.key === firstKey.current;
     if (initial && !location.hash) return;
 
-    if (!initial) setAnnouncement(name);
+    // The NAME, only where the name has changed. A fragment jump inside one page would
+    // otherwise announce the page the person is already on.
+    if (pathChanged) setAnnouncement(name);
     return takeFocus(location.hash);
   }, [location.pathname, location.search, location.hash, location.key]);
 
