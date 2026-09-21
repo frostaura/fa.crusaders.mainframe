@@ -352,17 +352,36 @@ public sealed class ControlBoardHttpTests
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+    /// <summary>
+    /// A caller with no credential gets nothing — and which refusal depends on whether a club
+    /// could be identified at all, which is this application's documented order rather than
+    /// this endpoint's choice.
+    ///
+    /// <para>
+    /// <b>Both halves are asserted because only the second one is about the control board.</b>
+    /// A request carrying no tenant is refused <c>400 tenant_unresolved</c> by the resolution
+    /// middleware, which runs before authentication — so a test that asserted 401 for it would
+    /// pass or fail on the middleware's behaviour and say nothing about whether this route is
+    /// protected. The half that proves the route is the one where the club IS resolved, from
+    /// the host subdomain, and there is still no credential.
+    /// </para>
+    /// </summary>
     [SkippableFact]
     public async Task An_unauthenticated_request_is_refused()
     {
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        await ControlBoardClub.SeedAsync(factory, "cbanon");
+        var club = await ControlBoardClub.SeedAsync(factory, "cbanon");
 
-        var response = await factory.CreateClient().GetAsync(BoardPath);
+        var noTenant = await factory.CreateClient().GetAsync(BoardPath);
+        Assert.Equal(HttpStatusCode.BadRequest, noTenant.StatusCode);
 
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        var anonymous = factory.CreateClient();
+        anonymous.DefaultRequestHeaders.Host = $"{club.Slug}.crusaders.test";
+        var refused = await anonymous.GetAsync(BoardPath);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
     }
 
     /// <summary>
