@@ -145,10 +145,25 @@ describe("the header's touch targets", () => {
     // this test is about a class, not about a figure.
     const wallet = screen.getByRole("link", { name: /^Wallet balance/ });
     expect(wallet.className).toContain("[@media(pointer:coarse)]:min-h-[44px]");
-    // B12's other half on this chip: it never abbreviates the one number it exists to show.
-    // At a 32 px root font size the `max-w-[35vw]` + `truncate` pair rendered a balance of
-    // 0 as "0…".
-    expect(wallet.className).not.toContain("truncate");
+    /**
+     * B12's other half on this chip: it never abbreviates the one number it exists to show.
+     * At a 32 px root font size the `max-w-[35vw]` + `truncate` pair rendered a balance of
+     * 0 as "0…".
+     *
+     * <p>
+     * <b>Asserted on the FIGURE, not on the link.</b> The first draft of this checked the
+     * link's own class list, and a mutation that put `truncate` back on the span holding
+     * the number survived it — the guard was on the element that never carried the class.
+     * `truncate` is `overflow-hidden text-ellipsis whitespace-nowrap`, and it is the
+     * ellipsis that cut the figure, so the bound belongs on the node the digits are in.
+     * </p>
+     */
+    const figure = wallet.querySelector("span[aria-hidden]")!;
+    expect(figure).toBeTruthy();
+    for (const node of [wallet, figure]) {
+      expect(node.className).not.toContain("truncate");
+      expect(node.className).not.toContain("text-ellipsis");
+    }
     expect(wallet.className).not.toContain("max-w-[35vw]");
 
     const avatar = screen.getByRole("link", { name: "Edit profile" });
