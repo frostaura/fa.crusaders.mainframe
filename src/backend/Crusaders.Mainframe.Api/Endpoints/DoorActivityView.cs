@@ -58,10 +58,17 @@ public static class DoorActivityView
     /// <c>AdminDoorLogHttpTests.A_club_log_row_and_a_board_feed_row_agree_on_every_shared_key</c>
     /// is what actually holds them together.
     /// </para>
+    ///
+    /// <para>
+    /// <b><paramref name="door"/> is not nullable any more.</b> It was, and a deleted board sent
+    /// <c>door: null</c> to a page that read <c>.id</c> off it — the white screen three reviewers
+    /// found independently. <see cref="DoorRowDoor"/> is the one producer, and it answers a
+    /// four-field object for a removed door rather than nothing at all.
+    /// </para>
     /// </summary>
     public static object WithDoor(
         string action, DateTimeOffset at, Guid? subjectUserId, string? detailsJson,
-        IReadOnlyDictionary<Guid, string> names, object? door)
+        IReadOnlyDictionary<Guid, string> names, object door)
     {
         var details = Details(detailsJson);
         return new

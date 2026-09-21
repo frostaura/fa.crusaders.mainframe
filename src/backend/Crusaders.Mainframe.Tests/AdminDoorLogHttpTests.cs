@@ -198,14 +198,24 @@ public sealed class AdminDoorLogHttpTests
             factory, doorId, DeviceGateEndpoint.OpenedAction, now.AddMinutes(-4), subjectUserId: club.AdminUserId);
 
         var client = club.AdminClient(factory);
-        var baseline = await (await client.GetAsync(LogPath)).Content.ReadAsStringAsync();
+
+        // An EXPLICIT range, so the comparison can stay byte-for-byte. The response carries the
+        // range it resolved (A4), and the default one is "the last twenty-four hours from NOW",
+        // which is a different pair of instants on every request — so two identical calls to
+        // the default window differ in two fields for reasons that have nothing to do with P3.
+        // Pinning the range keeps the assertion the strong one it was written to be.
+        var window = $"?from={Uri.EscapeDataString(now.AddHours(-6).ToString("O"))}" +
+                     $"&to={Uri.EscapeDataString(now.ToString("O"))}";
+        var baseline = await (await client.GetAsync(LogPath + window)).Content.ReadAsStringAsync();
 
         foreach (var key in new[] { "member", "user", "subject", "q", "search" })
         {
-            var filtered = await (await client.GetAsync($"{LogPath}?{key}={club.MemberUserId}")).Content.ReadAsStringAsync();
+            var filtered = await (await client.GetAsync($"{LogPath}{window}&{key}={club.MemberUserId}"))
+                .Content.ReadAsStringAsync();
             Assert.Equal(baseline, filtered);
 
-            var byName = await (await client.GetAsync($"{LogPath}?{key}=Door%20Member")).Content.ReadAsStringAsync();
+            var byName = await (await client.GetAsync($"{LogPath}{window}&{key}=Door%20Member"))
+                .Content.ReadAsStringAsync();
             Assert.Equal(baseline, byName);
         }
     }
@@ -464,7 +474,7 @@ public sealed class AdminDoorLogHttpTests
         // The words, not the machine codes — and the machine code beside them.
         var cells = lines[1].Split(',');
         Assert.Equal(DoorWords.Released, cells[6]);
-        Assert.Equal(DoorWords.ReasonOf(GateAccess.Ok), cells[7]);
+        Assert.Equal(DoorWords.ReasonOf(DoorTrail.OpenedAction, GateAccess.Ok), cells[7]);
         Assert.Equal(GateAccess.Ok, cells[8]);
         Assert.Equal("no", cells[9]);
     }

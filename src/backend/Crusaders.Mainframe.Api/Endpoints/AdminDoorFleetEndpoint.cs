@@ -119,17 +119,23 @@ public static class AdminDoorFleetEndpoint
             foreach (var outage in open) outage.EndedAt = now;
         }
 
+        var actor = ctx.User.Id() ?? Guid.Empty;
         foreach (var door in changing)
         {
             door.Enabled = !shut;
             door.OutOfServiceSince = shut ? now : null;
             door.ShutByShutAllAt = shut ? now : null;
+
+            // Who, beside when. A fleet shut writes ONE audit row for the whole club with no
+            // device_id on it, so a door shut this way could not be attributed by any query —
+            // which is why this is a column and not a derivation. See Device.ShutByUserId.
+            door.ShutByUserId = shut ? actor : null;
         }
 
         db.AuditLogs.Add(new AuditLog
         {
             TenantId = tenant.TenantId,
-            ActorUserId = ctx.User.Id() ?? Guid.Empty,
+            ActorUserId = actor,
 
             // No subject. The club's doors are not a person, and A1.5 / P4 are explicit that a
             // door action is about doors — naming a member here would be the first place this

@@ -776,6 +776,12 @@ public static class DeviceEventEndpoints
             // since the scan, which is the one case resolution cannot answer. Null on a court
             // box, which has no key. See MeDoorEndpoints.DoorNameOf, and S1.
             gate_key = device.GateKey,
+
+            // And the board's DISPLAY name beside it, for the same reason and the same one
+            // case: a board DELETED since the scan. A row from a removed door used to reach
+            // the console as `door: null`, which the log page dereferenced (A1 / E-C1 / C1).
+            // See DoorRowDoor.
+            door_name = device.Name,
             seq = e.Seq,
             kind = time.Kind,
             court = e.Court,

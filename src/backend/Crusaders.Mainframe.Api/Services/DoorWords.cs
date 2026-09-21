@@ -36,6 +36,23 @@ public static class DoorWords
     /// </summary>
     public const string NoReason = "No reason recorded";
 
+    /// <summary>
+    /// Why a board turned somebody away while the link was down: the code they held was not in
+    /// the roster it had cached.
+    ///
+    /// <para>
+    /// <b>It is the one refusal with no reason code, and printing "No reason recorded" for it
+    /// was wrong twice over (E-L2).</b> The reason IS recorded — it is the action itself,
+    /// <c>device.unknown_scan</c> — and a club reading "Refused / No reason recorded" in an
+    /// export concludes the system lost the answer rather than that the board had one. A board
+    /// deciding alone has exactly one way to refuse: the code was not on the list it last
+    /// downloaded. That also explains, on the same row, why some offline rows name a member and
+    /// others cannot: a code on the saved list names its holder and an unknown one names nobody
+    /// (A3).
+    /// </para>
+    /// </summary>
+    public const string NotOnTheSavedList = "Code not on the door's saved list";
+
     /// <summary>The outcome of one action, in the product's words.</summary>
     public static string? OutcomeOf(string action)
     {
@@ -44,19 +61,23 @@ public static class DoorWords
     }
 
     /// <summary>
-    /// One reason code in the product's words.
+    /// One reason code in the product's words, read together with the ACTION that carried it.
     ///
     /// <para>
     /// The set is <see cref="GateAccess.Reasons"/> plus the offline path's <c>ok</c>, and an
     /// unrecognised code is returned AS ITSELF rather than mapped to a guess: a board or a
     /// server ahead of this one can write a reason this list has not met, and printing the
-    /// code is honest where inventing a sentence for it is not. Block body for the lizard
-    /// reason in <c>memory/gotchas.md</c>.
+    /// code is honest where inventing a sentence for it is not. The action is needed for the
+    /// one row whose reason lives in the action — see <see cref="NotOnTheSavedList"/>. Block
+    /// body for the lizard reason in <c>memory/gotchas.md</c>.
     /// </para>
     /// </summary>
-    public static string ReasonOf(string? reason)
+    public static string ReasonOf(string action, string? reason)
     {
-        if (string.IsNullOrWhiteSpace(reason)) return NoReason;
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return action == DoorTrail.OfflineUnknownScanAction ? NotOnTheSavedList : NoReason;
+        }
         return reason switch
         {
             GateAccess.Ok => "Recognised and allowed",

@@ -21,8 +21,24 @@ public static class DeviceView
     /// fields below can be computed once, on the server, from the same numbers the box is
     /// given on its heartbeat.
     /// </param>
-    public static object Of(Device d, int heartbeatSeconds) => new
+    /// <param name="shutByName">
+    /// The display name of the admin who took this board out of service, or null. Passed in
+    /// rather than read here because the caller resolves every name on a page in ONE read —
+    /// a projection that queried would be a query per row.
+    /// </param>
+    /// <param name="unchanged">
+    /// True on the one answer that is not a change: a PATCH whose fields all already held the
+    /// values sent. Present on every device view rather than only on that one, because a key
+    /// that appears and disappears is a second response shape wearing one name — the argument
+    /// this file already makes about the door-card fields on a court box. A stale tab shutting
+    /// an already-shut door was told it had succeeded (B10); with this and
+    /// <c>shut_by_name</c> the console can say "it was already shut — by Priya Naidoo at 21:48".
+    /// </param>
+    public static object Of(
+        Device d, int heartbeatSeconds, string? shutByName = null, bool unchanged = false) => new
     {
+        unchanged,
+        shut_by_name = shutByName,
         id = d.Id,
         device_code = d.DeviceCode,
         name = d.Name,

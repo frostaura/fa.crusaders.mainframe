@@ -67,8 +67,19 @@ public static class AdminDoorLogEndpoint
     /// a spreadsheet and with the frontend's own copy, and a header row assembled inline is a
     /// contract nothing can assert against.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>delivered_at_utc</c> is LAST and is blank on every online row (E-L1). The file had the
+    /// scan's instant and not the delivery's, so an export could not answer "when did the club
+    /// actually hear about this" — the question an outage is reconciled with — and a reader
+    /// comparing the file against "last heard from" had nothing to compare. Appended rather than
+    /// inserted beside <c>at_utc</c>, because a club's saved spreadsheet formulae address
+    /// columns by position.
+    /// </para>
+    /// </remarks>
     public const string Header =
-        "date,time,timezone,at_utc,door,door_name,outcome,reason,reason_code,offline,member,code_fingerprint";
+        "date,time,timezone,at_utc,door,door_name,outcome,reason,reason_code,offline,member," +
+        "code_fingerprint,delivered_at_utc";
 
     /// <summary>
     /// <c>GET /api/v1/admin/doors/activity</c> — one page of the club's door log.
@@ -94,17 +105,111 @@ public static class AdminDoorLogEndpoint
         {
             items = page
                 .Select(r => DoorActivityView.WithDoor(
-                    r.Action, r.CreatedAt, r.SubjectUserId, r.DetailsJson, names, DoorOf(r.DetailsJson, doors)))
+                    r.Action, r.CreatedAt, r.SubjectUserId, r.DetailsJson, names,
+                    DoorRowDoor.Of(DoorActivityView.Details(r.DetailsJson), doors)))
                 .ToList(),
             next_cursor = rows.Count > query.Limit && page.Count > 0
                 ? new DoorLogCursor(page[^1].CreatedAt, page[^1].Id).Encode()
                 : null,
+
+            // How many rows the RANGE holds, not how many this page carries (A6 / E-M2). See
+            // DoorLogQuery.Filtered for why it is counted without the cursor.
+            total = await query.Filtered(db).CountAsync(ct),
+
+            // The range this server actually resolved, in the club's own offset, and the zone
+            // it was resolved in — so the page states the window in words above the rows rather
+            // than inferring one from a period name it sent (A4, O1).
+            range = new { from = query.From, to = query.To },
+            timezone = query.Timezone,
+
+            // Every removed door that still has rows the log can answer for, so the door filter
+            // can offer them (A2). A deleted board's rows were reachable and unnameable: not in
+            // the filter, unlabelled in the export, and — until DoorRowDoor — a white page.
+            removed_doors = await RemovedDoorsAsync(db, query, ct),
 
             // W1.9's number, so the page's retention statement is the club's own and not a
             // constant the console carries.
             retention_days = query.RetentionDays,
         });
     }
+
+    /// <summary>
+    /// The doors that have been DELETED and still have scan rows inside the club's retention.
+    ///
+    /// <para>
+    /// <b>Found through <c>device.deleted</c> rather than by scanning the log for orphans.</b>
+    /// The delete writes one audit row naming the board, that row lives under
+    /// <c>retention_years</c> rather than the door retention (see
+    /// <see cref="DoorTrail.IsPurgeableRow"/>, which names the two <c>device.*</c> actions
+    /// exactly), and a board's scans are always OLDER than its delete — so every removed door
+    /// that could still have rows in range has a delete row in range too. That makes the
+    /// candidate set small and indexed, where a <c>DISTINCT</c> over a club's ninety days of
+    /// jsonb would be neither.
+    /// </para>
+    ///
+    /// <para>
+    /// An id that is back in the devices table is not removed: a board that re-registers gets a
+    /// NEW row and a new id, so this can only happen if somebody recreated the row by hand, and
+    /// a live board is not a removed door whatever its history says.
+    /// </para>
+    ///
+    /// <para>
+    /// The name and key come off the newest surviving ROW, which is the only place they can
+    /// come from once the device row is gone — and is exactly what
+    /// <see cref="DoorRowDoor.StoredName"/> reads for the rows themselves, so the filter's label
+    /// and the rows' labels cannot disagree.
+    /// </para>
+    /// </summary>
+    private static async Task<List<object>> RemovedDoorsAsync(
+        MainframeDbContext db, DoorLogQuery query, CancellationToken ct)
+    {
+        var floor = DateTimeOffset.UtcNow.AddDays(-query.RetentionDays).ToUniversalTime();
+
+        var deleted = await db.AuditLogs.AsNoTracking()
+            .Where(a => a.Action == DoorAuditActions.Deleted && a.CreatedAt >= floor)
+            .OrderByDescending(a => a.CreatedAt)
+            .Take(MaxRemovedDoors)
+            .Select(a => a.DetailsJson)
+            .ToListAsync(ct);
+
+        var candidates = deleted
+            .Select(d => DoorTrail.DeviceIdOf(DoorActivityView.Details(d)))
+            .Where(d => d is not null).Select(d => d!.Value).Distinct().ToList();
+        if (candidates.Count == 0) return [];
+
+        var stillLive = await db.Devices.AsNoTracking()
+            .Where(d => candidates.Contains(d.Id)).Select(d => d.Id).ToListAsync(ct);
+
+        var removed = new List<object>();
+        foreach (var id in candidates.Where(c => !stillLive.Contains(c)))
+        {
+            var containment = JsonSerializer.Serialize(new { device_id = id });
+            var newest = await db.AuditLogs.AsNoTracking()
+                .Where(DoorTrail.IsScanRow)
+                .Where(a => a.CreatedAt >= floor)
+                .Where(a => a.DetailsJson != null && EF.Functions.JsonContains(a.DetailsJson, containment))
+                .OrderByDescending(a => a.CreatedAt)
+                .Select(a => a.DetailsJson)
+                .FirstOrDefaultAsync(ct);
+            if (newest is null) continue;
+
+            var details = DoorActivityView.Details(newest);
+            removed.Add(new
+            {
+                key = id.ToString(),
+                name = DoorRowDoor.StoredName(details),
+                gate_key = DoorRowDoor.StoredKey(details),
+            });
+        }
+        return removed;
+    }
+
+    /// <summary>
+    /// Most removed doors one response will name. A club that has deleted more than this many
+    /// boards inside its retention has a bigger problem than a filter list, and an unbounded
+    /// loop of containment reads on a page load is not the place to find out.
+    /// </summary>
+    public const int MaxRemovedDoors = 50;
 
     /// <summary>
     /// <c>GET /api/v1/admin/doors/activity.csv</c> — the same filters, as a file.
@@ -140,18 +245,17 @@ public static class AdminDoorLogEndpoint
         // The club's own zone, so the two readable columns are the times an admin saw on the
         // screen they exported from. A zone this platform does not know falls back to UTC and
         // SAYS so in the `timezone` column, rather than printing local-looking times that are
-        // not — the same rule DoorDay applies to the day boundary.
-        var day = DoorDay.StartOfToday(settings, DateTimeOffset.UtcNow);
-        var clock = new CsvClock(
-            TimeZoneInfo.TryFindSystemTimeZoneById(day.Timezone, out var found) ? found : TimeZoneInfo.Utc,
-            day.Timezone);
+        // not — the same rule DoorDay applies to the day boundary. Resolved once, at parse
+        // time, so the range, the columns and the filename are all in one zone.
+        var clock = new CsvClock(query.Zone, query.Timezone);
 
         var csv = new StringBuilder(Header).Append("\r\n");
         foreach (var row in exported)
         {
             var details = DoorActivityView.Details(row.DetailsJson);
-            var door = DoorTrail.DeviceIdOf(details) is { } id && doors.TryGetValue(id, out var d) ? d : null;
-            csv.Append(Line(row.Action, row.CreatedAt, MemberName(row.SubjectUserId, names), details, door, clock));
+            csv.Append(Line(
+                row.Action, row.CreatedAt, MemberName(row.SubjectUserId, names), details,
+                DoorRowDoor.Columns(details, doors), clock));
         }
 
         // The export is a thing that happened to a club's own records, so the trail says who
@@ -189,9 +293,43 @@ public static class AdminDoorLogEndpoint
 
         // Quoted, as WIRE-W1 §4 says and as RFC 6266 wants (S2). Unquoted it survives only
         // because this filename happens to contain no space or comma today.
-        var filename = $"door-log-{query.From:yyyy-MM-dd}-{query.To:yyyy-MM-dd}.csv";
-        ctx.Response.Headers.ContentDisposition = $"attachment; filename=\"{filename}\"";
+        ctx.Response.Headers.ContentDisposition = $"attachment; filename=\"{FileName(query)}\"";
         return Results.File(bytes, "text/csv; charset=utf-8");
+    }
+
+    /// <summary>
+    /// What the file is called: the exact range it holds, in the club's own zone.
+    ///
+    /// <para>
+    /// <b>A4 — the chair was nearly given half of yesterday.</b> The name was
+    /// <c>door-log-&lt;date&gt;-&lt;date&gt;.csv</c> whatever the range was, so the rolling
+    /// twenty-four-hour default produced a file called "the 20th to the 21st" holding from
+    /// 09:50 on one to 09:50 on the other. A file is forwarded, printed and filed under its
+    /// name, and the name was the only thing about it that was not true.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Two dates when both ends are club-local midnights, and date-and-time otherwise.</b>
+    /// The common case — a period, a day, a week — stays readable, and the case that was lying
+    /// says so in the name: <c>door-log-2026-09-20T0950-to-2026-09-21T0950.csv</c>. The file's
+    /// FIRST LINE is still the header row and not a comment: a club opens this in a spreadsheet
+    /// and a machine-clean file is worth more than a banner (A4's own ruling).
+    /// </para>
+    ///
+    /// <para>
+    /// Block body for the lizard reason in <c>memory/gotchas.md</c>.
+    /// </para>
+    /// </summary>
+    public static string FileName(DoorLogQuery query)
+    {
+        var wholeDays = DoorClock.IsStartOfLocalDay(query.Zone, query.From)
+                        && DoorClock.IsStartOfLocalDay(query.Zone, query.To);
+        var format = wholeDays ? "yyyy-MM-dd" : "yyyy-MM-dd'T'HHmm";
+        var invariant = System.Globalization.CultureInfo.InvariantCulture;
+
+        var from = TimeZoneInfo.ConvertTime(query.From, query.Zone).ToString(format, invariant);
+        var to = TimeZoneInfo.ConvertTime(query.To, query.Zone).ToString(format, invariant);
+        return $"door-log-{from}-to-{to}.csv";
     }
 
     /// <summary>
@@ -218,9 +356,11 @@ public static class AdminDoorLogEndpoint
     /// </para>
     /// </summary>
     private static string Line(
-        string action, DateTimeOffset at, string member, JsonElement? details, DoorRef? door, CsvClock clock)
+        string action, DateTimeOffset at, string member, JsonElement? details,
+        (string Key, string Name) door, CsvClock clock)
     {
         var scanned = DoorActivityView.ScannedAt(details, at);
+        var delivered = DoorActivityView.DeliveredAt(details, at);
         var local = TimeZoneInfo.ConvertTime(scanned, clock.Zone);
         var invariant = System.Globalization.CultureInfo.InvariantCulture;
 
@@ -230,10 +370,13 @@ public static class AdminDoorLogEndpoint
             local.ToString("HH:mm:ss", invariant),
             clock.Timezone,
             scanned.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", invariant),
-            door?.GateKey ?? "",
-            door?.Name ?? "",
+
+            // From the live board where there is one and from what the row itself stored where
+            // there is not, so a removed door's rows are still named in the file (E-M1).
+            door.Key,
+            door.Name,
             DoorWords.OutcomeOf(action) ?? "",
-            DoorWords.ReasonOf(DoorActivityView.Reason(details)),
+            DoorWords.ReasonOf(action, DoorActivityView.Reason(details)),
 
             // The machine value beside the words: a club filtering a spreadsheet wants the
             // stable one, and a club reading it wants the sentence.
@@ -241,6 +384,11 @@ public static class AdminDoorLogEndpoint
             DoorActivityView.Offline(details) ? "yes" : "no",
             member,
             DoorActivityView.Fingerprint(details) ?? "",
+
+            // Blank on an online row rather than a copy of at_utc, for the same reason
+            // `delivered_at` is null there: a delivery time for a decision the server made as
+            // it happened would be a delay the file invented.
+            delivered is { } arrived ? arrived.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", invariant) : "",
         };
         return string.Join(",", cells.Select(Cell)) + "\r\n";
     }
@@ -300,13 +448,6 @@ public static class AdminDoorLogEndpoint
             .ToDictionaryAsync(d => d.Id, d => d, ct);
     }
 
-    /// <summary>The door a row belongs to, or null when the board has been deleted since.</summary>
-    private static object? DoorOf(string? detailsJson, IReadOnlyDictionary<Guid, DoorRef> doors)
-    {
-        if (DoorTrail.DeviceIdOf(DoorActivityView.Details(detailsJson)) is not { } id) return null;
-        if (!doors.TryGetValue(id, out var door)) return null;
-        return new { id = door.Id, name = door.Name, gate_key = door.GateKey };
-    }
 }
 
 /// <summary>

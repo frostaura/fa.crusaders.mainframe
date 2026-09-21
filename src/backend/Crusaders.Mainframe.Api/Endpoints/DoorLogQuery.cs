@@ -28,6 +28,15 @@ public sealed record DoorLogQuery(
     Guid? Door, DateTimeOffset From, DateTimeOffset To, string? Outcome, string? Reason, int Limit,
     DoorLogCursor? Cursor, int RetentionDays)
 {
+    /// <summary>
+    /// The club's zone, resolved once when the request was parsed, so the range, the wire's
+    /// <c>timezone</c> and the export's filename are all written in the same one.
+    /// </summary>
+    public required TimeZoneInfo Zone { get; init; }
+
+    /// <summary>The name of <see cref="Zone"/> as the wire reports it — UTC's when the stored id is not one.</summary>
+    public required string Timezone { get; init; }
+
     /// <summary>Rows per page when the caller does not ask. A console page.</summary>
     public const int DefaultLimit = 50;
 
@@ -39,6 +48,31 @@ public sealed record DoorLogQuery(
 
     /// <summary>The refusal when <c>?outcome=</c> is not one of the three.</summary>
     public const string OutcomeInvalid = "outcome_invalid";
+
+    /// <summary>
+    /// The refusal when <c>?door=</c> or <c>?removed_door=</c> is present and is not a UUID.
+    ///
+    /// <para>
+    /// <b>It was silently ignored, which is the <c>from_invalid</c> defect at a different
+    /// parameter (E-M3).</b> <c>?door=notauuid</c> answered <c>200</c> with the WHOLE club's log
+    /// while the console showed it under one door's name. A well-formed id that names no board
+    /// is different and still answers 200 with no rows: that is a real question with a real
+    /// answer, and it is the shape a link to a removed door takes.
+    /// </para>
+    /// </summary>
+    public const string DoorInvalid = "door_invalid";
+
+    /// <summary>
+    /// The refusal when <c>?reason=</c> is not one this server can write.
+    ///
+    /// <para>
+    /// Also silently ignored (E-M3): <c>?reason=bogus</c> answered <c>200</c> with an empty list,
+    /// which an admin reads as "nothing happened" rather than "that is not a reason". The set is
+    /// <see cref="DoorTrail.Reasons"/> — both vocabularies, because a gate decision writes
+    /// <c>reason</c> and an uploaded event writes <c>outcome</c>.
+    /// </para>
+    /// </summary>
+    public const string ReasonInvalid = "reason_invalid";
 
     /// <summary>
     /// The refusal when <c>?from=</c> is present and is not an instant.
@@ -90,26 +124,44 @@ public sealed record DoorLogQuery(
     /// full log while they believed they were looking at refusals.
     /// </para>
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The range may be named three ways and only one of them at a time.</b> A request
+    /// carrying both <c>?period=yesterday</c> and a <c>?from=</c> is not a request this server
+    /// can bound — one of the two was meant, guessing is how an export lies about what it holds,
+    /// and the second console that grows a date picker beside a period button is the one that
+    /// sends it. <see cref="DoorPeriod.RangeConflict"/>, by name, rather than a precedence rule
+    /// nobody can see.
+    /// </para>
+    /// </remarks>
     public static (DoorLogQuery? Query, string? Error) Parse(
         HttpRequest request, TenantSettingsView settings, DateTimeOffset now)
     {
         var retentionDays = DoorSettings.LogRetentionDays(settings);
         var floor = now.AddDays(-retentionDays);
+        var (zone, timezone, _) = DoorClock.ZoneOf(settings);
 
         var outcome = Text(request, "outcome");
         if (outcome is not null && Array.IndexOf(DoorTrail.Outcomes, outcome) < 0) return (null, OutcomeInvalid);
 
+        var reason = Text(request, "reason");
+        if (reason is not null && Array.IndexOf(DoorTrail.Reasons, reason) < 0) return (null, ReasonInvalid);
+
+        var (door, doorBad) = DoorId(request);
+        if (doorBad) return (null, DoorInvalid);
+
+        var (range, rangeError) = Range(request, zone, now);
+        if (rangeError is not null) return (null, rangeError);
+        if (range is not { } window) return (null, DoorPeriod.RangeConflict);
+
         // Normalised to UTC because Npgsql refuses to write a DateTimeOffset with a non-zero
         // offset to a `timestamp with time zone` — and `?from=2026-09-19T00:00:00+02:00` is
-        // exactly what a console in a club's own zone sends. Same instant; it is the
-        // representation the parameter has to be in, not the value.
-        var (fromValue, fromBad) = Instant(request, "from");
-        if (fromBad) return (null, FromInvalid);
-        var (toValue, toBad) = Instant(request, "to");
-        if (toBad) return (null, ToInvalid);
-
-        var from = (fromValue ?? now - DefaultWindow).ToUniversalTime();
-        var to = (toValue ?? now).ToUniversalTime();
+        // exactly what a console in a club's own zone sends, as is every boundary DoorPeriod
+        // builds. Same instant; it is the representation the parameter has to be in, not the
+        // value. The RANGE on the wire keeps the club's offset, which is what lets the page say
+        // "since 00:00 club time".
+        var from = window.From;
+        var to = window.To;
         if (from < floor) from = floor.ToUniversalTime();
         if (to < from) to = from;
 
@@ -118,14 +170,93 @@ public sealed record DoorLogQuery(
         if (cursorText is not null && cursor is null) return (null, CursorInvalid);
 
         return (new DoorLogQuery(
-            Door: Guid.TryParse(Text(request, "door"), out var door) ? door : null,
+            Door: door,
             From: from,
             To: to,
             Outcome: outcome,
-            Reason: Text(request, "reason"),
+            Reason: reason,
             Limit: Math.Clamp(Number(request, "limit") ?? DefaultLimit, 1, MaxLimit),
             Cursor: cursor,
-            RetentionDays: retentionDays), null);
+            RetentionDays: retentionDays)
+        {
+            Zone = zone,
+            Timezone = timezone,
+        }, null);
+    }
+
+    /// <summary>
+    /// The door this request names, under either spelling, and whether it was present and
+    /// unreadable.
+    ///
+    /// <para>
+    /// <c>removed_door</c> carries the key <c>GET /admin/doors/activity</c>'s
+    /// <c>removed_doors</c> list hands out — the device id the rows themselves stored — so the
+    /// console can offer a removed board in the same filter as a live one without having to know
+    /// that the two are the same kind of value. They ARE the same filter slot, so a request that
+    /// names two different doors is contradictory and is refused rather than silently resolved
+    /// by a precedence rule. Block body for the lizard reason in <c>memory/gotchas.md</c>.
+    /// </para>
+    /// </summary>
+    private static (Guid? Door, bool Invalid) DoorId(HttpRequest request)
+    {
+        var live = Text(request, "door");
+        var removed = Text(request, RemovedDoorParameter);
+        if (live is null && removed is null) return (null, false);
+
+        Guid? first = null;
+        foreach (var text in new[] { live, removed })
+        {
+            if (text is null) continue;
+            if (!Guid.TryParse(text, out var parsed)) return (null, true);
+            if (first is { } already && already != parsed) return (null, true);
+            first = parsed;
+        }
+        return (first, false);
+    }
+
+    /// <summary>The query parameter a removed door is filtered by. See <see cref="DoorId"/>.</summary>
+    public const string RemovedDoorParameter = "removed_door";
+
+    /// <summary>
+    /// The window this request asks for: a named period, a club-local day, an explicit
+    /// <c>from</c>/<c>to</c> pair, or the default rolling day — and never more than one of them.
+    ///
+    /// <para>
+    /// Block body for the lizard reason in <c>memory/gotchas.md</c>.
+    /// </para>
+    /// </summary>
+    private static ((DateTimeOffset From, DateTimeOffset To)? Window, string? Error) Range(
+        HttpRequest request, TimeZoneInfo zone, DateTimeOffset now)
+    {
+        var period = Text(request, "period");
+        var day = Text(request, "day");
+        var explicitEdge = Text(request, "from") is not null || Text(request, "to") is not null;
+
+        var named = (period is not null ? 1 : 0) + (day is not null ? 1 : 0) + (explicitEdge ? 1 : 0);
+        if (named > 1) return (null, DoorPeriod.RangeConflict);
+
+        if (period is not null)
+        {
+            var resolved = DoorPeriod.Resolve(period, zone, now);
+            return resolved is { } window
+                ? ((window.From.ToUniversalTime(), window.To.ToUniversalTime()), null)
+                : (null, DoorPeriod.PeriodInvalid);
+        }
+
+        if (day is not null)
+        {
+            var resolved = DoorPeriod.Day(day, zone);
+            return resolved is { } window
+                ? ((window.From.ToUniversalTime(), window.To.ToUniversalTime()), null)
+                : (null, DoorPeriod.DayInvalid);
+        }
+
+        var (fromValue, fromBad) = Instant(request, "from");
+        if (fromBad) return (null, FromInvalid);
+        var (toValue, toBad) = Instant(request, "to");
+        if (toBad) return (null, ToInvalid);
+
+        return (((fromValue ?? now - DefaultWindow).ToUniversalTime(), (toValue ?? now).ToUniversalTime()), null);
     }
 
     /// <summary>
@@ -140,6 +271,32 @@ public sealed record DoorLogQuery(
     /// </para>
     /// </summary>
     public IQueryable<AuditLog> Apply(MainframeDbContext db)
+    {
+        var rows = Filtered(db);
+
+        if (Cursor is { } cursor)
+        {
+            rows = rows.Where(a => a.CreatedAt < cursor.At || (a.CreatedAt == cursor.At && a.Id.CompareTo(cursor.Id) < 0));
+        }
+
+        return rows.OrderByDescending(a => a.CreatedAt).ThenByDescending(a => a.Id);
+    }
+
+    /// <summary>
+    /// The same rows WITHOUT the cursor and without an order — the set <c>total</c> counts.
+    ///
+    /// <para>
+    /// <b>The heading said a number it could not know (A6 / E-M2).</b> "50 scans, newest first"
+    /// is what the page printed over a page of fifty rows drawn from a range holding seventy,
+    /// and an admin reads that as the range's total; the export then handed them a file with
+    /// seventy rows in it. The count has to be of the FILTERED RANGE and not of the page, which
+    /// means not of the cursor — a cursor is where this page starts, not what the club asked
+    /// for. It is a <c>COUNT</c> on the same index-scan plan the page already runs
+    /// (<c>IX_audit_log_TenantId_CreatedAt</c>, measured sub-millisecond at 400 000 rows), which
+    /// is why it can be answered on every request rather than on the first.
+    /// </para>
+    /// </summary>
+    public IQueryable<AuditLog> Filtered(MainframeDbContext db)
     {
         var rows = db.AuditLogs.AsNoTracking()
             .Where(DoorTrail.IsScanRow)
@@ -161,12 +318,7 @@ public sealed record DoorLogQuery(
 
         if (Reason is { } reason) rows = rows.Where(ReasonMatch(reason));
 
-        if (Cursor is { } cursor)
-        {
-            rows = rows.Where(a => a.CreatedAt < cursor.At || (a.CreatedAt == cursor.At && a.Id.CompareTo(cursor.Id) < 0));
-        }
-
-        return rows.OrderByDescending(a => a.CreatedAt).ThenByDescending(a => a.Id);
+        return rows;
     }
 
     /// <summary>

@@ -383,6 +383,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset?>("ShutByShutAllAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("ShutByUserId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
 
