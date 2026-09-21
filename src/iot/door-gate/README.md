@@ -54,6 +54,8 @@ so the headers still compile with no build system at all.
 | `HEARTBEAT_INTERVAL_MS` | 30000 | starting cadence; the tenant's is adopted |
 | `ROSTER_MAX_AGE_MS` | 21600000 | 6 h, same as the court box |
 | `EVENTQ_SLOTS` | 64 | offline events held before the oldest is lost |
+| `FAULT_REPORT` | 1 | whether this board reports faults at all, until a heartbeat says otherwise. See *What the board says about itself* |
+| `FAULT_MAX_PER_HOUR` | 20 | fault **events** per code per hour — one every three minutes per code. A fault is *counted*, never queued, so the rate bounds the reporting and not the counting |
 
 Three more are not build flags because nothing about a door should make them
 negotiable per board, and they are one budget rather than three numbers
@@ -539,6 +541,106 @@ Two consequences of that rule, stated because both look like faults:
 
 ---
 
+## What the board says about itself — aggregated `fault` events
+
+This board has **one LED and no screen**. Everything it notices about itself — a
+corrupt line off the GM65, a `/gate` call that 500ed, a ring that overflowed
+while the radio was away, a release time the server and the board disagree about
+— used to be visible **nowhere at all**. `eventq::Kind::Fault` has existed since
+the queue was written, renders as `"fault"`, and nothing ever emitted one.
+
+**The channel is the event queue, not the heartbeat.** A fault channel carried
+on the heartbeat is lost on every *missed* heartbeat, which is precisely when
+faults happen: a board that cannot reach the API is a board whose faults are
+about not reaching the API. The queue survives an outage and is already
+deduplicated on `(TenantId, DeviceId, Seq)`.
+
+**No new field on `eventq::Event`, and `devlink::renderEventBody` is
+unchanged.** A fault reuses what is already there:
+
+| field | carries |
+|---|---|
+| `kind` | `"fault"` |
+| `subject` | the fault **code** |
+| `duration_ms` | the **count** since the last report of that code |
+| `court` | `-1` — a door is not on a court |
+| `method` | `null` — a fault is not an identification |
+
+```json
+{"mac":"5ccf7f0a1b2c","boot_id":2596069104,"uptime_ms":86400000,
+ "events":[{"seq":412,"uptime_ms":86390000,"kind":"fault","court":-1,
+            "method":null,"subject":"scanner_uart_error","duration_ms":37}]}
+```
+
+**Aggregation IS the rate limit.** A fault is *counted*, never queued; one event
+per code per window carries everything since the last one, where the window is
+`3600 / device_fault_max_per_hour` seconds — three minutes per code at the
+default of 20. Four hundred errors a minute cost **one event every three minutes
+carrying 1200**, not four hundred events a minute carrying 1. Dropping a fault is
+then impossible rather than merely unlikely: what would be dropped is a *report*,
+and the number it would have carried is still in the next one. The **first**
+occurrence of a code is reported at once rather than a window later — it is what
+tells somebody a door has started misbehaving.
+
+**Two bounds, because a window bounds the rate and not the variety.** At most
+**8 distinct codes** are tracked at once; a ninth increments `fault_overflow`,
+which is reported under its own code and has a counter of its *own* rather than
+one of the eight — a board with eight live faults must still be able to say
+there were more than eight. A slot is reclaimed only when it is idle **and** out
+of its own window, so cycling codes cannot be used to walk out of the rate limit.
+
+**A diagnostic never evicts an admission.** The ring fills only while the board
+is offline, and offline every slot is a `gate_open` nobody else knows about — so
+a fault is not queued at all while the ring is full. Nothing is lost by waiting:
+the count stays in the log and goes out whole once the drain makes room.
+
+**The vocabulary is closed**, lowercase snake, ≤ 32 characters, every code a
+literal in `gatelogic/FaultLog.h`. A code that does not fit is *ignored*, never
+truncated — the same rule the scanner and the roster are held to.
+
+| code | raised when |
+|---|---|
+| `http_4xx` · `http_5xx` · `http_timeout` | every completed call, from one place — `GateApi::post` |
+| `queue_overflow` | the ring's since-boot loss total jumped, counted as the whole jump |
+| `api_breaker_open` | the breaker's closed→**open** edge. A breaker that *stays* open is still one fault |
+| `heartbeat_rejected` | the heartbeat specifically was refused — this door has no roster and offline admits nobody. Distinct from the `http_4xx` the same call produced |
+| `wdt_reset` | this board is in a consecutive-watchdog-reset run |
+| `clock_corrected` | **shared vocabulary only — a gate never raises it.** There is no RTC on this hardware and nothing corrects a clock |
+| `fault_overflow` | a ninth distinct code arrived |
+| `scanner_uart_error` | a UART overrun, **or** a line corrupted by a byte outside the roster's alphabet. Both, because an overrun that ends on a terminator never produces the second and a framing error never produces the first |
+| `scan_oversize` | `ScanAssembler` refused a line for being longer than the token cap — somebody presenting the wrong *kind* of code, which is answered at the desk rather than with a cable |
+| `nvs_write_failed` | a `hal::IStore` write did not complete. Counted by a decorator round the port, because the queue and the store are shared with the court box |
+| `unlock_clamped` | the adopted `gate.unlock_seconds` was outside [1, 30] and the board's own clamp changed it — the server and this board disagree about this door |
+| `relock_overdue` | the relay was energised for longer than `kMaxPhysicalReleaseMs` (42 010 ms), which means the loop did not get back to its own lock inside the budget the release arithmetic above is built on |
+| `boot_reason_<x>` | every boot, from `esp_reset_reason()`. A healthy board reports `boot_reason_power_on` — a channel that only speaks when something is wrong cannot be told apart from a channel that is broken |
+
+**Two settings, delivered inside the heartbeat's existing `gate` object** and
+adopted on exactly the rule `gate.unlock_seconds` follows — read from the
+**top-level** `gate` object, clamped by the board, and an absent key or one of
+the wrong JSON type leaves the working value alone:
+
+| key | default | range |
+|---|---|---|
+| `device_fault_reporting` | `true` (`FAULT_REPORT`) | bool. Turning it **off clears the counts**: a count kept while off would arrive as one enormous number nobody could date |
+| `device_fault_max_per_hour` | `20` (`FAULT_MAX_PER_HOUR`) | `[1, 120]`, clamped here as well as on the server |
+
+> **The API does not send these yet, and there is deliberately no corpus
+> response vector for them.** The gate corpus is pinned byte-for-byte against
+> `GateHeartbeatView.Of` in the backend's `DeviceGateProtocolCorpusTests`, so a
+> vector carrying keys the server does not emit would turn that test red while
+> pinning bytes nobody produces — a corpus that agrees with neither side, which
+> is the exact failure `make corpus-check` exists to prevent. The firmware reads
+> them with a compile-time fallback, so a board deployed before the backend
+> lands runs on the build flags and adopts the settings the moment they appear,
+> with no flag day. **The vector is owed once the backend emits them**, in the
+> `gate` object, after `unlock_seconds`.
+
+**Where a gate-local `FaultLog` sits is a compromise, not a judgement.** By
+[`../README.md`](../README.md)'s own test — *would a device with different
+hardware want this unchanged* — this belongs in `shared/lib`, and the court box
+is building a second copy against the same wire contract. Merging the two is
+owed and is a shared-library change neither device's lane could make alone.
+
 ## What the LED means
 
 | Pattern | Meaning |
@@ -635,6 +737,26 @@ are in [`test/`](test/) and run by `make test-iot`.
 | A re-arm never shortens the window | `test_unlock_a_re_arm_never_shortens_the_window` |
 | No sequence of scans passes the hard cap | `test_unlock_the_hard_cap_bounds_both_one_answer_and_the_whole_window` |
 | The 15 s default is only what runs until the server answers, and `gate.unlock_seconds` overrides it at both clamp bounds while an absent or wrongly-typed key leaves it alone | `test_config_the_default_is_only_what_runs_until_the_server_answers` |
+| A burst of one code is ONE event carrying the count, at every clock base | `test_fault_a_burst_is_one_event_carrying_its_count_at_every_base` |
+| The rendered `fault` body is the agreed wire shape | `test_fault_the_rendered_body_is_the_agreed_wire_shape` |
+| A chatty code cannot starve the other seven | `test_fault_a_chatty_code_cannot_starve_the_others` |
+| A ninth distinct code is counted under `fault_overflow`, which has a counter of its own | `test_fault_a_ninth_distinct_code_is_counted_under_its_own_name` |
+| A slot inside its own window is never reclaimed, so cycling codes cannot escape the rate limit | `test_fault_a_slot_inside_its_own_window_is_never_reclaimed` |
+| Reporting off counts nothing and forgets what it had | `test_fault_reporting_off_counts_nothing_and_forgets_what_it_had` |
+| A code that does not fit the wire is refused, never truncated; the whole vocabulary fits | `test_fault_a_code_that_does_not_fit_is_refused_rather_than_truncated` |
+| `device_fault_max_per_hour` is clamped at both ends by the board | `test_fault_the_rate_is_clamped_at_both_ends_by_the_board` |
+| The two settings are adopted independently, clamped, and an absent or wrongly-typed key changes nothing | `test_heartbeat_adopts_the_two_fault_settings_and_clamps_them` |
+| The board says when its own clamp had to change the release time | `test_heartbeat_says_when_its_own_clamp_had_to_change_the_release_time` |
+| A store write that did not complete is `nvs_write_failed`; a `get` that finds nothing is not | `test_fault_a_store_write_that_did_not_complete_is_counted` |
+| Every boot reports its reason, and a watchdog run is reported with it | `test_app_a_boot_reports_its_reason_and_a_watchdog_run_with_it` |
+| HTTP faults are classified from what the peer actually said | `test_app_http_faults_are_classified_from_what_the_peer_actually_said` |
+| A breaker that opens is one fault, not one per pass | `test_app_a_breaker_that_opens_is_one_fault_not_one_per_pass` |
+| The ring's loss total is a jump, and the whole jump is counted — and a diagnostic never evicts an admission | `test_app_a_ring_that_overflowed_reports_the_whole_jump` |
+| A healthy capped release is NOT `relock_overdue` | `test_app_a_release_past_the_documented_bound_is_reported` |
+| A pass queues at most one fault | `test_app_a_pass_queues_at_most_one_fault` |
+| The heartbeat's settings reach the log, and a board told to be quiet queues nothing | `test_app_the_heartbeat_settings_reach_the_fault_log` |
+| A clamped `unlock_seconds` reaches the ring as `unlock_clamped` | `test_app_a_clamped_unlock_seconds_reaches_the_ring` |
+| A refused heartbeat is its own code as well as its status; an outage is not a refusal | `test_app_a_refused_heartbeat_is_reported_as_well_as_its_status` |
 | The 42.01 s / 27.01 s release arithmetic above, term by term | `test_config_the_worst_call_is_connect_plus_headers_plus_body` |
 | The lock opens once and closes once | `test_unlock_opens_once_and_closes_once_at_every_clock_base` |
 | CR/LF is one terminator; empty lines are ignored; lines are trimmed | `test_scan_assembles_a_line_and_treats_crlf_as_one_terminator`, `test_scan_trims_and_ignores_an_empty_line` |

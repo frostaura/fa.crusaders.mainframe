@@ -88,6 +88,8 @@
 #include "devlink/ApiBreaker.h"
 #include "fwversion/Version.h"
 #include "gatelogic/ApiBaseUrl.h"
+#include "gatelogic/FaultLog.h"
+#include "gatelogic/FaultingStore.h"
 #include "gatelogic/GateApi.h"
 #include "gatelogic/GateApp.h"
 #include "gatelogic/GateConfig.h"
@@ -342,10 +344,11 @@ public:
                   clock_),
         ledPin_("led", ledPinLevel(true, kGateConfig.ledActiveHigh), clock_), link_(clock_),
         watchdog_(kGateConfig.watchdogSeconds, clock_), http_(options.apiBase, authorization_, clock_),
-        api_(http_, breaker_, clock_),
+        api_(http_, breaker_, clock_, faults_),
         lock_(relayPin_, kGateConfig.relayActiveHigh, kGateConfig.unlockEnergisesRelay),
         unlockTimer_(kGateConfig.unlockHardCapMs, kGateConfig.minRelockMs, kGateConfig.relockDwellMs),
-        queue_(&store_), roster_(kGateConfig.rosterMaxAgeMs), app_(wire()) {}
+        countedStore_(&store_, faults_, clock_), queue_(&countedStore_), roster_(kGateConfig.rosterMaxAgeMs),
+        app_(wire()) {}
 
   /// `Bearer <key>`, rendered once, exactly as setupIdentity() does at boot.
   /// Static and filled before the Board is constructed, because SocketHttpPort
@@ -422,6 +425,7 @@ private:
     ports.debounce = &debounce_;
     ports.roster = &roster_;
     ports.queue = &queue_;
+    ports.faults = &faults_;
     // THE ONE PORT THE BOARD LEAVES NULL. A refusal reason reaches no surface
     // on the hardware — see gatelogic/GatePorts.h — so on this build it reaches
     // stdout, and that is what lets a harness assert that a given server reason
@@ -430,6 +434,11 @@ private:
     ports.mac = options_.mac;
     ports.firmwareVersion = fw::kFirmwareVersion;
     ports.bootId = options_.bootId;
+    // NULL, HONESTLY. `esp_reset_reason()` is a fact about a part, and this
+    // process was started by a shell. A simulator that invented
+    // `boot_reason_power_on` would put a reading in the transcript that no
+    // hardware produced — and the harness reads this transcript.
+    ports.bootReason = nullptr;
     ports.heartbeatBody = heartbeatBody_;
     ports.heartbeatBodyCap = sizeof(heartbeatBody_);
     return ports;
@@ -507,7 +516,8 @@ private:
     printf(
         "[status] link=%d released=%d relocking_ms=%lu capped=%lu roster=%u age_ms=%lu unlock_ms=%lu "
         "queued=%u lost=%lu no_push=%lu calls=%lu worst_call_ms=%lu worst_gap_ms=%lu wdt_breaches=%lu "
-        "dropped_scan_bytes=%lu t=%lums\n",
+        "dropped_scan_bytes=%lu fault_report=%d fault_per_hour=%u fault_window_ms=%lu fault_codes=%u "
+        "fault_overflow=%lu t=%lums\n",
         app_.linkUp() ? 1 : 0, lock_.released() ? 1 : 0,
         static_cast<unsigned long>(unlockTimer_.relockingForMs(clock_.nowMs())),
         static_cast<unsigned long>(app_.capForcedCloses()), static_cast<unsigned>(roster_.size()),
@@ -516,7 +526,10 @@ private:
         static_cast<unsigned long>(queue_.overflowed()), static_cast<unsigned long>(app_.noPushHeartbeats()),
         static_cast<unsigned long>(http_.calls()), static_cast<unsigned long>(http_.worstCallMs()),
         static_cast<unsigned long>(watchdog_.worstGapMs()), static_cast<unsigned long>(watchdog_.breaches()),
-        static_cast<unsigned long>(scanner_.droppedBytes()), static_cast<unsigned long>(clock_.nowMs()));
+        static_cast<unsigned long>(scanner_.droppedBytes()), faults_.reporting() ? 1 : 0,
+        static_cast<unsigned>(faults_.maxPerHour()), static_cast<unsigned long>(faults_.windowMs()),
+        static_cast<unsigned>(faults_.tracked()), static_cast<unsigned long>(faults_.overflowPending()),
+        static_cast<unsigned long>(clock_.nowMs()));
     static_cast<void>(fflush(stdout));
   }
 
@@ -560,6 +573,14 @@ private:
   posix_gate_hal::SocketHttpPort http_;
   posix_gate_hal::ConsoleDecisionLog decisions_;
 
+  /// ONE LOG FOR THE WHOLE SIMULATOR, exactly as the board has one: the API
+  /// client, the store wrapper and the loop all report into it, and a second
+  /// instance would be a second set of rate-limit windows.
+  ///
+  /// DECLARED BEFORE `api_`, because member initialisation follows declaration
+  /// order and `api_` binds a reference to it.
+  FaultLog faults_;
+
   devlink::ApiBreaker breaker_;
   GateApi api_;
 
@@ -568,6 +589,10 @@ private:
   LedPattern led_;
   ScanAssembler assembler_;
   ScanDebounce debounce_;
+  /// The FileStore with its failed writes counted — the same decorator the
+  /// board wires round its NVS store, so `nvs_write_failed` is exercised by the
+  /// end-to-end harness and not only by a host test.
+  FaultingStore countedStore_;
   GateQueue queue_;
   GateRoster roster_;
 

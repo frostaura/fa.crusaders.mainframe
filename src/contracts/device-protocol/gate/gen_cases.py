@@ -58,6 +58,18 @@ def heartbeat(device_code: str, gate_key, roster, unlock_seconds: int = 15,
     DeviceEndpoints.HeartbeatAsync's gate branch. Changing one without the other
     is what the byte-identity test exists to catch.
 
+    TWO KEYS ARE COMING AND ARE DELIBERATELY NOT HERE YET. The gate firmware
+    reads `device_fault_reporting` (bool) and `device_fault_max_per_hour` (int,
+    clamped [1, 120]) out of this same `gate` object, for the aggregated `fault`
+    event channel — see src/iot/door-gate/README.md. It reads them with a
+    compile-time fallback and an absent key leaves the working value alone, so
+    there is nothing to pin until the server actually emits them: a vector
+    carrying keys `GateHeartbeatView.Of` does not produce would turn
+    DeviceGateProtocolCorpusTests red while pinning bytes nobody sends, which is
+    a corpus that agrees with neither side. When the backend emits them they go
+    in this object AFTER `unlock_seconds`, and a vector is owed in the same
+    change.
+
     `unlock_seconds` defaults to FIFTEEN, which is the tenant default
     `TenantSettingsView.DefaultGateUnlockSeconds` — it was three, Carl's
     `delay(3000)`, which is how long a lock takes to throw rather than how long a

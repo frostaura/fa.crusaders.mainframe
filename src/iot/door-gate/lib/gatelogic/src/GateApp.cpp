@@ -13,10 +13,18 @@ GateApp::GateApp(const Ports& ports)
     : clock_(*ports.clock), scanner_(*ports.scanner), watchdog_(*ports.watchdog), link_(*ports.link),
       api_(*ports.api), breaker_(*ports.breaker), lock_(*ports.lock), unlock_(*ports.unlock),
       led_(*ports.led), ledPin_(*ports.ledPin), assembler_(*ports.assembler), debounce_(*ports.debounce),
-      roster_(*ports.roster), queue_(*ports.queue), log_(ports.log), mac_(ports.mac),
+      roster_(*ports.roster), queue_(*ports.queue), faults_(*ports.faults), log_(ports.log), mac_(ports.mac),
       firmwareVersion_(ports.firmwareVersion), bootId_(ports.bootId),
-      watchdogResetRun_(ports.watchdogResetRun), heartbeatBody_(ports.heartbeatBody),
-      heartbeatBodyCap_(ports.heartbeatBodyCap), ledActiveHigh_(ports.ledActiveHigh) {
+      watchdogResetRun_(ports.watchdogResetRun), bootReason_(ports.bootReason),
+      heartbeatBody_(ports.heartbeatBody), heartbeatBodyCap_(ports.heartbeatBodyCap),
+      ledActiveHigh_(ports.ledActiveHigh) {
+}
+
+void GateApp::fault(const char* code) {
+  // A FRESH CLOCK READ, like every other instant in this class. A fault
+  // recorded from an instant sampled before a blocking call would arm its
+  // window a whole worst case in the past and be that much less of a limit.
+  faults_.record(code, clock_.nowMs());
 }
 
 // --- boot -------------------------------------------------------------------
@@ -69,6 +77,24 @@ void GateApp::begin() {
 
   led_.setLinkUp(false);
   led_.cue(LedCue::Boot, now);
+
+  // WHY THIS BOARD IS RUNNING, recorded at the one moment it is knowable.
+  //
+  // Both go in, and they are not the same fact: `wdt_reset` is the RUN — this
+  // board has been reset by its watchdog at least once in a row and is holding
+  // its first call back because of it — and `boot_reason_<x>` is this ONE
+  // boot's cause, which on a healthy board is `boot_reason_power_on` and is the
+  // baseline everything else is read against. A board that reports only the
+  // first says nothing at all when it is well.
+  //
+  // `begin()` runs before any pass, so these are the first two things in the
+  // log and the first fault event the drain hands the ring.
+  if (watchdogResetRun_ > 0U) {
+    fault(kFaultWdtReset);
+  }
+  if (bootReason_ != nullptr) {
+    fault(bootReason_);
+  }
 }
 
 // --- one pass ---------------------------------------------------------------
@@ -151,9 +177,67 @@ void GateApp::pass() {
   pumpHeartbeat();
   pumpEvents();
 
+  // AFTER BOTH UPLOADS, so everything this pass noticed — including the HTTP
+  // status of the one blocking call it made — is counted before the drain
+  // looks. It makes no call of its own and is therefore outside the
+  // one-call-per-pass rule entirely.
+  pumpFaults();
+
   // The lamp last, so what it shows is the state every step above just left it
   // in.
   pumpLed();
+}
+
+void GateApp::pumpFaults() {
+  const uint32_t now = clock_.nowMs();
+
+  // THE TWO FAULTS THAT ARE ONLY VISIBLE AS A CHANGE.
+  //
+  // `EventQueue::overflowed()` is a since-boot TOTAL, and what the fault
+  // channel wants is occurrences, so the jump between two passes is what is
+  // recorded — in one call, because a board back from an evening offline can
+  // jump by hundreds and a loop here would be a pass spent counting.
+  const uint32_t lost = queue_.overflowed();
+  if (lost > eventsLostSeen_) {
+    faults_.recordMany(kFaultQueueOverflow, now, lost - eventsLostSeen_);
+    eventsLostSeen_ = lost;
+  }
+
+  // The breaker's closed→OPEN edge, not its state: a breaker that stays open
+  // for ten minutes is ONE fault, and counting the state would be one per pass
+  // — about a hundred a second — which the aggregation would then faithfully
+  // report as a board with sixty thousand faults an hour.
+  const bool open = breaker_.open(now);
+  if (open && !breakerWasOpen_) {
+    faults_.record(kFaultBreakerOpen, now);
+  }
+  breakerWasOpen_ = open;
+
+  // A DIAGNOSTIC MAY NOT EVICT AN ADMISSION, AND A FULL RING IS THE ONLY STATE
+  // IN WHICH IT COULD (round G4's H1, arriving from the other direction).
+  //
+  // The ring fills only while the board is offline — online it drains a pass at
+  // a time — and offline is exactly when every slot is a `gate_open` nobody
+  // else knows about. `isDiscardable(Kind::Fault)` protects the OTHER kinds
+  // from a fault already IN the ring; it does nothing about the push that puts
+  // one there, which on a ring full of `gate_open` evicts the oldest admission.
+  //
+  // Measured: the evicted record itself increments `overflowed()`, which is a
+  // `queue_overflow` fault, which is another push a window later. A diagnostic
+  // that eats the records it is diagnosing.
+  //
+  // NOTHING IS LOST BY WAITING. The count stays in the log and goes out whole
+  // once the link returns and the drain makes room — which is the entire reason
+  // a fault is counted rather than queued.
+  if (queue_.full()) {
+    return;
+  }
+
+  // AT MOST ONE. See the header on this function.
+  eventq::Event event;
+  if (faults_.drain(now, event)) {
+    static_cast<void>(queue_.push(event));
+  }
 }
 
 void GateApp::beforeBlocking() {
@@ -193,6 +277,14 @@ void GateApp::pumpScanner() {
     // TERMINATOR, because the last thing buffered may be half of the holed
     // line. If the drain ended ON a terminator the holed line is already
     // complete and the next byte starts a clean one.
+    // AND IT IS SAID OUT LOUD NOW. A UART overrun was the quietest thing this
+    // board could notice: the member got a denial blink, the bytes went in the
+    // bin, and nothing anywhere could tell a cable running beside a switching
+    // relay coil from a member presenting a dead code. 9600 baud on jumper wire
+    // produces these by the dozen a minute when the routing is wrong, and the
+    // fix is a cable, which nobody can order without evidence.
+    fault(kFaultScannerUartError);
+
     bool endedOnTerminator = false;
     uint8_t dropped = 0U;
     for (uint16_t i = 0U; i < kScannerDrainOnErrorBytes && scanner_.read(dropped); ++i) {
@@ -221,16 +313,34 @@ void GateApp::feedByte(uint8_t byte) {
   case ScanEvent::Token:
     decideScan(assembler_.token());
     break;
+  // THE SAME ANSWER TO THE MEMBER FOR BOTH, and that is deliberate. From where
+  // they are standing an over-long code and a holed one are one thing — the
+  // board could not read what they presented — and there is nothing to ask the
+  // API about in either case, because the bytes were discarded rather than
+  // truncated and a token cut short is a different member's token.
+  //
+  // `Corrupt` used to be `None`: no blink, no record, nothing, while
+  // `pumpScanner`'s comment promised feedback (round G4, L1).
+  //
+  // THE CLUB DOES NOT GET THE SAME ANSWER, and that is the fault channel's
+  // whole point. An over-long line is somebody presenting the wrong KIND of
+  // code — a shipping label, a loyalty card, a QR that is not the club's — and
+  // it is answered at the desk. A corrupt line is a CABLE, routed beside a
+  // switching relay coil, and it is answered with a cable. Two codes, because
+  // two different people do something about them.
   case ScanEvent::Refused:
+    fault(kFaultScanOversize);
+    refuseUnreadableLine();
+    break;
   case ScanEvent::Corrupt:
-    // THE SAME ANSWER FOR BOTH, and that is deliberate. From where the member
-    // is standing an over-long code and a holed one are one thing — the board
-    // could not read what they presented — and there is nothing to ask the API
-    // about in either case, because the bytes were discarded rather than
-    // truncated and a token cut short is a different member's token.
-    //
-    // `Corrupt` used to be `None`: no blink, no record, nothing, while
-    // `pumpScanner`'s comment promised feedback (round G4, L1).
+    // COUNTED HERE AS WELL AS AT THE DRIVER OVERRUN IN `pumpScanner`, and the
+    // two are not one event counted twice: an overrun that happens to end on a
+    // terminator never produces a `Corrupt` at all, and a byte outside the
+    // roster's alphabet produces one with no overrun anywhere. Counting only
+    // one of the two would leave a whole path silent, which is the state this
+    // code is being added to end. The number means "times the scanner could not
+    // be read", not "distinct root causes".
+    fault(kFaultScannerUartError);
     refuseUnreadableLine();
     break;
   case ScanEvent::None:
@@ -392,12 +502,35 @@ void GateApp::queue(const ScanDecision& decision, const char* subject, uint32_t 
 // --- the lock, the link and the lamp ----------------------------------------
 
 void GateApp::pumpLock() {
-  const UnlockTimer::Close closed = unlock_.tick(clock_.nowMs());
+  const uint32_t now = clock_.nowMs();
+  // READ BEFORE THE TICK, because the tick is what clears it. This is how long
+  // the RELAY was actually energised for this window, which is a different
+  // number from the deadline and is the only one a lock cares about.
+  const uint32_t heldMs = unlock_.releasedForMs(now);
+  const UnlockTimer::Close closed = unlock_.tick(now);
   if (closed == UnlockTimer::Close::None) {
     return;
   }
   lock_.set(false);
   led_.setReleased(false);
+
+  // THE ARITHMETIC IN GateConfig.h, CHECKED AGAINST WHAT THE RELAY DID.
+  //
+  // `kMaxPhysicalReleaseMs` is the cap plus one worst-case blocking call plus
+  // one pass tick — 42 010 ms — and it has been a sentence in three files and a
+  // literal in one test while nothing on the board ever compared it to reality.
+  // A release longer than it means the loop did not get back to its own lock
+  // inside the budget the whole of that arithmetic is built on, and until now
+  // the only surface that could have said so was a door standing open.
+  //
+  // NOT REACHABLE BY THE WATCHDOG CASE, and saying so matters: a peer that
+  // dribbles headers is ended by GATE_WATCHDOG_SECONDS and the reset takes the
+  // lock back in `beginOutputs()`, so nothing is running here to notice. That
+  // one shows up as `wdt_reset` and `boot_reason_task_wdt` on the next boot.
+  if (heldMs > kMaxPhysicalReleaseMs) {
+    fault(kFaultRelockOverdue);
+  }
+
   if (closed == UnlockTimer::Close::CapForced) {
     // A WINDOW THAT RAN THE WHOLE HARD CAP. Counted rather than queued, and
     // that is a stated limitation rather than an oversight: the event queue has
@@ -670,13 +803,52 @@ void GateApp::commitEmptyRoster() {
   roster_.commitReplace();
 }
 
+void GateApp::adoptGateSettings(const char* body, size_t len) {
+  static_cast<void>(adoptUnlockMs(body, len, unlockMs_));
+
+  // THE SERVER AND THIS BOARD DISAGREE ABOUT THIS DOOR. The clamp above is not
+  // in dispute — the board must not trust the server to have clamped, and it
+  // does not — but the clamp cannot say that it HAPPENED, so the door then runs
+  // for a number no console shows while the server believes its own. This is
+  // the first thing on this hardware that can say so.
+  if (unlockSecondsWereClamped(body, len)) {
+    fault(kFaultUnlockClamped);
+  }
+
+  // The two fault settings, adopted on the SAME rule as the release time: the
+  // board's working values go in, whatever the body actually carried comes
+  // back, and an absent key — or one of the wrong JSON type — leaves that value
+  // exactly where it was. An older API that sends neither must not silence a
+  // board a newer one configured.
+  GateFaultSettings settings{faults_.reporting(), faults_.maxPerHour()};
+  if (adoptFaultSettings(body, len, settings)) {
+    faults_.setReporting(settings.reporting);
+    faults_.setMaxPerHour(settings.maxPerHour);
+  }
+}
+
 void GateApp::adoptHeartbeat(const HttpOutcome& outcome) {
   if (outcome.status == 403U) {
     commitEmptyRoster();
+    // A REFUSAL OF THE HEARTBEAT SPECIFICALLY, and it is not the same fact as
+    // the `http_4xx` `GateApi` already counted for this call. That one says a
+    // 4xx happened somewhere; this one says THE HEARTBEAT was refused, which
+    // means this board has no roster and, offline, will admit nobody. Two
+    // codes, because a club reading the trail needs to tell "one scan was
+    // refused" from "this door has been switched off".
+    fault(kFaultHeartbeatRejected);
     return;
   }
 
   if (devapi::react(outcome.status) != devapi::Reaction::Accepted) {
+    // A 401 with the wrong compiled-in key, a 400, a 404 on a proxied path:
+    // every one of them is a board that is not being given a roster. A
+    // transport failure is NOT counted here — `GateApi` already recorded it as
+    // `http_timeout`, and a board whose WiFi is down has not been rejected by
+    // anybody.
+    if (devapi::react(outcome.peerStatus) == devapi::Reaction::Rejected) {
+      fault(kFaultHeartbeatRejected);
+    }
     // A BODY THAT DID NOT ARRIVE ON AN OTHERWISE-ACCEPTED HEARTBEAT IS A
     // NO-PUSH, AND ROUND G2 MADE IT THE QUIETEST PATH IN THE FIRMWARE.
     //
@@ -698,7 +870,9 @@ void GateApp::adoptHeartbeat(const HttpOutcome& outcome) {
   }
 
   const size_t len = strlen(heartbeatBody_);
-  static_cast<void>(adoptUnlockMs(heartbeatBody_, len, unlockMs_));
+  // The release time, whether this board's own clamp had to change it, and the
+  // two fault settings — everything the `gate` object carries, in one place.
+  adoptGateSettings(heartbeatBody_, len);
   // The roster's times are relative to the instant the server produced them,
   // so the roster is anchored to a FRESH read. Every accepted heartbeat
   // re-anchors it, which is what resets staleness; ROSTER_MAX_AGE_MS only

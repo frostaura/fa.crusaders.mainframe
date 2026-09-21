@@ -387,6 +387,35 @@ inline constexpr uint32_t kMaxDiagnosticCount = 2147483647UL;
 /// scheduled. It is the ONLY delay in this firmware.
 inline constexpr uint32_t kIdleDelayMs = 10UL;
 
+/// THE LONGEST THE RELAY MAY BE ENERGISED FOR ONE WINDOW, term by term.
+///
+///   the granted window, bounded by GATE_UNLOCK_HARD_CAP_MS   30 000 ms
+/// + one worst-case blocking call in flight when the deadline
+///   passes (connect + headers + body)                        12 000 ms
+/// + one pass tick, kIdleDelayMs                                  10 ms
+/// -----------------------------------------------------------------------
+///                                                            42 010 ms
+///
+/// GATE_UNLOCK_DEFAULT_MS IS NOT IN THIS SUM, and the first term is why: it is
+/// the CAP, which a single answer cannot exceed and which no sequence of
+/// re-arms may pass either, so raising the default from 3 s to 15 s did not
+/// move this number. What the default bounds is the ordinary case — 15 000 +
+/// 12 000 + 10 = 27 010 ms for a board that has never heard a heartbeat — and
+/// `test_config_the_worst_call_is_connect_plus_headers_plus_body` pins both.
+///
+/// A NUMBER RATHER THAN A COMMENT because `GateApp` now reports a release that
+/// exceeds it as a `relock_overdue` fault: this arithmetic was a sentence in
+/// three files and a literal in one test, and nothing on the board checked it
+/// against what the relay actually did. It is the only bound on this hardware
+/// whose violation means the loop did not get back to its own lock.
+///
+/// It is NOT the watchdog case. A peer that dribbles headers is bounded by
+/// GATE_WATCHDOG_SECONDS and the boot that follows it instead — about 45.5 s
+/// with this image's numbers — and no code running on this board can report
+/// that one, because the part has reset. See GateApp.h.
+inline constexpr uint32_t kMaxPhysicalReleaseMs =
+    static_cast<uint32_t>(GATE_UNLOCK_HARD_CAP_MS) + kWorstBlockingCallMs + kIdleDelayMs;
+
 /// A backoff shorter than one pass would not be a backoff, and one that starts
 /// past its own cap would never double.
 static_assert(kEventRetryStartMs >= kIdleDelayMs && kEventRetryStartMs <= kEventRetryMaxMs,

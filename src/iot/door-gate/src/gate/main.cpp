@@ -66,6 +66,8 @@
 #include "fwversion/Version.h"
 #include "gatelogic/ApiBaseUrl.h"
 #include "gatelogic/BootRecovery.h"
+#include "gatelogic/FaultLog.h"
+#include "gatelogic/FaultingStore.h"
 #include "gatelogic/GateApi.h"
 #include "gatelogic/GateApp.h"
 #include "gatelogic/GateConfig.h"
@@ -246,14 +248,67 @@ uint32_t drawWatchdogResetRun() {
 
 uint32_t gWatchdogResetRunThisBoot = drawWatchdogResetRun();
 
+/// THIS BOOT'S CAUSE, as the whole fault code the log will carry.
+///
+/// One code per `esp_reset_reason_t`, spelled out rather than built at runtime:
+/// `FaultLog`'s vocabulary is CLOSED because the backend normalises and caps a
+/// kind at 32 characters and a code assembled from a number is a subject
+/// nobody declared. This function is the only place in the image that has both
+/// the IDF enumerators and the vocabulary in scope, which is exactly why the
+/// reason is a PORT into `GateApp` rather than something the loop reaches for.
+///
+/// A healthy board reports `boot_reason_power_on`, every boot, and that is the
+/// point: a channel that only speaks when something is wrong cannot be told
+/// apart from a channel that is broken.
+const char* bootReasonCode() {
+  switch (esp_reset_reason()) {
+  case ESP_RST_POWERON:
+    return "boot_reason_power_on";
+  case ESP_RST_EXT:
+    return "boot_reason_external";
+  case ESP_RST_SW:
+    return "boot_reason_software";
+  case ESP_RST_PANIC:
+    return "boot_reason_panic";
+  case ESP_RST_INT_WDT:
+    return "boot_reason_int_wdt";
+  case ESP_RST_TASK_WDT:
+    return "boot_reason_task_wdt";
+  case ESP_RST_WDT:
+    return "boot_reason_wdt";
+  case ESP_RST_DEEPSLEEP:
+    return "boot_reason_deepsleep";
+  case ESP_RST_BROWNOUT:
+    return "boot_reason_brownout";
+  case ESP_RST_SDIO:
+    return "boot_reason_sdio";
+  default:
+    // INCLUDING `ESP_RST_UNKNOWN`, and a core that adds an enumerator. One code
+    // rather than nothing: "this board restarted and could not say why" is a
+    // fact worth having, and silence would read as a board that never rebooted.
+    return "boot_reason_unknown";
+  }
+}
+
 /// `Bearer <DEVICE_API_KEY>`, rendered once at boot. Held rather than rebuilt
 /// per call because it is the same string for the life of the image and the
 /// heap it would churn is shared with the network stack.
 char gAuthHeader[devapi::kAuthorizationBufSize] = {};
 
+/// ONE FAULT LOG FOR THE WHOLE IMAGE, and it has to be one: the API client, the
+/// store wrapper and the loop all report into it, and a second instance would
+/// be a second set of rate-limit windows — a board reporting each code twice at
+/// half the rate it believes.
+FaultLog gFaults;
+
 esp32_hal::Esp32HttpPort gHttp(API_BASE_URL, gAuthHeader, gClock);
 devlink::ApiBreaker gBreaker;
-GateApi gApi(gHttp, gBreaker, gClock);
+GateApi gApi(gHttp, gBreaker, gClock, gFaults);
+
+/// The NVS store, with the one operation that can silently lose the sequence
+/// mark counted. See FaultingStore.h for why the counter is a decorator here
+/// rather than a field inside the shared `EventQueue`.
+FaultingStore gCountedStore(&gStore, gFaults, gClock);
 
 LockDriver gLock(gRelayPin, kGateConfig.relayActiveHigh, kGateConfig.unlockEnergisesRelay);
 UnlockTimer gUnlock(kGateConfig.unlockHardCapMs, kGateConfig.minRelockMs, kGateConfig.relockDwellMs);
@@ -261,7 +316,7 @@ LedPattern gLed;
 ScanAssembler gAssembler;
 ScanDebounce gDebounce;
 
-GateQueue gQueue(&gStore);
+GateQueue gQueue(&gCountedStore);
 GateRoster gRoster(kGateConfig.rosterMaxAgeMs);
 
 /// The heartbeat response. File scope, not stack: the contract allows 4096
@@ -289,6 +344,7 @@ GateApp::Ports wire() {
   ports.debounce = &gDebounce;
   ports.roster = &gRoster;
   ports.queue = &gQueue;
+  ports.faults = &gFaults;
   // NULL, AND IT HAS TO BE. `IDecisionLog` is the simulator's console; this
   // board has one LED and a USB line nobody is standing at. Written out rather
   // than left to the default so the shipped value is visible beside every other
@@ -299,6 +355,7 @@ GateApp::Ports wire() {
   ports.firmwareVersion = fw::kFirmwareVersion;
   ports.bootId = gBootId;
   ports.watchdogResetRun = gWatchdogResetRunThisBoot;
+  ports.bootReason = bootReasonCode();
   ports.heartbeatBody = gHeartbeatBody;
   ports.heartbeatBodyCap = sizeof(gHeartbeatBody);
   return ports;
