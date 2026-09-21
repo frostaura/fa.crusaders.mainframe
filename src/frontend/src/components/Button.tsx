@@ -21,7 +21,17 @@ export function Button({
      * utility on `accent.strong` emits nothing at all; see the accent block in tailwind.config.
      */
     primary: "bg-brand-strong text-brand-ink border border-brand-strong hover:bg-brand-strong/90",
-    ghost: "bg-transparent text-text-secondary hover:bg-bg-muted",
+    /**
+     * C8 — `border border-transparent`, on the one variant that had no boundary at all.
+     *
+     * Under `forced-colors: active` every author background goes, so a ghost button is
+     * left as bare text with no edge and nothing to say it can be pressed. A transparent
+     * 1 px border costs nothing in ordinary rendering — it is already in the box model,
+     * so nothing moves when the `forced-colors` block in index.css gives it a system
+     * colour — and it is what stops this variant collapsing into a paragraph. The other
+     * four variants already declare a border; this is the one that did not.
+     */
+    ghost: "bg-transparent border border-transparent text-text-secondary hover:bg-bg-muted",
     // `border-control`: an outline button's boundary IS the button — there is no fill to see
     // it by — so SC 1.4.11's 3:1 applies to it more plainly than to anything else here.
     outline: "border border-control bg-bg-surface hover:bg-bg-muted",

@@ -116,6 +116,45 @@ export default function Layout() {
   const publicLanding =
     location.pathname === "/" && auth.status !== "authenticated" && !probablySignedIn;
 
+  /**
+   * B13 — how tall the chrome actually is, published for anything that must sit under it.
+   *
+   * <p>
+   * The toast strip was anchored at a constant 100 px, which is the header's height at a
+   * 16 px root font on a wide screen and nothing like it anywhere else: at a 32 px root the
+   * header plus the section tab strip is taller, so the offline error toast covered the tab
+   * bar — the only way between sections a phone has. A guessed constant is wrong on exactly
+   * the configuration the finding was raised on.
+   * </p>
+   *
+   * <p>
+   * Measured rather than computed: the header wraps, so its height is a function of the
+   * viewport width, the root font size and how many tabs this session has. `ResizeObserver`
+   * is what catches all three. It is written to the document element as a custom property
+   * because the consumer — `ToastProvider` — is mounted ABOVE this component and cannot be
+   * handed a prop.
+   * </p>
+   */
+  const headerRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const root = document.documentElement;
+    const header = headerRef.current;
+    if (!header) {
+      root.style.setProperty("--app-chrome-height", "0px");
+      return () => root.style.removeProperty("--app-chrome-height");
+    }
+    const publish = () => root.style.setProperty("--app-chrome-height", `${Math.round(header.getBoundingClientRect().height)}px`);
+    publish();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(publish);
+    observer?.observe(header);
+    window.addEventListener("resize", publish);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", publish);
+      root.style.removeProperty("--app-chrome-height");
+    };
+  }, [publicLanding, headerless, auth.status]);
+
   if (publicLanding) {
     // No chrome, no width cap and no inner scroll container: the page lays itself out, and the
     // DOCUMENT scrolls. The app's own shell scrolls a nested <main> instead, which on a long
@@ -171,7 +210,7 @@ export default function Layout() {
       >
         Skip to main content
       </a>
-      <header className="bg-bg-surface border-b border-border sticky top-0 z-30">
+      <header ref={headerRef} data-app-header className="bg-bg-surface border-b border-border sticky top-0 z-30">
         {/*
           A10 / C14 / D6 — the row WRAPS rather than overflowing.
 
@@ -186,8 +225,25 @@ export default function Layout() {
           horizontal scrollbar when it genuinely cannot fit. The club name still truncates
           first, because it is the only item here that carries no action.
         */}
-        <div className="max-w-5xl mx-auto px-4 min-h-[3.5rem] py-1 flex flex-wrap items-center gap-x-4 gap-y-1">
-          <NavLink to="/" className="font-semibold tracking-tight whitespace-nowrap min-w-0 truncate [@media(pointer:coarse)]:py-2.5">Crusaders Squash</NavLink>
+        {/*
+          B12 — every length in this row is now PIXELS, not rem.
+
+          At a 32 px root font size `min-h-[3.5rem]` is 112 px, `h-11` is 88 px and the row
+          wrapped to three of them: the header and the tab strip together took 54 % of a
+          320×568 screen, leaving the page itself less than half the phone. None of that
+          height is a touch target — 44 px is — it is a touch target written in a unit that
+          doubles when the text doubles. The TEXT still scales, which is the whole point of
+          a root font size; the boxes around it stop scaling at the size a fingertip needs.
+
+          The GAPS and PADDINGS go the same way, and they are most of the number. Measured
+          on a coarse pointer at 320×568 with a 32 px root, one change at a time:
+          262 px of chrome → 234 (the club name's `py-2.5`, which was 40 px of padding round
+          a 48 px word) → 182 (the wallet chip's `px-3`, 48 px of padding that pushed the
+          cluster's total 4 px past the row and wrapped the gear onto a line of its own).
+          182 px is 32 % of the phone, against the 54 % reviewer B measured.
+        */}
+        <div className="max-w-5xl mx-auto px-4 min-h-[56px] py-[4px] flex flex-wrap items-center gap-x-[16px] gap-y-[4px]">
+          <NavLink to="/" className="font-semibold tracking-tight whitespace-nowrap min-w-0 truncate [@media(pointer:coarse)]:py-[10px]">Crusaders Squash</NavLink>
           {auth.status === "authenticated" && (
             // `lg`, not `md`. The inline nav switched on at 768 and the row it sits in needs
             // 800: an admin had five tabs, and at 768 the header measured a 795px scrollWidth
@@ -241,7 +297,7 @@ export default function Layout() {
             width it is given and wrap the gear onto a second line, which is the whole point:
             the club name may truncate and the wallet chip may wrap, the gear may not vanish.
           */}
-          <div className="ml-auto flex flex-wrap justify-end items-center gap-2 min-w-0">
+          <div className="ml-auto flex flex-wrap justify-end items-center gap-[8px] min-w-0">
             {auth.status === "authenticated" && (
               <NavLink
                 to="/wallet"
@@ -250,12 +306,19 @@ export default function Layout() {
                   // only: the constraint is a fingertip, and a 44 px chip in a desktop
                   // header is a chip that has stopped being a chip.
                   //
-                  // D6 — `max-w-[35vw]` with the figure truncating. Every length here is
-                  // rem-based, so at a 32 px root font size this chip alone measured wider
-                  // than a third of a 360 px screen and the cluster holding it overflowed.
-                  // A viewport-relative cap is the one bound that does not scale with the
-                  // text it is bounding.
-                  "inline-flex items-center gap-1.5 h-9 [@media(pointer:coarse)]:h-11 px-3 rounded-lg text-sm font-medium tabular-nums whitespace-nowrap transition-colors min-w-0 max-w-[35vw]",
+                  // B12 — the cap and the truncation both GO, and the box is sized in
+                  // pixels like everything else in this row.
+                  //
+                  // `max-w-[35vw]` with `truncate` on the figure was the D6 fix, and at a
+                  // 32 px root font size reviewer B measured what it actually produced: a
+                  // balance of 0 rendered as "0…". A wallet chip that abbreviates the one
+                  // number it exists to show has stopped being a wallet chip — and the
+                  // reason it needed a cap was that its own height and padding were rem,
+                  // so it grew with the text and squeezed the gear off the row. With the
+                  // box in pixels the chip is about as wide as its digits, and `shrink-0`
+                  // lets the cluster WRAP it onto a line of its own rather than compress
+                  // it. The whole number, always, on one line, whatever the text size.
+                  "inline-flex shrink-0 items-center gap-[6px] min-h-[36px] [@media(pointer:coarse)]:min-h-[44px] px-[12px] rounded-lg text-sm font-medium tabular-nums whitespace-nowrap transition-colors max-w-[calc(100vw-32px)]",
                   balance !== null && balance < LOW_BALANCE_CREDITS
                     ? "bg-warning-soft text-warning-strong hover:bg-warning-soft/80"
                     : "bg-success-soft text-success-strong hover:bg-success-soft/80",
@@ -278,10 +341,10 @@ export default function Layout() {
               >
                 <WalletIcon size={14} strokeWidth={2.25} className="shrink-0" />
                 {/* aria-hidden: the label above already says the number, and the visible text
-                    abbreviates it to "cr", which is not a word. `truncate` so the cap above
-                    shortens the figure rather than pushing the gear off the screen — the
-                    whole number is still in the chip's accessible name either way. */}
-                <span aria-hidden="true" className="truncate">{balance === null ? "— cr" : formatCredits(balance)}</span>
+                    abbreviates it to "cr", which is not a word. No `truncate`: B12 — it cut
+                    a balance of 0 down to "0…", which is the one thing this chip must never
+                    do. The cluster wraps instead. */}
+                <span aria-hidden="true">{balance === null ? "— cr" : formatCredits(balance)}</span>
               </NavLink>
             )}
             {auth.status === "authenticated" && (
@@ -327,8 +390,13 @@ export default function Layout() {
           // anyone who can see it, a tab stop so the arrow keys can reach the rest, and a sentence
           // for a screen reader while there is more to reach.
           <nav className="lg:hidden border-t border-border" aria-label="Sections">
-            <ScrollArea label="Section tabs">
-              <div className="flex items-center gap-1 px-2 py-1 text-sm w-max">
+            {/* C19 — the region is no longer a tab stop. Every tab inside it is a link, and
+                since C16 every link scrolls itself into view on focus, so the container's
+                own stop reached nothing the next Tab would not have. It was the second stop
+                on every route on a phone, it announced itself as a region, and it went
+                nowhere. The fade and the overflow announcement stay; only the stop goes. */}
+            <ScrollArea label="Section tabs" tabbable={false}>
+              <div className="flex items-center gap-[4px] px-2 py-[4px] text-sm w-max">
                 <SectionTabs
                   isAdmin={auth.isAdmin}
                   pendingApplications={pendingApplications}
@@ -452,11 +520,27 @@ function NavTab({ to, label, badge }: {
   return (
     <NavLink
       to={to}
-      // C16 — `h-9` is 36 px, and 36 px is not a touch target. 44 px on a coarse pointer
-      // only: this strip is what a phone gets, and the same tab in a desktop header row at
-      // 44 px crowds a 56 px row for no gain.
+      /*
+        C16 / E-L4 — a focused tab brings ITSELF into view.
+
+        At 400 % zoom reviewer C tabbed to "Members" and it was clipped by the right edge of
+        the viewport: the strip scrolls, the focus ring was inside it, and nothing told the
+        strip to move. At 390 px reviewer E found "Doors" off-screen for the same reason.
+        `inline: "nearest"` is the whole fix and it is deliberately "nearest" rather than
+        "center": a tab that is already fully visible must not make the strip jump, which is
+        what "center" does to every tab in the middle of the list.
+
+        `block: "nearest"` with it, because this strip lives inside the page and a
+        `scrollIntoView` with no block argument would scroll the DOCUMENT to it as well — a
+        header that scrolls itself up to meet a focus ring is a worse bug than the one below.
+      */
+      onFocus={(e) => e.currentTarget.scrollIntoView?.({ inline: "nearest", block: "nearest" })}
+      // B12 / C16 — 36 px is not a touch target and `h-11` is not 44 px at every root font
+      // size. A minimum in PIXELS on a coarse pointer: the text still grows, the box stops
+      // at the size a fingertip needs instead of doubling with it. (A `h-11` strip measured
+      // 96 px tall at a 32 px root, which is most of why the chrome ate 54 % of the phone.)
       className={({ isActive }) =>
-        `px-3 h-9 [@media(pointer:coarse)]:h-11 inline-flex items-center gap-1.5 rounded-lg whitespace-nowrap ${isActive ? "bg-accent-soft text-accent-strong font-medium" : "text-text-secondary hover:bg-bg-muted"}`}
+        `px-3 min-h-[36px] [@media(pointer:coarse)]:min-h-[44px] inline-flex items-center gap-1.5 rounded-lg whitespace-nowrap ${isActive ? "bg-accent-soft text-accent-strong font-medium" : "text-text-secondary hover:bg-bg-muted"}`}
     >
       {label}
       {badge && badge.count > 0 && (
@@ -598,7 +682,14 @@ function SettingsMenu({ isAdmin, doorsNeedingAttention, onSignOut }: {
       >
         <SettingsIcon size={26} strokeWidth={1.75} />
         {doorsNeedingAttention > 0 && (
-          <span aria-hidden="true" className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-danger-strong" />
+          // B12 — pixels, and in the corner rather than on the glyph.
+          //
+          // `right-1.5 top-1.5 h-1.5 w-1.5` is 6 px at a 16 px root and 12 px at a 32 px
+          // one, inside a button that is 44 px either way: at the larger size the dot
+          // landed at x 20–32, y 12–24, straight across the cog's own 26 px glyph, and
+          // read as part of the icon rather than as a flag on it. Fixed at 8 px in the
+          // corner it clears the glyph's box at every text size.
+          <span aria-hidden="true" className="absolute right-[1px] top-[1px] h-[8px] w-[8px] rounded-full bg-danger-strong" />
         )}
       </button>
       {open && (

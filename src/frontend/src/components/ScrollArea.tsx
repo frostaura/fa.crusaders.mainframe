@@ -21,11 +21,24 @@ import { cn } from "../lib/utils";
 export function ScrollArea({
   label,
   className,
+  tabbable = true,
   children,
 }: {
   /** Names the region for assistive tech — "Wallet ledger", not "Table". */
   label: string;
   className?: string;
+  /**
+   * Whether the region itself is a tab stop. It is, by default, for the reason above.
+   *
+   * <p>
+   * C19 — set it false where everything inside is ALREADY focusable and brings itself into
+   * view, which is the section tab strip: every tab is a link, every link scrolls itself in
+   * on focus, so the region's own stop reaches nothing the next Tab would not. A tab stop
+   * that does nothing is not neutral; on a phone the strip is the second stop on every
+   * route, announced as a region, and it goes nowhere.
+   * </p>
+   */
+  tabbable?: boolean;
   children: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -64,7 +77,7 @@ export function ScrollArea({
         // users cannot focus cannot be scrolled by keyboard at all, so its hidden content is
         // simply unreachable. role="region" + aria-label is what keeps the stop from being a
         // mystery when a screen reader lands on it.
-        tabIndex={0}
+        tabIndex={tabbable ? 0 : undefined}
         role="region"
         aria-label={label}
         className="overflow-auto h-full focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-strong rounded-lg"

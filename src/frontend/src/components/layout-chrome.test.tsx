@@ -123,15 +123,33 @@ describe("the header's touch targets", () => {
   it("raises every one of them to 44 px on a coarse pointer", async () => {
     chrome({ isAdmin: true });
 
+    /**
+     * B12 — the target is stated in PIXELS now, and that is the point of the finding.
+     *
+     * <p>
+     * `[@media(pointer:coarse)]:h-11` is 2.75rem, which is 44 px at a 16 px root font size
+     * and <b>88 px at a 32 px one</b>. Reviewer B measured what that did on a 320×568
+     * screen: the header and this strip together took 54 % of the phone, so the page the
+     * chrome exists to get you to had less than half of it. None of that height is a touch
+     * target — 44 px is — it was a touch target written in a unit that doubles when the text
+     * doubles. `min-h-[44px]` is the same 44 px at every root font size, and it is a floor,
+     * so the text inside is still free to grow.
+     * </p>
+     */
     const tabs = await screen.findAllByRole("link", { name: "Bookings" });
-    for (const tab of tabs) expect(tab.className).toContain("[@media(pointer:coarse)]:h-11");
+    for (const tab of tabs) expect(tab.className).toContain("[@media(pointer:coarse)]:min-h-[44px]");
 
     // `/^Wallet balance/`, not the figure. The chip's accessible name is the BALANCE, and it
     // passes through "Wallet balance, loading" before the wallet read lands — a query on the
     // number is a query that depends on which of those two the render happened to be in, and
     // this test is about a class, not about a figure.
     const wallet = screen.getByRole("link", { name: /^Wallet balance/ });
-    expect(wallet.className).toContain("[@media(pointer:coarse)]:h-11");
+    expect(wallet.className).toContain("[@media(pointer:coarse)]:min-h-[44px]");
+    // B12's other half on this chip: it never abbreviates the one number it exists to show.
+    // At a 32 px root font size the `max-w-[35vw]` + `truncate` pair rendered a balance of
+    // 0 as "0…".
+    expect(wallet.className).not.toContain("truncate");
+    expect(wallet.className).not.toContain("max-w-[35vw]");
 
     const avatar = screen.getByRole("link", { name: "Edit profile" });
     expect(avatar.className).toContain("[@media(pointer:coarse)]:h-[44px]");
