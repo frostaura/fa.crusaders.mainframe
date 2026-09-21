@@ -10,7 +10,13 @@ libraries, and nothing else.
 | [`tools/`](tools/) | Project-neutral firmware tooling: the Arduino IDE exporter (`--project`, or every project) and the iCloud duplicate sweep. Nothing here knows about one board. |
 | [`shared/`](shared/) | The libraries every Crusaders device needs and no device owns: rollover-safe time, the HAL ports and their fakes, hex, the firmware-version string, the device API client, the event queue, the roster cache, and `devlink` — the heartbeat body, the event-upload body, the roster push and the API circuit breaker. Builds for **no board at all**; its `platformio.ini` carries host test environments only. |
 | [`court-box/`](court-box/) | The **court light box**: WeMos Mega 2560 + onboard ESP8266, four court-light relays, an LCD, a button panel and a QR scanner — plus the native simulator and the generated Arduino IDE sketches that are the flashing route. Everything here is true of *this* hardware. Start at [`court-box/README.md`](court-box/README.md). |
-| [`door-gate/`](door-gate/) | The **door gate**: one ESP32 per door, a QR scanner on `Serial2`, one relay on the lock and one LED — plus the generated Arduino IDE sketch that is its flashing route. Pull-only, online-first with a roster fallback, and a lock asserted LOCKED before its pin is ever an output. Start at [`door-gate/README.md`](door-gate/README.md). |
+| [`door-gate/`](door-gate/) | The **door gate**: one ESP32 per door, a QR scanner on `Serial2`, one relay on the lock and one LED — plus its own native simulator and the generated Arduino IDE sketch that is its flashing route. Pull-only, online-first with a roster fallback, and a lock asserted LOCKED before its pin is ever an output. Start at [`door-gate/README.md`](door-gate/README.md). |
+
+**Both board projects have a native simulator**, and the two exist for the same
+reason: a stub only ever agrees with itself, because both ends of the
+conversation get written from one reading of the spec. The court box's is the
+Mega half behind a TCP socket; the gate's is the whole board, making real HTTP
+calls to a real API. `test/e2e-device/` drives both.
 
 A firmware project reaches the shared libraries with one line in its own
 `platformio.ini`:
@@ -146,10 +152,12 @@ Two rules the generator enforces rather than documents:
   reaches the compiler on either build and `fwversion/Version.h`'s `#ifndef`
   fallback of 0 supplies both. Verified against the real `pio run -v` compile
   line, which carries `-DFW_VERSION_MAJOR=1` and neither of the other two.
-- **The forbidden host-only libraries (`posix_hal`, `hal_fakes`) fail the
-  export from any project**, not only from the one whose `lib/` owns them. Their
-  include namespaces are derived by scanning every project under `src/iot`,
-  because `posix_hal` lives in `court-box/lib` and was therefore invisible to
-  the gate's closure — an `#include "posix_hal/…"` there was silently not
-  vendored rather than refused, and surfaced later as a missing header from
-  `arduino-cli`.
+- **The forbidden host-only libraries (`posix_hal`, `posix_gate_hal`,
+  `hal_fakes`) fail the export from any project**, not only from the one whose
+  `lib/` owns them. Their include namespaces are derived by scanning every
+  project under `src/iot`, because `posix_hal` used to live in `court-box/lib`
+  and was therefore invisible to the gate's closure — an `#include
+  "posix_hal/…"` there was silently not vendored rather than refused, and
+  surfaced later as a missing header from `arduino-cli`. `posix_hal` is in
+  `shared/lib` now and `posix_gate_hal` is in `door-gate/lib`, so the scan is
+  still what makes the rule fire from either direction.

@@ -15,9 +15,9 @@ GateApp::GateApp(const Ports& ports)
     : clock_(*ports.clock), scanner_(*ports.scanner), watchdog_(*ports.watchdog), link_(*ports.link),
       api_(*ports.api), breaker_(*ports.breaker), lock_(*ports.lock), unlock_(*ports.unlock),
       led_(*ports.led), ledPin_(*ports.ledPin), assembler_(*ports.assembler), debounce_(*ports.debounce),
-      roster_(*ports.roster), queue_(*ports.queue), mac_(ports.mac), firmwareVersion_(ports.firmwareVersion),
-      heartbeatBody_(ports.heartbeatBody), heartbeatBodyCap_(ports.heartbeatBodyCap),
-      ledActiveHigh_(ports.ledActiveHigh) {
+      roster_(*ports.roster), queue_(*ports.queue), log_(ports.log), mac_(ports.mac),
+      firmwareVersion_(ports.firmwareVersion), heartbeatBody_(ports.heartbeatBody),
+      heartbeatBodyCap_(ports.heartbeatBodyCap), ledActiveHigh_(ports.ledActiveHigh) {
 }
 
 // --- boot -------------------------------------------------------------------
@@ -223,6 +223,9 @@ void GateApp::refuseUnreadableLine() {
   const ScanDecision decision = refuseUnreadable(attempt(now) == Attempt::RosterOnly);
   const uint32_t granted = apply(decision, now);
   queue(decision, "", now, granted);
+  // No token: the bytes were discarded rather than truncated, and a token cut
+  // short is a different member's token.
+  report(decision, "", now, granted);
 }
 
 void GateApp::decideScan(const char* token) {
@@ -267,6 +270,18 @@ void GateApp::decideScan(const char* token) {
   // never allowed is a club reading an audit trail that is not true.
   queue(decision, token, now, granted);
   debounce_.decided(token, now);
+  // LAST, after the door and the lamp are already driven and the event is
+  // already queued. An observer that ran first would be an observer a reader
+  // could mistake for a step.
+  report(decision, token, now, granted);
+}
+
+void GateApp::report(const ScanDecision& decision, const char* token, uint32_t nowMs, uint32_t grantedMs) {
+  if (log_ == nullptr) {
+    // Every board. There is no console on an ESP32 door gate.
+    return;
+  }
+  log_->decided(decision, token, grantedMs, nowMs);
 }
 
 uint32_t GateApp::apply(const ScanDecision& decision, uint32_t nowMs) {

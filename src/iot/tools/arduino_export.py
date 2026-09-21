@@ -100,22 +100,25 @@ REPO = IOT.parent.parent
 # pointing at a path that no longer exists.
 TOOL = os.path.relpath(Path(__file__).resolve(), REPO)
 
-# Libraries that must never reach a board. posix_hal is the simulator's host
-# HAL; hal_fakes is test infrastructure. Both compile for the host only, and a
-# closure that reaches either means an #include went the wrong way.
-FORBIDDEN_LIBS = {"posix_hal", "hal_fakes"}
+# Libraries that must never reach a board. posix_hal and posix_gate_hal are the
+# two simulators' host HALs; hal_fakes is test infrastructure. All three compile
+# for the host only, and a closure that reaches any of them means an #include
+# went the wrong way.
+FORBIDDEN_LIBS = {"posix_hal", "posix_gate_hal", "hal_fakes"}
 
 
 def forbidden_namespaces() -> set[str]:
     """The include namespaces of FORBIDDEN_LIBS, ACROSS EVERY PROJECT under src/iot.
 
-    Deliberately not scoped to the project being exported. posix_hal lives in
-    court-box/lib, so the door gate's library roots cannot see it — which meant
-    a `#include "posix_hal/PosixClock.h"` in the gate's composition root was not
-    refused by the closure at all, just silently not vendored, and the failure
-    arrived later as a missing header from arduino-cli. A rule that only fires
-    in the project that happens to own the forbidden library is not the rule
-    anybody thinks it is.
+    Deliberately not scoped to the project being exported. posix_hal used to
+    live in court-box/lib, so the door gate's library roots could not see it —
+    which meant a `#include "posix_hal/PosixClock.h"` in the gate's composition
+    root was not refused by the closure at all, just silently not vendored, and
+    the failure arrived later as a missing header from arduino-cli. A rule that
+    only fires in the project that happens to own the forbidden library is not
+    the rule anybody thinks it is. It still is not scoped: posix_hal is in
+    shared/lib now and posix_gate_hal is in door-gate/lib, so the same rule has
+    to fire in both directions.
 
     Derived from the tree rather than listed, so a rename of the namespace
     directory cannot leave this looking for one that no longer exists.

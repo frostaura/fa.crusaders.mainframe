@@ -289,6 +289,33 @@ It was 8 010 ms and 38.01 s until round G3 gave the response body its own
 budget. The number went **up** because the old one was measured against a call
 whose body phase could be handed no time at all.
 
+**And it has now been MEASURED, not only derived.** `test/e2e-device`'s `DS8`
+step drives the native simulator — this firmware, over a real socket — against
+a peer that accepts the connection and then never answers, presenting a second
+scan a hundred and fifty milliseconds before a thirty-second release is due to
+end so a call is certainly in flight when the deadline passes:
+
+| | Derived | Measured |
+|---|---|---|
+| one blocking call | 12 000 ms | **4 000 ms** |
+| release overrun | 12 010 ms | **3 916 ms** |
+| physical release, 30 s grant | 42 010 ms | **33 916 ms** |
+| longest interval with the watchdog unkicked | — | **4 001 ms** (period 15 000) |
+
+**The bound holds and is conservative, and the reason is worth knowing: the
+three phases are not all reachable in one call.** A connect that times out is
+followed by no header phase and no body phase, so that call costs 4 s and
+stops; a peer that answers the connect promptly spends nothing on it. The full
+12 000 ms therefore needs a connect that is *slow but successful* — a SYN
+retransmit completing just inside four seconds — followed by a slow header
+phase and a slow body. That is a real network state, so 12 000 ms remains a
+correct upper bound; it is simply not what a hung or absent host produces, and
+the honest worst case against those is **about 34 seconds**.
+
+The connect budget itself was exercised separately, against `192.0.2.1`
+(TEST-NET-1, routed nowhere): **4 019 ms**, which is `kHttpConnectTimeoutMs`
+plus the pass tick.
+
 That sentence replaces "the lock can never stay released longer than the hard
 cap", which was false: the loop used to check the deadline once per pass
 *before* the blocking calls, so the overrun was a whole pass's worth of them.
@@ -498,6 +525,8 @@ are in [`test/`](test/) and run by `make test-iot`.
 | The watchdog is kicked around every blocking call | `test_app_the_watchdog_is_kicked_around_every_blocking_call` + the `static_assert` in `GateConfig.h` |
 | A dead API host never trips the watchdog or starves the lock | `test_app_a_dead_api_host_never_starves_the_watchdog_or_the_lock` |
 | The 12 010 ms release-overrun bound above | `test_app_a_release_outlives_its_deadline_by_at_most_one_blocking_call`, `test_config_the_worst_call_is_connect_plus_headers_plus_body` |
+| ...and the same bound MEASURED, on a real socket against a hung peer | `test/e2e-device`'s `DS8`, via `gate_sim.measure_worst_case_release` |
+| Every decision reaches the log with the reason it acted on, and a board with no log decides identically | `test_app_every_decision_reaches_the_log_with_the_reason_it_acted_on`, `test_app_a_debounced_repeat_is_not_logged_as_a_decision`, `test_app_a_board_with_no_decision_log_decides_exactly_the_same` |
 | A call is three phases and the watchdog exceeds their sum | `test_config_the_worst_call_is_connect_plus_headers_plus_body` + the `static_assert` in `GateConfig.h` |
 | An overrun costs everything buffered, and nothing after the next terminator | `test_app_an_rx_error_discards_everything_that_was_buffered_when_it_happened` |
 | Boot and a link event throw away a partial line | `test_app_boot_and_a_link_event_throw_away_a_partial_line` |
@@ -596,10 +625,12 @@ door-gate/
   platformio.ini          the wiring flags, the board pin and the host test envs
   lib/gatelogic/          every decision, pure, host-tested
     GateApp               the loop itself — one pass, over ports a fake answers
-    GatePorts             watchdog, link and scanner-error ports
+    GatePorts             watchdog, link, scanner-error and decision-log ports
     ApiBaseUrl/StaticText compile-time checks on API_BASE_URL, C++11-clean
   lib/esp32_hal/          the only place allowed to include Arduino headers
+  lib/posix_gate_hal/     the SIMULATOR's drivers — never reaches a board
   src/gate/main.cpp       wiring only: construction, begin(), pass()
+  src/simulator/main.cpp  the native simulator's wiring — the same two calls
   src/common/             secrets.h.example (secrets.h is gitignored)
   test/test_gatelogic/    the unit suite, including the whole loop
   test/test_gate_corpus/  all 15 contract vectors, executed and counted
@@ -613,12 +644,79 @@ clock**, which is the single thing that makes a stale instant expressible in a
 test at all.
 
 The device-agnostic libraries — `timebase`, `hal`, `hal_fakes`, `devcrypto`,
-`fwversion`, `devapi`, `eventq`, `roster`, `devlink` — are **not** here. They are
+`fwversion`, `devapi`, `eventq`, `roster`, `devlink`, `posix_hal` — are **not**
+here. They are
 in [`../shared/lib`](../shared/lib) and arrive through one line of
 `platformio.ini`; `roster::Roster<48>`, `devlink::parseRosterElement`,
 `devlink::renderEventBody`, `devapi`'s bearer header and its heapless JSON
 scanner, and `eventq` are all used unchanged. The gate's only addition to them is
 `eventq::Kind::GateOpen`.
+
+`posix_hal` is in that list because it moved there when this project grew a
+simulator: a clock that can start near the `millis()` wrap, a file-backed store
+and a non-blocking stdin reader are as true of a door as of a court box, and two
+copies of the rollover clock would be two things that can disagree about the one
+behaviour it exists to reproduce.
+
+---
+
+## The native simulator — the real firmware with no board
+
+```bash
+pio run -d src/iot/door-gate -e simulator      # or make build-iot
+.pio/build/simulator/program --api-base http://127.0.0.1:8088 --mac 02d0deadbeef
+```
+
+`[env:simulator]` builds a host binary running **this firmware**: the same
+`GateApp` loop, the same `GateApi`, the same `GateFlow` status table, the same
+`ResponseBody` framing and de-chunker, the same `UnlockTimer`, `LockDriver`,
+`ScanAssembler`, `ScanDebounce` and `LedPattern` — over `lib/posix_gate_hal` and
+the shared `posix_hal` instead of `lib/esp32_hal`, making **real HTTP calls over
+a real socket**, bounded by the same three budgets whose sum is
+`kWorstBlockingCallMs`.
+
+It exists for one reason, and it is the court box's: **a stub only ever agrees
+with itself**, because both ends of the conversation get written from one reading
+of the spec, so a misreading passes. `test/e2e-device/door_evening.py` had
+exactly that shape — a Python script played the whole board — and the two defect
+classes that hides are the two this project has already paid for: round G1's four
+defects in a `loop()` no host test could see, and round G3's chunked framing that
+no test in this tree read a real socket to find.
+
+**Nothing secret and nothing per-door is compiled in.** The API base URL, the
+device API key and the MAC arrive at run time from flags or from
+`GATE_API_BASE` / `GATE_DEVICE_KEY` / `GATE_MAC`, and the key is never printed.
+The base URL is checked at startup against the same `gatelogic::isValidApiBaseUrl`
+grammar `src/gate/main.cpp` `static_assert`s, so the simulator cannot accept a URL
+the firmware would refuse. Every pin, polarity and timing is `GateConfig.h`'s
+default, which is Carl's value; there are no wiring flags in that environment at
+all.
+
+| Console | What it does |
+|---|---|
+| `scan <code>` | present a code at the reader, as a line of scanner bytes through the real `ScanAssembler` |
+| `rxerror` | raise the UART's receive-error flag, as an overrun does |
+| `wifi up` / `wifi down` | associate or drop the radio — the input that chooses the API or the cached roster |
+| `status` | one line of everything observable, including the worst blocking call and the worst unkicked watchdog gap |
+| `quit` | stop, locking the door on the way out |
+
+Stdout carries one line per **relay** and **LED** transition with the board's own
+`millis()` stamp and the electrical level, one per **decision** with the reason
+the firmware acted on and what the lock was actually given, plus `[hb]`, `[evq]`,
+`[link]` and a `[wdt]` line wherever a real board would have reset.
+
+**What it does not simulate, stated rather than implied:** the WiFi radio (the
+link is told, not sensed), the GM-series scanner's own UART (bytes come from a
+console line, one at a time), the physical relay and lock (there is no coil, no
+contact and no readback — and there is none on the real board either), the
+watchdog's *reset* (it prints the breach so the transcript carries the evidence),
+and NVS (the sequence high-water mark is a file, which cannot tear).
+
+`gatelogic::IDecisionLog` is the one port that exists for this build. It is
+`nullptr` on every board — there is no console on an ESP32 door gate — and it is
+how a harness can assert that a given server reason produced a refusal rather
+than that a relay happened not to move. It returns void, it is called last on
+every decision path, and nothing in this firmware reads anything back from it.
 
 ## The rollover rule
 

@@ -1,0 +1,10 @@
+{
+  "name": "posix_gate_hal",
+  "version": "1.0.0",
+  "description": "Host implementations of the DOOR GATE's own ports for the native simulator: a console pin, a console scanner with an injectable UART error, a console-driven link, a watchdog that reports rather than resets, a real-socket HTTP port, and a console decision log.",
+  "keywords": "gatelogic, simulator, posix, door-gate",
+  "frameworks": "*",
+  "platforms": "native",
+  "dependencies": { "hal": "*", "gatelogic": "*", "timebase": "*" },
+  "build": { "flags": ["-I include"] }
+}

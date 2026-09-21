@@ -53,3 +53,11 @@ The edges this loop talks through — the URL and the UART — are in
     42.01 s** against the 30 s cap. It went UP at G3 because the old number was measured
     against a call whose body phase could be handed no time at all. One precondition, in
     `decisions-door-gate-io.md`.
+  - **MEASURED 2026-09-21, and the bound is conservative.** `test/e2e-device`'s `DS8` drives the
+    native simulator against a peer that accepts and never answers: one call **4 000 ms**, overrun
+    **3 916 ms**, physical release on a 30 s grant **33 916 ms**, worst unkicked watchdog interval
+    **4 001 ms**, connect budget alone **4 019 ms** against TEST-NET-1. The three phases are not all
+    reachable in ONE call — a connect that times out has no header or body phase, and a peer that
+    answers promptly spends nothing on the connect — so 12 000 ms needs a connect that is slow BUT
+    SUCCESSFUL. A real state, so the bound stands; against a hung or absent host the honest worst
+    case is ~34 s, not 42.

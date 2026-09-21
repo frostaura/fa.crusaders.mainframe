@@ -79,17 +79,24 @@ STRICT=(
 
 # Pure modules only. The HAL-IMPLEMENTATION directories need platform headers
 # and are covered by `pio run` for their real targets instead. They are excluded
-# BY NAME, one per board family — arduino_hal (Mega + ESP8266), posix_hal (the
-# simulator), esp32_hal (the door gate) — and a new firmware's HAL has to be
-# added here, in the Makefile's purity grep and in ci.yml's. That three-place
-# duplication is deliberate: each of the three runs in a context the others do
-# not, and a shared list would have to live somewhere all three can read, which
-# is a Makefile variable a shell script and a YAML file cannot see.
+# BY NAME, one per board family plus one per SIMULATOR — arduino_hal (Mega +
+# ESP8266), posix_hal (both simulators' shared host drivers), esp32_hal (the
+# door gate's real drivers), posix_gate_hal (the door gate's simulator) — and a
+# new firmware's HAL has to be added here, in the Makefile's purity grep and in
+# ci.yml's. That three-place duplication is deliberate: each of the three runs
+# in a context the others do not, and a shared list would have to live somewhere
+# all three can read, which is a Makefile variable a shell script and a YAML
+# file cannot see.
+#
+# The exclusion does two things here, not one: it keeps the HAL out of SOURCES
+# and it keeps its `include` root off the include path. Both halves matter —
+# a HAL left in SOURCES but off the path fails to find its own headers.
 #
 # The include roots are the UNION across every project in scope, because a
 # court-box library includes a shared one by the same `<ns>/X.h` path
 # PlatformIO's LDF gives it.
-HAL_EXCLUDES=(-not -path '*/arduino_hal/*' -not -path '*/posix_hal/*' -not -path '*/esp32_hal/*')
+HAL_EXCLUDES=(-not -path '*/arduino_hal/*' -not -path '*/posix_hal/*' -not -path '*/esp32_hal/*'
+              -not -path '*/posix_gate_hal/*')
 
 INCLUDES=()
 while IFS= read -r d; do

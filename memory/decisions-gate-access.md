@@ -39,7 +39,10 @@ Shape: [`decisions-gate.md`](decisions-gate.md). Self-reporting:
   the relief reached the member who did **not** come and refused the one who had just played — and
   it survived two rounds on its FIXTURE: three theories set `Completed` by hand on rows with
   `CheckedInAt == null`, a state the product cannot make. The pin drives the real worker; the
-  relief's horizon is the DOOR's, not the entry window.
+  relief's horizon is the DOOR's, not the entry window. **Its upper edge is
+  `StartsAt + SliceMinutes x SliceCount + grace` and never `EndsAt`**, which the no-show sweep
+  truncates — a harness query keyed on `EndsAt` reports a member free while the server has them
+  due, and did.
 - **Club admins always pass the `booking_window` check; there is no operator role.** Keyed on
   `IsAdmin`: the ABSENCE of a membership row is a state no production path creates. **Three**
   limits — a suspended admin is still `member_not_active`, their booking code is still bounded by

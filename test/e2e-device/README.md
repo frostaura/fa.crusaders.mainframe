@@ -16,6 +16,7 @@ exchanges plus the API log tail.
 | `scenario.py` | the **court box**: the club key, auto-registration, the roster, `/activate`, `/events`, `/walkup`, the money leg, the Mega simulator over serial, the no-show sweep |
 | `door_evening.py` | the **door**: one board's whole evening — and it reads every device response *the way the board does*, over a raw socket. See [Why the door reads its own sockets](#why-the-door-reads-its-own-sockets) |
 | `wire.py` | not a scenario: the board-grade HTTP reader `door_evening.py` uses |
+| `gate_sim.py` | not a scenario either: the **compiled door firmware**, driven as a process. Step `DSIM`. See [The door's own firmware](#dsim--the-doors-own-firmware-in-the-chain) |
 
 The court box runs first because it is the shorter of the two and a shorter failure is the
 cheaper signal. The rest of this file is `scenario.py`'s unless a heading says otherwise.
@@ -27,6 +28,7 @@ cheaper signal. The rest of this file is `scenario.py`'s unless a heading says o
 | API | **real**, from source | `dotnet build` then the DLL, `ASPNETCORE_ENVIRONMENT=Development` so the Seeder creates the pilot tenant, admin, four courts and five sample members |
 | Postgres | **real** | whatever answers on `E2E_PG_HOST:E2E_PG_PORT` (default `localhost:5439`, the throwaway `crusaders-fixprog-pg` container; `docker start`/`docker run` if nothing is listening — in CI the `e2e-device` job points these at its Postgres service container, so no docker is needed there). A fresh `e2e_device_<stamp>` database per run — EF's `Migrate` creates it — so re-runs never see each other |
 | Mega half of the court box | **real firmware** | `src/iot/court-box/.pio/build/simulator/program`: the same `courtlogic::CourtBox`, `court-box/lib/protocol` codec and relay auto-off timer the ATmega runs, behind `posix_hal` and a TCP socket. Built by the target with `pio run -e simulator` |
+| **The door gate board** | **real firmware** | `src/iot/door-gate/.pio/build/simulator/program`: the same `gatelogic::GateApp` loop, `GateApi`, `GateFlow` status table, `ResponseBody` de-chunker, `UnlockTimer`, `LockDriver`, `ScanAssembler`, `ScanDebounce` and `LedPattern` the ESP32 runs, behind `posix_gate_hal`/`posix_hal` and a **real socket** to the run's own API. Driven by `gate_sim.py` at step `DSIM`; built by the target with `pio run -d src/iot/door-gate -e simulator`. What is **still played**: the WiFi radio (the link is told, not sensed), the GM-series scanner's UART (a console line, delivered a byte at a time), the physical relay and lock (there is no coil and no readback — and none on the real board either) |
 | PayFast | **imposter** | mountebank with `test/virtualization/payfast/imposter.json` — the same file `make virt-up` and `docker-compose.test.yml` use. Reused if one is already up on `:4545` |
 | ESP8266 bridge | **played** by the script | the club's device API key as a bearer header and the box's MAC in every body (both self-tested against `src/contracts/device-protocol/http/cases.json` before anything else), heartbeat, `/activate`, `/events`, `/walkup`, and the serial `!VERB,arg*CC` codec towards the simulated Mega |
 | Member's phone | **played** | admin password reset → member login → `POST /me/qr/generate` |
@@ -122,6 +124,23 @@ API for something, did not check the answer, and carried on.**
 The general lesson is the one `memory/gotchas.md` already carries in three other forms: **a
 test that books relative to `UtcNow` inherits the wall clock as a hidden input.** The
 mechanical tell in both cases was a step whose result was printed rather than asserted.
+
+### A third time (2026-09-21), in `door_evening.py`'s own wipe
+
+`D3` opens by cancelling the seeder's demo bookings, for exactly the reason above, and
+it cancelled only the ones with `Status = Booked`. **The real `NoShowWorker` and
+`LightsCueWorker` have been running since the API booted**, so a seeded booking whose
+hour has just passed is already `NoShow` or `Completed` by the time that line executes —
+and `GateAccess.HoldsALiveBookingAsync` counts all three statuses, because both of those
+still open a door. A survivor therefore grants M the **relief** the door gives a member
+whose other court is running, and M's deliberately-too-early code answers `ok`.
+
+A run starting at 19:15 local inherited the seeder's 19:00 booking, already swept: five
+assertions went red across `D5`, `EDGE`, `POL`, `D10` and `D11` — `too_early` answering
+`ok`, then `slot_taken` and an exclusion-constraint violation from the slot the survivor
+was still holding — and **not one of them named the cause**. The same run an hour earlier
+was green. The wipe now cancels every booking that is not already cancelled, which at
+that point in the run is exactly the seeder's set and is what was meant all along.
 
 ## Observations from the first passing runs (2026-09-04)
 
@@ -219,21 +238,86 @@ always passes and this repository has shipped three of those.
 | D15 | **D15** | all five `/device/*` routes are `403` out of service and the heartbeat hands back **no roster** — which is what a board commits an empty one on; the one documented exception is `400 kind_unknown`, checked before the MAC; re-enabling restores service and the roster |
 | D16 | **D16 / B2** | a gate cannot activate a court or sell a walk-up, refused **by name**; a court box at `/device/gate` is `200 not_a_gate`; a `gate_open` from a court box is receipted as `not_a_gate` and **names nobody**; respelling the kind does not step around it |
 | DA | **B5** | `GET /admin/devices/{id}/activity` returns the board's rows newest-first, carrying both halves of its day plus the registration and the admin's edits; `offline` is keyed on `seq`; an open names the member, a refusal carries its reason, an offline open carries a validated 8-hex fingerprint; **no `DetailsJson`, no device id, no gate key and no twelve-character token** reaches the console; `limit` defaults to 50 and is clamped to 1–200; another club's board is 404 |
+| DSIM | **DSIM** | the **compiled firmware**, as a process: its own heartbeat auto-registers a Gate row carrying the MAC it was given and the version its image reports; an allowed scan energises the relay and releases after the club's configured 3 s, **measured on the board's own clock**; every refusal reason this image can reach (`not_recognised`, `too_early`, `member_not_active`, `no_booking`) leaves the relay unmoved; with the radio gone the cached list allows a rostered booking and refuses everything else, and both decisions are uploaded on reconnect and appear server-side **exactly once**; an admin shutting the door is a `403` the board hears on the next scan and answers by committing an EMPTY roster; and the watchdog was never left unkicked for its own period. Plus `DS8`: the release-overrun bound, measured — see [the worst case](#the-worst-case-measured-rather-than-derived) |
 | DW | **E1** | HTTP/1.0 is not chunked; HTTP/1.1 **is**, with no `Content-Length` and the socket held open, and hand de-chunking recovers a whole document inside the body's own budget with no framing byte reaching the parser; a second call on the same kept-open socket reads correctly; the body is under 4096; and all of it again through real nginx, which must close-delimit to a 1.0 client and re-chunk to a 1.1 one |
 | D17 | **D17** | every decision left one row, refusals included; no `gate.*` row carries a live token; the rows name the door by its `gate_key`; and **every refusal reason with a corpus vector was provoked at the live door in this run** — derived from `src/contracts/device-protocol/gate/cases.json`, so a reason nothing here reaches is a screen the firmware has for a refusal this harness has never seen |
 
+## `DSIM` — the door's own firmware, in the chain
+
+`gate_sim.py` drives `src/iot/door-gate/.pio/build/simulator/program`, which is this
+firmware: the same `GateApp` loop, the same `GateApi`, the same `GateFlow` status
+table, the same `ResponseBody` framing and de-chunker, the same `UnlockTimer` and
+`LockDriver` — over a POSIX HAL, making **real HTTP calls over a real socket** to the
+run's own API, bounded by the same three budgets whose sum is `kWorstBlockingCallMs`.
+The harness types at a console and reads a transcript; it answers nothing on the
+board's behalf.
+
+**This does not replace `wire.py` and does not touch its assertions.** `DW` remains
+the strict judge of the API's *bytes* — framing is still asserted by a deliberately
+stupid reader that makes the firmware's three framing decisions by hand — and `DSIM`
+is the judge of the *firmware's behaviour*. A framing regression still fails at `DW`;
+a decision regression now fails at `DSIM`.
+
+**Four of the corpus's six refusal reasons are reachable from this image, and that is
+a fact about the firmware.** `renderScanBody` hard-codes `"method":"qr"`, so
+`method_not_supported` is a screen this image can never be shown; and `not_a_gate` is
+what a *court box* is told at `/device/gate`, which this image cannot become, because
+the server keys a board's kind on its MAC's existing row and not on the `kind` hint.
+Both are still provoked over the wire by `D5` and `D16`, which is why `D17`'s
+"every corpus reason was provoked" assertion still holds.
+
+**One firmware change was needed for any of this.** `gatelogic::IDecisionLog` is an
+observer offered every decision after it has been applied. A refusal *reason* reaches
+no surface on the hardware — the relay and the one lamp between them cannot tell six
+reasons apart — so without it a harness watching a relay could prove that a door did
+not open and nothing about why. It is `nullptr` on every board, it returns void, it is
+called last on every decision path, and `GateApp` is host-tested on exactly that null
+path because it is the one that ships.
+
+### The worst case, measured rather than derived
+
+`gatelogic/GateApp.h` and `src/iot/door-gate/README.md` both state the release bound in
+words: the release *deadline* is bounded by the 30 s hard cap, but what the deadline
+does not bound is when the loop gets back to look at it, so
+
+    physical release <= granted window + kWorstBlockingCallMs + kIdleDelayMs
+
+— 42 010 ms with this image's numbers. That sentence had never been measured; it was
+derived from three timeout constants. `DS8` measures it against a peer the real API
+cannot be made into (`gate_sim.HostileApi`, which answers *chunked with no
+Content-Length* so the measurement runs against the framing the firmware actually
+meets): a hung API, a dropped connection, and a black hole for the connect budget.
+The numbers land in the run's `notes:` block, and on one run they were:
+
+| | Derived | Measured |
+|---|---|---|
+| one blocking call | 12 000 ms | 4 000 ms |
+| release overrun | 12 010 ms | 3 916 ms |
+| physical release on a 30 s grant | 42 010 ms | 33 916 ms |
+| the connect budget, against TEST-NET-1 | 4 000 ms | 4 019 ms |
+| longest interval with the watchdog unkicked | — | 4 001 ms, against a 15 000 ms period |
+
+**The bound holds and is conservative**, because the three phases are not all
+reachable in one call: a connect that times out is followed by no header phase and
+no body phase, and a peer that answers the connect promptly spends nothing on it. The
+full 12 000 ms needs a connect that is *slow but successful*, which is a real network
+state and so a correct upper bound — just not what a hung or absent host produces.
+`src/iot/door-gate/README.md` carries the same table beside the sentence it measures.
+
 ## What `door_evening.py` deliberately does not prove
 
-- **The firmware's own decisions.** `gatelogic` (the pass, the roster cache, the release
-  deadline, what a board *does* with a 403 versus a timeout) is host-tested in
-  `src/iot/door-gate/test/`. `wire.py` re-implements the reader's *framing rules* to read
-  the server the way a board would; it does not execute the firmware.
-- **That a 403 makes a board commit an empty roster.** This asserts the server half — a
-  shut door is refused on all five routes and its heartbeat hands back nothing to keep.
-  The board's half is the firmware project's.
+- **The scanner module, the radio and the lock.** `DSIM` runs the firmware, not the
+  hardware: WiFi up and down is *said* through the console rather than sensed, scanner
+  bytes come from a console line rather than from a GM-series module on GPIO 4 at 9600
+  baud, and there is no coil, no contact and no readback — there is none on the real
+  board either, which is a hardware fact rather than a harness gap.
 - **Anything physical.** Which lock the club fits, what the relay does before `setup()`
   runs, and that egress is mechanical are `docs/go-live-checklist.md`'s, where a person
   signs them off. See `docs/specs/door-gate.md` §11.
+- **The `esp32_hal` drivers.** `Esp32HttpPort`, `Esp32Scanner`'s overrun callback and
+  `Esp32Watchdog`'s TWDT reconfiguration are the one layer the simulator replaces
+  rather than runs. `posix_gate_hal` is written to be as thin as they are and to use
+  the same budgets and the same `frameFromHeaders` / `readBody`, but it is not them.
 
 ## Knobs
 
@@ -256,6 +340,12 @@ limits are raised far above a club's traffic so the scenario's burst of auth cal
 mistaken for password guessing. `door_evening.py` takes its own ephemeral port and its own
 database, and puts its scratch in a `…-door` sibling of `scenario.py`'s run directory, so
 the two never share anything but the source they are built from.
+
+`gate_sim.py` needs the door simulator built. `make test-e2e-device` builds it before
+running this script, and `make build-iot` builds it too; running `door_evening.py` on
+its own, it builds it with `PIO` if it is missing and **fails by name** if it cannot.
+It is never skipped: "no binary, no assertions" is exactly the shape of gate this
+repository has already shipped three of.
 
 ## Why not `make virt-up`
 

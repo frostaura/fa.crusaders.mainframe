@@ -117,15 +117,18 @@ IOT_FORMAT_FILES = git ls-files -co --exclude-standard \
 	'$(IOT_DIR)/**/*.cpp' '$(IOT_DIR)/**/*.h' ':(exclude)$(IOT_DIR)/*/arduino/**'
 
 # Lint — IoT firmware. Formatting, the purity rule, and the strict compile gate.
-# All three cover every project in IOT_PROJECTS: the purity exclusions are
-# arduino_hal and posix_hal, which live under court-box/lib, and a gate that
-# looked at one project would leave the shared libraries — the ones compiled
-# into ALL the firmwares — checked by nothing.
+# All three cover every project in IOT_PROJECTS: the HAL implementations are
+# spread across all three project directories — arduino_hal under court-box/lib,
+# posix_hal under shared/lib, esp32_hal and posix_gate_hal under door-gate/lib —
+# and a gate that looked at one project would leave the shared libraries, the
+# ones compiled into ALL the firmwares, checked by nothing.
 #
 # The purity exclusions are the HAL-IMPLEMENTATION directories, by name: one per
-# board family. A new firmware's HAL has to be added to this list AND to the same
-# list in .github/workflows/ci.yml, or the gate fails on the one directory that
-# is allowed to include what it includes.
+# board family plus one per SIMULATOR. `--exclude-dir` matches a whole directory
+# name, so posix_gate_hal needs its own entry and is not covered by posix_hal's.
+# A new firmware's HAL has to be added to this list AND to the same list in
+# .github/workflows/ci.yml AND in court-box/tools/strict_compile.sh, or the gate
+# fails on the one directory that is allowed to include what it includes.
 #
 # The header families are likewise per-board. ESP32 brought four the ESP8266
 # never had — HTTPClient, Preferences, HardwareSerial and the whole esp_* IDF
@@ -137,6 +140,7 @@ lint-iot:
 	@! grep -rn --include=*.h --include=*.cpp \
 	    -E '#include *<(Arduino|WiFi|ESP8266|Wire|LiquidCrystal|HTTPClient|Preferences|HardwareSerial|EEPROM|SPI|esp_|driver/|soc/)' \
 	    $(IOT_LIB_DIRS) --exclude-dir=arduino_hal --exclude-dir=posix_hal --exclude-dir=esp32_hal \
+	    --exclude-dir=posix_gate_hal \
 	  || (echo 'pure lib/ must not include Arduino headers' && exit 1)
 	@! grep -rnE '(>=|<=|>|<) *[A-Za-z_]*([Dd]eadline|[Ee]xpires|[Aa]tMs)|millis\(\) *(>=|<=|>|<)|(>=|<=|>|<) *millis\(\)|(>=|<=|>|<) *[A-Za-z_][A-Za-z0-9_]*\.at\b' \
 	    $(IOT_LIB_DIRS) $(IOT_SRC_DIRS) --include=*.cpp --include=*.h 2>/dev/null | grep -v 'lib/timebase' \
@@ -156,16 +160,21 @@ build: lint build-iot
 # PlatformIO to `run` it would be asking it to build nothing and say so.
 #
 # The ENVIRONMENTS are named per project rather than looped, because they are
-# per project by nature — the court box has three targets and the gate has one,
-# and `pio run` with no `-e` would also build each project's native environments
-# for nothing. A fourth project is a fourth line here.
+# per project by nature — each board project has its boards AND its native
+# simulator, and `pio run` with no `-e` would also build each project's test
+# environments for nothing. A fourth project is a fourth line here.
+#
+# BOTH SIMULATORS ARE BUILT HERE, and both are needed by `make test-e2e-device`:
+# the court box's is the Mega half of `scenario.py`, and the gate's is the real
+# firmware in `door_evening.py`. Neither needs a secrets.h — a simulator takes
+# its API base URL and device key at run time.
 #
 # Both board projects `#error` without their own src/common/secrets.h, which is
 # gitignored. That is what stops an image being built with a blank in it; it also
 # means this target cannot run on a fresh checkout until both exist.
 build-iot: sweep-icloud
 	$(PIO) run -d $(IOT_DIR)/court-box -e court_mega -e court_bridge -e simulator
-	$(PIO) run -d $(IOT_DIR)/door-gate -e door_gate
+	$(PIO) run -d $(IOT_DIR)/door-gate -e door_gate -e simulator
 
 # Delete iCloud's fabricated `Name 2.h` / `program 3` copies from under src/iot.
 #
@@ -367,6 +376,11 @@ test-e2e:
 # connection, against which the firmware's reader timed out on EVERY call — no
 # roster, and a door that refused everyone, with nothing red anywhere.
 #
+# AND ITS `DSIM` SECTION RUNS THE REAL DOOR FIRMWARE, which is why the gate's
+# simulator is built on the line above it. `wire.py` reads the server the way a board
+# would; the simulator IS a board — the same GateApp loop, the same GateFlow status
+# table, the same ResponseBody de-chunker — over a real socket to the same API.
+#
 # Both print `finding-id -> assertion` and exit non-zero on any failed assertion. The
 # door needs `psql` on PATH (it places bookings at hours the admin API will not) and
 # it is run second, because it is the longer of the two and the shorter one failing
@@ -382,6 +396,7 @@ test-e2e:
 test-e2e-device:
 	"$(PIO)" run -d $(IOT_DIR)/court-box -e simulator
 	DOTNET="$${DOTNET:-dotnet}" PIO="$(PIO)" "$(PY)" test/e2e-device/scenario.py
+	"$(PIO)" run -d $(IOT_DIR)/door-gate -e simulator
 	DOTNET="$${DOTNET:-dotnet}" "$(PY)" test/e2e-device/door_evening.py
 
 # Service virtualization as plain processes.
