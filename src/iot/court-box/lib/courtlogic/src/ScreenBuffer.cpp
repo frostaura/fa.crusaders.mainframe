@@ -7,15 +7,13 @@ namespace courtlogic {
 
 namespace {
 
-/// The action row's left zone beside a CLOCK, which the landing screen owns.
-constexpr uint8_t clockLeftCols() {
-  return hal::kDisplayCols > kClockCols ? static_cast<uint8_t>(hal::kDisplayCols - kClockCols)
-                                        : hal::kDisplayCols;
-}
-
-/// The action row's left zone beside a COUNTDOWN, which an overlay owns. One
-/// column wider, which is exactly the sixteenth character of a screen written
-/// to the safe-subset contract.
+/// The action row's left zone beside a COUNTDOWN, which an overlay owns.
+///
+/// One column wider than the zone beside a CLOCK, which is exactly the
+/// sixteenth character of a screen written to the safe-subset contract. The
+/// clock's own left edge is not a named function because nothing composes text
+/// against it — writeTail measures back from the right, and the landing
+/// screen's own strings are held to fifteen columns by the test over them.
 constexpr uint8_t countLeftCols() {
   return hal::kDisplayCols > kCountdownCols ? static_cast<uint8_t>(hal::kDisplayCols - kCountdownCols)
                                             : hal::kDisplayCols;

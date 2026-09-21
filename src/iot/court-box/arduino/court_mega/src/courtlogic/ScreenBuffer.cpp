@@ -9,10 +9,16 @@ namespace courtlogic {
 
 namespace {
 
-/// The action row's left zone: everything up to the clock/countdown cells.
-constexpr uint8_t leftZoneCols() {
-  return hal::kDisplayCols > kStatusTailCols ? static_cast<uint8_t>(hal::kDisplayCols - kStatusTailCols)
-                                             : hal::kDisplayCols;
+/// The action row's left zone beside a COUNTDOWN, which an overlay owns.
+///
+/// One column wider than the zone beside a CLOCK, which is exactly the
+/// sixteenth character of a screen written to the safe-subset contract. The
+/// clock's own left edge is not a named function because nothing composes text
+/// against it — writeTail measures back from the right, and the landing
+/// screen's own strings are held to fifteen columns by the test over them.
+constexpr uint8_t countLeftCols() {
+  return hal::kDisplayCols > kCountdownCols ? static_cast<uint8_t>(hal::kDisplayCols - kCountdownCols)
+                                            : hal::kDisplayCols;
 }
 
 /// One court's cell on the live row: `<letter><space><2 right-aligned><space>`.
@@ -233,8 +239,8 @@ bool ScreenBuffer::showActionRowOnly(uint32_t seconds, uint32_t nowMs) {
   hintUntil_.arm(nowMs, ms);
 
   char row[hal::kDisplayCols + 1U];
-  padInto(row, staged_[3], leftZoneCols());
-  for (uint8_t c = leftZoneCols(); c < hal::kDisplayCols; ++c) {
+  padInto(row, staged_[3], countLeftCols());
+  for (uint8_t c = countLeftCols(); c < hal::kDisplayCols; ++c) {
     row[c] = live_[3][c];
   }
   row[hal::kDisplayCols] = '\0';
@@ -295,7 +301,7 @@ void ScreenBuffer::refreshLive(const RelayGuard& relays, uint32_t nowMs) {
       // The hold, surfaced as what it MEANS. There is no separate cooldown
       // state and no second timer — inventing one would be a state that can get
       // stuck, which is the whole failure class this file exists to close.
-      readyIn(live_[3], leftZoneCols(), left);
+      readyIn(live_[3], countLeftCols(), left);
     }
     writeCountdown(live_[3], left);
     if (!hintUntil_.isArmed()) {
@@ -385,21 +391,21 @@ void ScreenBuffer::renderActionRow(uint32_t nowMs, char* out) const {
   rightAlign(&clock[3], 2U, static_cast<uint16_t>(minuteOfDay % 60U));
   clock[3] = clock[3] == ' ' ? '0' : clock[3];
   clock[5] = '\0';
-  writeTail(out, clock);
+  writeTail(out, clock, kClockCols);
 }
 
-void ScreenBuffer::writeTail(char* row, const char* tail) const {
-  const uint8_t at = leftZoneCols();
-  for (uint8_t i = 0U; i < kStatusTailCols && static_cast<uint8_t>(at + i) < hal::kDisplayCols; ++i) {
+void ScreenBuffer::writeTail(char* row, const char* tail, uint8_t width) const {
+  const uint8_t at = hal::kDisplayCols > width ? static_cast<uint8_t>(hal::kDisplayCols - width) : 0U;
+  for (uint8_t i = 0U; i < width && static_cast<uint8_t>(at + i) < hal::kDisplayCols; ++i) {
     row[at + i] = tail[i] == '\0' ? ' ' : tail[i];
   }
 }
 
 void ScreenBuffer::writeCountdown(char* row, uint16_t seconds) const {
-  char tail[kStatusTailCols + 1U];
-  rightAlign(tail, kStatusTailCols, seconds);
-  tail[kStatusTailCols] = '\0';
-  writeTail(row, tail);
+  char tail[kCountdownCols + 1U];
+  rightAlign(tail, kCountdownCols, seconds);
+  tail[kCountdownCols] = '\0';
+  writeTail(row, tail, kCountdownCols);
 }
 
 uint16_t ScreenBuffer::holdLeftSeconds(uint32_t nowMs) const {

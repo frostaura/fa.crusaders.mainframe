@@ -14,6 +14,7 @@
 #include <string.h>
 #include <unity.h>
 
+#include "court/Session.h"
 #include "courtlogic/AuthWindow.h"
 #include "courtlogic/ButtonPanel.h"
 #include "courtlogic/CourtBox.h"

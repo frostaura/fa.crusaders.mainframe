@@ -142,7 +142,20 @@ bool parseRosterElement(const char* text, roster::Entry& out) {
 }
 
 bool parseCourtNumbers(const char* body, size_t len, int16_t out[kMaxCourts], uint8_t& count) {
-  size_t at = devapi::json::findArray(body, len, "court_numbers");
+  // THE TOP-LEVEL `court_numbers`, for the reason applyRoster reads the
+  // top-level `roster` (round G4, B2). This array decides which club court each
+  // RELAY is — what a walk-up is sold as, and what the power-dip restore gates
+  // on — and the flat scan returns the first match in document order, so a
+  // decoy placed before the real field wins. A box that adopted one would map
+  // relay 0 to somebody else's court and sell a member court time the club
+  // never booked.
+  //
+  // Narrowing this is safe for the same reason it was safe for the roster: the
+  // contract puts `court_numbers` at the top level. The NESTED reads — the
+  // button map, the slice minutes, the walk-up maximum, all out of `config` —
+  // still use the flat scan, deliberately and documented, and must not be
+  // narrowed with it.
+  size_t at = devapi::json::findTopLevelArray(body, len, "court_numbers");
   if (at == devapi::json::kNotFound) {
     return false;
   }

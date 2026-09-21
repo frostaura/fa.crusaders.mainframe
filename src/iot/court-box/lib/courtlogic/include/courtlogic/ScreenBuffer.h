@@ -66,7 +66,6 @@
 
 #include "hal/Display.h"
 
-#include "court/Session.h"
 #include "courtlogic/RelayGuard.h"
 #include "protocol/Protocol.h"
 #include "timebase/TimeBase.h"
@@ -134,9 +133,15 @@ inline constexpr uint32_t kLandingRefreshMs = 1000UL;
 inline constexpr uint8_t kClockCols = 5U;
 inline constexpr uint8_t kCountdownCols = 4U;
 
-static_assert(kCountdownCols + court::kSafeSubsetCols <= hal::kDisplayCols,
-              "the countdown would overwrite the last column of an action row written to the "
-              "16-column contract");
+/// On a panel WIDER than the safe subset the countdown must sit entirely to the
+/// right of it, or it eats the sixteenth character of every action row written
+/// to the contract. On a panel that IS the safe subset there is no room to the
+/// right of it and the overlap is the documented degradation — rows 0-1 still
+/// carry the whole message, which is the only thing the contract promises.
+static_assert(hal::kDisplayCols <= hal::kSafeSubsetCols ||
+                  kCountdownCols + hal::kSafeSubsetCols <= hal::kDisplayCols,
+              "on a wide panel the countdown would overwrite the last column of an action row "
+              "written to the 16-column contract");
 
 /// Seconds at which the countdown starts saying what it MEANS rather than just
 /// counting. Below this the action row reads `READY IN <n> s`, which is GOAL

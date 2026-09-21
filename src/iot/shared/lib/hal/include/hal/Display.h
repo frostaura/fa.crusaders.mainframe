@@ -46,6 +46,21 @@ constexpr uint8_t kDisplayRows = static_cast<uint8_t>(LCD_ROWS);
 constexpr uint8_t kDisplayRows = 2U;
 #endif
 
+/// The columns a 16-column panel would show.
+///
+/// THE SAFE-SUBSET CONTRACT, as a number both halves of a box can name. The
+/// geometry above says how wide the glass IS; this says how much of it a
+/// message may depend on. Rows 0-1 truncated here must still be a complete and
+/// correct message on every screen, so a 1602 fitted where a 2004A was
+/// expected degrades to a smaller screen rather than to half a sentence —
+/// which is the property this port chose 16x2 for in the first place, kept as
+/// a contract now that the firmware drives the panel it actually has.
+///
+/// It is HERE rather than in one board's own library because both the half
+/// that composes the text and the half that paints it have to agree about it,
+/// and neither may depend on the other.
+constexpr uint8_t kSafeSubsetCols = 16U;
+
 /// A character-cell display, addressed by row and column.
 class IDisplayPort {
 public:

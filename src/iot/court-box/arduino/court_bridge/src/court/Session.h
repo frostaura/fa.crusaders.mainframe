@@ -71,7 +71,11 @@ inline constexpr size_t kLineLen = static_cast<size_t>(hal::kDisplayCols);
 
 /// The columns a 1602 would show. Rows 0-1 clipped here must still read as a
 /// whole message; columns beyond it, and rows 2-3, carry enrichment only.
-inline constexpr size_t kSafeSubsetCols = 16U;
+///
+/// The number lives in hal/Display.h, beside the geometry it qualifies: both
+/// the half that composes the text and the half that paints it have to agree
+/// about it, and neither may depend on the other's library.
+inline constexpr size_t kSafeSubsetCols = static_cast<size_t>(hal::kSafeSubsetCols);
 
 static_assert(kLineLen >= kSafeSubsetCols,
               "a panel narrower than the 16-column safe subset would make the contract "
