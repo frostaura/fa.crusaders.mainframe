@@ -8,6 +8,7 @@ using Crusaders.Mainframe.Api.Webhooks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Crusaders.Mainframe.Tests;
@@ -479,7 +480,10 @@ public sealed class ConcurrentDecisionTests
             upload.ServiceProvider.GetRequiredService<AccessCodeService>(),
             upload.ServiceProvider.GetRequiredService<CourtActivationService>(),
             upload.ServiceProvider.GetRequiredService<BookingService>(),
-            upload.ServiceProvider.GetRequiredService<TenantSettingsAccessor>());
+            upload.ServiceProvider.GetRequiredService<TenantSettingsAccessor>(),
+            upload.ServiceProvider.GetRequiredService<CourtLightStateService>(),
+            upload.ServiceProvider.GetRequiredService<IServiceScopeFactory>(),
+            upload.ServiceProvider.GetRequiredService<ILoggerFactory>());
 
         var outcome = await DeviceEventEndpoints.ActivateOrReverseAsync(
             services, new LateActivation(court, stale, club.MemberId, "offline", scannedAt, 2_700_000), default);

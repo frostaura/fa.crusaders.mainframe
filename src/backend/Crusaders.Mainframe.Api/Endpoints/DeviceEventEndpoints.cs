@@ -114,6 +114,47 @@ public static class DeviceEventEndpoints
     public const string UnknownScanKind = "unknown_scan";
 
     /// <summary>
+    /// A board reporting something wrong with itself — GOAL item 7's device half.
+    ///
+    /// <para>
+    /// <b>The seam already existed and terminated in a row nothing read.</b> <c>Kind::Fault</c>
+    /// has been on the wire since the queue was written and fell through the dispatch switch to
+    /// a <c>device.fault</c> audit row with a null outcome. So this is modelling and surfacing,
+    /// not plumbing.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The existing fields are reused rather than extended</b>, and that is a constraint of
+    /// the hardware rather than a shortcut: the event record is written to a fixed ring on a
+    /// part with no allocator, and widening it costs RAM on both boards. So <c>subject</c>
+    /// carries the fault CODE, <c>duration_ms</c> carries the COUNT since that code was last
+    /// reported, and <c>court</c> carries the relay when the fault is about one (<c>-1</c>
+    /// otherwise).
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Aggregation is the rate limit.</b> The board counts a fault rather than queueing it
+    /// and emits at most one event per code per window, so a link producing four hundred CRC
+    /// errors a minute costs one event carrying the number 1200 rather than four hundred
+    /// events. The receipt is still written, so a replayed batch cannot double-count — which is
+    /// why the events queue is the right channel and the heartbeat is not.
+    /// </para>
+    /// </summary>
+    public const string FaultKind = "fault";
+
+    /// <summary>
+    /// The board restarted. Emitted by both firmwares today and, until now, read by nothing.
+    ///
+    /// <para>
+    /// Recorded at <c>Info</c>, which is not a downgrade: every board boots, so a boot is not a
+    /// fault — but a board booting repeatedly is the clearest single signal of a failing power
+    /// supply, and the error log's count column is what turns "it rebooted" into "it has
+    /// rebooted forty times today".
+    /// </para>
+    /// </summary>
+    public const string BootKind = "boot";
+
+    /// <summary>
     /// Longest <c>kind</c> this endpoint will store. The receipt's column, and — through
     /// <see cref="AuditKind"/> — what bounds the audit row's <c>Action</c>.
     /// </summary>
@@ -223,6 +264,24 @@ public static class DeviceEventEndpoints
         if (refusal is not null) return refusal;
 
         var events = (batch.Events ?? []).Take(MaxBatch).ToList();
+
+        // LIVENESS BEFORE THE DECISION, ON EVERY BRANCH — including the ones that throw.
+        //
+        // This used to be recorded once, after the whole loop, while /activate, /gate and
+        // /walkup all record it up front on every branch including their refusals. /events is
+        // the route most able to throw: the receipt write rethrows anything that is not a
+        // duplicate, and the settlement can exhaust its retries. So a box talking to the API
+        // every minute and failing on one poisoned event was declared OFFLINE — every admin
+        // mailed "court box not reporting", and the outage index started waiving no-show
+        // penalties on those courts. The control board would have painted that box red while
+        // it was plainly working, and the error log would have been its only contradicting
+        // evidence.
+        var uploadSettings = await services.Settings.GetAsync(ct);
+        DeviceSilenceLog.NoteHeartbeat(
+            services.Db, device!, DateTimeOffset.UtcNow,
+            HeartbeatCadence.OfflineAfterSeconds(uploadSettings.HeartbeatSeconds));
+        await services.Db.SaveChangesAsync(ct);
+
         if (events.Count == 0) return Results.Ok(new { accepted_through = 0L, recorded = 0 });
 
         // The box has no RTC, so an event carries its uptime and the batch carries the
@@ -274,32 +333,50 @@ public static class DeviceEventEndpoints
                     ActivationKind => await ActivationOutcomeAsync(device!, e, time.OccurredAt, services, ct),
                     ReleaseKind => await ReleaseOutcomeAsync(device!, e, time.OccurredAt, services, ct),
                     GateOpenKind => await GateOpenOutcomeAsync(e, time.OccurredAt, services, ct),
+
+                    // Both of these used to fall through to `_ => null` and land as an audit
+                    // row with a null outcome that nothing read. They keep that row — the
+                    // trail is where "the box restarted" belongs — and now also reach the
+                    // club's monitoring page, which is the surface an admin can act from.
+                    FaultKind or BootKind => FaultOutcome(kind),
+
                     _ => null,
                 };
 
-                if (await RecordAsync(services, device!, e, time, outcome, ct)) recorded++;
+                if (await RecordAsync(services, device!, e, time, outcome, ct))
+                {
+                    recorded++;
+
+                    // Reported only for an event that was actually RECEIPTED. A duplicate
+                    // upload of one batch would otherwise inflate a fault's count by however
+                    // many times the box retried, which is the opposite of what a count on a
+                    // monitoring page is for.
+                    if (kind is FaultKind or BootKind) NoteFault(services, device!, e, kind, time.OccurredAt);
+                }
+
+                // THE SIDE EFFECT HAS RUN; the batch must not run it again. `alreadyRecorded`
+                // was snapshotted once before the loop and never updated inside it, so two
+                // events in one batch sharing a seq BOTH passed this gate: the second ran its
+                // full settlement — moving money — and only then lost the unique index, which
+                // detached its receipt and its audit rows while the settlement's own save had
+                // already committed. Money moved with no receipt and no audit row, and
+                // `accepted_through` told the box to drop both.
+                alreadyRecorded.Add(e.Seq);
             }
 
             acceptedThrough = e.Seq;
         }
 
-        // An upload is a liveness signal like the heartbeat is, and it is the call a box
-        // reconnecting after an outage very often makes first. Same recording, same reason:
-        // see DeviceSilenceLog.
+        // Recorded AGAIN, at the end, with a fresh instant.
         //
-        // STAMPED WITH A FRESH INSTANT, NOT WITH `now`. `now` is taken before the batch is
-        // recorded and is the clock every uploaded event's arithmetic is clamped against, which
-        // it has to be — but the audit rows this call writes are created DURING the loop, so
-        // their CreatedAt, which is the delivery instant on the wire, is later than `now` by
-        // however long the batch took. That put `last_seen_at` a millisecond BEFORE the
-        // `delivered_at` of a row the same request had just delivered, which is the product
-        // saying it had not yet heard from a board that was at that moment talking to it.
-        //
-        // It is exactly the contradiction A3 was raised about, in miniature: "last heard from
-        // 28m ago" beside "the door told us at 09:38" is only ever a seed artefact IF the
-        // server itself keeps the two in order. Now it does — contact is when the call was
-        // finished with, which is at or after every row it wrote.
-        var uploadSettings = await services.Settings.GetAsync(ct);
+        // The one above is the liveness signal and runs before anything can throw. This one
+        // keeps `last_seen_at` at or after every row this call wrote: `now` is taken before
+        // the batch is recorded and is the clock every uploaded event's arithmetic is clamped
+        // against, but the audit rows are created DURING the loop, so their CreatedAt — the
+        // delivery instant on the wire — is later than `now` by however long the batch took.
+        // That put `last_seen_at` a millisecond BEFORE the `delivered_at` of a row the same
+        // request had just delivered, which is the product saying it had not yet heard from a
+        // board that was at that moment talking to it.
         DeviceSilenceLog.NoteHeartbeat(
             services.Db, device!, DateTimeOffset.UtcNow,
             HeartbeatCadence.OfflineAfterSeconds(uploadSettings.HeartbeatSeconds));
@@ -468,7 +545,7 @@ public static class DeviceEventEndpoints
     private static async Task<ActivationOutcome> ActivationOutcomeAsync(
         Device device, DeviceEventDto e, DateTimeOffset occurredAt, DeviceEventServices services, CancellationToken ct)
     {
-        var (db, _, codes, _, _, _) = services;
+        var (db, _, codes, _, _, _, _, _, _) = services;
 
         // Live at the scan, not at the upload: the roster token expires at the slot's end
         // plus grace, and a box offline past that is precisely the box whose evidence
@@ -497,7 +574,102 @@ public static class DeviceEventEndpoints
 
         var target = new ActivationTarget(court, booking, resolved.UserId, e.Method ?? "offline", occurredAt, e.DurationMs);
         var settled = await SettleAsync(services, target, ct);
+
+        // The server's belief about this court's relay, moved by the one event that proves the
+        // lights went on. Only on a settled success: a refusal means the box lit a court the
+        // API would not have, and recording it as a grant would make the control board agree
+        // with a box that broke the rule.
+        if (settled.Code is ActivationOutcome.Ok or ActivationOutcome.ReversedNoShow)
+        {
+            await NoteLightsOnAsync(services, device, booking, court, resolved.UserId, e, occurredAt, ct);
+        }
+
         return new ActivationOutcome(settled.Code, booking.Id, ActivationKind, settled.RelatedBookingId);
+    }
+
+    /// <summary>
+    /// Records that a court's lights are believed on, and says so in the club's history.
+    ///
+    /// <para>
+    /// <c>OnUntil</c> is the SOLD end rather than the granted seconds: the grant is clamped by
+    /// the relay's ninety-minute cap and a member with a two-hour booking is re-lit past it,
+    /// so a countdown to the cap would tell the control board the court frees at 19:30 when it
+    /// frees at 20:00 — and an admin would sell the slot twice.
+    /// </para>
+    /// </summary>
+    private static async Task NoteLightsOnAsync(
+        DeviceEventServices services, Device device, Booking booking, Court court, Guid userId,
+        DeviceEventDto e, DateTimeOffset occurredAt, CancellationToken ct)
+    {
+        var evidence = new LightEvidence(
+            court.Id, device.Id, e.Court, e.Seq, BootId: 0, At: occurredAt);
+
+        var row = await services.Lights.RecordOnAsync(
+            evidence, BookingService.OriginalEndsAt(booking),
+            booking.UserId is null ? LightCause.WalkUp : LightCause.Member,
+            userId, booking.Id, ct);
+        if (row is null) return;
+
+        services.Lights.Audit(
+            CourtLightStateService.LightsOnAction, court.Id, court.CourtNumber, booking.UserId,
+            new { device_id = device.Id, relay = e.Court, booking_id = booking.Id, seq = e.Seq });
+    }
+
+    /// <summary>
+    /// The outcome for a <c>fault</c> or <c>boot</c> event: <c>ok</c>, so the existing audit
+    /// row keeps its shape and no second <c>device.fault_&lt;code&gt;</c> row is written.
+    ///
+    /// <para>
+    /// A board reporting a fault has not failed at reporting it, and a non-ok outcome here
+    /// would put a second row in the door trail for every diagnostic a board sends. The
+    /// fault's own record lives in <c>device_errors</c>, which is a health STATE rather than a
+    /// list to scroll — the distinction item 7 is actually asking for.
+    /// </para>
+    /// </summary>
+    private static ActivationOutcome FaultOutcome(string kind)
+    {
+        return new ActivationOutcome(ActivationOutcome.Ok, BookingId: null, Kind: kind);
+    }
+
+    /// <summary>
+    /// One reported fault onto the club's error log.
+    ///
+    /// <para>
+    /// Off the request thread, for the reason every device-facing write to that table is: this
+    /// runs on the path a box drains its queue down, and an error log that can fail a device
+    /// upload converts a scanner fault into a lost activation. A monitoring feature that makes
+    /// the hardware less reliable in order to report on its reliability is not worth having.
+    /// </para>
+    ///
+    /// <para>
+    /// A <c>boot</c> event carries no code of its own, so it is recorded under the
+    /// <c>boot</c> code with the board's uptime as its detail. The digit-collapsing in the
+    /// fingerprint is what keeps that one row rather than one per restart.
+    /// </para>
+    /// </summary>
+    private static void NoteFault(
+        DeviceEventServices services, Device device, DeviceEventDto e, string kind, DateTimeOffset at)
+    {
+        var code = kind == BootKind ? DeviceErrorCodes.Boot : e.Subject;
+
+        // duration_ms carries the COUNT since this code was last reported — see FaultKind.
+        // Clamped rather than believed: a board with a wild counter is still reporting
+        // something real, and refusing the row would lose it.
+        var count = (int)Math.Clamp(e.DurationMs, 1, DeviceErrorService.MaxReportedCount);
+
+        DeviceErrorService.InBackground(
+            services.Scopes, services.Logs.CreateLogger(typeof(DeviceEventEndpoints)),
+            device.TenantId, services.Tenant.TenantSlug,
+            new DeviceErrorReport(
+                code, DeviceErrorSource.Device,
+                DeviceId: device.Id,
+                ClaimedDeviceCode: device.DeviceCode,
+                Detail: kind == BootKind ? $"uptime_ms={e.UptimeMs}" : null,
+
+                // -1 is the wire's "no court", and it must not become relay -1 on the row.
+                Court: e.Court is >= 0 ? e.Court : null,
+                Count: kind == BootKind ? 1 : count,
+                At: at));
     }
 
     /// <summary>
@@ -552,7 +724,7 @@ public static class DeviceEventEndpoints
     private static async Task<ActivationOutcome> ReleaseOutcomeAsync(
         Device device, DeviceEventDto e, DateTimeOffset occurredAt, DeviceEventServices services, CancellationToken ct)
     {
-        var (db, _, _, _, bookings, _) = services;
+        var (db, _, _, _, bookings, _, _, _, _) = services;
         if (e.Court is not { } relay || relay < 0) return new ActivationOutcome("unpaired", null, ReleaseKind);
 
         var session = await db.DeviceEventReceipts.AsNoTracking()
@@ -579,6 +751,25 @@ public static class DeviceEventEndpoints
         var window = LitWindowOf(booking, session.OccurredAt, grantMs: 0, heldMs: e.DurationMs);
         var settled = await bookings.SettleReleaseAsync(booking, window.Minutes, window.End, Guid.Empty, ct);
         var code = settled.Code == ReleaseSettlement.NotApplicable.Code ? ActivationOutcome.Ok : settled.Code;
+
+        // The lights are believed OFF, and the MEASURED end is kept on the row so the control
+        // board and the night trace can still say how long the court was actually lit. This is
+        // also the event the power-dip restore reads back: a member who pressed OFF early has
+        // this receipt, and it is the only thing on the server that says they did — the
+        // booking's own LightsOffCuedAt is set by the slot-end sweep, never by the device.
+        var court = await db.Courts.AsNoTracking().FirstOrDefaultAsync(c => c.Id == booking.CourtId, ct);
+        if (court is not null)
+        {
+            var evidence = new LightEvidence(court.Id, device.Id, relay, e.Seq, BootId: 0, At: window.End);
+            var row = await services.Lights.RecordOffAsync(evidence, ct);
+            if (row is not null)
+            {
+                services.Lights.Audit(
+                    CourtLightStateService.LightsOffAction, court.Id, court.CourtNumber, booking.UserId,
+                    new { device_id = device.Id, relay, booking_id = booking.Id, minutes = window.Minutes });
+            }
+        }
+
         return new ActivationOutcome(code, booking.Id, ReleaseKind);
     }
 
@@ -632,7 +823,7 @@ public static class DeviceEventEndpoints
     /// </summary>
     private static async Task<SettleOutcome> SettleAsync(DeviceEventServices services, ActivationTarget t, CancellationToken ct)
     {
-        var (db, _, _, activation, bookings, settingsAccessor) = services;
+        var (db, _, _, activation, bookings, settingsAccessor, _, _, _) = services;
         var settings = await settingsAccessor.GetAsync(ct);
 
         for (var attempt = 0; attempt < 3; attempt++)
@@ -777,7 +968,7 @@ public static class DeviceEventEndpoints
         DeviceEventServices services, Device device, DeviceEventDto e, EventFacts time,
         ActivationOutcome? outcome, CancellationToken ct)
     {
-        var (db, tenant, _, _, _, _) = services;
+        var (db, tenant, _, _, _, _, _, _, _) = services;
 
         var receipt = new DeviceEventReceipt
         {
@@ -1354,7 +1545,25 @@ public sealed record DeviceEventServices(
     AccessCodeService Codes,
     CourtActivationService Activation,
     BookingService Bookings,
-    TenantSettingsAccessor Settings);
+    TenantSettingsAccessor Settings,
+    /// <summary>
+    /// The light-state projection an activation and a release both move — GOAL items 10 and 17.
+    ///
+    /// <para>
+    /// POSITIONAL, and that is not a style choice. These three were init-only properties for
+    /// one build, and <c>[AsParameters]</c> does not resolve those from the container: every
+    /// handler on this route bound them as <c>null</c> and the first activation threw a
+    /// <c>NullReferenceException</c> from inside a device upload. A required constructor
+    /// parameter makes a missing dependency a COMPILE error at every construction site,
+    /// including the fixtures — which is the failure mode a service this route cannot run
+    /// without has to have.
+    /// </para>
+    /// </summary>
+    CourtLightStateService Lights,
+    /// <summary>For the fault rows this route raises off the request thread. See <see cref="DeviceErrorService.InBackground"/>.</summary>
+    IServiceScopeFactory Scopes,
+    /// <summary>The logger factory those background writes report their own failures to.</summary>
+    ILoggerFactory Logs);
 
 /// <summary>
 /// One event as the box queued it. Names mirror <c>lib/eventq</c>'s wire form. <c>court</c> is
