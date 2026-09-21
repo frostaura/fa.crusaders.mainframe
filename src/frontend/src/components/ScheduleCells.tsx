@@ -217,13 +217,19 @@ function HeaderRow({ courts, sliceMinutes, yourRate }: {
  * are collapsed behind a real `aria-expanded` button that says what is inside it, and the
  * parenthetical naming the viewer's own bookings is the whole reason it is not merely hidden.
  * </p>
+ *
+ * <p>
+ * `border-control`, not `border-border`: this rule is not a row separator that happens to sit
+ * under a button — it IS this control's only visible boundary, because the bar has no other
+ * edge. SC 1.4.11 wants 3:1 for that, which is exactly the split the two tokens encode.
+ * </p>
  */
 function EarlierRow({ label, span, onExpand }: { label: string; span: number; onExpand: () => void }) {
   return (
     <div role="row" style={{ display: "contents" }}>
       <div role="gridcell" style={{ gridColumn: `1 / span ${span}` }}>
         <button type="button" onClick={onExpand} aria-expanded={false}
-          className="w-full min-h-[44px] px-3 py-2 flex items-center gap-2 text-left text-xs text-text-secondary bg-bg-muted/40 border-b border-border">
+          className="w-full min-h-[44px] px-3 py-2 flex items-center gap-2 text-left text-xs text-text-secondary bg-bg-muted/40 border-b border-control">
           <ChevronRight size={14} aria-hidden="true" />
           <span>{label}</span>
         </button>
