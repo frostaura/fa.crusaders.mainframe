@@ -201,8 +201,24 @@ public static class MeDoorEndpoints
         // Clamped, not refused — the same rule the admin log's limit runs and for the same
         // reason: a page asking for a million rows is a mistake to bound, and an error screen
         // is not what a member opening their own history wanted.
+        //
+        // A value that is not a NUMBER is the other case, and it is the one that was silently
+        // coerced (E7 / R3-32). `?limit=abc` cannot be clamped to anything, so falling back to
+        // fifty answers a question nobody asked while the page believes it asked another. The
+        // admin log refuses it by name; this does too, because a member's page is a console
+        // like any other and two surfaces answering one mistake two ways is how a shared client
+        // helper ends up with a branch nobody can explain.
+        var askedText = ctx.Request.Query["limit"].ToString();
+        var present = !string.IsNullOrWhiteSpace(askedText);
+        if (present && !int.TryParse(
+                askedText.Trim(), System.Globalization.NumberStyles.AllowLeadingSign,
+                System.Globalization.CultureInfo.InvariantCulture, out _))
+        {
+            return Results.BadRequest(new { error = DoorLogQuery.LimitInvalid });
+        }
+
         var limit = Math.Clamp(
-            int.TryParse(ctx.Request.Query["limit"].ToString(), out var asked) ? asked : DefaultHistoryLimit,
+            present && int.TryParse(askedText.Trim(), out var asked) ? asked : DefaultHistoryLimit,
             1, MaxHistoryLimit);
 
         var rows = Mine(db, userId).Where(a => a.CreatedAt >= floor);

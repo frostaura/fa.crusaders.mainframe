@@ -127,7 +127,6 @@ public sealed class DoorLogRefusalHttpTests
     [InlineData("-1", 1)]
     [InlineData("-999", 1)]
     [InlineData("1", 1)]
-    [InlineData("abc", 3)]
     [InlineData("", 3)]
     [InlineData("1000000", 3)]
     public async Task A_limit_outside_the_range_is_clamped_and_never_refused(string limit, int expected)
@@ -158,5 +157,42 @@ public sealed class DoorLogRefusalHttpTests
         Assert.Equal(
             expected,
             (await history.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("items").GetArrayLength());
+    }
+
+    /// <summary>
+    /// <b>A limit that is not a NUMBER is the case the clamp cannot answer (E7 / R3-32).</b>
+    ///
+    /// <para>
+    /// It used to sit in the theory above, asserting that <c>?limit=abc</c> came back with the
+    /// default page — which is a real answer to a question nobody asked, while the console
+    /// believes it asked another. A value out of RANGE is a mistake this server can bound and
+    /// still is; a value that is not a number has nothing to bound. WIRE-R3 §4 names the
+    /// refusal for the admin log, and the member's history answers identically because a
+    /// member's page is a console too — the same sentence the clamp theory above is written on.
+    /// </para>
+    /// </summary>
+    [SkippableTheory]
+    [InlineData("abc")]
+    [InlineData("1e9")]
+    [InlineData("12.5")]
+    [InlineData("٣")]
+    public async Task A_limit_that_is_not_a_number_is_refused_by_name_on_both_surfaces(string limit)
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, $"lognan{limit.Length}");
+
+        foreach (var response in new[]
+                 {
+                     await club.AdminClient(factory).GetAsync($"{LogPath}?limit={limit}"),
+                     await club.ClientFor(factory, club.MemberUserId, null).GetAsync($"{HistoryPath}?limit={limit}"),
+                 })
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Equal(
+                DoorLogQuery.LimitInvalid,
+                (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+        }
     }
 }

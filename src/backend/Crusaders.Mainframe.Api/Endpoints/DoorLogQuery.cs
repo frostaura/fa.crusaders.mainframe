@@ -371,16 +371,22 @@ public sealed record DoorLogQuery(
         // under which two adjacent days each contain that instant exactly once, and it is
         // already what DoorDay's own counts do (`s.At >= day.DayStartedAt`). On a caller-supplied
         // `to` it moves the edge by one tick, which is the price of the days being right.
-        // RANGED ON THE SAME INSTANT THE ROWS ARE SORTED AND PRINTED BY (AuditLog.ScanAt), not on
-        // when the club heard. The range was on CreatedAt while the times on screen — and the
-        // per-door day counts on /admin/doors, which have always used the scan's instant — were
-        // not, so "yesterday" held an offline scan from the night before and omitted one of
-        // yesterday's that arrived this morning. An admin asking what happened at a door
-        // yesterday is asking about people standing at a door, and the day counts beside the
-        // list have to be countable from the list.
+        // THE RANGE STAYS ON CreatedAt WHILE THE SORT MOVES TO ScanAt, and the asymmetry is
+        // deliberate rather than an oversight.
+        //
+        // The range answers "what does this club know about, in this window" — which is when it
+        // HEARD, and is the same instant retention and the per-door day counts on /admin/doors
+        // are computed from, so the list and the numbers beside it stay countable from each
+        // other. Ranging on the scan's instant instead would silently hide the one row an admin
+        // most needs after an outage: a batch delivered this morning carrying scans from two
+        // days ago would fall outside "last 24 hours" — and outside every window they would ever
+        // ask for afterwards, because it is already older than all of them.
+        //
+        // What the sort moves for is the opposite failure: a row that IS in the window printed
+        // in a position its own timestamp contradicts. See AuditLog.ScanAt.
         var rows = db.AuditLogs.AsNoTracking()
             .Where(DoorTrail.IsScanRow)
-            .Where(a => a.ScanAt >= From && a.ScanAt < To);
+            .Where(a => a.CreatedAt >= From && a.CreatedAt < To);
 
         if (Door is { } door)
         {

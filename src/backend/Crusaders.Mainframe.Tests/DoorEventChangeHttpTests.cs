@@ -73,8 +73,22 @@ public sealed class DoorEventChangeHttpTests
             },
             events.Select(e => e.GetProperty("change").GetString()!).ToArray());
 
-        // `kind` is unchanged for compatibility: the console's existing dictionary still works.
-        Assert.All(events, e => Assert.Equal(DoorAuditActions.EditedKind, e.GetProperty("kind").GetString()));
+        // `kind` CARRIES THE SAME DISTINCTION NOW (E5 / R3-18, WIRE-R3 §6).
+        //
+        // It was the coarse word — `edited` for all four — on the reasoning that the console's
+        // existing dictionary still worked. That is true and it left the page joining two
+        // fields to get one sentence, which is a join a renderer gets wrong once and then shows
+        // wrong for ever; and the wire for this round names the fine set. `change` keeps its own
+        // older vocabulary beside it, asserted above, so nothing reading that field breaks.
+        Assert.Equal(
+            new[]
+            {
+                DoorAuditActions.ReopenedKind,
+                DoorAuditActions.ShutKind,
+                DoorAuditActions.DetailsChangedKind,
+                DoorAuditActions.RenamedKind,
+            },
+            events.Select(e => e.GetProperty("kind").GetString()!).ToArray());
 
         Assert.All(events, e => Assert.Equal("Door Admin", e.GetProperty("actor_name").GetString()));
     }

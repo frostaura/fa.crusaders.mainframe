@@ -207,12 +207,27 @@ public sealed class DoorScanTimeHttpTests
     }
 
     /// <summary>
-    /// The club log stamps the scan too, and still PAGES by when the club heard about it —
-    /// which is what keeps the keyset cursor total over an append-only table. The two are
-    /// different axes and the response says both, so nothing has to infer one from the other.
+    /// The club log stamps the scan AND orders by it — the two axes were different and it was
+    /// ordered by the wrong one (R3-17, WIRE-R3 §2).
+    ///
+    /// <para>
+    /// <b>This test asserted the defect.</b> It pinned "stamped by the scan, ordered by the
+    /// delivery" as a property, on the reasoning that the delivery instant is what keeps a
+    /// keyset cursor total over an append-only table — which is true of the CURSOR and says
+    /// nothing about what a reader should see. The consequence was a list headed "newest first"
+    /// whose visible timestamps ran the other way, and three reviewers independently read a
+    /// 19:48 scan above a 19:22 one as the product losing track of time. The cursor is still
+    /// total; it is now keyed on the same column the list is sorted by, which is what makes it
+    /// total over the ORDER a reader can see.
+    /// </para>
+    ///
+    /// <para>
+    /// Both instants are still on every row, because reconciling a scan against "last heard
+    /// from" needs both. What changed is which one decides where the row goes.
+    /// </para>
     /// </summary>
     [SkippableFact]
-    public async Task The_log_is_stamped_by_the_scan_and_ordered_by_the_delivery()
+    public async Task The_log_is_stamped_by_the_scan_and_ordered_by_it_too()
     {
         Skip.IfNot(_pg.Available, Skipped);
 
@@ -233,10 +248,15 @@ public sealed class DoorScanTimeHttpTests
             .GetFromJsonAsync<JsonElement>("/api/v1/admin/doors/activity"));
 
         Assert.Equal(2, items.Count);
+
+        // Newest first BY THE INSTANT ON SCREEN…
+        Assert.True(
+            items[0].GetProperty("at").GetDateTimeOffset() > items[1].GetProperty("at").GetDateTimeOffset());
+
+        // …and the delivery instants are still both present and still disagree, which is the
+        // fixture doing its job: an order that happened to agree would prove nothing.
         Assert.True(
             items[0].GetProperty("delivered_at").GetDateTimeOffset()
-            > items[1].GetProperty("delivered_at").GetDateTimeOffset());
-        Assert.True(
-            items[0].GetProperty("at").GetDateTimeOffset() < items[1].GetProperty("at").GetDateTimeOffset());
+            < items[1].GetProperty("delivered_at").GetDateTimeOffset());
     }
 }

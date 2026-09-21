@@ -295,10 +295,20 @@ public sealed class DoorRemovedHttpTests
         Assert.Empty(body.GetProperty("removed_doors").EnumerateArray());
         Assert.Equal(0, body.GetProperty("total").GetInt32());
 
-        // And naming their door id explicitly answers nothing rather than their rows.
-        var probed = await mine.AdminClient(factory).GetFromJsonAsync<JsonElement>(
+        // And naming their door id explicitly answers nothing rather than their rows — which
+        // since R3-13 is a NAMED refusal rather than an empty page. The refusal is the stronger
+        // isolation statement of the two: it is the identical answer an invented guid gets
+        // (asserted here, in the same request shape, so the two cannot drift apart), so it
+        // carries no information about whether their board exists.
+        var probed = await mine.AdminClient(factory).GetAsync(
             $"{LogPath}?{DoorLogQuery.RemovedDoorParameter}={theirGone}");
-        Assert.Equal(0, probed.GetProperty("total").GetInt32());
-        Assert.Empty(Items(probed));
+        var invented = await mine.AdminClient(factory).GetAsync(
+            $"{LogPath}?{DoorLogQuery.RemovedDoorParameter}={Guid.NewGuid()}");
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, probed.StatusCode);
+        Assert.Equal(
+            await invented.Content.ReadAsStringAsync(), await probed.Content.ReadAsStringAsync());
+        Assert.Equal(
+            $"{{\"error\":\"{DoorLogQuery.DoorNotFound}\"}}", await probed.Content.ReadAsStringAsync());
     }
 }
