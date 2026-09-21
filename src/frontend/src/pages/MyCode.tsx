@@ -1,8 +1,7 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { QrCode as QrIcon, RefreshCw } from "lucide-react";
 import { type MemberDoor, type MemberDoorsShut, type MyQrCode } from "../lib/api";
-import { encodeQr, qrPath } from "../lib/qr";
 import { formatCountdown } from "../lib/countdown";
 import { clubClock } from "../lib/clubClock";
 import { Card } from "../components/Card";
@@ -32,6 +31,7 @@ import {
   staleContact,
 } from "../lib/memberDoorCopy";
 import { ClubContact } from "../components/member-door/ClubContact";
+import { QrSvg } from "../components/member-door/QrSvg";
 import { CopySentence } from "../components/member-door/CopySentence";
 import { DecisionCard } from "../components/member-door/DecisionCard";
 import { FullScreenQr } from "../components/member-door/FullScreenQr";
@@ -88,8 +88,6 @@ import { useMemberDoor, useShownDecision } from "../components/member-door/useMe
  * "walk up / pay for someone" switch asks for an ident code outright.
  * </p>
  */
-
-const QUIET_ZONE = 4;
 
 /**
  * How wide the inline QR is — D7, and every length in it is deliberate.
@@ -149,24 +147,6 @@ const QR_WIDTH = "w-full max-w-[320px]";
  * </p>
  */
 const CODE_CARD_BOX = "w-[min(100vw-32px,354px)] sm:w-full p-[16px] sm:p-[24px]";
-
-/** A QR symbol for `value`, black on white regardless of theme — scanners want contrast, not tokens. */
-export function QrSvg({ value, className }: { value: string; className?: string }) {
-  const matrix = useMemo(() => encodeQr(value), [value]);
-  const extent = matrix.size + QUIET_ZONE * 2;
-  return (
-    <svg
-      viewBox={`0 0 ${extent} ${extent}`}
-      role="img"
-      aria-label={`QR code ${value}`}
-      shapeRendering="crispEdges"
-      className={className}
-    >
-      <rect width={extent} height={extent} fill="#ffffff" />
-      <path d={qrPath(matrix, QUIET_ZONE)} fill="#000000" />
-    </svg>
-  );
-}
 
 /**
  * One clock face for the whole product, in `lib/clubClock.ts` — not a second `Intl`
@@ -732,6 +712,65 @@ function DoorFooter({ doorsKnowledge, contact }: { doorsKnowledge: "yes" | "no" 
 }
 
 /**
+ * The club's number, in THREE states rather than two nulls.
+ *
+ * <p>
+ * The shape this replaced ended `?? { phone: null, email: null }`, so a read that never
+ * landed came out looking exactly like a club that has set neither — and every surface
+ * downstream went on to state the second as a fact to somebody standing outside a locked
+ * building. A remembered number keeps its age, so it is offered as a number from earlier
+ * rather than as the current one. See {@link ContactKnowledge}.
+ * </p>
+ */
+function contactFrom(door: MemberDoor | null, remembered: LastKnown["door"]): ContactKnowledge {
+  if (door) return liveContact(door.contact);
+  if (remembered) return staleContact(remembered.value.contact, minutesSince(remembered.savedAt));
+  return CONTACT_UNKNOWN;
+}
+
+/**
+ * Does this club have a door at all — and D1's THIRD answer when nobody knows.
+ *
+ * <p>
+ * The live answer wins outright, including when it is `false`: a club that has just retired
+ * its gate must go silent. With no live answer either fallback will do, and they are ORed
+ * rather than ranked — both are the same claim from two different reads, and a member at a
+ * door is not served by the page forgetting one of them.
+ * </p>
+ *
+ * <p>
+ * <b>`unknown` is not `no`.</b> It is what the page has when every read has failed and
+ * nothing was ever cached, and it used to be spelled `false` — which is an answer, and the
+ * wrong one. A club this phone has never heard anything about is not a club with no door.
+ * </p>
+ */
+function doorsKnowledgeOf(
+  door: MemberDoor | null,
+  qr: MyQrCode | null,
+  remembered: LastKnown["door"],
+  failed: boolean,
+): "yes" | "no" | "unknown" {
+  const known = door ? door.doors : (qr?.doors === true || remembered?.value.doors === true);
+  if (known) return "yes";
+  return failed ? "unknown" : "no";
+}
+
+/**
+ * D4 — the end of the booking THIS code is for, and of no other.
+ *
+ * <p>
+ * `next_booking` is the member's next one, which the moment a court has finished is a
+ * different booking entirely: taking its end for the end of the code on screen is how a
+ * card came to read "on now · ends" against a slot that was over.
+ * </p>
+ */
+function bookingEndsAtFor(door: MemberDoor | null, qr: MyQrCode): string | null {
+  const next = door?.next_booking;
+  if (!next || next.starts_at !== qr.starts_at) return null;
+  return next.ends_at;
+}
+
+/**
  * The three door facts the page derives rather than reads.
  *
  * <p>
@@ -749,49 +788,44 @@ function DoorFooter({ doorsKnowledge, contact }: { doorsKnowledge: "yes" | "no" 
  * </p>
  *
  * <p>
- * <b>The contact is where the same shape was WRONG, and one `??` chain hid it.</b> It
- * ended `?? { phone: null, email: null }`, so a read that never landed came out looking
- * exactly like a club that has set neither — and every surface downstream went on to
- * state the second as a fact to somebody standing outside a locked building. The three
- * states are now carried in the type rather than collapsed into two nulls, and the
- * last-known one keeps its age so it is offered as a number from earlier rather than as
- * the current one. See {@link ContactKnowledge}.
+ * <b>The contact is where the same shape was WRONG</b>, and it is {@link contactFrom}'s
+ * now — along with {@link bookingEndsAtFor} and the one source both `doorsShut` and
+ * `timezone` are read from. Each was an optional chain with a default on the end, inline
+ * among six others, and together they took this function past the complexity gate: at
+ * twenty-five branches in twenty-three lines, "a render nobody can check by reading" had
+ * simply moved down here.
  * </p>
  */
 function doorFacts(door: MemberDoor | null, qr: MyQrCode | null, cached: LastKnown, failed: boolean) {
   const remembered = cached.door ?? null;
-  let contact: ContactKnowledge = CONTACT_UNKNOWN;
-  if (door) contact = liveContact(door.contact);
-  else if (remembered) contact = staleContact(remembered.value.contact, minutesSince(remembered.savedAt));
+  const contact = contactFrom(door, remembered);
 
   const standingSource = door ?? remembered?.value ?? null;
   const code = codeOnScreen(qr);
   const standing = standingSource ? describeStanding(standingSource, code) : null;
-  const known = door ? door.doors : (qr?.doors === true || remembered?.value.doors === true);
+  const doorsKnowledge = doorsKnowledgeOf(door, qr, remembered, failed);
+  /*
+    One source for both of these, rather than the same `(door ?? remembered?.value)?.x ?? y`
+    chain spelled out three times. It was spelled out three times, and two of the copies fed
+    the standing sentences while the third fed the code card — which is how two halves of one
+    screen come to disagree about whether the club has shut its doors.
+  */
+  const doorsShut = standingSource?.doors_shut ?? "none";
+  const timezone = standingSource?.timezone;
   return {
-    /**
-     * D1's third state. `true` and `false` are answers; `unknown` is what the page has when
-     * every read has failed and nothing was ever cached — and it used to be spelled `false`,
-     * which is an answer, and the wrong one. A club it has never heard about is not a club
-     * with no door.
-     */
-    doorsKnowledge: (known ? "yes" : failed ? "unknown" : "no") as "yes" | "no" | "unknown",
-    doorsClub: known,
+    doorsKnowledge,
+    doorsClub: doorsKnowledge === "yes",
     contact,
     code,
-    doorsShut: (door ?? remembered?.value)?.doors_shut ?? "none",
-    timezone: standingSource?.timezone,
+    doorsShut,
+    timezone,
     // The de-duplication rule, stated once. See describeDoor.
     meaning: qr
       ? describeKind(qr, {
         suppressed: !!standing?.suppressesCodeClause,
-        doorsShut: (door ?? remembered?.value)?.doors_shut ?? "none",
-        timezone: standingSource?.timezone,
-        // D4: only the END of the booking THIS code is for. `next_booking` is the member's
-        // next one, which after a court has finished is a different booking entirely.
-        bookingEndsAt: door?.next_booking && door.next_booking.starts_at === qr.starts_at
-          ? door.next_booking.ends_at
-          : null,
+        doorsShut,
+        timezone,
+        bookingEndsAt: bookingEndsAtFor(door, qr),
       })
       : null,
   };
