@@ -104,7 +104,15 @@ test.describe("C6 — what a navigation does", () => {
     // D3 §3.1 — Doors left the gear menu for the Monitoring section, so the navigation under
     // test is the tab rather than the menu item. What is being measured is unchanged: a title,
     // an announcement, and focus landing on the new page's own h1.
-    await page.locator('header nav[aria-label="Sections"]').getByRole("link", { name: /^Monitoring/ }).click();
+    /*
+     * The VISIBLE Monitoring link, whichever nav is rendering it.
+     *
+     * The chrome carries two copies of the section tabs — an inline nav above `lg` and the
+     * scrolling strip below it — and the hidden one is still in the DOM. Scoping to the strip
+     * passed on mobile and timed out on desktop waiting for a link that is `display: none`
+     * there. The href is the same in both copies and `:visible` picks whichever is on screen.
+     */
+    await page.locator('header a[href="/admin/monitoring"]:visible').first().click();
 
     await expect(page).toHaveTitle("Control board — Crusaders Mainframe");
     await expect(page.getByTestId("route-announcer")).toHaveText("Control board");
