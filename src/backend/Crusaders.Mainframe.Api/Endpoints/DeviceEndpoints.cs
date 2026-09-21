@@ -226,12 +226,13 @@ public static class DeviceEndpoints
             //
             // The offset is deliberately NOT appended. A board that prints a prefix cannot be
             // handed a value whose meaning depends on a suffix it will never read.
+            //
+            // AND THERE IS NO `server_unix` BESIDE IT. One was added here and taken out again:
+            // the device scheme keeps no clock, every relative number on this wire is relative
+            // to the response, and three tests — two on the live response and one on each
+            // corpus family — exist precisely to stop that field coming back. A second
+            // representation of the same instant is a second thing that can disagree.
             ["server_time"] = ClubWallTime(s, now),
-
-            // …and the UTC truth beside it, for anything that computes rather than prints.
-            // Epoch seconds because that is the one representation a board with no tz database
-            // can do arithmetic on, and because it makes the two fields impossible to confuse.
-            ["server_unix"] = now.ToUnixTimeSeconds(),
 
             ["tenant_slug"] = tenantSlug,
             ["device_code"] = device.DeviceCode,
