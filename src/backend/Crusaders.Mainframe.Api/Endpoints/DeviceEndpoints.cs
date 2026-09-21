@@ -618,11 +618,13 @@ public static class DeviceEndpoints
     private static void NoteCounterRows(
         HeartbeatServices services, Device device, HeartbeatRequest req, DateTimeOffset now)
     {
-        NoteCounter(services, device, DeviceErrorCodes.QueueEventsLost, req.EventsLost, device.EventsLost, now,
-            (d, value) => { d.EventsLost = value; d.EventsLostReportedAt = now; });
+        NoteCounter(services, device, new CounterReport(
+            DeviceErrorCodes.QueueEventsLost, req.EventsLost, device.EventsLost, now,
+            (d, value) => { d.EventsLost = value; d.EventsLostReportedAt = now; }));
 
-        NoteCounter(services, device, DeviceErrorCodes.QueueNoPush, req.NoPush, device.NoPush, now,
-            (d, value) => { d.NoPush = value; d.NoPushReportedAt = now; });
+        NoteCounter(services, device, new CounterReport(
+            DeviceErrorCodes.QueueNoPush, req.NoPush, device.NoPush, now,
+            (d, value) => { d.NoPush = value; d.NoPushReportedAt = now; }));
     }
 
     /// <summary>
@@ -644,10 +646,9 @@ public static class DeviceEndpoints
     /// cannot throw.
     /// </para>
     /// </summary>
-    private static void NoteCounter(
-        HeartbeatServices services, Device device, string code, long? reported, int previous,
-        DateTimeOffset now, Action<Device, int> store)
+    private static void NoteCounter(HeartbeatServices services, Device device, CounterReport report)
     {
+        var (code, reported, previous, now, store) = report;
         if (reported is not { } value) return;
 
         var current = (int)Math.Clamp(value, 0, int.MaxValue);
@@ -664,6 +665,18 @@ public static class DeviceEndpoints
                 Detail: $"since_boot={current}", Count: rise, At: now));
     }
 }
+
+/// <summary>
+/// One since-boot counter as this heartbeat found it: what it is called, what the board says
+/// now, what the row said before, and where to put the new value.
+/// </summary>
+/// <param name="Code">The error-log code the RISE is reported under.</param>
+/// <param name="Reported">What the board sent, or null when it sent nothing.</param>
+/// <param name="Previous">What the row held before this heartbeat.</param>
+/// <param name="Now">The instant the value arrived, which is what makes "as of 19:04" sayable.</param>
+/// <param name="Store">Puts the clamped value and its instant on the row.</param>
+public sealed record CounterReport(
+    string Code, long? Reported, int Previous, DateTimeOffset Now, Action<Device, int> Store);
 
 /// <summary>
 /// The services the heartbeat needs, bundled — the same reason as <see cref="WalkUpServices"/>:

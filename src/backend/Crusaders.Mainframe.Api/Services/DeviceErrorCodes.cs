@@ -134,8 +134,10 @@ public static class DeviceErrorCodes
     /// default was chosen.
     /// </para>
     /// </summary>
-    public static DeviceErrorSeverity SeverityOf(string code) => code switch
+    public static DeviceErrorSeverity SeverityOf(string code)
     {
+        return code switch
+        {
         // Critical — the club cannot sell or deliver court time until somebody attends.
         RelayCmdDropped or RestoreFailed or RestoreNotConfirmed or MegaLinkLost => DeviceErrorSeverity.Critical,
 
@@ -159,8 +161,9 @@ public static class DeviceErrorCodes
         // Info — worth counting, not worth waking anybody.
         MegaLinkBack or Boot => DeviceErrorSeverity.Info,
 
-        _ => DeviceErrorSeverity.Error,
-    };
+            _ => DeviceErrorSeverity.Error,
+        };
+    }
 
     /// <summary>
     /// The sentence a club reads instead of the code.
@@ -172,8 +175,10 @@ public static class DeviceErrorCodes
     /// the raw string — never a guess at what it might have meant.
     /// </para>
     /// </summary>
-    public static string HeadlineOf(string code) => code switch
+    public static string HeadlineOf(string code)
     {
+        return code switch
+        {
         SerialBadCrc or SerialBadFrame => "The two halves of the court box are garbling each other",
         SerialOverrunRx or SerialOverrunTx => "The court box's internal link is losing messages",
         SerialBadVerb or SerialBadArg or SerialNoCourt => "The court box sent an instruction its other half did not understand",
@@ -219,8 +224,9 @@ public static class DeviceErrorCodes
         QueueEventsLost => "The board lost some records before it could send them",
         ErrorLogOverflow => "This board is reporting more distinct problems than the club records",
         Unknown => "An error the club's software does not have a name for",
-        _ => "An error the club's software does not have a name for",
-    };
+            _ => "An error the club's software does not have a name for",
+        };
+    }
 
     /// <summary>Every code this server will ever write, pinned by a test against the severity and headline maps.</summary>
     public static readonly IReadOnlyList<string> All =

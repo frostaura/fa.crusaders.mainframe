@@ -293,6 +293,8 @@ builder.Services.AddScoped<LedgerService>();
 builder.Services.AddScoped<ScheduleService>();
 builder.Services.AddScoped<BookingService>();
 builder.Services.AddScoped<AdminBlockService>();
+// The activation service's non-decision dependencies, bundled — see ActivationPlumbing.
+builder.Services.AddScoped<ActivationPlumbing>();
 builder.Services.AddScoped<CourtActivationService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<MemberApprovalService>();

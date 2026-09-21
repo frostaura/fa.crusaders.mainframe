@@ -633,7 +633,10 @@ public static class DeviceEventEndpoints
         // court the control board still showed as dark.
         if (settled.Code == ActivationOutcome.ReversedNoShow)
         {
-            await NoteLightsOnAsync(services, device, booking, court, resolved.UserId, e, occurredAt, ct);
+            await NoteLightsOnAsync(
+                services,
+                new LightEvidence(court.Id, device.Id, e.Court, e.Seq, BootId: 0, At: occurredAt),
+                booking, court, resolved.UserId, ct);
         }
         else if (settled.Code == ActivationOutcome.Ok)
         {
@@ -664,12 +667,9 @@ public static class DeviceEventEndpoints
     /// </para>
     /// </summary>
     private static async Task NoteLightsOnAsync(
-        DeviceEventServices services, Device device, Booking booking, Court court, Guid userId,
-        DeviceEventDto e, DateTimeOffset occurredAt, CancellationToken ct)
+        DeviceEventServices services, LightEvidence evidence, Booking booking, Court court,
+        Guid userId, CancellationToken ct)
     {
-        var evidence = new LightEvidence(
-            court.Id, device.Id, e.Court, e.Seq, BootId: 0, At: occurredAt);
-
         var row = await services.Lights.RecordOnAsync(
             evidence, BookingService.OriginalEndsAt(booking),
             booking.UserId is null ? LightCause.WalkUp : LightCause.Member,
@@ -678,7 +678,13 @@ public static class DeviceEventEndpoints
 
         services.Lights.Audit(
             CourtLightStateService.LightsOnAction, court.Id, court.CourtNumber, booking.UserId,
-            new { device_id = device.Id, relay = e.Court, booking_id = booking.Id, seq = e.Seq });
+            new
+            {
+                device_id = evidence.DeviceId,
+                relay = evidence.Relay,
+                booking_id = booking.Id,
+                seq = evidence.Seq,
+            });
     }
 
     /// <summary>

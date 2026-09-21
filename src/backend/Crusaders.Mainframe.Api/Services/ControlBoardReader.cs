@@ -205,13 +205,28 @@ public sealed class ControlBoardReader
             // must see, not one the server should resolve by adopting the box's view and
             // losing the evidence that they ever disagreed.
             confirmed_at = light?.ConfirmedAt,
-            confirmed_state = light is null || light.ConfirmedAt is null
-                ? null
-                : CourtLightStateService.StateWire(light.ConfirmedState),
+            confirmed_state = ConfirmedWire(light),
 
             turned_on_by = TurnedOnBy(cause, light?.CausedByUserId, data),
             from_booking_id = light?.BookingId,
         };
+    }
+
+    /// <summary>
+    /// What the BOX last said about this relay, or null when it has never said anything.
+    ///
+    /// <para>
+    /// Null rather than <c>"off"</c> for a board whose firmware does not report relay state —
+    /// which is every board in the field until the new image ships. Three states, not two: a
+    /// tile that read "confirmed off" about a court no box has ever spoken about would be the
+    /// software asserting evidence it does not have, on the one screen whose job is to tell
+    /// those two apart.
+    /// </para>
+    /// </summary>
+    private static string? ConfirmedWire(CourtLightState? light)
+    {
+        if (light?.ConfirmedAt is null) return null;
+        return CourtLightStateService.StateWire(light.ConfirmedState);
     }
 
     /// <summary>
@@ -362,15 +377,18 @@ public sealed class ControlBoardReader
         return booking.ChargedAt is { } charged && charged == booking.StartsAt ? "walk_up" : "booking";
     }
 
-    private static string StatusWire(BookingStatus status) => status switch
+    private static string StatusWire(BookingStatus status)
     {
-        BookingStatus.Booked => "booked",
-        BookingStatus.Completed => "completed",
-        BookingStatus.Cancelled => "cancelled",
-        BookingStatus.NoShow => "no_show",
-        BookingStatus.AdminBlock => "admin_block",
-        _ => "booked",
-    };
+        return status switch
+        {
+            BookingStatus.Booked => "booked",
+            BookingStatus.Completed => "completed",
+            BookingStatus.Cancelled => "cancelled",
+            BookingStatus.NoShow => "no_show",
+            BookingStatus.AdminBlock => "admin_block",
+            _ => "booked",
+        };
+    }
 
     /// <summary>
     /// The club's zone, or UTC when the stored id is one this platform's tzdb cannot name.

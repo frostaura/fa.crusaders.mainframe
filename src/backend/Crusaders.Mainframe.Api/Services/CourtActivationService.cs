@@ -79,16 +79,15 @@ public class CourtActivationService
         TenantSettingsAccessor settings,
         ITenantContext tenant,
         IEventBus bus,
-        ILogger<CourtActivationService> logger,
-        CourtLightStateService lights)
+        ActivationPlumbing plumbing)
     {
         _db = db;
         _bookings = bookings;
         _settings = settings;
         _tenant = tenant;
         _bus = bus;
-        _logger = logger;
-        _lights = lights;
+        _logger = plumbing.Logger;
+        _lights = plumbing.Lights;
     }
 
     private readonly CourtLightStateService _lights;
@@ -401,3 +400,18 @@ public sealed record ActivationRequest(
     Guid? PayerOverrideUserId,
     string Method,
     DateTimeOffset? OccurredAt);
+
+/// <summary>
+/// The two dependencies <see cref="CourtActivationService"/> needs that are not part of the
+/// booking decision: somewhere to log, and the light-state projection to move.
+///
+/// <para>
+/// Bundled rather than listed, for the reason <c>HeartbeatServices</c> and
+/// <c>AdjustServices</c> are: the complexity gate caps a constructor at six parameters, and a
+/// seventh that is a logger says nothing about how hard this class is to reason about. It is
+/// registered in the container beside the service it serves.
+/// </para>
+/// </summary>
+public sealed record ActivationPlumbing(
+    ILogger<CourtActivationService> Logger,
+    CourtLightStateService Lights);

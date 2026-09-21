@@ -651,8 +651,22 @@ public static class AdminConfigEndpoints
         return null;
     }
 
-    /// <summary>Whether a value the caller actually sent is outside its bounds. Absent is never out of range — omitted means unchanged.</summary>
-    private static bool OutOfRange(int? value, int min, int max) => value is { } v && (v < min || v > max);
+    /// <summary>
+    /// Whether a value the caller actually sent is outside its bounds. Absent is never out of
+    /// range — omitted means unchanged.
+    ///
+    /// <para>
+    /// Block body rather than an expression one: lizard's C# parser reads the <c>{</c> of the
+    /// property pattern as the end of a function and dumps the rest of the file into a
+    /// <i>global</i> pseudo-function whose reported length trips <c>-L 200</c>. See
+    /// <c>memory/gotchas.md</c>.
+    /// </para>
+    /// </summary>
+    private static bool OutOfRange(int? value, int min, int max)
+    {
+        if (value is not { } v) return false;
+        return v < min || v > max;
+    }
 
     /// <summary>Same omitted-means-unchanged rule as the economics keys, for the box's nine.</summary>
     private static void WriteOptionalBoxSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
@@ -770,10 +784,31 @@ public static class AdminConfigEndpoints
         return dict;
     }
     private static JsonElement ToElement<T>(T value) => JsonSerializer.SerializeToElement(value);
+    /// <summary>
+    /// An integer out of the stored document, or the default.
+    ///
+    /// <para>
+    /// <b><c>TryGetInt32</c>, not <c>GetInt32</c> — the same defect as
+    /// <see cref="TenantSettingsAccessor"/>'s, in the second of the two places that read this
+    /// column.</b> The kind check only proves the value is a NUMBER; <c>GetInt32</c> then
+    /// throws <c>FormatException</c> on <c>15.5</c> and <c>OverflowException</c> past
+    /// <c>int.MaxValue</c>. A hand-edited or restored-from-backup document therefore made the
+    /// SETTINGS PAGE ITSELF answer 500 — which is the one screen an admin would go to in order
+    /// to fix it. Falling back leaves the page usable and the wrong value visible.
+    /// </para>
+    /// </summary>
     private static int GetInt(IReadOnlyDictionary<string, JsonElement> d, string k, int fallback)
-        => d.TryGetValue(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : fallback;
+    {
+        if (!d.TryGetValue(k, out var v) || v.ValueKind != JsonValueKind.Number) return fallback;
+        return v.TryGetInt32(out var parsed) ? parsed : fallback;
+    }
+
+    /// <summary>A decimal out of the stored document, or the default. <c>TryGetDecimal</c> for the reason <see cref="GetInt"/> gives.</summary>
     private static decimal GetDecimal(IReadOnlyDictionary<string, JsonElement> d, string k, decimal fallback)
-        => d.TryGetValue(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDecimal() : fallback;
+    {
+        if (!d.TryGetValue(k, out var v) || v.ValueKind != JsonValueKind.Number) return fallback;
+        return v.TryGetDecimal(out var parsed) ? parsed : fallback;
+    }
     private static string GetString(IReadOnlyDictionary<string, JsonElement> d, string k, string fallback)
         => d.TryGetValue(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? fallback : fallback;
 }

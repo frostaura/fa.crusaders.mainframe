@@ -119,6 +119,7 @@ public static class RelayRestorePlan
                         && r.OccurredAt > earliest)
             .Select(r => new { r.Court, r.OccurredAt })
             .ToListAsync(ct);
+        var releaseTimes = releases.Select(r => (r.Court, r.OccurredAt)).ToList();
 
         var items = new List<RelayRestoreItem>(numbers.Count);
         for (var relay = 0; relay < numbers.Count; relay++)
@@ -126,26 +127,44 @@ public static class RelayRestorePlan
             var court = courts.FirstOrDefault(c => c.CourtNumber == numbers[relay]);
             if (court is null) continue;
 
-            // A court with two live cued bookings is not a state the booking engine can
-            // produce — the GiST exclusion constraint forbids overlapping slots — but reading
-            // the LATEST rather than the first means a back-to-back pair whose predecessor was
-            // never swept restores the one the member is actually playing.
-            var booking = live.Where(b => b.CourtId == court.Id)
-                .OrderByDescending(b => b.StartsAt)
-                .FirstOrDefault();
-            if (booking is null) continue;
-
-            var checkedIn = booking.CheckedInAt!.Value;
-            if (releases.Any(r => r.Court == relay && r.OccurredAt > checkedIn)) continue;
-
-            var remaining = (int)Math.Ceiling((booking.EndsAt - now).TotalSeconds);
-            if (remaining <= 0) continue;
-
-            items.Add(new RelayRestoreItem(
-                relay, court.Id, court.CourtNumber, booking.Id, remaining, booking.EndsAt,
-                booking.PaidByUserId ?? booking.UserId));
+            var item = ItemFor(relay, court, live, releaseTimes, now);
+            if (item is not null) items.Add(item);
         }
 
         return items;
+    }
+
+    /// <summary>
+    /// What one relay should be told, or null when it should be left dark.
+    ///
+    /// <para>
+    /// Lifted out of the loop so each of the four reasons a relay is skipped is one guard with
+    /// its own sentence, rather than four continues sharing a method with two queries.
+    /// </para>
+    /// </summary>
+    private static RelayRestoreItem? ItemFor(
+        int relay, Court court, List<Booking> live,
+        List<(int? Court, DateTimeOffset OccurredAt)> releases, DateTimeOffset now)
+    {
+        // A court with two live cued bookings is not a state the booking engine can produce —
+        // the GiST exclusion constraint forbids overlapping slots — but reading the LATEST
+        // rather than the first means a back-to-back pair whose predecessor was never swept
+        // restores the one the member is actually playing.
+        var booking = live.Where(b => b.CourtId == court.Id)
+            .OrderByDescending(b => b.StartsAt)
+            .FirstOrDefault();
+        if (booking is null) return null;
+
+        // The member pressed OFF. Nothing else on the server records that they did — see the
+        // type's remarks.
+        var checkedIn = booking.CheckedInAt!.Value;
+        if (releases.Any(r => r.Court == relay && r.OccurredAt > checkedIn)) return null;
+
+        var remaining = (int)Math.Ceiling((booking.EndsAt - now).TotalSeconds);
+        if (remaining <= 0) return null;
+
+        return new RelayRestoreItem(
+            relay, court.Id, court.CourtNumber, booking.Id, remaining, booking.EndsAt,
+            booking.PaidByUserId ?? booking.UserId);
     }
 }

@@ -158,14 +158,15 @@ public sealed class DeviceErrorService
 
         var suppressed = count + (existing is null ? 0 : SuppressedOf(existing.Detail));
 
+        // The overflow row counts REPORTS, not occurrences, and its detail carries the running
+        // total — so the count column climbs by one per suppressed report rather than by the
+        // suppressed occurrences, which would double-count against the number in the detail.
         return await UpsertRawAsync(
-            report, DeviceErrorCodes.ErrorLogOverflow, $"suppressed={suppressed}",
-            court: null, fingerprint, count, at,
-            // The overflow row counts REPORTS, not occurrences, and its detail carries the
-            // running total — so the count column is incremented by one per suppressed report
-            // rather than by the suppressed occurrences, which would double-count against the
-            // number already in the detail.
-            countDelta: 1, ct);
+            report,
+            new Upsert(
+                DeviceErrorCodes.ErrorLogOverflow, $"suppressed={suppressed}",
+                Court: null, fingerprint, at, CountDelta: 1),
+            ct);
     }
 
     private static int SuppressedOf(string? detail)
@@ -183,7 +184,8 @@ public sealed class DeviceErrorService
     {
         var fingerprint = DeviceErrorFingerprint.Of(
             _tenant.TenantId, report.DeviceId, report.ClaimedMac, code, report.Court, detail);
-        return await UpsertRawAsync(report, code, detail, report.Court, fingerprint, count, at, count, ct);
+        return await UpsertRawAsync(
+            report, new Upsert(code, detail, report.Court, fingerprint, at, count), ct);
     }
 
     /// <summary>
@@ -196,10 +198,14 @@ public sealed class DeviceErrorService
     /// while an existing one climbs.
     /// </para>
     /// </summary>
+    /// <summary>One row's worth of values, already normalised, bounded and fingerprinted.</summary>
+    private sealed record Upsert(
+        string Code, string? Detail, int? Court, string Fingerprint, DateTimeOffset At, int CountDelta);
+
     private async Task<DeviceError?> UpsertRawAsync(
-        DeviceErrorReport report, string code, string? detail, int? court, string fingerprint,
-        int count, DateTimeOffset at, int countDelta, CancellationToken ct)
+        DeviceErrorReport report, Upsert upsert, CancellationToken ct)
     {
+        var (code, detail, court, fingerprint, at, countDelta) = upsert;
         var id = Guid.NewGuid();
         var severity = (int)DeviceErrorCodes.SeverityOf(code);
         var source = (int)report.Source;
@@ -247,13 +253,16 @@ public sealed class DeviceErrorService
     }
 
     /// <summary>The wire spelling of a severity — lower snake, a closed set of four.</summary>
-    public static string SeverityWire(DeviceErrorSeverity severity) => severity switch
+    public static string SeverityWire(DeviceErrorSeverity severity)
     {
-        DeviceErrorSeverity.Critical => "critical",
-        DeviceErrorSeverity.Error => "error",
-        DeviceErrorSeverity.Warning => "warning",
-        _ => "info",
-    };
+        return severity switch
+        {
+            DeviceErrorSeverity.Critical => "critical",
+            DeviceErrorSeverity.Error => "error",
+            DeviceErrorSeverity.Warning => "warning",
+            _ => "info",
+        };
+    }
 
     /// <summary>The wire spelling of a source.</summary>
     public static string SourceWire(DeviceErrorSource source) =>

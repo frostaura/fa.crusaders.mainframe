@@ -322,26 +322,32 @@ public sealed class CourtLightStateService
     }
 
     /// <summary>The wire spelling of a light state — lower snake, a closed set of three.</summary>
-    public static string StateWire(LightState state) => state switch
+    public static string StateWire(LightState state)
     {
-        LightState.On => "on",
-        LightState.Off => "off",
-        _ => "unknown",
-    };
+        return state switch
+        {
+            LightState.On => "on",
+            LightState.Off => "off",
+            _ => "unknown",
+        };
+    }
 
     /// <summary>
     /// The wire spelling of a cause. <c>restore_after_power_dip</c> is spelled out rather than
     /// abbreviated because the screen shows it to a volunteer admin and "restored after a power
     /// cut" is the sentence they need.
     /// </summary>
-    public static string CauseWire(LightCause cause) => cause switch
+    public static string CauseWire(LightCause cause)
     {
-        LightCause.Member => "member",
-        LightCause.WalkUp => "walk_up",
-        LightCause.Admin => "admin",
-        LightCause.RestoreAfterPowerDip => "restore_after_power_dip",
-        _ => "unknown",
-    };
+        return cause switch
+        {
+            LightCause.Member => "member",
+            LightCause.WalkUp => "walk_up",
+            LightCause.Admin => "admin",
+            LightCause.RestoreAfterPowerDip => "restore_after_power_dip",
+            _ => "unknown",
+        };
+    }
 
     /// <summary>Writes the audit row that puts a lights change into the night trace and the club's history.</summary>
     public void Audit(string action, Guid courtId, int courtNumber, Guid? subjectUserId, object details)
