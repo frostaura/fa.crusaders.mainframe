@@ -108,7 +108,16 @@ public static class DeviceActivateEndpoint
         var result = await services.Activation.ActivateAsync(
             found.Court!, found.Booking!, resolved.UserId, payerOverrideUserId: null, req.Method!, ct);
 
-        return From(result, found.Court!, now, display);
+        var answer = From(result, found.Court!, now, display);
+
+        // A scan the API would not act on, onto the club's monitoring page. Only from here
+        // down: the refusals above this line are a board asking a question it should not have
+        // asked (a gate on a court route, a method that identifies nobody), which is a
+        // firmware fact rather than a club one. THIS one is a member standing at a court that
+        // did not come on, which is the sentence an admin needs.
+        if (!answer.Activated) services.Faults.ActivationRefused(device, answer.Reason);
+
+        return answer;
     }
 
     private sealed record Found(Booking? Booking, Court? Court, string? Reason);
@@ -259,7 +268,9 @@ public sealed record DeviceActivateServices(
     MainframeDbContext Db,
     AccessCodeService Codes,
     CourtActivationService Activation,
-    TenantSettingsAccessor Settings);
+    TenantSettingsAccessor Settings,
+    /// <summary>Where a refused scan is recorded for the club's monitoring page. See <see cref="DeviceFaultSink"/>.</summary>
+    DeviceFaultSink Faults);
 
 /// <summary>
 /// What a box sends when a scan needs the server. <c>mac</c> names the board;

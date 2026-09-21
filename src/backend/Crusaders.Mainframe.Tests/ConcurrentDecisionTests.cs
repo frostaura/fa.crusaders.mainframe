@@ -724,7 +724,8 @@ public sealed class ConcurrentDecisionTests
         scope.ServiceProvider.GetRequiredService<CourtActivationService>(),
         scope.ServiceProvider.GetRequiredService<IdentificationResolver>(),
         scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>(),
-        scope.ServiceProvider.GetRequiredService<LedgerService>());
+        scope.ServiceProvider.GetRequiredService<LedgerService>(),
+        scope.ServiceProvider.GetRequiredService<DeviceFaultSink>());
 
     private static (int Status, JsonElement Body) Unwrap(IResult result) => (
         (result as IStatusCodeHttpResult)?.StatusCode ?? StatusCodes.Status200OK,

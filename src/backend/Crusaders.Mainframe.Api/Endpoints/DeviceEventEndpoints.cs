@@ -345,6 +345,13 @@ public static class DeviceEventEndpoints
         // whole evening as duplicates is what this field exists to stop.
         var alreadyRecorded = await SeenAsync(services.Db, device!, events, batch.BootId, ct);
 
+        // A board whose sequence numbers went BACKWARDS inside one boot. Within a boot the
+        // sequence is monotonic by construction and the receipt index depends on it, so a
+        // board that renumbers without declaring a new boot has its events silently discarded
+        // as duplicates — a hole in the evening's record that nothing else reports. A board
+        // that genuinely restarted says so with a new boot id and never lands here.
+        await NoteSeqRegressionAsync(services, device!, events, batch.BootId, ct);
+
         foreach (var e in events.OrderBy(e => e.Seq))
         {
             // A retry of something already taken is acknowledged, not re-recorded — which
@@ -694,6 +701,26 @@ public static class DeviceEventEndpoints
                 booking_id = booking.Id,
                 seq = evidence.Seq,
             });
+    }
+
+    /// <summary>
+    /// Files a fault when this batch offers a sequence number below one already receipted for
+    /// the same board and the same boot. One query, and only when the batch could regress.
+    /// </summary>
+    private static async Task NoteSeqRegressionAsync(
+        DeviceEventServices services, Device device, List<DeviceEventDto> events, long bootId,
+        CancellationToken ct)
+    {
+        var lowest = events.Min(e => e.Seq);
+        var highest = await services.Db.DeviceEventReceipts.AsNoTracking()
+            .Where(r => r.DeviceId == device.Id && r.BootId == bootId)
+            .Select(r => (long?)r.Seq)
+            .MaxAsync(ct);
+
+        if (highest is { } seen && lowest < seen)
+        {
+            services.Faults.SeqRegression(device, bootId, lowest, seen);
+        }
     }
 
     /// <summary>
@@ -1327,7 +1354,7 @@ public static class DeviceEventEndpoints
     public static async Task<IResult> WalkUpForDeviceAsync(
         Device device, WalkUpRequest req, WalkUpServices services, CancellationToken ct)
     {
-        var (db, bookings, activation, identities, settingsAccessor, _) = services;
+        var (db, bookings, activation, identities, settingsAccessor, _, _) = services;
 
         var settings = await settingsAccessor.GetAsync(ct);
 
@@ -1408,7 +1435,15 @@ public static class DeviceEventEndpoints
             return original;
         }
 
-        if (created is not BookingResult.Ok ok) return Refusal(created);
+        if (created is not BookingResult.Ok ok)
+        {
+            // A purchase the club would not sell, onto the monitoring page. The member is at
+            // the box with their card out and the court did not come on, and the reason —
+            // out of hours, no time available, the court already in use — is a fact about the
+            // CLUB's configuration that only an admin can act on.
+            services.Faults.WalkUpRefused(device, WalkUpRefusalOf(created));
+            return Refusal(created);
+        }
 
         // Straight into the one activation path, so attendance, the audit row and
         // booking.lights_on all come from the place that is allowed to produce them.
@@ -1520,7 +1555,7 @@ public static class DeviceEventEndpoints
     private static async Task<IResult?> ReplayAsync(
         string reference, WalkUpRequest req, WalkUpServices services, CancellationToken ct)
     {
-        var (db, bookings, activation, _, _, ledger) = services;
+        var (db, bookings, activation, _, _, ledger, _) = services;
 
         var entry = await db.LedgerEntries.AsNoTracking()
             .FirstOrDefaultAsync(l => l.ExternalReference == reference, ct);
@@ -1600,6 +1635,19 @@ public static class DeviceEventEndpoints
         };
     }
 
+    /// <summary>The refusal's own word, for the fault row's detail. Block body for the lizard reason in <c>memory/gotchas.md</c>.</summary>
+    private static string WalkUpRefusalOf(BookingResult created)
+    {
+        return created switch
+        {
+            BookingResult.InsufficientBalance => "insufficient_balance",
+            BookingResult.NoTimeAvailable => "no_time_available",
+            BookingResult.SlotTaken => "court_in_use",
+            BookingResult.OutOfHours => "out_of_hours",
+            _ => "walk_up_refused",
+        };
+    }
+
     private static IResult Refusal(BookingResult created)
     {
         return created switch
@@ -1659,7 +1707,19 @@ public sealed record WalkUpServices(
     CourtActivationService Activation,
     IdentificationResolver Identities,
     TenantSettingsAccessor Settings,
-    LedgerService Ledger);
+    LedgerService Ledger,
+    /// <summary>
+    /// Where a refused purchase is recorded for the club's monitoring page.
+    ///
+    /// <para>
+    /// POSITIONAL, for the reason <c>DeviceEventServices</c>' three are: this record is built
+    /// by <c>[AsParameters]</c>, which does NOT resolve init-only properties from the
+    /// container. As a property it would have been null on every walk-up, and the first
+    /// refused purchase would have thrown from inside a member's card payment rather than
+    /// answering them.
+    /// </para>
+    /// </summary>
+    DeviceFaultSink Faults);
 
 /// <summary>
 /// One activation as a box reported it, resolved: the court and booking the token named,
