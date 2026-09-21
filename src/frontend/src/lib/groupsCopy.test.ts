@@ -3,7 +3,7 @@ import {
   GROUP_REFUSAL_CODES, MOST_RESTRICTIVE_STANDING, addMembersLabel, addResultLine,
   capResolutionSentence, deleteRefusalSentence, emptyIntersectionSentence, explainGroupRefusal,
   groupChangeConsequence, memberCountLine, paintedRunAnnouncement, paintedWeekSentence,
-  previewSummary, ratePerBlockSentence, slicePriceLine,
+  misalignedWindowNote, previewSummary, ratePerBlockSentence, slicePriceLine,
 } from "./groupsCopy";
 import { UNLIMITED } from "./groupRules";
 import { ApiError } from "./api";
@@ -119,6 +119,21 @@ describe("the sentence the painter means — the accessible summary, not a decor
     // The PHRASE still reads back what was painted, because that is what is on the grid — the
     // count is what has to be true of the club.
     expect(paintedWeekSentence(painted, CLUB_WEEK, 15)).toContain("Saturdays 06:00–22:00");
+  });
+
+  /**
+   * A saved window that cannot be drawn in whole cells is NARROWED by the painter, which is the
+   * right direction to fail for a permission and the wrong thing to do silently: an admin who
+   * opened a group to change its name would otherwise save a different rule than they opened.
+   */
+  it("owns up to a saved time the grid cannot draw, in both the one and the several", () => {
+    expect(misalignedWindowNote(["Tuesdays 06:07–09:00"], 15))
+      .toBe("One of this group's saved times doesn't line up with the club's 15-minute slots "
+        + "(Tuesdays 06:07–09:00). Painting here saves the whole slots inside it, which is "
+        + "slightly less time — leave the painter alone and save nothing else if you want it "
+        + "kept as it is.");
+    expect(misalignedWindowNote(["Tuesdays 06:07–09:00", "Fridays 17:03–21:00"], 15))
+      .toContain("Some of this group's saved times");
   });
 
   it("speaks a painted run once, with the day and both edges", () => {

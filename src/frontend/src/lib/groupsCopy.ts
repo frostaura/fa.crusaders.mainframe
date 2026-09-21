@@ -164,6 +164,24 @@ export function paintedWeekSentence(
 }
 
 /**
+ * A saved window that does not line up with the club's own slices.
+ *
+ * <p>
+ * <b>Said rather than silently rounded.</b> The painter can only represent whole slices, so a
+ * saved 06:07–09:00 under 15-minute slots paints as 06:15–09:00 — an access rule narrowed by a
+ * rendering decision. Narrowing is the right direction to fail in (this is a permission), and
+ * doing it without a word on screen is not: an admin who opens a group to change its name would
+ * otherwise save a different rule than the one they opened.
+ * </p>
+ */
+export function misalignedWindowNote(faces: string[], sliceMinutes: number): string {
+  const which = faces.length === 1 ? "One of this group's saved times" : "Some of this group's saved times";
+  return `${which} doesn't line up with the club's ${sliceMinutes}-minute slots (${listOf(faces)}). `
+    + "Painting here saves the whole slots inside it, which is slightly less time — leave the "
+    + "painter alone and save nothing else if you want it kept as it is.";
+}
+
+/**
  * What the live region says after a painted run — ONCE, not per cell.
  *
  * A `Shift+Arrow` run of twelve cells announced twelve times is a live region an admin turns
