@@ -3,8 +3,26 @@ import { UNSAFE_LocationContext } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { focusAfterAction, pageHeading } from "../lib/focusAfterAction";
+import { ActionGlyph } from "./ActionGlyph";
+import { useActionFeedback, type ActionIntent } from "./useActionFeedback";
 
 export type ConfirmTone = "info" | "danger";
+
+/**
+ * Item 12, on the control that carries every destructive decision in the product.
+ *
+ * <p>
+ * <b>Derived from `tone`, so no call site changes.</b> `info` is an affirm; `danger` is
+ * <em>destructive</em>, not "decline" — and that distinction is ruling 4's. A thumbs-up on
+ * "Delete this door" claims the software approves of the deletion. A destructive confirm keeps
+ * the icon the call site already draws (a bin, a lock), keeps the danger treatment, does not
+ * celebrate when it lands, and its press settles rather than snapping.
+ * </p>
+ */
+const INTENT_BY_TONE: Record<ConfirmTone, ActionIntent> = {
+  info: "affirm",
+  danger: "destructive",
+};
 
 type ConfirmButtonProps = {
   idleLabel: React.ReactNode;
@@ -120,7 +138,52 @@ type ConfirmButtonProps = {
    * product already used; `idleClassName` still overrides it for the one-off.
    */
   tone?: ConfirmTone;
+  /**
+   * Item 12's one additive prop. Defaults from {@link tone}; no call site has to change.
+   *
+   * Pass it only to overrule the default — a `tone="info"` control that is really a refusal,
+   * or a `tone="danger"` one that is not destructive at all.
+   */
+  intent?: ActionIntent;
 };
+
+/**
+ * What the way OUT is about, as a noun — from whichever of the three the call site gave.
+ *
+ * <p>
+ * <b>C-M3, and the half of it that was still open.</b> The way out was named
+ * <code>"Keep it open — Shut this door"</code>: a control whose whole job is to NOT do the
+ * thing, named after the thing, with the destructive verb inside its own accessible name.
+ * `subject` fixed it for the call sites that pass one. The doors console passes the door's name
+ * through <code>ariaLabel</code> instead — <code>"Shut Side door"</code> — and those call sites
+ * fell through to the idle label and got the defect back.
+ * </p>
+ *
+ * <p>
+ * So where there is an <code>ariaLabel</code> and no <code>subject</code>, the shared leading
+ * WORDS are dropped: <code>"Shut Side door"</code> against <code>"Shut this door"</code> shares
+ * <code>"Shut"</code>, leaving <code>"Side door"</code> — which is exactly what
+ * <code>subject</code> would have said. Word boundaries, not characters: a character-wise
+ * common prefix of those two strings is <code>"Shut "</code> plus nothing useful on other
+ * pairs, and half a word in an accessible name is worse than none.
+ * </p>
+ *
+ * <p>
+ * It never returns empty. Where stripping would leave nothing — the label and the context are
+ * the same words — the whole context is used, and where there is no context at all the idle
+ * label is, which is the behaviour every call site had before `subject` existed.
+ * </p>
+ */
+export function confirmSubject(subject: string | undefined, ariaLabel: string | undefined, idleText: string): string {
+  if (subject) return subject;
+  if (!ariaLabel) return idleText;
+  const label = idleText.split(/\s+/).filter(Boolean);
+  const context = ariaLabel.split(/\s+/).filter(Boolean);
+  let shared = 0;
+  while (shared < label.length && shared < context.length && label[shared] === context[shared]) shared += 1;
+  const rest = context.slice(shared).join(" ").trim();
+  return rest || ariaLabel;
+}
 
 /**
  * What the button looks like before it is armed, by what it is about to do.
@@ -143,6 +206,18 @@ export const CONFIRM_CANCELLED_ANNOUNCEMENT = "Cancelled — nothing was changed
 
 /** What it says when the caller's action finished and named no result of its own. (C3) */
 export const CONFIRM_DONE_ANNOUNCEMENT = "Done.";
+
+/**
+ * What it says when the caller's action threw.
+ *
+ * <p>
+ * There was no such sentence: a rejected `onConfirm` announced nothing and escaped as an
+ * unhandled rejection. Both halves of the conditional now speak, and this one says the second
+ * fact as well as the first — the same promise `Toast`'s `NOTHING_CHANGED` makes, because "it
+ * failed" leaves somebody looking at a screen they can no longer trust.
+ * </p>
+ */
+export const CONFIRM_FAILED_ANNOUNCEMENT = "That didn't work. Nothing was changed — you can try again.";
 
 /**
  * The words inside a label, whatever it is made of.
@@ -425,7 +500,9 @@ export function ConfirmButton({
   ariaLabel,
   subject,
   focusAfter,
+  intent = INTENT_BY_TONE[tone],
 }: ConfirmButtonProps) {
+  const feedback = useActionFeedback(intent);
   const [armed, setArmed] = useState(false);
   const [pending, setPending] = useState(false);
   // `seq` so that two identical announcements in a row are two announcements: a live region
@@ -575,8 +652,34 @@ export function ConfirmButton({
     if (disabled || pending) return;
     setPending(true);
     try {
-      const result = await Promise.resolve(onConfirm());
-      if (mounted.current) say(typeof result === "string" && result ? result : CONFIRM_DONE_ANNOUNCEMENT);
+      /**
+       * A refusal is a report, not an unhandled rejection. (and this is a behaviour change)
+       *
+       * <p>
+       * This was <code>await Promise.resolve(onConfirm())</code> inside a bare
+       * <code>try/finally</code>, so an <code>onConfirm</code> that rejected settled the
+       * control, announced <b>nothing at all</b>, and let the rejection escape the
+       * <code>void confirm()</code> on the click handler as an unhandled promise rejection: a
+       * console error no member ever sees, on a control that looks as though it ignored them.
+       * </p>
+       *
+       * <p>
+       * <code>feedback.run</code> catches it, reaches the failure phase, and hands back an
+       * outcome rather than a value — which is the whole reason it does not simply return
+       * <code>T | undefined</code>. Most <code>onConfirm</code>s resolve to
+       * <code>undefined</code>, so "did it work" is not a question a value can answer, and a
+       * control announcing "Done." over a refusal is worse than one announcing nothing.
+       * </p>
+       */
+      const outcome = await feedback.run(onConfirm);
+      if (mounted.current) {
+        if (outcome.ok) {
+          const result = outcome.value;
+          say(typeof result === "string" && result ? result : CONFIRM_DONE_ANNOUNCEMENT);
+        } else {
+          say(CONFIRM_FAILED_ANNOUNCEMENT);
+        }
+      }
     } finally {
       if (mounted.current) {
         restoreFocus.current = holdsFocus();
@@ -659,17 +762,33 @@ export function ConfirmButton({
             * control's, which is what made every `getByRole("button", { name: /…/ })` in the
             * suite match two elements the moment a control armed.
             * </p>
+            *
+            * <p>
+            * The subject now comes from {@link confirmSubject}, which also reaches the doors
+            * console's call sites — they pass the door's name through `ariaLabel` rather than
+            * `subject`, fell through to the idle label, and got C-M3 back verbatim.
+            * </p>
+            *
+            * <p>
+            * <b>Item 12 — this button is the DECLINE half of the pair.</b> It wears the
+            * decline glyph (thumbs-down, or ✕ where the club has chosen marks) whatever the
+            * control's own intent is, because refusing a deletion is not itself destructive.
+            * The glyph is `aria-hidden` and sits beside the word, always.
+            * </p>
             */}
           <button
             ref={cancelRef}
             type="button"
             disabled={pending}
             data-confirm="stop"
-            aria-label={`${cancelLabel} — ${subject ?? idleText}`}
+            aria-label={`${cancelLabel} — ${confirmSubject(subject, ariaLabel, idleText)}`}
             onClick={(e) => { e.stopPropagation(); cancel(); }}
             className={cn(CONTROL_CLASS, "border-control bg-bg-surface text-text-secondary")}
           >
-            {cancelLabel}
+            <span className="inline-flex items-center justify-center gap-1.5">
+              <ActionGlyph kind="decline" />
+              <span>{cancelLabel}</span>
+            </span>
           </button>
           <button
             type="button"
@@ -693,7 +812,17 @@ export function ConfirmButton({
             // the off half of the first. The prompt is ANNOUNCED instead, below.
             aria-busy={pending}
             onClick={(e) => { e.stopPropagation(); void confirm(); }}
-            className={cn(CONTROL_CLASS, armedClassName, pending && "cursor-wait", withoutFixedHeight(className))}
+            /*
+              Item 12 — `feedback.className` LAST, and that ordering is the whole of it.
+              `tailwind-merge` keeps the later of two conflicting utilities, so the outcome's
+              fill has to come after `armedClassName` and after the caller's own classes or a
+              success settles invisibly under the armed orange.
+            */
+            {...feedback.props}
+            className={cn(
+              CONTROL_CLASS, armedClassName, pending && "cursor-wait",
+              withoutFixedHeight(className), feedback.className,
+            )}
           >
             {pending ? (
               <span className="flex items-center justify-center gap-2">
@@ -702,7 +831,15 @@ export function ConfirmButton({
                 <Loader2 className="animate-spin motion-reduce:animate-none" size={16} strokeWidth={2.5} />
                 <span>Working…</span>
               </span>
-            ) : idleLabel}
+            ) : (
+              <span className="flex items-center justify-center gap-1.5">
+                {/* Nothing for a destructive confirm — ruling 4. The call site's own icon,
+                    inside `idleLabel`, is what this control wears, and a thumbs-up over
+                    "Delete this door" is the thing that rule exists to refuse. */}
+                {feedback.glyph}
+                <span className="min-w-0">{idleLabel}</span>
+              </span>
+            )}
           </button>
         </>
       ) : (
@@ -713,7 +850,15 @@ export function ConfirmButton({
           aria-label={accessibleName(idleText, ariaLabel)}
           aria-busy={false}
           onClick={(e) => { e.stopPropagation(); arm(); }}
-          className={cn(CONTROL_CLASS, idleClassName, withoutFixedHeight(className))}
+          /*
+            The trigger carries the OUTCOME, because by the time there is one this is the only
+            button left: `confirm()`'s `finally` sets `armed` false, so the pair unmounts and
+            this re-renders — with `data-fb="success"` on it for the hold. That is also where
+            `focusAfterAction` puts the keyboard back, so the person who pressed it is looking
+            at the thing that changed.
+          */
+          {...feedback.props}
+          className={cn(CONTROL_CLASS, idleClassName, withoutFixedHeight(className), feedback.className)}
         >
           {idleLabel}
         </button>

@@ -1,5 +1,6 @@
 import { type ButtonHTMLAttributes } from "react";
 import { cn } from "../lib/utils";
+import { ACTION_FAILED_ANNOUNCEMENT, useActionFeedback, type ActionIntent } from "./useActionFeedback";
 
 export type Variant = "default" | "primary" | "ghost" | "danger" | "outline";
 
@@ -53,9 +54,98 @@ export const BUTTON_VARIANT_CLASS: Record<Variant, string> = {
   danger: "bg-danger-soft text-danger-strong border border-danger-soft hover:bg-danger-soft/70",
 };
 
+/**
+ * Item 12's additions. <b>Every one of them is optional, and the defaults are today exactly.</b>
+ *
+ * <p>
+ * There are over a hundred bare `<Button>` call sites in this product across four lanes
+ * editing in parallel. A theme that restyled any of them unreviewed would be the
+ * `default: bg-info-soft` mistake again — see the note on {@link BUTTON_VARIANT_CLASS}. So
+ * `intent` defaults to `"neutral"`, which renders byte-identical classes to the button before
+ * this change, and `action-feedback.test.tsx` asserts that rather than trusting it.
+ * </p>
+ */
+export type ActionButtonProps = {
+  /**
+   * Draws the glyph and turns the feedback theme on. `"neutral"` is today's look, exactly.
+   *
+   * `"destructive"` is the one that matters for a bin or a lock: it never draws a thumb, it
+   * does not celebrate, and its press settles rather than snapping. See `useActionFeedback`.
+   */
+  intent?: ActionIntent;
+  /**
+   * Wraps the work, so the outcome phase means something.
+   *
+   * <p>
+   * Omit it and `onClick` behaves exactly as it does now, with no outcome phase — which is
+   * right for a button that navigates or opens a dialog, where "it worked" is the next screen
+   * appearing. Supply it and a resolve reaches `success`, a reject reaches `failure`, and
+   * neither escapes to the console.
+   * </p>
+   *
+   * <p>
+   * Runs INSTEAD of `onClick`, not as well as it: a call site that passes both would do its
+   * work twice, which on a money endpoint is a double charge. Passing both is a type error
+   * nowhere, so it is stated here and asserted in the test.
+   * </p>
+   */
+  onAction?: () => void | Promise<unknown>;
+  /**
+   * What a screen reader hears when `onAction` succeeds. Required when there is nothing else.
+   *
+   * <p>
+   * A visual success a blind member never learns about is not a success. Where the action
+   * already raises a `Toast`, or where the button lives inside a `ConfirmButton`'s own polite
+   * region, the announcement exists and this must be left out — two regions saying one fact is
+   * the defect `Toast.tsx:62-74` records. Where neither is true, this is the region, and the
+   * hook below refuses the outcome phase in development without it.
+   * </p>
+   */
+  feedbackAnnouncement?: string;
+  /** What it says on failure. Defaults to {@link ACTION_FAILED_ANNOUNCEMENT}. */
+  failureAnnouncement?: string;
+  /**
+   * Set where something ELSE announces the outcome — a toast, an enclosing `ConfirmButton`.
+   *
+   * It is opt-in and never inferred: "an announcement exists" is a fact only the call site
+   * knows, and guessing it wrong is silence in one direction and a double announcement in the
+   * other.
+   */
+  announcedElsewhere?: boolean;
+};
+
 export function Button({
-  className, variant = "default", loading, disabled, children, ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; loading?: boolean }) {
+  className, variant = "default", loading, disabled, children,
+  intent = "neutral", onAction, feedbackAnnouncement, failureAnnouncement, announcedElsewhere,
+  onClick, ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; loading?: boolean } & ActionButtonProps) {
+  const feedback = useActionFeedback(intent);
+  const themed = intent !== "neutral";
+
+  /**
+   * A silent visual success, refused at the one moment it can still be fixed.
+   *
+   * <p>
+   * In development only, and only for a button that has an intent AND does work AND names no
+   * announcer of any kind. It cannot fire on any existing call site — `intent` is new and
+   * defaults to neutral — so this is a guard on the code being written now, which is when a
+   * missing announcement is a one-line fix rather than an accessibility finding in a review.
+   * </p>
+   */
+  if (import.meta.env.DEV && themed && onAction && !feedbackAnnouncement && !announcedElsewhere) {
+    throw new Error(
+      "Button: intent + onAction with no `feedbackAnnouncement` and no `announcedElsewhere`. " +
+      "A visual-only outcome is a success a blind member is never told about. Pass the sentence, " +
+      "or set announcedElsewhere when a Toast or a ConfirmButton already says it.",
+    );
+  }
+
+  const announcement = feedback.phase === "success"
+    ? feedbackAnnouncement
+    : feedback.phase === "failure"
+      ? (failureAnnouncement ?? ACTION_FAILED_ANNOUNCEMENT)
+      : "";
+
   // The hover lift, the pressed state, the cursor and the focus ring all come from the
   // base layer in index.css, which keys on the element rather than on this component —
   // so a control built without reaching for `Button` still feels like the rest of the
@@ -66,7 +156,18 @@ export function Button({
   return (
     <button
       disabled={disabled || loading}
-      aria-busy={loading || undefined}
+      aria-busy={loading || feedback.phase === "working" || undefined}
+      onClick={onAction ? () => { void feedback.run(onAction); } : onClick}
+      /*
+        `data-fb` and the press handlers, only for a themed button.
+        <p>
+        A neutral button must be byte-identical to what it was, and an extra attribute on the
+        element is not byte-identical: `e2e/feedback-theme.spec.ts` counts `[data-fb]` nodes to
+        prove the theme reaches every acting control, and a hundred neutral buttons carrying
+        the attribute would make that count meaningless.
+        </p>
+      */
+      {...(themed ? feedback.props : {})}
       className={cn(
         "inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg text-sm font-medium",
         BUTTON_VARIANT_CLASS[variant],
@@ -75,6 +176,7 @@ export function Button({
         // button that greys out the moment you press it reads as "that broke", which is the
         // opposite of what is happening.
         loading ? "disabled:opacity-100 disabled:cursor-progress" : "disabled:opacity-50",
+        themed && feedback.className,
         className
       )}
       {...props}
@@ -85,7 +187,15 @@ export function Button({
           className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-current/30 border-t-current motion-reduce:animate-none"
         />
       )}
+      {themed && feedback.glyph}
       {children}
+      {/* ONE polite region, and only where this button is the only thing that could speak.
+          `aria-live` without `role="status"`, exactly as `ConfirmButton` settles it: the role
+          is the same live region plus a landmark, and a screen of these would put a dozen
+          empty status landmarks in the accessibility tree. */}
+      {themed && !announcedElsewhere && (feedbackAnnouncement || failureAnnouncement) && (
+        <span aria-live="polite" className="sr-only">{announcement}</span>
+      )}
     </button>
   );
 }

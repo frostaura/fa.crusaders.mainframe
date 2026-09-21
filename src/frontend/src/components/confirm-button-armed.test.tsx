@@ -313,7 +313,19 @@ describe("ConfirmButton — the armed state", () => {
     // "Cancel" alone, heard out of context in a list of controls, names nothing.
     expect(cancel.tagName).toBe("BUTTON");
     expect(cancel).toHaveAttribute("type", "button");
-    expect(cancel.getAttribute("aria-label")).toBe("Cancel — Shut all doors");
+    /*
+     * C-M3, the half that was still open — and this assertion used to hold the defect.
+     *
+     * It read `"Cancel — Shut all doors"`: the way out, named after the thing it refuses to
+     * do, with the destructive verb inside its own accessible name. That is precisely the
+     * failure `subject` was added for, and this call site passes its context through
+     * `ariaLabel` instead — so it fell through to the idle label and kept it.
+     *
+     * `confirmSubject` drops the words the two share ("Shut") and leaves the noun phrase. See
+     * its own tests for the doors console's "Keep it open — Side door".
+     */
+    expect(cancel.getAttribute("aria-label")).toBe("Cancel — every door the club has open — 3 of 3");
+    expect(cancel.getAttribute("aria-label")).not.toMatch(/shut/i);
     // 44 px. A get-out that is harder to hit than the destructive control beside it is not one.
     expect(cancel.className).toContain("min-h-11");
 
@@ -617,9 +629,20 @@ describe("ConfirmButton — the armed state", () => {
     armByPressing(screen.getByRole("button", { name: "Revoke" }));
     fireEvent.click(screen.getByRole("button", { name: "Revoke — Really revoke?" }));
 
-    const spinner = container.querySelector("svg")!;
+    /*
+     * Scoped to the CONFIRM button, not to the container.
+     *
+     * `container.querySelector("svg")` was unambiguous while the control drew exactly one
+     * SVG. Since item 12 the way out carries a decline glyph, which is earlier in the DOM,
+     * so the bare query started measuring the glyph and reporting that the spinner had lost
+     * its reduced-motion class. Ask for the spinner where the spinner is.
+     */
+    const working = screen.getByRole("button", { name: "Revoke — Really revoke?" });
+    const spinner = working.querySelector("svg.animate-spin")!;
     expect(spinner).toBeTruthy();
     expect(spinner.getAttribute("class")).toContain("motion-reduce:animate-none");
+    // …and the container still has the glyph in it, which is what the query above tripped on.
+    expect(container.querySelectorAll("svg").length).toBeGreaterThan(1);
     // And the way out stays on screen while the action is in flight, disabled rather than
     // removed: a button that unmounts under a focused finger drops focus to <body>.
     expect(screen.getByRole("button", { name: /^Cancel/ })).toBeDisabled();

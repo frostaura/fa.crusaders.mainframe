@@ -5,6 +5,7 @@ import Layout from "./components/Layout";
 import { ToastProvider } from "./components/Toast";
 import { BalanceProvider } from "./lib/balance";
 import { ProfileProvider } from "./lib/profile";
+import { ClubUiProvider } from "./lib/ClubUiProvider";
 import HomePage from "./pages/Home";
 import LoginPage from "./pages/Login";
 import RegisterPage from "./pages/Register";
@@ -47,6 +48,10 @@ export default function App() {
       <RouteAnnouncer />
       <AuthProvider>
         <ProfileProvider>
+        {/* Inside ProfileProvider, because that is where the club's glyph choice arrives, and
+            outside everything that draws one — so a sign-in button and a booking confirm wear
+            the same marks. Absent or unrecognised, it is the default; never "the other one". */}
+        <ClubUiProvider>
         <BalanceProvider>
         <ToastProvider>
         <Routes>
@@ -96,6 +101,7 @@ export default function App() {
         </Routes>
         </ToastProvider>
         </BalanceProvider>
+        </ClubUiProvider>
         </ProfileProvider>
       </AuthProvider>
     </BrowserRouter>
