@@ -2266,6 +2266,10 @@ def run_step(fn: Callable[[], None], label: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--no-simulator", action="store_true", help="skip the Mega-half checks")
+    parser.add_argument("--quick", action="store_true",
+                        help="skip E-LCD-2, the two-minute screen ceiling — the only step here that "
+                             "costs two minutes, and the only one that proves no screen a bridge "
+                             "paints can become permanent")
     parser.add_argument("--no-money", action="store_true", help="skip the PayFast leg")
     args = parser.parse_args()
 
@@ -2314,6 +2318,20 @@ def main() -> int:
             run_step(lambda: money_leg(w, mb), "money")
         if sim:
             run_step(lambda: mega_half(sim), "M-serial")
+            # THE GLASS, at an ordinary clock base and again four seconds before
+            # the 49.7-day millis() rollover. Every deadline in these steps is a
+            # tb::Deadline, and a box that has been up for forty-nine days and
+            # reboots is the NORMAL case for a machine in a cupboard rather than
+            # an edge case — so the wrap is a fixture here, not a footnote.
+            run_step(lambda: glass_steps(sim, "ordinary clock", args.quick), "E-LCD")
+            wrap = Simulator(cfg, name="simulator-wrap", start_ms=MILLIS_WRAP_START_MS)
+            try:
+                wrap.start()
+                wrap.connect()
+                run_step(lambda: glass_steps(wrap, "4 s before the millis() wrap", args.quick),
+                         "E-LCD")
+            finally:
+                wrap.stop()
         run_step(lambda: no_show_sweep(w), "H5")
     except StepFailed as e:
         REPORT.check("infra", f"environment: {e}", False)
