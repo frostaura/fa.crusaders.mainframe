@@ -301,6 +301,29 @@ describe("the club-wide shut banner", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  /**
+   * <b>C17-21, found by looking at a rendered overview.</b> The banner's action linked to
+   * `/admin/doors`, which is a dead control once you are already there — and the doors page
+   * carries the real fleet control a few hundred pixels below it, so one screen offered the
+   * same action twice, one of them inert. The sentence stays everywhere; the link stands
+   * down where the page beneath it can do the job.
+   */
+  it("offers no link of its own on the page that carries the real control", async () => {
+    chrome([doorFixture({ enabled: false, shut_by_shut_all_at: ago(120) })], "/admin/doors");
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("1 of 1 door shut");
+    expect(within(banner).queryByRole("link")).toBeNull();
+  });
+
+  it("still offers it on an admin route that cannot reopen anything", async () => {
+    chrome([doorFixture({ enabled: false, shut_by_shut_all_at: ago(120) })], "/admin/settings");
+
+    const banner = await screen.findByRole("alert");
+    expect(within(banner).getByRole("link", { name: "Reopen the door shut together" }))
+      .toHaveAttribute("href", "/admin/doors");
+  });
+
   /** B14 — it printed across the top of the door card that goes on a wall, Reopen and all. */
   it("is hidden from print", async () => {
     chrome([doorFixture({ enabled: false })], "/admin/settings");
@@ -343,9 +366,21 @@ describe("the admin Home row", () => {
   });
 
   it("says a shut door is shut rather than that it has gone quiet", async () => {
-    home([doorFixture({ name: "Side door", enabled: false, last_seen_at: null })]);
+    home([doorFixture({ name: "Side door", enabled: false, last_seen_at: ago(12) })]);
 
     expect(await screen.findByText("Side door is shut. Nobody gets in through it.")).toBeInTheDocument();
+  });
+
+  /**
+   * C2's family. This fixture is a door that has NEVER called in — so "Nobody gets in
+   * through it" is a claim about a machine the club has never heard from, which is exactly
+   * the overstatement the banner was rewritten to stop making.
+   */
+  it("does not claim nobody gets in through a shut door it has never heard from", async () => {
+    home([doorFixture({ name: "Side door", enabled: false, last_seen_at: null })]);
+
+    expect(await screen.findByText(/Side door is shut, but nothing can reach it/))
+      .toHaveTextContent("may not have been told");
   });
 
   it("names one door and counts the others", async () => {

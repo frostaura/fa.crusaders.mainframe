@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DOORS_EMPTY_HINT, DOORS_EMPTY_NOTICE, DOORS_READ_FAILED, LOG_EMPTY_FILTERED,
   LOG_EMPTY_FILTERED_HINT, LOG_EMPTY_NOTHING, LOG_READ_FAILED, LOG_OLDER_FAILED,
-  CSV_MAX_ROWS, DOOR_EVENTS_NOTE, NO_REASON_RECORDED,
+  DOOR_EVENTS_NOTE, NO_REASON_RECORDED,
   doorAttentionReason, doorCsvDownloaded, doorCsvNotice, doorExhaustedNotice,
   doorLogEmptyOneDoor, doorLogHowToRead, doorMayNotBeReleasingNotice, doorNeedsAttention,
   doorOutcomeChip, doorQuietNotice, doorRefusalSpikeNotice, doorRetentionNotice,
@@ -93,7 +93,7 @@ function everySentence(): string[] {
     doorCsvDownloaded(165),
     doorCsvDownloaded(1),
     doorCsvDownloaded(null),
-    doorCsvDownloaded(CSV_MAX_ROWS),
+    doorCsvDownloaded(10_000, true),
     doorExhaustedNotice(90),
     doorExhaustedNotice(null),
     // C7 — all three arms, including the one that says the screen does not know.
@@ -493,11 +493,20 @@ describe("doorRetentionNotice / doorCsvNotice", () => {
       expect(notice).toContain("may be more than this page shows");
     });
 
-    it("says so when the file hit the cap and rows were left out", () => {
-      const notice = doorCsvDownloaded(CSV_MAX_ROWS);
-      expect(notice).toContain("10,000-row limit");
+    /**
+     * Truncation comes from the server's own `X-Crusaders-Truncated` (WIRE-R1 §7), never
+     * from comparing the count to a cap this side holds — a client that decides "this looks
+     * like the limit" is wrong the day the server's limit moves.
+     */
+    it("says so when the SERVER says the file was truncated", () => {
+      const notice = doorCsvDownloaded(10_000, true);
+      expect(notice).toContain("as many as one file holds");
       expect(notice).toContain("older scans in this range were left out");
       expect(notice).toContain("Narrow the range");
+    });
+
+    it("says nothing about a limit when the server did not flag one", () => {
+      expect(doorCsvDownloaded(10_000, false)).toBe("10000 scans downloaded.");
     });
   });
 });
@@ -588,6 +597,31 @@ describe("the overview's own states", () => {
  * fires on a dead board ever appears.
  * </p>
  */
+/**
+ * <b>C2's family, one screen along — found by looking at a rendered overview.</b>
+ *
+ * The banner correctly read "3 of 3 doors shut — 2 confirmed, 1 not yet", and the attention
+ * line directly under it said "Side door is shut. Nobody gets in through it." about a door
+ * the club had not heard from in an hour. A shut door that cannot be reached has not heard
+ * the refusal: it goes on admitting members with a booking from the list it last
+ * downloaded, for up to six hours. Two sentences on one screen, contradicting each other
+ * about the same door.
+ */
+describe("doorAttentionReason, on a shut door nothing can reach", () => {
+  it("does not claim nobody gets in through a door that has not been told", () => {
+    const silent = doorAttentionReason(door({ enabled: false, name: "Side door" }), false, [])!;
+    expect(silent.kind).toBe("shut");
+    expect(silent.reason).not.toContain("Nobody gets in");
+    expect(silent.reason).toContain("nothing can reach it");
+    expect(silent.reason).toContain("may not have been told");
+  });
+
+  it("still says it plainly for a shut door the club CAN reach", () => {
+    const reachable = doorAttentionReason(door({ enabled: false, name: "Side door" }), true, [])!;
+    expect(reachable.reason).toBe("Side door is shut. Nobody gets in through it.");
+  });
+});
+
 describe("doorNeedsAttention", () => {
   it("names the three states that need somebody, in the words Home uses", () => {
     expect(doorNeedsAttention(door({ last_seen_at: "2026-09-19T04:12:00Z" }), false))

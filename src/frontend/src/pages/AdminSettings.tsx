@@ -885,7 +885,7 @@ function DoorRecordsBlock({ settings, set }: {
           <Field
             settingKey="door_log_retention_days"
             label={SETTING_LABELS.door_log_retention_days}
-            hint={`${DOOR_LOG_RETENTION_MIN_DAYS}-${DOOR_LOG_RETENTION_MAX_DAYS}. Past this a door scan is DELETED, receipts and all, rather than anonymised. Money records follow the separate, longer rule above.`}
+            hint={`${DOOR_LOG_RETENTION_MIN_DAYS}–${DOOR_LOG_RETENTION_MAX_DAYS}. Past this a door scan is DELETED, receipts and all, rather than anonymised. Money records follow the separate, longer rule above.`}
           >
             <Input type="number" min={DOOR_LOG_RETENTION_MIN_DAYS} max={DOOR_LOG_RETENTION_MAX_DAYS}
               value={shown(settings.door_log_retention_days)}
@@ -896,7 +896,7 @@ function DoorRecordsBlock({ settings, set }: {
           <Field
             settingKey="door_refusal_spike_count"
             label={SETTING_LABELS.door_refusal_spike_count}
-            hint={`${DOOR_REFUSAL_SPIKE_MIN_COUNT}-${DOOR_REFUSAL_SPIKE_MAX_COUNT}. How many refusals at one door, inside the window beside this, before Doors says the door is refusing a lot. It counts SCANS: one person trying four times is four.`}
+            hint={`${DOOR_REFUSAL_SPIKE_MIN_COUNT}–${DOOR_REFUSAL_SPIKE_MAX_COUNT}. How many refusals at one door, inside the window beside this, before Doors says the door is refusing a lot. It counts SCANS: one person trying four times is four.`}
           >
             <Input type="number" min={DOOR_REFUSAL_SPIKE_MIN_COUNT} max={DOOR_REFUSAL_SPIKE_MAX_COUNT}
               value={shown(settings.door_refusal_spike_count)}
@@ -907,7 +907,7 @@ function DoorRecordsBlock({ settings, set }: {
           <Field
             settingKey="door_refusal_spike_minutes"
             label={SETTING_LABELS.door_refusal_spike_minutes}
-            hint={`${DOOR_REFUSAL_SPIKE_MIN_MINUTES}-${DOOR_REFUSAL_SPIKE_MAX_MINUTES}. The window that count is measured over. It rolls, so the flag clears itself when the window empties and there is nothing to acknowledge.`}
+            hint={`${DOOR_REFUSAL_SPIKE_MIN_MINUTES}–${DOOR_REFUSAL_SPIKE_MAX_MINUTES}. The window that count is measured over. It rolls, so the flag clears itself when the window empties and there is nothing to acknowledge.`}
           >
             <Input type="number" min={DOOR_REFUSAL_SPIKE_MIN_MINUTES} max={DOOR_REFUSAL_SPIKE_MAX_MINUTES}
               value={shown(settings.door_refusal_spike_minutes)}

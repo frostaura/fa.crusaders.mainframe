@@ -13,7 +13,7 @@ import {
 } from "../lib/doorsCopy";
 import { clubClock, clubDayAndClock } from "../lib/clubClock";
 import { isOnline, offlineAfterSecondsFor } from "../lib/deviceLiveness";
-import { DOOR_OUTCOME_CHIPS } from "../lib/deviceActivity";
+import { DOOR_OUTCOME_CHIPS, isDoorScan } from "../lib/deviceActivity";
 import { UNNAMED_GATE } from "../lib/gateCopy";
 import { describeDeviceError } from "../lib/deviceErrors";
 import {
@@ -209,7 +209,7 @@ export function AdminDoorsLogPage() {
   const download = async () => {
     setDownloading(true);
     try {
-      const { blob, filename, rows: counted } = await doorEndpoints.doorActivityCsv(activeFilters ?? filtersOf(params));
+      const { blob, filename, rows: counted, truncated } = await doorEndpoints.doorActivityCsv(activeFilters ?? filtersOf(params));
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -219,7 +219,7 @@ export function AdminDoorsLogPage() {
       // B3: the SERVER's row count, never the length of the list on screen. The toast said
       // "50 scans downloaded" over a 165-row file, and that number is the one an admin
       // repeats to a committee.
-      toast.push({ tone: "success", text: doorCsvDownloaded(counted), durationMs: 8000 });
+      toast.push({ tone: "success", text: doorCsvDownloaded(counted, truncated), durationMs: 8000 });
     } catch (e) {
       toast.push({ tone: "danger", text: describeDeviceError(e, "Could not build that CSV.") });
     } finally {
@@ -238,6 +238,8 @@ export function AdminDoorsLogPage() {
    */
   const chosen = doors?.doors.find((d) => d.device.id === doorId) ?? null;
   const pickerDoors = doorOptions(doors, rows);
+  /** The rows that ARE scans — see the note beside the count below (B1). */
+  const scans = (rows ?? []).filter(isDoorScan);
   const doorName = chosen?.device.name ?? pickerDoors.find((d) => d.id === doorId)?.name ?? null;
   const doorOnline = chosen
     ? isOnline(chosen.device, offlineAfterSecondsFor(chosen.device, null), now)
@@ -258,8 +260,11 @@ export function AdminDoorsLogPage() {
         </Button>
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="space-y-4 lg:order-1">
+      {/* `min-w-0` on the grid and its columns: a grid item defaults to `min-width: auto`
+          and so refuses to shrink below its content's min-content width. Same fault, same
+          fix and the same measurement as the door page — see the note there. */}
+      <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-w-0 space-y-4 lg:order-1">
           <fieldset className="grid gap-3 sm:grid-cols-3">
             <legend className="sr-only">Filter these scans</legend>
             <div>
@@ -340,7 +345,7 @@ export function AdminDoorsLogPage() {
             </div>
           ) : loading ? (
             <p className="text-sm text-text-secondary">Loading the club's door scans…</p>
-          ) : (rows?.length ?? 0) === 0 ? (
+          ) : scans.length === 0 ? (
             <div className="space-y-2">
               {emptySentence(params, doorName, doorOnline).map((sentence) => (
                 <p key={sentence} className="text-sm text-text-secondary">{sentence}</p>
@@ -353,12 +358,22 @@ export function AdminDoorsLogPage() {
             </div>
           ) : (
             <>
+              {/*
+                B1's "four views of ONE set", held on this side too.
+
+                The server already narrows this route to scans — it is why the reviewer's
+                club log showed no rows for a door whose own page claimed thirteen refusals.
+                But the count here is a CLAIM an admin quotes, and the door's own feed made
+                exactly this mistake by counting whatever arrived. Counting what is actually
+                a scan costs one filter and cannot be wrong; trusting the route is a promise
+                about somebody else's code.
+              */}
               <p role="status" className="text-sm text-text-secondary">
-                {`${rows!.length} ${rows!.length === 1 ? "scan" : "scans"}, newest first`}
+                {`${scans.length} ${scans.length === 1 ? "scan" : "scans"}, newest first`}
               </p>
               <Card>
                 <ul>
-                  {rows!.map((entry, i) => (
+                  {scans.map((entry, i) => (
                     <DoorFeedRow
                       key={`${entry.at}-${entry.action}-${i}`}
                       entry={entry}
@@ -372,7 +387,7 @@ export function AdminDoorsLogPage() {
                   ))}
                 </ul>
               </Card>
-              {olderFailed && <Alert tone="danger">{`${LOG_OLDER_FAILED} The ${rows!.length} above are still correct.`}</Alert>}
+              {olderFailed && <Alert tone="danger">{`${LOG_OLDER_FAILED} The ${scans.length} above are still correct.`}</Alert>}
               {cursor ? (
                 <Button variant="outline" className="w-full" onClick={() => void loadOlder()} disabled={loadingOlder}>
                   {olderFailed ? "Try again" : loadingOlder ? "Loading…" : "Load older scans"}
@@ -386,7 +401,7 @@ export function AdminDoorsLogPage() {
 
         {/* Never dismissible. Dismissing it is how it stops being true for the next reader, who
             is usually somebody reading a log after an incident. */}
-        <aside aria-labelledby="how-to-read" className="lg:order-2">
+        <aside aria-labelledby="how-to-read" className="min-w-0 lg:order-2">
           <Card className="space-y-3">
             <h2 id="how-to-read" className="text-base font-semibold">How to read this log</h2>
             <p className="text-sm text-text-secondary">{banner1}</p>

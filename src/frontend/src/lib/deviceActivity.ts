@@ -139,10 +139,10 @@ const OFFLINE_OPEN_ACTION = "device.gate_open";
  * </p>
  */
 export const DOOR_EVENT_WORDS: Record<string, string> = {
-  "device.registered": "Board registered itself",
-  "device.auto_registered": "Board registered itself",
-  "device.updated": "Someone changed this door's details",
-  "device.deleted": "Door deleted",
+  "device.registered": "The board registered itself",
+  "device.auto_registered": "The board registered itself",
+  "device.updated": "This door's details or state were changed",
+  "device.deleted": "This door was deleted",
   "device.boot": "Board started up",
   "device.api_key_regenerated": "The club's device key was replaced",
   "device.event_time_clamped": "The board's clock was out and was corrected",
@@ -210,20 +210,54 @@ export const UNRECOGNISED_EVENT = "Unrecognised event";
  * </p>
  */
 export const DOOR_EVENT_KIND_WORDS: Record<string, string> = {
-  registered: "Board registered itself",
-  renamed: "Someone renamed this door",
-  details_changed: "Someone changed this door's details",
-  shut: "This door was shut",
-  reopened: "This door was reopened",
-  shut_all: "Every door was shut together",
-  reopened_all: "The doors shut together were reopened",
-  deleted: "Door deleted",
-  boot: "Board started up",
+  registered: "The board registered itself",
+  /**
+   * ONE kind for four things, and the copy must not pretend otherwise.
+   *
+   * The backend writes `device.updated` for a rename, a details change, a shut and a reopen
+   * alike, and records nothing that says which. "Someone renamed this door" over a shut
+   * would be a guess rendered as a fact — this round's own defect in a new place — so the
+   * sentence says what is actually known and points at the fields above it.
+   */
+  edited: "This door's details or state were changed",
+  removed: "This door was deleted",
+  clock_corrected: "The board's clock was out and was corrected",
+  unrecognised: UNRECOGNISED_EVENT,
 };
 
 export function describeDoorEventKind(event: DoorEventEntry): string {
   return DOOR_EVENT_KIND_WORDS[event.kind.trim()] ?? UNRECOGNISED_EVENT;
 }
+
+/**
+ * The nine actions that ARE a scan, exactly as the backend enumerates them.
+ *
+ * <p>
+ * Held as a literal set as well as by the rules in {@link classifyDoorRow}, so
+ * `door-actions.test.ts` can assert the two agree in BOTH directions: no scan action is
+ * classified as an event, and no event action is classified as a scan. A prefix rule that
+ * silently widened would otherwise be invisible until a club saw a green "Refused".
+ * </p>
+ */
+export const DOOR_SCAN_ACTIONS = [
+  "gate.opened",
+  "gate.denied_not_recognised",
+  "gate.denied_member_not_active",
+  "gate.denied_no_booking",
+  "gate.denied_too_early",
+  "gate.denied_method_not_supported",
+  "gate.denied_not_a_gate",
+  "device.gate_open",
+  "device.unknown_scan",
+] as const;
+
+/**
+ * Actions that are CLUB-wide rather than a door's, and never appear on a door's own feed.
+ *
+ * Kept in the dictionary all the same: they reached the feed before the backend separated
+ * the two arrays, and a screen that met one again should read it rather than guess at it.
+ */
+export const DOOR_FLEET_ACTIONS = ["doors.shut_all", "doors.reopened_all", "doors.log_exported"] as const;
 
 /**
  * What an OFFLINE grant reads as: the board decided, and uploaded the row afterwards.

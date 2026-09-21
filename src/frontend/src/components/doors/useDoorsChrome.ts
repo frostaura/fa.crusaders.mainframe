@@ -163,6 +163,31 @@ export function attentionRankOf(a: DoorAttention): number {
   return 3;
 }
 
+/**
+ * Was this door shut TOGETHER, as opposed to on its own (C1)?
+ *
+ * <p>
+ * Three sources, most authoritative first, because the three landed in three different
+ * changes and the page has to be right against all of them:
+ * </p>
+ *
+ * <ol>
+ *   <li><b>`shut_together`</b> — the server's own list, and the only one that is right in
+ *       every case.</li>
+ *   <li><b>`shut_by_shut_all_at`</b> on the door row, which answers the same question per
+ *       door.</li>
+ *   <li><b>`shut_all_active`</b>, the tenant-wide flag. Wrong in exactly one case — a door
+ *       shut on its own WHILE a shut-all is standing — which is a reason to want the first
+ *       two, not a reason to guess differently.</li>
+ * </ol>
+ */
+function shutTogetherHas(view: DoorsView, id: string): boolean {
+  if (view.shut_together) return view.shut_together.some((d) => d.id === id);
+  const row = view.doors.find((d) => d.device.id === id)?.device;
+  if (row?.shut_by_shut_all_at !== undefined) return row.shut_by_shut_all_at !== null;
+  return view.shut_all_active === true;
+}
+
 function summarise(view: DoorsView): DoorsChrome {
   const now = Date.now();
   const ranked: { rank: number; reason: string; signal: boolean }[] = [];
@@ -190,11 +215,7 @@ function summarise(view: DoorsView): DoorsChrome {
       // exactly one case — a door shut on its own WHILE a shut-all is standing — and that
       // is a case the tenant flag cannot distinguish at all, so it is a reason to want the
       // field, not a reason to guess differently.
-      shutByFleet: !row.device.enabled && (
-        row.device.shut_by_shut_all_at !== undefined
-          ? row.device.shut_by_shut_all_at !== null
-          : view.shut_all_active === true
-      ),
+      shutByFleet: !row.device.enabled && shutTogetherHas(view, row.device.id),
     });
   }
   ranked.sort((a, b) => a.rank - b.rank);

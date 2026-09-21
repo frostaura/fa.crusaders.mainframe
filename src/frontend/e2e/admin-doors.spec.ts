@@ -97,11 +97,18 @@ function doorsView(doors: Record<string, unknown>[], options: DoorsOptions = {})
   return {
     day_started_at: new Date(new Date().setHours(0, 0, 0, 0)).toISOString(),
     timezone: "Africa/Johannesburg",
-    // C1: a shut-all is standing only when a shut-all shut something. This used to be
-    // `doors.some(d => !d.enabled)`, which made a door shut on its OWN look like a fleet
-    // shut — the exact conflation that produced "Reopen all 3" over a request that
-    // reopened none of them, and the reason the fixture could not see the bug.
+    // C1 / WIRE-R1 §4: a shut-all is standing only when a shut-all shut something. This
+    // used to be `doors.some(d => !d.enabled)`, which made a door shut on its OWN look like
+    // a fleet shut — the exact conflation that produced "Reopen all 3" over a request that
+    // reopened none of them, and the reason no browser test could see the bug.
     shut_all_active: doors.some((d) => d.enabled === false && d.shut_by_shut_all_at != null),
+    // NAMED, not counted. The fleet control reads its label and its confirm off these.
+    shut_together: doors
+      .filter((d) => d.enabled === false && d.shut_by_shut_all_at != null)
+      .map((d) => ({ id: d.id, name: d.name, gate_key: d.gate_key })),
+    shut_individually: doors
+      .filter((d) => d.enabled === false && d.shut_by_shut_all_at == null)
+      .map((d) => ({ id: d.id, name: d.name, gate_key: d.gate_key })),
     doors: doors.map((device) => ({
       device,
       today: options.today && String(device.id) in options.today
@@ -119,7 +126,7 @@ function routes(doors: Record<string, unknown>[], extra: ApiRoute[] = [], option
     { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], count: 0 } },
     { path: "/api/v1/admin/members", body: [] },
     { path: "/api/v1/admin/settings/", body: SETTINGS },
-    { path: `/api/v1/admin/devices/${DOOR_ID}/activity`, body: { items: [] } },
+    { path: `/api/v1/admin/devices/${DOOR_ID}/activity`, body: { items: [], events: [] } },
     { path: "/api/v1/admin/doors/activity", body: { items: [], next_cursor: null, retention_days: 90 } },
     { path: "/api/v1/admin/doors", body: doorsView(doors, options) },
     ...extra,

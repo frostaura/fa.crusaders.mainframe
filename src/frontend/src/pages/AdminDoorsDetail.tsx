@@ -235,7 +235,18 @@ export function AdminDoorsDetailPage() {
 
       <DoorSignalNotices doorName={door.name} signals={row.signals} settings={signalSettingsOf(read.settings)} />
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+      {/*
+        `min-w-0` on the grid AND on the column, and it is load-bearing rather than tidy.
+
+        A grid item's default is `min-width: auto`, so a column refuses to shrink below its
+        content's MIN-CONTENT width — and below `lg` this is a one-column grid whose column
+        therefore sizes to the widest unbreakable thing inside it. Measured at 360 px with a
+        32 px root font (the large-text setting an older volunteer actually uses): the right
+        column reported 459 px inside a 360 px viewport, and the whole page scrolled
+        sideways by 98 px. The `minmax(0,…)` in the `lg` template says the same thing for
+        the two-column case and was always there; the single-column case had nothing.
+      */}
+      <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
         <DoorFeed
           door={door}
           today={row.today}
@@ -245,7 +256,7 @@ export function AdminDoorsDetailPage() {
           clock={{ now, dayStartedAt: read.view!.day_started_at, timezone }}
         />
 
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           <DoorCardSection
             door={door}
             settings={read.settings}

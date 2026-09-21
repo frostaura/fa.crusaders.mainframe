@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { doorFleetReopenLabel, doorsShutBannerLine, doorsShutIndividuallyBanner } from "../../lib/gateCopy";
 import { type DoorsChrome } from "./useDoorsChrome";
 
@@ -42,9 +42,18 @@ import { type DoorsChrome } from "./useDoorsChrome";
  * </p>
  */
 export function ShutDoorsBanner({ chrome }: { chrome: DoorsChrome }) {
+  const { pathname } = useLocation();
   const shut = chrome.doors.filter((d) => !d.enabled);
   if (shut.length === 0 || chrome.total === 0) return null;
 
+  /**
+   * C17-21: the banner's action was a link to `/admin/doors`, which is a DEAD CONTROL once
+   * you are already there — and the doors page carries the real fleet control a few hundred
+   * pixels below it, so the screen offered the same action twice, once inertly. The sentence
+   * is still worth carrying everywhere (it is the standing reminder the club has no
+   * auto-reopen); only the link stands down where the page beneath it can do the job.
+   */
+  const onDoorsPage = pathname.startsWith("/admin/doors");
   const byFleet = shut.filter((d) => d.shutByFleet);
   return (
     <div
@@ -56,7 +65,7 @@ export function ShutDoorsBanner({ chrome }: { chrome: DoorsChrome }) {
           ? doorsShutBannerLine(shut, chrome.total)
           : doorsShutIndividuallyBanner(shut, chrome.total)}
       </span>
-      {byFleet.length > 0 ? (
+      {onDoorsPage ? null : byFleet.length > 0 ? (
         <Link
           to="/admin/doors"
           className="ml-auto inline-flex min-h-11 items-center rounded-lg border border-danger-strong px-4 font-medium"

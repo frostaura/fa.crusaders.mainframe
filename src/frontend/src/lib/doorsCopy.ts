@@ -1,9 +1,9 @@
 import {
   DOOR_OUTCOME_CHIPS, UNRECOGNISED_EVENT, classifyDoorRow, describeActivityReason,
-  describeDoorEvent, describeDoorEventKind, type DoorRowKind,
+  describeDoorEvent, describeDoorEventKind, isDoorScan, type DoorRowKind,
 } from "./deviceActivity";
 // A13 — one club-locale formatter for the whole surface. See lib/clubClock.ts.
-import { clubClock, clubDayAndClock } from "./clubClock";
+import { clubClock, clubDayAndClock, clubInstant } from "./clubClock";
 import { POWER_LOSS_LABELS, doorShutNotice } from "./gateCopy";
 import {
   type AdminDoorDevice, type DeviceActivityEntry, type DoorEventEntry, type DoorSignal,
@@ -326,14 +326,17 @@ const DOOR_LOG_PAGE_HINT = "rows";
  * page length, because a wrong number is worse than no number.
  * </p>
  */
-export function doorCsvDownloaded(rows: number | null): string {
+export function doorCsvDownloaded(rows: number | null, truncated = false): string {
   if (rows === null) {
     return "The file has downloaded. It holds every scan matching the filters, which may be more"
       + " than this page shows.";
   }
-  if (rows >= CSV_MAX_ROWS) {
-    return `${plural(rows, "scan")} downloaded — that is the ${CSV_MAX_ROWS.toLocaleString("en-GB")}-row`
-      + " limit, so older scans in this range were left out. Narrow the range to get the rest.";
+  // Truncation comes from the server's own `X-Crusaders-Truncated`, not from comparing the
+  // count to a cap this side holds: the cap is the server's, and a client that decides
+  // "this looks like the limit" is wrong the day the server's limit moves.
+  if (truncated) {
+    return `${plural(rows, "scan")} downloaded — that is as many as one file holds, so older scans`
+      + " in this range were left out. Narrow the range to get the rest.";
   }
   return `${plural(rows, "scan")} downloaded.`;
 }
@@ -450,6 +453,17 @@ export function doorAttentionReason(
   device: AdminDoorDevice, online: boolean, signals: DoorSignal[],
 ): DoorAttention | null {
   if (!device.enabled) {
+    // C2's family, one screen along. "Nobody gets in through it" was said of every shut
+    // door — including one the club cannot reach, which has not heard the refusal and goes
+    // on admitting booked members from its saved list. Found by looking at a rendered
+    // overview where the banner correctly said "1 not yet" and the line under it flatly
+    // contradicted it about the same door.
+    if (!online) {
+      return {
+        kind: "shut",
+        reason: `${device.name} is shut, but nothing can reach it — it may not have been told.`,
+      };
+    }
     return { kind: "shut", reason: `${device.name} is shut. Nobody gets in through it.` };
   }
   if (device.gate_key === null) {
@@ -547,6 +561,36 @@ export type DoorRowRender = {
 export const NO_REASON_RECORDED = "No reason recorded";
 
 /**
+ * When an offline row happened, and when the club learned of it (A4).
+ *
+ * <p>
+ * <b>The contradiction this closes.</b> A reviewer read "Last heard from 21:00" beside scans
+ * "decided at the door at 21:25" and could not reconcile them. Both were true: an offline
+ * row is stamped with the SCAN, and the board delivers it whenever it next calls in — and
+ * that upload IS contact, so `last_seen_at` moves to the upload. The row now says both
+ * instants, so the pair reads as two facts rather than as a clock that disagrees with
+ * itself.
+ * </p>
+ *
+ * <p>
+ * <b>No delay is rendered when `delivered_at` is null.</b> It is non-null on offline rows
+ * only, so a null means the scan was decided at the club as it happened and there is no
+ * second instant to report. The earlier draft filled that gap with "the club was told when
+ * the door next called in", which invents a delay for a row that had none.
+ * </p>
+ */
+export function doorScanTiming(at: string, deliveredAt: string | null | undefined): string {
+  if (!deliveredAt) return clubInstant(at);
+  return `Decided at the door at ${clubClock(at)} — the door told us at ${clubClock(deliveredAt)}.`;
+}
+
+/** The long form, for a `title` where the fact has to arrive once and completely. */
+export function doorScanTimingLong(at: string, deliveredAt: string | null | undefined): string {
+  if (!deliveredAt) return clubInstant(at);
+  return `Decided at the door at ${clubInstant(at)} — the door told us at ${clubInstant(deliveredAt)}.`;
+}
+
+/**
  * What the "Door events" block is, said once at the top of it.
  *
  * It exists because the alternative reading is the one that shipped: a reader who sees
@@ -591,13 +635,19 @@ export function doorRowRender(entry: DeviceActivityEntry): DoorRowRender {
  */
 export function doorEventRows(
   items: DeviceActivityEntry[] | null, events: DoorEventEntry[] | null | undefined,
-): { at: string; text: string; actor: string | null }[] {
+): { at: string; text: string; token: string | null }[] {
+  // The raw token travels with an UNRECOGNISED row only. On a recognised one it is noise —
+  // the sentence already says what happened — and on an unrecognised one it is the only
+  // thing a reader can report upstream.
   const rows = (events ?? []).map((e) => ({
-    at: e.at, text: describeDoorEventKind(e), actor: e.actor_name,
+    at: e.at,
+    text: describeDoorEventKind(e),
+    token: describeDoorEventKind(e) === UNRECOGNISED_EVENT ? e.action : null,
   }));
   for (const entry of items ?? []) {
-    if (classifyDoorRow(entry) === "released" || classifyDoorRow(entry) === "refused") continue;
-    rows.push({ at: entry.at, text: doorRowRender(entry).detail ?? UNRECOGNISED_EVENT, actor: entry.member?.name ?? null });
+    if (isDoorScan(entry)) continue;
+    const text = describeDoorEvent(entry);
+    rows.push({ at: entry.at, text, token: text === UNRECOGNISED_EVENT ? entry.action : null });
   }
   const seen = new Set<string>();
   return rows

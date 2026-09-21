@@ -1,8 +1,7 @@
 import { Badge } from "../Button";
 import { relative } from "../../lib/deviceLiveness";
-import { doorRowRender } from "../../lib/doorsCopy";
+import { doorRowRender, doorScanTiming, doorScanTimingLong } from "../../lib/doorsCopy";
 import { describeActivityWho } from "../../lib/deviceActivity";
-import { clubInstant } from "../../lib/clubClock";
 import { type DeviceActivityEntry } from "../../lib/api";
 
 /**
@@ -48,38 +47,57 @@ export function DoorFeedRow({ entry, now, doorName, innerRef }: {
   const who = describeActivityWho(entry);
   const detail = [doorName, render.detail].filter((part) => part).join(" · ");
   /**
-   * A4. "decided at the door at 21:25" beside "last heard from 21:00" reads as a
-   * contradiction until the row says the two are different facts: an offline row is stamped
-   * with the SCAN, and the club learned of it whenever the board next called in.
+   * A4. "decided at the door at 21:25" beside "last heard from 21:00" read as a
+   * contradiction until the row said the two are different facts: an offline row is stamped
+   * with the SCAN and is delivered when the board next calls in — and that upload IS
+   * contact, which is why `last_seen_at` can be later than a scan it delivered.
+   *
+   * `delivered_at` is non-null on offline rows only, so a null row has one instant and the
+   * copy reports one. It never invents a delay.
    */
-  const title = entry.offline
-    ? `Decided at the door at ${clubInstant(entry.at)}.`
-      + (entry.delivered_at
-        ? ` The club was told at ${clubInstant(entry.delivered_at)}.`
-        : " The club was told when the door next called in.")
-    : clubInstant(entry.at);
+  const title = doorScanTimingLong(entry.at, entry.delivered_at);
+  const timing = entry.delivered_at ? doorScanTiming(entry.at, entry.delivered_at) : null;
   return (
     <li
       ref={innerRef}
       tabIndex={innerRef ? -1 : undefined}
       className={`border-t border-border py-2 first:border-t-0 ${entry.offline ? "border-l-2 border-l-warning-strong pl-2" : ""}`}
     >
+      {/*
+        B17. The club log is a bare list whose columns are conveyed by VISUAL POSITION —
+        which is nothing at all to somebody reading it with a screen reader, where four
+        values arrive in a row with no indication of what each one is. A `<table>` was the
+        other candidate and is wrong here: A2.3 forbids the sort control a table invites, and
+        `DataTable`'s own `search` prop would put the member's name in a filter string, which
+        is P3 broken by a component default. So the field names are carried as
+        visually-hidden text on the list this surface already has.
+      */}
       <div className="flex flex-wrap items-baseline gap-2 sm:grid sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-3">
         <span className="flex flex-wrap items-center gap-1.5">
-          {render.chip && <Badge tone={render.tone}>{render.chip}</Badge>}
+          {render.chip && (
+            <Badge tone={render.tone}>
+              <span className="sr-only">Outcome: </span>{render.chip}
+            </Badge>
+          )}
           {entry.offline && <Badge tone="warning">Offline</Badge>}
         </span>
-        <span className="min-w-0 break-words text-sm text-text-secondary">{who ?? ""}</span>
+        <span className="min-w-0 break-words text-sm text-text-secondary">
+          {who ? <><span className="sr-only">Whose code: </span>{who}</> : ""}
+        </span>
         <time dateTime={entry.at} title={title} className="ml-auto shrink-0 text-xs text-text-muted">
-          {relative(entry.at, now)}
+          <span className="sr-only">When: </span>{relative(entry.at, now)}
         </time>
       </div>
-      {detail && <p className="mt-0.5 min-w-0 break-words text-sm text-text-secondary">{detail}</p>}
-      {/* Said in the row, not only in a `title`: a tooltip is invisible on a phone and to a
-          screen reader, and the "scan time vs delivery time" confusion is A4's whole finding. */}
-      {entry.offline && (
-        <p className="mt-0.5 text-xs text-text-muted">{title}</p>
+      {detail && (
+        <p className="mt-0.5 min-w-0 break-words text-sm text-text-secondary">
+          <span className="sr-only">{doorName ? "Door and reason: " : "Reason: "}</span>{detail}
+        </p>
       )}
+      {/* Said in the row, not only in a `title`: a tooltip is invisible on a phone and to a
+          screen reader, and the "scan time vs delivery time" confusion is A4's whole finding.
+          Rendered only where there ARE two instants — `delivered_at` is non-null on offline
+          rows only, and a row with one instant must not be given a delay it did not have. */}
+      {timing && <p className="mt-0.5 text-xs text-text-muted">{timing}</p>}
     </li>
   );
 }

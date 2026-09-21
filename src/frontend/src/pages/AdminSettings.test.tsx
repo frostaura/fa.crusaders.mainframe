@@ -926,7 +926,7 @@ describe("AdminSettings — alert cooldown", () => {
       // Each hint names its own bound, through aria-describedby rather than by proximity.
       const retention = screen.getByLabelText(/Keep door scans for/);
       const hint = document.getElementById(retention.getAttribute("aria-describedby")!);
-      expect(hint).toHaveTextContent("7-730");
+      expect(hint).toHaveTextContent("7–730");
       expect(hint).toHaveTextContent("DELETED");
     });
 

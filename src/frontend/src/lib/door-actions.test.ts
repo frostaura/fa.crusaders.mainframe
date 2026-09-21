@@ -2,8 +2,8 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  DOOR_EVENT_KIND_WORDS, DOOR_EVENT_WORDS, UNRECOGNISED_EVENT, classifyDoorRow,
-  describeDoorEvent, describeDoorEventKind, isDoorScan,
+  DOOR_EVENT_KIND_WORDS, DOOR_EVENT_WORDS, DOOR_FLEET_ACTIONS, DOOR_SCAN_ACTIONS,
+  UNRECOGNISED_EVENT, classifyDoorRow, describeDoorEvent, describeDoorEventKind, isDoorScan,
 } from "./deviceActivity";
 import { NO_REASON_RECORDED, doorEventRows, doorRowRender } from "./doorsCopy";
 import { type DeviceActivityEntry } from "./api";
@@ -178,6 +178,56 @@ describe("doorRowRender", () => {
   });
 });
 
+/**
+ * <b>The nine scan actions, pinned against the rules that classify them.</b>
+ *
+ * WIRE-R1 §3 enumerates them, and `classifyDoorRow` reaches the same answer through prefix
+ * rules. Two implementations of one fact is exactly how the original defect shipped — a
+ * two-way test standing in for a four-way one — so they are asserted against each other in
+ * BOTH directions rather than each being trusted on its own.
+ */
+describe("the scan-action set and the rules that classify it", () => {
+  it("classifies every one of the nine as a scan", () => {
+    for (const action of DOOR_SCAN_ACTIONS) {
+      expect(isDoorScan(entry({ action })), action).toBe(true);
+    }
+  });
+
+  it("classifies nothing else as a scan", () => {
+    const notScans = [
+      ...DOOR_FLEET_ACTIONS,
+      "device.updated", "device.auto_registered", "device.registered", "device.deleted",
+      "device.boot", "device.event_time_clamped", "device.api_key_regenerated",
+      "device.activation", "device.release", "gate.somethingNobodyHasSeen",
+    ];
+    for (const action of notScans) {
+      expect(isDoorScan(entry({ action })), action).toBe(false);
+    }
+  });
+
+  /**
+   * The five kinds the backend actually emits. `edited` covers rename, details change, shut
+   * and reopen — the backend writes `device.updated` for all four and records nothing that
+   * says which — so the copy for it must not guess at a verb.
+   */
+  it("reads every event kind, and guesses at no verb for `edited`", () => {
+    const kinds = ["registered", "edited", "removed", "clock_corrected", "unrecognised"];
+    for (const kind of kinds) {
+      expect(DOOR_EVENT_KIND_WORDS[kind], kind).toBeTruthy();
+    }
+    const edited = DOOR_EVENT_KIND_WORDS.edited.toLowerCase();
+    for (const guess of ["renamed", "shut", "reopened"]) {
+      expect(edited, `"${guess}" in the \`edited\` sentence`).not.toContain(guess);
+    }
+    expect(edited).toContain("details or state");
+  });
+
+  it("takes the neutral arm for a kind nobody has written copy for", () => {
+    expect(describeDoorEventKind({ at: "x", action: "device.propped_open", kind: "propped_open" }))
+      .toBe(UNRECOGNISED_EVENT);
+  });
+});
+
 describe("doorEventRows", () => {
   /**
    * The page must be right whether or not the API sends `events` yet, because the two lanes
@@ -195,11 +245,12 @@ describe("doorEventRows", () => {
 
   it("uses the API's own events where it sends them", () => {
     const rows = doorEventRows([entry({ action: "gate.opened" })], [
-      { at: "2026-09-19T09:00:00Z", kind: "renamed", actor_name: "Ruth" },
+      { at: "2026-09-19T09:00:00Z", action: "device.updated", kind: "edited" },
     ]);
     expect(rows).toHaveLength(1);
-    expect(rows[0].text).toBe(DOOR_EVENT_KIND_WORDS.renamed);
-    expect(rows[0].actor).toBe("Ruth");
+    expect(rows[0].text).toBe(DOOR_EVENT_KIND_WORDS.edited);
+    // No actor on the wire, so no row invents one.
+    expect(rows[0].token).toBeNull();
   });
 
   /** During the changeover one fact can legitimately arrive down both paths. */
@@ -207,7 +258,7 @@ describe("doorEventRows", () => {
     const at = "2026-09-19T09:00:00Z";
     const rows = doorEventRows(
       [entry({ at, action: "device.updated", reason: null })],
-      [{ at, kind: "details_changed", actor_name: null }],
+      [{ at, action: "device.updated", kind: "edited" }],
     );
     expect(rows).toHaveLength(1);
   });
@@ -223,14 +274,14 @@ describe("doorEventRows", () => {
 
   it("puts the newest first", () => {
     const rows = doorEventRows(null, [
-      { at: "2026-09-19T08:00:00Z", kind: "shut", actor_name: null },
-      { at: "2026-09-19T09:00:00Z", kind: "reopened", actor_name: null },
+      { at: "2026-09-19T08:00:00Z", action: "device.updated", kind: "edited" },
+      { at: "2026-09-19T09:00:00Z", action: "device.auto_registered", kind: "registered" },
     ]);
     expect(rows.map((r) => r.at)).toEqual(["2026-09-19T09:00:00Z", "2026-09-19T08:00:00Z"]);
   });
 
   it("reads an unknown event kind neutrally rather than guessing at it", () => {
-    expect(describeDoorEventKind({ at: "x", kind: "propped_open", actor_name: null }))
+    expect(describeDoorEventKind({ at: "x", action: "device.propped_open", kind: "propped_open" }))
       .toBe(UNRECOGNISED_EVENT);
     expect(describeDoorEvent(entry({ action: "device.nothing_like_this" }))).toBe(UNRECOGNISED_EVENT);
   });

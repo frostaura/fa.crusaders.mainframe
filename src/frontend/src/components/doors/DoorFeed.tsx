@@ -53,7 +53,17 @@ function FeedBody({ read, clock }: { read: FeedRead; clock: FeedClock }) {
   if (read.error) return <p className="text-sm text-danger-strong">{read.error || ACTIVITY_READ_FAILED}</p>;
   const scans = (read.entries ?? []).filter(isDoorScan);
   if (scans.length === 0) return <p className="text-sm text-text-secondary">{activityEmptyNotice(true)}</p>;
-  const quiet = doorQuietNotice(scans[0].at, clock.dayStartedAt, clock.now, clock.timezone);
+  /**
+   * The newest SCAN, which is not `scans[0]`.
+   *
+   * The list is ordered, paged and counted on the DELIVERY axis, so an offline row that was
+   * decided at 18:40 and uploaded at 21:05 sits above rows scanned at 20:00. Reading the
+   * first row's `at` as "the newest scan" would tell a club its door had been quiet since
+   * 18:40 on an evening it was busy — the quiet notice is precisely the sentence that must
+   * not be computed off a sort key it does not share.
+   */
+  const newest = scans.reduce((max, row) => (row.at > max ? row.at : max), scans[0].at);
+  const quiet = doorQuietNotice(newest, clock.dayStartedAt, clock.now, clock.timezone);
   return (
     <>
       {quiet && <p role="status" className="rounded-lg bg-warning-soft px-3 py-2 text-sm text-warning-strong">{quiet}</p>}
@@ -100,8 +110,12 @@ function DoorEvents({ read }: { read: FeedRead }) {
           {rows.map((row, i) => (
             <li key={`${row.at}-${i}`} className="border-t border-border py-2 first:border-t-0">
               <div className="flex flex-wrap items-baseline gap-2">
+                {/* The raw token only on an UNRECOGNISED row: on a recognised one the
+                    sentence already says what happened, and on an unrecognised one the token
+                    is the only thing a reader can report upstream. There is no actor on the
+                    wire (WIRE-R1 §1), so no row names one. */}
                 <span className="min-w-0 break-words text-sm text-text-secondary">
-                  {row.actor ? `${row.text} · ${row.actor}` : row.text}
+                  {row.token ? `${row.text} · ${row.token}` : row.text}
                 </span>
                 <time dateTime={row.at} className="ml-auto shrink-0 text-xs text-text-muted">
                   {clubDayAndClock(row.at)}
@@ -138,7 +152,11 @@ export function DoorFeed({ door, today, read, clock }: {
   clock: FeedClock;
 }) {
   return (
-    <div className="space-y-6">
+    // `min-w-0`: this is a grid item, and a grid item's default `min-width: auto` makes it
+    // refuse to shrink below its content's min-content width. See the note on the grid in
+    // `AdminDoorsDetail` — measured at 98 px of whole-page sideways scroll at 360 px with a
+    // 32 px root font.
+    <div className="min-w-0 space-y-6">
       <section aria-labelledby="door-feed-heading" className="space-y-2">
         <h2 id="door-feed-heading" className="text-lg font-semibold">Scans at this door</h2>
         <Card className="space-y-3">

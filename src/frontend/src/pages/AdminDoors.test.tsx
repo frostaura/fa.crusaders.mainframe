@@ -122,6 +122,26 @@ describe("the doors surface", () => {
       expect(notice).toHaveTextContent("opens for members with a booking");
     });
 
+    /**
+     * <b>C2, on the tile.</b> `doorStateChip` collapses liveness into "Shut", because shut
+     * outranks liveness — which is right for a door the club can reach and hides the only
+     * thing that matters about one it cannot. Found by looking at a rendered overview where
+     * the banner said "2 confirmed, 1 not yet" over three tiles that looked identical.
+     */
+    it("wears Shut AND Not reporting when both are true", async () => {
+      openDoors([doorFixture({ enabled: false, last_seen_at: ago(3600) })]);
+
+      expect(await screen.findByText("Shut")).toBeInTheDocument();
+      expect(screen.getByText("Not reporting")).toBeInTheDocument();
+    });
+
+    it("wears only Shut when the club can still reach it", async () => {
+      openDoors([doorFixture({ enabled: false, last_seen_at: ago(12) })]);
+
+      expect(await screen.findByText("Shut")).toBeInTheDocument();
+      expect(screen.queryByText("Not reporting")).toBeNull();
+    });
+
     it("says a shut door opens for nobody AND that a cut-off one keeps admitting", async () => {
       openDoors([doorFixture({ enabled: false })]);
 
@@ -366,7 +386,13 @@ describe("the doors surface", () => {
     it("marks an offline open as the board's own decision, at the scan's own time", async () => {
       const at = "2026-09-19T18:04:00Z";
       openDoor([doorFixture()], {
-        activity: [activityFixture({ at, action: "device.gate_open", reason: null, offline: true })],
+        // WIRE-R1 §2: `delivered_at` is non-null on offline rows ONLY, so an offline fixture
+        // that omitted it would be a shape the API cannot emit — and the row's whole point
+        // is that it carries TWO instants.
+        activity: [activityFixture({
+          at, action: "device.gate_open", reason: null, offline: true,
+          delivered_at: "2026-09-19T18:31:00Z",
+        })],
       });
 
       expect(await screen.findByText("Offline")).toBeInTheDocument();
@@ -386,7 +412,7 @@ describe("the doors surface", () => {
        */
       expect(when.getAttribute("title")).toContain("Decided at the door at");
       expect(within(feed).getByText(/Decided at the door at/)).toHaveTextContent(
-        "The club was told when the door next called in",
+        "the door told us at",
       );
       expect(when.getAttribute("title")).not.toMatch(/\d{1,2}\/\d{1,2}\/\d{2}/);
       expect(when.getAttribute("title")).not.toMatch(/\b[AP]M\b/);
@@ -406,9 +432,28 @@ describe("the doors surface", () => {
       });
 
       const feed = await screen.findByRole("region", { name: "Scans at this door" });
-      expect(within(feed).getByText(/Decided at the door at/)).toHaveTextContent(
-        "The club was told at 19 September 2026, 20:31",
-      );
+      // Both instants, in WIRE-R1 §2's own words. An /events upload IS contact, so
+      // `last_seen_at` moving PAST a scan it delivered is not a contradiction — which is
+      // exactly why the row has to say which instant is which rather than showing one.
+      expect(within(feed).getByText(/Decided at the door at/))
+        .toHaveTextContent("Decided at the door at 20:04 \u2014 the door told us at 20:31.");
+    });
+
+    /**
+     * WIRE-R1 §2: "Never render a delay for delivered_at null." A row the club decided as it
+     * happened has ONE instant, and inventing a second is the same class of falsehood as
+     * the contradiction A4 was raised about — the first draft of this fix filled the gap
+     * with "the club was told when the door next called in", which is a delay that row
+     * never had.
+     */
+    it("invents no delivery time for a row the club decided as it happened", async () => {
+      openDoor([doorFixture()], {
+        activity: [activityFixture({ at: "2026-09-19T18:04:00Z", delivered_at: null })],
+      });
+
+      const feed = await screen.findByRole("region", { name: "Scans at this door" });
+      expect(within(feed).queryByText(/told us at/)).toBeNull();
+      expect(within(feed).queryByText(/Decided at the door at/)).toBeNull();
     });
 
     /**

@@ -1387,7 +1387,7 @@ describe("AdminDevices", () => {
       // The liveness word is the doors surface's, not the box list's: this product knows the
       // board answered N seconds ago and nothing more.
       expect(screen.getByText("Reporting")).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "Manage on Doors" }))
+      expect(screen.getByRole("link", { name: "Manage Front door on Doors" }))
         .toHaveAttribute("href", "/admin/doors/99999999-9999-9999-9999-999999999999");
     });
 

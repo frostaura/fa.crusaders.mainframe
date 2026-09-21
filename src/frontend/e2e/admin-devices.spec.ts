@@ -592,7 +592,9 @@ test.describe("A door gate", () => {
     // The doors surface's liveness word, not the box list's: this product knows the board
     // answered N seconds ago and nothing more.
     await expect(page.getByText("Reporting")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Manage on Doors" }))
+    // The door's NAME in the accessible name (reviewer B): three links reading "Manage on
+    // Doors" on one screen are told apart only by which row they sit in.
+    await expect(page.getByRole("link", { name: "Manage Front door on Doors" }))
       .toHaveAttribute("href", `/admin/doors/${GATE.id}`);
     await expect(page.getByText("Doors are set up and shut under Doors.")).toBeVisible();
 

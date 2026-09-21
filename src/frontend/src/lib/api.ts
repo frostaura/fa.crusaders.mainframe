@@ -722,6 +722,12 @@ export type DeviceActivityEntry = {
    * </p>
    */
   delivered_at?: string | null;
+  /**
+   * `at` is the SCAN instant; `delivered_at` is when the club was told, and is non-null on
+   * offline rows ONLY. Lists are ordered, paged and counted on the DELIVERY axis, so an
+   * offline row's `at` may be older than the rows around it — which is not a sorting fault
+   * and must not be rendered as one.
+   */
   /** The member, when `SubjectUserId` resolved to one. Null on an unknown code and on a boot. */
   member: DeviceActivityMember | null;
   /** First eight hex of the code's SHA-256 (B4) — the only thing that correlates two scans of one unknown code. */
@@ -749,10 +755,20 @@ export type DeviceActivityEntry = {
  */
 export type DoorEventEntry = {
   at: string;
-  /** `registered` · `renamed` · `details_changed` · `shut` · `reopened` · `shut_all` · `reopened_all` · … */
+  /** The raw audit token, carried so an unrecognised event is still reportable upstream. */
+  action: string;
+  /**
+   * `registered` · `edited` · `removed` · `clock_corrected` · `unrecognised`.
+   *
+   * <p>
+   * <b>`edited` is ONE kind covering rename, details change, shut and reopen</b> — the
+   * backend writes `device.updated` for all four and does not record which. So the copy for
+   * it says what is true ("this door's details or state changed") rather than guessing at a
+   * verb; a row reading "Someone renamed this door" over a shut would be this round's own
+   * defect in a new place. There is no actor on the wire, so no row names one.
+   * </p>
+   */
   kind: string;
-  /** The admin who did it, where there was one. Null for a board's own event. */
-  actor_name: string | null;
 };
 
 /**
@@ -761,6 +777,7 @@ export type DoorEventEntry = {
  */
 export type DeviceActivityPage = {
   items: DeviceActivityEntry[];
+  /** Always present for a gate; `[]` for a court box. Optional only for an older API. */
   events?: DoorEventEntry[];
 };
 
@@ -1792,6 +1809,20 @@ export type DoorsView = {
   timezone: string;
   /** True while any door is shut by a shut-all — the club-wide banner's whole input (A1.5). */
   shut_all_active: boolean;
+  /**
+   * The two halves of "shut", NAMED rather than counted (C1).
+   *
+   * <p>
+   * `reopen-all` reopens only what a shut-all shut, so the UI has to be able to say which
+   * doors those are BEFORE the request: the fleet Reopen exists only while `shut_together`
+   * is non-empty and is labelled with that count, and `shut_individually` is what the
+   * confirm and the result name as staying shut. Optional here only so the page is correct
+   * against an API that has not landed them yet — it then falls back to the per-door
+   * `shut_by_shut_all_at`, and to the tenant-wide flag after that.
+   * </p>
+   */
+  shut_together?: { id: string; name: string; gate_key: string | null }[];
+  shut_individually?: { id: string; name: string; gate_key: string | null }[];
   /** Name ascending, stable. There is no sort parameter and no sort control. */
   doors: DoorRow[];
 };
@@ -1888,7 +1919,7 @@ export const doorEndpoints = {
    */
   doorActivityCsv: async (
     filters: DoorLogFilters = {},
-  ): Promise<{ blob: Blob; filename: string; rows: number | null }> => {
+  ): Promise<{ blob: Blob; filename: string; rows: number | null; truncated: boolean }> => {
     const res = await fetchWithTimeout(doorEndpoints.doorActivityCsvUrl(filters), {
       headers: { ...(tokenStore.get() ? { authorization: `Bearer ${tokenStore.get()}` } : {}) },
     });
@@ -1899,11 +1930,14 @@ export const doorEndpoints = {
     // the list on screen — "50 scans downloaded" over a 165-row file — because that was the
     // only number it had. `null` is the honest answer against an API that does not send the
     // header; the copy then carries no number at all rather than the wrong one.
-    const counted = Number(res.headers.get("x-crusaders-rows"));
-    const rows = Number.isFinite(counted) && counted >= 0 && res.headers.get("x-crusaders-rows") !== null
-      ? counted
-      : null;
-    return { blob: await res.blob(), filename: match?.[1] ?? "door-log.csv", rows };
+    const header = res.headers.get("x-crusaders-rows");
+    const counted = Number(header);
+    const rows = header !== null && Number.isFinite(counted) && counted >= 0 ? counted : null;
+    // `X-Crusaders-Truncated` rather than comparing the count to a cap this side holds: the
+    // cap is the server's, and a client that decides "this looks like the limit" is wrong
+    // the day the server's limit moves.
+    const truncated = (res.headers.get("x-crusaders-truncated") ?? "").toLowerCase() === "true";
+    return { blob: await res.blob(), filename: match?.[1] ?? "door-log.csv", rows, truncated };
   },
 
   /**

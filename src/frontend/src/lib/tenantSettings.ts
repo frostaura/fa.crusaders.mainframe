@@ -309,7 +309,29 @@ export function clubContactPhoneComplaint(value: string): string | null {
   if (!CLUB_CONTACT_PHONE_PATTERN.test(phone)) {
     return "A club contact number can only hold digits, spaces and + - ( ) , — this one goes on a printed door card.";
   }
+  /**
+   * <b>And at least five digits, which the character set alone does not give you.</b>
+   *
+   * `((( )))` passes the charset check and is not a phone number. This round's first pass
+   * deliberately left the rule out — a client rule the server does not have produces a
+   * field that saves from a hand edit but not from the console — and the backend has since
+   * landed exactly this bound, so the two now agree. It is the number printed on a card in
+   * a corridor, which is the only place a member finds it when a door has turned them away.
+   */
+  if (digitsIn(phone) < CLUB_CONTACT_PHONE_MIN_DIGITS) {
+    return `A club contact number needs at least ${CLUB_CONTACT_PHONE_MIN_DIGITS} digits — this one`
+      + " goes on a printed door card, and a member reads it when a door has turned them away.";
+  }
   return null;
+}
+
+/** The API's own floor (`club_contact_phone_invalid`). Mirrored, never guessed. */
+export const CLUB_CONTACT_PHONE_MIN_DIGITS = 5;
+
+function digitsIn(value: string): number {
+  let count = 0;
+  for (const ch of value) if (ch >= "0" && ch <= "9") count += 1;
+  return count;
 }
 
 /** Why the club's contact email cannot be saved, or null. Empty is allowed, for the same reason. */

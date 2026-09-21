@@ -373,6 +373,27 @@ describe("the club door log", () => {
   });
 
   /**
+   * <b>B1's "four views of ONE set", held on this side too.</b>
+   *
+   * The server already narrows this route to scans — it is why the reviewer's club log
+   * showed no rows for a door whose own page claimed thirteen refusals. But the count here
+   * is a claim an admin quotes to a committee, and the door's own feed made exactly this
+   * mistake by counting whatever arrived. Counting what is a scan costs one filter and
+   * cannot be wrong; trusting the route is a promise about somebody else's code.
+   */
+  it("counts and lists scans only, whatever the route sends", async () => {
+    open([
+      doorLogFixture(),
+      doorLogFixture({ at: ago(60), action: "device.updated", reason: null }),
+      doorLogFixture({ at: ago(120), action: "doors.shut_all", reason: null }),
+    ]);
+
+    expect(await screen.findByText("1 scan, newest first")).toBeInTheDocument();
+    expect(screen.queryByText(/Someone changed this door's details/)).toBeNull();
+    expect(screen.queryByText(/Every door was shut together/)).toBeNull();
+  });
+
+  /**
    * <b>B17 / A5 — the log named every row by its SLUG.</b>
    *
    * A committee reading a log after an incident saw "front-door" where the club says

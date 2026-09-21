@@ -9,6 +9,8 @@ import { tokenStore } from "../lib/api";
 // The API's own bound on `gate_key`, read from the copy module rather than restated: a mock
 // that refuses at 64 while the column stores 64 has to be the SAME 64.
 import { GATE_KEY_MAX_LENGTH } from "../lib/gateCopy";
+// The nine scan actions, from the one place they are written down (WIRE-R1 §3).
+import { DOOR_SCAN_ACTIONS } from "../lib/deviceActivity";
 
 /**
  * The shared frontend test harness.
@@ -732,6 +734,14 @@ function doorsView(state: DoorsState) {
     day_started_at: state.dayStartedAt,
     timezone: state.timezone,
     shut_all_active: state.doors.some((d) => d.enabled === false && state.shutByFleet.has(String(d.id))),
+    // WIRE-R1 §4. NAMED, not counted: `reopen-all` reopens only what a shut-all shut, and
+    // the fleet control has to be able to say which doors those are before it is pressed.
+    shut_together: state.doors
+      .filter((d) => d.enabled === false && state.shutByFleet.has(String(d.id)))
+      .map((d) => ({ id: d.id, name: d.name, gate_key: d.gate_key })),
+    shut_individually: state.doors
+      .filter((d) => d.enabled === false && !state.shutByFleet.has(String(d.id)))
+      .map((d) => ({ id: d.id, name: d.name, gate_key: d.gate_key })),
     doors: [...state.doors]
       .sort((a, b) => String(a.name).localeCompare(String(b.name)))
       .map((device) => ({
@@ -756,6 +766,8 @@ function doorsView(state: DoorsState) {
  */
 function applyFleet(state: DoorsState, enabled: boolean) {
   const at = new Date().toISOString();
+  // Captured BEFORE the map below empties the set, so a reopen can report what it touched.
+  const touched = new Set(enabled ? [...state.shutByFleet] : []);
   state.doors = state.doors.map((d) => {
     if (enabled) {
       if (!state.shutByFleet.has(String(d.id))) return d;
@@ -767,12 +779,22 @@ function applyFleet(state: DoorsState, enabled: boolean) {
     return { ...d, enabled: false, out_of_service_since: at };
   });
   return {
-    doors: state.doors.map((d) => ({
-      id: d.id, name: d.name, gate_key: d.gate_key, enabled: d.enabled,
-      last_seen_at: d.last_seen_at,
-      offline_after_seconds: d.offline_after_seconds ?? 180,
-      power_loss_behaviour: d.power_loss_behaviour ?? "not_established",
-    })),
+    // Only the doors this request actually changed. A reopen-all that reopened nothing
+    // answers `{doors: []}` — the shape C1's "0 doors reopened" came from, and the page has
+    // to go on being right about it.
+    doors: state.doors
+      .filter((d) => (enabled ? touched.has(String(d.id)) : d.enabled === false))
+      .map((d) => ({
+        id: d.id, name: d.name, gate_key: d.gate_key, enabled: d.enabled,
+        last_seen_at: d.last_seen_at,
+        offline_after_seconds: d.offline_after_seconds ?? 180,
+        power_loss_behaviour: d.power_loss_behaviour ?? "not_established",
+      })),
+    // WIRE-R1 §5: ALWAYS present. A zero-change result that names nothing is exactly the
+    // dead end the ruling closes.
+    left_shut: state.doors
+      .filter((d) => d.enabled === false && !state.shutByFleet.has(String(d.id)))
+      .map((d) => ({ id: d.id, name: d.name, gate_key: d.gate_key })),
   };
 }
 
@@ -809,16 +831,45 @@ function doorsLogPage(state: DoorsState, path: string) {
   };
 }
 
-/** The B5 per-device feed, and the device list beneath it. */
+/**
+ * The B5 per-device feed, and the device list beneath it.
+ *
+ * <p>
+ * <b>It answers `{items, events}`, because the API does (WIRE-R1 §1).</b> The two used to be
+ * one array, and that is the whole of B1: a `device.updated` row arrived among the scans and
+ * the feed painted it as a green "Refused". A mock that goes on merging them is a mock that
+ * cannot fail for the reason production failed — so it splits them here by the same rule the
+ * screen uses, and the events it emits carry the real `{at, action, kind}`, with NO actor
+ * and the five real kinds.
+ * </p>
+ */
 function doorsDeviceRoute(state: DoorsState, path: string) {
   if (!path.includes("/activity")) return state.doors;
   const id = path.split("/api/v1/admin/devices/")[1].split("/")[0];
+  const mine = state.activity.filter((e) => {
+    const door = (e.door ?? {}) as Record<string, unknown>;
+    return door.id === undefined || door.id === id;
+  });
+  const isScan = (e: Record<string, unknown>) =>
+    (DOOR_SCAN_ACTIONS as readonly string[]).includes(String(e.action));
   return {
-    items: state.activity.filter((e) => {
-      const door = (e.door ?? {}) as Record<string, unknown>;
-      return door.id === undefined || door.id === id;
-    }),
+    items: mine.filter(isScan),
+    events: mine.filter((e) => !isScan(e))
+      .map((e) => ({ at: e.at, action: e.action, kind: doorEventKindOf(String(e.action)) })),
   };
+}
+
+/** `device.updated` → `edited`, and so on. Mirrors the backend's own map (WIRE-R1 §3). */
+const DOOR_EVENT_KINDS: Record<string, string> = {
+  "device.auto_registered": "registered",
+  "device.registered": "registered",
+  "device.updated": "edited",
+  "device.deleted": "removed",
+  "device.event_time_clamped": "clock_corrected",
+};
+
+function doorEventKindOf(action: string): string {
+  return DOOR_EVENT_KINDS[action] ?? "unrecognised";
 }
 
 /** The devices PATCH, applying and refusing what the API applies and refuses. */
@@ -874,7 +925,13 @@ export function doorsServer(
     dayStartedAt: new Date(new Date().setHours(0, 0, 0, 0)).toISOString(),
     ...options,
     doors: initial.map((d) => ({ ...d })),
-    shutByFleet: new Set<string>(),
+    // Seeded from the fixture's own `shut_by_shut_all_at`, so a test can start from a club
+    // that is ALREADY under a shut-all without driving the button. The two spellings are
+    // one fact — `shut_together` is derived from this set — and a fixture that set the
+    // field while the set stayed empty would describe a club whose own records disagree.
+    shutByFleet: new Set<string>(
+      initial.filter((d) => d.shut_by_shut_all_at != null).map((d) => String(d.id)),
+    ),
   };
 
   return {

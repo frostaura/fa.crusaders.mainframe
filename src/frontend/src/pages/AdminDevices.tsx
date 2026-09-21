@@ -719,6 +719,11 @@ function GateRows({ gates, tenantHeartbeat, now }: {
               <Link
                 to={`/admin/doors/${gate.id}`}
                 className="ml-auto inline-flex min-h-11 items-center rounded-lg border border-control px-4 text-sm font-medium"
+                /* The door's NAME in the accessible name. Reviewer B met three links reading
+                   "Manage on Doors" on one screen — identical to anybody tabbing or using
+                   speech control, and distinguished only by which row they happen to sit in,
+                   which is visual position and therefore nothing at all. */
+                aria-label={`Manage ${gate.name} on Doors`}
               >
                 Manage on Doors
               </Link>

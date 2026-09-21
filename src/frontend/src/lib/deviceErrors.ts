@@ -69,6 +69,29 @@ const DEVICE_ERROR_TEXT: Record<string, string> = {
   power_loss_behaviour_unknown: "What this door does with no power has to be one of the three"
     + " answers on the form. Pick one and save again.",
 
+  // --- the club door log's own refusals ------------------------------------------------
+  //
+  // E3: a mistyped range used to answer 200 with the FULL unfiltered result, so an admin who
+  // fat-fingered a date exported everything believing it narrowed. The API refuses now, and
+  // these are the sentences those refusals reach a person as — without them the page shows
+  // its generic "could not be read", which says nothing about which field to look at.
+  from_invalid: "That start date could not be read, so the scans below were not narrowed to it."
+    + " Pick a range from the When list.",
+  to_invalid: "That end date could not be read, so the scans below were not narrowed to it."
+    + " Pick a range from the When list.",
+  cursor_invalid: "This page of older scans could not be read. Press Refresh to start the list again.",
+  outcome_invalid: "That is not an outcome a door records. Set Outcome back to All outcomes.",
+
+  // --- the club's public contact (B10 / C12) -------------------------------------------
+  //
+  // The console validates both before it sends, so these reach an admin only through a
+  // hand-edited settings document or a value saved from somewhere else — and the value is
+  // printed on the card that goes on a wall, which is why the server checks at all.
+  club_contact_phone_invalid: "A club phone number can hold digits, spaces and + - ( ) , and needs"
+    + " at least five digits. Check it and save again.",
+  club_contact_email_invalid: "That is not an email address the club can be reached at. Check it"
+    + " and save again.",
+
   // The three tenant numbers, each named with the bound the API holds, because
   // "out of range" alone leaves an admin guessing which end they went past.
   gate_unlock_seconds_out_of_range: `Unlock time has to be between ${GATE_UNLOCK_MIN_SECONDS} and ${GATE_UNLOCK_MAX_SECONDS} seconds. A door never holds the lock open longer than ${GATE_UNLOCK_MAX_SECONDS} seconds whatever is set here.`,
