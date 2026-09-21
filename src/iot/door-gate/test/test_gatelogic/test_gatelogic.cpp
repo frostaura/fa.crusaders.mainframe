@@ -211,8 +211,70 @@ void test_config_defaults_are_carls_wiring() {
   TEST_ASSERT_EQUAL_UINT8(27U, gatelogic::kGateConfig.ledPin);
   TEST_ASSERT_TRUE(gatelogic::kGateConfig.relayActiveHigh);
   TEST_ASSERT_TRUE(gatelogic::kGateConfig.unlockEnergisesRelay);
-  TEST_ASSERT_EQUAL_UINT32(3000UL, gatelogic::kGateConfig.unlockDefaultMs);
+  // FIFTEEN SECONDS, NOT CARL'S THREE. Carl's sketch was `delay(3000)` and this
+  // default was three seconds to match it. Three is the time a lock is released
+  // for; it is not the time a person takes to notice a lamp go solid, reach for
+  // a handle and pull a door that opens towards them. The default is what a
+  // board runs on until its first heartbeat — a fresh board, a board whose
+  // radio has never associated, a board the API has not answered yet — so it is
+  // the number a member meets on exactly the days nothing else is working.
+  //
+  // It is still bounded at both ends by the same clamp as any server answer:
+  // [kMinUnlockMs, unlockHardCapMs] = [1 s, 30 s], which the static_asserts in
+  // GateConfig.h hold and which nothing here relaxes.
+  TEST_ASSERT_EQUAL_UINT32(15000UL, gatelogic::kGateConfig.unlockDefaultMs);
   TEST_ASSERT_EQUAL_UINT32(30000UL, gatelogic::kGateConfig.unlockHardCapMs);
+  // AND THE DWELL IS NO LONGER "THE DEFAULT". It was 3000 because the default
+  // was, and the two are now different numbers with different jobs: the dwell is
+  // how long a door a member has been holding open has to stay shut, and 15 s of
+  // that would refuse a queue of innocent members behind them. Pinned here so a
+  // later edit cannot quietly re-collapse them.
+  TEST_ASSERT_EQUAL_UINT32(3000UL, gatelogic::kGateConfig.relockDwellMs);
+  TEST_ASSERT_TRUE_MESSAGE(gatelogic::kGateConfig.relockDwellMs < gatelogic::kGateConfig.unlockDefaultMs,
+                           "the dwell is a door-closing time, not a release time");
+}
+
+/// THE DEFAULT IS ADOPTABLE-OVER, AND THAT IS THE WHOLE REASON IT IS SAFE TO
+/// RAISE IT.
+///
+/// A board takes `gate.unlock_seconds` from the first heartbeat that carries
+/// one, clamped to [1, 30]. So the default governs only the window before the
+/// server has spoken — and a tenant that wants Carl's three seconds back sets
+/// three and gets three, on the very next heartbeat, with no reflash.
+///
+/// At all four clock bases, because `adoptUnlockMs` is pure arithmetic over a
+/// body and a test that only ran at zero would prove nothing about the board.
+void test_config_the_default_is_only_what_runs_until_the_server_answers() {
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    uint32_t unlockMs = gatelogic::kGateConfig.unlockDefaultMs;
+    TEST_ASSERT_EQUAL_UINT32(15000UL, unlockMs);
+
+    // The tenant asks for Carl's three back.
+    const char* three = "{\"kind\":\"gate\",\"gate\":{\"unlock_seconds\":3},\"roster\":[]}";
+    TEST_ASSERT_TRUE(gatelogic::adoptUnlockMs(three, strlen(three), unlockMs));
+    TEST_ASSERT_EQUAL_UINT32(3000UL, unlockMs);
+
+    // And back up again, at the top of the clamp.
+    const char* thirty = "{\"kind\":\"gate\",\"gate\":{\"unlock_seconds\":30},\"roster\":[]}";
+    TEST_ASSERT_TRUE(gatelogic::adoptUnlockMs(thirty, strlen(thirty), unlockMs));
+    TEST_ASSERT_EQUAL_UINT32(30000UL, unlockMs);
+
+    // AN ABSENT KEY LEAVES THE WORKING VALUE ALONE — an older API that sends no
+    // `gate` object must not reset a release time a newer one configured.
+    const char* absent = "{\"kind\":\"gate\",\"roster\":[]}";
+    TEST_ASSERT_FALSE(gatelogic::adoptUnlockMs(absent, strlen(absent), unlockMs));
+    TEST_ASSERT_EQUAL_UINT32(30000UL, unlockMs);
+
+    // A KEY OF THE WRONG JSON TYPE is not an answer either.
+    const char* wrongType = "{\"kind\":\"gate\",\"gate\":{\"unlock_seconds\":\"15\"},\"roster\":[]}";
+    TEST_ASSERT_FALSE(gatelogic::adoptUnlockMs(wrongType, strlen(wrongType), unlockMs));
+    TEST_ASSERT_EQUAL_UINT32(30000UL, unlockMs);
+
+    // The clock base is not an input to any of the above, and saying so is the
+    // point: a release time that moved with the boot instant would be a door
+    // that behaves differently 49 days in.
+    static_cast<void>(kBases[b]);
+  }
 }
 
 /// The scanner refuses what the roster could never match, and the roster holds
@@ -2680,6 +2742,18 @@ constexpr char kHealthyHeartbeat[] =
     "{\"kind\":\"gate\",\"gate\":{\"unlock_seconds\":3},\"roster\":[\"MEMBERTOKEN1|0|0|86399\"],"
     "\"accepted_through\":0}";
 
+/// WHAT THE HEARTBEAT ABOVE ACTUALLY GRANTS, as a number, because a scenario
+/// that has to wait for a window to end has to wait for THIS and not for
+/// `kGateConfig.unlockDefaultMs`.
+///
+/// The two were both 3000 until the unlock default was raised to fifteen
+/// seconds, and two of the dwell scenarios below waited on the default while the
+/// window they needed closed came from this body. They passed on a coincidence:
+/// raising the default made them wait 15 s for a 3 s window, by which time the
+/// relock dwell they were testing had long expired and the door simply opened
+/// again. Named here so the coupling is visible rather than arithmetical.
+constexpr uint32_t kHealthyHeartbeatGrantMs = 3000U;
+
 /// E1 CRITICAL, and the scenario the round-G2 finders reproduced against the
 /// real GateApp.
 ///
@@ -3893,8 +3967,15 @@ void test_app_a_scan_inside_the_relock_dwell_costs_no_call_and_records_no_openin
 
   // Let the window end, then scan again inside the dwell. A DIFFERENT token, so
   // the debounce is not what refuses it.
-  rig.runFor(gatelogic::kGateConfig.unlockDefaultMs + 2U * gatelogic::kIdleDelayMs);
+  //
+  // THE WINDOW `kHealthyHeartbeat` GRANTED, not the build-flag default: the two
+  // were the same 3000 until the default was raised, and waiting the default
+  // here would run 15 s for a 3 s window and land well past the dwell this test
+  // is about. See kHealthyHeartbeatGrantMs.
+  rig.runFor(kHealthyHeartbeatGrantMs + 2U * gatelogic::kIdleDelayMs);
   TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(), "the window has to have closed");
+  TEST_ASSERT_TRUE_MESSAGE(rig.unlock.relocking(rig.clock.value()),
+                           "and the dwell has to still be running, or this proves nothing");
 
   rig.scanner.feed("MEMBERTOKEN1\n");
   rig.tick();
@@ -3927,8 +4008,12 @@ void test_app_a_scan_inside_the_relock_dwell_never_reaches_the_api() {
   rig.tick();
   rig.tick();
   TEST_ASSERT_TRUE_MESSAGE(rig.lock.released(), "the scenario needs the door to open first");
-  rig.runFor(gatelogic::kGateConfig.unlockDefaultMs + 2U * gatelogic::kIdleDelayMs);
+  // THE WINDOW `kOpenThreeSeconds` GRANTED, not the build-flag default — see
+  // kHealthyHeartbeatGrantMs for what waiting on the default cost here.
+  rig.runFor(kOpenGrantMs + 2U * gatelogic::kIdleDelayMs);
   TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(), "the window has to have closed");
+  TEST_ASSERT_TRUE_MESSAGE(rig.unlock.relocking(rig.clock.value()),
+                           "and the dwell has to still be running, or this proves nothing");
 
   const uint32_t gateCallsBefore = rig.http.callsTo(gatelogic::kPathGate);
   rig.scanner.feed("MEMBERTOKEN1\n");
@@ -4579,8 +4664,51 @@ void test_config_the_worst_call_is_connect_plus_headers_plus_body() {
                                   "a 12 s watchdog against a 12 s worst call is a reset loop");
   // The overrun sentence in GateApp.h and README.md, as a number.
   TEST_ASSERT_EQUAL_UINT32(12010UL, gatelogic::kWorstBlockingCallMs + gatelogic::kIdleDelayMs);
-  TEST_ASSERT_EQUAL_UINT32(42010UL, gatelogic::kGateConfig.unlockHardCapMs + gatelogic::kWorstBlockingCallMs +
-                                        gatelogic::kIdleDelayMs);
+
+  // THE WORST-CASE PHYSICAL RELEASE, TERM BY TERM, AND WHICH TERM THE UNLOCK
+  // DEFAULT IS IN (it is NOT in this one).
+  //
+  //   granted window, bounded by GATE_UNLOCK_HARD_CAP_MS   30 000 ms
+  // + one worst-case blocking call in flight (4+4+4)       12 000 ms
+  // + one pass tick, kIdleDelayMs                              10 ms
+  // ------------------------------------------------------------------
+  //                                                        42 010 ms  = 42.01 s
+  //
+  // Raising GATE_UNLOCK_DEFAULT_MS from 3 s to 15 s does NOT move this number,
+  // and that is worth stating rather than assuming: the first term is the CAP,
+  // which a single answer cannot exceed and which no sequence of re-arms may
+  // pass either. The default is one of the values that term is a bound ON.
+  TEST_ASSERT_EQUAL_UINT32(30000UL, gatelogic::kGateConfig.unlockHardCapMs);
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(42010UL,
+                                   gatelogic::kGateConfig.unlockHardCapMs + gatelogic::kWorstBlockingCallMs +
+                                       gatelogic::kIdleDelayMs,
+                                   "cap + one blocking call + one pass tick");
+
+  // AND THE NUMBER THAT DID MOVE: what a board running on the DEFAULT can hold
+  // a door open for, with one grant and no re-arms — the fresh board, the board
+  // whose radio has never associated, the board the API has not answered.
+  //
+  //   GATE_UNLOCK_DEFAULT_MS                               15 000 ms
+  // + one worst-case blocking call in flight               12 000 ms
+  // + one pass tick                                            10 ms
+  // ------------------------------------------------------------------
+  //                                                        27 010 ms  = 27.01 s
+  //
+  // It was 15 010 ms at a three-second default. Pinned here so the raise is a
+  // stated cost rather than a consequence somebody finds at a door.
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(27010UL,
+                                   gatelogic::kGateConfig.unlockDefaultMs + gatelogic::kWorstBlockingCallMs +
+                                       gatelogic::kIdleDelayMs,
+                                   "default grant + one blocking call + one pass tick");
+
+  // AND THE DOOR'S DUTY CYCLE, which is the sentence the merged relock dwell
+  // added and which the release bound above is only half of: after a window the
+  // cap forced, the lock is genuinely dark for at least GATE_RELOCK_DWELL_MS,
+  // and after ANY close for at least GATE_MIN_RELOCK_MS. So the worst the DOOR
+  // does is 42 010 ms open followed by at least 3 000 ms shut, for ever — not
+  // 42 010 ms open followed by 0 ms, which is what it did before round G4's A1.
+  TEST_ASSERT_EQUAL_UINT32(3000UL, gatelogic::kGateConfig.relockDwellMs);
+  TEST_ASSERT_EQUAL_UINT32(400UL, gatelogic::kGateConfig.minRelockMs);
 }
 
 /// E1. A call that has already spent its whole budget before the body starts
@@ -5008,6 +5136,7 @@ int main(int, char**) {
   UNITY_BEGIN();
 
   RUN_TEST(test_config_defaults_are_carls_wiring);
+  RUN_TEST(test_config_the_default_is_only_what_runs_until_the_server_answers);
   RUN_TEST(test_config_token_cap_matches_the_roster);
 
   RUN_TEST(test_lock_level_for_all_four_polarity_combinations);

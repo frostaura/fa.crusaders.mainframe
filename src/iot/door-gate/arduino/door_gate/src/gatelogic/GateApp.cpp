@@ -289,6 +289,12 @@ void GateApp::decideScan(const char* token) {
     // roster: the roster does not know about a membership barred this morning,
     // so letting a throttle send a scan there would be this board's own rate
     // limiting opening a door the API would have refused.
+    //
+    // NOT QUEUED (the `false`): this branch only runs when the board is ONLINE,
+    // and the queue is for decisions the API does not already know about. The
+    // API knows nothing about this one either — but it is about this board's own
+    // throttle rather than about the member, and a ring filling with a board's
+    // notes to itself is the H1 eviction problem with a different cause.
     decision = refuseTooFast(false);
   } else if (how == Attempt::Online) {
     scanCallFloorAt_.arm(asked, kMinScanCallSpacingMs);
@@ -299,9 +305,9 @@ void GateApp::decideScan(const char* token) {
     decision.fallbackToRoster = true;
   }
 
-  // A FRESH read, on BOTH branches — the online one because the call may have
-  // just spent its whole worst case, and the roster one so there is only one
-  // rule here instead of two that can drift apart.
+  // A FRESH read, on EVERY branch above — the online one because the call may
+  // have just spent its whole worst case, and the other three so there is one
+  // rule here rather than four that can drift apart.
   //
   // This instant is what the release window, the queued event and the debounce
   // are all stamped from. Reading it before the call is what made a 2.9-second

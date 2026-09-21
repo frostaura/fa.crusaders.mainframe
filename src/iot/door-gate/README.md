@@ -45,9 +45,9 @@ so the headers still compile with no build system at all.
 | `GATE_RELAY_ACTIVE_HIGH` | 1 | **the relay module**: 1 if driving its input HIGH energises the coil |
 | `GATE_UNLOCK_ENERGISES_RELAY` | 1 | **the lock's wiring**: 1 if an energised coil *releases* the lock |
 | `GATE_LED_PIN` / `GATE_LED_ACTIVE_HIGH` | 27 / 1 | the lamp and its polarity |
-| `GATE_UNLOCK_DEFAULT_MS` | 3000 | release time until the first heartbeat |
+| `GATE_UNLOCK_DEFAULT_MS` | 15000 | release time until the first heartbeat. **Was 3000** — Carl's `delay(3000)`, which is how long a lock takes to *throw*, not how long a person takes to notice a lamp go solid, move a bag and pull a door. It is only what a board runs on before the server has answered, and `gate.unlock_seconds` overrides it within [1 s, 30 s] on the first heartbeat that carries one |
 | `GATE_UNLOCK_HARD_CAP_MS` | 30000 | the longest ONE release window may last. On its own this is not a bound on the DOOR — see *the hard cap is a bound on a window* below |
-| `GATE_RELOCK_DWELL_MS` | 3000 | after a window the hard cap ended, the lock stays locked for at least this long and no grant may energise the relay inside it |
+| `GATE_RELOCK_DWELL_MS` | 3000 | after a window the hard cap ended, the lock stays locked for at least this long and no grant may energise the relay inside it. It used to be described as "the same number as `GATE_UNLOCK_DEFAULT_MS`" and no longer is: this is a door-*closing* time, that is a door-*open* time, and fifteen seconds of this would refuse a queue of innocent members for a quarter of a minute |
 | `GATE_MIN_RELOCK_MS` | 400 | the same, after ANY close: the floor that makes sure the lock is actually de-energised between two windows |
 | `GATE_MAX_TOKEN_LEN` | 20 | `= roster::kMaxTokenLen`, asserted |
 | `GATE_WATCHDOG_SECONDS` | 15 | task watchdog period; **asserted** to exceed one worst-case HTTP call. Was 12, when a call was two phases rather than three. |
@@ -144,8 +144,12 @@ Keep them apart:
   de-energises the relay coil and nothing else. That is the truth table's last
   column, and `GATE_UNLOCK_ENERGISES_RELAY` alone decides it.
 
-The defaults are Carl's own sketch, which he has run on the real door: the coil
-is energised to release, for three seconds. **Which lock is fitted, and which
+The polarity defaults are Carl's own sketch, which he has run on the real door:
+the coil is energised to release. **The release TIME is no longer his** — his
+sketch is `delay(3000)` and `GATE_UNLOCK_DEFAULT_MS` is 15 000 ms, because three
+seconds is how long a strike takes to throw rather than how long a member takes
+to reach a handle; the wiring is untouched and only the timing moved. **Which
+lock is fitted, and which
 relay contact it is fed through, are not recorded anywhere in this repository**,
 so nothing here claims what that door does in either failure. It is measured on
 the go-live bench (§12) with the real lock — pull the mains, then separately pull
@@ -278,6 +282,23 @@ API call, an audit row or a re-armed lock. A different token is never suppressed
 and no sequence of scans can set a deadline later than the hard cap measured from
 the moment the door first opened.
 
+**What that means for back-to-back scans at a 15-second door**, in the words the
+programme asked for:
+
+> A member at a 15-second door gets **one** extension from back-to-back scans and
+> no more: the first scan opens the lock until t = 15 s; a second scan at
+> t = 14 s carries the deadline to t = 29 s; a third arriving just before that
+> gets only the ~1 s left of the 30-second cap measured from the moment the door
+> **first** opened; and the scan after it is refused with `relocking`, because
+> the cap-forced close owes the door `GATE_RELOCK_DWELL_MS` of dark time. At the
+> old three-second default the identical rule allowed **nine** extensions
+> instead of one.
+
+That is a consequence of raising the default, not a change to the cap, and it is
+the **safe** direction: the cap is what bounds the door, and a longer grant
+spends more of it per scan. Nobody who scans once notices. Somebody holding a
+phone at the reader reaches the cap nine times faster and then meets the dwell.
+
 **What the deadline does not bound is when the loop next looks at it.** The lock
 is taken back by the loop, and the loop can be inside a blocking HTTP call when
 the deadline passes. The deadline is re-checked with a fresh clock immediately
@@ -290,6 +311,30 @@ after every call, and a pass makes at most one, so the true bound is:
 It was 8 010 ms and 38.01 s until round G3 gave the response body its own
 budget. The number went **up** because the old one was measured against a call
 whose body phase could be handed no time at all.
+
+**Raising `GATE_UNLOCK_DEFAULT_MS` from 3 s to 15 s did not move the 42.01 s**,
+and that is worth stating term by term rather than assuming, because it is the
+first thing a reader expects to have changed:
+
+| | term | ms |
+|---|---|---|
+| worst case, **any** grant | granted window, bounded by `GATE_UNLOCK_HARD_CAP_MS` | 30 000 |
+| | one worst-case blocking call in flight (4 000 + 4 000 + 4 000) | 12 000 |
+| | one pass tick, `kIdleDelayMs` | 10 |
+| | **total** | **42 010 = 42.01 s** |
+| worst case on the **default**, one grant, no re-arms | `GATE_UNLOCK_DEFAULT_MS` | 15 000 |
+| | one worst-case blocking call in flight | 12 000 |
+| | one pass tick | 10 |
+| | **total** | **27 010 = 27.01 s** (was 15 010) |
+
+The first table's opening term is the **cap**, which a single answer cannot
+exceed and which no sequence of re-arms may pass either — the default is one of
+the values that term is a bound *on*. What moved is the second: a board that has
+never heard a heartbeat now holds a door for 27.01 s in the worst case rather
+than 15.01 s, and after it closes the lock is genuinely dark for at least
+`GATE_MIN_RELOCK_MS`, or at least `GATE_RELOCK_DWELL_MS` when the cap forced the
+close. Both are pinned by
+`test_config_the_worst_call_is_connect_plus_headers_plus_body`.
 
 **And it has now been MEASURED, not only derived.** `test/e2e-device`'s `DS8`
 step drives the native simulator — this firmware, over a real socket — against
@@ -377,7 +422,17 @@ So a close now guarantees dark time, and a grant inside it is **refused**:
 | | after | for | because |
 |---|---|---|---|
 | `GATE_MIN_RELOCK_MS` | any close | 400 ms | long enough for a strike to drop or a maglock to re-magnetise, short enough that a second member behind the first does not notice it |
-| `GATE_RELOCK_DWELL_MS` | a close the **cap** forced | 3000 ms | that close is the board overruling somebody who has held the door open for the whole cap, and the point of overruling them is that the door shuts. It is `GATE_UNLOCK_DEFAULT_MS`: the door is shut for at least as long as an ordinary grant holds it open |
+| `GATE_RELOCK_DWELL_MS` | a close the **cap** forced | 3000 ms | that close is the board overruling somebody who has held the door open for the whole cap, and the point of overruling them is that the door shuts. Long enough for any strike or maglock to relatch and for a normal doorway's closer to swing, short enough that a legitimate member caught inside it pays one re-scan |
+
+This row **used to justify itself as "it is `GATE_UNLOCK_DEFAULT_MS`"**, and that
+justification is gone rather than quietly falsified. The default is 15 000 ms
+now and this is still 3 000 ms, because the two answer different questions and
+only ever looked like one number by coincidence: the default is how long a
+member is given to get *through* a door, and this is how long a door somebody
+has held open for the whole cap has to stay *shut*. Fifteen seconds of it would
+refuse a queue of innocent members for a quarter of a minute over something one
+person did, and every one of those refusals costs a denial blink and, offline, a
+ring slot.
 
 A refused scan is **answered, never swallowed**: the lamp gives the denial cue,
 the decision carries the reason `relocking`, and offline it is queued as an
@@ -579,6 +634,8 @@ are in [`test/`](test/) and run by `make test-iot`.
 | The window runs from the decision | `test_debounce_measures_from_the_decision_not_from_the_scan` |
 | A re-arm never shortens the window | `test_unlock_a_re_arm_never_shortens_the_window` |
 | No sequence of scans passes the hard cap | `test_unlock_the_hard_cap_bounds_both_one_answer_and_the_whole_window` |
+| The 15 s default is only what runs until the server answers, and `gate.unlock_seconds` overrides it at both clamp bounds while an absent or wrongly-typed key leaves it alone | `test_config_the_default_is_only_what_runs_until_the_server_answers` |
+| The 42.01 s / 27.01 s release arithmetic above, term by term | `test_config_the_worst_call_is_connect_plus_headers_plus_body` |
 | The lock opens once and closes once | `test_unlock_opens_once_and_closes_once_at_every_clock_base` |
 | CR/LF is one terminator; empty lines are ignored; lines are trimmed | `test_scan_assembles_a_line_and_treats_crlf_as_one_terminator`, `test_scan_trims_and_ignores_an_empty_line` |
 | An over-long line is refused, not truncated, and costs only itself | `test_scan_refuses_a_token_one_character_over_the_cap_without_truncating` |

@@ -21,10 +21,29 @@
 // Per request: a single answer can never ask for more than the cap. That alone
 // is not enough — "re-arm never shortens" plus a scanner that repeats is a door
 // that stays open for as long as somebody keeps waving a phone at it, one
-// legal 3-second extension at a time. So the release WINDOW is also bounded:
+// legal extension at a time. So the release WINDOW is also bounded:
 // no deadline may ever fall later than the cap after the moment the door was
 // first released. Both bounds are mutation-proved; remove either and a member
 // can hold a door open indefinitely with no single request that breaks a rule.
+//
+// WHAT THE WINDOW BOUND COSTS A MEMBER, NOW THAT A GRANT IS FIFTEEN SECONDS
+// -------------------------------------------------------------------------
+// The cap is a budget for the whole window and a longer grant spends more of it
+// per scan, so raising GATE_UNLOCK_DEFAULT_MS from 3 s to 15 s changed how many
+// extensions back-to-back scans can buy — without changing a line of this file:
+//
+//   A member at a 15-second door gets ONE extension from back-to-back scans and
+//   no more: the first scan opens the lock until t = 15 s; a second scan at
+//   t = 14 s carries the deadline to t = 29 s; a third arriving just before that
+//   gets only the ~1 s left of the 30-second cap measured from the moment the
+//   door FIRST opened; and the scan after it is refused with `relocking`,
+//   because the cap-forced close owes the door GATE_RELOCK_DWELL_MS of dark
+//   time. At the old three-second default the identical rule allowed NINE
+//   extensions instead of one.
+//
+// That is the SAFE direction and it stays. Nobody who scans once notices it;
+// somebody holding a phone at the reader reaches the cap nine times faster and
+// then meets the dwell, which is exactly what the cap and the dwell are for.
 //
 // AND TWO BOUNDS ON THE WINDOW WERE STILL NOT A BOUND ON THE DOOR
 // ---------------------------------------------------------------

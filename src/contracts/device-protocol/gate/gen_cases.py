@@ -52,11 +52,18 @@ def entry(tok: str, opens_in: int, closes_in: int) -> str:
     return f"{tok}|0|{opens_in}|{closes_in}"
 
 
-def heartbeat(device_code: str, gate_key, roster, unlock_seconds: int = 3,
+def heartbeat(device_code: str, gate_key, roster, unlock_seconds: int = 15,
               tenant_slug: str = "crusaders") -> dict:
     """Key order is the declaration order of the anonymous object in
     DeviceEndpoints.HeartbeatAsync's gate branch. Changing one without the other
-    is what the byte-identity test exists to catch."""
+    is what the byte-identity test exists to catch.
+
+    `unlock_seconds` defaults to FIFTEEN, which is the tenant default
+    `TenantSettingsView.DefaultGateUnlockSeconds` — it was three, Carl's
+    `delay(3000)`, which is how long a lock takes to throw rather than how long a
+    person takes to notice a lamp and pull a door. The clamp is unchanged at
+    [1, 30]. The `expect` block of gate-heartbeat-response-empty-roster carries
+    the same number by hand and has to move with this one."""
     return {
         "server_time": SERVER_TIME,
         "tenant_slug": tenant_slug,
@@ -278,7 +285,14 @@ responses = [
             "gate_key": "front-door",
             "roster": [],
             "heartbeat_seconds": 60,
-            "gate": {"unlock_seconds": 3},
+            # FIFTEEN, AND IT WAS THREE. The tenant default `gate_unlock_seconds`
+            # moved from Carl's `delay(3000)` to fifteen seconds — a number about
+            # a person reaching a handle rather than about a strike throwing. The
+            # clamp is unchanged at [1, 30] and a club that wants three back sets
+            # three. This has to track `heartbeat()`'s own default above, because
+            # the body is generated from that and this is what the FIRMWARE's
+            # corpus suite checks the body against.
+            "gate": {"unlock_seconds": 15},
         },
     },
     {

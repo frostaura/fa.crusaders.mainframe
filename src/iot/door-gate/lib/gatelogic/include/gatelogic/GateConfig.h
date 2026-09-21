@@ -72,8 +72,27 @@
 // --- timings ----------------------------------------------------------------
 
 /// How long the lock is released, until the first heartbeat says otherwise.
+///
+/// FIFTEEN SECONDS, AND IT WAS CARL'S THREE. His sketch is `delay(3000)` and
+/// this default copied it, which made it a number about a LOCK rather than a
+/// number about a PERSON: three seconds is comfortably longer than any strike
+/// or maglock needs to throw, and comfortably shorter than somebody notices a
+/// lamp go solid, moves a bag to the other hand, reaches for a handle and pulls
+/// a door that opens towards them. A member who is half a second slow scans
+/// again, and on a board that is offline that second scan is a second audit row
+/// for one arrival.
+///
+/// It is a DEFAULT and not a policy: `gate.unlock_seconds` on the heartbeat
+/// overrides it within [1, 30] on the first answer the server gives, so a club
+/// that wants three back sets three and has it without a reflash. What this
+/// number governs is the window before the server has spoken — a fresh board, a
+/// board whose radio has never associated, a board the API has not answered —
+/// which is exactly the situation in which nobody is standing by to help.
+///
+/// It does NOT move GATE_RELOCK_DWELL_MS, which used to be "the same number":
+/// see that flag for why the two have come apart.
 #ifndef GATE_UNLOCK_DEFAULT_MS
-#define GATE_UNLOCK_DEFAULT_MS 3000UL
+#define GATE_UNLOCK_DEFAULT_MS 15000UL
 #endif
 /// The longest ONE release window may last, whatever the server answers and
 /// however often somebody scans. A safety bound, not a default.
@@ -97,11 +116,24 @@
 /// swing is a door that never actually closes between two windows, which is the
 /// same outcome the cap exists to prevent, reached more slowly.
 ///
-/// Three seconds, which is GATE_UNLOCK_DEFAULT_MS: the door is shut for at least
-/// as long as an ordinary grant holds it open. It is longer than any electric
-/// strike or maglock needs to relatch and longer than a normal doorway's closer
-/// takes to swing, and it costs a legitimate member who scans inside it one
-/// re-scan — which is what the denial blink tells them to do.
+/// Three seconds. It USED TO BE STATED AS "which is GATE_UNLOCK_DEFAULT_MS",
+/// and that justification is gone rather than quietly falsified: the default is
+/// fifteen seconds now and this is still three, because the two numbers answer
+/// different questions and only looked like one number by coincidence.
+///
+///   * the DEFAULT is how long a member is given to get through a door. Longer
+///     is kinder, and the cap is what stops it being unsafe.
+///   * this DWELL is how long a door that somebody has held open for the whole
+///     cap has to stay SHUT. Longer is a queue of innocent members refused for
+///     something one person did, and every one of those refusals costs the
+///     board a denial blink and, offline, a ring slot.
+///
+/// So it is sized against the hardware and the doorway, which is what it was
+/// always really sized against: longer than any electric strike or maglock needs
+/// to relatch, longer than a normal doorway's closer takes to swing, and short
+/// enough that a legitimate member who scans inside it pays one re-scan — which
+/// is what the denial blink tells them to do. Fifteen seconds of it would be a
+/// door refusing a queue for a quarter of a minute.
 #ifndef GATE_RELOCK_DWELL_MS
 #define GATE_RELOCK_DWELL_MS 3000UL
 #endif
