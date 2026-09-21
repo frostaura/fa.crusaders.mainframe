@@ -89,53 +89,193 @@ const NOTHING: DoorsChrome = {
  * {@link AdminDoorsHomeRow}, which still counts only the three.
  * </p>
  */
-export function useDoorsChrome(enabled: boolean, routeKey: string): DoorsChrome {
-  const [chrome, setChrome] = useState<DoorsChrome>(NOTHING);
+export function useDoorsChrome(enabled: boolean, _routeKey?: string): DoorsChrome {
+  return useDoorsStore(enabled).chrome;
+}
+
+// --- the store ---------------------------------------------------------------------
+
+/**
+ * Everything every reader of the doors state needs, in ONE place that does ONE read.
+ *
+ * <p>
+ * <b>E-L6.</b> `/admin/doors` fired three identical `GET /admin/doors` on mount: the banner
+ * store re-read on navigation, the page polled on its own, and the gear badge read a third
+ * time. Three readers of one fact is also C3 — an admin who shut every door could see three
+ * different counts on one screen — and the answer to both is the same: the store owns the
+ * request, and every reader subscribes.
+ * </p>
+ *
+ * <p>
+ * <b>B2.</b> The shut banner re-read only on navigation, so it sat frozen on `/schedule`
+ * while another admin shut every door in the club. The store polls on EVERY route.
+ * </p>
+ */
+export type DoorsState = {
+  chrome: DoorsChrome;
+  /** The last successful read, or null if none has landed. */
+  view: DoorsView | null;
+  loading: boolean;
+  /** True while the most recent attempt failed. A6's "cue, not a screen" rule still holds. */
+  failed: boolean;
+  /** Consecutive failures. A8 suspends liveness claims at two; see the page. */
+  failures: number;
+  /** When the last SUCCESSFUL read landed. */
+  checkedAt: number | null;
+};
+
+const IDLE: DoorsState = {
+  chrome: NOTHING, view: null, loading: true, failed: false, failures: 0, checkedAt: null,
+};
+
+let state: DoorsState = IDLE;
+
+/**
+ * How often the store re-reads on an ordinary route, milliseconds.
+ *
+ * Thirty seconds is a cue's cadence: the banner exists so that a club does not discover at
+ * 05:50 that its doors are still shut, and a reader who is not looking at doors does not need
+ * a faster one. The doors surface itself asks for {@link DOORS_PAGE_INTERVAL_MS}.
+ */
+export const DOORS_CHROME_INTERVAL_MS = 30_000;
+
+/**
+ * What the doors pages ask for — the firmware's own minimum heartbeat spacing, so a page
+ * cannot be more than one beat behind the fastest board a club can configure.
+ */
+export const DOORS_PAGE_INTERVAL_MS = 15_000;
+
+const subscribers = new Set<(next: DoorsState) => void>();
+/** Each subscriber's requested cadence. The timer runs at the fastest one asked for. */
+const cadences = new Map<(next: DoorsState) => void, number>();
+
+let timer: number | null = null;
+let listening = false;
+/**
+ * The read in flight, so N components mounting in one commit make ONE request.
+ *
+ * This is E-L6's actual fix. Without it, "every reader subscribes" still produces a request
+ * per reader the moment each of them asks for a refresh on mount.
+ */
+let inFlight: Promise<void> | null = null;
+
+function publish(next: DoorsState) {
+  state = next;
+  for (const fn of subscribers) fn(next);
+}
+
+/** Read now, or join the read already going. Never throws — a cue is not a screen. */
+export function refreshDoorsView(): Promise<void> {
+  if (inFlight) return inFlight;
+  inFlight = doorEndpoints.doors()
+    .then((view) => {
+      publish({
+        chrome: summarise(view), view, loading: false, failed: false, failures: 0,
+        checkedAt: Date.now(),
+      });
+    })
+    .catch(() => {
+      // The chrome keeps whatever it last knew — the banner's ABSENCE is its default, so a
+      // failed read must not be allowed to invent an all-clear either way. What changes is
+      // `failures`, which is what A8's suspended liveness keys on.
+      publish({ ...state, loading: false, failed: true, failures: state.failures + 1 });
+    })
+    .finally(() => { inFlight = null; });
+  return inFlight;
+}
+
+function fastestCadence(): number {
+  let fastest = DOORS_CHROME_INTERVAL_MS;
+  for (const ms of cadences.values()) fastest = Math.min(fastest, ms);
+  return fastest;
+}
+
+function startPolling() {
+  stopTimer();
+  const tick = () => {
+    if (document.visibilityState === "hidden") return;
+    void refreshDoorsView();
+  };
+  timer = window.setInterval(tick, fastestCadence());
+  if (!listening) {
+    // And a read on the way back IN, rather than up to a whole interval of the state the tab
+    // was left in. The outage email links here, and a stale "Reporting" is the whole defect.
+    document.addEventListener("visibilitychange", onVisibility);
+    listening = true;
+  }
+}
+
+function onVisibility() {
+  if (document.visibilityState === "visible") void refreshDoorsView();
+}
+
+function stopTimer() {
+  if (timer !== null) { window.clearInterval(timer); timer = null; }
+}
+
+function stopPolling() {
+  stopTimer();
+  if (listening) { document.removeEventListener("visibilitychange", onVisibility); listening = false; }
+  // Back to the state a fresh admin session starts in, so a sign-out cannot leave a previous
+  // club's counts sitting in the chrome.
+  state = IDLE;
+}
+
+/**
+ * Subscribe to the one doors read.
+ *
+ * `intervalMs` is a REQUEST, not a promise: the timer runs at the fastest cadence any current
+ * subscriber asked for, because two timers over one endpoint is the thing being removed.
+ */
+export function useDoorsStore(enabled: boolean, intervalMs = DOORS_CHROME_INTERVAL_MS): DoorsState {
+  const [snapshot, setSnapshot] = useState<DoorsState>(state);
 
   useEffect(() => {
     if (!enabled) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- clears the cue when the session stops being an admin one
-      setChrome(NOTHING);
-      publish(NOTHING);
+      setSnapshot(IDLE);
+      if (subscribers.size === 0) stopPolling();
       return;
     }
-    let cancelled = false;
-    doorEndpoints.doors()
-      .then((view) => { if (!cancelled) setChrome(summarise(view)); })
-      .catch(() => { /* A cue, not a screen: a failed read shows nothing rather than an error. */ });
-    return () => { cancelled = true; };
-  }, [enabled, routeKey]);
+    subscribers.add(setSnapshot);
+    cadences.set(setSnapshot, intervalMs);
+    startPolling();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hands the joining reader what the store already knows
+    setSnapshot(state);
+    void refreshDoorsView();
+    return () => {
+      subscribers.delete(setSnapshot);
+      cadences.delete(setSnapshot);
+      if (subscribers.size === 0) stopPolling(); else startPolling();
+    };
+  }, [enabled, intervalMs]);
 
-  // The doors page's own reads and actions, which are far fresher than this hook's
-  // navigation-scoped one. Without this the banner in the chrome and the page under it are
-  // two independent readers of one fact — which is C3 exactly.
-  useEffect(() => subscribe(setChrome), []);
-
-  return chrome;
+  return snapshot;
 }
 
 /**
- * The doors page hands its read here, so the chrome above it stops being a second reader.
+ * Did a successful read land after `since`? — what a MANUAL Refresh answers with (A8 / C4).
  *
- * A plain module-level subscriber set rather than a context: the banner lives in `Layout`,
- * above the router's `Outlet`, so a provider would have to wrap the whole app to carry a
- * fact only the doors page produces — and `lib/pendingApplications.ts` is the precedent this
- * product already has for exactly that shape.
+ * The store swallows its own failures, so a press that produced nothing visible is exactly
+ * the silence a reviewer met on a phone with no signal. Read off the store rather than off a
+ * React snapshot, because the answer is needed in the same turn the request finished in.
  */
-const subscribers = new Set<(chrome: DoorsChrome) => void>();
-
-function subscribe(fn: (chrome: DoorsChrome) => void): () => void {
-  subscribers.add(fn);
-  return () => { subscribers.delete(fn); };
+export function storeCheckedSince(since: number | null): boolean {
+  if (state.checkedAt === null) return false;
+  return since === null || state.checkedAt > since;
 }
 
-function publish(chrome: DoorsChrome) {
-  for (const fn of subscribers) fn(chrome);
-}
-
-/** Called by the doors page after every poll and after every action that changed a door. */
+/**
+ * Hand the store a view somebody else already read — after an action, mostly.
+ *
+ * Kept because a write's own response is fresher than the next poll, and because the doors
+ * page's actions call it. It publishes a SUCCESS, so it also clears a failure streak.
+ */
 export function publishDoorsView(view: DoorsView) {
-  publish(summarise(view));
+  publish({
+    chrome: summarise(view), view, loading: false, failed: false, failures: 0,
+    checkedAt: Date.now(),
+  });
 }
 
 /**

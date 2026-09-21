@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import Layout from "../Layout";
 import HomePage from "../../pages/Home";
@@ -423,5 +423,90 @@ describe("the admin Home row", () => {
 
     await screen.findByText("Book a court");
     expect(screen.queryByText("Admin · Doors")).toBeNull();
+  });
+});
+
+/**
+ * <b>B2 / E-L6 — the store the chrome and the pages share.</b>
+ *
+ * <p>
+ * The banner re-read only on navigation, so it sat frozen on `/schedule` while another admin
+ * shut every door in the club — and `/admin/doors` fired three identical `GET /admin/doors`
+ * on mount, because the banner, the page and the gear badge were three readers of one fact.
+ * One store, one request, polling on every route.
+ * </p>
+ */
+describe("the shared doors store", () => {
+  const admin = () => {
+    const whoami = signIn({ isAdmin: true });
+    return [
+      { path: "/api/v1/whoami", body: whoami },
+      { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
+      {
+        path: "/api/v1/me/profile",
+        body: {
+          user_id: whoami.user_id, email: "a@b.c", full_name: "Ada", photo_url: null,
+          membership_number: "C-1",
+        },
+      },
+      { path: "/api/v1/admin/members", body: [] },
+      { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
+    ];
+  };
+
+  // Restored here rather than at the end of the test body: a failing assertion would
+  // otherwise leave fake timers installed, and the NEXT test in the file then hangs on a
+  // `findBy*` that can never advance. That is a slow, misattributed failure, and it is
+  // exactly what happened the first time this block was written.
+  afterEach(() => vi.useRealTimers());
+
+  const doorsReads = (stub: { calls: { path: string }[] }) =>
+    stub.calls.filter((c) => c.path === "/api/v1/admin/doors").length;
+
+  it("polls on a route that has nothing to do with doors", async () => {
+    // Fake timers from BEFORE the render, deliberately. `setInterval` is captured at the
+    // moment the store starts polling, so installing the fake clock afterwards leaves a real
+    // interval the fake clock can never advance — a test that passes for the wrong reason or,
+    // as here, fails for one.
+    vi.useFakeTimers();
+    const server = doorsServer([doorFixture()]);
+    const stub = stubFetch([...admin(), ...server.routes]);
+    renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: ["/schedule"] });
+
+    // The session has to resolve before the chrome is an admin's chrome at all, and that is
+    // several promise turns. Pumped rather than slept through: `waitFor` cannot help here,
+    // because nothing advances without this clock.
+    for (let i = 0; i < 20 && doorsReads(stub) === 0; i += 1) await vi.advanceTimersByTimeAsync(10);
+    const before = doorsReads(stub);
+    expect(before).toBeGreaterThan(0);
+
+    await vi.advanceTimersByTimeAsync(31_000);
+
+    expect(doorsReads(stub)).toBeGreaterThan(before);
+  });
+
+  /** And on the way back IN, rather than up to a whole interval of the state the tab was left in. */
+  it("re-reads when the tab comes back to the front", async () => {
+    const server = doorsServer([doorFixture()]);
+    const stub = stubFetch([...admin(), ...server.routes]);
+    renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: ["/schedule"] });
+
+    await waitFor(() => expect(doorsReads(stub)).toBeGreaterThan(0));
+    const before = doorsReads(stub);
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await waitFor(() => expect(doorsReads(stub)).toBeGreaterThan(before));
+  });
+
+  /** E-L6: readers mounting in one commit join the read in flight rather than starting one. */
+  it("makes one request however many readers mount at once", async () => {
+    const server = doorsServer([doorFixture({ enabled: false })]);
+    const stub = stubFetch([...admin(), ...server.routes]);
+    renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: ["/admin/settings"] });
+
+    // The banner, the gear badge and the gear's menu item are three readers of one fact.
+    await screen.findByText(/1 of 1 door shut/);
+    expect(doorsReads(stub)).toBe(1);
   });
 });

@@ -65,12 +65,12 @@ function everySentence(): string[] {
   const silent = door({ last_seen_at: "2026-09-19T04:12:00Z" });
   return [
     ...[true, false].flatMap((online) => [
-      doorStateNotice(reachable, online, TZ),
-      doorStateNotice(door({ gate_key: null }), online, TZ),
-      doorStateNotice(silent, online, TZ),
-      doorStateNotice(door({ last_seen_at: null, gate_key: null }), online, TZ),
-      doorStateNotice(door({ enabled: false }), online, TZ),
-      doorStateChip(reachable, online).label,
+      doorStateNotice(reachable, online, TZ) ?? "",
+      doorStateNotice(door({ gate_key: null }), online, TZ) ?? "",
+      doorStateNotice(silent, online, TZ) ?? "",
+      doorStateNotice(door({ last_seen_at: null, gate_key: null }), online, TZ) ?? "",
+      doorStateNotice(door({ enabled: false }), online, TZ) ?? "",
+      doorStateChip(reachable, online)?.label ?? "",
       doorNeedsAttention(reachable, online) ?? "",
       doorNeedsAttention(door({ gate_key: null }), online) ?? "",
       doorNeedsAttention(door({ enabled: false }), online) ?? "",
@@ -125,7 +125,7 @@ describe("doorStateChip", () => {
   it("says Reporting, never Working and never Online", () => {
     expect(doorStateChip(door(), true)).toEqual({ label: "Reporting", tone: "success" });
     for (const online of [true, false]) {
-      const label = doorStateChip(door(), online).label;
+      const label = doorStateChip(door(), online)?.label;
       expect(label).not.toBe("Working");
       expect(label).not.toBe("Online");
       expect(label).not.toBe("Open");
@@ -140,7 +140,7 @@ describe("doorStateChip", () => {
   /** Shut wins over liveness: a shut door nobody expects to hear from is not "not reporting". */
   it("calls a shut door shut whether or not it is still calling in", () => {
     for (const online of [true, false]) {
-      expect(doorStateChip(door({ enabled: false }), online).label).toBe("Shut");
+      expect(doorStateChip(door({ enabled: false }), online)?.label).toBe("Shut");
     }
   });
 });
@@ -256,7 +256,7 @@ describe("doorStateNotice", () => {
     });
     expect(doorStateNotice(shut, true, TZ)).toContain("Shut by Priya Naidoo at Sun 20 Sept, 19:40.");
     for (const variant of [shut, door({ enabled: false }), door({ enabled: false, shut_by_name: "Priya Naidoo" })]) {
-      expect(doorStateNotice(variant, true, TZ).toLowerCase()).not.toContain("you shut");
+      expect((doorStateNotice(variant, true, TZ) ?? "").toLowerCase()).not.toContain("you shut");
     }
   });
 
@@ -278,11 +278,11 @@ describe("doorStateNotice", () => {
 
   it("every branch states both halves of its conditional", () => {
     const notices = [
-      doorStateNotice(door(), true, TZ),
-      doorStateNotice(door({ gate_key: null }), true, TZ),
-      doorStateNotice(door({ last_seen_at: "2026-09-19T04:12:00Z" }), false, TZ),
-      doorStateNotice(door({ gate_key: null }), false, TZ),
-      doorStateNotice(door({ enabled: false }), true, TZ),
+      doorStateNotice(door(), true, TZ) ?? "",
+      doorStateNotice(door({ gate_key: null }), true, TZ) ?? "",
+      doorStateNotice(door({ last_seen_at: "2026-09-19T04:12:00Z" }), false, TZ) ?? "",
+      doorStateNotice(door({ gate_key: null }), false, TZ) ?? "",
+      doorStateNotice(door({ enabled: false }), true, TZ) ?? "",
     ];
     for (const notice of notices) {
       // Each says something about being reachable AND something about being cut off.
@@ -664,8 +664,24 @@ describe("doorNeedsAttention", () => {
       .toBe("Side door has not been heard from.");
     expect(doorNeedsAttention(door({ enabled: false }), true))
       .toBe("Side door is shut. Nobody gets in through it.");
+    // A10: it said "A door still has no name" — which door? The summary above the tiles is
+    // the reader's route to the card now that the cards no longer reorder, so every arm
+    // names the door it is about.
     expect(doorNeedsAttention(door({ gate_key: null }), true))
-      .toBe("A door still has no name, so it opens nothing while it is offline.");
+      .toBe("Side door still has no name, so it opens nothing while it is offline.");
+  });
+
+  /**
+   * <b>A8.</b> `null` is "this page cannot currently say". A reason derived from a frozen age
+   * is a claim about a DOOR made out of a fact about the browser — so the unknown arm keeps
+   * only what was actually read (shut, unnamed) and drops silence and the signals.
+   */
+  it("claims nothing about liveness when the page cannot say", () => {
+    expect(doorNeedsAttention(door({ last_seen_at: "2026-09-19T04:12:00Z" }), null)).toBeNull();
+    expect(doorAttentionReason(door(), null, [signal("refusal_spike")])).toBeNull();
+    expect(doorNeedsAttention(door({ enabled: false }), null)).toBe("Side door is shut.");
+    expect(doorNeedsAttention(door({ gate_key: null }), null))
+      .toContain("still has no name");
   });
 
   it("says nothing about a door that is reporting, named and open", () => {

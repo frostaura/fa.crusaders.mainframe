@@ -1,6 +1,6 @@
 import {
   DOOR_OUTCOME_CHIPS, UNRECOGNISED_EVENT, classifyDoorRow, describeActivityReason,
-  describeDoorEvent, describeDoorEventKind, isDoorScan, type DoorRowKind,
+  describeDoorEvent, describeDoorEventChange, describeDoorEventKind, isDoorScan, type DoorRowKind,
 } from "./deviceActivity";
 // A13 — one club-locale formatter for the whole surface. See lib/clubClock.ts.
 import { clubClock, clubDayAndClock, clubInstant } from "./clubClock";
@@ -210,10 +210,27 @@ function plural(count: number, noun: string): string {
  * matters.
  * </p>
  */
-export function doorStateChip(device: AdminDoorDevice, online: boolean): DoorChip {
+export function doorStateChip(device: AdminDoorDevice, online: boolean | null): DoorChip | null {
   if (!device.enabled) return { label: "Shut", tone: "muted" };
+  // A8: `null` is "this page cannot currently say". While the reads themselves are failing,
+  // "Not reporting" is a claim about a DOOR derived from a frozen age — the thing that has
+  // gone quiet is the browser. A chip that says nothing is better than one that is wrong,
+  // and the page carries the sentence explaining why the chips are missing.
+  if (online === null) return null;
   return online ? { label: "Reporting", tone: "success" } : { label: "Not reporting", tone: "danger" };
 }
+
+/**
+ * What a page says about itself once it cannot read (A8).
+ *
+ * The subject is THIS PAGE, not the doors. With an admin's phone off the network every age on
+ * the screen went on ticking from a frozen read, doors flipped one by one to "Not reporting",
+ * and the page asserted "nothing can reach it" about boards that were, as far as anybody
+ * knew, fine.
+ */
+export const DOORS_LIVENESS_SUSPENDED = "This page can't reach the club right now, so it can't say"
+  + " whether the doors are reporting. What each door was doing at the last successful check is"
+  + " still shown, with the time it was checked.";
 
 /**
  * The second chip, and it is a second DIMENSION rather than a fourth value (D2 / A2.2).
@@ -259,7 +276,14 @@ export function doorShutAttribution(device: AdminDoorDevice, timezone: string): 
  * an admin standing in a club at 09:00 needs a time, not an interval to add up.
  * </p>
  */
-export function doorStateNotice(device: AdminDoorDevice, online: boolean, timezone: string): string {
+export function doorStateNotice(
+  device: AdminDoorDevice, online: boolean | null, timezone: string,
+): string | null {
+  // A8: with the reads themselves failing, every sentence below is derived from a frozen age
+  // and would be a claim about a door made out of a fact about the browser. Null rather than
+  // {@link DOORS_LIVENESS_SUSPENDED}: the page says that ONCE, above the cards, and a copy
+  // of it on every tile is the same sentence four times on one screen.
+  if (online === null && device.enabled) return null;
   // A5: it said "You shut this door." to every admin who opened the page — false for all but
   // one of them, and unfalsifiable for the reader. The audit row has always carried the
   // actor; WIRE-R2 §2 puts the name on the door row, so the screen can say who and when.
@@ -349,6 +373,59 @@ export function doorSignalChip(kind: DoorSignal["kind"]): DoorChip {
     ? { label: "Refusing a lot", tone: "warning" }
     : { label: "May not be releasing", tone: "warning" };
 }
+
+/**
+ * <b>A9 / B9 — a signal, explained, on the card it appears on.</b>
+ *
+ * <p>
+ * The chips were unexplained on the overview: an admin met "May not be releasing" as two
+ * words on a tile, with the explanation on a page they had not opened. Worse, the signals and
+ * their advice survived a state that makes them meaningless — "usually a dirty scanner" on a
+ * door the club shut hours ago, and "change how long the lock is released" on a door that has
+ * not been heard from since.
+ * </p>
+ *
+ * <p>
+ * <b>Null is the answer for a shut or unreachable door, and for one this page cannot judge.</b>
+ * A signal is a reading of the last N minutes of scans; on a shut door those scans are all
+ * refusals the club itself caused, and on a cut-off door the club has not seen the recent ones
+ * at all. The reading is not wrong so much as about a different question, and the honest thing
+ * is to say what the door's state is instead.
+ * </p>
+ */
+export type DoorSignalLine = {
+  text: string;
+  /** The `#setting-…` hash the action links to, or null where the action is not a setting. */
+  settingHash: string | null;
+  action: string;
+};
+
+export function doorSignalLine(
+  device: AdminDoorDevice, online: boolean | null, signal: DoorSignal, settings: SignalNumbers,
+): DoorSignalLine | null {
+  if (!device.enabled || online !== true) return null;
+  if (signal.kind === "refusal_spike") {
+    if (settings.spikeMinutes === null) return null;
+    return {
+      text: `Turned away ${plural(signal.scans, "scan")} in the last ${plural(settings.spikeMinutes, "minute")}`
+        + " — usually a dirty scanner, an expired code, or a stricter door policy than people expect.",
+      settingHash: null,
+      action: "Look at the reasons",
+    };
+  }
+  const release = settings.unlockSeconds === null
+    ? "How long the lock is released is under Admin settings."
+    : `The lock is released for ${plural(settings.unlockSeconds, "second")}.`;
+  return {
+    text: `A code was accepted three times in under a minute, and people do not scan again when a door`
+      + ` opens. ${release}`,
+    settingHash: "#setting-gate-unlock-seconds",
+    action: "Change how long the lock is released",
+  };
+}
+
+/** The club's own numbers a signal sentence needs, or nulls where the settings read failed. */
+export type SignalNumbers = { spikeMinutes: number | null; unlockSeconds: number | null };
 
 /**
  * S1 — a door turning people away.
@@ -560,7 +637,7 @@ export function doorStaleChecksNotice(failures: number, secondsSinceRead: number
  * is a state they created and already know about.
  * </p>
  */
-export function doorNeedsAttention(device: AdminDoorDevice, online: boolean): string | null {
+export function doorNeedsAttention(device: AdminDoorDevice, online: boolean | null): string | null {
   return doorAttentionReason(device, online, [])?.reason ?? null;
 }
 
@@ -568,6 +645,15 @@ export function doorNeedsAttention(device: AdminDoorDevice, online: boolean): st
 export type DoorAttention = {
   kind: "silent" | "shut" | "unnamed" | "signal";
   reason: string;
+  /**
+   * WHICH door, so the summary above the tiles can LINK to it (A10).
+   *
+   * The overview used to re-sort by severity every poll so the door that needed somebody was
+   * first — and cards swapped under a thumb already on its way down. Name order is stable
+   * now, and the summary is what carries the reader to the right card.
+   */
+  doorId: string;
+  doorName: string;
 };
 
 /**
@@ -601,33 +687,45 @@ export type DoorAttention = {
  * </p>
  */
 export function doorAttentionReason(
-  device: AdminDoorDevice, online: boolean, signals: DoorSignal[],
+  device: AdminDoorDevice, online: boolean | null, signals: DoorSignal[],
 ): DoorAttention | null {
+  const where = { doorId: device.id, doorName: doorDisplayName(device) };
+  const name = where.doorName;
   if (!device.enabled) {
     // C2's family, one screen along. "Nobody gets in through it" was said of every shut
     // door — including one the club cannot reach, which has not heard the refusal and goes
     // on admitting booked members from its saved list. Found by looking at a rendered
     // overview where the banner correctly said "1 not yet" and the line under it flatly
     // contradicted it about the same door.
+    // A8: `null` is "this page cannot say", and it takes the SHUT sentence without the
+    // liveness clause — shut is a state the page read, not one it derived from an age.
+    if (online === null) return { ...where, kind: "shut", reason: `${name} is shut.` };
     if (!online) {
       return {
+        ...where,
         kind: "shut",
-        reason: `${device.name} is shut, but nothing can reach it — it may not have been told.`,
+        reason: `${name} is shut, but nothing can reach it — it may not have been told.`,
       };
     }
-    return { kind: "shut", reason: `${device.name} is shut. Nobody gets in through it.` };
+    return { ...where, kind: "shut", reason: `${name} is shut. Nobody gets in through it.` };
   }
   if (device.gate_key === null) {
-    return { kind: "unnamed", reason: "A door still has no name, so it opens nothing while it is offline." };
-  }
-  if (!online) return { kind: "silent", reason: `${device.name} has not been heard from.` };
-  const signal = signals[0];
-  if (signal) {
     return {
+      ...where,
+      kind: "unnamed",
+      reason: `${name} still has no name, so it opens nothing while it is offline.`,
+    };
+  }
+  // A8: not "has not been heard from" while the thing that cannot hear is this browser.
+  if (online === false) return { ...where, kind: "silent", reason: `${name} has not been heard from.` };
+  const signal = signals[0];
+  if (signal && online === true) {
+    return {
+      ...where,
       kind: "signal",
       reason: signal.kind === "refusal_spike"
-        ? `${device.name} is turning a lot of scans away.`
-        : `${device.name} may not be releasing.`,
+        ? `${name} is turning a lot of scans away.`
+        : `${name} may not be releasing.`,
     };
   }
   return null;
@@ -824,8 +922,11 @@ export function doorEventRows(
   // thing a reader can report upstream.
   const rows = (events ?? []).map((e) => ({
     at: e.at,
-    text: describeDoorEventKind(e),
-    token: describeDoorEventKind(e) === UNRECOGNISED_EVENT ? e.action : null,
+    // A5 / E-L3: `change` where the API sends it, `kind` where it does not. Nine identical
+    // "this door's details or state were changed" rows told an admin nothing, and the actor
+    // has been on the audit row since the gate shipped.
+    text: describeDoorEventChange(e),
+    token: describeDoorEventKind(e) === UNRECOGNISED_EVENT && !e.change ? e.action : null,
   }));
   for (const entry of items ?? []) {
     if (isDoorScan(entry)) continue;

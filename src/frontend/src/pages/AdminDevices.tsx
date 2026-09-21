@@ -704,7 +704,11 @@ function GateRows({ gates, tenantHeartbeat, now }: {
           const chip = doorStateChip(gate, online);
           return (
             <li key={gate.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 p-3">
-              <Badge tone={chip.tone}>{chip.label}</Badge>
+              {/* A8: `doorStateChip` answers null where the caller cannot say whether a
+                  door is reporting. This page always can — it resolves `online` from a read
+                  it has just made — so the chip is always here; the guard is the type
+                  saying so rather than a claim this call site is allowed to make. */}
+              {chip && <Badge tone={chip.tone}>{chip.label}</Badge>}
               <span className="min-w-0 break-words text-sm font-medium">{gate.name}</span>
               <span className="min-w-0 break-words text-xs text-slate-500">
                 {`${gate.gate_key ?? UNNAMED_GATE} · ${gate.device_code}`}

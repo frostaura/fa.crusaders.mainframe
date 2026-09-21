@@ -10,7 +10,9 @@ import { DoorFeed } from "../components/doors/DoorFeed";
 import { DoorShutControl } from "../components/doors/DoorShutControl";
 import { DoorSignalNotices } from "../components/doors/DoorSignalNotices";
 import { DoorCardSection } from "../components/doors/DoorCardSection";
-import { publishDoorsView } from "../components/doors/useDoorsChrome";
+import {
+  DOORS_PAGE_INTERVAL_MS, refreshDoorsView, useDoorsStore,
+} from "../components/doors/useDoorsChrome";
 import { useDoorActions, type DoorActions } from "../components/doors/useDoorActions";
 import { useTicker } from "../lib/useTicker";
 import { clubDayAndClock } from "../lib/clubClock";
@@ -21,7 +23,7 @@ import { ACTIVITY_READ_FAILED } from "../lib/deviceActivity";
 import { describeDeviceError } from "../lib/deviceErrors";
 import { withDoorsBoundary } from "../components/doors/DoorsErrorBoundary";
 import {
-  doorEndpoints, endpoints, type AdminDoorDevice, type AdminSettings, type DeviceActivityEntry,
+  endpoints, type AdminDoorDevice, type AdminSettings, type DeviceActivityEntry,
   type DoorEventEntry, type DoorsView,
 } from "../lib/api";
 
@@ -90,30 +92,33 @@ function useDoorPage(id: string) {
     view: null, settings: null, entries: null, feedError: null,
     feedLoading: true, loading: true, failed: false,
   });
+  // E-L6: the doors read comes from the shared store — the page no longer makes its own.
+  // B1: and it is the store that keeps it fresh, at the page's cadence.
+  const store = useDoorsStore(true, DOORS_PAGE_INTERVAL_MS);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors the store into this page's one read object
+    setRead((r) => ({
+      ...r,
+      view: store.view,
+      failed: store.failed && store.view === null,
+      loading: store.loading && store.view === null,
+    }));
+  }, [store.view, store.failed, store.loading]);
 
   const reload = useCallback(async () => {
-    const view = await doorEndpoints.doors();
-    setRead((r) => ({ ...r, view, failed: false }));
-    // C3: the chrome's shut banner subscribes to this, so shutting a door from its own page
-    // updates the banner without a navigation. Three readers of one fact is how an admin
-    // came to see three different door counts on one screen.
-    publishDoorsView(view);
+    await refreshDoorsView();
   }, []);
 
-  const load = useCallback(async () => {
-    try {
-      await reload();
-    } catch {
-      setRead((r) => ({ ...r, failed: true, view: null }));
-    } finally {
-      setRead((r) => ({ ...r, loading: false }));
-    }
-    // The settings read's failure is not the page's: signals simply do not render, rather
-    // than rendering a threshold nobody set.
-    try {
-      const settings = await endpoints.adminSettingsGet();
-      setRead((r) => ({ ...r, settings }));
-    } catch { /* the signal notices take their no-number arm */ }
+  /**
+   * <b>B1: the feed re-reads too, every fifteen seconds while the tab is in front.</b>
+   *
+   * The detail page made zero repeat requests over seventy seconds while its relative clocks
+   * went on ticking: another admin's shut was invisible, "Shut this door" was still offered
+   * for a door that was already shut, and no banner appeared. The overview polled and this
+   * page — the one somebody opens BECAUSE something is wrong — did not.
+   */
+  const readFeed = useCallback(async () => {
     try {
       const page = await endpoints.adminDeviceActivity(id);
       setRead((r) => ({
@@ -123,10 +128,35 @@ function useDoorPage(id: string) {
       const feedError = describeDeviceError(e, ACTIVITY_READ_FAILED);
       setRead((r) => ({ ...r, entries: null, events: null, feedError, feedLoading: false }));
     }
-  }, [id, reload]);
+  }, [id]);
+
+  const load = useCallback(async () => {
+    await refreshDoorsView();
+    // The settings read's failure is not the page's: signals simply do not render, rather
+    // than rendering a threshold nobody set.
+    try {
+      const settings = await endpoints.adminSettingsGet();
+      setRead((r) => ({ ...r, settings }));
+    } catch { /* the signal notices take their no-number arm */ }
+    await readFeed();
+  }, [readFeed]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader; sync loading flag is the house idiom
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState === "hidden") return;
+      void readFeed();
+    };
+    const onVisibility = () => { if (document.visibilityState === "visible") tick(); };
+    const feedTimer = setInterval(tick, DOORS_PAGE_INTERVAL_MS);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(feedTimer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [readFeed]);
 
   return { read, load, reload };
 }
@@ -230,15 +260,37 @@ function AdminDoorsDetailPageBody() {
         <p className="min-w-0 break-words text-xs text-text-muted">
           {`${door.gate_key ?? UNNAMED_GATE} · ${door.device_code}`}
         </p>
+        {/* B1: it polls, and it says so. The page made zero repeat requests over seventy
+            seconds while its relative clocks went on ticking — another admin's shut was
+            invisible and "Shut this door" was still offered for a door already shut. A page
+            that re-reads silently is only half the fix: the reader has to know how fresh
+            what they are looking at is. */}
+        <p className="text-xs text-text-muted">
+          {`Re-reads every ${DOORS_PAGE_INTERVAL_MS / 1000} seconds while this tab is in front.`}
+        </p>
       </header>
 
-      <Card><p className="text-sm text-text-secondary">{doorStateNotice(door, online, timezone)}</p></Card>
+      {doorStateNotice(door, online, timezone) && (
+        <Card><p className="text-sm text-text-secondary">{doorStateNotice(door, online, timezone)}</p></Card>
+      )}
 
-      <DoorSignalNotices doorName={door.name} signals={row.signals} settings={signalSettingsOf(read.settings)} />
+      <DoorSignalNotices
+        doorName={door.name}
+        signals={row.signals}
+        settings={signalSettingsOf(read.settings)}
+        enabled={door.enabled}
+        online={online}
+      />
 
       {/*
-        `min-w-0` on the grid AND on the column, and it is load-bearing rather than tidy.
+        <b>B6: state and controls FIRST, then the door card, then the scans.</b>
 
+        The controls were the third thing on the page, below a feed of up to fifty rows —
+        5 231 px down on a phone, measured. Somebody opens this page because something is
+        wrong at a door, and the thing they came to do was two full screens of scrolling
+        past the thing they came to read.
+
+        `min-w-0` on the grid AND on the column, and it is load-bearing rather than tidy.
         A grid item's default is `min-width: auto`, so a column refuses to shrink below its
         content's MIN-CONTENT width — and below `lg` this is a one-column grid whose column
         therefore sizes to the widest unbreakable thing inside it. Measured at 360 px with a
@@ -246,18 +298,18 @@ function AdminDoorsDetailPageBody() {
         column reported 459 px inside a 360 px viewport, and the whole page scrolled
         sideways by 98 px. The `minmax(0,…)` in the `lg` template says the same thing for
         the two-column case and was always there; the single-column case had nothing.
+
+        On a WIDE screen the two columns put the feed beside the controls, so `order` is a
+        phone-width concern only — which is exactly where the 5 231 px was measured.
       */}
       <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
-        <DoorFeed
-          door={door}
-          today={row.today}
-          read={{
-            entries: read.entries, events: read.events, loading: read.feedLoading, error: read.feedError,
-          }}
-          clock={{ now, dayStartedAt: read.view!.day_started_at, timezone }}
-        />
-
-        <div className="min-w-0 space-y-6">
+        <div className="order-1 min-w-0 space-y-6 lg:order-2">
+          <DoorControls
+            door={door}
+            actions={actions}
+            online={online}
+            shutAt={shutAtFace(door.out_of_service_since ?? null, timezone)}
+          />
           <DoorCardSection
             door={door}
             settings={read.settings}
@@ -266,11 +318,16 @@ function AdminDoorsDetailPageBody() {
             onClose={() => setEditing(false)}
             onSave={actions.save}
           />
-          <DoorControls
+        </div>
+
+        <div className="order-2 min-w-0 lg:order-1">
+          <DoorFeed
             door={door}
-            actions={actions}
-            online={online}
-            shutAt={shutAtFace(door.out_of_service_since ?? null, timezone)}
+            today={row.today}
+            read={{
+              entries: read.entries, events: read.events, loading: read.feedLoading, error: read.feedError,
+            }}
+            clock={{ now, dayStartedAt: read.view!.day_started_at, timezone }}
           />
         </div>
       </div>

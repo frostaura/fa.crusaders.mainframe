@@ -1,20 +1,20 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "../components/Button";
 import { Alert } from "../components/Alert";
 import { DoorTile } from "../components/doors/DoorTile";
 import { FleetShutPanel } from "../components/doors/FleetShutPanel";
 import {
-  attentionRankOf, publishDoorsView, summariseDoors, type DoorsChrome,
+  DOORS_PAGE_INTERVAL_MS, attentionRankOf, refreshDoorsView, storeCheckedSince, useDoorsStore,
 } from "../components/doors/useDoorsChrome";
 import { useTicker } from "../lib/useTicker";
 import { isOnline, offlineAfterSecondsFor, relative } from "../lib/deviceLiveness";
 import {
-  DOORS_EMPTY_HINT, DOORS_EMPTY_NOTICE, DOORS_READ_FAILED, doorAttentionReason,
-  doorStaleChecksNotice, doorsAttentionSummary,
+  DOORS_EMPTY_HINT, DOORS_EMPTY_NOTICE, DOORS_LIVENESS_SUSPENDED, DOORS_READ_FAILED,
+  doorAttentionReason, doorDisplayName, doorStaleChecksNotice, doorsAttentionSummary,
 } from "../lib/doorsCopy";
 import { withDoorsBoundary } from "../components/doors/DoorsErrorBoundary";
-import { doorEndpoints, endpoints, type DoorRow, type DoorsView } from "../lib/api";
+import { endpoints, type AdminSettings, type DoorRow } from "../lib/api";
 
 /**
  * Doors — "is the front door working?", answered in one glance.
@@ -47,124 +47,99 @@ import { doorEndpoints, endpoints, type DoorRow, type DoorsView } from "../lib/a
  */
 
 /**
- * How often the page re-reads, milliseconds.
+ * <b>A10: name order, always.</b>
  *
- * Fifteen seconds is the firmware's own minimum heartbeat spacing, so the page cannot be
- * more than one beat behind the fastest board a club can configure. Same number and same
- * reason as the Devices page.
+ * <p>
+ * The overview used to re-sort by severity on every poll, so cards swapped position under a
+ * thumb already on its way down — a reviewer tapped a door and landed on a different one. A
+ * list an admin has learned the shape of is worth more than a list that is optimally ordered
+ * for a state that changes every fifteen seconds; attention is carried by the chips on each
+ * card and by the summary line above them, which LINKS to the door that needs somebody.
+ * </p>
  */
-const REFRESH_MS = 15_000;
+function sortRows(rows: DoorRow[]): DoorRow[] {
+  return [...rows].sort((a, b) => doorDisplayName(a.device).localeCompare(doorDisplayName(b.device)));
+}
 
 /**
- * Needs-attention first — silent, then shut, then unnamed, then signalling — then
- * alphabetical by name.
+ * <b>A8 — while the page cannot read, it does not get to say who is reporting.</b>
  *
- * A3: a door flagged "Refusing a lot" used to rank alongside a healthy one, so on a phone a
- * front door turning away thirty scans in twenty minutes sat below the fold under three
- * doors with nothing wrong with them.
+ * <p>
+ * With the ADMIN's phone offline, every age on the page went on ticking from a frozen read;
+ * doors flipped one by one to "Not reporting" and the page asserted "nothing can reach it" —
+ * about doors that were, as far as anybody knew, perfectly fine. The failing thing was the
+ * phone. Two failures is the same threshold the staleness notice uses, so the page tells one
+ * story rather than two.
+ * </p>
  */
-function attentionRank(row: DoorRow, tenantHeartbeat: number | null, now: number): number {
-  const online = isOnline(row.device, offlineAfterSecondsFor(row.device, tenantHeartbeat), now);
-  const attention = doorAttentionReason(row.device, online, row.signals);
-  return attention ? attentionRankOf(attention) : 4;
-}
-
-function sortRows(rows: DoorRow[], tenantHeartbeat: number | null, now: number): DoorRow[] {
-  return [...rows].sort((a, b) => {
-    const rank = attentionRank(a, tenantHeartbeat, now) - attentionRank(b, tenantHeartbeat, now);
-    if (rank !== 0) return rank;
-    return a.device.name.localeCompare(b.device.name);
-  });
-}
+const SUSPEND_LIVENESS_AFTER_FAILURES = 2;
 
 function AdminDoorsPageBody() {
-  const [view, setView] = useState<DoorsView | null>(null);
-  const [chrome, setChrome] = useState<DoorsChrome | null>(null);
-  const [tenantHeartbeat, setTenantHeartbeat] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [failed, setFailed] = useState(false);
-  const [failures, setFailures] = useState(0);
-  const [checkedAt, setCheckedAt] = useState<number | null>(null);
+  // E-L6 / B2: ONE reader. The page, the chrome banner and the gear badge all subscribe to
+  // this store, and it makes one request no matter how many of them mount at once.
+  const store = useDoorsStore(true, DOORS_PAGE_INTERVAL_MS);
+  const { view, chrome, loading, failed, failures, checkedAt } = store;
+  const [settings, setSettings] = useState<AdminSettings | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  /** C4: what Refresh says back, so pressing it offline is not silence. */
+  const [refreshNote, setRefreshNote] = useState<string | null>(null);
   const now = useTicker(true);
 
-  const read = useCallback(async () => {
-    const next = await doorEndpoints.doors();
-    setView(next);
-    setChrome(summariseDoors(next));
-    // The chrome's banner subscribes to this. Without it the banner is a second, staler
-    // reader of the same fact — C3.
-    publishDoorsView(next);
-    setFailed(false);
-    setFailures(0);
-    setCheckedAt(Date.now());
+  useEffect(() => {
+    // The club's declared heartbeat, for boards that do not carry their own, and the two
+    // signal numbers A9's card lines interpolate. Its failure is not this page's failure: a
+    // liveness threshold has a documented fallback and a signal with no number does not
+    // render at all.
+    let cancelled = false;
+    endpoints.adminSettingsGet()
+      .then((s) => { if (!cancelled) setSettings(s); })
+      .catch(() => { /* the fallbacks below */ });
+    return () => { cancelled = true; };
   }, []);
 
-  const load = useCallback(async () => {
-    try {
-      await read();
-    } catch {
-      setFailed(true);
-      setView(null);
-      setChrome(null);
-    } finally {
-      setLoading(false);
-    }
-    // The club's declared heartbeat, for boards that do not carry their own. Its failure is
-    // not this page's failure: a liveness threshold has a documented fallback and the doors
-    // read does not.
-    try { setTenantHeartbeat((await endpoints.adminSettingsGet()).heartbeat_seconds); } catch { /* fallback */ }
-  }, [read]);
-
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader; sync loading flag is the house idiom
-  useEffect(() => { void load(); }, [load]);
-
-  /**
-   * Keeps the liveness live, and suspends while nobody is looking.
-   *
-   * <p>
-   * A failed poll is SWALLOWED — one toast every fifteen seconds while a laptop is off the
-   * WiFi is worse than the staleness — but counted, and at two the "Checked" line says so.
-   * The Devices page swallows silently and simply stops advancing, which is honest but mute.
-   * </p>
-   *
-   * <p>
-   * No `mounted` ref and no early-return guard: StrictMode's mount → cleanup → mount leaves a
-   * cleanup-written ref false before the first tick, which is the shape behind two live
-   * defects in this repo. Clearing the interval is the whole cleanup.
-   * </p>
-   */
-  useEffect(() => {
-    const tick = () => {
-      if (document.visibilityState === "hidden") return;
-      void read().catch(() => setFailures((n) => n + 1));
-    };
-    // And a read on the way back IN, rather than up to fifteen seconds of the state the tab
-    // was left in — the outage email links here, and a stale "Reporting" is the whole defect.
-    const onVisibility = () => { if (document.visibilityState === "visible") tick(); };
-    const timer = setInterval(tick, REFRESH_MS);
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [read]);
-
-  const refreshNow = async () => {
-    setRefreshing(true);
-    try { await read(); } catch { setFailures((n) => n + 1); } finally { setRefreshing(false); }
+  const tenantHeartbeat = settings?.heartbeat_seconds ?? null;
+  const signalSettings = {
+    spikeMinutes: settings?.door_refusal_spike_minutes ?? null,
+    unlockSeconds: settings?.gate_unlock_seconds ?? null,
   };
 
-  const rows = view ? sortRows(view.doors, tenantHeartbeat, now) : [];
+  /**
+   * A8 / C4: Refresh answers immediately, whether or not the club is reachable.
+   *
+   * Tapped on a phone with no signal it used to do nothing visible at all — the button went
+   * back to "Refresh", the ages carried on ticking, and there was no way to tell the request
+   * from the network.
+   */
+  const refreshNow = async () => {
+    setRefreshing(true);
+    setRefreshNote(null);
+    const before = checkedAt;
+    await refreshDoorsView();
+    setRefreshing(false);
+    // The store swallows its own failures — a toast every fifteen seconds while a laptop is
+    // off the WiFi is worse than the staleness — so a MANUAL press reads the outcome off
+    // whether `checkedAt` moved. Silence is the one answer a press must never get.
+    setRefreshNote(storeCheckedSince(before) ? "Checked just now." : "Still can't reach the club.");
+  };
+
+  // A8: the liveness verdict is `null` — "this page cannot say" — once the reads themselves
+  // are failing. Every consumer takes its unknown arm rather than deriving "Not reporting"
+  // from an age that has been frozen since the last successful read.
+  const livenessSuspended = failures >= SUSPEND_LIVENESS_AFTER_FAILURES;
+  const livenessOf = (row: DoorRow): boolean | null => (livenessSuspended
+    ? null
+    : isOnline(row.device, offlineAfterSecondsFor(row.device, tenantHeartbeat), now));
+
+  const rows = view ? sortRows(view.doors) : [];
   const attention = rows
-    .map((row) => doorAttentionReason(
-      row.device,
-      isOnline(row.device, offlineAfterSecondsFor(row.device, tenantHeartbeat), now),
-      row.signals,
-    ))
-    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-    .map((entry) => entry.reason);
-  const summary = doorsAttentionSummary(attention);
+    .map((row) => doorAttentionReason(row.device, livenessOf(row), row.signals))
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+  // A10: the summary NAMES a door and LINKS to it, because the cards no longer reorder to put
+  // it first. "3 doors need attention" sends nobody anywhere.
+  const first = [...attention].sort((a, b) => attentionRankOf(a) - attentionRankOf(b))[0] ?? null;
+  const summary = doorsAttentionSummary(
+    [...attention].sort((a, b) => attentionRankOf(a) - attentionRankOf(b)).map((a) => a.reason),
+  );
   const secondsSinceRead = checkedAt === null ? 0 : Math.max(0, Math.round((now - checkedAt) / 1000));
   const stale = doorStaleChecksNotice(failures, secondsSinceRead);
 
@@ -179,7 +154,7 @@ function AdminDoorsPageBody() {
               one screen cannot disagree. */}
           <p className="text-xs text-text-muted">
             {checkedAt === null ? "Checking…" : `Checked ${relative(new Date(checkedAt).toISOString(), now)}`}
-            {` · re-reads every ${REFRESH_MS / 1000} seconds while this tab is in front`}
+            {` · re-reads every ${DOORS_PAGE_INTERVAL_MS / 1000} seconds while this tab is in front`}
           </p>
           {stale && <p className="mt-1 text-xs text-warning-strong">{stale}</p>}
         </div>
@@ -190,21 +165,51 @@ function AdminDoorsPageBody() {
           >
             All scans, all doors
           </Link>
-          <Button variant="outline" onClick={() => void refreshNow()} disabled={refreshing || loading}>
+          {/* C4: never `disabled` — a browser blurs a disabled element, so disabling the
+              control an admin just pressed throws their place away. */}
+          <Button variant="outline" onClick={() => void refreshNow()} aria-busy={refreshing}>
             {refreshing ? "Checking…" : "Refresh"}
           </Button>
         </div>
       </header>
 
-      {summary && <p role="status" className="rounded-lg bg-warning-soft px-3 py-2.5 text-sm text-warning-strong">{summary}</p>}
+      {/* A8 / C4: one polite region carrying what Refresh found and whether this page can
+          currently say anything about liveness at all. */}
+      <p role="status" className="sr-only">{refreshNote ?? ""}</p>
+      {livenessSuspended && (
+        <p className="rounded-lg bg-warning-soft px-3 py-2.5 text-sm text-warning-strong">
+          {DOORS_LIVENESS_SUSPENDED}
+        </p>
+      )}
+
+      {/*
+        A10: the banner used to ARRIVE and shift everything under it by 164 px, which on a
+        phone moves the card a thumb is already descending on. The slot is reserved, so the
+        summary appearing and disappearing across polls costs no layout at all.
+      */}
+      <div className="min-h-14">
+        {summary && (
+          <p role="status" className="rounded-lg bg-warning-soft px-3 py-2.5 text-sm text-warning-strong">
+            {summary}
+            {first?.doorId && (
+              <>
+                {" "}
+                <Link to={`/admin/doors/${first.doorId}`} className="font-medium underline">
+                  {`Go to ${first.doorName}`}
+                </Link>
+              </>
+            )}
+          </p>
+        )}
+      </div>
 
       {/* Failed read before empty, always. An admin who reads "no doors" while a door is shut
           goes to look for a board that is fine — a worse false claim than the members page's,
           which is the rule pages/admin-failed-read.test.tsx exists to hold. */}
-      {failed ? (
+      {failed && view === null ? (
         <div className="space-y-3">
           <Alert tone="danger">{DOORS_READ_FAILED}</Alert>
-          <Button variant="outline" onClick={() => void load()}>Try again</Button>
+          <Button variant="outline" onClick={() => void refreshDoorsView()}>Try again</Button>
         </div>
       ) : loading ? (
         <p className="text-sm text-text-secondary">Loading the club's doors…</p>
@@ -219,11 +224,11 @@ function AdminDoorsPageBody() {
       ) : (
         <>
           <FleetShutPanel
-            chrome={chrome ?? summariseDoors(view!)}
+            chrome={chrome}
             loading={loading}
-            failed={failed}
-            reload={read}
-            onRetry={() => void load()}
+            failed={failed && view === null}
+            reload={refreshDoorsView}
+            onRetry={() => void refreshDoorsView()}
           />
           {/* `items-stretch` and an internal footer: B18. Tiles misaligned whenever one door
               carried more chips than its neighbour, so three cards in a row ended with their
@@ -234,9 +239,12 @@ function AdminDoorsPageBody() {
                 key={row.device.id}
                 row={row}
                 now={now}
-                tenantHeartbeat={tenantHeartbeat}
+                // A8: `null` means "this page cannot currently say". The tile suppresses
+                // every liveness claim rather than deriving one from a frozen age.
+                online={livenessOf(row)}
                 timezone={view!.timezone}
                 dayStartedAt={view!.day_started_at}
+                settings={signalSettings}
               />
             ))}
           </div>

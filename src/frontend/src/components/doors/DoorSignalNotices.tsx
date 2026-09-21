@@ -30,11 +30,25 @@ export type SignalSettings = {
  * and an assertive region for a dirty scanner is a region an admin learns to talk over.
  * </p>
  */
-export function DoorSignalNotices({ doorName, signals, settings }: {
+export function DoorSignalNotices({ doorName, signals, settings, enabled = true, online = true }: {
   doorName: string;
   signals: DoorSignal[];
   settings: SignalSettings;
+  /**
+   * <b>B9 / A9: a signal does not survive a shut or an outage.</b>
+   *
+   * A reviewer read "may not be releasing… change how long the lock is released" on a door
+   * the club had shut hours earlier, and "usually a dirty scanner" on one nothing could
+   * reach. A signal is a reading of the last N minutes of SCANS: on a shut door those are
+   * refusals the club itself caused, and on a cut-off door the club has not seen the recent
+   * ones at all. The reading is about a question nobody is asking, and the advice attached to
+   * it sends somebody to change a setting that is not the problem.
+   */
+  enabled?: boolean;
+  /** `null` = this page cannot currently say (A8), which is not a state to judge signals in. */
+  online?: boolean | null;
 }) {
+  if (!enabled || online !== true) return null;
   const notices = signals
     .map((signal) => noticeFor(doorName, signal, settings))
     .filter((notice): notice is { text: string; link: boolean } => notice !== null);

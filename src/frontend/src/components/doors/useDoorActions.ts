@@ -1,6 +1,7 @@
 import { useToast } from "../Toast";
 import { doorStateNotice } from "../../lib/doorsCopy";
-import { unnamedGateOfflineNotice } from "../../lib/gateCopy";
+import { clubDayAndClock } from "../../lib/clubClock";
+import { doorAlreadyNotice, unnamedGateOfflineNotice } from "../../lib/gateCopy";
 import { describeDeviceError } from "../../lib/deviceErrors";
 import { doorEndpoints, endpoints, type AdminDoorDevice, type PowerLossBehaviour } from "../../lib/api";
 
@@ -72,12 +73,37 @@ export function useDoorActions(
 
     setEnabled: async (enabled) => {
       try {
-        await endpoints.adminDeviceUpdate(door.id, { enabled });
+        const answer = await doorEndpoints.doorSetEnabled(door.id, enabled);
+        /**
+         * <b>B10 — a tab left open overnight "shut" a door somebody else had already shut,
+         * and was told it had worked.</b>
+         *
+         * There is no conflict detection anywhere else on this surface, and this is where it
+         * costs something: an admin learns that their click did a thing it did not do, and
+         * the club has no way to discover from this screen that the door's state predates
+         * them. WIRE-R2 §2 answers such a PATCH with `unchanged: true` and the CURRENT
+         * `shut_by_name` / `out_of_service_since`, which is the only reason the sentence can
+         * name anybody.
+         */
+        if (answer.unchanged) {
+          toast.push({
+            tone: "info",
+            text: doorAlreadyNotice(
+              door.name,
+              !enabled,
+              answer.shut_by_name ?? null,
+              answer.out_of_service_since ? clubDayAndClock(answer.out_of_service_since, context.timezone) : null,
+            ),
+            durationMs: 8000,
+          });
+          await context.reload();
+          return;
+        }
         toast.push({
           tone: "success",
           text: enabled
             ? `${door.name} is open again. A door that can reach the club opens for members from its very next scan.`
-            : `${door.name} is shut. ${doorStateNotice({ ...door, enabled: false }, context.online, context.timezone)}`,
+            : `${door.name} is shut. ${doorStateNotice({ ...door, ...answer, enabled: false }, context.online, context.timezone) ?? ""}`,
           durationMs: 8000,
         });
         await context.reload();

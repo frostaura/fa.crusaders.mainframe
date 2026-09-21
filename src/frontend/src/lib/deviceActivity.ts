@@ -230,6 +230,50 @@ export function describeDoorEventKind(event: DoorEventEntry): string {
 }
 
 /**
+ * <b>A5 / E-M6 / WIRE-R2 §2 — what actually changed, and who changed it.</b>
+ *
+ * <p>
+ * `kind` could not say: the backend wrote `device.updated` for a rename, a details change, a
+ * shut and a reopen alike, so a reviewer met nine identical rows reading "this door's details
+ * or state were changed" and learned nothing from any of them. The server derives `change`
+ * from the audit details now, and `other` is the honest arm for a row written before it did.
+ * </p>
+ *
+ * <p>
+ * <b>The actor is named, and the reason that is not P3.</b> P3 is about MEMBERS: a per-member
+ * observation on an admin screen is the attendance report nobody agreed to. This is the
+ * club's own admin audit — admins seeing admins — and without it the door card said "You
+ * shut this door" to four admins who had not.
+ * </p>
+ */
+export const DOOR_EVENT_CHANGE_WORDS: Record<string, string> = {
+  registered: "The board registered itself",
+  renamed: "Renamed",
+  details: "Details changed",
+  shut: "Shut",
+  reopened: "Reopened",
+  shut_all: "Shut with every other door",
+  reopened_all: "Reopened with the doors shut together",
+  removed: "Deleted",
+  clock_corrected: "The board's clock was out and was corrected",
+  /** A row written before the server recorded which of the four an edit was. */
+  other: "Details or state changed",
+};
+
+export function describeDoorEventChange(event: DoorEventEntry): string {
+  const change = (event.change ?? "").trim();
+  const words = change === "" ? null : DOOR_EVENT_CHANGE_WORDS[change] ?? null;
+  // No `change` at all is an older API, and `kind` is what it has to say. An unrecognised
+  // `change` is the same honest arm as an unrecognised action: read it out rather than guess.
+  const head = words ?? (change === "" ? describeDoorEventKind(event) : UNRECOGNISED_EVENT);
+  const actor = (event.actor_name ?? "").trim();
+  // Board-side events have no actor and must not be given one — "The board registered itself
+  // by Priya Naidoo" is a sentence about a thing that did not happen.
+  if (actor === "" || change === "registered" || change === "clock_corrected") return head;
+  return `${head} by ${actor}`;
+}
+
+/**
  * The nine actions that ARE a scan, exactly as the backend enumerates them.
  *
  * <p>

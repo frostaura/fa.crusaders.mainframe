@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Card } from "../Card";
 import { Button } from "../Button";
@@ -27,13 +28,30 @@ export function DoorCardSection({ door, settings, editing, onEdit, onClose, onSa
     name: string; gateKey: string; note: string; behaviour: PowerLossBehaviour;
   }) => Promise<boolean>;
 }) {
+  /**
+   * <b>C4: "Edit this door" and its Cancel/Save both dropped focus to `&lt;body&gt;`.</b>
+   *
+   * Opening the editor unmounts the button, and closing it unmounts the form — a keyboard or
+   * screen-reader user was returned to the top of the document twice per edit, with nothing
+   * announced. The button is kept and focus returns to it when the editor closes; the editor
+   * takes focus to its first field when it opens.
+   */
+  // A ref on the WRAPPER rather than on the control: `components/Button.tsx` does not forward
+  // one and belongs to another lane this round. The wrapper holds exactly one button, so
+  // `querySelector` names it unambiguously.
+  const controls = useRef<HTMLDivElement>(null);
+  const [wasEditing, setWasEditing] = useState(editing);
+  useEffect(() => {
+    if (wasEditing && !editing) controls.current?.querySelector("button")?.focus();
+    if (wasEditing !== editing) setWasEditing(editing);
+  }, [editing, wasEditing]);
+
   return (
     <section aria-labelledby="door-card-heading" className="space-y-2">
       <h2 id="door-card-heading" className="text-lg font-semibold">Door card</h2>
       <Card className="space-y-4">
-        {editing ? (
-          <GateDetailsEditor device={door} onSave={onSave} onClose={onClose} />
-        ) : (
+        {editing && <GateDetailsEditor device={door} onSave={onSave} onClose={onClose} />}
+        {!editing && (
           <>
             <DoorCardRead door={door} />
             <dl className="space-y-1 text-sm">
@@ -43,22 +61,28 @@ export function DoorCardSection({ door, settings, editing, onEdit, onClose, onSa
               <Fact label="Door name" value={door.gate_key ?? UNNAMED_GATE} />
             </dl>
             <ClubContact settings={settings} />
-            <div className="flex flex-wrap gap-2">
-              {/* The door's NAME in the accessible name: three "Manage"-shaped controls on
-                  one admin's screen all reading "Edit" is reviewer B's repeated-link
-                  finding one control along. */}
-              <Button variant="outline" onClick={onEdit} aria-label={`Edit ${door.name}`}>
-                Edit this door
-              </Button>
-              <Link
-                to={`/admin/doors/${door.id}/card`}
-                className="inline-flex min-h-11 items-center rounded-lg border border-control px-5 text-sm font-medium"
-              >
-                Print this door card
-              </Link>
-            </div>
           </>
         )}
+        {/*
+          C4: the trigger stays MOUNTED while the editor is open — `hidden`, not removed — so
+          the focus this section returns to it after Cancel or Save has somewhere to land. A
+          button that unmounts under its own focus sends a keyboard user to `<body>`, which
+          is what a reviewer measured on every re-rendering control on this surface.
+        */}
+        <div ref={controls} className={`flex flex-wrap gap-2 ${editing ? "hidden" : ""}`}>
+          {/* The door's NAME in the accessible name: three "Manage"-shaped controls on
+              one admin's screen all reading "Edit" is reviewer B's repeated-link
+              finding one control along. */}
+          <Button variant="outline" onClick={onEdit} aria-label={`Edit ${door.name}`}>
+            Edit this door
+          </Button>
+          <Link
+            to={`/admin/doors/${door.id}/card`}
+            className="inline-flex min-h-11 items-center rounded-lg border border-control px-5 text-sm font-medium"
+          >
+            Print this door card
+          </Link>
+        </div>
       </Card>
     </section>
   );

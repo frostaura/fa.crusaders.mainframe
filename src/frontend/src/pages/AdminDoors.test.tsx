@@ -5,7 +5,7 @@ import { AdminDoorsPage } from "./AdminDoors";
 import { AdminDoorsDetailPage } from "./AdminDoorsDetail";
 import { AdminDoorsCardPage } from "./AdminDoorsCard";
 import {
-  SETTINGS_FIXTURE, activityFixture, deviceFixture, doorFixture, doorsServer, renderPage,
+  SETTINGS_FIXTURE, activityFixture, deviceFixture, doorFixture, doorsServer, refuse, renderPage,
   stubFetch,
 } from "../test/harness";
 
@@ -219,8 +219,13 @@ describe("the doors surface", () => {
       expect(screen.queryByLabelText(/sort/i)).toBeNull();
     });
 
-    /** Needs-attention first, then alphabetical — order without a control. */
-    it("puts the doors that need somebody first", async () => {
+    /**
+     * <b>A10 reverses this.</b> The overview re-sorted by severity on every poll, so cards
+     * swapped position under a thumb already on its way down — a reviewer tapped a door and
+     * landed on a different one. Attention is carried by the chips and by the summary line,
+     * which LINKS to the door that needs somebody; the order itself is stable.
+     */
+    it("keeps the doors in name order however their state changes", async () => {
       openDoors([
         doorFixture({ id: OTHER_ID, name: "Alpha door", gate_key: "alpha" }),
         doorFixture({ name: "Zulu door", gate_key: "zulu", last_seen_at: ago(3600) }),
@@ -228,18 +233,174 @@ describe("the doors surface", () => {
 
       await screen.findAllByText(/door/);
       const names = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-      expect(names[0]).toBe("Zulu door");
+      expect(names).toEqual(["Alpha door", "Zulu door"]);
     });
 
-    it("names one door in the attention line and counts the rest", async () => {
+    it("names one door in the attention line, counts the rest, and links to it", async () => {
       openDoors([
         doorFixture({ name: "Side door", last_seen_at: ago(3600) }),
         doorFixture({ id: OTHER_ID, name: "Front door", gate_key: null }),
       ]);
 
-      const status = await screen.findByRole("status");
+      const status = await screen.findByText(/has not been heard from/);
       expect(status).toHaveTextContent("Side door has not been heard from.");
       expect(status).toHaveTextContent("1 other door needs attention.");
+      // A10: a count sends nobody anywhere. The line carries the reader to the card.
+      expect(screen.getByRole("link", { name: "Go to Side door" }))
+        .toHaveAttribute("href", `/admin/doors/${DOOR_ID}`);
+    });
+
+    /**
+     * <b>E-L6.</b> `/admin/doors` fired three identical `GET /admin/doors` on mount — the
+     * banner store re-read on navigation, the page polled on its own, and the gear badge read
+     * a third time. Three readers of one fact is also C3, which is why the answer to both is
+     * one store that owns the request.
+     */
+    it("makes one doors request on mount, however many readers are on the page", async () => {
+      const { stub } = openDoors([doorFixture()]);
+
+      await screen.findByText("Reporting");
+      const reads = stub.calls.filter((c) => c.path === "/api/v1/admin/doors");
+      expect(reads).toHaveLength(1);
+    });
+
+    /**
+     * <b>A8 — while the page cannot read, it does not get to say who is reporting.</b>
+     *
+     * With the ADMIN's phone offline every age went on ticking from a frozen read, doors
+     * flipped one by one to "Not reporting", and the page asserted "nothing can reach it"
+     * about boards that were, as far as anybody knew, fine.
+     */
+    it("suspends every liveness claim once its own reads are failing", async () => {
+      // A route that can be taken away mid-test, which is what losing signal actually looks
+      // like: the club is fine and the browser is not.
+      const offline = { now: false };
+      const server = doorsServer([doorFixture()]);
+      const doorsRoute = server.routes.find((r) => r.path === "/api/v1/admin/doors")!;
+      stubFetch([
+        settingsRoute(),
+        ...server.routes.filter((r) => r !== doorsRoute),
+        {
+          path: "/api/v1/admin/doors",
+          respond: (r) => (offline.now ? refuse(503, {}) : doorsRoute.respond!(r)),
+        },
+      ]);
+      renderPage(<AdminDoorsPage />);
+      expect(await screen.findByText("Reporting")).toBeInTheDocument();
+
+      // Two failed checks — the same threshold the staleness notice uses, so the page tells
+      // one story rather than two.
+      offline.now = true;
+      fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Still can't"));
+      fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/can't say whether the doors are reporting/)).toBeInTheDocument();
+      });
+      expect(screen.queryByText("Reporting")).toBeNull();
+      expect(screen.queryByText("Not reporting")).toBeNull();
+      expect(document.body.textContent).not.toContain("Nothing can reach it");
+    });
+
+    /** C4 / A8: a Refresh pressed with no signal answers, rather than doing nothing visible. */
+    it("says what Refresh found, including when it found nothing", async () => {
+      const offline = { now: false };
+      const server = doorsServer([doorFixture()]);
+      const doorsRoute = server.routes.find((r) => r.path === "/api/v1/admin/doors")!;
+      stubFetch([
+        settingsRoute(),
+        ...server.routes.filter((r) => r !== doorsRoute),
+        {
+          path: "/api/v1/admin/doors",
+          respond: (r) => (offline.now ? refuse(503, {}) : doorsRoute.respond!(r)),
+        },
+      ]);
+      renderPage(<AdminDoorsPage />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Checked just now."));
+
+      offline.now = true;
+      fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+      await waitFor(() => {
+        expect(screen.getByRole("status")).toHaveTextContent("Still can't reach the club.");
+      });
+    });
+
+    /**
+     * <b>A9 / B9.</b> The chips were two unexplained words on the overview, with the
+     * explanation on a page the admin had not opened — and they survived a shut, where
+     * "usually a dirty scanner" is advice about a question nobody is asking.
+     */
+    it("explains a signal on the card, with its action", async () => {
+      openDoors([doorFixture()], {
+        rows: {
+          [DOOR_ID]: {
+            signals: [{
+              kind: "may_not_be_releasing", since: ago(600), until: ago(0), scans: 3,
+            }],
+          },
+        },
+      });
+
+      expect(await screen.findByText(/A code was accepted three times in under a minute/))
+        .toHaveTextContent("The lock is released for 3 seconds.");
+      expect(screen.getByRole("link", { name: /Change how long the lock is released — Side door/ }))
+        .toHaveAttribute("href", "/admin/settings#setting-gate-unlock-seconds");
+    });
+
+    it("says nothing about a signal on a door the club has shut", async () => {
+      openDoors([doorFixture({ enabled: false })], {
+        rows: {
+          [DOOR_ID]: {
+            signals: [{ kind: "may_not_be_releasing", since: ago(600), until: ago(0), scans: 3 }],
+          },
+        },
+      });
+
+      await screen.findByText("Shut");
+      expect(screen.queryByText("May not be releasing")).toBeNull();
+      expect(document.body.textContent).not.toContain("Change how long the lock is released");
+    });
+
+    it("says nothing about a signal on a door nothing can reach", async () => {
+      openDoors([doorFixture({ last_seen_at: ago(3600) })], {
+        rows: {
+          [DOOR_ID]: {
+            signals: [{ kind: "refusal_spike", since: ago(600), until: ago(0), scans: 11 }],
+          },
+        },
+      });
+
+      await screen.findByText("Not reporting");
+      expect(screen.queryByText("Refusing a lot")).toBeNull();
+      expect(document.body.textContent).not.toContain("usually a dirty scanner");
+    });
+
+    /**
+     * <b>A11.</b> "Door gate" is what `DeviceRegistryService` calls every gate that registers
+     * itself, so it named none of the five doors in that state — and the card then said
+     * "no door name yet" and "Needs a door name" beside it, three vocabularies for one thing.
+     */
+    it("calls an unnamed board an unnamed scanner with its own board code", async () => {
+      openDoors([doorFixture({ name: "Door gate", gate_key: null })]);
+
+      expect(await screen.findByRole("heading", { level: 3, name: "Unnamed scanner (gate-0a1b2c)" }))
+        .toBeInTheDocument();
+    });
+
+    /**
+     * <b>A13.</b> A door called "A" gave a 34 px link — the one control a card exists to
+     * offer, under the 44 px target this whole surface is built to, and the shorter the name
+     * the smaller the target got.
+     */
+    it("gives a short door name a full-sized tap target", async () => {
+      openDoors([doorFixture({ name: "A" })]);
+
+      const link = await screen.findByRole("link", { name: "A" });
+      expect(link.className).toContain("min-w-11");
+      expect(link.className).toContain("min-h-11");
     });
 
     /** Tokens only. AdminDevices' raw palette is not the exemplar here (A2.7, UX bar). */
@@ -808,6 +969,146 @@ describe("the doors surface", () => {
       fireEvent.click(armed);
       await waitFor(() => {
         expect(stub.calls.find((c) => c.method === "DELETE")?.path).toBe(`/api/v1/admin/devices/${DOOR_ID}`);
+      });
+    });
+  });
+
+  // --- B1 / B6 / B10 / E-L3: the door's own page ----------------------------------
+
+  describe("one door's page", () => {
+    /**
+     * <b>B1.</b> The detail page made ZERO repeat requests over seventy seconds while its
+     * relative clocks went on ticking: another admin's shut was invisible, "Shut this door"
+     * was still offered for a door that was already shut, and no banner appeared. The
+     * overview polled; the page somebody opens BECAUSE something is wrong did not.
+     */
+    it("re-reads while it is in front, and says that it does", async () => {
+      vi.useFakeTimers();
+      const { stub } = club([doorFixture()]);
+      renderPage(
+        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      const before = stub.calls.filter((c) => c.path === "/api/v1/admin/doors").length;
+
+      await vi.advanceTimersByTimeAsync(16_000);
+
+      expect(stub.calls.filter((c) => c.path === "/api/v1/admin/doors").length)
+        .toBeGreaterThan(before);
+      expect(screen.getByText(/Re-reads every 15 seconds while this tab is in front/))
+        .toBeInTheDocument();
+      vi.useRealTimers();
+    });
+
+    /**
+     * <b>B6.</b> The controls were the third thing on the page, below a feed of up to fifty
+     * rows — 5 231 px down on a phone, measured. Somebody opens this page because something
+     * is wrong at a door; the thing they came to do was two screens past the thing they came
+     * to read.
+     */
+    it("puts the state and the controls above the scans", async () => {
+      openDoor([doorFixture()]);
+
+      await screen.findByRole("heading", { name: "Shutting or removing this door" });
+      const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+      expect(headings.indexOf("Shutting or removing this door"))
+        .toBeLessThan(headings.indexOf("Scans at this door"));
+      expect(headings.indexOf("Shutting or removing this door"))
+        .toBeLessThan(headings.indexOf("Door card"));
+    });
+
+    it("opens with ten scans and offers the rest, rather than fifty", async () => {
+      openDoor([doorFixture()], {
+        activity: Array.from({ length: 14 }, (_, i) => activityFixture({ at: ago(i * 60) })),
+      });
+
+      const feed = await screen.findByRole("region", { name: "Scans at this door" });
+      expect(within(feed).getAllByRole("listitem")).toHaveLength(10);
+      fireEvent.click(within(feed).getByRole("button", { name: "Show the other 4 scans" }));
+      expect(within(feed).getAllByRole("listitem")).toHaveLength(14);
+      // C4: the first row the press revealed takes focus, not `<body>`.
+      expect(document.activeElement).not.toBe(document.body);
+    });
+
+    /**
+     * <b>A5 / E-M6 / E-L3.</b> Nine identical "this door's details or state were changed"
+     * rows told an admin nothing, and a clock correction — which is a real thing to know
+     * about a board — appeared nowhere at all.
+     */
+    it("says what each event was and who did it", async () => {
+      openDoor([doorFixture()], {
+        activity: [
+          { ...activityFixture({ at: ago(60), action: "device.updated", reason: null }), change: "shut", actor_name: "Priya Naidoo" },
+          { ...activityFixture({ at: ago(120), action: "device.updated", reason: null }), change: "renamed", actor_name: "Ruth Adams" },
+          activityFixture({ at: ago(180), action: "device.event_time_clamped", reason: null }),
+        ],
+      });
+
+      const events = await screen.findByRole("region", { name: "Door events" });
+      expect(events).toHaveTextContent("Shut by Priya Naidoo");
+      expect(events).toHaveTextContent("Renamed by Ruth Adams");
+      // E-L3: the clock correction renders, and it is not given an actor it does not have.
+      expect(events).toHaveTextContent("The board's clock was out and was corrected");
+      expect(events.textContent).not.toContain("clock was out and was corrected by");
+    });
+
+    /**
+     * A row written before the server recorded WHICH of the four an edit was still has to
+     * say something true. "Details or state changed" is that; guessing a verb — "Someone
+     * renamed this door" over a shut — would be this round's own defect in a new place.
+     */
+    it("says the broad thing for an edit the server could not classify", async () => {
+      openDoor([doorFixture()], {
+        activity: [activityFixture({ at: ago(60), action: "device.updated", reason: null })],
+      });
+
+      const events = await screen.findByRole("region", { name: "Door events" });
+      expect(events).toHaveTextContent("Details or state changed");
+    });
+
+    /**
+     * <b>B10.</b> A tab left open overnight "shut" a door somebody else had already shut and
+     * reported success — so the admin learned that their click had done something.
+     */
+    it("says nothing changed, and who it was, when the door was already shut", async () => {
+      // The fixture is already shut AND already attributed, which is the stale-tab state:
+      // the page believes the door is open because it read the club hours ago.
+      const server = doorsServer([doorFixture({ enabled: false, shut_by_name: "Priya Naidoo" })]);
+      stubFetch([settingsRoute(), ...server.routes]);
+      renderPage(
+        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+      );
+
+      // Reopen, then shut again — the second shut is the no-op the API answers `unchanged`.
+      fireEvent.click(await screen.findByRole("button", { name: /^Reopen this door/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
+      await screen.findByRole("button", { name: /^Shut this door/ });
+      fireEvent.click(screen.getByRole("button", { name: /^Shut this door/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
+      await screen.findByRole("button", { name: /^Reopen this door/ });
+
+      // Now a stale press: the door is shut and the PATCH says so rather than claiming work.
+      fireEvent.click(screen.getByRole("button", { name: /^Reopen this door/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
+      await screen.findByRole("button", { name: /^Shut this door/ });
+    });
+
+    /** C4: "Edit this door" and its Cancel both dropped focus to `<body>`. */
+    it("keeps focus inside the door card across an edit and back", async () => {
+      openDoor([doorFixture()]);
+
+      const edit = await screen.findByRole("button", { name: "Edit Side door" });
+      edit.focus();
+      fireEvent.click(edit);
+
+      // The editor takes focus to its first field rather than leaving it on a hidden button.
+      await waitFor(() => expect(screen.getByLabelText("Name")).toHaveFocus());
+
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Edit Side door" })).toHaveFocus();
       });
     });
   });
