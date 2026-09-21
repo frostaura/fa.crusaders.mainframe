@@ -44,6 +44,32 @@ constexpr uint8_t kCourtA = 0U;
 constexpr uint8_t kCourtB = 1U;
 constexpr uint8_t kCourtC = 2U;
 
+/// `text`, space-padded to the panel's width, in a rotating scratch buffer.
+///
+/// The width is DERIVED rather than typed out. Six assertions in this file
+/// pinned sixteen columns as a literal and all six went red the day the panel's
+/// real geometry was adopted — which proved nothing about the box and only that
+/// somebody had counted spaces. Four buffers so a single assertion can compare
+/// two padded rows.
+const char* padded(const char* text) {
+  static char bufs[4][hal::kDisplayCols + 1U];
+  static uint8_t next = 0U;
+  char* out = bufs[next];
+  next = static_cast<uint8_t>((next + 1U) % 4U);
+
+  uint8_t i = 0U;
+  while (i < hal::kDisplayCols && text[i] != '\0') {
+    out[i] = text[i];
+    ++i;
+  }
+  while (i < hal::kDisplayCols) {
+    out[i] = ' ';
+    ++i;
+  }
+  out[hal::kDisplayCols] = '\0';
+  return out;
+}
+
 /// True when the transport's transcript contains a line starting with `prefix`.
 /// Prefix rather than equality because a frame carries a checksum, and pinning
 /// checksums into these assertions would make them tests of proto::encode()
@@ -799,7 +825,7 @@ void test_box_rst_releases_everything(void) {
 
   TEST_ASSERT_FALSE(b.relay.anyOn());
   TEST_ASSERT_FALSE(b.box.auth().allows(kBaseMid + 10U));
-  TEST_ASSERT_EQUAL_STRING(courtlogic::kIdleLine1, b.display.row(0U));
+  TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kIdleLine1), b.display.row(0U));
 }
 
 void test_box_repaints_a_row_padded_to_the_full_width(void) {
@@ -807,13 +833,13 @@ void test_box_repaints_a_row_padded_to_the_full_width(void) {
 
   feedFrame(b.bridge, proto::Frame::lcd("COURT A 45 MIN", "PRESS START"));
   b.step(kBaseMid);
-  TEST_ASSERT_EQUAL_STRING("COURT A 45 MIN  ", b.display.row(0U));
+  TEST_ASSERT_EQUAL_STRING(padded("COURT A 45 MIN"), b.display.row(0U));
 
   // The shorter message must not leave the old tail on the glass: without
   // padding this reads "COURT A 5 MINN".
   feedFrame(b.bridge, proto::Frame::lcd("COURT A 5 MIN", "PRESS START"));
   b.step(kBaseMid + 1U);
-  TEST_ASSERT_EQUAL_STRING("COURT A 5 MIN   ", b.display.row(0U));
+  TEST_ASSERT_EQUAL_STRING(padded("COURT A 5 MIN"), b.display.row(0U));
   TEST_ASSERT_EQUAL_UINT16(0U, b.display.droppedChars());
 }
 
@@ -911,8 +937,8 @@ void test_box_a_scan_is_acknowledged_on_the_glass_before_any_answer(void) {
   TEST_ASSERT_TRUE(b.scanner.feed("MEM-0042\r\n"));
   b.step(kBaseMid + 1U);
 
-  TEST_ASSERT_EQUAL_STRING("CHECKING...     ", b.display.row(0U));
-  TEST_ASSERT_EQUAL_STRING("                ", b.display.row(1U));
+  TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kScanFeedbackLine1), b.display.row(0U));
+  TEST_ASSERT_EQUAL_STRING(padded(""), b.display.row(1U));
   TEST_ASSERT_TRUE(sentLineStarting(b.bridge, "!SCAN,MEM-0042"));
 }
 
@@ -926,7 +952,7 @@ void test_box_a_dead_bridge_still_gets_the_scan_acknowledged(void) {
   b.step(kBaseMid + 1U);
 
   TEST_ASSERT_TRUE(b.box.droppedTxFrames() > 0U);
-  TEST_ASSERT_EQUAL_STRING("CHECKING...     ", b.display.row(0U));
+  TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kScanFeedbackLine1), b.display.row(0U));
 }
 
 void test_box_the_bridges_answer_replaces_the_acknowledgement_and_stays(void) {
@@ -937,14 +963,14 @@ void test_box_the_bridges_answer_replaces_the_acknowledgement_and_stays(void) {
 
   feedFrame(b.bridge, proto::Frame::lcd("COURT A", "45 MIN"));
   b.step(kBaseMid + 800U);
-  TEST_ASSERT_EQUAL_STRING("COURT A         ", b.display.row(0U));
+  TEST_ASSERT_EQUAL_STRING(padded("COURT A"), b.display.row(0U));
 
   // Ten seconds on, the answer must NOT be painted over with the idle screen:
   // the bridge answered, so the feedback timer was disarmed.
   b.step(kBaseMid + 1U + courtlogic::kScanFeedbackMs);
   b.step(kBaseMid + 1U + courtlogic::kScanFeedbackMs + 5000U);
-  TEST_ASSERT_EQUAL_STRING("COURT A         ", b.display.row(0U));
-  TEST_ASSERT_EQUAL_STRING("45 MIN          ", b.display.row(1U));
+  TEST_ASSERT_EQUAL_STRING(padded("COURT A"), b.display.row(0U));
+  TEST_ASSERT_EQUAL_STRING(padded("45 MIN"), b.display.row(1U));
 }
 
 void test_box_silence_after_a_scan_returns_to_idle_at_ten_seconds(void) {
@@ -954,17 +980,17 @@ void test_box_silence_after_a_scan_returns_to_idle_at_ten_seconds(void) {
 
     TEST_ASSERT_TRUE(b.scanner.feed("MEM-0042\r\n"));
     b.step(base);
-    TEST_ASSERT_EQUAL_STRING("CHECKING...     ", b.display.row(0U));
+    TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kScanFeedbackLine1), b.display.row(0U));
 
     // Still waiting one millisecond before the deadline — across the wrap for
     // the two wrap bases, where a naive comparison would repaint immediately
     // or never.
     b.step(base + courtlogic::kScanFeedbackMs - 1U);
-    TEST_ASSERT_EQUAL_STRING("CHECKING...     ", b.display.row(0U));
+    TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kScanFeedbackLine1), b.display.row(0U));
 
     b.step(base + courtlogic::kScanFeedbackMs);
-    TEST_ASSERT_EQUAL_STRING(courtlogic::kIdleLine1, b.display.row(0U));
-    TEST_ASSERT_EQUAL_STRING("SCAN TO START   ", b.display.row(1U));
+    TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kIdleLine1), b.display.row(0U));
+    TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kIdleLine2), b.display.row(1U));
   }
 }
 

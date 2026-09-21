@@ -39,14 +39,36 @@
 
 #include "eventq/Event.h"
 #include "eventq/EventQueue.h"
+#include "hal/Display.h"
 #include "protocol/Protocol.h"
 #include "roster/Roster.h"
 
 namespace court {
 
-/// Exactly 16 characters plus a terminator: the display's width, and the width
-/// hal::IDisplayPort will pad or clip to.
-inline constexpr size_t kLineLen = 16U;
+/// The display's width plus a terminator — the width hal::IDisplayPort will pad
+/// or clip to.
+///
+/// DERIVED, not 16. It was hardcoded, so the panel's geometry lived in two
+/// places that could disagree: the flags said how wide the glass was and this
+/// said how much text the box was willing to compose for it. On the 2004A that
+/// is actually fitted, the second number won and four columns of every line
+/// were unreachable.
+///
+/// The SAFE-SUBSET CONTRACT is what makes widening this safe, and it is not
+/// optional: **rows 0 and 1, truncated at column 16, must still be a complete
+/// and correct message on every screen.** A 1602 fitted by mistake then
+/// degrades to exactly the old behaviour rather than to a half-sentence, which
+/// is the property hal/Display.h chose 16x2 for in the first place. The test
+/// that enforces it is in the bridge's suite, over every screen at once.
+inline constexpr size_t kLineLen = static_cast<size_t>(hal::kDisplayCols);
+
+/// The columns a 1602 would show. Rows 0-1 clipped here must still read as a
+/// whole message; columns beyond it, and rows 2-3, carry enrichment only.
+inline constexpr size_t kSafeSubsetCols = 16U;
+
+static_assert(kLineLen >= kSafeSubsetCols,
+              "a panel narrower than the 16-column safe subset would make the contract "
+              "unsatisfiable rather than merely degraded");
 
 /// The longest grant this layer will hand out, in milliseconds: the relay hard
 /// cap. The Mega clamps the wire duration to the same number, so a grant past
