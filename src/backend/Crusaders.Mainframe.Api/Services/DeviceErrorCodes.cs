@@ -138,30 +138,30 @@ public static class DeviceErrorCodes
     {
         return code switch
         {
-        // Critical — the club cannot sell or deliver court time until somebody attends.
-        RelayCmdDropped or RestoreFailed or RestoreNotConfirmed or MegaLinkLost => DeviceErrorSeverity.Critical,
+            // Critical — the club cannot sell or deliver court time until somebody attends.
+            RelayCmdDropped or RestoreFailed or RestoreNotConfirmed or MegaLinkLost => DeviceErrorSeverity.Critical,
 
-        // Error — a board is failing at something it is for.
-        SerialBadCrc or SerialBadFrame or SerialOverrunRx or SerialOverrunTx
-            or SerialBadVerb or SerialBadArg or SerialNoCourt
-            or OnNotAcked or ExtRefused or LcdI2cTimeout
-            or WdtReset or StoreWriteFailed or Http5xx or ApiBreakerOpen
-            or ScannerUartError or NvsWriteFailed or RelockOverdue
-            or AuthFailed or CourtNotMapped or Unknown => DeviceErrorSeverity.Error,
+            // Error — a board is failing at something it is for.
+            SerialBadCrc or SerialBadFrame or SerialOverrunRx or SerialOverrunTx
+                or SerialBadVerb or SerialBadArg or SerialNoCourt
+                or OnNotAcked or ExtRefused or LcdI2cTimeout
+                or WdtReset or StoreWriteFailed or Http5xx or ApiBreakerOpen
+                or ScannerUartError or NvsWriteFailed or RelockOverdue
+                or AuthFailed or CourtNotMapped or Unknown => DeviceErrorSeverity.Error,
 
-        // Warning — degraded, self-correcting, or a rule the club set being hit.
-        LcdResync or QueueOverflow or RosterRejected or Http4xx or HttpTimeout
-            or HeartbeatRejected or ClockCorrected or FaultOverflow
-            or ScanOversize or ButtonUnauthorised or UnlockClamped
-            or UnregisteredMac or MalformedBody or ClockClamped or EventRejected
-            or SeqRegression or OutageOpened or WalkupRefused or ActivationRefused
-            or TooManyUnacknowledgedDevices or QueueNoPush or QueueEventsLost
-            or ErrorLogOverflow => DeviceErrorSeverity.Warning,
+            // Warning — degraded, self-correcting, or a rule the club set being hit.
+            LcdResync or QueueOverflow or RosterRejected or Http4xx or HttpTimeout
+                or HeartbeatRejected or ClockCorrected or FaultOverflow
+                or ScanOversize or ButtonUnauthorised or UnlockClamped
+                or UnregisteredMac or MalformedBody or ClockClamped or EventRejected
+                or SeqRegression or OutageOpened or WalkupRefused or ActivationRefused
+                or TooManyUnacknowledgedDevices or QueueNoPush or QueueEventsLost
+                or ErrorLogOverflow => DeviceErrorSeverity.Warning,
 
-        // Info — worth counting, not worth waking anybody.
-        MegaLinkBack or Boot => DeviceErrorSeverity.Info,
+            // Info — worth counting, not worth waking anybody.
+            MegaLinkBack or Boot => DeviceErrorSeverity.Info,
 
-            _ => DeviceErrorSeverity.Error,
+                _ => DeviceErrorSeverity.Error,
         };
     }
 
@@ -179,52 +179,52 @@ public static class DeviceErrorCodes
     {
         return code switch
         {
-        SerialBadCrc or SerialBadFrame => "The two halves of the court box are garbling each other",
-        SerialOverrunRx or SerialOverrunTx => "The court box's internal link is losing messages",
-        SerialBadVerb or SerialBadArg or SerialNoCourt => "The court box sent an instruction its other half did not understand",
-        MegaLinkLost => "The court box's two halves have stopped talking",
-        MegaLinkBack => "The court box's two halves are talking again",
-        OnNotAcked => "A lights-on instruction was not acknowledged",
-        ExtRefused => "An extra-time instruction was refused",
-        RelayCmdDropped => "A lights instruction could not be sent at all",
-        ScanOversize => "A scanned code was too long to read",
-        ButtonUnauthorised => "A button is being pressed with nobody signed in — it may be stuck",
-        LcdI2cTimeout => "The screen stopped answering",
-        LcdResync => "The screen had to be restarted",
-        WdtReset => "The board restarted itself after locking up",
-        QueueOverflow => "The board ran out of room and overwrote its own records",
-        StoreWriteFailed => "The board could not save its place",
-        RosterRejected => "The board refused part of the booking list it was sent",
-        Http4xx => "The club's server refused the board's request",
-        Http5xx => "The club's server failed on the board's request",
-        HttpTimeout => "The board could not reach the club's server in time",
-        ApiBreakerOpen => "The board has stopped trying to reach the club's server",
-        HeartbeatRejected => "The board's check-in was refused",
-        RestoreFailed => "The board could not switch the lights back on after a power cut",
-        RestoreNotConfirmed => "A court should be lit after a power cut and the box has not confirmed it",
-        ClockCorrected => "The board's clock was well out and has been corrected",
-        FaultOverflow => "The board is reporting more kinds of fault than it can track",
-        ScannerUartError => "The door's scanner is sending corrupt data",
-        NvsWriteFailed => "The door could not save its settings",
-        UnlockClamped => "The door was told to stay open for longer than it allows",
-        RelockOverdue => "The door did not lock again when it should have",
-        Boot => "The board restarted",
-        AuthFailed => "Something tried to talk to the club's server with a bad key",
-        UnregisteredMac => "A board the club has not registered tried to check in",
-        MalformedBody => "A board sent something the server could not read",
-        ClockClamped => "A board's clock was wrong and its times had to be corrected",
-        EventRejected => "The server could not accept something a board reported",
-        SeqRegression => "A board's record numbering went backwards",
-        OutageOpened => "A board stopped reporting",
-        CourtNotMapped => "A board lit a relay that is not wired to the court it named",
-        WalkupRefused => "A walk-up purchase at the box was refused",
-        ActivationRefused => "A member's scan at the box was refused",
-        TooManyUnacknowledgedDevices => "More boards are trying to register than the club allows",
-        QueueNoPush => "The board could not send some of its check-ins",
-        QueueEventsLost => "The board lost some records before it could send them",
-        ErrorLogOverflow => "This board is reporting more distinct problems than the club records",
-        Unknown => "An error the club's software does not have a name for",
-            _ => "An error the club's software does not have a name for",
+            SerialBadCrc or SerialBadFrame => "The two halves of the court box are garbling each other",
+            SerialOverrunRx or SerialOverrunTx => "The court box's internal link is losing messages",
+            SerialBadVerb or SerialBadArg or SerialNoCourt => "The court box sent an instruction its other half did not understand",
+            MegaLinkLost => "The court box's two halves have stopped talking",
+            MegaLinkBack => "The court box's two halves are talking again",
+            OnNotAcked => "A lights-on instruction was not acknowledged",
+            ExtRefused => "An extra-time instruction was refused",
+            RelayCmdDropped => "A lights instruction could not be sent at all",
+            ScanOversize => "A scanned code was too long to read",
+            ButtonUnauthorised => "A button is being pressed with nobody signed in — it may be stuck",
+            LcdI2cTimeout => "The screen stopped answering",
+            LcdResync => "The screen had to be restarted",
+            WdtReset => "The board restarted itself after locking up",
+            QueueOverflow => "The board ran out of room and overwrote its own records",
+            StoreWriteFailed => "The board could not save its place",
+            RosterRejected => "The board refused part of the booking list it was sent",
+            Http4xx => "The club's server refused the board's request",
+            Http5xx => "The club's server failed on the board's request",
+            HttpTimeout => "The board could not reach the club's server in time",
+            ApiBreakerOpen => "The board has stopped trying to reach the club's server",
+            HeartbeatRejected => "The board's check-in was refused",
+            RestoreFailed => "The board could not switch the lights back on after a power cut",
+            RestoreNotConfirmed => "A court should be lit after a power cut and the box has not confirmed it",
+            ClockCorrected => "The board's clock was well out and has been corrected",
+            FaultOverflow => "The board is reporting more kinds of fault than it can track",
+            ScannerUartError => "The door's scanner is sending corrupt data",
+            NvsWriteFailed => "The door could not save its settings",
+            UnlockClamped => "The door was told to stay open for longer than it allows",
+            RelockOverdue => "The door did not lock again when it should have",
+            Boot => "The board restarted",
+            AuthFailed => "Something tried to talk to the club's server with a bad key",
+            UnregisteredMac => "A board the club has not registered tried to check in",
+            MalformedBody => "A board sent something the server could not read",
+            ClockClamped => "A board's clock was wrong and its times had to be corrected",
+            EventRejected => "The server could not accept something a board reported",
+            SeqRegression => "A board's record numbering went backwards",
+            OutageOpened => "A board stopped reporting",
+            CourtNotMapped => "A board lit a relay that is not wired to the court it named",
+            WalkupRefused => "A walk-up purchase at the box was refused",
+            ActivationRefused => "A member's scan at the box was refused",
+            TooManyUnacknowledgedDevices => "More boards are trying to register than the club allows",
+            QueueNoPush => "The board could not send some of its check-ins",
+            QueueEventsLost => "The board lost some records before it could send them",
+            ErrorLogOverflow => "This board is reporting more distinct problems than the club records",
+            Unknown => "An error the club's software does not have a name for",
+                _ => "An error the club's software does not have a name for",
         };
     }
 
