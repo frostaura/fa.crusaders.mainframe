@@ -1979,6 +1979,96 @@ void test_the_uplink_decoder_keeps_every_mega_frame_around_the_noise() {
   TEST_ASSERT_EQUAL_UINT16(0U, uplink.droppedResults());
 }
 
+// ---------------------------------------------------------------------------
+// OnRetry — D1-3: the replay that lit the wrong court
+// ---------------------------------------------------------------------------
+//
+// THE LIVE DEFECT CARL AND DEAN HIT. `!ERR,BADCRC` says only "the last line I
+// received did not decode" — it does not say WHICH line. The bridge sends
+// several frames in quick succession, and `OnRetry::sent` returned EARLY for
+// any non-relay verb WITHOUT clearing, contradicting its own header ("Anything
+// else clears the memory rather than replacing it"). So a CRC failure on the
+// `!AUTH,<n>` that follows every grant by under a millisecond replayed the
+// `!ON` before it; and when the corrupted frame was the `!OFF,B` a release
+// press sends, the replay lit A for a fresh FULL duration while B was never
+// released. That is "it added time to the wrong court".
+
+void test_on_retry_a_non_relay_frame_clears_the_memory_rather_than_skipping_it() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::OnRetry retry;
+    proto::Frame out;
+
+    // settleScan's order, to the millisecond: applyOutcome writes `!LCD` then
+    // `!ON`, and applyAuth writes `!AUTH,30` under a millisecond later.
+    retry.sent(proto::Frame::lcd("COURT A", "45 MIN"), base);
+    retry.sent(proto::Frame::on(proto::Court::A, 2700U), base);
+    retry.sent(proto::Frame::auth(30U), base + 1U);
+
+    // The `!AUTH` is the line that died on the wire. It is not relay-affecting,
+    // so there is nothing to replay — and nothing to attribute to court A.
+    TEST_ASSERT_TRUE(bridgelogic::isReceiveError(proto::Verb::Err, "BADCRC", ""));
+    TEST_ASSERT_FALSE(retry.pending());
+    TEST_ASSERT_FALSE(retry.shouldResend(base + 2U, out));
+    TEST_ASSERT_EQUAL_UINT8(bridgelogic::kNoRetryCourt, retry.court());
+    TEST_ASSERT_TRUE(retry.verb() == proto::Verb::Unknown);
+    TEST_ASSERT_EQUAL_UINT16(0U, retry.retries());
+  }
+}
+
+void test_on_retry_an_off_for_b_after_an_on_for_a_replays_neither() {
+  // handleButton's release path writes `!OFF,B`. `!OFF` is not one of the two
+  // frames this type replays — re-sending an OFF is harmless but pointless, and
+  // the Mega's own timer is the authority — so it CLEARS. Before the fix it
+  // skipped, and the BADCRC that followed lit court A all over again.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::OnRetry retry;
+    proto::Frame out;
+
+    retry.sent(proto::Frame::on(proto::Court::A, 2700U), base);
+    retry.sent(proto::Frame::off(proto::Court::B), base + 1U);
+
+    TEST_ASSERT_FALSE(retry.shouldResend(base + 2U, out));
+    TEST_ASSERT_EQUAL_UINT8(bridgelogic::kNoRetryCourt, retry.court());
+    // Nothing was re-sent, so nothing can have named a court at all.
+    TEST_ASSERT_TRUE(out.empty());
+  }
+}
+
+void test_on_retry_a_badcrc_after_a_non_relay_frame_never_moves_a_relay_deadline() {
+  // The MEASURED effect, pinned rather than argued: a replayed `!ON` re-arms
+  // the Mega's relay from the moment of the replay, which is what "it added
+  // time to the wrong court" looks like from the glass. The bridge's own model
+  // of that deadline is Relight's, so the property is that it never jumps
+  // forward across a BADCRC that followed a non-relay frame.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::OnRetry retry;
+    bridgelogic::Relight relight;
+    proto::Frame out;
+
+    // Court A, two-hour booking, ninety minutes on the relay.
+    court::Outcome grant = outcomeOf(court::Action::TurnOn, 0U, true);
+    grant.durationMs = 5400000UL;
+    grant.bookingRemainingMs = 7200000UL;
+    relight.onGrant(grant, base);
+    retry.sent(proto::Frame::on(proto::Court::A, 5400U), base);
+
+    // When the extension falls due, before anything else happens.
+    const uint32_t dueAt = base + 5400000UL - 60000UL;
+    TEST_ASSERT_FALSE(relight.check(0U, dueAt - 1U).due);
+    TEST_ASSERT_TRUE(relight.check(0U, dueAt).due);
+
+    // The grant's `!AUTH` dies on the wire. Nothing is replayed, so nothing
+    // re-arms the relay — the deadline is exactly where it was.
+    retry.sent(proto::Frame::auth(30U), base + 1U);
+    TEST_ASSERT_FALSE(retry.shouldResend(base + 2U, out));
+    TEST_ASSERT_FALSE(relight.check(0U, dueAt - 1U).due);
+    TEST_ASSERT_TRUE(relight.check(0U, dueAt).due);
+  }
+}
+
 } // namespace
 
 void setUp() {
@@ -2054,6 +2144,9 @@ int main(int, char**) {
   RUN_TEST(test_on_retry_resends_the_last_on_once_and_only_inside_the_window);
   RUN_TEST(test_on_retry_keeps_an_ext_too_and_a_lost_one_is_sent_again);
   RUN_TEST(test_on_retry_a_release_on_another_court_keeps_this_courts_retry);
+  RUN_TEST(test_on_retry_a_non_relay_frame_clears_the_memory_rather_than_skipping_it);
+  RUN_TEST(test_on_retry_an_off_for_b_after_an_on_for_a_replays_neither);
+  RUN_TEST(test_on_retry_a_badcrc_after_a_non_relay_frame_never_moves_a_relay_deadline);
   RUN_TEST(test_relight_adopts_the_megas_remaining_seconds_so_a_lost_ext_is_re_sent);
   RUN_TEST(test_state_seconds_parse_decimal_and_refuse_everything_else);
   RUN_TEST(test_a_rescan_on_a_court_this_box_already_lit_is_not_a_second_grant);

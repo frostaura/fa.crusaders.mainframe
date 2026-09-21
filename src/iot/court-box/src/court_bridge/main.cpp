@@ -347,13 +347,36 @@ char gHeartbeatBody[2560] = {};
 
 /// Write a frame to the Mega, all of it or none of it. A fragment would fail
 /// the Mega's checksum AND be read as the head of the next frame.
+///
+/// THE SINGLE REGISTRATION POINT FOR bridgelogic::OnRetry (D1-3). `!ERR,BADCRC`
+/// says "the last line I received did not decode" and says nothing about WHICH
+/// line, so the only sound way to answer it is for the retry memory to track
+/// the last line this half actually wrote. It used to be registered at one call
+/// site — applyOutcome's `!ON` — while `!LCD`, `!AUTH`, `!OFF`, `!PING` and the
+/// `!EXT` from pumpRelight went out unregistered, and OnRetry::sent returned
+/// early for them without clearing. A CRC failure on the `!AUTH` that follows
+/// every grant therefore replayed the `!ON`; a corrupted `!OFF,B` lit court A
+/// again for a fresh full duration while B was never released. That is the
+/// "it added time to the wrong court" defect.
+///
+/// Registered only on a SUCCESSFUL write: a frame that never left the bridge is
+/// not the Mega's last received line, and clearing on it would throw away a
+/// retry that is still legitimately owed.
 bool sendToMega(const proto::Frame& frame) {
   char buf[proto::kMaxFrameLen];
   const size_t len = proto::encode(frame, buf, sizeof(buf));
   if (len == 0U || gMega.writable() < len) {
     return false;
   }
-  return gMega.write(reinterpret_cast<const uint8_t*>(buf), len) == len;
+  if (gMega.write(reinterpret_cast<const uint8_t*>(buf), len) != len) {
+    return false;
+  }
+  // A fresh clock read rather than the pass's: several callers write frames
+  // immediately after a blocking HTTP call, and a retry window stamped four
+  // seconds before the frame left is a window that is already most of the way
+  // gone.
+  gOnRetry.sent(frame, gClock.nowMs());
+  return true;
 }
 
 /// Paints what this board IS: two screens, chosen by whether the WiFi is up.
@@ -455,12 +478,11 @@ void applyOutcome(const court::Outcome& outcome, uint32_t nowMs) {
   if (!sent) {
     static_cast<void>(
         sendToMega(proto::Frame::lcd(bridgelogic::kOnNotSentLine1, bridgelogic::kOnNotSentLine2)));
-    return;
   }
-  // Left the bridge, which is not the same as reached the Mega: a checksum
-  // that dies on the wire comes back as `!ERR,BADCRC`, and this is the frame
-  // that is then sent once more (bridgelogic::OnRetry).
-  gOnRetry.sent(on, nowMs);
+  // The `!ON` left the bridge, which is not the same as reached the Mega: a
+  // checksum that dies on the wire comes back as `!ERR,BADCRC`, and it is then
+  // sent once more (bridgelogic::OnRetry). sendToMega registered it — there is
+  // exactly ONE registration point and this is deliberately not a second one.
 }
 
 /// A scan has been decided, by whichever path: paint it, light it, spend the
@@ -565,12 +587,22 @@ void releaseCourt(uint8_t court, uint32_t heldMs, uint32_t nowMs) {
 /// "did not decode", it goes once more; otherwise nothing, because a repaint
 /// the Mega missed is a repaint and the next one is a second away.
 void handleReceiveError(const proto::Frame& frame, uint32_t nowMs) {
-  if (bridgelogic::isExtRefusal(frame.verb(), frame.arg(0)) && gOnRetry.verb() == proto::Verb::Ext) {
+  const bridgelogic::ReceiveErrorAction action =
+      bridgelogic::classifyReceiveError(frame.verb(), frame.arg(0), frame.arg(1), gOnRetry.verb());
+  if (action == bridgelogic::ReceiveErrorAction::None) {
+    return;
+  }
+  if (action == bridgelogic::ReceiveErrorAction::ExtRefused) {
     // `!ERR,BADARG` after an `!EXT` is not a lost frame. It is the Mega saying
     // the relay is already OPEN — the court went dark between the extension
     // being decided and the frame arriving — so there is nothing to extend and
     // re-sending would be a court lit for nobody. Forget the extension and let
     // the next `!STATE` reconcile the court, which is what queues the Release.
+    //
+    // UNREACHABLE UNTIL D1-6 (D1-3's fix is what made it reachable): nothing
+    // registered the `!EXT` with gOnRetry, so verb() could only ever be `On` or
+    // `Unknown`, BADARG fell to the resend test below and compared "BADARG"
+    // against "BADCRC", and gRelight kept believing it held a dark court.
     const uint8_t court = gOnRetry.court();
     gOnRetry.clear();
     if (court < bridgelogic::kStateCourts) {
@@ -580,8 +612,7 @@ void handleReceiveError(const proto::Frame& frame, uint32_t nowMs) {
   }
 
   proto::Frame pending;
-  if (!bridgelogic::isReceiveError(frame.verb(), frame.arg(0), frame.arg(1)) ||
-      !gOnRetry.shouldResend(nowMs, pending)) {
+  if (!gOnRetry.shouldResend(nowMs, pending)) {
     return;
   }
   const uint8_t court = static_cast<uint8_t>(pending.arg(0)[0] - 'A');
@@ -589,6 +620,10 @@ void handleReceiveError(const proto::Frame& frame, uint32_t nowMs) {
     return;
   }
   const bool sent = sendToMega(pending);
+  // ONCE, not until acknowledged: a second failure is a cable, not a transient.
+  // sendToMega re-registered the frame it just wrote — it registers everything,
+  // which is the whole point — so this is what spends the one retry.
+  gOnRetry.clear();
   if (pending.verb() == proto::Verb::Ext) {
     // An extension is about a court that is ALREADY held, so nothing about the
     // held state changes either way. A second failure costs nothing beyond the
