@@ -42,13 +42,27 @@ public sealed record MonitoringLookups(
         return new MonitoringLookups(devices, names);
     }
 
-    /// <summary>The board this row came from, when the club still has its row.</summary>
+    /// <summary>
+    /// The board this row came from, when the club still has its row.
+    /// </summary>
+    /// <remarks>
+    /// Block body, and <c>is not Guid id</c> rather than <c>is { } id</c>: lizard's C# parser
+    /// reads the <c>{</c> of a property pattern in an EXPRESSION body as the end of the
+    /// function and dumps the rest of the file into a global pseudo-function that trips the
+    /// length gate. Same family as the object-initialiser trap in <c>memory/gotchas.md</c>.
+    /// </remarks>
     public Device? DeviceOf(DeviceError row)
-        => row.DeviceId is { } id && Devices.TryGetValue(id, out var device) ? device : null;
+    {
+        if (row.DeviceId is not Guid id) return null;
+        return Devices.TryGetValue(id, out var device) ? device : null;
+    }
 
     /// <summary>The name of whoever resolved this row, or null — including for a row the retention sweep aged out, which nobody resolved.</summary>
     public string? ResolverOf(DeviceError row)
-        => row.ResolvedByUserId is { } id && Names.TryGetValue(id, out var name) ? name : null;
+    {
+        if (row.ResolvedByUserId is not Guid id) return null;
+        return Names.TryGetValue(id, out var name) ? name : null;
+    }
 }
 
 /// <summary>
@@ -246,7 +260,7 @@ public static class MonitoringLink
         if (!device.Enabled || device.OutOfServiceSince is not null) return "out_of_service";
 
         // Never heard from at all is OFFLINE, not online-with-a-null.
-        if (device.LastSeenAt is not { } seen) return "offline";
+        if (device.LastSeenAt is not DateTimeOffset seen) return "offline";
 
         var quiet = Math.Max(0, (now - seen).TotalSeconds);
         if (quiet > offlineAfter) return "offline";

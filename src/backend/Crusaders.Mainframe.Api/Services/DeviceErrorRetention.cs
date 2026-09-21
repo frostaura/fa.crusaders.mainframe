@@ -39,8 +39,18 @@ public static class DeviceErrorRetention
     /// Sweeps one tenant. The caller has already set the tenant context, so both reads are
     /// tenant-filtered by the context's global query filter rather than by a comparison here.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It logs its own result rather than returning one for the worker to branch on.</b>
+    /// <c>RetentionWorker.TickAsync</c> sat exactly at the complexity gate's ceiling, and the
+    /// obvious two-line "if anything happened, say so" at the call site pushed it over — which
+    /// would have made a one-step addition into a reason to restructure a worker that deletes
+    /// a club's records. The count still comes back, for tests that assert on it.
+    /// </para>
+    /// </remarks>
     public static async Task<Sweep> SweepAsync(
-        MainframeDbContext db, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
+        MainframeDbContext db, TenantSettingsView settings, DateTimeOffset now,
+        ILogger logger, string tenantSlug, CancellationToken ct)
     {
         // Clamped on read, because a hand-edited settings document is not a PUT and this is the
         // sharpest case of that rule in the tree: the number decides what gets DELETED.
@@ -67,6 +77,9 @@ public static class DeviceErrorRetention
         if (expired.Count == 0 && stale.Count == 0) return new Sweep(0, 0);
 
         await db.SaveChangesAsync(ct);
+        logger.LogInformation(
+            "Retention deleted {Deleted} resolved and aged out {AgedOut} open device errors for tenant {Slug}",
+            expired.Count, stale.Count, tenantSlug);
         return new Sweep(expired.Count, stale.Count);
     }
 }

@@ -118,18 +118,8 @@ public sealed record DeviceErrorQuery(
         var floor = now.AddDays(-retentionDays).ToUniversalTime();
         var (zone, timezone, _) = DoorClock.ZoneOf(settings);
 
-        var (severity, severityBad) = SeverityOf(request);
-        if (severityBad) return (null, SeverityInvalid);
-
-        var code = Text(request, "code");
-        if (code is not null && !DeviceErrorCodes.IsKnown(code.ToLowerInvariant())) return (null, CodeInvalid);
-
-        var (state, stateBad) = StateOf(request);
-        if (stateBad) return (null, StateInvalid);
-
-        var deviceText = Text(request, "device");
-        if (deviceText is not null && !Guid.TryParse(deviceText, out _)) return (null, DeviceInvalid);
-        var device = deviceText is null ? (Guid?)null : Guid.Parse(deviceText);
+        var (filters, filterError) = Filters(request);
+        if (filterError is not null || filters is null) return (null, filterError);
 
         var (range, rangeError) = Range(request, zone, now, floor);
         if (rangeError is not null) return (null, rangeError);
@@ -146,10 +136,10 @@ public sealed record DeviceErrorQuery(
         if (limitBad) return (null, LimitInvalid);
 
         return (new DeviceErrorQuery(
-            Device: device,
-            Severity: severity,
-            Code: code?.ToLowerInvariant(),
-            State: state,
+            Device: filters.Device,
+            Severity: filters.Severity,
+            Code: filters.Code,
+            State: filters.State,
             From: from,
             To: to,
             Limit: Math.Clamp(limit ?? DefaultLimit, 1, MaxLimit),
@@ -159,6 +149,37 @@ public sealed record DeviceErrorQuery(
             Zone = zone,
             Timezone = timezone,
         }, null);
+    }
+
+    /// <summary>
+    /// The four things this request asks ABOUT — board, severity, code and state — and the
+    /// first one it got wrong.
+    ///
+    /// <para>
+    /// Lifted out of <see cref="Parse"/> rather than left inline with the range, because every
+    /// one of them is a closed vocabulary with its own named refusal and together they were
+    /// most of that method's branching. The split is also the honest one: these four say WHICH
+    /// faults and the range says WHEN, which are two questions a reader can hold separately.
+    /// </para>
+    ///
+    /// <para>Block body for the lizard reason in <c>memory/gotchas.md</c>.</para>
+    /// </summary>
+    private static (DeviceErrorFilters? Filters, string? Error) Filters(HttpRequest request)
+    {
+        var (severity, severityBad) = SeverityOf(request);
+        if (severityBad) return (null, SeverityInvalid);
+
+        var code = Text(request, "code")?.ToLowerInvariant();
+        if (code is not null && !DeviceErrorCodes.IsKnown(code)) return (null, CodeInvalid);
+
+        var (state, stateBad) = StateOf(request);
+        if (stateBad) return (null, StateInvalid);
+
+        var deviceText = Text(request, "device");
+        if (deviceText is null) return (new DeviceErrorFilters(null, severity, code, state), null);
+        if (!Guid.TryParse(deviceText, out var device)) return (null, DeviceInvalid);
+
+        return (new DeviceErrorFilters(device, severity, code, state), null);
     }
 
     /// <summary>
@@ -305,3 +326,14 @@ public sealed record DeviceErrorQuery(
             : (null, true);
     }
 }
+
+/// <summary>
+/// Which faults a request is asking about, once every closed vocabulary in it has been checked.
+/// Top-level and bodyless for the lizard reason recorded in <c>memory/gotchas.md</c>.
+/// </summary>
+/// <param name="Device">One board, or every board.</param>
+/// <param name="Severity">One grade, or every grade.</param>
+/// <param name="Code">One code — already lower-cased, and already proved to be one this server can write.</param>
+/// <param name="State">Open, resolved, or both. Open by default, because it is the club's actual question.</param>
+public sealed record DeviceErrorFilters(
+    Guid? Device, DeviceErrorSeverity? Severity, string? Code, DeviceErrorState State);
