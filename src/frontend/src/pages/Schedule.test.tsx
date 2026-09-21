@@ -37,6 +37,26 @@ vi.mock("../lib/scheduleGrid", async (importOriginal) => {
  * under jsdom 28 + vitest 4 here and the failure reads as a component ignoring input.
  * </p>
  */
+/**
+ * <b>Why this file buys itself more time than the 5 s default.</b>
+ *
+ * <p>
+ * Every test here passes alone in under a second; four or five of the fifty-one cross the
+ * default budget when the whole file runs, and WHICH four varies between runs — the signature
+ * of an accumulated per-test cost, not of a hang. The cost is real and it is the price of the
+ * D3-B04 fix: the grid is now a `role="grid"` of ~300 named `gridcell`s, and every
+ * `getByRole(..., {name})` in this file computes an accessible name for each of them, on a
+ * retry loop. Raising the budget is the honest answer; making the cells anonymous again to
+ * make the suite faster would be trading a member's screen reader for a test runner.
+ * </p>
+ *
+ * <p>
+ * `memory/gotchas.md` already records the sibling trap on `AdminSettings` — re-run a suspect
+ * file in ISOLATION before blaming a change for a timeout.
+ * </p>
+ */
+vi.setConfig({ testTimeout: 20_000 });
+
 describe("Schedule", () => {
   afterEach(() => {
     vi.unstubAllGlobals();

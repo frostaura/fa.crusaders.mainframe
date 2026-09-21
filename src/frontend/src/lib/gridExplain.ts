@@ -101,33 +101,40 @@ export function useGridExplainer(day: ScheduleDay | null, rules: ViewerRules): G
   return { live, announce, explain, notices, quotaPill: pill, rateLine, collapsedRows };
 }
 
-/** The one sentence a cell answers with. Never a code, never "an error occurred". */
+/**
+ * The one sentence a cell answers with. Never a code, never "an error occurred".
+ *
+ * <p>
+ * A table of builders rather than a switch, so adding a reason to D2 §4.4's closed vocabulary
+ * is one row and not one more branch through a function the complexity gate already watches.
+ * The default arm is what an UNKNOWN reason gets — a server ahead of this client says something
+ * honest rather than nothing.
+ * </p>
+ */
+type SentenceContext = { where: string; clubDay: string; rules: ViewerRules; day: ScheduleDay | null };
+
+const SENTENCE: Partial<Record<GridReason, (c: SentenceContext) => string>> = {
+  // The hours are on the day payload already (`dayStartMinute` / `dayEndMinute`, per weekday),
+  // so the sentence names them even on a server that sends no `rules` block at all. "The club
+  // is shut at that time" is the honest fallback; it is not the best answer available, and the
+  // best answer is already in the client's hands.
+  out_of_hours: (c) => `${c.where}: ${closedSentence(c.clubDay, c.rules.clubHours ?? hoursFromDay(c.day))}`,
+  no_bookable_window: (c) =>
+    emptyWindowSentence(c.rules.emptyWindow?.groups ?? c.rules.groups.map((g) => g.name), c.clubDay),
+  group_window: (c) => restrictionSentence(c.where, c.rules.groups, c.rules.allowedWindows ?? []),
+  peak_league_only: (c) => `${c.where} is reserved for league and senior members until closer to the time. `
+    + "It becomes yours to book if it is still free then.",
+  per_day_slot_cap: (c) =>
+    `${quotaBannerTitle(c.rules.maxSlotsPerDay ?? 0, c.clubDay)} ${quotaBannerBody(c.rules.maxSlotsPerDay ?? 0)}`,
+  per_day_minute_cap: (c) => `You've booked your ${c.rules.maxMinutesPerDay ?? 0} minutes of court time for that day. `
+    + "Cancel one of them, or pick another day.",
+  court_inactive: (c) => `${c.where} is not in use at the moment. The club can tell you when it is back.`,
+};
+
 function sentenceFor(reason: GridReason, where: string, day: ScheduleDay | null, rules: ViewerRules): string {
+  const build = SENTENCE[reason];
   const clubDay = rules.clubDay ?? day?.date ?? "";
-  switch (reason) {
-    case "out_of_hours":
-      // The hours are on the day payload already (`dayStartMinute` / `dayEndMinute`, per
-      // weekday), so the sentence names them even on a server that sends no `rules` block at
-      // all. "The club is shut at that time" is the honest fallback; it is not the best answer
-      // available, and the best answer is already in the client's hands.
-      return `${where}: ${closedSentence(clubDay, rules.clubHours ?? hoursFromDay(day))}`;
-    case "no_bookable_window":
-      return emptyWindowSentence(rules.emptyWindow?.groups ?? rules.groups.map((g) => g.name), clubDay);
-    case "group_window":
-      return restrictionSentence(where, rules.groups, rules.allowedWindows ?? []);
-    case "peak_league_only":
-      return `${where} is reserved for league and senior members until closer to the time. `
-        + "It becomes yours to book if it is still free then.";
-    case "per_day_slot_cap":
-      return `${quotaBannerTitle(rules.maxSlotsPerDay ?? 0, clubDay)} ${quotaBannerBody(rules.maxSlotsPerDay ?? 0)}`;
-    case "per_day_minute_cap":
-      return `You've booked your ${rules.maxMinutesPerDay ?? 0} minutes of court time for that day. `
-        + "Cancel one of them, or pick another day.";
-    case "court_inactive":
-      return `${where} is not in use at the moment. The club can tell you when it is back.`;
-    default:
-      return `${where} isn't available.`;
-  }
+  return build ? build({ where, clubDay, rules, day }) : `${where} isn't available.`;
 }
 
 /**
@@ -141,35 +148,39 @@ function sentenceFor(reason: GridReason, where: string, day: ScheduleDay | null,
  * </p>
  */
 function buildNotices(rules: ViewerRules, balanceCredits: number | null, day: ScheduleDay | null): Notice[] {
-  const out: Notice[] = [];
   const clubDay = rules.clubDay ?? day?.date ?? "";
+  return [ruleNotice(rules, clubDay), walletNotice(balanceCredits, day)]
+    .filter((n): n is Notice => n !== null);
+}
 
+/** At most one rule notice: the empty intersection outranks the cap, because it outlasts it. */
+function ruleNotice(rules: ViewerRules, clubDay: string): Notice | null {
   if (rules.emptyWindow) {
-    out.push({
-      id: "empty-window", tone: "warning",
-      title: emptyWindowSentence(rules.emptyWindow.groups, clubDay),
-    });
-  } else if (rules.remainingToday === 0 && !rules.adminExempt && (rules.maxSlotsPerDay ?? 0) > 0) {
-    out.push({
-      id: "quota", tone: "warning",
-      title: quotaBannerTitle(rules.maxSlotsPerDay ?? 0, clubDay),
-      body: quotaBannerBody(rules.maxSlotsPerDay ?? 0),
-      action: { label: "Try tomorrow", nextDay: true },
-    });
+    return { id: "empty-window", tone: "warning", title: emptyWindowSentence(rules.emptyWindow.groups, clubDay) };
   }
+  const max = rules.maxSlotsPerDay ?? 0;
+  if (rules.adminExempt || rules.remainingToday !== 0 || max <= 0) return null;
+  return {
+    id: "quota", tone: "warning",
+    title: quotaBannerTitle(max, clubDay),
+    body: quotaBannerBody(max),
+    action: { label: "Try tomorrow", nextDay: true },
+  };
+}
 
-  // D4 §2.6. A member with 0.00 credits was shown thirty-one green cells and found out in the
-  // dialog, after picking a court and a time. `null` is UNKNOWN — a wallet read that has not
-  // landed — and says nothing, because a grid that shouted "no credits" at a slow network
-  // would be wrong more often than right.
-  if (balanceCredits !== null && balanceCredits <= 0) {
-    out.push({
-      id: "wallet", tone: "warning",
-      title: emptyWalletSentence(cheapestSlice(day)),
-      action: { label: "Top up", to: "/wallet/topup" },
-    });
-  }
-  return out;
+/**
+ * D4 §2.6. A member with 0.00 credits was shown thirty-one green cells and found out in the
+ * dialog, after picking a court and a time. `null` is UNKNOWN — a wallet read that has not
+ * landed — and says nothing, because a grid that shouted "no credits" at a slow network would
+ * be wrong more often than right.
+ */
+function walletNotice(balanceCredits: number | null, day: ScheduleDay | null): Notice | null {
+  if (balanceCredits === null || balanceCredits > 0) return null;
+  return {
+    id: "wallet", tone: "warning",
+    title: emptyWalletSentence(cheapestSlice(day)),
+    action: { label: "Top up", to: "/wallet/topup" },
+  };
 }
 
 /** The club's own opening and closing for THIS weekday, as clock faces. */

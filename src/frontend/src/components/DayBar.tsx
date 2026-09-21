@@ -31,12 +31,10 @@ export function DayBar(props: {
   quota?: { text: string; atLimit: boolean } | null;
   /** "You're booking as a league member." — item 3, and only when a group price applies. */
   rateLine?: string | null;
-  /** Admin-only: whether multi-select exists at all on this grid. */
-  selectable?: boolean;
-  selecting?: boolean;
-  onToggleSelect?: () => void;
+  /** Admin-only, and null for everyone else — multi-select does not exist on a member's grid. */
+  selection?: { api: { active: boolean }; toggleMode: () => void } | null;
 }) {
-  const { date, bounds, loading, onDate, onRefresh, quota, rateLine, selectable, selecting, onToggleSelect } = props;
+  const { date, bounds, loading, onDate, onRefresh, quota, rateLine, selection } = props;
   return (
     <div className="space-y-1">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -51,9 +49,9 @@ export function DayBar(props: {
         />
         <span className="text-sm font-medium text-text-secondary">{weekdayName(date)}</span>
         <Button variant="ghost" onClick={onRefresh} disabled={loading}>{loading ? "Loading…" : "Refresh"}</Button>
-        {selectable && (
-          <Button variant="outline" onClick={onToggleSelect} aria-pressed={selecting}>
-            {selecting ? "Done" : "Select"}
+        {selection && (
+          <Button variant="outline" onClick={selection.toggleMode} aria-pressed={selection.api.active}>
+            {selection.api.active ? "Done" : "Select"}
           </Button>
         )}
         {quota && (

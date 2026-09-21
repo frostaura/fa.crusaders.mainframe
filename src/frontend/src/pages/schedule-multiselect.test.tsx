@@ -132,6 +132,65 @@ describe("entering and leaving selection mode", () => {
   });
 });
 
+describe("the keyboard path — D3 §4.7", () => {
+  beforeEach(() => { forgetClubZone(); signIn({ isAdmin: true }); });
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); forgetClubZone(); });
+
+  it("makes the grid ONE tab stop, not two hundred and forty", async () => {
+    openAsAdmin();
+    await select([/^Book Court 1 at 16:00/]);
+
+    const cells = screen.getAllByRole("gridcell");
+    const stops = cells.filter((c) => c.getAttribute("tabindex") === "0");
+    // Exactly one roving stop, and every control inside the cells is out of the tab order
+    // while the cell itself is the stop. Found by driving it: Tab from a ticked cell landed on
+    // the NEXT CELL, so reaching the action bar from the keyboard meant tabbing through every
+    // remaining slot in the day.
+    expect(stops).toHaveLength(1);
+    const inner = screen.getAllByRole("button", { name: /^Book Court/ });
+    expect(inner.every((b) => b.tabIndex === -1)).toBe(true);
+  });
+
+  it("moves the roving stop with the arrow keys, across courts and down the day", async () => {
+    openAsAdmin();
+    await select([/^Book Court 1 at 16:00/]);
+    const grid = screen.getByRole("grid");
+
+    await act(async () => { fireEvent.keyDown(grid, { key: "ArrowRight" }); });
+    expect(screen.getByRole("gridcell", { name: "Court 2 at 16:00" }).tabIndex).toBe(0);
+
+    await act(async () => { fireEvent.keyDown(grid, { key: "ArrowDown" }); });
+    expect(screen.getByRole("gridcell", { name: "Court 2 at 16:15" }).tabIndex).toBe(0);
+
+    await act(async () => { fireEvent.keyDown(grid, { key: "Home" }); });
+    expect(screen.getByRole("gridcell", { name: "Court 1 at 16:15" }).tabIndex).toBe(0);
+  });
+
+  it("will not walk off the edges of the grid", async () => {
+    openAsAdmin();
+    await select([/^Book Court 1 at 16:00/]);
+    const grid = screen.getByRole("grid");
+    await act(async () => { fireEvent.keyDown(grid, { key: "ArrowUp" }); });
+    await act(async () => { fireEvent.keyDown(grid, { key: "ArrowLeft" }); });
+    expect(screen.getByRole("gridcell", { name: "Court 1 at 16:00" }).tabIndex).toBe(0);
+  });
+
+  it("drops the choices on the first Escape and the mode on the second", async () => {
+    openAsAdmin();
+    await select([/^Book Court 1 at 16:00/, /^Book Court 1 at 16:15/]);
+    const grid = screen.getByRole("grid");
+
+    await act(async () => { fireEvent.keyDown(grid, { key: "Escape" }); });
+    // An admin who has ticked twelve cells by mistake should not also lose the mode they were
+    // working in — so the choices go first and the mode stays.
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Selected slots" })).toBeNull());
+    expect(screen.getByRole("button", { name: "Done" })).toBeInTheDocument();
+
+    await act(async () => { fireEvent.keyDown(grid, { key: "Escape" }); });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Select" })).toBeInTheDocument());
+  });
+});
+
 describe("the selection bar", () => {
   beforeEach(() => { forgetClubZone(); signIn({ isAdmin: true }); });
   afterEach(() => { vi.unstubAllGlobals(); signOut(); forgetClubZone(); });
@@ -303,7 +362,7 @@ describe("booking many — item 13", () => {
     const dialog = await screen.findByRole("dialog");
     await act(async () => { fireEvent.click(within(dialog).getByRole("radio", { name: /A written-in name/ })); });
     await act(async () => {
-      fireEvent.change(within(dialog).getByLabelText("Written-in name"), { target: { value: "Sarah from Westville" } });
+      fireEvent.change(within(dialog).getByLabelText("The name to write in"), { target: { value: "Sarah from Westville" } });
     });
     await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "Next" })); });
 

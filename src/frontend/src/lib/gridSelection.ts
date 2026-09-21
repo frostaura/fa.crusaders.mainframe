@@ -60,6 +60,17 @@ export type SelectionApi = {
    * </p>
    */
   armLongPress(key: SelectionKey): (e: React.PointerEvent) => void;
+  /**
+   * Drop the choices but stay in the mode — the first Escape.
+   *
+   * <p>
+   * Two steps rather than one, because an admin who has ticked twelve cells by mistake should
+   * not also lose the mode they were working in. D3 §4.7.
+   * </p>
+   */
+  clearAll(): void;
+  /** Leave the mode — the second Escape, and the day strip's Done. */
+  leave(): void;
 };
 
 /** The key for this cell when it can be chosen right now, else null. */
@@ -86,6 +97,8 @@ export type Selection = {
   enter(): void;
   /** Leave selection mode entirely. */
   exit(): void;
+  /** What the day strip's one button does. In here so the page carries no branch for it. */
+  toggleMode(): void;
   /** Keep the mode, drop the choices — what a date change does, and what Clear does. */
   clear(): void;
   /** Drop specific keys, for the cells a batch has just acted on. */
@@ -130,22 +143,35 @@ export function useGridSelection(enabled: boolean, onAnnounce: (text: string) =>
     }, LONG_PRESS_MS);
   }, [onAnnounce]);
 
+  const enter = useCallback(() => {
+    setActive(true);
+    onAnnounce("Selection on. Use the arrow keys to move and space to choose.");
+  }, [onAnnounce]);
+  const exit = useCallback(() => {
+    setActive(false);
+    setKeys([]);
+    onAnnounce("Selection off.");
+  }, [onAnnounce]);
+
   const api = useMemo<SelectionApi>(() => ({
     active, count: keys.length,
     isSelected: (key) => keys.includes(key),
     toggle, armLongPress,
-  }), [active, keys, toggle, armLongPress]);
+    clearAll: () => setKeys([]),
+    leave: exit,
+  }), [active, keys, toggle, armLongPress, exit]);
 
   return useMemo<Selection | null>(() => {
     if (!enabled) return null;
     return {
       api, keys,
-      enter: () => { setActive(true); onAnnounce("Selection on. Use the arrow keys to move and space to choose."); },
-      exit: () => { setActive(false); setKeys([]); onAnnounce("Selection off."); },
+      enter,
+      exit,
+      toggleMode: () => (active ? exit() : enter()),
       clear: () => setKeys([]),
       drop: (done) => setKeys((prev) => prev.filter((k) => !done.includes(k))),
     };
-  }, [enabled, api, keys, onAnnounce]);
+  }, [enabled, api, keys, active, enter, exit]);
 }
 
 /** How a selection splits: free slots get booked, booked rows get cancelled. */

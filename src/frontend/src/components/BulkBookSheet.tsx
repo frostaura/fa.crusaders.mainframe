@@ -174,7 +174,7 @@ function WhoPicker({ who, members, actorUserId, onChange }: {
       </Choice>
       <Choice checked={who.kind === "guest"} onSelect={() => onChange({ kind: "guest", name: "" })}
         title="A written-in name" hint="For a visitor or a guest. Nobody is charged and the name shows on the grid.">
-        <input className={fieldClassName} aria-label="Written-in name" maxLength={128}
+        <input className={fieldClassName} aria-label="The name to write in" maxLength={128}
           value={who.kind === "guest" ? who.name : ""}
           onChange={(e) => onChange({ kind: "guest", name: e.target.value })}
           placeholder="e.g. Sarah from Westville" />

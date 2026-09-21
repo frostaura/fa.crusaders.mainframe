@@ -18,7 +18,7 @@ import { bookButtonLabel, cancelButtonLabel } from "../lib/bulkCopy";
  * them.
  * </p>
  */
-export function BulkActionSheet({ mode, day, keys, members, actorUserId, onClose, onSettled }: {
+export type BulkActionSheetProps = {
   mode: "book" | "cancel";
   day: ScheduleDay;
   keys: SelectionKey[];
@@ -26,7 +26,10 @@ export function BulkActionSheet({ mode, day, keys, members, actorUserId, onClose
   actorUserId: string | null;
   onClose: () => void;
   onSettled: (doneKeys: SelectionKey[]) => void;
-}) {
+};
+
+export function BulkActionSheet(props: BulkActionSheetProps) {
+  const { mode, day, keys, members, actorUserId, onClose, onSettled } = props;
   const { free, booked } = splitSelection(keys);
 
   if (mode === "cancel") {

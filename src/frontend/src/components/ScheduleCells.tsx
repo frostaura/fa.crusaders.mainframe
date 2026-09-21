@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { ChevronRight, Info, Lock } from "lucide-react";
 import { Card } from "./Card";
 import type { ScheduleCourt, ScheduleDay, ScheduleSlot } from "../lib/api";
@@ -108,12 +108,60 @@ export function ScheduleBoard(props: GridProps & { onExpandEarlier: () => void; 
     box.scrollTop = Math.max(0, box.scrollTop - row.offsetHeight);
   }, [day.date, collapsedRows]);
 
+  /**
+   * <b>Roving tabindex — the grid is ONE tab stop in selection mode, not two hundred and forty.</b>
+   *
+   * <p>
+   * D3 §4.7. Found by driving it: `Tab` from a ticked cell landed on the NEXT CELL, so reaching
+   * the action bar from the keyboard meant tabbing through every remaining slot in the day. The
+   * cell itself is the stop rather than the control inside it, so a Past cell and a Closed cell
+   * are traversable too — a grid you can only walk through the bookable parts of is a grid a
+   * keyboard user cannot read.
+   * </p>
+   */
+  const [roving, setRoving] = useState({ row: 0, col: 0 });
+  const rowCount = timeSlices.length;
+  const colCount = day.courts.length;
+
+  const onGridKey = (e: React.KeyboardEvent) => {
+    const move = (dr: number, dc: number) => {
+      e.preventDefault();
+      setRoving((p) => ({
+        row: Math.min(rowCount - 1, Math.max(collapsedRows, p.row + dr)),
+        col: Math.min(colCount - 1, Math.max(0, p.col + dc)),
+      }));
+    };
+    switch (e.key) {
+      case "ArrowDown": return move(1, 0);
+      case "ArrowUp": return move(-1, 0);
+      case "ArrowRight": return move(0, 1);
+      case "ArrowLeft": return move(0, -1);
+      case "Home": e.preventDefault(); return setRoving((p) => ({ ...p, col: 0 }));
+      case "End": e.preventDefault(); return setRoving((p) => ({ ...p, col: colCount - 1 }));
+      // Space chooses; Enter is left alone so the control inside the cell keeps its own meaning.
+      case " ": {
+        e.preventDefault();
+        const cell = e.target as HTMLElement;
+        (cell.querySelector("button") as HTMLButtonElement | null)?.click();
+        return;
+      }
+      // One Escape drops the choices, a second leaves the mode — so an admin who has ticked
+      // twelve cells by mistake does not also lose the mode they are working in.
+      case "Escape":
+        e.preventDefault();
+        return ctx.selection?.count ? ctx.selection.clearAll() : ctx.selection?.leave();
+      default: return undefined;
+    }
+  };
+
   const columns = `64px repeat(${day.courts.length}, minmax(120px, 1fr))`;
+  const selecting = ctx.selection?.active ?? false;
   return (
     <Card className="p-0 overflow-hidden mb-6">
       <div ref={scroller}
         className="overflow-auto max-h-[max(280px,calc(100dvh-var(--app-chrome-height,154px)-var(--selection-bar-height,0px)-96px))]">
         <div role="grid" aria-labelledby={HEADING_ID} aria-multiselectable={ctx.selection ? true : undefined}
+          onKeyDown={selecting ? onGridKey : undefined}
           className="grid min-w-[600px]" style={{ gridTemplateColumns: columns }}>
           <HeaderRow courts={day.courts} sliceMinutes={day.sliceMinutes}
             yourRate={ctx.rules.known && ctx.rules.groups.length > 0} />
@@ -126,6 +174,7 @@ export function ScheduleBoard(props: GridProps & { onExpandEarlier: () => void; 
             ctx={ctx} slotsByCourt={props.slotsByCourt} timeSlices={timeSlices}
             pastThresholdMs={props.pastThresholdMs} peakNowMs={props.peakNowMs}
             collapsedRows={collapsedRows} firstLiveRow={firstLiveRow} startRow={collapsedRows}
+            roving={selecting ? roving : null}
           />
           {timeSlices.length === 0 && <div className="col-span-full p-6 text-sm text-text-secondary">This day has no hours to show.</div>}
         </div>
@@ -185,8 +234,9 @@ function EarlierRow({ label, span, onExpand }: { label: string; span: number; on
 
 export const ScheduleGrid = memo(function ScheduleGrid(props: GridProps & {
   firstLiveRow: React.RefObject<HTMLDivElement | null>; startRow: number;
+  roving: { row: number; col: number } | null;
 }) {
-  const { ctx, slotsByCourt, timeSlices, pastThresholdMs, peakNowMs, firstLiveRow, startRow } = props;
+  const { ctx, slotsByCourt, timeSlices, pastThresholdMs, peakNowMs, firstLiveRow, startRow, roving } = props;
   const { day } = ctx;
   // The row the scroll is seeded on: the first one that has not started. Computed once rather
   // than latched while mapping — a variable written during render is state, and React may
@@ -200,9 +250,10 @@ export const ScheduleGrid = memo(function ScheduleGrid(props: GridProps & {
         const isPast = cellStartMs <= pastThresholdMs;
         return (
           <GridRow key={t.utc} t={t} rowRef={rowIndex === firstLiveIndex ? firstLiveRow : undefined}>
-            {day.courts.map((c) => (
+            {day.courts.map((c, colIndex) => (
               <SlotCell
                 key={c.id + t.utc}
+                roving={roving ? roving.row === rowIndex && roving.col === colIndex : null}
                 ctx={ctx}
                 court={c}
                 slot={slotAt(slotsByCourt, c.id, cellStartMs, day.sliceMinutes)}
@@ -263,6 +314,8 @@ type SlotCellProps = {
   isHead: (slot: ScheduleSlot) => boolean;
   startsAtUtc: string;
   facts: { minuteOfDay: number; sliceMinutes: number; isPast: boolean; outOfHours: boolean; peakRestricted: boolean };
+  /** True on the one cell that is the grid's tab stop; null outside selection mode. */
+  roving?: boolean | null;
 };
 
 export function SlotCell(props: SlotCellProps) {
@@ -271,7 +324,7 @@ export function SlotCell(props: SlotCellProps) {
   // Only the booking's first cell carries its name and controls. Every later cell of the same
   // booking is a continuation — which is what makes a 60-minute booking read as one block
   // rather than four identical buttons, and stops a member being offered "cancel" four times.
-  if (!isHead(slot)) return <ContinuationCell slot={slot} where={where} />;
+  if (!isHead(slot)) return <ContinuationCell slot={slot} where={where} roving={props.roving} />;
   if (slot.status === "adminblock") return <HoldCell {...props} slot={slot} />;
   if (slot.isMine) return <MyCell {...props} slot={slot} />;
   return <OtherCell {...props} slot={slot} ctx={ctx} />;
@@ -296,13 +349,31 @@ export function SlotCell(props: SlotCellProps) {
  * sentence twice. So the cell says where it is and the control says what it does.
  * </p>
  */
-function Cell({ label, selectKey, selection, children }: {
-  label: string; selectKey?: string | null; selection?: SelectionApi | null; children: React.ReactNode;
+function Cell({ label, selectKey, selection, roving, children }: {
+  label: string; selectKey?: string | null; selection?: SelectionApi | null;
+  /** Roving tabindex: `true` on the ONE cell that is the grid's tab stop. Null outside selection mode. */
+  roving?: boolean | null;
+  children: React.ReactNode;
 }) {
   const selected = selectKey && selection ? selection.isSelected(selectKey) : undefined;
+  const ref = useRef<HTMLDivElement>(null);
+  // Focus follows the roving index rather than the pointer, which is what makes the arrow keys
+  // move a visible caret rather than silently changing a number.
+  useEffect(() => { if (roving && document.activeElement !== ref.current) ref.current?.focus(); }, [roving]);
+  // And while the CELL is the tab stop, whatever is inside it must not be one as well —
+  // otherwise the grid is 240 tab stops plus a roving index, which is worse than either. Done
+  // here rather than by threading a `tabIndex` prop through six cell variants, so a seventh
+  // variant cannot forget it. `roving == null` is "not in selection mode", where the controls
+  // keep their ordinary place in the tab order.
+  useEffect(() => {
+    const inner = ref.current?.querySelectorAll<HTMLElement>("button,a[href],input,select,textarea");
+    inner?.forEach((el) => { el.tabIndex = roving == null ? 0 : -1; });
+  }, [roving, children]);
   return (
-    <div role="gridcell" aria-label={label} aria-selected={selection && selectKey ? Boolean(selected) : undefined}
-      className={cn("relative", selected && "ring-2 ring-inset ring-accent-strong rounded-md")}>
+    <div ref={ref} role="gridcell" aria-label={label} tabIndex={roving == null ? undefined : (roving ? 0 : -1)}
+      aria-selected={selection && selectKey ? Boolean(selected) : undefined}
+      className={cn("relative outline-none", selected && "ring-2 ring-inset ring-accent-strong rounded-md",
+        roving && "ring-2 ring-offset-1 ring-accent-strong rounded-md")}>
       {children}
       {selected && (
         <span aria-hidden="true"
@@ -322,13 +393,13 @@ function EmptyCell(props: SlotCellProps) {
   const armKey = pressableAs(ctx.selection, target, verdict.bookable);
 
   if (verdict.reason === "past_time") {
-    return <Cell label={pastCellLabel(where)}>{inert("bg-bg-muted/60 border border-border uppercase tracking-wide font-medium", CELL_WORD.past)}</Cell>;
+    return <Cell label={pastCellLabel(where)} roving={props.roving}>{inert("bg-bg-muted/60 border border-border uppercase tracking-wide font-medium", CELL_WORD.past)}</Cell>;
   }
   if (verdict.reason !== null) {
-    return <Cell label={where}><UnavailableCell reason={verdict.reason} where={where} ctx={ctx} /></Cell>;
+    return <Cell label={where} roving={props.roving}><UnavailableCell reason={verdict.reason} where={where} ctx={ctx} /></Cell>;
   }
   if (court.isActive === false) {
-    return <Cell label={`${where} — this court is not in use`}>{inert("bg-bg-muted/40 border border-dashed border-border", "Not in use")}</Cell>;
+    return <Cell label={`${where} — this court is not in use`} roving={props.roving}>{inert("bg-bg-muted/40 border border-dashed border-border", "Not in use")}</Cell>;
   }
 
   // The parameter used to be called priceZar and rendered with a rand sign. The name was the
@@ -336,7 +407,7 @@ function EmptyCell(props: SlotCellProps) {
   // at well under half what it costs.
   const price = formatCredits(court.slicePriceCredits);
   return (
-    <Cell label={where} selectKey={selectKey} selection={ctx.selection}>
+    <Cell label={where} selectKey={selectKey} selection={ctx.selection} roving={props.roving}>
       <button
         type="button"
         onClick={() => (selectKey ? ctx.selection?.toggle(selectKey) : ctx.onBook(court, startsAtUtc))}
@@ -420,7 +491,7 @@ function HoldCell(props: SlotCellProps & { slot: ScheduleSlot }) {
   const shell = "m-0.5 h-12 rounded-md border border-transparent bg-bg-muted bg-[repeating-linear-gradient(45deg,_rgba(0,0,0,0.04)_0,_rgba(0,0,0,0.04)_4px,_transparent_4px,_transparent_8px)] flex items-center justify-center gap-1 text-xs text-text-secondary px-1";
   if (selectKey) {
     return (
-      <Cell label={where} selectKey={selectKey} selection={ctx.selection}>
+      <Cell label={where} selectKey={selectKey} selection={ctx.selection} roving={props.roving}>
         <button type="button" className={cn(shell, "w-full")} aria-label={holdCellLabel(where, slot.blockLabel)}
           onClick={() => ctx.selection?.toggle(selectKey)}>{body}</button>
       </Cell>
@@ -431,7 +502,7 @@ function HoldCell(props: SlotCellProps & { slot: ScheduleSlot }) {
   // cell answering to two labels.
   const liftable = ctx.isAdmin && slot.bookingId && !facts.isPast;
   return (
-    <Cell label={holdCellLabel(where, slot.blockLabel)}>
+    <Cell label={holdCellLabel(where, slot.blockLabel)} roving={props.roving}>
       <div className={shell}>
         {body}
         {liftable && (
@@ -450,10 +521,10 @@ function HoldCell(props: SlotCellProps & { slot: ScheduleSlot }) {
 }
 
 /** A later cell of a booking that started earlier. Reserved, and visibly the same booking. */
-function ContinuationCell({ slot, where }: { slot: ScheduleSlot; where: string }) {
+function ContinuationCell({ slot, where, roving }: { slot: ScheduleSlot; where: string; roving?: boolean | null }) {
   const tone = slot.isMine ? "bg-info-soft/60 text-info-strong" : "bg-bg-muted text-text-secondary";
   return (
-    <Cell label={slot.isMine ? `${where} — continues, your booking` : `${where} — continues, reserved`}>
+    <Cell label={slot.isMine ? `${where} — continues, your booking` : `${where} — continues, reserved`} roving={roving}>
       {/* `border border-transparent`, the house rule from `index.css`'s forced-colors block and
           from `BUTTON_VARIANT_CLASS.ghost`: under `forced-colors: active` every author
           background is thrown away, so a cell whose only boundary is its fill becomes bare text
@@ -477,7 +548,7 @@ function MyCell(props: SlotCellProps & { slot: ScheduleSlot }) {
   const armKey = pressableAs(ctx.selection, target, pickable);
   if (facts.isPast || !slot.bookingId) {
     return (
-      <Cell label={slot.checkedIn ? `${where} — your past booking, attended` : `${where} — your past booking`}>
+      <Cell label={slot.checkedIn ? `${where} — your past booking, attended` : `${where} — your past booking`} roving={props.roving}>
         <div className="m-0.5 h-12 rounded-md bg-info-soft/60 text-info-strong border border-info-soft flex items-center justify-center text-xs font-medium text-center px-1">
           {slot.checkedIn ? "Mine · played" : "Mine · past"}
         </div>
@@ -486,7 +557,7 @@ function MyCell(props: SlotCellProps & { slot: ScheduleSlot }) {
   }
   const mineLabel = slot.checkedIn ? `Cancel your booking on ${where} — checked in` : `Cancel your booking on ${where}`;
   return (
-    <Cell label={where} selectKey={selectKey} selection={ctx.selection}>
+    <Cell label={where} selectKey={selectKey} selection={ctx.selection} roving={props.roving}>
       <button
         type="button"
         onClick={() => (selectKey ? ctx.selection?.toggle(selectKey) : ctx.onCancel(slot, court.name))}
@@ -533,7 +604,7 @@ function OtherCell(props: SlotCellProps & { slot: ScheduleSlot }) {
   const otherLabel = `${slot.ownerFirstName ?? "Reserved"} — cancel on their behalf, ${where}`;
   if (ctx.isAdmin && slot.bookingId && !facts.isPast) {
     return (
-      <Cell label={where} selectKey={selectKey} selection={ctx.selection}>
+      <Cell label={where} selectKey={selectKey} selection={ctx.selection} roving={props.roving}>
         <button
           type="button"
           onClick={() => (selectKey ? ctx.selection?.toggle(selectKey) : ctx.onCancel(slot, court.name))}
@@ -547,7 +618,7 @@ function OtherCell(props: SlotCellProps & { slot: ScheduleSlot }) {
     );
   }
   return (
-    <Cell label={`${where} — booked by ${slot.ownerFirstName ?? "another member"}`}>
+    <Cell label={`${where} — booked by ${slot.ownerFirstName ?? "another member"}`} roving={props.roving}>
       <div className={cn(shell, "overflow-visible")} aria-hidden="true">{body}</div>
     </Cell>
   );

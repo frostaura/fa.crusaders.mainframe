@@ -5,9 +5,6 @@ import { DayBar } from "../components/DayBar";
 import { useToast } from "../components/Toast";
 import { useAuth } from "../lib/auth";
 import { useBalance } from "../lib/balance";
-import { formatCredits } from "../lib/utils";
-import { ADMIN_SELF_SHORT_TEXT, describeBookingError, MEMBER_SHORT_TEXT, provesStaleGrid } from "../lib/bookingErrors";
-import { ApiError } from "../lib/api";
 import { BookingConfirmModal, type AdminOption, type BookingIntent, type BookingOutcome } from "../components/BookingConfirmModal";
 import { CancelBookingModal } from "../components/CancelBookingModal";
 import { ScheduleBoard, ScheduleGridHeading } from "../components/ScheduleCells";
@@ -15,30 +12,101 @@ import { ScheduleNotices } from "../components/ScheduleNotices";
 import { SelectionBar } from "../components/SelectionBar";
 import { BulkActionSheet } from "../components/BulkActionSheet";
 import { useSlotEnders, type CancelTarget } from "../lib/scheduleEnd";
-import { buildTimeSlices, groupSlotsByCourt } from "../lib/scheduleGrid";
+import { useBookingConfirm } from "../lib/scheduleBook";
+import { useScheduleDay } from "../lib/scheduleDay";
 import { clubDayAndClock } from "../lib/clubClock";
-import { clubDayOf, gridNow, shiftClubDay } from "../lib/gridClock";
-import { readViewerRules } from "../lib/gridRules";
-import { useTicker } from "../lib/useTicker";
-import { useGridSelection } from "../lib/gridSelection";
+import { useGridSelection, type Selection } from "../lib/gridSelection";
 import { useGridExplainer } from "../lib/gridExplain";
-import { describeFailure } from "../lib/errors";
+
+/**
+ * The selection bar and whichever bulk sheet it opened — items 5 and 13.
+ *
+ * <p>
+ * <b>The bar appears while anything IS selected, never merely because the mode is on.</b> An
+ * action strip reading "0 slots selected" with two dead buttons on it is furniture, and it
+ * costs the last row of the grid the padding it reserves.
+ * </p>
+ *
+ * <p>
+ * Out of the page body for the same reason as the dialogs below it: each is a conditional, and
+ * the page has none to spare against the complexity gate.
+ * </p>
+ */
+function ScheduleBulk(props: {
+  selection: Selection | null;
+  day: ScheduleDay | null;
+  slotsByCourt: Map<string, ScheduleSlot[]>;
+  bulk: "book" | "cancel" | null;
+  setBulk: (m: "book" | "cancel" | null) => void;
+  members: MemberOption[];
+  actorUserId: string | null;
+  onSettled: (doneKeys: string[]) => void;
+}) {
+  const { selection, day, slotsByCourt, bulk, setBulk } = props;
+  return (
+    <>
+      {selection && selection.keys.length > 0 && (
+        <SelectionBar
+          keys={selection.keys} day={day} slotsByCourt={slotsByCourt}
+          onClear={selection.clear} onBook={() => setBulk("book")} onCancel={() => setBulk("cancel")}
+        />
+      )}
+      {bulk && day && (
+        <BulkActionSheet
+          mode={bulk} day={day} keys={selection?.keys ?? []} members={props.members}
+          actorUserId={props.actorUserId}
+          onClose={() => setBulk(null)}
+          onSettled={props.onSettled}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * The two dialogs, mounted together.
+ *
+ * <p>
+ * Out of the page body because each of them is a conditional branch, and a page that already
+ * carries the day's state machine, a bulk sheet and a selection bar has no branches to spare
+ * against the complexity gate. Nothing here holds state; both are driven entirely by the
+ * page's.
+ * </p>
+ */
+function ScheduleDialogs(props: {
+  booking: BookingIntent | null;
+  cancelling: CancelTarget | null;
+  balanceCredits: number | null;
+  members: MemberOption[];
+  isAdmin: boolean;
+  onCloseBooking: () => void;
+  onConfirmBooking: (option: AdminOption) => Promise<BookingOutcome>;
+  onCloseCancel: () => void;
+  onConfirmCancel: (waivePenalty: boolean, waiveReason: string) => Promise<void>;
+}) {
+  const { booking, cancelling, balanceCredits, members, isAdmin } = props;
+  return (
+    <>
+      {booking && (
+        <BookingConfirmModal
+          intent={booking} balanceCredits={balanceCredits} members={members} isAdmin={isAdmin}
+          onCancel={props.onCloseBooking} onConfirm={props.onConfirmBooking}
+        />
+      )}
+      {cancelling && (
+        <CancelBookingModal
+          bookingId={cancelling.bookingId} courtName={cancelling.courtName}
+          whenLabel={cancelling.whenLabel} memberName={cancelling.memberName}
+          asAdmin={isAdmin && !cancelling.mine}
+          onClose={props.onCloseCancel} onConfirm={props.onConfirmCancel}
+        />
+      )}
+    </>
+  );
+}
 
 /** A member the desk can book for, with the credit the club last read for them. */
 export type MemberOption = { userId: string; name: string; balanceCredits: number | null };
-
-/**
- * How often the grid re-reads the clock.
- *
- * <p>
- * <b>D3-B02.</b> "Now" used to be stamped once, at load, and every cell compared against that
- * stamp for the life of the tab — so a console left open on the club desk went on offering, and
- * charging for, slots that had already started. Ten seconds is the resolution; what it costs is
- * bounded by `gridNow`, which turns the tick into thresholds that move in slice and minute
- * steps, so the memoised grid still repaints at most once a minute.
- * </p>
- */
-const GRID_TICK_MS = 10_000;
 
 export default function SchedulePage() {
   const auth = useAuth();
@@ -50,72 +118,19 @@ export default function SchedulePage() {
   // person, so the screen has to know which row in that list is the actor's own.
   const actorUserId = auth.status === "authenticated" ? auth.userId : null;
 
-  // D3-B03: the CLUB's day, not the browser's. `clubDayOf` falls back to the reader's clock
-  // only while nobody has told us a zone — and the server's own answer overrides it below,
-  // which is what makes a cold start right as well as a returning visit.
-  const [date, setDate] = useState(() => clubDayOf(Date.now(), undefined));
-  const [day, setDay] = useState<ScheduleDay | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  // The day, the clock against it and the two bugs that lived in both — in `lib/scheduleDay`,
+  // because this page already carries two modals, a bulk sheet, four mutations and an
+  // optimistic grid, and the complexity gate is what stops that growing unnoticed.
+  const {
+    date, setDate, nextDay, day, setDay, rules, error, loading, refresh, reconcile,
+    slotsByCourt, timeSlices, pastThresholdMs, peakNowMs, bounds,
+  } = useScheduleDay(isAdmin);
+
   const [booking, setBooking] = useState<BookingIntent | null>(null);
   const [cancelling, setCancelling] = useState<CancelTarget | null>(null);
   const [members, setMembers] = useState<MemberOption[]>([]);
   const [bulk, setBulk] = useState<"book" | "cancel" | null>(null);
   const [showEarlier, setShowEarlier] = useState(false);
-
-  /**
-   * The club day the grid is actually holding.
-   *
-   * <p>
-   * <b>The SERVER's club day wins, and adopting it must not refetch.</b> D2-B33 defaults
-   * `/schedule`'s date from the club day rather than from a UTC marker, and `clubDayOf` above
-   * can only guess until the club has told this browser its zone — which on a cold start it has
-   * not. So when the day that comes back is not the day that was asked for, the picker adopts
-   * it. This ref is what stops that adoption looking like a date change and firing a second
-   * day-sized read, which on a phone grid is the difference between a screen that settles and
-   * one that flickers.
-   * </p>
-   */
-  const loadedDate = useRef<string | null>(null);
-
-  const load = useCallback(async (which: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const fresh = await endpoints.schedule(which);
-      loadedDate.current = fresh.date;
-      setDay(fresh);
-      if (fresh.date !== which) setDate(fresh.date);
-    }
-    // Was a bare `catch` mapping EVERY failure to "Check your connection and press Refresh."
-    // — so a missing tenant row, a 500 and an expired session all told the member their
-    // network was down, and Refresh was the one thing that could not help.
-    catch (err) { setError(describeFailure(err, { action: "load the schedule" })); }
-    finally { setLoading(false); }
-  }, []);
-
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader; sync loading flag is the house idiom
-  useEffect(() => { if (loadedDate.current !== date) void load(date); }, [date, load]);
-
-  // Reconcile in the BACKGROUND after a write.
-  //
-  // The page used to await a full-day refetch (and a wallet read) before the member saw
-  // anything change, so the cost of a booking was the POST plus two more round trips plus a
-  // rebuild of every cell — with the member staring at a grid that still said the slot was
-  // free. The write's own response says what happened, so the grid is patched from it
-  // immediately and the authoritative read follows behind without being waited on.
-  //
-  // Silent on failure, deliberately, and this is the one place that is right: the write
-  // SUCCEEDED. Telling a member who has just booked and been charged that the schedule could
-  // not be loaded would be alarming and untrue.
-  //
-  // Returned, not fire-and-forget: a refusal that proves the grid is stale (L-F2) refetches and
-  // AWAITS this before its sentence is shown.
-  const reconcile = useCallback(() => {
-    return endpoints.schedule(date)
-      .then((fresh) => { loadedDate.current = fresh.date; setDay(fresh); })
-      .catch(() => { /* the optimistic view stands until something asks for the day again */ });
-  }, [date]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -129,27 +144,6 @@ export default function SchedulePage() {
   const refreshMembers = useCallback(() => {
     void fetchMembers().then((rows) => { if (rows) setMembers(rows); });
   }, []);
-
-  const slotsByCourt = useMemo(() => groupSlotsByCourt(day), [day]);
-  const timeSlices = useMemo(() => (day ? buildTimeSlices(day) : []), [day]);
-  const rules = useMemo(() => readViewerRules(day), [day]);
-
-  const tick = useTicker(true, GRID_TICK_MS);
-  const rowStarts = useMemo(() => timeSlices.map((t) => Date.parse(t.utc)), [timeSlices]);
-  const { pastThresholdMs, peakNowMs } = useMemo(() => gridNow(rowStarts, tick), [rowStarts, tick]);
-
-  const dateBounds = useMemo(() => {
-    const span = day?.advanceBookingDays ?? 14;
-    // §5 "Date picker lets the player navigate ±N days". `min` was pinned to today for
-    // everyone but an admin, so a member could only ever move forward — and with no bookings
-    // list anywhere else in the product, there was no way to look at a booking they had
-    // already played. Past days are read-only: every slot on them renders as Past.
-    const today = clubDayOf(tick, day?.timezone);
-    return {
-      min: isAdmin ? undefined : shiftClubDay(today, -span),
-      max: isAdmin ? undefined : shiftClubDay(today, span),
-    };
-  }, [isAdmin, day?.advanceBookingDays, day?.timezone, tick]);
 
   // Keyed on the DAY'S SHAPE, not on `day` — so these keep their identity while the page's
   // modal state moves, and change only when a new schedule arrives. That is what makes the
@@ -188,27 +182,10 @@ export default function SchedulePage() {
     if (selection?.keys.length) { selection.clear(); explainer.announce("Selection cleared — you changed day."); }
   }, [date, selection, explainer]);
 
-  const confirmBooking = async (option: AdminOption): Promise<BookingOutcome> => {
-    if (!booking) return { kind: "done" };
-    try {
-      const memberBalanceAfter = await placeBooking(
-        booking, option, (slot) => setDay((d) => withSlot(d, slot)), applyBalance);
-      toast.push({ tone: "success", text: bookedMessage(booking, option, memberBalanceAfter, nameOf(members, option)) });
-      setBooking(null);
-      reconcile();
-      if (option.kind === "member") refreshMembers();
-      return { kind: "done" };
-    } catch (err) {
-      // A member who cannot cover the court is not an error to report and dismiss — it is §8's
-      // decision, and it goes back to the modal so the admin can take it with the figures in
-      // front of them.
-      const short = shortfallFrom(err, option, actorUserId);
-      if (short) return short;
-      // The server has just told us this day is not what we are showing.
-      if (provesStaleGrid(err)) await reconcile();
-      return { kind: "refused", message: refusalText(err, option, actorUserId) };
-    }
-  };
+  const confirmBooking = useBookingConfirm({
+    booking, setBooking, setDay, reconcile, refreshMembers, applyBalance, toast,
+    members, actorUserId,
+  });
 
   // Cancelling a booking and lifting an admin block, both of which end a slot: same optimistic
   // removal, same reconcile, same failure copy. In their own hook because this page was over
@@ -238,19 +215,17 @@ export default function SchedulePage() {
       <h1 className="text-xl font-semibold">Bookings</h1>
 
       <DayBar
-        date={date} bounds={dateBounds} loading={loading} timezone={day?.timezone}
-        onDate={setDate} onRefresh={() => void load(date)}
+        date={date} bounds={bounds} loading={loading} timezone={day?.timezone}
+        onDate={setDate} onRefresh={refresh}
         quota={explainer.quotaPill}
         rateLine={explainer.rateLine}
-        selectable={Boolean(selection)}
-        selecting={selection?.api.active ?? false}
-        onToggleSelect={() => (selection?.api.active ? selection.exit() : selection?.enter())}
+        selection={selection}
       />
 
       {error && <Card><p className="text-sm text-danger-strong">{error}</p></Card>}
 
       <ScheduleNotices notices={explainer.notices(balance, day)} live={explainer.live}
-        onNextDay={() => setDate(shiftClubDay(date, 1))} />
+        onNextDay={nextDay} />
 
       {day && <ScheduleGridHeading />}
 
@@ -267,39 +242,18 @@ export default function SchedulePage() {
         />
       )}
 
-      {/* The bar appears while anything IS selected, never merely because the mode is on. An
-          action strip reading "0 slots selected" with two dead buttons on it is furniture, and
-          it costs the last row of the grid the padding it reserves. */}
-      {selection && selection.keys.length > 0 && (
-        <SelectionBar
-          keys={selection.keys} day={day} slotsByCourt={slotsByCourt}
-          onClear={selection.clear} onBook={() => setBulk("book")} onCancel={() => setBulk("cancel")}
-        />
-      )}
+      <ScheduleBulk
+        selection={selection} day={day} slotsByCourt={slotsByCourt} bulk={bulk} setBulk={setBulk}
+        members={members} actorUserId={actorUserId}
+        onSettled={(done) => { selection?.drop(done); void reconcile(); void refreshBalance(); refreshMembers(); }}
+      />
 
-      {bulk && day && (
-        <BulkActionSheet
-          mode={bulk} day={day} keys={selection?.keys ?? []} members={members} actorUserId={actorUserId}
-          onClose={() => setBulk(null)}
-          onSettled={(done) => { selection?.drop(done); void reconcile(); void refreshBalance(); refreshMembers(); }}
-        />
-      )}
-
-      {booking && (
-        <BookingConfirmModal
-          intent={booking} balanceCredits={balance} members={members} isAdmin={isAdmin}
-          onCancel={() => setBooking(null)} onConfirm={confirmBooking}
-        />
-      )}
-
-      {cancelling && (
-        <CancelBookingModal
-          bookingId={cancelling.bookingId} courtName={cancelling.courtName}
-          whenLabel={cancelling.whenLabel} memberName={cancelling.memberName}
-          asAdmin={isAdmin && !cancelling.mine}
-          onClose={() => setCancelling(null)} onConfirm={confirmCancel}
-        />
-      )}
+      <ScheduleDialogs
+        booking={booking} cancelling={cancelling}
+        balanceCredits={balance} members={members} isAdmin={isAdmin}
+        onCloseBooking={() => setBooking(null)} onConfirmBooking={confirmBooking}
+        onCloseCancel={() => setCancelling(null)} onConfirmCancel={confirmCancel}
+      />
     </div>
   );
 }
@@ -325,112 +279,3 @@ async function fetchMembers(): Promise<MemberOption[] | null> {
   } catch { return null; }
 }
 
-/**
- * Place the booking and hand back the slot it created, so the grid can show it before the
- * confirming read comes back. The balance comes from the same response — the wallet GET that
- * used to follow every booking was asking a question the POST had answered.
- */
-async function placeBooking(
-  intent: BookingIntent, option: AdminOption,
-  addSlot: (slot: ScheduleSlot) => void, applyBalance: (credits: number) => void,
-): Promise<number | null> {
-  const base = {
-    courtId: intent.courtId, courtNumber: 0,
-    startsAtUtc: intent.startsAtUtc,
-    endsAtUtc: new Date(Date.parse(intent.startsAtUtc) + intent.sliceMinutes * 60_000).toISOString(),
-    ownerPhotoUrl: null, checkedIn: false,
-  };
-  if (option.kind === "block") {
-    const r = await endpoints.adminBlock(intent.courtId, intent.startsAtUtc, 1, option.label);
-    addSlot({
-      ...base, status: "adminblock", ownerUserId: null, ownerFirstName: null,
-      isMine: false, bookingId: r.booking_id, blockLabel: option.label, amountChargedCredits: null,
-    });
-    return null;
-  }
-  if (option.kind === "member") {
-    const r = await endpoints.adminBook(
-      intent.courtId, option.userId, intent.startsAtUtc, 1, option.allowNegativeBalance ?? false);
-    addSlot({
-      ...base, status: "booked", ownerUserId: option.userId, ownerFirstName: null,
-      isMine: false, bookingId: r.booking_id, blockLabel: null, amountChargedCredits: intent.priceCredits,
-    });
-    // The MEMBER's balance, and deliberately not handed to applyBalance: the admin's own wallet
-    // did not move, and overwriting it with somebody else's figure is the same wrong-wallet
-    // mistake in the other direction.
-    return r.balance_after_credits;
-  }
-  const r = await endpoints.book(intent.courtId, intent.startsAtUtc, 1);
-  addSlot({
-    ...base, status: "booked", ownerUserId: null, ownerFirstName: null,
-    isMine: true, bookingId: r.booking_id, blockLabel: null, amountChargedCredits: intent.priceCredits,
-  });
-  applyBalance(r.balance_after_credits);
-  return null;
-}
-
-/**
- * §8's override opportunity: an on-behalf booking the MEMBER cannot cover.
- *
- * <p>
- * Narrow on purpose. It fires only on the first attempt of a member-mode booking — an override
- * that is itself refused must not offer another override — and only when the server sent both
- * figures, because the whole value of the offer is that it states what the overdraft costs.
- * </p>
- */
-function shortfallFrom(err: unknown, option: AdminOption, actorUserId: string | null): BookingOutcome | null {
-  if (option.kind !== "member" || option.allowNegativeBalance) return null;
-  // An admin who picked THEMSELVES out of the member list. The server's override is
-  // `payer.AllowNegativeBalance && actorId != userId`, so this one cannot be granted — an actor
-  // authorising their own overdraft is an unlimited credit line, not an override.
-  if (option.userId === actorUserId) return null;
-  if (!(err instanceof ApiError) || err.code !== "insufficient_balance") return null;
-  const current = err.detail("current_credits");
-  const required = err.detail("required_credits");
-  if (typeof current !== "number" || typeof required !== "number") return null;
-  return { kind: "short", currentCredits: current, requiredCredits: required };
-}
-
-/**
- * The refusal sentence, addressed to the wallet that is actually short.
- *
- * <p>
- * `insufficient_balance` reaches this screen for two different people. A member is told to top
- * up, which is what they can do about it. An admin booking on somebody else's behalf was told
- * to top up their own wallet — a desk account with a permanent balance of zero.
- * </p>
- */
-function refusalText(err: unknown, option: AdminOption, actorUserId: string | null): string {
-  const fallback = "Couldn't make that booking. Refresh the schedule and try again.";
-  if (option.kind === "member" && err instanceof ApiError && err.code === "insufficient_balance") {
-    return option.userId === actorUserId ? ADMIN_SELF_SHORT_TEXT : MEMBER_SHORT_TEXT;
-  }
-  return describeBookingError(err, fallback);
-}
-
-/** The name the desk picked from the dropdown, for the sentence that confirms what it did. */
-function nameOf(members: MemberOption[], option: AdminOption): string {
-  if (option.kind !== "member") return "";
-  return members.find((m) => m.userId === option.userId)?.name ?? "that member";
-}
-
-function bookedMessage(
-  intent: BookingIntent, option: AdminOption, memberBalanceAfter: number | null, memberName: string,
-): string {
-  if (option.kind === "block") return `${intent.courtName} held for "${option.label}" at ${intent.whenLabel}.`;
-  if (option.kind === "member") {
-    // Naming the resulting balance is the point of the override being deliberate: the admin who
-    // has just put somebody in the red is told by how much, at the moment they did it.
-    const owing = memberBalanceAfter !== null && memberBalanceAfter < 0
-      ? ` ${memberName}'s balance is now ${formatCredits(memberBalanceAfter)} — they've been emailed about it.`
-      : "";
-    // Named, not "that member". The desk has just picked a name from a dropdown and spent that
-    // person's credit; repeating the name back is the one check that catches a mis-click.
-    return `Booked ${intent.courtName} at ${intent.whenLabel} for ${memberName}.${owing}`;
-  }
-  return `Booked ${intent.courtName} at ${intent.whenLabel}.`;
-}
-
-function withSlot(day: ScheduleDay | null, slot: ScheduleSlot): ScheduleDay | null {
-  return day ? { ...day, slots: [...day.slots, slot] } : day;
-}
