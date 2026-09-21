@@ -2195,6 +2195,136 @@ void test_a_badarg_with_no_ext_remembered_is_not_a_release() {
                    bridgelogic::ReceiveErrorAction::None);
 }
 
+// ---------------------------------------------------------------------------
+// B7 — the JSON-read audit the court box had never had
+// ---------------------------------------------------------------------------
+//
+// Round G4's B2 found `onGateResponse` reading `opened` — the one field that
+// drives a lock — with the FLAT any-depth scanner, so `{"outer":{"opened":true}}`
+// released the lock, and so did `{"opened":false,"detail":{"opened":true}}`:
+// `findKey` returns the FIRST match in document order, and a decoy placed
+// before the real field wins outright.
+//
+// The court box's activate and walk-up readers had the same shape and had never
+// been audited. Every field below is ACTED ON — it lights a relay, decides how
+// long for, decides which relay, or decides whether an unknown barcode gets
+// thirty seconds of button control — so every one is scoped to the outermost
+// object. What is deliberately NOT narrowed is stated at the end.
+//
+// The bodies are the server's, so this is not a hypothetical: `reason` is a
+// free-form string the API chooses, a roster token is a member's own barcode,
+// and a nested object is one field away at any time.
+
+void test_activate_reads_every_field_it_acts_on_from_the_top_level() {
+  const bridgelogic::ScanFlow flow;
+
+  // `activated` — the field that lights a court. A decoy BEFORE the real one
+  // is the case findKey loses outright.
+  const char decoyFirst[] = "{\"detail\":{\"activated\":true},\"activated\":false,\"reason\":\"no_booking\"}";
+  bridgelogic::ActivationResult r =
+      flow.onActivateResponse(200U, decoyFirst, len(decoyFirst), kCourts, kCourtCount);
+  TEST_ASSERT_FALSE(r.fallbackToRoster);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::Refuse);
+
+  const char decoyAfter[] = "{\"activated\":false,\"reason\":\"no_booking\",\"detail\":{\"activated\":true}}";
+  r = flow.onActivateResponse(200U, decoyAfter, len(decoyAfter), kCourts, kCourtCount);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::Refuse);
+
+  // An ARRAY is not an object with members, so nothing in it is a top-level
+  // field. `[{"activated":true}]` used to light a court.
+  const char array[] = "[{\"activated\":true,\"granted_seconds\":2700,\"court_number\":7}]";
+  r = flow.onActivateResponse(200U, array, len(array), kCourts, kCourtCount);
+  TEST_ASSERT_TRUE(r.fallbackToRoster);
+
+  // `granted_seconds` — HOW LONG the court is lit, and the money the club is
+  // paid for. A nested 5400 in front of a real 0 is ninety minutes given away.
+  const char seconds[] = "{\"activated\":true,\"court_number\":7,"
+                         "\"detail\":{\"granted_seconds\":5400},\"granted_seconds\":0}";
+  r = flow.onActivateResponse(200U, seconds, len(seconds), kCourts, kCourtCount);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::Refuse);
+  TEST_ASSERT_EQUAL_UINT32(0U, r.outcome.durationMs);
+  TEST_ASSERT_FALSE(r.fallbackToRoster);
+
+  // `court_number` — WHICH relay. A nested 7 in front of a real 99 lights court
+  // A for a booking on a court this box does not drive.
+  const char number[] = "{\"activated\":true,\"granted_seconds\":600,"
+                        "\"detail\":{\"court_number\":7},\"court_number\":99}";
+  r = flow.onActivateResponse(200U, number, len(number), kCourts, kCourtCount);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::Refuse);
+  TEST_ASSERT_FALSE(r.fallbackToRoster);
+
+  // `reason` — which decides `recognised`, which is the only thing that arms
+  // the Mega's button window. A nested "insufficient_balance" in front of a
+  // real "not_recognised" is thirty seconds of relay control for a barcode the
+  // API said it did not know.
+  const char reason[] = "{\"activated\":false,\"detail\":{\"reason\":\"insufficient_balance\"},"
+                        "\"reason\":\"not_recognised\"}";
+  r = flow.onActivateResponse(200U, reason, len(reason), kCourts, kCourtCount);
+  TEST_ASSERT_FALSE(r.outcome.recognised);
+
+  // A truncated body yields no top-level field at all, which is a fallback
+  // rather than a guess.
+  const char cut[] = "{\"activated\":true,\"granted_seconds\":27";
+  TEST_ASSERT_TRUE(flow.onActivateResponse(200U, cut, len(cut), kCourts, kCourtCount).fallbackToRoster);
+
+  // A field of the wrong JSON type is absent, not coerced.
+  const char quoted[] = "{\"activated\":\"true\"}";
+  TEST_ASSERT_TRUE(
+      flow.onActivateResponse(200U, quoted, len(quoted), kCourts, kCourtCount).fallbackToRoster);
+}
+
+void test_walkup_reads_every_field_it_acts_on_from_the_top_level() {
+  // `granted_minutes` — how long the member is lit for, on the one path that
+  // charges money at the moment of the request.
+  const char minutes[] = "{\"granted_minutes\":15,\"detail\":{\"granted_minutes\":90}}";
+  bridgelogic::WalkUpResult r = bridgelogic::onWalkUpResponse(200U, minutes, len(minutes), 1U, 30U);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::TurnOn);
+  TEST_ASSERT_EQUAL_UINT32(15UL * 60000UL, r.outcome.durationMs);
+
+  const char minutesFirst[] = "{\"detail\":{\"granted_minutes\":90},\"granted_minutes\":15}";
+  r = bridgelogic::onWalkUpResponse(200U, minutesFirst, len(minutesFirst), 1U, 30U);
+  TEST_ASSERT_EQUAL_UINT32(15UL * 60000UL, r.outcome.durationMs);
+
+  // `error` — which decides `recognised`, which arms the button window. A
+  // nested verdict about a known member in front of a real `not_recognised`
+  // hands the panel to a stranger's barcode.
+  const char error[] = "{\"detail\":{\"error\":\"insufficient_balance\"},\"error\":\"not_recognised\"}";
+  r = bridgelogic::onWalkUpResponse(402U, error, len(error), 1U, 30U);
+  TEST_ASSERT_FALSE(r.outcome.recognised);
+
+  // `opens_at` — what the member is told to come back for.
+  const char opens[] = "{\"error\":\"club_closed\",\"detail\":{\"opens_at\":\"23:59\"},\"opens_at\":\"06:00\"}";
+  r = bridgelogic::onWalkUpResponse(400U, opens, len(opens), 1U, 30U);
+  TEST_ASSERT_NOT_NULL(strstr(r.outcome.line2, "06:00"));
+  TEST_ASSERT_NULL(strstr(r.outcome.line2, "23:59"));
+}
+
+void test_the_flat_scan_is_kept_where_it_is_genuinely_wanted() {
+  // NOT narrowed, and this is a decision rather than an omission. The court box
+  // reads `button_map`, `slice_minutes` and `walk_up_max_minutes` out of the
+  // heartbeat's NESTED `config` object with no path expression at all, and
+  // `devapi::json::findKey`'s own header says that is depended upon. Narrowing
+  // findKey itself is a breaking change for every reader of that object.
+  //
+  // The distinction that decides it: nothing in `config` is a verdict about a
+  // member or a court. A decoy there costs a wrong panel label until the next
+  // heartbeat; a decoy in `activated` costs a lit court.
+  const char body[] = "{\"config\":{\"slice_minutes\":15,\"button_map\":[\"court:A\",\"minutes:30\"]}}";
+  TEST_ASSERT_NOT_EQUAL(devapi::json::kNotFound, devapi::json::findArray(body, len(body), "button_map"));
+  TEST_ASSERT_EQUAL(devapi::json::kNotFound,
+                    devapi::json::findTopLevelArray(body, len(body), "button_map"));
+
+  // `accepted_through` IS narrowed, at its call site in the composition root's
+  // drainEvents: it decides which queued attendance events are dropped, and
+  // under charge-at-booking a dropped activation is a member refunded and
+  // penalised for a game they played. Pinned here because main.cpp is filtered
+  // out of this build.
+  const char ack[] = "{\"detail\":{\"accepted_through\":9999},\"accepted_through\":4}";
+  uint32_t through = 0U;
+  TEST_ASSERT_TRUE(devapi::json::topLevelUnsignedField(ack, len(ack), "accepted_through", through));
+  TEST_ASSERT_EQUAL_UINT32(4U, through);
+}
+
 } // namespace
 
 void setUp() {
@@ -2276,6 +2406,9 @@ int main(int, char**) {
   RUN_TEST(test_a_refused_ext_releases_the_court_instead_of_reading_as_a_lost_frame);
   RUN_TEST(test_a_refused_ext_on_a_dark_court_is_sent_exactly_once);
   RUN_TEST(test_a_badarg_with_no_ext_remembered_is_not_a_release);
+  RUN_TEST(test_activate_reads_every_field_it_acts_on_from_the_top_level);
+  RUN_TEST(test_walkup_reads_every_field_it_acts_on_from_the_top_level);
+  RUN_TEST(test_the_flat_scan_is_kept_where_it_is_genuinely_wanted);
   RUN_TEST(test_relight_adopts_the_megas_remaining_seconds_so_a_lost_ext_is_re_sent);
   RUN_TEST(test_state_seconds_parse_decimal_and_refuse_everything_else);
   RUN_TEST(test_a_rescan_on_a_court_this_box_already_lit_is_not_a_second_grant);

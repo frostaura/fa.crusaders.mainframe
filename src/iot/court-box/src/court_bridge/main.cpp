@@ -823,9 +823,19 @@ uint16_t callApi(const char* path, const char* body, char* out, size_t outCap) {
   const int status = http.POST(reinterpret_cast<const uint8_t*>(body), strlen(body));
   if (status > 0 && out != nullptr && outCap > 0U) {
     const String payload = http.getString();
-    const size_t n = payload.length() < outCap - 1U ? payload.length() : outCap - 1U;
-    memcpy(out, payload.c_str(), n);
-    out[n] = '\0';
+    if (payload.length() < outCap) {
+      memcpy(out, payload.c_str(), payload.length());
+      out[payload.length()] = '\0';
+    } else {
+      // EMPTY, NOT HALF. A response cut mid-object is a body whose readers see
+      // whichever fields happened to land inside the buffer — and the activate
+      // reader used to refuse a grant whose `court_number` was in the lost tail,
+      // which is a dark court for an attendance the API had already recorded.
+      // Nothing here can recover the rest, so nothing here pretends to have it;
+      // bridgelogic::ScanFlow treats an absent body as no decision and the
+      // roster answers instead.
+      out[0] = '\0';
+    }
   }
   http.end();
   const uint16_t result = status > 0 ? static_cast<uint16_t>(status) : 0U;
@@ -849,8 +859,10 @@ bool activateOnline(const char* token) {
   }
 
   // Static, not stack: this runs under the HTTP call on the 4 KB continuation
-  // stack, beside callApi's own url buffer.
-  static char response[256];
+  // stack, beside callApi's own url buffer. 384 rather than 256: the contract
+  // body is ~150 bytes, `member_display` adds up to 16 more, and a response
+  // that does not fit is discarded whole rather than read in part (callApi).
+  static char response[384];
   response[0] = '\0';
 
   const uint16_t status = callApi("/api/v1/device/activate", body, response, sizeof(response));
@@ -907,7 +919,8 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
     return;
   }
 
-  static char response[256];
+  // 384 for the same reason as the activate response above.
+  static char response[384];
   response[0] = '\0';
   const uint16_t status = callApi("/api/v1/device/walkup", body, response, sizeof(response));
 
@@ -1024,7 +1037,7 @@ void drainEvents(uint32_t nowMs) {
   switch (devapi::react(status)) {
   case devapi::Reaction::Accepted: {
     uint32_t through = 0U;
-    if (devapi::json::unsignedField(response, strlen(response), "accepted_through", through)) {
+    if (devapi::json::topLevelUnsignedField(response, strlen(response), "accepted_through", through)) {
       static_cast<void>(gQueue.releaseThrough(through));
     }
     return;
