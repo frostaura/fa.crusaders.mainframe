@@ -125,6 +125,23 @@ The general lesson is the one `memory/gotchas.md` already carries in three other
 test that books relative to `UtcNow` inherits the wall clock as a hidden input.** The
 mechanical tell in both cases was a step whose result was printed rather than asserted.
 
+### A third time (2026-09-21), in `door_evening.py`'s own wipe
+
+`D3` opens by cancelling the seeder's demo bookings, for exactly the reason above, and
+it cancelled only the ones with `Status = Booked`. **The real `NoShowWorker` and
+`LightsCueWorker` have been running since the API booted**, so a seeded booking whose
+hour has just passed is already `NoShow` or `Completed` by the time that line executes —
+and `GateAccess.HoldsALiveBookingAsync` counts all three statuses, because both of those
+still open a door. A survivor therefore grants M the **relief** the door gives a member
+whose other court is running, and M's deliberately-too-early code answers `ok`.
+
+A run starting at 19:15 local inherited the seeder's 19:00 booking, already swept: five
+assertions went red across `D5`, `EDGE`, `POL`, `D10` and `D11` — `too_early` answering
+`ok`, then `slot_taken` and an exclusion-constraint violation from the slot the survivor
+was still holding — and **not one of them named the cause**. The same run an hour earlier
+was green. The wipe now cancels every booking that is not already cancelled, which at
+that point in the run is exactly the seeder's set and is what was meant all along.
+
 ## Observations from the first passing runs (2026-09-04)
 
 Not defects in the fix programme, but worth knowing before reading the output:

@@ -33,9 +33,15 @@ Why a green suite is not evidence at all is a decision, not a gotcha:
   thing neither could see was the FRAMING. The real API answers `Transfer-Encoding: chunked` on
   a keep-alive connection, and a reader that was correct against every invented fixture timed
   out on **every** call against the actual server: no roster, and a door that refused everyone.
-  The firmware fixtures are real captured bytes now, and `test/e2e-device/door_evening.py` reads
-  over a raw socket (HTTP/1.0, and 1.1 de-chunked by hand, direct and through nginx);
-  `scenario.py` still uses `urllib`. A client that handles the protocol for you proves neither.
+  The firmware fixtures are real captured bytes now; `door_evening.py` reads over a raw socket
+  (1.0, and 1.1 de-chunked by hand, direct and through nginx) at `DW`, and at `DSIM` it runs the
+  REAL door firmware over a real socket — so a FRAMING regression goes red at the first and a
+  DECISION one at the second. `scenario.py` still uses `urllib`, which proves neither.
+- **A fixture that reads "this member is free" as `Status = Booked` and `EndsAt` ahead is wrong
+  both ways** — see `decisions-gate-access.md` for the rule. `D3`'s seeded-booking wipe filtered
+  on `Booked`; the `NoShowWorker` had already swept the seeder's 19:00 demo booking, and the
+  survivor granted M the RELIEF. A 19:15 run lost five assertions across `D5`, `EDGE`, `POL`,
+  `D10` and `D11`, green an hour earlier, nothing naming the cause.
 - **A test can be green because of its FIXTURE, not its code.** Flipping one boolean on a stale
   device fixture exposed a live money rule — a stale-but-enabled box beside a healthy one waiving
   no-show penalties indefinitely — that no test discriminated. Mutate the rule *and* vary the

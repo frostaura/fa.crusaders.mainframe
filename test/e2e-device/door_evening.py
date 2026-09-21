@@ -594,8 +594,27 @@ def d3_member_books(d: Door) -> dict:
     # they are cancelled wholesale and every negative below is about the booking it
     # names and nothing else. `ensure_free` exists for the court-box scenario's four
     # windows; this one books across the whole evening.
-    d.sql.run(f"""update bookings set "Status"={BOOKING_CANCELLED} where "Status"={BOOKING_BOOKED}""")
-    print("  [db] cancelled every seeded demo booking so the evening starts empty", flush=True)
+    #
+    # EVERY STATUS BUT CANCELLED, AND `= Booked` WAS NOT ENOUGH. The real
+    # `NoShowWorker` and `LightsCueWorker` have been running since the API booted,
+    # so by the time this line executes a seeded booking whose hour has just passed
+    # is already `NoShow` or `Completed` — and BOTH still open a door and both still
+    # hold a slot. `GateAccess.HoldsALiveBookingAsync` counts all three statuses, so
+    # a survivor grants M the RELIEF the door gives a member whose other court is
+    # running, and M's deliberately-too-early code then answers `ok`. Observed: a run
+    # starting at 19:15 local inherited the seeder's 19:00 booking already swept to
+    # NoShow, and five assertions went red across D5, EDGE, POL, D10 and D11 —
+    # `too_early` answering `ok`, then `slot_taken` and an exclusion-constraint
+    # violation from the slot it was still holding. Nothing named the cause.
+    #
+    # Every booking in this database is the seeder's at this point, so "not already
+    # cancelled" is exactly the set meant all along. This is the third form of the
+    # lesson this file's README already carries twice: A TEST THAT BOOKS RELATIVE TO
+    # `UtcNow` INHERITS THE WALL CLOCK AS A HIDDEN INPUT.
+    d.sql.run(f"""update bookings set "Status"={BOOKING_CANCELLED} """
+              f"""where "Status"<>{BOOKING_CANCELLED}""")
+    print("  [db] cancelled every seeded demo booking — any status, not just Booked — so the "
+          "evening starts empty", flush=True)
 
     members = expect_status(d.w.http.get("/api/v1/admin/members", token=d.w.admin_token), 200, "members").json
     d.spare = [m for m in members if m["user_id"] not in (d.w.m_user_id, d.w.admin_user_id)]
