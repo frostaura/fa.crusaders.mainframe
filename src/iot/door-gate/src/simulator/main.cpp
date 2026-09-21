@@ -432,11 +432,17 @@ private:
       static_cast<void>(fflush(stdout));
     }
 
-    if (queue_.size() != lastQueued_) {
+    // ON THE SIZE OR ON THE LOSS, and the second is round G4's H1. A ring that
+    // is FULL does not change size when it overflows — it evicts one event and
+    // takes another — so every loss after the first was invisible in a
+    // transcript, which is exactly the state (offline, ring full) the losses
+    // happen in. `lost` is what a harness asserts the eviction policy with.
+    if (queue_.size() != lastQueued_ || queue_.overflowed() != lastLost_) {
       printf("[evq] held=%u lost=%lu t=%lums\n", static_cast<unsigned>(queue_.size()),
              static_cast<unsigned long>(queue_.overflowed()), static_cast<unsigned long>(clock_.nowMs()));
       static_cast<void>(fflush(stdout));
       lastQueued_ = queue_.size();
+      lastLost_ = queue_.overflowed();
     }
   }
 
@@ -517,6 +523,7 @@ private:
   GateApp app_;
 
   uint32_t lastCapped_ = 0U;
+  uint32_t lastLost_ = 0U;
   uint32_t lastRosterAge_ = 0U;
   uint32_t lastUnlockMs_ = 0U;
   uint32_t lastNoPush_ = 0U;

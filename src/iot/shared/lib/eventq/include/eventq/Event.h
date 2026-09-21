@@ -74,6 +74,40 @@ enum class Kind : uint8_t {
   GateOpen = 6U,
 };
 
+/// Whether the ring may EVICT an event of this kind to make room for a newer
+/// one when it is full.
+///
+/// ROUND G4, H1, AND THE ONLY STATE IN WHICH IT EVER HAPPENS IS THE ONE THAT
+/// MATTERS. A ring fills only while the board is offline — online it drains a
+/// pass at a time — and offline is exactly when every refusal costs a slot. A
+/// code taped near a door, a member re-presenting a dead one, or line noise:
+/// each an `unknown_scan`, each one evicting the OLDEST event, which on a busy
+/// evening is a `gate_open`. The one record that matters — somebody came in,
+/// and nobody else knows it — was thrown away to keep a record of somebody who
+/// did not get in.
+///
+/// So the ring evicts the oldest DISCARDABLE event first and falls back to the
+/// oldest of anything only when there is nothing else left. What is discardable
+/// is decided here rather than in the ring, because it is a decision about what
+/// a club ever learns, not about a data structure:
+///
+///   * `UnknownScan` — a refusal. Nothing turns on it: nobody was admitted, no
+///     money moved, and the member went to the desk, which is a record in
+///     itself. Losing one costs a diagnostic.
+///   * `Fault` — a dropped frame or a decode error. Diagnostic by definition.
+///
+/// Everything else is kept: an `Activation` is a court lit and charged, a
+/// `Release` is the only MEASUREMENT of what the lights did, a `GateOpen` is
+/// somebody inside the building, and a `Boot` is the operator's warning that
+/// explains why the others are missing. A kind a newer firmware wrote is kept
+/// too — this board cannot know what it costs to lose, and the safe direction
+/// for a record is to keep it.
+///
+/// One return statement: the generated sketches compile at gnu++11.
+constexpr bool isDiscardable(Kind kind) {
+  return kind == Kind::UnknownScan || kind == Kind::Fault;
+}
+
 /// How a member identified themselves, mirroring the API's `method` field.
 enum class Method : uint8_t {
   None = 0U,
