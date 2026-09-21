@@ -832,7 +832,9 @@ const COLUMN_WIDTH = {
   email: "w-[216px]",
   memberNumber: "w-[104px]",
   status: "w-[118px]",
-  memberClass: "w-[148px]",
+  // D3-B13: 148px clipped "League or senior", which is one of only two values this column
+  // can hold. A column that cannot show its own longest value is a column that lies.
+  memberClass: "w-[176px]",
   joined: "w-[100px]",
   balance: "w-[9rem]",
   actions: "w-[200px]",
@@ -1068,8 +1070,15 @@ function MemberRow({ member: m, fingerprints, busy, onClass, actions }: {
         <div className="flex flex-row items-center gap-1 sm:justify-end">
           {m.status === "PendingApproval" && (
             <>
-              <Button onClick={actions.approve} disabled={busy} className="h-9 px-3 text-xs">Approve</Button>
-              <Button variant="outline" onClick={actions.reject} disabled={busy} className="h-9 px-3 text-xs">Reject</Button>
+              {/*
+                D3-B07: measured at 72×36 and 61×36 on a coarse pointer. WCAG 2.5.5 asks 44,
+                the doors surface next door is built to 44 because it is used standing up in
+                a club, and these two are the most consequential controls on this page —
+                approving somebody is what lets them through a door. `min-h-11` rather than
+                `h-11` so the words grow instead of clipping at a 32px root font.
+              */}
+              <Button onClick={actions.approve} disabled={busy} className="min-h-11 px-3 text-sm">Approve</Button>
+              <Button variant="outline" onClick={actions.reject} disabled={busy} className="min-h-11 px-3 text-sm">Reject</Button>
             </>
           )}
           {m.status === "Active" && (
@@ -1107,6 +1116,16 @@ function MemberRow({ member: m, fingerprints, busy, onClass, actions }: {
           )}
           {m.status === "Suspended" && (
             <>
+              {/*
+                D3-B18: a suspended row silently lost Top up and Biometrics, with nothing
+                saying why. Two controls vanishing from one row out of twelve reads as a
+                rendering fault, and an admin who wants to credit a suspended member back
+                for a court they could not use has no way to tell whether the product
+                refuses it or has broken. It says so now, in the row, in words — and the
+                sentence is the row's, not a tooltip, because a title is invisible on a
+                phone and to a screen reader and to touch, which is this whole audience.
+              */}
+              <span className="text-xs text-text-muted">{SUSPENDED_ACTIONS_NOTE}</span>
               <IconAction title="Reactivate member" onClick={actions.reactivate} icon={<RotateCcw size={16} />} disabled={busy} />
               <IconAction title="Reset password" onClick={actions.reset} icon={<KeyRound size={16} />} disabled={busy} />
             </>
@@ -1124,6 +1143,14 @@ function MemberRow({ member: m, fingerprints, busy, onClass, actions }: {
     </tr>
   );
 }
+
+/**
+ * Why a suspended member's row is shorter than everybody else's. (D3-B18)
+ *
+ * Both halves, as every refusal on this estate is required to be: what is not available, and
+ * what to do about it. "Reactivate them first" is the action, and it is on the same row.
+ */
+const SUSPENDED_ACTIONS_NOTE = "Suspended — no top-ups or fingerprints until they are reactivated.";
 
 const MEMBER_CLASSES: MemberClass[] = ["Regular", "LeagueOrSenior"];
 
@@ -1152,7 +1179,18 @@ function MemberClassCell({ member, busy, onChange }: { member: AdminMember; busy
       disabled={busy}
       aria-label={`Member class for ${member.full_name}`}
       onChange={(e) => onChange(e.target.value as MemberClass)}
-      className="h-9 px-2 w-full max-w-full rounded-lg border border-border bg-bg-surface text-text-primary text-xs disabled:opacity-60"
+      /*
+        D3-B07 and D3-B13, which are one control's worth of two findings.
+
+        36px tall on a coarse pointer, and "League or senior" rendered as "League or senio"
+        at 1440 — a native select does not shrink its own text, so a fixed-width column
+        clips the longer of its two options and the screen shows a value the club does not
+        have. `min-h-11` for the target; the column widened for the words; and a `title`
+        carrying the full value, because the one thing worse than a clipped label is a
+        clipped label with no way to read the rest of it.
+      */
+      title={classLabel(current)}
+      className="min-h-11 px-2 w-full max-w-full rounded-lg border border-border bg-bg-surface text-text-primary text-xs disabled:opacity-60"
     >
       {MEMBER_CLASSES.map((c) => <option key={c} value={c}>{classLabel(c)}</option>)}
     </select>
