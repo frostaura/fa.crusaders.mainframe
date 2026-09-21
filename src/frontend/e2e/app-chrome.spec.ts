@@ -398,6 +398,10 @@ test.describe("B13 — where a toast lands", () => {
       await page.getByRole("button", { name: "Add court" }).click();
       const toast = page.getByRole("status").filter({ hasText: "Court name is required." });
       await expect(toast).toBeVisible();
+      // Measured once it has ARRIVED. The strip animates in from 12 px below its resting place
+      // now that it is anchored to the bottom, so an entry frame is 12 px past the bottom edge
+      // and a measurement that races it reads as a toast hanging off the screen.
+      await expect(toast).toHaveCSS("opacity", "1");
 
       const geometry = await page.evaluate(() => {
         const header = document.querySelector("header")!.getBoundingClientRect();
@@ -405,10 +409,35 @@ test.describe("B13 — where a toast lands", () => {
         const box = [...document.querySelectorAll('[role="status"]')]
           .find((n) => (n as HTMLElement).innerText.includes("Court name is required"))!
           .getBoundingClientRect();
-        return { toastTop: box.top, headerBottom: header.bottom, stripBottom: strip.bottom };
+        const heading = document.querySelector("#main-content h1")!.getBoundingClientRect();
+        return {
+          toastTop: box.top, toastBottom: box.bottom,
+          headerBottom: header.bottom, stripBottom: strip.bottom,
+          headingBottom: heading.bottom, viewport: window.innerHeight,
+        };
       });
       expect(geometry.toastTop).toBeGreaterThanOrEqual(geometry.headerBottom);
       expect(geometry.toastTop).toBeGreaterThanOrEqual(geometry.stripBottom);
+
+      /**
+       * R3-28 / B10 — and it is nowhere near the line it argues with.
+       *
+       * <p>
+       * Under the chrome is exactly where this product puts a page's own status line, and a
+       * failure toast landing on top of one is a screen where the only two sentences that
+       * matter are stacked, with the wrong one on top. The far edge of the screen is the one
+       * place no heading, chip or status line lives — so the assertion is that the strip is in
+       * the bottom half and clear of the page's heading, which is what a top anchor cannot be.
+       * </p>
+       */
+      expect(
+        geometry.toastTop,
+        `the toast starts at y=${Math.round(geometry.toastTop)} of ${geometry.viewport} — it is anchored to the top`,
+      ).toBeGreaterThan(geometry.viewport / 2);
+      expect(geometry.toastTop, "the toast covers the page's own heading")
+        .toBeGreaterThan(geometry.headingBottom);
+      // And still on screen, safe-area inset and all.
+      expect(geometry.toastBottom).toBeLessThanOrEqual(geometry.viewport);
     });
   }
 });

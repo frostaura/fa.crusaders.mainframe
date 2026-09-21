@@ -9,11 +9,43 @@ type ToastItem = {
   text: string;
   /** ms before the toast auto-dismisses. Default 4000. Set 0 to keep until manually closed. */
   durationMs: number;
+  /** Whether this failure left the world exactly as it was. See {@link NOTHING_CHANGED}. */
+  unchanged: boolean;
 };
 
 type ToastContextValue = {
-  push: (input: { tone?: ToastTone; text: string; durationMs?: number }) => void;
+  push: (input: {
+    tone?: ToastTone;
+    text: string;
+    durationMs?: number;
+    /**
+     * Say, in the same breath, that nothing happened. (R3-28 / B10)
+     *
+     * <p>
+     * A failure toast tells an admin that something did not work. It does not tell them
+     * whether the door is now shut, half-shut, or exactly as it was — and that is the only
+     * question they have. Reviewer B watched a failed shut produce "Could not shut that door."
+     * over a status line still reading the old state, with nothing anywhere saying which of
+     * the two to believe.
+     * </p>
+     *
+     * <p>
+     * Deliberately opt-IN and never inferred from the tone. "It failed" and "nothing changed"
+     * are different facts: a request that timed out after the server committed it failed and
+     * changed everything. Only a call site that knows the write did not land may say so.
+     * </p>
+     */
+    unchanged?: boolean;
+  }) => void;
 };
+
+/**
+ * The sentence, in one place, because it is a claim about the world and not a wording.
+ *
+ * Exported so a call site can assert on it, and so the four doors call sites and the two
+ * device ones cannot each invent their own near-miss of it.
+ */
+export const NOTHING_CHANGED = "Nothing changed.";
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
@@ -38,6 +70,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       tone: input.tone ?? "info",
       text: input.text,
       durationMs: input.durationMs ?? 4000,
+      unchanged: input.unchanged ?? false,
     };
     setToasts((t) => [...t, item]);
   }, []);
@@ -74,22 +107,38 @@ function ToastViewport({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: 
    */
   //
   /**
-   * <b>B13 — it sits BELOW the chrome, not on top of it.</b>
+   * <b>R3-28 / B10 — it sits at the BOTTOM, because what it was covering was the answer.</b>
    *
    * <p>
-   * `top-[100px]` was a guess at the header's height, and at a 32 px root font size the
-   * header plus the section tab strip is taller than that: the offline error toast covered
-   * the tab bar, which is the product's only way between sections on a phone. `Layout`
-   * measures its own header and publishes the number as `--app-chrome-height`, so this is
-   * the real height rather than a constant that is right on one device. The fallback is 0,
-   * which is correct for every screen that has no chrome at all (login, the public landing)
-   * — and those are exactly the screens where a 100 px offset had nothing to clear.
+   * It was anchored under the header (B13: measured rather than the `top-[100px]` guess that
+   * covered the tab strip at a 32 px root font). Under the header is exactly where a page puts
+   * the thing a toast most often contradicts: reviewer B failed a shut and watched "Could not
+   * shut that door." land on top of the door's own status line, so the one sentence that could
+   * have settled which of the two was true was the one hidden by the other.
+   * </p>
+   *
+   * <p>
+   * The bottom edge is the far side of the screen from every heading, chip and status line in
+   * this product, and it is where a phone puts a message anyway. `env(safe-area-inset-bottom)`
+   * keeps it clear of the home indicator on a notched phone — the viewport meta already carries
+   * `viewport-fit=cover`, so without it the strip sits underneath the gesture bar.
+   * </p>
+   *
+   * <p>
+   * `--app-chrome-height` stays published by `Layout` — the route-heading scroll margin in
+   * `index.css` reads it — it is simply no longer this strip's problem.
    * </p>
    */
   return (
     <div
-      style={{ top: "calc(var(--app-chrome-height, 0px) + 12px)" }}
-      className="pointer-events-none fixed left-1/2 z-[200] -translate-x-1/2 flex flex-col items-center gap-2 w-[min(92vw,420px)]"
+      /*
+       * A CLASS, not an inline style, and the reason is a test rather than a preference:
+       * jsdom's CSS parser mangles `env()` in an inline declaration — it serialised this one
+       * back as `calc(12px + env(0px * , * safe-area-i…` — so the one assertion that could
+       * hold the anchoring would have been asserting about a string jsdom invented. Tailwind
+       * emits the arbitrary value verbatim into the stylesheet, where the browser parses it.
+       */
+      className="pointer-events-none fixed bottom-[calc(env(safe-area-inset-bottom,0px)+12px)] left-1/2 z-[200] -translate-x-1/2 flex flex-col items-center gap-2 w-[min(92vw,420px)]"
     >
       {toasts.map((t) => (
         <ToastView key={t.id} toast={t} onDismiss={onDismiss} />
@@ -149,6 +198,11 @@ function ToastView({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: num
       )}
     >
       {toast.text}
+      {/* R3-28 — the second fact, in the same breath as the first. "It did not work" leaves an
+          admin looking at a status line they can no longer trust; "and nothing changed" is the
+          sentence that lets them stop looking. Its own line rather than appended to the text,
+          so a call site cannot half-say it. */}
+      {toast.unchanged && <span className="mt-0.5 block font-normal">{NOTHING_CHANGED}</span>}
     </div>
   );
 }

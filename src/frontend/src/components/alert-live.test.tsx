@@ -84,6 +84,92 @@ describe("Alert — how loudly it speaks", () => {
 });
 
 /**
+ * R3-26 / C-M1, C-M2 — a STANDING fact, said once.
+ *
+ * <p>
+ * Reviewer C sat on the doors pages with a screen reader for three minutes. The shut banner was
+ * mirrored into a `role="alert"` and a `role="status"` at once, so every announcement arrived
+ * twice; the alert region was emptied to `""` between polls, which is a third event and an
+ * interruption to a braille reader; and a door page re-rendering every fifteen seconds re-spoke
+ * its fifty-word advisory each time. `polite` does not fix that — a live region announces on a
+ * REMOUNT too, and these blocks are conditional on a payload that is re-read on a timer.
+ * </p>
+ */
+describe("Alert — a standing fact, said once", () => {
+  /** What a screen reader would actually be handed: the live region's text, not the banner's. */
+  const spoken = () => [...document.querySelectorAll("[aria-live='polite']")]
+    .map((n) => n.textContent ?? "").join("");
+
+  it("says it once, in a region the banner's own re-render cannot touch", () => {
+    const { rerender } = render(
+      <Alert tone="danger" live="standing" announceKey="front-door">Front door is shut.</Alert>,
+    );
+
+    // The visible banner, and the invisible region that speaks for it — two nodes with the
+    // same words, which is the shape: the words on screen never move, and the announcement is
+    // a separate thing that happens once.
+    expect(screen.getAllByText("Front door is shut.")).toHaveLength(2);
+    // Not on the visible banner. A re-render of the banner is not an announcement.
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(spoken()).toBe("Front door is shut.");
+
+    // Twelve polls' worth of re-renders with the same fact. Still one announcement.
+    for (let i = 0; i < 12; i += 1) {
+      rerender(<Alert tone="danger" live="standing" announceKey="front-door">Front door is shut.</Alert>);
+    }
+    expect(spoken()).toBe("Front door is shut.");
+  });
+
+  it("survives the remount, which is what a poll actually does to a conditional block", () => {
+    const banner = <Alert tone="danger" live="standing" announceKey="front-door">Front door is shut.</Alert>;
+    const first = render(banner);
+    expect(spoken()).toBe("Front door is shut.");
+    first.unmount();
+
+    // The payload comes back, the block mounts again, and a fresh live region with text in it
+    // is an announcement — which is the defect. Component state cannot see this; the memory
+    // has to outlive the component.
+    render(banner);
+    expect(spoken()).toBe("");
+  });
+
+  it("speaks again when the fact itself changes, including back to one it said before", () => {
+    const shut = <Alert tone="danger" live="standing" announceKey="front-door">Front door is shut.</Alert>;
+    const { rerender } = render(shut);
+    expect(spoken()).toBe("Front door is shut.");
+
+    rerender(<Alert tone="success" live="standing" announceKey="front-door">Front door is open again.</Alert>);
+    expect(spoken()).toBe("Front door is open again.");
+
+    // Shut, reopened, shut again in one evening: the second shut is news, and keying on the
+    // text rather than on the channel would swallow it.
+    rerender(shut);
+    expect(spoken()).toBe("Front door is shut.");
+  });
+
+  it("never churns the region to an empty string", () => {
+    const { rerender } = render(
+      <Alert tone="danger" live="standing" announceKey="front-door">Front door is shut.</Alert>,
+    );
+    expect(spoken()).toBe("Front door is shut.");
+    // A poll that briefly hands the banner nothing must not blank the region: emptying a live
+    // region announces nothing and interrupts everything (C-M1).
+    rerender(<Alert tone="danger" live="standing" announceKey="front-door">{"   "}</Alert>);
+    expect(spoken()).toBe("Front door is shut.");
+  });
+
+  it("reads a sentence with markup in the middle of it as one sentence", () => {
+    render(
+      <Alert tone="danger" live="standing">
+        <strong>Front door</strong> is shut. <a href="/admin/doors">Reopen it</a>
+      </Alert>,
+    );
+    expect(spoken()).toBe("Front door is shut. Reopen it");
+  });
+});
+
+/**
  * And the one call site this lane changed, because a prop nobody passes is a prop that
  * changed nothing.
  *

@@ -62,3 +62,13 @@ import { beforeEach } from "vitest";
 import { forgetClubZone } from "../lib/clubZone";
 
 beforeEach(() => { forgetClubZone(); });
+
+// R3-26 — and the same for what has already been ANNOUNCED.
+//
+// `lib/announce` deliberately remembers across remounts, so a standing banner behind a poll
+// says itself once rather than twelve times. That memory is module state, so without this one
+// test's announcement silences the next test's identical one — and the failure reads as a
+// component that does not announce.
+import { resetStandingAnnouncements } from "../lib/announce";
+
+beforeEach(() => { resetStandingAnnouncements(); });

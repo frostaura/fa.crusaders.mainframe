@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { focusFragmentTarget, focusHeading, routePageName, routeTitle } from "../lib/routeAnnouncer";
+import { resetStandingAnnouncements } from "../lib/announce";
 
 /**
  * What happens when this app changes page. (C6, and the shell half of C15 / D9)
@@ -47,6 +48,14 @@ export function RouteAnnouncer() {
   useEffect(() => {
     const name = routePageName(location.pathname);
     document.title = routeTitle(location.pathname);
+
+    // R3-26 — arriving somewhere is an occasion to be told what is standing there.
+    //
+    // `lib/announce` remembers what has already been said so that a banner behind a 15-second
+    // poll says it once rather than twelve times. That memory has to end at the page boundary,
+    // or a screen-reader user who navigates away and back is told nothing about the screen
+    // they are now on. Cleared on every route change, including the first paint's hash case.
+    resetStandingAnnouncements();
 
     // A first paint is a real page load: the browser has already announced the document and
     // put focus at the top of it, and moving focus there again is a second announcement of
@@ -95,6 +104,18 @@ export function RouteAnnouncer() {
  * A route change can come from a search box or a date field writing to the query string, and
  * a heading that grabs focus mid-sentence is a worse bug than the one being fixed.
  * </p>
+ *
+ * <p>
+ * <b>C-M6 — but "not now" is not "never", and that is what put the browser's Back button on
+ * `&lt;body&gt;`.</b> Reviewer C filtered the door log — which is done in a `&lt;select&gt;`,
+ * so focus was inside a control this guard protects — and then pressed Back. The guard fired,
+ * the attempt returned, and because it returned without scheduling another one it gave up for
+ * good. React then re-rendered the filter row underneath the departing page, the focused
+ * `&lt;select&gt;` was replaced by a new node, and focus fell to the body with nothing left
+ * that was ever going to put it anywhere. Retrying means the protection lasts exactly as long
+ * as the person is still in the control: still typing a second later, and this stops trying;
+ * gone from the document, and the heading gets it.
+ * </p>
  */
 function takeFocus(hash: string): () => void {
   let attempts = 0;
@@ -102,10 +123,9 @@ function takeFocus(hash: string): () => void {
 
   const attempt = () => {
     attempts += 1;
-    if (isTyping(document.activeElement)) return;
-    const landed = hash
-      ? focusFragmentTarget(hash)
-      : focusPageHeading();
+    const landed = isTyping(document.activeElement)
+      ? false
+      : (hash ? focusFragmentTarget(hash) : focusPageHeading());
     if (landed) return;
     if (attempts < 10) timer = window.setTimeout(attempt, 100);
   };

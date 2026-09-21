@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
@@ -150,6 +151,53 @@ describe("RouteAnnouncer", () => {
 
     await waitFor(() => expect(document.title).toBe("Door log — Crusaders Mainframe"));
     expect(field).toHaveFocus();
+    // And it is still theirs a second later — the retry below must not turn "not now" into
+    // "in a hundred milliseconds".
+    await act(async () => { await new Promise((r) => setTimeout(r, 400)); });
+    expect(field).toHaveFocus();
+  });
+
+  /**
+   * C-M6 (MED) — the browser's Back button landed the keyboard on `&lt;body&gt;`.
+   *
+   * <p>
+   * Reviewer C filtered the door log and pressed Back. Filtering is done in a
+   * `&lt;select&gt;`, so at the moment the route changed focus was inside a control the
+   * typing guard protects; the guard declined to move focus and, crucially, declined to try
+   * again. The re-render then replaced that control, focus fell to the body, and nothing was
+   * ever going to pick it up. "Not while they are typing" has to mean exactly that, and not
+   * "not at all".
+   * </p>
+   */
+  it("lands on the heading when the control it was protecting goes away", async () => {
+    function Filter({ gone }: { gone: boolean }) {
+      return gone ? <p>Filtered</p> : <select aria-label="Outcome"><option>All</option></select>;
+    }
+    function Screen() {
+      const [gone, setGone] = useState(false);
+      return (
+        <>
+          <RouteAnnouncer />
+          <Nav to="/admin/doors/log?outcome=refused" />
+          <button type="button" onClick={() => setGone(true)}>Replace the filter</button>
+          <Page title="Door log" extra={<Filter gone={gone} />} />
+        </>
+      );
+    }
+
+    render(<MemoryRouter initialEntries={["/admin/doors/log"]}><Screen /></MemoryRouter>);
+
+    const filter = screen.getByLabelText("Outcome");
+    act(() => { filter.focus(); });
+    // The navigation happens while focus is in the select, exactly as Back does.
+    act(() => { screen.getByRole("button", { name: "Go" }).click(); });
+    expect(filter).toHaveFocus();
+
+    // …and then the page replaces it, which is what leaves focus on the body.
+    act(() => { screen.getByRole("button", { name: "Replace the filter" }).click(); });
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Door log" })).toHaveFocus());
+    expect(document.activeElement).not.toBe(document.body);
   });
 
   /**
