@@ -398,6 +398,8 @@ public static class DeviceEventEndpoints
                     // many times the box retried, which is the opposite of what a count on a
                     // monitoring page is for.
                     if (kind is FaultKind or BootKind) NoteFault(services, device!, e, kind, time.OccurredAt);
+
+                    NoteServerDetected(services, device!, time, outcome);
                 }
 
                 // THE SIDE EFFECT HAS RUN; the batch must not run it again. `alreadyRecorded`
@@ -685,6 +687,59 @@ public static class DeviceEventEndpoints
                 booking_id = booking.Id,
                 seq = evidence.Seq,
             });
+    }
+
+    /// <summary>
+    /// What the SERVER noticed about this event, onto the club's error log — the second half
+    /// of GOAL item 7.
+    ///
+    /// <para>
+    /// <b>The board did not report any of these; the server decided them.</b> A clamped clock,
+    /// a relay wired to a court the event did not name, a body that could not be read, a
+    /// refusal of any other kind — each is a fact about the estate that only this side knows,
+    /// and each used to exist only as an audit row in a trail nobody reads for board health.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>clock_clamped</c> is recorded here <b>as well as</b> the existing
+    /// <c>device.event_time_clamped</c> audit row, and that duplication is deliberate: the
+    /// audit row is the DOORS TRAIL, read by the doors console and pinned by its own posture
+    /// test, and this row is the MONITORING view. Unifying them would either put board health
+    /// into the door log — the defect <c>DoorAuditActions</c> is named after — or make the
+    /// error log depend on the door vocabulary. Written down so the next reader does not
+    /// "fix" it.
+    /// </para>
+    /// </summary>
+    private static void NoteServerDetected(
+        DeviceEventServices services, Device device, EventFacts time, ActivationOutcome? outcome)
+    {
+        if (time.ClampedFrom is { } claimed)
+        {
+            Note(services, device, DeviceErrorCodes.ClockClamped, $"claimed {claimed:O}", time.OccurredAt);
+        }
+
+        var code = outcome?.Code;
+        if (code is null or ActivationOutcome.Ok or ActivationOutcome.ReversedNoShow) return;
+
+        // A relay the box lit that is not wired to the booking's court is its own fault: the
+        // member is standing on the wrong court, which no other refusal means.
+        var mapped = code == "wrong_court"
+            ? DeviceErrorCodes.CourtNotMapped
+            : code == Malformed ? DeviceErrorCodes.MalformedBody : DeviceErrorCodes.EventRejected;
+
+        Note(services, device, mapped, $"{time.Kind}: {code}", time.OccurredAt);
+    }
+
+    /// <summary>One server-detected fault, off the request thread. See <see cref="DeviceErrorService.InBackground"/>.</summary>
+    private static void Note(
+        DeviceEventServices services, Device device, string code, string detail, DateTimeOffset at)
+    {
+        DeviceErrorService.InBackground(
+            services.Scopes, services.Logs.CreateLogger(typeof(DeviceEventEndpoints)),
+            device.TenantId, services.Tenant.TenantSlug,
+            new DeviceErrorReport(
+                code, DeviceErrorSource.Server, DeviceId: device.Id,
+                ClaimedDeviceCode: device.DeviceCode, Detail: detail, At: at));
     }
 
     /// <summary>
