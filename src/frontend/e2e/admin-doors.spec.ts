@@ -1441,3 +1441,65 @@ test.describe("The doors pages at 320 px with a 32 px root font", () => {
     expect(stuck, `boxes that cannot hold their content: ${JSON.stringify(stuck)}`).toEqual([]);
   });
 });
+
+/**
+ * <b>R3-1 and R3-13, driven in a real browser.</b>
+ *
+ * <p>
+ * Both are about what a screen ASSERTS when the thing it is asserting about cannot be seen —
+ * a shut door whose age froze the moment it was shut, and a filter pointing at a board that
+ * has been replaced. Both produced sentences a volunteer acts on, and neither is visible to a
+ * test that cannot render a page.
+ * </p>
+ */
+test.describe("What a door page claims about a shut it cannot see", () => {
+  test("reports a confirmed shut as confirmed, though the door has gone quiet since", async ({ page }) => {
+    const heardAt = new Date(Date.now() - 3600_000).toISOString();
+    await openDoor(page, [door({
+      name: "Front door",
+      enabled: false,
+      last_seen_at: heardAt,
+      shut_heard_at: heardAt,
+    })]);
+
+    // Twice, and both are wanted: the state paragraph at the top of the page and the
+    // clause beside the control an admin is about to press.
+    await expect(page.getByText(/Confirmed: this door heard the shut at/).first()).toBeVisible();
+    await expect(page.getByText(/Confirmed: this door heard the shut at/)).toHaveCount(2);
+    // The three sentences a reviewer read over a board that had emptied its roster.
+    await expect(page.getByText(/may still be admitting/)).toHaveCount(0);
+    await expect(page.getByText(/Nothing can reach/)).toHaveCount(0);
+
+    await page.getByRole("button", { name: /^Reopen this door/ }).click();
+    await expect(page.getByText(/was told of the shut and has been opening for nobody/).first())
+      .toBeVisible();
+  });
+
+  test("says it cannot tell where the server has not said", async ({ page }) => {
+    await openDoor(page, [door({
+      name: "Front door", enabled: false, last_seen_at: new Date(Date.now() - 3600_000).toISOString(),
+    })]);
+
+    await expect(page.getByText(/this page cannot say whether it was told/)).toBeVisible();
+  });
+});
+
+test.describe("A club log filtered to a door that is gone", () => {
+  test("says the door is gone rather than that nothing happened at any door", async ({ page }) => {
+    await signIn(page);
+    await serveApi(page, [
+      ...routes([door()]),
+      {
+        path: "/api/v1/admin/doors/activity",
+        status: 400,
+        body: { error: "door_not_found" },
+      },
+    ]);
+    await page.goto("/admin/doors/log?door=11111111-2222-3333-4444-555555555555");
+
+    await expect(page.getByText(/no longer on the club's list/)).toBeVisible();
+    await expect(page.getByText("No scans at any door in the last 24 hours")).toHaveCount(0);
+    // And the export that would have written a nought-row file under the ordinary name.
+    await expect(page.getByRole("button", { name: "Download CSV" })).toHaveCount(0);
+  });
+});

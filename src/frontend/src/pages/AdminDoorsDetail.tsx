@@ -17,7 +17,9 @@ import { useDoorActions, type DoorActions } from "../components/doors/useDoorAct
 import { useTicker } from "../lib/useTicker";
 import { clubDayAndClock } from "../lib/clubClock";
 import { isOnline, offlineAfterSecondsFor } from "../lib/deviceLiveness";
-import { DOORS_READ_FAILED, doorDisplayName, doorStateNotice } from "../lib/doorsCopy";
+import {
+  DOORS_READ_FAILED, doorDisplayName, doorEventsLostNotice, doorStateNotice,
+} from "../lib/doorsCopy";
 import { UNNAMED_GATE, gateDeleteConfirm, gateDeleteStandingNotice } from "../lib/gateCopy";
 import { ACTIVITY_READ_FAILED } from "../lib/deviceActivity";
 import { describeDeviceError } from "../lib/deviceErrors";
@@ -296,6 +298,14 @@ function AdminDoorsDetailPageBody() {
 
       {doorStateNotice(door, online, timezone) && (
         <Card><p className="text-sm text-text-secondary">{doorStateNotice(door, online, timezone)}</p></Card>
+      )}
+
+      {/* G4c / R3-33: records this door threw away. Not a live region — it is a standing
+          fact about a board, and this page re-reads every fifteen seconds (C-M2). */}
+      {doorEventsLostNotice(door) && (
+        <Card className="border-l-4 border-warning-strong bg-warning-soft">
+          <p className="text-sm text-warning-strong">{doorEventsLostNotice(door)}</p>
+        </Card>
       )}
 
       <DoorSignalNotices

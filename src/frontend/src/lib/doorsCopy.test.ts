@@ -10,7 +10,7 @@ import {
   doorStateChip, doorStateNotice, doorsAttentionSummary, describePowerLoss, spellAge,
   doorDisplayName, doorPickerLabel, doorRowIdentity, doorRowName, doorShutAttribution,
   REMOVED_DOOR_UNNAMED, doorShutHeard, doorShutHeardLine, doorTimeIsUncertain, doorScanTiming,
-  doorEventRows, doorEventText,
+  doorEventRows, doorEventText, doorEventsLostNotice,
 } from "./doorsCopy";
 import { doorShutNotice } from "./gateCopy";
 import { type AdminDoorDevice, type DeviceActivityEntry, type DoorSignal } from "./api";
@@ -1170,5 +1170,36 @@ describe("the two spellings WIRE-R3 renamed", () => {
     expect(say("details")).toBe("Details changed by Priya Naidoo");
     expect(say("deleted")).toBe("Deleted by Priya Naidoo");
     expect(say("removed")).toBe("Deleted by Priya Naidoo");
+  });
+});
+
+/**
+ * <b>G4c / R3-33 — records a door threw away, which nothing had ever shown.</b>
+ *
+ * <p>
+ * A board reports, in every heartbeat, how many queued events its ring buffer has overwritten
+ * since boot. The number travelled since the gate shipped and was stored nowhere — so a door
+ * that dropped forty scans during an outage looked identical to one that dropped none, and
+ * the club log a committee reads after an incident was silently incomplete.
+ * </p>
+ */
+describe("doorEventsLostNotice", () => {
+  it("says how many, and that it is a total since boot", () => {
+    const said = doorEventsLostNotice(door({ events_lost: 40 }))!;
+    expect(said).toContain("dropped 40 records");
+    // The misreading that sends an admin after an outage that ended last month.
+    expect(said).toContain("running total since the board last restarted, not a count for today");
+    expect(said).toContain("cannot be recovered");
+  });
+
+  it("says nothing at zero, and nothing where the API has not said", () => {
+    expect(doorEventsLostNotice(door({ events_lost: 0 }))).toBeNull();
+    // Absent is not zero: a page that printed "0 records dropped" would be stating a fact it
+    // had not read.
+    expect(doorEventsLostNotice(door())).toBeNull();
+  });
+
+  it("counts one record as one", () => {
+    expect(doorEventsLostNotice(door({ events_lost: 1 }))).toContain("dropped 1 record ");
   });
 });

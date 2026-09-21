@@ -502,6 +502,33 @@ export function doorStateNotice(
 }
 
 /**
+ * <b>G4c / R3-33 — records this door threw away, which nothing had ever shown.</b>
+ *
+ * <p>
+ * A board queues events it cannot upload in a ring buffer and reports, in every heartbeat,
+ * how many that ring has overwritten since boot. The number has travelled since the gate
+ * shipped and was logged and stored nowhere, so a door that dropped forty scans during an
+ * outage looked identical to one that dropped none — and the club log, which is the record a
+ * committee reads after an incident, was silently incomplete with nothing saying so.
+ * </p>
+ *
+ * <p>
+ * <b>A since-boot TOTAL, not a delta</b>, and the sentence says so: an admin who reads it as
+ * "forty just now" goes looking for an outage that ended last month. `0` is a real answer and
+ * says nothing; `undefined` is an API that does not carry it and also says nothing — never a
+ * zero this side invented.
+ * </p>
+ */
+export function doorEventsLostNotice(device: AdminDoorDevice): string | null {
+  const lost = device.events_lost;
+  if (typeof lost !== "number" || lost <= 0) return null;
+  return `This door has dropped ${plural(lost, "record")} since it last started up — its queue`
+    + " filled while it could not reach the club, and the oldest waiting records were"
+    + " overwritten. They are not in the club log and cannot be recovered. It is a running"
+    + " total since the board last restarted, not a count for today.";
+}
+
+/**
  * The day boundary, named rather than assumed.
  *
  * "Today" computed in a browser is a different day from the club's for any admin travelling
