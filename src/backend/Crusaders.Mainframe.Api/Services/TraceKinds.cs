@@ -363,16 +363,22 @@ public static class TraceKinds
     /// word would render a member's own money as "no word for this", which
     /// <c>TraceKindsTests</c> refuses.
     /// </summary>
-    public static string OfLedger(LedgerEntryType type) => type switch
+    public static string OfLedger(LedgerEntryType type)
     {
-        LedgerEntryType.TopUp => WalletToppedUp,
-        LedgerEntryType.BookingCharge or LedgerEntryType.LightsPurchase => WalletSpent,
-        LedgerEntryType.CancellationRefund => WalletRefunded,
-        LedgerEntryType.NoShowPenalty or LedgerEntryType.LateCancellationPenalty => WalletPenalised,
-        LedgerEntryType.AdminAdjustment => WalletAdjustedByAdmin,
-        LedgerEntryType.PaymentReversal => WalletReversed,
-        _ => Unrecognised,
-    };
+        // Block body for the lizard reason in `memory/gotchas.md`: lizard's C# parser cannot
+        // follow `=> x switch { … }`, loses scope, and emits a `*global*` pseudo-function
+        // spanning the whole FILE, which then trips the function-length gate.
+        return type switch
+        {
+            LedgerEntryType.TopUp => WalletToppedUp,
+            LedgerEntryType.BookingCharge or LedgerEntryType.LightsPurchase => WalletSpent,
+            LedgerEntryType.CancellationRefund => WalletRefunded,
+            LedgerEntryType.NoShowPenalty or LedgerEntryType.LateCancellationPenalty => WalletPenalised,
+            LedgerEntryType.AdminAdjustment => WalletAdjustedByAdmin,
+            LedgerEntryType.PaymentReversal => WalletReversed,
+            _ => Unrecognised,
+        };
+    }
 
     /// <summary>The strand one word belongs to, derived from its namespace rather than listed twice.</summary>
     public static string StrandOf(string kind)
@@ -429,7 +435,7 @@ public static class TraceKinds
             LightsOff => $"{court} lights went off",
 
             WalletToppedUp => $"Topped up {Credits(facts)} credits",
-            WalletSpent => $"Paid {Credits(facts)} credits",
+            WalletSpent => Spent(facts),
             WalletRefunded => Refunded(facts),
             WalletPenalised => Penalised(facts),
             WalletAdjustedByAdmin => AdjustedByAdmin(facts),
@@ -441,9 +447,13 @@ public static class TraceKinds
 
     /// <summary>The movement as a club reads it, or a dash when the row carries none.</summary>
     private static string Credits(TraceFacts facts)
-        => facts.AmountCredits is { } amount
+    {
+        // Block body for the lizard reason in `memory/gotchas.md`: a `{ }` property pattern in
+        // an expression-bodied member costs this file its scope in lizard's C# parser.
+        return facts.AmountCredits is { } amount
             ? Math.Abs(amount).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)
             : "—";
+    }
 
     /// <summary>Whether the club's own machinery did this, rather than a person.</summary>
     private static bool BySystem(TraceFacts facts) => facts.ActorKind == TraceActors.System;
@@ -475,4 +485,16 @@ public static class TraceKinds
 
     private static string AdjustedByAdmin(TraceFacts facts)
         => $"{Who(facts)} changed their credits by {Credits(facts)}";
+
+    /// <summary>
+    /// What they paid for, named when the row knows it. D2 §6.2's own example sentence is
+    /// "Paid 36.00 credits for Court 2", and the court is what makes it answer a question — but
+    /// a ledger row carries no court of its own, so the sentence degrades rather than inventing
+    /// one. Block body for the lizard reason in <c>memory/gotchas.md</c>.
+    /// </summary>
+    private static string Spent(TraceFacts facts)
+    {
+        var paid = $"Paid {Credits(facts)} credits";
+        return string.IsNullOrWhiteSpace(facts.CourtName) ? paid : $"{paid} for {facts.CourtName.Trim()}";
+    }
 }

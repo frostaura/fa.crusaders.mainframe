@@ -388,6 +388,25 @@ public sealed record DoorLogQuery(
             .Where(DoorTrail.IsScanRow)
             .Where(a => a.CreatedAt >= From && a.CreatedAt < To);
 
+        // AND NOT AT A COURT BOX (D2-B27).
+        //
+        // `unknown_scan` is declared on the upload path with no dispatch case and no kind
+        // guard, unlike `gate_open`, which is gated — and a court box genuinely emits one
+        // (Session.h). Its action is classified as a door REFUSAL by DoorTrail, so a member
+        // mis-scanning at a court box appeared here as somebody turned away at a door, was
+        // counted in the club's per-day door totals, and was exported into the club's door log
+        // under a door's name. The predicate belongs beside the other door predicates and not
+        // at each of the four readers, for the reason DoorTrail.IsScanRow already gives.
+        //
+        // Read synchronously and on every call, which is cheap and deliberate: a club has a
+        // handful of boards, the read is a primary-key scan of a tiny table, and the
+        // alternative — caching it on this record — would put mutable state on a type whose
+        // whole value is that it is a description of a request. See DoorTrail.NotADoorIds for
+        // why the rule is "not a door" rather than "is a gate": a REMOVED door's rows survive
+        // it, and filtering to boards that still exist would delete exactly the rows the
+        // removed_door filter exists to serve.
+        rows = DoorTrail.WithoutNonDoorBoards(rows, DoorTrail.NotADoorIds(db));
+
         if (Door is { } door)
         {
             var containment = System.Text.Json.JsonSerializer.Serialize(new { device_id = door });
