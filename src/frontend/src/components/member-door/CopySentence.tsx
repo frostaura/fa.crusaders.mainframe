@@ -1,4 +1,5 @@
 import type { Sentence } from "../../lib/memberDoorCopy";
+import { MEMBER_DOOR_LINK } from "./links";
 
 /**
  * A sentence whose club number is a number a thumb can press. D13.
@@ -28,8 +29,9 @@ export function CopySentence({ sentence, className }: { sentence: Sentence; clas
           // `inline` rather than the footer's `min-h-11` block: this one sits INSIDE a
           // sentence, and a 44px inline-flex anchor mid-paragraph tears the line box apart.
           // The underline and the colour are what make it findable; the footer's link is the
-          // one built for a cold thumb, and it is still there.
-          className="text-accent-strong underline underline-offset-2 hover:no-underline"
+          // one built for a cold thumb, and it is still there. R3-36: one spelling, in
+          // `links.ts`, for every link on this surface.
+          className={MEMBER_DOOR_LINK}
         >
           {sentence.link.text}
         </a>

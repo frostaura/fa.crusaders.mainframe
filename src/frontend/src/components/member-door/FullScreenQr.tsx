@@ -53,7 +53,7 @@ import { CopySentence } from "./CopySentence";
  * </p>
  */
 const COLUMN_RESERVE = [
-  0.5,  // `p-2` above the symbol
+  0.5,  // `py-2` above the symbol
   0.5,  // `gap-2` under it
   1.75, // the code line, `text-lg` on a 1.75rem line box
   0.5,  // `gap-2`
@@ -83,7 +83,28 @@ const COLUMN_RESERVE = [
  * inherited fallback to paint if it ever goes missing.
  * </p>
  */
-const SQUARE = `min(100vw - 1rem, 100vh - ${COLUMN_RESERVE}rem)`;
+/*
+  <b>R3-36 (D-L2): the horizontal inset is gone, and the arithmetic below is why it is the
+  only thing that could go.</b>
+
+  Measured at 390×844 the dark modules came out 270px wide — sixty-nine per cent of the
+  glass, under a sea of white — and "the largest area the screen can give it" was not what
+  the overlay was doing. The 1rem was two of the missing pixels per side; the other 104 are
+  the QR specification's four-module quiet zone, which `QrSvg` draws INSIDE the symbol.
+
+  It stays. A version-1 symbol is 21 modules across and the quiet zone is 4 a side, so a box
+  of width W renders modules of W/29 and exactly four modules of white around them — which
+  is the largest the symbol can be while the white beside it is still a quiet zone. Taking
+  the zone out to draw a bigger picture buys 38% of module size and spends the margin a
+  scanner in a dark doorway reads the finder patterns against, on the one screen in this
+  product whose whole job is to be scanned. So the inset goes, the quiet zone does not, and
+  the honest gain is 374px of box to 390.
+
+  The vertical `p-2` stays and is still in {@link COLUMN_RESERVE}: there the square is not
+  the binding constraint in portrait at all, and the padding is what keeps Done off the
+  bottom bezel in landscape.
+*/
+const SQUARE = `min(100vw, 100vh - ${COLUMN_RESERVE}rem)`;
 
 /** The square as a style object: declared once, read twice. See {@link SQUARE}. */
 const SQUARE_BOX = { "--fsq-square": SQUARE, width: "var(--fsq-square)" } as React.CSSProperties;
@@ -339,7 +360,7 @@ export function FullScreenQr(props: {
         `bg-white` with no alpha anywhere in the chain, because a scrim is light the
         scanner does not get.
       */
-      className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-2 bg-white p-2"
+      className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-2 bg-white py-2"
       onClick={dismiss}
     >
       {/*

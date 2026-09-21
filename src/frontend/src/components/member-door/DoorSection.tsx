@@ -9,6 +9,8 @@ import {
   DIAGNOSIS_TRIGGER,
   type ContactKnowledge,
   describeStanding,
+  memberCodeOpensDoorNow,
+  normaliseDoorsShut,
 } from "../../lib/memberDoorCopy";
 import { SelfDiagnosis } from "./SelfDiagnosis";
 import { StandingLine } from "./StandingLine";
@@ -98,7 +100,9 @@ export function DoorSection(props: {
   const zone = standing?.timezone;
   /** The window of the code ON SCREEN, which is a fact about the code and not about the member. */
   const codeWindow = useCodeWindow(code, zone);
-  const line = standing ? describeStanding(standing, code) : null;
+  /** R3-8. A screen with nothing on it for a door to read promises nothing about one. */
+  const hasLiveCode = codeSecondsLeft > 0;
+  const line = standing ? describeStanding(standing, code, { hasLiveCode }) : null;
 
   /** Both reads forced, and the checklist rendered only once they settle — never a stale tick. */
   const run = async () => {
@@ -135,6 +139,7 @@ export function DoorSection(props: {
         failure={doorRead.failure}
         code={code}
         staleSince={staleSince}
+        hasLiveCode={hasLiveCode}
         onUseMemberCode={onUseMemberCode}
       />
 
@@ -170,6 +175,15 @@ export function DoorSection(props: {
             codeWindow,
             lastRefusal: refusal,
             offerMemberCode: line?.offerMemberCode ?? false,
+            // R3-5. The check had no idea the club had switched a door off, on a page whose
+            // own standing line was saying so ten pixels above, and concluded that the
+            // scanner might need a wipe. Read through `normaliseDoorsShut` so an absent
+            // field stays "nobody told this screen" rather than becoming an answer.
+            doorsShut: normaliseDoorsShut(standing?.doors_shut),
+            doorsShutNames: standing?.doors_shut_names,
+            // R3-6. Distinct from `offerMemberCode`, which is false for the member who is
+            // ALREADY holding the code the club's rule admits — which was Lerato exactly.
+            memberCodeOpensDoor: memberCodeOpensDoorNow(standing),
             // Not `!failed`. A 500 from the club's API is a read that failed and a phone
             // whose line works perfectly, and scoring that row ✗ sent a member to look for
             // signal they already had. See `MemberDoorRead.failure`.

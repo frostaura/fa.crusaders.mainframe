@@ -155,7 +155,13 @@ export function rememberDoor(door: MemberDoor): void {
     doors: door.doors,
     // B4 / E-H1: without this a member reading the page with no signal is told what the club
     // was like before it shut its doors, in the present tense.
+    //
+    // R3-4: it is optional on the wire now, and it travels as whatever arrived — including
+    // `undefined`. Defaulting it here to one of the three answers would put the invented
+    // fact back, one layer down, where the page can no longer tell it was invented.
     doors_shut: door.doors_shut,
+    /* WIRE-R3 §5. Names, so a cached answer can still say WHICH door is shut. */
+    doors_shut_names: door.doors_shut_names,
     // O1: the club's zone travels with the facts, so a cached clock face is still the club's
     // day rather than reverting to the viewer's the moment the network goes.
     timezone: door.timezone,

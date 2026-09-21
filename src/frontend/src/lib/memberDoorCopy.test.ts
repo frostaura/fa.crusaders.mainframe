@@ -1021,10 +1021,20 @@ describe("memberDoorCopy", () => {
    * straight past the check. Telling that member the club has them as not active is the
    * page contradicting the door they are standing at.
    */
+  /**
+   * <b>R3-5 changed the second half of this.</b> It used to assert the promise —
+   * "A live member code of yours opens the club door" — directly after telling her the club
+   * has no record of her and that it is worth putting right, and the two read as the screen
+   * arguing with itself. The mechanism is unchanged and is still stated; what the sentence
+   * no longer does is finish on a promise as though the records were in order.
+   */
   it("does not tell a member with no membership row that theirs is not active", () => {
     const line = standingFor({ policy: "active_member", membership: "none", membership_detail: "none" });
     expect(line.body).not.toMatch(/not active|until they change that/i);
-    expect(line.body).toMatch(/opens the club door/i);
+    // The mechanism, stated: a door here does not check for a membership row.
+    expect(line.body).toMatch(/don't check for one/i);
+    // R3-5: and never the bare promise on top of it.
+    expect(line.body).not.toMatch(/live member code of yours opens/i);
   });
 
   it("still applies the booking rule to a member with no membership row", () => {
@@ -1154,11 +1164,22 @@ describe("memberDoorCopy", () => {
    * active membership ✓ Passed" for a rule she is not held to and "nothing on file ✓
    * Passed" for a state the club would want to know about.
    */
+  /**
+   * <b>R3-5: neutral was still the wrong shade.</b> Neutral draws the same grey dash as
+   * "not needed at this club", and the only thing separating the two was a state word that
+   * is `sr-only` — so a sighted member scanning the column saw a row that looked like the
+   * rows meaning "fine, does not apply here". It is `attention` now: its own glyph, its own
+   * colour, and the same word.
+   */
   it("never ticks a membership the club has nothing on file for", () => {
     const { rows } = buildDiagnosis({ ...HEALTHY, membership: "none" as const, membership_detail: "none" });
     const membership = rows.find((r) => r.key === "membership")!;
-    expect(membership.state).toBe("neutral");
+    expect(membership.state).toBe("attention");
     expect(membership.stateWord).toMatch(/unusual/i);
+    // R3-5, the half that is visible without a screen reader: not the grey n/a dash the
+    // two "does not apply here" rows draw.
+    const notApplicable = rows.filter((r) => r.state === "neutral").map((r) => r.key);
+    expect(notApplicable).not.toContain("membership");
   });
 
   /** The policy row states the club's rule. It is not a check and may never read as one. */
@@ -1384,8 +1405,13 @@ describe("memberDoorCopy", () => {
     for (const membership of ["active", "none"] as const) {
       const line = standingFor({ policy: "active_member", membership, membership_detail: membership });
       expect(line.body).not.toMatch(/code on this screen/i);
-      expect(line.body).toMatch(/live member code of yours/i);
     }
+    // The promise is still made where it is true: an active member at a club that opens for
+    // one, with nothing shut and a live code in hand. R3-5 removed it from the `none` arm
+    // alone — see the test above — and the two arms are asserted apart rather than together,
+    // because "both arms say the same thing" was the defect.
+    expect(standingFor({ policy: "active_member", membership: "active" }).body)
+      .toMatch(/live member code of yours/i);
   });
 
   /**

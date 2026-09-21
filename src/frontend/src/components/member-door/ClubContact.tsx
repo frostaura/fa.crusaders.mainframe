@@ -6,6 +6,8 @@ import {
   contactStaleNotice,
   contactUnknownNotice,
 } from "../../lib/memberDoorCopy";
+import { cn } from "../../lib/utils";
+import { MEMBER_DOOR_LINK_TAPPABLE } from "./links";
 
 /**
  * The club's number, on the page at all times rather than only on a refusal.
@@ -54,15 +56,13 @@ export function ClubContact({ contact }: { contact: ContactKnowledge }) {
       {/* Stacked below `sm`, each its own 44px row; inline with a separator above it. */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2">
         {phone && (
-          <a href={`tel:${phone.replace(/\s+/g, "")}`}
-             className="inline-flex items-center min-h-11 text-accent-strong underline underline-offset-2 hover:no-underline">
+          <a href={`tel:${phone.replace(/\s+/g, "")}`} className={MEMBER_DOOR_LINK_TAPPABLE}>
             {phone}
           </a>
         )}
         {phone && email && <span aria-hidden="true" className="hidden sm:inline">·</span>}
         {email && (
-          <a href={`mailto:${email}`}
-             className="inline-flex items-center min-h-11 break-all text-accent-strong underline underline-offset-2 hover:no-underline">
+          <a href={`mailto:${email}`} className={cn("break-all", MEMBER_DOOR_LINK_TAPPABLE)}>
             {email}
           </a>
         )}

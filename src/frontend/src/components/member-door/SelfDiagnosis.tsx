@@ -13,6 +13,7 @@ import {
   buildDiagnosis,
 } from "../../lib/memberDoorCopy";
 import { CopySentence } from "./CopySentence";
+import { MEMBER_DOOR_ACTION_LINK } from "./links";
 
 /**
  * "The door didn't open" — the self-diagnosis, expanded in place.
@@ -120,10 +121,7 @@ export function SelfDiagnosis(props: {
               </Button>
             )}
             {input.policy === "booking_window" && !input.hasBooking && (
-              <Link
-                to="/schedule"
-                className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg text-sm font-medium bg-brand-strong text-brand-ink border border-brand-strong hover:bg-brand-strong/90 w-full sm:w-auto"
-              >
+              <Link to="/schedule" className={MEMBER_DOOR_ACTION_LINK}>
                 Book a court
               </Link>
             )}

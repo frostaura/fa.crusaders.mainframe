@@ -1271,6 +1271,25 @@ export type MemberDoorDecision = {
    * </p>
    */
   opens_at: string | null;
+  /**
+   * The instant on this row cannot be trusted to the minute. WIRE-R3 §2, R3-17.
+   *
+   * <p>
+   * True when the server clamped the board's own clock, or when `delivered_at` is earlier
+   * than `at` — which is impossible and means the door's clock was out. A board has no RTC
+   * and takes its time from the club, so a board that has been cut off since boot is
+   * guessing; the row is still evidence and is still shown, but no screen may print it as
+   * though it were to the minute.
+   * </p>
+   *
+   * <p>
+   * Optional because the field is newer than the surfaces that read it, and absent is
+   * "nothing said". The page derives the impossible-order half for itself either way — see
+   * `timeIsUncertain` in `lib/memberDoorCopy.ts` — so a row that predates the flag still
+   * cannot print an order that never happened.
+   * </p>
+   */
+  time_uncertain?: boolean;
 };
 
 /**
@@ -1285,6 +1304,21 @@ export type MemberDoorDecision = {
  * </p>
  */
 export type MemberDoorsShut = "none" | "some" | "all";
+
+/**
+ * The same fact as {@link MemberDoorsShut}, plus the answer this page kept getting wrong.
+ *
+ * <p>
+ * <b>R3-4.</b> `doors_shut` is optional on the wire in practice — an API that predates
+ * WIRE-R2 §4 sends none, and a partial response can drop it — and every sentence built from
+ * it read an absent field as "some of this club's doors are shut". A member at a club that
+ * had shut nothing was told, in the present tense, that the club had shut doors; the same
+ * response then promised that their code opens one. Unknown is not shut, and it is not
+ * "none" either: it is a fourth state in which the page says nothing about shut doors and
+ * promises nothing about an open one.
+ * </p>
+ */
+export type MemberDoorsShutKnowledge = MemberDoorsShut | "unknown";
 
 export type MemberDoor = {
   /**
@@ -1304,8 +1338,30 @@ export type MemberDoor = {
    * </p>
    */
   doors: boolean;
-  /** None, some or all of the club's doors are shut. See {@link MemberDoorsShut}. */
-  doors_shut: MemberDoorsShut;
+  /**
+   * None, some or all of the club's doors are shut. See {@link MemberDoorsShut}.
+   *
+   * <p>
+   * <b>Optional, and R3-4 is why it is typed that way.</b> It is required of the current
+   * API, but a response that predates WIRE-R2 §4 — or one a gateway truncated — arrives
+   * without it, and the page that read `undefined` as "some" told every member at the club
+   * that doors were shut. Typing it optional is what forces every reader through
+   * {@link MemberDoorsShutKnowledge}'s fourth state instead of through a `??` default that
+   * picks one of the three answers on the member's behalf.
+   * </p>
+   */
+  doors_shut?: MemberDoorsShut;
+  /**
+   * The club's own names for the doors it has shut. WIRE-R3 §5. May be empty.
+   *
+   * <p>
+   * `doors_shut` says how much of the estate is shut; this says which. A member told "some
+   * of its doors" cannot tell which door they are walking up to, and the club knows the
+   * answer. Empty — or absent, on an API that predates the field — means the page says what
+   * it knows without naming anything, which is the sentence it had before.
+   * </p>
+   */
+  doors_shut_names?: string[];
   /**
    * The club's own IANA zone, so every clock face on this surface is the club's day.
    *
@@ -1389,6 +1445,8 @@ export type MemberDoorHistoryRow = {
   /** Null for the same malformed-details row {@link MemberDoorDecision.reason} describes. */
   reason: string | null;
   offline: boolean;
+  /** The row's time was clamped, or its delivery predates it. See {@link MemberDoorDecision.time_uncertain}. */
+  time_uncertain?: boolean;
 };
 
 export type MemberDoorHistory = {

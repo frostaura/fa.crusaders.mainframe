@@ -1762,7 +1762,13 @@ describe("MyCode at a club with a door", () => {
     }));
 
     const line = await screen.findByText(/no membership on file for you/);
-    expect(line).toHaveTextContent(/A live member code of yours opens the club door/);
+    // R3-5: the mechanism, stated — and NOT the bare promise on top of it. It used to end
+    // "A live member code of yours opens the club door" directly after telling her the club
+    // has no record of her and that it is worth putting right, which reads as the screen
+    // arguing with itself. What the door does is still said; what it no longer does is
+    // finish on a promise as though the records were in order.
+    expect(line).toHaveTextContent(/This club's doors don't check for one/);
+    expect(line).not.toHaveTextContent(/A live member code of yours opens the club door/);
     // Neither neighbour's sentence: not "yours is active" and not "yours is not active".
     expect(line).not.toHaveTextContent(/Yours is active/);
     expect(screen.queryByText(/not active/i)).toBeNull();
@@ -2226,7 +2232,10 @@ describe("MyCode at a club with a door", () => {
 
     // The symbol fills what the card has, up to the size a scanner needs at arm's length.
     expect(qrBox.className).toContain("w-full");
-    expect(qrBox.className).toMatch(/max-w-\[\d+px\]/);
+    // R3-29 (D-M2) added a HEIGHT bound beside the px ceiling: at 320x568 a 288px square put
+    // the readable code and the "which code" label below the fold. `vh` is not `rem` — it is
+    // the viewport, not the reader's font — so the root-invariance rule above is untouched.
+    expect(qrBox.className).toMatch(/max-w-\[min\(\d+px,\d+vh\)\]/);
     // And the card is what is pinned: a px gutter off the viewport below `sm`, px padding
     // throughout. Both halves have to be here — a pinned symbol inside a rem-padded card is
     // the arrangement that overflowed.
