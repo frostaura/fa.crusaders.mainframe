@@ -58,6 +58,9 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   ["/admin/members", "Members"],
   ["/admin/webhooks", "Webhooks"],
   ["/admin/biometric", "Members"],
+  // The old admin paths. Each one still resolves — they are permanent redirects, not
+  // deletions — and each still needs a name, because a redirect renders for a tick and
+  // `route-titles.test.ts` reads every `path=` in the router without caring what it renders.
   ["/admin/devices", "Devices"],
   ["/admin/doors", "Doors"],
   ["/admin/doors/log", "Door log"],
@@ -65,6 +68,25 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   ["/admin/doors/:id/card", "Door card"],
   ["/admin/settings", "Admin settings"],
   ["/admin/ledger", "Transactions"],
+  /*
+    eco / MONITORING. Named for what an admin came to look at, never for the mechanism:
+    "Faults", not "Device errors"; "A person's night", not "Member trace". These strings are
+    a browser tab, a bookmark, a history entry and the first thing a screen reader says on
+    arrival, and this audience does not read "trace".
+  */
+  ["/admin/monitoring", "Control board"],
+  ["/admin/monitoring/doors", "Doors"],
+  ["/admin/monitoring/doors/log", "Door log"],
+  ["/admin/monitoring/doors/:id", "Door"],
+  ["/admin/monitoring/doors/:id/card", "Door card"],
+  ["/admin/monitoring/devices", "Boards"],
+  ["/admin/monitoring/faults", "Faults"],
+  ["/admin/monitoring/night", "A person's night"],
+  ["/admin/monitoring/changes", "Admin change record"],
+  // eco / items 14, 3 and 19.
+  ["/admin/schedules", "Repeating bookings"],
+  ["/admin/schedules/:id", "Repeating booking"],
+  ["/admin/groups", "Member groups"],
 ];
 
 /** What the catch-all route renders, so it is what an unmatched path is called. */

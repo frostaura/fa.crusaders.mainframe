@@ -132,7 +132,7 @@ function DoorsList({ store, rows, now, livenessOf, settings }: {
       <div className="space-y-2">
         <p className="text-sm text-text-secondary">{DOORS_EMPTY_NOTICE}</p>
         <p className="text-sm text-text-muted">{DOORS_EMPTY_HINT}</p>
-        <Link to="/admin/devices" className="inline-flex min-h-11 items-center text-sm text-accent-strong">
+        <Link to="/admin/monitoring/devices" className="inline-flex min-h-11 items-center text-sm text-accent-strong">
           Go to Devices
         </Link>
       </div>
@@ -272,7 +272,7 @@ function AdminDoorsPageBody() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Link
-            to="/admin/doors/log"
+            to="/admin/monitoring/doors/log"
             className="inline-flex min-h-11 items-center rounded-lg border border-control bg-bg-surface px-5 text-sm font-medium"
           >
             All scans, all doors
@@ -325,7 +325,7 @@ function AdminDoorsPageBody() {
                   with a minimum on BOTH axes, so a door called "A" is still a target.
                 */}
                 <Link
-                  to={`/admin/doors/${first.doorId}`}
+                  to={`/admin/monitoring/doors/${first.doorId}`}
                   className="inline-flex min-h-11 min-w-11 items-center font-medium underline"
                 >
                   {`Go to ${first.doorName}`}
@@ -346,7 +346,7 @@ function AdminDoorsPageBody() {
       />
 
       <p className="text-sm">
-        <Link to="/admin/devices" className="inline-flex min-h-11 items-center text-accent-strong">
+        <Link to="/admin/monitoring/devices" className="inline-flex min-h-11 items-center text-accent-strong">
           Court boxes are on Devices
         </Link>
       </p>

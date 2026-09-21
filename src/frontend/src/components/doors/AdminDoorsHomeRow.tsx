@@ -35,7 +35,7 @@ export function AdminDoorsHomeRow() {
   if (hint === null) return null;
   return (
     <Link
-      to="/admin/doors"
+      to="/admin/monitoring/doors"
       className="flex items-start gap-3 rounded-lg border border-accent-strong bg-accent-soft p-4"
     >
       <DoorClosed size={20} className="mt-0.5 shrink-0 text-accent-strong" aria-hidden="true" />

@@ -28,7 +28,7 @@ describe("the doors error boundary", () => {
 
     expect(screen.getByRole("heading", { name: "This page could not be shown" })).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Nothing at the doors has changed");
-    expect(screen.getByRole("link", { name: "Back to Doors" })).toHaveAttribute("href", "/admin/doors");
+    expect(screen.getByRole("link", { name: "Back to Doors" })).toHaveAttribute("href", "/admin/monitoring/doors");
     expect(screen.getByRole("button", { name: "Reload this page" })).toBeInTheDocument();
   });
 

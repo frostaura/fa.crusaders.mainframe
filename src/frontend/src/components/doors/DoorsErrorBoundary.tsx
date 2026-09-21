@@ -78,7 +78,7 @@ class DoorsErrorBoundaryInner extends Component<BoundaryProps, BoundaryState> {
         </Alert>
         <div className="flex flex-wrap gap-2">
           <Link
-            to="/admin/doors"
+            to="/admin/monitoring/doors"
             className="inline-flex min-h-11 items-center rounded-lg border border-control bg-bg-surface px-5 text-sm font-medium"
           >
             Back to Doors

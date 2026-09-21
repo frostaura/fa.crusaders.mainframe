@@ -126,7 +126,7 @@ export function FleetResultPanel({ state }: { state: FleetResultState }) {
             {state.leftShut.map((door) => (
               <li key={door.id}>
                 <Link
-                  to={`/admin/doors/${door.id}`}
+                  to={`/admin/monitoring/doors/${door.id}`}
                   className="inline-flex min-h-11 items-center text-sm font-medium text-accent-strong underline"
                 >
                   {door.name}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AuthProvider, readLastIdentity, useAuth } from "./lib/auth";
 import Layout from "./components/Layout";
 import { ToastProvider } from "./components/Toast";
@@ -30,6 +30,17 @@ import { AdminDoorsPage } from "./pages/AdminDoors";
 import { AdminDoorsDetailPage } from "./pages/AdminDoorsDetail";
 import { AdminDoorsLogPage } from "./pages/AdminDoorsLog";
 import { AdminDoorsCardPage } from "./pages/AdminDoorsCard";
+// eco: Monitoring — the section that absorbs Doors and Devices and adds the four surfaces
+// GOAL items 6, 7, 10 and 14 asked for. The section shell and the nav entry belong to the
+// chrome lane; these are the pages.
+import { ControlBoardPage } from "./pages/monitoring/ControlBoard";
+import { MonitoringFaultsPage } from "./pages/monitoring/MonitoringFaults";
+import { MemberNightPage } from "./pages/monitoring/MemberNight";
+import { AdminChangeRecordPage } from "./pages/monitoring/AdminChangeRecord";
+// eco: item 14's calendar half, and items 3 + 19's admin half.
+import { AdminSchedulesPage } from "./pages/AdminSchedules";
+import { AdminScheduleDetailPage } from "./pages/AdminScheduleDetail";
+import { AdminGroupsPage } from "./pages/AdminGroups";
 import NotFoundPage from "./pages/NotFound";
 import { Card } from "./components/Card";
 import { Button } from "./components/Button";
@@ -79,14 +90,44 @@ export default function App() {
             <Route path="/admin/members" element={<RequireAuth admin><AdminMembersPage /></RequireAuth>} />
             <Route path="/admin/webhooks" element={<RequireAuth admin><AdminWebhooksPage /></RequireAuth>} />
             <Route path="/admin/biometric" element={<Navigate to="/admin/members" replace />} />
-            <Route path="/admin/devices" element={<RequireAuth admin><AdminDevicesPage /></RequireAuth>} />
-            {/* doors: admin. `/log` is declared BEFORE `/:id` or it resolves as a door id and
-                the club log becomes a 404 nobody can explain. `/card` is a child of a door
-                because it is that door's card, and its back link says so. */}
-            <Route path="/admin/doors" element={<RequireAuth admin><AdminDoorsPage /></RequireAuth>} />
-            <Route path="/admin/doors/log" element={<RequireAuth admin><AdminDoorsLogPage /></RequireAuth>} />
-            <Route path="/admin/doors/:id" element={<RequireAuth admin><AdminDoorsDetailPage /></RequireAuth>} />
-            <Route path="/admin/doors/:id/card" element={<RequireAuth admin><AdminDoorsCardPage /></RequireAuth>} />
+            {/*
+              eco / MONITORING — one section for "how is the club's estate doing", and the
+              six pages under it.
+
+              Doors and Devices MOVE here; they do not get copies. The old paths below are
+              permanent redirects for the same reason `/court-code` is one: they are in
+              outage emails, in bookmarks, in the pairing instructions on the Devices page
+              and on the printed card that is screwed to a door frame. A moved URL that 404s
+              is a dead link somebody finds while standing at a locked door.
+
+              `/log` is declared BEFORE `/:id` or it resolves as a door id and the club log
+              becomes a 404 nobody can explain. `/card` is a child of a door because it is
+              that door's card, and its back link says so.
+            */}
+            <Route path="/admin/monitoring" element={<RequireAuth admin><ControlBoardPage /></RequireAuth>} />
+            <Route path="/admin/monitoring/doors" element={<RequireAuth admin><AdminDoorsPage /></RequireAuth>} />
+            <Route path="/admin/monitoring/doors/log" element={<RequireAuth admin><AdminDoorsLogPage /></RequireAuth>} />
+            <Route path="/admin/monitoring/doors/:id" element={<RequireAuth admin><AdminDoorsDetailPage /></RequireAuth>} />
+            <Route path="/admin/monitoring/doors/:id/card" element={<RequireAuth admin><AdminDoorsCardPage /></RequireAuth>} />
+            <Route path="/admin/monitoring/devices" element={<RequireAuth admin><AdminDevicesPage /></RequireAuth>} />
+            <Route path="/admin/monitoring/faults" element={<RequireAuth admin><MonitoringFaultsPage /></RequireAuth>} />
+            <Route path="/admin/monitoring/night" element={<RequireAuth admin><MemberNightPage /></RequireAuth>} />
+            <Route path="/admin/monitoring/changes" element={<RequireAuth admin><AdminChangeRecordPage /></RequireAuth>} />
+
+            {/* The old paths, kept working. `MovedTo` carries the `:id` across rather than
+                dropping the reader on a list — a bookmarked door is a door somebody wants. */}
+            <Route path="/admin/devices" element={<Navigate to="/admin/monitoring/devices" replace />} />
+            <Route path="/admin/doors" element={<Navigate to="/admin/monitoring/doors" replace />} />
+            <Route path="/admin/doors/log" element={<Navigate to="/admin/monitoring/doors/log" replace />} />
+            <Route path="/admin/doors/:id" element={<MovedTo to="/admin/monitoring/doors/:id" />} />
+            <Route path="/admin/doors/:id/card" element={<MovedTo to="/admin/monitoring/doors/:id/card" />} />
+
+            {/* eco / item 14 — the calendar half. Under /admin rather than beside the grid,
+                because a plan is a thing with a life of its own; the grid links to it. */}
+            <Route path="/admin/schedules" element={<RequireAuth admin><AdminSchedulesPage /></RequireAuth>} />
+            <Route path="/admin/schedules/:id" element={<RequireAuth admin><AdminScheduleDetailPage /></RequireAuth>} />
+            {/* eco / items 3 + 19 — groups, rates, windows and the per-day ceiling. */}
+            <Route path="/admin/groups" element={<RequireAuth admin><AdminGroupsPage /></RequireAuth>} />
             <Route path="/admin/settings" element={<RequireAuth admin><AdminSettingsPage /></RequireAuth>} />
             <Route path="/admin/ledger" element={<RequireAuth admin><AdminLedgerPage /></RequireAuth>} />
             {/* A real 404, not a redirect. The catch-all used to send every unknown path to the
@@ -118,6 +159,27 @@ export default function App() {
  * else regardless, because a redirect is only ever a suggestion to whatever holds the token.
  * </p>
  */
+/**
+ * A moved route, with its parameters carried across. (eco / Monitoring)
+ *
+ * <p>
+ * `<Navigate to="/admin/monitoring/doors/:id">` would send a reader to a URL with the literal
+ * two characters `:id` in it, which is a 404 that looks like a typo somebody made. The
+ * substitution has to happen at render time, from the params the old route matched.
+ * </p>
+ *
+ * <p>
+ * `replace`, always: a redirect that pushes a history entry makes Back bounce between the old
+ * path and the new one for ever, which is the one navigation a person will definitely try when
+ * a page surprises them.
+ * </p>
+ */
+function MovedTo({ to }: { to: string }) {
+  const params = useParams();
+  const resolved = to.replace(/:([A-Za-z0-9_]+)/g, (whole, name: string) => params[name] ?? whole);
+  return <Navigate to={resolved} replace />;
+}
+
 /**
  * The routes that are worth anything with no signal at all. (D3)
  *

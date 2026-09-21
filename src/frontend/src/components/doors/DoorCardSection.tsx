@@ -80,7 +80,7 @@ export function DoorCardSection({ door, displayName, settings, editing, onEdit, 
             Edit this door
           </Button>
           <Link
-            to={`/admin/doors/${door.id}/card`}
+            to={`/admin/monitoring/doors/${door.id}/card`}
             className="inline-flex min-h-11 items-center rounded-lg border border-control px-5 text-sm font-medium"
           >
             Print this door card

@@ -390,7 +390,7 @@ function DeviceRowHeader({ device, online, now }: { device: AdminDevice; online:
  * <p>
  * <b>A GATE never reaches this notice at all (A2.5).</b> A door drives no courts, so every
  * clause above about a court going dark and its no-shows being waived is simply not true of
- * one — and rather than a second branch here, a door is shut on /admin/doors, where
+ * one — and rather than a second branch here, a door is shut on /admin/monitoring/doors, where
  * `doorStateNotice` says the door's own consequence. Two call sites for one 403 path is the
  * failure `lib/gateCopy.ts`'s header documents.
  * </p>
@@ -675,7 +675,7 @@ function DeviceRow({
             A DOOR is not offered this control at all any more (A2.5): its own vocabulary is
             "Shut" and "Reopen", the consequence is the opposite one, and two call sites for
             one 403 path is the failure lib/gateCopy's header documents. Doors are shut on
-            /admin/doors. */}
+            /admin/monitoring/doors. */}
         {device.enabled ? (
           <ConfirmButton
             idleLabel="Take out of service"
@@ -788,7 +788,7 @@ function GateRows({ gates, tenantHeartbeat, now }: {
                 {relative(gate.last_seen_at, now)}
               </time>
               <Link
-                to={`/admin/doors/${gate.id}`}
+                to={`/admin/monitoring/doors/${gate.id}`}
                 className="ml-auto inline-flex min-h-11 items-center rounded-lg border border-control px-4 text-sm font-medium"
                 /* The door's NAME in the accessible name. Reviewer B met three links reading
                    "Manage on Doors" on one screen — identical to anybody tabbing or using

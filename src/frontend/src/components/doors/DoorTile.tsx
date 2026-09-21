@@ -98,7 +98,7 @@ export function DoorTile({ row, now, online, timezone, dayStartedAt, settings }:
               so the hit area grows rather than the text.
             */}
             <Link
-              to={`/admin/doors/${device.id}`}
+              to={`/admin/monitoring/doors/${device.id}`}
               className="inline-flex min-h-11 min-w-11 items-center justify-start text-accent-strong"
             >
               {name}
@@ -139,7 +139,7 @@ export function DoorTile({ row, now, online, timezone, dayStartedAt, settings }:
               </Link>
             ) : (
               <Link
-                to={`/admin/doors/log?door=${encodeURIComponent(device.id)}&outcome=refused`}
+                to={`/admin/monitoring/doors/log?door=${encodeURIComponent(device.id)}&outcome=refused`}
                 className="mt-1 inline-flex min-h-11 items-center font-medium underline"
               >
                 {`${line.action} — ${name}`}

@@ -1448,7 +1448,7 @@ describe("AdminDevices", () => {
       // board answered N seconds ago and nothing more.
       expect(screen.getByText("Reporting")).toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Manage Front door on Doors" }))
-        .toHaveAttribute("href", "/admin/doors/99999999-9999-9999-9999-999999999999");
+        .toHaveAttribute("href", "/admin/monitoring/doors/99999999-9999-9999-9999-999999999999");
     });
 
     /**
@@ -1568,7 +1568,7 @@ describe("AdminDevices", () => {
   // Round G3, F2. The board has written an audit row for every decision since it shipped
   // and no screen read one.
   //
-  // A2.5 moved the DOOR's half of this to /admin/doors/:id, where the feed is open on
+  // A2.5 moved the DOOR's half of this to /admin/monitoring/doors/:id, where the feed is open on
   // arrival, chip-first, and renders an offline row three distinct ways. What is tested
   // here is the panel this page still has — a court box's — and every claim below is one
   // the panel makes whatever kind of board it is reading.
