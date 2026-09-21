@@ -122,6 +122,87 @@
   }
 
   /*
+   * C8 — forced colours, where a control's boundary is the only thing left of it.
+   *
+   * Windows High Contrast (and any `forced-colors: active` mode) throws away every
+   * author background and every author colour and substitutes the user's pair. A
+   * filled button whose ONLY edge is its fill — `bg-danger-soft` with nothing else —
+   * therefore loses the fill, keeps the text, and is left indistinguishable from a
+   * paragraph. Reviewer C found exactly that on the destructive confirms: a control
+   * that shuts a door, rendered as body text.
+   *
+   * The fix is a boundary the mode cannot take away. Every primitive in the product
+   * now carries `border border-transparent`, which costs nothing anywhere else — a
+   * transparent 1 px edge is invisible and already in the box model, so nothing moves
+   * when this rule fires. Here that edge is given a system colour.
+   *
+   * `ButtonText` for things that are pressed, `CanvasText` for banners and cards that
+   * are read: the two roles are different, and forced colours is the one mode in which
+   * a user can tell them apart by colour at all.
+   */
+  @media (forced-colors: active) {
+    button,
+    [role="button"],
+    [data-interactive],
+    a[href][class*="border"] {
+      border: 1px solid ButtonText;
+    }
+
+    [role="alert"],
+    [role="status"],
+    [data-banner] {
+      border: 1px solid CanvasText;
+    }
+
+    /* A focus ring in a mode that has thrown the accent away. `Highlight` is the
+       system's own, and it is the only colour here guaranteed to differ from the text. */
+    :focus-visible {
+      outline: 2px solid Highlight;
+    }
+  }
+
+  /*
+   * C6 / C15 / D9 — the heading the router moves focus to on a route change.
+   *
+   * <p>
+   * A heading is not a control, so a ring around it is a statement rather than an
+   * affordance: right for a keyboard user, who needs to see where focus went, and wrong
+   * for a mouse user, who did not ask and gets a rectangle flashing on a title. That is
+   * the whole distinction `:focus-visible` exists for, so the plain `:focus` is silenced
+   * and the visible one is given the product's own ring.
+   * </p>
+   *
+   * <p>
+   * `scroll-margin-top` is D9's half. The header is sticky, a fragment target scrolls to
+   * y=0 of the scroll container, and the two facts together put the section heading
+   * underneath the header — measured at −29 px and −335 px on `/profile#door-history`.
+   * </p>
+   *
+   * <p>
+   * <b>The measured chrome height, not a constant.</b> It was `5rem`, which is 80 px at a
+   * 16 px root and clears a desktop header; on a phone the header plus the section tab
+   * strip is 101 px, so the heading still landed under it — the same guess-a-constant
+   * failure the toast strip had at `top-[100px]`, found the same way, by running the test
+   * under the mobile project. `Layout` already publishes what the header actually
+   * measures for the toast; this reads the same number. The fallback is what a desktop
+   * header comes to, for the screens with no chrome at all.
+   * </p>
+   */
+  [data-route-heading],
+  :target {
+    scroll-margin-top: calc(var(--app-chrome-height, 5rem) + 12px);
+  }
+
+  [data-route-heading]:focus {
+    outline: none;
+  }
+
+  [data-route-heading]:focus-visible {
+    outline: 2px solid rgb(var(--accent-strong-rgb, 0 73 141));
+    outline-offset: 2px;
+  }
+
+  /*
    * Reduced motion, with the specificity to actually win.
    *
    * This block used to say `button:hover` — (0,1,1) — against a base rule of

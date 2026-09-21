@@ -43,7 +43,13 @@ function describeNotApproved(status: string | number | null): string {
     return "Your membership is suspended, so you can't sign in. The club may have emailed you the reason — speak to them to have it restored.";
   }
   if (status === "Rejected") {
-    return "Your application wasn't approved, so this account can't be used. The club emailed you the reason — contact them if you think it's a mistake.";
+    // "may have emailed", not "emailed". This screen knows the review happened and what the
+    // answer was, because both are on the 403 in front of it; whether anybody wrote to the
+    // applicant is a thing that happened somewhere else. A member who never got one — wrong
+    // address, spam folder, an admin who refused an application and wrote nothing — is told
+    // the club has already explained itself, and reads the silence that follows as being
+    // ignored. The contact block below is what this screen can actually offer them.
+    return "Your application wasn't approved, so this account can't be used. The club may have emailed you the reason — contact them if you think it's a mistake.";
   }
   return "Your account isn't approved yet. An admin will email you once they've reviewed it.";
 }

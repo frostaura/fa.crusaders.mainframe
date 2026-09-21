@@ -1,13 +1,28 @@
 import { type ButtonHTMLAttributes } from "react";
 import { cn } from "../lib/utils";
 
-type Variant = "default" | "primary" | "ghost" | "danger" | "outline";
+export type Variant = "default" | "primary" | "ghost" | "danger" | "outline";
 
-export function Button({
-  className, variant = "default", loading, disabled, children, ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; loading?: boolean }) {
-  const variants: Record<Variant, string> = {
-    default: "bg-info-soft text-info-strong border border-info-soft hover:bg-info-soft/70",
+/**
+ * What each variant looks like — hoisted out of the component, and exported. (C8)
+ *
+ * <p>
+ * It was a `Record` rebuilt inside every render, which cost nothing and hid something: there
+ * was no way to ask the question "does every variant carry a boundary?" without rendering one
+ * button per variant and hoping the list of variants in the test still matched the list in the
+ * component. Reviewer C found `ghost` with no border at all under forced colours, and a test
+ * that enumerates a hand-written list would have missed it exactly as a reader did.
+ * </p>
+ *
+ * <p>
+ * Exported so that `e2e/confirm-armed.spec.ts` can put a real button of every variant on a real
+ * page under `forced-colors: active` and measure the border the browser computes — the class
+ * strings come from here rather than being copied, so a sixth variant is measured the day it is
+ * added and a variant that drops its border fails rather than being quietly skipped.
+ * </p>
+ */
+export const BUTTON_VARIANT_CLASS: Record<Variant, string> = {
+  default: "bg-info-soft text-info-strong border border-info-soft hover:bg-info-soft/70",
     /**
      * A real filled primary, for the one action a screen exists for.
      *
@@ -20,13 +35,27 @@ export function Button({
      * `hover:bg-brand-strong/90` compiles because brand.strong is literal hex. The identical
      * utility on `accent.strong` emits nothing at all; see the accent block in tailwind.config.
      */
-    primary: "bg-brand-strong text-brand-ink border border-brand-strong hover:bg-brand-strong/90",
-    ghost: "bg-transparent text-text-secondary hover:bg-bg-muted",
-    // `border-control`: an outline button's boundary IS the button — there is no fill to see
-    // it by — so SC 1.4.11's 3:1 applies to it more plainly than to anything else here.
-    outline: "border border-control bg-bg-surface hover:bg-bg-muted",
-    danger: "bg-danger-soft text-danger-strong border border-danger-soft hover:bg-danger-soft/70",
-  };
+  primary: "bg-brand-strong text-brand-ink border border-brand-strong hover:bg-brand-strong/90",
+  /**
+   * C8 — `border border-transparent`, on the one variant that had no boundary at all.
+   *
+   * Under `forced-colors: active` every author background goes, so a ghost button is
+   * left as bare text with no edge and nothing to say it can be pressed. A transparent
+   * 1 px border costs nothing in ordinary rendering — it is already in the box model,
+   * so nothing moves when the `forced-colors` block in index.css gives it a system
+   * colour — and it is what stops this variant collapsing into a paragraph. The other
+   * four variants already declare a border; this is the one that did not.
+   */
+  ghost: "bg-transparent border border-transparent text-text-secondary hover:bg-bg-muted",
+  // `border-control`: an outline button's boundary IS the button — there is no fill to see
+  // it by — so SC 1.4.11's 3:1 applies to it more plainly than to anything else here.
+  outline: "border border-control bg-bg-surface hover:bg-bg-muted",
+  danger: "bg-danger-soft text-danger-strong border border-danger-soft hover:bg-danger-soft/70",
+};
+
+export function Button({
+  className, variant = "default", loading, disabled, children, ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; loading?: boolean }) {
   // The hover lift, the pressed state, the cursor and the focus ring all come from the
   // base layer in index.css, which keys on the element rather than on this component —
   // so a control built without reaching for `Button` still feels like the rest of the
@@ -40,7 +69,7 @@ export function Button({
       aria-busy={loading || undefined}
       className={cn(
         "inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg text-sm font-medium",
-        variants[variant],
+        BUTTON_VARIANT_CLASS[variant],
         // The disabled LOOK is suppressed while loading, but `disabled` itself is kept — it is
         // what stops a double submit, which on register means uploading the photo twice. A
         // button that greys out the moment you press it reads as "that broke", which is the

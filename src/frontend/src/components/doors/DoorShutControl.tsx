@@ -47,14 +47,12 @@ export function DoorShutControl({ door, onDone, shutAt, online }: {
     return (
       <div className="space-y-3">
         {/*
-          C11, one screen along from the club-wide banner it was written about. A shut door
-          is a STANDING fact, and this sat in an assertive region on a page that re-reads
-          itself every fifteen seconds. What is standing is polite; only a change somebody
-          else caused earns an interruption, and the store is what knows whose change it
-          was. The colour and the left rule stay — this is still a refusal to look at, it
-          is just not shouted over whatever the reader was in the middle of.
+          C11: a shut door is a STANDING fact, and this sat in an assertive region on a page
+          that re-reads itself every fifteen seconds. What is standing is polite; only a change
+          somebody else caused earns an interruption. `live` is Alert's own prop — the role no
+          longer depends on the order of a spread.
         */}
-        <Alert tone="danger" role="status">
+        <Alert tone="danger" live="polite">
           {doorShutStandingNotice(door.name, shutAt, door.shut_by_name ?? null)}
         </Alert>
         {/* C2 / C5: shut AND not reporting are two facts and both are shown. A shut door

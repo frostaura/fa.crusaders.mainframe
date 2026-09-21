@@ -118,11 +118,16 @@ services:
         condition: service_started
 
   frontend:
+    # No build args. `VITE_SHOW_DEV_LOGIN` used to be passed through here, defaulting to
+    # false — which reads as safe and is not, because it made "print the seeded admin's
+    # e-mail and password on the sign-in screen" a one-word change in an unreviewed .env
+    # file, on the one surface that is public by definition. The dev-shortcuts block is
+    # gated on `import.meta.env.DEV`, which vite resolves at build time and the minifier
+    # deletes from a production bundle; an override is the only thing that could defeat
+    # that. Pinned by src/frontend/src/production-posture.test.ts.
     build:
       context: .
       dockerfile: ./src/frontend/Dockerfile
-      args:
-        VITE_SHOW_DEV_LOGIN: ${VITE_SHOW_DEV_LOGIN:-false}
     depends_on:
       - backend
 

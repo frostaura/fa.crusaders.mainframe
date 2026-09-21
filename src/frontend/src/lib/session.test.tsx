@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api, ApiError, setUnauthorizedHandler, TOKEN_KEY, tokenStore } from "./api";
-import { AuthProvider, useAuth } from "./auth";
+import { AuthProvider, readLastIdentity, useAuth } from "./auth";
+import { forgetLastKnown, readLastKnown, rememberQr } from "./lastKnown";
 import { BalanceProvider } from "./balance";
 import { stubFetch, type StubCall } from "../test/harness";
 
@@ -42,6 +43,10 @@ class FakeEventSource {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // D3 — the store is `localStorage` and survives a render, so a case that wrote one
+  // would otherwise hand the next case a member's code it never asked for.
+  forgetLastKnown();
+  localStorage.clear();
   vi.useRealTimers();
   tokenStore.clear();
   FakeEventSource.opened = [];
@@ -240,5 +245,123 @@ describe("the wallet stream", () => {
     // sign-in — that replay is what froze the header pill for the life of the tab.
     await waitFor(() => expect(FakeEventSource.opened).toHaveLength(2), { timeout: 4000 });
     expect(FakeEventSource.opened[1]).toContain("ticket=ticket-two");
+  });
+});
+
+/**
+ * D3 — what the member code page's last-known store is allowed to outlive.
+ *
+ * <p>
+ * <b>Why this is a session test rather than a member-page one.</b> `lib/lastKnown` keeps a
+ * member's last code, their court, their door times and the club's number in `localStorage`,
+ * because the service worker is forbidden to cache a byte of member data. Until D3 nothing
+ * rendered it while the club could not be reached, so nothing ever had to clear it — and
+ * nothing did: `clearOfflineCache()` purges the Cache API, which `localStorage` is not part of,
+ * and `forgetLastKnown()` had no caller anywhere in the app.
+ * </p>
+ *
+ * <p>
+ * Letting `/my-code` render from that store with no signal is what turns a dormant leak into a
+ * live one, so the clearing is part of the same change rather than a follow-up. Both endings
+ * are covered because they are different code paths and only one of them involves a member
+ * pressing anything — on a shared club phone the common ending is nobody pressing anything at
+ * all.
+ * </p>
+ */
+describe("a session that ends takes the member's last-known code with it", () => {
+  /** The store, written the way the member page writes it. */
+  function storeACodeFor(code: string) {
+    rememberQr({
+      code, kind: "booking", expires_in_seconds: 900, court_number: 3,
+      starts_at: "2099-01-01T17:00:00Z", doors: true,
+      door_opens_at: "2099-01-01T16:30:00Z", door_closes_at: "2099-01-01T18:05:00Z",
+    } as Parameters<typeof rememberQr>[0]);
+    expect(readLastKnown().qr?.value.code, "the fixture stored nothing").toBe(code);
+  }
+
+  it("clears it when the member signs out on purpose", async () => {
+    tokenStore.set("member.jwt.value");
+    stubFetch([
+      { method: "GET", path: "/api/v1/whoami", body: WHOAMI },
+      { method: "POST", path: "/api/v1/auth/logout", status: 204, body: null },
+    ]);
+
+    render(<MemoryRouter><AuthProvider><SignOutProbe /></AuthProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
+    storeACodeFor("AAAA1111BBBB");
+
+    screen.getByRole("button", { name: "Sign out" }).click();
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"));
+
+    expect(readLastKnown().qr, "the next person on this phone inherits a working code").toBeNull();
+    expect(readLastIdentity()).toBeNull();
+  });
+
+  /**
+   * And when nobody pressed anything, which on a shared phone is most of the time: the token
+   * expires, is revoked, or an admin resets the password. `endSession` is that path.
+   */
+  it("clears it when the session is taken away rather than given up", async () => {
+    tokenStore.set("member.jwt.value");
+    stubFetch([{ method: "GET", path: "/api/v1/whoami", status: 401, body: { error: "expired" } }]);
+
+    render(<MemoryRouter><AuthProvider><SessionProbe /></AuthProvider></MemoryRouter>);
+    storeACodeFor("CCCC2222DDDD");
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"));
+
+    expect(readLastKnown().qr).toBeNull();
+    expect(readLastIdentity()).toBeNull();
+  });
+
+  /**
+   * The case a clean sign-out cannot cover. A phone kills the tab, the member walks off, and
+   * the next member signs in on the same device: nothing ran the clearing above, so the first
+   * member's code is still sitting there when the second one's session is confirmed.
+   *
+   * <p>
+   * This is the fixture varied rather than the code — the store is written by ONE member and
+   * read after a DIFFERENT one is confirmed — which is the only way the defect shows itself at
+   * all. A test that signed the same member in twice passes against a version with no identity
+   * check in it.
+   * </p>
+   */
+  it("clears it when a different member is confirmed on the same device", async () => {
+    tokenStore.set("first.member.jwt");
+    stubFetch([{ method: "GET", path: "/api/v1/whoami", body: WHOAMI }]);
+    const { unmount } = render(<MemoryRouter><AuthProvider><SessionProbe /></AuthProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
+    storeACodeFor("EEEE3333FFFF");
+    expect(readLastIdentity()).toBe(WHOAMI.user_id);
+    // No sign-out: the tab simply goes away, which is what a phone does to a backgrounded PWA.
+    unmount();
+
+    vi.unstubAllGlobals();
+    tokenStore.set("second.member.jwt");
+    stubFetch([{
+      method: "GET", path: "/api/v1/whoami",
+      body: { ...WHOAMI, user_id: "55555555-5555-5555-5555-555555555555" },
+    }]);
+    render(<MemoryRouter><AuthProvider><SessionProbe /></AuthProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
+
+    expect(readLastKnown().qr, "the second member is holding the first member's code").toBeNull();
+    expect(readLastIdentity()).toBe("55555555-5555-5555-5555-555555555555");
+  });
+
+  /** And the same member coming back keeps their own, which is the whole point of the store. */
+  it("keeps it when the same member is confirmed again", async () => {
+    tokenStore.set("member.jwt.value");
+    stubFetch([{ method: "GET", path: "/api/v1/whoami", body: WHOAMI }]);
+    const { unmount } = render(<MemoryRouter><AuthProvider><SessionProbe /></AuthProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
+    storeACodeFor("GGGG4444HHHH");
+    unmount();
+
+    vi.unstubAllGlobals();
+    stubFetch([{ method: "GET", path: "/api/v1/whoami", body: WHOAMI }]);
+    render(<MemoryRouter><AuthProvider><SessionProbe /></AuthProvider></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
+
+    expect(readLastKnown().qr?.value.code).toBe("GGGG4444HHHH");
   });
 });

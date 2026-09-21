@@ -4,13 +4,15 @@ import {
 import { endpoints, GATE_ACCESS_POLICIES, type AdminSettings, type AdminCourt, type GateAccessPolicy } from "../lib/api";
 import {
   DAY_KEYS, DAY_NAMES, DEVICE_ALERT_COOLDOWN_MAX_MINUTES, DEVICE_ALERT_COOLDOWN_MIN_MINUTES,
+  DOOR_BOOKING_HORIZON_MAX_MINUTES,
   GATE_EARLY_ENTRY_MAX_MINUTES, GATE_EARLY_ENTRY_MIN_MINUTES,
   GATE_UNLOCK_MAX_SECONDS, GATE_UNLOCK_MIN_SECONDS, OFFLINE_FLOOR_SECONDS, describeOfflineAfter,
   CLUB_CONTACT_EMAIL_MAX_LENGTH, CLUB_CONTACT_PHONE_MAX_LENGTH,
   DOOR_LOG_RETENTION_MAX_DAYS, DOOR_LOG_RETENTION_MIN_DAYS,
   DOOR_REFUSAL_SPIKE_MAX_COUNT, DOOR_REFUSAL_SPIKE_MAX_MINUTES,
   DOOR_REFUSAL_SPIKE_MIN_COUNT, DOOR_REFUSAL_SPIKE_MIN_MINUTES,
-  deviceNumbersComplaint, doorBookingHorizonMinutes, doorSettingComplaints, formatDayHours,
+  deviceNumbersComplaint, doorBookingHorizonBasis, doorBookingHorizonMinutes, doorSettingComplaints,
+  formatDayHours,
   gateSettingComplaints, operatingHoursComplaint, parseDayHours, settingAnchorId, timezoneOptions,
   type DayHours, type DayKey, type SettingComplaint,
 } from "../lib/tenantSettings";
@@ -21,10 +23,13 @@ import {
 // doors: admin
 import { doorRetentionNotice } from "../lib/doorsCopy";
 import { describeDeviceError } from "../lib/deviceErrors";
+import { focusFragmentTarget } from "../lib/routeAnnouncer";
+import { cn } from "../lib/utils";
 import { Card } from "../components/Card";
 import { Button, Input, Label, fieldClassName } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { useToast } from "../components/Toast";
+import { AlertCircle } from "lucide-react";
 
 const minToHHMM = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 const hhmmToMin = (s: string) => {
@@ -165,6 +170,116 @@ function blockersOf(
       label: SETTING_LABELS[complaint.key] ?? complaint.key,
     })),
   ];
+}
+
+/**
+ * C14 — this page is a document, and a document has sections you can go to.
+ *
+ * <p>
+ * <b>The measurement.</b> Reviewer C counted the tab stops from the top of the document to
+ * the first door setting: <b>seventy-six</b>. The page is nine cards and about thirty fields
+ * long, the door numbers are seventh, and every field above them is a stop. A keyboard user
+ * sent here by the doors page's "change how long the lock is released" link — which is the
+ * journey this screen exists to be the end of — paid for the entire booking, credits and
+ * court-box blocks first, every time.
+ * </p>
+ *
+ * <p>
+ * Two halves, and both are needed. The cards become <code>&lt;section&gt;</code>s named by
+ * their own heading, so a screen reader can list them and jump between them with the keys it
+ * already has. And the page grows a plain in-page nav at the top, so a KEYBOARD user — who
+ * has no such list — reaches any section in at most nine stops from the skip link. The
+ * per-setting <code>#setting-*</code> deep link is unchanged and still lands on the field
+ * itself; this is the coarser thing for somebody who does not know which field they want.
+ * </p>
+ */
+const SECTION_IDS = {
+  booking: "settings-booking",
+  hours: "settings-opening-hours",
+  policy: "settings-no-show",
+  credits: "settings-credits",
+  courtAccess: "settings-court-access",
+  boxes: "settings-court-boxes",
+  doors: "settings-door-gates",
+  records: "settings-records",
+  courts: "settings-courts",
+} as const;
+
+/** The nav's running order, which is the page's own order. Captions are the headings verbatim. */
+const SECTION_ORDER: ReadonlyArray<readonly [string, string]> = [
+  [SECTION_IDS.booking, "Booking"],
+  [SECTION_IDS.hours, "Opening hours"],
+  [SECTION_IDS.policy, "No-show & cancellation"],
+  [SECTION_IDS.credits, "Credits & top-ups"],
+  [SECTION_IDS.courtAccess, "Court access"],
+  [SECTION_IDS.boxes, "Court boxes & identification"],
+  [SECTION_IDS.doors, "Door gates"],
+  [SECTION_IDS.records, "Records"],
+  [SECTION_IDS.courts, "Courts"],
+];
+
+/**
+ * One card, as a named region.
+ *
+ * <p>
+ * <code>aria-labelledby</code> pointing at the card's own <code>&lt;h2&gt;</code> rather than
+ * an <code>aria-label</code> repeating it: one string, on screen, and a rename cannot leave
+ * the region announcing the old name.
+ * </p>
+ */
+function SettingsSection({ id, title, beside, className, children }: {
+  id: string;
+  title: string;
+  /** Anything that sits on the heading's own row — the Courts block's count. */
+  beside?: React.ReactNode;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section id={id} aria-labelledby={`${id}-heading`} className="scroll-mt-24">
+      <Card className={cn("space-y-5", className)}>
+        {beside ? (
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 id={`${id}-heading`} className="text-base font-semibold">{title}</h2>
+            {beside}
+          </div>
+        ) : (
+          <h2 id={`${id}-heading`} className="text-base font-semibold">{title}</h2>
+        )}
+        {children}
+      </Card>
+    </section>
+  );
+}
+
+/**
+ * The jump nav — real links, and a jump that moves FOCUS rather than only the scroll.
+ *
+ * <p>
+ * A bare fragment navigation scrolls and leaves focus at the top of the document, which is
+ * C15's finding on <code>/profile#door-history</code> in a different place: the person who
+ * most needs the jump is the one it does nothing for. {@link focusFragmentTarget} is the same
+ * function the router uses for a hash arriving on a route, so the two behave identically and
+ * there is one <code>scroll-margin-top</code> rule to keep the heading clear of the header.
+ * </p>
+ */
+function SectionJumpNav() {
+  return (
+    <nav aria-label="Jump to section" className="rounded-lg border border-border bg-bg-surface px-3 py-2">
+      <h2 className="sr-only">Jump to section</h2>
+      <ul className="flex flex-wrap gap-x-1 gap-y-1">
+        {SECTION_ORDER.map(([id, caption]) => (
+          <li key={id}>
+            <a
+              href={`#${id}`}
+              onClick={(e) => { e.preventDefault(); focusFragmentTarget(`#${id}`); }}
+              className="inline-flex items-center min-h-[36px] [@media(pointer:coarse)]:min-h-[44px] rounded-lg px-2 text-sm text-accent-strong underline decoration-accent-strong/40 underline-offset-2 hover:bg-bg-muted"
+            >{caption}</a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
 }
 
 /** What every {@link Field} on the page needs to know that its own props do not carry. */
@@ -311,8 +426,9 @@ export default function AdminSettingsPage() {
           <p className="text-sm text-text-secondary">Court schedule, booking limits, penalty policy and court-box behaviour for this club.</p>
         </div>
 
-        <Card className="space-y-5">
-          <h2 className="text-base font-semibold">Booking</h2>
+        <SectionJumpNav />
+
+        <SettingsSection id={SECTION_IDS.booking} title="Booking">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field settingKey="advance_booking_days" label={SETTING_LABELS.advance_booking_days} hint="0–365. Members can only book up to this many days in advance.">
               <Input type="number" min={0} max={365} value={shown(settings.advance_booking_days)}
@@ -348,12 +464,11 @@ export default function AdminSettingsPage() {
               </select>
             </Field>
           </div>
-        </Card>
+        </SettingsSection>
 
         <OperatingHoursSection settings={settings} onChange={setSettings} />
 
-        <Card className="space-y-5">
-          <h2 className="text-base font-semibold">No-show & cancellation policy</h2>
+        <SettingsSection id={SECTION_IDS.policy} title="No-show & cancellation policy">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Field settingKey="penalty_pct" label={SETTING_LABELS.penalty_pct}>
               <Input type="number" min={0} max={100} value={shown(settings.penalty_pct)}
@@ -368,10 +483,9 @@ export default function AdminSettingsPage() {
                 onChange={(e) => setSettings({ ...settings, penalty_window_minutes: toNumber(e.target.value) })} />
             </Field>
           </div>
-        </Card>
+        </SettingsSection>
 
-        <Card className="space-y-5">
-          <h2 className="text-base font-semibold">Credits &amp; top-ups</h2>
+        <SettingsSection id={SECTION_IDS.credits} title="Credits & top-ups">
           {/* These four decide what a member's money is worth. Until now the only way to
               change one was to hand-edit a JSON column on a live system — no validation,
               no audit trail, and a typo away from making every top-up worthless. */}
@@ -404,10 +518,9 @@ export default function AdminSettingsPage() {
                 onChange={(e) => setSettings({ ...settings, topup_max_zar_per_member: toNumber(e.target.value) })} />
             </Field>
           </div>
-        </Card>
+        </SettingsSection>
 
-        <Card className="space-y-5">
-          <h2 className="text-base font-semibold">Court access</h2>
+        <SettingsSection id={SECTION_IDS.courtAccess} title="Court access">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field settingKey="member_per_day_max_minutes" label={SETTING_LABELS.member_per_day_max_minutes} hint="0 turns the cap off. A slot starting today is allowed over the cap if the court is otherwise free.">
               <Input type="number" min={0} max={1440} step={15} value={shown(settings.member_per_day_max_minutes)}
@@ -422,14 +535,13 @@ export default function AdminSettingsPage() {
                 onChange={(e) => setSettings({ ...settings, peak_advance_hours_for_regular: toNumber(e.target.value) })} />
             </Field>
           </div>
-        </Card>
+        </SettingsSection>
 
         <DeviceNumbersSection settings={settings} onChange={setSettings} />
 
         <GateSection settings={settings} onChange={setSettings} />
 
-        <Card className="space-y-5">
-          <h2 className="text-base font-semibold">Records</h2>
+        <SettingsSection id={SECTION_IDS.records} title="Records">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field settingKey="retention_years" label={SETTING_LABELS.retention_years}>
               <Input type="number" min={1} max={50} value={shown(settings.retention_years)}
@@ -441,7 +553,7 @@ export default function AdminSettingsPage() {
             </Field>
           </div>
           <SaveBar blockers={blockers} saving={saving} onSave={save} onFocusSetting={focusSetting} />
-        </Card>
+        </SettingsSection>
 
         <CourtsSection courts={courts} reload={load} />
       </div>
@@ -567,8 +679,7 @@ function OperatingHoursSection({ settings, onChange }: { settings: AdminSettings
   };
 
   return (
-    <Card className="space-y-5">
-      <h2 className="text-base font-semibold">Opening hours</h2>
+    <SettingsSection id={SECTION_IDS.hours} title="Opening hours">
       <p className="text-sm text-text-secondary">
         When members can book. A day left on the club default uses <strong className="text-text-primary">Day starts</strong> and{" "}
         <strong className="text-text-primary">Day ends</strong> above ({minToHHMM(settings.day_start_minute)}–{minToHHMM(settings.day_end_minute)}).
@@ -588,7 +699,7 @@ function OperatingHoursSection({ settings, onChange }: { settings: AdminSettings
           />
         ))}
       </div>
-    </Card>
+    </SettingsSection>
   );
 }
 
@@ -674,8 +785,7 @@ function DeviceNumbersSection({ settings, onChange }: { settings: AdminSettings;
   // "0–NaN" on a hint or `max="NaN"` on an input while the admin retypes it.
   const lookahead = orElse(settings.activation_forward_window_minutes, 1440);
   return (
-    <Card className="space-y-5">
-      <h2 className="text-base font-semibold">Court boxes &amp; identification</h2>
+    <SettingsSection id={SECTION_IDS.boxes} title="Court boxes & identification">
       <p className="text-sm text-text-secondary">
         {/* "Picks a change up on their next heartbeat" is a protocol detail wearing a
             sentence. The interval below is where an admin who wants the detail finds it. */}
@@ -767,7 +877,7 @@ function DeviceNumbersSection({ settings, onChange }: { settings: AdminSettings;
             onChange={(e) => set({ device_alert_cooldown_minutes: toNumber(e.target.value) })} />
         </Field>
       </div>
-    </Card>
+    </SettingsSection>
   );
 }
 
@@ -798,8 +908,7 @@ function GateSection({ settings, onChange }: { settings: AdminSettings; onChange
   // what `doorBookingHorizonMinutes` already does with the same value.
   const earlyEntry = orElse(settings.gate_early_entry_minutes, GATE_EARLY_ENTRY_MIN_MINUTES);
   return (
-    <Card className="space-y-5">
-      <h2 className="text-base font-semibold">Door gates</h2>
+    <SettingsSection id={SECTION_IDS.doors} title="Door gates">
       <p className="text-sm text-text-secondary">
         How the doors behave. A door picks a change up the next time it calls in.{" "}
         {gateOfflineFallbackNotice()}
@@ -850,9 +959,71 @@ function GateSection({ settings, onChange }: { settings: AdminSettings; onChange
       <p className="text-sm font-medium text-text-primary">
         {describeDoorBookingHorizon(doorBookingHorizonMinutes(settings))}
       </p>
+      {/* C13 — and WHERE that number came from, in a second sentence rather than in the
+          first, because the first one was already right and is already pinned. */}
+      <p className="text-sm text-text-secondary">{doorHorizonBasis(settings)}</p>
       <DoorRecordsBlock settings={settings} set={set} />
-    </Card>
+    </SettingsSection>
   );
+}
+
+/**
+ * Which fields on screen the door horizon above was read from. (C13)
+ *
+ * <p>
+ * <b>The finding.</b> Reviewer C edited "Early entry" and watched the sentence above not
+ * move. It was not stale — under <code>active_member</code> the number really is read from
+ * two fields on the <em>Court boxes</em> card — but a derived sentence that ignores the
+ * control directly beside it, and says nothing about why, reads as a broken page and sends
+ * an admin to change the wrong number. The rule lives in
+ * {@link doorBookingHorizonBasis}; the words live here, with the captions the fields are
+ * actually wearing taken from {@link SETTING_LABELS} rather than written out a second time.
+ * </p>
+ *
+ * <p>
+ * The last clause is the other half of C13. Under the open policy a booking QR is not the
+ * only way through a door at all — a member's own code works whenever their membership is
+ * active — and a block that quotes one horizon and never mentions that reads as the whole
+ * rule. Under the strict policy it would be false, so it is not said there.
+ * </p>
+ */
+function doorHorizonBasis(settings: AdminSettings): string {
+  const basis = doorBookingHorizonBasis(settings);
+  const named = basis.from.map((key) => `“${SETTING_LABELS[key]}”`).join(" plus ");
+  const early = `“${SETTING_LABELS.gate_early_entry_minutes}”`;
+  const parts: string[] = [];
+
+  if (settings.gate_access_policy === "booking_window") {
+    parts.push(
+      `Under “${GATE_POLICY_LABELS.booking_window}” that is ${named} on this block and nothing`
+      + " else — change it and this sentence changes with it.",
+    );
+  } else if (basis.floorGoverns) {
+    parts.push(
+      `Under “${GATE_POLICY_LABELS.active_member}” it comes from ${named} on this block: the two`
+      + ` court-box windows below would give ${basis.courtWindowsMinutes}, and a door never opens`
+      + " less early than this floor.",
+    );
+  } else {
+    parts.push(
+      `Under “${GATE_POLICY_LABELS.active_member}” it comes from ${named} — both on the “Court`
+      + ` boxes & identification” block above, not from ${early}, which only sets a floor`
+      + ` (currently ${basis.floorMinutes}). Editing ${early} below that changes nothing here.`,
+    );
+  }
+
+  if (basis.capped) {
+    parts.push(`Those two add up to more than ${DOOR_BOOKING_HORIZON_MAX_MINUTES} minutes, which is the cap, so the answer stops there.`);
+  }
+
+  if (settings.gate_access_policy === "active_member") {
+    parts.push(
+      "A booking QR is not the only way in under this policy, either: a member's own code opens a"
+      + " door whenever their membership is active, booking or no booking.",
+    );
+  }
+
+  return parts.join(" ");
 }
 
 /**
@@ -981,24 +1152,67 @@ function Field({ label, hint, settingKey, children }: {
   const { errors, highlighted } = useContext(FieldStateContext);
   const anchorId = settingKey ? settingAnchorId(settingKey) : undefined;
   const error = settingKey ? errors[settingKey] : undefined;
+  /**
+   * C12 — the complaint, said out loud, when the person leaves the field.
+   *
+   * <p>
+   * The message has been on the input's <code>aria-describedby</code> since B5, which is
+   * what a screen reader reads when it ARRIVES at the field. It reads nothing when the value
+   * inside it goes bad, because a description is not a live region — so an admin typing 400
+   * into a field bounded at 30 and tabbing on was told nothing at all until they reached
+   * Save, thirty fields later. Announcing on blur rather than on every keystroke is the
+   * difference between a field that reports a finished answer and one that interrupts a
+   * half-typed one.
+   * </p>
+   *
+   * <p>
+   * Derived rather than stored: the flag says "this field has been left", and the text is
+   * whatever is wrong with it NOW. A message cannot outlive the mistake it is about.
+   * </p>
+   */
+  const [left, setLeft] = useState(false);
 
   // The error first: it is the news. A field with both reads "…is out of range. 1–30, how
   // long the lock is released…", which is the order a person would want it in.
   const describedBy = [error ? errorId : null, hint ? hintId : null].filter(Boolean).join(" ");
   const control = isValidElement(children)
-    ? cloneElement(children as React.ReactElement<{ id?: string; "aria-describedby"?: string; "aria-invalid"?: boolean }>, {
+    ? cloneElement(children as React.ReactElement<{
+        id?: string; className?: string; "aria-describedby"?: string; "aria-invalid"?: boolean;
+      }>, {
         id,
+        // C12 — a boundary that says something is wrong with it, rather than the same border
+        // every other field on the page is wearing. `aria-invalid` alone was the whole marking:
+        // measured, a refused field and a good one were pixel-identical.
+        className: cn(
+          (children as React.ReactElement<{ className?: string }>).props.className,
+          error && "border-danger-strong ring-1 ring-danger-strong",
+        ),
         ...(describedBy ? { "aria-describedby": describedBy } : {}),
         ...(error ? { "aria-invalid": true } : {}),
       })
     : children;
 
   return (
-    <div id={anchorId} className={`scroll-mt-24 ${anchorId && highlighted === anchorId ? HIGHLIGHT_CLASS : ""}`}>
+    <div
+      id={anchorId}
+      data-invalid={error ? "" : undefined}
+      onFocus={() => setLeft(false)}
+      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setLeft(true); }}
+      className={`scroll-mt-24 ${anchorId && highlighted === anchorId ? HIGHLIGHT_CLASS : ""}`}
+    >
       <Label htmlFor={id}>{label}</Label>
       {control}
-      {error && <p id={errorId} className="text-xs text-danger-strong mt-1">{error}</p>}
+      {error && (
+        <p id={errorId} className="text-xs text-danger-strong mt-1 flex items-start gap-1">
+          {/* The icon is the half a colour cannot carry: danger red on white is a colour, and
+              colour alone is never the signal (SC 1.4.1). `aria-hidden` because the sentence
+              beside it already says everything the shape does. */}
+          <AlertCircle size={14} strokeWidth={2.5} aria-hidden="true" className="mt-px shrink-0" />
+          <span>{error}</span>
+        </p>
+      )}
       {hint && <p id={hintId} className="text-xs text-text-muted mt-1">{hint}</p>}
+      <p aria-live="polite" className="sr-only">{left && error ? `${label}: ${error}` : ""}</p>
     </div>
   );
 }
@@ -1022,12 +1236,12 @@ function CourtsSection({ courts, reload }: { courts: AdminCourt[]; reload: () =>
   };
 
   return (
-    <Card className="space-y-4">
-      <div className="flex items-baseline justify-between">
-        <h2 className="text-base font-semibold">Courts</h2>
-        <span className="text-xs text-text-muted">{courts.filter((c) => c.is_active).length} active · {courts.length} total</span>
-      </div>
-
+    <SettingsSection
+      id={SECTION_IDS.courts}
+      title="Courts"
+      className="space-y-4"
+      beside={<span className="text-xs text-text-muted">{courts.filter((c) => c.is_active).length} active · {courts.length} total</span>}
+    >
       <div className="space-y-2">
         {courts.map((c) => <CourtRow key={c.id} court={c} reload={reload} />)}
         {courts.length === 0 && <p className="text-sm text-text-secondary">No courts yet — add one below.</p>}
@@ -1042,7 +1256,7 @@ function CourtsSection({ courts, reload }: { courts: AdminCourt[]; reload: () =>
         </Field>
         <Button onClick={create} disabled={adding}>{adding ? "Adding…" : "Add court"}</Button>
       </div>
-    </Card>
+    </SettingsSection>
   );
 }
 
@@ -1084,7 +1298,15 @@ function CourtRow({ court, reload }: { court: AdminCourt; reload: () => Promise<
           confirmLabel="Confirm deactivate"
           onConfirm={remove}
           tone="danger"
-          className="h-11 px-4"
+          /*
+            No `className`. It was `h-11 px-4`, and neither half was doing what it looked like.
+            `h-11` is stripped by the component (`withoutFixedHeight`) because a height is not a
+            floor and a control shorter than its own words is the defect that rule closes. And
+            `px-4` is 1 rem a side — 32 px each at a 32 px root font size, 64 px of padding
+            inside a control this row gives 140 px to, leaving 76 px for the word "Deactivate".
+            The component's own `px-[12px]` is in pixels for exactly that reason; overriding it
+            with a rem put the padding back on the scale the padding was taken off.
+          */
         />
       ) : (
         <span className="text-xs text-text-muted px-3">Inactive</span>

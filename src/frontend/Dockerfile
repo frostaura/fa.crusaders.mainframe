@@ -1,8 +1,15 @@
 FROM node:22-alpine AS build
 WORKDIR /workspace/src/frontend
 RUN apk add --no-cache bash
-ARG VITE_SHOW_DEV_LOGIN=false
-ENV VITE_SHOW_DEV_LOGIN=${VITE_SHOW_DEV_LOGIN}
+# No VITE_SHOW_DEV_LOGIN build arg, and there must not be one again.
+#
+# It defaulted to false, which reads as safe and is not: it made "put the seeded admin's
+# e-mail and password on the sign-in screen of a production image" a one-word change in a
+# .env file nobody reviews, on the one surface that is public by definition. The block is
+# dev-only through `import.meta.env.DEV`, which vite resolves at build time and the minifier
+# then deletes — that is the whole mechanism, and an override is the only thing that could
+# defeat it. `src/production-posture.test.ts` builds the bundle and greps it, and fails if
+# this ARG, or a compose build arg, comes back.
 COPY src/frontend/package*.json ./
 RUN npm ci
 COPY src/frontend/ /workspace/src/frontend/

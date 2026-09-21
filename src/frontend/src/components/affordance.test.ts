@@ -146,7 +146,23 @@ describe("the affordance every clickable surface shares", () => {
     // then remove wholesale, taking the keyboard user's ring with it — which is how a
     // codebase ends up with no focus indication at all.
     expect(css).toMatch(/:focus-visible\s*\{[^}]*outline:\s*2px solid/);
-    expect(css).not.toMatch(/[^-]:focus\s*\{/);
+    /**
+     * The bound is on what a bare `:focus` PAINTS, not on the word.
+     *
+     * <p>
+     * It was "no bare `:focus` rule at all", which is the right instinct and the wrong
+     * test: C6 added one, and it is the exact opposite of the failure this guards —
+     * `[data-route-heading]:focus { outline: none }` REMOVES an indicator from a heading
+     * the router focuses, so a mouse user does not get a ring flashing on a title they
+     * did not ask about, while `:focus-visible` below it gives a keyboard user the
+     * product's own ring. A rule that draws on `:focus` is still forbidden; one that
+     * declines to is the mechanism.
+     * </p>
+     */
+    const bareFocusBodies = [...css.matchAll(/[^-]:focus\s*\{([^}]*)\}/g)].map((rule) => rule[1]);
+    for (const body of bareFocusBodies) {
+      expect(body, `a bare :focus rule paints something: {${body}}`).toMatch(/outline:\s*none/);
+    }
   });
 
   it("marks a disabled control as unpressable rather than pretending", () => {

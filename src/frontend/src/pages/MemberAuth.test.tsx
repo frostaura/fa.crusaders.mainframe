@@ -112,6 +112,19 @@ describe("Login — a 403 is two different problems", () => {
 
     expect(await screen.findByText(/wasn't approved/i)).toBeInTheDocument();
     expect(screen.queryByText(/isn't approved yet/i)).not.toBeInTheDocument();
+    /*
+      And it does not assert an email that this screen cannot know was sent.
+
+      Reviewer D filed the same sentence on the SUSPENDED refusal: "The club emailed you the
+      reason" is a claim about something that happened elsewhere, and a member who never got
+      one — wrong address, spam folder, an admin who suspended an account and wrote nothing —
+      is told the club has already explained itself and reads the silence as being ignored.
+      The rejected refusal carried the identical sentence. What this screen actually knows is
+      on the 403 in front of it: the review happened, the answer was no, and here is the club's
+      own number and address, which the lines below assert are rendered as things to press.
+    */
+    expect(screen.queryByText(/The club emailed you/i), "asserts an email it cannot know was sent")
+      .not.toBeInTheDocument();
     // Confirming an address cannot un-reject an application, and the walk ends at a screen
     // saying an admin will review it — which is what had already happened.
     expect(screen.queryByRole("button", { name: /Resend the confirmation email/i })).not.toBeInTheDocument();

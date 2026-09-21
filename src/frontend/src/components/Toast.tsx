@@ -58,10 +58,38 @@ function ToastViewport({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: 
   // than the toast's own strip hid it outright. Booking refusals no longer travel this way
   // at all (they render inside the dialog), but a toast raised over any other dialog has
   // the same problem and this is the layer that fixes it.
+  //
+  /**
+   * <b>C10 — no `aria-live` here, because each toast already is one.</b>
+   *
+   * <p>
+   * This container carried `aria-live="polite"` AND every toast inside it carries
+   * `role="status"`, which is the same live region nested in itself. A screen reader
+   * announced the download toast twice: once because a node was inserted into a live
+   * region, and once because the node inserted was itself a live region. The rule is one
+   * live ancestor, and the toast is the better place for it — it is the thing that arrives,
+   * it is what carries the text, and it keeps announcing correctly if the viewport is ever
+   * moved or split.
+   * </p>
+   */
+  //
+  /**
+   * <b>B13 — it sits BELOW the chrome, not on top of it.</b>
+   *
+   * <p>
+   * `top-[100px]` was a guess at the header's height, and at a 32 px root font size the
+   * header plus the section tab strip is taller than that: the offline error toast covered
+   * the tab bar, which is the product's only way between sections on a phone. `Layout`
+   * measures its own header and publishes the number as `--app-chrome-height`, so this is
+   * the real height rather than a constant that is right on one device. The fallback is 0,
+   * which is correct for every screen that has no chrome at all (login, the public landing)
+   * — and those are exactly the screens where a 100 px offset had nothing to clear.
+   * </p>
+   */
   return (
     <div
-      aria-live="polite"
-      className="pointer-events-none fixed left-1/2 top-[100px] z-[200] -translate-x-1/2 flex flex-col items-center gap-2 w-[min(92vw,420px)]"
+      style={{ top: "calc(var(--app-chrome-height, 0px) + 12px)" }}
+      className="pointer-events-none fixed left-1/2 z-[200] -translate-x-1/2 flex flex-col items-center gap-2 w-[min(92vw,420px)]"
     >
       {toasts.map((t) => (
         <ToastView key={t.id} toast={t} onDismiss={onDismiss} />

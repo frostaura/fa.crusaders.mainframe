@@ -31,27 +31,72 @@ const TONES: Record<AlertTone, string> = {
   warning: "border-warning-strong bg-warning-soft text-warning-strong",
 };
 
-type AlertProps = HTMLAttributes<HTMLParagraphElement> & {
-  tone?: AlertTone;
+/**
+ * How loudly this alert speaks — which is not the same question as what it looks like.
+ *
+ * <ul>
+ *   <li><b>assertive</b> (`role="alert"`) — a screen reader says it immediately and over
+ *       whatever it was in the middle of. Right for something that has just happened because
+ *       the person did something: a refusal, a failed save.</li>
+ *   <li><b>polite</b> (`role="status"`) — said when the reader reaches a pause. Right for a
+ *       STANDING fact about the screen somebody has just arrived at.</li>
+ *   <li><b>off</b> — no live region at all. For an alert on a page nobody is reading live: the
+ *       printable door card, a panel rendered into a PDF.</li>
+ * </ul>
+ */
+export type AlertLive = "assertive" | "polite" | "off";
+
+const ROLE_BY_LIVE: Record<AlertLive, string | undefined> = {
+  assertive: "alert",
+  polite: "status",
+  off: undefined,
 };
 
-export function Alert({ tone = "danger", className, ...props }: AlertProps) {
+/**
+ * What a tone means when the call site has not said. Unchanged from the behaviour every
+ * existing call site was written against — see {@link Alert}.
+ */
+function defaultLive(tone: AlertTone): AlertLive {
+  return tone === "danger" || tone === "warning" ? "assertive" : "polite";
+}
+
+type AlertProps = HTMLAttributes<HTMLParagraphElement> & {
+  tone?: AlertTone;
+  /**
+   * Defaults to assertive for `danger` and `warning`, polite otherwise — which is what this
+   * component did before the prop existed, and is right for the case it was written for: an
+   * alert that appears BECAUSE somebody pressed something.
+   *
+   * <p>
+   * Pass `polite` for a standing notice. "This door is shut" is a fact about a screen, not an
+   * event, and an assertive region announcing it cuts across the heading on arrival and again
+   * on every re-render. An assertive region used for the state of things is one people learn
+   * to talk over, and the refusals go with it.
+   * </p>
+   */
+  live?: AlertLive;
+};
+
+export function Alert({ tone = "danger", live, className, ...props }: AlertProps) {
   return (
     <p
       /*
-       * `alert` for the tones that interrupt, `status` for the ones that inform.
+       * AFTER the spread, deliberately — the opposite of every other attribute here.
        *
-       * A screen reader announces `alert` immediately and over whatever it was saying, which is
-       * right for a refusal and wrong for "saved" — an assertive live region used for every
-       * confirmation is one users learn to ignore, taking the refusals with it.
+       * The urgency of a live region is this component's to decide, through the prop above,
+       * and a `role` arriving in `...props` must not quietly win. It used to: the doors lane
+       * got a polite standing notice by passing `role="status"` through the spread, which
+       * worked only because the spread happened to sit after the role in the source. A
+       * component whose accessibility semantics depend on line ordering has not decided
+       * anything. `live` is the way to say it, and it is the only way.
        */
-      role={tone === "danger" || tone === "warning" ? "alert" : "status"}
       className={cn(
         "rounded-lg border-l-4 px-3 py-2.5 text-sm",
         TONES[tone],
         className,
       )}
       {...props}
+      role={ROLE_BY_LIVE[live ?? defaultLive(tone)]}
     />
   );
 }

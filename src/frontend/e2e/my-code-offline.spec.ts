@@ -203,10 +203,23 @@ async function warmThenGoOffline(page: import("@playwright/test").Page, context:
   await page.reload();
   await expect(page.getByLabel("Your code", { exact: true })).toHaveText(CODE.code);
 
-  // What the page managed to keep. If this is empty the offline assertions below would be
-  // testing an empty store rather than the page's use of a full one.
-  const stored = await page.evaluate(() =>
-    window.localStorage.getItem("crusaders.member-door.last-known"));
+  /*
+    What the page managed to keep — BOTH halves, and waited for rather than sampled.
+
+    This asserted only that the code had been stored, and the door record is written by a
+    different read (`GET /me/door`) that resolves whenever it resolves. So a run where that
+    read landed after the reload went offline with half a store, and the offline case failed
+    on the door sentence — intermittently, and only in the full file, because running the case
+    alone gave the read all the time it needed. That is the fixture being unfinished, not the
+    page being wrong, and it cost this lane a `test.fail()` marker on a case that already
+    passed.
+  */
+  const stored = await page.waitForFunction(() => {
+    const raw = window.localStorage.getItem("crusaders.member-door.last-known");
+    if (!raw) return null;
+    const record = JSON.parse(raw) as { qr?: unknown; door?: unknown };
+    return record.qr && record.door ? raw : null;
+  }, undefined, { timeout: 15_000 }).then((handle) => handle.jsonValue());
   expect(stored, "the page stored nothing while it had signal").toContain(CODE.code);
 
   // Interception goes FIRST, so that nothing below can be answered by the harness. From
@@ -239,34 +252,31 @@ test("a production build registers its worker and serves the shell with no signa
  * </p>
  *
  * <p>
- * <b>It fails, and the failure is the finding.</b> `/my-code` is never reached: `RequireAuth`
- * in `src/App.tsx` reads `useAuth()`, `GET /api/v1/whoami` cannot be answered with no signal,
- * the state resolves to `offline`, and the whole route is replaced by `ConnectionLost` —
- * "Can't reach the club right now. You're still signed in." So the entire last-known store,
- * and every sentence on this surface built to be true without the club, is unreachable by the
- * one member it was written for. Each read failing individually is handled well (D1, held in
- * `my-code.spec.ts`); the app-wide gate in front of them is not, and it is the gate that a
- * genuine cold start hits first.
+ * <b>It used to fail, and the failure was the finding.</b> `/my-code` was never reached:
+ * `RequireAuth` in `src/App.tsx` reads `useAuth()`, `GET /api/v1/whoami` cannot be answered
+ * with no signal, the state resolved to `offline`, and the whole route was replaced by
+ * `ConnectionLost` — "Can't reach the club right now. You're still signed in." So the entire
+ * last-known store, and every sentence on this surface built to be true without the club, was
+ * unreachable by the one member it was written for. Each read failing individually was handled
+ * well (D1, held in `my-code.spec.ts`); the app-wide gate in front of them was not, and it is
+ * the gate a genuine cold start hits first.
  * </p>
  *
  * <p>
- * <b>Why it is marked rather than fixed.</b> `App.tsx` and `lib/auth.tsx` are app-wide and
- * belong to another lane — the member lane changing when a session is trusted without a
- * server, on the strength of a token in `localStorage`, is not a call this surface gets to
- * make on its own. `test.fail()` rather than a skip so the case RUNS on every suite: the day
- * that lane lets a confirmed-offline read fall through to the page, this turns green and
- * Playwright fails the run until the marker is removed. A skipped test would let the fix land
- * with nobody noticing it had.
+ * The member lane left this marked `test.fail()` because `App.tsx` and `lib/auth.tsx` are
+ * app-wide: deciding when a session may be trusted without a server, on the strength of a token
+ * in `localStorage`, is not a call one surface gets to make on its own. The chrome lane has now
+ * made it, narrowly — see `OFFLINE_CAPABLE` in `App.tsx` — and the marker is gone.
  * </p>
+ *
  */
-test("a cold offline start shows the last code, what the club's doors need, and a number to press", async ({ page, context }) => {
-  test.fail(true, "blocked by RequireAuth's offline state in src/App.tsx — see this test's comment");
+test("a cold offline start shows the last code, says it is a remembered one, and offers a number to press", async ({ page, context }) => {
   await warmThenGoOffline(page, context);
 
   await page.goto(`${origin}/my-code`);
 
-  // FIRST, so that the expected failure reads as the diagnosis rather than as a missing
-  // element: what is on the screen is the app-wide connection notice, not this page.
+  // FIRST, so that a failure reads as the diagnosis rather than as a missing element: what
+  // used to be on the screen is the app-wide connection notice, not this page.
   await expect(page.getByRole("heading", { name: /Can't reach the club/i })).toHaveCount(0);
 
   // The code, and the symbol, from the store rather than from a fetch that cannot happen.
@@ -278,12 +288,50 @@ test("a cold offline start shows the last code, what the club's doors need, and 
   // run out on this screen and must never be presented as freshly minted.
   await expect(page.getByText(/no signal|can't reach|last (code|one)/i).first()).toBeVisible();
 
-  // What the club's doors want, which is the sentence that decides whether it is worth
-  // walking round to the other entrance.
-  await expect(page.getByText("What opens the door for you right now")).toBeVisible();
-
   // And a human, as a link a cold thumb can press in the dark rather than a number to
   // memorise. This is the one that was entirely absent when both reads failed.
   await expect(page.getByRole("link", { name: CONTACT.phone }).first())
     .toHaveAttribute("href", "tel:0215550134");
+});
+
+/**
+ * The sentence that decides whether it is worth walking round to the other entrance.
+ *
+ * <p>
+ * <b>Marked, and the marker names one expression in one file on one branch.</b> When BOTH
+ * member reads have failed, `MyCode` short-circuits to `everythingFailed(…)` and returns
+ * `<OfflinePage cached contact loading onTryAgain />` — a reduced page carrying the code, its
+ * staleness sentence and the club's number, and nothing about doors. `everythingFailed` itself
+ * is byte-identical on both branches; what differs is what that arm RENDERS. On
+ * `claude/doors-r2-fe-member-fin3` it passes the door block and the door footer in as children
+ * (D1: "the door section's existence must not depend on the code read"), and that is what puts
+ * this sentence on the screen. It is `pages/MyCode.tsx`, the member lane's file, which this
+ * lane is instructed not to touch.
+ * </p>
+ *
+ * <p>
+ * <b>It is not enough that the store holds the answer, and this is the trap worth recording.</b>
+ * It does: `doorFacts` already falls back to `remembered?.value.doors === true`, and the record
+ * is in `localStorage` with `doors: true` at the moment of the assertion — verified by printing
+ * it. Running this case ALONE passes for that reason, three times out of three, which is the
+ * test winning a race against the failure state rather than the feature existing. It is only
+ * once the code read has actually failed and `error` is set that the page takes the arm that
+ * drops the block. A reduced page reached by a different route is the thing to assert about.
+ * </p>
+ *
+ * <p>
+ * `test.fail()` rather than a skip, for the reason the member lane gave when the boot was on
+ * the other foot: the case RUNS, and the day the two branches meet it turns green and Playwright
+ * fails the run until this marker is deleted.
+ * </p>
+ */
+test("a cold offline start also says what the club's doors need", async ({ page, context }) => {
+  test.fail(true, "needs OfflinePage's door children from claude/doors-r2-fe-member-fin3 — see this test's comment");
+  await warmThenGoOffline(page, context);
+
+  await page.goto(`${origin}/my-code`);
+  // The reduced page first, so a failure reads as "which arm rendered" rather than as a
+  // missing element — this is the arm whose children the finding is about.
+  await expect(page.getByText(/can't reach the club|last managed to get/i).first()).toBeVisible();
+  await expect(page.getByText("What opens the door for you right now")).toBeVisible();
 });

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { AuthProvider, useAuth } from "./lib/auth";
+import { AuthProvider, readLastIdentity, useAuth } from "./lib/auth";
 import Layout from "./components/Layout";
 import { ToastProvider } from "./components/Toast";
 import { BalanceProvider } from "./lib/balance";
@@ -33,10 +33,18 @@ import { AdminDoorsCardPage } from "./pages/AdminDoorsCard";
 import NotFoundPage from "./pages/NotFound";
 import { Card } from "./components/Card";
 import { Button } from "./components/Button";
+import { RouteAnnouncer } from "./components/RouteAnnouncer";
 
 export default function App() {
   return (
     <BrowserRouter>
+      {/*
+        C6 — the three things a real page load does that a single-page app does not: name the
+        document, move focus to where the new page begins, and say where you have arrived.
+        Above `Routes` rather than inside `Layout`, because `Layout` returns early for the
+        public landing and for every auth-flow screen, and those are routes too.
+      */}
+      <RouteAnnouncer />
       <AuthProvider>
         <ProfileProvider>
         <BalanceProvider>
@@ -110,13 +118,65 @@ export default function App() {
  * else regardless, because a redirect is only ever a suggestion to whatever holds the token.
  * </p>
  */
-function RequireAuth({ children, admin = false }: { children: React.ReactNode; admin?: boolean }) {
+/**
+ * The routes that are worth anything with no signal at all. (D3)
+ *
+ * <p>
+ * One, today, and the list is deliberately a literal rather than a prop somebody can pass: a
+ * route that renders while the club cannot be reached is rendering from a store on the device,
+ * and which screens may do that is an app-wide decision, not a per-page one.
+ * </p>
+ *
+ * <p>
+ * <b>Why `/my-code` earns it.</b> Reviewer D's finding is a member standing at a locked door
+ * with no signal, which is not an edge case — it is the moment the whole surface was designed
+ * for. `lib/lastKnown` exists because the service worker is forbidden to cache a byte of member
+ * data, so the page keeps its own copy of the last code, the club's door rules and the club's
+ * telephone number. All of it was unreachable behind `ConnectionLost`: the app-wide gate fired
+ * before the page that knew how to cope. Every other route needs the club to say anything true,
+ * and gets the honest "can't reach it" screen.
+ * </p>
+ */
+const OFFLINE_CAPABLE = new Set(["/my-code"]);
+
+/**
+ * Exported for `offline-routing.test.tsx`, which is the only test that can hold the
+ * offline-capable rule: the decision is three conditions deep and the two that matter most —
+ * "only these routes" and "only a confirmed identity" — are invisible to the production-build
+ * e2e, which necessarily arrives with both already satisfied.
+ */
+export function RequireAuth({ children, admin = false }: { children: React.ReactNode; admin?: boolean }) {
   const auth = useAuth();
   const location = useLocation();
   if (auth.status === "loading") return <BootSplash />;
   // A session we cannot confirm is not a session we have lost. Bouncing to /login here is what
   // turned a few seconds of backend downtime into a permanent sign-out for everyone on the site.
-  if (auth.status === "offline") return <ConnectionLost onRetry={auth.retryConnection} />;
+  //
+  /**
+   * D3 — and an offline-capable route falls through instead.
+   *
+   * <p>
+   * Three conditions, and each is load-bearing. The state must be `offline`, which `auth.tsx`
+   * reaches only on a network failure and never on a 401 — an authentication refusal still ends
+   * the session and still goes to `/login`, because "the club says this token is bad" and "I
+   * could not ask" are different events and conflating them is the older bug this file already
+   * carries a paragraph about. The route must be on the list above. And this device must hold
+   * an identity the club has actually confirmed at some point: a token alone is a string in
+   * `localStorage` that nothing has vouched for, and a first-ever visitor who is handed one has
+   * no last-known store to render anyway.
+   * </p>
+   *
+   * <p>
+   * The page is still responsible for saying that what it is showing is remembered rather than
+   * fresh. It knows how — every sentence on it is built from a store that records an absolute
+   * expiry and its own age — and it could not say it while it was not being rendered.
+   * </p>
+   */
+  if (auth.status === "offline") {
+    const canCope = OFFLINE_CAPABLE.has(location.pathname) && readLastIdentity() !== null;
+    if (!canCope) return <ConnectionLost onRetry={auth.retryConnection} />;
+    return <>{children}</>;
+  }
   if (auth.status !== "authenticated") return <Navigate to="/login" replace state={{ from: location }} />;
   if (auth.mustChangePassword && location.pathname !== "/change-password") {
     return <Navigate to="/change-password" replace />;
