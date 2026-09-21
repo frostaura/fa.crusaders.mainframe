@@ -33,11 +33,19 @@ public static class WalletEndpoints
 
             // Resolve display names so rows read with the same from/to/amount/time/comment shape
             // as the admin ledger.
+            //
+            // D2-B20: both reads carried IgnoreQueryFilters, on a MEMBER-facing route. The id set
+            // includes e.ActorUserId, and LedgerService copies whatever a posting carries with no
+            // tenant check — so any row whose actor was not in this tenant rendered that foreign
+            // user's full name and email to a member. A deliberate filter bypass on a
+            // member-facing route is exactly what MainframeDbContext's own comment says must not
+            // exist, and nothing here needed it: an actor in another club has no name this club
+            // is entitled to show, and "(unknown)" is the honest answer.
             var ids = entries.Select(e => e.UserId).Concat(entries.Select(e => e.ActorUserId)).Distinct().ToList();
-            var nameByUserId = await db.Memberships.AsNoTracking().IgnoreQueryFilters()
+            var nameByUserId = await db.Memberships.AsNoTracking()
                 .Where(m => ids.Contains(m.UserId))
                 .ToDictionaryAsync(m => m.UserId, m => m.FullName, ct);
-            var emailByUserId = await db.Users.AsNoTracking().IgnoreQueryFilters()
+            var emailByUserId = await db.Users.AsNoTracking()
                 .Where(u2 => ids.Contains(u2.Id))
                 .ToDictionaryAsync(u2 => u2.Id, u2 => u2.Email, ct);
             string nameFor(Guid id) => nameByUserId.TryGetValue(id, out var n) ? n

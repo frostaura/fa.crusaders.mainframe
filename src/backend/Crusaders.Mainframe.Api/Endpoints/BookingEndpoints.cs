@@ -10,7 +10,14 @@ public static class BookingEndpoints
 {
     public static IEndpointRouteBuilder MapBookingEndpoints(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/v1/bookings").RequireAuthorization();
+        // D2-B43: these routes carried no limiter, only the global 600/min per IP. With no
+        // slice-boundary validation (fixed in BookingService) an authenticated member could
+        // issue unbounded bookings at arbitrary offsets, each taking a PayerLock and a GiST
+        // index write. `auth` is the right ceiling: booking is a deliberate human action, not a
+        // poll, and the device surface has its own policy.
+        var g = app.MapGroup("/api/v1/bookings")
+            .RequireAuthorization()
+            .RequireRateLimiting(Security.RateLimitPolicies.Auth);
 
         g.MapPost("/", async (CreateBookingRequest req, HttpContext ctx, BookingService svc, MainframeDbContext db, CancellationToken ct) =>
         {
@@ -47,7 +54,9 @@ public static class BookingEndpoints
         });
 
         // Admin: book on behalf + cancel-with-waive
-        var admin = app.MapGroup("/api/v1/admin/bookings").RequireAuthorization(p => p.RequireRole("admin"));
+        var admin = app.MapGroup("/api/v1/admin/bookings")
+            .RequireAuthorization(p => p.RequireRole("admin"))
+            .RequireRateLimiting(Security.RateLimitPolicies.Auth);
 
         // §8: "Book on behalf of any member (charges that member's credit; if insufficient,
         // admin can override and create a negative balance, logged)."

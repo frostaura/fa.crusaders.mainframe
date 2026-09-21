@@ -39,8 +39,21 @@ public class BookingCapAndGroupTests
     /// </summary>
     private static DateTimeOffset? SoonInsideTheDay()
     {
-        var start = DateTimeOffset.UtcNow.AddMinutes(20);
+        // Placed on the club's own slice grid, forward rather than back, so the fixture is the
+        // same shape at every hour of the day: a slot at :07 is not a slot the product's grid can
+        // produce, and a test whose start wanders with the runner's clock is a test whose failures
+        // wander with it too (memory/gotchas-clock.md).
+        var start = OnTheGrid(DateTimeOffset.UtcNow.AddMinutes(20));
         return SameClubDay(start, start.AddMinutes(30 + 15)) ? start : null;
+    }
+
+    /// <summary>The next 15-minute boundary at or after an instant, on the CLUB'S clock.</summary>
+    private static DateTimeOffset OnTheGrid(DateTimeOffset at)
+    {
+        var local = TimeZoneInfo.ConvertTime(at, Johannesburg);
+        var minutes = (local.Hour * 60) + local.Minute;
+        var forward = (15 - (minutes % 15)) % 15;
+        return at.AddMinutes(forward).AddSeconds(-local.Second).AddMilliseconds(-local.Millisecond);
     }
 
     private const string OpenAllHours =
@@ -97,7 +110,7 @@ public class BookingCapAndGroupTests
 
         // Today, but hours away — past same_day_relaxation_window_minutes, so the blueprint's
         // relaxation cannot be what lets these through.
-        var baseStart = DateTimeOffset.UtcNow.AddHours(6);
+        var baseStart = OnTheGrid(DateTimeOffset.UtcNow.AddHours(6));
 
         // Skip rather than assert a falsehood when the club's own day has not enough left in it:
         // a test that books relative to UtcNow inherits the wall clock as a hidden input
@@ -113,7 +126,7 @@ public class BookingCapAndGroupTests
         }
 
         var fifth = await booking.CreateAsync(
-            host.Courts[1].Id, host.PlayerUser.Id, host.PlayerUser.Id, baseStart.AddMinutes(200), 1, default);
+            host.Courts[1].Id, host.PlayerUser.Id, host.PlayerUser.Id, baseStart.AddMinutes(195), 1, default);
 
         var refusal = Assert.IsType<BookingResult.PerDaySlotCapExceeded>(fifth);
         Assert.Equal(4, refusal.CapSlots);
