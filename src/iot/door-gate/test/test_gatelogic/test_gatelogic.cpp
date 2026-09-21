@@ -1564,6 +1564,81 @@ private:
   uint16_t calls_ = 0U;
 };
 
+/// The simulator's console, as a recorder.
+///
+/// `gatelogic::IDecisionLog` is the only port on this board that is an OUTPUT,
+/// and the only one that is genuinely absent on the hardware. A refusal reason
+/// reaches no other surface — the relay and the one lamp between them cannot
+/// tell six reasons apart — so this is what the native simulator prints and
+/// what the end-to-end harness reads to assert that a given server reason
+/// produced a refusal rather than that a relay happened not to move.
+///
+/// A RING, not a bounded array that fails when it fills. Several scenarios here
+/// run simulated hours with a scanner that never stops talking, and a recorder
+/// that failed the test on its own capacity would be a fixture rule deciding
+/// the outcome of a test about the event drain. It keeps the last `kMax` and
+/// counts every one.
+class RecordingDecisionLog final : public gatelogic::IDecisionLog {
+public:
+  static constexpr size_t kMax = 32U;
+
+  void decided(const gatelogic::ScanDecision& decision, const char* token, uint32_t grantedMs,
+               uint32_t nowMs) override {
+    Row& row = rows_[(first_ + count_) % kMax];
+    strncpy(row.reason, decision.reason, sizeof(row.reason) - 1U);
+    row.reason[sizeof(row.reason) - 1U] = '\0';
+    strncpy(row.token, token == nullptr ? "" : token, sizeof(row.token) - 1U);
+    row.token[sizeof(row.token) - 1U] = '\0';
+    row.released = decision.released;
+    row.queued = decision.queueEvent;
+    row.outOfService = decision.outOfService;
+    row.grantedMs = grantedMs;
+    row.atMs = nowMs;
+    ++total_;
+    if (count_ < kMax) {
+      ++count_;
+    } else {
+      first_ = (first_ + 1U) % kMax;
+    }
+  }
+
+  struct Row {
+    char reason[gatelogic::kMaxReasonLen + 1U] = {};
+    char token[roster::kMaxTokenLen + 1U] = {};
+    uint32_t grantedMs = 0U;
+    uint32_t atMs = 0U;
+    bool released = false;
+    bool queued = false;
+    bool outOfService = false;
+  };
+
+  /// Decisions held. Equal to total() until the ring wraps.
+  size_t count() const { return count_; }
+
+  /// Decisions ever offered, wrap or no wrap.
+  size_t total() const { return total_; }
+
+  /// Oldest retained first.
+  const Row& at(size_t i) const {
+    TEST_ASSERT_TRUE_MESSAGE(i < count_, "no decision was recorded at that index");
+    return rows_[(first_ + i) % kMax];
+  }
+
+  const Row& last() const { return at(count_ - 1U); }
+
+  void forget() {
+    count_ = 0U;
+    total_ = 0U;
+    first_ = 0U;
+  }
+
+private:
+  Row rows_[kMax];
+  size_t first_ = 0U;
+  size_t count_ = 0U;
+  size_t total_ = 0U;
+};
+
 /// One whole board, wired the way main.cpp wires it.
 struct Rig {
   explicit Rig(uint32_t base)
@@ -1589,6 +1664,9 @@ struct Rig {
     ports.debounce = &debounce;
     ports.roster = &roster;
     ports.queue = &queue;
+    // The board leaves this nullptr. The rig wires it because it is the only
+    // way a test — or the simulator — can see WHY a scan was refused.
+    ports.log = &log;
     ports.mac = "5ccf7f0a1b2c";
     ports.firmwareVersion = "1.0.0";
     ports.heartbeatBody = heartbeatBody;
@@ -1687,6 +1765,7 @@ struct Rig {
   gatelogic::GateRoster roster;
   fakes::FakeStore store;
   gatelogic::GateQueue queue;
+  RecordingDecisionLog log;
   char heartbeatBody[gatelogic::kGateResponseCap] = {};
   gatelogic::GateApp app;
 };
@@ -3633,6 +3712,134 @@ void test_app_the_link_is_read_before_the_scanner_decides() {
   TEST_ASSERT_TRUE(rig.lock.released());
 }
 
+/// E6. EVERY decision reaches the log, with the reason the board acted on.
+///
+/// A refusal reason is computed here and observed nowhere: an open the API
+/// granted is in the API's audit trail and is deliberately not queued, and the
+/// only two surfaces on the hardware are a relay that moves or does not and a
+/// lamp that blinks three times for every refusal there is. So the native
+/// simulator — and through it the end-to-end harness — can prove what the LOCK
+/// did and nothing about the DECISION behind it, unless the decision is
+/// offered somewhere.
+///
+/// All four shapes, because they are computed on four different paths: a 200
+/// that opens, a 200 that refuses with the server's own word, a 403 (the club
+/// took this board out of service, decided from a status with no body), and a
+/// roster decision taken while the API cannot be reached.
+void test_app_every_decision_reaches_the_log_with_the_reason_it_acted_on() {
+  Rig rig(kBaseWrapSoon);
+  rig.boot(true);
+  rig.log.forget();
+
+  // (1) A 200 that opens. The log carries what the LOCK was given, not what the
+  // body asked for.
+  rig.http.answer(200U, kOpenThreeSeconds);
+  rig.scanner.feed("7Q3F9KM2XZ8B\n");
+  rig.tick();
+  TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, rig.log.count(), "an open is a decision");
+  TEST_ASSERT_EQUAL_STRING("ok", rig.log.at(0).reason);
+  TEST_ASSERT_EQUAL_STRING("7Q3F9KM2XZ8B", rig.log.at(0).token);
+  TEST_ASSERT_TRUE(rig.log.at(0).released);
+  TEST_ASSERT_EQUAL_UINT32(kOpenGrantMs, rig.log.at(0).grantedMs);
+  TEST_ASSERT_FALSE_MESSAGE(rig.log.at(0).queued,
+                            "a decision the API made is already in the API's own trail");
+
+  // (2) A 200 that refuses, carrying a reason NO OTHER SURFACE CAN SHOW. The
+  // lamp blinks three times for this and for every other refusal alike.
+  rig.clock.advance(gatelogic::kScanDebounceMs + 1U);
+  rig.http.answer(200U, "{\"opened\":false,\"reason\":\"member_not_active\",\"unlock_seconds\":0}");
+  rig.scanner.feed("MEMBERBARRED\n");
+  rig.tick();
+  TEST_ASSERT_EQUAL_size_t(2U, rig.log.count());
+  TEST_ASSERT_EQUAL_STRING_MESSAGE("member_not_active", rig.log.at(1).reason,
+                                   "the server's own word, as the board acted on it");
+  TEST_ASSERT_FALSE(rig.log.at(1).released);
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, rig.log.at(1).grantedMs, "a refusal grants nothing");
+
+  // (3) A 403. Decided by the board from a status with no body at all, and the
+  // one refusal that also empties the roster.
+  rig.clock.advance(gatelogic::kScanDebounceMs + 1U);
+  rig.http.answer(403U, "");
+  rig.scanner.feed("SHUTD00RC0DE\n");
+  rig.tick();
+  TEST_ASSERT_EQUAL_size_t(3U, rig.log.count());
+  TEST_ASSERT_EQUAL_STRING(gatelogic::kReasonOutOfService, rig.log.at(2).reason);
+  TEST_ASSERT_TRUE_MESSAGE(rig.log.at(2).outOfService,
+                           "the caller has to act on this, so the log has to carry it");
+
+  // (4) The roster, with the radio gone. The reasons here are the BOARD's
+  // vocabulary and exist for nothing but the lamp, the logs and the tests —
+  // which is precisely why they need a log to reach.
+  rig.link.set(false);
+  rig.clock.advance(gatelogic::kScanDebounceMs + 1U);
+  rig.scanner.feed("N0TINR0STER1\n");
+  rig.tick();
+  TEST_ASSERT_EQUAL_size_t(4U, rig.log.count());
+  TEST_ASSERT_FALSE(rig.log.at(3).released);
+  TEST_ASSERT_TRUE_MESSAGE(rig.log.at(3).queued,
+                           "a decision this board took for itself is one the API has to be told about");
+
+  // (5) A line this board refuses without looking at it. It names no token,
+  // because the bytes were discarded rather than truncated.
+  rig.clock.advance(gatelogic::kScanDebounceMs + 1U);
+  rig.scanner.feed("THISLINEISFARTOOLONGFORTHETOKENCAP\n");
+  rig.tick();
+  TEST_ASSERT_EQUAL_size_t(5U, rig.log.count());
+  TEST_ASSERT_EQUAL_STRING_MESSAGE("", rig.log.at(4).token,
+                                   "a token cut short is a different member's token");
+  TEST_ASSERT_FALSE(rig.log.at(4).released);
+}
+
+/// E6b. A DEBOUNCED repeat is not a decision, and must not look like one.
+///
+/// The same phone still held at the window is the normal case, and a log line
+/// per repeat would show a member entering eleven times — which is the audit
+/// artefact `ScanDebounce` exists to prevent, reproduced on the one surface
+/// built to read it back.
+void test_app_a_debounced_repeat_is_not_logged_as_a_decision() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  rig.log.forget();
+  rig.http.answer(200U, kOpenThreeSeconds);
+
+  rig.scanner.feed("7Q3F9KM2XZ8B\n");
+  rig.tick();
+  TEST_ASSERT_EQUAL_size_t(1U, rig.log.count());
+
+  rig.clock.advance(gatelogic::kScanDebounceMs / 2U);
+  rig.scanner.feed("7Q3F9KM2XZ8B\n");
+  rig.tick();
+  TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, rig.log.count(),
+                                   "a suppressed repeat is not a decision, not a call and not a row");
+}
+
+/// E6c. A BOARD HAS NO LOG, AND DECIDES EXACTLY THE SAME.
+///
+/// `ports.log` is nullptr in `src/gate/main.cpp` — there is no console on an
+/// ESP32 door gate — so the null path is the SHIPPED one and is the one that
+/// has to be proven. A port that could change a decision would be a door whose
+/// behaviour depends on whether a cable is plugged into it.
+void test_app_a_board_with_no_decision_log_decides_exactly_the_same() {
+  Rig rig(kBaseWrapSoon);
+  gatelogic::GateApp::Ports ports = rig.wire();
+  ports.log = nullptr;
+  gatelogic::GateApp app(ports);
+
+  app.beginOutputs();
+  app.begin();
+  rig.link.set(true);
+  rig.http.answer(200U, kOpenThreeSeconds);
+
+  rig.scanner.feed("7Q3F9KM2XZ8B\n");
+  for (int i = 0; i < 4; ++i) {
+    app.pass();
+    rig.clock.advance(gatelogic::kIdleDelayMs);
+  }
+
+  TEST_ASSERT_TRUE_MESSAGE(rig.lock.released(), "the door opens with no console attached");
+  TEST_ASSERT_EQUAL_size_t_MESSAGE(0U, rig.log.count(), "nothing may reach a log this board has not got");
+}
+
 } // namespace
 
 void setUp() {
@@ -3745,6 +3952,9 @@ int main(int, char**) {
   RUN_TEST(test_led_a_watchdog_that_would_not_arm_blinks_four_times_as_fast);
   RUN_TEST(test_app_a_refused_watchdog_changes_nothing_about_the_door);
   RUN_TEST(test_app_the_link_is_read_before_the_scanner_decides);
+  RUN_TEST(test_app_every_decision_reaches_the_log_with_the_reason_it_acted_on);
+  RUN_TEST(test_app_a_debounced_repeat_is_not_logged_as_a_decision);
+  RUN_TEST(test_app_a_board_with_no_decision_log_decides_exactly_the_same);
 
   return UNITY_END();
 }

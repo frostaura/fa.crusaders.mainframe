@@ -232,6 +232,12 @@ GateApp::Ports wire() {
   ports.debounce = &gDebounce;
   ports.roster = &gRoster;
   ports.queue = &gQueue;
+  // NULL, AND IT HAS TO BE. `IDecisionLog` is the simulator's console; this
+  // board has one LED and a USB line nobody is standing at. Written out rather
+  // than left to the default so the shipped value is visible beside every other
+  // port — and `GateApp` is host-tested on exactly this null path, because it
+  // is the one that ships.
+  ports.log = nullptr;
   ports.mac = gMacHex;
   ports.firmwareVersion = fw::kFirmwareVersion;
   ports.heartbeatBody = gHeartbeatBody;
