@@ -33,6 +33,7 @@
 #include "bridgelogic/Relight.h"
 #include "bridgelogic/RosterTokenFits.h"
 #include "bridgelogic/ScanFlow.h"
+#include "bridgelogic/ScreenScript.h"
 #include "bridgelogic/StateReconcile.h"
 #include "bridgelogic/WalkUp.h"
 #include "bridgelogic/WallClock.h"
@@ -1268,6 +1269,85 @@ void test_corpus_roster_pushes_load_exactly_as_the_contract_declares_them() {
   TEST_ASSERT_TRUE(cache.decide("K4TQ8N2ZV7BM", 0U, kBaseMid).verdict == roster::Verdict::Allow);
 }
 
+/// B5 — the three `member_display` vectors the contracts lane pinned.
+///
+/// THE BACKEND DOES NOT EMIT THIS FIELD YET. The corpus declares the contract
+/// the server must then satisfy, which is the direction this corpus is allowed
+/// to run in — so the firmware half reads it TOLERANTLY: absent is the ordinary
+/// case today and stays the ordinary case for a club that never fills the field
+/// in, and an unnamed member must still get their court.
+void test_corpus_member_display_names_the_member_or_greets_them_anyway() {
+  loadHttpCorpus();
+  const bridgelogic::ScanFlow flow;
+  char body[512] = {};
+  bridgelogic::ScreenFacts facts;
+
+  // Present. The greeting is the member's only confirmation that the box knows
+  // who they are, and it never changes what they are granted.
+  size_t n = bodyOf(responseVector("activate-response-ok-named"), body, sizeof(body));
+  bridgelogic::ActivationResult r = flow.onActivateResponse(200U, body, n, kCorpusCourts, devlink::kMaxCourts);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::TurnOn);
+  TEST_ASSERT_EQUAL_UINT8(2U, r.outcome.court); // court_number 3 of [1,2,3,4]
+  bridgelogic::readMemberDisplay(body, n, facts);
+  TEST_ASSERT_EQUAL_STRING("DEAN M", facts.name);
+  TEST_ASSERT_EQUAL_STRING("HI DEAN M",
+                           bridgelogic::screenFor(bridgelogic::ScreenId::CardBooked, facts).rows[0]);
+
+  // Absent: HI THERE, and the court still comes on. Absence changes the
+  // greeting and nothing else.
+  n = bodyOf(responseVector("activate-response-unnamed"), body, sizeof(body));
+  r = flow.onActivateResponse(200U, body, n, kCorpusCourts, devlink::kMaxCourts);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::TurnOn);
+  TEST_ASSERT_EQUAL_UINT8(1U, r.outcome.court);
+  TEST_ASSERT_EQUAL_UINT32(1800U * 1000U, r.outcome.durationMs);
+  bridgelogic::readMemberDisplay(body, n, facts);
+  TEST_ASSERT_EQUAL_STRING("", facts.name);
+  TEST_ASSERT_EQUAL_STRING("HI THERE",
+                           bridgelogic::screenFor(bridgelogic::ScreenId::CardBooked, facts).rows[0]);
+
+  // Forty characters. devapi::json REFUSES rather than truncates — half a name
+  // is a different member's — so the box greets and NEVER shows a cut name.
+  n = bodyOf(responseVector("activate-response-name-too-long"), body, sizeof(body));
+  r = flow.onActivateResponse(200U, body, n, kCorpusCourts, devlink::kMaxCourts);
+  TEST_ASSERT_TRUE(r.outcome.action == court::Action::TurnOn);
+  TEST_ASSERT_EQUAL_UINT8(0U, r.outcome.court);
+  bridgelogic::readMemberDisplay(body, n, facts);
+  TEST_ASSERT_EQUAL_STRING("", facts.name);
+  const bridgelogic::Screen card = bridgelogic::screenFor(bridgelogic::ScreenId::CardBooked, facts);
+  TEST_ASSERT_EQUAL_STRING("HI THERE", card.rows[0]);
+  TEST_ASSERT_NULL(strstr(card.rows[0], "BARTHOLOMEW"));
+}
+
+/// B8 — the court box's events, now carrying a real boot id.
+///
+/// The vector is the same event as the millis-wrap one with a non-zero
+/// `boot_id` in it, which is the whole of the change: `boot_id` sits second,
+/// between `mac` and the batch `uptime_ms`, and is OMITTED when it is zero —
+/// the compatibility hinge that let this box render the old body byte for byte
+/// while it still passed 0.
+void test_corpus_the_event_body_carries_this_boots_id() {
+  loadHttpCorpus();
+  char expected[512] = {};
+  const size_t n = bodyOf(requestVector("event-request-boot-id"), expected, sizeof(expected));
+
+  eventq::Event event;
+  event.seq = 41U;
+  event.kind = eventq::Kind::Activation;
+  event.court = 1U;
+  event.method = eventq::Method::Qr;
+  event.durationMs = 2700000UL;
+  event.uptimeMs = 0xFFFFF000UL;
+  TEST_ASSERT_TRUE(event.setSubject("TOKEN-B"));
+
+  char rendered[devlink::kEventBodyCap] = {};
+  const size_t renderedLen =
+      devlink::renderEventBody(rendered, sizeof(rendered), corpusMac(), bridgelogic::bootIdFrom(2596069104UL),
+                               0x100000000ULL + 20000ULL, event);
+  TEST_ASSERT_EQUAL_size_t(n, renderedLen);
+  TEST_ASSERT_EQUAL_STRING(expected, rendered);
+  TEST_ASSERT_EQUAL_MEMORY(expected, rendered, n);
+}
+
 /// Every http vector this suite binds to, by id. The executed-count gate below
 /// compares this against the corpus and the manifest in both directions.
 const char* const kBoundHttpVectors[] = {
@@ -1284,6 +1364,10 @@ const char* const kBoundHttpVectors[] = {
     "heartbeat-response-roster-single",
     "heartbeat-response-roster-full",
     "heartbeat-response-roster-negative-opens",
+    "activate-response-ok-named",
+    "activate-response-unnamed",
+    "activate-response-name-too-long",
+    "event-request-boot-id",
 };
 
 bool isBound(const char* id) {
@@ -2503,6 +2587,324 @@ void test_a_clock_nobody_has_confirmed_for_too_long_blanks_rather_than_lies() {
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// B4 — the layout contract, over EVERY screen at once
+// ---------------------------------------------------------------------------
+//
+// THIS TABLE IS THE DELIVERABLE, not a nicety. Before ScreenScript there was no
+// place any test could stand and look at every screen the box can paint, so a
+// screen that read as half a sentence on the panel that is actually fitted was
+// only ever found by somebody standing in front of one. It found `WRONG COURT`
+// / `Your booking is on` while the table was being written: that clips at
+// column 16 to "Your booking is", a sentence that stops one word before the
+// only word that matters.
+
+struct ScreenContract {
+  bridgelogic::ScreenId id;
+  /// The word rows 0-1 must still carry when a 1602 clips them at column 16.
+  const char* keyNoun;
+  /// Row 3 is generated from the live button map rather than being fixed text.
+  bool actionRowFromMap;
+  /// The greeting carve-out: row 0 is `HI <NAME>`, and a clipped name is a
+  /// shortened name rather than a broken sentence.
+  bool greeting;
+};
+
+const ScreenContract kContract[] = {
+    {bridgelogic::ScreenId::Grant, "COURT", false, false},
+    {bridgelogic::ScreenId::AlreadyOn, "COURT", false, false},
+    {bridgelogic::ScreenId::NoBooking, "BOOKING", true, false},
+    {bridgelogic::ScreenId::InsufficientBalance, "CREDITS", false, false},
+    {bridgelogic::ScreenId::WrongCourt, "COURT", false, false},
+    {bridgelogic::ScreenId::TooEarly, "EARLY", false, false},
+    {bridgelogic::ScreenId::NotRecognised, "CODE", false, false},
+    {bridgelogic::ScreenId::SlotEnded, "ENDED", true, false},
+    {bridgelogic::ScreenId::CourtInUse, "COURT", true, false},
+    {bridgelogic::ScreenId::NoTimeAvailable, "TIME", true, false},
+    {bridgelogic::ScreenId::MinutesOutOfRange, "LONG", true, false},
+    {bridgelogic::ScreenId::ClubClosed, "CLOSED", false, false},
+    {bridgelogic::ScreenId::PurchaseEnded, "ENDED", true, false},
+    {bridgelogic::ScreenId::ActivationRefused, "START", false, false},
+    {bridgelogic::ScreenId::NoConnection, "CONNECTION", false, false},
+    {bridgelogic::ScreenId::SeeTheDesk, "DESK", false, false},
+    {bridgelogic::ScreenId::OnNotSent, "AGAIN", false, false},
+    {bridgelogic::ScreenId::NotYourCourt, "COURT", false, false},
+    {bridgelogic::ScreenId::ScanFirst, "SCAN", false, false},
+    {bridgelogic::ScreenId::ChooseTime, "COURT", true, false},
+    {bridgelogic::ScreenId::OneMoment, "MOMENT", false, false},
+    {bridgelogic::ScreenId::CardBooked, "COURT", false, true},
+    {bridgelogic::ScreenId::CardNoBooking, "BOOKING", true, true},
+    {bridgelogic::ScreenId::CardBookedOffline, "BOOKING", false, false},
+};
+
+constexpr size_t kContractCount = sizeof(kContract) / sizeof(kContract[0]);
+
+/// Facts every screen can be built from, all of them present, so the contract
+/// is checked against the WIDEST rendering of each row rather than a convenient
+/// one. The court number is four digits and the minutes two, which is the most
+/// either can be on this panel.
+bridgelogic::ScreenFacts fullFacts(const court::ButtonMap* map) {
+  bridgelogic::ScreenFacts facts;
+  facts.court = 3U; // D, the widest letter position
+  facts.courtNumber = 9999;
+  facts.minutes = 90U;
+  snprintf(facts.endsAt, sizeof(facts.endsAt), "%s", "18:45");
+  snprintf(facts.atTime, sizeof(facts.atTime), "%s", "06:00");
+  snprintf(facts.fromTime, sizeof(facts.fromTime), "%s", "18:00");
+  snprintf(facts.toTime, sizeof(facts.toTime), "%s", "18:45");
+  snprintf(facts.name, sizeof(facts.name), "%s", "Dean");
+  facts.buttons = map;
+  return facts;
+}
+
+bool endsMidWord(const char* row, size_t cutAt) {
+  // A row that survives the cut whole cannot end mid-word.
+  if (strlen(row) <= cutAt) {
+    return false;
+  }
+  // Cut inside the text: the character at the cut, and the one before it, must
+  // not both be part of one word.
+  return row[cutAt] != ' ' && row[cutAt - 1U] != ' ';
+}
+
+void test_every_screen_holds_the_layout_contract() {
+  // Every screen is in the table, and the table is every screen: a screen added
+  // without a contract row is a screen nothing checks.
+  TEST_ASSERT_EQUAL_size_t(bridgelogic::kScreenCount, kContractCount);
+
+  court::ButtonMap map;
+  const bridgelogic::ScreenFacts facts = fullFacts(&map);
+
+  for (size_t i = 0U; i < kContractCount; ++i) {
+    const ScreenContract& contract = kContract[i];
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(static_cast<uint8_t>(i), static_cast<uint8_t>(contract.id),
+                                    "the contract table must be indexed by ScreenId");
+    const bridgelogic::Screen screen = bridgelogic::screenFor(contract.id, facts);
+
+    char label[64] = {};
+    snprintf(label, sizeof(label), "screen %u: %s", static_cast<unsigned>(i), screen.rows[0]);
+
+    // --- rule 1: rows 0-1 are a whole message at sixteen columns -----------
+    TEST_ASSERT_TRUE_MESSAGE(screen.rows[0][0] != '\0', label);
+    TEST_ASSERT_TRUE_MESSAGE(screen.rows[1][0] != '\0', label);
+    for (size_t row = 0U; row < 2U; ++row) {
+      TEST_ASSERT_TRUE_MESSAGE(strlen(screen.rows[row]) <= court::kSafeSubsetCols, label);
+      if (!contract.greeting) {
+        TEST_ASSERT_FALSE_MESSAGE(endsMidWord(screen.rows[row], court::kSafeSubsetCols), label);
+      }
+    }
+    // The key noun survives the clip, in the pair.
+    char pair[(court::kSafeSubsetCols * 2U) + 2U] = {};
+    snprintf(pair, sizeof(pair), "%s %s", screen.rows[0], screen.rows[1]);
+    if (!contract.greeting) {
+      TEST_ASSERT_NOT_NULL_MESSAGE(strstr(pair, contract.keyNoun), label);
+    }
+
+    // --- rule 2: row 3 leaves columns 16-19 to the countdown ---------------
+    TEST_ASSERT_TRUE_MESSAGE(strlen(screen.rows[3]) <= court::kSafeSubsetCols, label);
+
+    // --- every row fits the panel that is actually fitted ------------------
+    for (size_t row = 0U; row < proto::kMaxRows; ++row) {
+      TEST_ASSERT_TRUE_MESSAGE(strlen(screen.rows[row]) <= court::kLineLen, label);
+    }
+
+    // --- rule 4: no code, no id, no number the member did not choose -------
+    // A relay index never reaches the glass — courts are letters — and the only
+    // numbers here are a club court number, a duration and a clock.
+    TEST_ASSERT_NULL_MESSAGE(strstr(pair, "relay"), label);
+    TEST_ASSERT_NULL_MESSAGE(strstr(pair, "booking_id"), label);
+
+    // --- the hold is bounded, always ---------------------------------------
+    TEST_ASSERT_TRUE_MESSAGE(screen.holdSeconds >= proto::kShowHoldMinSeconds, label);
+    TEST_ASSERT_TRUE_MESSAGE(screen.holdSeconds <= proto::kShowHoldMaxSeconds, label);
+    // Unallocated flag bits stay zero: a bit this build sets and the Mega does
+    // not know is a screen nobody designed.
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, screen.flags & static_cast<uint8_t>(~bridgelogic::kShowFlagCountdown),
+                                    label);
+
+    // --- rule 3: the action row is generated where the table says it is ----
+    if (contract.actionRowFromMap) {
+      TEST_ASSERT_TRUE_MESSAGE(screen.rows[3][0] != '\0', label);
+    }
+  }
+}
+
+void test_a_sixteen_character_name_still_fits_the_panel() {
+  // `member_display` is server-truncated to sixteen characters, so `HI ` plus a
+  // name is nineteen — inside the 2004A's twenty and past the 1602's sixteen.
+  // That is the ONE carve-out from rule 1, and it is a shortened name rather
+  // than a broken sentence: the message is still complete and still correct.
+  court::ButtonMap map;
+  bridgelogic::ScreenFacts facts = fullFacts(&map);
+  snprintf(facts.name, sizeof(facts.name), "%s", "Bartholomew Jone");
+  TEST_ASSERT_EQUAL_size_t(bridgelogic::kMaxMemberNameLen, strlen(facts.name));
+
+  const bridgelogic::Screen card = bridgelogic::screenFor(bridgelogic::ScreenId::CardBooked, facts);
+  TEST_ASSERT_EQUAL_STRING("HI Bartholomew Jone", card.rows[0]);
+  TEST_ASSERT_TRUE(strlen(card.rows[0]) <= court::kLineLen);
+
+  // A one-character name, and none at all.
+  snprintf(facts.name, sizeof(facts.name), "%s", "X");
+  TEST_ASSERT_EQUAL_STRING("HI X", bridgelogic::screenFor(bridgelogic::ScreenId::CardBooked, facts).rows[0]);
+  facts.name[0] = '\0';
+  TEST_ASSERT_EQUAL_STRING("HI THERE",
+                           bridgelogic::screenFor(bridgelogic::ScreenId::CardBooked, facts).rows[0]);
+}
+
+void test_the_screens_say_what_the_table_says_they_say() {
+  // The wording itself, for the screens whose exact words are the point.
+  court::ButtonMap map;
+  bridgelogic::ScreenFacts facts = fullFacts(&map);
+  facts.court = 1U;
+  facts.courtNumber = 9;
+  facts.minutes = 45U;
+
+  bridgelogic::Screen s = bridgelogic::screenFor(bridgelogic::ScreenId::Grant, facts);
+  TEST_ASSERT_EQUAL_STRING("COURT B IS ON", s.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("45 MINUTES", s.rows[1]);
+  TEST_ASSERT_EQUAL_STRING("Ends 18:45", s.rows[2]);
+  TEST_ASSERT_EQUAL_STRING("ENJOY YOUR GAME", s.rows[3]);
+  TEST_ASSERT_EQUAL_UINT16(bridgelogic::kRevertSeconds, s.holdSeconds);
+  TEST_ASSERT_EQUAL_UINT8(bridgelogic::kShowFlagCountdown, s.flags);
+
+  s = bridgelogic::screenFor(bridgelogic::ScreenId::AlreadyOn, facts);
+  TEST_ASSERT_EQUAL_STRING("45 MINUTES LEFT", s.rows[1]);
+
+  // The screen the contract caught: the court NUMBER on row 1, where sixteen
+  // columns can hold it.
+  s = bridgelogic::screenFor(bridgelogic::ScreenId::WrongCourt, facts);
+  TEST_ASSERT_EQUAL_STRING("WRONG COURT", s.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("GO TO COURT 9", s.rows[1]);
+
+  s = bridgelogic::screenFor(bridgelogic::ScreenId::ChooseTime, facts);
+  TEST_ASSERT_EQUAL_STRING("COURT B", s.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("HOW LONG?", s.rows[1]);
+  TEST_ASSERT_EQUAL_UINT16(bridgelogic::kChoiceSeconds, s.holdSeconds);
+  TEST_ASSERT_EQUAL_UINT8(bridgelogic::kShowFlagCountdown, s.flags);
+
+  // Never indefinite, and never longer than the blocking call plus slack.
+  s = bridgelogic::screenFor(bridgelogic::ScreenId::OneMoment, facts);
+  TEST_ASSERT_EQUAL_UINT16(bridgelogic::kWaitSeconds, s.holdSeconds);
+  TEST_ASSERT_EQUAL_STRING("", s.rows[2]);
+
+  s = bridgelogic::screenFor(bridgelogic::ScreenId::CardBooked, facts);
+  TEST_ASSERT_EQUAL_STRING("Booked 18:00-18:45", s.rows[2]);
+  TEST_ASSERT_EQUAL_UINT16(bridgelogic::kCardSeconds, s.holdSeconds);
+
+  // The offline roster path has no name and does not pretend to.
+  s = bridgelogic::screenFor(bridgelogic::ScreenId::CardBookedOffline, facts);
+  TEST_ASSERT_EQUAL_STRING("BOOKING FOUND", s.rows[0]);
+}
+
+void test_a_row_that_would_name_a_time_blanks_when_the_clock_is_not_trusted() {
+  // B6's rule, seen from the glass: a stale clock reads exactly like a live
+  // one, so a row whose only content is a blanked time renders BLANK rather
+  // than "Ends " — a prefix with its answer missing reads as a screen that is
+  // still loading.
+  court::ButtonMap map;
+  bridgelogic::ScreenFacts facts = fullFacts(&map);
+  facts.endsAt[0] = '\0';
+  facts.atTime[0] = '\0';
+  facts.toTime[0] = '\0';
+
+  TEST_ASSERT_EQUAL_STRING("", bridgelogic::screenFor(bridgelogic::ScreenId::Grant, facts).rows[2]);
+  TEST_ASSERT_EQUAL_STRING("", bridgelogic::screenFor(bridgelogic::ScreenId::TooEarly, facts).rows[2]);
+  TEST_ASSERT_EQUAL_STRING("", bridgelogic::screenFor(bridgelogic::ScreenId::ClubClosed, facts).rows[1]);
+  TEST_ASSERT_EQUAL_STRING("", bridgelogic::screenFor(bridgelogic::ScreenId::CardBooked, facts).rows[2]);
+
+  // And the rows that do NOT name a time are untouched: a blank clock must not
+  // blank the screen.
+  const bridgelogic::Screen grant = bridgelogic::screenFor(bridgelogic::ScreenId::Grant, facts);
+  TEST_ASSERT_EQUAL_STRING("COURT D IS ON", grant.rows[0]);
+  TEST_ASSERT_EQUAL_STRING("ENJOY YOUR GAME", grant.rows[3]);
+}
+
+void test_the_action_row_is_the_live_panel_and_never_a_hardcoded_one() {
+  court::ButtonMap map;
+  bridgelogic::ScreenFacts facts = fullFacts(&map);
+
+  // The default panel: courts A-D on the green row, 15/30/45/60 on the black.
+  char row[court::kLineLen + 1U] = {};
+  bridgelogic::renderActionRow(map, bridgelogic::kCourtCellsFrom, row, sizeof(row));
+  TEST_ASSERT_EQUAL_STRING("A   B   C   D", row);
+  bridgelogic::renderActionRow(map, bridgelogic::kDurationCellsFrom, row, sizeof(row));
+  TEST_ASSERT_EQUAL_STRING("15  30  45  60", row);
+  TEST_ASSERT_TRUE(strlen(row) <= court::kSafeSubsetCols);
+
+  // A club that maps `minutes:20` must see 20. Hardcoding the row is how a
+  // screen tells a member to press a button that buys something else.
+  TEST_ASSERT_TRUE(map.setFromWire(4U, "minutes:20"));
+  TEST_ASSERT_TRUE(map.setFromWire(5U, "off"));
+  TEST_ASSERT_TRUE(map.setFromWire(6U, "none"));
+  bridgelogic::renderActionRow(map, bridgelogic::kDurationCellsFrom, row, sizeof(row));
+  // `off` and `none` render BLANK: a button that does nothing must not
+  // advertise a duration somebody would press.
+  TEST_ASSERT_EQUAL_STRING("20          60", row);
+
+  facts.buttons = &map;
+  TEST_ASSERT_EQUAL_STRING("20          60",
+                           bridgelogic::screenFor(bridgelogic::ScreenId::ChooseTime, facts).rows[3]);
+
+  // No map at all falls back to the original wiring, which is what a box that
+  // has never had a heartbeat actually has.
+  facts.buttons = nullptr;
+  TEST_ASSERT_EQUAL_STRING("15  30  45  60",
+                           bridgelogic::screenFor(bridgelogic::ScreenId::ChooseTime, facts).rows[3]);
+}
+
+void test_member_display_is_read_tolerantly_and_never_truncated() {
+  bridgelogic::ScreenFacts facts;
+
+  // The ordinary case today: the backend does not send the field yet.
+  const char none[] = "{\"activated\":true,\"granted_seconds\":2700,\"court_number\":7}";
+  bridgelogic::readMemberDisplay(none, len(none), facts);
+  TEST_ASSERT_EQUAL_STRING("", facts.name);
+
+  const char one[] = "{\"member_display\":\"X\"}";
+  bridgelogic::readMemberDisplay(one, len(one), facts);
+  TEST_ASSERT_EQUAL_STRING("X", facts.name);
+
+  const char sixteen[] = "{\"member_display\":\"Bartholomew Jone\"}";
+  bridgelogic::readMemberDisplay(sixteen, len(sixteen), facts);
+  TEST_ASSERT_EQUAL_STRING("Bartholomew Jone", facts.name);
+
+  // The frame's escape set. These are the bytes that would re-write the fields
+  // around a name if it were ever interpolated into a body — it is not, it only
+  // ever reaches the glass — and the scanner must still find the string's end.
+  const char escapes[] = "{\"member_display\":\"A,B*C%D\"}";
+  bridgelogic::readMemberDisplay(escapes, len(escapes), facts);
+  TEST_ASSERT_EQUAL_STRING("A,B*C%D", facts.name);
+
+  // Forty characters: REFUSED by devapi::json rather than truncated, because
+  // half a name is a different member's. It degrades to the greeting, never to
+  // a missing screen.
+  const char long40[] = "{\"member_display\":\"0123456789012345678901234567890123456789\"}";
+  bridgelogic::readMemberDisplay(long40, len(long40), facts);
+  TEST_ASSERT_EQUAL_STRING("", facts.name);
+  court::ButtonMap map;
+  facts.buttons = &map;
+  TEST_ASSERT_EQUAL_STRING("HI THERE",
+                           bridgelogic::screenFor(bridgelogic::ScreenId::CardBooked, facts).rows[0]);
+
+  // A decoy at a deeper level, before and after. The greeting is the member's
+  // only confirmation that the box knows who they are.
+  const char decoyFirst[] = "{\"detail\":{\"member_display\":\"Mallory\"},\"member_display\":\"Dean\"}";
+  bridgelogic::readMemberDisplay(decoyFirst, len(decoyFirst), facts);
+  TEST_ASSERT_EQUAL_STRING("Dean", facts.name);
+  const char decoyOnly[] = "{\"detail\":{\"member_display\":\"Mallory\"}}";
+  bridgelogic::readMemberDisplay(decoyOnly, len(decoyOnly), facts);
+  TEST_ASSERT_EQUAL_STRING("", facts.name);
+
+  // Wrong type, and a truncated body.
+  const char wrongType[] = "{\"member_display\":42}";
+  bridgelogic::readMemberDisplay(wrongType, len(wrongType), facts);
+  TEST_ASSERT_EQUAL_STRING("", facts.name);
+  const char cut[] = "{\"member_display\":\"Dea";
+  bridgelogic::readMemberDisplay(cut, len(cut), facts);
+  TEST_ASSERT_EQUAL_STRING("", facts.name);
+}
+
 } // namespace
 
 void setUp() {
@@ -2561,6 +2963,8 @@ int main(int, char**) {
   RUN_TEST(test_corpus_walkup_body_is_byte_identical_to_the_contract);
   RUN_TEST(test_corpus_events_body_is_byte_identical_to_the_contract);
   RUN_TEST(test_corpus_roster_pushes_load_exactly_as_the_contract_declares_them);
+  RUN_TEST(test_corpus_member_display_names_the_member_or_greets_them_anyway);
+  RUN_TEST(test_corpus_the_event_body_carries_this_boots_id);
   RUN_TEST(test_corpus_every_http_section_is_declared_and_every_vector_is_bound);
 
   RUN_TEST(test_scan_flow_a_box_with_no_court_list_is_not_online);
@@ -2591,6 +2995,12 @@ int main(int, char**) {
   RUN_TEST(test_server_time_is_read_as_club_local_wall_time_or_refused);
   RUN_TEST(test_the_clock_advances_between_heartbeats_and_wraps_at_midnight);
   RUN_TEST(test_a_clock_nobody_has_confirmed_for_too_long_blanks_rather_than_lies);
+  RUN_TEST(test_every_screen_holds_the_layout_contract);
+  RUN_TEST(test_a_sixteen_character_name_still_fits_the_panel);
+  RUN_TEST(test_the_screens_say_what_the_table_says_they_say);
+  RUN_TEST(test_a_row_that_would_name_a_time_blanks_when_the_clock_is_not_trusted);
+  RUN_TEST(test_the_action_row_is_the_live_panel_and_never_a_hardcoded_one);
+  RUN_TEST(test_member_display_is_read_tolerantly_and_never_truncated);
   RUN_TEST(test_relight_adopts_the_megas_remaining_seconds_so_a_lost_ext_is_re_sent);
   RUN_TEST(test_state_seconds_parse_decimal_and_refuse_everything_else);
   RUN_TEST(test_a_rescan_on_a_court_this_box_already_lit_is_not_a_second_grant);
