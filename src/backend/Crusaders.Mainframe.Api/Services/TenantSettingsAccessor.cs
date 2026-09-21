@@ -122,6 +122,17 @@ public sealed class TenantSettingsAccessor
             // separate questions with one answer each. See TraceSettings.
             MemberTraceEnabled = TryBool(root, "member_trace_enabled", TraceSettings.DefaultEnabled),
             MemberTraceMaxEvents = TryInt(root, "member_trace_max_events", TraceSettings.DefaultMaxEvents),
+
+            // The three schedule numbers. Raw here, bounded at ScheduleSettings — and the
+            // horizon is the sharpest case of that rule in this lane, because a horizon
+            // shorter than advance_booking_days lets a member book into a league night that
+            // has not been written yet, weeks before anyone finds out.
+            ScheduleMaterialisationDays = TryInt(
+                root, "schedule_materialisation_days", ScheduleSettings.DefaultMaterialisationDays),
+            ScheduleMaxRowsPerChange = TryInt(
+                root, "schedule_max_rows_per_change", ScheduleSettings.DefaultMaxRowsPerChange),
+            ScheduleWorkerIntervalSeconds = TryInt(
+                root, "schedule_worker_interval_seconds", ScheduleSettings.DefaultWorkerIntervalSeconds),
         };
     }
 
@@ -358,6 +369,20 @@ public sealed record TenantSettingsView(
 
     /// <summary>Most events one trace returns. Read via <see cref="TraceSettings.MaxEvents"/>.</summary>
     public int MemberTraceMaxEvents { get; init; } = TraceSettings.DefaultMaxEvents;
+
+    // ---- The three schedule settings ----
+    //
+    // Raw as stored and read through ScheduleSettings, where the bounds live along with the
+    // cross-field rule that the horizon must reach at least as far as advance_booking_days.
+
+    /// <summary>How far ahead occurrences are written, days. Read via <see cref="ScheduleSettings.MaterialisationDays"/>.</summary>
+    public int ScheduleMaterialisationDays { get; init; } = ScheduleSettings.DefaultMaterialisationDays;
+
+    /// <summary>Most rows one schedule change may touch. Read via <see cref="ScheduleSettings.MaxRowsPerChange"/>.</summary>
+    public int ScheduleMaxRowsPerChange { get; init; } = ScheduleSettings.DefaultMaxRowsPerChange;
+
+    /// <summary>The materialisation worker's tick, seconds. Read via <see cref="ScheduleSettings.WorkerInterval"/>.</summary>
+    public int ScheduleWorkerIntervalSeconds { get; init; } = ScheduleSettings.DefaultWorkerIntervalSeconds;
 
     /// <summary>
     /// The number a member refused at a door should ring. Empty by default — a club that has
