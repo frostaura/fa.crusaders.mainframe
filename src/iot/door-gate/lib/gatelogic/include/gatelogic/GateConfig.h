@@ -177,6 +177,18 @@ inline constexpr uint32_t kMinUnlockMs = 1000UL;
 /// otherwise be an API call, an audit row and a re-armed lock.
 inline constexpr uint32_t kScanDebounceMs = 2000UL;
 
+/// How often an UNREADABLE line may produce an answer — a denial blink and,
+/// offline, one queued record.
+///
+/// Round G4's L1 gave a corrupt line feedback it had never had, and this is
+/// what makes that safe to give. 9600 baud beside a switching relay coil
+/// produces holed lines by the hundred; unlimited, the lamp would strobe and an
+/// offline ring would fill with noise and evict the admissions that matter.
+/// The same number as the debounce, because it is the same question asked about
+/// a line with no token in it: a member presenting something this board cannot
+/// read is answered at the rate a member presenting something it CAN read is.
+inline constexpr uint32_t kUnreadableFeedbackMs = kScanDebounceMs;
+
 // --- the loop's own timings -------------------------------------------------
 //
 // These were literals in main.cpp, where `build_src_filter = -<*>` meant no

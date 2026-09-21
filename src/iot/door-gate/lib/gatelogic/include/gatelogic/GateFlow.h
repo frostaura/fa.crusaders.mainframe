@@ -85,8 +85,13 @@ static_assert(text::length(kPathHeartbeat) <= kMaxPathLen && text::length(kPathG
               "a device path is longer than kMaxPathLen, which sizes the URL buffer");
 
 /// The smallest buffer renderScanBody is ever given: three keys, a 12-hex MAC
-/// and a token bounded by roster::kMaxTokenLen.
-inline constexpr size_t kScanBodyCap = 96U;
+/// and a token bounded by roster::kMaxTokenLen — ESCAPED, which is up to six
+/// bytes per character (round G4, B1). 20 x 6 = 120 for the token alone.
+///
+/// The assembler refuses bytes outside the roster's alphabet now, so nothing a
+/// real scan produces expands at all; the budget is here because the renderer
+/// must be safe against its caller rather than because of it.
+inline constexpr size_t kScanBodyCap = 192U;
 
 /// The longest `reason` the contract defines is `method_not_supported` (21).
 inline constexpr size_t kMaxReasonLen = 24U;

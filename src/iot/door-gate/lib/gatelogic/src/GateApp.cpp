@@ -206,6 +206,15 @@ void GateApp::feedByte(uint8_t byte) {
     decideScan(assembler_.token());
     break;
   case ScanEvent::Refused:
+  case ScanEvent::Corrupt:
+    // THE SAME ANSWER FOR BOTH, and that is deliberate. From where the member
+    // is standing an over-long code and a holed one are one thing — the board
+    // could not read what they presented — and there is nothing to ask the API
+    // about in either case, because the bytes were discarded rather than
+    // truncated and a token cut short is a different member's token.
+    //
+    // `Corrupt` used to be `None`: no blink, no record, nothing, while
+    // `pumpScanner`'s comment promised feedback (round G4, L1).
     refuseUnreadableLine();
     break;
   case ScanEvent::None:
@@ -215,6 +224,17 @@ void GateApp::feedByte(uint8_t byte) {
 
 void GateApp::refuseUnreadableLine() {
   const uint32_t now = clock_.nowMs();
+  // RATE-LIMITED, AND THIS IS WHAT MAKES L1'S FEEDBACK SAFE TO GIVE. A cable
+  // running beside a switching relay coil produces holed lines by the hundred:
+  // unlimited, the lamp would strobe and, offline, the event ring would fill
+  // with noise and evict the admissions that matter. One answer per window,
+  // which is the debounce's own number — the rate a member's own repeated scans
+  // are already answered at — and what happens in between is nothing at all
+  // rather than something quieter.
+  if (unreadableAt_.remaining(now) > 0U) {
+    return;
+  }
+  unreadableAt_.arm(now, kUnreadableFeedbackMs);
   // The SAME judgement a scan makes — the radio AND the breaker. Asking about
   // the radio alone queued nothing while the host was down, which is the one
   // window in which an unreadable scan is worth knowing about.

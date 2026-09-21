@@ -156,6 +156,44 @@ bool isCompleteObject(const char* body, size_t len);
 /// Container levels `isCompleteObject` can track. One bit each in a uint32_t.
 inline constexpr uint32_t kMaxNesting = 32U;
 
+// --- writing ----------------------------------------------------------------
+//
+// WHY A READER HAS AN ESCAPER IN IT
+// ---------------------------------
+// Because the two halves of the JSON string grammar have to agree, and round
+// G4's B1 is what it costs when only one of them exists. `renderScanBody` and
+// `renderEventBody` interpolated SCANNED BYTES with a bare `%s`, and the
+// scanner admitted every printable byte including `"` and `\`. A QR code of
+// twenty characters — `a","method":"code` is seventeen — re-wrote the fields
+// around it: `method`, `mac`, `seq`, `kind`, `court`. `","seq":99999,"x":"` is
+// nineteen and, scanned at a door that was offline, forged the batch's sequence
+// number; the server answers `accepted_through` from the seq it PARSED, so one
+// crafted code discarded a whole evening's backlog on reconnect.
+//
+// So the escaper lives beside the scanner that has to be able to read what it
+// writes. `endOfString` above is the one authority on where a string ENDS, and
+// this is the one authority on how to write one that ends where it should.
+
+/// Longest an escaped string can be per input byte: `\u00XX`.
+inline constexpr size_t kMaxEscapeExpansion = 6U;
+
+/// Writes the CONTENTS of a JSON string — no surrounding quotes — for the first
+/// `inLen` bytes of `in`, escaped so that NO input byte can end the string or
+/// start a field beside it.
+///
+/// `"` and `\` take their two-character forms; every byte below 0x20 takes a
+/// short form where JSON defines one and `\u00XX` otherwise, because a raw
+/// control byte inside a string is not legal JSON and a server that rejects the
+/// body drops the record behind it. Bytes at 0x20 and above pass through, which
+/// keeps UTF-8 intact.
+///
+/// False, with `out` emptied, when it would not fit — REFUSED rather than
+/// truncated, on the same rule as every other renderer here: half an escape
+/// sequence is a body the server cannot parse, and a subject cut short is a
+/// different subject. True with an empty `out` for an empty input, which is a
+/// legitimate subject: a line the board discarded has no bytes to report.
+bool escapeInto(const char* in, size_t inLen, char* out, size_t outCap);
+
 } // namespace json
 } // namespace devapi
 

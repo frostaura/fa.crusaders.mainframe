@@ -1,6 +1,7 @@
 #include "gatelogic/GateFlow.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "devapi/Json.h"
 #include "gatelogic/GateHeartbeat.h"
@@ -39,7 +40,20 @@ size_t renderScanBody(char* out, size_t cap, const char* mac, const char* token)
     return 0U;
   }
 
-  const int written = snprintf(out, cap, "{\"mac\":\"%s\",\"method\":\"qr\",\"token\":\"%s\"}", mac, token);
+  // ESCAPED, NOT INTERPOLATED (round G4, B1). These bytes came off a scanner
+  // and a QR code is whatever somebody printed on it; a bare `%s` let a
+  // seventeen-character code re-write `method` and a twenty-one-character one
+  // re-write `mac`. The assembler refuses bytes outside the roster's alphabet
+  // now as well, and that is the layer that stops a forged token being asked
+  // about at all — but a renderer that is only safe because of what its caller
+  // happens to feed it is a renderer one refactor away from being unsafe.
+  char safeToken[roster::kMaxTokenLen * devapi::json::kMaxEscapeExpansion + 1U] = {};
+  if (!devapi::json::escapeInto(token, strlen(token), safeToken, sizeof(safeToken))) {
+    return 0U;
+  }
+
+  const int written =
+      snprintf(out, cap, "{\"mac\":\"%s\",\"method\":\"qr\",\"token\":\"%s\"}", mac, safeToken);
   if (written < 0 || static_cast<size_t>(written) >= cap) {
     out[0] = '\0';
     return 0U;

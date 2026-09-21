@@ -330,6 +330,98 @@ size_t pastBalancedObject(const char* body, size_t len, size_t at) {
 
 } // namespace
 
+namespace {
+
+/// One escaped byte, written into `out` at `at`. Returns the new `at`, or
+/// kNotFound when it would not fit — checked per byte rather than up front,
+/// because the expansion depends on the bytes and an up-front worst-case check
+/// would refuse a subject that fits comfortably.
+size_t writeEscaped(char byte, char* out, size_t outCap, size_t at) {
+  const char* pair = nullptr;
+  switch (byte) {
+  case '"':
+    pair = "\\\"";
+    break;
+  case '\\':
+    pair = "\\\\";
+    break;
+  case '\b':
+    pair = "\\b";
+    break;
+  case '\f':
+    pair = "\\f";
+    break;
+  case '\n':
+    pair = "\\n";
+    break;
+  case '\r':
+    pair = "\\r";
+    break;
+  case '\t':
+    pair = "\\t";
+    break;
+  default:
+    break;
+  }
+
+  if (pair != nullptr) {
+    if (at + 2U >= outCap) {
+      return kNotFound;
+    }
+    out[at] = pair[0];
+    out[at + 1U] = pair[1];
+    return at + 2U;
+  }
+
+  const unsigned char value = static_cast<unsigned char>(byte);
+  if (value >= 0x20U) {
+    // Everything printable, and every UTF-8 continuation byte, straight
+    // through: escaping those would change what the server stores.
+    if (at + 1U >= outCap) {
+      return kNotFound;
+    }
+    out[at] = byte;
+    return at + 1U;
+  }
+
+  // A control byte with no short form. Raw, it is not legal JSON at all, and a
+  // body the server refuses is a record the drain then drops.
+  static const char kHex[] = "0123456789abcdef";
+  if (at + 6U >= outCap) {
+    return kNotFound;
+  }
+  out[at] = '\\';
+  out[at + 1U] = 'u';
+  out[at + 2U] = '0';
+  out[at + 3U] = '0';
+  out[at + 4U] = kHex[(value >> 4) & 0x0FU];
+  out[at + 5U] = kHex[value & 0x0FU];
+  return at + 6U;
+}
+
+} // namespace
+
+bool escapeInto(const char* in, size_t inLen, char* out, size_t outCap) {
+  if (out == nullptr || outCap == 0U) {
+    return false;
+  }
+  out[0] = '\0';
+  if (in == nullptr) {
+    return inLen == 0U;
+  }
+
+  size_t at = 0U;
+  for (size_t i = 0U; i < inLen; ++i) {
+    at = writeEscaped(in[i], out, outCap, at);
+    if (at == kNotFound) {
+      out[0] = '\0';
+      return false;
+    }
+  }
+  out[at] = '\0';
+  return true;
+}
+
 bool isCompleteObject(const char* body, size_t len) {
   if (body == nullptr) {
     return false;

@@ -343,6 +343,11 @@ private:
   tb::Uptime64 uptime_;
   tb::Deadline heartbeatAt_;
 
+  /// When an unreadable line may next produce an answer. See
+  /// `kUnreadableFeedbackMs`: the feedback L1 added is rate-limited so that a
+  /// noisy cable cannot strobe the lamp or fill the event ring.
+  tb::Deadline unreadableAt_;
+
   /// THE FLOOR, armed after every heartbeat ATTEMPT. Whatever re-armed
   /// `heartbeatAt_` — the cadence, or a link-up edge — no attempt happens
   /// within `kMinHeartbeatSpacingMs` of the last one. A flapping radio re-arms

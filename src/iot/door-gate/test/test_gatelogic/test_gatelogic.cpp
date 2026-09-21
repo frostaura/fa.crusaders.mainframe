@@ -34,6 +34,7 @@
 
 #include "devlink/ApiBreaker.h"
 #include "devlink/RosterSync.h"
+#include "devlink/EventUpload.h"
 #include "eventq/Event.h"
 #include "fakes/FakeClock.h"
 #include "fakes/FakeStore.h"
@@ -524,6 +525,34 @@ void test_unlock_reports_how_long_it_has_been_released() {
 // ScanAssembler — bytes into one token, or into nothing
 // ---------------------------------------------------------------------------
 
+/// Quotes that actually delimit a JSON string: a `"` not preceded by an odd
+/// number of backslashes. The one structural fact a forged field has to break.
+size_t unescapedQuotes(const char* body) {
+  size_t count = 0U;
+  size_t slashes = 0U;
+  for (size_t i = 0U; body[i] != '\0'; ++i) {
+    if (body[i] == '\\') {
+      ++slashes;
+      continue;
+    }
+    if (body[i] == '"' && (slashes % 2U) == 0U) {
+      ++count;
+    }
+    slashes = 0U;
+  }
+  return count;
+}
+
+size_t occurrences(const char* haystack, const char* needle) {
+  size_t count = 0U;
+  const char* at = haystack;
+  while ((at = strstr(at, needle)) != nullptr) {
+    ++count;
+    at += strlen(needle);
+  }
+  return count;
+}
+
 void test_scan_assembles_a_line_and_treats_crlf_as_one_terminator() {
   gatelogic::ScanAssembler assembler;
   TEST_ASSERT_TRUE(feedLine(assembler, "7Q3F9KM2XZ8B\r") == gatelogic::ScanEvent::Token);
@@ -577,7 +606,10 @@ void test_scan_a_non_printable_byte_discards_the_whole_line() {
 
   TEST_ASSERT_TRUE(feedLine(assembler, "GOOD") == gatelogic::ScanEvent::None);
   TEST_ASSERT_TRUE(assembler.feed(0x00U) == gatelogic::ScanEvent::None);
-  TEST_ASSERT_TRUE(feedLine(assembler, "TOKEN\n") == gatelogic::ScanEvent::None);
+  // CORRUPT, NOT NONE (round G4, L1). The line is still discarded — nothing is
+  // handed up and no token is offered — but the caller is told, so the member
+  // standing there gets the denial blink instead of silence.
+  TEST_ASSERT_TRUE(feedLine(assembler, "TOKEN\n") == gatelogic::ScanEvent::Corrupt);
 
   // And the next line is unaffected.
   TEST_ASSERT_TRUE(feedLine(assembler, "CLEAN1\n") == gatelogic::ScanEvent::Token);
@@ -586,7 +618,155 @@ void test_scan_a_non_printable_byte_discards_the_whole_line() {
   // A high byte from a framing error costs the line too.
   TEST_ASSERT_TRUE(feedLine(assembler, "AB") == gatelogic::ScanEvent::None);
   TEST_ASSERT_TRUE(assembler.feed(0xFEU) == gatelogic::ScanEvent::None);
-  TEST_ASSERT_TRUE(feedLine(assembler, "CD\n") == gatelogic::ScanEvent::None);
+  TEST_ASSERT_TRUE(feedLine(assembler, "CD\n") == gatelogic::ScanEvent::Corrupt);
+}
+
+/// G4 / B1. THE LINE IS HELD TO THE ROSTER'S OWN ALPHABET, not to "printable".
+///
+/// Printable ASCII includes `"` and `\`, and the token was interpolated into a
+/// JSON body with a bare `%s`. A token outside `roster::isTokenChar` can never
+/// match anything in the roster and can never be a code the server minted, so
+/// admitting one was only ever a refusal taken slowly — by way of a blocking
+/// call, or of bytes written into an audit trail that nobody scanned.
+void test_scan_refuses_every_byte_outside_the_rosters_token_alphabet() {
+  // Exhaustive over the whole byte range, which is the only way to be sure the
+  // set the SCANNER admits is the set the ROSTER can hold.
+  for (unsigned value = 0U; value < 256U; ++value) {
+    const uint8_t byte = static_cast<uint8_t>(value);
+    if (gatelogic::isLineTerminator(byte)) {
+      continue;
+    }
+    gatelogic::ScanAssembler assembler;
+    static_cast<void>(assembler.feed(static_cast<uint8_t>('A')));
+    static_cast<void>(assembler.feed(byte));
+    const gatelogic::ScanEvent result = assembler.feed(static_cast<uint8_t>('\n'));
+
+    char message[96] = {};
+    snprintf(message, sizeof(message), "byte 0x%02X in a line", value);
+    const bool trimmable = byte == static_cast<uint8_t>(' ') || byte == static_cast<uint8_t>('\t');
+    if (roster::isTokenChar(static_cast<char>(byte)) || trimmable) {
+      TEST_ASSERT_TRUE_MESSAGE(result == gatelogic::ScanEvent::Token, message);
+    } else {
+      TEST_ASSERT_TRUE_MESSAGE(result == gatelogic::ScanEvent::Corrupt, message);
+    }
+  }
+
+  // The two that matter most, named so a reader does not have to derive them:
+  // these are the bytes B1's forged bodies were made of.
+  gatelogic::ScanAssembler assembler;
+  TEST_ASSERT_TRUE(feedLine(assembler, "a\",\"method\":\"code\n") == gatelogic::ScanEvent::Corrupt);
+  TEST_ASSERT_TRUE(feedLine(assembler, "a\\\n") == gatelogic::ScanEvent::Corrupt);
+  // And the roster's own grammar still gets through whole.
+  TEST_ASSERT_TRUE(feedLine(assembler, "7Q3F9KM2XZ8B\n") == gatelogic::ScanEvent::Token);
+  TEST_ASSERT_EQUAL_STRING("7Q3F9KM2XZ8B", assembler.token());
+  TEST_ASSERT_TRUE(feedLine(assembler, "a-b_C9\n") == gatelogic::ScanEvent::Token);
+  TEST_ASSERT_EQUAL_STRING("a-b_C9", assembler.token());
+}
+
+/// G4 / B1, CRITICAL. A QR CODE COULD FORGE THE FIELDS AROUND IT.
+///
+/// `renderScanBody` interpolated the scanned bytes with a bare `%s`, and the
+/// assembler admitted every printable byte including `"` and `\`. Twenty
+/// characters is enough: `a","method":"code` re-writes `method`, and the
+/// assembler's own cap is the only thing that ever refused one.
+///
+/// FUZZED rather than enumerated, because the property is "no byte sequence
+/// ever leaves the string" and a list of five is a list of the five somebody
+/// thought of. Every line the ASSEMBLER accepts is rendered and the result is
+/// checked against the one structural fact that matters: the body has exactly
+/// as many unescaped quotes as its own fixed shape.
+void test_render_no_scanned_line_can_forge_a_field_in_the_scan_body() {
+  // The alphabet a hostile QR can be made of: the JSON metacharacters, a
+  // backslash, and enough ordinary bytes that a sequence looks like a token.
+  static const char kAlphabet[] = "\"\\\\:,{}[]abAB01-_ \t";
+  const size_t alphabetLen = sizeof(kAlphabet) - 1U;
+
+  uint32_t state = 0x13579BDFU;
+  for (int iteration = 0; iteration < 20000; ++iteration) {
+    char line[roster::kMaxTokenLen + 2U] = {};
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    const size_t length = 1U + (state % roster::kMaxTokenLen);
+    for (size_t i = 0U; i < length; ++i) {
+      state ^= state << 13;
+      state ^= state >> 17;
+      state ^= state << 5;
+      line[i] = kAlphabet[state % alphabetLen];
+    }
+    line[length] = '\n';
+
+    // THROUGH THE REAL ASSEMBLER: only what the board would actually hand to
+    // `decideScan` is rendered, so this cannot pass by testing a token the
+    // firmware would have refused anyway.
+    gatelogic::ScanAssembler assembler;
+    if (feedLine(assembler, line) != gatelogic::ScanEvent::Token) {
+      continue;
+    }
+
+    char body[gatelogic::kScanBodyCap] = {};
+    const size_t written = gatelogic::renderScanBody(body, sizeof(body), "5ccf7f0a1b2c", assembler.token());
+    if (written == 0U) {
+      continue; // refused rather than rendered, which is also safe
+    }
+
+    char message[256] = {};
+    snprintf(message, sizeof(message), "token %s produced %s", assembler.token(), body);
+    // The shape is `{"mac":"..","method":"qr","token":".."}` — six keys and
+    // values in quotes, so exactly twelve unescaped quotes and no more. A byte
+    // that escaped the string adds two.
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(12U, unescapedQuotes(body), message);
+    // And the one field a forged `method` would change is still `qr`.
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, "\"method\":\"qr\","), message);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, occurrences(body, "\"method\":"), message);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, occurrences(body, "\"mac\":"), message);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, occurrences(body, "\"token\":"), message);
+  }
+}
+
+/// G4 / B1, the second layer: the SHARED event body, which the court box uses
+/// too and which carries an offline refusal's own bytes as `subject`.
+///
+/// `","seq":99999,"x":"` is nineteen characters. Rendered raw it forged the
+/// batch's `seq`, and the server answers `accepted_through` from the seq it
+/// PARSED — so one crafted QR scanned while a door was offline discarded the
+/// whole evening's backlog on reconnect.
+void test_render_no_scanned_subject_can_forge_a_field_in_the_event_body() {
+  static const char* kHostile[] = {
+      "\",\"seq\":99999,\"x\":\"",
+      "\",\"kind\":\"release",
+      "\",\"court\":0,\"x\":\"",
+      "\",\"duration_ms\":9,\"x\":\"",
+      "a\\",
+      "a\"b",
+      "\\\\\\\\\"",
+  };
+  for (size_t i = 0U; i < sizeof(kHostile) / sizeof(kHostile[0]); ++i) {
+    eventq::Event event;
+    event.seq = 7U;
+    event.kind = eventq::Kind::UnknownScan;
+    event.court = eventq::Event::kNoCourt;
+    event.method = eventq::Method::Qr;
+    event.uptimeMs = 1000U;
+    static_cast<void>(event.setSubject(kHostile[i]));
+
+    char body[devlink::kEventBodyCap] = {};
+    const size_t written = devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 2000ULL, event);
+    char message[384] = {};
+    snprintf(message, sizeof(message), "subject %s produced %s", kHostile[i], body);
+    TEST_ASSERT_TRUE_MESSAGE(written > 0U, message);
+    // `{"mac":"..","uptime_ms":N,"events":[{"seq":N,"uptime_ms":N,"kind":"..",
+    //   "court":N,"method":"..","subject":"..","duration_ms":N}]}` — ten keys
+    // and four quoted values, so twenty-eight unescaped quotes exactly. A byte
+    // that escaped the string adds two; the raw renderer produced 34 for the
+    // first subject below, which is its own six quotes let straight through.
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(28U, unescapedQuotes(body), message);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, occurrences(body, "\"seq\":"), message);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, occurrences(body, "\"kind\":"), message);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, occurrences(body, "\"court\":"), message);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, occurrences(body, "\"duration_ms\":"), message);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, "\"seq\":7,"), message);
+  }
 }
 
 void test_scan_reset_discards_a_partial_line() {
@@ -3140,6 +3320,78 @@ void test_app_a_404_on_events_keeps_the_backlog_and_retries_it() {
 }
 
 // ---------------------------------------------------------------------------
+// G4 / L1 — a line the board could not read is answered, and bounded
+// ---------------------------------------------------------------------------
+
+/// L1. `pumpScanner`'s comment has promised a member feedback on a holed line
+/// since it was written, and the assembler returned `None` for one: no blink,
+/// no record, nothing. A member stood at a door that gave them nothing back.
+void test_app_a_corrupt_line_gives_the_member_an_answer() {
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    Rig rig(kBases[b]);
+    rig.boot(true);
+    rig.http.setLatency(0U);
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.forceHeartbeat();
+    rig.log.forget();
+
+    const uint32_t mark = rig.relayPin.opCount();
+    // A NUL out of a framing error, in the middle of an otherwise fine line.
+    rig.scanner.feed("AB\x01" "CD\n");
+    rig.tick();
+    rig.tick();
+
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, rig.log.total(),
+                                     "a line the board could not read has to be ANSWERED");
+    TEST_ASSERT_FALSE_MESSAGE(rig.log.last().released, "and answered as a refusal");
+    TEST_ASSERT_EQUAL_STRING(gatelogic::kReasonNotRecognised, rig.log.last().reason);
+    // NO TOKEN. The bytes were discarded rather than truncated, and a token cut
+    // short is a different member's token.
+    TEST_ASSERT_EQUAL_STRING("", rig.log.last().token);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(mark, rig.relayPin.opCount(),
+                                     "and the lock never moves for one");
+  }
+}
+
+/// L1's other half, and the reason the feedback is safe to give at all: 9600
+/// baud beside a switching relay coil produces holed lines by the HUNDRED.
+/// Unlimited, the lamp would strobe and — offline — the event ring would fill
+/// with noise and evict the admissions that matter.
+void test_app_line_noise_cannot_strobe_the_lamp_or_fill_the_ring() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  rig.http.setLatency(0U);
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+  rig.forceHeartbeat();
+  rig.link.set(false);
+  rig.tick();
+  rig.log.forget();
+  const uint16_t queuedBefore = rig.queue.size();
+
+  // Fifty holed lines, faster than any member could present them.
+  for (int i = 0; i < 50; ++i) {
+    if (rig.scanner.drained()) {
+      rig.scanner.feed("A\x01" "B\n");
+    }
+    rig.tick();
+  }
+
+  TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, rig.log.total(),
+                                   "fifty holed lines inside one window are ONE answer");
+  TEST_ASSERT_EQUAL_UINT16_MESSAGE(static_cast<uint16_t>(queuedBefore + 1U), rig.queue.size(),
+                                   "and ONE record, or line noise evicts the opens that matter");
+
+  // Past the window, the next one is answered again — rate-limited, not muted.
+  rig.runFor(gatelogic::kUnreadableFeedbackMs + gatelogic::kIdleDelayMs);
+  rig.log.forget();
+  rig.scanner.feed("A\x01" "B\n");
+  rig.tick();
+  rig.tick();
+  TEST_ASSERT_EQUAL_size_t_MESSAGE(1U, rig.log.total(),
+                                   "a member who comes back a moment later is still answered");
+}
+
+// ---------------------------------------------------------------------------
 // G4 / A1 — the hard cap, through the whole loop rather than through the timer
 // ---------------------------------------------------------------------------
 
@@ -4388,6 +4640,9 @@ int main(int, char**) {
   RUN_TEST(test_scan_trims_and_ignores_an_empty_line);
   RUN_TEST(test_scan_refuses_a_token_one_character_over_the_cap_without_truncating);
   RUN_TEST(test_scan_a_non_printable_byte_discards_the_whole_line);
+  RUN_TEST(test_scan_refuses_every_byte_outside_the_rosters_token_alphabet);
+  RUN_TEST(test_render_no_scanned_line_can_forge_a_field_in_the_scan_body);
+  RUN_TEST(test_render_no_scanned_subject_can_forge_a_field_in_the_event_body);
   RUN_TEST(test_scan_reset_discards_a_partial_line);
 
   RUN_TEST(test_debounce_suppresses_the_same_token_inside_the_window_and_not_outside_it);
@@ -4454,6 +4709,8 @@ int main(int, char**) {
   RUN_TEST(test_app_a_heartbeat_whose_body_never_arrived_counts_as_a_no_push);
   RUN_TEST(test_app_a_draining_backlog_still_lets_the_member_at_the_door_through);
   RUN_TEST(test_app_a_404_on_events_keeps_the_backlog_and_retries_it);
+  RUN_TEST(test_app_a_corrupt_line_gives_the_member_an_answer);
+  RUN_TEST(test_app_line_noise_cannot_strobe_the_lamp_or_fill_the_ring);
   RUN_TEST(test_app_two_alternating_tokens_cannot_hold_the_door_open_for_ever);
   RUN_TEST(test_app_a_scan_inside_the_relock_dwell_costs_no_call_and_records_no_opening);
   RUN_TEST(test_app_a_scan_inside_the_relock_dwell_never_reaches_the_api);

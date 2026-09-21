@@ -44,10 +44,17 @@
 
 namespace devlink {
 
-/// The smallest buffer renderEventBody is ever given. The longest body is the
-/// fixed JSON, a 12-hex MAC, a 32-character subject, two 20-digit uptimes and
-/// three 10-digit numbers — comfortably inside this.
-inline constexpr size_t kEventBodyCap = 384U;
+/// The smallest buffer renderEventBody is ever given.
+///
+/// The longest body is the fixed JSON, a 12-hex MAC, two 20-digit uptimes,
+/// three 10-digit numbers, a 12-character kind, an 11-character quoted method
+/// — and a subject that is 32 bytes BEFORE escaping and up to six times that
+/// after it (round G4, B1: a control byte becomes `\u00XX`). 32 x 6 = 192 for
+/// the subject alone, against 32 when the bytes went on the wire raw, which is
+/// why this number moved. About 420 bytes of it are reachable; the rest is the
+/// margin a refusal would otherwise eat, because `renderEventBody` returning 0
+/// makes the drain DROP the event.
+inline constexpr size_t kEventBodyCap = 512U;
 
 /// Renders the `/api/v1/device/events` body for one queued event.
 ///

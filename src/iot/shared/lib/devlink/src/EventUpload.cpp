@@ -3,9 +3,35 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "devapi/Json.h"
 #include "timebase/TimeBase.h"
 
 namespace devlink {
+namespace {
+
+/// Twelve lowercase hex and nothing else, which is what both composition roots
+/// render from `dc::hex::encodeLower` and what the contract pins.
+///
+/// CHECKED RATHER THAN ESCAPED. The MAC is not scanned bytes, so escaping it
+/// would only ever hide a board that had got its own identity wrong; refusing
+/// is the answer that says so. It is checked at all because this is the one
+/// other `%s` in the body and a renderer should not have a field whose safety
+/// rests on nobody having changed its caller.
+bool isTwelveLowerHex(const char* mac) {
+  size_t i = 0U;
+  for (; mac[i] != '\0'; ++i) {
+    if (i >= 12U) {
+      return false;
+    }
+    const char c = mac[i];
+    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+      return false;
+    }
+  }
+  return i == 12U;
+}
+
+} // namespace
 
 size_t renderEventBody(char* out, size_t cap, const char* mac, uint64_t nowUptimeMs,
                        const eventq::Event& event) {
@@ -13,14 +39,22 @@ size_t renderEventBody(char* out, size_t cap, const char* mac, uint64_t nowUptim
     return 0U;
   }
   out[0] = '\0';
-  if (mac == nullptr || mac[0] == '\0') {
+  if (mac == nullptr || !isTwelveLowerHex(mac)) {
     return 0U;
   }
 
-  char subject[eventq::kMaxSubjectLen + 1U] = {};
+  // ESCAPED, NOT INTERPOLATED (round G4, B1). `subject` is whatever was
+  // scanned: at a door it is the bytes off a QR code, and `","seq":99999,"x":"`
+  // is nineteen characters. Rendered raw it forged the batch's sequence number,
+  // and the server answers `accepted_through` from the seq it PARSED — so one
+  // crafted code, scanned while the door was offline, discarded every genuine
+  // entry queued behind it the moment the link came back.
+  char subject[eventq::kMaxSubjectLen * devapi::json::kMaxEscapeExpansion + 1U] = {};
   const size_t subjectLen =
       event.subjectLen > eventq::kMaxSubjectLen ? eventq::kMaxSubjectLen : event.subjectLen;
-  memcpy(subject, event.subject, subjectLen);
+  if (!devapi::json::escapeInto(event.subject, subjectLen, subject, sizeof(subject))) {
+    return 0U;
+  }
 
   // Omitted as a null rather than sent as the string "none", matching what
   // eventq::methodName returns — a release has no identification method, and
