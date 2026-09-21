@@ -151,7 +151,7 @@ public sealed record DoorClub(
         TestWebAppFactory factory, Guid deviceId, string action, DateTimeOffset at,
         Guid? subjectUserId = null, string? reason = null, string? fingerprint = null,
         long? seq = null, string? gateKey = null, string? deviceCode = null,
-        DateTimeOffset? occurredAt = null)
+        DateTimeOffset? occurredAt = null, string? doorName = null)
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -161,6 +161,12 @@ public sealed record DoorClub(
             ["device_code"] = deviceCode ?? "gate-000000",
             ["gate_key"] = gateKey,
         };
+
+        // The board's display name at the scan — written by both scan paths since round two,
+        // and absent from every row older than that. Omitted rather than nulled when the caller
+        // does not name one, so a fixture can reproduce an OLD row exactly: a key that is
+        // present and null is a different document from one that is not there.
+        if (doorName is not null) details["door_name"] = doorName;
         if (reason is not null) details["reason"] = reason;
         if (fingerprint is not null) details["subject"] = fingerprint;
         if (seq is not null) details["seq"] = seq;
@@ -177,6 +183,38 @@ public sealed record DoorClub(
             SubjectUserId = subjectUserId,
             Action = action,
             DetailsJson = System.Text.Json.JsonSerializer.Serialize(details),
+
+            // .ToUniversalTime() is not cosmetic and it belongs HERE rather than at each caller.
+            //
+            // Npgsql REFUSES to write a DateTimeOffset with a non-zero offset to a
+            // `timestamp with time zone` — memory/gotchas-postgres-offsets.md — and a test that
+            // writes a row at a CLUB-LOCAL instant is the only way to test a club-local day
+            // boundary at all. The first such test died inside the fixture's own SaveChanges and
+            // read as a broken endpoint. Same instant either way; it is the representation the
+            // parameter has to be in.
+            CreatedAt = at.ToUniversalTime(),
+        });
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// The <c>device.deleted</c> row an admin's delete leaves behind, written directly — for the
+    /// tests that need a board to have been removed a while ago without also needing an HTTP
+    /// delete at that instant. The same shape <c>DeviceRegistryService.DeleteAsync</c> writes.
+    /// </summary>
+    public async Task DeleteRecordAsync(
+        TestWebAppFactory factory, Guid deviceId, string deviceCode, DateTimeOffset at)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        db.AuditLogs.Add(new AuditLog
+        {
+            TenantId = TenantId,
+            ActorUserId = AdminUserId,
+            SubjectUserId = null,
+            Action = "device.deleted",
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(
+                new { device_id = deviceId, device_code = deviceCode }),
             CreatedAt = at,
         });
         await db.SaveChangesAsync();

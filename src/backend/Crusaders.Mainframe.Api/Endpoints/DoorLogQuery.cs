@@ -298,9 +298,18 @@ public sealed record DoorLogQuery(
     /// </summary>
     public IQueryable<AuditLog> Filtered(MainframeDbContext db)
     {
+        // HALF-OPEN: the lower edge is in and the upper edge is out.
+        //
+        // It was closed at both ends, and a named day is what exposed that. "Yesterday" ends at
+        // the same instant "today" begins, so a scan at exactly a club's midnight was counted in
+        // BOTH days — two answers to "how many came through last night" that differ by one, from
+        // the same rows, depending on which day you asked about. Half-open is the only reading
+        // under which two adjacent days each contain that instant exactly once, and it is
+        // already what DoorDay's own counts do (`s.At >= day.DayStartedAt`). On a caller-supplied
+        // `to` it moves the edge by one tick, which is the price of the days being right.
         var rows = db.AuditLogs.AsNoTracking()
             .Where(DoorTrail.IsScanRow)
-            .Where(a => a.CreatedAt >= From && a.CreatedAt <= To);
+            .Where(a => a.CreatedAt >= From && a.CreatedAt < To);
 
         if (Door is { } door)
         {
