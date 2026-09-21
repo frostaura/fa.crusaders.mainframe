@@ -56,10 +56,27 @@ describe("the control board", () => {
    * The honesty rule, on the page rather than in the copy module: the tile may say the lights
    * are on ONLY because the server said its own reading was not stale.
    */
-  it("says the box confirmed it, when the box confirmed it", async () => {
-    stubFetch(routes(boardFixture()));
+  it("says the box confirmed it, when the BOX confirmed it", async () => {
+    const court = boardCourtFixture();
+    stubFetch(routes(boardFixture({
+      courts: [{ ...court, lights: { ...court.lights!, confirmed_at: court.lights!.as_of, confirmed_state: "on" } }],
+    })));
     renderPage(<ControlBoardPage />);
     expect(await screen.findByText(/confirmed by the box at 18:00/)).toBeInTheDocument();
+  });
+
+  /**
+   * And NOT when only the server's own record is recent. `stale: false` is a fact about the
+   * activation the API granted, not about a relay — every board in the field reports no relay
+   * state until the new firmware ships, so reading it as confirmation would have printed
+   * "confirmed by the box" across a whole club on day one.
+   */
+  it("does not manufacture confirmation out of the server's own freshness", async () => {
+    stubFetch(routes(boardFixture()));
+    renderPage(<ControlBoardPage />);
+
+    expect(await screen.findByText(/No box has confirmed it\./)).toBeInTheDocument();
+    expect(screen.queryByText(/confirmed by the box/)).not.toBeInTheDocument();
   });
 
   it("will not assert a relay it has not heard about", async () => {
@@ -88,9 +105,13 @@ describe("the control board", () => {
     stubFetch(routes(boardFixture({ courts: [{ ...court, lights }] })));
     renderPage(<ControlBoardPage />);
 
-    expect(await screen.findByText(/records say the lights went on at 18:00/)).toBeInTheDocument();
+    expect(await screen.findByText("The club's records say the lights went on at 18:00."))
+      .toBeInTheDocument();
     expect(screen.queryByText(/confirmed by the box/)).not.toBeInTheDocument();
     expect(screen.queryByText(/nothing has confirmed it/)).not.toBeInTheDocument();
+    // And not even the "no box has confirmed it" clause: with `stale` absent this arm makes
+    // no claim in EITHER direction, which is the whole of what a third arm is for.
+    expect(screen.queryByText(/No box has confirmed it/)).not.toBeInTheDocument();
   });
 
   it("goes UNKNOWN for a court whose box is silent, and names the court rather than counting it", async () => {

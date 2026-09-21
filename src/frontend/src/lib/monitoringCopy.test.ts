@@ -110,9 +110,39 @@ describe.each(RUNNER_ZONES)("what the BOX last said, with the reader's browser i
 
   const ON = "2026-09-22T16:00:31Z"; // 18:00 club time
 
-  it("may say confirmed only when the server says the reading is not stale", () => {
-    expect(lightsLine({ state: "on", stale: false, as_of: ON }, CLUB))
+  /**
+   * <b>Only the BOX's own report licenses the word "confirmed", and nothing else does.</b>
+   *
+   * <p>
+   * This case was written the other way round first — `stale === false` read as confirmation
+   * — and checking it against the merged backend showed it was wrong in the direction that
+   * matters. `stale` is a fact about how recent the SERVER's record is, i.e. about the
+   * activation the API granted; it says nothing whatever about a relay. Every board in the
+   * field reports no relay state until the new firmware ships, so that reading would have
+   * printed "confirmed by the box" across a whole club on day one — on a wall, in a club,
+   * which is the exact failure this surface exists to prevent.
+   * </p>
+   */
+  it("says confirmed only when the box itself reported, never from the server's own freshness", () => {
+    expect(lightsLine({ state: "on", stale: false, as_of: ON, confirmed_at: ON, confirmed_state: "on" }, CLUB))
       .toBe("Lights on — confirmed by the box at 18:00.");
+
+    const unconfirmed = lightsLine({ state: "on", stale: false, as_of: ON }, CLUB)!;
+    expect(unconfirmed, "confirmation manufactured out of the server's own record")
+      .not.toContain("confirmed by the box");
+    expect(unconfirmed).toContain("No box has confirmed it.");
+  });
+
+  /**
+   * And where the two disagree, BOTH are shown. A box reporting a relay open while the club's
+   * records say it granted nothing is the contradiction an admin is standing there to see,
+   * not one the screen should resolve by picking a side and losing the evidence.
+   */
+  it("shows the disagreement rather than resolving it", () => {
+    const said = lightsLine({ state: "off", stale: false, as_of: ON, confirmed_at: ON, confirmed_state: "on" }, CLUB)!;
+    expect(said).toContain("The box says the lights are on");
+    expect(said).toContain("the club's records say off");
+    expect(said).toContain("They do not agree.");
   });
 
   it("never asserts a relay it has not heard about, and says when it last did", () => {

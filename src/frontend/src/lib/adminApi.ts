@@ -138,7 +138,34 @@ export type ControlBoardLights = {
    */
   stale?: boolean;
   as_of?: string | null;
+  /**
+   * <b>What the BOX said, kept apart from what the server believes.</b>
+   *
+   * <p>
+   * These two are the ones that license the word "confirmed", and nothing else does.
+   * `stale: false` means only that the SERVER's own record is recent — it is a fact about the
+   * activation the API granted, not about a relay. A tile that read `stale === false` as
+   * confirmation would print "confirmed by the box" over a court no box has ever spoken
+   * about, which is the exact failure this whole surface is built against.
+   * </p>
+   *
+   * <p>
+   * `null` rather than `"off"` for a board whose firmware does not report relay state, which
+   * is every board in the field until the new image ships. Three states, not two.
+   * </p>
+   *
+   * <p>
+   * And when `confirmed_state` disagrees with `state`, BOTH are shown: a box reporting a
+   * relay open while the server believes it granted nothing is a contradiction an admin must
+   * see, not one the screen should resolve by picking a side and losing the evidence that
+   * they ever disagreed.
+   * </p>
+   */
+  confirmed_at?: string | null;
+  confirmed_state?: LightState | null;
   turned_on_by?: (AdminPerson & { kind: LightCause }) | null;
+  /** The booking the grant belongs to, for the tile's "open this booking" link. */
+  from_booking_id?: string | null;
 };
 
 export type ControlBoardBooking = {
