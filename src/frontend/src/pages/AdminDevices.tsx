@@ -650,13 +650,13 @@ function DeviceRow({
         {device.enabled ? (
           <ConfirmButton
             idleLabel="Take out of service"
+            cancelLabel="Leave it in service"
             // The confirm names the consequence that is hardest to undo knowing about, per
             // court and only where it is true — see outOfServiceConfirm in lib/deviceCoverage.
             // An admin taking a spare out of service beside a box that is reporting gets the
             // plain sentence.
             confirmLabel={outOfServiceConfirm(coverage)}
             onConfirm={() => actions.setEnabled(false)}
-            className="h-8 px-3"
           />
         ) : (
           <Button variant="outline" className="h-8 px-3 text-xs" onClick={() => void actions.setEnabled(true)}>
@@ -670,10 +670,10 @@ function DeviceRow({
             admin think they had just taken a box off the network. */}
         <ConfirmButton
           idleLabel="Delete"
+          cancelLabel="Keep this box"
           confirmLabel="Delete? The box re-registers on its next heartbeat."
           onConfirm={actions.remove}
           tone="danger"
-          className="h-8 px-3"
         />
       </div>
     </div>

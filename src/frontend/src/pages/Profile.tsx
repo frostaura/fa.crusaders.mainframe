@@ -357,7 +357,6 @@ function PasskeysCard() {
                 confirmLabel="Tap to confirm"
                 onConfirm={() => remove(r.id)}
                 tone="danger"
-                className="h-9 px-3 text-xs"
               />
             </li>
           ))}

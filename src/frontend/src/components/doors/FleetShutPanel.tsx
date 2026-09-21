@@ -156,6 +156,7 @@ export function FleetShutPanel({ chrome, loading, failed, reload, onRetry }: {
               {open > 0 && (
                 <ConfirmButton
                   idleLabel={open === chrome.total ? "Shut all doors" : `Shut the ${open} ${open === 1 ? "door" : "doors"} still open`}
+                  cancelLabel="Keep them open"
                   confirmLabel={doorFleetShutConfirm(open, shutUnreachable)}
                   ariaLabel={`every door the club has open — ${open} of ${chrome.total}`}
                   onConfirm={() => run("shut")}
@@ -168,6 +169,7 @@ export function FleetShutPanel({ chrome, loading, failed, reload, onRetry }: {
                 <>
                   <ConfirmButton
                     idleLabel={doorFleetReopenLabel(shutTogether.length)}
+                    cancelLabel="Leave them shut"
                     confirmLabel={doorFleetReopenConfirm(shutTogether.length, reopenUnreachable)}
                     ariaLabel={`every door the club shut together — ${shutTogether.length}`}
                     onConfirm={() => run("reopen")}

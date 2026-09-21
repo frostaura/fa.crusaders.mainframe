@@ -198,6 +198,7 @@ function DoorControls({ door, actions, online, shutAt }: {
           <p className="text-sm text-text-secondary">{gateDeleteStandingNotice(door.name)}</p>
           <ConfirmButton
             idleLabel="Delete this door"
+            cancelLabel="Keep this door"
             confirmLabel={gateDeleteConfirm()}
             ariaLabel={door.name}
             onConfirm={actions.remove}

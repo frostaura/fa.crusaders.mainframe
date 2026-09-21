@@ -1342,7 +1342,6 @@ function BiometricModal({
                 confirmLabel="Tap to confirm"
                 onConfirm={removeAll}
                 tone="danger"
-                className="h-11 px-4"
               />
             )}
             <Button variant="ghost" onClick={onClose}>Close</Button>

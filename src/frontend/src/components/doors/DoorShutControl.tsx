@@ -63,6 +63,7 @@ export function DoorShutControl({ door, onDone, shutAt, online }: {
         )}
         <ConfirmButton
           idleLabel={DOOR_REOPEN_LABEL}
+          cancelLabel="Leave it shut"
           confirmLabel={doorReopenConfirm(situation)}
           ariaLabel={door.name}
           onConfirm={() => onDone(true)}
@@ -81,6 +82,7 @@ export function DoorShutControl({ door, onDone, shutAt, online }: {
       <p className="text-sm text-text-secondary">{doorShutNotice()}</p>
       <ConfirmButton
         idleLabel={DOOR_SHUT_LABEL}
+        cancelLabel="Keep it open"
         confirmLabel={doorShutConfirm(situation)}
         ariaLabel={door.name}
         onConfirm={() => onDone(false)}

@@ -432,7 +432,6 @@ export default function AdminWebhooksPage() {
                         confirmLabel="Tap to confirm"
                         onConfirm={() => remove(w.id)}
                         tone="danger"
-                        className="h-11 px-4"
                       />
                     </div>
                   </div>

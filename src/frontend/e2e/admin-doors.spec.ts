@@ -511,9 +511,11 @@ test.describe("One door's page", () => {
     // C10's two facts, in the words A2 gave them this round: the armed confirm was a
     // paragraph, and what it listed it destroyed while saying nothing about the door's
     // history — so a reviewer concluded, reasonably, that the scans went too.
-    await expect(armed).toContainText("its place and its power answer go");
+    // B5 (round 2): the consequence is the paragraph above the two buttons, not the button.
+    const told = armed.locator("xpath=..").locator("> p");
+    await expect(told).toContainText("its place and its power answer go");
     // A2: the question a reviewer went looking for and could not find an answer to.
-    await expect(armed).toContainText("Its past scans stay in the club log");
+    await expect(told).toContainText("Its past scans stay in the club log");
   });
 
   /** Fifty rows of decisions, each carrying a member name of a length nobody controls. */
@@ -797,7 +799,16 @@ test.describe("An armed doors confirm fits the words it is showing", () => {
         name: el.getAttribute("aria-label"),
       }));
 
-      expect(measured.shown, `confirm ${i} ("${idleText}") shows no consequence`).not.toBe(idleText);
+      // B5 (round 2): the consequence is a paragraph ABOVE the two buttons, not the armed
+      // button's own words — the button says what pressing it does, in a word or two.
+      const consequence = wrapper.locator("> p");
+      await expect(consequence, `confirm ${i} ("${idleText}") shows no consequence`).toBeVisible();
+      const told = (await consequence.innerText()).trim();
+      expect(told.length, `confirm ${i} ("${idleText}") shows no consequence`).toBeGreaterThan(0);
+      expect(told.split(/\s+/).length, `confirm ${i} ("${idleText}") runs past 25 words: "${told}"`)
+        .toBeLessThanOrEqual(25);
+      expect(measured.shown.length, `confirm ${i} ("${idleText}") armed with an empty control`)
+        .toBeGreaterThan(0);
       expect(
         measured.scrollHeight,
         `confirm ${i} ("${idleText}") clips its own words: scrollHeight ${measured.scrollHeight}`

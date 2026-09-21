@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { Card } from "../Card";
 import { Button } from "../Button";
@@ -40,11 +40,12 @@ export function DoorCardSection({ door, settings, editing, onEdit, onClose, onSa
   // one and belongs to another lane this round. The wrapper holds exactly one button, so
   // `querySelector` names it unambiguously.
   const controls = useRef<HTMLDivElement>(null);
-  const [wasEditing, setWasEditing] = useState(editing);
+  // The previous value is a ref, not state: remembering it must not cause a render.
+  const wasEditing = useRef(editing);
   useEffect(() => {
-    if (wasEditing && !editing) controls.current?.querySelector("button")?.focus();
-    if (wasEditing !== editing) setWasEditing(editing);
-  }, [editing, wasEditing]);
+    if (wasEditing.current && !editing) controls.current?.querySelector("button")?.focus();
+    wasEditing.current = editing;
+  }, [editing]);
 
   return (
     <section aria-labelledby="door-card-heading" className="space-y-2">

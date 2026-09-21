@@ -170,7 +170,6 @@ export function DeviceApiKeyPanel() {
               confirmLabel="Reflash every board after this — regenerate?"
               onConfirm={regenerate}
               tone="danger"
-              className="h-9 px-3"
             />
             <span className="text-xs text-slate-500">
               The old key stops working immediately. Every board — court boxes and door gates — has to be reflashed with the new one before it can call in, and until then a door gate opens only for members with a booking on the list it last received, for at most six hours.

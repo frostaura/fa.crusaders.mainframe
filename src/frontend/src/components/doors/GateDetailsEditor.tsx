@@ -79,8 +79,8 @@ export function GateDetailsEditor({ device, onSave, onClose }: {
             hidden rather than unmounted (see `DoorCardSection`), so without this a keyboard
             user is left on a control that is no longer visible and a screen-reader user hears
             nothing at all about a form that has just appeared. */}
-        {/* eslint-disable-next-line jsx-a11y/no-autofocus -- the editor is opened by an
-            explicit press, which is exactly the case autofocus is correct for */}
+        {/* autoFocus is deliberate: the editor is opened by an explicit press, which is
+            exactly the case it is correct for. */}
         <Input
           id={nameId}
           autoFocus

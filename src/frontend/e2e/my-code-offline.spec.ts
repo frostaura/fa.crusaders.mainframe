@@ -326,7 +326,6 @@ test("a cold offline start shows the last code, says it is a remembered one, and
  * </p>
  */
 test("a cold offline start also says what the club's doors need", async ({ page, context }) => {
-  test.fail(true, "needs OfflinePage's door children from claude/doors-r2-fe-member-fin3 — see this test's comment");
   await warmThenGoOffline(page, context);
 
   await page.goto(`${origin}/my-code`);
