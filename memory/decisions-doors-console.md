@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-decisions-doors-console
-description: "The admin doors surface: one vocabulary for four audit actions, the club's own day with a null that is never zero, a log with no member filter by construction, a formula-safe export, and a fleet shut that reopen-all can undo."
+description: "The admin doors surface: one vocabulary for four audit actions, a deleted door that is removed rather than absent, a half-open club day built at midnight's own offset, no member filter, and an edit that says which one it was."
 type: decision
-last_verified: 2026-09-19
+last_verified: 2026-09-21
 ---
 
 # Live decisions — the admin doors console
@@ -29,6 +29,18 @@ because a `403` on `/api/v1/device/*` may mean one thing only.
   device clock, and it is the number somebody quotes in a committee meeting. A zone the platform
   does not know reaches this through a hand-edited column, and rendering that as `0` is the
   admin-failed-read defect wearing a number.
+- **A deleted door is REMOVED, never a row with no door.** *Why:* `audit_log` has no foreign key
+  to `devices`, so a delete never destroyed a scan row, only its READABILITY — and a console
+  asked to tell `door: null` from "no door" went white for the club. The per-board feed
+  keeps WIRE-W1's seven keys: a deleted id 404s it.
+- **The range is half-open and the club's day is built at MIDNIGHT's own offset** (`DoorClock`).
+  *Why:* closed at both ends, a scan at a club's midnight fell in yesterday AND today — two
+  answers to "how many came through last night" from one set of rows. And `DoorDay` used the
+  offset at *now*: the same every day in UTC and Johannesburg, wrong on a DST change.
+- **An edit says which one it was and who made it**, from a `changes` list comparing before with
+  after; changing nothing writes no row and answers `unchanged: true`. *Why:* a console sends the
+  whole card on every save, so nine identical "details were changed" rows buried the one that
+  mattered. `ShutByUserId` is a COLUMN: a fleet shut writes one row, with no `device_id`.
 - **Two numbers per door, never one, and no sort parameter — ever.** *Why:* one headline on a
   sortable list of doors is a footfall ranking by accident, the shape the spec's §1 prevents.
 - **A signal has nowhere to put a member.** Four fields: kind, since, until, scans. *Why:* the

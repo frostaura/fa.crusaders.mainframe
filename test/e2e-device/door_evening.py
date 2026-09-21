@@ -593,8 +593,22 @@ def d3_member_books(d: Door) -> dict:
     # they are cancelled wholesale and every negative below is about the booking it
     # names and nothing else. `ensure_free` exists for the court-box scenario's four
     # windows; this one books across the whole evening.
-    d.sql.run(f"""update bookings set "Status"={BOOKING_CANCELLED} where "Status"={BOOKING_BOOKED}""")
-    print("  [db] cancelled every seeded demo booking so the evening starts empty", flush=True)
+    #
+    # EVERY status, not just `Booked`, and the difference is a whole hour of the day.
+    # `ck_bookings_no_overlapping_slot` excludes `Cancelled` and NOTHING ELSE, so a
+    # seeded row the real NoShowWorker reached first — it sweeps every thirty seconds
+    # and the seeder's 18:00 demo booking on court 1 is already past its grace window
+    # when the evening starts after 18:01 — was written off to `NoShow`, had its
+    # `EndsAt` truncated to that instant, and then sat in the constraint as a live
+    # range that this `where "Status" = Booked` could not see. D8 shifts its own
+    # booking back over the slot that has just ended, which is exactly where that
+    # corpse lies, and the psql UPDATE was refused: one step red, on the clock alone,
+    # roughly 18:00-18:45 local and green every other hour. At this point in the
+    # evening the table holds seeder rows and nothing else, so clearing all of them is
+    # what "starts empty" already claimed to mean.
+    d.sql.run(f"""update bookings set "Status"={BOOKING_CANCELLED} where "Status"<>{BOOKING_CANCELLED}""")
+    print("  [db] cancelled every seeded demo booking, whatever a sweep had already made of it",
+          flush=True)
 
     members = expect_status(d.w.http.get("/api/v1/admin/members", token=d.w.admin_token), 200, "members").json
     d.spare = [m for m in members if m["user_id"] not in (d.w.m_user_id, d.w.admin_user_id)]
