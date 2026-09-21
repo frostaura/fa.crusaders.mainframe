@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Ban, Fingerprint, KeyRound, MailWarning, Plus, RotateCcw, Search, Users, Wallet, X } from "lucide-react";
-import { endpoints, type AdminMember, type BiometricEnrollmentRow, type BiometricTemplateRow, type MemberClass } from "../lib/api";
+import { ApiError, endpoints, type AdminMember, type BiometricEnrollmentRow, type BiometricTemplateRow, type MemberClass } from "../lib/api";
+import { adminEndpoints, type AdjustReasonCode } from "../lib/adminApi";
 import {
-  OTHER_BOOKING, newIdempotencyKey, recentBookingsFrom, relatedBookingRefusal,
-  validateAdjustment, type RecentBooking,
+  OTHER_BOOKING, isGuid, newIdempotencyKey, recentBookingsFrom,
+  relatedBookingRefusal, type RecentBooking,
 } from "../lib/creditAdjustment";
+import { TopUpSheet } from "../components/members/TopUpSheet";
 import { describeFailure } from "../lib/errors";
 import { notifyPendingApplicationsChanged } from "../lib/pendingApplications";
 import { Card } from "../components/Card";
@@ -65,8 +67,6 @@ export default function AdminMembersPage() {
   const [rejectFor, setRejectFor] = useState<AdminMember | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [creditFor, setCreditFor] = useState<AdminMember | null>(null);
-  const [creditAmount, setCreditAmount] = useState("");
-  const [creditReason, setCreditReason] = useState("");
   const [creditBooking, setCreditBooking] = useState("");
   // The server's verdict on the named booking, shown at the field rather than as a toast:
   // it is the one input the admin has to change, and a toast that has faded says nothing.
@@ -203,13 +203,39 @@ export default function AdminMembersPage() {
   };
 
   const closeCredit = () => {
-    setCreditFor(null); setCreditAmount(""); setCreditReason(""); setCreditBooking(""); setCreditBookingError(null);
+    setCreditFor(null); setCreditBooking(""); setCreditBookingError(null);
     adjustKey.current = null;
     adjustInFlight.current = false;
   };
 
-  const adjust = async () => {
-    if (!creditFor) return;
+  /**
+   * One hand movement of credit.
+   *
+   * <p>
+   * <b>The idempotency machinery below is untouched and must stay that way.</b> It has a
+   * paid-for bug history — a double-click posted +7 twice and moved a member 444 → 458, and
+   * four clicks on a slow connection granted 44 credits where 11 were typed — and money is
+   * ledger-only here, so a duplicated row IS the wrong balance with nothing on the ledger to
+   * say which of the two was the mistake.
+   * </p>
+   *
+   * <p>
+   * <b>What changed is where the amount comes from (D3-B08).</b> It used to be parsed out of
+   * one signed free-text field on this page. It now arrives already signed from
+   * {@link TopUpSheet}, which decides the sign from the DIRECTION the admin chose by name —
+   * so there is no field anywhere in the flow whose sign is a decision, and a mistyped minus
+   * cannot move a member two hundred credits the wrong way.
+   * </p>
+   *
+   * <p>
+   * Returns the new balance on success and `null` on refusal, so the sheet can show its
+   * receipt rather than being closed out from under the person reading it.
+   * </p>
+   */
+  const adjust = async (
+    amount: number, reasonCode: AdjustReasonCode, reason: string,
+  ): Promise<{ balanceAfterCredits: number } | null> => {
+    if (!creditFor) return null;
     // Two guards, because they stop two different things.
     //
     // The ref stops the second click: `busyId` is React state, and a second click landing
@@ -219,32 +245,47 @@ export default function AdminMembersPage() {
     // The key stops everything the ref cannot see: a retry after a failed response, a
     // second tab, a request the browser retried under the covers. It names THIS movement
     // and survives until the movement succeeds, so the server answers a repeat with the
-    // row it already wrote instead of writing a second one. A double-click posted +7
-    // twice and moved a member 444 -> 458; four clicks on a slow connection granted 44
-    // credits where 11 were typed. Money is ledger-only, so a duplicated row IS the wrong
-    // balance and nothing on the ledger says which of the two was the mistake.
-    if (adjustInFlight.current) return;
+    // row it already wrote instead of writing a second one.
+    if (adjustInFlight.current) return null;
     const bookingId = creditBooking.trim();
-    const complaint = validateAdjustment(creditAmount, creditReason, bookingId);
-    if (complaint) { toast.push({ tone: "warning", text: complaint }); return; }
-    const amount = parseFloat(creditAmount);
+    if (bookingId && !isGuid(bookingId)) {
+      setCreditBookingError("That booking ID is not one — it should look like 8-4-4-4-12 hex characters. Pick one from the list or leave it blank.");
+      return null;
+    }
     const targetUserId = creditFor.user_id;
     adjustInFlight.current = true;
     adjustKey.current ??= newIdempotencyKey();
     setBusyId(targetUserId);
     setCreditBookingError(null);
     try {
-      const r = await endpoints.adminAdjust(targetUserId, amount, creditReason, bookingId || undefined, adjustKey.current);
+      const r = await adminEndpoints.adjustCredit(targetUserId, {
+        amountCredits: amount,
+        reasonCode,
+        reason,
+        ...(bookingId ? { relatedBookingId: bookingId } : {}),
+        idempotencyKey: adjustKey.current,
+      });
       // Reflect the new balance in this row immediately — no list refetch, no reload.
       setMembers((prev) => patchMember(prev, (row) => row.user_id === targetUserId, { balance_credits: r.balance_after_credits }));
-      toast.push({ tone: "success", text: `${amount > 0 ? "Credited" : "Debited"} ${creditFor.full_name} ${formatCredits(Math.abs(amount))}${bookingId ? ` for booking ${bookingId.slice(0, 8)}` : ""}.` });
-      closeCredit();
+      // No success toast: the sheet holds its own receipt and keeps it on screen. Money
+      // deserves more than the four seconds a toast lasts, and the figure a volunteer needs
+      // to check is the one AFTER the movement.
+      adjustKey.current = null;
+      return { balanceAfterCredits: r.balance_after_credits };
     } catch (err) {
       // A refused booking id keeps the form open with the reason at the field. Anything
-      // else is not about one input, so it stays a toast.
+      // else is not about one input, so it stays a toast — and it may say "nothing changed"
+      // only where the server REFUSED, never where the answer was simply lost.
       const refusal = relatedBookingRefusal(err);
-      if (refusal) setCreditBookingError(refusal);
-      else toast.push({ tone: "danger", text: "Credit adjustment failed." });
+      if (refusal) { setCreditBookingError(refusal); return null; }
+      const refused = err instanceof ApiError && err.status >= 400 && err.status < 500;
+      toast.push({
+        tone: "danger",
+        text: refused ? "The club refused that adjustment." : "Couldn't reach the club.",
+        unchanged: refused,
+        durationMs: 8000,
+      });
+      return null;
     }
     finally { adjustInFlight.current = false; setBusyId(null); }
   };
@@ -499,26 +540,34 @@ export default function AdminMembersPage() {
         </Modal>
       )}
 
-      {/* Credit adjust modal */}
+      {/*
+        Top up, or take credit back — D3-B08.
+
+        The form this replaces was ONE signed field, "Amount (credits — positive adds,
+        negative deducts)", guarded only by "non-zero", with the resulting balance appearing
+        afterwards in a four-second toast over a row that had already changed. A volunteer
+        typing -100 where they meant 100 moved a member two hundred credits the wrong way and
+        nothing on the screen would have stopped them.
+      */}
       {creditFor && (
-        <Modal onClose={closeCredit} title={`Adjust credit — ${creditFor.full_name}`}>
-          <Label htmlFor="credit-amount">Amount (credits — positive adds, negative deducts)</Label>
-          <Input id="credit-amount" value={creditAmount} onChange={(e) => setCreditAmount(e.target.value)} placeholder="e.g. 100" inputMode="decimal" />
-          <Label htmlFor="credit-reason" className="mt-3">Reason (audit-logged)</Label>
-          <Input id="credit-reason" value={creditReason} onChange={(e) => setCreditReason(e.target.value)} placeholder="e.g. Goodwill — court 2 lights faulty on 2026-05-04" />
-          <RelatedBookingField
-            userId={creditFor.user_id}
-            value={creditBooking}
-            error={creditBookingError}
-            onChange={(next) => { setCreditBooking(next); setCreditBookingError(null); }}
-          />
-          <div className="flex justify-end gap-2 mt-4">
-            <Button variant="ghost" onClick={closeCredit}>Cancel</Button>
-            <Button onClick={adjust} disabled={busyId === creditFor.user_id}>
-              {busyId === creditFor.user_id ? "Applying…" : "Apply"}
-            </Button>
-          </div>
-        </Modal>
+        <TopUpSheet
+          name={creditFor.full_name}
+          // NOT zero where the row has no figure: a balance the console could not read is a
+          // balance it must not do arithmetic on.
+          balance={typeof creditFor.balance_credits === "number" ? creditFor.balance_credits : null}
+          busy={busyId === creditFor.user_id}
+          bookingError={creditBookingError}
+          onApply={adjust}
+          onClose={closeCredit}
+          renderBookingField={() => (
+            <RelatedBookingField
+              userId={creditFor.user_id}
+              value={creditBooking}
+              error={null}
+              onChange={(next) => { setCreditBooking(next); setCreditBookingError(null); }}
+            />
+          )}
+        />
       )}
 
       {/* Reset password — confirm */}
@@ -1025,7 +1074,21 @@ function MemberRow({ member: m, fingerprints, busy, onClass, actions }: {
           )}
           {m.status === "Active" && (
             <>
-              <IconAction title="Adjust credit" onClick={actions.credit} icon={<Wallet size={16} />} disabled={busy} />
+              {/*
+                D3-B06: this was a 32×32 icon-only control, four to a row, twelve rows. WCAG
+                2.5.5 asks 44 and the rest of this chrome already uses a coarse-pointer
+                minimum — `IconAction` never got the memo. It is also the one action on the
+                row a volunteer comes to this page to perform, so it says what it is.
+              */}
+              <Button
+                variant="outline"
+                onClick={actions.credit}
+                disabled={busy}
+                className="min-h-11 px-3 text-sm"
+              >
+                <Wallet size={16} className="mr-1 inline-block" aria-hidden />
+                Top up
+              </Button>
               <IconAction
                 title={fingerprints > 0 ? "Manage biometrics" : "Enroll fingerprint"}
                 onClick={actions.enroll}

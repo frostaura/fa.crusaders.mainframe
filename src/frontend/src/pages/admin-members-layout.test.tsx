@@ -71,7 +71,10 @@ describe("the admin members table", () => {
 
   it("lays the row actions along the row, not down it", async () => {
     renderMembers();
-    const adjust = await screen.findByRole("button", { name: "Adjust credit" });
+    // D3-B06: this control was a 32×32 icon-only button, four to a row, twelve rows —
+    // WCAG 2.5.5 asks 44, and the rest of this chrome already uses a coarse-pointer minimum.
+    // It is now a labelled 44px button, in the same place in the same row.
+    const adjust = await screen.findByRole("button", { name: "Top up" });
     const actions = adjust.parentElement!;
     // Four 32px buttons stacked vertically is a 164px row. This is the assertion that stops it
     // coming back as a "tidier" column — or as a wrapping one, which measures at 136.5px and
@@ -83,7 +86,10 @@ describe("the admin members table", () => {
 
   it("pins the actions column so the buttons do not start off-screen", async () => {
     renderMembers();
-    const adjust = await screen.findByRole("button", { name: "Adjust credit" });
+    // D3-B06: this control was a 32×32 icon-only button, four to a row, twelve rows —
+    // WCAG 2.5.5 asks 44, and the rest of this chrome already uses a coarse-pointer minimum.
+    // It is now a labelled 44px button, in the same place in the same row.
+    const adjust = await screen.findByRole("button", { name: "Top up" });
     const cell = adjust.closest("td")!;
     const header = screen.getByRole("columnheader", { name: "Actions" });
     // 0 of 27 controls on screen before this, 27 of 27 after — see the file comment. The
@@ -125,7 +131,7 @@ describe("the admin members table", () => {
    */
   it("draws a column only at the widths where it fits, and keeps every field in card mode", async () => {
     renderMembers();
-    await screen.findByRole("button", { name: "Adjust credit" });
+    await screen.findByRole("button", { name: "Top up" });
 
     const expected: Record<string, string> = {
       // Email is the widest optional column and lands last, at the width where the whole
@@ -158,7 +164,7 @@ describe("the admin members table", () => {
 
   it("pins the balance header with its cells, at the same offset", async () => {
     renderMembers();
-    await screen.findByRole("button", { name: "Adjust credit" });
+    await screen.findByRole("button", { name: "Top up" });
     const balance = screen.getByRole("columnheader", { name: "Balance" });
     const actions = screen.getByRole("columnheader", { name: "Actions" });
     // Balance is pinned beside Actions rather than left to scroll under it — measured in
