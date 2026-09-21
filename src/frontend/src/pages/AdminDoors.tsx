@@ -15,6 +15,7 @@ import {
   doorAttentionReason, doorDisplayName, doorStaleChecksNotice, doorsAttentionSummary,
 } from "../lib/doorsCopy";
 import { withDoorsBoundary } from "../components/doors/DoorsErrorBoundary";
+import { MonitoringNav } from "../components/monitoring/MonitoringNav";
 import { endpoints, type AdminSettings, type DoorRow } from "../lib/api";
 
 /**
@@ -283,6 +284,10 @@ function AdminDoorsPageBody() {
             {refreshing ? "Checking…" : "Refresh"}
           </Button>
         </div>
+        {/* eco: Doors lives inside Monitoring now. The strip is on the page rather than only
+            in the chrome because an admin arriving from a bookmark or an outage email lands
+            HERE, and without it the section they are in is invisible from inside it. */}
+        <MonitoringNav className="pt-1" />
       </header>
 
       {/* A8 / C4: one polite region carrying what Refresh found and whether this page can

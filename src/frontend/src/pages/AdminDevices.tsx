@@ -29,6 +29,7 @@ import { ConfirmButton } from "../components/ConfirmButton";
 import { ButtonMapEditor, buttonMapWithinCap, MAX_GRANT_MINUTES, RELAYS } from "../components/ButtonMapEditor";
 import { ClubButtonMapCard, WalkUpCapNotice } from "../components/ClubButtonMapCard";
 import { DeviceApiKeyPanel } from "../components/DeviceApiKeyPanel";
+import { MonitoringNav } from "../components/monitoring/MonitoringNav";
 import { useToast } from "../components/Toast";
 
 /**
@@ -1063,6 +1064,10 @@ export function AdminDevicesPage() {
     // a WORD, which does.
     <div className="mx-auto min-w-0 max-w-4xl space-y-6 p-[16px]">
       <h1 className="text-2xl font-bold">Devices</h1>
+      {/* eco: Devices was in a gear menu and is a destination now — the section this page was
+          moved into is invisible from inside it without this strip, which is the IA problem
+          the section was created to fix, re-created one page in. */}
+      <MonitoringNav />
 
       <DeviceApiKeyPanel />
 
