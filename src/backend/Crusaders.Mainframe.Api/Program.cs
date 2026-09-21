@@ -286,6 +286,9 @@ builder.Services.AddScoped<AdminBlockService>();
 builder.Services.AddScoped<CourtActivationService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<MemberApprovalService>();
+// The club's undeletable admin change record. Every admin mutation in every lane writes
+// through this one service; see AdminChangeRecorder for why staging and recording differ.
+builder.Services.AddScoped<AdminChangeRecorder>();
 
 // Phase 4 — webhook engine + lights cue worker + no-show worker
 builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();

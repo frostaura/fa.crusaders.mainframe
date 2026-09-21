@@ -32,6 +32,19 @@ public class MainframeDbContext : DbContext
     public DbSet<Booking> Bookings => Set<Booking>();
     public DbSet<LedgerEntry> LedgerEntries => Set<LedgerEntry>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+
+    /// <summary>
+    /// The club's undeletable record of what its administrators did.
+    ///
+    /// <para>
+    /// <b>There is no <c>Remove</c> anywhere in this tree for this set, and there must never
+    /// be.</b> <c>AdminChangeLogPostureTests</c> greps for one; the table's own triggers raise
+    /// <c>42501</c> on <c>DELETE</c>, <c>UPDATE</c> and <c>TRUNCATE</c>; and
+    /// <c>RetentionWorker</c> never names it. See <see cref="AdminChangeLog"/> for why it is not
+    /// <see cref="AuditLogs"/>.
+    /// </para>
+    /// </summary>
+    public DbSet<AdminChangeLog> AdminChangeLogs => Set<AdminChangeLog>();
     public DbSet<WebhookEndpoint> WebhookEndpoints => Set<WebhookEndpoint>();
     public DbSet<WebhookDelivery> WebhookDeliveries => Set<WebhookDelivery>();
     public DbSet<EnrolledTemplate> EnrolledTemplates => Set<EnrolledTemplate>();
@@ -176,6 +189,7 @@ public class MainframeDbContext : DbContext
         });
 
         ConfigureAuditLog(modelBuilder);
+        ConfigureAdminChangeLog(modelBuilder);
 
         modelBuilder.Entity<WebhookEndpoint>(e =>
         {
@@ -404,6 +418,48 @@ public class MainframeDbContext : DbContext
             e.HasIndex(a => new { a.TenantId, a.ScanAt });
             e.Property(a => a.Action).HasMaxLength(128).IsRequired();
             e.Property(a => a.DetailsJson).HasColumnType("jsonb");
+            e.HasQueryFilter(a => a.TenantId == _tenant.TenantId);
+        });
+    }
+
+    /// <summary>
+    /// The undeletable admin change record.
+    ///
+    /// <para>
+    /// <b>Four indexes, because this table is read four ways and never scanned.</b> The change
+    /// view pages by time; the area filter is the console's default narrowing; "what did this
+    /// admin do" is how a club monitors itself, which is the sentence GOAL item 14 asks for;
+    /// and "what happened to this schedule" is the per-schedule view. Without the last two a
+    /// club's own record becomes a sequential scan of a table that, by design, is never pruned.
+    /// </para>
+    ///
+    /// <para>
+    /// The immutability triggers are NOT here — they are raw SQL in
+    /// <c>ProtectAdminChangeLog</c>, because EF has no model concept for one. This method
+    /// configures the shape; that migration configures the promise.
+    /// </para>
+    /// </summary>
+    private void ConfigureAdminChangeLog(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AdminChangeLog>(e =>
+        {
+            e.ToTable("admin_change_log");
+            e.HasKey(a => a.Id);
+            e.HasIndex(a => new { a.TenantId, a.OccurredAt });
+            e.HasIndex(a => new { a.TenantId, a.Area, a.OccurredAt });
+            e.HasIndex(a => new { a.TenantId, a.ActorUserId, a.OccurredAt });
+            e.HasIndex(a => new { a.TenantId, a.SubjectKind, a.SubjectId, a.OccurredAt });
+            e.Property(a => a.ActorName).HasMaxLength(255).IsRequired();
+            e.Property(a => a.ActorEmail).HasMaxLength(320);
+            e.Property(a => a.Area).HasMaxLength(32).IsRequired();
+            e.Property(a => a.Action).HasMaxLength(64).IsRequired();
+            e.Property(a => a.SubjectKind).HasMaxLength(32);
+            e.Property(a => a.SubjectLabel).HasMaxLength(255);
+            e.Property(a => a.Reason).HasMaxLength(512);
+            e.Property(a => a.BeforeJson).HasColumnType("jsonb");
+            e.Property(a => a.AfterJson).HasColumnType("jsonb");
+            e.Property(a => a.RequestId).HasMaxLength(64);
+            e.Property(a => a.IpAddress).HasMaxLength(64);
             e.HasQueryFilter(a => a.TenantId == _tenant.TenantId);
         });
     }
