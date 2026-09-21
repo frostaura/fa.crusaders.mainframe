@@ -178,13 +178,13 @@ public sealed class DoorScanSetHttpTests
         var feed = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/admin/devices/{doorId}/activity?limit=200");
         var log = await admin.GetFromJsonAsync<JsonElement>("/api/v1/admin/doors/activity?limit=200");
 
-        var feedActions = Items(feed).Select(i => i.GetProperty("action").GetString()).Order().ToList();
-        var logActions = Items(log).Select(i => i.GetProperty("action").GetString()).Order().ToList();
+        var feedActions = Items(feed).Select(i => i.GetProperty("action").GetString()!).Order().ToList();
+        var logActions = Items(log).Select(i => i.GetProperty("action").GetString()!).Order().ToList();
 
         Assert.Equal(DoorAuditActions.Scans.Order().ToList(), feedActions);
         Assert.Equal(feedActions, logActions);
         Assert.Equal(
             DoorAuditActions.Events.Order().ToList(),
-            feed.GetProperty("events").EnumerateArray().Select(e => e.GetProperty("action").GetString()).Order().ToList());
+            feed.GetProperty("events").EnumerateArray().Select(e => e.GetProperty("action").GetString()!).Order().ToList());
     }
 }

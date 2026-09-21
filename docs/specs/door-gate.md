@@ -1417,6 +1417,41 @@ as the heartbeat does, so `LastSeenAt` moves to the upload and the outage it end
 page may not read either as the other: the board was silent until it called in, and it brought
 an old scan with it.
 
+**A deleted door is a door that was removed, not a row with no door.** `audit_log` has no
+foreign key to `devices`, so deleting a board has never touched one of its scan rows — but the
+wire said `door: null` and the console dereferenced it, and `/admin/doors/log` went white for
+every admin in the club. Three reviewers found it independently, by a direct link, by the
+outcome filter, and by pressing "Load older scans" until the cursor reached the rows. Every scan
+row on the club log and in the export now carries `door: {id, name, gate_key, removed}` and
+`removed: true` is how a renderer is told; both scan writers store the board's display name
+beside the key, so a removed board can still be named. `GET /admin/doors/activity` lists
+`removed_doors` — found through the `device.deleted` rows, which outlive the door retention
+under `retention_years`, rather than by a `DISTINCT` over ninety days of jsonb — and
+`?removed_door=<key>` filters to one. The per-BOARD feed is deliberately NOT changed: it is
+reached by a device id, a deleted device 404s the whole route, and WIRE-W1 pins it at seven keys.
+
+**The range is half-open, and a named day is what proved it had to be.** It was closed at both
+ends, which nothing could see while the only range was "the last twenty-four hours from now".
+"Yesterday" ends at the instant "today" begins, so a scan at exactly a club's midnight was
+counted in both — two answers to "how many came through last night", from the same rows,
+differing by one depending on which day you asked about.
+
+**A club's day is built with the offset in force AT MIDNIGHT.** `DoorDay` used the offset at
+*now*, which is the same number every day of the year in UTC and in Africa/Johannesburg and an
+hour wrong on the two days a DST zone changes. `DoorClock` also handles a midnight that does not
+exist (a zone that springs forward at 00:00) and one that happens twice. Five named periods and
+`?day=` are resolved from it, server-side, and the response states the range it resolved so the
+page can say it in words rather than infer it from what it sent.
+
+**An edit says which edit it was, and who made it.** `device.updated` writes a `changes` list —
+computed by comparing before with after, because a console sends the whole card on every save —
+and the feed derives `change` from it (`renamed` · `details` · `shut` · `reopened`, and
+`other` for every row written before the list existed). A PATCH that changes nothing writes no
+audit row and answers `unchanged: true`, which with `shut_by_name` is what a stale tab needs to
+be told "it was already shut — by Priya Naidoo at 21:48". `Device.ShutByUserId` is a column
+rather than a derivation because a fleet shut writes ONE audit row for the whole club with no
+`device_id` on it, so a door shut that way could not be attributed by any query.
+
 **A door's name is resolved by `device_id` at read time, on every surface.** The online gate
 path writes `gate_key` into its details and the offline upload path did not, so a member's own
 history showed six releases at a null door — at a door the club had named — and the page then
@@ -1424,6 +1459,22 @@ told her the club had not named it. Both `/me` routes resolve it now, the club's
 first and the board's display `Name` second, falling back to the key stored on the row only for
 a board DELETED since the scan. The upload path stores the key too, which is what makes that
 fallback worth having.
+
+**A member sees the door's DISPLAY name, and `doors` means the club has scanners.** Round one
+chose the `gate_key` on the argument that `Name` starts life as the auto-registration
+placeholder. That is true of the placeholder and of nothing else, and it put `front-door` on a
+member's history beside `Front door` on the admin log for the same scan — so the rule reversed:
+the display name unless it is still `Door gate`, then the key, then nothing. And `doors` used to
+mean "at least one scanner is switched on", which is the same answer a club with no scanners at
+all gets: a club that shut its doors for the night handed its members a page with no door
+section, no history link and nothing said about why the building would not let them in.
+`doors` is now any gate row and `doors_shut` is `none` / `some` / `all`. Both halves stay true
+at once — a shut board is 403 on every route it calls, AND a board that has lost the network
+never hears the switch — so the page may say the club has shut its doors and may not say nobody
+gets in. `early_entry_minutes` is null unless the policy is `booking_window`, because under
+`active_member` the door's window is `StartsAt − DoorHorizonMinutes` and that number is not it;
+and `next_booking` has no horizon at all, because a member with a court tomorrow was told nothing
+about when the door would open for it on the page whose job is to explain that window.
 
 **A limit is clamped and a date is refused, and the difference is the rule.** "Give me a
 million rows" is unambiguous and bounded, so it is clamped and an error screen would be the
@@ -1477,8 +1528,17 @@ The value is kept intact and prefixed with an apostrophe, so the log stays reada
 execute; quoting first would leave it a formula the moment a reader stripped the quotes.
 
 **The export is for a spreadsheet, not for a parser.** Columns
-`date,time,timezone,at_utc,door,door_name,outcome,reason,reason_code,offline,member,code_fingerprint`;
-UTF-8 **BOM**, because Excel reads a BOM-less UTF-8 file in the machine's legacy code page and
+`date,time,timezone,at_utc,door,door_name,outcome,reason,reason_code,offline,member,code_fingerprint,delivered_at_utc`
+— the last one blank on an online row, because a delivery time for a decision the server made as
+it happened would be a delay the file invented, and appended rather than inserted because a
+club's saved formulae address columns by position. The filename carries the exact local range,
+as two dates when both ends are club-local midnights and `YYYY-MM-DDTHHmm` when they are not:
+`door-log-<date>-<date>.csv` over a rolling window was a name saying "a day" over a file
+starting at 09:50. The file's first line is still the header row and not a comment — a club
+opens this in a spreadsheet. An offline `unknown_scan` reads "Code not on the door's saved list"
+rather than "No reason recorded": the reason IS recorded, it is the action, and a board deciding
+alone has exactly one way to refuse.
+The rest is unchanged: UTF-8 **BOM**, because Excel reads a BOM-less UTF-8 file in the machine's legacy code page and
 a club whose door is named "Café" gets mojibake on a printed report; CRLF; `date` and `time` in
 the **club's** zone with the zone named beside them, so the file is still unambiguous when it
 is mailed on; `at_utc` to the second, because a round-trip ISO string with seven fractional
@@ -1568,6 +1628,25 @@ if a club's door ever outgrows a day's rows per page, which at a racquet club it
 | `shut_all_active` is the fleet's state and not "some door is shut" | `AdminDoorsOverviewHttpTests.Shut_all_active_is_false_until_a_fleet_shut_and_true_after_one`, `…One_door_shut_by_hand_does_not_raise_the_club_wide_banner` |
 | Another club's doors and rows never appear, even naming this club's device id | `AdminDoorsOverviewHttpTests.Another_clubs_doors_and_rows_never_appear_here` |
 | The log defaults to the last 24 h, newest first, and carries the retention number | `AdminDoorLogHttpTests.The_default_window_is_the_last_day_newest_first` |
+| **A removed door's rows are still named**, and `door` is never null | `DoorRemovedHttpTests.Every_log_row_names_a_door_and_a_removed_one_says_so_rather_than_being_null`, `…An_old_row_from_a_removed_board_falls_back_to_the_code_the_board_announced` |
+| **Deleting a door destroys no scan rows** — on the log, the export, the counts and a member's history | `DoorRemovedHttpTests.Deleting_a_door_destroys_no_scan_rows_on_the_log_the_export_the_counts_or_a_members_history` |
+| A removed door with rows in range is offered as a filter, and narrows to its own rows | `DoorRemovedHttpTests.A_removed_door_with_rows_in_range_is_offered_as_a_filter_and_narrows_to_its_own_rows`, `…A_board_that_is_still_in_the_devices_table_is_not_a_removed_door` |
+| The export names a removed door from what the row stored | `DoorRemovedHttpTests.The_export_names_a_removed_door_from_what_the_row_stored` |
+| Another club's removed door reaches neither this club's filter nor its total | `DoorRemovedHttpTests.Another_clubs_removed_door_never_reaches_this_clubs_filter_or_its_total`, `DoorLogRangeHttpTests.Another_clubs_rows_are_not_in_this_clubs_total` |
+| The response carries the RANGE's total, the resolved range and the club's zone | `DoorLogRangeHttpTests.The_response_carries_the_ranges_total_the_resolved_range_and_the_clubs_zone`, `…The_total_is_the_ranges_and_does_not_shrink_as_the_cursor_walks_it` |
+| Five named periods and one named day, resolved server-side in the club's zone | `DoorLogRangeHttpTests.Every_period_resolves_to_a_range_the_response_states` (five), `…A_named_day_is_that_clubs_day_and_excludes_the_minute_before_it` |
+| **A row at either midnight lands in exactly one club day** — the range is half-open | `DoorLogRangeHttpTests.A_row_at_either_midnight_lands_in_exactly_one_club_day` |
+| A club's day is built with the offset in force AT MIDNIGHT, across both DST transitions | `DoorClockTests` (seven cases, incl. a day with no midnight and a 25-hour day) |
+| Naming the range twice is `range_conflict`; `door` / `reason` / `period` / `day` that cannot be read are refused by name | `DoorLogRangeHttpTests.A_request_that_names_the_range_twice_is_refused` (three), `…A_filter_the_server_cannot_read_is_refused_by_name_on_both_routes` (six), `…A_well_formed_door_id_that_names_no_board_answers_an_empty_page` |
+| The export's filename carries the exact local range, with times when it is not whole days | `DoorLogRangeHttpTests.The_export_filename_carries_the_exact_local_range_and_says_when_it_is_not_whole_days` |
+| The export's last column is the DELIVERY instant, and an offline refusal says why | `DoorLogRangeHttpTests.The_export_carries_the_delivery_instant_and_says_why_an_offline_refusal_was_refused` |
+| A zone the platform does not know is reported as UTC, never as itself | `DoorLogRangeHttpTests.A_zone_the_platform_does_not_know_is_reported_as_UTC_and_not_as_itself` |
+| **Each kind of edit says which one it was, and who made it** | `DoorEventChangeHttpTests.Each_kind_of_edit_says_which_one_it_was_and_who_made_it`, `…An_edit_that_renames_and_shuts_at_once_is_reported_as_the_shut`, `…Every_change_word_a_door_can_carry_is_in_the_closed_set` |
+| A PATCH that changes nothing writes no row and answers `unchanged: true` | `DoorEventChangeHttpTests.A_patch_that_changes_nothing_writes_no_row_and_says_it_changed_nothing`, `…A_repeated_shut_does_not_move_the_instant_or_the_name` |
+| **A second admin is told who shut the door**, by hand or by the fleet, and reopening clears it | `DoorEventChangeHttpTests.A_second_admin_is_told_who_shut_the_door_and_reopening_clears_it`, `…A_fleet_shut_records_who_shut_each_door_and_a_fleet_reopen_clears_it` |
+| No admin of another club is ever named on this club's door or its events | `DoorEventChangeHttpTests.Another_clubs_admin_is_never_named_on_this_clubs_door`, `…An_event_whose_actor_belongs_to_another_club_names_nobody` |
+| The member is told which clock the club's times are in | `MeDoorHttpTests.The_member_is_told_which_clock_the_clubs_times_are_in` |
+| **No shipped file turns on the dev sign-in block, and the seeded admin cannot exist outside Development** | `DeploymentPostureTests.No_shipped_compose_file_turns_on_the_dev_sign_in_block` (four files), `…The_frontend_image_defaults_the_dev_sign_in_block_off`, `…The_development_seeder_is_called_from_one_place_and_only_under_Development` |
 | Every row names its door, and an unnamed door's `gate_key` is null rather than absent | `AdminDoorLogHttpTests.Every_row_names_the_door_it_happened_at`, `…A_row_from_an_unnamed_door_carries_a_null_gate_key_rather_than_vanishing` |
 | The filters are door, outcome (a closed set of three) and reason (both vocabularies) | `AdminDoorLogHttpTests.The_door_filter_narrows_to_one_board`, `…The_outcome_filter_is_a_closed_set_of_three`, `…An_outcome_outside_the_closed_set_is_refused`, `…The_reason_filter_reaches_both_vocabularies` |
 | **There is no member filter, under any spelling** | `AdminDoorLogHttpTests.No_parameter_named_after_a_member_changes_anything` (five names, by id and by name, byte-identical answers) |
@@ -1583,7 +1662,7 @@ if a club's door ever outgrows a day's rows per page, which at a racquet club it
 | **The closed action list matches what the API's own source writes**, in both directions | `DoorAuditActionsTests.Every_action_literal_in_the_api_source_is_accounted_for`, `…The_list_and_the_scan_predicate_agree_in_both_directions`, `…Every_gate_refusal_reason_is_on_the_list`, `…The_three_lists_are_disjoint_and_All_is_their_union` |
 | An offline row is stamped with the SCAN and names its delivery; an online row has neither to name | `DoorScanTimeHttpTests.An_offline_row_is_stamped_with_the_scan_and_names_its_delivery`, `…An_online_row_has_nothing_to_deliver`, `…The_log_is_stamped_by_the_scan_and_ordered_by_the_delivery` |
 | **An upload moves `LastSeenAt`** — it is contact, like the heartbeat | `DeviceEventHttpTests.An_upload_that_ends_a_long_silence_records_the_outage_it_ended` |
-| A member's row names the door even when the row did not, and falls back to the stored key for a deleted board | `DoorScanTimeHttpTests.A_members_own_rows_name_the_door_even_when_the_row_did_not`, `…A_deleted_board_falls_back_to_the_key_the_row_stored` |
+| A member's row names the door by its DISPLAY name, then the club's key, then nothing — and never the auto-registration placeholder | `DoorScanTimeHttpTests.A_members_own_rows_name_the_door_even_when_the_row_did_not`, `…A_door_still_carrying_the_placeholder_name_falls_back_to_the_clubs_key`, `…A_deleted_board_falls_back_to_the_key_the_row_stored` |
 | `from` / `to` / `cursor` that cannot be read are refused BY NAME, on the log and the export | `DoorLogRefusalHttpTests.A_parameter_the_server_cannot_read_is_refused_by_name` (seven cases × two routes), `…A_members_history_refuses_a_cursor_it_did_not_mint` |
 | A refused export is not recorded as an export | `DoorLogRefusalHttpTests.A_refused_export_is_not_recorded_as_an_export` |
 | The limit is clamped and never refused, on the log AND the member's history | `DoorLogRefusalHttpTests.A_limit_outside_the_range_is_clamped_and_never_refused` (seven values) |
@@ -1617,10 +1696,10 @@ if a club's door ever outgrows a day's rows per page, which at a racquet club it
 | The cutoff is the club's own number, clamped | `DoorRetentionTests.The_cutoff_is_the_clubs_own_setting`, `…A_retention_below_the_floor_does_not_purge_a_weeks_worth_of_doors` |
 | Door receipts outlive a short retention by the event horizon; a court box's receipt is not a door's | `DoorRetentionTests.Door_receipts_outlive_a_short_retention_by_the_event_horizon`, `…A_court_boxs_receipt_is_not_a_door_receipt` |
 | The purge never crosses a tenant boundary | `DoorRetentionTests.The_purge_never_crosses_a_tenant_boundary` |
-| `doors: false` for a club with no door, or whose only door is out of service | `MeDoorHttpTests.A_club_with_no_door_says_so_and_the_page_stays_silent`, `…A_club_whose_only_door_is_out_of_service_has_no_doors` |
+| **`doors` is "this club has scanners", and `doors_shut` is how many are shut** | `MeDoorHttpTests.A_club_with_no_door_says_so_and_the_page_stays_silent`, `…A_club_whose_only_door_is_out_of_service_still_HAS_a_door_and_says_it_is_shut`, `…A_club_with_no_gate_row_at_all_has_no_doors_and_nothing_shut`, `…One_door_shut_out_of_two_is_some_and_not_all` |
 | Membership is three-valued, with the club's recorded status beside it, and no membership row is `none` | `MeDoorHttpTests.The_membership_state_is_reported_in_three_values`, `…The_membership_detail_is_the_clubs_own_recorded_status`, `…A_user_with_no_membership_row_is_none_rather_than_not_active` |
-| The next booking's window is the one the door will honour | `MeDoorHttpTests.The_next_booking_carries_the_window_the_door_will_actually_honour` |
-| `early_entry_minutes` is the clamped value the door reads | `MeDoorHttpTests.The_early_entry_minutes_are_the_clamped_value_the_door_uses` |
+| The next booking's window is the one the door will honour, and there is **no horizon** on which booking counts | `MeDoorHttpTests.The_next_booking_carries_the_window_the_door_will_actually_honour`, `…The_next_booking_has_no_horizon_and_a_court_tomorrow_still_counts`, `…A_booking_whose_window_has_already_closed_is_not_the_next_one` |
+| `early_entry_minutes` is the clamped value the door reads — and is **null** under the policy it is not the window for | `MeDoorHttpTests.The_early_entry_minutes_are_the_clamped_value_the_door_uses`, `…The_early_entry_minutes_are_null_under_the_policy_they_are_not_the_window_for` |
 | **`is_club_admin` agrees with what the door really does under `booking_window`** | `MeDoorHttpTests.The_admin_flag_agrees_with_what_the_door_really_does_under_booking_window` (drives the real `/device/gate` for both people) |
 | The club contact is whatever the club set, and null when it set none | `MeDoorHttpTests.The_club_contact_is_whatever_the_club_has_set_and_null_when_it_has_set_none` |
 | The last decision is this member's newest row inside the 120-second fetch window | `MeDoorHttpTests.The_last_decision_is_this_members_newest_row_inside_the_fetch_window`, `…A_decision_older_than_the_fetch_window_is_not_returned` |

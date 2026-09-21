@@ -1031,6 +1031,29 @@ def d12_offline_uploads(d: Door, booking: dict) -> None:
     chk("D12", "an offline open settles nothing: still one ledger row on that booking", ledger == "1",
         f"rows={ledger}")
 
+    # A3 — AN UPLOAD IS CONTACT, and the two clocks have to agree about it.
+    #
+    # Reviewer A read a door page saying "Last heard from 28m ago · Nothing can reach it"
+    # over nine offline rows each saying "the door told us at 09:38", and could not tell
+    # whether the product was contradicting itself or the fixture was. It is not a
+    # contradiction: `POST /device/events` runs DeviceSilenceLog.NoteHeartbeat exactly as the
+    # heartbeat does, so a board that uploads has just been heard from. Which means
+    # `last_seen_at` can never be OLDER than the delivery instant of a row that board
+    # uploaded — and that is a sentence about the product rather than about a screen, so it
+    # is asserted here rather than argued about.
+    row = d.activity()[0]
+    delivered = row.get("delivered_at")
+    devices = expect_status(d.w.http.get("/api/v1/admin/devices/", token=d.w.admin_token),
+                            200, "devices").json
+    mine = next((x for x in devices if x.get("id") == d.gate_id), None)
+    last_seen = (mine or {}).get("last_seen_at")
+    chk("D12", "an upload IS contact: last_seen_at is at or after the row it just delivered",
+        bool(delivered) and bool(last_seen) and parse_dt(last_seen) >= parse_dt(delivered),
+        f"last_seen_at={last_seen} delivered_at={delivered}")
+    chk("D12", "...and the row it delivered is stamped with the SCAN, which is older",
+        bool(row.get("at")) and parse_dt(row["at"]) <= parse_dt(delivered),
+        f"at={row.get('at')} delivered_at={delivered}")
+
 
 def d13_malformed_and_counters(d: Door, booking: dict) -> None:
     sc.step("D13  Malformed kinds, the normalisation guard, and the two diagnostic counters")

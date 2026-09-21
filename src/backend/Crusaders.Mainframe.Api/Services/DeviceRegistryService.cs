@@ -276,8 +276,9 @@ public sealed class DeviceRegistryService
         Device device, UpdateDeviceCommand cmd, Guid actorUserId, CancellationToken ct)
     {
         var changes = new List<string>();
-        if (cmd.Name is not null && device.Name != cmd.Name.Trim()) changes.Add(DoorAuditActions.NameToken);
-        if (cmd.Name is not null) device.Name = cmd.Name.Trim();
+        Rename(device, cmd, changes);
+        Court(device, cmd, changes);
+        Card(device, cmd, changes);
 
         // The switch-off instant and the outage it closes: see SwitchAsync.
         //

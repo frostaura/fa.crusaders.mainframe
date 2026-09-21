@@ -282,9 +282,23 @@ public static class DeviceEventEndpoints
         // An upload is a liveness signal like the heartbeat is, and it is the call a box
         // reconnecting after an outage very often makes first. Same recording, same reason:
         // see DeviceSilenceLog.
+        //
+        // STAMPED WITH A FRESH INSTANT, NOT WITH `now`. `now` is taken before the batch is
+        // recorded and is the clock every uploaded event's arithmetic is clamped against, which
+        // it has to be — but the audit rows this call writes are created DURING the loop, so
+        // their CreatedAt, which is the delivery instant on the wire, is later than `now` by
+        // however long the batch took. That put `last_seen_at` a millisecond BEFORE the
+        // `delivered_at` of a row the same request had just delivered, which is the product
+        // saying it had not yet heard from a board that was at that moment talking to it.
+        //
+        // It is exactly the contradiction A3 was raised about, in miniature: "last heard from
+        // 28m ago" beside "the door told us at 09:38" is only ever a seed artefact IF the
+        // server itself keeps the two in order. Now it does — contact is when the call was
+        // finished with, which is at or after every row it wrote.
         var uploadSettings = await services.Settings.GetAsync(ct);
         DeviceSilenceLog.NoteHeartbeat(
-            services.Db, device!, now, HeartbeatCadence.OfflineAfterSeconds(uploadSettings.HeartbeatSeconds));
+            services.Db, device!, DateTimeOffset.UtcNow,
+            HeartbeatCadence.OfflineAfterSeconds(uploadSettings.HeartbeatSeconds));
         await services.Db.SaveChangesAsync(ct);
 
         return Results.Ok(new
