@@ -1,21 +1,26 @@
 import { useCallback, useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { Card } from "../Card";
 import { Button, Badge } from "../Button";
 import { Alert } from "../Alert";
 import { endpoints, type MemberDoorHistoryRow } from "../../lib/api";
-import { formatDayAndClock } from "../../lib/countdown";
+import { formatClock, formatDayAndClock } from "../../lib/countdown";
+import { cn } from "../../lib/utils";
 import {
   HISTORY_ANCHOR,
+  HISTORY_DELIVERY_ORDER,
   HISTORY_EMPTY,
   HISTORY_FAILED,
   HISTORY_INTRO,
   HISTORY_LOADING,
   HISTORY_MORE_FAILED,
   HISTORY_P2_NOTICE,
+  HISTORY_REFRESH,
   HISTORY_RETRY,
   HISTORY_SHOW_MORE,
   HISTORY_TITLE,
   UNNAMED_DOOR,
+  historyAsOf,
   historyChip,
   historyLine,
   historyRetention,
@@ -71,6 +76,18 @@ export function DoorHistoryCard() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [moreFailed, setMoreFailed] = useState(false);
   const [busy, setBusy] = useState(false);
+  /**
+   * When the rows on screen were read. D14.
+   *
+   * <p>
+   * This card is read on mount and never polled, deliberately — a member scanning back
+   * through their own record should control every fetch. The cost of that decision is a
+   * page that can sit open for an hour showing rows from an hour ago with nothing on it
+   * to say so, and nothing short of a full reload to ask again. Both halves were missing
+   * and both are one line.
+   * </p>
+   */
+  const [readAt, setReadAt] = useState<string | null>(null);
 
   const load = useCallback(async (from: string | null) => {
     setBusy(true);
@@ -81,6 +98,7 @@ export function DoorHistoryCard() {
       setRows((current) => (from ? [...current, ...page.items] : page.items));
       setCursor(page.next_cursor);
       setRetention(page.retention_days ?? null);
+      setReadAt(new Date().toISOString());
       setPhase("ready");
     } catch {
       if (from) setMoreFailed(true);
@@ -118,9 +136,17 @@ export function DoorHistoryCard() {
       )}
 
       {phase === "ready" && rows.length > 0 && (
-        <ul className="divide-y divide-border">
-          {rows.map((row, i) => <HistoryRow key={`${row.at}-${i}`} row={row} />)}
-        </ul>
+        <>
+          <ul className="divide-y divide-border">
+            {rows.map((row, i) => <HistoryRow key={`${row.at}-${i}`} row={row} />)}
+          </ul>
+          {/* Only when a row on screen was actually decided offline, because only then is
+              it true — and only then does a member have a row whose own time runs
+              backwards against its neighbours to be confused by. See the constant. */}
+          {rows.some((row) => !!row.delivered_at) && (
+            <p className="text-xs text-text-muted">{HISTORY_DELIVERY_ORDER}</p>
+          )}
+        </>
       )}
 
       {moreFailed && (
@@ -135,7 +161,17 @@ export function DoorHistoryCard() {
         </Button>
       )}
 
-      {phase === "ready" && <p className="text-xs text-text-muted">{historyRetention(retention)}</p>}
+      {phase === "ready" && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+          <p className="text-xs text-text-muted">
+            {readAt && `${historyAsOf(formatClock(readAt))} `}{historyRetention(retention)}
+          </p>
+          <Button variant="outline" className="px-3 text-xs" onClick={() => void load(null)} disabled={busy}>
+            <RefreshCw size={14} className={cn("mr-1", busy && "animate-spin motion-reduce:animate-none")} />
+            {HISTORY_REFRESH}
+          </Button>
+        </div>
+      )}
     </Card>
   );
 }

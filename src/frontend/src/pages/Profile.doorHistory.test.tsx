@@ -8,6 +8,7 @@ import { ToastProvider } from "../components/Toast";
 import {
   memberDoorFixture,
   memberDoorHistoryRowFixture,
+  memberDoorOfflineHistoryRowFixture,
   memberDoorsOnFixture,
   signIn,
   signOut,
@@ -58,6 +59,21 @@ describe("My door history", () => {
         </AuthProvider>
       </MemoryRouter>,
     );
+  }
+
+
+  /**
+   * The calls the stub has recorded, read back after `renderProfile` has installed it.
+   *
+   * <p>
+   * `renderProfile` owns the stub and returns the render result rather than the stub, so
+   * a test that wants to count requests reaches the mock through the global it replaced.
+   * Cheaper than changing a helper eight tests already depend on.
+   * </p>
+   */
+  function stubFetchForRefresh(): () => { path: string }[] {
+    return () => (globalThis.fetch as unknown as { mock: { calls: [string][] } }).mock.calls
+      .map(([input]) => ({ path: String(input) }));
   }
 
   const HISTORY = (over: Record<string, unknown> = {}) => ({
@@ -319,5 +335,155 @@ describe("My door history", () => {
     // No text input inside the card at all — a search box is the first step of every one
     // of the above.
     expect(container.querySelector("#door-history input")).toBeNull();
+  });
+
+  // --- D14: a record with no date on it is one nobody can trust twice ---------------------
+
+  /**
+   * This card is read on mount and never polled, deliberately: a member scanning back
+   * through their own record should control every fetch. The cost of that decision is a
+   * page that can sit open for an hour showing rows from an hour ago with nothing on it
+   * to say so, and nothing short of a full reload to ask again. Both halves were missing.
+   */
+  it("says when the rows on screen were read", async () => {
+    renderProfile([
+      { path: "/api/v1/me/door/history", body: HISTORY() },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+
+    expect(await screen.findByText(/^As of \d{2}:\d{2}\./)).toBeInTheDocument();
+  });
+
+  it("lets the member ask again without reloading the page", async () => {
+    const stub = stubFetchForRefresh();
+    renderProfile([
+      { path: "/api/v1/me/door/history", body: HISTORY() },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+    await screen.findByText("My door history");
+
+    const before = stub().filter((c) => c.path.startsWith("/api/v1/me/door/history")).length;
+    fireEvent.click(await screen.findByRole("button", { name: /Refresh/ }));
+
+    await waitFor(() => {
+      expect(stub().filter((c) => c.path.startsWith("/api/v1/me/door/history")).length).toBeGreaterThan(before);
+    });
+  });
+
+  /**
+   * Refresh REPLACES, where Show more appends. A refresh that appended would double every
+   * row on screen — a member's own record apparently recording the same scan twice, which
+   * on this card of all cards is the worst possible way to be wrong.
+   */
+  it("replaces the rows on a refresh rather than appending them", async () => {
+    renderProfile([
+      { path: "/api/v1/me/door/history", body: HISTORY() },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+    await screen.findByText("My door history");
+    const rows = () => [...document.querySelectorAll("#door-history li")].length;
+    await waitFor(() => expect(rows()).toBe(1));
+
+    const stub = stubFetchForRefresh();
+    const before = stub().filter((c) => c.path.startsWith("/api/v1/me/door/history")).length;
+    fireEvent.click(screen.getByRole("button", { name: /Refresh/ }));
+
+    // WAIT for the refresh to land before counting. A `waitFor` on "still one row" is
+    // satisfied by its first reading, which happens before the response has been applied
+    // — so it passes over an implementation that appends, which is what a mutation pass
+    // found. The request count is what says the answer has actually arrived.
+    await waitFor(() => {
+      expect(stub().filter((c) => c.path.startsWith("/api/v1/me/door/history")).length).toBeGreaterThan(before);
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: /Refresh/ })).toBeEnabled());
+    expect(rows()).toBe(1);
+  });
+
+  // --- D7: a member never reads about a door the club has not named ----------------------
+
+  /**
+   * The contradiction the reviewer photographed: six offline releases listed against "a
+   * door the club hasn't named yet", directly above a disclosure saying such a door
+   * "opens nothing while it is cut off". The name was being stripped from offline rows on
+   * the way out — the backend lane is fixing that — and the phrase itself is an admin fact
+   * a member cannot act on either way.
+   */
+  it("calls a row with no door name a club door", async () => {
+    renderProfile([
+      {
+        path: "/api/v1/me/door/history",
+        body: HISTORY({ items: [memberDoorHistoryRowFixture({ door_name: null, offline: true })] }),
+      },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+
+    expect(await screen.findByText("a club door")).toBeInTheDocument();
+    expect(screen.queryByText(/hasn't named/i)).toBeNull();
+  });
+
+  // --- WIRE-R1 §2 / §8: the list is ordered on DELIVERY, not on the scan ------------------
+
+  /**
+   * A door cut off for an hour hands the club an hour of scans at once, and the list is
+   * ordered and paged on that axis — so those rows land together and their own times run
+   * backwards against the rows around them. Unexplained, a member reads their own record
+   * as wrong, which on the one screen that exists for them to check what happened is the
+   * worst thing it could be.
+   */
+  it("says when the club heard, and why a row can sit out of order", async () => {
+    renderProfile([
+      {
+        path: "/api/v1/me/door/history",
+        body: HISTORY({
+          items: [
+            memberDoorHistoryRowFixture({ at: "2026-09-19T06:20:00Z" }),
+            memberDoorOfflineHistoryRowFixture({ at: "2026-09-19T05:40:00Z" }),
+          ],
+        }),
+      },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+
+    expect(await screen.findByText(/The club heard at \d{2}:\d{2}\./)).toBeInTheDocument();
+    expect(screen.getByText(/listed by when the club heard about them/)).toBeInTheDocument();
+  });
+
+  /**
+   * And neither sentence appears when nothing on screen took that journey. A note about
+   * out-of-order rows, on a list that has none, is the page explaining a mechanism instead
+   * of answering a question.
+   */
+  it("explains nothing about delivery when every row was decided with the club", async () => {
+    renderProfile([
+      { path: "/api/v1/me/door/history", body: HISTORY() },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+
+    await screen.findByText("My door history");
+    expect(screen.queryByText(/The club heard at/)).toBeNull();
+    expect(screen.queryByText(/listed by when the club heard about them/)).toBeNull();
+  });
+
+  /**
+   * WIRE-R1 §8: a malformed cursor is a 400 `cursor_invalid` rather than a silent full
+   * result. The page cannot send one — the cursor comes from the previous response — but
+   * a 400 on Show more must still leave the rows that are already on screen, because
+   * replacing them with an error is the member losing their record over a paging fault.
+   */
+  it("keeps the rows it has when the club refuses the cursor", async () => {
+    renderProfile([
+      {
+        method: "GET", path: "/api/v1/me/door/history", status: [200, 400], body: null,
+        sequence: [HISTORY({ next_cursor: "c2" }), { error: "cursor_invalid" }],
+      },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+    await screen.findByText("My door history");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+
+    expect(await screen.findByText(/Couldn't load any more/)).toBeInTheDocument();
+    // The record itself survives. The failed read is a sentence beside it, not instead of it.
+    expect([...document.querySelectorAll("#door-history li")].length).toBe(1);
   });
 });

@@ -1046,6 +1046,10 @@ export function memberDoorsOnFixture(overrides: Record<string, unknown> = {}) {
 export function memberDoorDecisionFixture(overrides: Record<string, unknown> = {}) {
   return {
     at: "2026-09-19T06:04:00Z",
+    // Null unless the door decided it OFFLINE — a row the door asked the club about has
+    // no delivery to state, and a fixture that carried one would let a page render a
+    // journey the row never made. `memberDoorOfflineDecisionFixture` is the other arm.
+    delivered_at: null,
     door_name: "front-door",
     released: false,
     reason: "too_early",
@@ -1059,10 +1063,69 @@ export function memberDoorDecisionFixture(overrides: Record<string, unknown> = {
   };
 }
 
+/**
+ * A route the request never gets an answer out of — the wire shape of no signal.
+ *
+ * <p>
+ * <b>A 500 is not what a phone with no bars looks like, and the page has to tell them
+ * apart.</b> Every failed-read test on this surface used to stub a status and call the
+ * result "the read failed", which is half the cases: one of them is a response that
+ * arrived carrying an error, and the other is no response at all. The page told both
+ * members "Your phone can't reach the club" and scored the phone's own diagnostic row ✗
+ * over a 500 the club's own API had answered with.
+ * </p>
+ *
+ * <p>
+ * A `respond` that throws is what produces the real thing rather than an approximation of
+ * it: the throw escapes the stubbed `fetch` synchronously, `fetchWithTimeout` catches it
+ * exactly as it catches a dropped connection, and the page receives the same
+ * `NetworkError` a phone in a lift would give it. Stubbing the error object directly
+ * would prove only that the page can read a field somebody handed it.
+ * </p>
+ */
+export function unreachable(path: string, method = "GET"): StubRoute {
+  return {
+    method,
+    path,
+    respond: () => { throw new TypeError("Failed to fetch"); },
+  };
+}
+
+/**
+ * A decision a CUT-OFF door made, with both instants on it.
+ *
+ * <p>
+ * The pair moves together in reality — `delivered_at` is non-null exactly when `offline`
+ * is true — so spelling them out at each call site is how one ends up with a row that
+ * claims a delivery delay for a scan the door asked the club about at the time, which is
+ * a shape the endpoint cannot produce. Five minutes late by default, which is long enough
+ * to read as a gap and short enough to be an ordinary one.
+ * </p>
+ */
+export function memberDoorOfflineDecisionFixture(overrides: Record<string, unknown> = {}) {
+  return memberDoorDecisionFixture({
+    released: true,
+    reason: "ok",
+    offline: true,
+    delivered_at: "2026-09-19T06:09:00Z",
+    ...overrides,
+  });
+}
+
+/** The same pairing for a history row. See `memberDoorOfflineDecisionFixture`. */
+export function memberDoorOfflineHistoryRowFixture(overrides: Record<string, unknown> = {}) {
+  return memberDoorHistoryRowFixture({
+    offline: true,
+    delivered_at: "2026-09-19T06:09:00Z",
+    ...overrides,
+  });
+}
+
 /** One row of `GET /api/v1/me/door/history`. An open, from a door that could reach the club. */
 export function memberDoorHistoryRowFixture(overrides: Record<string, unknown> = {}) {
   return {
     at: "2026-09-19T06:04:00Z",
+    delivered_at: null,
     door_name: "front-door",
     released: true,
     reason: "ok",

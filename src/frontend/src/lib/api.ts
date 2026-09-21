@@ -1115,6 +1115,31 @@ export type MemberDoorContact = { phone: string | null; email: string | null };
 export type MemberDoorDecision = {
   /** The SCAN's own time, never the upload's. UTC. */
   at: string;
+  /**
+   * When the door's account of this scan reached the club. UTC, and null unless the door
+   * decided it OFFLINE.
+   *
+   * <p>
+   * The two instants are the same event seen from two places, and a member standing at a
+   * door has a use for the gap: it is why the club's own screens showed nothing while they
+   * were being let in. A null here is not "delivered instantly" — it is a row there was
+   * never a delay to state, because the door asked the club at the time. Rendering a
+   * delivery time for one would be inventing a journey the row never made.
+   * </p>
+   */
+  delivered_at: string | null;
+  /**
+   * The club's own name for the door, resolved when the row is READ rather than taken
+   * from what the board wrote at the time.
+   *
+   * <p>
+   * The club's `gate_key` first, the board's own display name second, the key stored on
+   * the row for a board since deleted, and null only when none of those survives. It used
+   * to be whatever the offline upload happened to carry, which for an offline row was
+   * nothing — so a named door's own rows reached the member unnamed. Null now genuinely
+   * means unknown, and `UNNAMED_DOOR` is what a member reads for it.
+   * </p>
+   */
   door_name: string | null;
   released: boolean;
   /**
@@ -1181,7 +1206,19 @@ export type MemberDoor = {
 
 /** One row of the member's own door history. `offline` — the door decided from its own list. */
 export type MemberDoorHistoryRow = {
+  /** The SCAN's own instant. See {@link MemberDoorDecision.at}. */
   at: string;
+  /**
+   * When the club heard. Null unless the door decided this one on its own.
+   *
+   * <p>
+   * <b>The list is ordered and paged on THIS axis, not on `at`.</b> A door that was cut
+   * off for an hour delivers an hour of scans at once, so an offline row's `at` can be
+   * older than the rows around it — which reads as a record in the wrong order unless the
+   * page says why. `historyLine` and `HISTORY_DELIVERY_ORDER` are where it says so.
+   * </p>
+   */
+  delivered_at: string | null;
   door_name: string | null;
   released: boolean;
   /** Null for the same malformed-details row {@link MemberDoorDecision.reason} describes. */

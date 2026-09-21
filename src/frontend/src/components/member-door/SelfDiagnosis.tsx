@@ -32,22 +32,48 @@ import {
  * </p>
  */
 
-const STATE_GLYPH: Record<DiagnosisState, string> = { passed: "✓", attention: "⚠", failed: "✗" };
+/**
+ * The glyph is decoration and the colour is emphasis; the WORD in the row's accessible
+ * text is the state. `neutral` gets a dash in the muted colour for the reason it exists:
+ * a tick is a claim, and a row with nothing to claim must not make one. See
+ * `DiagnosisState`.
+ */
+const STATE_GLYPH: Record<DiagnosisState, string> = { passed: "✓", neutral: "–", attention: "⚠", failed: "✗" };
 const STATE_COLOUR: Record<DiagnosisState, string> = {
   passed: "text-success-strong",
+  neutral: "text-text-muted",
   attention: "text-warning-strong",
   failed: "text-danger-strong",
 };
 
+/**
+ * One row: a glyph, what is being checked, and what this screen found.
+ *
+ * <p>
+ * <b>Stacked below `sm`, side by side above it.</b> Three items on a baseline row at
+ * 360px put a wrapping label next to a wrapping value, and the result — photographed
+ * during the visual pass — read "You nothing on file, and nothing barring you
+ * membership": two sentences interleaved line by line, which is not a sentence at all.
+ * Long values made it worse, and this lane has just added several, because a row that
+ * declines to score itself has to say why in words.
+ * </p>
+ *
+ * <p>
+ * The glyph stays beside the label at every width; it is the label's own mark, and
+ * floating it above a two-line block loses what it belongs to.
+ * </p>
+ */
 function Row({ row }: { row: DiagnosisRow }) {
   return (
-    <li className="flex items-baseline gap-2 py-1.5 text-sm">
-      {/* The glyph is decoration. The row's accessible text carries the state as a WORD,
-          because colour is never the only signal — and a tick and a cross are a colour
-          for a great many people. */}
-      <span aria-hidden="true" className={cn("shrink-0", STATE_COLOUR[row.state])}>{STATE_GLYPH[row.state]}</span>
-      <span className="flex-1 min-w-0">{row.label}</span>
-      <span className="text-text-secondary text-right">{row.value}</span>
+    <li className="flex flex-col gap-0.5 py-1.5 text-sm sm:flex-row sm:items-baseline sm:gap-2">
+      <span className="flex items-baseline gap-2">
+        {/* The glyph is decoration. The row's accessible text carries the state as a WORD,
+            because colour is never the only signal — and a tick and a cross are a colour
+            for a great many people. */}
+        <span aria-hidden="true" className={cn("shrink-0", STATE_COLOUR[row.state])}>{STATE_GLYPH[row.state]}</span>
+        <span>{row.label}</span>
+      </span>
+      <span className="pl-6 text-text-secondary sm:flex-1 sm:pl-0 sm:text-right">{row.value}</span>
       <span className="sr-only">— {row.stateWord}</span>
     </li>
   );

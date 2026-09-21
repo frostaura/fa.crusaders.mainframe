@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { endpoints, type MemberDoor } from "../../lib/api";
+import { NetworkError, endpoints, type MemberDoor } from "../../lib/api";
 import { readLastKnown, rememberDoor } from "../../lib/lastKnown";
+import type { ReadFailure } from "../../lib/memberDoorCopy";
 
 /**
  * The one read that carries the member's whole door picture, and how often it is made.
@@ -39,11 +40,38 @@ export type MemberDoorRead = {
   door: MemberDoor | null;
   /** The last attempt failed. Not the same thing as having no answer — see the page. */
   failed: boolean;
+  /**
+   * WHICH failure it was, or null while the last read succeeded.
+   *
+   * <p>
+   * <b>The page used to know only that something had failed, and said the wrong thing
+   * about half of them.</b> On an HTTP 500 from the club's own API it told the member
+   * "Your phone can't reach the club" and scored "This phone's line to the club ✗" —
+   * about a phone that had just carried the request there and brought an answer back. A
+   * {@link NetworkError} is the only failure that is the member's signal; everything else
+   * arrived, which makes it the club's system, which is a different thing to do next.
+   * </p>
+   */
+  failure: ReadFailure | null;
   /** No answer has landed yet and one is in flight. */
   loading: boolean;
   /** Read now, ignoring the pacing. What `The door didn't open` and Try again call. */
   refresh: () => Promise<void>;
 };
+
+/**
+ * Whose failure was it — read off the error's own type rather than guessed.
+ *
+ * <p>
+ * `NetworkError` is thrown only when the request produced no response at all: the socket
+ * was refused, the network dropped, or the server took it and never answered. Anything
+ * else — an `ApiError`, or a bug of our own — means a round trip happened, so the phone's
+ * line to the club demonstrably works and the fault is on the far end of it.
+ * </p>
+ */
+function classify(error: unknown): ReadFailure {
+  return error instanceof NetworkError ? "network" : "server";
+}
 
 function isVisible(): boolean {
   return typeof document === "undefined" || document.visibilityState === "visible";
@@ -73,7 +101,7 @@ function nextGap(failures: number, door: MemberDoor | null, openedAt: number): n
 
 export function useMemberDoor(enabled: boolean): MemberDoorRead {
   const [door, setDoor] = useState<MemberDoor | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<ReadFailure | null>(null);
   const [loading, setLoading] = useState(enabled);
   const [visible, setVisible] = useState(isVisible);
   /** Bumped by every settled read, which is what reschedules the next one. */
@@ -92,14 +120,16 @@ export function useMemberDoor(enabled: boolean): MemberDoorRead {
       failures.current = 0;
       doorNow.current = next;
       setDoor(next);
-      setFailed(false);
+      setFailure(null);
       // Written on every success, so a cold start with no signal paints something.
       rememberDoor(next);
-    } catch {
+    } catch (error) {
       // Which sentence a failure earns is the page's call, not this hook's: a failed
       // read with a cached copy and a failed read without one are different silences.
+      // WHOSE failure it was is this hook's call, because the error object is the only
+      // place that fact survives, and it is gone by the time the page renders.
       failures.current += 1;
-      setFailed(true);
+      setFailure(classify(error));
     } finally {
       inflight.current = false;
       setLoading(false);
@@ -141,7 +171,7 @@ export function useMemberDoor(enabled: boolean): MemberDoorRead {
     return () => clearTimeout(timer);
   }, [enabled, visible, settled, refresh, openedAt]);
 
-  return { door, failed, loading, refresh };
+  return { door, failed: failure !== null, failure, loading, refresh };
 }
 
 /**

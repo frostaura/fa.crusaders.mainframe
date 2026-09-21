@@ -7,6 +7,7 @@ import {
   DIAGNOSIS_HEADING,
   DIAGNOSIS_ROW_LABELS,
   DIAGNOSIS_TRIGGER,
+  HISTORY_DELIVERY_ORDER,
   HISTORY_EMPTY,
   HISTORY_FAILED,
   HISTORY_INTRO,
@@ -21,13 +22,20 @@ import {
   STANDING_LOADING,
   UNNAMED_DOOR,
   buildDiagnosis,
+  codeExpiredDeadEnd,
   contactMissingNotice,
+  contactUnknownNotice,
+  liveContact,
+  staleContact,
+  CONTACT_UNKNOWN,
+  DOOR_SECTION_CHECKING,
   decisionStamp,
   describeDecision,
   describeStanding,
   formatWindowMinutes,
   historyChip,
   historyLine,
+  historyOfflineLine,
   historyRetention,
   offlineDetailsBody,
   offlineIdentDeadEnd,
@@ -74,8 +82,10 @@ describe("memberDoorCopy", () => {
     .replace(/^\s*\/\/.*$/gm, "")
     .replace(/export const BANNED_IN_MEMBER_DOOR_COPY[\s\S]*?\] as const;/, "");
 
-  const CONTACT = { phone: "021 555 0134", email: "info@crusaders.co.za" };
-  const NO_CONTACT = { phone: null, email: null };
+  const CONTACT = liveContact({ phone: "021 555 0134", email: "info@crusaders.co.za" });
+  const NO_CONTACT = liveContact({ phone: null, email: null });
+  /** D1's third state: no answer has ever landed, so the page knows NOTHING about a number. */
+  const UNKNOWN_CONTACT = CONTACT_UNKNOWN;
 
   /** The decision context every arm that does not care about the clock can share. */
   const DECIDED = {
@@ -122,10 +132,17 @@ describe("memberDoorCopy", () => {
       ...Object.values(DIAGNOSIS_ROW_LABELS),
       STANDING_HEADING, STANDING_LOADING, OFFLINE_DETAILS_SUMMARY, offlineDetailsBody(),
       DIAGNOSIS_TRIGGER, DIAGNOSIS_HEADING, CONTACT_LEAD, contactMissingNotice(),
+      contactUnknownNotice(), DOOR_SECTION_CHECKING,
+      codeExpiredDeadEnd("network", CONTACT), codeExpiredDeadEnd("server", NO_CONTACT),
+      codeExpiredDeadEnd("network", UNKNOWN_CONTACT),
       HISTORY_TITLE, HISTORY_INTRO, HISTORY_P2_NOTICE, HISTORY_LOADING, HISTORY_FAILED,
-      HISTORY_EMPTY, HISTORY_MORE_FAILED, HISTORY_OFFLINE_LINE,
+      HISTORY_EMPTY, HISTORY_MORE_FAILED, HISTORY_OFFLINE_LINE, HISTORY_DELIVERY_ORDER,
+      historyOfflineLine("2026-09-19T06:09:00Z"), historyOfflineLine(null),
+      decisionStamp("front-door", "2026-09-19T06:04:00Z", "2026-09-19T06:09:00Z"),
       historyRetention(90), historyRetention(null),
-      standingFailed(null), standingFailed({ body: "cached sentence", minutesAgo: 4 }),
+      standingFailed(null, "network"), standingFailed(null, "server"),
+      standingFailed({ body: "cached sentence", minutesAgo: 4 }, "network"),
+      standingFailed({ body: "cached sentence", minutesAgo: 4 }, "server"),
       offlineWithCode({ fetchedAtClock: "06:02", minutesAgo: 7, kind: "booking" }),
       offlineWithCode({ fetchedAtClock: "06:02", minutesAgo: 7, kind: "ident" }),
       offlineNoCode(CONTACT), offlineNoCode(NO_CONTACT),
@@ -302,7 +319,7 @@ describe("memberDoorCopy", () => {
   it("offers email when the club gave no phone number", () => {
     const copy = describeDecision({ reason: "member_not_active", released: false, offline: false }, {
       countdown: null, opensAtClock: null, bookingStartsClock: null, earlyEntryMinutes: 0,
-      contact: { phone: null, email: "info@crusaders.co.za" },
+      contact: liveContact({ phone: null, email: "info@crusaders.co.za" }),
     });
     expect(copy.actions).toContainEqual({
       kind: "email_the_club", label: "Email the club", href: "mailto:info@crusaders.co.za",
@@ -431,7 +448,7 @@ describe("memberDoorCopy", () => {
   });
 
   it("says it cannot check, and what it last heard, when the read failed", () => {
-    const withCache = standingFailed({ body: "Your club opens its doors for any active member.", minutesAgo: 4 });
+    const withCache = standingFailed({ body: "Your club opens its doors for any active member.", minutesAgo: 4 }, "network");
     expect(withCache).toMatch(/can't reach the club/i);
     expect(withCache).toContain("Your club opens its doors for any active member.");
     expect(withCache).toMatch(/4 minutes ago/);
@@ -440,8 +457,8 @@ describe("memberDoorCopy", () => {
 
   /** Three silences, three sentences: no cache is not the same sentence as a stale one. */
   it("says something different when there is no cached copy at all", () => {
-    const withCache = standingFailed({ body: "anything", minutesAgo: 4 });
-    const without = standingFailed(null);
+    const withCache = standingFailed({ body: "anything", minutesAgo: 4 }, "network");
+    const without = standingFailed(null, "network");
     expect(without).not.toBe(withCache);
     expect(without).toMatch(/can't reach the club/i);
     expect(without).not.toMatch(/ago/);
@@ -453,8 +470,11 @@ describe("memberDoorCopy", () => {
     const body = offlineDetailsBody();
     expect(body).toContain(String(GATE_ROSTER_MAX_ENTRIES));
     expect(body).toMatch(/bookings/i);
-    // The unnamed-door half, which is the one that is easiest to leave out.
-    expect(body).toMatch(/hasn't named/i);
+    // The half that is easiest to leave out — a door the club has not finished setting
+    // up gets no list at all. D7: never phrased as a door "the club hasn't named", which
+    // is an admin fact and contradicted this member's own history.
+    expect(body).toMatch(/still setting up/i);
+    expect(body).not.toMatch(/hasn't named/i);
   });
 
   it("never types the roster cap as a literal", () => {
@@ -497,6 +517,7 @@ describe("memberDoorCopy", () => {
   // --- the self-diagnosis ----------------------------------------------------------
 
   const HEALTHY = {
+    standingKnown: true,
     membership: "active" as const,
     membership_detail: "active",
     policy: "booking_window" as const,
@@ -506,7 +527,7 @@ describe("memberDoorCopy", () => {
     opensAtClock: "18:30",
     opensInWords: "27 minutes",
     codeSecondsLeft: 58,
-    connectionOk: true,
+    connection: "ok" as const,
     contact: CONTACT,
   };
 
@@ -514,7 +535,7 @@ describe("memberDoorCopy", () => {
     const { rows } = buildDiagnosis(HEALTHY);
     expect(rows).toHaveLength(6);
     for (const row of rows) {
-      expect(["Passed", "Needs attention", "Failed"]).toContain(row.stateWord);
+      expect(["Passed", "Needs attention", "Failed", "Not what decides it here", "The club's rule, not a check"]).toContain(row.stateWord);
       expect(row.label.length).toBeGreaterThan(0);
       expect(row.value.length).toBeGreaterThan(0);
     }
@@ -536,7 +557,7 @@ describe("memberDoorCopy", () => {
       HEALTHY,
       { ...HEALTHY, membership: "not_active" as const, membership_detail: "suspended" },
       { ...HEALTHY, membership: "none" as const, membership_detail: "none" },
-      { ...HEALTHY, connectionOk: false },
+      { ...HEALTHY, connection: "network" as const },
       { ...HEALTHY, hasBooking: false, bookingStartsClock: null, doorWindowOpen: null, opensAtClock: null, opensInWords: null },
       { ...HEALTHY, doorWindowOpen: false },
       { ...HEALTHY, codeSecondsLeft: 0 },
@@ -552,13 +573,13 @@ describe("memberDoorCopy", () => {
 
   /** First failing row wins, so the member is given ONE thing to do rather than five. */
   it("names the membership and nothing else when the membership is the first failure", () => {
-    const { conclusion } = buildDiagnosis({ ...HEALTHY, membership: "not_active", membership_detail: "pending_approval", connectionOk: false, codeSecondsLeft: 0 });
+    const { conclusion } = buildDiagnosis({ ...HEALTHY, membership: "not_active" as const, membership_detail: "pending_approval", connection: "network" as const, codeSecondsLeft: 0 });
     expect(conclusion).toMatch(/membership/i);
     expect(conclusion).not.toMatch(/had run out/i);
   });
 
   it("says the check is guessing when the phone could not reach the club", () => {
-    const { conclusion, rows } = buildDiagnosis({ ...HEALTHY, connectionOk: false });
+    const { conclusion, rows } = buildDiagnosis({ ...HEALTHY, connection: "network" as const });
     expect(conclusion).toMatch(/guessing/i);
     const connection = rows.find((r) => r.key === "connection")!;
     expect(connection.stateWord).toBe("Failed");
@@ -893,13 +914,311 @@ describe("memberDoorCopy", () => {
    * `readLastKnown` can still hand back after a version bump nobody has written yet.
    */
   it("takes the roster cap from the wire when it is given one", () => {
-    expect(offlineDetailsBody(12)).toContain("first 12 bookings");
+    expect(offlineDetailsBody(12)).toContain("next 12 bookings");
     expect(offlineDetailsBody(12)).not.toContain(`${GATE_ROSTER_MAX_ENTRIES}`);
   });
 
   it("falls back to the shared constant when the wire carried no cap", () => {
     for (const absent of [null, undefined, 0, -3]) {
-      expect(offlineDetailsBody(absent)).toContain(`first ${GATE_ROSTER_MAX_ENTRIES} bookings`);
+      expect(offlineDetailsBody(absent)).toContain(`next ${GATE_ROSTER_MAX_ENTRIES} bookings`);
+    }
+  });
+
+  // --- D1: the club's contact is THREE states, and a failed read is not "none" ---------
+
+  /**
+   * The finding this closes, in one sentence: a `/me/door` that failed on first load
+   * rendered "This club hasn't given the app a number to call" — a confident negative
+   * fact derived from a read that never landed. Three states, three sentences, and the
+   * unknown one may never be mistaken for the empty one.
+   */
+  it("says it could not load the club's number rather than that the club has none", () => {
+    const unknown = contactUnknownNotice();
+    expect(unknown).not.toBe(contactMissingNotice());
+    expect(unknown).toMatch(/couldn't load|could not load/i);
+    expect(unknown).not.toMatch(/hasn't given|has not given|no number/i);
+  });
+
+  /** No member screen tells a member to go and change a club setting they cannot see. */
+  it("never sends a member to Admin settings", () => {
+    for (const sentence of everySentence()) {
+      expect(sentence).not.toMatch(/admin settings/i);
+    }
+    expect(contactMissingNotice()).not.toMatch(/admin/i);
+  });
+
+  /**
+   * The conclusion of a self-check, and the closing line of the offline arms, must not
+   * assert "whatever is written on the door is the ONLY way from here" off a read that
+   * never landed. That sentence is the none-set arm and nothing else.
+   */
+  it("never claims the door notice is the only way in when it could not read the club's number", () => {
+    const shapes = [
+      offlineNoCode(UNKNOWN_CONTACT),
+      offlineIdentDeadEnd(UNKNOWN_CONTACT),
+      buildDiagnosis({ ...HEALTHY, contact: UNKNOWN_CONTACT }).conclusion,
+      codeExpiredDeadEnd("network", UNKNOWN_CONTACT),
+    ];
+    for (const text of shapes) {
+      expect(text).not.toMatch(/only way from here/i);
+      expect(text).not.toMatch(/hasn't given the app a number/i);
+    }
+  });
+
+  it("offers no call button off a contact it never managed to read", () => {
+    const copy = describeDecision({ reason: "member_not_active", released: false, offline: false }, {
+      countdown: null, opensAtClock: null, bookingStartsClock: null, earlyEntryMinutes: 0,
+      contact: UNKNOWN_CONTACT,
+    });
+    expect(copy.actions).toEqual([]);
+  });
+
+  /** A last-known number is still a number, and its age travels with it. */
+  it("keeps a last-known number usable, and says how old it is", () => {
+    const stale = staleContact({ phone: "021 555 0134", email: null }, 6);
+    const copy = describeDecision({ reason: "member_not_active", released: false, offline: false }, {
+      countdown: null, opensAtClock: null, bookingStartsClock: null, earlyEntryMinutes: 0, contact: stale,
+    });
+    expect(copy.actions).toContainEqual({ kind: "call_the_club", label: "Call the club", href: "tel:0215550134" });
+    expect(stale.minutesAgo).toBe(6);
+  });
+
+  // --- D2: the phone failing and the club's system failing are different sentences ------
+
+  it("blames the club's system, not the phone, when the club's system answered with an error", () => {
+    const server = standingFailed(null, "server");
+    const network = standingFailed(null, "network");
+    expect(server).not.toBe(network);
+    expect(server).toMatch(/answered with an error/i);
+    expect(server).toMatch(/not your phone/i);
+    expect(server).not.toMatch(/your phone can't reach/i);
+    expect(network).toMatch(/your phone can't reach/i);
+  });
+
+  it("keeps the two apart when there is a cached copy too", () => {
+    const cached = { body: "Your club opens its doors for any active member.", minutesAgo: 4 };
+    expect(standingFailed(cached, "server")).not.toBe(standingFailed(cached, "network"));
+    expect(standingFailed(cached, "server")).toMatch(/answered with an error/i);
+    expect(standingFailed(cached, "server")).toContain(cached.body);
+  });
+
+  /**
+   * The diagnostic row is where the wrong blame did the real damage: a 500 from the club
+   * scored "This phone's line to the club ✗ Failed" in front of somebody whose phone was
+   * fine.
+   */
+  it("does not fail the phone's own row when it was the club's system that failed", () => {
+    const { rows, conclusion } = buildDiagnosis({ ...HEALTHY, connection: "server" as const });
+    const connection = rows.find((r) => r.key === "connection")!;
+    expect(connection.state).toBe("neutral");
+    expect(connection.stateWord).not.toBe("Failed");
+    expect(connection.value).not.toMatch(/not reaching the club/i);
+    expect(conclusion).toMatch(/answered with an error/i);
+    expect(conclusion).toMatch(/not your phone/i);
+  });
+
+  // --- D3: a check that does not apply, or is anomalous, is NEUTRAL ---------------------
+
+  /**
+   * Kayla, who has no membership row at all, scored six green ticks — including "an
+   * active membership ✓ Passed" for a rule she is not held to and "nothing on file ✓
+   * Passed" for a state the club would want to know about.
+   */
+  it("never ticks a membership the club has nothing on file for", () => {
+    const { rows } = buildDiagnosis({ ...HEALTHY, membership: "none" as const, membership_detail: "none" });
+    const membership = rows.find((r) => r.key === "membership")!;
+    expect(membership.state).toBe("neutral");
+    expect(membership.stateWord).toMatch(/unusual/i);
+  });
+
+  /** The policy row states the club's rule. It is not a check and may never read as one. */
+  it("never ticks the rule row, which is a statement rather than a check", () => {
+    for (const policy of ["active_member", "booking_window"] as const) {
+      const { rows } = buildDiagnosis({ ...HEALTHY, policy });
+      expect(rows.find((r) => r.key === "policy")!.state).toBe("neutral");
+    }
+  });
+
+  it("never ticks a check that does not apply at this club", () => {
+    const { rows } = buildDiagnosis({
+      ...HEALTHY, policy: "active_member" as const, hasBooking: false, bookingStartsClock: null,
+      doorWindowOpen: null, opensAtClock: null, opensInWords: null,
+    });
+    expect(rows.find((r) => r.key === "booking")!.state).toBe("neutral");
+    expect(rows.find((r) => r.key === "window")!.state).toBe("neutral");
+  });
+
+  /**
+   * The whole of Kayla's screen, in one probe: not one green tick may be claimed off a
+   * rule she is not held to, and the conclusion has to mention what the club is missing.
+   */
+  it("gives a member with no membership on file no green tick for one", () => {
+    const { rows, conclusion } = buildDiagnosis({
+      ...HEALTHY, membership: "none" as const, membership_detail: "none",
+      policy: "active_member" as const, hasBooking: false, bookingStartsClock: null,
+      doorWindowOpen: null, opensAtClock: null, opensInWords: null,
+    });
+    const passed = rows.filter((r) => r.state === "passed");
+    // Her code and her signal are the only two things on this screen she can be said to
+    // have passed. Everything else is either the club's rule or a check this club does not apply.
+    expect(passed.map((r) => r.key)).toEqual(["code", "connection"]);
+    // The exact pairing the reviewer photographed: the words "an active membership" beside
+    // a green tick, in front of somebody who has none. The words may stay — they state the
+    // club's rule — but never as something this member is said to have passed.
+    for (const row of rows) {
+      if (row.value === "an active membership") expect(row.state).not.toBe("passed");
+      if (row.value.startsWith("nothing on file")) expect(row.state).not.toBe("passed");
+    }
+    expect(conclusion).toMatch(/no membership on file/i);
+  });
+
+  it("carries a word for every state it can produce", () => {
+    const shapes = [
+      HEALTHY,
+      { ...HEALTHY, membership: "none" as const, membership_detail: "none" },
+      { ...HEALTHY, membership: "not_active" as const, membership_detail: "suspended" },
+      { ...HEALTHY, connection: "server" as const },
+      { ...HEALTHY, connection: "network" as const },
+      { ...HEALTHY, doorWindowOpen: false },
+      { ...HEALTHY, doorWindowOpen: null, opensAtClock: null, opensInWords: null },
+      { ...HEALTHY, policy: "active_member" as const },
+      { ...HEALTHY, codeSecondsLeft: 0 },
+    ];
+    for (const shape of shapes) {
+      for (const row of buildDiagnosis(shape).rows) {
+        expect(row.stateWord.length).toBeGreaterThan(3);
+        expect(["passed", "neutral", "attention", "failed"]).toContain(row.state);
+      }
+    }
+  });
+
+  // --- D5: an expired code that cannot be renewed ---------------------------------------
+
+  it("says a code that has run out cannot be renewed, and why", () => {
+    const noSignal = codeExpiredDeadEnd("network", CONTACT);
+    const serverDown = codeExpiredDeadEnd("server", CONTACT);
+    expect(noSignal).toMatch(/run out/i);
+    expect(noSignal).toMatch(/signal/i);
+    expect(noSignal).not.toMatch(/refreshing/i);
+    expect(serverDown).not.toBe(noSignal);
+    expect(serverDown).toMatch(/answered with an error/i);
+    expect(noSignal).toContain("021 555 0134");
+  });
+
+  // --- D9: the door section says it is still looking ------------------------------------
+
+  it("has a sentence for a door read that has not landed yet", () => {
+    expect(DOOR_SECTION_CHECKING).toMatch(/checking/i);
+    // It must be true at a club with no door as well: this fires before the answer that
+    // says whether there is a door at all.
+    expect(DOOR_SECTION_CHECKING).toMatch(/whether/i);
+  });
+
+  // --- D7 / D12: the offline disclosure, in the member's voice ---------------------------
+
+  /**
+   * It read like an admin's note — "whichever rule is set above", "the first 48 by start
+   * time" — to somebody standing outside a building. And its unnamed-door clause
+   * contradicted the same member's own history, which showed releases at a door it called
+   * unnamed.
+   */
+  it("states the offline half in the member's own terms", () => {
+    const body = offlineDetailsBody(12);
+    expect(body).toMatch(/\byou\b/i);
+    expect(body).not.toMatch(/whichever rule is set above/i);
+  });
+
+  it("never calls a door one the club has not named, on any surface a member reads", () => {
+    expect(UNNAMED_DOOR).toBe("a club door");
+    for (const sentence of [...everySentence(), decisionStamp(null, "2026-09-19T06:04:00Z"), UNNAMED_DOOR]) {
+      expect(sentence).not.toMatch(/hasn't named|has not named|unnamed/i);
+    }
+  });
+
+  // --- the LOW finding: a checklist that contradicts itself under a failed read ---------
+
+  /**
+   * With no `/me/door` at all — failed on a cold start, nothing cached — the page
+   * defaulted the membership to `active` and the policy to `active_member` so the
+   * connection row would win the conclusion. That is right about the conclusion and wrong
+   * about the rows: it printed "Your membership — active ✓ Passed" directly above "This
+   * phone's line to the club — ✗ Failed", in front of somebody trying to work out what
+   * went wrong.
+   */
+  it("answers nothing it could not ask about, and says which rows those are", () => {
+    const { rows, conclusion } = buildDiagnosis({
+      ...HEALTHY, standingKnown: false, connection: "network" as const,
+    });
+    for (const key of ["membership", "policy", "booking", "window"] as const) {
+      const unknown = rows.find((r) => r.key === key)!;
+      expect(unknown.state).toBe("neutral");
+      expect(unknown.stateWord).toBe("Couldn't check");
+    }
+    // The two the page can answer for itself, whatever the club said, still answer.
+    expect(rows.find((r) => r.key === "code")!.state).toBe("passed");
+    expect(rows.find((r) => r.key === "connection")!.state).toBe("failed");
+    expect(conclusion).toMatch(/unanswered rather than fine/i);
+  });
+
+  it("still asks all six, so a row is never silently dropped", () => {
+    const { rows } = buildDiagnosis({ ...HEALTHY, standingKnown: false, connection: "server" as const });
+    expect(rows.map((r) => r.key)).toEqual(["membership", "policy", "booking", "window", "code", "connection"]);
+  });
+
+  // --- WIRE-R1 §2 / §8: the second instant, and only where it exists ----------------------
+
+  it("names the instant the club heard, on a row a cut-off door decided alone", () => {
+    const stamp = decisionStamp("front-door", "2026-09-19T06:04:00Z", "2026-09-19T06:09:00Z");
+    expect(stamp).toMatch(/^front-door · \d{2}:\d{2} · the club heard at \d{2}:\d{2}$/);
+    // The two instants are different times, and the sentence has to carry both.
+    const [scan, heard] = stamp.match(/\d{2}:\d{2}/g)!;
+    expect(scan).not.toBe(heard);
+  });
+
+  /** A delivery time on a row that never took that journey is a delay that did not happen. */
+  it("prints no delivery clause when there was nothing to deliver", () => {
+    expect(decisionStamp("front-door", "2026-09-19T06:04:00Z", null))
+      .toMatch(/^front-door · \d{2}:\d{2}$/);
+    expect(decisionStamp("front-door", "2026-09-19T06:04:00Z")).not.toMatch(/heard/);
+  });
+
+  it("does the same on a history row's own line", () => {
+    expect(historyOfflineLine("2026-09-19T06:09:00Z")).toMatch(/The club heard at \d{2}:\d{2}\./);
+    expect(historyOfflineLine(null)).toBe(HISTORY_OFFLINE_LINE);
+    expect(historyOfflineLine(null)).not.toMatch(/heard/);
+  });
+
+  it("reads the delivery instant off the row rather than off the offline flag alone", () => {
+    const withTime = historyLine({ reason: "ok", released: true, offline: true, delivered_at: "2026-09-19T06:09:00Z" });
+    const without = historyLine({ reason: "ok", released: true, offline: true, delivered_at: null });
+    expect(withTime).not.toBe(without);
+    expect(without).toBe(HISTORY_OFFLINE_LINE);
+  });
+
+  /**
+   * The list is ordered and paged on the DELIVERY axis, so an offline row's own time can
+   * run backwards against its neighbours. A member who is not told that reads their own
+   * record as wrong.
+   */
+  it("explains why a row can sit below one that happened after it", () => {
+    expect(HISTORY_DELIVERY_ORDER).toMatch(/when the club heard/i);
+    expect(HISTORY_DELIVERY_ORDER).toMatch(/below/i);
+    // Member voice, like every other sentence here: about the rows, never about a cursor,
+    // an axis or a page.
+    expect(HISTORY_DELIVERY_ORDER).not.toMatch(/cursor|axis|paged|sorted by/i);
+  });
+
+  /**
+   * The standing line is about the club's RULE and this member's standing. Pointing at
+   * "the code on this screen" makes it a claim about whatever is rendered ten pixels above
+   * — and when that code has run out and been replaced by a dead state, the two contradict
+   * each other outright. Photographed on the expired screen during the visual pass.
+   */
+  it("never points at whatever code happens to be on screen", () => {
+    for (const membership of ["active", "none"] as const) {
+      const line = standingFor({ policy: "active_member", membership, membership_detail: membership });
+      expect(line.body).not.toMatch(/code on this screen/i);
+      expect(line.body).toMatch(/live code of yours/i);
     }
   });
 });

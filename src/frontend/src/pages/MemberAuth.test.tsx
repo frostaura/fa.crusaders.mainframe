@@ -136,6 +136,110 @@ describe("Login — a 403 is two different problems", () => {
 
     expect(await screen.findByText(/Too many sign-in attempts/i)).toBeInTheDocument();
   });
+
+  // --- D8: "speak to them", on a screen that gave them no way to -------------------------
+
+  /**
+   * All three not-approved sentences end by telling the member to talk to the club, and
+   * the sign-in screen is exactly where a member has nothing else left to try — they are
+   * stopped before any API that knows a club's phone number is reachable to them. The
+   * refusal now carries the club's public contact; the screen renders it as things that
+   * can be pressed.
+   */
+  it.each([
+    ["Suspended", /membership is suspended/i],
+    ["Rejected", /wasn't approved/i],
+    ["Pending", /isn't approved yet/i],
+  ])("gives a %s member a way to reach the club it just told them to speak to", async (status, sentence) => {
+    stubFetch([err("/api/v1/auth/login", 403, {
+      error: "not_approved",
+      status,
+      contact: { phone: "021 555 0134", email: "desk@club.test" },
+    })]);
+    renderAt(<LoginPage />);
+    await signInAs("someone@club.test", "Password123!");
+
+    expect(await screen.findByText(sentence)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "021 555 0134" })).toHaveAttribute("href", "tel:0215550134");
+    expect(screen.getByRole("link", { name: "desk@club.test" })).toHaveAttribute("href", "mailto:desk@club.test");
+  });
+
+  /**
+   * The absent case, which is the ordinary one against an API that predates the field —
+   * and the one where a page that renders anything at all is making a claim. Nothing,
+   * never an empty link, never "Call the club on null".
+   */
+  it.each([
+    ["no contact key at all", { error: "not_approved", status: "Suspended" }],
+    ["both halves null", { error: "not_approved", status: "Suspended", contact: { phone: null, email: null } }],
+    ["a contact that is not an object", { error: "not_approved", status: "Suspended", contact: "021 555 0134" }],
+    ["blank strings", { error: "not_approved", status: "Suspended", contact: { phone: "  ", email: "" } }],
+  ])("claims nothing when the refusal carried %s", async (_case, body) => {
+    stubFetch([err("/api/v1/auth/login", 403, body)]);
+    renderAt(<LoginPage />);
+    await signInAs("suspended@club.test", "Password123!");
+
+    await screen.findByText(/membership is suspended/i);
+    expect(document.querySelectorAll('a[href^="tel:"]')).toHaveLength(0);
+    expect(document.querySelectorAll('a[href^="mailto:"]')).toHaveLength(0);
+    expect(document.body.textContent).not.toMatch(/null|undefined/);
+  });
+
+  /** One half is enough, and the other must not be invented to keep it company. */
+  it("renders only the half the club actually set", async () => {
+    stubFetch([err("/api/v1/auth/login", 403, {
+      error: "not_approved", status: "Rejected", contact: { phone: null, email: "desk@club.test" },
+    })]);
+    renderAt(<LoginPage />);
+    await signInAs("rejected@club.test", "Password123!");
+
+    await screen.findByText(/wasn't approved/i);
+    expect(screen.getByRole("link", { name: "desk@club.test" })).toBeInTheDocument();
+    expect(document.querySelectorAll('a[href^="tel:"]')).toHaveLength(0);
+  });
+
+  /**
+   * Scoped to the one refusal that asks the member to make contact. A wrong password is
+   * not an invitation to phone the club, and a screen that printed the number for every
+   * failure would be handing it to whoever is guessing credentials.
+   */
+  it("shows nothing of the sort on a refusal that is not about the membership", async () => {
+    stubFetch([err("/api/v1/auth/login", 401, {
+      error: "invalid_credentials", contact: { phone: "021 555 0134", email: "desk@club.test" },
+    })]);
+    renderAt(<LoginPage />);
+    await signInAs("someone@club.test", "wrong");
+
+    await screen.findByText(/Email or password is incorrect/i);
+    expect(document.querySelectorAll('a[href^="tel:"]')).toHaveLength(0);
+  });
+
+  /** It belongs to the answer the API just gave, not to this browser. */
+  it("drops the contact on the next attempt", async () => {
+    stubFetch([{
+      method: "POST",
+      path: "/api/v1/auth/login",
+      status: 403,
+      // `body` as well as `sequence`: the stub rejects outright for a route with neither
+      // a `body` key nor a `respond`, and the rejection arrives at the page as a network
+      // failure — so the screen shows "Couldn't reach the club" and the test fails for a
+      // reason that has nothing to do with what it is about.
+      body: null,
+      // The same refusal twice, and the club has cleared its number between them. The
+      // first answer must not still be on screen behind the second.
+      sequence: [
+        { error: "not_approved", status: "Suspended", contact: { phone: "021 555 0134", email: null } },
+        { error: "not_approved", status: "Suspended" },
+      ],
+    }]);
+    renderAt(<LoginPage />);
+    await signInAs("suspended@club.test", "Password123!");
+    expect(await screen.findByRole("link", { name: "021 555 0134" })).toBeInTheDocument();
+
+    await signInAs("suspended@club.test", "Password123!");
+    await waitFor(() => expect(document.querySelectorAll('a[href^="tel:"]')).toHaveLength(0));
+    expect(screen.getByText(/membership is suspended/i)).toBeInTheDocument();
+  });
 });
 
 describe("Login — the page you actually asked for", () => {
