@@ -14,7 +14,9 @@ public static class MeProfileEndpoints
     {
         var g = app.MapGroup("/api/v1/me").RequireAuthorization();
 
-        g.MapGet("/profile", async (HttpContext ctx, ITenantContext tenant, MainframeDbContext db, CancellationToken ct) =>
+        g.MapGet("/profile", async (
+            HttpContext ctx, ITenantContext tenant, MainframeDbContext db,
+            TenantSettingsAccessor settings, CancellationToken ct) =>
         {
             var userId = ctx.User.Id() ?? Guid.Empty;
             var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId, ct);
@@ -31,6 +33,13 @@ public static class MeProfileEndpoints
                 photo_url = membership?.PhotoUrl,
                 status = membership?.Status.ToString().ToLowerInvariant(),
                 must_change_password = user.MustChangePassword,
+
+                // GOAL item 12: which glyph pair this club's confirm/decline buttons wear. Here
+                // rather than on a settings route because this is the one club-wide value a
+                // MEMBER needs and the settings surface is admin-only. It is their own club's by
+                // construction — the accessor resolves the tenant from the caller's own token, so
+                // there is no id a member could supply to read another club's.
+                action_glyphs = ActionGlyphs.For(await settings.GetAsync(ct)),
             });
         });
 

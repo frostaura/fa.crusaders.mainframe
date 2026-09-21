@@ -123,12 +123,18 @@ public static class MemberGroupEndpoints
             HasAnyWindows: windows.Any(w => w.GroupId == g.Id),
             WindowsForDay: []);
 
-    private static string ModeName(GroupPricingMode mode) => mode switch
+    // Block body, not an expression one: lizard's C# parser reads the `{` of a switch or an
+    // object initialiser as the END of the function and dumps the rest of the file into a
+    // *global* pseudo-function whose length trips `-L 200`. See memory/gotchas.md.
+    private static string ModeName(GroupPricingMode mode)
     {
-        GroupPricingMode.Multiplier => "multiplier",
-        GroupPricingMode.FlatPerSlice => "flat_per_slice",
-        _ => "inherit_court",
-    };
+        return mode switch
+        {
+            GroupPricingMode.Multiplier => "multiplier",
+            GroupPricingMode.FlatPerSlice => "flat_per_slice",
+            _ => "inherit_court",
+        };
+    }
 
     private static async Task<IResult> CreateAsync(
         MemberGroupRequest req, MainframeDbContext db, ITenantContext tenant, HttpContext ctx, CancellationToken ct)

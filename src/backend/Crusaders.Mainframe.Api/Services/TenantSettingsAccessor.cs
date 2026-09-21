@@ -127,6 +127,10 @@ public sealed class TenantSettingsAccessor
                 root, "realtime_fallback_window_seconds", RealtimeSettings.DefaultFallbackWindowSeconds),
             RealtimePollSecondsWallet = TryInt(
                 root, "realtime_poll_seconds_wallet", RealtimeSettings.DefaultPollSecondsWallet),
+
+            // GOAL item 12's glyph set. Read RAW, like every other key; ActionGlyphs is what
+            // decides what an unrecognised stored value means.
+            ActionGlyphs = TryString(root, ActionGlyphs.Key, ActionGlyphs.Thumbs),
         };
     }
 
@@ -162,15 +166,16 @@ public sealed class TenantSettingsAccessor
     /// above are: <c>"true"</c> the string is a client bug, and silently reading it as
     /// <c>true</c> would hide it for as long as the value happened to be the one wanted.
     /// </summary>
+    // Block body, not an expression one: lizard's C# parser reads the `{` of a switch as the
+    // END of the function and dumps the rest of the file into a *global* pseudo-function
+    // whose length trips `-L 200`. See memory/gotchas.md.
     private static bool TryBool(JsonElement root, string name, bool fallback)
-        => root.TryGetProperty(name, out var v)
-            ? v.ValueKind switch
-            {
-                JsonValueKind.True => true,
-                JsonValueKind.False => false,
-                _ => fallback,
-            }
-            : fallback;
+    {
+        if (!root.TryGetProperty(name, out var v)) return fallback;
+        if (v.ValueKind == JsonValueKind.True) return true;
+        if (v.ValueKind == JsonValueKind.False) return false;
+        return fallback;
+    }
 }
 
 public sealed record TenantSettingsView(
@@ -411,6 +416,13 @@ public sealed record TenantSettingsView(
 
     /// <summary>The wallet poll cadence for a degraded client, seconds.</summary>
     public int RealtimePollSecondsWallet { get; init; } = RealtimeSettings.DefaultPollSecondsWallet;
+
+    /// <summary>
+    /// Which glyph pair a confirm/decline button wears — <c>thumbs</c> or <c>marks</c>. Read via
+    /// <see cref="Services.ActionGlyphs.For"/>, which is where an unrecognised stored value is
+    /// decided rather than obeyed.
+    /// </summary>
+    public string ActionGlyphs { get; init; } = Services.ActionGlyphs.Thumbs;
 
     /// <summary>
     /// The club's open and close for one local weekday, as minutes past local midnight.

@@ -191,10 +191,8 @@ public sealed class BookingService
             TotalCost: totalCost,
             DurationLabel: $"{settings.SliceMinutes * sliceCount} min",
             IsWalkUp: false,
-            AllowNegativeBalance: overdraftAuthorised)
-        {
-            Rules = (subject, slot),
-        }, ct);
+            AllowNegativeBalance: overdraftAuthorised,
+            Rules: (subject, slot)), ct);
     }
 
     /// <summary>
@@ -311,10 +309,8 @@ public sealed class BookingService
             DurationLabel: $"{grantedMinutes} min",
             IsWalkUp: true,
             ExternalReference: externalReference,
-            DeferConfirmation: true)
-        {
-            Rules = (walkUpSubject, walkUpSlot),
-        }, ct);
+            DeferConfirmation: true,
+            Rules: (walkUpSubject, walkUpSlot)), ct);
     }
 
     /// <summary>
@@ -551,15 +547,13 @@ public sealed class BookingService
         decimal TotalCost, string DurationLabel, bool IsWalkUp,
         string? ExternalReference = null,
         bool AllowNegativeBalance = false,
-        bool DeferConfirmation = false)
-    {
-        /// <summary>
-        /// Who is booking and what for, so <c>CommitAsync</c> can re-ask the rules UNDER the
-        /// payer lock. Null only for callers that have no rules to re-ask — see
-        /// <c>CommitAsync</c>.
-        /// </summary>
-        public (RuleSubject Subject, RuleSlot Slot)? Rules { get; init; }
-    }
+        bool DeferConfirmation = false,
+        // Who is booking and what for, so CommitAsync can re-ask the rules UNDER the payer
+        // lock. Positional rather than init-only deliberately: a block-bodied record here
+        // flips lizard's C# scoping for every method BELOW it in the file, and the gate then
+        // goes red on functions nobody edited — the instability whitelizard.txt's own header
+        // is about.
+        (RuleSubject Subject, RuleSlot Slot)? Rules = null);
 
     private async Task<BookingResult> CommitAsync(NewBooking spec, CancellationToken ct)
     {

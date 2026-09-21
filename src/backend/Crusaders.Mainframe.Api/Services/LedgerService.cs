@@ -159,8 +159,13 @@ public sealed class LedgerService
         return kinds.Count == 1 ? kinds[0] : "mixed";
     }
 
-    internal static string ReasonFor(LedgerEntryType type) => type switch
+    // Block body, not an expression one: lizard's C# parser reads the `{` of a switch or an
+    // object initialiser as the END of the function and dumps the rest of the file into a
+    // *global* pseudo-function whose length trips `-L 200`. See memory/gotchas.md.
+    internal static string ReasonFor(LedgerEntryType type)
     {
+        return type switch
+        {
         LedgerEntryType.TopUp => "top_up",
         LedgerEntryType.AdminAdjustment => "admin_adjustment",
         LedgerEntryType.AdminTopUp => "admin_top_up",
@@ -168,9 +173,10 @@ public sealed class LedgerService
         LedgerEntryType.CancellationRefund => "cancellation_refund",
         LedgerEntryType.NoShowPenalty or LedgerEntryType.LateCancellationPenalty => "penalty",
         LedgerEntryType.LightsPurchase => "lights_purchase",
-        LedgerEntryType.PaymentReversal => "correction",
-        _ => "unknown",
-    };
+            LedgerEntryType.PaymentReversal => "correction",
+            _ => "unknown",
+        };
+    }
 
     /// <summary>
     /// <c>credit.refunded</c>, <c>credit.penalty_applied</c> and <c>credit.adjusted</c>
@@ -274,8 +280,13 @@ public sealed class LedgerService
             ? (null, false)
             : (entry.ActorUserId, entry.ActorUserId != entry.UserId);
 
-    private LedgerEntry Build(LedgerPosting posting) => new()
+    // Block body, not an expression one: lizard's C# parser reads the `{` of a switch or an
+    // object initialiser as the END of the function and dumps the rest of the file into a
+    // *global* pseudo-function whose length trips `-L 200`. See memory/gotchas.md.
+    private LedgerEntry Build(LedgerPosting posting)
     {
+        return new LedgerEntry
+        {
         TenantId = _tenant.TenantId,
         UserId = posting.UserId,
         Type = posting.Type,
@@ -284,9 +295,10 @@ public sealed class LedgerService
         ConversionRate = posting.ConversionRate,
         RelatedBookingId = posting.RelatedBookingId,
         ActorUserId = posting.ActorUserId,
-        Reason = posting.Reason,
-        ExternalReference = posting.ExternalReference,
-    };
+            Reason = posting.Reason,
+            ExternalReference = posting.ExternalReference,
+        };
+    }
 
     public async Task<LedgerEntry> PostAsync(LedgerPosting posting, CancellationToken ct)
     {

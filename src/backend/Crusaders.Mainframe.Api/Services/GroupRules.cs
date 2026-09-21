@@ -100,15 +100,21 @@ public static class GroupRules
     /// does not round in its own favour in one place and against itself in another.
     /// </para>
     /// </summary>
-    public static decimal PriceFor(MemberGroupRules group, decimal courtPrice) => group.PricingMode switch
+    // Block body, not an expression one: lizard's C# parser reads the `{` of a switch or an
+    // object initialiser as the END of the function and dumps the rest of the file into a
+    // *global* pseudo-function whose length trips `-L 200`. See memory/gotchas.md.
+    public static decimal PriceFor(MemberGroupRules group, decimal courtPrice)
     {
-        GroupPricingMode.Multiplier => Math.Max(0m, decimal.Round(
-            courtPrice * Math.Clamp(group.PriceMultiplierBps, MinMultiplierBps, MaxMultiplierBps) / 10_000m,
-            2, MidpointRounding.AwayFromZero)),
-        GroupPricingMode.FlatPerSlice => Math.Max(0m, decimal.Round(
-            group.FlatSlicePriceCredits ?? courtPrice, 2, MidpointRounding.AwayFromZero)),
-        _ => courtPrice,
-    };
+        return group.PricingMode switch
+        {
+            GroupPricingMode.Multiplier => Math.Max(0m, decimal.Round(
+                courtPrice * Math.Clamp(group.PriceMultiplierBps, MinMultiplierBps, MaxMultiplierBps) / 10_000m,
+                2, MidpointRounding.AwayFromZero)),
+            GroupPricingMode.FlatPerSlice => Math.Max(0m, decimal.Round(
+                group.FlatSlicePriceCredits ?? courtPrice, 2, MidpointRounding.AwayFromZero)),
+            _ => courtPrice,
+        };
+    }
 
     /// <summary>
     /// The price a member actually pays per slice: the highest any of their groups asks for, and

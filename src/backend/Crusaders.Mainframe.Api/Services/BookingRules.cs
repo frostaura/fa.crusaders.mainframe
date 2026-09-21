@@ -142,54 +142,8 @@ public sealed class BookingRules
         var onBehalf = subject.ActorIsAdmin;
 
         var day = ClubClock.DateOf(settings, slot.StartsAt);
-        var startMinute = ClubClock.MinutesIntoDay(settings, slot.StartsAt);
-        var endMinute = startMinute + (int)Math.Round((slot.EndsAt - slot.StartsAt).TotalMinutes);
-        var (openMinute, closeMinute) = settings.HoursFor(day.DayOfWeek);
 
-        // §5 operating hours.
-        //
-        // <b>An on-behalf admin booking bypasses them</b>, which is the contract
-        // OperatingHoursTests already pins: the desk booking a court outside advertised hours is
-        // the club deciding to open, and the club is allowed to. The GROUP window below is not
-        // bypassed, and the two are different questions — opening hours are a fact about the
-        // building that the desk owns, a group window is a rule about that MEMBER which the desk
-        // is not overriding by booking for them.
-        //
-        // A walk-up is truncated at the club's close by SellableEndAsync rather than refused,
-        // which is the right behaviour for somebody standing at the court, so it does not meet
-        // this rule here either.
-        if (!onBehalf && !slot.IsWalkUp && (startMinute < openMinute || endMinute > closeMinute))
-        {
-            return Refuse(new BookingResult.OutOfHours(
-                BookingService.MinutesToHhmm(openMinute), BookingService.MinutesToHhmm(closeMinute)));
-        }
-
-        // GOAL item 3. The member's groups intersected with the club's hours, and the booking has
-        // to fit inside ONE resulting stretch — see GroupRules.Permits for why the union is the
-        // wrong test.
-        // The window the intersection STARTS from is the club's own hours — except where the
-        // hours rule above has just been bypassed, in which case seeding with them would refuse
-        // through the back door exactly what was deliberately allowed through the front. An
-        // admin booking a member in at 06:00 on a Saturday the club opens at 07:00 must not be
-        // told "your groups do not allow this", least of all when the member is in no group at
-        // all. The GROUPS' own windows still bind either way, which is what D2 asks for.
-        var baseWindow = onBehalf || slot.IsWalkUp
-            ? new MinuteWindow(0, 1440)
-            : new MinuteWindow(openMinute, closeMinute);
-
-        var allowed = GroupRules.AllowedWindows(subject.Groups, baseWindow);
-        if (allowed.Count == 0)
-        {
-            return Refuse(new BookingResult.NoBookableWindow(
-                subject.Groups.Select(g => g.Name).ToList(), DayName(day.DayOfWeek)));
-        }
-        if (!GroupRules.Permits(allowed, startMinute, endMinute))
-        {
-            return Refuse(new BookingResult.GroupWindow(
-                subject.Groups.Select(g => g.Name).ToList(),
-                DayName(day.DayOfWeek),
-                allowed.Select(w => (BookingService.MinutesToHhmm(w.Start), BookingService.MinutesToHhmm(w.End))).ToList()));
-        }
+        if (AccessRefusal(subject, slot, settings, day, onBehalf) is { } access) return Refuse(access);
 
         // A.12 peak, which an on-behalf admin booking bypasses: the desk is taking the decision.
         if (!onBehalf && !slot.IsWalkUp && PeakRefusal(subject.Class, slot, settings) is { } peak)
@@ -199,17 +153,98 @@ public sealed class BookingRules
 
         // Item 19 + blueprint A.4. Bypassed for an on-behalf admin booking — the cap is exactly
         // what a desk is overriding when it books for somebody — and for a walk-up unless the
-        // club has asked otherwise.
-        var capApplies = !onBehalf && (!slot.IsWalkUp || settings.WalkUpHonoursDayCap);
-        if (capApplies && await CapRefusalAsync(subject, slot, settings, day, ct) is { } cap)
+        // club has asked otherwise. A walk-up always COUNTS toward the cap either way.
+        if (onBehalf || (slot.IsWalkUp && !settings.WalkUpHonoursDayCap))
         {
-            return Refuse(cap);
+            return new RuleVerdict.Allowed(price);
         }
 
-        return new RuleVerdict.Allowed(price);
+        return await CapRefusalAsync(subject, slot, settings, day, ct) is { } cap
+            ? Refuse(cap)
+            : new RuleVerdict.Allowed(price);
     }
 
     private static RuleVerdict Refuse(BookingResult result) => new RuleVerdict.Refused(result);
+
+    /// <summary>
+    /// May this member be on a court at this TIME at all — the club's opening hours, then their
+    /// groups' windows.
+    ///
+    /// <para>
+    /// <b>An on-behalf admin booking bypasses the opening hours</b>, which is the contract
+    /// <c>OperatingHoursTests</c> already pins: the desk booking a court outside advertised hours
+    /// is the club deciding to open, and the club is allowed to. It does NOT bypass the group
+    /// window, and the two are different questions — opening hours are a fact about the building
+    /// that the desk owns, a group window is a rule about that MEMBER which the desk is not
+    /// overriding by booking for them.
+    /// </para>
+    ///
+    /// <para>
+    /// A walk-up is truncated at the club's close by <c>SellableEndAsync</c> rather than refused,
+    /// which is the right behaviour for somebody standing at the court, so it does not meet the
+    /// hours rule here either.
+    /// </para>
+    ///
+    /// <para>
+    /// When the hours rule does not apply, the window intersection starts from the whole day
+    /// rather than from the club's hours — seeding it with them would refuse through the back
+    /// door exactly what was deliberately allowed through the front, and would do it to a member
+    /// who is in no group at all.
+    /// </para>
+    /// </summary>
+    private static BookingResult? AccessRefusal(
+        RuleSubject subject, RuleSlot slot, TenantSettingsView settings, DateOnly day, bool onBehalf)
+    {
+        var startMinute = ClubClock.MinutesIntoDay(settings, slot.StartsAt);
+        var endMinute = startMinute + (int)Math.Round((slot.EndsAt - slot.StartsAt).TotalMinutes);
+        var (openMinute, closeMinute) = settings.HoursFor(day.DayOfWeek);
+        var hoursApply = !onBehalf && !slot.IsWalkUp;
+
+        if (hoursApply && (startMinute < openMinute || endMinute > closeMinute))
+        {
+            return new BookingResult.OutOfHours(
+                BookingService.MinutesToHhmm(openMinute), BookingService.MinutesToHhmm(closeMinute));
+        }
+
+        var baseWindow = hoursApply
+            ? new MinuteWindow(openMinute, closeMinute)
+            : new MinuteWindow(0, 1440);
+
+        return WindowRefusal(subject, day, baseWindow, startMinute, endMinute);
+    }
+
+    /// <summary>
+    /// The member's groups intersected with the window the club is open in, and whether the
+    /// booking fits inside ONE resulting stretch.
+    ///
+    /// <para>
+    /// One stretch, not the union — see <see cref="GroupRules.Permits"/>: half the court time the
+    /// member asked for is time they may not have, which is the same whole-range rule the
+    /// operating-hours check already applies.
+    /// </para>
+    ///
+    /// <para>
+    /// The EMPTY case is its own refusal rather than a <c>GroupWindow</c> carrying no windows,
+    /// because the honest sentence is completely different — "you are in two groups whose booking
+    /// times do not overlap, so there is nothing you can book on a Tuesday" is not a narrower
+    /// version of "not at this time".
+    /// </para>
+    /// </summary>
+    private static BookingResult? WindowRefusal(
+        RuleSubject subject, DateOnly day, MinuteWindow baseWindow, int startMinute, int endMinute)
+    {
+        var allowed = GroupRules.AllowedWindows(subject.Groups, baseWindow);
+        var names = subject.Groups.Select(g => g.Name).ToList();
+
+        if (allowed.Count == 0) return new BookingResult.NoBookableWindow(names, DayName(day.DayOfWeek));
+        if (GroupRules.Permits(allowed, startMinute, endMinute)) return null;
+
+        return new BookingResult.GroupWindow(
+            names,
+            DayName(day.DayOfWeek),
+            allowed.Select(w =>
+                (BookingService.MinutesToHhmm(w.Start), BookingService.MinutesToHhmm(w.End))).ToList());
+    }
 
     private static BookingResult? PeakRefusal(MemberClass memberClass, RuleSlot slot, TenantSettingsView settings)
     {
@@ -277,25 +312,42 @@ public sealed class BookingRules
         var relaxed = await RelaxedAsync(settings, slot, day, ct);
         if (relaxed) return null;
 
-        var resetsAt = ClubClock.DayWindow(settings, day).End;
-        var boundByGroup = overSlots
-            ? GroupRules.BoundBy(subject.Groups, BookingLimits.MaxSlotsPerDay(settings), g => g.MaxSlotsPerDay)
-            : GroupRules.BoundBy(subject.Groups, BookingLimits.MaxMinutesPerDay(settings), g => g.MaxMinutesPerDay);
-
-        // Which one BOUND is what the member's sentence is about, so the slot cap is reported when
-        // both are exceeded: it is the one item 19 asked for and the one a grid counts buttons
-        // against.
         return overSlots
-            ? new BookingResult.PerDaySlotCapExceeded(
-                slotCap, bookedSlots, slot.SliceCount, Math.Max(slotCap - bookedSlots, 0),
-                boundByGroup?.Name, day.ToString("yyyy-MM-dd"), resetsAt,
-                RelaxationAvailable: settings.SameDayCapRelaxation && day == ClubClock.Today(settings))
-            : new BookingResult.PerDayCapExceeded(minuteCap, bookedMinutes, attemptedMinutes)
-            {
-                BoundByGroupName = boundByGroup?.Name,
-                ClubDay = day.ToString("yyyy-MM-dd"),
-                ResetsAt = resetsAt,
-            };
+            ? SlotRefusal(subject, settings, day, slotCap, bookedSlots, slot.SliceCount)
+            : MinuteRefusal(subject, settings, day, minuteCap, bookedMinutes, attemptedMinutes);
+    }
+
+    /// <summary>
+    /// GOAL item 19's refusal, with every figure its sentence needs.
+    ///
+    /// <para>
+    /// Reported in preference to the minutes twin when both caps are exceeded — which on a
+    /// default club is always, because four slots IS the sixty minutes blueprint A.4 already
+    /// required. The slot one is what the member's screen is counting, so naming it is what makes
+    /// the sentence and the screen agree.
+    /// </para>
+    /// </summary>
+    private static BookingResult SlotRefusal(
+        RuleSubject subject, TenantSettingsView settings, DateOnly day, int cap, int booked, int attempted)
+    {
+        var group = GroupRules.BoundBy(subject.Groups, BookingLimits.MaxSlotsPerDay(settings), g => g.MaxSlotsPerDay);
+        return new BookingResult.PerDaySlotCapExceeded(
+            cap, booked, attempted, Math.Max(cap - booked, 0),
+            group?.Name, day.ToString("yyyy-MM-dd"), ClubClock.DayWindow(settings, day).End,
+            RelaxationAvailable: settings.SameDayCapRelaxation && day == ClubClock.Today(settings));
+    }
+
+    /// <summary>Blueprint A.4's, which fires when the MINUTES cap alone binds — a member holding long bookings.</summary>
+    private static BookingResult MinuteRefusal(
+        RuleSubject subject, TenantSettingsView settings, DateOnly day, int cap, int booked, int attempted)
+    {
+        var group = GroupRules.BoundBy(subject.Groups, BookingLimits.MaxMinutesPerDay(settings), g => g.MaxMinutesPerDay);
+        return new BookingResult.PerDayCapExceeded(cap, booked, attempted)
+        {
+            BoundByGroupName = group?.Name,
+            ClubDay = day.ToString("yyyy-MM-dd"),
+            ResetsAt = ClubClock.DayWindow(settings, day).End,
+        };
     }
 
     /// <summary>

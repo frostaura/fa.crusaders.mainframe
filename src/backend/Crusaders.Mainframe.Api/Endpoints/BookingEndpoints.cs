@@ -156,8 +156,14 @@ public static class BookingEndpoints
     /// declaration order in <c>BookingService.cs</c> so the pair reads as one list.
     /// </para>
     /// </summary>
-    private static IResult ToHttpResult(BookingResult result, HttpContext ctx) => result switch
+    // Block body, not an expression one: lizard's C# parser reads the `{` of a switch or an
+    // object initialiser as the END of the function and dumps the rest of the file into a
+    // *global* pseudo-function whose length trips `-L 200`. See memory/gotchas.md and
+    // whitelizard.txt's header.
+    private static IResult ToHttpResult(BookingResult result, HttpContext ctx)
     {
+        return result switch
+        {
         BookingResult.Ok ok => Results.Ok(new { booking_id = ok.Booking.Id, balance_after_credits = ok.BalanceAfterCredits }),
         BookingResult.NotFound => Results.NotFound(new { error = "court_not_found" }),
         BookingResult.PastTime => Results.BadRequest(new { error = "past_time" }),
@@ -223,16 +229,24 @@ public static class BookingEndpoints
         BookingResult.InvalidDuration id => Results.BadRequest(
             new { error = "invalid_duration", requested_slices = id.RequestedSlices, max_slices = id.MaxSlices }),
         BookingResult.DuplicateRequest => Results.Conflict(new { error = "duplicate_request" }),
-        _ => Unmapped(result, ctx),
-    };
+            _ => Unmapped(result, ctx),
+        };
+    }
 
-    private static IResult ToHttpResult(CancellationResult result, HttpContext ctx) => result switch
+    // Block body, not an expression one: lizard's C# parser reads the `{` of a switch or an
+    // object initialiser as the END of the function and dumps the rest of the file into a
+    // *global* pseudo-function whose length trips `-L 200`. See memory/gotchas.md and
+    // whitelizard.txt's header.
+    private static IResult ToHttpResult(CancellationResult result, HttpContext ctx)
     {
+        return result switch
+        {
         CancellationResult.Ok ok => Results.Ok(new { refunded_credits = ok.RefundedCredits, penalty_credits = ok.PenaltyCredits }),
         CancellationResult.NotFound => Results.NotFound(new { error = "booking_not_found" }),
         CancellationResult.AlreadyStarted => Results.BadRequest(new { error = "already_started" }),
-        _ => Unmapped(result, ctx),
-    };
+            _ => Unmapped(result, ctx),
+        };
+    }
 
     /// <summary>
     /// The arm that should never run. It answers 500 as before — but it LOGS, naming the

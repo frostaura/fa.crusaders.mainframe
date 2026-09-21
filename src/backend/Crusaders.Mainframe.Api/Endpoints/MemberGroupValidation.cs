@@ -52,9 +52,20 @@ public static class MemberGroupValidation
                 new { valid = new[] { "inherit_court", "multiplier", "flat_per_slice" } });
         }
 
-        // A field the mode does not use is refused rather than ignored: an admin who set a flat
-        // price and then switched to inherit_court needs to know the price is not in force, and
-        // silently keeping it is how a group ends up carrying two prices and honouring neither.
+        return RefuseFieldsNotForMode(pricing, mode) ?? RefusePriceValue(pricing, mode);
+    }
+
+    /// <summary>
+    /// A field the mode does not use is refused rather than ignored.
+    ///
+    /// <para>
+    /// An admin who set a flat price and then switched to <c>inherit_court</c> needs to know the
+    /// price is not in force; silently keeping it is how a group ends up carrying two prices and
+    /// honouring neither, which is a thing nobody can read off the screen afterwards.
+    /// </para>
+    /// </summary>
+    private static IResult? RefuseFieldsNotForMode(GroupPricingRequest pricing, string mode)
+    {
         if (mode != "multiplier" && pricing.MultiplierBps is not null)
         {
             return Bad("group_pricing_field_not_for_mode", new { field = "multiplier_bps", mode });
@@ -63,26 +74,29 @@ public static class MemberGroupValidation
         {
             return Bad("group_pricing_field_not_for_mode", new { field = "flat_slice_price_credits", mode });
         }
+        return null;
+    }
 
-        if (mode == "multiplier")
+    /// <summary>The value the chosen mode actually uses, bounded.</summary>
+    private static IResult? RefusePriceValue(GroupPricingRequest pricing, string mode)
+    {
+        if (mode == "multiplier"
+            && (pricing.MultiplierBps is not { } bps
+                || bps < GroupRules.MinMultiplierBps
+                || bps > GroupRules.MaxMultiplierBps))
         {
-            if (pricing.MultiplierBps is not { } bps || bps < GroupRules.MinMultiplierBps || bps > GroupRules.MaxMultiplierBps)
-            {
-                return Bad("group_multiplier_out_of_range",
-                    new { min = GroupRules.MinMultiplierBps, max = GroupRules.MaxMultiplierBps });
-            }
+            return Bad("group_multiplier_out_of_range",
+                new { min = GroupRules.MinMultiplierBps, max = GroupRules.MaxMultiplierBps });
         }
 
-        if (mode == "flat_per_slice")
-        {
-            if (pricing.FlatSlicePriceCredits is not { } flat
+        if (mode == "flat_per_slice"
+            && (pricing.FlatSlicePriceCredits is not { } flat
                 || flat < MoneySettings.MinSlicePriceCredits
                 || flat > MoneySettings.MaxSlicePriceCredits
-                || !MoneySettings.IsWholeCents(flat))
-            {
-                return Bad("group_flat_price_invalid",
-                    new { min = MoneySettings.MinSlicePriceCredits, max = MoneySettings.MaxSlicePriceCredits });
-            }
+                || !MoneySettings.IsWholeCents(flat)))
+        {
+            return Bad("group_flat_price_invalid",
+                new { min = MoneySettings.MinSlicePriceCredits, max = MoneySettings.MaxSlicePriceCredits });
         }
 
         return null;

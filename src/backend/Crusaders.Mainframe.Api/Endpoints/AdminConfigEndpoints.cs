@@ -123,6 +123,11 @@ public static class AdminConfigEndpoints
                 realtime_fallback_after_failures = RealtimeSettings.FallbackAfterFailures(defaults),
                 realtime_fallback_window_seconds = RealtimeSettings.FallbackWindowSeconds(defaults),
                 realtime_poll_seconds_wallet = RealtimeSettings.PollSecondsWallet(defaults),
+
+                // GOAL item 12. Rendered from the RESOLVED value, like operating_hours and
+                // gate_access_policy: a settings page that showed a glyph set the product does
+                // not draw would report a choice that is not in force.
+                action_glyphs = ActionGlyphs.For(defaults),
             });
         });
 
@@ -204,6 +209,13 @@ public static class AdminConfigEndpoints
 
             var realtimeError = ValidateRealtime(req);
             if (realtimeError is not null) return Results.BadRequest(realtimeError);
+
+            // Refused rather than coerced, which is what lets the READ side above render the
+            // resolved value honestly — the same posture gate_access_policy takes.
+            if (req.EffectiveActionGlyphs is { } glyphs && !ActionGlyphs.IsKnown(glyphs.Trim()))
+            {
+                return Results.BadRequest(new { error = "action_glyphs_invalid", valid = ActionGlyphs.All });
+            }
 
             var row = await db.TenantSettings.FirstOrDefaultAsync(s => s.TenantId == tenant.TenantId, ct);
             if (row is null)
@@ -374,19 +386,7 @@ public static class AdminConfigEndpoints
     /// </summary>
     private static string? ValidateEconomics(UpdateSettingsRequest req)
     {
-        // D2-B06. The one money key on this endpoint with NO bound of any kind: required,
-        // written unconditionally at the bottom of the handler, and touched by none of the five
-        // validators. `slicePriceCredits: -500` answered {"saved":true}; the court POST then
-        // falls back to it when a price is omitted, producing a court on which every booking
-        // CREDITED the member. Whole cents for the same reason the admin adjustment demands
-        // them: the ledger column is numeric(10,2), so half a cent is rounded by the database
-        // and then disagrees with every figure quoted back.
-        if (req.SlicePriceCredits < MoneySettings.MinSlicePriceCredits
-            || req.SlicePriceCredits > MoneySettings.MaxSlicePriceCredits)
-        {
-            return "slice_price_credits_out_of_range";
-        }
-        if (!MoneySettings.IsWholeCents(req.SlicePriceCredits)) return "slice_price_credits_not_whole_cents";
+        if (ValidateSlicePrice(req.SlicePriceCredits) is { } priceError) return priceError;
 
         if (req.CreditsPerZarRegular is <= 0 or > 1000) return "credits_per_zar_regular_out_of_range";
         if (req.CreditsPerZarLeague is <= 0 or > 1000) return "credits_per_zar_league_out_of_range";
@@ -405,6 +405,33 @@ public static class AdminConfigEndpoints
 
         if (req.PeakHours is not null && !TryParsePeakHours(req.PeakHours)) return "peak_hours_invalid";
         return null;
+    }
+
+    /// <summary>
+    /// Bounds on the default court price.
+    ///
+    /// <para>
+    /// <b>D2-B06.</b> The one money key on this endpoint with NO bound of any kind: required,
+    /// written unconditionally at the bottom of the handler, and touched by none of the five
+    /// validators. <c>slicePriceCredits: -500</c> answered <c>{"saved":true}</c>, and the court
+    /// POST falls back to it when a price is omitted — producing a court on which <b>every
+    /// booking credited the member</b>.
+    /// </para>
+    ///
+    /// <para>
+    /// Whole cents for the same reason the admin adjustment demands them: the ledger column is
+    /// <c>numeric(10,2)</c>, so half a cent is rounded by the database and then disagrees with
+    /// every figure quoted back to the member. Its own method rather than another two branches
+    /// inside <see cref="ValidateEconomics"/>, which is at the gate's ceiling.
+    /// </para>
+    /// </summary>
+    private static string? ValidateSlicePrice(decimal price)
+    {
+        if (price < MoneySettings.MinSlicePriceCredits || price > MoneySettings.MaxSlicePriceCredits)
+        {
+            return "slice_price_credits_out_of_range";
+        }
+        return MoneySettings.IsWholeCents(price) ? null : "slice_price_credits_not_whole_cents";
     }
 
     /// <summary>
@@ -667,6 +694,7 @@ public static class AdminConfigEndpoints
         if (req.EffectiveRealtimeFallbackAfterFailures is { } failures) doc["realtime_fallback_after_failures"] = ToElement(failures);
         if (req.EffectiveRealtimeFallbackWindowSeconds is { } window) doc["realtime_fallback_window_seconds"] = ToElement(window);
         if (req.EffectiveRealtimePollSecondsWallet is { } poll) doc["realtime_poll_seconds_wallet"] = ToElement(poll);
+        if (req.EffectiveActionGlyphs is { } glyphs) doc[ActionGlyphs.Key] = ToElement(glyphs.Trim());
     }
 
     /// <summary>Same omitted-means-unchanged rule as the economics keys, for the gate block.</summary>
@@ -878,8 +906,13 @@ public sealed record UpdateSettingsRequest(
     [property: JsonPropertyName("sse_keepalive_seconds")] int? SseKeepaliveSecondsSnake = null,
     [property: JsonPropertyName("realtime_fallback_after_failures")] int? RealtimeFallbackAfterFailuresSnake = null,
     [property: JsonPropertyName("realtime_fallback_window_seconds")] int? RealtimeFallbackWindowSecondsSnake = null,
-    [property: JsonPropertyName("realtime_poll_seconds_wallet")] int? RealtimePollSecondsWalletSnake = null)
+    [property: JsonPropertyName("realtime_poll_seconds_wallet")] int? RealtimePollSecondsWalletSnake = null,
+    string? ActionGlyphs = null,
+    [property: JsonPropertyName("action_glyphs")] string? ActionGlyphsSnake = null)
 {
+    /// <summary>The glyph set the club asked for, under either spelling.</summary>
+    public string? EffectiveActionGlyphs => ActionGlyphs ?? ActionGlyphsSnake;
+
     /// <summary>The slot cap the club asked for, under either spelling.</summary>
     public int? EffectiveMemberMaxSlotsPerDay => MemberMaxSlotsPerDay ?? MemberMaxSlotsPerDaySnake;
 

@@ -242,6 +242,16 @@ public class MainframeDbContext : DbContext
             e.HasQueryFilter(w => w.TenantId == _tenant.TenantId);
         });
 
+        ConfigurePendingTopups(modelBuilder);
+    }
+
+    /// <summary>
+    /// The pending top-up table, lifted out of <c>OnModelCreating</c> for the same reason
+    /// <see cref="ConfigureDevices"/> was: that method is at its stated 200-line ceiling and
+    /// every new table lands in it.
+    /// </summary>
+    private void ConfigurePendingTopups(ModelBuilder modelBuilder)
+    {
         modelBuilder.Entity<PendingTopup>(e =>
         {
             e.ToTable("pending_topups");

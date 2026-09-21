@@ -161,16 +161,10 @@ public sealed class ScheduleService
             .OrderBy(c => c.CourtNumber).Select(c => (decimal?)c.SlicePriceCredits).FirstOrDefaultAsync(ct);
         var price = GroupRules.PriceFor(groups, court ?? settings.DefaultSlicePriceCredits);
 
-        if (viewerIsAdmin)
-        {
-            return new ScheduleRules(
-                ClubDay: date, Groups: [], AllowedWindows: [WireWindow.Of(clubHours)], ClubHours: WireWindow.Of(clubHours),
-                SlicePriceCredits: price,
-                MaxSlotsPerDay: null, MaxMinutesPerDay: null,
-                BookedSlotsToday: 0, BookedMinutesToday: 0, RemainingToday: null,
-                AdvanceBookingDays: settings.AdvanceBookingDays,
-                AdminExempt: true, EmptyWindowReason: null);
-        }
+        // An admin's grid states that they have no limit rather than showing them a number that
+        // does not apply to them: RemainingToday is null, not a figure they would then wonder
+        // about.
+        if (viewerIsAdmin) return AdminRules(date, clubHours, price, settings.AdvanceBookingDays);
 
         var slotCap = GroupRules.SlotCapFor(groups, BookingLimits.MaxSlotsPerDay(settings));
         var minuteCap = GroupRules.MinuteCapFor(groups, BookingLimits.MaxMinutesPerDay(settings));
@@ -188,15 +182,7 @@ public sealed class ScheduleService
 
         // The number item 19 asks the UI to lock buttons on: the tighter of the two headrooms,
         // floored at zero. A cap of 0 is unlimited, which is null here rather than a big number.
-        int? remaining = null;
-        if (slotCap > 0 || minuteCap > 0)
-        {
-            var slotHeadroom = slotCap > 0 ? Math.Max(slotCap - bookedSlots, 0) : int.MaxValue;
-            var minuteHeadroom = minuteCap > 0
-                ? Math.Max((minuteCap - bookedMinutes) / Math.Max(settings.SliceMinutes, 1), 0)
-                : int.MaxValue;
-            remaining = Math.Min(slotHeadroom, minuteHeadroom);
-        }
+        var remaining = RemainingSlots(slotCap, minuteCap, bookedSlots, bookedMinutes, settings.SliceMinutes);
 
         return new ScheduleRules(
             ClubDay: date,
@@ -216,6 +202,38 @@ public sealed class ScheduleService
             EmptyWindowReason: allowed.Count == 0
                 ? new EmptyWindowReason(groups.Select(g => g.Name).ToList(), BookingRules.DayName(date.DayOfWeek))
                 : null);
+    }
+
+    /// <summary>An admin's rules: the club's own hours, and no limit of any kind.</summary>
+    private static ScheduleRules AdminRules(DateOnly date, MinuteWindow clubHours, decimal price, int advanceDays)
+    {
+        return new ScheduleRules(
+            ClubDay: date, Groups: [], AllowedWindows: [WireWindow.Of(clubHours)], ClubHours: WireWindow.Of(clubHours),
+            SlicePriceCredits: price,
+            MaxSlotsPerDay: null, MaxMinutesPerDay: null,
+            BookedSlotsToday: 0, BookedMinutesToday: 0, RemainingToday: null,
+            AdvanceBookingDays: advanceDays,
+            AdminExempt: true, EmptyWindowReason: null);
+    }
+
+    /// <summary>
+    /// The number GOAL item 19 asks the UI to lock buttons on: the tighter of the two headrooms,
+    /// floored at zero.
+    ///
+    /// <para>
+    /// <b>Null means no limit</b> — an admin, or a club with both caps off — which is a different
+    /// thing from 0, and a client that conflated them would either lock every button or none.
+    /// </para>
+    /// </summary>
+    private static int? RemainingSlots(int slotCap, int minuteCap, int bookedSlots, int bookedMinutes, int sliceMinutes)
+    {
+        if (slotCap <= 0 && minuteCap <= 0) return null;
+
+        var slotHeadroom = slotCap > 0 ? Math.Max(slotCap - bookedSlots, 0) : int.MaxValue;
+        var minuteHeadroom = minuteCap > 0
+            ? Math.Max((minuteCap - bookedMinutes) / Math.Max(sliceMinutes, 1), 0)
+            : int.MaxValue;
+        return Math.Min(slotHeadroom, minuteHeadroom);
     }
 
     /// <summary>

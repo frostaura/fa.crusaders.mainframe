@@ -221,21 +221,8 @@ public static class WalletEndpoints
         var (ledger, db, tenant, email, loggerFactory) = services;
         var logger = loggerFactory.CreateLogger("CreditAdjustment");
 
-        if (req.AmountCredits == 0) return Results.BadRequest(new { error = "amount_zero" });
-        if (string.IsNullOrWhiteSpace(req.Reason)) return Results.BadRequest(new { error = "reason_required" });
-        if (RefuseAmount(req.AmountCredits) is { } badAmount) return badAmount;
-
-        if (AdminCreditReasons.Resolve(req.ReasonCodeEither, logger) is not { } kind)
-        {
-            return Results.BadRequest(new { error = "reason_code_invalid", valid = AdminCreditReasons.All });
-        }
-        // A top-up is money the club TOOK. A negative one is a refund or a correction and has a
-        // code of its own; mixing signs inside a directional bucket is what makes a per-row
-        // listing unreadable and a revenue figure a guess.
-        if (kind.Type == LedgerEntryType.AdminTopUp && req.AmountCredits < 0)
-        {
-            return Results.BadRequest(new { error = "amount_must_be_positive_for_top_up" });
-        }
+        var (refusal, kind) = RefuseRequest(req, logger);
+        if (refusal is not null) return refusal;
 
         var reference = IdempotencyReference(tenant.TenantId, req.IdempotencyKey);
         if (reference is { Length: 0 }) return Results.BadRequest(new { error = "idempotency_key_invalid" });
@@ -251,7 +238,7 @@ public static class WalletEndpoints
         // there is nothing on the ledger to say which of the identical rows was the mistake.
         if (reference is not null && await ExistingAdjustmentAsync(db, reference, ct) is { } already)
         {
-            return Replay(already, req, kind, balanceBefore, user);
+            return Replay(already, req, kind!.Value, balanceBefore, user);
         }
 
         LedgerEntry entry;
@@ -259,7 +246,7 @@ public static class WalletEndpoints
         {
             entry = await ledger.PostAsync(new LedgerPosting(
                 UserId: userId,
-                Type: kind.Type,
+                Type: kind!.Value.Type,
                 AmountCredits: req.AmountCredits,
                 ActorUserId: ctx.User.Id() ?? Guid.Empty,
                 // Naming the booking is what nets this adjustment, per leg, against a late
@@ -280,7 +267,7 @@ public static class WalletEndpoints
             db.ChangeTracker.Clear();
             var raced = await ExistingAdjustmentAsync(db, reference, ct);
             if (raced is null) throw;
-            return Replay(raced, req, kind, balanceBefore, user);
+            return Replay(raced, req, kind!.Value, balanceBefore, user);
         }
 
         var balanceAfter = await ledger.GetBalanceAsync(userId, ct);
@@ -305,10 +292,10 @@ public static class WalletEndpoints
             {
                 user_id = userId,
                 entry_id = entry.Id,
-                entry_type = kind.Type.ToString(),
+                entry_type = kind!.Value.Type.ToString(),
                 amount_credits = req.AmountCredits,
                 reason = req.Reason,
-                reason_code = kind.Code,
+                reason_code = kind.Value.Code,
                 balance_before_credits = balanceBefore,
                 balance_after_credits = balanceAfter,
                 related_booking_id = req.RelatedBookingId,
@@ -328,7 +315,40 @@ public static class WalletEndpoints
                 user.Email, entry.AmountCredits, balanceAfter, req.Reason),
             $"credit adjustment {entry.Id}");
 
-        return AdjustmentResult(entry, kind, balanceBefore, balanceAfter, user);
+        return AdjustmentResult(entry, kind!.Value, balanceBefore, balanceAfter, user);
+    }
+
+    /// <summary>
+    /// Everything that can refuse a by-hand movement before anything is read from the database,
+    /// and the kind of movement it turns out to be.
+    ///
+    /// <para>
+    /// Its own method because <c>AdjustAsync</c> is the most consequential route in this file —
+    /// it moves a member's balance by hand — and a reader asking "what will this refuse" should
+    /// not have to walk the whole handler to find out.
+    /// </para>
+    /// </summary>
+    private static (IResult? Refusal, AdminCreditReasons.Kind? Kind) RefuseRequest(
+        AdjustRequest req, ILogger logger)
+    {
+        if (req.AmountCredits == 0) return (Results.BadRequest(new { error = "amount_zero" }), null);
+        if (string.IsNullOrWhiteSpace(req.Reason)) return (Results.BadRequest(new { error = "reason_required" }), null);
+        if (RefuseAmount(req.AmountCredits) is { } badAmount) return (badAmount, null);
+
+        if (AdminCreditReasons.Resolve(req.ReasonCodeEither, logger) is not { } kind)
+        {
+            return (Results.BadRequest(new { error = "reason_code_invalid", valid = AdminCreditReasons.All }), null);
+        }
+
+        // A top-up is money the club TOOK. A negative one is a refund or a correction and has
+        // codes of its own; mixing signs inside a directional bucket is what makes a per-row
+        // listing unreadable and a revenue figure a guess.
+        if (kind.Type == LedgerEntryType.AdminTopUp && req.AmountCredits < 0)
+        {
+            return (Results.BadRequest(new { error = "amount_must_be_positive_for_top_up" }), null);
+        }
+
+        return (null, kind);
     }
 
     /// <summary>

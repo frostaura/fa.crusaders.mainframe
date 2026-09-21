@@ -1258,4 +1258,79 @@ public sealed class AdminSettingsHttpTests
         var shown = await client.GetFromJsonAsync<JsonElement>(SettingsPath);
         Assert.Equal(15, shown.GetProperty("gate_unlock_seconds").GetInt32());
     }
+
+    /// <summary>
+    /// GOAL item 12 / ruling 4: which glyph pair a confirm/decline button wears. Thumbs by
+    /// default — the founder asked for them by name and the club is South African, where a
+    /// thumbs-up reads as plain agreement.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData("actionGlyphs")]
+    [InlineData("action_glyphs")]
+    public async Task The_glyph_set_is_served_and_binds_under_either_spelling(string field)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        Assert.Equal("thumbs",
+            (await client.GetFromJsonAsync<JsonElement>(SettingsPath)).GetProperty("action_glyphs").GetString());
+
+        var body = Baseline();
+        body[field] = "marks";
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(SettingsPath, body)).StatusCode);
+
+        Assert.Equal("marks",
+            (await client.GetFromJsonAsync<JsonElement>(SettingsPath)).GetProperty("action_glyphs").GetString());
+
+        // Omitted means unchanged.
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(SettingsPath, Baseline())).StatusCode);
+        Assert.Equal("marks",
+            (await client.GetFromJsonAsync<JsonElement>(SettingsPath)).GetProperty("action_glyphs").GetString());
+    }
+
+    /// <summary>
+    /// Refused rather than coerced, which is what lets the GET render the RESOLVED value
+    /// honestly — the same posture gate_access_policy takes.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData("Thumbs")]
+    [InlineData("emoji")]
+    [InlineData("")]
+    public async Task A_glyph_set_outside_the_closed_pair_is_refused(string value)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var body = Baseline();
+        body["actionGlyphs"] = value;
+        var save = await client.PutAsJsonAsync(SettingsPath, body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
+        Assert.Equal("action_glyphs_invalid",
+            (await save.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+    }
+
+    /// <summary>
+    /// And a hand-edited nonsense value falls back to thumbs rather than to a button nobody can
+    /// draw — unlike a door policy, this decides an ICON, so failing closed would cost a club a
+    /// screen it cannot use for no safety gained.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_hand_edited_glyph_set_falls_back_rather_than_breaking_the_button()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory, """{"action_glyphs":"hieroglyphs"}""");
+        var client = AdminClient(factory, seeded);
+
+        Assert.Equal("thumbs",
+            (await client.GetFromJsonAsync<JsonElement>(SettingsPath)).GetProperty("action_glyphs").GetString());
+    }
 }
