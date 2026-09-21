@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-gotchas-build
-description: "Firmware toolchain traps: src/iot is several PlatformIO projects on one venv, every arduino/ tree is GENERATED, both cores force gnu++11 so a sketch must be C++11-clean, and GCC under UBSan will not fold an object address in a constexpr."
+description: "Toolchain traps in both trees: src/iot is several PlatformIO projects on one venv, every arduino/ tree is GENERATED, both cores force gnu++11, GCC under UBSan will not fold an object address in a constexpr — and on the .NET side make complexity is unrunnable as written, lizard mis-parses expression-bodied switch members into a file-spanning *global*, and a stale migration Designer snapshot makes every later migration re-add columns."
 type: gotcha
-last_verified: 2026-09-19
+last_verified: 2026-09-22
 ---
 
 # Gotchas — the firmware toolchain
@@ -65,3 +65,35 @@ The gates that check this firmware have traps of their own:
   `pio run -v` line, which carries `-DFW_VERSION_MAJOR=1` and no MINOR or PATCH. 1.0.0 on both
   builds, by luck: the fallback equals the intended value. The exporter mirrors the rule and fails
   if a name survives twice with different values.
+
+## The .NET gates — two traps that cost this lane hours
+
+- **`make complexity` is unrunnable as written on this machine**: the target invokes
+  `src/iot/.venv/bin/python`, which does not exist here. Run lizard directly with the SAME flags —
+  `python3 -m lizard src/backend/Crusaders.Mainframe.Api -C 15 -L 200 -a 6 -W whitelizard.txt
+  -x '*/Migrations/*' -x '*/bin/*' -x '*/obj/*' -w`. The baseline is genuinely **zero warnings**, so
+  anything it reports is yours (verified against `~/src/.crusaders-merge-main`, 2026-09-22).
+
+- **lizard's C# parser cannot follow an expression-bodied member whose value carries braces** —
+  `=> x switch { … }`, `=> new { … }`, `=> new() { … }`. It loses scope and emits a `*global*`
+  pseudo-function **spanning the whole FILE**, which then trips the `-L 200` FUNCTION-length gate on
+  any file longer than 200 lines. The warning names no method, so it reads as "this file is too
+  long" and invites a pointless split. **This is what every "Block body for the lizard reason in
+  `memory/gotchas.md`" comment in this tree is actually about**; the mechanism had never been
+  written down, so the workaround read as superstition and was reinvented by guessing. Cure: give
+  such a member a block body and `return` the switch. Bisected 2026-09-22; a one-class file with no
+  such member and 312 lines (`DoorAuditActions.cs`) is clean, and an otherwise identical one with a
+  `=> … switch` is not.
+
+- **The newest migration's `.Designer.cs` is the baseline every future migration diffs against, and
+  a merge can leave it stale.** `20260921190452_AddDeviceEventReceiptBootId.Designer.cs` was written
+  on a branch without `20260921185533_AddDoorTruthColumns`, so it was missing five columns and EVERY
+  migration scaffolded after it proposed to ADD them a second time — a duplicate-column failure
+  mid-chain on a fresh database, which only `ApiBoundaryTests.Migrations_apply_cleanly_to_a_fresh_database`
+  catches. **Read a newly scaffolded migration before committing it**; if it contains operations you
+  did not cause, delete those by hand. The drift ends at the first migration whose own designer
+  snapshot is complete (2026-09-22).
+
+- **`dotnet ef migrations add --no-build` scaffolds against the LAST BUILT assembly**, so it silently
+  produces an empty migration when the model has changed since. Worse, `migrations remove` then
+  rewrites the model snapshot from that same stale assembly. Never pass `--no-build` here.
