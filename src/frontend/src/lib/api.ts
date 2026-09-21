@@ -2156,7 +2156,13 @@ export const doorEndpoints = {
 /**
  * What a door PATCH answers: the row, plus whether it changed anything (WIRE-R2 §2).
  *
- * `unchanged` absent means an API that does not answer the question — the page then says
+ * <p>
+ * <b>Read the VALUE, never the presence.</b> The field is on every DeviceView the API
+ * serves — `false` on a list row and on a PATCH that did work, `true` only on a no-op — so
+ * `"unchanged" in answer` is true of every door the club has and would report every shut as
+ * a shut that had already happened. It stays optional here for an older API that does not
+ * send it at all, and an absent field means the same thing a `false` does: the page says
  * what it did rather than claiming the door was already in that state.
+ * </p>
  */
 export type DoorPatchResult = AdminDoorDevice & { unchanged?: boolean };

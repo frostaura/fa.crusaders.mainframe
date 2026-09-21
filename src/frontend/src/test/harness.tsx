@@ -718,6 +718,8 @@ function doorOutcomeOf(entry: Record<string, unknown>): string[] {
 /** Everything one doors server is holding, so its three jobs can be functions rather than closures. */
 type DoorsState = {
   doors: Record<string, unknown>[];
+  /** A resolved range pinned by the fixture, or undefined to let the stub compute one. */
+  range?: { from: string; to: string };
   activity: Record<string, unknown>[];
   rows: Record<string, DoorsServerRow>;
   retentionDays: number;
@@ -929,7 +931,10 @@ function doorsLogPage(state: DoorsState, path: string) {
     // is the number an admin quotes to a committee.
     total: matched.length,
     timezone: state.timezone,
-    range: {
+    // UTC instants, as the API sends them. A fixture may pin the pair outright; see the
+    // `range` option, which exists so a test can put the club's midnight on the far side of
+    // UTC's and see which one the page prints.
+    range: state.range ?? {
       from: new Date(Math.max(range.from, floor)).toISOString(),
       to: new Date(range.to).toISOString(),
     },
@@ -1053,6 +1058,14 @@ export function doorsServer(
     pageSize?: number;
     /** Deleted doors that still have rows in range (WIRE-R2 §1), for the picker's own group. */
     removedDoors?: { key: string; name?: string | null; gate_key?: string | null }[];
+    /**
+     * The resolved range, verbatim, instead of the one this stub would compute.
+     *
+     * For fixtures that need a SPECIFIC pair of instants — the backend sends these as UTC
+     * (`…Z`), and a club whose wall clock is hours away from UTC is the only fixture that
+     * can tell a page rendering them in the club's zone from one printing them raw.
+     */
+    range?: { from: string; to: string };
   } = {},
 ): DoorsServer {
   // Defaults as one object rather than seven `??`s: each of those is a branch lizard counts,

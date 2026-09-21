@@ -189,6 +189,39 @@ describe("the club door log", () => {
     expect(await screen.findByText(/^Scans from .* to .*, club time\.$/)).toBeInTheDocument();
   });
 
+  /**
+   * <b>And it is a UTC instant on the wire, rendered as CLUB wall time.</b>
+   *
+   * The backend lane's final wire sends `range.from` / `range.to` as `…Z`, not club-offset.
+   * A page that printed either as it arrived would date a club's midnight two hours early
+   * — and on this club's own day boundary, on the wrong day. The whole point of A4 was that
+   * the range is resolved in the club's zone; printing it in the viewer's would hand it
+   * straight back.
+   */
+  it("prints a UTC range as the club's own wall clock, on the club's own day", async () => {
+    /*
+      The club is in New York and the runner's clock is pinned to Africa/Johannesburg, and
+      that gap is the whole fixture: a page that simply drops the zone falls back to the
+      RUNNER's, which in every other fixture on this surface happens to be the club's — so
+      the bug renders correctly and the test passes. Varying the fixture rather than the
+      code, which is what this suite keeps learning.
+
+      22:30 UTC is 18:30 in New York and 00:30 the NEXT DAY in Johannesburg, so the clock
+      and the date both move.
+    */
+    open([doorLogFixture()], {
+      range: { from: "2026-09-19T22:30:00Z", to: "2026-09-20T05:00:00Z" },
+      timezone: "America/New_York",
+    }, ["/admin/doors/log?range=yesterday"]);
+
+    const line = await screen.findByText(/^Scans from .* to .*, club time\.$/);
+    expect(line).toHaveTextContent("18:30");
+    expect(line).toHaveTextContent("01:00");
+    // Neither the raw UTC instant nor the reader's own zone.
+    expect(line.textContent).not.toContain("22:30");
+    expect(line.textContent).not.toContain("00:30");
+  });
+
   /** Query-string filters are what let a door page pre-filter and a link be shareable. */
   it("reads its filters out of the query string", async () => {
     const { stub } = open([doorLogFixture()], {}, [`/admin/doors/log?door=${DOOR_ID}`]);
@@ -632,6 +665,75 @@ describe("the club door log", () => {
       // Never both: the API answers 400 for the pair (WIRE-R2 §1).
       expect(read.searchParams.get("door")).toBeNull();
     });
+  });
+
+  /**
+   * <b>The other direction, which the pair above does not cover.</b>
+   *
+   * The backend lane's final wire makes `door` and `removed_door` ONE filter slot: both,
+   * with different values, is a 400 `door_invalid` rather than a narrower result. The
+   * dangerous direction is this one — a link somebody was sent carries `?door=`, and
+   * picking a removed door from the group has to CLEAR it rather than add beside it.
+   */
+  it("clears a door already in the URL when a removed door is chosen", async () => {
+    const { stub } = open([doorLogFixture()], {
+      removedDoors: [{ key: "side-door", name: "Side door", gate_key: "side-door" }],
+    }, [`/admin/doors/log?door=${DOOR_ID}`]);
+
+    await screen.findByRole("group", { name: "Removed doors" });
+    fireEvent.change(screen.getByLabelText("Door"), { target: { value: "removed:side-door" } });
+
+    await waitFor(() => {
+      const read = new URL(`http://x${stub.calls.filter((c) => c.path.includes("/doors/activity")).at(-1)!.path}`);
+      expect(read.searchParams.get("removed_door")).toBe("side-door");
+      expect(read.searchParams.get("door")).toBeNull();
+    });
+  });
+
+  it("clears a removed door when a live one is chosen instead", async () => {
+    const { stub } = open([doorLogFixture()], {
+      removedDoors: [{ key: "side-door", name: "Side door", gate_key: "side-door" }],
+    }, ["/admin/doors/log?removed_door=side-door"]);
+
+    await screen.findByRole("group", { name: "Removed doors" });
+    fireEvent.change(screen.getByLabelText("Door"), { target: { value: DOOR_ID } });
+
+    await waitFor(() => {
+      const read = new URL(`http://x${stub.calls.filter((c) => c.path.includes("/doors/activity")).at(-1)!.path}`);
+      expect(read.searchParams.get("door")).toBe(DOOR_ID);
+      expect(read.searchParams.get("removed_door")).toBeNull();
+    });
+  });
+
+  /**
+   * <b>The server caps this list at fifty.</b>
+   *
+   * A picker that lists fifty removed doors and stops looks exactly like a club that has
+   * removed fifty — and the door an admin is hunting for after an incident is, by
+   * definition, the one that is not in it. Same class of falsehood as A6's count, one
+   * control along: a page length presented as a total.
+   */
+  it("says the removed-door list is capped when it arrives full", async () => {
+    open([doorLogFixture()], {
+      removedDoors: Array.from({ length: 50 }, (_, i) => ({
+        key: `gone-${i}`, name: `Gone ${i}`, gate_key: `gone-${i}`,
+      })),
+    });
+
+    await screen.findByRole("group", { name: "Removed doors" });
+    expect(screen.getByText(/50 most recently removed doors. There may be more/))
+      .toBeInTheDocument();
+  });
+
+  it("says nothing about a cap on a list that is not full", async () => {
+    open([doorLogFixture()], {
+      removedDoors: Array.from({ length: 49 }, (_, i) => ({
+        key: `gone-${i}`, name: `Gone ${i}`, gate_key: `gone-${i}`,
+      })),
+    });
+
+    await screen.findByRole("group", { name: "Removed doors" });
+    expect(screen.queryByText(/There may be more/)).toBeNull();
   });
 
   /** A removed door has no page, so the page does not offer to send anybody to one. */

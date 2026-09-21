@@ -160,6 +160,24 @@ export function removedDoorName(door: { key: string; name?: string | null; gate_
 }
 
 /**
+ * <b>The server caps this list at 50, so a full one is not a complete one.</b>
+ *
+ * <p>
+ * A picker that lists fifty removed doors and stops looks exactly like a club that has
+ * removed fifty doors — and the one an admin is hunting for after an incident is, by
+ * definition, the one that is not in the list. The same class of falsehood as A6's count,
+ * one control along: a page length presented as a total.
+ * </p>
+ */
+export const REMOVED_DOORS_CAP = 50;
+
+export function removedDoorsCapNotice(shown: number): string | null {
+  return shown < REMOVED_DOORS_CAP
+    ? null
+    : `These are the ${REMOVED_DOORS_CAP} most recently removed doors. There may be more.`;
+}
+
+/**
  * <b>A6 — "50 scans, newest first" read as a total, and the file had 70.</b>
  *
  * <p>

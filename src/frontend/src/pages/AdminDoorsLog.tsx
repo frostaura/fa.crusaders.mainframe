@@ -10,7 +10,7 @@ import {
   LOG_EMPTY_FILTERED, LOG_EMPTY_FILTERED_HINT, LOG_EMPTY_NOTHING, LOG_OLDER_FAILED,
   LOG_READ_FAILED, OFFLINE_WHO_NOTE, doorCsvDownloaded, doorCsvNotice, doorDisplayName,
   doorExhaustedNotice, doorLogCountLine, doorLogEmptyOneDoor, doorLogHowToRead, doorPickerLabel,
-  doorRetentionNotice, doorRowIdentity, doorRowName, removedDoorName,
+  doorRetentionNotice, doorRowIdentity, doorRowName, removedDoorName, removedDoorsCapNotice,
 } from "../lib/doorsCopy";
 import { clubClock, clubDayAndClock, clubRangeInWords } from "../lib/clubClock";
 import { isOnline, offlineAfterSecondsFor } from "../lib/deviceLiveness";
@@ -452,6 +452,15 @@ function AdminDoorsLogPageBody() {
                   </optgroup>
                 )}
               </Select>
+              {/* The server caps this list, and a full one is not a complete one: fifty
+                  removed doors and a full stop looks exactly like a club that removed
+                  fifty. The one an admin is hunting for after an incident is the one that
+                  is not in the list. */}
+              {removedDoorsCapNotice(page.removedDoors.length) && (
+                <p className="mt-1 text-xs text-text-muted">
+                  {removedDoorsCapNotice(page.removedDoors.length)}
+                </p>
+              )}
               {doors === null && (
                 <p className="mt-1 text-xs text-warning-strong">
                   The club's doors could not be read, so this list may be short. The scans below are

@@ -1158,6 +1158,60 @@ describe("the doors surface", () => {
     });
 
     /**
+     * <b>`unchanged` is a VALUE, not a field that is either there or not.</b>
+     *
+     * The backend's final wire puts it on every DeviceView — `false` on a list row and on a
+     * PATCH that did real work, `true` only on a no-op. A page testing for its presence
+     * would report every shut in the club as a shut that had already happened, by somebody
+     * it could not name.
+     */
+    it("reports a shut that did work as work, even carrying unchanged: false", async () => {
+      const server = doorsServer([doorFixture({ enabled: true })]);
+      stubFetch([
+        settingsRoute(),
+        ...server.routes,
+        {
+          method: "PATCH",
+          path: `/api/v1/admin/devices/${DOOR_ID}`,
+          respond: () => ({ ...doorFixture({ enabled: false }), unchanged: false }),
+        },
+      ]);
+      renderPage(
+        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+      );
+
+      fireEvent.click(await screen.findByRole("button", { name: /^Shut this door/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
+
+      expect(await screen.findByText(/Side door is shut\./)).toBeInTheDocument();
+      expect(screen.queryByText(/Nothing changed/)).toBeNull();
+    });
+
+    /**
+     * <b>C11, one screen along from the banner it was written about.</b>
+     *
+     * <p>
+     * "Side door is shut. … Shut by Priya Naidoo on Mon 21 Sept, 18:34." is a STANDING fact,
+     * and it sat in an assertive region on a page that re-reads itself every fifteen
+     * seconds. The ruling is the same one the club-wide banner got: what is standing is
+     * polite, and only a change somebody else caused earns an interruption. A shut door is
+     * still a refusal in every other sense — it keeps its danger colour and its left rule.
+     * </p>
+     */
+    it("states a standing shut politely rather than interrupting", async () => {
+      openDoor([doorFixture({
+        enabled: false, shut_by_name: "Priya Naidoo", out_of_service_since: new Date().toISOString(),
+      })]);
+
+      const notice = await screen.findByText(/Side door is shut/);
+      expect(notice).toHaveAttribute("role", "status");
+      // And it still LOOKS like a refusal: the finding is about what is announced over the
+      // top of a reader, not about making a shut door look ordinary.
+      expect(notice.className).toContain("border-danger-strong");
+    });
+
+    /**
      * <b>B10.</b> A tab left open overnight "shut" a door somebody else had already shut and
      * reported success — so the admin learned that their click had done something.
      */

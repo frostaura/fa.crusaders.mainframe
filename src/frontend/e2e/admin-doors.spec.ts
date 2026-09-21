@@ -988,7 +988,9 @@ test.describe("The log a committee reads", () => {
           retention_days: 90,
           total: 70,
           timezone: "Africa/Johannesburg",
-          range: { from: "2026-09-19T00:00:00+02:00", to: "2026-09-20T00:00:00+02:00" },
+          // UTC instants, as the API sends them — NOT club-offset. 22:00 UTC on the 18th
+          // is midnight on the 19th in the club's zone, which is what the page must print.
+          range: { from: "2026-09-18T22:00:00Z", to: "2026-09-19T22:00:00Z" },
           ...body,
         },
       },
@@ -1032,8 +1034,13 @@ test.describe("The log a committee reads", () => {
     await page.getByLabel("When", { exact: true }).selectOption("yesterday");
 
     await expect.poll(() => asked.some((u) => u.includes("period=yesterday"))).toBe(true);
-    // In words, above the rows, from the server's own resolved range.
-    await expect(page.getByText(/19 Sep/)).toBeVisible();
+    // In words, above the rows, from the server's own resolved range — and rendered in the
+    // club's zone, so a `…Z` midnight prints as 00:00 on the 19th rather than 22:00 on the
+    // 18th. Getting this wrong puts a committee's "yesterday" on the wrong day.
+    const line = page.getByText(/^Scans from .* to .*, club time\.$/);
+    await expect(line).toContainText("19 Sept");
+    await expect(line).toContainText("00:00");
+    await expect(line).not.toContainText("22:00");
   });
 
   /** And one particular day, which the page had no way to ask for at all. */
@@ -1061,6 +1068,16 @@ test.describe("The log a committee reads", () => {
 });
 
 test.describe("A page somebody left open", () => {
+  /*
+    These wait for a real poll to come round — thirty seconds on an ordinary route, fifteen
+    on the doors surface — so the per-test cap has to be larger than the interval by more
+    than the margin a loaded machine eats. It defaults to 30 s, which is the interval
+    itself: the banner case passed standalone and failed inside the full suite, where the
+    poll landed a second the wrong side of the cap. A test that depends on the load on the
+    machine is a test that reports the machine.
+  */
+  test.describe.configure({ timeout: 120_000 });
+
   /**
    * <b>B1 — the door page made zero repeat requests over seventy seconds</b> while its
    * relative clocks went on ticking: another admin's shut was invisible, "Shut this door" was
@@ -1084,7 +1101,7 @@ test.describe("A page somebody left open", () => {
     // Somebody else, in the club, shuts it.
     shut = true;
 
-    await expect(page.getByRole("button", { name: /^Reopen this door/ })).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByRole("button", { name: /^Reopen this door/ })).toBeVisible({ timeout: 60_000 });
   });
 
   /**
@@ -1108,7 +1125,7 @@ test.describe("A page somebody left open", () => {
 
     shut = true;
 
-    await expect(page.getByText(/1 of 1 door shut/)).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByText(/1 of 1 door shut/)).toBeVisible({ timeout: 90_000 });
   });
 
   /**
@@ -1148,6 +1165,9 @@ test.describe("A page somebody left open", () => {
 });
 
 test.describe("The overview under a thumb", () => {
+  // Two of these wait for the doors page's own fifteen-second poll. See the note above.
+  test.describe.configure({ timeout: 120_000 });
+
   /**
    * <b>A10.</b> The overview re-sorted by severity on every poll, so cards swapped position
    * under a thumb already on its way down — a reviewer tapped a door and landed on a
@@ -1173,7 +1193,7 @@ test.describe("The overview under a thumb", () => {
     const before = await alpha.boundingBox();
 
     quiet = true;
-    await expect(page.getByText(/Zulu door has not been heard from/)).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByText(/Zulu door has not been heard from/)).toBeVisible({ timeout: 60_000 });
 
     const names = await page.getByRole("heading", { level: 3 }).allTextContents();
     expect(names).toEqual(["Alpha door", "Zulu door"]);
@@ -1210,7 +1230,7 @@ test.describe("The overview under a thumb", () => {
     await page.getByRole("button", { name: "Refresh" }).click();
     await page.getByRole("button", { name: /Refresh|Checking/ }).click();
 
-    await expect(page.getByText(/can't reach the club right now/)).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByText(/can't reach the club right now/)).toBeVisible({ timeout: 60_000 });
     await expect(page.getByText("Not reporting")).toHaveCount(0);
   });
 });
