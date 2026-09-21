@@ -417,13 +417,31 @@ test.describe("A-M11 — the header on a phone", () => {
 
         const row = await page.evaluate(() => {
           const el = document.querySelector("header > div") as HTMLElement;
-          const tops = new Set([...el.children]
-            .filter((k) => k.getBoundingClientRect().width > 0)
-            .map((k) => Math.round(k.getBoundingClientRect().top)));
-          return { height: Math.round(el.getBoundingClientRect().height), lines: tops.size };
+          // Anything with width: the inline nav is `hidden` below `lg` and measures 0×0, which
+          // is not on a line at all.
+          const boxes = [...el.children]
+            .map((k) => k.getBoundingClientRect())
+            .filter((box) => box.width > 0);
+          return {
+            height: Math.round(el.getBoundingClientRect().height),
+            // Every item shares a line when the lowest top is above the highest bottom.
+            // NOT "how many distinct tops": `items-center` gives a 44 px chip and a 24 px
+            // link different tops on the same row, which read as two lines on the desktop
+            // project and as one on the mobile one — a measurement that depended on which
+            // project ran it.
+            lowestTop: Math.round(Math.max(...boxes.map((b) => b.top))),
+            highestBottom: Math.round(Math.min(...boxes.map((b) => b.bottom))),
+            kids: [...el.children].map((k) => {
+              const b = k.getBoundingClientRect();
+              return `${k.tagName}@${Math.round(b.x)},${Math.round(b.y)} w${Math.round(b.width)}`;
+            }),
+          };
         });
 
-        expect(row.lines, `the header row wrapped onto ${row.lines} lines`).toBe(1);
+        expect(
+          row.lowestTop,
+          `the header row wrapped: ${JSON.stringify(row.kids)}`,
+        ).toBeLessThan(row.highestBottom);
         // 56 px is the row at every ordinary width; 80 is what the wrap cost.
         expect(row.height, `the header row is ${row.height} px tall`).toBeLessThanOrEqual(60);
       });

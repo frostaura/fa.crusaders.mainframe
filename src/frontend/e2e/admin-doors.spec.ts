@@ -781,15 +781,19 @@ test.describe("An armed doors confirm fits the words it is showing", () => {
 
     for (let i = 0; i < expected; i += 1) {
       const wrapper = wrappers.nth(i);
-      const control = wrapper.locator("> button").first();
+      const trigger = wrapper.locator("> button").first();
       // `innerText`, not `textContent`: the width sentinel inside the control is
       // visibility-hidden and carries a copy of BOTH labels, which textContent would hand back.
-      const idleText = (await control.evaluate((el) => (el as HTMLElement).innerText)).trim();
+      const idleText = (await trigger.evaluate((el) => (el as HTMLElement).innerText)).trim();
 
-      await control.click();
-      // Armed: the wrapper now holds the control and its Cancel.
+      await trigger.click();
+      // Armed: the wrapper now holds the control and its way out.
       await expect(wrapper.locator("> button")).toHaveCount(2);
 
+      // By ROLE in the armed pair, not by position: C-H1 put the way out FIRST, so that the
+      // natural Tab out of the auto-focused safe button reaches the other option instead of
+      // leaving the control. An index here measures whichever button happens to be there.
+      const control = wrapper.locator('> button[data-confirm="go"]');
       const measured = await control.evaluate((el) => ({
         scrollHeight: el.scrollHeight,
         clientHeight: el.clientHeight,
@@ -828,7 +832,7 @@ test.describe("An armed doors confirm fits the words it is showing", () => {
         .toBeGreaterThan(0);
 
       // C10: a visible way out, at a real touch size.
-      const cancel = wrapper.locator("> button").nth(1);
+      const cancel = wrapper.locator('> button[data-confirm="stop"]');
       await expect(cancel).toBeVisible();
       expect((await cancel.boundingBox())!.height, `confirm ${i}'s Cancel is under 44 px`)
         .toBeGreaterThanOrEqual(44);

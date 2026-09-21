@@ -87,11 +87,11 @@ test.skip(({ isMobile }) => !!isMobile, "the bundle is the same bundle at every 
  */
 test.describe.configure({ mode: "serial" });
 
-test.beforeAll(async ({}, testInfo) => {
+test.beforeAll(async () => {
   // The skip above is evaluated per TEST, which is after this hook has already run — so
   // without this the mobile worker builds `dist/` as well, and two `vite build`s race into one
   // directory. Observed: two "built in 12s" lines on one run.
-  if (testInfo.project.use.isMobile) return;
+  if (test.info().project.use.isMobile) return;
   // A cold `vite build` is about forty seconds and a hook gets the ordinary test timeout, so
   // without this the first run on a clean checkout fails with "Test ended" in the middle of a
   // navigation — a failure that says nothing about the build it was waiting for.

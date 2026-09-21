@@ -55,6 +55,12 @@ export function useStandingAnnouncement(text: string, channel?: string): string 
     if (!message) return;
     if (said.get(key) === message) return;
     said.set(key, message);
+    // The announcement has to happen AFTER the commit that put the region in the document, and
+    // at most once per fact: a live region only announces a change made to a node that is
+    // already there, so writing this during render would be announced never — or twice, under
+    // StrictMode's double invoke. One render, once, on a string that is empty the rest of the
+    // time.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- see the paragraph above
     setSpoken(message);
   }, [key, message]);
 
