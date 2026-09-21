@@ -37,9 +37,12 @@ failures are in [`gotchas-env.md`](gotchas-env.md).
   distro's `postgresql/16/bin`; the superuser on a locally-initialised cluster is **`crusaders`**,
   and `pg_ctl` refuses to run as root.
 - **The purity gate's exclusions are HAL directory NAMES, in three places.** `arduino_hal`,
-  `posix_hal` and now `esp32_hal` are listed in the Makefile's `lint-iot`, in `ci.yml`'s purity step
-  AND in `court-box/tools/strict_compile.sh` — each runs in a context the others cannot read, so a
-  new firmware's HAL has to be added to all three. **The forbidden-include regex is per board family
+  `posix_hal`, `esp32_hal` and now `posix_gate_hal` are listed in the Makefile's `lint-iot`, in
+  `ci.yml`'s purity step AND in `court-box/tools/strict_compile.sh` — each runs in a context the
+  others cannot read, so a new firmware's HAL has to be added to all three. **The names are matched
+  whole**: `--exclude-dir=posix_hal` does not cover `posix_gate_hal`, and in `strict_compile.sh` the
+  exclusion also governs the include path, so a HAL left in `SOURCES` but off the path fails to find
+  its own headers. **The forbidden-include regex is per board family
   too**: ESP32 brought `HTTPClient`, `Preferences`, `HardwareSerial` and the whole `esp_*` /
   `driver/` / `soc/` IDF set, none of which the ESP8266 pattern matched — without extending it an
   `esp_task_wdt.h` in pure `lib/` would have broken the host build of every project at once with the

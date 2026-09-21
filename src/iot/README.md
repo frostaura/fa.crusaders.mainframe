@@ -146,10 +146,12 @@ Two rules the generator enforces rather than documents:
   reaches the compiler on either build and `fwversion/Version.h`'s `#ifndef`
   fallback of 0 supplies both. Verified against the real `pio run -v` compile
   line, which carries `-DFW_VERSION_MAJOR=1` and neither of the other two.
-- **The forbidden host-only libraries (`posix_hal`, `hal_fakes`) fail the
-  export from any project**, not only from the one whose `lib/` owns them. Their
-  include namespaces are derived by scanning every project under `src/iot`,
-  because `posix_hal` lives in `court-box/lib` and was therefore invisible to
-  the gate's closure — an `#include "posix_hal/…"` there was silently not
-  vendored rather than refused, and surfaced later as a missing header from
-  `arduino-cli`.
+- **The forbidden host-only libraries (`posix_hal`, `posix_gate_hal`,
+  `hal_fakes`) fail the export from any project**, not only from the one whose
+  `lib/` owns them. Their include namespaces are derived by scanning every
+  project under `src/iot`, because `posix_hal` used to live in `court-box/lib`
+  and was therefore invisible to the gate's closure — an `#include
+  "posix_hal/…"` there was silently not vendored rather than refused, and
+  surfaced later as a missing header from `arduino-cli`. `posix_hal` is in
+  `shared/lib` now and `posix_gate_hal` is in `door-gate/lib`, so the scan is
+  still what makes the rule fire from either direction.

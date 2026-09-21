@@ -248,8 +248,10 @@ jobs:
         run: src/iot/court-box/tools/strict_compile.sh
 
       # The exclusions are the HAL-IMPLEMENTATION directories, by name: one per
-      # board family. A new firmware's HAL has to be added here, to the same list
-      # in the Makefile's lint-iot, and to the one in strict_compile.sh.
+      # board family plus one per SIMULATOR. A new firmware's HAL has to be added
+      # here, to the same list in the Makefile's lint-iot, and to the one in
+      # strict_compile.sh. `--exclude-dir` matches a whole directory name, so
+      # posix_gate_hal needs its own entry and is not covered by posix_hal's.
       #
       # The header families are per board family too. ESP32 brought four the
       # ESP8266 never had — HTTPClient, Preferences, HardwareSerial and the whole
@@ -261,7 +263,8 @@ jobs:
           if grep -rn --include=*.h --include=*.cpp \
                -E '#include *<(Arduino|WiFi|ESP8266|Wire|LiquidCrystal|HTTPClient|Preferences|HardwareSerial|EEPROM|SPI|esp_|driver/|soc/)' \
                src/iot/shared/lib src/iot/court-box/lib src/iot/door-gate/lib \
-               --exclude-dir=arduino_hal --exclude-dir=posix_hal --exclude-dir=esp32_hal; then
+               --exclude-dir=arduino_hal --exclude-dir=posix_hal --exclude-dir=esp32_hal \
+               --exclude-dir=posix_gate_hal; then
             echo "::error::pure lib/ modules must stay free of Arduino headers so they compile for the host"
             exit 1
           fi

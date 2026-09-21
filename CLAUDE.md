@@ -15,7 +15,7 @@ First customer is **Crusaders Squash Club**, the namesake. Multi-tenancy is stru
   The **Mega is a thin I/O layer** (buttons, scanner, relays, LCD, plus an *independent* auto-off timer) and
   **all volatile logic lives on the ESP8266**, because the ATmega cannot be flashed over WiFi — its ESP sits
   on Serial3, not the Serial0 bootloader port, and no GPIO reaches RESET. Everything under either `lib/`
-  except the hardware layers (`arduino_hal/`, `posix_hal/`, the gate's `esp32_hal/`) is free of Arduino headers so it compiles for the host test runner.
+  except the hardware layers (`arduino_hal/`, the shared `posix_hal/`, the gate's `esp32_hal/` and `posix_gate_hal/`) is free of Arduino headers so it compiles for the host test runner.
   **A module belongs in `shared/lib` only if a second, unrelated device would want it unchanged** — anything
   that knows a relay, a DIP switch, a court or the Mega↔ESP dialect stays in the device's own project, and
   where the two sides must agree on a constant the `static_assert` lives on the device side

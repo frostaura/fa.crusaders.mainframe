@@ -295,7 +295,8 @@ lib/           THIS box — no other device wants these
                token cap and the protocol's argument cap are asserted against
                each other.
   arduino_hal/ real drivers (AVR / ESP)   ← the ONLY place Arduino headers live
-  posix_hal/   host drivers, for the simulator
+               (the simulator's host drivers are ../../shared/lib/posix_hal —
+               the door gate's simulator uses the same ones)
 src/
   court_mega/    ATmega2560 firmware — composition root only
   court_bridge/  ESP8266 firmware — composition root only
@@ -309,8 +310,8 @@ arduino/       GENERATED Arduino IDE sketches — the flashing route. Never hand
                `make arduino-export` writes it and `make arduino-check` fails on a diff.
 ```
 
-Everything under either `lib/` except `arduino_hal/` and `posix_hal/` is free of
-Arduino headers, so the same code compiles for AVR, Xtensa **and** the host test
+Everything under either `lib/` except `arduino_hal/` and the shared
+`posix_hal/` is free of Arduino headers, so the same code compiles for AVR, Xtensa **and** the host test
 runner. That is what lets the whole logic layer be proven with no board
 attached. CI enforces the rule with a grep gate, across both directories.
 

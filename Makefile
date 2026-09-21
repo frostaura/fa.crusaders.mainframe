@@ -117,15 +117,18 @@ IOT_FORMAT_FILES = git ls-files -co --exclude-standard \
 	'$(IOT_DIR)/**/*.cpp' '$(IOT_DIR)/**/*.h' ':(exclude)$(IOT_DIR)/*/arduino/**'
 
 # Lint — IoT firmware. Formatting, the purity rule, and the strict compile gate.
-# All three cover every project in IOT_PROJECTS: the purity exclusions are
-# arduino_hal and posix_hal, which live under court-box/lib, and a gate that
-# looked at one project would leave the shared libraries — the ones compiled
-# into ALL the firmwares — checked by nothing.
+# All three cover every project in IOT_PROJECTS: the HAL implementations are
+# spread across all three project directories — arduino_hal under court-box/lib,
+# posix_hal under shared/lib, esp32_hal and posix_gate_hal under door-gate/lib —
+# and a gate that looked at one project would leave the shared libraries, the
+# ones compiled into ALL the firmwares, checked by nothing.
 #
 # The purity exclusions are the HAL-IMPLEMENTATION directories, by name: one per
-# board family. A new firmware's HAL has to be added to this list AND to the same
-# list in .github/workflows/ci.yml, or the gate fails on the one directory that
-# is allowed to include what it includes.
+# board family plus one per SIMULATOR. `--exclude-dir` matches a whole directory
+# name, so posix_gate_hal needs its own entry and is not covered by posix_hal's.
+# A new firmware's HAL has to be added to this list AND to the same list in
+# .github/workflows/ci.yml AND in court-box/tools/strict_compile.sh, or the gate
+# fails on the one directory that is allowed to include what it includes.
 #
 # The header families are likewise per-board. ESP32 brought four the ESP8266
 # never had — HTTPClient, Preferences, HardwareSerial and the whole esp_* IDF
@@ -137,6 +140,7 @@ lint-iot:
 	@! grep -rn --include=*.h --include=*.cpp \
 	    -E '#include *<(Arduino|WiFi|ESP8266|Wire|LiquidCrystal|HTTPClient|Preferences|HardwareSerial|EEPROM|SPI|esp_|driver/|soc/)' \
 	    $(IOT_LIB_DIRS) --exclude-dir=arduino_hal --exclude-dir=posix_hal --exclude-dir=esp32_hal \
+	    --exclude-dir=posix_gate_hal \
 	  || (echo 'pure lib/ must not include Arduino headers' && exit 1)
 	@! grep -rnE '(>=|<=|>|<) *[A-Za-z_]*([Dd]eadline|[Ee]xpires|[Aa]tMs)|millis\(\) *(>=|<=|>|<)|(>=|<=|>|<) *millis\(\)|(>=|<=|>|<) *[A-Za-z_][A-Za-z0-9_]*\.at\b' \
 	    $(IOT_LIB_DIRS) $(IOT_SRC_DIRS) --include=*.cpp --include=*.h 2>/dev/null | grep -v 'lib/timebase' \
