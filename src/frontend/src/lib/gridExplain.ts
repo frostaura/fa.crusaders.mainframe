@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import type { ScheduleDay, ScheduleSlot } from "./api";
 import type { GridReason, ViewerRules } from "./gridRules";
 import type { TimeSlice } from "./scheduleGrid";
+import { walletTone } from "./balance";
 import {
   closedSentence, earlierSummary, emptyWalletSentence, emptyWindowSentence, groupRateLine,
   quotaBannerBody, quotaBannerTitle, quotaPill, restrictionSentence,
@@ -174,8 +175,12 @@ function ruleNotice(rules: ViewerRules, clubDay: string): Notice | null {
  * landed — and says nothing, because a grid that shouted "no credits" at a slow network would
  * be wrong more often than right.
  */
-function walletNotice(balanceCredits: number | null, day: ScheduleDay | null): Notice | null {
-  if (balanceCredits === null || balanceCredits > 0) return null;
+export function walletNotice(balanceCredits: number | null, day: ScheduleDay | null): Notice | null {
+  // Through `walletTone`, and exported so the one rule can be asserted on all three surfaces
+  // at once. This used to ask `balanceCredits > 0`, which let 0.004 through — a balance that
+  // renders as "0.00" and buys nothing, on a grid still offering thirty-one green cells while
+  // the chip beside it was already red.
+  if (walletTone(balanceCredits) !== "zero") return null;
   return {
     id: "wallet", tone: "warning",
     title: emptyWalletSentence(cheapestSlice(day)),

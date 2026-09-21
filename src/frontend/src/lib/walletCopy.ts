@@ -1,4 +1,5 @@
 import type { LedgerEntryType } from "./api";
+import type { WalletTone } from "./balance";
 
 /**
  * The wallet's own words, and the one distinction the product kept getting wrong.
@@ -12,49 +13,34 @@ import type { LedgerEntryType } from "./api";
  * </p>
  *
  * <p>
- * The chip in the header is the UI lane's; this is the wallet and top-up pages' half, and the
- * two must not drift, so both read the threshold from `LOW_BALANCE_CREDITS`.
+ * The chip in the header is the UI lane's; this is the wallet and top-up pages' half. They no
+ * longer read one threshold and decide separately — they ask `walletTone` and look the answer
+ * up in the tables below, which is what makes "must not drift" a fact rather than an intention.
  * </p>
  */
 
-/** The three states a balance can be in, named once. */
-export type BalanceLevel = "empty" | "low" | "fine";
-
 /**
- * How near zero counts as zero. Half a cent of a credit — the smallest movement that can
- * change what `toFixed(2)` paints.
+ * The three states a balance can be in.
+ *
+ * <p>
+ * The type is {@link WalletTone}, and the RULE that picks between them lives with it in
+ * `lib/balance` — one question, asked in one place, because three lanes each answered it and
+ * their answers disagreed at 0.004 credits. What lives here is only what each state SAYS.
+ * </p>
  */
-const ROUNDS_TO_ZERO = 0.005;
-
-export function balanceLevel(balance: number | null, lowBelow: number): BalanceLevel {
-  if (balance === null) return "fine";
-  /*
-    Not `=== 0`, and not `<= 0` either.
-
-    `=== 0` misses a negative balance, which is a real state: the settlement model posts a
-    late reversal as two NEW rows rather than an edit and says in so many words that the
-    balance may go negative. That is emptier than empty, not a different kind of thing.
-
-    `<= 0` misses the other end. A balance of 0.004 is not `<= 0`, renders as "0.00 credits",
-    and buys nothing — a slot costs fifty — so a member would read "0.00" beside a sentence
-    saying they have enough for a slot or two. What the member can see is two decimal places;
-    the rule has to be about the same number they are looking at.
-  */
-  if (balance < ROUNDS_TO_ZERO) return "empty";
-  return balance < lowBelow ? "low" : "fine";
-}
+export type BalanceLevel = WalletTone;
 
 /**
  * What the wallet card says under the figure.
  *
  * <p>
- * The "empty" sentence names the CONSEQUENCE rather than the number, because the number is
+ * The "zero" sentence names the CONSEQUENCE rather than the number, because the number is
  * already three times its size directly above it. "0.00 credits" is a fact a member can read;
  * "you can't book a court until you top up" is the thing they came to find out.
  * </p>
  */
 export const BALANCE_SENTENCE: Record<BalanceLevel, string> = {
-  empty: "You can't book a court until you top up.",
+  zero: "You can't book a court until you top up.",
   low: "That's enough for a slot or two. Top up before it runs out.",
   fine: "Credits are what court time is bought with. Top up in rand and the club converts at your member rate.",
 };
@@ -64,14 +50,14 @@ export const BALANCE_TONE: Record<BalanceLevel, { fill: string; ink: string }> =
   // danger, not warning. Amber for 0.00 and amber for 49.99 is the defect: one of those is a
   // caution and the other is a stop, and colour was the only thing distinguishing them from
   // a comfortable balance at all.
-  empty: { fill: "bg-danger-soft", ink: "text-danger-strong" },
+  zero: { fill: "bg-danger-soft", ink: "text-danger-strong" },
   low: { fill: "bg-warning-soft", ink: "text-warning-strong" },
   fine: { fill: "bg-bg-muted", ink: "text-text-secondary" },
 };
 
 /** The top-up control's own label, which changes with the state because the errand does. */
 export const TOP_UP_LABEL: Record<BalanceLevel, string> = {
-  empty: "Top up to start booking",
+  zero: "Top up to start booking",
   low: "Top up",
   fine: "Top up",
 };

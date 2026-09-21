@@ -195,7 +195,20 @@ export type LiveBalance = {
   delta: BalanceDelta | null;
   /** The chip has shown this delta. Clears it so a re-render cannot raise a second toast. */
   clearDelta: () => void;
-  refresh: () => Promise<void>;
+  /**
+   * Re-read the wallet over HTTP.
+   *
+   * <p>
+   * <b>`expectSelf` says whose doing the movement was, and it is not cosmetic.</b> A plain
+   * re-read is indistinguishable from an admin crediting the member at the desk, so the chip
+   * announces it — which is right for the refresh on focus and on visibility, and wrong on
+   * the path where the page has ALREADY told the member what happened. Cancelling a booking
+   * is that path: its endpoint answers with `refunded_credits` and `penalty_credits` and no
+   * balance, so there is no figure to `apply`, and the un-flagged re-read raised "The club
+   * added 50 credits" over the page's own "50.00 back".
+   * </p>
+   */
+  refresh: (options?: { expectSelf?: boolean }) => Promise<void>;
   /** Take a figure the server has just stated, without asking it again. */
   apply: (credits: number) => void;
 };
@@ -231,7 +244,14 @@ export function useLiveBalance({
    * does not re-run on every balance change, because re-running it tears down the stream.
    */
   const previous = useRef<number | null>(null);
-  /** Set by `apply` and by `refresh`: the next movement is this tab's own doing. */
+  /**
+   * The next movement is this tab's own doing.
+   *
+   * Set by `apply`, and by `refresh({ expectSelf: true })` — never by a bare `refresh`, which
+   * is what the focus and visibility reads use and is how a member learns about a top-up that
+   * happened while the phone was in a pocket. `record` clears it whatever it decides, so one
+   * flagged read cannot silence the movement after it.
+   */
   const expectSelf = useRef(false);
 
   const record = useCallback((credits: number, frame?: BalanceFrame) => {
@@ -252,10 +272,11 @@ export function useLiveBalance({
     expectSelf.current = false;
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options?: { expectSelf?: boolean }) => {
     if (!enabled) return;
     if (inflight.current) return;
     inflight.current = true;
+    if (options?.expectSelf) expectSelf.current = true;
     try {
       const w = await endpoints.wallet();
       record(w.balance_credits);

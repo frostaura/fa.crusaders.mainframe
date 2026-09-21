@@ -6,11 +6,11 @@ import { Card } from "../components/Card";
 import { Button } from "../components/Button";
 import { LedgerTable } from "../components/LedgerTable";
 import { useToast } from "../components/Toast";
-import { LOW_BALANCE_CREDITS } from "../lib/balance";
+import { walletTone } from "../lib/balance";
 import { useBalanceMovement, useCountUp, useWalletLive } from "../components/wallet/useWalletLive";
 import {
   BALANCE_SENTENCE, BALANCE_TONE, LEDGER_CLOCK_NOTE, TOP_UP_LABEL,
-  balanceLevel, creditArrivedSentence, creditLeftSentence,
+  creditArrivedSentence, creditLeftSentence,
 } from "../lib/walletCopy";
 
 /** One page of movements. Big enough that most members never press "Show older". */
@@ -114,12 +114,12 @@ export default function WalletPage() {
 
   const shown = rows.length;
   const painted = countUp ?? balance;
-  const level = balanceLevel(balance, LOW_BALANCE_CREDITS);
+  const level = walletTone(balance);
   const tone = BALANCE_TONE[level];
 
   return (
     <div className="flex-1 min-h-0 flex flex-col gap-6">
-      <Card className={level === "fine" ? undefined : `${tone.fill} border-l-4 ${level === "empty" ? "border-danger-strong" : "border-warning-strong"}`}>
+      <Card className={level === "fine" ? undefined : `${tone.fill} border-l-4 ${level === "zero" ? "border-danger-strong" : "border-warning-strong"}`}>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <p className="text-sm text-text-secondary">Current balance</p>
@@ -129,7 +129,7 @@ export default function WalletPage() {
               it: a number that re-renders sixty times a second inside a live region is sixty
               announcements. The toast is the announcement.
             */}
-            <p className={`text-3xl font-semibold tabular-nums ${level === "empty" ? tone.ink : ""}`}>
+            <p className={`text-3xl font-semibold tabular-nums ${level === "zero" ? tone.ink : ""}`}>
               {(painted ?? 0).toFixed(2)} <span className="text-base font-normal text-text-secondary">credits</span>
             </p>
             <p className={`text-xs mt-1 ${level === "fine" ? "text-text-muted" : tone.ink}`}>
@@ -139,7 +139,7 @@ export default function WalletPage() {
           <Link to="/wallet/topup" className="shrink-0">
             {/* Primary when there is nothing to play with: at zero this is the only control on
                 the page that does anything for the member. */}
-            <Button variant={level === "empty" ? "primary" : "default"}>{TOP_UP_LABEL[level]}</Button>
+            <Button variant={level === "zero" ? "primary" : "default"}>{TOP_UP_LABEL[level]}</Button>
           </Link>
         </div>
       </Card>

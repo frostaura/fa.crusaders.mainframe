@@ -4,8 +4,8 @@ import { ApiError, endpoints, type PayFastFormField, type TopUpOptions } from ".
 import { Card } from "../components/Card";
 import { Button, Input, Label } from "../components/Button";
 import { formatCredits, formatRatePerRand, formatZar } from "../lib/utils";
-import { LOW_BALANCE_CREDITS, useBalance } from "../lib/balance";
-import { BALANCE_SENTENCE, balanceLevel } from "../lib/walletCopy";
+import { useBalance, walletTone } from "../lib/balance";
+import { BALANCE_SENTENCE } from "../lib/walletCopy";
 
 /**
  * Why an amount is not acceptable, or null when it is.
@@ -113,11 +113,11 @@ export default function TopUpPage() {
   const nav = useNavigate();
   /*
     Only to say WHY the member is here, never to gate anything: a balance that has not
-    loaded is `null`, which `balanceLevel` reads as nothing to warn about, and the form
+    loaded is `null`, which `walletTone` reads as nothing to warn about, and the form
     behaves identically either way.
   */
   const { balance } = useBalance();
-  const emptyWallet = balanceLevel(balance, LOW_BALANCE_CREDITS) === "empty";
+  const emptyWallet = walletTone(balance) === "zero";
   const [options, setOptions] = useState<TopUpOptions | null>(null);
   const [amount, setAmount] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
@@ -205,7 +205,7 @@ export default function TopUpPage() {
         */}
         {emptyWallet && (
           <p role="status" className="mb-5 rounded-lg border-l-4 border-danger-strong bg-danger-soft px-3 py-2 text-sm text-danger-strong">
-            {BALANCE_SENTENCE.empty}
+            {BALANCE_SENTENCE.zero}
           </p>
         )}
         <form onSubmit={submit} className="space-y-4">

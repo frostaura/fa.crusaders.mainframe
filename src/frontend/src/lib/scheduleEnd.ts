@@ -19,7 +19,19 @@ type Args = {
   setCancelling: (t: CancelTarget | null) => void;
   setDay: (f: (d: ScheduleDay | null) => ScheduleDay | null) => void;
   reconcile: () => void;
-  refreshBalance: () => Promise<void> | void;
+  /**
+   * Re-read the wallet, flagged as THIS page's doing.
+   *
+   * <p>
+   * The cancel endpoint answers `refunded_credits` and `penalty_credits` and no balance, so
+   * there is no server figure to `apply` — and `balance + refunded - penalty` in the client
+   * would be the optimistic guess `apply` exists to not be, on the one screen where being
+   * wrong about money is worst. So the read stays a read and says who asked for it: without
+   * the flag the chip raised "The club added 50 credits" on top of the toast below, and a
+   * member saw one cancellation reported twice, in two different voices.
+   * </p>
+   */
+  refreshBalance: (options?: { expectSelf?: boolean }) => Promise<void> | void;
   toast: Toast;
 };
 
@@ -54,7 +66,7 @@ export function useSlotEnders({ cancelling, setCancelling, setDay, reconcile, re
           cancelling.mine ? null : cancelling.memberName ?? "the member"),
       });
       reconcile();
-      void refreshBalance();
+      void refreshBalance({ expectSelf: true });
     } catch (err) {
       // Same rule as the booking path: a booking that is "no longer there" is the server
       // saying this grid is stale, so it is refetched — and awaited, so the sentence that
