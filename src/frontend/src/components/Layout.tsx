@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { DoorClosed, LogOut, Settings as SettingsIcon, Webhook as WebhookIcon, Cpu } from "lucide-react";
+import { LogOut, Settings as SettingsIcon, Webhook as WebhookIcon } from "lucide-react";
 import { ShutDoorsBanner } from "./doors/ShutDoorsBanner";
 import { useDoorsChrome } from "./doors/useDoorsChrome";
 import { endpoints } from "../lib/api";
@@ -481,14 +481,28 @@ function pendingApplicationsLabel(count: number): string {
 }
 
 /**
- * doors: admin — the attention count, as a sentence.
+ * What needs an admin's attention in Monitoring, as a sentence.
  *
- * Three call sites now say it: the gear's accessible name, the Doors menu item's badge and
- * the Doors tab's badge. It was written out twice before and the third copy is what turned
- * a wording into a function.
+ * <p>
+ * It was `doorsAttentionLabel` and it counted doors, because doors was all there was. The
+ * badge moves to the Monitoring tab with the section (D3 §3.1), so it has to say BOTH halves
+ * — "2 doors need attention and 1 board has a fault" — or an admin who sees a number and
+ * finds every door fine concludes the badge is wrong.
+ * </p>
+ *
+ * <p>
+ * `faults` is optional and defaults to 0. <b>Unknown is not zero</b> in general, but here the
+ * fault store does not exist yet: the count has no source, and a badge is a cue rather than a
+ * claim, so the honest thing is to count what we can count and say only that. The admin lane
+ * passes the real number when the store lands, and this sentence grows its second half
+ * without any caller changing.
+ * </p>
  */
-function doorsAttentionLabel(count: number): string {
-  return `${count} ${count === 1 ? "door needs" : "doors need"} attention`;
+export function monitoringAttentionLabel(doors: number, faults = 0): string {
+  const parts: string[] = [];
+  if (doors > 0) parts.push(`${doors} ${doors === 1 ? "door needs" : "doors need"} attention`);
+  if (faults > 0) parts.push(`${faults} ${faults === 1 ? "board has" : "boards have"} a fault`);
+  return parts.join(" and ");
 }
 
 /**
@@ -517,13 +531,15 @@ function SectionTabs({ isAdmin, pendingApplications, doorsNeedingAttention }: {
           badge={{ count: pendingApplications, label: pendingApplicationsLabel(pendingApplications) }}
         />
       )}
-      {/* A20 — Doors is a named destination rather than a 6 px dot on a cog.
-          See the measurement note on the `lg` nav in `Layout`. */}
+      {/* A20 — a named destination rather than a 6 px dot on a cog. D3 §3.1 — and it is
+          Monitoring now, not Doors: the doors overview, the boards, the faults and the
+          control board are one subject, and Devices was in a gear menu linking to a
+          top-level tab, which is what proved the split was wrong. Six tabs stay six tabs. */}
       {isAdmin && (
         <NavTab
-          to="/admin/doors"
-          label="Doors"
-          badge={{ count: doorsNeedingAttention, label: doorsAttentionLabel(doorsNeedingAttention) }}
+          to="/admin/monitoring"
+          label="Monitoring"
+          badge={{ count: doorsNeedingAttention, label: monitoringAttentionLabel(doorsNeedingAttention) }}
         />
       )}
       <NavTab to="/reports" label="Reports" />
@@ -694,7 +710,7 @@ function SettingsMenu({ isAdmin, doorsNeedingAttention, onSignOut }: {
            colour alone is never the signal. */
         aria-label={doorsNeedingAttention === 0
           ? "Open menu"
-          : `Open menu — ${doorsAttentionLabel(doorsNeedingAttention)}`}
+          : `Open menu — ${monitoringAttentionLabel(doorsNeedingAttention)}`}
         aria-haspopup="menu"
         aria-expanded={open}
         // 44 px in PIXELS, not `w-11`/`h-11`. The rem form doubled to 88 px at a 32 px root
@@ -725,19 +741,16 @@ function SettingsMenu({ isAdmin, doorsNeedingAttention, onSignOut }: {
         >
           {isAdmin && (
             <>
-              {/* doors: admin — first, above Devices. Ordered by urgency of use rather than
-                  alphabetically: Doors is opened standing in a club with a member waiting,
-                  Webhooks twice a year. `DoorClosed`, not `DoorOpen` — an open door is a
-                  state claim this product cannot make, two lines above the page whose whole
-                  discipline is not making it. */}
-              <MenuLink
-                to="/admin/doors"
-                onNavigate={() => setOpen(false)}
-                icon={<DoorClosed size={16} />}
-                label="Doors"
-                badge={{ count: doorsNeedingAttention, label: doorsAttentionLabel(doorsNeedingAttention) }}
-              />
-              <MenuLink to="/admin/devices" onNavigate={() => setOpen(false)} icon={<Cpu size={16} />} label="Devices" />
+              {/*
+                D3 §3.1 — Doors and Devices are GONE from here, and that is the point.
+
+                They are destinations, not settings, and they now live under the Monitoring
+                tab beside the boards and the faults. What is left in this menu is the two
+                things that really are configuration. The gear keeps its attention dot,
+                because the menu is still a route to Monitoring on a phone where the tab strip
+                has scrolled — the dot says "there is something to look at", and the
+                accessible name above says what.
+              */}
               <MenuLink to="/admin/settings" onNavigate={() => setOpen(false)} icon={<SettingsIcon size={16} />} label="Admin settings" />
               <MenuLink to="/admin/webhooks" onNavigate={() => setOpen(false)} icon={<WebhookIcon size={16} />} label="Webhooks" />
               <div className="border-t border-border" />

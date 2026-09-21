@@ -114,19 +114,27 @@ function chromeWithFailedDoors(route = "/admin/settings") {
   return renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: [route] });
 }
 
-describe("the Doors entry in the gear menu", () => {
+describe("the doors cue in the chrome", () => {
   /**
-   * <b>First in the menu, above Devices.</b> Ordered by urgency of use rather than
-   * alphabetically — Doors is opened standing in a club with a member waiting, Webhooks
-   * twice a year.
+   * <b>Doors and Devices have LEFT the gear menu (D3 §3.1), and that is the fix.</b>
+   *
+   * <p>
+   * This test asserted that Doors was first in the menu and Devices second. They were there
+   * because there was nowhere better, and the arrangement was its own finding: Devices sat in
+   * a settings menu while rendering an inline link to Doors, which was a top-level tab —
+   * two pages that already knew they were one subject, linking to each other across a nav
+   * boundary. They are destinations now, under Monitoring. What is left in the gear is the
+   * two things that really are configuration.
+   * </p>
    */
-  it("is first in the menu, above Devices", async () => {
+  it("leaves only configuration in the gear", async () => {
     chrome([doorFixture()]);
 
     fireEvent.click(await screen.findByRole("button", { name: /Open menu/ }));
     const items = screen.getAllByRole("menuitem").map((i) => i.textContent);
-    expect(items[0]).toContain("Doors");
-    expect(items[1]).toContain("Devices");
+    expect(items[0]).toContain("Admin settings");
+    expect(items[1]).toContain("Webhooks");
+    expect(items.join(" ")).not.toContain("Devices");
   });
 
   /**
@@ -143,8 +151,11 @@ describe("the Doors entry in the gear menu", () => {
   it("is reachable without opening the gear", async () => {
     chrome([doorFixture()]);
 
-    const inNav = (await screen.findAllByRole("link", { name: /Doors/ }))
-      .some((link) => link.getAttribute("href") === "/admin/doors");
+    // The tab is "Monitoring" now — the section the doors overview lives in. The point the
+    // test was written to pin is unchanged: an admin's landing screen names the surface, and
+    // it is not a 6 px dot on a cog.
+    const inNav = (await screen.findAllByRole("link", { name: /Monitoring/ }))
+      .some((link) => link.getAttribute("href") === "/admin/monitoring");
     expect(inNav).toBe(true);
   });
 
@@ -170,13 +181,18 @@ describe("the Doors entry in the gear menu", () => {
       .toBeInTheDocument();
   });
 
-  it("puts the same sentence on the menu item's badge", async () => {
+  it("puts the same sentence on the Monitoring tab's badge", async () => {
     chrome([doorFixture({ last_seen_at: ago(3600) })]);
 
-    fireEvent.click(await screen.findByRole("button", { name: /Open menu/ }));
-    // The gear carries the same sentence, so scope to the menu rather than the document.
-    const badge = within(screen.getByRole("menu")).getByLabelText("1 door needs attention");
-    expect(badge).toHaveTextContent("1");
+    // The badge moved with the section: it was on the Doors menu item, and the gear no longer
+    // has one. Twice over, because the chrome carries a desktop nav and a mobile strip and an
+    // admin on a phone is exactly who is standing at the club desk.
+    const badges = await screen.findAllByLabelText("1 door needs attention");
+    expect(badges.length).toBeGreaterThanOrEqual(2);
+    expect(badges[0]).toHaveTextContent("1");
+    // And the gear still says it in its own accessible name, because on a phone the strip may
+    // have scrolled the tab out of sight.
+    expect(screen.getByRole("button", { name: "Open menu — 1 door needs attention" })).toBeInTheDocument();
   });
 
   /**
