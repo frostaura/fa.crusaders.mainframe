@@ -114,11 +114,43 @@ public sealed class TenantSettingsAccessor
             // admin bulk action may act on" is a different question with a different answer
             // for a hand-edited document.
             AdminBulkMaxItems = TryInt(root, "admin_bulk_max_items", BulkSettings.DefaultMaxItems),
+
+            // The two night-trace numbers. Raw here and bounded by TraceSettings at the one
+            // reader, exactly like the five door settings above — and for a sharper reason: the
+            // first of them is the kill switch on the most surveillance-capable surface in the
+            // product, so "what the column says" and "what the endpoint may act on" must be two
+            // separate questions with one answer each. See TraceSettings.
+            MemberTraceEnabled = TryBool(root, "member_trace_enabled", TraceSettings.DefaultEnabled),
+            MemberTraceMaxEvents = TryInt(root, "member_trace_max_events", TraceSettings.DefaultMaxEvents),
         };
     }
 
     private static int TryInt(JsonElement root, string name, int fallback)
         => root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : fallback;
+
+    /// <summary>
+    /// A boolean from the document, or the fallback when the key is absent or holds anything
+    /// else.
+    ///
+    /// <para>
+    /// <b>A JSON <c>true</c>/<c>false</c> only, never a truthy string.</b> A hand-edited
+    /// <c>"member_trace_enabled": "false"</c> is not a boolean, and coercing it would make a
+    /// club that believed it had switched the trace OFF find it on — the one direction this
+    /// particular key must never fail in. It falls back to the documented default and the
+    /// settings page shows that default, which is visible; a silent coercion is not.
+    /// </para>
+    /// </summary>
+    private static bool TryBool(JsonElement root, string name, bool fallback)
+    {
+        if (!root.TryGetProperty(name, out var v)) return fallback;
+        return v.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => fallback,
+        };
+    }
+
     private static decimal TryDecimal(JsonElement root, string name, decimal fallback)
         => root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDecimal() : fallback;
     private static string TryString(JsonElement root, string name, string fallback)
@@ -310,6 +342,22 @@ public sealed record TenantSettingsView(
     /// </para>
     /// </summary>
     public int AdminBulkMaxItems { get; init; } = BulkSettings.DefaultMaxItems;
+
+    // ---- The two night-trace settings ----
+    //
+    // Raw as stored, like everything else on this record, and read through TraceSettings, which
+    // is where the bounds and the kill switch's meaning live. The defaults are TraceSettings'
+    // own constants rather than literals here, so the accessor's fallback and this initialiser
+    // cannot drift.
+
+    /// <summary>
+    /// Whether this club's admins may read one member's night. Read via
+    /// <see cref="TraceSettings.Enabled"/>; false makes the route answer <c>404</c>.
+    /// </summary>
+    public bool MemberTraceEnabled { get; init; } = TraceSettings.DefaultEnabled;
+
+    /// <summary>Most events one trace returns. Read via <see cref="TraceSettings.MaxEvents"/>.</summary>
+    public int MemberTraceMaxEvents { get; init; } = TraceSettings.DefaultMaxEvents;
 
     /// <summary>
     /// The number a member refused at a door should ring. Empty by default — a club that has
