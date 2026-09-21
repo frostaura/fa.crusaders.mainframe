@@ -31,6 +31,12 @@ these to switch a **contactor coil**, with the contactor carrying the lighting l
 whose lights cannot be switched off by anything — not the Mega's timer, not the ESP, not
 the API. The box has no readback and cannot even detect it.
 
+**This got MORE urgent, not less.** The box now restores the courts a power dip took out:
+on its first accepted heartbeat after boot it re-energises, unattended, whatever the API
+says should still be on. Nobody is standing next to the box when that happens. An
+installation that was inside its rating while a human was pressing the buttons is the same
+installation re-closing contacts by itself at three in the morning after a brownout.
+
 ---
 
 ## 2. The publish chain is unproven, and the redeploy is manual
@@ -303,8 +309,9 @@ a multimeter on the actual box:
       measured during WiFi transmit bursts (item 7).
 - [ ] The physical 8-way DIP verified against the wiring sheet for all four modes — Mega
       upload, ESP upload, ESP USB monitor, run.
-- [ ] All firmware screens confirmed legible on the physical 20×4 glass (driven as 16×2 —
-      no wrapped or orphaned half-lines).
+- [ ] All firmware screens confirmed legible on the physical 20×4 glass — which the
+      firmware now drives as 20×4 rather than as 16×2. No wrapped or orphaned half-lines,
+      and rows 2 and 3 landing where they should. See §10a, which gates this.
 - [ ] A real minted **12-character access code** QR fed to the physical scanner and its TX
       output captured: the terminator, and that the whole code arrives intact. (This bullet
       used to describe a ~200-character JWT payload and ask where it truncates; the system
@@ -324,6 +331,99 @@ a multimeter on the actual box:
       behaviour re-confirmed end to end on all four channels.
 - [ ] Physical A/B/C/D and 15/30/45/60 buttons confirmed on pins 22/24/26/28 and
       30/32/34/36 in that order — a swapped pair sells the wrong duration or court.
+
+---
+
+## 10a. The panel, the countdown and the fifteen-second lock
+
+Four things the firmware changes in this programme cannot settle from the host, in the
+order that matters.
+
+**Somebody must LOOK at the fitted panel before a club box is flashed.**
+
+The wiring sheet records a 2004A — twenty columns by four rows — and the firmware drove it
+as sixteen by two by decision, so a swapped display would degrade rather than produce
+garbage. It now drives all twenty columns and all four rows. Everything about that is right
+for a 2004A and silently wrong for a 1602, where rows 2-3 and columns 17-20 write into
+DDRAM that is off-glass.
+
+The **safe-subset contract** is what makes shipping it reasonable rather than a reason to
+skip the look: rows 0 and 1, truncated at column 16, are a complete and correct message on
+every screen, enforced by a table-driven test over all of them. A 1602 fitted by mistake
+therefore degrades to exactly the old behaviour instead of to half a sentence.
+
+- [ ] Somebody has read the part number off the panel, or counted the character cells, and
+      confirmed it is 20×4.
+- [ ] If it is a 1602: `-DLCD_COLS`/`-DLCD_ROWS` in `court-box/platformio.ini`'s `[lcd]`
+      block go back to 16/2 before flashing, and the box is confirmed to show the same two
+      rows it always did.
+
+**If skipped:** four rows of text written to a panel that has two. Half of every screen
+lands nowhere and the member reads the remaining half as the whole message.
+
+**Bench the four-row atomic repaint against a wedged I²C bus.**
+
+`!SHOW` commits four rows in one go, which is what removed the torn
+`CRUSADERS COURTS / 45 MIN` intermediate a member could see. Four `setCursor` calls plus
+eighty character writes is roughly 84 I²C transactions where the old two-row paint was
+about 42. The `Wire` timeout is armed per transaction and the watchdog is two seconds, so a
+healthy paint is far inside both — but a bus wedged MID-paint is bounded by
+`courtlogic::DisplayHoldoff`, which skips a fixed number of writes, and with four rows that
+is now **less than one full screen** where it used to be more than one.
+
+- [ ] SDA shorted mid-paint on the bench: the re-sync recovers, the watchdog does not fire,
+      and the screen after recovery is a whole screen rather than two rows of one and two
+      of another.
+- [ ] The numbers re-read off `arduino_hal/LcdDisplay.cpp` and `courtlogic/DisplayHoldoff.h`
+      rather than from this page, and this page corrected if they have moved.
+
+**Is the countdown legible at arm's length?**
+
+The design deliberately uses **no custom glyphs**. A progress bar would cost CGRAM that the
+I²C re-sync path has to restore after every bus wedge, and it carries no information the
+digits do not.
+
+- [ ] Plain digits confirmed readable at 1.5 m in the corridor's own light, by somebody who
+      did not write them.
+
+**The physical unlock time at fifteen seconds.**
+
+The door release default moves from three seconds to fifteen (GOAL item 2). That is five
+times the duty cycle the strike coil has been seeing.
+
+- [ ] The coil and the PSU measured comfortable at 15 s, repeatedly, back to back.
+- [ ] The club asked, in words, whether a fifteen-second open door is what they want at the
+      front of the building.
+- [ ] The consequence confirmed with whoever staffs the door: the 30 s hard cap bounds the
+      TOTAL release across re-arms, so at 3 s it allowed nine extensions and at 15 s it
+      allows **one**. A second member scanning at t = 14 s gets fifteen seconds more; a
+      third at t = 29 s gets one.
+
+**If skipped:** an overheated strike, or a front door a club did not agree to leave open
+for a quarter of a minute.
+
+---
+
+## 10b. The first week's fault numbers will be surprising
+
+The boards now report their own faults, aggregated — one event per code per window, the
+count riding `duration_ms`. Several of the counters behind them have existed since the
+first firmware with nothing off the board able to read them, so **there is no baseline for
+any of this and the first readings are data, not alarms.**
+
+The one to watch is `serial_badcrc`: the real-world CRC error rate on a 9600 baud link
+running beside four switching relay coils, measured for the first time. `D1-3`'s severity —
+the retry that replayed the wrong court's `!ON` — is a function of that rate, and until now
+it has only ever been reasoned about.
+
+- [ ] A week of `device_faults` read before anybody concludes anything from it.
+- [ ] `scanner_uart_error` and `scan_oversize` checked specifically: both were counted by
+      the Mega and readable by nothing, so a scanner that has been dropping lines has been
+      doing so silently for as long as the box has existed.
+- [ ] `button_unauthorised` checked: a climbing count is a stuck contact or a bridge that
+      stopped sending `!AUTH`, and it is invisible any other way.
+- [ ] A `device.relay_restore_failed` row treated as urgent rather than informational — it
+      means a court is dark that should not be.
 
 ---
 
