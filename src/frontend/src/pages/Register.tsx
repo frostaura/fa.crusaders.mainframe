@@ -1,42 +1,15 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { endpoints, uploadPhoto } from "../lib/api";
 import { describeFailure, isDeploymentFault } from "../lib/errors";
 import { AuthShell } from "../components/AuthShell";
 import { Alert } from "../components/Alert";
 import { Button, Input, Label } from "../components/Button";
-import { PhotoPicker } from "../components/PhotoPicker";
-
-/**
- * The API's refusal codes, as sentences.
- *
- * <p>
- * This screen used to map by status alone: every 400 became "password must be at least 8
- * characters", so a member who left their name blank was told to fix a password that was
- * already fine. And a membership number that was already taken produced an unhandled 500 and
- * "Registration failed. Try again." — advice that could never work, on the most ordinary human
- * mistake there is: typing a digit of someone else's club number.
- * </p>
- */
-const MESSAGES: Record<string, string> = {
-  missing_fields: "Please fill in every field — name, email, membership number and password.",
-  password_too_short: "Your password must be at least 8 characters.",
-  email_in_use: "An account with that email already exists. Sign in instead, or reset your password.",
-  membership_number_in_use:
-    "That membership number is already registered. Check the number on your card — if it's right, contact the club committee.",
-
-  // The upload endpoint's own refusals. They were absent, and that absence is what made a
-  // rejected photo read as a network fault: uploadPhoto throws before register() is ever
-  // called, and every code it can produce fell through to the connection sentence.
-  // preparePhoto now re-encodes to a small JPEG before the request, so reaching any of these
-  // means something stranger than a big iPhone photo went wrong — they stay mapped because a
-  // sentence naming the real cause is the entire point of this screen.
-  unsupported_content_type:
-    "The club's system wouldn't accept that image format. Try a different photo — a JPEG or PNG works.",
-  file_too_large: "That photo is too large for the club's system, even after resizing. Try a different one.",
-  file_missing: "The photo didn't reach the club's system. Pick it again and resubmit.",
-  expected_multipart: "The photo didn't upload correctly. Pick it again and resubmit.",
-};
+import { PhotoPicker, type PhotoPickerHandle } from "../components/PhotoPicker";
+import {
+  INBOX_HEADING, INBOX_PATIENCE, INBOX_STEPS,
+  PHOTO_PREPARING, PHOTO_REQUIRED, REGISTER_MESSAGES, VERIFY_BACK_TO_SIGN_IN,
+} from "../lib/registrationCopy";
 
 export default function RegisterPage() {
   const nav = useNavigate();
@@ -54,18 +27,37 @@ export default function RegisterPage() {
   const [blocked, setBlocked] = useState(false);
   /** True while PhotoPicker is decoding and re-encoding — see its onBusyChange. */
   const [preparingPhoto, setPreparingPhoto] = useState(false);
+  /**
+   * The form's complaint about the photo field, shown ON the field.
+   *
+   * <p>
+   * Held apart from `error` — the page-level alert — because they are about different things
+   * and, until this change, one of them could not be reached at all. `error` is what the club's
+   * system said about an application that was actually sent; this is what this form noticed
+   * before sending one. Putting the second in the first's banner also announced it twice, since
+   * `Alert` and the picker's own message are both `role="alert"`.
+   * </p>
+   */
+  const [photoProblem, setPhotoProblem] = useState<string | null>(null);
+  /** So a refusal can put the keyboard on the field it is about. See PhotoPickerHandle. */
+  const photoField = useRef<PhotoPickerHandle>(null);
+
+  /** Refuse, say why on the field, and take the member to it. Never silently. */
+  const refusePhoto = (message: string) => {
+    setPhotoProblem(message);
+    photoField.current?.focus();
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setPhotoProblem(null);
     if (preparingPhoto) {
-      // Distinct from having no photo at all. Telling someone who is watching their photo
-      // being prepared that they have not chosen one is simply false.
-      setError("Your photo is still being prepared — give it a second, then submit again.");
+      refusePhoto(PHOTO_PREPARING);
       return;
     }
     if (!photo) {
-      setError("Please upload a photo of yourself — it's used to identify you on court.");
+      refusePhoto(PHOTO_REQUIRED);
       return;
     }
     setLoading(true);
@@ -74,7 +66,7 @@ export default function RegisterPage() {
       await endpoints.register({ email, password, fullName, membershipNumber, photoUrl: upload.url });
       setSubmitted(true);
     } catch (err) {
-      setError(describeFailure(err, { codes: MESSAGES, action: "submit your application" }));
+      setError(describeFailure(err, { codes: REGISTER_MESSAGES, action: "submit your application" }));
       // A missing tenant or a 5xx is not something resubmitting can cure. Hiding the submit
       // button is the honest response: the previous screen invited the member to keep
       // pressing it against a fault only the club's operator could clear.
@@ -88,18 +80,20 @@ export default function RegisterPage() {
     return (
       <AuthShell className="my-auto" subline="Your application is in.">
         <>
-          <h1 className="text-lg font-semibold mb-2">Check your inbox</h1>
-          <ol className="mb-5 space-y-2 text-sm text-text-secondary">
+          <h1 className="text-lg font-semibold mb-2">{INBOX_HEADING}</h1>
+          <ol className="mb-3 space-y-2 text-sm text-text-secondary">
             {/*
               The three steps, because "an admin reviews your application" left an applicant with
               no idea whether anything more was required of them, or how long to wait before
               assuming it had failed.
             */}
-            <li className="flex gap-2"><span aria-hidden="true">1.</span><span>We've emailed you a link — open it to confirm your address.</span></li>
-            <li className="flex gap-2"><span aria-hidden="true">2.</span><span>The club checks your membership number against its records.</span></li>
-            <li className="flex gap-2"><span aria-hidden="true">3.</span><span>You'll get a second email once you're approved, and then you can book.</span></li>
+            {INBOX_STEPS.map((step, i) => (
+              <li key={step} className="flex gap-2"><span aria-hidden="true">{i + 1}.</span><span>{step}</span></li>
+            ))}
           </ol>
-          <Button variant="outline" onClick={() => nav("/login")} className="w-full">Back to sign in</Button>
+          {/* How long, before anybody has to ask. See INBOX_PATIENCE. */}
+          <p className="mb-5 text-sm text-text-muted">{INBOX_PATIENCE}</p>
+          <Button variant="outline" onClick={() => nav("/login")} className="w-full">{VERIFY_BACK_TO_SIGN_IN}</Button>
         </>
       </AuthShell>
     );
@@ -130,7 +124,16 @@ export default function RegisterPage() {
             <Input id="password" type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
             <p className="text-xs text-text-muted mt-1">At least 8 characters.</p>
           </div>
-          <PhotoPicker value={photo} onChange={setPhoto} onError={setError} onBusyChange={setPreparingPhoto} required />
+          <PhotoPicker
+            ref={photoField}
+            value={photo}
+            /* Choosing one answers the complaint, so the complaint goes at that moment rather
+               than surviving until the next submit. */
+            onChange={(file) => { setPhoto(file); setPhotoProblem(null); }}
+            error={photoProblem}
+            onBusyChange={setPreparingPhoto}
+            required
+          />
           {error && (
             <Alert>
               {error}

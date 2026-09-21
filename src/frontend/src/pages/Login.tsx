@@ -7,6 +7,7 @@ import { isPasskeySupported } from "../lib/webauthn";
 import { AuthShell } from "../components/AuthShell";
 import { Alert } from "../components/Alert";
 import { Button, Input, Label } from "../components/Button";
+import { PENDING_APPROVAL } from "../lib/registrationCopy";
 
 // Seeded by Seeder.cs in Development. Hidden behind import.meta.env.DEV so it disappears in prod builds.
 const DEV_ADMIN_EMAIL = "any@frostaura.net";
@@ -51,7 +52,11 @@ function describeNotApproved(status: string | number | null): string {
     // ignored. The contact block below is what this screen can actually offer them.
     return "Your application wasn't approved, so this account can't be used. The club may have emailed you the reason — contact them if you think it's a mistake.";
   }
-  return "Your account isn't approved yet. An admin will email you once they've reviewed it.";
+  // The genuinely pending case, and the one fact it was missing: how long. "An admin will email
+  // you once they've reviewed it" is true and leaves an applicant with no idea whether to wait
+  // an hour or a fortnight — which is how somebody decides their application was lost, registers
+  // again with a second address, and arrives at the desk with two accounts. See PENDING_APPROVAL.
+  return PENDING_APPROVAL;
 }
 
 /**
