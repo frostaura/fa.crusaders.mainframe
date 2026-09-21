@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { ApiError, endpoints, setPasswordChangeRequiredHandler, setUnauthorizedHandler, TOKEN_KEY, tokenStore } from "./api";
 import { loginWithPasskey as runPasskeyLogin } from "./webauthn";
 import { clearOfflineCache } from "./pwa";
+import { forgetLastKnown } from "./lastKnown";
 
 type AuthState =
   | { status: "loading" }
@@ -170,6 +171,53 @@ function usePasswordChangeRequired(arm: () => void) {
   }, [arm]);
 }
 
+/**
+ * Who this browser last had a CONFIRMED session for. (D3)
+ *
+ * <p>
+ * The offline state means "there is a token and the club cannot be reached to say anything
+ * about it", and on its own that is not enough to render anything belonging to a person: a
+ * token is a string in `localStorage` that nothing has vouched for. This is the second fact —
+ * the id of the member `whoami` last actually confirmed, on this device. Together they are what
+ * {@link OFFLINE_CAPABLE} routes are allowed to render a last-known store against.
+ * </p>
+ *
+ * <p>
+ * It is written only where the server has answered, and cleared wherever a session ends, so it
+ * can never be true of somebody who has signed out. It is NOT a credential and grants nothing:
+ * every request still carries the token and the API still decides.
+ * </p>
+ */
+const LAST_IDENTITY_KEY = "crusaders.mainframe.last-identity";
+
+/** Never throws — private mode refuses writes and a locked-down profile refuses reads. */
+export function readLastIdentity(): string | null {
+  try { return window.localStorage?.getItem(LAST_IDENTITY_KEY) ?? null; } catch { return null; }
+}
+
+/**
+ * Records the confirmed member — and drops the last-known store when it is somebody else.
+ *
+ * <p>
+ * <b>The second half is the privacy rule, and it is not the same as the one on sign-out.</b>
+ * Signing out clears the store, but a session does not always end that way: a phone kills the
+ * tab, a member walks off, the token expires unseen. The next member signs in on the same
+ * device and the previous one's code, court and door times are still in `localStorage` — and
+ * before D3 that was harmless only because nothing ever rendered them. It is not harmless now.
+ * So a confirmed id that differs from the stored one forgets everything the last one left.
+ * </p>
+ */
+function rememberIdentity(userId: string): void {
+  if (readLastIdentity() !== userId) forgetLastKnown();
+  try { window.localStorage?.setItem(LAST_IDENTITY_KEY, userId); } catch { /* private mode */ }
+}
+
+/** A session is over: the id goes, and everything the page stored under it goes with it. */
+function forgetIdentity(): void {
+  try { window.localStorage?.removeItem(LAST_IDENTITY_KEY); } catch { /* nothing to do */ }
+  forgetLastKnown();
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ status: "loading" });
   const [sessionExpired, setSessionExpired] = useState(false);
@@ -194,6 +242,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const endSession = useCallback(() => {
     tokenStore.clear();
     void clearOfflineCache();
+    // D3 — and this one matters more than the sign-out case, because it is the way a session
+    // on a shared club phone usually ends: nobody presses anything. The member's last code and
+    // door times must not outlive the credential that fetched them.
+    forgetIdentity();
     setSessionExpired(true);
     setState({ status: "anonymous" });
   }, []);
@@ -208,6 +260,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const w = await endpoints.whoami();
       if (w.is_authenticated && w.user_id) {
         probeAttempt.current = 0;
+        // D3 — the only place a confirmed identity is written, because this is the only place
+        // the club has said who the token belongs to.
+        rememberIdentity(w.user_id);
         setState({ status: "authenticated", userId: w.user_id, isAdmin: w.is_admin, mustChangePassword: w.must_change_password === true });
       } else {
         // Token present but server doesn't recognise it — most likely expired or signed by an old key.
@@ -340,8 +395,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const ending = endpoints.logout().catch(() => undefined);
     tokenStore.clear();
     // A club phone is a shared device; the next person to sign in must inherit nothing this
-    // browser stored while the last session was alive.
+    // browser stored while the last session was alive. `clearOfflineCache` purges the Cache
+    // API; `forgetIdentity` is the other half — the member code page's own last-known store
+    // lives in `localStorage`, which no cache purge touches, and until D3 nothing ever cleared
+    // it because nothing ever rendered it while signed out.
     void clearOfflineCache();
+    forgetIdentity();
     // Signing out on purpose is not losing a session; /login should not commiserate about it.
     setSessionExpired(false);
     setState({ status: "anonymous" });
