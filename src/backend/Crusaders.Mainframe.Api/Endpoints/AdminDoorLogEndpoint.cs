@@ -436,7 +436,13 @@ public static class AdminDoorLogEndpoint
     /// grammar. Both, in that order — a value quoted first would still begin with <c>=</c>
     /// once the quotes were stripped by the reader.
     /// </summary>
-    private static string Cell(string value)
+    /// <remarks>
+    /// Public because the monitoring export needs exactly this rule and a second copy of it is
+    /// a second place for it to be got wrong. It is the club's own strings that are dangerous
+    /// here — a board's name, a fault's detail — and the two exports must defuse them
+    /// identically or one of them is a file that executes.
+    /// </remarks>
+    public static string Cell(string value)
     {
         var safe = value.Length > 0 && value[0] is '=' or '+' or '-' or '@' ? "'" + value : value;
         return safe.Contains(',') || safe.Contains('"') || safe.Contains('\n') || safe.Contains('\r')

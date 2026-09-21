@@ -108,6 +108,34 @@ public static class AdminConfigEndpoints
                 door_refusal_spike_minutes = DoorSettings.RefusalSpikeMinutes(defaults),
                 club_contact_phone = DoorSettings.ContactPhone(defaults) ?? "",
                 club_contact_email = DoorSettings.ContactEmail(defaults) ?? "",
+
+                // The box's nine, the error log's three and the streams' seven — rendered from
+                // the CLAMPED values for the reason operating_hours, gate_access_policy and the
+                // door numbers already are: a settings screen reads a value, shows it to a
+                // person and PUTs back whatever it was shown, so showing a number the engine
+                // does not honour would let the page report a timeout the box is not running
+                // and a retention the worker is not deleting against.
+                lcd_revert_seconds = BoxSettings.LcdRevertSeconds(defaults),
+                lcd_choice_seconds = BoxSettings.LcdChoiceSeconds(defaults),
+                lcd_card_seconds = BoxSettings.LcdCardSeconds(defaults),
+                lcd_hint_seconds = BoxSettings.LcdHintSeconds(defaults),
+                scan_memory_seconds = BoxSettings.ScanMemorySeconds(defaults),
+                clock_trust_minutes = BoxSettings.ClockTrustMinutes(defaults),
+                relay_restore_enabled = BoxSettings.RelayRestoreEnabled(defaults),
+                device_fault_reporting = BoxSettings.DeviceFaultReporting(defaults),
+                device_fault_max_per_hour = BoxSettings.DeviceFaultMaxPerHour(defaults),
+
+                device_error_retention_days = MonitoringSettings.RetentionDays(defaults),
+                device_error_max_open_rows = MonitoringSettings.MaxOpenRows(defaults),
+                device_error_ingest_per_minute = MonitoringSettings.IngestPerMinute(defaults),
+
+                sse_keepalive_seconds = (int)RealtimeSettings.KeepAlive(defaults).TotalSeconds,
+                control_board_resync_seconds = RealtimeSettings.ResyncSeconds(defaults),
+                control_board_stale_multiplier = RealtimeSettings.StaleMultiplier(defaults),
+                realtime_fallback_after_failures = RealtimeSettings.FallbackAfterFailures(defaults),
+                realtime_fallback_window_seconds = RealtimeSettings.FallbackWindowSeconds(defaults),
+                realtime_poll_seconds_wallet = RealtimeSettings.PollSecondsWallet(defaults),
+                realtime_poll_seconds_control_board = RealtimeSettings.PollSecondsControlBoard(defaults),
             });
         });
 
@@ -184,6 +212,12 @@ public static class AdminConfigEndpoints
             var doorError = ValidateDoorSettings(req);
             if (doorError is not null) return Results.BadRequest(new { error = doorError });
 
+            var boxError = ValidateBoxSettings(req);
+            if (boxError is not null) return Results.BadRequest(new { error = boxError });
+
+            var liveError = ValidateLiveSettings(req);
+            if (liveError is not null) return Results.BadRequest(new { error = liveError });
+
             var row = await db.TenantSettings.FirstOrDefaultAsync(s => s.TenantId == tenant.TenantId, ct);
             if (row is null)
             {
@@ -256,6 +290,8 @@ public static class AdminConfigEndpoints
             WriteOptionalDeviceNumbers(doc, req);
             WriteOptionalGateSettings(doc, req);
             WriteOptionalDoorSettings(doc, req);
+            WriteOptionalBoxSettings(doc, req);
+            WriteOptionalLiveSettings(doc, req);
             row.SettingsJson = JsonSerializer.Serialize(doc);
             // The column was written once, at construction, and never again — a dead audit
             // field on the one table that governs money and lights. Nothing reads it today,
@@ -530,6 +566,137 @@ public static class AdminConfigEndpoints
         return null;
     }
 
+    /// <summary>
+    /// Bounds on the nine numbers delivered to the court box's SCREEN.
+    ///
+    /// <para>
+    /// Every bound is <see cref="BoxSettings"/>' own constant, so the number an admin is
+    /// refused at and the number the reader clamps to cannot drift. That rule matters more
+    /// here than anywhere else on this endpoint, because these values end up on a board in a
+    /// cupboard: an admin who sets a 90-second revert, is answered <c>{"saved": true}</c>, and
+    /// watches the box revert after 60 has been told something untrue about hardware they
+    /// cannot inspect.
+    /// </para>
+    ///
+    /// <para>
+    /// The two booleans have no bounds to check — a boolean is already inside its range — and
+    /// the cross-key invariant (<c>scan_memory_seconds &gt;= lcd_choice_seconds</c>) is NOT
+    /// enforced here. It is enforced by the reader, which raises the memory to the hold, so a
+    /// club that sets them the wrong way round gets the safe answer rather than a refusal
+    /// about a relationship between two fields on two different rows of one form.
+    /// </para>
+    /// </summary>
+    private static string? ValidateBoxSettings(UpdateSettingsRequest req)
+    {
+        if (OutOfRange(req.LcdRevertSeconds, BoxSettings.MinLcdRevertSeconds, BoxSettings.MaxLcdRevertSeconds))
+            return "lcd_revert_seconds_out_of_range";
+        if (OutOfRange(req.LcdChoiceSeconds, BoxSettings.MinLcdChoiceSeconds, BoxSettings.MaxLcdChoiceSeconds))
+            return "lcd_choice_seconds_out_of_range";
+        if (OutOfRange(req.LcdCardSeconds, BoxSettings.MinLcdCardSeconds, BoxSettings.MaxLcdCardSeconds))
+            return "lcd_card_seconds_out_of_range";
+        if (OutOfRange(req.LcdHintSeconds, BoxSettings.MinLcdHintSeconds, BoxSettings.MaxLcdHintSeconds))
+            return "lcd_hint_seconds_out_of_range";
+        if (OutOfRange(req.ScanMemorySeconds, BoxSettings.MinLcdChoiceSeconds, BoxSettings.MaxScanMemorySeconds))
+            return "scan_memory_seconds_out_of_range";
+        if (OutOfRange(req.ClockTrustMinutes, BoxSettings.MinClockTrustMinutes, BoxSettings.MaxClockTrustMinutes))
+            return "clock_trust_minutes_out_of_range";
+        if (OutOfRange(req.DeviceFaultMaxPerHour, BoxSettings.MinDeviceFaultMaxPerHour, BoxSettings.MaxDeviceFaultMaxPerHour))
+            return "device_fault_max_per_hour_out_of_range";
+        return null;
+    }
+
+    /// <summary>
+    /// Bounds on the error log's three and the live streams' seven.
+    ///
+    /// <para>
+    /// <b>The keep-alive's ceiling of 55 seconds is the sharpest of these and is not
+    /// arbitrary.</b> This deployment's nginx sets no <c>proxy_read_timeout</c>, so its
+    /// 60-second default applies — a keep-alive at or above that is a stream the gateway cuts
+    /// before the keep-alive that would have saved it, and the symptom is a wall screen that
+    /// silently stops updating rather than one that errors.
+    /// </para>
+    /// </summary>
+    private static string? ValidateLiveSettings(UpdateSettingsRequest req)
+    {
+        if (OutOfRange(req.DeviceErrorRetentionDays, MonitoringSettings.MinRetentionDays, MonitoringSettings.MaxRetentionDays))
+            return "device_error_retention_days_out_of_range";
+        if (OutOfRange(req.DeviceErrorMaxOpenRows, MonitoringSettings.MinMaxOpenRows, MonitoringSettings.MaxMaxOpenRows))
+            return "device_error_max_open_rows_out_of_range";
+        if (OutOfRange(req.DeviceErrorIngestPerMinute, MonitoringSettings.MinIngestPerMinute, MonitoringSettings.MaxIngestPerMinute))
+            return "device_error_ingest_rate_out_of_range";
+        if (OutOfRange(req.SseKeepAliveSeconds, RealtimeSettings.MinKeepAliveSeconds, RealtimeSettings.MaxKeepAliveSeconds))
+            return "sse_keepalive_seconds_out_of_range";
+        if (OutOfRange(req.ControlBoardResyncSeconds, RealtimeSettings.MinResyncSeconds, RealtimeSettings.MaxResyncSeconds))
+            return "control_board_resync_out_of_range";
+        if (OutOfRange(req.ControlBoardStaleMultiplier, RealtimeSettings.MinStaleMultiplier, RealtimeSettings.MaxStaleMultiplier))
+            return "control_board_stale_multiplier_out_of_range";
+        return ValidateFallbackSettings(req);
+    }
+
+    /// <summary>
+    /// The four numbers a degraded CLIENT runs on. Split from
+    /// <see cref="ValidateLiveSettings"/> only because the two together are past the
+    /// complexity gate's branch ceiling.
+    /// </summary>
+    private static string? ValidateFallbackSettings(UpdateSettingsRequest req)
+    {
+        if (OutOfRange(req.RealtimeFallbackAfterFailures, RealtimeSettings.MinFallbackAfterFailures, RealtimeSettings.MaxFallbackAfterFailures))
+            return "realtime_fallback_after_failures_out_of_range";
+        if (OutOfRange(req.RealtimeFallbackWindowSeconds, RealtimeSettings.MinFallbackWindowSeconds, RealtimeSettings.MaxFallbackWindowSeconds))
+            return "realtime_fallback_window_out_of_range";
+        if (OutOfRange(req.RealtimePollSecondsWallet, RealtimeSettings.MinPollSecondsWallet, RealtimeSettings.MaxPollSecondsWallet))
+            return "realtime_poll_wallet_out_of_range";
+        if (OutOfRange(req.RealtimePollSecondsControlBoard, RealtimeSettings.MinPollSecondsControlBoard, RealtimeSettings.MaxPollSecondsControlBoard))
+            return "realtime_poll_control_board_out_of_range";
+        return null;
+    }
+
+    /// <summary>
+    /// Whether a value the caller actually sent is outside its bounds. Absent is never out of
+    /// range — omitted means unchanged.
+    ///
+    /// <para>
+    /// Block body rather than an expression one: lizard's C# parser reads the <c>{</c> of the
+    /// property pattern as the end of a function and dumps the rest of the file into a
+    /// <i>global</i> pseudo-function whose reported length trips <c>-L 200</c>. See
+    /// <c>memory/gotchas.md</c>.
+    /// </para>
+    /// </summary>
+    private static bool OutOfRange(int? value, int min, int max)
+    {
+        if (value is not { } v) return false;
+        return v < min || v > max;
+    }
+
+    /// <summary>Same omitted-means-unchanged rule as the economics keys, for the box's nine.</summary>
+    private static void WriteOptionalBoxSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
+    {
+        if (req.LcdRevertSeconds is { } revert) doc["lcd_revert_seconds"] = ToElement(revert);
+        if (req.LcdChoiceSeconds is { } choice) doc["lcd_choice_seconds"] = ToElement(choice);
+        if (req.LcdCardSeconds is { } card) doc["lcd_card_seconds"] = ToElement(card);
+        if (req.LcdHintSeconds is { } hint) doc["lcd_hint_seconds"] = ToElement(hint);
+        if (req.ScanMemorySeconds is { } memory) doc["scan_memory_seconds"] = ToElement(memory);
+        if (req.ClockTrustMinutes is { } trust) doc["clock_trust_minutes"] = ToElement(trust);
+        if (req.RelayRestoreEnabled is { } restore) doc["relay_restore_enabled"] = ToElement(restore);
+        if (req.DeviceFaultReporting is { } reporting) doc["device_fault_reporting"] = ToElement(reporting);
+        if (req.DeviceFaultMaxPerHour is { } faults) doc["device_fault_max_per_hour"] = ToElement(faults);
+    }
+
+    /// <summary>Same omitted-means-unchanged rule, for the error log's three and the streams' seven.</summary>
+    private static void WriteOptionalLiveSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
+    {
+        if (req.DeviceErrorRetentionDays is { } days) doc["device_error_retention_days"] = ToElement(days);
+        if (req.DeviceErrorMaxOpenRows is { } rows) doc["device_error_max_open_rows"] = ToElement(rows);
+        if (req.DeviceErrorIngestPerMinute is { } rate) doc["device_error_ingest_per_minute"] = ToElement(rate);
+        if (req.SseKeepAliveSeconds is { } keepAlive) doc["sse_keepalive_seconds"] = ToElement(keepAlive);
+        if (req.ControlBoardResyncSeconds is { } resync) doc["control_board_resync_seconds"] = ToElement(resync);
+        if (req.ControlBoardStaleMultiplier is { } stale) doc["control_board_stale_multiplier"] = ToElement(stale);
+        if (req.RealtimeFallbackAfterFailures is { } failures) doc["realtime_fallback_after_failures"] = ToElement(failures);
+        if (req.RealtimeFallbackWindowSeconds is { } window) doc["realtime_fallback_window_seconds"] = ToElement(window);
+        if (req.RealtimePollSecondsWallet is { } wallet) doc["realtime_poll_seconds_wallet"] = ToElement(wallet);
+        if (req.RealtimePollSecondsControlBoard is { } board) doc["realtime_poll_seconds_control_board"] = ToElement(board);
+    }
+
     /// <summary>Same omitted-means-unchanged rule as the economics keys, for the five door settings.</summary>
     private static void WriteOptionalDoorSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
     {
@@ -617,10 +784,31 @@ public static class AdminConfigEndpoints
         return dict;
     }
     private static JsonElement ToElement<T>(T value) => JsonSerializer.SerializeToElement(value);
+    /// <summary>
+    /// An integer out of the stored document, or the default.
+    ///
+    /// <para>
+    /// <b><c>TryGetInt32</c>, not <c>GetInt32</c> — the same defect as
+    /// <see cref="TenantSettingsAccessor"/>'s, in the second of the two places that read this
+    /// column.</b> The kind check only proves the value is a NUMBER; <c>GetInt32</c> then
+    /// throws <c>FormatException</c> on <c>15.5</c> and <c>OverflowException</c> past
+    /// <c>int.MaxValue</c>. A hand-edited or restored-from-backup document therefore made the
+    /// SETTINGS PAGE ITSELF answer 500 — which is the one screen an admin would go to in order
+    /// to fix it. Falling back leaves the page usable and the wrong value visible.
+    /// </para>
+    /// </summary>
     private static int GetInt(IReadOnlyDictionary<string, JsonElement> d, string k, int fallback)
-        => d.TryGetValue(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : fallback;
+    {
+        if (!d.TryGetValue(k, out var v) || v.ValueKind != JsonValueKind.Number) return fallback;
+        return v.TryGetInt32(out var parsed) ? parsed : fallback;
+    }
+
+    /// <summary>A decimal out of the stored document, or the default. <c>TryGetDecimal</c> for the reason <see cref="GetInt"/> gives.</summary>
     private static decimal GetDecimal(IReadOnlyDictionary<string, JsonElement> d, string k, decimal fallback)
-        => d.TryGetValue(k, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDecimal() : fallback;
+    {
+        if (!d.TryGetValue(k, out var v) || v.ValueKind != JsonValueKind.Number) return fallback;
+        return v.TryGetDecimal(out var parsed) ? parsed : fallback;
+    }
     private static string GetString(IReadOnlyDictionary<string, JsonElement> d, string k, string fallback)
         => d.TryGetValue(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? fallback : fallback;
 }
@@ -724,7 +912,34 @@ public sealed record UpdateSettingsRequest(
     [property: JsonPropertyName("door_refusal_spike_count")] int? DoorRefusalSpikeCountSnake = null,
     [property: JsonPropertyName("door_refusal_spike_minutes")] int? DoorRefusalSpikeMinutesSnake = null,
     [property: JsonPropertyName("club_contact_phone")] string? ClubContactPhoneSnake = null,
-    [property: JsonPropertyName("club_contact_email")] string? ClubContactEmailSnake = null)
+    [property: JsonPropertyName("club_contact_email")] string? ClubContactEmailSnake = null,
+
+    // ---- The box's screen, the error log, and the live streams ----
+    //
+    // Snake-case only. The two-spelling burden above exists because those keys shipped
+    // camelCase first and a club's console was already sending them; nothing has ever sent
+    // these, so binding one spelling is the whole cost of never having to read the other.
+    [property: JsonPropertyName("lcd_revert_seconds")] int? LcdRevertSeconds = null,
+    [property: JsonPropertyName("lcd_choice_seconds")] int? LcdChoiceSeconds = null,
+    [property: JsonPropertyName("lcd_card_seconds")] int? LcdCardSeconds = null,
+    [property: JsonPropertyName("lcd_hint_seconds")] int? LcdHintSeconds = null,
+    [property: JsonPropertyName("scan_memory_seconds")] int? ScanMemorySeconds = null,
+    [property: JsonPropertyName("clock_trust_minutes")] int? ClockTrustMinutes = null,
+    [property: JsonPropertyName("relay_restore_enabled")] bool? RelayRestoreEnabled = null,
+    [property: JsonPropertyName("device_fault_reporting")] bool? DeviceFaultReporting = null,
+    [property: JsonPropertyName("device_fault_max_per_hour")] int? DeviceFaultMaxPerHour = null,
+
+    [property: JsonPropertyName("device_error_retention_days")] int? DeviceErrorRetentionDays = null,
+    [property: JsonPropertyName("device_error_max_open_rows")] int? DeviceErrorMaxOpenRows = null,
+    [property: JsonPropertyName("device_error_ingest_per_minute")] int? DeviceErrorIngestPerMinute = null,
+
+    [property: JsonPropertyName("sse_keepalive_seconds")] int? SseKeepAliveSeconds = null,
+    [property: JsonPropertyName("control_board_resync_seconds")] int? ControlBoardResyncSeconds = null,
+    [property: JsonPropertyName("control_board_stale_multiplier")] int? ControlBoardStaleMultiplier = null,
+    [property: JsonPropertyName("realtime_fallback_after_failures")] int? RealtimeFallbackAfterFailures = null,
+    [property: JsonPropertyName("realtime_fallback_window_seconds")] int? RealtimeFallbackWindowSeconds = null,
+    [property: JsonPropertyName("realtime_poll_seconds_wallet")] int? RealtimePollSecondsWallet = null,
+    [property: JsonPropertyName("realtime_poll_seconds_control_board")] int? RealtimePollSecondsControlBoard = null)
 {
     /// <summary>The release the club asked for, under either spelling, or null when neither arrived.</summary>
     public int? EffectiveGateUnlockSeconds => GateUnlockSeconds ?? GateUnlockSecondsSnake;

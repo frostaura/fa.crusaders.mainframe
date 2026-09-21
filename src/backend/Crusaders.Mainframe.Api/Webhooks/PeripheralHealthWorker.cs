@@ -59,6 +59,17 @@ public sealed class PeripheralHealthWorker : BackgroundService
         int OfflineAfterSeconds,
         DateTimeOffset Now)
     {
+        /// <summary>
+        /// The light-state projection a newly-opened outage sets to <c>unknown</c>.
+        ///
+        /// <para>
+        /// Init-only rather than positional because this record is at the six-parameter gate,
+        /// and — unlike the device route's services — there is exactly ONE construction site,
+        /// in this file, a dozen lines above the only reader. A missing value here cannot hide.
+        /// </para>
+        /// </summary>
+        public CourtLightStateService Lights { get; init; } = null!;
+
         /// <summary>Console link for the alert, resolved once per tick rather than per device.</summary>
         public string ConsoleUrl { get; init; } = "/admin/devices";
 
@@ -82,6 +93,7 @@ public sealed class PeripheralHealthWorker : BackgroundService
         var settings = scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>();
         var email = scope.ServiceProvider.GetRequiredService<IEmailService>();
         var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+        var lights = scope.ServiceProvider.GetRequiredService<CourtLightStateService>();
 
         var baseUrl = config["App:PublicBaseUrl"] ?? "http://localhost:8088";
 
@@ -92,6 +104,7 @@ public sealed class PeripheralHealthWorker : BackgroundService
             var s = await settings.GetAsync(ct);
             var health = new Health(db, email, tenant, HeartbeatCadence.OfflineAfterSeconds(s.HeartbeatSeconds), now)
             {
+                Lights = lights,
                 ConsoleUrl = $"{baseUrl}/admin/devices",
                 Cooldown = TimeSpan.FromMinutes(Math.Clamp(
                     s.DeviceAlertCooldownMinutes,
@@ -199,6 +212,44 @@ public sealed class PeripheralHealthWorker : BackgroundService
     /// re-alerts the whole club every thirty seconds for as long as the box stays dark.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// Sets every court this board drives to <c>unknown</c>, and records the outage on the
+    /// club's monitoring page.
+    ///
+    /// <para>
+    /// A gate drives no courts, so this is a court box's step only. The scope is resolved from
+    /// the sweep's own <c>DbContext</c>, which is already tenant-set for this tick.
+    /// </para>
+    /// </summary>
+    private async Task DarkenAsync(Health health, Device device, CancellationToken ct)
+    {
+        // On its own scope, like every other write to this table: the sweep's context is
+        // mid-tenant-loop and shared across every board in the club, and a monitoring write
+        // that threw here would take the whole club's outage detection down with it.
+        DeviceErrorService.InBackground(
+            _services.GetRequiredService<IServiceScopeFactory>(), _logger,
+            health.Tenant.Id, health.Tenant.Slug,
+            new DeviceErrorReport(
+                DeviceErrorCodes.OutageOpened, DeviceErrorSource.Server,
+                DeviceId: device.Id, ClaimedDeviceCode: device.DeviceCode,
+                Detail: $"no contact since {device.LastSeenAt:O}", At: health.Now));
+
+        if (device.Kind != DeviceKind.CourtBox || device.CourtNumbers.Count == 0) return;
+
+        var numbers = device.CourtNumbers;
+        var courts = await health.Db.Courts
+            .Where(c => numbers.Contains(c.CourtNumber))
+            .Select(c => c.Id)
+            .ToListAsync(ct);
+
+        foreach (var courtId in courts)
+        {
+            await health.Lights.RecordUnknownAsync(courtId, device.Id, health.Now, ct);
+        }
+
+        await health.Db.SaveChangesAsync(ct);
+    }
+
     private async Task OpenAsync(Health health, Device device, DateTimeOffset lastSeen, CancellationToken ct)
     {
         var outage = new DeviceOutage
@@ -222,6 +273,17 @@ public sealed class PeripheralHealthWorker : BackgroundService
             _logger.LogInformation("Peripheral outage for {DeviceCode} was already open", device.DeviceCode);
             return;
         }
+
+        // THE SERVER CAN NO LONGER MAKE A CLAIM ABOUT THIS BOARD'S COURTS.
+        //
+        // Every belief in court_light_state about them was assembled from events THIS BOARD
+        // sent, and a board that has stopped talking may have been cut by the same power event
+        // that silenced it — or may be happily running a relay the server will never hear about
+        // again. Writing "off" would be the server claiming to have seen something switched off
+        // that it did not, which is how a club leaves a court lit all night believing the
+        // software knows. Unknown is the honest third state, and it is the whole reason the
+        // projection has one.
+        await DarkenAsync(health, device, ct);
 
         var minutes = (int)Math.Round((health.Now - lastSeen).TotalMinutes, MidpointRounding.AwayFromZero);
         var announce = Mailable(device) && await AnnouncedAsync(health, device, outage, ct);

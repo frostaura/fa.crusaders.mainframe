@@ -79,15 +79,18 @@ public class CourtActivationService
         TenantSettingsAccessor settings,
         ITenantContext tenant,
         IEventBus bus,
-        ILogger<CourtActivationService> logger)
+        ActivationPlumbing plumbing)
     {
         _db = db;
         _bookings = bookings;
         _settings = settings;
         _tenant = tenant;
         _bus = bus;
-        _logger = logger;
+        _logger = plumbing.Logger;
+        _lights = plumbing.Lights;
     }
+
+    private readonly CourtLightStateService _lights;
 
     /// <summary>
     /// The window in which an identification <i>finds</i> a booking, from tenant settings.
@@ -306,11 +309,41 @@ public class CourtActivationService
             }),
         });
 
+        // THE SERVER'S BELIEF ABOUT THE RELAY, MOVED HERE AND NOWHERE ELSE ON THIS PATH.
+        //
+        // This is the one method that stamps CheckedInAt, so it is the one place that can move
+        // the belief for the online scan, the walk-up, the kiosk and the box's uploaded event
+        // alike — the last of which reaches here through the event route's settlement. Writing
+        // it at each caller instead would be four writes that agree until one of them does not.
+        //
+        // OnUntil is the SOLD end rather than the granted seconds: the grant is clamped by the
+        // relay's ninety-minute cap and a member with a two-hour booking is re-lit past it, so
+        // a countdown to the cap would tell the control board the court frees at 19:30 when it
+        // frees at 20:00 — and an admin would sell the slot twice.
+        var lightRow = await _lights.RecordOnAsync(
+            new LightEvidence(court.Id, DeviceId: null, Relay: null, Seq: 0, BootId: 0, At: occurredAt),
+            BookingService.OriginalEndsAt(booking),
+            booking.UserId is null ? LightCause.WalkUp : LightCause.Member,
+            identifiedUserId, booking.Id, ct);
+
+        if (lightRow is not null)
+        {
+            _lights.Audit(
+                CourtLightStateService.LightsOnAction, court.Id, court.CourtNumber, booking.UserId,
+                new { method, payer_user_id = payerUserId, booking_id = booking.Id, occurred_at = occurredAt });
+        }
+
         // Saved before the event so a failure here cannot leave a cued light with no
         // attendance record. The remaining failure direction — charged, then a crash before
         // this save — leaves the booking looking like a no-show, which the sweep refunds.
         // That is the safe way round.
         await _db.SaveChangesAsync(ct);
+
+        // AFTER the commit, never before it. A court that flashes "on" on a wall screen and
+        // then silently reverts because the transaction rolled back is worse than one that is
+        // a second late — the club walks to a court nobody is on. Publishing here rather than
+        // beside the row write is the whole of that ordering.
+        if (lightRow is not null) await _lights.PublishAsync(lightRow, court.CourtNumber, ct);
 
         await _bus.EmitAsync(LightsOnEvent(court, booking, payerUserId, method, now), ct);
 
@@ -373,3 +406,18 @@ public sealed record ActivationRequest(
     Guid? PayerOverrideUserId,
     string Method,
     DateTimeOffset? OccurredAt);
+
+/// <summary>
+/// The two dependencies <see cref="CourtActivationService"/> needs that are not part of the
+/// booking decision: somewhere to log, and the light-state projection to move.
+///
+/// <para>
+/// Bundled rather than listed, for the reason <c>HeartbeatServices</c> and
+/// <c>AdjustServices</c> are: the complexity gate caps a constructor at six parameters, and a
+/// seventh that is a logger says nothing about how hard this class is to reason about. It is
+/// registered in the container beside the service it serves.
+/// </para>
+/// </summary>
+public sealed record ActivationPlumbing(
+    ILogger<CourtActivationService> Logger,
+    CourtLightStateService Lights);

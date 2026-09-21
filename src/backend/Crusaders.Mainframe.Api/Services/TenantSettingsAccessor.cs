@@ -108,15 +108,77 @@ public sealed class TenantSettingsAccessor
             DoorRefusalSpikeMinutes = TryInt(root, "door_refusal_spike_minutes", DoorSettings.DefaultRefusalSpikeMinutes),
             ClubContactPhone = TryString(root, "club_contact_phone", ""),
             ClubContactEmail = TryString(root, "club_contact_email", ""),
+
+            // The nine numbers the court box's SCREEN runs on, and the three monitoring and
+            // seven realtime bounds. Raw here and clamped at each reader (BoxSettings,
+            // MonitoringSettings, RealtimeSettings) — the same split as the five door
+            // settings above, and for the same reason: this method's contract is "what the
+            // column says", and "what a board may act on" is a different question with a
+            // different answer for a hand-edited document.
+            LcdRevertSeconds = TryInt(root, "lcd_revert_seconds", BoxSettings.DefaultLcdRevertSeconds),
+            LcdChoiceSeconds = TryInt(root, "lcd_choice_seconds", BoxSettings.DefaultLcdChoiceSeconds),
+            LcdCardSeconds = TryInt(root, "lcd_card_seconds", BoxSettings.DefaultLcdCardSeconds),
+            LcdHintSeconds = TryInt(root, "lcd_hint_seconds", BoxSettings.DefaultLcdHintSeconds),
+            ScanMemorySeconds = TryInt(root, "scan_memory_seconds", BoxSettings.DefaultScanMemorySeconds),
+            ClockTrustMinutes = TryInt(root, "clock_trust_minutes", BoxSettings.DefaultClockTrustMinutes),
+            RelayRestoreEnabled = TryBool(root, "relay_restore_enabled", BoxSettings.DefaultRelayRestoreEnabled),
+            DeviceFaultReporting = TryBool(root, "device_fault_reporting", BoxSettings.DefaultDeviceFaultReporting),
+            DeviceFaultMaxPerHour = TryInt(root, "device_fault_max_per_hour", BoxSettings.DefaultDeviceFaultMaxPerHour),
+
+            DeviceErrorRetentionDays = TryInt(root, "device_error_retention_days", MonitoringSettings.DefaultRetentionDays),
+            DeviceErrorMaxOpenRows = TryInt(root, "device_error_max_open_rows", MonitoringSettings.DefaultMaxOpenRows),
+            DeviceErrorIngestPerMinute = TryInt(root, "device_error_ingest_per_minute", MonitoringSettings.DefaultIngestPerMinute),
+
+            SseKeepAliveSeconds = TryInt(root, "sse_keepalive_seconds", RealtimeSettings.DefaultKeepAliveSeconds),
+            ControlBoardResyncSeconds = TryInt(root, "control_board_resync_seconds", RealtimeSettings.DefaultResyncSeconds),
+            ControlBoardStaleMultiplier = TryInt(root, "control_board_stale_multiplier", RealtimeSettings.DefaultStaleMultiplier),
+            RealtimeFallbackAfterFailures = TryInt(root, "realtime_fallback_after_failures", RealtimeSettings.DefaultFallbackAfterFailures),
+            RealtimeFallbackWindowSeconds = TryInt(root, "realtime_fallback_window_seconds", RealtimeSettings.DefaultFallbackWindowSeconds),
+            RealtimePollSecondsWallet = TryInt(root, "realtime_poll_seconds_wallet", RealtimeSettings.DefaultPollSecondsWallet),
+            RealtimePollSecondsControlBoard = TryInt(root, "realtime_poll_seconds_control_board", RealtimeSettings.DefaultPollSecondsControlBoard),
         };
     }
 
+    /// <summary>
+    /// An integer setting, or the default.
+    ///
+    /// <para>
+    /// <b><c>TryGetInt32</c> and not <c>GetInt32</c>, which is a real defect and not tidiness.</b>
+    /// The kind check only proves the value is a NUMBER; <c>GetInt32</c> then throws
+    /// <c>FormatException</c> on <c>15.5</c> and <c>OverflowException</c> on anything past
+    /// <c>int.MaxValue</c>. This accessor is read on the heartbeat, on every booking and on
+    /// every device event, so one hand-edited or restored-from-backup document containing
+    /// <c>{"slice_minutes": 15.5}</c> answered <b>500 to every request in the club</b> — boxes
+    /// included — with no way back except an UPDATE on the JSON column. Falling back to the
+    /// default keeps the club running on a known-good number and leaves the wrong one visible
+    /// on the settings page, which is the failure mode a person can act on.
+    /// </para>
+    /// </summary>
     private static int TryInt(JsonElement root, string name, int fallback)
-        => root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : fallback;
+        => root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var i)
+            ? i : fallback;
+
+    /// <summary>A decimal setting, or the default. <c>TryGetDecimal</c> for the reason <see cref="TryInt"/> gives.</summary>
     private static decimal TryDecimal(JsonElement root, string name, decimal fallback)
-        => root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDecimal() : fallback;
+        => root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetDecimal(out var d)
+            ? d : fallback;
+
     private static string TryString(JsonElement root, string name, string fallback)
         => root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? fallback : fallback;
+
+    /// <summary>
+    /// A boolean setting, or the default.
+    ///
+    /// <para>
+    /// Strict about the JSON kind: a document holding the STRING <c>"false"</c> falls back to
+    /// the default rather than being coerced, because the two plausible coercions disagree
+    /// (<c>bool.Parse</c> says false, truthiness says true) and a setting that silently turns
+    /// the relay restore off is a court that stays dark after a power cut.
+    /// </para>
+    /// </summary>
+    private static bool TryBool(JsonElement root, string name, bool fallback)
+        => root.TryGetProperty(name, out var v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? v.GetBoolean() : fallback;
 }
 
 public sealed record TenantSettingsView(
@@ -302,6 +364,75 @@ public sealed record TenantSettingsView(
 
     /// <summary>The address a member refused at a door should write to. Empty by default, for the same reason.</summary>
     public string ClubContactEmail { get; init; } = "";
+
+    // ---- The nine numbers delivered to the court box on the heartbeat ----
+    //
+    // Raw as stored, like everything else on this record, and read through BoxSettings, which
+    // is where the bounds live and the only place a reader should take them from. The defaults
+    // are BoxSettings' own constants rather than literals here, so the accessor's fallback and
+    // this initialiser cannot drift — the trap the settings endpoint's own defaults fell into
+    // once already.
+
+    /// <summary>Seconds a decided scan's result holds before the screen reverts (GOAL items 1 and 18). Read via <see cref="BoxSettings.LcdRevertSeconds"/>.</summary>
+    public int LcdRevertSeconds { get; init; } = BoxSettings.DefaultLcdRevertSeconds;
+
+    /// <summary>Seconds the court/time selection screens hold. Read via <see cref="BoxSettings.LcdChoiceSeconds"/>.</summary>
+    public int LcdChoiceSeconds { get; init; } = BoxSettings.DefaultLcdChoiceSeconds;
+
+    /// <summary>Seconds the member's name card shows. Read via <see cref="BoxSettings.LcdCardSeconds"/>.</summary>
+    public int LcdCardSeconds { get; init; } = BoxSettings.DefaultLcdCardSeconds;
+
+    /// <summary>Seconds a one-off hint holds the bottom row. Read via <see cref="BoxSettings.LcdHintSeconds"/>.</summary>
+    public int LcdHintSeconds { get; init; } = BoxSettings.DefaultLcdHintSeconds;
+
+    /// <summary>Seconds the box remembers who scanned. Read via <see cref="BoxSettings.ScanMemorySeconds"/>, which also holds it at or above the choice hold.</summary>
+    public int ScanMemorySeconds { get; init; } = BoxSettings.DefaultScanMemorySeconds;
+
+    /// <summary>Minutes the box trusts its adopted clock. Read via <see cref="BoxSettings.ClockTrustMinutes"/>.</summary>
+    public int ClockTrustMinutes { get; init; } = BoxSettings.DefaultClockTrustMinutes;
+
+    /// <summary>Whether a box may re-energise relays from the heartbeat's restore answer (GOAL item 17).</summary>
+    public bool RelayRestoreEnabled { get; init; } = BoxSettings.DefaultRelayRestoreEnabled;
+
+    /// <summary>Whether boards should report faults at all (GOAL item 7).</summary>
+    public bool DeviceFaultReporting { get; init; } = BoxSettings.DefaultDeviceFaultReporting;
+
+    /// <summary>Distinct fault reports one board may emit per hour. Read via <see cref="BoxSettings.DeviceFaultMaxPerHour"/>.</summary>
+    public int DeviceFaultMaxPerHour { get; init; } = BoxSettings.DefaultDeviceFaultMaxPerHour;
+
+    // ---- The IoT error log's three bounds ----
+
+    /// <summary>Days a club keeps its error rows. Read via <see cref="MonitoringSettings.RetentionDays"/>.</summary>
+    public int DeviceErrorRetentionDays { get; init; } = MonitoringSettings.DefaultRetentionDays;
+
+    /// <summary>Distinct open rows one board may hold. Read via <see cref="MonitoringSettings.MaxOpenRows"/>.</summary>
+    public int DeviceErrorMaxOpenRows { get; init; } = MonitoringSettings.DefaultMaxOpenRows;
+
+    /// <summary>Reports one board may record per minute. Read via <see cref="MonitoringSettings.IngestPerMinute"/>.</summary>
+    public int DeviceErrorIngestPerMinute { get; init; } = MonitoringSettings.DefaultIngestPerMinute;
+
+    // ---- The live streams' seven numbers ----
+
+    /// <summary>Seconds of quiet before a stream writes a <c>ping</c>. Read via <see cref="RealtimeSettings.KeepAlive"/>.</summary>
+    public int SseKeepAliveSeconds { get; init; } = RealtimeSettings.DefaultKeepAliveSeconds;
+
+    /// <summary>Seconds between full control-board snapshots. Read via <see cref="RealtimeSettings.ResyncSeconds"/>.</summary>
+    public int ControlBoardResyncSeconds { get; init; } = RealtimeSettings.DefaultResyncSeconds;
+
+    /// <summary>Heartbeat intervals of silence that make a light state stale. Read via <see cref="RealtimeSettings.StaleMultiplier"/>.</summary>
+    public int ControlBoardStaleMultiplier { get; init; } = RealtimeSettings.DefaultStaleMultiplier;
+
+    /// <summary>Consecutive stream failures after which a client polls instead.</summary>
+    public int RealtimeFallbackAfterFailures { get; init; } = RealtimeSettings.DefaultFallbackAfterFailures;
+
+    /// <summary>Seconds a client stays in polling mode before retrying the stream.</summary>
+    public int RealtimeFallbackWindowSeconds { get; init; } = RealtimeSettings.DefaultFallbackWindowSeconds;
+
+    /// <summary>Seconds between wallet polls while degraded.</summary>
+    public int RealtimePollSecondsWallet { get; init; } = RealtimeSettings.DefaultPollSecondsWallet;
+
+    /// <summary>Seconds between control-board polls while degraded.</summary>
+    public int RealtimePollSecondsControlBoard { get; init; } = RealtimeSettings.DefaultPollSecondsControlBoard;
 
     /// <summary>
     /// The club's open and close for one local weekday, as minutes past local midnight.

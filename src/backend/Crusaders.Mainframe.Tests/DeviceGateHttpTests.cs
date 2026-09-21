@@ -531,6 +531,60 @@ public sealed class DeviceGateHttpTests
     /// converse; this pins the case that would have broken it.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// D2-B30. The cap holds when the boards arrive TOGETHER, which is the only way a flood
+    /// ever arrives.
+    ///
+    /// <para>
+    /// <b>A COUNT followed by an INSERT is not a limit.</b> The check read "fewer than sixteen"
+    /// and the insert happened afterwards, with nothing in between to stop a second caller
+    /// reading the same answer — so thirty-two heartbeats in flight together with thirty-two
+    /// invented MACs and one valid club key all passed, and all thirty-two rows landed. The
+    /// only unique index is on <c>(TenantId, MacAddress)</c>, which constrains identity and
+    /// says nothing whatever about a count. The real ceiling was the per-minute rate limit — a
+    /// different and much larger number — and every row past the cap is permanent.
+    /// </para>
+    ///
+    /// <para>
+    /// The sequential test above passes against the defect, which is why it did not find it:
+    /// one request at a time can never observe the window. This one fires
+    /// <c>2 × MaxUnacknowledgedDevices</c> at once from an empty club and asserts the row
+    /// count afterwards.
+    /// </para>
+    ///
+    /// <para><b>Mutant:</b> remove the registration lock. The count comes back above the cap.</para>
+    /// </summary>
+    [SkippableFact]
+    public async Task Boards_arriving_together_cannot_walk_past_the_cap()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "gaterace", DefaultSettings);
+        var client = factory.CreateClient();
+
+        var attempts = DeviceRegistryService.MaxUnacknowledgedDevices * 2;
+        var inFlight = Enumerable.Range(0, attempts)
+            .Select(_ => client.SendAsync(Heartbeat(club.Key, NewMac(), DeviceKinds.Gate)))
+            .ToList();
+
+        var answers = await Task.WhenAll(inFlight);
+        var admitted = answers.Count(r => r.StatusCode == HttpStatusCode.OK);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var rows = await db.Devices.IgnoreQueryFilters().CountAsync(d => d.TenantId == club.TenantId);
+
+        Assert.True(
+            rows <= DeviceRegistryService.MaxUnacknowledgedDevices,
+            $"{attempts} boards arriving together left {rows} rows against a cap of {DeviceRegistryService.MaxUnacknowledgedDevices} — the count-then-insert window is open");
+
+        // …and the answers agree with the rows: a board told OK has one.
+        Assert.Equal(rows, admitted);
+
+        foreach (var answer in answers) answer.Dispose();
+    }
+
     [SkippableFact]
     public async Task A_club_cannot_be_filled_with_boards_nobody_has_acknowledged()
     {

@@ -37,7 +37,9 @@ internal sealed class RefusingActivation : CourtActivationService
         scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>(),
         scope.ServiceProvider.GetRequiredService<ITenantContext>(),
         scope.ServiceProvider.GetRequiredService<IEventBus>(),
-        NullLogger<CourtActivationService>.Instance)
+        new ActivationPlumbing(
+            NullLogger<CourtActivationService>.Instance,
+            scope.ServiceProvider.GetRequiredService<CourtLightStateService>()))
     {
     }
 

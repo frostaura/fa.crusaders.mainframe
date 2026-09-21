@@ -401,6 +401,49 @@ public sealed class Device : ITenantScoped
     public DateTimeOffset? EventsLostReportedAt { get; set; }
 
     /// <summary>
+    /// The board's since-boot count of heartbeats it could not push, as last reported — the
+    /// companion to <see cref="EventsLost"/> and read the same way.
+    ///
+    /// <para>
+    /// It used to be logged to the container log and stored nowhere, on the stated grounds
+    /// that "a column on Device would be an EF migration for a counter nothing decides
+    /// anything on". <b>That was correct and has stopped being true</b>: GOAL item 7's error
+    /// log is something that decides on it. The column exists so the RISE between two
+    /// heartbeats can be computed — a since-boot total re-reported every minute would
+    /// otherwise open one row per beat carrying the same number, which is the opposite of a
+    /// monitoring page.
+    /// </para>
+    /// </summary>
+    public int NoPush { get; set; }
+
+    /// <summary>When <see cref="NoPush"/> was last reported. Null on a board that has never sent the counter.</summary>
+    public DateTimeOffset? NoPushReportedAt { get; set; }
+
+    /// <summary>
+    /// When this board was last SERVED a non-empty power-dip restore that it has not yet
+    /// answered for — null when there is nothing outstanding.
+    ///
+    /// <para>
+    /// <b>Why an expectation has to be recorded at all.</b> The API serves the restore answer
+    /// on every heartbeat, because only the box knows whether it has just booted. The box
+    /// applies it exactly once and reports what it did on the NEXT heartbeat. Without a marker,
+    /// a <c>restored_relays: 0</c> from a box that has been up for a week is indistinguishable
+    /// from a box that was told to light two courts and did not — and the second is the one an
+    /// admin must see, because it means a court is dark that the club believes is lit, with a
+    /// member on it who has already been charged.
+    /// </para>
+    ///
+    /// <para>
+    /// It is set only when the board looks freshly booted, so an ordinary running box with a
+    /// lit court is never asked to confirm a restore it was never going to perform.
+    /// </para>
+    /// </summary>
+    public DateTimeOffset? RestoreServedAt { get; set; }
+
+    /// <summary>How many relays the outstanding restore named. Zero when nothing is outstanding.</summary>
+    public int RestoreServedRelays { get; set; }
+
+    /// <summary>
     /// This box's own button map, as the eight-entry wire array (<c>ButtonMap.ToWire()</c>)
     /// serialised to JSON — or null to use the club's map from <c>tenant_settings</c>.
     ///

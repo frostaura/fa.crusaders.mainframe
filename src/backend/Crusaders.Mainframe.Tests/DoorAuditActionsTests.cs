@@ -35,6 +35,17 @@ public sealed class DoorAuditActionsTests
     [
         "device.activation", "device.release", "device.api_key_regenerated", "device.heartbeat",
         "device.registered", "device.unknown", "device.boot",
+
+        // GOAL item 17's three. A power-dip restore is a COURT BOX telling the club what it
+        // did with its relays; it names no door and no member, and the console word for it
+        // belongs on the control board rather than in the door log. Listed here rather than
+        // added to DoorAuditActions for the reason that type is named after: mixing board
+        // health into the door vocabulary is the defect, not the tidy-up.
+        "device.relay_restore_served", "device.relay_restore_confirmed", "device.relay_restore_failed",
+
+        // A court box's unrecognised scan, filed apart from a door's so it can never be
+        // counted as a refused door scan. See DeviceEventEndpoints.CourtUnknownScanKind.
+        "device.court_unknown_scan",
     ];
 
     private static string ApiSourceRoot()

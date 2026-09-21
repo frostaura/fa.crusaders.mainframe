@@ -90,7 +90,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             OnMessageReceived = ctx =>
             {
                 if (string.IsNullOrEmpty(ctx.Token)
-                    && ctx.HttpContext.Request.Path.StartsWithSegments(TokenPurposes.WalletStreamPath))
+                    && TokenPurposes.AcceptsTicketInQuery(ctx.HttpContext.Request.Path))
                 {
                     // A stream TICKET, never the session token. The query string is logged verbatim
                     // by every proxy in front of this — nginx's `location /api/` records `$request`
@@ -278,11 +278,24 @@ builder.Services.AddScoped<DeviceKeyResolver>();
 builder.Services.AddScoped<TenantSecretsAccessor>();
 builder.Services.AddScoped<IPaymentProvider, Crusaders.Mainframe.Api.Payments.PayFast.PayFastProvider>();
 builder.Services.AddSingleton<BalanceBroadcaster>();
+// The fan-out behind the two ADMIN streams (control board, IoT monitoring). Singleton for
+// the same reason the balance broadcaster is: the channels have to survive across requests.
+// The wallet stream deliberately keeps its own broadcaster — see IRealtimeBus.
+builder.Services.AddSingleton<Crusaders.Mainframe.Api.Services.Realtime.IRealtimeBus,
+                              Crusaders.Mainframe.Api.Services.Realtime.InProcessRealtimeBus>();
+// The one writer for the IoT error log. Scoped: it takes the request's DbContext and tenant,
+// and its background variant opens a scope of its own.
+builder.Services.AddScoped<DeviceErrorService>();
+builder.Services.AddScoped<DeviceFaultSink>();
+builder.Services.AddScoped<CourtLightStateService>();
+builder.Services.AddScoped<ControlBoardReader>();
 builder.Services.AddSingleton<AccessTokenRevocationList>();
 builder.Services.AddScoped<LedgerService>();
 builder.Services.AddScoped<ScheduleService>();
 builder.Services.AddScoped<BookingService>();
 builder.Services.AddScoped<AdminBlockService>();
+// The activation service's non-decision dependencies, bundled — see ActivationPlumbing.
+builder.Services.AddScoped<ActivationPlumbing>();
 builder.Services.AddScoped<CourtActivationService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<MemberApprovalService>();
@@ -510,6 +523,8 @@ app.MapQrEndpoints();
 app.MapUploadEndpoints();
 app.MapDeviceEndpoints();
 app.MapDeviceEventEndpoints();
+app.MapAdminControlBoardEndpoints();
+app.MapAdminMonitoringEndpoints();
 
 app.Run();
 

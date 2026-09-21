@@ -82,6 +82,13 @@ public sealed class RetentionWorker : BackgroundService
             // surviving past it would make that sentence false.
             await PurgeDoorTrailAsync(db, tenant, settings, ct);
 
+            // The IoT fault log, on its own horizon and with its own asymmetry: resolved rows
+            // past the cutoff are DELETED and open ones are AGED OUT rather than dropped. See
+            // DeviceErrorRetention for why — an "open errors" count that silently loses rows
+            // nobody looked at is a count that lies about the club's estate — and for why it
+            // logs its own result instead of handing this method a condition to branch on.
+            await DeviceErrorRetention.SweepAsync(db, settings, DateTimeOffset.UtcNow, _logger, tenant.Slug, ct);
+
             // Bookings — anonymise the user link on completed/no-show/cancelled rows older than the cutoff.
             var oldBookings = await db.Bookings
                 .Where(b => b.CreatedAt < cutoff
