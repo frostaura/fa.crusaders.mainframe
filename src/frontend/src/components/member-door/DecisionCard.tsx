@@ -150,7 +150,7 @@ export function DecisionCard(props: {
             <p className="sr-only">{spoken.headline}</p>
           </>
         )}
-        <p className="text-sm text-text-secondary">{decisionStamp(decision.door_name, decision.at)}</p>
+        <p className="text-sm text-text-secondary">{decisionStamp(decision.door_name, decision.at, decision.delivered_at)}</p>
       </div>
       <p className="text-sm text-text-secondary">{copy.body}</p>
       {copy.actions.length === 0 && (decision.reason === "member_not_active" || decision.reason === "method_not_supported" || decision.reason === "not_a_gate") && (

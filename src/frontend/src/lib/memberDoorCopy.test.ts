@@ -7,6 +7,7 @@ import {
   DIAGNOSIS_HEADING,
   DIAGNOSIS_ROW_LABELS,
   DIAGNOSIS_TRIGGER,
+  HISTORY_DELIVERY_ORDER,
   HISTORY_EMPTY,
   HISTORY_FAILED,
   HISTORY_INTRO,
@@ -34,6 +35,7 @@ import {
   formatWindowMinutes,
   historyChip,
   historyLine,
+  historyOfflineLine,
   historyRetention,
   offlineDetailsBody,
   offlineIdentDeadEnd,
@@ -134,7 +136,9 @@ describe("memberDoorCopy", () => {
       codeExpiredDeadEnd("network", CONTACT), codeExpiredDeadEnd("server", NO_CONTACT),
       codeExpiredDeadEnd("network", UNKNOWN_CONTACT),
       HISTORY_TITLE, HISTORY_INTRO, HISTORY_P2_NOTICE, HISTORY_LOADING, HISTORY_FAILED,
-      HISTORY_EMPTY, HISTORY_MORE_FAILED, HISTORY_OFFLINE_LINE,
+      HISTORY_EMPTY, HISTORY_MORE_FAILED, HISTORY_OFFLINE_LINE, HISTORY_DELIVERY_ORDER,
+      historyOfflineLine("2026-09-19T06:09:00Z"), historyOfflineLine(null),
+      decisionStamp("front-door", "2026-09-19T06:04:00Z", "2026-09-19T06:09:00Z"),
       historyRetention(90), historyRetention(null),
       standingFailed(null, "network"), standingFailed(null, "server"),
       standingFailed({ body: "cached sentence", minutesAgo: 4 }, "network"),
@@ -1159,5 +1163,62 @@ describe("memberDoorCopy", () => {
   it("still asks all six, so a row is never silently dropped", () => {
     const { rows } = buildDiagnosis({ ...HEALTHY, standingKnown: false, connection: "server" as const });
     expect(rows.map((r) => r.key)).toEqual(["membership", "policy", "booking", "window", "code", "connection"]);
+  });
+
+  // --- WIRE-R1 §2 / §8: the second instant, and only where it exists ----------------------
+
+  it("names the instant the club heard, on a row a cut-off door decided alone", () => {
+    const stamp = decisionStamp("front-door", "2026-09-19T06:04:00Z", "2026-09-19T06:09:00Z");
+    expect(stamp).toMatch(/^front-door · \d{2}:\d{2} · the club heard at \d{2}:\d{2}$/);
+    // The two instants are different times, and the sentence has to carry both.
+    const [scan, heard] = stamp.match(/\d{2}:\d{2}/g)!;
+    expect(scan).not.toBe(heard);
+  });
+
+  /** A delivery time on a row that never took that journey is a delay that did not happen. */
+  it("prints no delivery clause when there was nothing to deliver", () => {
+    expect(decisionStamp("front-door", "2026-09-19T06:04:00Z", null))
+      .toMatch(/^front-door · \d{2}:\d{2}$/);
+    expect(decisionStamp("front-door", "2026-09-19T06:04:00Z")).not.toMatch(/heard/);
+  });
+
+  it("does the same on a history row's own line", () => {
+    expect(historyOfflineLine("2026-09-19T06:09:00Z")).toMatch(/The club heard at \d{2}:\d{2}\./);
+    expect(historyOfflineLine(null)).toBe(HISTORY_OFFLINE_LINE);
+    expect(historyOfflineLine(null)).not.toMatch(/heard/);
+  });
+
+  it("reads the delivery instant off the row rather than off the offline flag alone", () => {
+    const withTime = historyLine({ reason: "ok", released: true, offline: true, delivered_at: "2026-09-19T06:09:00Z" });
+    const without = historyLine({ reason: "ok", released: true, offline: true, delivered_at: null });
+    expect(withTime).not.toBe(without);
+    expect(without).toBe(HISTORY_OFFLINE_LINE);
+  });
+
+  /**
+   * The list is ordered and paged on the DELIVERY axis, so an offline row's own time can
+   * run backwards against its neighbours. A member who is not told that reads their own
+   * record as wrong.
+   */
+  it("explains why a row can sit below one that happened after it", () => {
+    expect(HISTORY_DELIVERY_ORDER).toMatch(/when the club heard/i);
+    expect(HISTORY_DELIVERY_ORDER).toMatch(/below/i);
+    // Member voice, like every other sentence here: about the rows, never about a cursor,
+    // an axis or a page.
+    expect(HISTORY_DELIVERY_ORDER).not.toMatch(/cursor|axis|paged|sorted by/i);
+  });
+
+  /**
+   * The standing line is about the club's RULE and this member's standing. Pointing at
+   * "the code on this screen" makes it a claim about whatever is rendered ten pixels above
+   * — and when that code has run out and been replaced by a dead state, the two contradict
+   * each other outright. Photographed on the expired screen during the visual pass.
+   */
+  it("never points at whatever code happens to be on screen", () => {
+    for (const membership of ["active", "none"] as const) {
+      const line = standingFor({ policy: "active_member", membership, membership_detail: membership });
+      expect(line.body).not.toMatch(/code on this screen/i);
+      expect(line.body).toMatch(/live code of yours/i);
+    }
   });
 });

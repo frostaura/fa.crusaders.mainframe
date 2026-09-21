@@ -61,7 +61,7 @@ describe("lastKnown", () => {
     contact: { phone: "021 555 0134", email: "info@crusaders.co.za" },
     door_log_retention_days: 90,
     last_decision: {
-      at: "2026-09-19T06:04:00Z", door_name: "front-door", released: false,
+      at: "2026-09-19T06:04:00Z", delivered_at: null, door_name: "front-door", released: false,
       reason: "too_early", offline: false, opens_at: "2026-09-19T16:30:00Z",
     },
   };

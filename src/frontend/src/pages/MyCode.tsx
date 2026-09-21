@@ -724,17 +724,30 @@ function CodeCard(props: {
             </>
           )}
 
-          <div className="text-center space-y-1">
-            {/* `break-all` and `max-w-full`: twelve monospaced characters at 0.25em
-                tracking measure ~490px once the root font is 32, which is wider than the
-                phone the member is holding. A code that runs off the edge cannot be read
-                back to the desk, and it was what dragged the whole page sideways. */}
-            <p className="mx-auto max-w-full break-all font-mono text-2xl tracking-[0.25em]" aria-label="Your code">
-              {qr.code}
-            </p>
-            <p className="text-base font-medium">{meaning!.headline}</p>
-            <p className="text-sm text-text-secondary">{meaning!.detail}</p>
-          </div>
+          {/*
+            <b>Gone with the symbol when the code is dead, not just the QR.</b> The visual
+            pass caught this: the dead block said "there's no code on this screen a door or
+            a court box will take", and two centimetres below it the twelve characters were
+            still set at `text-2xl`, with "Identifies you at any court box… It also opens
+            the club door whenever the club's door rules allow" under them in the present
+            tense. The fallback code is the SAME dead code in a form somebody can type at a
+            desk, and its description is a promise about a code that has run out. Replacing
+            the symbol and leaving its twin and its sales pitch is the D5 defect with an
+            extra step.
+          */}
+          {!dead && (
+            <div className="text-center space-y-1">
+              {/* `break-all` and `max-w-full`: twelve monospaced characters at 0.25em
+                  tracking measure ~490px once the root font is 32, which is wider than the
+                  phone the member is holding. A code that runs off the edge cannot be read
+                  back to the desk, and it was what dragged the whole page sideways. */}
+              <p className="mx-auto max-w-full break-all font-mono text-2xl tracking-[0.25em]" aria-label="Your code">
+                {qr.code}
+              </p>
+              <p className="text-base font-medium">{meaning!.headline}</p>
+              <p className="text-sm text-text-secondary">{meaning!.detail}</p>
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
             <p className="text-xs text-text-muted inline-flex items-center gap-1.5">

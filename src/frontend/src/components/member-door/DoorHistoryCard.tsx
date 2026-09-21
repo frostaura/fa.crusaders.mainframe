@@ -8,6 +8,7 @@ import { formatClock, formatDayAndClock } from "../../lib/countdown";
 import { cn } from "../../lib/utils";
 import {
   HISTORY_ANCHOR,
+  HISTORY_DELIVERY_ORDER,
   HISTORY_EMPTY,
   HISTORY_FAILED,
   HISTORY_INTRO,
@@ -135,9 +136,17 @@ export function DoorHistoryCard() {
       )}
 
       {phase === "ready" && rows.length > 0 && (
-        <ul className="divide-y divide-border">
-          {rows.map((row, i) => <HistoryRow key={`${row.at}-${i}`} row={row} />)}
-        </ul>
+        <>
+          <ul className="divide-y divide-border">
+            {rows.map((row, i) => <HistoryRow key={`${row.at}-${i}`} row={row} />)}
+          </ul>
+          {/* Only when a row on screen was actually decided offline, because only then is
+              it true — and only then does a member have a row whose own time runs
+              backwards against its neighbours to be confused by. See the constant. */}
+          {rows.some((row) => !!row.delivered_at) && (
+            <p className="text-xs text-text-muted">{HISTORY_DELIVERY_ORDER}</p>
+          )}
+        </>
       )}
 
       {moreFailed && (

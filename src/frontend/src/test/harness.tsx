@@ -1046,6 +1046,10 @@ export function memberDoorsOnFixture(overrides: Record<string, unknown> = {}) {
 export function memberDoorDecisionFixture(overrides: Record<string, unknown> = {}) {
   return {
     at: "2026-09-19T06:04:00Z",
+    // Null unless the door decided it OFFLINE — a row the door asked the club about has
+    // no delivery to state, and a fixture that carried one would let a page render a
+    // journey the row never made. `memberDoorOfflineDecisionFixture` is the other arm.
+    delivered_at: null,
     door_name: "front-door",
     released: false,
     reason: "too_early",
@@ -1087,10 +1091,41 @@ export function unreachable(path: string, method = "GET"): StubRoute {
   };
 }
 
+/**
+ * A decision a CUT-OFF door made, with both instants on it.
+ *
+ * <p>
+ * The pair moves together in reality — `delivered_at` is non-null exactly when `offline`
+ * is true — so spelling them out at each call site is how one ends up with a row that
+ * claims a delivery delay for a scan the door asked the club about at the time, which is
+ * a shape the endpoint cannot produce. Five minutes late by default, which is long enough
+ * to read as a gap and short enough to be an ordinary one.
+ * </p>
+ */
+export function memberDoorOfflineDecisionFixture(overrides: Record<string, unknown> = {}) {
+  return memberDoorDecisionFixture({
+    released: true,
+    reason: "ok",
+    offline: true,
+    delivered_at: "2026-09-19T06:09:00Z",
+    ...overrides,
+  });
+}
+
+/** The same pairing for a history row. See `memberDoorOfflineDecisionFixture`. */
+export function memberDoorOfflineHistoryRowFixture(overrides: Record<string, unknown> = {}) {
+  return memberDoorHistoryRowFixture({
+    offline: true,
+    delivered_at: "2026-09-19T06:09:00Z",
+    ...overrides,
+  });
+}
+
 /** One row of `GET /api/v1/me/door/history`. An open, from a door that could reach the club. */
 export function memberDoorHistoryRowFixture(overrides: Record<string, unknown> = {}) {
   return {
     at: "2026-09-19T06:04:00Z",
+    delivered_at: null,
     door_name: "front-door",
     released: true,
     reason: "ok",

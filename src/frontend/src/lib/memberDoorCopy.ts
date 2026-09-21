@@ -513,9 +513,22 @@ export function describeDecision(
   return { tone: arm.tone, headline: arm.headline, body: arm.body, actions: resolveActions(arm.wants, ctx.contact) };
 }
 
-/** `front-door · 06:04` — the club's own name for the door, and the time of the SCAN. */
-export function decisionStamp(doorName: string | null, at: string): string {
-  return `${doorName ?? UNNAMED_DOOR} · ${formatClock(at)}`;
+/**
+ * `front-door · 06:04` — the club's own name for the door, and the time of the SCAN.
+ *
+ * <p>
+ * <b>A third clause when, and only when, the door decided this one alone.</b> The scan
+ * instant and the instant the club heard about it are the same event seen from two places,
+ * and the gap between them is the answer to a question a member really does ask: why the
+ * club's own screens showed nothing while they were being let in. `delivered_at` is null
+ * on every row a door decided while it could reach the club, and a delay printed for one
+ * of those would be a journey the row never made — so the clause is absent rather than
+ * zero.
+ * </p>
+ */
+export function decisionStamp(doorName: string | null, at: string, deliveredAt: string | null = null): string {
+  const stamp = `${doorName ?? UNNAMED_DOOR} · ${formatClock(at)}`;
+  return deliveredAt ? `${stamp} · the club heard at ${formatClock(deliveredAt)}` : stamp;
 }
 
 /** Dropping the card is the member's call, so the control says what it does. */
@@ -674,9 +687,9 @@ export function describeStanding(door: StandingInput): StandingLine {
       // say both halves.
       body: door.membership === "none"
         ? `${ACTIVE_MEMBER_RULE} The club has no membership on file for you, which is not the same as one it`
-          + " has turned off — so the code on this screen still opens the club door. Worth asking the club to"
+          + " has turned off — so a live code of yours still opens the club door. Worth asking the club to"
           + " put that right."
-        : `${ACTIVE_MEMBER_RULE} Yours is active, so the code on this screen opens the club door.`,
+        : `${ACTIVE_MEMBER_RULE} Yours is active, so a live code of yours opens the club door.`,
       hasClockWindow: false,
       // The one arm where the clause EARNS its place: this line has no clock times and
       // the code card does.
@@ -784,7 +797,7 @@ export function codeExpiredDeadEnd(failure: ReadFailure, contact: ContactKnowled
     ? "This code has run out and can't be renewed without signal."
     : "This code has run out, and the club's system answered with an error when this screen asked for"
       + " another — that part is not your phone.";
-  return `${why} There's no code on this screen a door or a court box will take. ${reachTheClub(contact)}`;
+  return `${why} There's nothing on this screen for a door or a court box to read. ${reachTheClub(contact)}`;
 }
 
 // --- the offline half of the conditional (P6) ------------------------------------------
@@ -1059,7 +1072,10 @@ function membershipRow(input: DiagnosisInput): DiagnosisRow {
 const UNKNOWN_WORD = "Couldn't check";
 function unknownRows(): DiagnosisRow[] {
   return (["membership", "policy", "booking", "window"] as const)
-    .map((key) => row(key, "neutral", "this screen couldn't reach the club to find out", UNKNOWN_WORD));
+    // Short, because it is four rows in a column and the state WORD beside it already
+    // says "Couldn't check". A sentence repeated four times reads as noise and stops
+    // being read at all, which on a checklist is the same as not being there.
+    .map((key) => row(key, "neutral", "no answer from the club", UNKNOWN_WORD));
 }
 
 function diagnosisRows(input: DiagnosisInput): DiagnosisRow[] {
@@ -1235,6 +1251,28 @@ export const USE_MEMBER_CODE_INSTEAD = "Use your member code instead";
 /** The offline marker on a row: the door decided from the list it had already downloaded. */
 export const HISTORY_OFFLINE_LINE = "From the door's own list — it couldn't reach the club at the time.";
 
+/** The same, with the instant the club finally heard. See `MemberDoorHistoryRow.delivered_at`. */
+export function historyOfflineLine(deliveredAt: string | null): string {
+  if (!deliveredAt) return HISTORY_OFFLINE_LINE;
+  return `${HISTORY_OFFLINE_LINE} The club heard at ${formatClock(deliveredAt)}.`;
+}
+
+/**
+ * Why a row can sit below one that happened after it.
+ *
+ * <p>
+ * <b>Shown only when a row on screen was decided offline, because only then is it true.</b>
+ * The list is ordered and paged on the DELIVERY axis: a door cut off for an hour hands
+ * over an hour of scans at once, so those rows land together and their own times run
+ * backwards against the rows around them. Unexplained, a member reads their own record as
+ * wrong — which on the one screen that exists to let them check what happened about them
+ * is the worst thing it could be.
+ * </p>
+ */
+export const HISTORY_DELIVERY_ORDER = "These are listed by when the club heard about them. A door that had"
+  + " lost the network tells the club everything at once when it gets back, so one of those rows can sit"
+  + " below a scan that happened after it.";
+
 const CHIP_LABELS: Record<string, string> = {
   not_recognised: "Code not recognised",
   member_not_active: "Membership not active",
@@ -1269,8 +1307,10 @@ export function historyChip(row: { reason: string | null; released: boolean; off
 }
 
 /** The sentence under a row, or nothing when the chip has already said all there is. */
-export function historyLine(row: { reason: string | null; released: boolean; offline: boolean }): string | null {
-  if (row.offline) return HISTORY_OFFLINE_LINE;
+export function historyLine(
+  row: { reason: string | null; released: boolean; offline: boolean; delivered_at?: string | null },
+): string | null {
+  if (row.offline) return historyOfflineLine(row.delivered_at ?? null);
   if (row.released) return null;
   return MEMBER_DOOR_REASON_LINES[reasonKey(row.reason)] ?? null;
 }

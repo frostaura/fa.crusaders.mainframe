@@ -61,10 +61,20 @@ function door(over: Record<string, unknown> = {}) {
   };
 }
 
-/** One decision, with both of the fields WIRE-W1 §8 did not carry. */
+/**
+ * One decision, with every field WIRE-R1 §2 and §8 put on it.
+ *
+ * <p>
+ * `delivered_at` is null by default and non-null EXACTLY when `offline` is true: `at` is
+ * the instant the code was held up, and a delivery instant exists only for a door that had
+ * lost the network and told the club later. A fixture carrying one on an online row
+ * describes a journey the endpoint cannot produce.
+ * </p>
+ */
 function decision(over: Record<string, unknown> = {}) {
   return {
     at: "2099-01-01T16:02:00Z",
+    delivered_at: null,
     door_name: "front-door",
     released: false,
     reason: "too_early",
@@ -160,13 +170,20 @@ test("an open the door decided alone says so, and still says the lock released",
   await signIn(page);
   await serveApi(page, [...COMMON, {
     path: "/api/v1/me/door",
-    body: door({ last_decision: decision({ reason: "ok", released: true, offline: true }) }),
+    body: door({
+      last_decision: decision({
+        reason: "ok", released: true, offline: true, delivered_at: "2099-01-01T16:11:00Z",
+      }),
+    }),
   }]);
 
   await page.goto("/my-code");
 
   const card = page.getByRole("status");
   await expect(card).toContainText(/from the door's own list/);
+  // WIRE-R1 §2: both instants on screen, because the gap between them is why the club's
+  // own screens showed nothing while this member was being let in.
+  await expect(card).toContainText(/the club heard at \d{2}:\d{2}/);
   await expect(card).toContainText(/couldn't reach the club/);
   await expect(card).toHaveClass(/border-success-strong/);
   // A1.2, which outranks the UX spec's own literal wording for this arm.

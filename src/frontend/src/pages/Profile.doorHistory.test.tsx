@@ -8,6 +8,7 @@ import { ToastProvider } from "../components/Toast";
 import {
   memberDoorFixture,
   memberDoorHistoryRowFixture,
+  memberDoorOfflineHistoryRowFixture,
   memberDoorsOnFixture,
   signIn,
   signOut,
@@ -418,5 +419,71 @@ describe("My door history", () => {
 
     expect(await screen.findByText("a club door")).toBeInTheDocument();
     expect(screen.queryByText(/hasn't named/i)).toBeNull();
+  });
+
+  // --- WIRE-R1 §2 / §8: the list is ordered on DELIVERY, not on the scan ------------------
+
+  /**
+   * A door cut off for an hour hands the club an hour of scans at once, and the list is
+   * ordered and paged on that axis — so those rows land together and their own times run
+   * backwards against the rows around them. Unexplained, a member reads their own record
+   * as wrong, which on the one screen that exists for them to check what happened is the
+   * worst thing it could be.
+   */
+  it("says when the club heard, and why a row can sit out of order", async () => {
+    renderProfile([
+      {
+        path: "/api/v1/me/door/history",
+        body: HISTORY({
+          items: [
+            memberDoorHistoryRowFixture({ at: "2026-09-19T06:20:00Z" }),
+            memberDoorOfflineHistoryRowFixture({ at: "2026-09-19T05:40:00Z" }),
+          ],
+        }),
+      },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+
+    expect(await screen.findByText(/The club heard at \d{2}:\d{2}\./)).toBeInTheDocument();
+    expect(screen.getByText(/listed by when the club heard about them/)).toBeInTheDocument();
+  });
+
+  /**
+   * And neither sentence appears when nothing on screen took that journey. A note about
+   * out-of-order rows, on a list that has none, is the page explaining a mechanism instead
+   * of answering a question.
+   */
+  it("explains nothing about delivery when every row was decided with the club", async () => {
+    renderProfile([
+      { path: "/api/v1/me/door/history", body: HISTORY() },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+
+    await screen.findByText("My door history");
+    expect(screen.queryByText(/The club heard at/)).toBeNull();
+    expect(screen.queryByText(/listed by when the club heard about them/)).toBeNull();
+  });
+
+  /**
+   * WIRE-R1 §8: a malformed cursor is a 400 `cursor_invalid` rather than a silent full
+   * result. The page cannot send one — the cursor comes from the previous response — but
+   * a 400 on Show more must still leave the rows that are already on screen, because
+   * replacing them with an error is the member losing their record over a paging fault.
+   */
+  it("keeps the rows it has when the club refuses the cursor", async () => {
+    renderProfile([
+      {
+        method: "GET", path: "/api/v1/me/door/history", status: [200, 400], body: null,
+        sequence: [HISTORY({ next_cursor: "c2" }), { error: "cursor_invalid" }],
+      },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+    await screen.findByText("My door history");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+
+    expect(await screen.findByText(/Couldn't load any more/)).toBeInTheDocument();
+    // The record itself survives. The failed read is a sentence beside it, not instead of it.
+    expect([...document.querySelectorAll("#door-history li")].length).toBe(1);
   });
 });

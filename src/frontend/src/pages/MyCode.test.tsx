@@ -7,6 +7,7 @@ import {
   memberDoorDecisionFixture,
   memberDoorFixture,
   memberDoorNotActiveFixture,
+  memberDoorOfflineDecisionFixture,
   memberDoorsOnFixture,
   renderPage,
   stubFetch,
@@ -1399,6 +1400,7 @@ describe("MyCode at a club with a door", () => {
     // And the four rows only the club can answer say they were never asked, rather than
     // defaulting to fine above a row that has just failed. This stub has no cached copy.
     expect(panel).toHaveTextContent(/unanswered rather than fine/i);
+    expect(panel).toHaveTextContent(/no answer from the club/);
     expect(panel).not.toHaveTextContent(/Your membership.*active.*Passed/);
   });
 
@@ -1542,8 +1544,38 @@ describe("MyCode at a club with a door", () => {
       "court_number", "door_closes_at", "door_opens_at", "ends_at", "starts_at",
     ]);
     expect(Object.keys(memberDoorDecisionFixture()).sort()).toEqual([
-      "at", "door_name", "offline", "opens_at", "reason", "released",
+      "at", "delivered_at", "door_name", "offline", "opens_at", "reason", "released",
     ]);
+  });
+
+  // --- WIRE-R1 §2 / §8: the two instants a door scan has -----------------------------------
+
+  /**
+   * `at` is when the code was held up; `delivered_at` is when the club heard. They differ
+   * only for a door that had lost the network and decided alone — and that gap is the
+   * answer to a question a member really does ask, which is why the club's own screens
+   * showed nothing while they were being let in.
+   */
+  it("says when the club heard, on a decision a cut-off door made alone", async () => {
+    renderBoth(memberDoorsOnFixture({
+      last_decision: memberDoorOfflineDecisionFixture({ door_name: "front-door" }),
+    }));
+
+    expect(await screen.findByText(/^front-door · \d{2}:\d{2} · the club heard at \d{2}:\d{2}$/))
+      .toBeInTheDocument();
+  });
+
+  /**
+   * And says nothing of the sort for a row that never made that journey. A delivery time
+   * on a scan the door asked the club about at the time is a delay that did not happen.
+   */
+  it("prints no delivery time for a decision the door asked the club about", async () => {
+    renderBoth(memberDoorsOnFixture({
+      last_decision: memberDoorDecisionFixture({ reason: "no_booking" }),
+    }));
+
+    expect(await screen.findByText(/^front-door · \d{2}:\d{2}$/)).toBeInTheDocument();
+    expect(screen.queryByText(/the club heard at/)).toBeNull();
   });
 
   /**
@@ -1866,6 +1898,12 @@ describe("MyCode at a club with a door", () => {
     expect(screen.queryByRole("img", { name: /QR code/ })).toBeNull();
     expect(screen.getByText(/can't be renewed without signal/i)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/Expired — refreshing/);
+    // The fallback code goes with the symbol. It is the SAME dead code in a form somebody
+    // can type at a desk, and leaving it — with "Identifies you at any court box" under it
+    // in the present tense — is the same false offer with an extra step.
+    expect(screen.queryByLabelText("Your code")).toBeNull();
+    expect(document.body.textContent).not.toContain("ZZ9P4T6WQ8HN");
+    expect(document.body.textContent).not.toMatch(/Identifies you at any court box/);
   });
 
   // --- D9: the door section says a question is being asked -------------------------------
