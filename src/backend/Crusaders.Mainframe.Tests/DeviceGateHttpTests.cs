@@ -185,7 +185,7 @@ public sealed class DeviceGateHttpTests
         Assert.Equal($"gate-{mac[^6..]}", json.GetProperty("device_code").GetString());
         Assert.Equal(DeviceKinds.Gate, json.GetProperty("kind").GetString());
         Assert.Equal(45, json.GetProperty("heartbeat_seconds").GetInt32());
-        Assert.Equal(3, json.GetProperty("gate").GetProperty("unlock_seconds").GetInt32());
+        Assert.Equal(TenantSettingsView.DefaultGateUnlockSeconds, json.GetProperty("gate").GetProperty("unlock_seconds").GetInt32());
         Assert.Empty(json.GetProperty("roster").EnumerateArray());
 
         // Present, and null: a firmware that read an absent key as an empty string and a
@@ -632,7 +632,7 @@ public sealed class DeviceGateHttpTests
         var json = await BodyAsync(response);
         Assert.True(json.GetProperty("opened").GetBoolean());
         Assert.Equal(GateAccess.Ok, json.GetProperty("reason").GetString());
-        Assert.Equal(3, json.GetProperty("unlock_seconds").GetInt32());
+        Assert.Equal(TenantSettingsView.DefaultGateUnlockSeconds, json.GetProperty("unlock_seconds").GetInt32());
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -2009,7 +2009,7 @@ public sealed class DeviceGateHttpTests
         // The whole answer is intact, which is the point: a door that cannot read its roster
         // is a door that admits nobody at the next stale deadline.
         Assert.Equal(DeviceKinds.Gate, json.GetProperty("kind").GetString());
-        Assert.Equal(3, json.GetProperty("gate").GetProperty("unlock_seconds").GetInt32());
+        Assert.Equal(TenantSettingsView.DefaultGateUnlockSeconds, json.GetProperty("gate").GetProperty("unlock_seconds").GetInt32());
         Assert.Equal(JsonValueKind.Array, json.GetProperty("roster").ValueKind);
 
         // And neither counter comes back or is stored: they are logged and nothing else.

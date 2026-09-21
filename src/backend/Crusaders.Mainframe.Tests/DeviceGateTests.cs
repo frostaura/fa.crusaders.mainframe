@@ -69,11 +69,11 @@ public class DeviceGateTests
     /// init-only pattern is what keeps that true.
     /// </summary>
     private static TenantSettingsView Policy(
-        Fixture f, string policy, int unlockSeconds = 3, int earlyEntryMinutes = 30) =>
+        Fixture f, string policy, int? unlockSeconds = null, int earlyEntryMinutes = 30) =>
         f.Settings with
         {
             GateAccessPolicy = policy,
-            GateUnlockSeconds = unlockSeconds,
+            GateUnlockSeconds = unlockSeconds ?? TenantSettingsView.DefaultGateUnlockSeconds,
             GateEarlyEntryMinutes = earlyEntryMinutes,
         };
 
@@ -182,7 +182,7 @@ public class DeviceGateTests
         Assert.True(decision.Opened);
         Assert.Equal(GateAccess.Ok, decision.Reason);
         Assert.Equal(f.Host.PlayerUser.Id, decision.SubjectUserId);
-        Assert.Equal(3, decision.UnlockSeconds);
+        Assert.Equal(TenantSettingsView.DefaultGateUnlockSeconds, decision.UnlockSeconds);
         Assert.Empty(await f.Db.Bookings.ToListAsync());
     }
 
