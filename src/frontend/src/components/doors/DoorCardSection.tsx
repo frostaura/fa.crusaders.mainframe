@@ -18,8 +18,10 @@ import { type AdminDoorDevice, type AdminSettings, type PowerLossBehaviour } fro
  * lived. Everything writable about the door is now behind this button.
  * </p>
  */
-export function DoorCardSection({ door, settings, editing, onEdit, onClose, onSave }: {
+export function DoorCardSection({ door, displayName, settings, editing, onEdit, onClose, onSave }: {
   door: AdminDoorDevice;
+  /** A11 / R3-21: what an admin calls this door — never the raw registration placeholder. */
+  displayName: string;
   settings: AdminSettings | null;
   editing: boolean;
   onEdit: () => void;
@@ -74,7 +76,7 @@ export function DoorCardSection({ door, settings, editing, onEdit, onClose, onSa
           {/* The door's NAME in the accessible name: three "Manage"-shaped controls on
               one admin's screen all reading "Edit" is reviewer B's repeated-link
               finding one control along. */}
-          <Button variant="outline" onClick={onEdit} aria-label={`Edit ${door.name}`}>
+          <Button variant="outline" onClick={onEdit} aria-label={`Edit ${displayName}`}>
             Edit this door
           </Button>
           <Link

@@ -17,7 +17,7 @@ import { useDoorActions, type DoorActions } from "../components/doors/useDoorAct
 import { useTicker } from "../lib/useTicker";
 import { clubDayAndClock } from "../lib/clubClock";
 import { isOnline, offlineAfterSecondsFor } from "../lib/deviceLiveness";
-import { DOORS_READ_FAILED, doorStateNotice } from "../lib/doorsCopy";
+import { DOORS_READ_FAILED, doorDisplayName, doorStateNotice } from "../lib/doorsCopy";
 import { UNNAMED_GATE, gateDeleteConfirm, gateDeleteStandingNotice } from "../lib/gateCopy";
 import { ACTIVITY_READ_FAILED } from "../lib/deviceActivity";
 import { describeDeviceError } from "../lib/deviceErrors";
@@ -180,8 +180,10 @@ function useDoorPage(id: string) {
  * asking, which is what an armed control looks like.
  * </p>
  */
-function DoorControls({ door, actions, online, shutAt, timezone }: {
+function DoorControls({ door, displayName, actions, online, shutAt, timezone }: {
   door: AdminDoorDevice;
+  /** A11 / R3-21: what an admin calls this door — never the raw registration placeholder. */
+  displayName: string;
   actions: DoorActions;
   online: boolean;
   shutAt: string | null;
@@ -203,12 +205,12 @@ function DoorControls({ door, actions, online, shutAt, timezone }: {
           {/* The consequence is rendered as page text as well as on the confirm, because
               `ConfirmButton`'s aria-label replaces its contents: without this sentence a
               screen-reader user arming the control hears only "tap again to confirm". */}
-          <p className="text-sm text-text-secondary">{gateDeleteStandingNotice(door.name)}</p>
+          <p className="text-sm text-text-secondary">{gateDeleteStandingNotice(displayName)}</p>
           <ConfirmButton
             idleLabel="Delete this door"
             cancelLabel="Keep this door"
             confirmLabel={gateDeleteConfirm()}
-            ariaLabel={door.name}
+            ariaLabel={displayName}
             onConfirm={actions.remove}
             tone="danger"
             className="min-h-11 w-full"
@@ -229,8 +231,15 @@ function AdminDoorsDetailPageBody() {
   const [editing, setEditing] = useState(false);
 
   const { row, door, timezone, online } = doorOf(read, id, now);
+  const displayName = doorDisplayName(door);
   const actions = useDoorActions(door, {
-    online, timezone, reload, afterDelete: () => nav("/admin/doors"),
+    online,
+    timezone,
+    reload,
+    // A-M7 / R3-14: the confirmation travels WITH the navigation. Pushed as a toast and then
+    // navigated away from in the same tick, it was in practice never seen — and the page it
+    // lands on is a list that polls, so one fewer row reads as a board dropping off.
+    afterDelete: (said: string) => nav("/admin/doors", { state: { doorsNotice: said } }),
   });
 
   if (read.loading) return <p className="text-sm text-text-secondary">Loading this door…</p>;
@@ -260,7 +269,13 @@ function AdminDoorsDetailPageBody() {
       <header className="space-y-2">
         <BackToDoors />
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="min-w-0 break-words text-2xl font-bold tracking-tight">{door.name}</h1>
+          {/* A11 / R3-21: ONE fallback. This printed the raw `name`, which for a board
+              nobody has named is the registration placeholder "Door gate" — so the heading,
+              the identity line below it ("no door name yet") and the tile that linked here
+              ("Unnamed scanner (gate-44c103)") were three vocabularies for one state, and
+              the loudest was a word the club never chose and cannot tell apart from the
+              other four doors in it. */}
+          <h1 className="min-w-0 break-words text-2xl font-bold tracking-tight">{displayName}</h1>
           <DoorChips device={door} online={online} />
           <span className="sm:ml-auto">
             <DoorAge at={door.last_seen_at} now={now} prefix={online ? "Heard from" : "Last heard from"} />
@@ -284,7 +299,7 @@ function AdminDoorsDetailPageBody() {
       )}
 
       <DoorSignalNotices
-        doorName={door.name}
+        doorName={displayName}
         signals={row.signals}
         settings={signalSettingsOf(read.settings)}
         enabled={door.enabled}
@@ -315,6 +330,7 @@ function AdminDoorsDetailPageBody() {
         <div className="order-1 min-w-0 space-y-6 lg:order-2">
           <DoorControls
             door={door}
+            displayName={displayName}
             actions={actions}
             online={online}
             shutAt={shutAtFace(door.out_of_service_since ?? null, timezone)}
@@ -322,6 +338,7 @@ function AdminDoorsDetailPageBody() {
           />
           <DoorCardSection
             door={door}
+            displayName={displayName}
             settings={read.settings}
             editing={editing}
             onEdit={() => setEditing(true)}

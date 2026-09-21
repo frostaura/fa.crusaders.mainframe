@@ -1,7 +1,9 @@
 import { useId, useState } from "react";
 import { Button, Input, Label } from "../Button";
 import { PowerLossChoice, LOCATION_HINT, LOCATION_NOTE_MAX_LENGTH } from "./DoorCardFields";
-import { GATE_KEY_MAX_LENGTH, unnamedGateOfflineNotice } from "../../lib/gateCopy";
+import {
+  DEVICE_NAME_MAX_LENGTH, GATE_KEY_MAX_LENGTH, unnamedGateOfflineNotice,
+} from "../../lib/gateCopy";
 import { type AdminDoorDevice, type PowerLossBehaviour } from "../../lib/api";
 
 /**
@@ -50,6 +52,7 @@ export function GateDetailsEditor({ device, onSave, onClose }: {
   const [saving, setSaving] = useState(false);
   const base = useId();
   const nameId = `${base}-name`;
+  const nameHintId = `${base}-name-hint`;
   const keyId = `${base}-gate-key`;
   const keyHintId = `${base}-gate-key-hint`;
   const noteId = `${base}-note`;
@@ -60,10 +63,16 @@ export function GateDetailsEditor({ device, onSave, onClose }: {
     // will see — a key saved with a trailing space would render with an invisible difference
     // from the one they typed. An empty field goes as `""`, which is the API's clear; it used
     // to go as `null`, which the API discards.
+    //
+    // <b>B3 / R3-15: `name` goes as what was typed, INCLUDING empty.</b> It used to be
+    // `name.trim() || device.name` — so an admin who cleared the field was told "saved" and
+    // handed back exactly the name they had just removed, with nothing anywhere saying the
+    // clear had been refused. Either the screen performs the decision or it refuses it; it
+    // may not do neither and report the first. WIRE-R3 §3 makes `""` a clear.
     setSaving(true);
     try {
       const ok = await onSave({
-        name: name.trim() || device.name, gateKey: key.trim(), note: note.trim(), behaviour,
+        name: name.trim(), gateKey: key.trim(), note: note.trim(), behaviour,
       });
       if (ok) onClose();
     } finally {
@@ -73,25 +82,47 @@ export function GateDetailsEditor({ device, onSave, onClose }: {
 
   return (
     <div className="space-y-4">
+      {/*
+        <b>A-M3 / B12 / R3-21 — two name-shaped boxes, and the dangerous one had the
+        friendlier label.</b>
+
+        "Name" and "Door name" are indistinguishable to a volunteer, they sat next to each
+        other, and the one that reads as the innocuous cosmetic field — "Door name" — is the
+        one that decides whether the board is sent a roster at all. Clearing it stops the
+        door opening for anybody during an outage. So each label now says what the field IS
+        FOR rather than what it is called, and the cosmetic one is first: an admin who stops
+        reading after the first box has changed the harmless thing.
+      */}
       <div>
-        <Label htmlFor={nameId}>Name</Label>
+        <Label htmlFor={nameId}>What the club calls it</Label>
         {/* C4: focus the FIRST field when the editor opens. The trigger that opened it is
             hidden rather than unmounted (see `DoorCardSection`), so without this a keyboard
             user is left on a control that is no longer visible and a screen-reader user hears
             nothing at all about a form that has just appeared. */}
         {/* autoFocus is deliberate: the editor is opened by an explicit press, which is
             exactly the case it is correct for. */}
+        <p id={nameHintId} className="mb-2 text-xs text-text-muted">
+          {`The name on this screen, on the door's card and in the club's own conversation —`
+            + ` "Front door", "Side gate". At most ${DEVICE_NAME_MAX_LENGTH} characters. Leave it`
+            + " empty and the door shows as an unnamed scanner with its board code, which is"
+            + " what a board that has never been named shows."}
+        </p>
         <Input
           id={nameId}
+          aria-describedby={nameHintId}
           autoFocus
           value={name}
+          // A2 / B2 / R3-15: the column's own bound, ON the field. Over it the API used to
+          // answer 500 with the EF exception in it; it answers 400 `name_too_long` now, and
+          // this stops it at the keyboard either way.
+          maxLength={DEVICE_NAME_MAX_LENGTH}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Door gate"
+          placeholder="Front door"
           disabled={saving}
         />
       </div>
       <div>
-        <Label htmlFor={keyId}>Door name</Label>
+        <Label htmlFor={keyId}>Name the board uses offline — change only with the board</Label>
         {/* NOT "the only thing that tells one door from another": a gate decision is audited
             with the board's device code as well as its gate key, and the code is per board.
             What is true, and what an admin needs, is that the code is a fragment of a MAC

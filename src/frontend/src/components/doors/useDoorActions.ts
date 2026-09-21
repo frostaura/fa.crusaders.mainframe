@@ -1,5 +1,5 @@
 import { useToast } from "../Toast";
-import { doorStateNotice } from "../../lib/doorsCopy";
+import { doorDeletedNotice, doorDisplayName, doorStateNotice } from "../../lib/doorsCopy";
 import { clubDayAndClock } from "../../lib/clubClock";
 import { doorAlreadyNotice, unnamedGateOfflineNotice } from "../../lib/gateCopy";
 import { describeDeviceError } from "../../lib/deviceErrors";
@@ -43,9 +43,26 @@ export type DoorActions = {
  */
 export function useDoorActions(
   door: AdminDoorDevice,
-  context: { online: boolean; timezone: string; reload: () => Promise<void>; afterDelete: () => void },
+  context: {
+    online: boolean;
+    timezone: string;
+    reload: () => Promise<void>;
+    /**
+     * A-M7 / R3-14: it takes the CONFIRMATION with it.
+     *
+     * The toast was pushed and the page navigated in the same tick, so the confirmation for
+     * the most destructive control on this surface was in practice invisible — an admin
+     * arrived back at a list of doors with one fewer row and nothing saying the club had
+     * done it, which on a page that also polls looks exactly like a board dropping off.
+     */
+    afterDelete: (said: string) => void;
+  },
 ): DoorActions {
   const toast = useToast();
+  // A11 / R3-21: ONE fallback for a door nobody has named. `door.name` is the registration
+  // placeholder "Door gate", so every toast on this surface named every unnamed board in the
+  // club identically while the heading above it said "Unnamed scanner (gate-44c103)".
+  const name = doorDisplayName(door);
 
   return {
     save: async ({ name, gateKey, note, behaviour }) => {
@@ -93,7 +110,7 @@ export function useDoorActions(
           toast.push({
             tone: "info",
             text: doorAlreadyNotice(
-              door.name,
+              name,
               !enabled,
               answer.shut_by_name ?? null,
               answer.out_of_service_since ? clubDayAndClock(answer.out_of_service_since, context.timezone) : null,
@@ -106,8 +123,8 @@ export function useDoorActions(
         toast.push({
           tone: "success",
           text: enabled
-            ? `${door.name} is open again. A door that can reach the club opens for members from its very next scan.`
-            : `${door.name} is shut. ${doorStateNotice({ ...door, ...answer, enabled: false }, context.online, context.timezone) ?? ""}`,
+            ? `${name} is open again. A door that can reach the club opens for members from its very next scan.`
+            : `${name} is shut. ${doorStateNotice({ ...door, ...answer, enabled: false }, context.online, context.timezone) ?? ""}`,
           durationMs: 8000,
         });
         await context.reload();
@@ -125,12 +142,13 @@ export function useDoorActions(
         // C11: a deleted door leaves the shut set, which is a change this tab caused.
         markOwnDoorsAction();
         await endpoints.adminDeviceDelete(door.id);
-        toast.push({
-          tone: "success",
-          text: `${door.name} deleted. It still has the club's key, so it re-registers on its next heartbeat as a new door with no name — unplug it if you meant to retire it.`,
-          durationMs: 8000,
-        });
-        context.afterDelete();
+        // A-M7 / R3-14: the same sentence goes to the toast AND travels with the navigation,
+        // because the navigation is what made the toast invisible. One generator, so the
+        // two cannot say different things about one click — which is the lesson `gateCopy`'s
+        // own header records.
+        const said = doorDeletedNotice(name);
+        toast.push({ tone: "success", text: said, durationMs: 8000 });
+        context.afterDelete(said);
       } catch (e) {
         toast.push({ tone: "danger", text: describeDeviceError(e, "Could not delete that door.") });
       }

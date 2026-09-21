@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Button } from "../components/Button";
 import { Alert } from "../components/Alert";
 import { DoorTile } from "../components/doors/DoorTile";
@@ -179,6 +179,26 @@ function AdminDoorsPageBody() {
   /** C4: what Refresh says back, so pressing it offline is not silence. */
   const [refreshNote, setRefreshNote] = useState<string | null>(null);
   const now = useTicker(true);
+  /**
+   * <b>A-M7 / R3-14 — what the door page said on its way here.</b>
+   *
+   * <p>
+   * A delete pushed a toast and navigated in the same tick, so the confirmation for the most
+   * destructive control on the surface was in practice never seen. This page polls, so one
+   * fewer row reads as a board dropping off rather than as a thing the club did on purpose —
+   * and the two facts a delete's own confirm promised (the scans are kept, the board is not
+   * locked out) had nowhere left to be said.
+   * </p>
+   *
+   * <p>
+   * Read from the navigation's `state` rather than from a store, because it belongs to ONE
+   * arrival: a refresh, or coming back later, should not re-announce a delete that happened
+   * this morning. `assertive` because it is the result of an action the reader just took and
+   * has now been moved away from — this is the one case on this surface that earns it.
+   * </p>
+   */
+  const location = useLocation();
+  const arrivedWith = (location.state as { doorsNotice?: string } | null)?.doorsNotice ?? null;
 
   useEffect(() => {
     // The club's declared heartbeat, for boards that do not carry their own, and the two
@@ -267,6 +287,11 @@ function AdminDoorsPageBody() {
       {/* A8 / C4: one polite region carrying what Refresh found and whether this page can
           currently say anything about liveness at all. */}
       <p role="status" className="sr-only">{refreshNote ?? ""}</p>
+      {arrivedWith && (
+        <p role="alert" className="rounded-lg border-l-4 border-accent-strong bg-accent-soft px-3 py-2.5 text-sm">
+          {arrivedWith}
+        </p>
+      )}
       {livenessSuspended && (
         <p className="rounded-lg bg-warning-soft px-3 py-2.5 text-sm text-warning-strong">
           {DOORS_LIVENESS_SUSPENDED}
