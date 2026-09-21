@@ -276,9 +276,7 @@ public sealed class DeviceRegistryService
         Device device, UpdateDeviceCommand cmd, Guid actorUserId, CancellationToken ct)
     {
         var changes = new List<string>();
-        Rename(device, cmd, changes);
-        Court(device, cmd, changes);
-        Card(device, cmd, changes);
+        ApplyName(device, cmd, changes);
 
         // The switch-off instant and the outage it closes: see SwitchAsync.
         //
@@ -300,43 +298,8 @@ public sealed class DeviceRegistryService
 
         if (cmd.Enabled is not null) device.Enabled = cmd.Enabled.Value;
 
-        if (cmd.CourtNumbers is not null && !device.CourtNumbers.SequenceEqual(cmd.CourtNumbers))
-        {
-            changes.Add("court_numbers");
-        }
-        if (cmd.CourtNumbers is not null) device.CourtNumbers = cmd.CourtNumbers.ToList();
-
-        if (cmd.ButtonMap is { } buttons)
-        {
-            if (device.ButtonMapJson != buttons.Value?.ToJson()) changes.Add("button_map");
-            device.ButtonMapJson = buttons.Value?.ToJson();
-        }
-
-        // Two-valued rather than three, unlike the button map: absent leaves the name alone
-        // and an EMPTY STRING clears it. A door's name has no "run the club's default" state
-        // to distinguish a JSON null from, so the extra value would only be a second way of
-        // saying the same thing — and an empty name is what an admin types when they want it
-        // gone, which is the gesture worth honouring. Trimmed and bounded by the caller,
-        // where there is a person to refuse.
-        if (cmd.GateKey is not null)
-        {
-            var key = cmd.GateKey.Length == 0 ? null : cmd.GateKey;
-            if (device.GateKey != key) changes.Add(DoorAuditActions.GateKeyToken);
-            device.GateKey = key;
-        }
-
-        // The door card. Same two-valued rule as the name above, and the same reason for it.
-        if (cmd.LocationNote is not null)
-        {
-            var note = cmd.LocationNote.Length == 0 ? null : cmd.LocationNote;
-            if (device.LocationNote != note) changes.Add("location_note");
-            device.LocationNote = note;
-        }
-        if (cmd.PowerLossBehaviour is { } powerLoss)
-        {
-            if (device.PowerLossBehaviour != powerLoss) changes.Add("power_loss_behaviour");
-            device.PowerLossBehaviour = powerLoss;
-        }
+        ApplyCourts(device, cmd, changes);
+        ApplyCard(device, cmd, changes);
 
         // An admin has now looked at this row, so it stops reading as "appeared by itself,
         // nobody has checked the courts it guessed". Deleting the row and letting the box
@@ -354,6 +317,76 @@ public sealed class DeviceRegistryService
         await _db.SaveChangesAsync(ct);
 
         return (device, changes);
+    }
+
+    // The three blocks below are the field-by-field half of UpdateAsync, split out of it for
+    // one reason and one only: with all of them inline the method reached 22 branches against
+    // the complexity gate's 15, and a gate that is failed is a gate that stops being run. The
+    // split is along the lines an admin already thinks in — what the door is CALLED, what it is
+    // ASSIGNED to, what is on its CARD — and the call order is the original statement order, so
+    // the `changes` list still comes out in the sequence the tests were written against.
+    //
+    // Each of them compares before with after rather than reading which fields arrived: the
+    // reason is in UpdateAsync's own remarks and it is the whole of A5 and B10.
+
+    /// <summary>What the door is called. See the note above <see cref="ApplyCourts"/>.</summary>
+    private static void ApplyName(Device device, UpdateDeviceCommand cmd, List<string> changes)
+    {
+        if (cmd.Name is not null && device.Name != cmd.Name.Trim()) changes.Add(DoorAuditActions.NameToken);
+        if (cmd.Name is not null) device.Name = cmd.Name.Trim();
+    }
+
+    /// <summary>What a court box is assigned to, and which button is which court.</summary>
+    private static void ApplyCourts(Device device, UpdateDeviceCommand cmd, List<string> changes)
+    {
+        if (cmd.CourtNumbers is not null && !device.CourtNumbers.SequenceEqual(cmd.CourtNumbers))
+        {
+            changes.Add("court_numbers");
+        }
+        if (cmd.CourtNumbers is not null) device.CourtNumbers = cmd.CourtNumbers.ToList();
+
+        if (cmd.ButtonMap is { } buttons)
+        {
+            var json = buttons.Value?.ToJson();
+            if (device.ButtonMapJson != json) changes.Add("button_map");
+            device.ButtonMapJson = json;
+        }
+    }
+
+    /// <summary>
+    /// The club's key for the door, and the door card — where it is, what its lock does with no
+    /// power.
+    ///
+    /// <para>
+    /// <b>Two-valued rather than three, unlike the button map</b>: absent leaves the field alone
+    /// and an EMPTY STRING clears it. A door's key has no "run the club's default" state to
+    /// distinguish a JSON null from, so the extra value would only be a second way of saying the
+    /// same thing — and an empty value is what an admin types when they want it gone, which is
+    /// the gesture worth honouring. Trimmed and bounded by the caller, where there is a person
+    /// to refuse.
+    /// </para>
+    /// </summary>
+    private static void ApplyCard(Device device, UpdateDeviceCommand cmd, List<string> changes)
+    {
+        if (cmd.GateKey is not null)
+        {
+            var key = cmd.GateKey.Length == 0 ? null : cmd.GateKey;
+            if (device.GateKey != key) changes.Add(DoorAuditActions.GateKeyToken);
+            device.GateKey = key;
+        }
+
+        if (cmd.LocationNote is not null)
+        {
+            var note = cmd.LocationNote.Length == 0 ? null : cmd.LocationNote;
+            if (device.LocationNote != note) changes.Add("location_note");
+            device.LocationNote = note;
+        }
+
+        if (cmd.PowerLossBehaviour is { } powerLoss)
+        {
+            if (device.PowerLossBehaviour != powerLoss) changes.Add("power_loss_behaviour");
+            device.PowerLossBehaviour = powerLoss;
+        }
     }
 
     public Task<bool> DeviceCodeTakenAsync(string deviceCode, CancellationToken ct) =>

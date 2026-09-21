@@ -124,9 +124,10 @@ public static class AdminDeviceEndpoints
     /// </para>
     /// </remarks>
     private static async Task<IResult> UpdateAsync(
-        Guid id, UpdateDeviceRequest req, DeviceRegistryService devices, TenantSettingsAccessor settingsAccessor,
-        MainframeDbContext db, HttpContext ctx, CancellationToken ct)
+        Guid id, UpdateDeviceRequest req, [AsParameters] DeviceUpdateServices services,
+        HttpContext ctx, CancellationToken ct)
     {
+        var (devices, settingsAccessor, db) = services;
         var device = await devices.FindAsync(id, ct);
         if (device is null) return Results.NotFound();
 
@@ -452,3 +453,19 @@ public sealed record UpdateDeviceRequest(
         => EffectiveLocationNote is not null
            || EffectivePowerLossBehaviour.ValueKind != JsonValueKind.Undefined;
 }
+
+/// <summary>
+/// The services the device PATCH needs, bundled — see <c>WalkUpServices</c> for the pattern and
+/// the reason.
+///
+/// <para>
+/// The handler acquired its seventh parameter when the answer started naming the admin who shut
+/// the door (A5/B10): <see cref="PersonNames"/> reads the display name, and reading it needs the
+/// context. Seven is past the complexity gate's limit of six and past the point where the shape
+/// of the handler is visible at a glance; <c>[AsParameters]</c> leaves the binding identical.
+/// </para>
+/// </summary>
+public sealed record DeviceUpdateServices(
+    DeviceRegistryService Devices,
+    TenantSettingsAccessor SettingsAccessor,
+    MainframeDbContext Db);
