@@ -47,6 +47,17 @@ struct ScreenSpec {
   uint8_t flags;
 };
 
+/// The hold class each default second-count belongs to. Kept beside the
+/// defaults rather than derived from them: recognising a hold by its value is a
+/// mapping that breaks silently the day two defaults coincide.
+constexpr HoldClass holdClassFor(uint16_t holdSeconds) {
+  return holdSeconds == kChoiceSeconds
+             ? HoldClass::Choice
+             : (holdSeconds == kCardSeconds ? HoldClass::Card
+                                            : (holdSeconds == kWaitSeconds ? HoldClass::Wait
+                                                                           : HoldClass::Revert));
+}
+
 constexpr RowSpec kBlank = {"", RowArg::None, ""};
 
 /// EVERY SCREEN THIS BOX CAN PAINT, in one place, indexed by ScreenId.
@@ -433,6 +444,40 @@ void readMemberDisplay(const char* body, size_t len, ScreenFacts& facts) {
     return;
   }
   snprintf(facts.name, sizeof(facts.name), "%s", name);
+}
+
+HoldClass holdClassOf(ScreenId id) {
+  const size_t index = static_cast<size_t>(id) < kScreenCount ? static_cast<size_t>(id)
+                                                              : static_cast<size_t>(ScreenId::SeeTheDesk);
+  return holdClassFor(kScreenSpecs[index].holdSeconds);
+}
+
+Screen screenFor(ScreenId id, const ScreenFacts& facts, const devlink::LcdSettings& settings) {
+  Screen screen = screenFor(id, facts);
+  uint32_t ms = 0U;
+  switch (holdClassOf(id)) {
+  case HoldClass::Revert:
+    ms = settings.revertMs;
+    break;
+  case HoldClass::Choice:
+    ms = settings.choiceMs;
+    break;
+  case HoldClass::Card:
+    ms = settings.cardMs;
+    break;
+  case HoldClass::Wait:
+    // Deliberately not a tenant setting. See the header.
+    return screen;
+  }
+  uint32_t seconds = ms / 1000UL;
+  if (seconds < proto::kShowHoldMinSeconds) {
+    seconds = proto::kShowHoldMinSeconds;
+  }
+  if (seconds > proto::kShowHoldMaxSeconds) {
+    seconds = proto::kShowHoldMaxSeconds;
+  }
+  screen.holdSeconds = static_cast<uint16_t>(seconds);
+  return screen;
 }
 
 Screen screenFor(ScreenId id, const ScreenFacts& facts) {

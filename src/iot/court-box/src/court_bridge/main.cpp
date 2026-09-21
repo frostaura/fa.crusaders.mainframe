@@ -93,8 +93,10 @@
 #include "bridgelogic/OnRetry.h"
 #include "bridgelogic/Relight.h"
 #include "bridgelogic/ScanFlow.h"
+#include "bridgelogic/ScreenScript.h"
 #include "bridgelogic/StateReconcile.h"
 #include "bridgelogic/WalkUp.h"
+#include "bridgelogic/WallClock.h"
 #include "court/ButtonMap.h"
 #include "court/Session.h"
 #include "court/WalkUpPad.h"
@@ -104,6 +106,7 @@
 #include "devlink/ApiBreaker.h"
 #include "devlink/Cadence.h"
 #include "devlink/EventUpload.h"
+#include "devlink/LcdSettings.h"
 #include "devlink/RosterSync.h"
 #include "eventq/EventQueue.h"
 #include "fwversion/Version.h"
@@ -304,6 +307,33 @@ uint8_t gCourtCount = 0U;
 /// release instant matters too.
 bridgelogic::HeldState gHeld[bridgelogic::kStateCourts];
 
+/// The club's wall clock, borrowed from `server_time` on every accepted
+/// heartbeat and advanced on millis() between them. It decides what a screen
+/// may SAY and nothing else: the relay deadline is the Mega's and the booking
+/// window is the roster's, both millis()-relative. Past clock_trust_minutes it
+/// blanks — on the wire and on every screen row that would have named a time —
+/// because a stale clock reads exactly like a live one.
+/// The nine operator settings, adopted from every accepted heartbeat and
+/// applied NONE OF THEM RETROACTIVELY: a window that shortened under somebody
+/// mid-decision is the one timeout on this box that can lose a half-made
+/// purchase. Until the first heartbeat these are the compiled-in defaults,
+/// which are the behaviour the hand-built box already had.
+devlink::LcdSettings gLcdSettings;
+
+bridgelogic::WallClock gWallClock;
+
+/// Whether the power-dip restore is still outstanding. True from boot until the
+/// first accepted heartbeat has been acted on; `!IDLE` bit3, which is what puts
+/// `STARTING UP` on the Mega's landing screen. A scan is accepted throughout —
+/// the offline roster path works and a member must not be blocked by a restore
+/// that may never come.
+bool gRestorePending = true;
+
+/// The `!IDLE` flags at the last send, so the Mega is told on every CHANGE
+/// rather than once a second. The Mega advances its own copy of the clock.
+uint8_t gIdleFlags = 0xFFU;
+char gIdleClock[bridgelogic::kWireTimeLen] = {};
+
 /// The scan flow's decision core and the walk-up nonce policy. Both stateless
 /// or nearly so; both live in lib/bridgelogic so the host suite owns them.
 bridgelogic::ScanFlow gScanFlow;
@@ -344,8 +374,15 @@ court::WalkUpPad gPad;
 /// at the API, which is the real backstop.
 constexpr uint32_t kScanMemoryMs = AUTH_TTL_MS;
 
+/// The live value, from the tenant's `scan_memory_seconds`. A variable rather
+/// than the constant above because it is adopted per heartbeat; the constant is
+/// where a box starts and what its `!AUTH` sends until it is told otherwise.
+uint32_t gScanMemoryMs = kScanMemoryMs;
+
 /// What `!AUTH` is sent with when the window is armed.
-constexpr uint16_t kAuthSeconds = static_cast<uint16_t>(kScanMemoryMs / 1000UL);
+uint16_t authSeconds() {
+  return static_cast<uint16_t>(gScanMemoryMs / 1000UL);
+}
 
 /// The last thing the scanner read, verbatim. Cleared when it lapses or is spent.
 char gLastScan[proto::kMaxArgLen + 1] = {'\0'};
@@ -398,6 +435,91 @@ bool sendToMega(const proto::Frame& frame) {
   return true;
 }
 
+/// Stages a whole screen and commits it: `!ROW` for each non-empty row, then
+/// one `!SHOW`.
+///
+/// ATOMIC ON THE MEGA'S SIDE — `!ROW` paints nothing, and `!SHOW` commits the
+/// staged rows together — so a frame lost mid-screen cannot leave half of one
+/// verdict above half of another. And every screen carries a DEADLINE: the hold
+/// is clamped by the factory, by the decoder and by ScreenScript, which is what
+/// makes a permanent screen unrepresentable rather than merely discouraged.
+///
+/// A row that is empty is not sent: the Mega clears the staging area on
+/// `!SHOW`, so an omitted row is a blank row and a frame saved on a 9600 link.
+void sendScreen(const bridgelogic::Screen& screen) {
+  for (uint8_t row = 0U; row < proto::kMaxRows; ++row) {
+    if (screen.rows[row][0] == '\0') {
+      continue;
+    }
+    static_cast<void>(sendToMega(proto::Frame::row(row, screen.rows[row])));
+  }
+  static_cast<void>(sendToMega(proto::Frame::show(screen.holdSeconds, screen.flags)));
+}
+
+/// The facts every screen is built from that only this file knows: the live
+/// button map, and the clock.
+bridgelogic::ScreenFacts screenFacts(uint32_t nowMs) {
+  bridgelogic::ScreenFacts facts;
+  facts.buttons = &gButtons;
+  gWallClock.displayTime(nowMs, facts.atTime, sizeof(facts.atTime));
+  return facts;
+}
+
+void showScreen(bridgelogic::ScreenId id, uint32_t nowMs) {
+  sendScreen(bridgelogic::screenFor(id, screenFacts(nowMs), gLcdSettings));
+}
+
+/// `!IDLE` — what the Mega's own landing screen's status row says.
+///
+/// bit0 WiFi up, bit1 API reachable, bit2 the clock is trusted, bit3 a
+/// power-dip restore is still pending. `hhmm` is four digits of club-local wall
+/// time, or proto::kNoClock: the Mega advances its own copy on millis(), which
+/// is why this goes out on a CHANGE and on every accepted heartbeat and NEVER
+/// once a second — a status row repainted at 9600 baud is a link a scan has to
+/// share.
+///
+/// bit3 is what puts `STARTING UP` on the glass from boot until the first
+/// accepted heartbeat. A scan is accepted THROUGHOUT: the offline roster path
+/// works, and a member must not be blocked by a restore that may never come.
+void sendIdle(uint32_t nowMs) {
+  uint8_t flags = 0U;
+  if (gWifiUp) {
+    flags |= 0x01U;
+  }
+  if (!gBreaker.open(nowMs)) {
+    flags |= 0x02U;
+  }
+  if (gWallClock.trusted(nowMs)) {
+    flags |= 0x04U;
+  }
+  if (gRestorePending) {
+    flags |= 0x08U;
+  }
+
+  char hhmm[bridgelogic::kWireTimeLen] = {};
+  gWallClock.wireTime(nowMs, hhmm, sizeof(hhmm));
+  if (flags == gIdleFlags && strcmp(hhmm, gIdleClock) == 0) {
+    // Nothing the Mega does not already know. It advances the clock itself.
+    return;
+  }
+  gIdleFlags = flags;
+  snprintf(gIdleClock, sizeof(gIdleClock), "%s", hhmm);
+  static_cast<void>(sendToMega(proto::Frame::idle(flags, hhmm)));
+}
+
+/// `!MAP` — the club court number behind each relay index, 0 = unmapped.
+///
+/// Until it arrives the Mega renders every court cell BLANK rather than as a
+/// dark court, which is correct: the box does not drive a relay the heartbeat
+/// never mapped and must not claim to.
+void sendCourtMap() {
+  int16_t numbers[4] = {0, 0, 0, 0};
+  for (uint8_t i = 0U; i < 4U; ++i) {
+    numbers[i] = i < gCourtCount ? gCourtNumbers[i] : static_cast<int16_t>(0);
+  }
+  static_cast<void>(sendToMega(proto::Frame::map(numbers)));
+}
+
 /// Paints what this board IS: two screens, chosen by whether the WiFi is up.
 ///
 /// One function for both because every caller has the same question — "the
@@ -405,6 +527,14 @@ bool sendToMega(const proto::Frame& frame) {
 /// link-up, a link-down. The lines themselves are bridgelogic::MegaLink's, so
 /// the composition root cannot invent a third screen nothing tests.
 void showIdentityScreen() {
+  // `!IDLE` FIRST: it is what the Mega's landing screen renders its status row
+  // from, and it is the thing that is true for as long as nothing overlays it.
+  sendIdle(gClock.nowMs());
+  // AND the two identity lines, which are an OVERLAY with the ordinary hold —
+  // `!LCD` stages rows 0-1 and commits them with a deadline, so this reverts to
+  // the landing screen on its own. Kept because this lane cannot verify the
+  // Mega's `!IDLE` renderer from here, and a box that shows nothing because the
+  // only paint it had was removed is worse than one overlay frame.
   const bridgelogic::IdentityScreen screen = bridgelogic::identityScreen(gWifiUp);
   static_cast<void>(sendToMega(proto::Frame::lcd(screen.line1, screen.line2)));
 }
@@ -414,7 +544,7 @@ void showIdentityScreen() {
 void applyAuth(bridgelogic::AuthCommand command) {
   switch (command) {
   case bridgelogic::AuthCommand::Arm:
-    static_cast<void>(sendToMega(proto::Frame::auth(kAuthSeconds)));
+    static_cast<void>(sendToMega(proto::Frame::auth(authSeconds())));
     return;
   case bridgelogic::AuthCommand::Disarm:
     static_cast<void>(sendToMega(proto::Frame::auth(0U)));
@@ -738,9 +868,12 @@ void handleButton(const proto::Frame& frame, uint32_t nowMs) {
 
   switch (gPad.press(gButtons, index, nowMs)) {
   case court::PadResult::CourtSelected: {
-    char line[court::kLineLen + 1U] = "COURT ?";
-    line[6] = static_cast<char>('A' + gPad.selectedCourt());
-    static_cast<void>(sendToMega(proto::Frame::lcd(line, "CHOOSE TIME")));
+    // The one screen whose hold is the CHOICE window and whose countdown is the
+    // point: a half-made purchase is the one thing on this box a timeout can
+    // lose, so the member watches it go rather than finding out afterwards.
+    bridgelogic::ScreenFacts facts = screenFacts(nowMs);
+    facts.court = gPad.selectedCourt();
+    sendScreen(bridgelogic::screenFor(bridgelogic::ScreenId::ChooseTime, facts, gLcdSettings));
     return;
   }
   case court::PadResult::Requested:
@@ -752,8 +885,9 @@ void handleButton(const proto::Frame& frame, uint32_t nowMs) {
     // press that used to darken it mid-match now says so (review #4/#14).
     const uint8_t court = gPad.intent().court;
     if (!gAuth.allowsRelease(court, nowMs)) {
-      static_cast<void>(
-          sendToMega(proto::Frame::lcd(bridgelogic::kNotYourCourtLine1, bridgelogic::kNotYourCourtLine2)));
+      // STUCK FOREVER until this carried a hold: a bare `!LCD` with nothing to
+      // replace it left `NOT YOUR COURT` on the glass until somebody scanned.
+      showScreen(bridgelogic::ScreenId::NotYourCourt, nowMs);
       return;
     }
     static_cast<void>(sendToMega(proto::Frame::off(static_cast<proto::Court>(court))));
@@ -870,7 +1004,7 @@ uint16_t callApi(const char* path, const char* body, char* out, size_t outCap) {
 /// the roster. The interpretation is bridgelogic::ScanFlow's; this owns the
 /// socket and the one side effect it cannot see: the Mega.
 bool activateOnline(const char* token) {
-  static_cast<void>(sendToMega(proto::Frame::lcd("ONE MOMENT", "")));
+  showScreen(bridgelogic::ScreenId::OneMoment, gClock.nowMs());
 
   char body[128];
   if (bridgelogic::renderActivateBody(body, sizeof(body), gMacHex, token) == 0U) {
@@ -911,17 +1045,18 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
   if (gLastScan[0] == '\0') {
     // Nobody has identified. The buttons alone cannot say WHO is buying, and a walk-up
     // charged to the last person who happened to scan is worse than one refused.
-    static_cast<void>(sendToMega(proto::Frame::lcd("SCAN FIRST", "THEN PICK A TIME")));
+    // STUCK FOREVER until this carried a hold, exactly like NOT YOUR COURT.
+    showScreen(bridgelogic::ScreenId::ScanFirst, gClock.nowMs());
     return;
   }
   if (intent.court >= gCourtCount) {
     // A relay the heartbeat never mapped to a court. Refused here rather than
     // sold as court zero — the API cannot book a court this box did not name.
-    static_cast<void>(sendToMega(proto::Frame::lcd("SEE THE DESK", "SCAN TO START")));
+    showScreen(bridgelogic::ScreenId::SeeTheDesk, gClock.nowMs());
     return;
   }
 
-  static_cast<void>(sendToMega(proto::Frame::lcd("ONE MOMENT", "")));
+  showScreen(bridgelogic::ScreenId::OneMoment, gClock.nowMs());
 
   bridgelogic::WalkUpRequest request;
   request.mac = gMacHex;
@@ -934,7 +1069,7 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
   // (3), a 24-byte token, a court number (5) and a 16-hex nonce come to under 140.
   char body[320];
   if (bridgelogic::renderWalkUpBody(body, sizeof(body), request) == 0U) {
-    static_cast<void>(sendToMega(proto::Frame::lcd("SEE THE DESK", "SCAN TO START")));
+    showScreen(bridgelogic::ScreenId::SeeTheDesk, gClock.nowMs());
     return;
   }
 
@@ -1108,6 +1243,15 @@ void pumpHeartbeat(uint32_t nowMs) {
     return;
   }
 
+  // The nine operator settings, before anything that consumes them. Each is
+  // clamped by the parser and none of them refuses the eight beside it: a club
+  // that typed 3600 into one field must not thereby lose its button map.
+  static_cast<void>(devlink::parseLcdSettings(response, responseLen, gLcdSettings));
+  gPad.setTtlMs(gLcdSettings.choiceMs);
+  gScanMemoryMs = gLcdSettings.scanMemoryMs;
+  gAuth.setTtlMs(gLcdSettings.scanMemoryMs);
+  gWallClock.setTrustMinutes(gLcdSettings.clockTrustMs / 60000UL);
+
   applyButtonMap(response, responseLen);
   // Absent keys leave the previous set alone, for the same reason the button
   // map's does: an older API must not blank what a newer one configured.
@@ -1122,6 +1266,26 @@ void pumpHeartbeat(uint32_t nowMs) {
   // above already used the old value, which is a one-interval delay and not
   // worth a re-arm that could shorten this interval to nothing.
   static_cast<void>(devlink::parseHeartbeatInterval(response, responseLen, gHeartbeatMs));
+
+  // The club's clock, from `server_time`, anchored to a FRESH read for the same
+  // reason the roster is: the call above may have taken four seconds.
+  const uint32_t settledAt = gClock.nowMs();
+  char serverTime[32] = {};
+  if (devapi::json::topLevelStringField(response, responseLen, "server_time", serverTime,
+                                        sizeof(serverTime))) {
+    static_cast<void>(gWallClock.adopt(serverTime, settledAt));
+  }
+
+  // The restore is a ONE-SHOT at the first accepted heartbeat, never a
+  // reconcile: a continuous one would make the API the authority on the relay,
+  // which contradicts the Mega/ESP split this box is built on.
+  gRestorePending = false;
+
+  // The Mega's landing screen: the court numbers behind each relay, then the
+  // status row. Both on a CHANGE and on an accepted heartbeat, never per
+  // second — the Mega advances its own clock between them.
+  sendCourtMap();
+  sendIdle(settledAt);
   // Unknown keys in the response — anything a later contract adds — are ignored
   // by construction: every reader above looks up the key it wants and leaves
   // the rest alone.

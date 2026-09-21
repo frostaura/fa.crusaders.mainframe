@@ -62,6 +62,20 @@ public:
   /// the cable.
   explicit AuthPolicy(uint32_t ttlMs) : ttlMs_(ttlMs) {}
 
+  /// Adopt the tenant's `scan_memory_seconds`.
+  ///
+  /// From the NEXT scan, never the live window: shortening the window under a
+  /// member who is mid-purchase would close the buttons they are reaching for.
+  /// The same rule the heartbeat interval and the pad's selection TTL follow.
+  ///
+  /// The parser holds `scan_memory_seconds >= lcd_choice_seconds` by RAISING
+  /// this rather than lowering the choice window, which is what stops the box
+  /// forgetting who scanned while their selection is still on the pad — the
+  /// next person's presses would otherwise buy on their token.
+  void setTtlMs(uint32_t ttlMs) { ttlMs_ = ttlMs; }
+
+  uint32_t ttlMs() const { return ttlMs_; }
+
   /// A scan was decided, by whichever path. Arms for a recognised scan and
   /// binds the window to the court if one was lit; disarms for an unrecognised
   /// one. Returns what to send the Mega.

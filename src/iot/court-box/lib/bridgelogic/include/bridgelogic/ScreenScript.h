@@ -66,6 +66,7 @@
 #include <stdint.h>
 
 #include "bridgelogic/WallClock.h"
+#include "devlink/LcdSettings.h"
 #include "court/ButtonMap.h"
 #include "court/Session.h"
 #include "protocol/Protocol.h"
@@ -207,8 +208,39 @@ struct ScreenFacts {
   const court::ButtonMap* buttons = nullptr;
 };
 
+/// Which tenant setting a screen's hold comes from.
+///
+/// A CLASS rather than a number, because the composition root must not have to
+/// recognise a hold by its VALUE to know which setting replaces it — that is a
+/// mapping that breaks silently the day two defaults coincide.
+enum class HoldClass : uint8_t {
+  /// `lcd_revert_seconds`: a verdict, read once and gone.
+  Revert = 0U,
+  /// `lcd_choice_seconds`: the member is mid-decision, not reading an answer.
+  Choice,
+  /// `lcd_card_seconds`: an acknowledgement, not a thing to read.
+  Card,
+  /// The blocking call's own bound plus slack. NOT a tenant setting: a club
+  /// cannot be allowed to set this longer than the call it sits in front of.
+  Wait,
+};
+
+/// The hold class of `id`, for a caller that needs to know before it has a
+/// Screen — or that is reporting on one.
+HoldClass holdClassOf(ScreenId id);
+
 /// The screen for `id`, filled from `facts`.
 Screen screenFor(ScreenId id, const ScreenFacts& facts);
+
+/// The same screen with its hold taken from the tenant's adopted settings.
+///
+/// NONE OF THEM RETROACTIVELY: this is applied as a screen is BUILT, so a hold
+/// that shortened while somebody was looking at a screen does not cut the one
+/// they are reading. The Wait class ignores the settings entirely — a club must
+/// not be able to set the "one moment" screen longer than the HTTP call it
+/// stands in front of, because that is how a screen outlives the reset that
+/// call can end in.
+Screen screenFor(ScreenId id, const ScreenFacts& facts, const devlink::LcdSettings& settings);
 
 /// Renders one action row: four cells of kActionCellCols columns, taken from
 /// physical buttons `from`..`from+3` of `map`. A SelectCourt cell renders its
