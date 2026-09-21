@@ -68,6 +68,11 @@ export function DoorSection(props: {
           busy={busy}
           onHide={() => setOpen(false)}
           input={{
+            // Has the club's answer landed at all — live, or from the last-known store?
+            // With neither, the four rows only the club can answer say so instead of
+            // asserting off the defaults below, which is what produced "Your membership
+            // — active ✓ Passed" above "This phone's line to the club — ✗ Failed".
+            standingKnown: !!standing,
             // An UNKNOWN membership is not a failed one. Defaulting to "active" here is
             // what lets the connection row — evaluated next, and the true finding — win
             // instead of the page blaming a membership it could not read.

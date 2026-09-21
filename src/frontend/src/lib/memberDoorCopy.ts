@@ -948,6 +948,26 @@ export type DiagnosisRow = {
 };
 
 export type DiagnosisInput = {
+  /**
+   * Has the club's answer about this member ever landed in this browser?
+   *
+   * <p>
+   * <b>False is not "no", it is "this screen does not know", and four rows were asserting
+   * anyway.</b> With no `/me/door` — failed on a cold start, no cached copy — the page
+   * defaulted the membership to `active` and the policy to `active_member` so that the
+   * connection row, the true finding, would win the conclusion. That reasoning is right
+   * about the conclusion and wrong about the rows: it produced "Your membership — active
+   * ✓ Passed" directly above "This phone's line to the club — ✗ Failed", which is a
+   * checklist contradicting itself in front of somebody who is trying to work out what
+   * went wrong.
+   * </p>
+   *
+   * <p>
+   * The two rows the page CAN still answer for itself — the code in its own hand, and its
+   * own line to the club — keep answering. The four that belong to the club say so.
+   * </p>
+   */
+  standingKnown: boolean;
   membership: MemberDoorMembership;
   /** So the failing row names WHICH not-active, exactly as the standing line does. */
   membership_detail: MemberDoorMembershipDetail;
@@ -1035,8 +1055,17 @@ function membershipRow(input: DiagnosisInput): DiagnosisRow {
   return row("membership", "passed", "active");
 }
 
+/** The four rows only the club can answer, when the club's answer never arrived. */
+const UNKNOWN_WORD = "Couldn't check";
+function unknownRows(): DiagnosisRow[] {
+  return (["membership", "policy", "booking", "window"] as const)
+    .map((key) => row(key, "neutral", "this screen couldn't reach the club to find out", UNKNOWN_WORD));
+}
+
 function diagnosisRows(input: DiagnosisInput): DiagnosisRow[] {
-  return [
+  // The code in the member's hand and this phone's own line to the club are the two the
+  // page can answer whatever the club said, so they are answered. See `standingKnown`.
+  const standing = input.standingKnown ? [
     membershipRow(input),
     // A caption rather than a check: it states what this club's doors want, which is not
     // something this member either passes or fails. It ticked, and a tick beside "an
@@ -1045,6 +1074,10 @@ function diagnosisRows(input: DiagnosisInput): DiagnosisRow[] {
       "The club's rule, not a check"),
     bookingRow(input),
     windowRow(input),
+  ] : unknownRows();
+
+  return [
+    ...standing,
     // Through the shared formatter, not `${seconds}s`: a booking code has a quarter of an
     // hour on it and "fresh, 900s left" is a number nobody reads as fifteen minutes.
     row("code", input.codeSecondsLeft > 0 ? "passed" : "failed",
@@ -1070,15 +1103,30 @@ function concludeFrom(input: DiagnosisInput): string {
     return `The club has your membership as ${word}. That's the whole reason, and only the club can`
       + ` change it. ${reach}`;
   }
-  if (input.connection === "network") {
-    return `Your phone can't reach the club, so this check is guessing about half of it. Move somewhere with`
-      + ` signal, or reach the club another way. ${reach}`;
+  if (input.connection !== "ok") {
+    // <b>"Guessing about half of it" was doing two jobs and one of them badly.</b> When
+    // the club's answer never landed at all, four of the six rows are not a guess — they
+    // are unasked, and the checklist now says so rather than defaulting them to fine. When
+    // a cached copy IS in hand the rows are real but may have moved, which is the softer
+    // claim the original sentence was reaching for.
+    const scope = input.standingKnown
+      ? "this check is guessing about half of it"
+      : "four of these six are unanswered rather than fine";
+    return input.connection === "network"
+      ? `Your phone can't reach the club, so ${scope}. Move somewhere with signal, or reach the club`
+        + ` another way. ${reach}`
+      // The other half of the same silence, and a different thing to do about it. The
+      // member's phone worked; the answer it brought back was an error.
+      : `The club's system answered with an error, so ${scope}. That part is not your phone, and there's`
+        + ` nothing on it to fix. ${reach}`;
   }
-  // The other half of the same silence, and a different thing to do about it. The member's
-  // phone worked; the answer it brought back was an error. Nothing on this phone will help.
-  if (input.connection === "server") {
-    return "The club's system answered with an error, so this check is guessing about half of it. That part"
-      + ` is not your phone, and there's nothing on it to fix. ${reach}`;
+  // Nothing below this line is knowable without the club's answer, and three of the four
+  // arms would fire off a DEFAULT if it were let through. Unreachable in practice — an
+  // unknown standing means a read failed — but the type allows it and a silent wrong
+  // answer is what this whole control exists to replace. See `standingKnown`.
+  if (!input.standingKnown) {
+    return "This screen never got the club's answer about your membership or your bookings, so four of these"
+      + ` six are unanswered rather than fine. ${reach}`;
   }
   if (input.policy === "booking_window" && !input.hasBooking) {
     return "This club's doors open only for members with a court booked, and you have none starting soon."

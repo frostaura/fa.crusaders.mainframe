@@ -513,6 +513,7 @@ describe("memberDoorCopy", () => {
   // --- the self-diagnosis ----------------------------------------------------------
 
   const HEALTHY = {
+    standingKnown: true,
     membership: "active" as const,
     membership_detail: "active",
     policy: "booking_window" as const,
@@ -1128,5 +1129,35 @@ describe("memberDoorCopy", () => {
     for (const sentence of [...everySentence(), decisionStamp(null, "2026-09-19T06:04:00Z"), UNNAMED_DOOR]) {
       expect(sentence).not.toMatch(/hasn't named|has not named|unnamed/i);
     }
+  });
+
+  // --- the LOW finding: a checklist that contradicts itself under a failed read ---------
+
+  /**
+   * With no `/me/door` at all — failed on a cold start, nothing cached — the page
+   * defaulted the membership to `active` and the policy to `active_member` so the
+   * connection row would win the conclusion. That is right about the conclusion and wrong
+   * about the rows: it printed "Your membership — active ✓ Passed" directly above "This
+   * phone's line to the club — ✗ Failed", in front of somebody trying to work out what
+   * went wrong.
+   */
+  it("answers nothing it could not ask about, and says which rows those are", () => {
+    const { rows, conclusion } = buildDiagnosis({
+      ...HEALTHY, standingKnown: false, connection: "network" as const,
+    });
+    for (const key of ["membership", "policy", "booking", "window"] as const) {
+      const unknown = rows.find((r) => r.key === key)!;
+      expect(unknown.state).toBe("neutral");
+      expect(unknown.stateWord).toBe("Couldn't check");
+    }
+    // The two the page can answer for itself, whatever the club said, still answer.
+    expect(rows.find((r) => r.key === "code")!.state).toBe("passed");
+    expect(rows.find((r) => r.key === "connection")!.state).toBe("failed");
+    expect(conclusion).toMatch(/unanswered rather than fine/i);
+  });
+
+  it("still asks all six, so a row is never silently dropped", () => {
+    const { rows } = buildDiagnosis({ ...HEALTHY, standingKnown: false, connection: "server" as const });
+    expect(rows.map((r) => r.key)).toEqual(["membership", "policy", "booking", "window", "code", "connection"]);
   });
 });

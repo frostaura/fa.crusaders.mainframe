@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { StrictMode, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { BrowserRouter, Link, Route, Routes, useLocation } from "react-router-dom";
@@ -196,5 +196,72 @@ describe("FullScreenQr", () => {
     const code = screen.getByText("7K3M9XQ2RD5A");
     expect(code.className).toContain("break-all");
     expect(code.className).toContain("max-w-full");
+  });
+
+  /**
+   * One entry per opening, however many times React runs the effect.
+   *
+   * <p>
+   * <b>This is the bug a browser found in two seconds and jsdom could not see.</b> React
+   * mounts, unmounts and remounts every effect once in development, and a push per
+   * invocation left two entries behind one overlay: the member closed the code, pressed
+   * back expecting to leave the page, and stayed on it. The e2e caught it; nothing here
+   * did, because `render` does not double-invoke. `StrictMode` is what makes the same
+   * defect visible at this layer, which is where it is cheap to keep visible.
+   * </p>
+   */
+  it("pushes one entry per opening even when React runs the effect twice", async () => {
+    const pushes: unknown[] = [];
+    const real = window.history.pushState.bind(window.history);
+    vi.spyOn(window.history, "pushState").mockImplementation((state, title, url) => {
+      if ((state as { fullScreenQr?: number } | null)?.fullScreenQr !== undefined) pushes.push(state);
+      real(state, title, url);
+    });
+
+    window.history.replaceState(null, "", "/my-code");
+    render(
+      <StrictMode>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/my-code" element={<Host />} />
+            <Route path="/schedule" element={<p>the schedule</p>} />
+          </Routes>
+        </BrowserRouter>
+      </StrictMode>,
+    );
+    open();
+    await screen.findByRole("dialog", { name: /full screen/i });
+
+    expect(pushes).toHaveLength(1);
+  });
+
+  /**
+   * A browser that refuses `pushState` — a sandboxed frame, a `file:` url — gets the
+   * overlay without the gesture, and must not get a stolen history step with it.
+   *
+   * <p>
+   * Without the guard, `dismiss` calls `history.back()` off an entry that was never
+   * pushed: the member taps Done on their code and the app navigates to wherever they
+   * came from. This is the one state where the guard is the only thing standing between
+   * the two.
+   * </p>
+   */
+  it("closes without going back when the entry could not be pushed at all", async () => {
+    vi.spyOn(window.history, "pushState").mockImplementation(() => {
+      throw new Error("pushState refused");
+    });
+    const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
+
+    renderHost();
+    open();
+    await screen.findByRole("dialog", { name: /full screen/i });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(back).not.toHaveBeenCalled();
   });
 });

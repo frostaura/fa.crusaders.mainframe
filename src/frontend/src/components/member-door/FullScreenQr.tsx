@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "../Button";
 
 /**
@@ -42,12 +43,6 @@ export function FullScreenQr(props: { code: string; children: React.ReactNode; o
   // on the labelled dialog is the better of the two anyway.
   useEffect(() => { dialog.current?.focus(); }, []);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   /**
    * The hardware back button closes this rather than leaving the page.
    *
@@ -61,44 +56,79 @@ export function FullScreenQr(props: { code: string; children: React.ReactNode; o
    * </p>
    *
    * <p>
-   * <b>Three things make it safe beside react-router.</b> The entry is pushed at the SAME
-   * url, so the router sees a location it already has and re-renders nothing; the
-   * router's own state is spread through, so its `idx` bookkeeping survives the round
-   * trip; and the entry carries a marker that is checked before {@link History.back} is
-   * ever called on the way out. If the member navigated onward — a link on the card
-   * behind, a tab — our entry is buried, the marker no longer matches the current state,
-   * and the cleanup does nothing at all rather than stealing a step of somebody's
-   * history.
+   * <b>What makes it safe beside react-router.</b> The entry is pushed at the SAME url, so
+   * the router sees a location it already has and re-renders nothing, and the router's own
+   * state is spread through so its `idx` bookkeeping survives the round trip. The entry
+   * carries a marker, and every path that could unwind it checks that marker first: if the
+   * member navigated onward with this open, the entry is buried, the marker no longer
+   * matches, and nothing is unwound rather than a step of somebody's history being stolen.
    * </p>
    */
   useEffect(() => {
-    const marker = Date.now();
-    const previous = (window.history.state ?? {}) as Record<string, unknown>;
-    try {
-      window.history.pushState({ ...previous, fullScreenQr: marker }, "", window.location.href);
-      entry.current = marker;
-    } catch {
-      // A browser that refuses pushState (a sandboxed frame, a file: url) simply does not
-      // get the gesture. Nothing else on this overlay depends on it.
-      entry.current = null;
+    // ONE entry per opening, however many times this effect runs.
+    //
+    // React mounts, unmounts and remounts every effect once in development, and a push
+    // per invocation leaves two entries behind one overlay: the member closes the code,
+    // presses back expecting to leave the page, and stays on it. The ref survives the
+    // phantom remount — which is precisely what makes it the right place to record that
+    // the entry already exists — and a genuine reopen is a new component with fresh refs.
+    if (entry.current === null) {
+      const marker = Date.now();
+      const previous = (window.history.state ?? {}) as Record<string, unknown>;
+      try {
+        window.history.pushState({ ...previous, fullScreenQr: marker }, "", window.location.href);
+        entry.current = marker;
+      } catch {
+        // A browser that refuses pushState (a sandboxed frame, a file: url) simply does
+        // not get the gesture. Nothing else on this overlay depends on it.
+        entry.current = null;
+      }
     }
 
     const onPop = () => {
-      // The pop consumed our entry, so there is nothing left to unwind on the way out.
+      // The pop consumed our entry, so there is nothing left to unwind afterwards.
       entry.current = null;
       close.current();
     };
     window.addEventListener("popstate", onPop);
-
-    return () => {
-      window.removeEventListener("popstate", onPop);
-      const state = (window.history.state ?? {}) as Record<string, unknown>;
-      if (entry.current !== null && state.fullScreenQr === entry.current) {
-        entry.current = null;
-        window.history.back();
-      }
-    };
+    return () => window.removeEventListener("popstate", onPop);
   }, []);
+
+  /**
+   * Closing by tap, by Escape, or by Done — and the unwind that belongs HERE and not in
+   * the effect's cleanup.
+   *
+   * <p>
+   * <b>It was in the cleanup, and that was a bug a browser found in two seconds.</b> React
+   * mounts, unmounts and remounts every effect once in development, and the cleanup's
+   * `history.back()` fired on that phantom unmount: the overlay pushed its entry, popped
+   * it again and closed itself before a finger left the glass. A cleanup cannot tell a
+   * remount from a real close, so it must not be where a side effect that means "the
+   * member is finished with this" lives.
+   * </p>
+   *
+   * <p>
+   * So closing is one function with one decision. If our entry is still the current one,
+   * go back — the popstate handler above is what then calls `onClose`, which keeps both
+   * routes to closed on a single path. If it is not ours any more, the member has
+   * navigated and there is nothing to unwind, so close directly.
+   * </p>
+   */
+  const dismiss = useCallback(() => {
+    const state = (window.history.state ?? {}) as Record<string, unknown>;
+    if (entry.current !== null && state.fullScreenQr === entry.current) {
+      entry.current = null;
+      window.history.back();
+      return;
+    }
+    close.current();
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") dismiss(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [dismiss]);
 
   useEffect(() => {
     let sentinel: { release: () => Promise<void> } | null = null;
@@ -115,7 +145,28 @@ export function FullScreenQr(props: { code: string; children: React.ReactNode; o
     };
   }, []);
 
-  return (
+  /**
+   * <b>Rendered into `document.body`, not where it sits in the tree.</b>
+   *
+   * <p>
+   * `position: fixed` is supposed to resolve against the viewport, and inside the app's
+   * shell it did not: measured in a real browser at 360×780, this overlay came out at
+   * y=24 with a height of 756 while a bare `position:fixed;inset:0` div appended to the
+   * body in the same document measured 0×780. Something between the page column and the
+   * body — the scrolling `<main>`, most likely — is giving fixed descendants a containing
+   * block of their own, and the twenty-four pixels it costs are the top of the app header
+   * showing through the top of a code somebody is holding at a door.
+   * </p>
+   *
+   * <p>
+   * A portal is the fix rather than a larger z-index, because the problem is the
+   * containing block and not the paint order: no z-index reaches outside a stacking
+   * context it is trapped in. It also makes the overlay independent of whatever the page
+   * column does next, which for a control whose whole job is to cover everything is the
+   * right relationship.
+   * </p>
+   */
+  return createPortal(
     <div
       ref={dialog}
       tabIndex={-1}
@@ -129,7 +180,7 @@ export function FullScreenQr(props: { code: string; children: React.ReactNode; o
         scanner does not get.
       */
       className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-2 bg-white p-2"
-      onClick={onClose}
+      onClick={dismiss}
     >
       {/*
         <b>The square is bounded on BOTH axes, in one expression, and that is the fix.</b>
@@ -154,9 +205,10 @@ export function FullScreenQr(props: { code: string; children: React.ReactNode; o
           360px phone once the root font is turned up, and a code that runs off the edge is
           a code nobody can read back to the desk. */}
       <p className="max-w-full break-all text-center font-mono text-lg tracking-[0.25em] text-black">{code}</p>
-      <Button variant="outline" className="shrink-0 min-h-11" onClick={(e) => { e.stopPropagation(); onClose(); }}>
+      <Button variant="outline" className="shrink-0 min-h-11" onClick={(e) => { e.stopPropagation(); dismiss(); }}>
         Done
       </Button>
-    </div>
+    </div>,
+    document.body,
   );
 }

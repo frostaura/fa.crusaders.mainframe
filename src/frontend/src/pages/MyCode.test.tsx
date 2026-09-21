@@ -1396,7 +1396,10 @@ describe("MyCode at a club with a door", () => {
     const panel = screen.getByRole("group", { name: /work out why/i });
     const connection = [...panel.querySelectorAll("li")].find((li) => li.textContent?.includes("This phone's line"));
     expect(connection?.textContent).toContain("Failed");
-    expect(panel).toHaveTextContent(/guessing/i);
+    // And the four rows only the club can answer say they were never asked, rather than
+    // defaulting to fine above a row that has just failed. This stub has no cached copy.
+    expect(panel).toHaveTextContent(/unanswered rather than fine/i);
+    expect(panel).not.toHaveTextContent(/Your membership.*active.*Passed/);
   });
 
   /**
