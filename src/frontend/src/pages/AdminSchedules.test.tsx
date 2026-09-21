@@ -400,6 +400,54 @@ describe("creating one", () => {
     expect(screen.getByRole("button", { name: /^Check / })).toBeDisabled();
   });
 
+  it("is operable by keyboard alone, every field of it (D3 §12, story P6)", async () => {
+    // Native controls throughout, which is why this passes with no key handlers of our own.
+    // The assertion is the whole point of that decision: a popover-based sentence needs a
+    // focus trap, an escape handler and a restore path, and `Modal` in this repo has none of
+    // the three (D3-B05). Tab order here IS document order, so the sentence reads in the
+    // order it is spoken.
+    stubFetch([
+      ...sessionRoutes(),
+      { path: SCHEDULES, body: { schedules: [] } },
+      ...editorPrerequisiteRoutes(),
+    ]);
+    renderPage(<AdminSchedulesPage />);
+    await screen.findByText("No repeating bookings yet.");
+    await openEditor();
+    await screen.findByRole("heading", { name: "A new repeating booking" });
+
+    const order = [
+      screen.getByRole("button", { name: /^Courts: / }),
+      screen.getByRole("button", { name: /^Days of the week: / }),
+      screen.getByLabelText("Start time"),
+      screen.getByLabelText("End time"),
+      screen.getByLabelText("What members see on the grid"),
+      screen.getByLabelText("First date"),
+      screen.getByLabelText("Last date (leave empty for no end)"),
+      screen.getByLabelText("Repeat every how many weeks"),
+      screen.getByLabelText("A name for this repeating booking, for admins"),
+    ];
+    for (const field of order) {
+      await userEvent.tab();
+      expect(document.activeElement).toBe(field);
+    }
+
+    // And the one field that is not a native input opens from the keyboard and reports its
+    // state through `aria-expanded`, which is what a screen reader reads.
+    const courts = screen.getByRole("button", { name: /^Courts: / });
+    courts.focus();
+    expect(courts).toHaveAttribute("aria-expanded", "false");
+    await userEvent.keyboard("{Enter}");
+    expect(screen.getByRole("button", { name: /^Courts: / })).toHaveAttribute("aria-expanded", "true");
+    await userEvent.tab();
+    expect(document.activeElement).toBe(screen.getByRole("checkbox", { name: "Court 1" }));
+    await userEvent.keyboard(" ");
+    expect(screen.getByRole("checkbox", { name: "Court 1" })).toBeChecked();
+    // The inactive court is not offered: a court nobody may book one slot on is not a court
+    // that may be held every Tuesday for a season.
+    expect(screen.queryByRole("checkbox", { name: "Court 9" })).not.toBeInTheDocument();
+  });
+
   it("does not let the sentence be typed at all until the courts are known", async () => {
     // Unknown is never false: with the court read down, the editor declines to judge rather
     // than telling an admin their courts are invalid out of its own gap.
