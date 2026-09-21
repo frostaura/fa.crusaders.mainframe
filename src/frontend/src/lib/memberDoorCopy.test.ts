@@ -1202,6 +1202,42 @@ describe("memberDoorCopy", () => {
     expect(flat(conclusion)).toMatch(/no membership on file/i);
   });
 
+  /**
+   * The same member, on the screen the reviewer actually photographed: Kayla was holding a
+   * BOOKING code outside its window, so E-H2's code-window arm won the conclusion — and the
+   * club's missing row, which hung off the all-clear arm alone, vanished with it. The
+   * anomaly is a tail on whichever arm wins, so no future reordering can drop it again.
+   */
+  it("still names a missing membership when another arm wins the conclusion", () => {
+    const shapes = [
+      // The code-window arm — Kayla's.
+      { codeWindow: { open: false, opensAtClock: "18:30", closesAtClock: "20:05" }, offerMemberCode: false },
+      // The club's own rule, which wins above it.
+      { policy: "booking_window" as const, hasBooking: false, bookingStartsClock: null },
+      // And a read that failed on a page holding the club's answer from a moment ago.
+      { connection: "network" as const },
+    ];
+    for (const shape of shapes) {
+      const { conclusion } = buildDiagnosis({
+        ...HEALTHY, membership: "none" as const, membership_detail: "none", ...shape,
+      });
+      expect(flat(conclusion)).toMatch(/no membership on file/i);
+    }
+  });
+
+  /**
+   * And never on a guess. "None" arrives through the same field whether the club said so or
+   * nobody asked, and telling a member the club has nothing on file for them on the strength
+   * of a read that never landed is an invention with the club's name on it.
+   */
+  it("never claims the club has nothing on file when the club never answered", () => {
+    const { conclusion } = buildDiagnosis({
+      ...HEALTHY, membership: "none" as const, membership_detail: "none",
+      standingKnown: false, connection: "network" as const,
+    });
+    expect(flat(conclusion)).not.toMatch(/no membership on file/i);
+  });
+
   it("carries a word for every state it can produce", () => {
     const shapes = [
       HEALTHY,

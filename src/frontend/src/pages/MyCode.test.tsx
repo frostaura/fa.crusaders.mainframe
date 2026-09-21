@@ -2163,11 +2163,49 @@ describe("MyCode at a club with a door", () => {
   // --- D6: the code itself, at a root font this page did not survive --------------------------
 
   /**
+   * Nothing between the glass and the symbol is measured in the reader's own font size.
+   *
+   * <p>
+   * <b>The property, not the class string.</b> The first version of this assertion named
+   * the exact arbitrary value the fix had used — and that value was itself wrong: it
+   * subtracted the page gutter as it measures at the DEFAULT root, so at a 32px root the
+   * symbol wanted more width than the card had and dragged the page column off the glass.
+   * A test pinned to the literal would have stayed green through every step of that, because
+   * the string it was asserting never changed. What makes the symbol root-invariant is that
+   * every length in the chain — the card's width, the card's padding, the cap on the symbol
+   * — is a pixel or a viewport unit, and that is what is checked.
+   * </p>
+   *
+   * <p>
+   * jsdom computes no layout, so the sizes themselves are measured in `e2e/my-code.spec.ts`
+   * at two viewports and two root fonts. This holds the rule those measurements come from.
+   * </p>
+   */
+  function expectRootInvariantCode(qrBox: HTMLElement) {
+    const card = qrBox.closest("div.rounded-lg")!;
+    // A rem anywhere in the width chain is the defect, in any spelling: `max-w-xs`, a `p-4`
+    // on this card, or a `20rem` inside an arbitrary value.
+    const chain = `${qrBox.className} ${card.className}`;
+    expect(chain).not.toMatch(/rem/);
+    expect(chain).not.toMatch(/\b(max-)?w-(xs|sm|md|lg|xl)\b/);
+    expect(chain).not.toMatch(/\bp-\d/);
+
+    // The symbol fills what the card has, up to the size a scanner needs at arm's length.
+    expect(qrBox.className).toContain("w-full");
+    expect(qrBox.className).toMatch(/max-w-\[\d+px\]/);
+    // And the card is what is pinned: a px gutter off the viewport below `sm`, px padding
+    // throughout. Both halves have to be here — a pinned symbol inside a rem-padded card is
+    // the arrangement that overflowed.
+    expect(card.className).toMatch(/w-\[min\(100vw-\d+px,\d+px\)\]/);
+    expect(card.className).toMatch(/p-\[\d+px\]/);
+  }
+
+  /**
    * `max-w-xs` is 20 REM, and a rem is whatever the reader has set. At a root font of 32px
    * it resolved to 640px inside a 360px phone: the symbol ran off both edges, the
    * twelve-character fallback ran off with it, and the whole page scrolled sideways. A
    * jsdom test cannot see the overflow — the Playwright one below can — but it CAN hold
-   * the two classes that caused it, which is what a regression would change.
+   * the rule that caused it, which is what a regression would change.
    */
   it("caps the code and the QR against the column, not against the root font", async () => {
     renderBoth(memberDoorsOnFixture());
@@ -2175,15 +2213,7 @@ describe("MyCode at a club with a door", () => {
 
     expect(code.className).toContain("break-all");
     expect(code.className).toContain("max-w-full");
-    const qr = screen.getByRole("img", { name: /QR code/ }).parentElement!;
-    // D7 — off the VIEWPORT, not off the column. `min(20rem,100%)` kept the symbol inside
-    // the card, and the card's own `p-4` and the page column's `px-4` are both rem: at a
-    // 32px root they ate 128px of a 320px screen and the QR came out at 190px against 254px
-    // at the default. A member who has turned the type up was answered by a smaller code.
-    expect(qr.className).toContain("w-[min(100vw-64px,20rem)]");
-    expect(qr.className).not.toContain("max-w-xs");
-    // And the card's own padding is in pixels, which is the other half of the same fix.
-    expect(qr.closest("div.rounded-lg")?.className ?? "").not.toContain("max-w-[min(20rem,100%)]");
+    expectRootInvariantCode(screen.getByRole("img", { name: /QR code/ }).parentElement!);
   });
 
   /**
@@ -2203,15 +2233,7 @@ describe("MyCode at a club with a door", () => {
     const code = await screen.findByLabelText("Your code");
     expect(code.className).toContain("break-all");
     expect(code.className).toContain("max-w-full");
-    const qr = screen.getByRole("img", { name: /QR code/ }).parentElement!;
-    // D7 — off the VIEWPORT, not off the column. `min(20rem,100%)` kept the symbol inside
-    // the card, and the card's own `p-4` and the page column's `px-4` are both rem: at a
-    // 32px root they ate 128px of a 320px screen and the QR came out at 190px against 254px
-    // at the default. A member who has turned the type up was answered by a smaller code.
-    expect(qr.className).toContain("w-[min(100vw-64px,20rem)]");
-    expect(qr.className).not.toContain("max-w-xs");
-    // And the card's own padding is in pixels, which is the other half of the same fix.
-    expect(qr.closest("div.rounded-lg")?.className ?? "").not.toContain("max-w-[min(20rem,100%)]");
+    expectRootInvariantCode(screen.getByRole("img", { name: /QR code/ }).parentElement!);
   });
 
   // --- D1: the door section does not belong to the code read -------------------------

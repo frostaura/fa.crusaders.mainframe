@@ -32,6 +32,63 @@ import { CopySentence } from "./CopySentence";
  * it.
  * </p>
  */
+/**
+ * Everything in this column that is not the symbol, in `rem`, itemised.
+ *
+ * <p>
+ * The square is bounded on BOTH axes in one expression — `min(100vw-1rem, 100vh-RESERVE)` —
+ * because `min(92vw, 92vh)` in landscape is a square as tall as the whole viewport with a
+ * code line and a button still to place under it. A `justify-center` column then overflows
+ * at both ends: the symbol's top quiet zone goes off the top of the glass and Done goes off
+ * the bottom.
+ * </p>
+ *
+ * <p>
+ * <b>It is itemised because a reserve written as one number is a number nobody knows to
+ * change.</b> It was `6.5rem`, correct for a code line and a button; D12 then added the
+ * countdown between them and the landscape symbol went back to −6px, with nothing in the
+ * source connecting the new line to the old constant. Each part below names the class it
+ * measures, so adding a line to this overlay means adding a row here — and the landscape
+ * case in `e2e/my-code.spec.ts` fails until it is.
+ * </p>
+ */
+const COLUMN_RESERVE = [
+  0.5,  // `p-2` above the symbol
+  0.5,  // `gap-2` under it
+  1.75, // the code line, `text-lg` on a 1.75rem line box
+  0.5,  // `gap-2`
+  1.25, // the countdown, `text-sm` on a 1.25rem line box
+  0.5,  // `gap-2`
+  2.75, // Done, `min-h-11`
+  0.5,  // `p-2` below it
+].reduce((a, b) => a + b, 0);
+
+/**
+ * The square: as wide as the glass allows, as tall as what is left after {@link COLUMN_RESERVE}.
+ *
+ * <p>
+ * An inline `style` rather than an arbitrary Tailwind class, and the reason is mechanical:
+ * Tailwind generates CSS by scanning the source for literal class strings, so a class name
+ * built from a template literal produces NO rule at all — silently, with the element left
+ * unsized and the symbol collapsed. A value this overlay computes has to travel as a value.
+ * </p>
+ *
+ * <p>
+ * It travels as a CUSTOM PROPERTY that `width` and `height` then both read, for two
+ * reasons. One length, declared once, cannot come apart into a rectangle. And a custom
+ * property is stored verbatim by every CSS implementation, including jsdom's — which parses
+ * `min()` with mixed units as invalid and silently drops it, so a plain `width: min(…)`
+ * inline style reads back as the empty string in the unit tests and cannot be asserted on
+ * at all. The property is declared on the same element that reads it, so there is no
+ * inherited fallback to paint if it ever goes missing.
+ * </p>
+ */
+const SQUARE = `min(100vw - 1rem, 100vh - ${COLUMN_RESERVE}rem)`;
+
+/** The square as a style object: declared once, read twice. See {@link SQUARE}. */
+const SQUARE_BOX = { "--fsq-square": SQUARE, width: "var(--fsq-square)" } as React.CSSProperties;
+const SQUARE_BOTH = { ...SQUARE_BOX, height: "var(--fsq-square)" } as React.CSSProperties;
+
 export function FullScreenQr(props: {
   code: string;
   children: React.ReactNode;
@@ -294,9 +351,13 @@ export function FullScreenQr(props: {
         control. Reserving the rest of the column here is what keeps every part of this
         overlay on the glass.
 
-        `6.5rem` rather than a pixel count: what is being reserved is the code line plus
-        the button plus the gaps, and every one of those scales with the root font — which
-        is the whole of why this page broke at 32px in the first place.
+        `rem` rather than a pixel count: what is being reserved is the code line plus the
+        countdown plus the button plus the gaps, and every one of those scales with the root
+        font — which is the whole of why this page broke at 32px in the first place. The
+        parts are enumerated in {@link COLUMN_RESERVE}, because a reserve written as one
+        number is a number the next person to add a line does not know to change: that is
+        precisely what happened when D12's countdown arrived under a `6.5rem` that predated
+        it, and the symbol's top quiet zone went back off the glass in landscape.
       */}
       {dead ? (
         /*
@@ -306,7 +367,8 @@ export function FullScreenQr(props: {
           repeatedly while the screen promised a refresh that could not happen.
         */
         <div
-          className="w-[min(100vw-1rem,100vh-6.5rem)] max-w-full space-y-3 rounded-lg border border-danger-soft bg-danger-soft p-4 text-center"
+          style={SQUARE_BOX}
+          className="max-w-full space-y-3 rounded-lg border border-danger-soft bg-danger-soft p-4 text-center"
           onClick={(e) => e.stopPropagation()}
         >
           {renewing ? (
@@ -322,7 +384,17 @@ export function FullScreenQr(props: {
         </div>
       ) : (
         <div
-          className="w-[min(100vw-1rem,100vh-6.5rem)] h-[min(100vw-1rem,100vh-6.5rem)] shrink-0"
+          style={SQUARE_BOTH}
+          /*
+            It may SHRINK, and that is the safety valve rather than the design. The reserve
+            above is exact for the column as it stands, but a code that wraps to two lines at
+            a large root font, or a button a shared component grows by a pixel, would put the
+            symbol back off the top of the glass. `min-h-0` lets flex take the difference out
+            of the square instead; the SVG's own `preserveAspectRatio` keeps the symbol square
+            and centred inside whatever box is left, so it degrades to smaller rather than to
+            clipped.
+          */
+          className="min-h-0"
           onClick={(e) => e.stopPropagation()}
         >
           {children}

@@ -501,6 +501,13 @@ for (const [name, size] of [
 
     // And bigger than the inline one, which is the only reason to open it.
     expect(Math.min(qr.width, qr.height)).toBeGreaterThan(200);
+    // SQUARE, which is the part the reserve buys rather than the shrink valve.
+    //
+    // The box may shrink so that nothing is ever pushed off the glass, and that valve alone
+    // keeps the two assertions above true however wrong the reserve is — it just letterboxes
+    // the symbol inside a box that is no longer a square. So the reserve is held here: it is
+    // right exactly when the box the symbol is given is the size the symbol wants.
+    expect(Math.abs(qr.width - qr.height)).toBeLessThanOrEqual(1);
 
     const done = dialog.getByRole("button", { name: "Done" });
     const doneBox = (await done.boundingBox())!;
@@ -712,17 +719,64 @@ test("nothing that arrives or leaves moves the QR", async ({ page }) => {
   await page.goto("/my-code");
   const qr = page.getByRole("img", { name: /QR code/ });
   await expect(qr).toBeVisible();
-  const before = (await qr.boundingBox())!;
+
+  /*
+    Where the symbol sits in the SCROLLED CONTENT, not in the viewport.
+
+    The two are the same number for as long as nobody scrolls, and the arrival case below
+    checks both — which is the case the finding is about, a card appearing under a thumb
+    holding the phone still. Dismissal is not: the control sits below the fold at 320×568, so
+    pressing it scrolls the page there, and a viewport-relative reading afterwards reports
+    that scroll as a 429px layout jump. Reading the content position asks the question the
+    finding actually asks — did the layout move the code — rather than the question the test
+    harness's own scrolling happens to answer.
+
+    It has to find the scroller rather than ask the window, and that is not a detail: this
+    app scrolls inside `<main class="overflow-auto">`, so `window.scrollY` is nought on every
+    route and a `window.scrollTo` does nothing at all. A helper written against the window
+    reads every scroll of this page as a layout jump, which is how this assertion came to be
+    measuring the harness.
+
+    And the scroller is found by its OVERFLOW, not by whether its content is taller than its
+    box. Every wrapper between the symbol and `<main>` is taller than the box it sits in —
+    that is what it means to be inside something that scrolls — so the first-overflowing
+    test stops one element short, on a div whose `scrollTop` is permanently nought. It reads
+    the right number for a position and silently does nothing at all when asked to scroll.
+  */
+  const contentY = async () => Math.round(await qr.evaluate((el) => {
+    let scroller = el.parentElement;
+    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) {
+      scroller = scroller.parentElement;
+    }
+    if (!scroller) return el.getBoundingClientRect().top + window.scrollY;
+    return el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+  }));
+  const toTop = () => qr.evaluate((el) => {
+    let scroller = el.parentElement;
+    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) {
+      scroller = scroller.parentElement;
+    }
+    scroller?.scrollTo(0, 0);
+    window.scrollTo(0, 0);
+  });
+  const viewportY = async () => Math.round((await qr.boundingBox())!.y);
+
+  const before = await contentY();
+  const beforeInView = await viewportY();
 
   const card = page.getByText("The lock released.");
   await expect(card).toBeVisible({ timeout: 15_000 });
-  const during = (await qr.boundingBox())!;
-  expect(Math.round(during.y)).toBe(Math.round(before.y));
+  expect(await contentY()).toBe(before);
+  // Arrival moves nothing at all, on a page nobody has scrolled: this is the 290px jump.
+  expect(await viewportY()).toBe(beforeInView);
 
   await page.getByRole("button", { name: "Dismiss" }).click();
   await expect(card).toBeHidden();
-  const after = (await qr.boundingBox())!;
-  expect(Math.round(after.y)).toBe(Math.round(before.y));
+  expect(await contentY()).toBe(before);
+  // And back where the member was, the fold is where it was: the code has not been pulled
+  // up the page by the card's removal either.
+  await toTop();
+  expect(await viewportY()).toBe(beforeInView);
 });
 
 /**
@@ -745,7 +799,11 @@ test("the QR never shrinks when the root font grows", async ({ page }) => {
   await page.waitForTimeout(150);
   const large = (await qr.boundingBox())!.width;
 
-  expect(large).toBeGreaterThanOrEqual(normal);
+  // Not merely "no smaller": the SAME. Every length between the glass and the symbol is a
+  // pixel or a viewport unit now, so there is nothing left in the chain for a root font to
+  // move — and "no smaller" would also be satisfied by a symbol that grew off the edge of
+  // the screen, which is how the first fix for this passed while breaking the page.
+  expect(large).toBe(normal);
   // And still on the glass, which is the constraint the old expression was honouring.
   const box = (await qr.boundingBox())!;
   expect(box.x).toBeGreaterThanOrEqual(-1);

@@ -1599,24 +1599,50 @@ function concludeFrom(input: DiagnosisInput): Sentence {
   if (input.codeSecondsLeft <= 0) {
     return plain("The code you held up had run out. There's a fresh one on this screen now — try that one.");
   }
-  // The all-clear, plus the one anomaly that is worth a member's breath but is not
-  // stopping them. It goes HERE rather than higher up the order on purpose: a missing
-  // membership row bars nobody, so hoisting it would send somebody to the desk over a
-  // thing that is not the reason the door stayed shut.
-  const onFile = input.membership === "none"
-    ? " The club also has no membership on file for you, which is unusual — worth saying while you have them."
-    : "";
   const reach = reachTheClub(input.contact);
   return {
     text: "Everything on this phone looks right, so whatever went wrong is at the door: it may have lost the"
       + ` club's network, or its scanner may need a wipe. ${reach.text}`,
     link: reach.link,
-    tail: `${reach.tail}${onFile}`,
+    tail: reach.tail,
+  };
+}
+
+/**
+ * The one anomaly that is worth a member's breath but is never the reason they are outside.
+ *
+ * <p>
+ * <b>It is a TAIL on whichever conclusion won, not an arm of its own.</b> A club with no
+ * membership row for somebody bars nobody — under `active_member` it is the club's own
+ * record that is incomplete — so hoisting it up the order would send a member to the desk
+ * over a thing that is not why the door stayed shut. That much was already right.
+ * </p>
+ *
+ * <p>
+ * <b>What was wrong is that it was written into ONE arm.</b> It hung off the all-clear, so
+ * the moment any other arm won — and after E-H2 a member holding a booking code outside its
+ * window wins the code-window arm every time — the club's own missing row was silently
+ * dropped, on the one screen where a member is already asking the club a question. Kayla is
+ * exactly that case: nothing on file, a booking code on screen, and a conclusion that never
+ * mentioned it. Appending it here means the order of the arms can be rearranged again
+ * without any of them quietly losing it.
+ * </p>
+ */
+function withMembershipAnomaly(input: DiagnosisInput, conclusion: Sentence): Sentence {
+  // `standingKnown` guards it because "none" is only a fact when the club answered. A
+  // cached or absent standing reads as "none" through the same field, and telling somebody
+  // the club has nothing on file for them on the strength of a read that never landed is
+  // the class of invention this whole surface is built against.
+  if (!input.standingKnown || input.membership !== "none") return conclusion;
+  return {
+    ...conclusion,
+    tail: `${conclusion.tail} The club also has no membership on file for you, which is unusual — worth`
+      + " saying while you have them.",
   };
 }
 
 export function buildDiagnosis(input: DiagnosisInput): { rows: DiagnosisRow[]; conclusion: Sentence } {
-  return { rows: diagnosisRows(input), conclusion: concludeFrom(input) };
+  return { rows: diagnosisRows(input), conclusion: withMembershipAnomaly(input, concludeFrom(input)) };
 }
 
 // --- my door history -------------------------------------------------------------------

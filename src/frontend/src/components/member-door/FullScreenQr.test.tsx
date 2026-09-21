@@ -171,6 +171,15 @@ describe("FullScreenQr", () => {
    * went off the top of the glass and "Done" — a 44px control — went off the bottom as a
    * 22px sliver. jsdom computes no layout, so the Playwright check is what proves the
    * geometry; what this holds is the contract that produces it.
+   *
+   * <p>
+   * The reserve is read out of the rule rather than spelled out again here, because a
+   * second copy of the number is a second thing to forget: D12's countdown was added to the
+   * column under a reserve that predated it, and a test asserting the old literal would have
+   * gone green on the overflowing overlay for as long as nobody touched the string. What is
+   * asserted is the SHAPE — both axes bounded, the viewport-height term present, and the
+   * reserve large enough to hold the three things that sit under the symbol.
+   * </p>
    */
   it("bounds the symbol on both axes and reserves the rest of the column", () => {
     renderHost();
@@ -178,9 +187,21 @@ describe("FullScreenQr", () => {
     const dialog = screen.getByRole("dialog", { name: /full screen/i });
     const square = dialog.querySelector("svg")!.parentElement!;
 
-    expect(square.className).toContain("w-[min(100vw-1rem,100vh-6.5rem)]");
-    expect(square.className).toContain("h-[min(100vw-1rem,100vh-6.5rem)]");
+    // An inline value, not an arbitrary class: Tailwind emits no rule for a class name built
+    // from a template literal, so a computed size has to travel as a size. It is one custom
+    // property read by both axes, which is also the only spelling jsdom stores verbatim —
+    // `min()` with mixed units is invalid to its parser and silently dropped.
+    const declared = square.style.getPropertyValue("--fsq-square");
+    expect(declared).toMatch(/^min\(100vw - 1rem, 100vh - [\d.]+rem\)$/);
+    expect(square.style.width).toBe(square.style.height);
+    expect(square.style.width).toBe("var(--fsq-square)");
     expect(square.className).not.toContain("92vh");
+
+    // The three things under the symbol — the code line, the countdown and Done — plus the
+    // gaps and the padding. Under 6.5rem is the overlay as it was BEFORE the countdown line
+    // existed, which is the state this reserve regressed to once and may not again.
+    const reserve = Number(declared.match(/100vh - ([\d.]+)rem/)![1]);
+    expect(reserve).toBeGreaterThan(6.5);
   });
 
   /**

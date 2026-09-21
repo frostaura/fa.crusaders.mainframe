@@ -103,25 +103,51 @@ const QUIET_ZONE = 4;
  * </p>
  *
  * <p>
- * So the width comes from the VIEWPORT rather than from what is left of the column: `100vw`
- * does not move when a root font does. The 64 px is the page gutter plus the card's own
- * padding at the default root — which makes this exactly the column width there, and keeps
- * it there at every larger root, where it now spans the padding instead of being eaten by
- * it. `20rem` is the ceiling on a wide screen and is the only part that may grow.
+ * <b>The first fix reached past the card and overshot it.</b> Writing the width as
+ * `min(100vw - 64px, 20rem)` made the symbol root-invariant by subtracting the page gutter
+ * and the card padding as they measure AT THE DEFAULT ROOT — but the page gutter is
+ * `Layout`'s `px-4`, it is rem, and at a 32 px root it is 32 px a side rather than 16. The
+ * symbol then wanted 296 px inside a card that had 262 px to give, the card's min-content
+ * width dragged the whole page column 34 px wider than its parent, and the card's right edge
+ * went off the glass. A length that guesses at another component's padding is wrong twice:
+ * once here, and again the day that component changes it.
+ * </p>
+ *
+ * <p>
+ * <b>So the symbol takes the card's inner width, and the CARD is what is pinned.</b> See
+ * {@link CODE_CARD_BOX}. The two lengths below are then the only two that matter — fill
+ * what the card has, up to the size a scanner needs at arm's length — and neither can drift
+ * when a padding, a gutter or a breakpoint elsewhere moves.
  * </p>
  */
-const QR_WIDTH = "w-[min(100vw-64px,20rem)]";
+const QR_WIDTH = "w-full max-w-[320px]";
 
 /**
- * The code card's padding, in PIXELS. D7's other half.
+ * The code card's own width and padding, in PIXELS. D7's other half.
  *
  * <p>
  * `Card`'s own `p-4 sm:p-6` is the right default everywhere else in the product. On this one
  * card it is what ate 64 px of a 320 px screen at a 32 px root — padding around a QR code is
  * not type and has no reason to scale with it.
  * </p>
+ *
+ * <p>
+ * <b>Below `sm` the card sizes itself from the viewport, which is what makes the symbol
+ * root-invariant.</b> `100vw - 32px` is a 16 px gutter a side that does not grow with the
+ * root, and `354px` is that same card at its ceiling — 320 px of symbol, 16 px of padding a
+ * side and the 1 px border. When the reader's root font makes the page gutter wider than
+ * 16 px the card is wider than the column's content box, the column takes its min-content
+ * width, and the card lands hard against the gutter instead of inside it. That is the
+ * intended outcome: the gutter is whitespace, and the symbol is the page.
+ * </p>
+ *
+ * <p>
+ * From `sm` up the card fills the column as every other card does, because there the 320 px
+ * ceiling is doing the bounding and a card narrower than its neighbours would be a visible
+ * change to a layout no finding complained about.
+ * </p>
  */
-const CODE_CARD_PADDING = "p-[16px] sm:p-[24px]";
+const CODE_CARD_BOX = "w-[min(100vw-32px,354px)] sm:w-full p-[16px] sm:p-[24px]";
 
 /** A QR symbol for `value`, black on white regardless of theme — scanners want contrast, not tokens. */
 export function QrSvg({ value, className }: { value: string; className?: string }) {
@@ -865,7 +891,7 @@ function CodeCard(props: {
   const deadSentence = codeExpiredDeadEnd(failure ?? "network", contact);
   return (
     <>
-    <Card className={cn("space-y-5", CODE_CARD_PADDING)}>
+    <Card className={cn("space-y-5", CODE_CARD_BOX)}>
       {error && !qr ? (
         <div className="space-y-3">
           <p className="text-sm text-danger-strong">{error}</p>
@@ -895,9 +921,9 @@ function CodeCard(props: {
                   brightness before anything else, and a member holding a phone one-handed
                   should not have to find a small control to get them.
 
-                  The width comes from the VIEWPORT, not from what is left of the column
-                  after two layers of rem padding — see QR_WIDTH for the measurements that
-                  made that necessary. */}
+                  The width is the card's inner width, and the CARD is pinned in pixels —
+                  see QR_WIDTH and CODE_CARD_BOX for the measurements that made that
+                  necessary. */}
               <button
                 type="button"
                 aria-label="Show your code full screen"
@@ -1067,7 +1093,7 @@ function OfflinePage(props: {
 
       {showQr && (
         // D7 — the same px padding as the live card, for the same reason.
-        <Card className={cn("space-y-5", CODE_CARD_PADDING)}>
+        <Card className={cn("space-y-5", CODE_CARD_BOX)}>
           {/* The reduced opacity IS the message, and the sentence above says so in words:
               colour and weight are never the only signal for anything on this page. This
               QR is still LIVE — that is the arm's precondition — so unlike the expired one
