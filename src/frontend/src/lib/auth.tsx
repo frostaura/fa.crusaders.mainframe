@@ -212,7 +212,22 @@ function rememberIdentity(userId: string): void {
   try { window.localStorage?.setItem(LAST_IDENTITY_KEY, userId); } catch { /* private mode */ }
 }
 
-/** A session is over: the id goes, and everything the page stored under it goes with it. */
+/**
+ * A session is over: the id goes, and everything the page stored under it goes with it.
+ *
+ * <p>
+ * Called from BOTH endings, and the second matters more than the first. `logout` is a member
+ * pressing something; `endSession` is a token expiring, being revoked, or an admin resetting a
+ * password — which on a shared club phone is how a session usually ends, with nobody pressing
+ * anything at all.
+ * </p>
+ *
+ * <p>
+ * It is the other half of `clearOfflineCache()`, not a duplicate of it. That purges the Cache
+ * API; the member code page's last-known store is `localStorage`, which no cache purge touches,
+ * and until D3 nothing ever cleared it because nothing ever rendered it while signed out.
+ * </p>
+ */
 function forgetIdentity(): void {
   try { window.localStorage?.removeItem(LAST_IDENTITY_KEY); } catch { /* nothing to do */ }
   forgetLastKnown();
@@ -242,10 +257,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const endSession = useCallback(() => {
     tokenStore.clear();
     void clearOfflineCache();
-    // D3 — and this one matters more than the sign-out case, because it is the way a session
-    // on a shared club phone usually ends: nobody presses anything. The member's last code and
-    // door times must not outlive the credential that fetched them.
-    forgetIdentity();
+    forgetIdentity(); // D3 — see its own comment; this is the ending nobody presses anything for.
     setSessionExpired(true);
     setState({ status: "anonymous" });
   }, []);
@@ -395,10 +407,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const ending = endpoints.logout().catch(() => undefined);
     tokenStore.clear();
     // A club phone is a shared device; the next person to sign in must inherit nothing this
-    // browser stored while the last session was alive. `clearOfflineCache` purges the Cache
-    // API; `forgetIdentity` is the other half — the member code page's own last-known store
-    // lives in `localStorage`, which no cache purge touches, and until D3 nothing ever cleared
-    // it because nothing ever rendered it while signed out.
+    // browser stored while the last session was alive. Two stores, two calls.
     void clearOfflineCache();
     forgetIdentity();
     // Signing out on purpose is not losing a session; /login should not commiserate about it.
