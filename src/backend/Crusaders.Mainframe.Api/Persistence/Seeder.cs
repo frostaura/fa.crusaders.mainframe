@@ -81,6 +81,11 @@ public static class Seeder
             logger.LogInformation("Seeded tenant {Slug} ({Id})", tenant.Slug, tenant.Id);
         }
 
+        // GOAL item 3's two named groups, for a tenant that was just created AND for one that
+        // predates the feature. Unrestricted and inheriting, so it changes nothing until an admin
+        // edits one — see MemberGroupSeeder.
+        await MemberGroupSeeder.EnsureAsync(db, tenant.Id);
+
         // Set tenant context for the rest of the seed so query-filtered tables work normally.
         tenantContext.Set(tenant.Id, tenant.Slug);
 

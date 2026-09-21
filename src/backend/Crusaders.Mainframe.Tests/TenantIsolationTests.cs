@@ -323,4 +323,103 @@ public class TenantIsolationTests
         var settings = await db.TenantSettings.ToListAsync();
         Assert.All(settings, s => Assert.Equal(hostB.Tenant.Id, s.TenantId));
     }
+
+    /// <summary>
+    /// The three member-group tables (GOAL item 3) — the repo's non-negotiable cross-tenant
+    /// injection test, applied to every one of them.
+    ///
+    /// <para>
+    /// It matters more here than for most tables, because these rows decide what a member may
+    /// book and WHAT THEY PAY. A group leaking across the filter is not a privacy problem, it is
+    /// another club's tariff applied to this club's members.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Member_groups_and_their_windows_and_members_are_filtered_by_current_tenant()
+    {
+        var (hostA, hostB) = await TwoTenantsAsync($"groups-{Guid.NewGuid():N}");
+        await using var a = hostA;
+        await using var b = hostB;
+
+        Guid groupInA;
+        using (var scope = hostA.NewScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var group = new MemberGroup
+            {
+                TenantId = hostA.Tenant.Id,
+                Name = "Alpha league",
+                PricingMode = GroupPricingMode.Multiplier,
+                PriceMultiplierBps = 50_000,
+            };
+            db.MemberGroups.Add(group);
+            db.MemberGroupWindows.Add(new MemberGroupWindow
+            {
+                TenantId = hostA.Tenant.Id, GroupId = group.Id,
+                DayOfWeek = DayOfWeek.Tuesday, StartMinute = 60, EndMinute = 120,
+            });
+            db.MemberGroupMembers.Add(new MemberGroupMember
+            {
+                TenantId = hostA.Tenant.Id, GroupId = group.Id, UserId = hostA.PlayerUser.Id,
+            });
+            await db.SaveChangesAsync();
+            groupInA = group.Id;
+        }
+
+        using (var scope = hostB.NewScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+            Assert.DoesNotContain(await db.MemberGroups.ToListAsync(), g => g.Id == groupInA);
+            Assert.DoesNotContain(await db.MemberGroupWindows.ToListAsync(), w => w.GroupId == groupInA);
+            Assert.DoesNotContain(await db.MemberGroupMembers.ToListAsync(), m => m.GroupId == groupInA);
+
+            // Naming the id directly, which is what an injected parameter would do.
+            Assert.Null(await db.MemberGroups.FirstOrDefaultAsync(g => g.Id == groupInA));
+        }
+    }
+
+    /// <summary>
+    /// And the RULES the other club's group would impose do not reach this club's member: the
+    /// evaluator reads groups through the same filter, so a five-times multiplier next door is
+    /// not a price here.
+    /// </summary>
+    [Fact]
+    public async Task Another_clubs_group_does_not_price_this_clubs_member()
+    {
+        var (hostA, hostB) = await TwoTenantsAsync($"grouprules-{Guid.NewGuid():N}");
+        await using var a = hostA;
+        await using var b = hostB;
+
+        using (var scope = hostA.NewScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var group = new MemberGroup
+            {
+                TenantId = hostA.Tenant.Id,
+                Name = "Alpha premium",
+                PricingMode = GroupPricingMode.Multiplier,
+                PriceMultiplierBps = 500_000,
+            };
+            db.MemberGroups.Add(group);
+            // The same USER id in the other club's membership row — the shape an injected id
+            // takes when two clubs' tables share a store.
+            db.MemberGroupMembers.Add(new MemberGroupMember
+            {
+                TenantId = hostA.Tenant.Id, GroupId = group.Id, UserId = hostB.PlayerUser.Id,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using (var scope = hostB.NewScope())
+        {
+            var rules = scope.ServiceProvider.GetRequiredService<BookingRules>();
+            var settings = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+
+            var groups = await rules.GroupsForAsync(hostB.PlayerUser.Id, DayOfWeek.Tuesday, settings, default);
+
+            Assert.Empty(groups);
+            Assert.Equal(8m, GroupRules.PriceFor(groups, 8m));
+        }
+    }
 }

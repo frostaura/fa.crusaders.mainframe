@@ -1,6 +1,8 @@
+using System.Text.Json;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
+using Crusaders.Mainframe.Api.Services.Realtime;
 using Crusaders.Mainframe.Api.Webhooks;
 using Microsoft.EntityFrameworkCore;
 
@@ -19,11 +21,13 @@ public sealed class LedgerService
 {
     private readonly MainframeDbContext _db;
     private readonly ITenantContext _tenant;
-    private readonly BalanceBroadcaster _broadcaster;
+    private readonly IRealtimeBus _realtime;
+    private readonly RealtimeOutbox _outbox;
     private readonly IEventBus _bus;
 
-    public LedgerService(MainframeDbContext db, ITenantContext tenant, BalanceBroadcaster broadcaster, IEventBus bus)
-    { _db = db; _tenant = tenant; _broadcaster = broadcaster; _bus = bus; }
+    public LedgerService(
+        MainframeDbContext db, ITenantContext tenant, IRealtimeBus realtime, RealtimeOutbox outbox, IEventBus bus)
+    { _db = db; _tenant = tenant; _realtime = realtime; _outbox = outbox; _bus = bus; }
 
     public async Task<decimal> GetBalanceAsync(Guid userId, CancellationToken ct)
     {
@@ -85,15 +89,93 @@ public sealed class LedgerService
         await _db.SaveChangesAsync(ct);
 
         // One broadcast per affected user rather than one per row: two movements on the same
-        // wallet are one balance change as far as a live subscriber is concerned.
-        foreach (var userId in postings.Select(p => p.UserId).Distinct())
+        // wallet are one balance change as far as a live subscriber is concerned. The DELTA is
+        // the sum of that user's rows in this unit of work, which is why a refund and its
+        // penalty animate the badge once, by their net.
+        foreach (var group in postings.GroupBy(p => p.UserId))
         {
-            _broadcaster.Publish(userId, await GetBalanceAsync(userId, ct));
+            await PublishBalanceAsync(group.Key, group.Sum(p => p.AmountCredits), ReasonFor(group), ct);
         }
 
         foreach (var entry in entries) await MirrorAsync(entry, ct);
 
         return entries;
+    }
+
+    /// <summary>
+    /// Queues the member's live balance frame for after the commit. See <see cref="RealtimeOutbox"/>
+    /// for why it is not published here (D2-B07).
+    ///
+    /// <para>
+    /// <b>Two frames, not one.</b> The unnamed <c>data:</c> frame is what ships today and what
+    /// <c>balance.tsx</c> listens for as <c>message</c>; it is kept verbatim so a client on the
+    /// current build keeps working through the rollout. The named <c>balance</c> frame beside it
+    /// carries <c>delta_credits</c> and <c>reason</c>, which is what GOAL item 8 actually needs:
+    /// "animate the credits badge while zero to entice a user to add funds" requires the badge to
+    /// know that money <i>arrived</i>, and today's payload is only the new total — from which a
+    /// top-up and a cancellation refund are indistinguishable.
+    /// </para>
+    /// </summary>
+    private Task PublishBalanceAsync(Guid userId, decimal deltaCredits, string reason, CancellationToken ct)
+    {
+        var tenantId = _tenant.TenantId;
+        var topic = RealtimeTopic.Wallet(tenantId, userId);
+
+        return _outbox.EnqueueAsync(async token =>
+        {
+            var balance = await GetBalanceAsync(userId, token);
+
+            _realtime.Publish(topic, new RealtimeMessage(
+                string.Empty, JsonSerializer.Serialize(new { balance_credits = balance })));
+
+            _realtime.Publish(topic, new RealtimeMessage(BalanceEvent, JsonSerializer.Serialize(new
+            {
+                balance_credits = balance,
+                delta_credits = deltaCredits,
+                reason,
+                at = DateTimeOffset.UtcNow,
+            })));
+        }, ct);
+    }
+
+    /// <summary>The named SSE event the wallet stream carries alongside its legacy unnamed frame.</summary>
+    public const string BalanceEvent = "balance";
+
+    /// <summary>
+    /// Why the member's balance moved, as a closed set the client maps to a sentence and an
+    /// animation. Derived from the ledger type, because that is the only thing in the system
+    /// that actually knows.
+    ///
+    /// <para>
+    /// <c>mixed</c> exists for the one honest case: a unit of work that posts two different
+    /// kinds of row for one member — a cancellation's refund and its penalty. Inventing a single
+    /// reason for that pair would make the badge claim one of them happened and the other did
+    /// not, and the member's statement says otherwise.
+    /// </para>
+    /// </summary>
+    internal static string ReasonFor(IEnumerable<LedgerPosting> postings)
+    {
+        var kinds = postings.Select(p => ReasonFor(p.Type)).Distinct().ToList();
+        return kinds.Count == 1 ? kinds[0] : "mixed";
+    }
+
+    // Block body, not an expression one: lizard's C# parser reads the `{` of a switch or an
+    // object initialiser as the END of the function and dumps the rest of the file into a
+    // *global* pseudo-function whose length trips `-L 200`. See memory/gotchas.md.
+    internal static string ReasonFor(LedgerEntryType type)
+    {
+        return type switch
+        {
+        LedgerEntryType.TopUp => "top_up",
+        LedgerEntryType.AdminAdjustment => "admin_adjustment",
+        LedgerEntryType.AdminTopUp => "admin_top_up",
+        LedgerEntryType.BookingCharge => "booking_charge",
+        LedgerEntryType.CancellationRefund => "cancellation_refund",
+        LedgerEntryType.NoShowPenalty or LedgerEntryType.LateCancellationPenalty => "penalty",
+        LedgerEntryType.LightsPurchase => "lights_purchase",
+            LedgerEntryType.PaymentReversal => "correction",
+            _ => "unknown",
+        };
     }
 
     /// <summary>
@@ -131,16 +213,24 @@ public sealed class LedgerService
             LedgerEntryType.CancellationRefund => "credit.refunded",
             LedgerEntryType.NoShowPenalty or LedgerEntryType.LateCancellationPenalty => "credit.penalty_applied",
             LedgerEntryType.AdminAdjustment => "credit.adjusted",
+            LedgerEntryType.AdminTopUp => "credit.topped_up_by_admin",
             _ => null,
         };
         if (type is null) return;
 
-        await _bus.EmitAsync(new DomainEvent(
+        var (actorUserId, actorIsAdmin) = ActorOf(entry);
+        var tenantId = _tenant.TenantId;
+        var tenantSlug = _tenant.TenantSlug;
+
+        // Queued behind the commit, exactly as the balance frame is: a webhook consumer told a
+        // penalty was applied and then left with no such row is worse off than one told a
+        // moment late, because nothing ever retracts it (D2-B07).
+        await _outbox.EnqueueAsync(async token => await _bus.EmitAsync(new DomainEvent(
             Id: $"evt_{Guid.NewGuid():N}",
             Type: type,
-            TenantId: _tenant.TenantId, TenantSlug: _tenant.TenantSlug,
+            TenantId: tenantId, TenantSlug: tenantSlug,
             OccurredAt: entry.CreatedAt,
-            ActorUserId: entry.ActorUserId, ActorIsAdmin: entry.ActorUserId != entry.UserId,
+            ActorUserId: actorUserId, ActorIsAdmin: actorIsAdmin,
             SubjectUserId: entry.UserId,
             Data: new()
             {
@@ -150,11 +240,53 @@ public sealed class LedgerService
                 ["amount_credits"] = entry.AmountCredits,
                 ["booking_id"] = entry.RelatedBookingId,
                 ["reason"] = entry.Reason,
-            }), ct);
+            }), token), ct);
     }
 
-    private LedgerEntry Build(LedgerPosting posting) => new()
+    /// <summary>
+    /// Who performed this movement, as a webhook consumer should read it.
+    ///
+    /// <para>
+    /// <b>D2-B41.</b> This was <c>ActorIsAdmin: entry.ActorUserId != entry.UserId</c>, which is
+    /// wrong in both directions at once. Every SYSTEM posting — the no-show sweep's refund and
+    /// penalty, the no-show reversal's two legs, a displacement, a reinstatement — carries
+    /// <c>ActorUserId = Guid.Empty</c>, so all of them went out as
+    /// <c>actor.is_admin: true</c> with an <b>all-zero actor id</b>: an accounting consumer
+    /// reconciling by actor saw a phantom administrator issuing every automatic penalty the club
+    /// has ever applied. And in the other direction, a member paying for a friend's booking
+    /// differs from the subject and is not an admin either.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>Guid.Empty</c> becomes a <b>null</b> actor, which is what every other system emitter in
+    /// this tree already does (<c>MemberApprovalService</c> guards exactly this). The empty Guid
+    /// stays in the COLUMN — <c>BookingService</c> queries <c>l.ActorUserId == Guid.Empty</c> to
+    /// find system rows, and changing the column would be a schema migration in service of a
+    /// wire bug — so the translation happens here, at the wire, where the lie was.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>What is NOT claimed:</b> a human actor different from the subject is reported
+    /// <c>is_admin: true</c> only because this row is one of the four types mirrored above, and
+    /// three of those four are reachable only from an admin route. The honest test — does this
+    /// actor hold the admin role — needs a user read this method does not have and the callers
+    /// do not carry; <c>AdminTopUp</c> and <c>AdminAdjustment</c> are admin-only by route, and
+    /// the refund/penalty pair is system-posted. Recorded rather than papered over, so the next
+    /// reader knows which half is structural and which is inference.
+    /// </para>
+    /// </summary>
+    internal static (Guid? ActorUserId, bool ActorIsAdmin) ActorOf(LedgerEntry entry)
+        => entry.ActorUserId == Guid.Empty
+            ? (null, false)
+            : (entry.ActorUserId, entry.ActorUserId != entry.UserId);
+
+    // Block body, not an expression one: lizard's C# parser reads the `{` of a switch or an
+    // object initialiser as the END of the function and dumps the rest of the file into a
+    // *global* pseudo-function whose length trips `-L 200`. See memory/gotchas.md.
+    private LedgerEntry Build(LedgerPosting posting)
     {
+        return new LedgerEntry
+        {
         TenantId = _tenant.TenantId,
         UserId = posting.UserId,
         Type = posting.Type,
@@ -163,9 +295,10 @@ public sealed class LedgerService
         ConversionRate = posting.ConversionRate,
         RelatedBookingId = posting.RelatedBookingId,
         ActorUserId = posting.ActorUserId,
-        Reason = posting.Reason,
-        ExternalReference = posting.ExternalReference,
-    };
+            Reason = posting.Reason,
+            ExternalReference = posting.ExternalReference,
+        };
+    }
 
     public async Task<LedgerEntry> PostAsync(LedgerPosting posting, CancellationToken ct)
     {
@@ -185,9 +318,8 @@ public sealed class LedgerService
         _db.LedgerEntries.Add(entry);
         await _db.SaveChangesAsync(ct);
 
-        // Notify any live wallet-stream subscribers (admin top-ups, refunds, charges, etc.).
-        var balance = await GetBalanceAsync(posting.UserId, ct);
-        _broadcaster.Publish(posting.UserId, balance);
+        // Queued for after the commit, not published here — D2-B07 and RealtimeOutbox.
+        await PublishBalanceAsync(posting.UserId, posting.AmountCredits, ReasonFor(posting.Type), ct);
         await MirrorAsync(entry, ct);
 
         return entry;

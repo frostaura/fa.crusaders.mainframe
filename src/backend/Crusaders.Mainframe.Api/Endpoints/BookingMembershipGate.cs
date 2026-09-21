@@ -44,14 +44,20 @@ internal static class BookingMembershipGate
     public static async Task<IResult?> RefuseIfBarredAsync(
         MainframeDbContext db, Guid payerUserId, CancellationToken ct)
     {
+        // THREE codes now, not two. Ruling 15 added the third: a user with no membership row at
+        // all, which this gate used to let straight through — and which, at a door, opened the
+        // building. It carries no `status`, because there is no status to name; a screen that
+        // printed one would be inventing a decision the club never took.
+        var reason = await MembershipAccess.RefusalReasonAsync(db, payerUserId, ct);
+        if (reason is null) return null;
+
         var status = await MembershipAccess.StatusIfBarredAsync(db, payerUserId, ct);
-        if (status is null) return null;
 
         return Results.Json(
             new
             {
-                error = status == MembershipStatus.Suspended ? "member_suspended" : "member_not_active",
-                status = status.Value.ToString(),
+                error = reason,
+                status = status?.ToString(),
             },
             statusCode: 403);
     }

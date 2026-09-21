@@ -88,14 +88,14 @@ public sealed class TestHost : IAsyncDisposable
         // service the app does not would be the divergence this comment exists to prevent.
         // LightsCueTests constructs NullRelayClient directly to pin the interface's shape.
         services.AddMemoryCache();
-        services.AddSingleton<BalanceBroadcaster>();
-
-        // The two-stream fan-out and the light-state projection the activation path now
-        // writes. Registered here as well as in Program.cs because this host builds its own
-        // container: a service missing from one of the two is a suite that passes while the
-        // application cannot start, or the reverse.
+        // The three-stream fan-out, the post-commit outbox in front of it, and the
+        // light-state projection the activation path now writes. Registered here as well as
+        // in Program.cs because this host builds its own container: a service missing from
+        // one of the two is a suite that passes while the application cannot start, or the
+        // reverse.
         services.AddSingleton<Crusaders.Mainframe.Api.Services.Realtime.IRealtimeBus,
                               Crusaders.Mainframe.Api.Services.Realtime.InProcessRealtimeBus>();
+        services.AddScoped<Crusaders.Mainframe.Api.Services.Realtime.RealtimeOutbox>();
         services.AddScoped<CourtLightStateService>();
         services.AddScoped<DeviceErrorService>();
         services.AddScoped<DeviceFaultSink>();
@@ -113,6 +113,7 @@ public sealed class TestHost : IAsyncDisposable
         services.AddScoped<Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceKeyResolver>();
         services.AddScoped<LedgerService>();
         services.AddScoped<ScheduleService>();
+        services.AddScoped<BookingRules>();
         services.AddScoped<BookingService>();
         services.AddScoped<CourtActivationService>();
         services.AddScoped<BiometricService>();

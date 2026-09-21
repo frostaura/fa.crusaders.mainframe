@@ -35,12 +35,46 @@ public sealed class BookingService
     private readonly IEmailService _email;
     private readonly IEventBus _bus;
     private readonly AccessCodeService _codes;
+
+    /// <summary>
+    /// Every access, window, peak and cap rule, in one place. Asked TWICE on every booking —
+    /// once unlocked as a fast refusal, once under the payer lock as the authoritative one.
+    /// </summary>
+    private readonly BookingRules _rules;
+
+    /// <summary>
+    /// Holds this request's "tell the world" work until the transaction that produced it has
+    /// committed. Handed to every <see cref="PayerLock"/> this service opens; see
+    /// <see cref="Realtime.RealtimeOutbox"/> for what publishing before the commit cost.
+    /// </summary>
+    private readonly Realtime.RealtimeOutbox _outbox;
     private readonly ILogger<BookingService> _logger;
 
     public BookingService(
         MainframeDbContext db, ITenantContext tenant, LedgerService ledger, TenantSettingsAccessor settings,
-        IEmailService email, IEventBus bus, AccessCodeService codes, ILogger<BookingService> logger)
-    { _db = db; _tenant = tenant; _ledger = ledger; _settings = settings; _email = email; _bus = bus; _codes = codes; _logger = logger; }
+        IEmailService email, IEventBus bus, AccessCodeService codes, Realtime.RealtimeOutbox outbox,
+        BookingRules rules, ILogger<BookingService> logger)
+    {
+        _db = db; _tenant = tenant; _ledger = ledger; _settings = settings; _email = email; _bus = bus;
+        _codes = codes; _outbox = outbox; _rules = rules; _logger = logger;
+    }
+
+    /// <summary>
+    /// The subject of a rule evaluation: who is paying, who is acting, their class and their
+    /// groups for the club day the slot falls on.
+    /// </summary>
+    private async Task<RuleSubject> SubjectAsync(
+        BookingPayer payer, DateTimeOffset startsAt, TenantSettingsView settings, CancellationToken ct)
+    {
+        var membership = await _db.Memberships.AsNoTracking()
+            .FirstOrDefaultAsync(m => m.UserId == payer.UserId, ct);
+        var day = ClubClock.DateOf(settings, startsAt).DayOfWeek;
+
+        return new RuleSubject(
+            payer.UserId, payer.ActorId, payer.ActorIsAdmin,
+            membership?.MemberClass ?? MemberClass.Regular,
+            await _rules.GroupsForAsync(payer.UserId, day, settings, ct));
+    }
 
     /// <summary>
     /// A booking nobody is overriding anything for — the member's own, or an admin's
@@ -108,31 +142,20 @@ public sealed class BookingService
             b.StartsAt < endsAt && b.EndsAt > startsAt, ct);
         if (overlap) return new BookingResult.SlotTaken();
 
-        // Class / peak-hours / per-day-cap rules — admins bypass everything.
-        var isAdminActor = actorId != userId;
-        if (!isAdminActor)
-        {
-            // §5 "Operating hours per day per tenant: configurable". Enforced here and not
-            // only drawn on the grid, because the grid is not the only way in: a member
-            // could POST 03:00 on a Sunday, be charged for it, and then find the slot on
-            // no screen in the product — bought, unrefundable and invisible.
-            var hoursResult = CheckOperatingHoursRule(startsAt, endsAt, settings);
-            if (hoursResult is not null) return hoursResult;
+        // Every access, window, peak and cap rule, in ONE evaluator (see BookingRules). This is
+        // the FAST refusal: it reads an unlocked world, exactly as the balance check above it
+        // does, and the authoritative evaluation happens again inside CommitAsync under the payer
+        // lock. Two tabs beat a rule that is only read here — that is D2-B12, and it is why the
+        // cap has to be re-asked where the money is decided.
+        var subject = await SubjectAsync(payer, startsAt, settings, ct);
+        var slot = new RuleSlot(courtId, startsAt, endsAt, sliceCount, court.SlicePriceCredits, IsWalkUp: false);
 
-            var membership = await _db.Memberships.AsNoTracking().FirstOrDefaultAsync(m => m.UserId == userId, ct);
-            var memberClass = membership?.MemberClass ?? MemberClass.Regular;
+        var verdict = await _rules.EvaluateAsync(subject, slot, settings, ct);
+        if (verdict is RuleVerdict.Refused fastRefusal) return fastRefusal.Result;
 
-            // A.12 — peak hours league/senior exclusivity.
-            var peakResult = CheckPeakHoursRule(startsAt, endsAt, memberClass, settings);
-            if (peakResult is not null) return peakResult;
-
-            // A.4 / B.3 — per-day cap with same-day relaxation.
-            var capResult = await CheckPerDayCapAsync(userId, startsAt, endsAt, settings, ct);
-            if (capResult is not null) return capResult;
-        }
-
-        var pricePerSlice = court.SlicePriceCredits;      // Now in credits per blueprint A.8/A.9.
-        var totalCost = pricePerSlice * sliceCount;
+        // The member's own price, which their groups may have raised above the court's (GOAL
+        // item 3, most-restrictive = highest).
+        var totalCost = ((RuleVerdict.Allowed)verdict).SlicePriceCredits * sliceCount;
 
         // §8's third admin action: "Book on behalf of any member (charges that member's
         // credit; if insufficient, admin can override and create a negative balance,
@@ -156,7 +179,7 @@ public sealed class BookingService
         // moves is the WALLET, which is a sum over the ledger and has never been
         // constrained to be non-negative — DeviceEventHttpTests already covers a member
         // going negative when a release correction lands on spent credit.
-        var overdraftAuthorised = payer.AllowNegativeBalance && isAdminActor;
+        var overdraftAuthorised = payer.AllowNegativeBalance && payer.ActorIsAdmin && actorId != userId;
 
         var balance = await _ledger.GetBalanceAsync(userId, ct);
         if (!overdraftAuthorised && balance < totalCost) return new BookingResult.InsufficientBalance(balance, totalCost);
@@ -187,7 +210,8 @@ public sealed class BookingService
             DurationLabel: $"{settings.SliceMinutes * sliceCount} min",
             IsWalkUp: false,
             ExternalReference: externalReference,
-            AllowNegativeBalance: overdraftAuthorised), ct);
+            AllowNegativeBalance: overdraftAuthorised,
+            Rules: (subject, slot)), ct);
     }
 
     /// <summary>
@@ -256,11 +280,24 @@ public sealed class BookingService
 
         endsAt = now.AddMinutes(grantedMinutes);
 
+        // GOAL item 3: a walk-up carries the MEMBER'S price, not the court's. A member who pays
+        // 12 credits online and 8 at the box has found a discount nobody designed, and the box is
+        // the club. It must also honour the group WINDOW, because that is the club's access rule
+        // — see BookingRules, and walk_up_honours_day_cap for the cap half, which is off by
+        // default because the member is standing at a court that is about to go unlit.
+        var walkUpSubject = await SubjectAsync(
+            new BookingPayer(userId, actorId), now, settings, ct);
+        var walkUpSlot = new RuleSlot(courtId, now, endsAt, 1, court.SlicePriceCredits, IsWalkUp: true);
+
+        var walkUpVerdict = await _rules.EvaluateAsync(walkUpSubject, walkUpSlot, settings, ct);
+        if (walkUpVerdict is RuleVerdict.Refused walkUpRefusal) return walkUpRefusal.Result;
+
         // Pro rata, rounded to the ledger's own scale. Away-from-zero matches the penalty
         // arithmetic in CancelAsync; the club does not round in its own favour by accident
         // in one place and against itself in another.
         var totalCost = Math.Round(
-            court.SlicePriceCredits * grantedMinutes / settings.SliceMinutes, 2, MidpointRounding.AwayFromZero);
+            ((RuleVerdict.Allowed)walkUpVerdict).SlicePriceCredits * grantedMinutes / settings.SliceMinutes,
+            2, MidpointRounding.AwayFromZero);
 
         var balance = await _ledger.GetBalanceAsync(userId, ct);
         if (balance < totalCost) return new BookingResult.InsufficientBalance(balance, totalCost);
@@ -291,7 +328,8 @@ public sealed class BookingService
             DurationLabel: $"{grantedMinutes} min",
             IsWalkUp: true,
             ExternalReference: externalReference,
-            DeferConfirmation: true), ct);
+            DeferConfirmation: true,
+            Rules: (walkUpSubject, walkUpSlot)), ct);
     }
 
     /// <summary>
@@ -528,7 +566,13 @@ public sealed class BookingService
         decimal TotalCost, string DurationLabel, bool IsWalkUp,
         string? ExternalReference = null,
         bool AllowNegativeBalance = false,
-        bool DeferConfirmation = false);
+        bool DeferConfirmation = false,
+        // Who is booking and what for, so CommitAsync can re-ask the rules UNDER the payer
+        // lock. Positional rather than init-only deliberately: a block-bodied record here
+        // flips lizard's C# scoping for every method BELOW it in the file, and the gate then
+        // goes red on functions nobody edited — the instability whitelizard.txt's own header
+        // is about.
+        (RuleSubject Subject, RuleSlot Slot)? Rules = null);
 
     private async Task<BookingResult> CommitAsync(NewBooking spec, CancellationToken ct)
     {
@@ -548,9 +592,28 @@ public sealed class BookingService
         // So the authoritative check happens here, under a lock on the payer, in the same
         // transaction as the debit. See PayerLock for why it locks the payer rather than the
         // court, and why the key is derived rather than hashed.
-        await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, userId, ct);
+        await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, userId, _outbox, ct);
 
         var openingBalance = await _ledger.GetBalanceAsync(userId, ct);
+
+        // The AUTHORITATIVE rule evaluation, under the lock, in the same transaction as the
+        // debit — the same shape as the balance check beside it and for the same reason.
+        //
+        // D2-B12: the per-day cap was read once, unlocked, 420 lines before the lock was taken,
+        // so two simultaneous POSTs for one member both passed it and both committed. The lock
+        // is keyed on (tenant, payer), which IS the cap's unit, so the second request now sees
+        // the first's row.
+        if (spec.Rules is { } rules)
+        {
+            if (await _rules.EvaluateAsync(rules.Subject, rules.Slot, settings, ct)
+                is RuleVerdict.Refused refused)
+            {
+                // Detached for the same reason the balance refusal below detaches: the row was
+                // built optimistically and this request is over.
+                _db.Entry(booking).State = EntityState.Detached;
+                return refused.Result;
+            }
+        }
 
         // Read under the lock, so this is the answer and not a guess: nothing else can move
         // this payer's balance between here and the debit below, which makes
@@ -1221,7 +1284,7 @@ public sealed class BookingService
         var tail = await DisplacementAsync(booking, actorUserId, now, provisionalLitEnd, ct);
         var postings = legs.Postings.Concat(tail.Postings).ToList();
 
-        await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, payerUserId, ct);
+        await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, payerUserId, _outbox, ct);
 
         try
         {
@@ -2190,7 +2253,7 @@ public sealed class BookingService
             // within it, so a caller already holding a lock on this payer — the walk-up
             // path commits and releases the booker's before activating, but a future
             // caller that does not would simply nest — cannot deadlock against itself.
-            await using var volunteerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, reassignTo.Value, ct);
+            await using var volunteerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, reassignTo.Value, _outbox, ct);
 
             var volunteerBalance = await _ledger.GetBalanceAsync(reassignTo.Value, ct);
             if (volunteerBalance < booking.AmountChargedCredits)
@@ -2277,7 +2340,7 @@ public sealed class BookingService
         // uncharged bookings could otherwise have both activated at once and finish
         // negative. Same reentrancy note as the volunteer lock above. A refusal below
         // returns without committing, which rolls back — nothing to unwind.
-        await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, payerUserId, ct);
+        await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, payerUserId, _outbox, ct);
 
         var balance = await _ledger.GetBalanceAsync(payerUserId, ct);
         if (balance < booking.AmountChargedCredits)
@@ -2348,30 +2411,6 @@ public sealed class BookingService
         && pg.SqlState == "23505"
         && pg.ConstraintName == ExternalReferenceIndexName;
 
-    /// <summary>
-    /// Refuses court time the club is not open for.
-    ///
-    /// <para>
-    /// Both ends are checked against the LOCAL day the booking starts on, so a booking
-    /// that runs past close is refused rather than silently truncated — the member asked
-    /// for an hour and half of it does not exist. A booking that would cross local
-    /// midnight fails the same test, because its end lands past that day's close.
-    /// </para>
-    /// </summary>
-    private static BookingResult? CheckOperatingHoursRule(DateTimeOffset startsAt, DateTimeOffset endsAt, TenantSettingsView settings)
-    {
-        var tz = ResolveTz(settings.Timezone);
-        var localStart = TimeZoneInfo.ConvertTimeFromUtc(startsAt.UtcDateTime, tz);
-        var localEnd = TimeZoneInfo.ConvertTimeFromUtc(endsAt.UtcDateTime, tz);
-        var (openMinute, closeMinute) = settings.HoursFor(localStart.DayOfWeek);
-
-        var startMinute = (localStart.Hour * 60) + localStart.Minute;
-        var endMinute = startMinute + (int)Math.Round((localEnd - localStart).TotalMinutes);
-
-        if (startMinute >= openMinute && endMinute <= closeMinute) return null;
-        return new BookingResult.OutOfHours(MinutesToHhmm(openMinute), MinutesToHhmm(closeMinute));
-    }
-
     /// <summary>Minutes past midnight as <c>HH:mm</c> — the form the member is shown.</summary>
     internal static string MinutesToHhmm(int minutes)
     {
@@ -2382,83 +2421,29 @@ public sealed class BookingService
     /// <summary>The club's open window for the local day containing <paramref name="at"/>, as UTC instants plus the local labels to show.</summary>
     private sealed record OpenWindow(DateTimeOffset OpensAtUtc, DateTimeOffset ClosesAtUtc, string OpensAtLocal, string ClosesAtLocal);
 
+    /// <summary>
+    /// D2-B36 lived here in two ways at once. <c>ConvertTimeToUtc(SpecifyKind(date, Unspecified), tz)</c>
+    /// <b>throws</b> on a zone whose midnight does not exist and silently picks standard time on
+    /// an ambiguous one; and adding the opening minutes to that midnight is an hour out on any
+    /// day the clocks move between 00:00 and opening time, so the club either sells an hour it is
+    /// shut or refuses an hour it is open. <see cref="ClubClock.InstantAt"/> answers both.
+    /// </summary>
     private static OpenWindow OpenWindowUtc(DateTimeOffset at, TenantSettingsView settings)
     {
-        var tz = ResolveTz(settings.Timezone);
-        var local = TimeZoneInfo.ConvertTimeFromUtc(at.UtcDateTime, tz);
-        var (openMinute, closeMinute) = settings.HoursFor(local.DayOfWeek);
-        var midnightUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(local.Date, DateTimeKind.Unspecified), tz);
-        var midnight = new DateTimeOffset(midnightUtc, TimeSpan.Zero);
+        var day = ClubClock.DateOf(settings, at);
+        var (openMinute, closeMinute) = settings.HoursFor(day.DayOfWeek);
         return new OpenWindow(
-            midnight.AddMinutes(openMinute), midnight.AddMinutes(closeMinute),
+            ClubClock.InstantAt(settings, day, openMinute),
+            ClubClock.InstantAt(settings, day, closeMinute),
             MinutesToHhmm(openMinute), MinutesToHhmm(closeMinute));
     }
 
-    private static BookingResult? CheckPeakHoursRule(DateTimeOffset startsAt, DateTimeOffset endsAt, MemberClass memberClass, TenantSettingsView settings)
-    {
-        if (memberClass == MemberClass.LeagueOrSenior) return null;
-        var peak = settings.PeakHours();
-        if (peak is null) return null;
-        var (pStart, pEnd) = peak.Value;
-
-        // Convert to tenant-local time. If timezone is malformed, fall back to UTC.
-        TimeZoneInfo tz;
-        try { tz = TimeZoneInfo.FindSystemTimeZoneById(settings.Timezone); }
-        catch { tz = TimeZoneInfo.Utc; }
-        var local = TimeZoneInfo.ConvertTimeFromUtc(startsAt.UtcDateTime, tz);
-        var slotStart = TimeOnly.FromDateTime(local);
-        var inPeak = slotStart >= pStart && slotStart < pEnd;
-        if (!inPeak) return null;
-
-        // Regular members inside peak: only allowed within the last <peak_advance_hours_for_regular> hours before slot start.
-        var hoursUntil = (startsAt - DateTimeOffset.UtcNow).TotalHours;
-        if (hoursUntil > settings.PeakAdvanceHoursForRegular)
-            return new BookingResult.PeakHoursLeagueOnly(pStart.ToString("HH:mm"), pEnd.ToString("HH:mm"), settings.PeakAdvanceHoursForRegular);
-        return null;
-    }
-
-    private async Task<BookingResult?> CheckPerDayCapAsync(Guid userId, DateTimeOffset startsAt, DateTimeOffset endsAt, TenantSettingsView settings, CancellationToken ct)
-    {
-        if (settings.MemberPerDayMaxMinutes <= 0) return null;
-
-        // Compute the local-day window for the booking's start.
-        TimeZoneInfo tz;
-        try { tz = TimeZoneInfo.FindSystemTimeZoneById(settings.Timezone); }
-        catch { tz = TimeZoneInfo.Utc; }
-
-        var localDay = TimeZoneInfo.ConvertTimeFromUtc(startsAt.UtcDateTime, tz).Date;
-        // Build the local-day window in UTC — Npgsql requires offset 0 for timestamptz parameters.
-        var localDayStartUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(localDay, DateTimeKind.Unspecified), tz);
-        var localDayStart = new DateTimeOffset(localDayStartUtc, TimeSpan.Zero);
-        var localDayEnd = localDayStart.AddDays(1);
-
-        var existing = await _db.Bookings
-            .Where(b => b.UserId == userId
-                && b.Status != BookingStatus.Cancelled
-                && b.StartsAt < localDayEnd && b.EndsAt > localDayStart)
-            .ToListAsync(ct);
-
-        var minutesAlreadyBooked = existing.Sum(b => (b.EndsAt - b.StartsAt).TotalMinutes);
-        var thisBookingMinutes = (endsAt - startsAt).TotalMinutes;
-        if (minutesAlreadyBooked + thisBookingMinutes <= settings.MemberPerDayMaxMinutes) return null;
-
-        // Same-day relaxation per B.3: if the slot starts today AND there's no other booking on that
-        // court for the same window, the cap doesn't block it. (We've already done the overlap check.)
-        var bookingLocalDay = TimeZoneInfo.ConvertTimeFromUtc(startsAt.UtcDateTime, tz).Date;
-        var todayLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTimeOffset.UtcNow.UtcDateTime, tz).Date;
-        if (bookingLocalDay == todayLocal) return null;
-
-        return new BookingResult.PerDayCapExceeded(
-            CapMinutes: settings.MemberPerDayMaxMinutes,
-            AlreadyBookedMinutes: (int)Math.Round(minutesAlreadyBooked),
-            AttemptedMinutes: (int)Math.Round(thisBookingMinutes));
-    }
-
-    private static TimeZoneInfo ResolveTz(string id)
-    {
-        try { return TimeZoneInfo.FindSystemTimeZoneById(id); }
-        catch { return TimeZoneInfo.Utc; }
-    }
+    /// <summary>
+    /// The club's zone. One of the four private copies D2-B36 names, now delegating to the one
+    /// implementation — each copy swallowed its own exception and fell back to UTC separately, so
+    /// a club with a mistyped zone ran its bookings in one zone and its door log in another.
+    /// </summary>
+    private static TimeZoneInfo ResolveTz(string id) => ClubClock.ZoneById(id);
 
     /// <summary>
     /// The receipt PDF that rides on the booking confirmation, per spec §11.
@@ -2578,7 +2563,24 @@ public sealed class BookingService
 /// overdraw the actor's own wallet, and it defaults to <c>false</c> so no existing caller
 /// acquires it by accident.
 /// </param>
-public readonly record struct BookingPayer(Guid UserId, Guid ActorId, bool AllowNegativeBalance = false);
+/// <param name="ActorIsAdmin">
+/// Whether the ACTOR holds the admin role, taken from the route group's claim.
+///
+/// <para>
+/// <b>D2-B13.</b> This used to be inferred as <c>actorId != userId</c>, which is wrong in both
+/// directions at once: an admin booking for THEMSELVES was not exempt and was refused by peak
+/// hours and the per-day cap, and nothing on the path ever asked whether the actor held the role
+/// at all. <c>CancelAsync</c> already takes it explicitly, precisely because inferring it from
+/// ownership turned out to be an in-tenant IDOR.
+/// </para>
+///
+/// <para>
+/// Defaults to <c>false</c>, so no existing call site acquires an exemption by accident — the
+/// same defensive default <paramref name="AllowNegativeBalance"/> already uses.
+/// </para>
+/// </param>
+public readonly record struct BookingPayer(
+    Guid UserId, Guid ActorId, bool AllowNegativeBalance = false, bool ActorIsAdmin = false);
 
 public abstract record BookingResult
 {
@@ -2616,7 +2618,79 @@ public abstract record BookingResult
 
     /// <summary>The club is shut for the whole or part of the requested window. Carries that day's hours so the member is told when to come back.</summary>
     public sealed record OutOfHours(string OpensAt, string ClosesAt) : BookingResult;
-    public sealed record PerDayCapExceeded(int CapMinutes, int AlreadyBookedMinutes, int AttemptedMinutes) : BookingResult;
+    /// <summary>
+    /// The MINUTES cap — blueprint A.4's, which has always existed and until now did not work.
+    ///
+    /// <para>
+    /// The three positional figures are unchanged, so no existing client breaks; the three
+    /// init-only ones are what item 19 needs the sentence to carry. <c>ResetsAt</c> is on the
+    /// wire so the client never has to compute a club midnight in a browser, which is D2-B33
+    /// waiting to happen on the other side of the wire.
+    /// </para>
+    /// </summary>
+    public sealed record PerDayCapExceeded(int CapMinutes, int AlreadyBookedMinutes, int AttemptedMinutes)
+        : BookingResult
+    {
+        /// <summary>The group whose lower cap bound this member, or null when the club's own number did.</summary>
+        public string? BoundByGroupName { get; init; }
+
+        /// <summary>The club day the cap was counted over, as the club reckons days.</summary>
+        public string? ClubDay { get; init; }
+
+        /// <summary>When that day ends — the member's "they reset at midnight", in the club's own offset.</summary>
+        public DateTimeOffset? ResetsAt { get; init; }
+    }
+
+    /// <summary>
+    /// GOAL item 19's cap, in SLOTS — the unit Dean asked for and the unit a grid can lock
+    /// buttons against.
+    ///
+    /// <para>
+    /// Reported in preference to the minutes twin when both are exceeded, because it is the one
+    /// the member's screen is counting. Every figure the sentence needs is here, so the client
+    /// composes "You have used all 4 of your slots for Tuesday. They reset at midnight." without
+    /// fetching anything else.
+    /// </para>
+    /// </summary>
+    /// <param name="RelaxationAvailable">
+    /// Whether a slot starting soon would be allowed anyway under blueprint B.3 — the difference
+    /// between "come back tomorrow" and "there is a court free at 19:00 if you want it".
+    /// </param>
+    public sealed record PerDaySlotCapExceeded(
+        int CapSlots,
+        int BookedSlots,
+        int AttemptedSlots,
+        int RemainingSlots,
+        string? BoundByGroupName,
+        string ClubDay,
+        DateTimeOffset ResetsAt,
+        bool RelaxationAvailable) : BookingResult;
+
+    /// <summary>
+    /// GOAL item 3: the member's groups do not allow this time of day.
+    ///
+    /// <para>
+    /// Carries the windows they MAY book in, because "not now" without "then" is a refusal a
+    /// technology-averse member cannot act on.
+    /// </para>
+    /// </summary>
+    public sealed record GroupWindow(
+        IReadOnlyList<string> GroupNames,
+        string Day,
+        IReadOnlyList<(string Start, string End)> AllowedWindows) : BookingResult;
+
+    /// <summary>
+    /// The member is in two or more groups whose windows do not overlap on this day, so there is
+    /// nothing at all they can book.
+    ///
+    /// <para>
+    /// A distinct result rather than an empty <see cref="GroupWindow"/>, because the honest
+    /// sentence is completely different — "you are in two groups whose booking times do not
+    /// overlap, so there is nothing you can book on a Tuesday; please ask the club" — and because
+    /// an empty grid reads to a member as the club being shut.
+    /// </para>
+    /// </summary>
+    public sealed record NoBookableWindow(IReadOnlyList<string> GroupNames, string Day) : BookingResult;
 
     /// <summary>
     /// A walk-up truncated to nothing — the next booking starts now, or the request was for

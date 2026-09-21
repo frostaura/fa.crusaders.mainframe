@@ -73,7 +73,14 @@ public sealed class ConcurrentDecisionTests
             // otherwise refuse the second for the cap rather than the balance — and which
             // limit a concurrent attempt hits first is exactly the timing this test must not
             // depend on.
-            SettingsJson = """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"slice_price_credits":8,"grace_window_minutes":5,"penalty_pct":30,"penalty_window_minutes":15,"advance_booking_days":30,"member_per_day_max_minutes":600,"timezone":"UTC"}""",
+            // member_max_slots_per_day is 0 — UNLIMITED — deliberately, and it is the pair of the
+            // 600-minute line beside it. Every test in this class races two requests for the same
+            // member, which is exactly what the per-day cap now refuses under the payer lock
+            // (GOAL item 19 / D2-B12). A club left on the default of 4 slots would have the CAP
+            // answer these races instead of the rule each test is named for, and the tests would
+            // go on passing while proving something else entirely. The cap's own concurrency is
+            // pinned in BookingCapAndGroupTests, where it is the subject rather than the noise.
+            SettingsJson = """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"slice_price_credits":8,"grace_window_minutes":5,"penalty_pct":30,"penalty_window_minutes":15,"advance_booking_days":30,"member_per_day_max_minutes":600,"member_max_slots_per_day":0,"timezone":"UTC"}""",
         });
 
         var member = new User { TenantId = tenant.Id, Email = $"m-{slug}@test.local", PasswordHash = "x", EmailVerified = true };

@@ -1,4 +1,5 @@
 using Crusaders.Mainframe.Api.Persistence;
+using Crusaders.Mainframe.Api.Services.Realtime;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 
@@ -39,20 +40,35 @@ namespace Crusaders.Mainframe.Api.Services;
 public sealed class PayerLock : IAsyncDisposable
 {
     private readonly IDbContextTransaction? _transaction;
+    private readonly RealtimeOutbox _outbox;
     private bool _committed;
 
-    private PayerLock(IDbContextTransaction? transaction) => _transaction = transaction;
+    private PayerLock(IDbContextTransaction? transaction, RealtimeOutbox outbox)
+    {
+        _transaction = transaction;
+        _outbox = outbox;
+        // Everything the enclosed work wants to tell the world is held from here. See
+        // RealtimeOutbox: the balance and the webhooks used to be published the moment the save
+        // returned, which on this path is INSIDE an uncommitted transaction (D2-B07).
+        _outbox.Enter();
+    }
 
     /// <summary>
     /// Takes the lock, opening a transaction to scope it to. Returns a no-op guard when the
     /// provider cannot support one.
     /// </summary>
+    /// <param name="outbox">
+    /// The request's realtime outbox. Taken even on the no-transaction path, so the in-memory
+    /// provider the unit suites run on has the same publish-on-commit ordering as Postgres —
+    /// otherwise the ordering would only ever be exercised by the boundary tests, which is how
+    /// this defect survived in the first place.
+    /// </param>
     public static async Task<PayerLock> BeginAsync(
-        MainframeDbContext db, Guid tenantId, Guid payerUserId, CancellationToken ct)
+        MainframeDbContext db, Guid tenantId, Guid payerUserId, RealtimeOutbox outbox, CancellationToken ct)
     {
         if (!db.Database.IsNpgsql())
         {
-            return new PayerLock(null);
+            return new PayerLock(null, outbox);
         }
 
         // An ambient transaction means somebody up the stack already owns the boundary;
@@ -65,7 +81,7 @@ public sealed class PayerLock : IAsyncDisposable
         await db.Database.ExecuteSqlRawAsync(
             "SELECT pg_advisory_xact_lock({0})", [KeyFor(tenantId, payerUserId)], ct);
 
-        return new PayerLock(owned);
+        return new PayerLock(owned, outbox);
     }
 
     /// <summary>
@@ -80,10 +96,21 @@ public sealed class PayerLock : IAsyncDisposable
             await _transaction.CommitAsync(ct);
         }
         _committed = true;
+
+        // AFTER the commit, and only then: this is the line that makes the member's live
+        // balance and every webhook describe a world that actually exists.
+        await _outbox.LeaveAsync(committed: true, ct);
     }
 
     public async ValueTask DisposeAsync()
     {
+        if (!_committed)
+        {
+            // A refusal path. Whatever the enclosed work queued describes money that did not
+            // move, so it is dropped rather than published — the whole of D2-B07.
+            await _outbox.LeaveAsync(committed: false, CancellationToken.None);
+        }
+
         if (_transaction is null)
         {
             return;

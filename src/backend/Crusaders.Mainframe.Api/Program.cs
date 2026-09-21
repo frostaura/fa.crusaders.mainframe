@@ -277,12 +277,17 @@ builder.Services.AddScoped<DeviceRegistryService>();
 builder.Services.AddScoped<DeviceKeyResolver>();
 builder.Services.AddScoped<TenantSecretsAccessor>();
 builder.Services.AddScoped<IPaymentProvider, Crusaders.Mainframe.Api.Payments.PayFast.PayFastProvider>();
-builder.Services.AddSingleton<BalanceBroadcaster>();
-// The fan-out behind the two ADMIN streams (control board, IoT monitoring). Singleton for
-// the same reason the balance broadcaster is: the channels have to survive across requests.
-// The wallet stream deliberately keeps its own broadcaster — see IRealtimeBus.
+// The fan-out behind every SSE stream — the member's wallet, the admin control board and the
+// IoT monitoring feed. Singleton, so subscriptions survive across requests; in-process, which
+// is correct for the single backend container docker-compose.prod.yml runs and which
+// DeploymentPostureTests is what stops a compose file quietly contradicting. It replaced
+// BalanceBroadcaster outright: one keyed-by-(tenant, scope, subject) bus rather than a
+// wallet-only fan-out keyed on a bare user id.
 builder.Services.AddSingleton<Crusaders.Mainframe.Api.Services.Realtime.IRealtimeBus,
-                              Crusaders.Mainframe.Api.Services.Realtime.InProcessRealtimeBus>();
+    Crusaders.Mainframe.Api.Services.Realtime.InProcessRealtimeBus>();
+// SCOPED, not singleton: it holds one request's unpublished frames until that request's
+// transaction commits. See RealtimeOutbox for what publishing before the commit cost.
+builder.Services.AddScoped<Crusaders.Mainframe.Api.Services.Realtime.RealtimeOutbox>();
 // The one writer for the IoT error log. Scoped: it takes the request's DbContext and tenant,
 // and its background variant opens a scope of its own.
 builder.Services.AddScoped<DeviceErrorService>();
@@ -292,6 +297,7 @@ builder.Services.AddScoped<ControlBoardReader>();
 builder.Services.AddSingleton<AccessTokenRevocationList>();
 builder.Services.AddScoped<LedgerService>();
 builder.Services.AddScoped<ScheduleService>();
+builder.Services.AddScoped<BookingRules>();
 builder.Services.AddScoped<BookingService>();
 builder.Services.AddScoped<AdminBlockService>();
 // The activation service's non-decision dependencies, bundled — see ActivationPlumbing.
@@ -517,6 +523,7 @@ app.MapAuthEndpoints();
 app.MapAdminMemberEndpoints();
 app.MapWalletEndpoints();
 app.MapScheduleEndpoints();
+app.MapMemberGroupEndpoints();
 app.MapBookingEndpoints();
 app.MapAdminConfigEndpoints();
 app.MapAdminDeviceEndpoints();

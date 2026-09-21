@@ -242,8 +242,10 @@ public class OperatingHoursTests
 
         // "Admin always bypasses caps and peak-hour rules" (A.6/A.11), and the club's own
         // staff are the people who legitimately need a court at 06:00 on a Saturday.
+        // ActorIsAdmin is stated rather than inferred from actorId != userId (D2-B13).
+        var payer = new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, ActorIsAdmin: true);
         Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
-            host.Courts[0].Id, host.PlayerUser.Id, host.AdminUser.Id, At(Saturday, 6, 0), sliceCount: 1, default));
+            host.Courts[0].Id, payer, At(Saturday, 6, 0), sliceCount: 1, default));
     }
 
     // ---- The grid is drawn to the same hours the rule enforces ----

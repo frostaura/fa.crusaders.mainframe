@@ -159,7 +159,10 @@ public class CourtActivationService
             .Where(b => b.CourtId == courtId
                         && b.Status == BookingStatus.Booked
                         && b.StartsAt < end && b.EndsAt > start
-                        && !_db.Memberships.Any(m => m.UserId == b.UserId && m.Status != MembershipStatus.Active))
+                        // Ruling 15: an ACTIVE row, not merely the absence of a non-active one.
+                        // The old shape let a booking with NO membership row through, which is
+                        // the same conflation that opened a door — see MembershipAccess.
+                        && _db.Memberships.Any(m => m.UserId == b.UserId && m.Status == MembershipStatus.Active))
             .OrderBy(b => b.StartsAt)
             .ToListAsync(ct);
     }
@@ -177,7 +180,10 @@ public class CourtActivationService
                         && b.UserId == userId
                         && b.Status == BookingStatus.Booked
                         && b.StartsAt < end && b.EndsAt > start
-                        && !_db.Memberships.Any(m => m.UserId == b.UserId && m.Status != MembershipStatus.Active))
+                        // Ruling 15: an ACTIVE row, not merely the absence of a non-active one.
+                        // The old shape let a booking with NO membership row through, which is
+                        // the same conflation that opened a door — see MembershipAccess.
+                        && _db.Memberships.Any(m => m.UserId == b.UserId && m.Status == MembershipStatus.Active))
             .OrderBy(b => b.StartsAt)
             .FirstOrDefaultAsync(ct);
     }

@@ -21,6 +21,33 @@ public enum LedgerEntryType
     /// </para>
     /// </summary>
     LightsPurchase = 7,
+
+    /// <summary>
+    /// Money the club took by hand and converted to credits — cash at the desk, an EFT that
+    /// cleared, a card taken offline.
+    ///
+    /// <para>
+    /// <b>Not <see cref="AdminAdjustment"/>, and the difference is the club's revenue figure.</b>
+    /// <c>docs/specs/reporting.md</c> defines Revenue as <c>top_up</c> net of
+    /// <c>payment_reversal</c>, and <c>AdminAdjustment</c> sits in the
+    /// <see cref="LedgerEntryTypes.Adjustment"/> bucket — so every cash top-up an admin took at
+    /// the desk was invisible to the club's own revenue report, and the club's revenue figure
+    /// was wrong by every rand it took over the counter.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Strictly positive</b>, and refused otherwise. Mixing signs inside a directional
+    /// bucket is what makes a per-row listing unreadable; a goodwill credit or a book
+    /// correction is an <see cref="AdminAdjustment"/> and says so.
+    /// </para>
+    ///
+    /// <para>
+    /// <i>Rejected:</i> counting <c>AdminAdjustment &gt; 0</c> as revenue. A signed type netted
+    /// into a directional bucket is exactly the "field that mixes two things" the repo forbids,
+    /// and it would silently reclassify every goodwill credit ever issued as money the club took.
+    /// </para>
+    /// </summary>
+    AdminTopUp = 8,
 }
 
 /// <summary>
@@ -44,8 +71,18 @@ public enum LedgerEntryType
 /// </summary>
 public static class LedgerEntryTypes
 {
-    /// <summary>Money in: a member funding their account.</summary>
-    public static readonly LedgerEntryType[] Funding = [LedgerEntryType.TopUp];
+    /// <summary>
+    /// Money in: a member funding their account, however the club took it.
+    ///
+    /// <para>
+    /// <see cref="LedgerEntryType.AdminTopUp"/> belongs beside <see cref="LedgerEntryType.TopUp"/>
+    /// and not in <see cref="Adjustment"/>, because a R200 note handed over the counter is the
+    /// same event to the club's books as a R200 card payment. Putting it anywhere else is what
+    /// made the revenue report wrong by every cash top-up the club has ever taken.
+    /// </para>
+    /// </summary>
+    public static readonly LedgerEntryType[] Funding =
+        [LedgerEntryType.TopUp, LedgerEntryType.AdminTopUp];
 
     /// <summary>Money out for court time. Both booked slots and light time bought at the court.</summary>
     public static readonly LedgerEntryType[] Spend =

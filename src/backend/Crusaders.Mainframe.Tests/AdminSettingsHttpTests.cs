@@ -320,7 +320,7 @@ public sealed class AdminSettingsHttpTests
         // The three out-of-range numbers read back as their bounds — what the engine will
         // actually use — rather than as what the column says.
         Assert.Equal(BoxSettings.MaxLcdRevertSeconds, shown.GetProperty("lcd_revert_seconds").GetInt32());
-        Assert.Equal(RealtimeSettings.MaxKeepAliveSeconds, shown.GetProperty("sse_keepalive_seconds").GetInt32());
+        Assert.Equal(RealtimeSettings.MaxKeepaliveSeconds, shown.GetProperty("sse_keepalive_seconds").GetInt32());
         Assert.Equal(MonitoringSettings.MinRetentionDays, shown.GetProperty("device_error_retention_days").GetInt32());
     }
 
@@ -1241,5 +1241,257 @@ public sealed class AdminSettingsHttpTests
         // And the refusal is whole: nothing was half-written.
         var after = await EngineAsync(factory, seeded);
         Assert.Equal((7 * 60, 20 * 60), after.HoursFor(DayOfWeek.Saturday));
+    }
+
+    /// <summary>
+    /// <b>D2-B06.</b> <c>slice_price_credits</c> was required, written unconditionally, and
+    /// validated by nothing. The court POST refuses a negative price and then falls back to
+    /// this setting when one is omitted, so a club could be given a court on which every
+    /// booking CREDITED the member — <c>{"saved":true}</c> and no sign anywhere.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(-500, "slice_price_credits_out_of_range")]
+    [InlineData(-0.01, "slice_price_credits_out_of_range")]
+    [InlineData(100_000_000, "slice_price_credits_out_of_range")]
+    public async Task A_slice_price_outside_its_bounds_is_refused(decimal price, string expected)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var body = Baseline();
+        body["slicePriceCredits"] = price;
+        var save = await client.PutAsJsonAsync(SettingsPath, body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
+        Assert.Equal(expected, (await save.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+
+        // And nothing was half-written: the club still prices a court the way it did.
+        Assert.Equal(8m, (await EngineAsync(factory, seeded)).DefaultSlicePriceCredits);
+    }
+
+    /// <summary>
+    /// Half a cent is not a price. The ledger column is <c>numeric(10,2)</c>, so the database
+    /// rounds it and every figure quoted back to the member then disagrees with the row —
+    /// the same failure the admin credit adjustment already refuses <c>amount_not_whole_cents</c> for.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_slice_price_that_is_not_whole_cents_is_refused()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var body = Baseline();
+        body["slicePriceCredits"] = 8.005m;
+        var save = await client.PutAsJsonAsync(SettingsPath, body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
+        Assert.Equal("slice_price_credits_not_whole_cents",
+            (await save.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+    }
+
+    /// <summary>
+    /// Every key added for GOAL items 3, 19 and 8 is served on the GET at its documented
+    /// default, binds under BOTH spellings, and is unchanged by a save that does not mention
+    /// it — the three properties that together make a settings key real rather than decorative.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData("memberMaxSlotsPerDay", "member_max_slots_per_day", 4, 6)]
+    [InlineData("member_max_slots_per_day", "member_max_slots_per_day", 4, 6)]
+    [InlineData("sameDayRelaxationWindowMinutes", "same_day_relaxation_window_minutes", 120, 45)]
+    [InlineData("same_day_relaxation_window_minutes", "same_day_relaxation_window_minutes", 120, 45)]
+    [InlineData("sseKeepaliveSeconds", "sse_keepalive_seconds", 25, 40)]
+    [InlineData("sse_keepalive_seconds", "sse_keepalive_seconds", 25, 40)]
+    [InlineData("realtimeFallbackAfterFailures", "realtime_fallback_after_failures", 3, 5)]
+    [InlineData("realtimeFallbackWindowSeconds", "realtime_fallback_window_seconds", 120, 300)]
+    [InlineData("realtimePollSecondsWallet", "realtime_poll_seconds_wallet", 20, 60)]
+    public async Task A_new_numeric_setting_is_served_writable_and_survives_an_unrelated_save(
+        string field, string wireKey, int documentedDefault, int chosen)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var before = await client.GetFromJsonAsync<JsonElement>(SettingsPath);
+        Assert.Equal(documentedDefault, before.GetProperty(wireKey).GetInt32());
+
+        var body = Baseline();
+        body[field] = chosen;
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(SettingsPath, body)).StatusCode);
+
+        Assert.Equal(chosen, (await client.GetFromJsonAsync<JsonElement>(SettingsPath)).GetProperty(wireKey).GetInt32());
+
+        // Omitted means unchanged.
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(SettingsPath, Baseline())).StatusCode);
+        Assert.Equal(chosen, (await client.GetFromJsonAsync<JsonElement>(SettingsPath)).GetProperty(wireKey).GetInt32());
+    }
+
+    /// <summary>The three new booleans, on the same terms.</summary>
+    [SkippableTheory]
+    [InlineData("sameDayCapRelaxation", "same_day_cap_relaxation", true, false)]
+    [InlineData("same_day_cap_relaxation", "same_day_cap_relaxation", true, false)]
+    [InlineData("walkUpHonoursDayCap", "walk_up_honours_day_cap", false, true)]
+    [InlineData("walk_up_honours_day_cap", "walk_up_honours_day_cap", false, true)]
+    [InlineData("memberGroupsEnabled", "member_groups_enabled", true, false)]
+    public async Task A_new_boolean_setting_is_served_writable_and_survives_an_unrelated_save(
+        string field, string wireKey, bool documentedDefault, bool chosen)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var before = await client.GetFromJsonAsync<JsonElement>(SettingsPath);
+        Assert.Equal(documentedDefault, before.GetProperty(wireKey).GetBoolean());
+
+        var body = Baseline();
+        body[field] = chosen;
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(SettingsPath, body)).StatusCode);
+        Assert.Equal(chosen, (await client.GetFromJsonAsync<JsonElement>(SettingsPath)).GetProperty(wireKey).GetBoolean());
+
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(SettingsPath, Baseline())).StatusCode);
+        Assert.Equal(chosen, (await client.GetFromJsonAsync<JsonElement>(SettingsPath)).GetProperty(wireKey).GetBoolean());
+    }
+
+    /// <summary>
+    /// The bounds. <c>sse_keepalive_seconds</c> carries the reason in its BODY rather than only
+    /// a code: 55 is not a round number, it is the largest value that still sits under nginx's
+    /// unset-and-therefore-60-second <c>proxy_read_timeout</c>, and an admin told only
+    /// "out of range" would reasonably try 60 next and break the stream in a way that reports
+    /// nothing.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData("memberMaxSlotsPerDay", -1, "member_max_slots_per_day_out_of_range")]
+    [InlineData("memberMaxSlotsPerDay", 97, "member_max_slots_per_day_out_of_range")]
+    [InlineData("sameDayRelaxationWindowMinutes", -1, "same_day_relaxation_window_out_of_range")]
+    [InlineData("sameDayRelaxationWindowMinutes", 1441, "same_day_relaxation_window_out_of_range")]
+    [InlineData("sseKeepaliveSeconds", 4, "sse_keepalive_seconds_out_of_range")]
+    [InlineData("sseKeepaliveSeconds", 60, "sse_keepalive_seconds_out_of_range")]
+    [InlineData("realtimeFallbackAfterFailures", 0, "realtime_fallback_after_failures_out_of_range")]
+    [InlineData("realtimeFallbackAfterFailures", 11, "realtime_fallback_after_failures_out_of_range")]
+    [InlineData("realtimeFallbackWindowSeconds", 29, "realtime_fallback_window_out_of_range")]
+    [InlineData("realtimePollSecondsWallet", 4, "realtime_poll_wallet_out_of_range")]
+    [InlineData("realtimePollSecondsWallet", 301, "realtime_poll_wallet_out_of_range")]
+    public async Task A_new_number_outside_its_bounds_is_refused(string field, int value, string expected)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var body = Baseline();
+        body[field] = value;
+        var save = await client.PutAsJsonAsync(SettingsPath, body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
+        var problem = await save.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(expected, problem.GetProperty("error").GetString());
+
+        if (expected == "sse_keepalive_seconds_out_of_range")
+        {
+            Assert.Equal(55, problem.GetProperty("max_seconds").GetInt32());
+            Assert.Equal("proxy_idle_timeout_60s", problem.GetProperty("because").GetString());
+        }
+    }
+
+    /// <summary>
+    /// The door release default moved 3 -> 15 (GOAL item 2), and the page must show the number
+    /// the door will actually run — not the one it used to.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_settings_page_shows_a_fifteen_second_door_release_by_default()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var shown = await client.GetFromJsonAsync<JsonElement>(SettingsPath);
+        Assert.Equal(15, shown.GetProperty("gate_unlock_seconds").GetInt32());
+    }
+
+    /// <summary>
+    /// GOAL item 12 / ruling 4: which glyph pair a confirm/decline button wears. Thumbs by
+    /// default — the founder asked for them by name and the club is South African, where a
+    /// thumbs-up reads as plain agreement.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData("actionGlyphs")]
+    [InlineData("action_glyphs")]
+    public async Task The_glyph_set_is_served_and_binds_under_either_spelling(string field)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        Assert.Equal("thumbs",
+            (await client.GetFromJsonAsync<JsonElement>(SettingsPath)).GetProperty("action_glyphs").GetString());
+
+        var body = Baseline();
+        body[field] = "marks";
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(SettingsPath, body)).StatusCode);
+
+        Assert.Equal("marks",
+            (await client.GetFromJsonAsync<JsonElement>(SettingsPath)).GetProperty("action_glyphs").GetString());
+
+        // Omitted means unchanged.
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(SettingsPath, Baseline())).StatusCode);
+        Assert.Equal("marks",
+            (await client.GetFromJsonAsync<JsonElement>(SettingsPath)).GetProperty("action_glyphs").GetString());
+    }
+
+    /// <summary>
+    /// Refused rather than coerced, which is what lets the GET render the RESOLVED value
+    /// honestly — the same posture gate_access_policy takes.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData("Thumbs")]
+    [InlineData("emoji")]
+    [InlineData("")]
+    public async Task A_glyph_set_outside_the_closed_pair_is_refused(string value)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var body = Baseline();
+        body["actionGlyphs"] = value;
+        var save = await client.PutAsJsonAsync(SettingsPath, body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
+        Assert.Equal("action_glyphs_invalid",
+            (await save.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+    }
+
+    /// <summary>
+    /// And a hand-edited nonsense value falls back to thumbs rather than to a button nobody can
+    /// draw — unlike a door policy, this decides an ICON, so failing closed would cost a club a
+    /// screen it cannot use for no safety gained.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_hand_edited_glyph_set_falls_back_rather_than_breaking_the_button()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory, """{"action_glyphs":"hieroglyphs"}""");
+        var client = AdminClient(factory, seeded);
+
+        Assert.Equal("thumbs",
+            (await client.GetFromJsonAsync<JsonElement>(SettingsPath)).GetProperty("action_glyphs").GetString());
     }
 }

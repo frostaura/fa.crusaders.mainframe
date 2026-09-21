@@ -205,6 +205,17 @@
       }
     },
     {
+      "id": "gate-scan-response-denied-no-membership",
+      "kind": "gate",
+      "note": "the scanner read a real, live ident code for a real user of this club who has NO membership row at all. Previously this opened the door: MembershipAccess tested 'the club recorded a decision and it was not approval', and about such a user it recorded none, so under active_member the door released for somebody the club has never admitted. Named rather than folded into member_not_active because the desk's next action differs — there is nothing to un-suspend, the person needs enrolling — and the door says neither out loud.",
+      "body_hex": "7b226f70656e6564223a66616c73652c22726561736f6e223a226e6f5f6d656d62657273686970222c22756e6c6f636b5f7365636f6e6473223a307d",
+      "expect": {
+        "opened": false,
+        "reason": "no_membership",
+        "unlock_seconds": 0
+      }
+    },
+    {
       "id": "gate-scan-response-denied-no-booking",
       "kind": "gate",
       "note": "policy booking_window only: an active member with nothing booked inside [StartsAt - gate_early_entry_minutes, EndsAt]. Unreachable under the default active_member policy, which is why the policy is a tenant setting and this is a vector.",

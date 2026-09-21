@@ -964,7 +964,133 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.ToTable("ledger_entries", null, t =>
                         {
-                            t.HasCheckConstraint("ck_ledger_entries_type_range", "\"Type\" BETWEEN 0 AND 7");
+                            t.HasCheckConstraint("ck_ledger_entries_type_range", "\"Type\" BETWEEN 0 AND 8");
+                        });
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.MemberGroup", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("AdvanceBookingDays")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<decimal?>("FlatSlicePriceCredits")
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<bool>("IsSystemDefault")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("MaxMinutesPerDay")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("MaxSlotsPerDay")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("PriceMultiplierBps")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("PricingMode")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Status");
+
+                    b.ToTable("member_groups", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_member_groups_pricing", "(\"PricingMode\" = 0) OR (\"PricingMode\" = 1 AND \"PriceMultiplierBps\" BETWEEN 0 AND 1000000) OR (\"PricingMode\" = 2 AND \"FlatSlicePriceCredits\" IS NOT NULL AND \"FlatSlicePriceCredits\" >= 0)");
+                        });
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.MemberGroupMember", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("AddedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("AddedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("GroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "UserId");
+
+                    b.HasIndex("TenantId", "GroupId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("member_group_members", (string)null);
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.MemberGroupWindow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("DayOfWeek")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("EndMinute")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("GroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("StartMinute")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "GroupId", "DayOfWeek");
+
+                    b.ToTable("member_group_windows", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_member_group_windows_range", "\"StartMinute\" >= 0 AND \"EndMinute\" <= 1440 AND \"EndMinute\" > \"StartMinute\"");
                         });
                 });
 
@@ -1074,12 +1200,12 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ExternalReference")
-                        .IsUnique()
-                        .HasFilter("\"ExternalReference\" IS NOT NULL");
-
                     b.HasIndex("IdempotencyKey")
                         .IsUnique();
+
+                    b.HasIndex("TenantId", "ExternalReference")
+                        .IsUnique()
+                        .HasFilter("\"ExternalReference\" IS NOT NULL");
 
                     b.HasIndex("TenantId", "UserId", "CreatedAt");
 

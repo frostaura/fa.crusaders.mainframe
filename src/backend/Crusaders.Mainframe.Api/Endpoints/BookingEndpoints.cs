@@ -10,7 +10,14 @@ public static class BookingEndpoints
 {
     public static IEndpointRouteBuilder MapBookingEndpoints(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/v1/bookings").RequireAuthorization();
+        // D2-B43: these routes carried no limiter, only the global 600/min per IP. With no
+        // slice-boundary validation (fixed in BookingService) an authenticated member could
+        // issue unbounded bookings at arbitrary offsets, each taking a PayerLock and a GiST
+        // index write. `auth` is the right ceiling: booking is a deliberate human action, not a
+        // poll, and the device surface has its own policy.
+        var g = app.MapGroup("/api/v1/bookings")
+            .RequireAuthorization()
+            .RequireRateLimiting(Security.RateLimitPolicies.Auth);
 
         g.MapPost("/", async (CreateBookingRequest req, HttpContext ctx, BookingService svc, MainframeDbContext db, CancellationToken ct) =>
         {
@@ -23,7 +30,12 @@ public static class BookingEndpoints
             // not-Active rather than Suspended, is on BookingMembershipGate.
             if (await BookingMembershipGate.RefuseIfBarredAsync(db, userId, ct) is { } refused) return refused;
 
-            var result = await svc.CreateAsync(req.CourtId, userId, userId, req.StartsAt, req.SliceCount, ct);
+            // The member's OWN route. ActorIsAdmin is taken from the claim rather than left
+            // false, because an admin booking for themselves through the member route is still
+            // an admin — GOAL item 19's "with the exception of admins", and the half D2-B13's
+            // actorId != userId inference got exactly backwards.
+            var payer = new BookingPayer(userId, userId, ActorIsAdmin: ctx.User.IsInRole("admin"));
+            var result = await svc.CreateAsync(req.CourtId, payer, req.StartsAt, req.SliceCount, ct);
             return ToHttpResult(result, ctx);
         });
 
@@ -42,7 +54,9 @@ public static class BookingEndpoints
         });
 
         // Admin: book on behalf + cancel-with-waive
-        var admin = app.MapGroup("/api/v1/admin/bookings").RequireAuthorization(p => p.RequireRole("admin"));
+        var admin = app.MapGroup("/api/v1/admin/bookings")
+            .RequireAuthorization(p => p.RequireRole("admin"))
+            .RequireRateLimiting(Security.RateLimitPolicies.Auth);
 
         // §8: "Book on behalf of any member (charges that member's credit; if insufficient,
         // admin can override and create a negative balance, logged)."
@@ -61,7 +75,12 @@ public static class BookingEndpoints
             if (await BookingMembershipGate.RefuseIfBarredAsync(db, req.UserId, ct) is { } refused) return refused;
 
             var actorId = ctx.User.Id() ?? Guid.Empty;
-            var payer = new BookingPayer(req.UserId, actorId, req.AllowNegativeBalance);
+            // ActorIsAdmin comes from the ROUTE GROUP's role claim — this group is
+            // RequireRole("admin") — and is never re-derived from actorId != userId. That
+            // inference is D2-B13: it made an admin booking for themselves NOT exempt, and it
+            // never asked whether the actor held the role at all.
+            var payer = new BookingPayer(
+                req.UserId, actorId, req.AllowNegativeBalance, ActorIsAdmin: ctx.User.IsInRole("admin"));
             var result = await svc.CreateAsync(req.CourtId, payer, req.StartsAt, req.SliceCount, ct);
             return ToHttpResult(result, ctx);
         });
@@ -146,8 +165,14 @@ public static class BookingEndpoints
     /// declaration order in <c>BookingService.cs</c> so the pair reads as one list.
     /// </para>
     /// </summary>
-    private static IResult ToHttpResult(BookingResult result, HttpContext ctx) => result switch
+    // Block body, not an expression one: lizard's C# parser reads the `{` of a switch or an
+    // object initialiser as the END of the function and dumps the rest of the file into a
+    // *global* pseudo-function whose length trips `-L 200`. See memory/gotchas.md and
+    // whitelizard.txt's header.
+    private static IResult ToHttpResult(BookingResult result, HttpContext ctx)
     {
+        return result switch
+        {
         BookingResult.Ok ok => Results.Ok(new { booking_id = ok.Booking.Id, balance_after_credits = ok.BalanceAfterCredits }),
         BookingResult.NotFound => Results.NotFound(new { error = "court_not_found" }),
         BookingResult.PastTime => Results.BadRequest(new { error = "past_time" }),
@@ -157,8 +182,55 @@ public static class BookingEndpoints
             new { error = "insufficient_balance", current_credits = ib.CurrentCredits, required_credits = ib.RequiredCredits }, statusCode: 402),
         BookingResult.PeakHoursLeagueOnly p => Results.Conflict(
             new { error = "peak_hours_league_only", peak_start = p.PeakStart, peak_end = p.PeakEnd, regular_advance_hours = p.RegularAdvanceHours }),
+        // The minutes cap — blueprint A.4's. The three original figures are unchanged so no
+        // existing client breaks; the three new ones are what the member's sentence needs, and
+        // resets_at is here so a browser never has to compute a club midnight (which is D2-B33
+        // waiting to happen on the other side of the wire).
         BookingResult.PerDayCapExceeded c => Results.Conflict(
-            new { error = "per_day_cap_exceeded", cap_minutes = c.CapMinutes, already_booked_minutes = c.AlreadyBookedMinutes, attempted_minutes = c.AttemptedMinutes }),
+            new
+            {
+                error = "per_day_cap_exceeded",
+                cap_minutes = c.CapMinutes,
+                already_booked_minutes = c.AlreadyBookedMinutes,
+                attempted_minutes = c.AttemptedMinutes,
+                bound_by = c.BoundByGroupName is null ? "tenant" : "group",
+                group_name = c.BoundByGroupName,
+                club_day = c.ClubDay,
+                resets_at = c.ResetsAt,
+            }),
+        // GOAL item 19's cap, in SLOTS. Every figure the sentence needs, so the client composes
+        // "You have used all 4 of your slots for Tuesday. They reset at midnight." from one
+        // response. relaxation_available is the difference between "come back tomorrow" and
+        // "there is a court free at 19:00 if you want it".
+        BookingResult.PerDaySlotCapExceeded c => Results.Conflict(
+            new
+            {
+                error = "per_day_slot_cap_exceeded",
+                cap_slots = c.CapSlots,
+                booked_slots = c.BookedSlots,
+                attempted_slots = c.AttemptedSlots,
+                remaining_slots = c.RemainingSlots,
+                bound_by = c.BoundByGroupName is null ? "tenant" : "group",
+                group_name = c.BoundByGroupName,
+                club_day = c.ClubDay,
+                resets_at = c.ResetsAt,
+                relaxation_available = c.RelaxationAvailable,
+            }),
+        // GOAL item 3. The windows the member MAY book in travel with the refusal, because "not
+        // now" without "then" is a refusal a technology-averse member cannot act on.
+        BookingResult.GroupWindow w => Results.Conflict(
+            new
+            {
+                error = "group_window",
+                groups = w.GroupNames,
+                day = w.Day,
+                allowed_windows = w.AllowedWindows.Select(x => new { start = x.Start, end = x.End }).ToList(),
+            }),
+        // The member is in two or more groups whose windows do not overlap at all on this day,
+        // so there is nothing they can book. Its own code, because the honest sentence is
+        // completely different and because an empty grid reads as "the club is shut".
+        BookingResult.NoBookableWindow n => Results.Conflict(
+            new { error = "no_bookable_window", groups = n.GroupNames, day = n.Day }),
         BookingResult.OutOfHours h => Results.Conflict(
             new { error = "out_of_hours", opens_at = h.OpensAt, closes_at = h.ClosesAt }),
         BookingResult.NoTimeAvailable n => Results.Conflict(
@@ -166,16 +238,24 @@ public static class BookingEndpoints
         BookingResult.InvalidDuration id => Results.BadRequest(
             new { error = "invalid_duration", requested_slices = id.RequestedSlices, max_slices = id.MaxSlices }),
         BookingResult.DuplicateRequest => Results.Conflict(new { error = "duplicate_request" }),
-        _ => Unmapped(result, ctx),
-    };
+            _ => Unmapped(result, ctx),
+        };
+    }
 
-    private static IResult ToHttpResult(CancellationResult result, HttpContext ctx) => result switch
+    // Block body, not an expression one: lizard's C# parser reads the `{` of a switch or an
+    // object initialiser as the END of the function and dumps the rest of the file into a
+    // *global* pseudo-function whose length trips `-L 200`. See memory/gotchas.md and
+    // whitelizard.txt's header.
+    private static IResult ToHttpResult(CancellationResult result, HttpContext ctx)
     {
+        return result switch
+        {
         CancellationResult.Ok ok => Results.Ok(new { refunded_credits = ok.RefundedCredits, penalty_credits = ok.PenaltyCredits }),
         CancellationResult.NotFound => Results.NotFound(new { error = "booking_not_found" }),
         CancellationResult.AlreadyStarted => Results.BadRequest(new { error = "already_started" }),
-        _ => Unmapped(result, ctx),
-    };
+            _ => Unmapped(result, ctx),
+        };
+    }
 
     /// <summary>
     /// The arm that should never run. It answers 500 as before — but it LOGS, naming the

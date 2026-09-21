@@ -66,7 +66,7 @@ public class AdminOverdraftBookingTests
 
         var result = await bookings.CreateAsync(
             host.Courts[0].Id,
-            new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id),
+            new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, ActorIsAdmin: true),
             TestHost.BookableSlot(2), sliceCount: 1, default);
 
         var refusal = Assert.IsType<BookingResult.InsufficientBalance>(result);
@@ -92,7 +92,7 @@ public class AdminOverdraftBookingTests
 
         var result = await bookings.CreateAsync(
             host.Courts[0].Id,
-            new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, AllowNegativeBalance: true),
+            new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, AllowNegativeBalance: true, ActorIsAdmin: true),
             TestHost.BookableSlot(2), sliceCount: 1, default);
 
         var ok = Assert.IsType<BookingResult.Ok>(result);
@@ -153,7 +153,7 @@ public class AdminOverdraftBookingTests
 
         var ok = Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
             host.Courts[0].Id,
-            new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, AllowNegativeBalance: true),
+            new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, AllowNegativeBalance: true, ActorIsAdmin: true),
             TestHost.BookableSlot(2), sliceCount: 1, default));
 
         var audit = Assert.Single(await db.AuditLogs.IgnoreQueryFilters()
@@ -189,7 +189,7 @@ public class AdminOverdraftBookingTests
 
         Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
             host.Courts[0].Id,
-            new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, AllowNegativeBalance: true),
+            new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, AllowNegativeBalance: true, ActorIsAdmin: true),
             TestHost.BookableSlot(2), sliceCount: 1, default));
 
         var audit = Assert.Single(await db.AuditLogs.IgnoreQueryFilters()
@@ -217,7 +217,7 @@ public class AdminOverdraftBookingTests
         // Far enough out to be outside the 15-minute penalty window.
         var ok = Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
             host.Courts[0].Id,
-            new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, AllowNegativeBalance: true),
+            new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, AllowNegativeBalance: true, ActorIsAdmin: true),
             TestHost.BookableSlot(5), sliceCount: 1, default));
         Assert.Equal(-5m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
 

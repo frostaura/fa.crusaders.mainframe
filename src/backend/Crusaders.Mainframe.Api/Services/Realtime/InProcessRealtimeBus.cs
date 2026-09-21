@@ -118,4 +118,11 @@ public sealed class InProcessRealtimeBus : IRealtimeBus
         if (!_topics.TryGetValue(topic, out var bucket)) return 0;
         lock (bucket) { return bucket.Channels.Count; }
     }
+
+    /// <summary>
+    /// D2-B44's observable. <see cref="SubscriberCount"/> answers zero both for a topic whose
+    /// bucket is empty and for one that was never here, so it cannot tell a released
+    /// subscription from a leaked dictionary entry — which is the bug itself. This can.
+    /// </summary>
+    public int TopicCount => _topics.Count;
 }

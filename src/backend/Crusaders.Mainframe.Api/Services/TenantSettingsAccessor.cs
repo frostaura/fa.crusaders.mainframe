@@ -40,7 +40,7 @@ public sealed class TenantSettingsAccessor
         decimal topupBlockZar = TryDecimal(root, "topup_block_zar", 100m);                   // A.3 — block of R100.
         decimal topupMaxZarPerMember = TryDecimal(root, "topup_max_zar_per_member", 1000m);  // A.3 — R1000 cap.
         int memberPerDayMaxMinutes = TryInt(root, "member_per_day_max_minutes", 60);         // A.4 / B.3 — 60 minutes per day per member.
-        string peakHours = TryString(root, "peak_hours", "16:00-19:00");                     // A.12 — peak window.
+        string peakHours = TryString(root, "peak_hours", TenantSettingsView.DefaultPeakHoursRange);  // A.12 — peak window.
         int peakAdvanceHoursForRegular = TryInt(root, "peak_advance_hours_for_regular", 1);  // A.12 — Regular members may grab a still-empty peak slot within 1h of start.
         int retentionYears = TryInt(root, "retention_years", 2);                             // D.1 — 2-year retention.
         int noShowLookbackDays = TryInt(root, "no_show_lookback_days", 7);                   // How far back the no-show sweep reaches; bounds a first-run backlog.
@@ -129,7 +129,7 @@ public sealed class TenantSettingsAccessor
             DeviceErrorMaxOpenRows = TryInt(root, "device_error_max_open_rows", MonitoringSettings.DefaultMaxOpenRows),
             DeviceErrorIngestPerMinute = TryInt(root, "device_error_ingest_per_minute", MonitoringSettings.DefaultIngestPerMinute),
 
-            SseKeepAliveSeconds = TryInt(root, "sse_keepalive_seconds", RealtimeSettings.DefaultKeepAliveSeconds),
+            SseKeepaliveSeconds = TryInt(root, "sse_keepalive_seconds", RealtimeSettings.DefaultKeepaliveSeconds),
             ControlBoardResyncSeconds = TryInt(root, "control_board_resync_seconds", RealtimeSettings.DefaultResyncSeconds),
             ControlBoardStaleMultiplier = TryInt(root, "control_board_stale_multiplier", RealtimeSettings.DefaultStaleMultiplier),
             RealtimeFallbackAfterFailures = TryInt(root, "realtime_fallback_after_failures", RealtimeSettings.DefaultFallbackAfterFailures),
@@ -161,22 +161,44 @@ public sealed class TenantSettingsAccessor
                 root, "schedule_max_rows_per_change", ScheduleSettings.DefaultMaxRowsPerChange),
             ScheduleWorkerIntervalSeconds = TryInt(
                 root, "schedule_worker_interval_seconds", ScheduleSettings.DefaultWorkerIntervalSeconds),
+
+            // GOAL item 3 (member groups) and item 19 (slots per day). Raw here like every
+            // other key; bounded by BookingLimits and GroupRules at each reader.
+            MemberMaxSlotsPerDay = TryInt(root, "member_max_slots_per_day", BookingLimits.DefaultMaxSlotsPerDay),
+            SameDayCapRelaxation = TryBool(root, "same_day_cap_relaxation", true),
+            SameDayRelaxationWindowMinutes = TryInt(
+                root, "same_day_relaxation_window_minutes", BookingLimits.DefaultSameDayRelaxationWindowMinutes),
+            WalkUpHonoursDayCap = TryBool(root, "walk_up_honours_day_cap", false),
+            MemberGroupsEnabled = TryBool(root, "member_groups_enabled", true),
+
+            // GOAL item 12's glyph set. Read RAW, like every other key; ActionGlyphs is what
+            // decides what an unrecognised stored value means.
+            ActionGlyphs = TryString(root, ActionGlyphs.Key, ActionGlyphs.Thumbs),
         };
     }
 
     /// <summary>
-    /// An integer setting, or the default.
+    /// An integer setting, or the default — <b>never an exception</b>.
     ///
     /// <para>
-    /// <b><c>TryGetInt32</c> and not <c>GetInt32</c>, which is a real defect and not tidiness.</b>
-    /// The kind check only proves the value is a NUMBER; <c>GetInt32</c> then throws
-    /// <c>FormatException</c> on <c>15.5</c> and <c>OverflowException</c> on anything past
-    /// <c>int.MaxValue</c>. This accessor is read on the heartbeat, on every booking and on
-    /// every device event, so one hand-edited or restored-from-backup document containing
-    /// <c>{"slice_minutes": 15.5}</c> answered <b>500 to every request in the club</b> — boxes
-    /// included — with no way back except an UPDATE on the JSON column. Falling back to the
-    /// default keeps the club running on a known-good number and leaves the wrong one visible
-    /// on the settings page, which is the failure mode a person can act on.
+    /// D2-B18. This was <c>ValueKind == Number ? v.GetInt32() : fallback</c>, and
+    /// <c>JsonValueKind.Number</c> is true of <c>15.5</c> and of <c>99999999999</c> — both of
+    /// which make <c>GetInt32()</c> <b>throw</b> (<c>FormatException</c> and
+    /// <c>OverflowException</c> respectively). This accessor is read on the heartbeat, on every
+    /// booking and on every device event, so one hand-edited or restored-from-backup document
+    /// containing <c>{"slice_minutes": 15.5}</c> answered <b>500 to every request in the
+    /// club</b> — boxes included — with no way back except an UPDATE on the JSON column, in a
+    /// file whose own comment above says a broken document "must not stop every box in the club
+    /// from working". A club that mistypes one number does not get to have its doors stop
+    /// answering.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>TryGetInt32</c> is the whole fix, and the same reasoning covers the two below: a key
+    /// present with the wrong shape is indistinguishable from an absent one, which is the lesser
+    /// of the two evils and the one the rest of this accessor already assumes. Falling back to
+    /// the default keeps the club running on a known-good number and leaves the wrong one
+    /// visible on the settings page, which is the failure mode a person can act on.
     /// </para>
     /// </summary>
     private static int TryInt(JsonElement root, string name, int fallback)
@@ -195,15 +217,24 @@ public sealed class TenantSettingsAccessor
     /// A boolean setting, or the default.
     ///
     /// <para>
-    /// Strict about the JSON kind: a document holding the STRING <c>"false"</c> falls back to
-    /// the default rather than being coerced, because the two plausible coercions disagree
-    /// (<c>bool.Parse</c> says false, truthiness says true) and a setting that silently turns
-    /// the relay restore off is a court that stays dark after a power cut.
+    /// Strict about the JSON kind for the same reason the three above are: a document holding
+    /// the STRING <c>"false"</c> falls back to the default rather than being coerced, because
+    /// the two plausible coercions disagree (<c>bool.Parse</c> says false, truthiness says true)
+    /// and a setting that silently turns the relay restore off is a court that stays dark after
+    /// a power cut. <c>"true"</c> the string is a client bug, and silently reading it as
+    /// <c>true</c> would hide it for as long as the value happened to be the one wanted.
     /// </para>
     /// </summary>
+    // Block body, not an expression one: lizard's C# parser reads the `{` of a switch as the
+    // END of the function and dumps the rest of the file into a *global* pseudo-function
+    // whose length trips `-L 200`. See memory/gotchas.md.
     private static bool TryBool(JsonElement root, string name, bool fallback)
-        => root.TryGetProperty(name, out var v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False
-            ? v.GetBoolean() : fallback;
+    {
+        if (!root.TryGetProperty(name, out var v)) return fallback;
+        if (v.ValueKind == JsonValueKind.True) return true;
+        if (v.ValueKind == JsonValueKind.False) return false;
+        return fallback;
+    }
 }
 
 public sealed record TenantSettingsView(
@@ -283,12 +314,20 @@ public sealed record TenantSettingsView(
 
     // ---- The door-gate numbers ----
     //
-    // Three seconds is long enough to push a door and short enough that it has shut again
-    // before the next person reaches it. Thirty minutes of early entry is the club's own
-    // habit — a member due on court at six arrives at half past five to change — and it is
-    // deliberately much longer than activation_cue_window_minutes, because getting into the
-    // BUILDING early is ordinary and getting the LIGHTS on early is somebody else's court.
-    public const int DefaultGateUnlockSeconds = 3;
+    // FIFTEEN seconds, not three (GOAL item 2 — the founder asked for the number by name).
+    // Three was chosen as "long enough to push a door", which is true of a person standing in
+    // front of it with both hands free and false of the member this club actually has: a
+    // racquet bag on one shoulder, a phone held up to a scanner, and a door that has re-locked
+    // before they reach it. The cost of a re-lock is a second scan and a member who believes
+    // the door is broken; the cost of twelve more seconds is twelve seconds. This moves the
+    // DEFAULT only — GateAccess.MaxUnlockSeconds is unchanged at 30, and the firmware's own
+    // re-lock dwell and window cap still bound it at the door.
+    //
+    // Thirty minutes of early entry is the club's own habit — a member due on court at six
+    // arrives at half past five to change — and it is deliberately much longer than
+    // activation_cue_window_minutes, because getting into the BUILDING early is ordinary and
+    // getting the LIGHTS on early is somebody else's court.
+    public const int DefaultGateUnlockSeconds = 15;
     public const string DefaultGateAccessPolicy = GateAccessPolicies.ActiveMember;
     public const int DefaultGateEarlyEntryMinutes = 30;
 
@@ -480,7 +519,7 @@ public sealed record TenantSettingsView(
     // ---- The live streams' seven numbers ----
 
     /// <summary>Seconds of quiet before a stream writes a <c>ping</c>. Read via <see cref="RealtimeSettings.KeepAlive"/>.</summary>
-    public int SseKeepAliveSeconds { get; init; } = RealtimeSettings.DefaultKeepAliveSeconds;
+    public int SseKeepaliveSeconds { get; init; } = RealtimeSettings.DefaultKeepaliveSeconds;
 
     /// <summary>Seconds between full control-board snapshots. Read via <see cref="RealtimeSettings.ResyncSeconds"/>.</summary>
     public int ControlBoardResyncSeconds { get; init; } = RealtimeSettings.DefaultResyncSeconds;
@@ -500,6 +539,46 @@ public sealed record TenantSettingsView(
     /// <summary>Seconds between control-board polls while degraded.</summary>
     public int RealtimePollSecondsControlBoard { get; init; } = RealtimeSettings.DefaultPollSecondsControlBoard;
 
+    // ---- GOAL item 19: how much of a club day one member may hold ----
+    //
+    // Raw as stored, like everything else on this record. Read through BookingLimits, which is
+    // where the bounds live and where "0 means unlimited" is written down once.
+
+    /// <summary>Slots one member may book per club day; 0 = unlimited. Read via <see cref="BookingLimits.MaxSlotsPerDay"/>.</summary>
+    public int MemberMaxSlotsPerDay { get; init; } = BookingLimits.DefaultMaxSlotsPerDay;
+
+    /// <summary>
+    /// Whether blueprint B.3's same-day relaxation applies at all. On by default because it is
+    /// the customer's own rule; the club that wants a hard cap turns it off in one place rather
+    /// than discovering the cap is decorative.
+    /// </summary>
+    public bool SameDayCapRelaxation { get; init; } = true;
+
+    /// <summary>How close to a slot's start the relaxation reaches, minutes. Read via <see cref="BookingLimits.SameDayRelaxationWindowMinutes"/>.</summary>
+    public int SameDayRelaxationWindowMinutes { get; init; } = BookingLimits.DefaultSameDayRelaxationWindowMinutes;
+
+    /// <summary>
+    /// Whether a walk-up at the box is REFUSED by the per-day cap. Off by default: the member
+    /// is physically standing at a court that is about to go unlit and the club wants the
+    /// revenue. A walk-up always COUNTS toward the cap either way — the setting decides only
+    /// whether it is refused by it.
+    /// </summary>
+    public bool WalkUpHonoursDayCap { get; init; }
+
+    /// <summary>
+    /// Whether member groups (GOAL item 3) are consulted at all. On by default and harmless
+    /// there, because the seeded groups are unrestricted and inheriting: a club that never
+    /// opens the groups screen behaves exactly as it does today.
+    /// </summary>
+    public bool MemberGroupsEnabled { get; init; } = true;
+
+    /// <summary>
+    /// Which glyph pair a confirm/decline button wears — <c>thumbs</c> or <c>marks</c>. Read via
+    /// <see cref="Services.ActionGlyphs.For"/>, which is where an unrecognised stored value is
+    /// decided rather than obeyed.
+    /// </summary>
+    public string ActionGlyphs { get; init; } = Services.ActionGlyphs.Thumbs;
+
     /// <summary>
     /// The club's open and close for one local weekday, as minutes past local midnight.
     ///
@@ -518,12 +597,53 @@ public sealed record TenantSettingsView(
     public decimal ConversionRateFor(Crusaders.Mainframe.Api.Domain.MemberClass cls)
         => cls == Crusaders.Mainframe.Api.Domain.MemberClass.LeagueOrSenior ? CreditsPerZarLeague : CreditsPerZarRegular;
 
-    /// <summary>Parses <see cref="PeakHoursRange"/> ("16:00-19:00") into TimeOnly bounds. Returns null on malformed input.</summary>
+    /// <summary>
+    /// The club's peak window, as the booking rule will actually apply it.
+    ///
+    /// <para>
+    /// <b>D2-B16: this used to fail OPEN, and silently.</b> The settings PUT requires
+    /// <c>start &lt; end</c>; this reader did not, so a stored <c>"19:00-16:00"</c> produced
+    /// <c>inPeak = slotStart &gt;= 19:00 &amp;&amp; slotStart &lt; 16:00</c> — false for every
+    /// instant there has ever been. League exclusivity was off for every Regular member of that
+    /// club, no screen said so, and the settings page rendered the inverted range back as
+    /// though it were in force.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>An unusable value falls back to the default window rather than to "no peak".</b>
+    /// Peak exclusivity is an ACCESS rule, and an access rule whose configuration cannot be
+    /// read should narrow rather than open — the same posture <see cref="GateAccessPolicies"/>
+    /// takes about a door, and the opposite of the one <see cref="OperatingHours"/> takes,
+    /// because opening hours decide whether the club can trade at all and failing closed there
+    /// would shut it. Two postures, two reasons, both written down.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>EMPTY is a real instruction and is honoured.</b> A club that does not run league nights
+    /// stores an empty <c>peak_hours</c>, several fixtures do, and
+    /// <c>SchedulePeakVisibilityTests</c> pins it — inventing 16:00–19:00 for those clubs would
+    /// grey out a quarter of their day on the grid and refuse bookings the club wants to sell.
+    /// The fall-back is for a value that is present and UNUSABLE, which is a typo rather than a
+    /// decision: the club plainly meant to have a peak window, and the safe reading of a typo in
+    /// an access rule is the rule, not its absence.
+    /// </para>
+    /// </summary>
     public (TimeOnly start, TimeOnly end)? PeakHours()
     {
-        var parts = PeakHoursRange.Split('-');
+        if (string.IsNullOrWhiteSpace(PeakHoursRange)) return null;
+        return TryParsePeakRange(PeakHoursRange) ?? TryParsePeakRange(DefaultPeakHoursRange);
+    }
+
+    /// <summary>The window every club gets until it sets its own — blueprint A.12.</summary>
+    public const string DefaultPeakHoursRange = "16:00-19:00";
+
+    private static (TimeOnly start, TimeOnly end)? TryParsePeakRange(string range)
+    {
+        var parts = range.Split('-');
         if (parts.Length != 2) return null;
         if (!TimeOnly.TryParse(parts[0].Trim(), out var s) || !TimeOnly.TryParse(parts[1].Trim(), out var e)) return null;
-        return (s, e);
+        // The half the PUT enforced and this did not. An empty or inverted window is not a
+        // narrower rule, it is no rule — which is the failure this whole method is named for.
+        return s < e ? (s, e) : null;
     }
 }

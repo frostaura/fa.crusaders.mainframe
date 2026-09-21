@@ -150,6 +150,22 @@ public static class AdminConfigEndpoints
                 // The two night-trace keys, from TraceSettings for the same reason.
                 member_trace_enabled = TraceSettings.Enabled(defaults),
                 member_trace_max_events = TraceSettings.MaxEvents(defaults),
+
+                // GOAL items 3 and 19. Rendered from the CLAMPED values for the same reason
+                // operating_hours, gate_access_policy and the door numbers are: the settings
+                // screen reads a value, shows it to a person and PUTs back whatever it was
+                // shown, so a number the engine does not honour would let the page report a cap
+                // that is not being enforced.
+                member_max_slots_per_day = BookingLimits.MaxSlotsPerDay(defaults),
+                same_day_cap_relaxation = defaults.SameDayCapRelaxation,
+                same_day_relaxation_window_minutes = BookingLimits.SameDayRelaxationWindowMinutes(defaults),
+                walk_up_honours_day_cap = defaults.WalkUpHonoursDayCap,
+                member_groups_enabled = defaults.MemberGroupsEnabled,
+
+                // GOAL item 12. Rendered from the RESOLVED value, like operating_hours and
+                // gate_access_policy: a settings page that showed a glyph set the product does
+                // not draw would report a choice that is not in force.
+                action_glyphs = ActionGlyphs.For(defaults),
             });
         });
 
@@ -231,10 +247,28 @@ public static class AdminConfigEndpoints
             var boxError = ValidateBoxSettings(req);
             if (boxError is not null) return Results.BadRequest(new { error = boxError });
 
+            // The realtime keys are validated ONCE, here, by the money lane's validator — it is
+            // the one that answers with a refusal PAYLOAD naming the bound rather than a bare
+            // error string, which is what stops an admin wondering why they cannot have a
+            // minute. The control-board-only keys it does not know about are still checked by
+            // ValidateLiveSettings beside it.
+            var realtimeError = ValidateRealtime(req);
+            if (realtimeError is not null) return Results.BadRequest(realtimeError);
+
             var liveError = ValidateLiveSettings(req);
             if (liveError is not null) return Results.BadRequest(new { error = liveError });
             var adminError = ValidateAdminSettings(req);
             if (adminError is not null) return Results.BadRequest(new { error = adminError });
+
+            var limitsError = ValidateMemberLimits(req);
+            if (limitsError is not null) return Results.BadRequest(new { error = limitsError });
+
+            // Refused rather than coerced, which is what lets the READ side above render the
+            // resolved value honestly — the same posture gate_access_policy takes.
+            if (req.EffectiveActionGlyphs is { } glyphs && !ActionGlyphs.IsKnown(glyphs.Trim()))
+            {
+                return Results.BadRequest(new { error = "action_glyphs_invalid", valid = ActionGlyphs.All });
+            }
 
             var row = await db.TenantSettings.FirstOrDefaultAsync(s => s.TenantId == tenant.TenantId, ct);
             if (row is null)
@@ -314,6 +348,8 @@ public static class AdminConfigEndpoints
             WriteOptionalBoxSettings(doc, req);
             WriteOptionalLiveSettings(doc, req);
             WriteOptionalAdminSettings(doc, req);
+            WriteOptionalMemberLimits(doc, req);
+            WriteOptionalRealtime(doc, req);
 
             // D2-B19 — the diff of CHANGED KEYS ONLY, before the document is replaced.
             //
@@ -433,6 +469,8 @@ public static class AdminConfigEndpoints
     /// </summary>
     private static string? ValidateEconomics(UpdateSettingsRequest req)
     {
+        if (ValidateSlicePrice(req.SlicePriceCredits) is { } priceError) return priceError;
+
         if (req.CreditsPerZarRegular is <= 0 or > 1000) return "credits_per_zar_regular_out_of_range";
         if (req.CreditsPerZarLeague is <= 0 or > 1000) return "credits_per_zar_league_out_of_range";
         if (req.TopupBlockZar is <= 0 or > 100000) return "topup_block_zar_out_of_range";
@@ -450,6 +488,33 @@ public static class AdminConfigEndpoints
 
         if (req.PeakHours is not null && !TryParsePeakHours(req.PeakHours)) return "peak_hours_invalid";
         return null;
+    }
+
+    /// <summary>
+    /// Bounds on the default court price.
+    ///
+    /// <para>
+    /// <b>D2-B06.</b> The one money key on this endpoint with NO bound of any kind: required,
+    /// written unconditionally at the bottom of the handler, and touched by none of the five
+    /// validators. <c>slicePriceCredits: -500</c> answered <c>{"saved":true}</c>, and the court
+    /// POST falls back to it when a price is omitted — producing a court on which <b>every
+    /// booking credited the member</b>.
+    /// </para>
+    ///
+    /// <para>
+    /// Whole cents for the same reason the admin adjustment demands them: the ledger column is
+    /// <c>numeric(10,2)</c>, so half a cent is rounded by the database and then disagrees with
+    /// every figure quoted back to the member. Its own method rather than another two branches
+    /// inside <see cref="ValidateEconomics"/>, which is at the gate's ceiling.
+    /// </para>
+    /// </summary>
+    private static string? ValidateSlicePrice(decimal price)
+    {
+        if (price < MoneySettings.MinSlicePriceCredits || price > MoneySettings.MaxSlicePriceCredits)
+        {
+            return "slice_price_credits_out_of_range";
+        }
+        return MoneySettings.IsWholeCents(price) ? null : "slice_price_credits_not_whole_cents";
     }
 
     /// <summary>
@@ -652,14 +717,13 @@ public static class AdminConfigEndpoints
     }
 
     /// <summary>
-    /// Bounds on the error log's three and the live streams' seven.
+    /// Bounds on the error log's three and the three stream numbers only a CONTROL BOARD uses.
     ///
     /// <para>
-    /// <b>The keep-alive's ceiling of 55 seconds is the sharpest of these and is not
-    /// arbitrary.</b> This deployment's nginx sets no <c>proxy_read_timeout</c>, so its
-    /// 60-second default applies — a keep-alive at or above that is a stream the gateway cuts
-    /// before the keep-alive that would have saved it, and the symptom is a wall screen that
-    /// silently stops updating rather than one that errors.
+    /// The four keys a member's wallet stream shares with it — the keep-alive and the three
+    /// fallback numbers — are bounded once, in <see cref="ValidateRealtime"/>, which answers
+    /// with a payload naming the bound rather than a bare code. Two validators over one key is
+    /// how one of them silently stops being the one that runs.
     /// </para>
     /// </summary>
     private static string? ValidateLiveSettings(UpdateSettingsRequest req)
@@ -670,28 +734,10 @@ public static class AdminConfigEndpoints
             return "device_error_max_open_rows_out_of_range";
         if (OutOfRange(req.DeviceErrorIngestPerMinute, MonitoringSettings.MinIngestPerMinute, MonitoringSettings.MaxIngestPerMinute))
             return "device_error_ingest_rate_out_of_range";
-        if (OutOfRange(req.SseKeepAliveSeconds, RealtimeSettings.MinKeepAliveSeconds, RealtimeSettings.MaxKeepAliveSeconds))
-            return "sse_keepalive_seconds_out_of_range";
         if (OutOfRange(req.ControlBoardResyncSeconds, RealtimeSettings.MinResyncSeconds, RealtimeSettings.MaxResyncSeconds))
             return "control_board_resync_out_of_range";
         if (OutOfRange(req.ControlBoardStaleMultiplier, RealtimeSettings.MinStaleMultiplier, RealtimeSettings.MaxStaleMultiplier))
             return "control_board_stale_multiplier_out_of_range";
-        return ValidateFallbackSettings(req);
-    }
-
-    /// <summary>
-    /// The four numbers a degraded CLIENT runs on. Split from
-    /// <see cref="ValidateLiveSettings"/> only because the two together are past the
-    /// complexity gate's branch ceiling.
-    /// </summary>
-    private static string? ValidateFallbackSettings(UpdateSettingsRequest req)
-    {
-        if (OutOfRange(req.RealtimeFallbackAfterFailures, RealtimeSettings.MinFallbackAfterFailures, RealtimeSettings.MaxFallbackAfterFailures))
-            return "realtime_fallback_after_failures_out_of_range";
-        if (OutOfRange(req.RealtimeFallbackWindowSeconds, RealtimeSettings.MinFallbackWindowSeconds, RealtimeSettings.MaxFallbackWindowSeconds))
-            return "realtime_fallback_window_out_of_range";
-        if (OutOfRange(req.RealtimePollSecondsWallet, RealtimeSettings.MinPollSecondsWallet, RealtimeSettings.MaxPollSecondsWallet))
-            return "realtime_poll_wallet_out_of_range";
         if (OutOfRange(req.RealtimePollSecondsControlBoard, RealtimeSettings.MinPollSecondsControlBoard, RealtimeSettings.MaxPollSecondsControlBoard))
             return "realtime_poll_control_board_out_of_range";
         return null;
@@ -728,33 +774,21 @@ public static class AdminConfigEndpoints
         if (req.DeviceFaultMaxPerHour is { } faults) doc["device_fault_max_per_hour"] = ToElement(faults);
     }
 
-    /// <summary>Same omitted-means-unchanged rule, for the error log's three and the streams' seven.</summary>
+    /// <summary>
+    /// Same omitted-means-unchanged rule, for the error log's three and the three stream
+    /// numbers only a control board uses. The four shared with the wallet stream are written
+    /// once, by <see cref="WriteOptionalRealtime"/>.
+    /// </summary>
     private static void WriteOptionalLiveSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
     {
         if (req.DeviceErrorRetentionDays is { } days) doc["device_error_retention_days"] = ToElement(days);
         if (req.DeviceErrorMaxOpenRows is { } rows) doc["device_error_max_open_rows"] = ToElement(rows);
         if (req.DeviceErrorIngestPerMinute is { } rate) doc["device_error_ingest_per_minute"] = ToElement(rate);
-        if (req.SseKeepAliveSeconds is { } keepAlive) doc["sse_keepalive_seconds"] = ToElement(keepAlive);
         if (req.ControlBoardResyncSeconds is { } resync) doc["control_board_resync_seconds"] = ToElement(resync);
         if (req.ControlBoardStaleMultiplier is { } stale) doc["control_board_stale_multiplier"] = ToElement(stale);
-        if (req.RealtimeFallbackAfterFailures is { } failures) doc["realtime_fallback_after_failures"] = ToElement(failures);
-        if (req.RealtimeFallbackWindowSeconds is { } window) doc["realtime_fallback_window_seconds"] = ToElement(window);
-        if (req.RealtimePollSecondsWallet is { } wallet) doc["realtime_poll_seconds_wallet"] = ToElement(wallet);
         if (req.RealtimePollSecondsControlBoard is { } board) doc["realtime_poll_seconds_control_board"] = ToElement(board);
     }
 
-    /// <summary>Same omitted-means-unchanged rule as the economics keys, for the five door settings.</summary>
-    /// <summary>
-    /// The four BE-ADMIN numbers, bounded, plus the one CROSS-FIELD rule in this lane.
-    ///
-    /// <para>
-    /// <b>The cross-field rule is the point of this method.</b> Either value can be edited
-    /// independently, from different screens, and the failure of the pair — a member booking
-    /// fourteen days out into a league night the materialiser has not written yet — appears
-    /// weeks later, on the night, as a member holding a paid court the club promised to a
-    /// division. It is refused here, where there is a person to tell.
-    /// </para>
-    /// </summary>
     /// <summary>
     /// The keys whose values differ between the stored document and the one about to replace
     /// it, as two parallel maps.
@@ -861,6 +895,7 @@ public static class AdminConfigEndpoints
             doc["member_trace_max_events"] = ToElement(events);
     }
 
+    /// <summary>Same omitted-means-unchanged rule as the economics keys, for the five door settings.</summary>
     private static void WriteOptionalDoorSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
     {
         if (req.EffectiveDoorLogRetentionDays is { } retention) doc["door_log_retention_days"] = ToElement(retention);
@@ -868,6 +903,99 @@ public static class AdminConfigEndpoints
         if (req.EffectiveDoorRefusalSpikeMinutes is { } minutes) doc["door_refusal_spike_minutes"] = ToElement(minutes);
         if (req.EffectiveClubContactPhone is { } phone) doc["club_contact_phone"] = ToElement(phone.Trim());
         if (req.EffectiveClubContactEmail is { } email) doc["club_contact_email"] = ToElement(email.Trim());
+    }
+
+    /// <summary>
+    /// Bounds on the five keys that decide how much of a club day one member may hold
+    /// (GOAL items 3 and 19).
+    ///
+    /// <para>
+    /// The bounds are <see cref="BookingLimits"/>' own constants rather than literals here, for
+    /// the reason the door block already records: a bound an admin is refused at that differs
+    /// from the bound the reader clamps to is the gap a hand-edited column walks through.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Zero is legal on both caps and means unlimited</b> — that is what it has always meant
+    /// in <c>CheckPerDayCapAsync</c> — so the lower bound is 0 rather than 1, and the refusal
+    /// an admin gets for -1 says out-of-range rather than pretending 0 is invalid.
+    /// </para>
+    /// </summary>
+    private static string? ValidateMemberLimits(UpdateSettingsRequest req)
+    {
+        if (req.EffectiveMemberMaxSlotsPerDay is < 0 or > BookingLimits.MaxSlotsPerDayCeiling)
+        {
+            return "member_max_slots_per_day_out_of_range";
+        }
+        if (req.EffectiveSameDayRelaxationWindowMinutes is < 0 or > BookingLimits.MaxSameDayRelaxationWindowMinutes)
+        {
+            return "same_day_relaxation_window_out_of_range";
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Bounds on the four real-time keys (GOAL item 8).
+    ///
+    /// <para>
+    /// This one returns a BODY rather than a code, because the keep-alive's ceiling is the one
+    /// bound in this file whose number is not self-explanatory: 55 seconds exists because
+    /// nginx's <c>proxy_read_timeout</c> default is 60 and the file sets none, so a keep-alive
+    /// at 60 is a stream the proxy closes before the server ever speaks on it. An admin told
+    /// only "out of range" would reasonably try 60 next.
+    /// </para>
+    /// </summary>
+    private static object? ValidateRealtime(UpdateSettingsRequest req)
+    {
+        if (req.EffectiveSseKeepaliveSeconds is { } keepalive
+            && (keepalive < RealtimeSettings.MinKeepaliveSeconds || keepalive > RealtimeSettings.MaxKeepaliveSeconds))
+        {
+            return new
+            {
+                error = "sse_keepalive_seconds_out_of_range",
+                min_seconds = RealtimeSettings.MinKeepaliveSeconds,
+                max_seconds = RealtimeSettings.MaxKeepaliveSeconds,
+                because = "proxy_idle_timeout_60s",
+            };
+        }
+        if (req.EffectiveRealtimeFallbackAfterFailures is { } failures
+            && (failures < RealtimeSettings.MinFallbackAfterFailures
+                || failures > RealtimeSettings.MaxFallbackAfterFailures))
+        {
+            return new { error = "realtime_fallback_after_failures_out_of_range" };
+        }
+        if (req.EffectiveRealtimeFallbackWindowSeconds is { } window
+            && (window < RealtimeSettings.MinFallbackWindowSeconds
+                || window > RealtimeSettings.MaxFallbackWindowSeconds))
+        {
+            return new { error = "realtime_fallback_window_out_of_range" };
+        }
+        if (req.EffectiveRealtimePollSecondsWallet is { } poll
+            && (poll < RealtimeSettings.MinPollSecondsWallet || poll > RealtimeSettings.MaxPollSecondsWallet))
+        {
+            return new { error = "realtime_poll_wallet_out_of_range" };
+        }
+        return null;
+    }
+
+    /// <summary>Same omitted-means-unchanged rule as the economics keys, for the member-limit block.</summary>
+    private static void WriteOptionalMemberLimits(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
+    {
+        if (req.EffectiveMemberMaxSlotsPerDay is { } slots) doc["member_max_slots_per_day"] = ToElement(slots);
+        if (req.EffectiveSameDayCapRelaxation is { } relax) doc["same_day_cap_relaxation"] = ToElement(relax);
+        if (req.EffectiveSameDayRelaxationWindowMinutes is { } window) doc["same_day_relaxation_window_minutes"] = ToElement(window);
+        if (req.EffectiveWalkUpHonoursDayCap is { } walkUp) doc["walk_up_honours_day_cap"] = ToElement(walkUp);
+        if (req.EffectiveMemberGroupsEnabled is { } groups) doc["member_groups_enabled"] = ToElement(groups);
+    }
+
+    /// <summary>Same omitted-means-unchanged rule as the economics keys, for the real-time block.</summary>
+    private static void WriteOptionalRealtime(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
+    {
+        if (req.EffectiveSseKeepaliveSeconds is { } keepalive) doc["sse_keepalive_seconds"] = ToElement(keepalive);
+        if (req.EffectiveRealtimeFallbackAfterFailures is { } failures) doc["realtime_fallback_after_failures"] = ToElement(failures);
+        if (req.EffectiveRealtimeFallbackWindowSeconds is { } window) doc["realtime_fallback_window_seconds"] = ToElement(window);
+        if (req.EffectiveRealtimePollSecondsWallet is { } poll) doc["realtime_poll_seconds_wallet"] = ToElement(poll);
+        if (req.EffectiveActionGlyphs is { } glyphs) doc[ActionGlyphs.Key] = ToElement(glyphs.Trim());
     }
 
     /// <summary>Same omitted-means-unchanged rule as the economics keys, for the gate block.</summary>
@@ -1077,11 +1205,13 @@ public sealed record UpdateSettingsRequest(
     [property: JsonPropertyName("club_contact_phone")] string? ClubContactPhoneSnake = null,
     [property: JsonPropertyName("club_contact_email")] string? ClubContactEmailSnake = null,
 
-    // ---- The box's screen, the error log, and the live streams ----
+    // ---- The box's screen, the error log, and the control board's own stream numbers ----
     //
     // Snake-case only. The two-spelling burden above exists because those keys shipped
     // camelCase first and a club's console was already sending them; nothing has ever sent
     // these, so binding one spelling is the whole cost of never having to read the other.
+    // The four keys a MEMBER's stream also uses are further down, under both spellings,
+    // because the member console was already sending them camelCase.
     [property: JsonPropertyName("lcd_revert_seconds")] int? LcdRevertSeconds = null,
     [property: JsonPropertyName("lcd_choice_seconds")] int? LcdChoiceSeconds = null,
     [property: JsonPropertyName("lcd_card_seconds")] int? LcdCardSeconds = null,
@@ -1096,12 +1226,8 @@ public sealed record UpdateSettingsRequest(
     [property: JsonPropertyName("device_error_max_open_rows")] int? DeviceErrorMaxOpenRows = null,
     [property: JsonPropertyName("device_error_ingest_per_minute")] int? DeviceErrorIngestPerMinute = null,
 
-    [property: JsonPropertyName("sse_keepalive_seconds")] int? SseKeepAliveSeconds = null,
     [property: JsonPropertyName("control_board_resync_seconds")] int? ControlBoardResyncSeconds = null,
     [property: JsonPropertyName("control_board_stale_multiplier")] int? ControlBoardStaleMultiplier = null,
-    [property: JsonPropertyName("realtime_fallback_after_failures")] int? RealtimeFallbackAfterFailures = null,
-    [property: JsonPropertyName("realtime_fallback_window_seconds")] int? RealtimeFallbackWindowSeconds = null,
-    [property: JsonPropertyName("realtime_poll_seconds_wallet")] int? RealtimePollSecondsWallet = null,
     [property: JsonPropertyName("realtime_poll_seconds_control_board")] int? RealtimePollSecondsControlBoard = null,
 
     // ---- The four BE-ADMIN keys, under both spellings ----
@@ -1127,8 +1253,69 @@ public sealed record UpdateSettingsRequest(
     bool? MemberTraceEnabled = null,
     int? MemberTraceMaxEvents = null,
     [property: JsonPropertyName("member_trace_enabled")] bool? MemberTraceEnabledSnake = null,
-    [property: JsonPropertyName("member_trace_max_events")] int? MemberTraceMaxEventsSnake = null)
+    [property: JsonPropertyName("member_trace_max_events")] int? MemberTraceMaxEventsSnake = null,
+
+    // ---- GOAL items 3, 19, 8 and 12, under both spellings ----
+    //
+    // Same asymmetry, same cost, same remedy as the door keys above: the GET answers snake_case
+    // and the PUT binds camelCase, and a client on the wrong side of that gets {"saved":true}
+    // and no change. The one a silent no-op would hurt most here is member_max_slots_per_day —
+    // an admin who lowers it and is told it saved believes the club is enforcing a cap it is
+    // not.
+    int? MemberMaxSlotsPerDay = null,
+    bool? SameDayCapRelaxation = null,
+    int? SameDayRelaxationWindowMinutes = null,
+    bool? WalkUpHonoursDayCap = null,
+    bool? MemberGroupsEnabled = null,
+    int? SseKeepaliveSeconds = null,
+    int? RealtimeFallbackAfterFailures = null,
+    int? RealtimeFallbackWindowSeconds = null,
+    int? RealtimePollSecondsWallet = null,
+    [property: JsonPropertyName("member_max_slots_per_day")] int? MemberMaxSlotsPerDaySnake = null,
+    [property: JsonPropertyName("same_day_cap_relaxation")] bool? SameDayCapRelaxationSnake = null,
+    [property: JsonPropertyName("same_day_relaxation_window_minutes")] int? SameDayRelaxationWindowMinutesSnake = null,
+    [property: JsonPropertyName("walk_up_honours_day_cap")] bool? WalkUpHonoursDayCapSnake = null,
+    [property: JsonPropertyName("member_groups_enabled")] bool? MemberGroupsEnabledSnake = null,
+    [property: JsonPropertyName("sse_keepalive_seconds")] int? SseKeepaliveSecondsSnake = null,
+    [property: JsonPropertyName("realtime_fallback_after_failures")] int? RealtimeFallbackAfterFailuresSnake = null,
+    [property: JsonPropertyName("realtime_fallback_window_seconds")] int? RealtimeFallbackWindowSecondsSnake = null,
+    [property: JsonPropertyName("realtime_poll_seconds_wallet")] int? RealtimePollSecondsWalletSnake = null,
+    string? ActionGlyphs = null,
+    [property: JsonPropertyName("action_glyphs")] string? ActionGlyphsSnake = null)
 {
+    /// <summary>The glyph set the club asked for, under either spelling.</summary>
+    public string? EffectiveActionGlyphs => ActionGlyphs ?? ActionGlyphsSnake;
+
+    /// <summary>The slot cap the club asked for, under either spelling.</summary>
+    public int? EffectiveMemberMaxSlotsPerDay => MemberMaxSlotsPerDay ?? MemberMaxSlotsPerDaySnake;
+
+    /// <summary>Whether the club wants blueprint B.3's same-day relaxation, under either spelling.</summary>
+    public bool? EffectiveSameDayCapRelaxation => SameDayCapRelaxation ?? SameDayCapRelaxationSnake;
+
+    /// <summary>How close to start the relaxation reaches, under either spelling.</summary>
+    public int? EffectiveSameDayRelaxationWindowMinutes
+        => SameDayRelaxationWindowMinutes ?? SameDayRelaxationWindowMinutesSnake;
+
+    /// <summary>Whether a walk-up is refused by the day cap, under either spelling.</summary>
+    public bool? EffectiveWalkUpHonoursDayCap => WalkUpHonoursDayCap ?? WalkUpHonoursDayCapSnake;
+
+    /// <summary>Whether member groups are consulted at all, under either spelling.</summary>
+    public bool? EffectiveMemberGroupsEnabled => MemberGroupsEnabled ?? MemberGroupsEnabledSnake;
+
+    /// <summary>The stream keep-alive the club asked for, under either spelling.</summary>
+    public int? EffectiveSseKeepaliveSeconds => SseKeepaliveSeconds ?? SseKeepaliveSecondsSnake;
+
+    /// <summary>The stream-failure tolerance the club asked for, under either spelling.</summary>
+    public int? EffectiveRealtimeFallbackAfterFailures
+        => RealtimeFallbackAfterFailures ?? RealtimeFallbackAfterFailuresSnake;
+
+    /// <summary>How long a degraded client stays degraded, under either spelling.</summary>
+    public int? EffectiveRealtimeFallbackWindowSeconds
+        => RealtimeFallbackWindowSeconds ?? RealtimeFallbackWindowSecondsSnake;
+
+    /// <summary>The wallet poll cadence the club asked for, under either spelling.</summary>
+    public int? EffectiveRealtimePollSecondsWallet => RealtimePollSecondsWallet ?? RealtimePollSecondsWalletSnake;
+
     /// <summary>Whether the club wants the night trace on, under either spelling.</summary>
     public bool? EffectiveMemberTraceEnabled => MemberTraceEnabled ?? MemberTraceEnabledSnake;
 

@@ -4,12 +4,14 @@ namespace Crusaders.Mainframe.Api.Services.Realtime;
 
 /// <summary>
 /// The shared mechanics of a Server-Sent Events response: the headers that survive this
-/// deployment's proxies, the named keep-alive, and the pump loop.
+/// deployment's proxies, the named keep-alive, the subscribe-then-send ordering that opens a
+/// stream, and the pump loop.
 ///
 /// <para>
-/// <b>The pump is not re-derived, and that is the point of this type existing.</b> The wallet
-/// stream's loop carries two real, browser-reproduced defects in its own doc comments, and both
-/// are properties of the SHAPE rather than of balances:
+/// Lifted out of <c>WalletEndpoints</c> <b>unchanged in behaviour</b> so three streams can share
+/// it. <b>The pump is not re-derived, and that is the point of this type existing.</b> The
+/// wallet stream's loop carried two real, browser-reproduced defects, and both are properties of
+/// the SHAPE rather than of balances:
 /// </para>
 /// <list type="number">
 ///   <item>racing a fresh <c>ReadAsync</c> against a timer and abandoning the loser leaves a
@@ -17,21 +19,17 @@ namespace Crusaders.Mainframe.Api.Services.Realtime;
 ///   awaits and is gone — the twenty-five-second cliff after which a member's balance froze;
 ///   and</item>
 ///   <item><c>PeriodicTimer</c> permits exactly one outstanding waiter, so the turn after a
-///   frame <i>was</i> delivered threw out of the handler with the response already started —
-///   an unhandled 500 and a torn stream.</item>
+///   frame <i>was</i> delivered threw <c>InvalidOperationException</c> out of the handler with
+///   the response already started — an unhandled 500 and a torn stream.</item>
 /// </list>
 /// <para>
-/// Writing that loop a second and third time for two new streams is how one of them acquires
-/// the bug back. Nothing here is abandoned: <c>WaitToReadAsync</c> observes availability
-/// without consuming, the only consumption is the <c>TryRead</c> on the line that writes, and
-/// the quiet period ends by a linked <c>CancellationTokenSource</c> which deregisters its
-/// waiter rather than orphaning it. The inner drain matters because the channel is bounded with
-/// drop-oldest and several frames can land while one write is in flight.
-/// </para>
-///
-/// <para>
-/// The wallet endpoint's own copy is deliberately left where it is — it is pinned by
-/// <c>WalletStreamPumpTests</c> and is the money lane's to move.
+/// Between them, a session was deaf from its first keep-alive onward. Writing that loop a second
+/// and third time for two new streams is how one of them acquires the bug back. Nothing here is
+/// abandoned: <c>WaitToReadAsync</c> observes availability without consuming, the only
+/// consumption is the <c>TryRead</c> on the line that writes, and the quiet period ends by a
+/// linked <c>CancellationTokenSource</c> which deregisters its waiter rather than orphaning it.
+/// The inner drain matters because the channel is bounded with drop-oldest and several frames
+/// can land while one write is in flight.
 /// </para>
 /// </summary>
 public static class SseStream
@@ -79,23 +77,27 @@ public static class SseStream
     }
 
     /// <summary>
-    /// Takes the subscription, THEN sends the opening frame.
+    /// Takes the subscription, <b>then</b> sends whatever the stream opens on.
     ///
     /// <para>
-    /// The order is the whole point. Read-then-subscribe loses anything published inside the
-    /// window of the opening read — the round trip of a database query — and the screen then
-    /// sits on a figure that is already out of date until something else moves. Subscribing
-    /// first cannot lose it: the message is queued, the read afterwards already reflects it,
-    /// and the worst case is the same state rendered twice.
+    /// The order is the whole point, and it used to be the other way round: the state was read,
+    /// written, and only then was the subscription taken. Anything that committed inside that
+    /// window — the round trip of a database read — had no subscriber to publish to and was
+    /// simply gone, and the member's chip then sat on a figure that was already out of date for
+    /// as long as nothing else moved. Subscribing first cannot lose it: the movement is queued,
+    /// and the read afterwards already reflects it, so the worst case is the same figure
+    /// written twice.
     /// </para>
     /// </summary>
     public static async Task<Channel<RealtimeMessage>> SubscribeThenSendAsync(
-        IRealtimeBus bus, RealtimeTopic topic, Func<Task> writeOpening)
+        IRealtimeBus bus,
+        RealtimeTopic topic,
+        Func<Task> writeOpeningState)
     {
         var channel = bus.Subscribe(topic);
         try
         {
-            await writeOpening();
+            await writeOpeningState();
             return channel;
         }
         catch
@@ -107,9 +109,9 @@ public static class SseStream
     }
 
     /// <summary>
-    /// Writes every published frame to one open response, with a keep-alive whenever the topic
-    /// has been quiet for <paramref name="keepAlive"/>. See the type's remarks for why this
-    /// loop is shaped the way it is.
+    /// Writes every published frame to one open SSE response, with a keep-alive whenever the
+    /// topic has been quiet for <paramref name="keepAlive"/>. See the type's remarks for the two
+    /// defects that decide the shape of this loop.
     /// </summary>
     public static async Task PumpAsync(
         ChannelReader<RealtimeMessage> reader,

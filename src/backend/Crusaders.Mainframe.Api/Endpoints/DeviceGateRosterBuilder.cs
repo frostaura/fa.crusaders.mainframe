@@ -148,7 +148,10 @@ public static class DeviceGateRosterBuilder
                         && b.UserId != null
                         && b.StartsAt <= latestStart
                         && b.EndsAt >= now
-                        && !db.Memberships.Any(m => m.UserId == b.UserId && m.Status != MembershipStatus.Active))
+                        // Ruling 15: an ACTIVE row, not merely the absence of a non-active one.
+                        // The old shape let a booking with NO membership row through, which is
+                        // the same conflation that opened a door — see MembershipAccess.
+                        && db.Memberships.Any(m => m.UserId == b.UserId && m.Status == MembershipStatus.Active))
             .OrderBy(b => b.StartsAt)
             .ThenBy(b => b.Id)
             .Take(GateRosterMaxEntries)
