@@ -2135,7 +2135,7 @@ export const BACK_TO_BOOKING_CODE = "Back to your booking code";
  * code gone" is the question that follows otherwise.
  * </p>
  */
-export const WALK_UP_ON_NOTICE = "You're on your member code.";
+export const WALK_UP_ON_NOTICE = "You're on your member code, and will be for the rest of this visit.";
 
 /** The offline marker on a row: the door decided from the list it had already downloaded. */
 export const HISTORY_OFFLINE_LINE = "From the door's own list — it couldn't reach the club at the time.";

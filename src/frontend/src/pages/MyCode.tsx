@@ -510,9 +510,10 @@ function WalkUpSwitch(props: { walkUp: boolean; loading: boolean; onChoose: (nex
 function WalkUpOnNotice(props: { loading: boolean; onBack: () => void }) {
   return (
     <Card className="flex flex-wrap items-center justify-between gap-3">
-      <p className="text-sm text-text-secondary">
-        {WALK_UP_ON_NOTICE} {WALK_UP_STICKY_HINT}
-      </p>
+      {/* The lifetime is IN this sentence rather than borrowed from the checkbox's hint:
+          two copies of "Stays on for the rest of this visit", two hundred pixels apart, is
+          the noise this round is about. One statement, in the place the member arrived. */}
+      <p className="text-sm text-text-secondary">{WALK_UP_ON_NOTICE}</p>
       <Button variant="outline" className="w-full sm:w-auto" disabled={props.loading} onClick={props.onBack}>
         {BACK_TO_BOOKING_CODE}
       </Button>
