@@ -2,35 +2,45 @@ import { Link } from "react-router-dom";
 import { Card } from "../Card";
 import { Button } from "../Button";
 import { cn } from "../../lib/utils";
-import { formatClock, formatCountdown } from "../../lib/countdown";
+import { formatCountdown } from "../../lib/countdown";
+import { clubClock } from "../../lib/clubClock";
 import type { MemberDoor, MemberDoorDecision } from "../../lib/api";
 import {
+  DECISION_COLLAPSE_AFTER_MINUTES,
   DECISION_DISMISS,
   type ContactKnowledge,
   type DecisionAction,
   type DecisionTone,
   contactMissingNotice,
   contactUnknownNotice,
+  decisionAge,
   decisionStamp,
   describeDecision,
 } from "../../lib/memberDoorCopy";
-import { spokenCountdown, useCountdownSeconds } from "./useCountdownSeconds";
+import { spokenCountdown, useCountdownSeconds, useMinutesSince } from "./useCountdownSeconds";
 
 /**
  * The member's own last door decision, as advice with one next action.
  *
  * <p>
- * <b>It sits above the QR</b>, which is the one piece of block order on this page worth
- * arguing about. A member who was just refused will hold the same code up again within
- * five seconds and be refused again. The reason is the answer; the QR is not.
+ * <b>It sits BELOW the code, and that reverses where it started.</b> The original argument
+ * was that a member who was just refused will hold the same code up again within five
+ * seconds, so the reason is the answer and the QR is not — which is true, and is not an
+ * argument for putting it above. Measured at 320×568, a decision arriving moved the QR down
+ * 290 px on a screen somebody was holding against a scanner, and dismissing it moved it back
+ * up; the first thing on the page has to be the code, and nothing that comes and goes may
+ * shift it (D8, D10). Directly under the code is close enough to read without scrolling and
+ * costs the QR nothing.
  * </p>
  *
  * <p>
- * <b>It stays until it is superseded or dismissed.</b> Two minutes is the SERVER's fetch
- * window, not a display window: a card that vanishes mid-sentence while a cold member is
- * reading it is a defect, and on a five-second poll that boundary lands mid-read for
- * somebody. Absolute times throughout, never "just now" — a member who pocketed the phone
- * for ninety seconds cannot tell a fresh card from a stale one.
+ * <b>It stays until it is superseded or dismissed — but it visibly ages.</b> Two minutes is
+ * the SERVER's fetch window, not a display window: a card that vanishes mid-sentence while a
+ * cold member is reading it is a defect. What A3.2 did not say, and D6 found, is that the
+ * card then stayed at full size and full confidence for as long as the page was open — a
+ * green "The lock released · 10:02" still the biggest thing on the screen twenty minutes
+ * later, over a code that had since run out. So it carries its age, and after five minutes
+ * it collapses to one line. Still dismissible at every size.
  * </p>
  */
 
@@ -109,11 +119,17 @@ export function DecisionCard(props: {
    */
   const opensAt = decision.opens_at ?? door?.next_booking?.door_opens_at ?? null;
   const seconds = useCountdownSeconds(decision.reason === "too_early" ? opensAt : null);
+  const zone = door?.timezone;
+  /** D6 — how long this card has been on screen, read off the clock once a minute. */
+  const minutesOld = useMinutesSince(decision.at);
+  const collapsed = minutesOld >= DECISION_COLLAPSE_AFTER_MINUTES;
 
   const shared = {
-    opensAtClock: opensAt ? formatClock(opensAt) : null,
-    bookingStartsClock: door?.next_booking ? formatClock(door.next_booking.starts_at) : null,
-    earlyEntryMinutes: door?.early_entry_minutes ?? 0,
+    opensAtClock: opensAt ? clubClock(opensAt, zone) : null,
+    bookingStartsClock: door?.next_booking ? clubClock(door.next_booking.starts_at, zone) : null,
+    // E-H3: null under every policy but `booking_window`, and the copy has a wordless arm
+    // for it. Zero here would print "in the next 0 minutes" at a club that has no such rule.
+    earlyEntryMinutes: door?.early_entry_minutes ?? null,
     contact,
   };
   const copy = describeDecision(decision, { ...shared, countdown: seconds === null ? null : formatCountdown(seconds) });
@@ -123,6 +139,26 @@ export function DecisionCard(props: {
   const spoken = describeDecision(decision, { ...shared, countdown: seconds === null ? null : spokenCountdown(seconds) });
 
   const refresh = copy.actions.find((a) => a.kind === "refresh_the_code");
+  const stamp = `${decisionStamp(decision.door_name, decision.at, decision.delivered_at, zone)}`
+    + ` · ${decisionAge(minutesOld)}`;
+
+  if (collapsed) {
+    /*
+      D6, after five minutes. It is a record rather than news by then, and it was still the
+      largest element on a page whose code had moved on without it. One line, its age on it,
+      and the same Dismiss — a collapsed card a member cannot get rid of is worse than a big
+      one they can.
+    */
+    return (
+      <Card className={cn("flex flex-wrap items-center justify-between gap-2 py-2", TONE_CHROME[copy.tone])} role="status">
+        <p className="text-sm">
+          <span className={TONE_TEXT[copy.tone]}>{copy.headline}</span>{" "}
+          <span className="text-text-muted">{stamp}</span>
+        </p>
+        <Button variant="outline" className="px-3 text-xs" onClick={onDismiss}>{DECISION_DISMISS}</Button>
+      </Card>
+    );
+  }
 
   return (
     <Card
@@ -150,7 +186,9 @@ export function DecisionCard(props: {
             <p className="sr-only">{spoken.headline}</p>
           </>
         )}
-        <p className="text-sm text-text-secondary">{decisionStamp(decision.door_name, decision.at, decision.delivered_at)}</p>
+        {/* D6: the age travels with the stamp. A member who pocketed the phone for ninety
+            seconds cannot tell a fresh card from a stale one off an absolute time alone. */}
+        <p className="text-sm text-text-secondary">{stamp}</p>
       </div>
       <p className="text-sm text-text-secondary">{copy.body}</p>
       {copy.actions.length === 0 && (decision.reason === "member_not_active" || decision.reason === "method_not_supported" || decision.reason === "not_a_gate") && (

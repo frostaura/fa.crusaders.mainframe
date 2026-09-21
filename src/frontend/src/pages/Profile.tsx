@@ -222,11 +222,20 @@ export default function ProfilePage() {
  * with a sentence under it. A member of a club that has never owned a door has no door
  * history and should not be told they have none.
  * </p>
+ *
+ * <p>
+ * <b>D11 — but a `/me/door` that FAILED is not a club with no gate, and it used to be
+ * treated as one.</b> The flag answered false on any error, so one unlucky request deleted
+ * a member's whole record from this page while `/me/door/history` was answering perfectly.
+ * The two reads are independent and the card is now gated on what it can see for itself:
+ * with the door question unanswered it renders only once it has rows, which keeps the
+ * no-gate club silent without letting a failed read silence anybody else.
+ * </p>
  */
 function MemberDoorHistory() {
   const doors = useDoorsFlag();
-  if (!doors) return null;
-  return <DoorHistoryCard />;
+  if (doors === "no") return null;
+  return <DoorHistoryCard onlyWithRows={doors === "unknown"} />;
 }
 
 /**

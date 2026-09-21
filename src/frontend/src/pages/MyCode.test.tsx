@@ -254,7 +254,13 @@ describe("MyCode", () => {
     // page and every assertion below would pass over a sentence that is not there.
     const start = said.indexOf("opens the club door");
     expect(start).toBeGreaterThan(-1);
-    const door = said.slice(start);
+    // To the end of THAT SENTENCE, not to the end of the document. D8 put the page's
+    // subtitle below the code card, and the subtitle's court half legitimately says "marks
+    // you as arrived" — slicing to the end swept it in and reported the door clause for a
+    // phrase twenty lines further down. A probe that fails on the right words in the wrong
+    // paragraph stops being read.
+    const end = said.indexOf(".", start);
+    const door = said.slice(start, end === -1 ? undefined : end + 1);
     expect(door).not.toMatch(/always/i);
     expect(door).not.toMatch(/guarantee/i);
     // The court vocabulary, kept out of the door sentence.
@@ -276,7 +282,10 @@ describe("MyCode", () => {
     // What presenting it does, in the member's terms — and which of the two codes this
     // is, because they behave differently at the box and look identical on the phone.
     // The hour is the viewer's local time, so only its shape is pinned here.
-    expect(screen.getByText(/^Booking code · court 3 · starts \d{2}:\d{2}$/)).toBeInTheDocument();
+    // D4 — the tense follows the clock. `BOOKING`'s slot began in 2026, so "starts" would
+    // be the page telling a member their court starts in the past; it said exactly that for
+    // the whole of every booking, because the heading only ever knew how to say "starts".
+    expect(screen.getByText(/^Booking code · court 3 · on now$/)).toBeInTheDocument();
     expect(screen.getByText(/For your booking only/)).toBeInTheDocument();
     expect(screen.getByText(/At any other court it will not be recognised/)).toBeInTheDocument();
     expect(screen.getByText(/Refreshes in 15m 00s/)).toBeInTheDocument();
@@ -813,10 +822,20 @@ describe("MyCode at a club with a door", () => {
   const BOOKING = memberDoorBookingFixture();
 
   /** Renders with both reads answered. `door` is the whole `/me/door` document. */
+  /** `GET /me/door/history` with nothing in it — what the self-check reads by default. */
+  const EMPTY_HISTORY = {
+    items: [], next_cursor: null, retention_days: 90, timezone: "Africa/Johannesburg",
+  };
+
   function renderBoth(door: Record<string, unknown>, code: Record<string, unknown> = CODE) {
     const stub = stubFetch([
       { method: "POST", path: "/api/v1/me/qr/generate", body: code },
       { path: "/api/v1/me/door", body: door },
+      // E-H2 (2) — the self-check reads the club's own record when the member presses the
+      // button. Stubbed EMPTY by default, and stubbed at all deliberately: `/me/door` is a
+      // prefix of `/me/door/history`, so without a route of its own the history request was
+      // answered with the door object and the page spread an `items` that was not there.
+      { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
     ]);
     renderPage(<MyCodePage />);
     return stub;
@@ -903,11 +922,38 @@ describe("MyCode at a club with a door", () => {
    * time at all, so deleting the code card's would leave the member without one.
    */
   it("keeps the code's own door window when the standing line has no clock of its own", async () => {
-    renderBoth(memberDoorsOnFixture({ policy: "active_member", membership: "active", next_booking: null }));
+    // A MEMBER code on screen: the standing line has no clock, the code has no window of
+    // its own, and the code card's clause is the only place the rule can be stated at all.
+    renderBoth(
+      memberDoorsOnFixture({ policy: "active_member", membership: "active", next_booking: null }),
+      IDENT_CODE,
+    );
 
     await screen.findByText(/Your club opens its doors for any active member/);
-    expect(screen.getByText(/doors open earlier than its courts do: this code opens the club door from \d{2}:\d{2} until \d{2}:\d{2}\./))
+    expect(screen.getByText(/It also opens the club door whenever the club's door rules allow/))
       .toBeInTheDocument();
+  });
+
+  /**
+   * E-H2 (1), D5 — the same club with a BOOKING code on screen, which is the case that put
+   * two sentences on the page arguing with each other.
+   *
+   * <p>
+   * "A live code of yours opens the club door" sat directly above "this code opens the club
+   * door from 08:05 until 10:50", with nothing to say the first was about the member's OTHER
+   * code. One sentence now, in the standing section, naming which code it is about — so the
+   * code card's vaguer copy of it is suppressed rather than printed a centimetre away.
+   * </p>
+   */
+  it("says which code the window belongs to when a booking code is the one on screen", async () => {
+    renderBoth(memberDoorsOnFixture({ policy: "active_member", membership: "active", next_booking: null }));
+
+    expect(await screen.findByText(/The booking code on screen is bounded by its own window/))
+      .toHaveTextContent(/whatever rule a club applies/);
+    // And the code card's own clause is gone, because it would be a second, vaguer copy.
+    expect(screen.queryByText(/doors open earlier than its courts do/)).toBeNull();
+    // With the offer to switch, which is what a member holding the wrong code needs.
+    expect(screen.getAllByRole("button", { name: "Use your member code instead" }).length).toBeGreaterThan(0);
   });
 
   /**
@@ -1012,7 +1058,8 @@ describe("MyCode at a club with a door", () => {
     // DIFFER — which is when a countdown is ticking in one of them. On an arm with no
     // countdown, two copies inside an atomic live region is the sentence read out twice.
     expect((await screen.findAllByText(/The club has your membership as not active\./)).length).toBe(1);
-    expect(screen.getByText(/^front-door · \d{2}:\d{2}$/)).toBeInTheDocument();
+    // D6 appended the age to the stamp.
+    expect(screen.getByText(/^front-door · \d{2}:\d{2} · just now$/)).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "Call the club" })[0]).toHaveAttribute("href", "tel:0215550134");
   });
 
@@ -1120,7 +1167,7 @@ describe("MyCode at a club with a door", () => {
       last_decision: memberDoorDecisionFixture({ door_name: null, reason: "no_booking" }),
     }));
 
-    expect(await screen.findByText(/^a club door · \d{2}:\d{2}$/)).toBeInTheDocument();
+    expect(await screen.findByText(/^a club door · \d{2}:\d{2} · just now$/)).toBeInTheDocument();
     expect(screen.queryByText(/hasn't named/i)).toBeNull();
   });
 
@@ -1348,7 +1395,10 @@ describe("MyCode at a club with a door", () => {
 
     const panel = screen.getByRole("group", { name: /work out why/i });
     const row = [...panel.querySelectorAll("li")].find((li) => li.textContent?.includes("The door's window"));
-    expect(row?.textContent).toContain("opens for you at 18:30");
+    // E-H2 (1) — the row is about the code ON SCREEN, which here is a booking code with a
+    // window of its own. The instant is the same one either way; what changed is that the
+    // sentence now says which code it belongs to.
+    expect(row?.textContent).toContain("this booking code works at a door from 18:30");
     expect(row?.textContent).not.toContain("no window to wait for");
 
     // And the booking row must not fail either. `opens_at` is only ever computed BECAUSE
@@ -1356,9 +1406,41 @@ describe("MyCode at a club with a door", () => {
     // them to book another, is the checklist contradicting the countdown above it.
     const booking = [...panel.querySelectorAll("li")].find((li) => li.textContent?.includes("Your booking"));
     expect(booking?.textContent).toContain("Passed");
+    // E-H2 (2) — the conclusion LEADS with the club's own record of the refusal, which is
+    // the one line on this control that is not an inference from what the phone can see.
+    // It used to reason its way to "the window hasn't opened yet" while the club's record,
+    // one request away, said so in the club's own words.
+    expect(panel).toHaveTextContent(/club's own record/i);
+    expect(panel).toHaveTextContent(/hadn't opened the door yet/i);
+    expect(panel.textContent).not.toMatch(/Book one from the schedule/);
+  });
+
+  /**
+   * And with nothing on the club's record, the same member gets the reasoned answer — which
+   * is what makes the arm above an addition rather than a replacement.
+   */
+  it("reasons its way to the window when the club has no recent refusal recorded", async () => {
+    fakeClock();
+    vi.setSystemTime(new Date("2026-09-19T16:03:00Z"));
+    renderBoth(memberDoorsOnFixture({
+      policy: "booking_window", next_booking: null,
+      // An hour old: past the fifteen minutes the check will lead with, and the server
+      // would not have sent it at all. The page must not reach back for it.
+      last_decision: memberDoorDecisionFixture({
+        at: "2026-09-19T15:02:00Z", reason: "too_early", opens_at: "2026-09-19T16:30:00Z",
+      }),
+      // A MEMBER code on screen, which has no window of its own — so the row and the
+      // conclusion both fall back to what the club's decision said the window was.
+    }), IDENT_CODE);
+    await advance(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "The door didn't open" }));
+    await advance(0);
+
+    const panel = screen.getByRole("group", { name: /work out why/i });
+    expect(panel.textContent).not.toMatch(/club's own record/i);
     expect(panel).toHaveTextContent(/window hasn't opened yet/i);
     expect(panel).toHaveTextContent(/Everything else is fine/i);
-    expect(panel.textContent).not.toMatch(/Book one from the schedule/);
   });
 
   /** The other half: genuinely nothing booked, and the row fails and says so. */
@@ -1376,7 +1458,13 @@ describe("MyCode at a club with a door", () => {
     const booking = [...panel.querySelectorAll("li")].find((li) => li.textContent?.includes("Your booking"));
     expect(booking?.textContent).toContain("Failed");
     expect(booking?.textContent).toContain("none starting soon");
-    expect(panel).toHaveTextContent(/Book one from the schedule/);
+    // E-H2 (2) — the club wrote down why, so that leads; the way to a court is still on
+    // screen as a control, which is what the member actually needs to press.
+    expect(panel).toHaveTextContent(/club's own record/i);
+    expect(panel).toHaveTextContent(/no court booked that the door would open for/i);
+    // Two of them on the page — the standing line's and the check's — and both are the
+    // one thing this member needs to press.
+    expect(screen.getAllByRole("link", { name: "Book a court" }).length).toBeGreaterThan(0);
   });
 
   /**
@@ -1536,9 +1624,9 @@ describe("MyCode at a club with a door", () => {
    */
   it("stubs every key GET /api/v1/me/door actually returns", () => {
     expect(Object.keys(memberDoorFixture()).sort()).toEqual([
-      "contact", "door_log_retention_days", "doors", "early_entry_minutes", "is_club_admin",
-      "last_decision", "membership", "membership_detail", "next_booking", "policy",
-      "roster_max_entries",
+      "contact", "door_log_retention_days", "doors", "doors_shut", "early_entry_minutes",
+      "is_club_admin", "last_decision", "membership", "membership_detail", "next_booking",
+      "policy", "roster_max_entries", "timezone",
     ]);
     expect(Object.keys(memberDoorBookingFixture()).sort()).toEqual([
       "court_number", "door_closes_at", "door_opens_at", "ends_at", "starts_at",
@@ -1561,7 +1649,9 @@ describe("MyCode at a club with a door", () => {
       last_decision: memberDoorOfflineDecisionFixture({ door_name: "front-door" }),
     }));
 
-    expect(await screen.findByText(/^front-door · \d{2}:\d{2} · the club heard at \d{2}:\d{2}$/))
+    // D6 appended the age. A member who pocketed the phone for ninety seconds cannot tell
+    // a fresh card from a stale one off an absolute time alone.
+    expect(await screen.findByText(/^front-door · \d{2}:\d{2} · the club heard at \d{2}:\d{2} · just now$/))
       .toBeInTheDocument();
   });
 
@@ -1574,7 +1664,7 @@ describe("MyCode at a club with a door", () => {
       last_decision: memberDoorDecisionFixture({ reason: "no_booking" }),
     }));
 
-    expect(await screen.findByText(/^front-door · \d{2}:\d{2}$/)).toBeInTheDocument();
+    expect(await screen.findByText(/^front-door · \d{2}:\d{2} · just now$/)).toBeInTheDocument();
     expect(screen.queryByText(/the club heard at/)).toBeNull();
   });
 
@@ -1631,13 +1721,16 @@ describe("MyCode at a club with a door", () => {
     }));
 
     const line = await screen.findByText(/no membership on file for you/);
-    expect(line).toHaveTextContent(/still opens the club door/);
+    expect(line).toHaveTextContent(/A live member code of yours opens the club door/);
     // Neither neighbour's sentence: not "yours is active" and not "yours is not active".
     expect(line).not.toHaveTextContent(/Yours is active/);
     expect(screen.queryByText(/not active/i)).toBeNull();
-    // And the code card's clause is kept, because this line has no clock of its own and
-    // the door really does open.
-    expect(screen.getByText(/opens the club door from/)).toBeInTheDocument();
+    // And the door's clock times are still on the page — in the sentence that says WHICH
+    // code they belong to, because the code on screen here is a booking code. E-H2 (1).
+    expect(screen.getByText(/The booking code on screen is bounded by its own window/))
+      // The DAY travels with the clock when the window is not today — `next_booking` has no
+      // horizon any more, so a bare "18:30" could mean a time three days out.
+      .toHaveTextContent(/works at a door from .*\d{2}:\d{2} until .*\d{2}:\d{2}/);
   });
 
   // --- early_entry_minutes: the club's own number --------------------------------------
@@ -2076,8 +2169,14 @@ describe("MyCode at a club with a door", () => {
     expect(code.className).toContain("break-all");
     expect(code.className).toContain("max-w-full");
     const qr = screen.getByRole("img", { name: /QR code/ }).parentElement!;
-    expect(qr.className).toContain("max-w-[min(20rem,100%)]");
+    // D7 — off the VIEWPORT, not off the column. `min(20rem,100%)` kept the symbol inside
+    // the card, and the card's own `p-4` and the page column's `px-4` are both rem: at a
+    // 32px root they ate 128px of a 320px screen and the QR came out at 190px against 254px
+    // at the default. A member who has turned the type up was answered by a smaller code.
+    expect(qr.className).toContain("w-[min(100vw-64px,20rem)]");
     expect(qr.className).not.toContain("max-w-xs");
+    // And the card's own padding is in pixels, which is the other half of the same fix.
+    expect(qr.closest("div.rounded-lg")?.className ?? "").not.toContain("max-w-[min(20rem,100%)]");
   });
 
   /**
@@ -2098,7 +2197,13 @@ describe("MyCode at a club with a door", () => {
     expect(code.className).toContain("break-all");
     expect(code.className).toContain("max-w-full");
     const qr = screen.getByRole("img", { name: /QR code/ }).parentElement!;
-    expect(qr.className).toContain("max-w-[min(20rem,100%)]");
+    // D7 — off the VIEWPORT, not off the column. `min(20rem,100%)` kept the symbol inside
+    // the card, and the card's own `p-4` and the page column's `px-4` are both rem: at a
+    // 32px root they ate 128px of a 320px screen and the QR came out at 190px against 254px
+    // at the default. A member who has turned the type up was answered by a smaller code.
+    expect(qr.className).toContain("w-[min(100vw-64px,20rem)]");
     expect(qr.className).not.toContain("max-w-xs");
+    // And the card's own padding is in pixels, which is the other half of the same fix.
+    expect(qr.closest("div.rounded-lg")?.className ?? "").not.toContain("max-w-[min(20rem,100%)]");
   });
 });

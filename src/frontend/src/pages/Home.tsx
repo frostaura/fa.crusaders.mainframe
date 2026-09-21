@@ -341,7 +341,9 @@ function SignedInHome({ isAdmin }: { isAdmin: boolean }) {
     {
       to: "/my-code",
       label: "Your code",
-      hint: doors ? "Show this at a court box, or at the club door" : "Show this at the court box",
+      // `=== "yes"`, so both "no" and "this read never landed" keep the silent half. The
+      // flag answers three ways now (D11); only one of them may add the door clause.
+      hint: doors === "yes" ? "Show this at a court box, or at the club door" : "Show this at the court box",
       icon: QrCode,
     },
     { to: "/wallet", label: "Wallet", hint: "Balance, top-ups and charges", icon: Wallet },

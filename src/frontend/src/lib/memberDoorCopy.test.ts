@@ -21,7 +21,13 @@ import {
   STANDING_HEADING,
   STANDING_LOADING,
   UNNAMED_DOOR,
+  WALK_UP_STICKY_HINT,
+  CLUB_TIME_NOTE,
+  DOOR_SECTION_UNKNOWN,
+  asOfMayHaveChanged,
   buildDiagnosis,
+  decisionAge,
+  sentenceText,
   codeExpiredDeadEnd,
   contactMissingNotice,
   contactUnknownNotice,
@@ -102,6 +108,17 @@ describe("memberDoorCopy", () => {
     door_closes_at: "2026-09-19T18:05:00Z",
   };
 
+  /** The code on screen, in each of its two shapes. E-H2 (1), D5. */
+  const BOOKING_CODE = {
+    kind: "booking" as const,
+    doorOpensAt: "2026-09-19T16:30:00Z",
+    doorClosesAt: "2026-09-19T18:05:00Z",
+  };
+  const IDENT_CODE = { kind: "ident" as const, doorOpensAt: null, doorClosesAt: null };
+
+  /** A {@link Sentence} as the one string a reader sees — what every copy probe reads. */
+  const flat = sentenceText;
+
   /**
    * A standing-line input with every field the endpoint sends, so a test names only the
    * one field it is about.
@@ -113,7 +130,10 @@ describe("memberDoorCopy", () => {
    * what makes a one-field probe mean something.
    * </p>
    */
-  function standingFor(overrides: Record<string, unknown> = {}) {
+  function standingFor(
+    overrides: Record<string, unknown> = {},
+    code: Parameters<typeof describeStanding>[1] = null,
+  ) {
     return describeStanding({
       policy: "active_member",
       membership: "active",
@@ -121,8 +141,12 @@ describe("memberDoorCopy", () => {
       is_club_admin: false,
       early_entry_minutes: 30,
       next_booking: null,
+      // WIRE-R2 §4. `none` by default: a club that has shut a door has DONE something, and
+      // the default fixture should not quietly describe a club in that state.
+      doors_shut: "none",
+      timezone: "Africa/Johannesburg",
       ...overrides,
-    } as Parameters<typeof describeStanding>[0]);
+    } as Parameters<typeof describeStanding>[0], code);
   }
 
   /** Every sentence this module can produce, for the probes that must sweep all of them. */
@@ -133,8 +157,10 @@ describe("memberDoorCopy", () => {
       STANDING_HEADING, STANDING_LOADING, OFFLINE_DETAILS_SUMMARY, offlineDetailsBody(),
       DIAGNOSIS_TRIGGER, DIAGNOSIS_HEADING, CONTACT_LEAD, contactMissingNotice(),
       contactUnknownNotice(), DOOR_SECTION_CHECKING,
-      codeExpiredDeadEnd("network", CONTACT), codeExpiredDeadEnd("server", NO_CONTACT),
-      codeExpiredDeadEnd("network", UNKNOWN_CONTACT),
+      flat(codeExpiredDeadEnd("network", CONTACT)), flat(codeExpiredDeadEnd("server", NO_CONTACT)),
+      flat(codeExpiredDeadEnd("network", UNKNOWN_CONTACT)),
+      DOOR_SECTION_UNKNOWN, WALK_UP_STICKY_HINT, CLUB_TIME_NOTE,
+      asOfMayHaveChanged("09:46"), decisionAge(0), decisionAge(1), decisionAge(12),
       HISTORY_TITLE, HISTORY_INTRO, HISTORY_P2_NOTICE, HISTORY_LOADING, HISTORY_FAILED,
       HISTORY_EMPTY, HISTORY_MORE_FAILED, HISTORY_OFFLINE_LINE, HISTORY_DELIVERY_ORDER,
       historyOfflineLine("2026-09-19T06:09:00Z"), historyOfflineLine(null),
@@ -145,8 +171,8 @@ describe("memberDoorCopy", () => {
       standingFailed({ body: "cached sentence", minutesAgo: 4 }, "server"),
       offlineWithCode({ fetchedAtClock: "06:02", minutesAgo: 7, kind: "booking" }),
       offlineWithCode({ fetchedAtClock: "06:02", minutesAgo: 7, kind: "ident" }),
-      offlineNoCode(CONTACT), offlineNoCode(NO_CONTACT),
-      offlineIdentDeadEnd(CONTACT), offlineIdentDeadEnd(NO_CONTACT),
+      flat(offlineNoCode(CONTACT)), flat(offlineNoCode(NO_CONTACT)),
+      flat(offlineIdentDeadEnd(CONTACT)), flat(offlineIdentDeadEnd(NO_CONTACT)),
     ];
     // The reason axis includes `null`, which the endpoint returns for a non-release row
     // whose details would not parse, and the offline axis forks the open.
@@ -154,7 +180,7 @@ describe("memberDoorCopy", () => {
       for (const released of [true, false]) {
         for (const offline of [true, false]) {
           for (const contact of [CONTACT, NO_CONTACT]) {
-            for (const earlyEntryMinutes of [0, 30, 240]) {
+            for (const earlyEntryMinutes of [0, 30, 240, null]) {
               const copy = describeDecision({ reason, released, offline }, {
                 countdown: "27m 12s", opensAtClock: "06:30", bookingStartsClock: "07:00",
                 earlyEntryMinutes, contact,
@@ -174,17 +200,31 @@ describe("memberDoorCopy", () => {
       for (const membership of ["active", "not_active", "none"] as const) {
         for (const detail of ["active", "pending_approval", "rejected", "suspended", "none", "lapsed_with_grace"]) {
           for (const is_club_admin of [true, false]) {
-            for (const early_entry_minutes of [0, 1, 30, 90, 240]) {
+            // `null` is E-H3's shape: no early-entry window in force under this policy.
+            for (const early_entry_minutes of [0, 1, 30, 90, 240, null]) {
               for (const next_booking of [null, BOOKING]) {
-                out.push(standingFor({
-                  policy, membership, membership_detail: detail,
-                  is_club_admin, early_entry_minutes, next_booking,
-                }).body);
+                // B4 / E-H1 and E-H2 (1): both new axes, swept like every other, because a
+                // sentence that only exists for a shut door is still a sentence this module
+                // can build and the ban list has to reach it.
+                for (const doors_shut of ["none", "some", "all"] as const) {
+                  for (const code of [null, BOOKING_CODE, IDENT_CODE]) {
+                    const line = standingFor({
+                      policy, membership, membership_detail: detail,
+                      is_club_admin, early_entry_minutes, next_booking, doors_shut,
+                    }, code);
+                    out.push(line.body, line.codeLine ?? "", line.shutLine ?? "");
+                  }
+                }
               }
             }
           }
         }
       }
+    }
+    // Every conclusion the self-check can reach, including the new refusal-led arm.
+    for (const shape of everyDiagnosis()) {
+      const built = buildDiagnosis(shape);
+      out.push(flat(built.conclusion), ...built.rows.map((r) => `${r.label} ${r.value} ${r.stateWord}`));
     }
     return out;
   }
@@ -492,9 +532,11 @@ describe("memberDoorCopy", () => {
   });
 
   it("closes the door on a dead cached code rather than showing a hopeful one", () => {
-    const text = offlineNoCode(CONTACT);
-    expect(text).toMatch(/run out/i);
-    expect(text).toContain("021 555 0134");
+    const sentence = offlineNoCode(CONTACT);
+    expect(flat(sentence)).toMatch(/run out/i);
+    expect(flat(sentence)).toContain("021 555 0134");
+    // D13 — and it is a link here too, on the page a member reads with no signal at all.
+    expect(sentence.link).toEqual({ href: "tel:0215550134", text: "021 555 0134" });
   });
 
   /**
@@ -503,15 +545,15 @@ describe("memberDoorCopy", () => {
    * so this member cannot get in, and the page owes them that rather than a QR.
    */
   it("tells a member holding only an ident code with no signal that it cannot open a cut-off door", () => {
-    const text = offlineIdentDeadEnd(CONTACT);
+    const text = flat(offlineIdentDeadEnd(CONTACT));
     expect(text).toMatch(/about a minute/i);
     expect(text).toMatch(/a court booked/i);
     expect(text).toContain("021 555 0134");
   });
 
   it("tells a member with no club contact where the only remaining answer is", () => {
-    expect(offlineIdentDeadEnd(NO_CONTACT)).toMatch(/written on the door/i);
-    expect(offlineNoCode(NO_CONTACT)).toMatch(/written on the door/i);
+    expect(flat(offlineIdentDeadEnd(NO_CONTACT))).toMatch(/written on the door/i);
+    expect(flat(offlineNoCode(NO_CONTACT))).toMatch(/written on the door/i);
   });
 
   // --- the self-diagnosis ----------------------------------------------------------
@@ -529,7 +571,48 @@ describe("memberDoorCopy", () => {
     codeSecondsLeft: 58,
     connection: "ok" as const,
     contact: CONTACT,
+    // E-H2. The three inputs the check ignored, at their silent defaults: no particular
+    // code on screen, no window of its own, and nothing in the club's record.
+    codeKind: null,
+    codeWindow: null,
+    lastRefusal: null,
+    offerMemberCode: false,
   };
+
+  /** Every shape the self-check can be handed, for the sweeps that must reach all of them. */
+  function everyDiagnosis(): Parameters<typeof buildDiagnosis>[0][] {
+    const base = [
+      HEALTHY,
+      { ...HEALTHY, membership: "not_active" as const, membership_detail: "suspended" },
+      { ...HEALTHY, membership: "none" as const, membership_detail: "none" },
+      { ...HEALTHY, connection: "network" as const },
+      { ...HEALTHY, connection: "server" as const },
+      { ...HEALTHY, standingKnown: false },
+      { ...HEALTHY, hasBooking: false, bookingStartsClock: null, doorWindowOpen: null, opensAtClock: null, opensInWords: null },
+      { ...HEALTHY, doorWindowOpen: false },
+      { ...HEALTHY, codeSecondsLeft: 0 },
+      { ...HEALTHY, policy: "active_member" as const, codeKind: "booking" as const },
+      { ...HEALTHY, contact: NO_CONTACT },
+      { ...HEALTHY, contact: UNKNOWN_CONTACT },
+    ];
+    const out: Parameters<typeof buildDiagnosis>[0][] = [];
+    for (const shape of base) {
+      for (const codeWindow of [null, OPEN_CODE_WINDOW, SHUT_CODE_WINDOW]) {
+        for (const lastRefusal of [null, ...REFUSALS]) {
+          for (const offerMemberCode of [true, false]) {
+            out.push({ ...shape, codeWindow, lastRefusal, offerMemberCode });
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  const OPEN_CODE_WINDOW = { open: true, opensAtClock: "08:05", closesAtClock: "10:50" };
+  const SHUT_CODE_WINDOW = { open: false, opensAtClock: "08:05", closesAtClock: "10:50" };
+  /** Including a token this build has never heard of, and a row with no reason at all. */
+  const REFUSALS = [...Object.keys(DOOR_REFUSAL_REASONS), null, "some_new_token"]
+    .map((reason) => ({ atClock: "09:46", reason }));
 
   it("asks six questions, each with its state in words as well as in colour", () => {
     const { rows } = buildDiagnosis(HEALTHY);
@@ -547,9 +630,11 @@ describe("memberDoorCopy", () => {
    */
   it("concludes that the problem is at the door when nothing on the phone is wrong", () => {
     const { conclusion } = buildDiagnosis(HEALTHY);
-    expect(conclusion).toMatch(/at the door/i);
-    expect(conclusion).toContain("021 555 0134");
-    expect(conclusion).not.toMatch(/no refusal|nothing to show|no recent|nothing found/i);
+    expect(flat(conclusion)).toMatch(/at the door/i);
+    expect(flat(conclusion)).toContain("021 555 0134");
+    expect(flat(conclusion)).not.toMatch(/no refusal|nothing to show|no recent|nothing found/i);
+    // D13 — and the number in it is a link, not text somebody has to re-type in the dark.
+    expect(conclusion.link).toEqual({ href: "tel:0215550134", text: "021 555 0134" });
   });
 
   it("never concludes with nothing, whatever it is given", () => {
@@ -564,9 +649,9 @@ describe("memberDoorCopy", () => {
       { ...HEALTHY, policy: "active_member" as const, hasBooking: false, bookingStartsClock: null, doorWindowOpen: null, opensAtClock: null, opensInWords: null },
       { ...HEALTHY, contact: NO_CONTACT },
     ];
-    for (const shape of shapes) {
+    for (const shape of [...shapes, ...everyDiagnosis()]) {
       const { conclusion, rows } = buildDiagnosis(shape);
-      expect(conclusion.length).toBeGreaterThan(20);
+      expect(flat(conclusion).length).toBeGreaterThan(20);
       expect(rows).toHaveLength(6);
     }
   });
@@ -574,13 +659,13 @@ describe("memberDoorCopy", () => {
   /** First failing row wins, so the member is given ONE thing to do rather than five. */
   it("names the membership and nothing else when the membership is the first failure", () => {
     const { conclusion } = buildDiagnosis({ ...HEALTHY, membership: "not_active" as const, membership_detail: "pending_approval", connection: "network" as const, codeSecondsLeft: 0 });
-    expect(conclusion).toMatch(/membership/i);
-    expect(conclusion).not.toMatch(/had run out/i);
+    expect(flat(conclusion)).toMatch(/membership/i);
+    expect(flat(conclusion)).not.toMatch(/had run out/i);
   });
 
   it("says the check is guessing when the phone could not reach the club", () => {
     const { conclusion, rows } = buildDiagnosis({ ...HEALTHY, connection: "network" as const });
-    expect(conclusion).toMatch(/guessing/i);
+    expect(flat(conclusion)).toMatch(/guessing/i);
     const connection = rows.find((r) => r.key === "connection")!;
     expect(connection.stateWord).toBe("Failed");
   });
@@ -589,14 +674,14 @@ describe("memberDoorCopy", () => {
     const { conclusion } = buildDiagnosis({
       ...HEALTHY, hasBooking: false, bookingStartsClock: null, doorWindowOpen: null, opensAtClock: null, opensInWords: null,
     });
-    expect(conclusion).toMatch(/book/i);
+    expect(flat(conclusion)).toMatch(/book/i);
   });
 
   it("tells a member whose window has not opened to wait, and says when", () => {
     const { conclusion } = buildDiagnosis({ ...HEALTHY, doorWindowOpen: false });
-    expect(conclusion).toContain("18:30");
-    expect(conclusion).toContain("27 minutes");
-    expect(conclusion).toMatch(/everything else/i);
+    expect(flat(conclusion)).toContain("18:30");
+    expect(flat(conclusion)).toContain("27 minutes");
+    expect(flat(conclusion)).toMatch(/everything else/i);
   });
 
   /** Through the shared formatter: "fresh, 900s left" is not a number anybody reads. */
@@ -608,8 +693,8 @@ describe("memberDoorCopy", () => {
 
   it("tells a member whose code had run out that there is a fresh one", () => {
     const { conclusion } = buildDiagnosis({ ...HEALTHY, codeSecondsLeft: 0 });
-    expect(conclusion).toMatch(/run out/i);
-    expect(conclusion).toMatch(/fresh one/i);
+    expect(flat(conclusion)).toMatch(/run out/i);
+    expect(flat(conclusion)).toMatch(/fresh one/i);
   });
 
   /** The trigger is the member's own sentence, not a support-desk word. */
@@ -959,9 +1044,12 @@ describe("memberDoorCopy", () => {
       buildDiagnosis({ ...HEALTHY, contact: UNKNOWN_CONTACT }).conclusion,
       codeExpiredDeadEnd("network", UNKNOWN_CONTACT),
     ];
-    for (const text of shapes) {
-      expect(text).not.toMatch(/only way from here/i);
-      expect(text).not.toMatch(/hasn't given the app a number/i);
+    for (const sentence of shapes) {
+      expect(flat(sentence)).not.toMatch(/only way from here/i);
+      expect(flat(sentence)).not.toMatch(/hasn't given the app a number/i);
+      // And nothing to press, because there is nothing behind it. A dead `tel:` in the
+      // dark is worse than no link at all — the same rule `contactAction` follows.
+      expect(sentence.link).toBeNull();
     }
   });
 
@@ -1013,8 +1101,8 @@ describe("memberDoorCopy", () => {
     expect(connection.state).toBe("neutral");
     expect(connection.stateWord).not.toBe("Failed");
     expect(connection.value).not.toMatch(/not reaching the club/i);
-    expect(conclusion).toMatch(/answered with an error/i);
-    expect(conclusion).toMatch(/not your phone/i);
+    expect(flat(conclusion)).toMatch(/answered with an error/i);
+    expect(flat(conclusion)).toMatch(/not your phone/i);
   });
 
   // --- D3: a check that does not apply, or is anomalous, is NEUTRAL ---------------------
@@ -1069,7 +1157,7 @@ describe("memberDoorCopy", () => {
       if (row.value === "an active membership") expect(row.state).not.toBe("passed");
       if (row.value.startsWith("nothing on file")) expect(row.state).not.toBe("passed");
     }
-    expect(conclusion).toMatch(/no membership on file/i);
+    expect(flat(conclusion)).toMatch(/no membership on file/i);
   });
 
   it("carries a word for every state it can produce", () => {
@@ -1095,8 +1183,8 @@ describe("memberDoorCopy", () => {
   // --- D5: an expired code that cannot be renewed ---------------------------------------
 
   it("says a code that has run out cannot be renewed, and why", () => {
-    const noSignal = codeExpiredDeadEnd("network", CONTACT);
-    const serverDown = codeExpiredDeadEnd("server", CONTACT);
+    const noSignal = flat(codeExpiredDeadEnd("network", CONTACT));
+    const serverDown = flat(codeExpiredDeadEnd("server", CONTACT));
     expect(noSignal).toMatch(/run out/i);
     expect(noSignal).toMatch(/signal/i);
     expect(noSignal).not.toMatch(/refreshing/i);
@@ -1157,7 +1245,7 @@ describe("memberDoorCopy", () => {
     // The two the page can answer for itself, whatever the club said, still answer.
     expect(rows.find((r) => r.key === "code")!.state).toBe("passed");
     expect(rows.find((r) => r.key === "connection")!.state).toBe("failed");
-    expect(conclusion).toMatch(/unanswered rather than fine/i);
+    expect(flat(conclusion)).toMatch(/unanswered rather than fine/i);
   });
 
   it("still asks all six, so a row is never silently dropped", () => {
@@ -1218,7 +1306,220 @@ describe("memberDoorCopy", () => {
     for (const membership of ["active", "none"] as const) {
       const line = standingFor({ policy: "active_member", membership, membership_detail: membership });
       expect(line.body).not.toMatch(/code on this screen/i);
-      expect(line.body).toMatch(/live code of yours/i);
+      expect(line.body).toMatch(/live member code of yours/i);
     }
+  });
+
+  /**
+   * E-H2 (1), D5 — and this is the OTHER half of the rule above, not a contradiction of it.
+   *
+   * <p>
+   * The standing line's body stays about the club's rule and this member's standing, so it
+   * can never argue with whatever the code card has on it. What was missing is a sentence
+   * that says which code each fact is about: a member at an `active_member` club, holding a
+   * BOOKING code for tomorrow, read "a live code of yours opens the club door" directly
+   * above "this code opens the club door from 08:05", with nothing to say they were two
+   * different codes. That sentence is `codeLine`, and it is separate precisely so that the
+   * body still has nothing to do with what is on screen.
+   * </p>
+   */
+  it("says which code a window belongs to when a booking code is the one on screen", () => {
+    const line = standingFor({}, BOOKING_CODE);
+    expect(line.body).not.toMatch(/08:05|booking code on screen/i);
+    expect(line.codeLine).toMatch(/booking code on screen/i);
+    // Both edges of the CODE's own window, and the fact that makes it true everywhere.
+    expect(line.codeLine).toMatch(/whatever rule a club applies/i);
+    expect(line.offerMemberCode).toBe(true);
+    // The code card's own clause would be a second, vaguer copy of this. Suppressed.
+    expect(line.suppressesCodeClause).toBe(true);
+  });
+
+  it("says nothing about a window when the member code is the one on screen", () => {
+    const line = standingFor({}, IDENT_CODE);
+    expect(line.codeLine).toBeNull();
+    expect(line.offerMemberCode).toBe(false);
+  });
+
+  /**
+   * The LOW note. `next_booking` reaches past the door's horizon now (WIRE-R2 §4), so a
+   * member with a court tomorrow can be told when its code starts working — which is the
+   * question they were left with and had no way to answer.
+   */
+  it("tells a member at an any-active-member club when their next booking opens a door", () => {
+    const line = standingFor({ next_booking: BOOKING });
+    expect(line.codeLine).toMatch(/court/i);
+    expect(line.codeLine).toMatch(/booking code works at a door from/i);
+  });
+
+  // --- B4 / E-H1: the club has shut its doors ---------------------------------------
+
+  /**
+   * <b>The sentence B4 found: "a live code of yours opens the club door", shown while the
+   * club's only usable door was shut.</b> `doors` means "this club has scanners" now, so
+   * the page no longer goes silent — which makes it this module's job to say the true
+   * thing instead of the reassuring one.
+   */
+  it.each(["some", "all"] as const)("never promises a door opens when %s of them are shut", (doors_shut) => {
+    for (const policy of ["active_member", "booking_window"] as const) {
+      for (const next_booking of [null, BOOKING]) {
+        for (const is_club_admin of [true, false]) {
+          const line = standingFor({ doors_shut, policy, next_booking, is_club_admin });
+          const whole = `${line.body} ${line.codeLine ?? ""} ${line.shutLine ?? ""}`;
+          expect(whole).not.toMatch(/opens the club door|the door opens for you now/i);
+          expect(line.shutLine).toMatch(/shut/i);
+        }
+      }
+    }
+  });
+
+  /** Both halves, and nothing predicted about the half this screen cannot see. */
+  it("states what a shut door does and declines to predict what a cut-off one will do", () => {
+    const line = standingFor({ doors_shut: "all" });
+    expect(line.shutLine).toMatch(/turns every code away/i);
+    expect(line.shutLine).toMatch(/lost the network/i);
+    expect(line.shutLine).toMatch(/can't see/i);
+    // No count: the wire carries none, so the page invents none.
+    expect(line.shutLine).not.toMatch(/[0-9]/);
+  });
+
+  it("tells them apart: some of the club's doors, or all of them", () => {
+    expect(standingFor({ doors_shut: "some" }).shutLine).toMatch(/some of its doors/i);
+    expect(standingFor({ doors_shut: "all" }).shutLine).not.toMatch(/some of its doors/i);
+    expect(standingFor({ doors_shut: "none" }).shutLine).toBeNull();
+  });
+
+  /** And a shut door silences the code card's own promise, which is the other half of B4. */
+  it("suppresses the code card's door clause while any door is shut", () => {
+    expect(standingFor({ doors_shut: "some" }).suppressesCodeClause).toBe(true);
+    expect(standingFor({ doors_shut: "all" }).suppressesCodeClause).toBe(true);
+    expect(standingFor({ doors_shut: "none" }).suppressesCodeClause).toBe(false);
+  });
+
+  // --- E-H3: the early-entry number that belongs to one policy only -------------------
+
+  /**
+   * Under `active_member` a booking code's door window comes from the roster horizon, not
+   * from early entry — so `early_entry_minutes` arrives null and no sentence may name a
+   * number. The wordless arm was already there for a club that had set zero; this is the
+   * same arm, reached by a different route.
+   */
+  it("names no early-entry window when the club's policy does not have one", () => {
+    const line = standingFor({ policy: "booking_window", early_entry_minutes: null, next_booking: null });
+    expect(line.body).toMatch(/soon enough for a door to open/i);
+    expect(line.body).not.toMatch(/[0-9]+ minutes|[0-9]+ hour/);
+  });
+
+  it("still names it when the club's policy does have one", () => {
+    const line = standingFor({ policy: "booking_window", early_entry_minutes: 90, next_booking: null });
+    expect(line.body).toMatch(/in the next 1 hour 30 minutes/i);
+  });
+
+  // --- O1: one clock face, and it is the CLUB's day ----------------------------------
+
+  /**
+   * The runner is pinned to Africa/Johannesburg (`vite.config.ts`), which is also the club
+   * under test's zone — so a clock assertion against the default fixture proves nothing
+   * about threading. Two hours behind is what makes the difference visible.
+   */
+  it("writes a booking's window in the club's own day, not the reader's", () => {
+    // A booking whose door window has NOT opened, so the sentence names `door_opens_at`
+    // rather than the closing time — and far enough ahead that it cannot drift into the
+    // past while the suite runs.
+    const soon = {
+      ...BOOKING,
+      starts_at: "2099-01-01T17:00:00Z",
+      ends_at: "2099-01-01T17:45:00Z",
+      door_opens_at: "2099-01-01T16:30:00Z",
+      door_closes_at: "2099-01-01T18:05:00Z",
+    };
+    const here = standingFor({ policy: "booking_window", next_booking: soon });
+    const abroad = standingFor({ policy: "booking_window", next_booking: soon, timezone: "Europe/London" });
+    // 16:30Z is 18:30 in Johannesburg and 16:30 in London on that January date.
+    expect(here.body).toContain("18:30");
+    expect(abroad.body).toContain("16:30");
+    expect(abroad.body).not.toContain("18:30");
+  });
+
+  // --- E-H2 (2): the club's own record leads ------------------------------------------
+
+  /**
+   * <b>The Lerato conclusion: "Everything on this phone looks right, so whatever went wrong
+   * is at the door", shown beside seventeen refusals the club had written down.</b> The
+   * check never read the club's record, so the one line available to it that is not an
+   * inference was the one line it did not have.
+   */
+  it("leads with the club's own record of a refusal rather than blaming the door", () => {
+    const { conclusion } = buildDiagnosis({
+      ...HEALTHY, lastRefusal: { atClock: "09:46", reason: "too_early" },
+    });
+    expect(flat(conclusion)).toMatch(/club's own record/i);
+    expect(flat(conclusion)).toContain("09:46");
+    expect(flat(conclusion)).toMatch(/the booking that code belonged to/i);
+    expect(flat(conclusion)).not.toMatch(/whatever went wrong is at the door/i);
+  });
+
+  it("never concludes the fault is at the door while a refusal is on the club's record", () => {
+    for (const refusal of REFUSALS) {
+      const { conclusion } = buildDiagnosis({ ...HEALTHY, lastRefusal: refusal });
+      expect(flat(conclusion)).not.toMatch(/whatever went wrong is at the door/i);
+    }
+  });
+
+  /** A reason this build has never heard of still reaches a sentence, and never the token. */
+  it("answers a recorded refusal whose reason it does not recognise", () => {
+    const { conclusion } = buildDiagnosis({
+      ...HEALTHY, lastRefusal: { atClock: "09:46", reason: "some_new_token" },
+    });
+    expect(flat(conclusion)).not.toContain("some_new_token");
+    expect(flat(conclusion)).toMatch(/doesn't say why/i);
+  });
+
+  /** Membership still outranks it: a barred member's refusal has one cause and it is that. */
+  it("puts a barred membership above the club's record of the refusal it caused", () => {
+    const { conclusion } = buildDiagnosis({
+      ...HEALTHY,
+      membership: "not_active" as const,
+      membership_detail: "suspended",
+      lastRefusal: { atClock: "09:46", reason: "member_not_active" },
+    });
+    expect(flat(conclusion)).toMatch(/suspended/i);
+  });
+
+  // --- E-H2 (1)/(3): the check is about the code ON SCREEN ----------------------------
+
+  it("judges the window of the booking code on screen, not the member's standing", () => {
+    const { rows } = buildDiagnosis({
+      ...HEALTHY, policy: "active_member" as const, codeKind: "booking" as const,
+      doorWindowOpen: null, opensAtClock: null, codeWindow: SHUT_CODE_WINDOW,
+    });
+    const window = rows.find((r) => r.key === "window")!;
+    expect(window.state).toBe("attention");
+    expect(window.value).toContain("08:05");
+    expect(window.value).not.toMatch(/no window to wait for/i);
+  });
+
+  it("does not tell a member holding a booking code that bookings are not needed, full stop", () => {
+    const { rows } = buildDiagnosis({
+      ...HEALTHY, policy: "active_member" as const, codeKind: "booking" as const,
+    });
+    const booking = rows.find((r) => r.key === "booking")!;
+    expect(booking.value).toMatch(/the code on screen belongs to one/i);
+  });
+
+  it("concludes with the code's own window when that is what is shut", () => {
+    const { conclusion } = buildDiagnosis({
+      ...HEALTHY, policy: "active_member" as const, codeKind: "booking" as const,
+      codeWindow: SHUT_CODE_WINDOW, offerMemberCode: true,
+    });
+    expect(flat(conclusion)).toContain("08:05");
+    expect(flat(conclusion)).toMatch(/whatever rule a club applies/i);
+    expect(flat(conclusion)).toMatch(/use your member code instead/i);
+  });
+
+  it("offers the member code only where the club's rule would admit it", () => {
+    const { conclusion } = buildDiagnosis({
+      ...HEALTHY, codeKind: "booking" as const, codeWindow: SHUT_CODE_WINDOW, offerMemberCode: false,
+    });
+    expect(flat(conclusion)).not.toMatch(/use your member code instead/i);
   });
 });

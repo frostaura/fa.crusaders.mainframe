@@ -43,8 +43,18 @@ export const LAST_KNOWN_KEY = "crusaders.member-door.last-known";
  * the exact failure this counter exists to prevent, arriving as plausible prose rather
  * than as a crash anybody would notice.
  * </p>
+ *
+ * <p>
+ * <b>3 — WIRE-R2 §4, and one of its three changes is a reversal rather than an addition.</b>
+ * `doors_shut` and `timezone` are new, and `early_entry_minutes` is now null under every
+ * policy but `booking_window`. A v2 record read as a v3 would carry a real number where the
+ * new shape means "there is no early-entry window in force", and `doors_shut` would arrive
+ * undefined — which the shut sentence reads as "none", putting the page back to promising a
+ * member that a shut door opens for them. That is the exact sentence the wire change exists
+ * to stop, so the record that predates it is discarded rather than patched.
+ * </p>
  */
-export const LAST_KNOWN_VERSION = 2;
+export const LAST_KNOWN_VERSION = 3;
 
 /** The half of a code the offline page renders. No token beyond the code itself. */
 export type LastKnownQr = {
@@ -143,6 +153,12 @@ export function rememberQr(qr: MyQrCode): void {
 export function rememberDoor(door: MemberDoor): void {
   const value: LastKnownDoor = {
     doors: door.doors,
+    // B4 / E-H1: without this a member reading the page with no signal is told what the club
+    // was like before it shut its doors, in the present tense.
+    doors_shut: door.doors_shut,
+    // O1: the club's zone travels with the facts, so a cached clock face is still the club's
+    // day rather than reverting to the viewer's the moment the network goes.
+    timezone: door.timezone,
     policy: door.policy,
     membership: door.membership,
     membership_detail: door.membership_detail,

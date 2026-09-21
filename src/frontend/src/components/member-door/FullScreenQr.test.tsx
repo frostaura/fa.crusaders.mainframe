@@ -33,8 +33,15 @@ describe("FullScreenQr", () => {
     window.history.replaceState(null, "", "/");
   });
 
+  /** D12's dead-end sentence, with the club's number in it as a pressable link. */
+  const DEAD_SENTENCE = {
+    text: "This code has run out and can't be renewed without signal. Phone the club on ",
+    link: { href: "tel:0215550134", text: "021 555 0134" },
+    tail: ".",
+  };
+
   /** The overlay, opened and closed by a control, inside a real router. */
-  function Host() {
+  function Host(props: { dead?: boolean; renewing?: boolean; onTryAgain?: () => void }) {
     const [open, setOpen] = useState(false);
     const location = useLocation();
     return (
@@ -43,7 +50,15 @@ describe("FullScreenQr", () => {
         <button type="button" onClick={() => setOpen(true)}>Show your code full screen</button>
         <Link to="/schedule">Go to the schedule</Link>
         {open && (
-          <FullScreenQr code="7K3M9XQ2RD5A" onClose={() => setOpen(false)}>
+          <FullScreenQr
+            code="7K3M9XQ2RD5A"
+            secondsLeft={props.dead ? 0 : 612}
+            dead={props.dead ?? false}
+            renewing={props.renewing ?? false}
+            deadSentence={DEAD_SENTENCE}
+            onTryAgain={props.onTryAgain ?? (() => {})}
+            onClose={() => setOpen(false)}
+          >
             <svg role="img" aria-label="QR code 7K3M9XQ2RD5A" />
           </FullScreenQr>
         )}
@@ -51,12 +66,12 @@ describe("FullScreenQr", () => {
     );
   }
 
-  function renderHost() {
+  function renderHost(props: { dead?: boolean; renewing?: boolean; onTryAgain?: () => void } = {}) {
     window.history.replaceState(null, "", "/my-code");
     return render(
       <BrowserRouter>
         <Routes>
-          <Route path="/my-code" element={<Host />} />
+          <Route path="/my-code" element={<Host {...props} />} />
           <Route path="/schedule" element={<p>the schedule</p>} />
         </Routes>
       </BrowserRouter>,

@@ -80,6 +80,8 @@ describe("My door history", () => {
     items: [memberDoorHistoryRowFixture()],
     next_cursor: null,
     retention_days: 90,
+    // WIRE-R2 §4 — the club's own zone, on the same read as the rows.
+    timezone: "Africa/Johannesburg",
     ...over,
   });
 
@@ -152,7 +154,11 @@ describe("My door history", () => {
     expect(await screen.findByText("Lock released")).toBeInTheDocument();
     expect(screen.getAllByText(/front-door/).length).toBe(2);
     expect(screen.getByText("Too early")).toBeInTheDocument();
-    expect(screen.getByText(/Your court hadn't opened the door yet/)).toBeInTheDocument();
+    // D2 — the row cannot know WHICH of the member's two codes was held up, so it may not
+    // say "your court". A member with no court booked at all read seventeen of these, all
+    // of them refusals of a booking code for the following day.
+    expect(screen.getByText(/The booking that code belonged to hadn't opened the door yet/))
+      .toBeInTheDocument();
     // A date as well as a clock time: two rows an hour apart on different days are
     // otherwise indistinguishable.
     expect(screen.getAllByText(/\d{2}:\d{2}$/).length).toBeGreaterThanOrEqual(2);

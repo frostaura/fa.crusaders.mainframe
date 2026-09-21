@@ -58,6 +58,41 @@ export function useCountdownSeconds(instant: string | null): number | null {
  * wait. Under a minute it says so in words rather than counting.
  * </p>
  */
+/**
+ * Whole minutes since an instant, re-read off the clock rather than counted. D6.
+ *
+ * <p>
+ * Once a minute rather than once a second, because nothing on screen changes in between and
+ * a per-second re-render of a card inside a polite live region is a screen reader talking
+ * over a member. The same three wake events every other clock here listens on: a phone that
+ * slept through four minutes must not come back showing "1 min ago".
+ * </p>
+ */
+export function useMinutesSince(instant: string): number {
+  const at = useMemo(() => Date.parse(instant), [instant]);
+  const read = useMemo(() => () => (Number.isNaN(at) ? 0 : Math.max(0, Math.floor((Date.now() - at) / 60_000))), [at]);
+  const [minutes, setMinutes] = useState(read);
+
+  useEffect(() => {
+    const tick = () => setMinutes(read());
+    // The first reading is of a NEW instant and must not wait thirty seconds: a card
+    // replaced by a fresher decision would otherwise carry its predecessor's age.
+    tick();
+    const timer = setInterval(tick, 30_000);
+    document.addEventListener("visibilitychange", tick);
+    window.addEventListener("focus", tick);
+    window.addEventListener("pageshow", tick);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+      window.removeEventListener("focus", tick);
+      window.removeEventListener("pageshow", tick);
+    };
+  }, [read]);
+
+  return minutes;
+}
+
 export function spokenCountdown(seconds: number): string {
   if (seconds <= 0) return "now";
   if (seconds < 60) return "less than a minute";

@@ -34,7 +34,13 @@ const DEFAULT_LANDING = "/schedule";
  */
 function describeNotApproved(status: string | number | null): string {
   if (status === "Suspended") {
-    return "Your membership is suspended, so you can't sign in. The club emailed you the reason — speak to them to have it restored.";
+    // "The club emailed you the reason" was asserted as fact, and this screen has no way to
+    // know it. Every player-affecting event does send an email — that is an invariant of the
+    // product — but a member reading this is being told to go and look for a message that
+    // may have bounced, been filtered, or gone to an address they no longer read. A member
+    // who does not find it concludes the screen is lying about something else too. "May"
+    // costs one word and is true either way.
+    return "Your membership is suspended, so you can't sign in. The club may have emailed you the reason — speak to them to have it restored.";
   }
   if (status === "Rejected") {
     return "Your application wasn't approved, so this account can't be used. The club emailed you the reason — contact them if you think it's a mistake.";
