@@ -105,6 +105,11 @@ RELEASE_TOLERANCE_MS = 400
 RELOCK_DWELL_MS = 400
 CAP_RELOCK_DWELL_MS = 3000
 
+#: `kScanDebounceMs`. A repeat of the SAME token inside this of a decision for it
+#: is dropped without a decision — so a harness re-scanning one code has to wait
+#: it out or the simulator answers nothing at all, which reads as a dead board.
+SCAN_DEBOUNCE_MS = 2000
+
 
 def chk(tag: str, what: str, ok: bool, detail: str = "") -> bool:
     return REPORT.check(tag, what, ok, detail)
@@ -1018,42 +1023,6 @@ def dsim_firmware(door: Any) -> None:
             not sim.relay_moved(denied_from),
             f"relay lines: {[l.raw for l in sim.since(denied_from, 'relay')]}")
 
-        # -- D S 4 b : the lock is DE-ENERGISED between two openings ---------
-        #
-        # Round G4, A1. The hard cap bounded a release WINDOW and nothing bounded
-        # the DOOR: the cap closed a window and the very next accepted scan opened
-        # a fresh one, in the same pass, because `pass()` pumps the lock out of
-        # `afterBlocking()` and applies the decision that call produced two lines
-        # later. Measured against this binary with two alternating tokens every
-        # 50 ms: relay OFF at t=31034 ms and ON at t=31034 ms, dark for 0 ms, then
-        # +42 ms and +45 ms, for ever. A relay de-energised for zero milliseconds
-        # was never de-energised — the strike does not drop and the maglock keeps
-        # its armature — so the door physically never relocked, with every single
-        # request inside the rules.
-        dwell_from = sim.mark()
-        dwell = sim.scan(live_code)
-        chk("DSIM", "a scan inside the relock dwell is REFUSED, with a reason that is about the door "
-                    "rather than about the member — a lock written OFF and ON at one instant was "
-                    "never de-energised",
-            not dwell.flag("released") and dwell.get("reason") == "relocking", dwell.raw)
-        chk("DSIM", "  ...and the relay does not move for it", not sim.relay_moved(dwell_from),
-            f"relay lines: {[l.raw for l in sim.since(dwell_from, 'relay')]}")
-        door.reasons_seen.add("relocking")
-
-        # AND IT IS A DWELL, NOT A REFUSAL: the same code opens the door again a
-        # moment later. A board that had simply stopped opening would pass the two
-        # assertions above and be far worse than the defect.
-        sim.let_the_lock_relatch()
-        back_from = sim.mark()
-        back = sim.scan(live_code)
-        chk("DSIM", "  ...and once the lock has relatched the same code opens the door again, so the "
-                    "dwell delays a member rather than refusing them",
-            back.flag("released"), back.raw)
-        chk("DSIM", "  ...with the relay actually moving for it", sim.relay_moved(back_from),
-            f"relay lines: {[l.raw for l in sim.since(back_from, 'relay')]}")
-        sim.relay_window(back_from, timeout=12.0)
-        sim.let_the_lock_relatch()
-
         held_lines = sim.since(offline_from, "evq")
         chk("DSIM", "both offline decisions are QUEUED, because the API by definition does not know "
                     "about a decision the board took for itself",
@@ -1092,6 +1061,69 @@ def dsim_firmware(door: Any) -> None:
             _audit_count(door, "device.gate_open", device_code) == 1
             and _audit_count(door, "device.unknown_scan", device_code) == 1,
             f"gate_open={_audit_count(door, 'device.gate_open', device_code)}")
+
+        # -- D S 5 b : the lock is DE-ENERGISED between two openings ---------
+        #
+        # Round G4, A1. The hard cap bounded a release WINDOW and nothing bounded
+        # the DOOR: the cap closed a window and the very next accepted scan opened
+        # a fresh one, in the same pass, because `pass()` pumps the lock out of
+        # `afterBlocking()` and applies the decision that call produced two lines
+        # later. Measured against this binary with two alternating tokens every
+        # 50 ms: relay OFF at t=31034 ms and ON at t=31034 ms, dark for 0 ms, then
+        # +42 ms and +45 ms, for ever. A relay de-energised for zero milliseconds
+        # was never de-energised — the strike does not drop and the maglock keeps
+        # its armature — so the door physically never relocked, with every single
+        # request inside the rules.
+        # THE STATE HAS TO BE MADE: a dwell exists only just after a CLOSE, so
+        # this opens the door and waits for the window to end before probing.
+        #
+        # AND IT IS HERE, AFTER DS5, RATHER THAN BESIDE THE OFFLINE SECTION: the
+        # openings below are real openings, and offline each one would queue a
+        # `gate_open` that DS5's "exactly once" counts would then read as a drain
+        # that duplicated. The board is back online by now, so these go through
+        # the API and queue nothing.
+        time.sleep((SCAN_DEBOUNCE_MS / 1000.0) + 0.3)
+        dwell_open = sim.mark()
+        reopened = sim.scan(live_code)
+        chk("DSIM", "the cached roster opens the door again, which is what creates the close the "
+                    "dwell follows",
+            reopened.flag("released"), reopened.raw)
+        _, closed_ms = sim.relay_window(dwell_open, timeout=12.0)
+        if closed_ms is None:
+            raise StepFailed("the release window never closed, so the dwell cannot be probed")
+
+        # IMMEDIATELY, which is what no person can do and this harness can. The
+        # SAME code that opened the door a moment ago, so the refusal is
+        # demonstrably about the DOOR and not about the member.
+        dwell_from = sim.mark()
+        dwell = sim.scan(live_code)
+        chk("DSIM", "a scan inside the relock dwell is REFUSED — with the same code that opened the "
+                    "door seconds earlier, so the answer is about the lock relatching and not about "
+                    "the member",
+            not dwell.flag("released") and dwell.get("reason") == "relocking", dwell.raw)
+        chk("DSIM", "  ...and the relay does not move for it", not sim.relay_moved(dwell_from),
+            f"relay lines: {[l.raw for l in sim.since(dwell_from, 'relay')]}")
+        door.reasons_seen.add("relocking")
+
+        # AND IT IS A DWELL, NOT A REFUSAL: the same code opens the door again a
+        # moment later. A board that had simply stopped opening would pass the two
+        # assertions above and be far worse than the defect.
+        #
+        # PAST THE DEBOUNCE TOO, not just past the dwell. The refusal above WAS a
+        # decision for this token, so a re-scan inside kScanDebounceMs is
+        # suppressed without one — correctly, and it would read here as the board
+        # having stopped answering.
+        time.sleep((SCAN_DEBOUNCE_MS / 1000.0) + 0.3)
+        back_from = sim.mark()
+        back = sim.scan(live_code)
+        chk("DSIM", "  ...and once the lock has relatched the same code opens the door again, so the "
+                    "dwell delays a member rather than refusing them",
+            back.flag("released"), back.raw)
+        chk("DSIM", "  ...with the relay actually moving for it", sim.relay_moved(back_from),
+            f"relay lines: {[l.raw for l in sim.since(back_from, 'relay')]}")
+        sim.relay_window(back_from, timeout=12.0)
+        sim.let_the_lock_relatch()
+
 
         # -- D S 6 : the club shuts the door --------------------------------
         #
