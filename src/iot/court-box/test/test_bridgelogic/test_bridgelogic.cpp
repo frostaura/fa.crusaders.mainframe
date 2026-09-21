@@ -35,6 +35,7 @@
 #include "bridgelogic/ScanFlow.h"
 #include "bridgelogic/StateReconcile.h"
 #include "bridgelogic/WalkUp.h"
+#include "bridgelogic/WallClock.h"
 #include "court/Session.h"
 #include "devapi/DeviceClient.h"
 #include "devlink/Cadence.h"
@@ -58,6 +59,7 @@ constexpr uint32_t kBases[] = {kBaseZero, kBaseMid, kBaseWrapSoon, kBaseWrapNow}
 constexpr size_t kBaseCount = sizeof(kBases) / sizeof(kBases[0]);
 
 constexpr uint32_t kSixHoursMs = 21600000UL;
+constexpr uint32_t kSecondsPerDayLocal = 86400UL;
 constexpr uint32_t kHourMs = 3600000UL;
 
 using Cache = roster::Roster<devlink::kMaxRosterEntries>;
@@ -2373,6 +2375,134 @@ void test_this_boot_has_an_identity_and_it_is_never_the_wires_absent_value() {
   TEST_ASSERT_NULL(strstr(legacy, "boot_id"));
 }
 
+
+// ---------------------------------------------------------------------------
+// B6 — the wall clock the box borrows, and the blank when it cannot
+// ---------------------------------------------------------------------------
+
+void test_server_time_is_read_as_club_local_wall_time_or_refused() {
+  uint32_t second = 0U;
+  TEST_ASSERT_TRUE(bridgelogic::secondOfDayFrom("2026-09-21T18:45:07+02:00", second));
+  TEST_ASSERT_EQUAL_UINT32(18UL * 3600UL + 45UL * 60UL + 7UL, second);
+  // A `Z`, a fractional part, a space separator: the same nineteen characters.
+  TEST_ASSERT_TRUE(bridgelogic::secondOfDayFrom("2026-09-21T06:00:00Z", second));
+  TEST_ASSERT_EQUAL_UINT32(6UL * 3600UL, second);
+  TEST_ASSERT_TRUE(bridgelogic::secondOfDayFrom("2026-09-21T23:59:59.9999999+02:00", second));
+  TEST_ASSERT_EQUAL_UINT32(kSecondsPerDayLocal - 1UL, second);
+  TEST_ASSERT_TRUE(bridgelogic::secondOfDayFrom("2026-01-01 00:00:00", second));
+  TEST_ASSERT_EQUAL_UINT32(0U, second);
+
+  // Refused, every one, with the caller's value untouched: printing whatever
+  // two bytes sat at offset 11 is exactly the failure this shape check exists
+  // to stop.
+  second = 12345U;
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom(nullptr, second));
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("", second));
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21T18:45", second));      // truncated
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026/09/21T18:45:07", second));   // wrong separators
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21X18:45:07", second));   // wrong date/time mark
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21Tab:45:07", second));   // not a digit
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("20x6-09-21T18:45:07", second));   // nor in the date
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21T24:00:00", second));   // out of range
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21T18:60:07", second));
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21T18:45:60", second));   // leap second
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21T-8:45:07", second));
+  TEST_ASSERT_EQUAL_UINT32(12345U, second);
+}
+
+void test_the_clock_advances_between_heartbeats_and_wraps_at_midnight() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::WallClock clock;
+
+    // Nothing adopted: the box does not know the time and says so, rather than
+    // reporting midnight.
+    TEST_ASSERT_FALSE(clock.trusted(base));
+    char wire[bridgelogic::kWireTimeLen] = {};
+    clock.wireTime(base, wire, sizeof(wire));
+    TEST_ASSERT_EQUAL_STRING(proto::kNoClock, wire);
+    char shown[bridgelogic::kDisplayTimeLen] = {};
+    clock.displayTime(base, shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("", shown);
+
+    TEST_ASSERT_TRUE(clock.adopt("2026-09-21T23:58:30+02:00", base));
+    TEST_ASSERT_TRUE(clock.trusted(base));
+    clock.displayTime(base, shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("23:58", shown);
+    clock.wireTime(base, wire, sizeof(wire));
+    TEST_ASSERT_EQUAL_STRING("2358", wire);
+
+    // Advanced on millis(), across the wrap of BOTH clocks: the club's midnight
+    // and the 49.7-day millis() rollover the bases put inside this scenario.
+    clock.displayTime(base + 60000UL, shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("23:59", shown);
+    clock.displayTime(base + 120000UL, shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("00:00", shown);
+    clock.wireTime(base + 120000UL, wire, sizeof(wire));
+    TEST_ASSERT_EQUAL_STRING("0000", wire);
+    clock.displayTime(base + 3600000UL, shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("00:58", shown);
+
+    // A time that is not NOW: what "Ends 18:45" is built from.
+    TEST_ASSERT_TRUE(clock.adopt("2026-09-21T18:00:00+02:00", base));
+    clock.displayTimeAt(base, clock.secondOfDayIn(base, 2700U), shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("18:45", shown);
+    // ...and past midnight, which a late booking really does reach.
+    clock.displayTimeAt(base, clock.secondOfDayIn(base, 8UL * 3600UL), shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("02:00", shown);
+  }
+}
+
+void test_a_clock_nobody_has_confirmed_for_too_long_blanks_rather_than_lies() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::WallClock clock;
+    TEST_ASSERT_EQUAL_UINT32(bridgelogic::kDefaultClockTrustMinutes, clock.trustMinutes());
+    TEST_ASSERT_TRUE(clock.adopt("2026-09-21T18:00:00+02:00", base));
+
+    const uint32_t window = bridgelogic::kDefaultClockTrustMinutes * 60000UL;
+    TEST_ASSERT_TRUE(clock.trusted(base + window));
+    TEST_ASSERT_FALSE(clock.trusted(base + window + 1U));
+
+    char wire[bridgelogic::kWireTimeLen] = {};
+    char shown[bridgelogic::kDisplayTimeLen] = {};
+    clock.wireTime(base + window + 1U, wire, sizeof(wire));
+    clock.displayTime(base + window + 1U, shown, sizeof(shown));
+    // A stale clock reads exactly like a live one, which is why it is worse
+    // than none: "19:30" on a box that has been offline since lunchtime is a
+    // number the member will plan around.
+    TEST_ASSERT_EQUAL_STRING(proto::kNoClock, wire);
+    TEST_ASSERT_EQUAL_STRING("", shown);
+    // And every row that names a FUTURE time blanks with it, not just "now".
+    clock.displayTimeAt(base + window + 1U, 12345U, shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("", shown);
+
+    // A fresh heartbeat restores it whole.
+    TEST_ASSERT_TRUE(clock.adopt("2026-09-21T19:31:00+02:00", base + window + 1U));
+    TEST_ASSERT_TRUE(clock.trusted(base + window + 1U));
+    clock.displayTime(base + window + 1U, shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("19:31", shown);
+
+    // A malformed `server_time` is not evidence that the last good one has gone
+    // stale — the box keeps the clock it has and lets it age out normally.
+    TEST_ASSERT_FALSE(clock.adopt("not a time", base + window + 2U));
+    TEST_ASSERT_TRUE(clock.trusted(base + window + 2U));
+    clock.displayTime(base + window + 2U, shown, sizeof(shown));
+    TEST_ASSERT_EQUAL_STRING("19:31", shown);
+
+    // The tenant's setting, clamped, and immediate: an admin who shortens this
+    // wants the stale clock gone now, and there is nobody mid-interaction.
+    clock.setTrustMinutes(0U);
+    TEST_ASSERT_EQUAL_UINT32(bridgelogic::kMinClockTrustMinutes, clock.trustMinutes());
+    clock.setTrustMinutes(999999UL);
+    TEST_ASSERT_EQUAL_UINT32(bridgelogic::kMaxClockTrustMinutes, clock.trustMinutes());
+    // Measured from the last ADOPTION, which was at base + window + 1.
+    clock.setTrustMinutes(5U);
+    TEST_ASSERT_TRUE(clock.trusted(base + window + 1U + (5UL * 60000UL)));
+    TEST_ASSERT_FALSE(clock.trusted(base + window + 1U + (5UL * 60000UL) + 1U));
+  }
+}
+
 } // namespace
 
 void setUp() {
@@ -2458,6 +2588,9 @@ int main(int, char**) {
   RUN_TEST(test_walkup_reads_every_field_it_acts_on_from_the_top_level);
   RUN_TEST(test_the_flat_scan_is_kept_where_it_is_genuinely_wanted);
   RUN_TEST(test_this_boot_has_an_identity_and_it_is_never_the_wires_absent_value);
+  RUN_TEST(test_server_time_is_read_as_club_local_wall_time_or_refused);
+  RUN_TEST(test_the_clock_advances_between_heartbeats_and_wraps_at_midnight);
+  RUN_TEST(test_a_clock_nobody_has_confirmed_for_too_long_blanks_rather_than_lies);
   RUN_TEST(test_relight_adopts_the_megas_remaining_seconds_so_a_lost_ext_is_re_sent);
   RUN_TEST(test_state_seconds_parse_decimal_and_refuse_everything_else);
   RUN_TEST(test_a_rescan_on_a_court_this_box_already_lit_is_not_a_second_grant);
