@@ -219,7 +219,11 @@ function useSettingFocus(ready: boolean) {
   useEffect(() => {
     if (!ready) return;
     const fromHash = () => {
-      const hash = window.location.hash.replace(/^#/, "");
+      // `slice` rather than `.replace(/^#/, "")`: lizard's lexer reads a regex literal in a
+      // .tsx file as division and swallows the rest of the file into this function, which is
+      // what failed `make complexity` on the length bound.
+      const raw = window.location.hash;
+      const hash = raw.startsWith("#") ? raw.slice(1) : raw;
       if (!hash.startsWith("setting-")) return;
       if (focusSettingElement(hash)) setHighlighted(hash);
     };

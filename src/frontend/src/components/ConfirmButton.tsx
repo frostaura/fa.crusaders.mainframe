@@ -97,8 +97,17 @@ function textOf(node: React.ReactNode): string {
   if (node === null || node === undefined || typeof node === "boolean") return "";
   if (typeof node === "string" || typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(textOf).join("");
-  if (isValidElement<{ children?: React.ReactNode }>(node)) {
-    return Children.toArray(node.props.children).map(textOf).join("");
+  // A CAST rather than `isValidElement<{ children?: React.ReactNode }>(node)`.
+  //
+  // A generic type argument in expression position opens with `<{`, and lizard's lexer in a
+  // .tsx file reads that as a JSX tag it then never finds the close of — so every brace
+  // after it is swallowed as tag content, three functions vanish from its output and the
+  // last one it does see is measured as running to the end of the file. That is what failed
+  // `make complexity` on the 200-line bound: `withoutFixedHeight` reported 15 NLOC at a
+  // length of 224. Same family as the bare-`<` trap recorded in `test/harness.tsx`.
+  if (isValidElement(node)) {
+    const props = node.props as { children?: React.ReactNode };
+    return Children.toArray(props.children).map(textOf).join("");
   }
   return "";
 }
@@ -172,12 +181,17 @@ function composeName(idleText: string, context: string): string {
  */
 function withoutFixedHeight(className?: string): string | undefined {
   if (!className) return className;
+  // String tests rather than regex literals: lizard's TypeScript lexer reads a `/.../` in a
+  // .tsx file as division, loses its place, and swallows the rest of the file into this
+  // function — it measured 14 NLOC at a LENGTH of 219 and failed `make complexity` on the
+  // 200-line bound. Same family as the bare-`<` trap recorded in `test/harness.tsx`.
   return className
-    .split(/\s+/)
+    .split(" ")
+    .filter((token) => token !== "")
     .filter((token) => {
       // `sm:h-11` and `[&:hover]:h-11` are heights too; `min-h-11` and `max-h-11` are not.
       const utility = token.slice(token.lastIndexOf(":") + 1);
-      return !/^-?h-/.test(utility);
+      return !utility.startsWith("h-") && !utility.startsWith("-h-");
     })
     .join(" ");
 }
