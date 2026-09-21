@@ -1375,6 +1375,50 @@ describe("AdminDevices", () => {
    * page shows a door and links to it, and Doors owns every control.
    * </p>
    */
+  /**
+   * <b>A3, on the panel it was not applied to.</b>
+   *
+   * <p>
+   * A reviewer read nine offline rows — some naming a member, some not — with nothing on
+   * the page reconciling the two, and concluded the product had lost records. It has not:
+   * an offline board decides from the list it last downloaded, so a code ON that list
+   * resolves to its holder and a code that is not on it resolves to nobody at all. The
+   * doors surface says this once, beside the offline rows; this panel serves the same rows
+   * for a court box and said nothing.
+   * </p>
+   */
+  describe("offline rows on a board's own trail", () => {
+    it("says once why some of them name a member and others cannot", async () => {
+      const server = deviceServer(deviceFixture(), [
+        activityFixture({ action: "device.gate_open", reason: null, offline: true }),
+        activityFixture({
+          action: "device.unknown_scan", reason: null, offline: true, member: null,
+          fingerprint: "9ab0cd12",
+        }),
+      ]);
+      stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
+
+      renderPage(<AdminDevicesPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Box activity" }));
+
+      await screen.findByText(/Unknown code · 9ab0cd12/);
+      expect(screen.getByText(/An offline row names somebody when the code was on the door's saved/))
+        .toBeInTheDocument();
+    });
+
+    /** And it is not printed over a panel with no offline row in it. */
+    it("says nothing about offline rows when none of them is offline", async () => {
+      const server = deviceServer(deviceFixture(), [activityFixture({ offline: false })]);
+      stubFetch([...withDevices([]).filter((r) => r.path !== "/api/v1/admin/devices/"), ...server.routes]);
+
+      renderPage(<AdminDevicesPage />);
+      fireEvent.click(await screen.findByRole("button", { name: "Box activity" }));
+
+      await screen.findAllByRole("listitem");
+      expect(screen.queryByText(/An offline row names somebody/)).toBeNull();
+    });
+  });
+
   describe("a door gate, read-only", () => {
     it("shows a door with its liveness, its door name and a link, under its own heading", async () => {
       stubFetch(withDevices([gateFixture({ gate_key: "front-door", name: "Front door" })]));
@@ -1389,6 +1433,30 @@ describe("AdminDevices", () => {
       expect(screen.getByText("Reporting")).toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Manage Front door on Doors" }))
         .toHaveAttribute("href", "/admin/doors/99999999-9999-9999-9999-999999999999");
+    });
+
+    /**
+     * <b>A11, and the page it was half-applied on.</b>
+     *
+     * <p>
+     * "Door gate" is the placeholder `DeviceRegistryService` gives every gate that registers
+     * itself, and the doors surface stopped presenting it as the club's own word for a board
+     * — five boards in that state all read "Door gate" and named none of them. This page
+     * went on printing it, so one board was "Unnamed scanner (gate-0a1b2c)" under Doors and
+     * "Door gate" here, two clicks apart, on the row that links to the other one.
+     * </p>
+     */
+    it("does not present the registration placeholder as the door's name", async () => {
+      stubFetch(withDevices([gateFixture({ gate_key: null, name: "Door gate" })]));
+
+      renderPage(<AdminDevicesPage />);
+
+      await screen.findByRole("heading", { name: "Doors" });
+      expect(screen.getByText("Unnamed scanner (gate-0a1b2c)")).toBeInTheDocument();
+      expect(screen.queryByText("Door gate")).toBeNull();
+      // Including the link's accessible name, which is the one a speech-control user says.
+      expect(screen.getByRole("link", { name: /Manage Unnamed scanner \(gate-0a1b2c\) on Doors/ }))
+        .toBeInTheDocument();
     });
 
     it("says a door has no name yet rather than showing a gap", async () => {

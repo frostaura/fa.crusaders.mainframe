@@ -6,7 +6,7 @@ import {
 } from "../lib/api";
 import { isOnline, offlineAfterSecondsFor, relative } from "../lib/deviceLiveness";
 import { useTicker } from "../lib/useTicker";
-import { doorStateChip } from "../lib/doorsCopy";
+import { OFFLINE_WHO_NOTE, doorDisplayName, doorStateChip } from "../lib/doorsCopy";
 import { describeDeviceError } from "../lib/deviceErrors";
 import {
   ACTIVITY_READ_FAILED, activityEmptyNotice, activityPanelTitle, describeActivityAction,
@@ -461,9 +461,21 @@ function ActivityBody({ entries, loading, error, gate, now }: {
   if (error) return <p className="text-xs text-danger-strong">{error}</p>;
   if (!entries || entries.length === 0) return <p className="text-xs text-slate-500">{activityEmptyNotice(gate)}</p>;
   return (
-    <ul className="text-xs">
-      {entries.map((entry, i) => <ActivityRow key={`${entry.at}-${entry.action}-${i}`} entry={entry} now={now} />)}
-    </ul>
+    <>
+      {/* A3, on the panel it was missed on. A reviewer read nine offline rows — some naming
+          a member, some not — with nothing reconciling the two, and concluded records had
+          been lost. They had not: an offline board decides from the list it last
+          downloaded, so a code ON that list resolves to its holder and one that is not
+          resolves to nobody. Said once, where the offline rows are, rather than left to be
+          inferred; the doors surface has carried this since the finding landed and this
+          panel serves the same rows for a court box. */}
+      {entries.some((entry) => entry.offline) && (
+        <p className="mb-1 text-xs text-slate-500">{OFFLINE_WHO_NOTE}</p>
+      )}
+      <ul className="text-xs">
+        {entries.map((entry, i) => <ActivityRow key={`${entry.at}-${entry.action}-${i}`} entry={entry} now={now} />)}
+      </ul>
+    </>
   );
 }
 
@@ -702,6 +714,11 @@ function GateRows({ gates, tenantHeartbeat, now }: {
         {gates.map((gate) => {
           const online = isOnline(gate, offlineAfterSecondsFor(gate, tenantHeartbeat), now);
           const chip = doorStateChip(gate, online);
+          // A11: "Door gate" is the placeholder every self-registering gate arrives with,
+          // and the doors surface stopped presenting it as a name — five boards in that
+          // state all read "Door gate" and named none of them. This row links straight to
+          // that surface, so it cannot call the same board something else.
+          const name = doorDisplayName(gate);
           return (
             <li key={gate.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 p-3">
               {/* A8: `doorStateChip` answers null where the caller cannot say whether a
@@ -709,7 +726,7 @@ function GateRows({ gates, tenantHeartbeat, now }: {
                   it has just made — so the chip is always here; the guard is the type
                   saying so rather than a claim this call site is allowed to make. */}
               {chip && <Badge tone={chip.tone}>{chip.label}</Badge>}
-              <span className="min-w-0 break-words text-sm font-medium">{gate.name}</span>
+              <span className="min-w-0 break-words text-sm font-medium">{name}</span>
               <span className="min-w-0 break-words text-xs text-slate-500">
                 {`${gate.gate_key ?? UNNAMED_GATE} · ${gate.device_code}`}
               </span>
@@ -727,7 +744,7 @@ function GateRows({ gates, tenantHeartbeat, now }: {
                    "Manage on Doors" on one screen — identical to anybody tabbing or using
                    speech control, and distinguished only by which row they happen to sit in,
                    which is visual position and therefore nothing at all. */
-                aria-label={`Manage ${gate.name} on Doors`}
+                aria-label={`Manage ${name} on Doors`}
               >
                 Manage on Doors
               </Link>
