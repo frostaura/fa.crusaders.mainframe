@@ -193,6 +193,33 @@ public static class DoorTrail
     }
 
     /// <summary>
+    /// The instant one audit row should be DISPLAYED and ORDERED at — the one rule behind
+    /// <see cref="AuditLog.ScanAt"/>, stated here beside the predicates that decide what a door
+    /// row is.
+    ///
+    /// <para>
+    /// It is the row's own instant for everything the server decided as it happened, and the
+    /// scan's instant for an offline row, which is written at the upload and carries
+    /// <c>occurred_at</c> in its details. That is the same rule
+    /// <see cref="Endpoints.DoorActivityView.ScannedAt"/> has applied on the way OUT since W1.2;
+    /// what was missing was applying it on the way IN, so that the column a list is ordered by
+    /// is the column it prints. See <see cref="AuditLog.ScanAt"/> for what the divergence cost.
+    /// </para>
+    ///
+    /// <para>
+    /// Deliberately tolerant: a row with no details, unparseable details, or an
+    /// <c>occurred_at</c> that is not an instant falls back to <paramref name="createdAt"/>. A
+    /// row is evidence and is listed whatever state its details are in — refusing to place it
+    /// because a field will not read is the wrong way round.
+    /// </para>
+    /// </summary>
+    public static DateTimeOffset ScanAtOf(string action, string? detailsJson, DateTimeOffset createdAt)
+    {
+        if (!IsScan(action)) return createdAt;
+        return Endpoints.DoorActivityView.ScannedAt(Endpoints.DoorActivityView.Details(detailsJson), createdAt);
+    }
+
+    /// <summary>
     /// The board a row is about, read out of the <c>device_id</c> every writer on these paths
     /// puts in its details. Null when the row carries none or its details will not parse.
     ///

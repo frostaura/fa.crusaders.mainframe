@@ -366,16 +366,20 @@ public sealed class AdminDoorLogHttpTests
         var feed = await client.GetFromJsonAsync<JsonElement>($"/api/v1/admin/devices/{doorId}/activity");
         var feedRow = feed.GetProperty("items").EnumerateArray().Single();
 
-        foreach (var key in new[] { "at", "delivered_at", "action", "reason", "offline", "fingerprint" })
+        foreach (var key in
+                 new[] { "at", "delivered_at", "time_uncertain", "action", "reason", "offline", "fingerprint" })
         {
             Assert.Equal(feedRow.GetProperty(key).GetRawText(), logRow.GetProperty(key).GetRawText());
         }
         Assert.Equal(feedRow.GetProperty("member").GetRawText(), logRow.GetProperty("member").GetRawText());
 
-        // …and the per-board feed stays exactly seven keys: WIRE-W1's six plus `delivered_at`,
+        // …and the per-board feed stays exactly EIGHT keys: WIRE-W1's six, plus `delivered_at`,
         // which A4 added because an offline row's `at` is the SCAN and the row was written when
-        // the board next called in. A page that had only one of the two could not say which.
-        Assert.Equal(7, feedRow.EnumerateObject().Count());
+        // the board next called in — a page with only one of the two could not say which — plus
+        // `time_uncertain` (WIRE-R3 §2), which says whether the pair can be trusted at all. The
+        // count is asserted rather than the keys listed because the point of this test is that
+        // NOTHING reaches one surface and not the other.
+        Assert.Equal(8, feedRow.EnumerateObject().Count());
     }
 
     /// <summary>A registration and an admin edit are the BOARD's story, not the door's log.</summary>
@@ -417,9 +421,21 @@ public sealed class AdminDoorLogHttpTests
 
         Assert.Single(Items(await client.GetFromJsonAsync<JsonElement>(LogPath)));
 
-        // And asking for their door by id answers nothing rather than their rows.
-        var byTheirDoor = await client.GetFromJsonAsync<JsonElement>($"{LogPath}?door={theirDoor}");
-        Assert.Empty(Items(byTheirDoor));
+        // And asking for their door by id answers nothing rather than their rows — which since
+        // R3-13 is a NAMED refusal rather than an empty page, because an empty page is also
+        // what a stale link to a DELETED door got and a console cannot tell those apart.
+        //
+        // The refusal is the stronger isolation claim of the two, and the second request is
+        // what makes that true rather than asserted: an id this club has never had gets the
+        // byte-identical answer, so nothing about it says whether their board exists.
+        var byTheirDoor = await client.GetAsync($"{LogPath}?door={theirDoor}");
+        var byNothing = await client.GetAsync($"{LogPath}?door={Guid.NewGuid()}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, byTheirDoor.StatusCode);
+        Assert.Equal(
+            await byNothing.Content.ReadAsStringAsync(), await byTheirDoor.Content.ReadAsStringAsync());
+        Assert.Equal(
+            $"{{\"error\":\"{DoorLogQuery.DoorNotFound}\"}}", await byTheirDoor.Content.ReadAsStringAsync());
     }
 
     [SkippableFact]

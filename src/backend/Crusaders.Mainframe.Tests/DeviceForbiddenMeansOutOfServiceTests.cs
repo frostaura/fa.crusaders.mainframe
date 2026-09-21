@@ -193,9 +193,25 @@ public sealed class DeviceForbiddenMeansOutOfServiceTests
                 "healthy board purge its roster and deny a member at the door.");
         }
 
+        // ONE Forbid in the whole file now, and both IsActive checks route through it.
+        //
+        // It used to be two literal `Results.Forbid()` returns, one per resolver, and R3-1
+        // merged them: a shut board's refused call has to RECORD the contact and the fact that
+        // the board has been told (Device.ShutHeardAt), and two copies of that write is one
+        // copy more than a rule this exacting should have. The property this test is about is
+        // unchanged and is now structurally easier to hold — a single statement, reachable only
+        // from the disabled check.
         var identity = StripComments(File.ReadAllText(Path.Combine(ApiSourceRoot(), "Services", "DeviceIdentity.cs")));
-        Assert.Equal(2, Regex.Matches(identity, @"Results\.Forbid\(").Count);
+        Assert.Single(Regex.Matches(identity, @"Results\.Forbid\("));
         Assert.Equal(2, Regex.Matches(identity, @"IsActive").Count);
+
+        // …and it is inside RefuseShutAsync, which is what "reachable only from the disabled
+        // check" means when the return is no longer beside the test that decides it. Both
+        // call sites are asserted by name, so a third caller — a rate limiter, a kind check,
+        // anything that decided a 403 was convenient — is a red test rather than a board in a
+        // cupboard quietly emptying its roster.
+        Assert.Equal(2, Regex.Matches(identity, @"await RefuseShutAsync\(").Count);
+        Assert.Contains("private static async Task<IResult> RefuseShutAsync(", identity, StringComparison.Ordinal);
 
         // The two middlewares that run before routing.
         var passwordGate = File.ReadAllText(Path.Combine(ApiSourceRoot(), "Security", "PasswordChangeGate.cs"));

@@ -118,8 +118,22 @@ public sealed class DoorScanSetHttpTests
         // is what {actor, subject} has always promised. Still no outcome, no reason, no member
         // and no fingerprint: P4 is untouched.
         Assert.All(events, e => Assert.Equal(
-            ["at", "action", "kind", "change", "actor_name"],
+            ["at", "action", "kind", "change", "actor_name", "count", "from"],
             e.EnumerateObject().Select(p => p.Name).ToArray()));
+
+        // `count` and `from` are ALWAYS present, 1 and equal to `at` on an ordinary entry — a
+        // key that appears only when a run was collapsed is a second response shape wearing one
+        // name, the argument DeviceView already makes about the door-card fields on a court box.
+        //
+        // AND NOTHING HERE IS COLLAPSED, which is the half of A-L4 worth pinning. These twelve
+        // edits are a minute apart, so the grouping must leave every one of them alone: it
+        // merges a RUN of the identical event inside one printed minute, and a rule that
+        // merged on the word alone would hide eleven separate decisions behind one line. See
+        // AdminDeviceActivityEndpoint.Grouped, and DoorTruthR3HttpTests for the run that does
+        // collapse.
+        Assert.All(events, e => Assert.Equal(1, e.GetProperty("count").GetInt32()));
+        Assert.All(events, e => Assert.Equal(
+            e.GetProperty("at").GetDateTimeOffset(), e.GetProperty("from").GetDateTimeOffset()));
 
         // Rows written before the `changes` list existed have no list, so they are `other` —
         // honest, where "details" would be a guess about what a past edit did.

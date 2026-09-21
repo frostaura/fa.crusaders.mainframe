@@ -223,6 +223,13 @@ public sealed class DeploymentPostureTests
     [InlineData("to=not-a-date", "to_invalid")]
     [InlineData("cursor=aGVsbG8=", "cursor_invalid")]
     [InlineData("outcome=banana", "outcome_invalid")]
+
+    // Round three's three. Each of the first two was a 500 before it was a refusal:
+    // `day=9999-12-31` asked DateOnly for the day after its last one, and `limit=abc` fell
+    // through to the default while the admin believed they had asked for something else.
+    [InlineData("day=9999-12-31", "day_invalid")]
+    [InlineData("limit=abc", "limit_invalid")]
+    [InlineData("door=00000000-0000-0000-0000-000000000001", "door_not_found")]
     public async Task A_refused_door_log_filter_names_the_error_and_nothing_else(string query, string error)
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
@@ -235,6 +242,44 @@ public sealed class DeploymentPostureTests
 
         AssertOpaque(response.StatusCode, body);
         Assert.Equal($"{{\"error\":\"{error}\"}}", body);
+    }
+
+    /// <summary>
+    /// <b>A value the DATABASE refuses never reaches a client as a developer page</b> (R3-15).
+    ///
+    /// <para>
+    /// This is the class of defect, not the one instance. A door name of 129 characters passed
+    /// every check the endpoint had and was refused by <c>varchar(128)</c>, so a
+    /// <c>DbUpdateException</c> came out of <c>SaveChangesAsync</c> as an unhandled <c>500</c> —
+    /// and the review stack, running Development, rendered it as a developer exception page
+    /// naming EF's internals, the Npgsql version, the assembly and the absolute source path of
+    /// the machine that built it. The bound belongs in front of the write; what this test pins
+    /// is that the club's own deployment never publishes the alternative, whichever column is
+    /// next to grow one.
+    /// </para>
+    ///
+    /// <para>
+    /// Every column an admin can put a string into, in one theory, so adding a field to this
+    /// surface without a bound is a red test rather than a discovery.
+    /// </para>
+    /// </summary>
+    [SkippableTheory]
+    [InlineData("name", 128)]
+    [InlineData("gate_key", 64)]
+    [InlineData("location_note", 200)]
+    public async Task An_over_length_admin_field_is_an_opaque_400_in_Production(string field, int max)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString, EnvironmentName = "Production" };
+        var club = await DoorClub.SeedAsync(factory, "posture");
+        var doorId = await club.AddDoorAsync(factory, "gate-dp0002", "front-door", name: "Front door");
+
+        var body = $"{{\"{field}\": \"{new string('x', max + 1)}\"}}";
+        var response = await club.AdminClient(factory).PatchAsync(
+            $"/api/v1/admin/devices/{doorId}", new StringContent(body, Encoding.UTF8, "application/json"));
+
+        AssertOpaque(response.StatusCode, await response.Content.ReadAsStringAsync());
     }
 
     /// <summary>

@@ -187,8 +187,9 @@ public sealed class DoorClockTests
 
         Assert.Null(DoorPeriod.Resolve("last_week", zone, DateTimeOffset.UtcNow));
         Assert.Null(DoorPeriod.Resolve("", zone, DateTimeOffset.UtcNow));
-        Assert.Null(DoorPeriod.Day("2026-13-40", zone));
-        Assert.Null(DoorPeriod.Day("yesterday", zone));
-        Assert.Null(DoorPeriod.Day("2026-9-1", zone));
+        var now = DateTimeOffset.UtcNow;
+        Assert.Null(DoorPeriod.Day("2026-13-40", zone, now));
+        Assert.Null(DoorPeriod.Day("yesterday", zone, now));
+        Assert.Null(DoorPeriod.Day("2026-9-1", zone, now));
     }
 }

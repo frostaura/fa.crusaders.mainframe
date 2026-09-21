@@ -39,9 +39,70 @@ public static class DeviceIdentity
 
         var device = await db.Devices.FirstOrDefaultAsync(d => d.MacAddress == normalised, ct);
         if (device is null) return (null, Results.NotFound());
-        if (!device.IsActive) return (null, Results.Forbid());
+        if (!device.IsActive) return (null, await RefuseShutAsync(db, device, ct));
 
         return (device, null);
+    }
+
+    /// <summary>
+    /// The 403 a shut board gets — and the two facts the server learns by serving it.
+    ///
+    /// <para>
+    /// <b>A refused call is still a call, and pretending otherwise made the console say the
+    /// opposite of what had happened (B1 / E10 / G4c-H2, R3-1).</b> This method returned
+    /// <c>Forbid()</c> before anything wrote anything down, so a shut door's
+    /// <see cref="Device.LastSeenAt"/> froze at its last pre-shut call. Three minutes later the
+    /// sweep declared it unreachable, the tile flipped to "Not reporting", and the page said
+    /// "Nothing can reach Front door, so it has not been told. It may still be admitting booked
+    /// members from its saved list" — about a board that had heard the 403 within one heartbeat
+    /// and emptied its roster on the spot. Reopening it then confirmed "it has been admitting
+    /// booked members from its saved list all along". Three sentences, all false, all reasoned
+    /// from a silence this server manufactured itself.
+    /// </para>
+    ///
+    /// <para>
+    /// So the contact is recorded (<see cref="DeviceSilenceLog.NoteContactAsync"/>, the same
+    /// rule and the same reason as every other board call), and
+    /// <see cref="Device.ShutHeardAt"/> records that the board has been TOLD — the first 403
+    /// served after the current shut began. A board being refused is a board that is reachable,
+    /// and "reachable" and "has heard" are two different facts that only a record written at the
+    /// refusal can separate afterwards.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Nothing else changes and nothing else may.</b> The answer is still 403 on every route,
+    /// still before any decision is reached, and still the only thing a shut board can get —
+    /// <c>DeviceForbiddenMeansOutOfServiceTests</c> pins that in both directions. What is added
+    /// is a write, not an answer.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>No outage row is written here, in either direction</b> (WIRE-R3 §1).
+    /// <c>PeripheralHealthWorker</c> skips disabled rows, so there is never an open one to
+    /// extend; and recording a CLOSED one for the silence this call ends would be minting
+    /// outage history for a board the club deliberately switched off — which is the exact noise
+    /// <c>DeviceRegistryService.SwitchAsync</c> closes rows to avoid. That is also why this does
+    /// not go through <see cref="DeviceSilenceLog.NoteContactAsync"/>, whose whole job is to
+    /// write that row. See <see cref="Domain.DeviceOutage.EndedByContact"/> for the other half
+    /// of the outage story, which is R3-2.
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> RefuseShutAsync(
+        MainframeDbContext db, Device device, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        // FIRST 403 of this shut, not the latest: the question the console asks is "when did
+        // this door learn?", and an instant that moved forward on every retry would answer
+        // "just now" for ever. Cleared on reopen (DeviceRegistryService.SwitchAsync), so a
+        // non-null value here always belongs to the shut that is in force.
+        device.ShutHeardAt ??= now;
+
+        // Liveness, like any other call from this board.
+        device.LastSeenAt = now;
+
+        await db.SaveChangesAsync(ct);
+        return Results.Forbid();
     }
 
     /// <summary>
@@ -92,7 +153,11 @@ public static class DeviceIdentity
         }
 
         // A box an admin disabled is refused rather than silently re-registered: the row is
-        // still there, and re-creating it around the disable would make the switch a lie.
-        return device.IsActive ? (device, null) : (null, Results.Forbid());
+        // still there, and re-creating it around the disable would make the switch a lie. The
+        // refusal records the contact and the fact that the board has been told — see
+        // RefuseShutAsync. The heartbeat is the call that matters most for that: it is the one
+        // a shut board goes on making on a fixed cadence, so it is the one that answers "has
+        // this door heard yet" within a heartbeat rather than at the next scan.
+        return device.IsActive ? (device, null) : (null, await RefuseShutAsync(db, device, ct));
     }
 }

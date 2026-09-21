@@ -131,6 +131,10 @@ public static class AdminDeviceEndpoints
         var device = await devices.FindAsync(id, ct);
         if (device is null) return Results.NotFound();
 
+        // Every refusal that can be decided from the request and the row alone, before a single
+        // field is parsed or written. See StateAndWidthRefusal and KindFieldsRefusal.
+        if (StateAndWidthRefusal(device, req) is { } refused) return refused;
+
         // Before the button map is even parsed: a field that does not belong on this kind of
         // row is refused rather than parsed and then ignored.
         if (KindFieldsRefusal(device, req) is { } wrongKind) return wrongKind;
@@ -174,6 +178,64 @@ public static class AdminDeviceEndpoints
             updated, await HeartbeatSecondsAsync(settingsAccessor, ct),
             PersonNames.Of(updated.ShutByUserId, names), unchanged: changes.Count == 0));
     }
+
+    /// <summary>
+    /// The two refusals that are about the row's STATE and the column's WIDTH rather than about
+    /// which kind of board this is — checked first, and before anything is written.
+    ///
+    /// <para>
+    /// <b><c>expected_enabled</c> is the half of a PATCH that was missing (B13 / R3-34,
+    /// WIRE-R3 §3).</b> A console tab left open overnight still offers "Shut this door" for a
+    /// door another admin reopened at 06:00, and sending it shut a door somebody had
+    /// deliberately opened — with a success panel and no sign anywhere that the screen had been
+    /// out of date. The request carries the state the admin WANTS and nothing about the state
+    /// they were looking at when they decided. This is an If-Match and not a version column, so
+    /// it is optional and a request without it behaves exactly as it always has; with it, a
+    /// mismatch is a <c>409</c> and NOTHING is written — not the name, not the card, not the
+    /// switch. A partial apply would be the worst answer available, because the admin would be
+    /// told their request was rejected while some of it had landed.
+    /// </para>
+    ///
+    /// <para>
+    /// It is distinct from <c>unchanged: true</c>, which is a <c>200</c>: that is a request that
+    /// asked for the state the row is already in, which is success. This is a request built on a
+    /// reading of the row that is no longer true.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The name's width is checked for BOTH kinds and before the kind rules</b>, because how
+    /// wide the column is is not a door question — and because the alternative is what R3-15
+    /// found: a <c>DbUpdateException</c> out of <c>SaveChangesAsync</c>, which in Development is
+    /// a developer exception page. See <see cref="Device.NameMaxLength"/>.
+    /// </para>
+    /// </summary>
+    private static IResult? StateAndWidthRefusal(Device device, UpdateDeviceRequest req)
+    {
+        if (req.ExpectedEnabled is { } expected && expected != device.Enabled)
+        {
+            return Results.Conflict(new { error = DoorChanged });
+        }
+
+        if (req.Name is { } proposed && proposed.Trim().Length > Device.NameMaxLength)
+        {
+            return Results.BadRequest(new { error = NameTooLong, max = Device.NameMaxLength });
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Error code for a <c>name</c> longer than <see cref="Device.NameMaxLength"/>. Carries
+    /// <c>max</c>, which is the number the console puts in front of the admin — WIRE-R3 §3.
+    /// </summary>
+    public const string NameTooLong = "name_too_long";
+
+    /// <summary>
+    /// Error code — on a <c>409</c>, not a <c>400</c> — for a PATCH whose <c>expected_enabled</c>
+    /// does not match the row. See <see cref="UpdateAsync"/>: it means "this door changed since
+    /// you looked", and nothing was written.
+    /// </summary>
+    public const string DoorChanged = "door_changed";
 
     /// <summary>Error code for <c>gate_key</c> sent to a court box.</summary>
     public const string GateKeyNotAGate = "gate_key_not_a_gate";
@@ -407,7 +469,18 @@ public sealed record UpdateDeviceRequest(
     /// refusal: see <c>DoorCardRefusal</c>.
     /// </summary>
     [property: JsonPropertyName("power_loss_behaviour")] JsonElement PowerLossBehaviour = default,
-    [property: JsonPropertyName("powerLossBehaviour")] JsonElement PowerLossBehaviourCamel = default)
+    [property: JsonPropertyName("powerLossBehaviour")] JsonElement PowerLossBehaviourCamel = default,
+
+    /// <summary>
+    /// The value of <c>enabled</c> the caller believes this row holds — an If-Match on the one
+    /// field that is a decision rather than a description (B13 / R3-34, WIRE-R3 §3). Optional;
+    /// absent means the caller is not asserting anything and the PATCH behaves as it always
+    /// has. Present and wrong is a <c>409</c> <see cref="AdminDeviceEndpoints.DoorChanged"/>
+    /// with nothing written. There is deliberately no camelCase twin: it is new in this round,
+    /// so there is no client spelling it the other way, and a second binding is a second thing
+    /// to keep in step.
+    /// </summary>
+    [property: JsonPropertyName("expected_enabled")] bool? ExpectedEnabled = null)
 {
     /// <summary>
     /// The door's name as the caller asked for it, under either spelling — or null when

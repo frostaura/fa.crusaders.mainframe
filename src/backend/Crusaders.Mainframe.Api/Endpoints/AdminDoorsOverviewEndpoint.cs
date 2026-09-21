@@ -71,11 +71,11 @@ public static class AdminDoorsOverviewEndpoint
             // banner can link to each door by the label the club uses for it.
             shut_together = doors
                 .Where(d => d.ShutByShutAllAt is not null)
-                .Select(d => new { id = d.Id, name = d.Name, gate_key = d.GateKey })
+                .Select(d => new { id = d.Id, name = DeviceView.Named(d.Name), gate_key = d.GateKey })
                 .ToList(),
             shut_individually = doors
                 .Where(d => !d.Enabled && d.ShutByShutAllAt is null)
-                .Select(d => new { id = d.Id, name = d.Name, gate_key = d.GateKey })
+                .Select(d => new { id = d.Id, name = DeviceView.Named(d.Name), gate_key = d.GateKey })
                 .ToList(),
 
             doors = doors.Select(d => new

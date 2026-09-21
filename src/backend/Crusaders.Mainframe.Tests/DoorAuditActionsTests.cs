@@ -79,11 +79,12 @@ public sealed class DoorAuditActionsTests
     {
         foreach (var action in DoorAuditActions.Events)
         {
-            var kind = DoorAuditActions.EventKindOf(action);
+            var kind = DoorAuditActions.EventKindOf(action, []);
             Assert.Contains(kind, DoorAuditActions.EventKinds);
             Assert.NotEqual(DoorAuditActions.UnrecognisedKind, kind);
         }
-        Assert.Equal(DoorAuditActions.UnrecognisedKind, DoorAuditActions.EventKindOf("device.invented_later"));
+        Assert.Equal(
+            DoorAuditActions.UnrecognisedKind, DoorAuditActions.EventKindOf("device.invented_later", []));
     }
 
     /// <summary>No action is on two of the three lists, so a console can switch on one.</summary>

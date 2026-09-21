@@ -93,7 +93,7 @@ public static class MeDoorEndpoints
         var now = DateTimeOffset.UtcNow;
 
         var gates = await db.Devices.Where(d => d.Kind == DeviceKind.Gate)
-            .Select(d => d.Enabled).ToListAsync(ct);
+            .Select(d => new { d.Enabled, d.Name, d.GateKey }).ToListAsync(ct);
         var status = await db.Memberships.Where(m => m.UserId == userId)
             .Select(m => (MembershipStatus?)m.Status).FirstOrDefaultAsync(ct);
 
@@ -104,7 +104,25 @@ public static class MeDoorEndpoints
             // "none" for a club with no doors at all, which is the same sentence as a club
             // whose doors are all open: there is nothing shut to tell anybody about, and the
             // `doors` flag above is what says whether the section exists.
-            doors_shut = ShutState(gates),
+            doors_shut = ShutState(gates.Select(g => g.Enabled).ToList()),
+
+            // WHICH doors are shut, by the label the club has written on them (WIRE-R3 §5,
+            // R3-4). "The club has shut some of its doors" is true and, for a member standing
+            // at one of three doors, useless: the two actions it leaves open — walk round to
+            // the other door, or phone the club — depend entirely on which one this is. May be
+            // empty, and is empty in exactly two cases that read the same way to a member and
+            // must not: no door is shut, and no shut door has a name anybody has given it. The
+            // page has `doors_shut` for the first and says "we can't tell you which" for the
+            // second rather than inventing "gate-44c103", which is a thing an admin reads off a
+            // board in a cupboard.
+            //
+            // MemberLabel is the same rule the member's history renders a door by, so one door
+            // is called one thing on both of the member's screens.
+            doors_shut_names = gates
+                .Where(g => !g.Enabled)
+                .Select(g => MemberLabel(g.Name, g.GateKey))
+                .Where(n => n is not null)
+                .ToList(),
 
             // The club's zone, so a member's history and code card can say "club time" once
             // rather than rendering in whatever zone the phone is in. O1: there were two clock
@@ -183,8 +201,24 @@ public static class MeDoorEndpoints
         // Clamped, not refused — the same rule the admin log's limit runs and for the same
         // reason: a page asking for a million rows is a mistake to bound, and an error screen
         // is not what a member opening their own history wanted.
+        //
+        // A value that is not a NUMBER is the other case, and it is the one that was silently
+        // coerced (E7 / R3-32). `?limit=abc` cannot be clamped to anything, so falling back to
+        // fifty answers a question nobody asked while the page believes it asked another. The
+        // admin log refuses it by name; this does too, because a member's page is a console
+        // like any other and two surfaces answering one mistake two ways is how a shared client
+        // helper ends up with a branch nobody can explain.
+        var askedText = ctx.Request.Query["limit"].ToString();
+        var present = !string.IsNullOrWhiteSpace(askedText);
+        if (present && !int.TryParse(
+                askedText.Trim(), System.Globalization.NumberStyles.AllowLeadingSign,
+                System.Globalization.CultureInfo.InvariantCulture, out _))
+        {
+            return Results.BadRequest(new { error = DoorLogQuery.LimitInvalid });
+        }
+
         var limit = Math.Clamp(
-            int.TryParse(ctx.Request.Query["limit"].ToString(), out var asked) ? asked : DefaultHistoryLimit,
+            present && int.TryParse(askedText.Trim(), out var asked) ? asked : DefaultHistoryLimit,
             1, MaxHistoryLimit);
 
         var rows = Mine(db, userId).Where(a => a.CreatedAt >= floor);
@@ -200,12 +234,17 @@ public static class MeDoorEndpoints
         }
         if (cursor is { } position)
         {
-            rows = rows.Where(a => a.CreatedAt < position.At || (a.CreatedAt == position.At && a.Id.CompareTo(position.Id) < 0));
+            rows = rows.Where(a => a.ScanAt < position.At || (a.ScanAt == position.At && a.Id.CompareTo(position.Id) < 0));
         }
 
-        var page = await rows.OrderByDescending(a => a.CreatedAt).ThenByDescending(a => a.Id)
+        // Ordered by the instant each row PRINTS, exactly as the admin log is (R3-17,
+        // WIRE-R3 §2). A member whose door uploaded a morning's scans at lunchtime saw them at
+        // the top of a list headed "newest first" stamped with the morning — the same
+        // impossible order the admin log had, on the page whose whole content is six rows. The
+        // cursor moves with the order or a page boundary skips rows. See AuditLog.ScanAt.
+        var page = await rows.OrderByDescending(a => a.ScanAt).ThenByDescending(a => a.Id)
             .Take(limit + 1)
-            .Select(a => new { a.Id, a.Action, a.CreatedAt, a.DetailsJson })
+            .Select(a => new { a.Id, a.Action, a.CreatedAt, a.ScanAt, a.DetailsJson })
             .ToListAsync(ct);
 
         var items = page.Take(limit).ToList();
@@ -215,7 +254,7 @@ public static class MeDoorEndpoints
         {
             items = items.Select(r => Entry(r.Action, r.CreatedAt, r.DetailsJson, doors)).ToList(),
             next_cursor = page.Count > limit && items.Count > 0
-                ? new DoorLogCursor(items[^1].CreatedAt, items[^1].Id).Encode()
+                ? new DoorLogCursor(items[^1].ScanAt, items[^1].Id).Encode()
                 : null,
 
             // The club's zone, so the list says "club time" once rather than rendering every
@@ -264,7 +303,7 @@ public static class MeDoorEndpoints
         if (row is null) return null;
 
         var details = DoorActivityView.Details(row.DetailsJson);
-        var reason = DoorActivityView.Reason(details)
+        var reason = DoorActivityView.Reason(row.Action, details)
                      ?? (DoorTrail.IsRelease(row.Action) ? GateAccess.Ok : null);
 
         // Only too_early has an instant to count down to. Every other refusal is about the
@@ -280,6 +319,12 @@ public static class MeDoorEndpoints
         {
             at = DoorActivityView.ScannedAt(details, row.CreatedAt),
             delivered_at = DoorActivityView.DeliveredAt(details, row.CreatedAt),
+
+            // The member's own card gets the same flag the admin surfaces do (WIRE-R3 §2). A
+            // page telling somebody standing at a door "the door refused you at 19:48" when the
+            // board's clock is the thing that produced 19:48 is the product asserting a time it
+            // had to overrule. See DoorActivityView.TimeUncertain.
+            time_uncertain = DoorActivityView.TimeUncertain(details, row.CreatedAt),
             door_name = DoorNameOf(details, doors),
             released = DoorTrail.IsRelease(row.Action),
             reason,
@@ -389,9 +434,10 @@ public static class MeDoorEndpoints
             // moment their door's board came back from an outage.
             at = DoorActivityView.ScannedAt(details, at),
             delivered_at = DoorActivityView.DeliveredAt(details, at),
+            time_uncertain = DoorActivityView.TimeUncertain(details, at),
             door_name = DoorNameOf(details, doors),
             released = DoorTrail.IsRelease(action),
-            reason = DoorActivityView.Reason(details) ?? (DoorTrail.IsRelease(action) ? GateAccess.Ok : null),
+            reason = DoorActivityView.Reason(action, details) ?? (DoorTrail.IsRelease(action) ? GateAccess.Ok : null),
             offline = DoorActivityView.Offline(details),
         };
     }

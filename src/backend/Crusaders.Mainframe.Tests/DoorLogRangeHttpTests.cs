@@ -307,22 +307,37 @@ public sealed class DoorLogRangeHttpTests
     }
 
     /// <summary>
-    /// The other half of the rule: a door id that is a UUID and names nothing answers 200 with
-    /// an empty page, because the question was well formed.
+    /// The other half of the rule, REVERSED by R3-13: a door id that is a UUID and names nothing
+    /// this club has ever had is a named refusal, not an empty page.
+    ///
+    /// <para>
+    /// <b>"The question was well formed" was the wrong test.</b> It is well formed and it is
+    /// unanswerable, and the two are different — which is exactly what an empty list could not
+    /// say. A stale bookmark to a deleted board reset the console's Door select to "All doors",
+    /// printed "No scans at any door in the last 24 hours" over a filter that was in fact
+    /// narrowed to one, and exported a zero-row file under the ordinary filename (A-C2). Three
+    /// false sentences from one missing answer.
+    /// </para>
+    ///
+    /// <para>
+    /// It is not an existence oracle. Every id this club cannot answer for gets the identical
+    /// refusal — invented, another club's, live or removed elsewhere — which is the same
+    /// property the 404 on a foreign device id already has.
+    /// </para>
     /// </summary>
     [SkippableFact]
-    public async Task A_well_formed_door_id_that_names_no_board_answers_an_empty_page()
+    public async Task A_well_formed_door_id_that_names_no_board_is_refused_by_name()
     {
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
         var club = await DoorClub.SeedAsync(factory, "logunknown", JohannesburgSettings);
 
-        var body = await club.AdminClient(factory)
-            .GetFromJsonAsync<JsonElement>($"{LogPath}?door={Guid.NewGuid()}");
+        var response = await club.AdminClient(factory).GetAsync($"{LogPath}?door={Guid.NewGuid()}");
 
-        Assert.Empty(Items(body));
-        Assert.Equal(0, body.GetProperty("total").GetInt32());
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(
+            $"{{\"error\":\"{DoorLogQuery.DoorNotFound}\"}}", await response.Content.ReadAsStringAsync());
     }
 
     /// <summary>

@@ -92,6 +92,10 @@ public static class DeviceEndpoints
         // a per-interval count sees a board that looks worse every hour it stays up.
         NoteCountersAsync(logs, device!, req);
 
+        // …and the one of the two counters a club has to be able to see, onto the row. See
+        // NoteEventsLost and Device.EventsLost (R3-33).
+        NoteEventsLost(device!, req, now);
+
         device!.LastIpAddress = ctx.Connection.RemoteIpAddress?.ToString();
         if (req.EffectiveRunningVersion is { } running) device.RunningVersion = running;
         if (!string.IsNullOrWhiteSpace(req.MegaVersion)) device.MegaVersion = req.MegaVersion.Trim();
@@ -229,6 +233,42 @@ public static class DeviceEndpoints
                 "Device {DeviceCode} reports {EventsLost} queued event(s) its ring overwrote since boot (a total, not a delta)",
                 device.DeviceCode, eventsLost);
         }
+    }
+
+    /// <summary>
+    /// Puts the board's dropped-record counter on the ROW, where a club can see it (R3-33).
+    ///
+    /// <para>
+    /// <b>It was logged and stored nowhere.</b> This is the only number in the system that says
+    /// a door's history has holes in it — the board's queue is a fixed ring, and a door that
+    /// scans faster than it can upload, or that stays offline long enough, overwrites its own
+    /// oldest entries. It went to a warning in the API's container log, which is not a place a
+    /// club can read, so "why is there nothing in the log between 19:00 and 21:00" had no answer
+    /// on any screen.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Absent is not zero, and a zero is not "nothing was lost".</b> A board on an older
+    /// build sends no counter at all; one that has just rebooted sends a genuine zero and has
+    /// forgotten everything it lost before the reboot. So an absent value leaves BOTH columns
+    /// exactly as they were — a club that has seen a loss keeps seeing it — and a present value,
+    /// including zero, is stored with the instant it arrived. That instant is what lets a
+    /// console say "as of 19:04" rather than asserting a current state it cannot know.
+    /// </para>
+    ///
+    /// <para>
+    /// Clamped into <see cref="int"/>: the wire field is a <c>long</c> because the board's
+    /// counter is, and a value past <c>int.MaxValue</c> is a board whose counter has gone wrong
+    /// rather than a club that lost two billion scans. Saturating is honest at the top end and
+    /// cannot throw. Block body for the lizard reason in <c>memory/gotchas.md</c>.
+    /// </para>
+    /// </summary>
+    private static void NoteEventsLost(Device device, HeartbeatRequest req, DateTimeOffset now)
+    {
+        if (req.EventsLost is not { } reported) return;
+
+        device.EventsLost = (int)Math.Clamp(reported, 0, int.MaxValue);
+        device.EventsLostReportedAt = now;
     }
 }
 

@@ -87,6 +87,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<string>("IpAddress")
                         .HasColumnType("text");
 
+                    b.Property<DateTimeOffset>("ScanAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid?>("SubjectUserId")
                         .HasColumnType("uuid");
 
@@ -99,6 +102,8 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("TenantId", "CreatedAt");
+
+                    b.HasIndex("TenantId", "ScanAt");
 
                     b.ToTable("audit_log", (string)null);
                 });
@@ -335,6 +340,12 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<bool>("Enabled")
                         .HasColumnType("boolean");
 
+                    b.Property<int>("EventsLost")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("EventsLostReportedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("GateKey")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
@@ -385,6 +396,9 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.Property<Guid?>("ShutByUserId")
                         .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ShutHeardAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
@@ -461,6 +475,9 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.Property<DateTimeOffset?>("EndedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("EndedByContact")
+                        .HasColumnType("boolean");
 
                     b.Property<DateTimeOffset>("StartedAt")
                         .HasColumnType("timestamp with time zone");

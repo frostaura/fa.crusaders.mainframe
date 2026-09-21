@@ -56,7 +56,7 @@ public static class DoorRowDoor
             return new
             {
                 id = (Guid?)door.Id,
-                name = (string?)door.Name,
+                name = DeviceView.Named(door.Name),
                 gate_key = door.GateKey,
                 removed = false,
             };
@@ -65,7 +65,7 @@ public static class DoorRowDoor
         return new
         {
             id = (Guid?)null,
-            name = StoredName(details),
+            name = DeviceView.Named(StoredName(details)),
             gate_key = StoredKey(details),
             removed = true,
         };

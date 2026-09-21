@@ -177,7 +177,35 @@ public sealed class Device : ITenantScoped
     /// </summary>
     public required string DeviceCode { get; set; }
 
+    /// <summary>
+    /// What the club calls this board. <b>May be empty, which means "nobody has named it"</b> —
+    /// see <see cref="NameMaxLength"/>.
+    /// </summary>
     public required string Name { get; set; }
+
+    /// <summary>
+    /// Longest <see cref="Name"/> accepted, matching the column.
+    ///
+    /// <para>
+    /// <b>It was not checked anywhere and the column threw (A-M4 / B2, R3-15).</b> A name of 129
+    /// characters reached <c>SaveChangesAsync</c>, Postgres refused the <c>varchar(128)</c>, and
+    /// the <c>DbUpdateException</c> came back to the console as a <c>500</c> — in Development, as
+    /// a developer exception page naming types, assemblies and the absolute source path of the
+    /// machine that built it. Named once, beside <see cref="GateKeyMaxLength"/> and
+    /// <see cref="LocationNoteMaxLength"/>, so the bound an admin meets and the width the
+    /// database enforces cannot drift.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>An empty name is a state and not a refusal.</b> Clearing the field is how an admin says
+    /// the club has no name for this board yet, and the PATCH stores exactly that; every door
+    /// projection answers <c>name: null</c> for it so a console has ONE unnamed case to render
+    /// rather than a blank string that looks like a rendering bug. Refusing a blank would leave
+    /// the old name in place, which is what the endpoint used to do silently — success reported,
+    /// nothing written (B3).
+    /// </para>
+    /// </summary>
+    public const int NameMaxLength = 128;
     public DeviceKind Kind { get; set; } = DeviceKind.CourtBox;
     public DeviceHardware Hardware { get; set; } = DeviceHardware.Esp8266;
 
@@ -307,6 +335,70 @@ public sealed class Device : ITenantScoped
     /// </para>
     /// </summary>
     public Guid? ShutByUserId { get; set; }
+
+    /// <summary>
+    /// The first time this server answered this board <c>403</c> AFTER the current shut began —
+    /// which is the only evidence that exists that the board has HEARD it is shut. Null while
+    /// the door is open, and null while it is shut and has not called since.
+    ///
+    /// <para>
+    /// <b>This column is R3-1, and the defect it closes is the console saying the opposite of
+    /// what happened.</b> <c>DeviceIdentity</c> answered a shut board <c>403</c> before anything
+    /// recorded the contact, so <see cref="LastSeenAt"/> froze at the last call before the shut.
+    /// Three minutes later the sweep declared the door unreachable and the page said: "Nothing
+    /// can reach Front door, so it has not been told. It may still be admitting booked members
+    /// from its saved list" — about a board that had heard the 403 inside one heartbeat and
+    /// emptied its roster on the spot. The reopen confirmation then said it had been "admitting
+    /// booked members all along". Every one of those sentences was false, and each was reasoned
+    /// from silence the server itself had manufactured by refusing to write down that the board
+    /// was talking to it.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Silence alone can never answer this question and that is why it is a column.</b>
+    /// "Not heard from" and "has not been told" are two different facts: a board can be silent
+    /// because its uplink is down, or because it is sitting there being refused. Only the second
+    /// is safe to report as "confirmed shut", and only a record written AT the refusal can tell
+    /// them apart afterwards.
+    /// </para>
+    ///
+    /// <para>
+    /// Cleared on the way back into service, like <see cref="ShutByUserId"/> and
+    /// <see cref="ShutByShutAllAt"/>: it is about the shut that is in force now, and a door that
+    /// is open has not been told anything. It is deliberately not a history — the trail is the
+    /// history — and nothing settles on it.
+    /// </para>
+    /// </summary>
+    public DateTimeOffset? ShutHeardAt { get; set; }
+
+    /// <summary>
+    /// The board's own count of queued records it had to drop, since it last booted, as of the
+    /// last heartbeat that reported one. Zero when it has never reported a loss.
+    ///
+    /// <para>
+    /// <b>It arrived on every heartbeat and was written to a log file (R3-33).</b> The board's
+    /// event queue is a fixed ring; a door that scans faster than it can upload — or that stays
+    /// offline long enough — overwrites its own oldest entries, and this is the only number
+    /// anywhere that says the club's door history has holes in it. A warning in the API's
+    /// container log is not a place a club can read, and no screen carried it, so "why is there
+    /// nothing in the log between 19:00 and 21:00" had no answer at all.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>A SINCE-BOOT TOTAL, not a delta,</b> which every reader has to say in words: a
+    /// technician reading it as a per-interval count sees a board that looks worse every hour it
+    /// stays up. It resets when the board does, which is why the instant beside it matters —
+    /// a zero from a board that rebooted an hour ago is not the same fact as a zero from one
+    /// that has been up a month.
+    /// </para>
+    /// </summary>
+    public int EventsLost { get; set; }
+
+    /// <summary>
+    /// When <see cref="EventsLost"/> was last reported, or null if this board has never reported
+    /// the counter at all. See that field for why the pair is needed and a bare zero is not.
+    /// </summary>
+    public DateTimeOffset? EventsLostReportedAt { get; set; }
 
     /// <summary>
     /// This box's own button map, as the eight-entry wire array (<c>ButtonMap.ToWire()</c>)

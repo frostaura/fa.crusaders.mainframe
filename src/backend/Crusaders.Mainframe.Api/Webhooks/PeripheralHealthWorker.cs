@@ -130,12 +130,63 @@ public sealed class PeripheralHealthWorker : BackgroundService
 
         if (unreachable && outage is null)
         {
+            if (await ResumedAsync(health, device, lastSeen, ct)) return;
             await OpenAsync(health, device, lastSeen, ct);
         }
         else if (!unreachable && outage is not null)
         {
             await CloseAsync(health, device, outage, lastSeen, ct);
         }
+    }
+
+    /// <summary>
+    /// Re-opens the row for a silence that never actually ended, and answers whether it did.
+    ///
+    /// <para>
+    /// <b>This is the other half of R3-2, and without it the fix for the first half makes four
+    /// rows into four rows.</b> Taking a board out of service closes its open outage, for the
+    /// reason <c>DeviceRegistryService.SwitchAsync</c> gives; put it back into service while it
+    /// is still dark and this sweep sees an unreachable board with no open row and opens a new
+    /// one — <c>StartedAt</c> at the same unmoved <see cref="Device.LastSeenAt"/> as the last.
+    /// A club that shut and reopened a dead door three times while waiting for an electrician
+    /// got four overlapping outages describing one continuous silence, three of them stamped
+    /// with an <c>EndedAt</c> nobody was present for.
+    /// </para>
+    ///
+    /// <para>
+    /// The test is exact rather than approximate: the row must start at the same instant this
+    /// silence starts, and must have been closed by something other than contact. Both together
+    /// mean "this is the same silence, and it never ended" — a row closed by a real heartbeat
+    /// describes a DIFFERENT, finished silence and is never touched.
+    /// </para>
+    ///
+    /// <para>
+    /// Nothing is announced. The club was told about this outage when it was opened, or was
+    /// deliberately not told; a resume is the correction of a bookkeeping error, not a new
+    /// incident, and <see cref="AnnouncedAsync"/> replays the same rows to the same answer
+    /// afterwards because the row's <c>DetectedAt</c> is untouched.
+    /// </para>
+    /// </summary>
+    private async Task<bool> ResumedAsync(
+        Health health, Device device, DateTimeOffset lastSeen, CancellationToken ct)
+    {
+        var resumable = await health.Db.DeviceOutages
+            .Where(o => o.DeviceId == device.Id && o.StartedAt == lastSeen && !o.EndedByContact)
+            .OrderByDescending(o => o.DetectedAt)
+            .FirstOrDefaultAsync(ct);
+        if (resumable is null) return false;
+
+        resumable.EndedAt = null;
+
+        // Back to the default reading: whatever closes it NEXT will be a heartbeat unless
+        // another switch says otherwise, and the row is once again the open-outage guard.
+        resumable.EndedByContact = true;
+        await health.Db.SaveChangesAsync(ct);
+
+        _logger.LogInformation(
+            "Outage for {DeviceCode} resumed — the board has not been heard from since {LastSeen}",
+            device.DeviceCode, lastSeen);
+        return true;
     }
 
     /// <summary>

@@ -41,7 +41,7 @@ public static class DeviceView
         shut_by_name = shutByName,
         id = d.Id,
         device_code = d.DeviceCode,
-        name = d.Name,
+        name = Named(d.Name),
         kind = d.Kind.ToString(),
         hardware = d.Hardware.ToString(),
         // In relay order: index 0 is relay A. See Device.CourtNumbers.
@@ -91,5 +91,38 @@ public static class DeviceView
         // before that rule existed is still in some club's settings row.
         effective_heartbeat_seconds = HeartbeatCadence.Effective(heartbeatSeconds),
         offline_after_seconds = HeartbeatCadence.OfflineAfterSeconds(heartbeatSeconds),
+
+        // WHETHER THE BOARD HAS HEARD THAT IT IS SHUT, and the instant it did (WIRE-R3 §1).
+        //
+        // Null while it is open, and null while it is shut and has not called since. The
+        // difference between that null and an instant is the difference between the two
+        // sentences the console may say, and until this field existed it could say neither:
+        // see Device.ShutHeardAt for the whole of R3-1, which is the console reasoning from
+        // silence about a board it was itself refusing to listen to.
+        shut_heard_at = d.ShutHeardAt,
+
+        // The board's own count of records it had to throw away, since it last booted, as of
+        // its last heartbeat (WIRE-R3 §1). Zero when it has never reported one — which is not
+        // the same as never having been asked, hence the instant beside it. It was logged and
+        // stored nowhere (R3-33), so the one number that says a door's history has holes in it
+        // lived in a log file nobody at the club can read.
+        events_lost = d.EventsLost,
+        events_lost_reported_at = d.EventsLostReportedAt,
     };
+
+    /// <summary>
+    /// The club's name for a board, or null when nobody has given it one.
+    ///
+    /// <para>
+    /// <b>One unnamed case on the wire rather than two.</b> An admin may CLEAR a board's name
+    /// (WIRE-R3 §3), which stores an empty string, and a console rendering that gets a row with
+    /// a blank where a label should be — indistinguishable from a rendering bug and the third
+    /// of the three different "unnamed" states R3-21 is about. Null is a state a page has one
+    /// sentence for. Block body for the lizard reason in <c>memory/gotchas.md</c>.
+    /// </para>
+    /// </summary>
+    public static string? Named(string? name)
+    {
+        return string.IsNullOrWhiteSpace(name) ? null : name;
+    }
 }

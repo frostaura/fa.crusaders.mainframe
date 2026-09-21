@@ -1,5 +1,6 @@
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Multitenancy;
+using Crusaders.Mainframe.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Persistence;
@@ -174,15 +175,7 @@ public class MainframeDbContext : DbContext
             e.HasQueryFilter(l => l.TenantId == _tenant.TenantId);
         });
 
-        modelBuilder.Entity<AuditLog>(e =>
-        {
-            e.ToTable("audit_log");
-            e.HasKey(a => a.Id);
-            e.HasIndex(a => new { a.TenantId, a.CreatedAt });
-            e.Property(a => a.Action).HasMaxLength(128).IsRequired();
-            e.Property(a => a.DetailsJson).HasColumnType("jsonb");
-            e.HasQueryFilter(a => a.TenantId == _tenant.TenantId);
-        });
+        ConfigureAuditLog(modelBuilder);
 
         modelBuilder.Entity<WebhookEndpoint>(e =>
         {
@@ -383,6 +376,39 @@ public class MainframeDbContext : DbContext
     }
 
     /// <summary>
+    /// The append-only trail: one table for the whole product, two orders over it.
+    ///
+    /// <para>
+    /// <b>Two indexes, deliberately.</b> The RANGE every door reader filters by is still
+    /// <c>CreatedAt</c> — retention, the club's day and "the last 24 hours" are all questions
+    /// about when the club HEARD — and it is the SORT that moved to
+    /// <see cref="AuditLog.ScanAt"/>, so that "newest first" is true of the instants printed on
+    /// screen rather than of a column nobody is looking at. A list ordered by one and filtered
+    /// by the other needs both, and ordering by <c>COALESCE</c> over the jsonb instead is what
+    /// the stored column exists to avoid: no index can serve it. See <see cref="AuditLog.ScanAt"/>.
+    /// </para>
+    ///
+    /// <para>
+    /// Its own method rather than another block inside <see cref="OnModelCreating"/>, because
+    /// that method is measured as one function and was one line from the length gate; see
+    /// <c>memory/gotchas.md</c> on the complexity tooling.
+    /// </para>
+    /// </summary>
+    private void ConfigureAuditLog(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AuditLog>(e =>
+        {
+            e.ToTable("audit_log");
+            e.HasKey(a => a.Id);
+            e.HasIndex(a => new { a.TenantId, a.CreatedAt });
+            e.HasIndex(a => new { a.TenantId, a.ScanAt });
+            e.Property(a => a.Action).HasMaxLength(128).IsRequired();
+            e.Property(a => a.DetailsJson).HasColumnType("jsonb");
+            e.HasQueryFilter(a => a.TenantId == _tenant.TenantId);
+        });
+    }
+
+    /// <summary>
     /// Bumps <see cref="Booking.Version"/> on every modified booking, then saves.
     ///
     /// <para>
@@ -404,9 +430,38 @@ public class MainframeDbContext : DbContext
         }
     }
 
+    /// <summary>
+    /// Fills in <see cref="AuditLog.ScanAt"/> on every row being written that has not set one.
+    ///
+    /// <para>
+    /// <b>Here for the same reason <see cref="BumpBookingVersions"/> is.</b> Four paths write
+    /// door rows — the online gate decision, the offline upload, the registry, the fleet
+    /// controls — and a fifth will. A sort key each of them has to remember is a sort key one of
+    /// them will not, and the symptom is a row in the wrong place in a list that says it is in
+    /// order, which nothing goes red about. The rule itself is <see cref="DoorTrail.ScanAtOf"/>,
+    /// stated once beside the predicates that decide what a door row is.
+    /// </para>
+    ///
+    /// <para>
+    /// A value already set is left alone, so a caller that knows better than the derivation —
+    /// a fixture placing a row in the past, a future importer — is believed.
+    /// </para>
+    /// </summary>
+    private void StampAuditScanInstants()
+    {
+        foreach (var entry in ChangeTracker.Entries<AuditLog>())
+        {
+            if (entry.State != EntityState.Added || entry.Entity.ScanAt != default) continue;
+
+            entry.Entity.ScanAt = DoorTrail.ScanAtOf(
+                entry.Entity.Action, entry.Entity.DetailsJson, entry.Entity.CreatedAt);
+        }
+    }
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         BumpBookingVersions();
+        StampAuditScanInstants();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
@@ -414,6 +469,7 @@ public class MainframeDbContext : DbContext
         bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         BumpBookingVersions();
+        StampAuditScanInstants();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 }

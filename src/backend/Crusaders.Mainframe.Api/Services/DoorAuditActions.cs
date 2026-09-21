@@ -111,18 +111,53 @@ public static class DoorAuditActions
     /// <summary>The server overruled the board's own clock on an uploaded event.</summary>
     public const string ClockCorrectedKind = "clock_corrected";
 
+    /// <summary>An admin took this door out of service.</summary>
+    public const string ShutKind = "shut";
+
+    /// <summary>An admin put it back into service.</summary>
+    public const string ReopenedKind = "reopened";
+
+    /// <summary>An admin gave the door a different name or key.</summary>
+    public const string RenamedKind = "renamed";
+
+    /// <summary>An admin changed something else on the door's card.</summary>
+    public const string DetailsChangedKind = "details_changed";
+
+    /// <summary>An admin removed the board.</summary>
+    public const string DeletedKind = "deleted";
+
     /// <summary>
     /// What a door event is called on the wire — a word, not an action string.
     ///
     /// <para>
-    /// A closed set, so a console can hold four sentences rather than parse a namespace. An
-    /// action this server writes and this list has no word for is
+    /// A closed set, so a console can hold a sentence per member rather than parse a namespace.
+    /// An action this server writes and this list has no word for is
     /// <see cref="UnrecognisedKind"/>, which the page renders neutrally: the one thing it must
     /// never do is fall through to a chip that asserts an outcome.
     /// </para>
+    ///
+    /// <para>
+    /// <b>The set is the FINE one now (E5 / R3-18, WIRE-R3 §6).</b> It used to be four coarse
+    /// words — <c>edited</c> covered a rename, a location note, a shut and a reopen alike — so
+    /// the one row anybody ever looks for on a door's feed, WHO SHUT IT, was rendered
+    /// identically to eight rows that did not matter. The fine word already existed as
+    /// <see cref="Changes"/> and the console had to join the two fields to get a sentence, which
+    /// is a join a page gets wrong once and then shows wrong for ever. <c>kind</c> is now the
+    /// word a console renders; <c>change</c> keeps its old vocabulary unchanged beside it, for
+    /// callers written against it.
+    /// </para>
+    ///
+    /// <para>
+    /// <see cref="EditedKind"/> survives in the set as the answer for a <c>device.updated</c>
+    /// row that recorded no <c>changes</c> list — every row written before that list existed.
+    /// It is honest where any of the five sharper words would be a guess.
+    /// </para>
     /// </summary>
     public static readonly string[] EventKinds =
-        [RegisteredKind, EditedKind, RemovedKind, ClockCorrectedKind, UnrecognisedKind];
+    [
+        RegisteredKind, ShutKind, ReopenedKind, RenamedKind, DetailsChangedKind, DeletedKind,
+        ClockCorrectedKind, EditedKind, UnrecognisedKind,
+    ];
 
     /// <summary>
     /// A row this server wrote that this list has no word for. It is on the wire rather than
@@ -237,18 +272,41 @@ public static class DoorAuditActions
     }
 
     /// <summary>
-    /// The word for one non-scan action. Block body for the lizard reason in
-    /// <c>memory/gotchas.md</c>.
+    /// The word for one non-scan action, read together with what that row recorded having
+    /// CHANGED — see <see cref="EventKinds"/> for why the coarse word was not enough.
+    ///
+    /// <para>
+    /// A <c>device.updated</c> with no <c>changes</c> list is <see cref="EditedKind"/>, which is
+    /// what every row written before that list existed looks like: honest, where any of the
+    /// sharper words would be a guess about a row that did not record one. Block body for the
+    /// lizard reason in <c>memory/gotchas.md</c>.
+    /// </para>
     /// </summary>
-    public static string EventKindOf(string action)
+    public static string EventKindOf(string action, IReadOnlyCollection<string> changes)
     {
         return action switch
         {
             AutoRegistered => RegisteredKind,
-            Updated => EditedKind,
-            Deleted => RemovedKind,
+            Updated => UpdatedKindOf(changes),
+            Deleted => DeletedKind,
             EventTimeClamped => ClockCorrectedKind,
             _ => UnrecognisedKind,
         };
+    }
+
+    /// <summary>
+    /// The word for one <c>device.updated</c>. Same precedence as
+    /// <see cref="UpdatedChangeOf"/> — state beats naming beats everything else, because "Shut
+    /// by Priya Naidoo at 09:48" is the sentence somebody is looking for and the rename is on
+    /// the same row for anybody who reads further. Block body for the lizard reason in
+    /// <c>memory/gotchas.md</c>.
+    /// </summary>
+    private static string UpdatedKindOf(IReadOnlyCollection<string> changes)
+    {
+        if (changes.Count == 0) return EditedKind;
+        if (changes.Contains(ShutToken)) return ShutKind;
+        if (changes.Contains(ReopenedToken)) return ReopenedKind;
+        if (changes.Contains(NameToken) || changes.Contains(GateKeyToken)) return RenamedKind;
+        return DetailsChangedKind;
     }
 }

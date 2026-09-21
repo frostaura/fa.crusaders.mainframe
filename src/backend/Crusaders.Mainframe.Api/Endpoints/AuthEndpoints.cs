@@ -19,12 +19,9 @@ public static class AuthEndpoints
 
         g.MapPost("/register", async (RegisterRequest req, AuthService auth, CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.Password) || string.IsNullOrWhiteSpace(req.FullName) || string.IsNullOrWhiteSpace(req.MembershipNumber))
-                return Results.BadRequest(new { error = "missing_fields" });
-            if (req.Password.Length < 8)
-                return Results.BadRequest(new { error = "password_too_short" });
+            if (RegistrationRules.Refusal(req) is { } refused) return refused;
 
-            var result = await auth.RegisterAsync(req.Email, req.Password, req.FullName, req.MembershipNumber, req.PhotoUrl, ct);
+            var result = await auth.RegisterAsync(req.Email, req.Password, req.FullName.Trim(), req.MembershipNumber, req.PhotoUrl, ct);
             return result switch
             {
                 RegistrationResult.Created c => Results.Ok(new { user_id = c.UserId, status = "pending_email_verification" }),
@@ -208,6 +205,46 @@ public static class AuthEndpoints
             phone = DoorSettings.ContactPhone(settings),
             email = DoorSettings.ContactEmail(settings),
         };
+    }
+}
+
+/// <summary>
+/// Every refusal an application can be given before a row is written, or null.
+///
+/// <para>
+/// Extracted from the handler rather than inlined, for the reason
+/// <c>memory/gotchas.md</c> records about the complexity gate: <c>MapAuthEndpoints</c> is one
+/// lizard function containing eleven route lambdas, so a branch added to any of them is a
+/// branch added to all of them, and the gate is failed by whichever one happens to be last.
+/// </para>
+///
+/// <para>
+/// <b>The full name's bound is the one that was missing (D-L4 / R3-37).</b>
+/// <c>PUT /me/profile</c> has held it since it shipped; this route, which creates every
+/// membership row in the product, checked only that the string was not whitespace and handed
+/// it to a <c>varchar(255)</c>. See <see cref="PersonNames.MaxFullNameLength"/>. Trimmed before
+/// the check so the value validated and the value stored are one value — <c>RegisterAsync</c>
+/// stored the string exactly as sent, spaces and all.
+/// </para>
+/// </summary>
+internal static class RegistrationRules
+{
+    internal static IResult? Refusal(RegisterRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.Password)
+            || string.IsNullOrWhiteSpace(req.FullName) || string.IsNullOrWhiteSpace(req.MembershipNumber))
+        {
+            return Results.BadRequest(new { error = "missing_fields" });
+        }
+
+        if (req.Password.Length < 8) return Results.BadRequest(new { error = "password_too_short" });
+
+        if (!PersonNames.IsAcceptable(req.FullName.Trim()))
+        {
+            return Results.BadRequest(new { error = PersonNames.FullNameInvalid, max = PersonNames.MaxFullNameLength });
+        }
+
+        return null;
     }
 }
 

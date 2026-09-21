@@ -231,6 +231,13 @@ public sealed class DeviceRegistryService
         // door." to every admin in the club because this was the one fact it did not have.
         device.ShutByUserId = enabled ? null : actorUserId;
 
+        // A NEW shut has not been heard by anybody yet, and a door that is open has not been
+        // told anything — so this is cleared on BOTH edges rather than only on the reopen. A
+        // stale value surviving a shut→reopen→shut cycle would make the console confirm the new
+        // shut with the old shut's instant, which is the failure R3-1 is about arriving by a
+        // different route. See Device.ShutHeardAt.
+        device.ShutHeardAt = null;
+
         // A door going back INTO service was not shut by a fleet shut-all any more, whichever
         // route reopened it. Cleared here rather than only in the fleet reopen, because an admin
         // reopening ONE door from its own page is the case that would otherwise leave a stale
@@ -247,7 +254,18 @@ public sealed class DeviceRegistryService
         var open = await _db.DeviceOutages
             .Where(o => o.DeviceId == device.Id && o.EndedAt == null)
             .ToListAsync(ct);
-        foreach (var outage in open) outage.EndedAt = switchedAt;
+        foreach (var outage in open)
+        {
+            outage.EndedAt = switchedAt;
+
+            // AND SAYS SO. Nobody heard from this board; the switch is what ended the row. A
+            // close indistinguishable from a recovery is what turned one continuous Side-door
+            // silence into four rows, three of them claiming the door came back, while
+            // LastSeenAt never moved once (E9 / R3-2) — and it is read as evidence of contact
+            // by DeviceOutageIndex, which prices no-show waivers off it. See
+            // DeviceOutage.EndedByContact.
+            outage.EndedByContact = false;
+        }
     }
 
     /// <returns>
@@ -329,11 +347,27 @@ public sealed class DeviceRegistryService
     // Each of them compares before with after rather than reading which fields arrived: the
     // reason is in UpdateAsync's own remarks and it is the whole of A5 and B10.
 
-    /// <summary>What the door is called. See the note above <see cref="ApplyCourts"/>.</summary>
+    /// <summary>
+    /// What the door is called. See the note above <see cref="ApplyCourts"/>.
+    ///
+    /// <para>
+    /// <b>A blank name CLEARS it, and that is a change like any other (B3 / R3-15).</b> The
+    /// endpoint reported success for a blank name and the console redrew the old one, so an
+    /// admin who deliberately emptied the field was told it had worked and watched it not have.
+    /// The trim is what makes the three blank spellings — absent-from-the-form <c>""</c>, a
+    /// stray space, a newline pasted from a label — one state rather than three, and
+    /// <see cref="Device.NameMaxLength"/> records why an empty name is a state this product has
+    /// a sentence for rather than a refusal. Absent (<c>null</c>) is still "leave it alone":
+    /// that is the two-valued rule every text field on this PATCH runs.
+    /// </para>
+    /// </summary>
     private static void ApplyName(Device device, UpdateDeviceCommand cmd, List<string> changes)
     {
-        if (cmd.Name is not null && device.Name != cmd.Name.Trim()) changes.Add(DoorAuditActions.NameToken);
-        if (cmd.Name is not null) device.Name = cmd.Name.Trim();
+        if (cmd.Name is null) return;
+
+        var name = cmd.Name.Trim();
+        if (device.Name != name) changes.Add(DoorAuditActions.NameToken);
+        device.Name = name;
     }
 
     /// <summary>What a court box is assigned to, and which button is which court.</summary>

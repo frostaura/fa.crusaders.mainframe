@@ -129,25 +129,102 @@ public static class AdminDeviceActivityEndpoint
 
         // The other half, in its own array and its own vocabulary. See DoorAuditActions for the
         // closed sets of words and why the lists exist.
-        var events = other
-            .Select(r => new
-            {
-                at = r.CreatedAt,
-                action = r.Action,
+        var events = Grouped(other, actors);
 
-                // `kind` stays for compatibility and is the coarse word; `change` is what
-                // actually happened. Nine rows of "details or state were changed" were the
-                // whole of a door's story and none of them said which one was the shut (A5).
-                kind = DoorAuditActions.EventKindOf(r.Action),
-                change = DoorAuditActions.ChangeOf(r.Action, Changes(r.DetailsJson)),
+        return Results.Ok(new { items, events });
+    }
+
+    /// <summary>
+    /// The board's own story, newest first, with runs of the identical event collapsed into one
+    /// entry carrying a <c>count</c>.
+    ///
+    /// <para>
+    /// <b>Nine rows saying "the clock was corrected", all at 19:22 (A-L4).</b> One upload of a
+    /// batch from a board whose uptime counter has gone wrong writes one
+    /// <c>device.event_time_clamped</c> PER EVENT — that is right, each clamp is a fact about a
+    /// different scan — and the feed then rendered nine identical lines a second apart. A door's
+    /// feed is read to find the one row that explains something, and nine copies of one row is
+    /// the shape that buries it; it is the same complaint A5 made about "details or state were
+    /// changed" arriving from the other direction.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Adjacent, same kind, same actor, same MINUTE.</b> Adjacency is what keeps this a
+    /// display grouping rather than an aggregation: a run is only ever collapsed with itself, so
+    /// nothing is hidden behind anything and the order is untouched. The minute is the
+    /// resolution the feed prints, so two entries that would render the same timestamp are the
+    /// two this may merge — grouping across a wider window would collapse a clock correction at
+    /// 19:22 with an unrelated one at 19:41 and assert they were one event.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>at</c> is the NEWEST of the run, which is the row's own position in the list.
+    /// <c>count</c> is always present and is 1 on an ordinary entry, because a key that appears
+    /// and disappears is a second response shape wearing one name — the argument
+    /// <c>DeviceView</c> already makes about the door-card fields on a court box.
+    /// </para>
+    /// </summary>
+    private static List<object> Grouped(
+        List<ActivityRow> rows, IReadOnlyDictionary<Guid, string> actors)
+    {
+        var events = new List<object>();
+        var index = 0;
+
+        while (index < rows.Count)
+        {
+            var row = rows[index];
+            var changes = Changes(row.DetailsJson);
+            var kind = DoorAuditActions.EventKindOf(row.Action, changes);
+            var actor = PersonNames.Of(row.ActorUserId, actors);
+
+            var run = 1;
+            while (index + run < rows.Count && SameEvent(row, kind, actor, rows[index + run], actors)) run++;
+
+            events.Add(new
+            {
+                at = row.CreatedAt,
+                action = row.Action,
+
+                // The word a console renders, now the FINE one (WIRE-R3 §6). `change` keeps its
+                // own older vocabulary beside it for callers written against it; see
+                // DoorAuditActions.EventKinds.
+                kind,
+                change = DoorAuditActions.ChangeOf(row.Action, changes),
 
                 // Null for the board's own rows, whose actor is Guid.Empty: nobody registered
                 // it and nobody corrected its clock. See PersonNames.
-                actor_name = PersonNames.Of(r.ActorUserId, actors),
-            })
-            .ToList();
+                actor_name = actor,
 
-        return Results.Ok(new { items, events });
+                // How many identical rows this entry stands for. Always present; 1 is the
+                // ordinary case. See the summary.
+                count = run,
+
+                // The OLDEST of the run, so a collapsed entry can say "×9, 19:22–19:23" rather
+                // than pretending the nine happened at one instant. Equal to `at` when count is
+                // 1, which is the same one-shape argument as `count` itself.
+                from = rows[index + run - 1].CreatedAt,
+            });
+
+            index += run;
+        }
+
+        return events;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="candidate"/> is another instance of the same event as the run's
+    /// head — same word, same actor, same printed minute. Block body for the lizard reason in
+    /// <c>memory/gotchas.md</c>.
+    /// </summary>
+    private static bool SameEvent(
+        ActivityRow head, string kind, string? actor, ActivityRow candidate,
+        IReadOnlyDictionary<Guid, string> actors)
+    {
+        if (DoorAuditActions.EventKindOf(candidate.Action, Changes(candidate.DetailsJson)) != kind) return false;
+        if (PersonNames.Of(candidate.ActorUserId, actors) != actor) return false;
+
+        return head.CreatedAt.UtcDateTime.ToString("yyyyMMddHHmm", System.Globalization.CultureInfo.InvariantCulture)
+               == candidate.CreatedAt.UtcDateTime.ToString("yyyyMMddHHmm", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     /// <summary>

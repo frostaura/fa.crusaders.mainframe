@@ -43,7 +43,7 @@ public static class MeProfileEndpoints
             if (req.FullName is not null)
             {
                 var name = req.FullName.Trim();
-                if (name.Length < 2 || name.Length > 120) return Results.BadRequest(new { error = "full_name_invalid" });
+                if (!PersonNames.IsAcceptable(name)) return Results.BadRequest(new { error = PersonNames.FullNameInvalid });
                 membership.FullName = name;
             }
             if (req.PhotoUrl is not null)
