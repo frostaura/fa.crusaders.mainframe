@@ -1,5 +1,6 @@
 import { type Locator, type Page } from "@playwright/test";
 import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { BUTTON_VARIANT_CLASS } from "../src/components/Button";
 
 /**
  * B5 / C2 / C3 / C7 — the armed confirm, measured rather than looked at.
@@ -187,6 +188,71 @@ for (const size of SIZES) {
 }
 
 /**
+ * C7 — the armed block brings itself to where it can be read.
+ *
+ * <p>
+ * Reviewer C armed a destructive confirm at 1440×900 and the block it grew scrolled out of
+ * view, leaving the Cancel below the fold: the trigger was the last thing on screen, arming it
+ * put a paragraph and two buttons where one button had been, and nothing moved the page. That
+ * is the same failure as the 320 px clipping and it needs a different fix, because the control
+ * is not too big for the viewport — it is simply no longer in it.
+ * </p>
+ *
+ * <p>
+ * <b>The trigger is put at the bottom edge on purpose.</b> Arming a control in the middle of a
+ * tall page cannot reproduce this; the finding only exists where the growth has nowhere to go.
+ * `block: "nearest"` is also what must NOT fire when the block is already comfortably on
+ * screen, so the second half of this test pins that the page does not jump for a control that
+ * needed nothing — a confirm that scrolls the page under somebody's cursor every time is the
+ * cure being worse than C7.
+ * </p>
+ */
+test("brings the armed block into view when the trigger was at the bottom edge", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page, "/admin/devices", 0);
+  await expect(page.getByText("Cupboard box").first()).toBeVisible();
+
+  const wrapper = page.locator(CONFIRMS).last();
+  const trigger = wrapper.locator("> button").first();
+
+  // Put the trigger's bottom on the viewport's bottom edge, so the block it grows has to
+  // push past it. `scrollIntoView({block: "end"})` inside the scrolling <main>, not a
+  // mouse wheel: the amount is exact and the same on every run.
+  await trigger.evaluate((node) => node.scrollIntoView({ block: "end" }));
+  await expect(trigger).toBeInViewport();
+
+  const before = await page.evaluate(() => document.querySelector("main")!.scrollTop);
+  await trigger.click();
+
+  await expect(wrapper.locator("> button")).toHaveCount(2);
+  const confirm = wrapper.locator("> button").nth(0);
+  const cancel = wrapper.locator("> button").nth(1);
+  await expect(wrapper.locator("> p")).toBeInViewport();
+  await expect(confirm, "the confirm scrolled out of view when it armed").toBeInViewport();
+  await expect(cancel, "the Cancel is below the fold — C7 exactly").toBeInViewport();
+
+  const after = await page.evaluate(() => document.querySelector("main")!.scrollTop);
+  expect(after, "nothing scrolled, so the block cannot have been brought anywhere")
+    .toBeGreaterThan(before);
+
+  // And the other half: a control with room around it must not move the page at all.
+  // `block: "center"` leaves 400-odd pixels below the trigger at this viewport, which is far
+  // more than the paragraph and the button row need — so a scroll here would be `nearest`
+  // behaving like `center`, and a confirm that jumps the page under somebody's cursor every
+  // time it arms is the cure being worse than C7.
+  await cancel.click();
+  await expect(wrapper.locator("> button")).toHaveCount(1);
+  await trigger.evaluate((node) => node.scrollIntoView({ block: "center" }));
+  const settled = await page.evaluate(() => document.querySelector("main")!.scrollTop);
+  await trigger.click();
+  await expect(wrapper.locator("> button")).toHaveCount(2);
+  expect(
+    await page.evaluate(() => document.querySelector("main")!.scrollTop),
+    "arming a control that was already on screen jumped the page",
+  ).toBe(settled);
+});
+
+/**
  * C3, from the listening side: a disarm used to empty the live region, and an emptied live
  * region announces nothing. A screen-reader user could not tell a loaded control from a
  * resting one, and pressing Enter again to find out is precisely what must not be a way of
@@ -263,6 +329,93 @@ test.describe("under forced colours", () => {
     });
 
     expect(offenders).toEqual([]);
+  });
+
+  /**
+   * EVERY variant, and the thing that is actually at risk.
+   *
+   * <p>
+   * The test above measures what `/admin/settings` happens to render, which is `default`,
+   * `outline` and `ghost` — so `primary` and `danger` were asserted about by nobody, and a
+   * variant is exactly the kind of thing that gets added without a screen to put it on. The
+   * class strings come from the component's own table rather than being copied here, so a sixth
+   * variant is measured the day it is added rather than the day somebody remembers.
+   * </p>
+   *
+   * <p>
+   * <b>And it measures both modes, because "has a border under forced colours" is not the
+   * property.</b> Proved by mutation, not by reading: stripping `border border-transparent`
+   * back off the `ghost` variant — the exact defect reviewer C reported — left a first draft of
+   * this test GREEN. The boundary does not come from the variant at all, it comes from the
+   * `button` rule in the `forced-colors` block in `index.css`, so every variant passes that
+   * assertion whatever it declares, including one that declares nothing.
+   * </p>
+   *
+   * <p>
+   * What the transparent border on each variant buys is that <b>nothing moves</b> when the mode
+   * fires: the 1 px edge is already in the box model, so the system colour lands on a box that
+   * is already the right size. A variant without one grows by 2 px in each direction the moment
+   * a user turns high contrast on — a whole layout reflowing under somebody who changed a
+   * display setting. That is the property, it is a difference between two measurements, and it
+   * is what the mutant is killed by.
+   * </p>
+   */
+  test("gives every Button variant a boundary, and moves nothing to get it", async ({ page }) => {
+    await open(page, "/admin/settings", 0);
+    await expect(page.getByLabel(/Unlock time/)).toBeVisible();
+
+    const variants = Object.entries(BUTTON_VARIANT_CLASS);
+    expect(variants.length, "the variant table is empty — nothing was measured").toBeGreaterThan(0);
+
+    // One button per variant, in a real page so the real stylesheet applies, left in place
+    // across the mode change so the two measurements are of the same nodes.
+    await page.evaluate((entries) => {
+      const host = document.createElement("div");
+      host.id = "c8-probe";
+      document.body.append(host);
+      for (const [variant, classes] of entries) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.variant = variant;
+        // The same base classes `Button` puts on every one of them, then the variant's own.
+        button.className = `inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg text-sm font-medium ${classes}`;
+        button.textContent = variant;
+        host.append(button);
+      }
+    }, variants);
+
+    const measure = () => page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>("#c8-probe button")].map((button) => {
+        const style = getComputedStyle(button);
+        const box = button.getBoundingClientRect();
+        return {
+          variant: button.dataset.variant!,
+          border: Number.parseFloat(style.borderTopWidth),
+          borderStyle: style.borderTopStyle,
+          width: Math.round(box.width),
+          height: Math.round(box.height),
+        };
+      }));
+
+    const ordinary = await measure();
+    await page.emulateMedia({ forcedColors: "active" });
+    const forced = await measure();
+    await page.evaluate(() => document.getElementById("c8-probe")?.remove());
+
+    expect(forced).toHaveLength(variants.length);
+    for (const [i, row] of forced.entries()) {
+      const before = ordinary[i];
+      expect(row.border, `the ${row.variant} variant has no border under forced colours`).toBeGreaterThan(0);
+      expect(row.borderStyle, `the ${row.variant} variant's border is not drawn`).not.toBe("none");
+      // The mutation-proved half: the variant must already carry the edge it is about to be
+      // given a colour for.
+      expect(before.border, `the ${row.variant} variant declares no border of its own, so forced colours will reflow it`)
+        .toBeGreaterThan(0);
+      expect(row.width, `the ${row.variant} variant changes width when forced colours fires`).toBe(before.width);
+      expect(row.height, `the ${row.variant} variant changes height when forced colours fires`).toBe(before.height);
+    }
+    // eslint-disable-next-line no-console -- the measurement IS the point of this test
+    console.log(`[C8] ${forced.map((r) => `${r.variant} ${r.border}px ${r.width}×${r.height}`).join(" · ")}`);
   });
 
   /** And the armed pair specifically, which is the control the finding was raised on. */
