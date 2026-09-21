@@ -462,8 +462,12 @@ public class DeviceGateProtocolCorpusTests
         var courtBox = JsonDocument.Parse(File.ReadAllText(Path.Combine(
             Directory.GetParent(ContractRoot())!.FullName, "http", "manifest.json"))).RootElement;
 
-        Assert.Equal(4, courtBox.GetProperty("case_count").GetProperty("requests").GetInt32());
-        Assert.Equal(9, courtBox.GetProperty("case_count").GetProperty("responses").GetInt32());
+        // 7 and 19 since the device-link round: three request vectors (restored_relays,
+        // relay_state, and the court box's event body carrying a real boot_id) and ten
+        // response vectors (five for the power-dip relay restore, two for the nine `config`
+        // settings, three for `member_display`).
+        Assert.Equal(7, courtBox.GetProperty("case_count").GetProperty("requests").GetInt32());
+        Assert.Equal(19, courtBox.GetProperty("case_count").GetProperty("responses").GetInt32());
     }
 
     private static string Body(string section, string id) =>
