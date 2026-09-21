@@ -5,7 +5,7 @@ import {
   groupChangeConsequence, memberCountLine, paintedRunAnnouncement, paintedWeekSentence,
   misalignedWindowNote, previewSummary, ratePerBlockSentence, slicePriceLine,
 } from "./groupsCopy";
-import { UNLIMITED } from "./groupRules";
+import { UNLIMITED, capOverrideIsInert } from "./groupRules";
 import { ApiError } from "./api";
 
 /**
@@ -195,6 +195,24 @@ describe("the per-day ceiling, said where it is set — item 19", () => {
 
   it("says one slot in the singular", () => {
     expect(capResolutionSentence("Regular", 1, 4)).toContain("may book 1 slot a day");
+  });
+
+  /**
+   * <b>Unknown is never false, and this is the field where it costs most.</b> The club-wide slot
+   * ceiling is a key a backend lane is shipping in parallel with this screen, so it will be
+   * ABSENT — and "the club has set no limit" is a claim an admin would act on, where "the club's
+   * system hasn't said" is the only true sentence available.
+   */
+  it("will not turn a key the API has not shipped into a club with no limit", () => {
+    expect(capResolutionSentence("Regular", null, null))
+      .toBe("The club's system hasn't said a limit on slots a day, and Regular doesn't set one "
+        + "either — so nothing on this screen limits how many slots a day they book. Admins are "
+        + "never limited.");
+    expect(capResolutionSentence("Regular", 3, null))
+      .toBe("Regular members may book 3 slots a day. The club's system hasn't said what everybody "
+        + "else gets. Admins are never limited.");
+    // And nothing can be inert against a bound nobody has stated.
+    expect(capOverrideIsInert(8, null)).toBe(false);
   });
 });
 

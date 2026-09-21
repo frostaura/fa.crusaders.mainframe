@@ -1,6 +1,9 @@
-import { WEEK_IN_READING_ORDER, formatClock, normalise, type Interval } from "../../lib/groupRules";
+import {
+  WEEK_IN_READING_ORDER, clubHoursFor, formatClock, normalise, parseClock, type ClubHoursSettings,
+  type Interval,
+} from "../../lib/groupRules";
 import { dayName, type PaintedWeek } from "../../lib/groupsCopy";
-import type { Weekday } from "../../lib/adminApi";
+import type { GroupWindow, Weekday } from "../../lib/adminApi";
 
 /**
  * The painter's arithmetic — intervals in, cells out, and back again.
@@ -92,4 +95,49 @@ export function misalignedFaces(value: PaintedWeek, rows: number[], sliceMinutes
     }
   }
   return out;
+}
+
+/**
+ * Wire windows → intervals per weekday.
+ *
+ * A row the module cannot read is DROPPED rather than guessed at: a window with `end <= start`
+ * is only reachable by a hand-edited row, and for an access rule the safe direction is closed.
+ * `groupRules.allowFor` takes the same posture for the same reason.
+ */
+export function windowsToPainted(windows: GroupWindow[] | undefined | null): PaintedWeek {
+  const out: PaintedWeek = {};
+  for (const row of windows ?? []) {
+    const start = parseClock(row.start);
+    const end = parseClock(row.end);
+    if (start === null || end === null || end <= start) continue;
+    out[row.day] = [...(out[row.day] ?? []), { start, end }];
+  }
+  for (const day of WEEK_IN_READING_ORDER) if (out[day]) out[day] = normalise(out[day]!);
+  return out;
+}
+
+/** Intervals per weekday → wire windows, in the API's own weekday vocabulary and `HH:mm` faces. */
+export function paintedToWindows(painted: PaintedWeek): GroupWindow[] {
+  const out: GroupWindow[] = [];
+  for (const day of WEEK_IN_READING_ORDER) {
+    for (const interval of normalise(painted[day] ?? [])) {
+      out.push({ day, start: formatClock(interval.start), end: formatClock(interval.end) });
+    }
+  }
+  return out;
+}
+
+/**
+ * The club's own hours for all seven days, in the shape the painter and every summary want.
+ *
+ * One function so the seven calls cannot drift apart — a week assembled by hand at three call
+ * sites is a week that names Wednesday twice at one of them.
+ */
+export function clubWeek(settings: ClubHoursSettings | null | undefined): PaintedWeek {
+  return {
+    mon: clubHoursFor(settings, "mon"), tue: clubHoursFor(settings, "tue"),
+    wed: clubHoursFor(settings, "wed"), thu: clubHoursFor(settings, "thu"),
+    fri: clubHoursFor(settings, "fri"), sat: clubHoursFor(settings, "sat"),
+    sun: clubHoursFor(settings, "sun"),
+  };
 }

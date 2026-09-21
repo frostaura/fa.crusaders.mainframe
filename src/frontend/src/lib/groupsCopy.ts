@@ -237,8 +237,23 @@ const ADMINS_EXEMPT = "Admins are never limited.";
  * </p>
  */
 export function capResolutionSentence(
-  groupName: string, groupCap: number | null | undefined, clubCap: number,
+  groupName: string, groupCap: number | null | undefined, clubCap: number | null,
 ): string {
+  /*
+   * `clubCap === null` is the club's system not having SENT the key, which is a different fact
+   * from the club having set no limit — and the difference matters most here, because "nobody
+   * is limited" is a claim an admin would act on. `member_max_slots_per_day` is being shipped
+   * by a backend lane in parallel with this screen, so absent is a state that will happen.
+   */
+  if (clubCap === null) {
+    if (groupCap === null || groupCap === undefined) {
+      return `The club's system hasn't said a limit on slots a day, and ${groupName} doesn't set `
+        + `one either — so nothing on this screen limits how many slots a day they book. `
+        + `${ADMINS_EXEMPT}`;
+    }
+    return `${groupName} members may book ${slotsWord(groupCap)} a day. The club's system hasn't `
+      + `said what everybody else gets. ${ADMINS_EXEMPT}`;
+  }
   const others = clubCap > 0
     ? `Everyone else gets the club's ${clubCap}.`
     : "Everybody else has no limit, because the club has not set one.";

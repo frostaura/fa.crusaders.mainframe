@@ -395,8 +395,8 @@ export function capFor(groups: MemberGroup[], key: CapKey, tenantDefault: number
  * and "unlimited" is above every bound — is inert and the editor says so.
  * </p>
  */
-export function capOverrideIsInert(override: number, tenantValue: number): boolean {
-  if (tenantValue <= 0) return false; // the club has no limit, so any override is the only one
+export function capOverrideIsInert(override: number, tenantValue: number | null): boolean {
+  if (tenantValue === null || tenantValue <= 0) return false; // no club bound to be inert against
   if (override <= 0) return true; // "unlimited" cannot lift the club's own limit
   return override >= tenantValue;
 }
