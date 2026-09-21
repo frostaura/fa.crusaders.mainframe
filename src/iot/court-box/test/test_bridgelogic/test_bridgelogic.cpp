@@ -2069,6 +2069,132 @@ void test_on_retry_a_badcrc_after_a_non_relay_frame_never_moves_a_relay_deadline
   }
 }
 
+// ---------------------------------------------------------------------------
+// OnRetry — D1-6: the `!EXT` retry that was never wired up
+// ---------------------------------------------------------------------------
+//
+// `pumpRelight` sent `!EXT` and stamped `Relight::extended`, but nothing
+// registered the frame with OnRetry and nothing else did either. Three things
+// followed, all of them verified: the header's "WHY `!EXT` IS KEPT AS WELL AS
+// `!ON`" described behaviour the composition root did not have;
+// `handleReceiveError`'s first branch required `verb() == Ext` and was
+// therefore UNREACHABLE, because verb() could only ever be `On` or `Unknown`;
+// and so `!ERR,BADARG` — the Mega refusing to extend a relay that is already
+// open — fell to the second branch, where "BADARG" is compared against
+// "BADCRC" and nothing at all happens. gRelight went on believing it held a
+// court the Mega had released.
+
+void test_a_refused_ext_releases_the_court_instead_of_reading_as_a_lost_frame() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::Relight relight;
+    bridgelogic::OnRetry retry;
+
+    // Court B, two-hour booking: ninety minutes on the relay, thirty to come.
+    court::Outcome grant = outcomeOf(court::Action::TurnOn, 1U, true);
+    grant.durationMs = 5400000UL;
+    grant.bookingRemainingMs = 7200000UL;
+    relight.onGrant(grant, base);
+
+    const uint32_t due = base + 5400000UL - 60000UL;
+    const bridgelogic::Extension ext = relight.check(1U, due);
+    TEST_ASSERT_TRUE(ext.due);
+
+    // The frame is written. sendToMega registers EVERY frame it writes, so the
+    // `!EXT` is what the retry memory now holds — which is the whole of what
+    // made the branch below reachable.
+    retry.sent(proto::Frame::ext(proto::Court::B, ext.seconds), due);
+    relight.extended(1U, ext.seconds, due);
+    TEST_ASSERT_TRUE(retry.verb() == proto::Verb::Ext);
+    TEST_ASSERT_EQUAL_UINT8(1U, retry.court());
+
+    // The Mega answers `!ERR,BADARG`: the relay is already open, the court is
+    // dark, there is nothing to extend. Not a lost frame — a verdict.
+    const bridgelogic::ReceiveErrorAction action =
+        bridgelogic::classifyReceiveError(proto::Verb::Err, "BADARG", "", retry.verb());
+    TEST_ASSERT_TRUE(action == bridgelogic::ReceiveErrorAction::ExtRefused);
+
+    const uint8_t court = retry.court();
+    retry.clear();
+    relight.onRelease(court);
+
+    TEST_ASSERT_FALSE(relight.tracking(1U));
+    TEST_ASSERT_FALSE(relight.check(1U, due + 1U).due);
+    TEST_ASSERT_FALSE(relight.check(1U, due + 60000UL).due);
+  }
+}
+
+void test_a_refused_ext_on_a_dark_court_is_sent_exactly_once() {
+  // THE FLOOD. `Relight::check` goes on saying "due" for as long as the bridge
+  // believes the court is held and the Mega keeps reporting nothing left on the
+  // relay — `relayLeft` is 0, so neither `relayLeft > kExtLeadMs` nor
+  // `bookingLeft <= relayLeft` holds. Without the refusal branch that is an
+  // `!EXT` every time a `!STATE` re-zeroes the reading, on a 9600 link, in
+  // exactly the window a scan or an `!EVT,AUTOOFF` has to share it. The refusal
+  // is what ends it in one frame instead of waiting for handleState's reconcile.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    const uint32_t base = kBases[i];
+    bridgelogic::Relight relight;
+    bridgelogic::OnRetry retry;
+
+    court::Outcome grant = outcomeOf(court::Action::TurnOn, 2U, true);
+    grant.durationMs = 5400000UL;
+    grant.bookingRemainingMs = 7200000UL;
+    relight.onGrant(grant, base);
+
+    const uint32_t start = base + 5400000UL - 60000UL;
+    uint16_t sends = 0U;
+    bool refusalDelivered = false;
+
+    // Two seconds of loop passes at 10 ms, with the Mega's own `!STATE` — every
+    // change and every ten seconds — reporting a dark relay twice a second.
+    for (uint32_t dt = 0U; dt <= 2000U; dt += 10U) {
+      const uint32_t now = start + dt;
+      if (dt % 500U == 0U) {
+        relight.observeRelayRemaining(2U, 0U, now);
+      }
+      const bridgelogic::Extension ext = relight.check(2U, now);
+      if (!ext.due) {
+        continue;
+      }
+      ++sends;
+      retry.sent(proto::Frame::ext(proto::Court::C, ext.seconds), now);
+      relight.extended(2U, ext.seconds, now);
+      if (refusalDelivered) {
+        continue;
+      }
+      refusalDelivered = true;
+      if (bridgelogic::classifyReceiveError(proto::Verb::Err, "BADARG", "", retry.verb()) ==
+          bridgelogic::ReceiveErrorAction::ExtRefused) {
+        const uint8_t court = retry.court();
+        retry.clear();
+        relight.onRelease(court);
+      }
+    }
+
+    TEST_ASSERT_EQUAL_UINT16(1U, sends);
+  }
+}
+
+void test_a_badarg_with_no_ext_remembered_is_not_a_release() {
+  // The branch is about an `!EXT` and nothing else. A BADARG answering an `!ON`
+  // — or answering nothing this half remembers — must not release a court that
+  // was only just lit.
+  TEST_ASSERT_TRUE(bridgelogic::classifyReceiveError(proto::Verb::Err, "BADARG", "", proto::Verb::On) ==
+                   bridgelogic::ReceiveErrorAction::None);
+  TEST_ASSERT_TRUE(bridgelogic::classifyReceiveError(proto::Verb::Err, "BADARG", "", proto::Verb::Unknown) ==
+                   bridgelogic::ReceiveErrorAction::None);
+  // And a genuine "did not decode" is still a resend, whatever is remembered.
+  TEST_ASSERT_TRUE(bridgelogic::classifyReceiveError(proto::Verb::Err, "BADCRC", "", proto::Verb::Ext) ==
+                   bridgelogic::ReceiveErrorAction::Resend);
+  TEST_ASSERT_TRUE(bridgelogic::classifyReceiveError(proto::Verb::Evt, "BADFRAME", "RX", proto::Verb::On) ==
+                   bridgelogic::ReceiveErrorAction::Resend);
+  TEST_ASSERT_TRUE(bridgelogic::classifyReceiveError(proto::Verb::Evt, "OVERRUN", "TX", proto::Verb::On) ==
+                   bridgelogic::ReceiveErrorAction::None);
+  TEST_ASSERT_TRUE(bridgelogic::classifyReceiveError(proto::Verb::Evt, "AUTOOFF", "B", proto::Verb::Ext) ==
+                   bridgelogic::ReceiveErrorAction::None);
+}
+
 } // namespace
 
 void setUp() {
@@ -2147,6 +2273,9 @@ int main(int, char**) {
   RUN_TEST(test_on_retry_a_non_relay_frame_clears_the_memory_rather_than_skipping_it);
   RUN_TEST(test_on_retry_an_off_for_b_after_an_on_for_a_replays_neither);
   RUN_TEST(test_on_retry_a_badcrc_after_a_non_relay_frame_never_moves_a_relay_deadline);
+  RUN_TEST(test_a_refused_ext_releases_the_court_instead_of_reading_as_a_lost_frame);
+  RUN_TEST(test_a_refused_ext_on_a_dark_court_is_sent_exactly_once);
+  RUN_TEST(test_a_badarg_with_no_ext_remembered_is_not_a_release);
   RUN_TEST(test_relight_adopts_the_megas_remaining_seconds_so_a_lost_ext_is_re_sent);
   RUN_TEST(test_state_seconds_parse_decimal_and_refuse_everything_else);
   RUN_TEST(test_a_rescan_on_a_court_this_box_already_lit_is_not_a_second_grant);
