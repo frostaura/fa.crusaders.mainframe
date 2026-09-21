@@ -1314,3 +1314,88 @@ test("never calls the code a walk-up code while a control says otherwise", async
   await expect(page.getByRole("tab", { name: "Member code" })).toHaveAttribute("aria-selected", "true");
   expect(await page.locator("body").innerText()).not.toMatch(/walk-up code/i);
 });
+
+/**
+ * The capsule, under the three conditions that throw a design's carriers away.
+ *
+ * <p>
+ * Emulated with `page.emulateMedia` rather than `test.use`, and deliberately: a describe-level
+ * `test.use` on this file's re-exported `test` object was measured NOT applying —
+ * `matchMedia("(prefers-reduced-motion: reduce)").matches` came back `false` inside the test
+ * while the assertion failed for the right-looking reason. A media emulation nobody verified
+ * is a test that passes because the condition never arrived, which is worse than no test.
+ * Each case checks that the condition is actually in force before it measures anything.
+ * </p>
+ */
+test.describe("item 9 under the conditions that throw a design's carriers away", () => {
+  const MEMBER_CODE = { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true };
+
+  const routes = [
+    ...COMMON.filter((r) => r.path !== "/api/v1/me/qr/generate"),
+    { method: "POST" as const, path: "/api/v1/me/qr/generate", body: MEMBER_CODE },
+    { path: "/api/v1/me/door", body: door({ next_booking: null, policy: "active_member" }) },
+  ];
+
+  test("the thumb JUMPS rather than easing, which is not the same as easing quickly", async ({ page }) => {
+    await signIn(page);
+    await serveApi(page, routes);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/my-code");
+    await expect(page.getByRole("tablist", { name: "Which code to show" })).toBeVisible();
+
+    const seen = await page.evaluate(() => {
+      const span = document.querySelector('[role="tablist"] span[aria-hidden="true"]');
+      return {
+        inForce: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+        property: span ? getComputedStyle(span).transitionProperty : null,
+      };
+    });
+    expect(seen.inForce, "reduced motion was not actually emulated").toBe(true);
+    /*
+      `transition-property: none`, not a shortened duration. `index.css` records what the
+      shortcut costs: a 1 ms transition made a hovered cell SNAP one pixel instead of easing
+      it, which is worse than the motion it replaced. The duration stays declared and inert.
+    */
+    expect(seen.property).toBe("none");
+  });
+
+  test("keeps a boundary when every author fill is thrown away", async ({ page }) => {
+    await signIn(page);
+    await serveApi(page, [...COMMON, { path: "/api/v1/me/door", body: door() }]);
+    await page.emulateMedia({ forcedColors: "active" });
+    await page.goto("/my-code");
+    await expect(page.getByRole("tablist", { name: "Which code to show" })).toBeVisible();
+
+    const seen = await page.evaluate(() => ({
+      inForce: window.matchMedia("(forced-colors: active)").matches,
+      borders: [
+        getComputedStyle(document.querySelector('[role="tablist"]')!).borderTopColor,
+        getComputedStyle(document.querySelector('[role="tab"]')!).borderTopColor,
+      ],
+    }));
+    expect(seen.inForce, "forced colours were not actually emulated").toBe(true);
+    // A capsule with no edge is two words floating in a paragraph. Every primitive in this
+    // product carries `border border-transparent` so the OS has something to colour.
+    for (const colour of seen.borders) expect(colour).not.toBe("rgba(0, 0, 0, 0)");
+  });
+
+  test("at a 32px root it stacks rather than overflowing, and stays a fingertip", async ({ page }) => {
+    await signIn(page);
+    await serveApi(page, [...COMMON, { path: "/api/v1/me/door", body: door() }]);
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/my-code");
+    await expect(page.getByRole("tablist", { name: "Which code to show" })).toBeVisible();
+
+    await page.addStyleTag({ content: "html { font-size: 32px }" });
+    // A vertical tablist is still a tablist and still announces as one; its arrows become
+    // Up/Down per the APG. The flip is read off the laid-out boxes, never off a breakpoint,
+    // because what decides it is the text scale.
+    await expect(page.getByRole("tablist")).toHaveAttribute("aria-orientation", "vertical");
+    for (const tab of await page.getByRole("tab").all()) {
+      // 44px in PIXELS: a touch target is a fingertip and does not scale with the type.
+      expect((await tab.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth))
+      .toBeLessThanOrEqual(0);
+  });
+});
