@@ -83,8 +83,14 @@ test.describe("the always-reachable guide", () => {
       { path: "/api/v1/me/door", body: door({ doors: false }) },
     ]);
     await page.goto("/how-it-works");
-    await expect(page.getByRole("heading", { level: 2 }).first()).toBeVisible();
-
+    /*
+      Wait for the ANSWER, not for the first heading. "Does this club have a door" starts
+      `unknown` and settles to `no` one round trip later, and `unknown` deliberately keeps the
+      door step — a member who HAS a door and is not told about it is stuck outside a
+      building. Reading the page between those two states is reading a screen that is still
+      asking, which is what made this assertion flaky rather than wrong.
+    */
+    await expect(page.getByRole("heading", { level: 2 })).toHaveCount(6);
     expect(await page.locator("body").innerText()).not.toMatch(/door/i);
   });
 

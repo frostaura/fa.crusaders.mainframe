@@ -616,6 +616,12 @@ test("a club system that answers with an error does not fail the phone's own row
  * D3. Kayla, who has no membership row at all, scored six green ticks — "an active
  * membership ✓ Passed" for a rule she is not held to, beside "nothing on file ✓ Passed".
  * The glyph is what a person reads, so the glyph is what is counted here.
+ *
+ * <p>
+ * Ruling 15 moved the row from "unusual, tell the club" to a failure: the door used to walk
+ * straight past the membership check for a user with no row, and the backend now refuses her
+ * with a reason of her own. The tick rule is unchanged — it is the one this case exists for.
+ * </p>
  */
 test("a member with no membership on file is shown no tick for one", async ({ page }) => {
   await signIn(page);
@@ -634,8 +640,10 @@ test("a member with no membership on file is shown no tick for one", async ({ pa
     rows.filter((row) => row.textContent?.includes("✓")).length);
   // Her code and her signal, and nothing else. A rule is not a check she passed.
   expect(ticks).toBeLessThanOrEqual(2);
-  await expect(panel).toContainText("Unusual — tell the club");
+  await expect(panel).toContainText(/the club has to add you/);
   await expect(panel).toContainText(/no membership on file/);
+  // And never "not active": there is nothing to reinstate.
+  await expect(panel).not.toContainText(/not active/i);
 });
 
 /**
