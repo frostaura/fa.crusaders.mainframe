@@ -489,12 +489,17 @@ public class MainframeDbContext : DbContext
             e.Property(s => s.State).HasConversion<int>();
             e.Property(s => s.Cause).HasConversion<int>();
 
-            // UNKNOWN, not Off, for every row that predates the box's own relay report — and
-            // for every board whose firmware never sends one. Defaulting to Off would make the
-            // control board say "confirmed off" about courts no box has ever spoken about,
-            // which is the software asserting evidence it does not have on the one screen whose
-            // job is to distinguish the two.
-            e.Property(s => s.ConfirmedState).HasConversion<int>().HasDefaultValue(LightState.Unknown);
+            // NO HasDefaultValue, AND THAT IS A CORRECTION RATHER THAN AN OMISSION.
+            //
+            // Existing rows must read Unknown — see the migration, which backfills them and
+            // then DROPS the database default. Declaring the default on the MODEL as well
+            // looks harmless and is not: EF omits a property from the INSERT whenever its
+            // value equals the CLR default, and the CLR default of this enum is 0, which is
+            // LightState.Off. So every genuine "the box reports this relay is open" was
+            // silently dropped from the statement and the database wrote its own default
+            // instead — the row said Unknown while the box had plainly just said Off. Caught
+            // by the relay-report test, which is the only place the two disagree visibly.
+            e.Property(s => s.ConfirmedState).HasConversion<int>();
             e.HasQueryFilter(s => s.TenantId == _tenant.TenantId);
 
             // The control board reads every row for the tenant in one go, and the restore

@@ -509,6 +509,64 @@ public sealed class DeviceRelayRestoreHttpTests
     }
 
     /// <summary>
+    /// The box's own <c>relay_state</c> report becomes the <c>confirmed</c> half of the
+    /// control board — and an ABSENT key confirms nothing.
+    ///
+    /// <para>
+    /// <b>Three states, not two.</b> Every board in the field runs firmware that sends no
+    /// <c>relay_state</c> at all, so reading absence as "the box reports nothing is closed"
+    /// would paint "confirmed off" across every court in every club on the current image.
+    /// An EMPTY array is the box actively saying nothing is closed, which does confirm off.
+    /// </para>
+    ///
+    /// <para>
+    /// The report never overwrites the server's BELIEF: a box saying a relay is open while the
+    /// server believes it granted time is a contradiction an admin must see, not one the
+    /// server should resolve by adopting the box's view and losing the evidence that they
+    /// disagreed.
+    /// </para>
+    ///
+    /// <para><b>Mutant:</b> fold the report into <c>State</c>, or default a missing key to an
+    /// empty list.</para>
+    /// </summary>
+    [SkippableFact]
+    public async Task The_boxs_own_relay_report_confirms_without_overwriting_what_the_server_believes()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+        using var factory = CreateFactory();
+        var box = await SeedAsync(factory, 1, 2);
+        using var client = factory.CreateClient();
+
+        // No key at all: nothing is confirmed, in either direction.
+        await BeatAsync(client, box);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var rows = await db.CourtLightStates.IgnoreQueryFilters()
+                .Where(s => s.TenantId == box.TenantId).ToListAsync();
+            Assert.All(rows, r => Assert.Null(r.ConfirmedAt));
+        }
+
+        // The box reports relay 0 closed and says nothing about relay 1 — which, in a report
+        // that arrived, is a positive statement that relay 1 is open.
+        await BeatAsync(client, box, new { relay_state = new[] { "0|1834" } });
+
+        using var after = factory.Services.CreateScope();
+        var db2 = after.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        var first = await db2.CourtLightStates.IgnoreQueryFilters().FirstAsync(s => s.CourtId == box.CourtIds[1]);
+        var second = await db2.CourtLightStates.IgnoreQueryFilters().FirstAsync(s => s.CourtId == box.CourtIds[2]);
+
+        Assert.NotNull(first.ConfirmedAt);
+        Assert.Equal(LightState.On, first.ConfirmedState);
+        Assert.NotNull(second.ConfirmedAt);
+        Assert.Equal(LightState.Off, second.ConfirmedState);
+
+        // …and the BELIEF is untouched. Nothing has activated anything, so it is still unknown.
+        Assert.Equal(LightState.Unknown, first.State);
+    }
+
+    /// <summary>
     /// A restore is not served to a club that has switched it off, and the key is then ABSENT
     /// rather than empty — which is how the box knows not to wait for one.
     /// </summary>

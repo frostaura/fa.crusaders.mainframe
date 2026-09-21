@@ -43,12 +43,21 @@ namespace Crusaders.Mainframe.Api.Migrations
                 type: "timestamp with time zone",
                 nullable: true);
 
+            // Added WITH a default of 2 (Unknown) so every existing row reads "the box has
+            // never told us", and the default is then DROPPED so it can never mask a value the
+            // application meant to write. See the model configuration for what keeping it cost:
+            // EF omits a property whose value equals the CLR default — 0, which is Off — so a
+            // database default of Unknown silently overwrote every genuine "the box reports
+            // this relay is open" the server tried to record.
             migrationBuilder.AddColumn<int>(
                 name: "ConfirmedState",
                 table: "court_light_state",
                 type: "integer",
                 nullable: false,
                 defaultValue: 2);
+
+            migrationBuilder.Sql(
+                "ALTER TABLE court_light_state ALTER COLUMN \"ConfirmedState\" DROP DEFAULT;");
         }
 
         /// <inheritdoc />

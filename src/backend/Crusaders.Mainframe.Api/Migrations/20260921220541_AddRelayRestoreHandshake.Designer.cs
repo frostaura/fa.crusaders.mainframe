@@ -337,9 +337,7 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("ConfirmedState")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(2);
+                        .HasColumnType("integer");
 
                     b.Property<Guid?>("DeviceId")
                         .HasColumnType("uuid");
