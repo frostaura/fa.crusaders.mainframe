@@ -130,6 +130,11 @@ export function useControlBoard(options: Options = {}): ControlBoardRead {
   // The first read, always over plain HTTP. A page that waited for a stream to open before
   // showing anything would show nothing at all where the stream cannot be had, which is
   // precisely the deployment this fallback exists for.
+  //
+  // `refresh` is async: the only thing this effect does synchronously is start a request, and
+  // every setState inside it happens in a promise callback. Fetching on mount is the
+  // "subscribe to an external system" case the rule's own message carves out.
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
   useEffect(() => { void refresh(); }, [refresh]);
 
   // The poll, while degraded. Suspended by `document.hidden` through the same visibility
@@ -137,6 +142,10 @@ export function useControlBoard(options: Options = {}): ControlBoardRead {
   // ten requests a minute, and a page that catches up on return is indistinguishable.
   useEffect(() => {
     if (!degraded) return;
+    // The mode IS the external state this effect synchronises: a poll has just started, and
+    // the line under the heading has to stop saying "live" in the same commit as the first
+    // poll rather than one tick later, because that tick is ten seconds long.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
     setMode((m) => (m === "lost" ? m : "polling"));
     const timer = setInterval(() => {
       if (document.visibilityState === "hidden") return;
@@ -152,6 +161,10 @@ export function useControlBoard(options: Options = {}): ControlBoardRead {
 
   useEffect(() => {
     if (!stream || degraded) return;
+    // A browser with no EventSource can never stream, so this is a one-shot capability check
+    // and not a render loop: `degraded` is in this effect's deps precisely so that setting it
+    // stops the effect running again.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
     if (typeof EventSource === "undefined") { setDegraded(true); return; }
 
     let es: EventSource | null = null;
