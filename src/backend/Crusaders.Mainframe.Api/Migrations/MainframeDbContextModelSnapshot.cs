@@ -698,12 +698,12 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ExternalReference")
-                        .IsUnique()
-                        .HasFilter("\"ExternalReference\" IS NOT NULL");
-
                     b.HasIndex("IdempotencyKey")
                         .IsUnique();
+
+                    b.HasIndex("TenantId", "ExternalReference")
+                        .IsUnique()
+                        .HasFilter("\"ExternalReference\" IS NOT NULL");
 
                     b.HasIndex("TenantId", "UserId", "CreatedAt");
 

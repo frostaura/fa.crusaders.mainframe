@@ -31,12 +31,21 @@ public static partial class TopUpEndpoints
             CancellationToken ct) =>
         {
             var s = await settings.GetAsync(ct);
-            var memberClass = await MemberClassOfAsync(db, ctx.User.Id() ?? Guid.Empty, ct);
+            var userId = ctx.User.Id() ?? Guid.Empty;
+            var memberClass = await MemberClassOfAsync(db, userId, ct);
+
+            // What this member has already put in, so the screen can say "R200 of your R1000
+            // left" instead of offering an amount the POST is about to refuse. The cap is per
+            // MEMBER (D2-B05) and a screen that cannot see the running total can only ever
+            // show the per-transaction half of it.
+            var already = await ToppedUpZarAsync(db, userId, ct);
             return Results.Ok(new
             {
                 block_zar = s.TopupBlockZar,
                 min_zar = s.TopupBlockZar,
                 max_zar = s.TopupMaxZarPerMember,
+                already_zar = already,
+                remaining_zar = Math.Max(s.TopupMaxZarPerMember - already, 0m),
                 presets_zar = Presets(s.TopupBlockZar, s.TopupMaxZarPerMember),
                 conversion_rate = s.ConversionRateFor(memberClass),
                 member_class = memberClass.ToString(),
@@ -66,6 +75,12 @@ public static partial class TopUpEndpoints
             if (creds is null) return Results.Json(new { error = "payments_not_configured" }, statusCode: 503);
 
             var userId = ctx.User.Id() ?? Guid.Empty;
+
+            // D2-B05. The per-transaction half of the cap is above; this is the half the key's
+            // own name promises and nothing implemented. See RefuseCumulativeAsync.
+            if (await RefuseCumulativeAsync(db, userId, req.AmountZar, s, isAdmin, ct) is { } overCap)
+                return overCap;
+
             var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
             if (user is null) return Results.Unauthorized();
 
@@ -212,6 +227,33 @@ public static partial class TopUpEndpoints
             if (pending.Status == TopUpStatus.Completed)
                 return Results.Ok(new { ok = true, idempotent = true });
 
+            // D2-B04. EVERY terminal state is terminal, not just Completed.
+            //
+            // The short-circuit covered Completed alone, and the amount-mismatch path sets
+            // Failed while KEEPING the original AmountZar and ConversionRate — so a later
+            // signed COMPLETE for the same m_payment_id fell straight through to CompleteAsync
+            // and credited at the originally-quoted figure, for a top-up the member had already
+            // been emailed about as failed. R1 reported against a R1000 registration, refused,
+            // and then 1600 credits issued for one rand. Cancelled had the same shape: a member
+            // who deliberately backed out could be credited by a later notification.
+            //
+            // 200 rather than a 4xx, for the reason above it: PayFast retries until it is
+            // acknowledged, and a club that answers 4xx for ever gets retried for ever. The
+            // body says plainly which way the row settled.
+            if (pending.Status is TopUpStatus.Failed or TopUpStatus.Cancelled)
+            {
+                logger.LogInformation(
+                    "topup {Key} is already settled as {Status}; a later notification does not re-open it",
+                    pending.IdempotencyKey, pending.Status);
+                return Results.Ok(new
+                {
+                    ok = false,
+                    reason = "already_settled",
+                    status = pending.Status.ToString(),
+                    failure_code = pending.FailureReason,
+                });
+            }
+
             // The amount is signed, so this cannot be forged — but it CAN legitimately
             // differ from what was asked for, and a correctly-signed notification for R1
             // must not credit the member for the R1000 they requested. The signature proves
@@ -232,6 +274,31 @@ public static partial class TopUpEndpoints
 
             if (interp.Successful)
             {
+                // D2-B01. `ExternalReference: interp.PaymentId`, and PaymentId is
+                // Field("pf_payment_id") — NULL when the field is missing. The unique index on
+                // ExternalReference is filtered `WHERE "ExternalReference" IS NOT NULL`, so a
+                // notification without that field carries no idempotency key at all and the
+                // only guard on the money-in path silently disappears. The Completed
+                // short-circuit above does not help: two deliveries racing each other both read
+                // Pending, and both credit.
+                //
+                // Refused rather than credited-once, because there is nothing to make it
+                // idempotent WITH. A refusal is visible — PayFast surfaces the failed ITN and
+                // the pending row stays Pending, so a well-formed retry can still complete it —
+                // and a double credit is not.
+                //
+                // Narrowed to the SUCCESSFUL branch deliberately. A cancellation or a decline
+                // posts no ledger row and so needs no reference; refusing those for a missing
+                // field would leave a member who backed out with a row stuck at Pending and no
+                // email, which is a second bug in the name of fixing this one.
+                if (string.IsNullOrWhiteSpace(interp.PaymentId))
+                {
+                    logger.LogWarning(
+                        "topup {Key}: a COMPLETE notification arrived with no pf_payment_id — refusing, "
+                        + "because nothing can make it idempotent", pending.IdempotencyKey);
+                    return Results.BadRequest(new { error = "payment_id_missing" });
+                }
+
                 return await CompleteAsync(
                     new TopUpCompletion(db, ledger, settingsAccessor, emailService, bus, logger),
                     pending, tenantRow, interp, ct);
@@ -351,19 +418,47 @@ public static partial class TopUpEndpoints
         // in its own favour by accident.
         var credits = Convert(pending.AmountZar, rate);
 
-        await c.Ledger.PostAsync(new LedgerPosting(
-            UserId: pending.UserId,
-            Type: LedgerEntryType.TopUp,
-            AmountCredits: credits,
-            ZarPaid: pending.AmountZar,
-            ConversionRate: rate,
-            ActorUserId: pending.UserId,
-            // Invariant separators, so the comment reads in the same convention as the
-            // amount column beside it rather than the server's ambient culture.
-            Reason: $"PayFast top-up ({EmailTemplates.Zar(pending.AmountZar)} → {EmailTemplates.Cr(credits)} @ {EmailTemplates.Num(rate)})",
-            ExternalReference: interp.PaymentId), ct);
+        // D2-B02. The unique index on ledger_entries.ExternalReference carries no TenantId
+        // while every READ of the table is scoped by the tenant query filter.
+        // WalletEndpoints.IdempotencyReference prefixes a desk adjustment by hand precisely to
+        // avoid that; the top-up path stored the bare PayFast id. Two clubs on one merchant
+        // account — or any sandbox with small repeating ids — collide, and the second club's
+        // post raises a unique violation which, with D2-B03's missing catch, was a 500, a
+        // PendingTopup stuck at Pending, and a member never credited for money PayFast took.
+        // Non-null by the caller's guard above, which is the whole of D2-B01. Asserted rather
+        // than coalesced: a null here would mean the refusal had been removed, and silently
+        // posting an unreferenced row is exactly the failure that guard exists to stop.
+        var paymentId = interp.PaymentId
+            ?? throw new InvalidOperationException(
+                "a top-up reached CompleteAsync with no pf_payment_id; the D2-B01 guard has been removed");
+        var reference = TopUpReference(tenantRow.Id, paymentId);
 
-        await c.Db.SaveChangesAsync(ct);
+        try
+        {
+            await c.Ledger.PostAsync(new LedgerPosting(
+                UserId: pending.UserId,
+                Type: LedgerEntryType.TopUp,
+                AmountCredits: credits,
+                ZarPaid: pending.AmountZar,
+                ConversionRate: rate,
+                ActorUserId: pending.UserId,
+                // Invariant separators, so the comment reads in the same convention as the
+                // amount column beside it rather than the server's ambient culture.
+                Reason: $"PayFast top-up ({EmailTemplates.Zar(pending.AmountZar)} → {EmailTemplates.Cr(credits)} @ {EmailTemplates.Num(rate)})",
+                ExternalReference: reference), ct);
+
+            await c.Db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (IsDuplicateReference(ex))
+        {
+            // D2-B03. This was the ONE PostAsync caller in the tree with no duplicate-reference
+            // catch — WalletEndpoints, and three call sites in BookingService, all have one.
+            // Two deliveries of the same payment in flight together cannot be separated by the
+            // read-then-write short-circuit above: under READ COMMITTED neither can see the
+            // other's uncommitted row, so the filtered unique index is what decides it, and the
+            // loser escaped as a 500 that PayFast then retried into.
+            return await AlreadyCreditedAsync(c, pending, interp, reference, ct);
+        }
 
         var balanceAfter = await c.Ledger.GetBalanceAsync(pending.UserId, ct);
 
@@ -401,6 +496,153 @@ public static partial class TopUpEndpoints
             }), ct);
 
         return Results.Ok(new { ok = true, credits, conversion_rate = rate });
+    }
+
+    /// <summary>
+    /// The <c>ExternalReference</c> a PayFast payment id maps to.
+    ///
+    /// <para>
+    /// The tenant is part of it for the reason <c>WalletEndpoints.IdempotencyReference</c>
+    /// records at length: the unique index is global and every read of the table is
+    /// tenant-filtered, so two clubs sending the same key collide in the index while each
+    /// club's lookup for its "existing" row finds nothing. The <c>topup:</c> prefix keeps this
+    /// namespace apart from <c>adjust:</c>, <c>walkup:</c> and the settlement references, all
+    /// of which share one column.
+    /// </para>
+    /// </summary>
+    internal static string TopUpReference(Guid tenantId, string paymentId)
+        => $"{TopUpReferencePrefix}{tenantId:N}:{paymentId.Trim()}";
+
+    /// <summary>The namespace a PayFast payment id lives in on <c>ledger_entries.ExternalReference</c>.</summary>
+    internal const string TopUpReferencePrefix = "topup:";
+
+    /// <summary>
+    /// The two filtered unique indexes that can decide a duplicate payment, matched by name.
+    ///
+    /// <para>
+    /// <b>Both, not one.</b> A completion writes two rows in one save — the ledger entry under
+    /// <c>topup:{tenant}:{id}</c> and the pending row's own <c>ExternalReference</c>, which
+    /// keeps the raw gateway id because it is what the member is asked to quote. So a second
+    /// registration reporting an already-seen payment id is refused by the <i>pending</i> index,
+    /// on a table the caller is not even thinking about, and matching only the ledger's name
+    /// would let that escape as the 500 this catch exists to end.
+    /// </para>
+    /// </summary>
+    private static readonly string[] DuplicateReferenceIndexes =
+    [
+        "IX_ledger_entries_ExternalReference",
+        "IX_pending_topups_TenantId_ExternalReference",
+    ];
+
+    private static bool IsDuplicateReference(DbUpdateException ex)
+        => ex.InnerException is Npgsql.PostgresException pg
+           && pg.SqlState == "23505"
+           && DuplicateReferenceIndexes.Contains(pg.ConstraintName);
+
+    /// <summary>
+    /// The answer when the index says this payment has already been credited.
+    ///
+    /// <para>
+    /// <b>The pending row's own status is the discriminator, and it is re-read after the
+    /// tracker is cleared.</b> There are exactly two ways to arrive here and they need
+    /// different answers:
+    /// </para>
+    ///
+    /// <list type="number">
+    ///   <item>
+    ///     <b>Two deliveries of ONE payment in flight together.</b> Both address the same
+    ///     <c>m_payment_id</c> and therefore the same row, the winner has just committed it as
+    ///     <c>Completed</c>, and the loser is a retry that has already been honoured — 200,
+    ///     idempotent, which is what PayFast needs to stop retrying.
+    ///   </item>
+    ///   <item>
+    ///     <b>A DIFFERENT registration reporting a payment id that is already spent.</b> The row
+    ///     is still <c>Pending</c>, because nothing has completed it — and it has not been paid
+    ///     for. Answering 200 would tell the member a second R100 had been credited when it had
+    ///     not, so this is <c>409 payment_id_conflict</c>, which is the honest answer and the
+    ///     one a person can act on.
+    ///   </item>
+    /// </list>
+    ///
+    /// <para>
+    /// Either way the money is not posted twice, which is the part that matters; the status
+    /// tells the two apart so the member is not lied to about which happened.
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> AlreadyCreditedAsync(
+        TopUpCompletion c, PendingTopup pending, CallbackInterpretation interp, string reference, CancellationToken ct)
+    {
+        c.Db.ChangeTracker.Clear();
+
+        var credited = await c.Db.LedgerEntries.AsNoTracking()
+            .FirstOrDefaultAsync(l => l.ExternalReference == reference, ct);
+        var row = await c.Db.PendingTopups.AsNoTracking().FirstOrDefaultAsync(p => p.Id == pending.Id, ct);
+
+        if (row?.Status == TopUpStatus.Completed && credited is not null && credited.UserId == pending.UserId)
+        {
+            c.Logger.LogInformation(
+                "topup {Key}: PayFast payment {PaymentId} was already credited by a concurrent delivery",
+                pending.IdempotencyKey, interp.PaymentId);
+            return Results.Ok(new { ok = true, idempotent = true });
+        }
+
+        c.Logger.LogError(
+            "topup {Key}: PayFast payment {PaymentId} is already spent on another top-up in this club — refusing",
+            pending.IdempotencyKey, interp.PaymentId);
+        return Results.Json(
+            new { error = "payment_id_conflict", topup_id = pending.Id },
+            statusCode: StatusCodes.Status409Conflict);
+    }
+
+    /// <summary>
+    /// How much rand this member has put into their account — settled, plus what is in flight.
+    ///
+    /// <para>
+    /// <b>D2-B05.</b> <c>topup_max_zar_per_member</c> compared one <c>amountZar</c> against the
+    /// setting and summed nothing, so blueprint A.3's R1000-per-member ceiling bounded a single
+    /// transaction and a member could register ten of them. The key's own name says per member.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Pending rows count.</b> A member with four R1000 registrations open in four tabs has
+    /// not paid yet but is one card form away from it, and counting only settled money is the
+    /// same hole one round narrower. <c>Failed</c> and <c>Cancelled</c> do not count — a
+    /// declined card is not money the member topped up, and charging their ceiling for it would
+    /// lock them out of their own account.
+    /// </para>
+    /// </summary>
+    private static async Task<decimal> ToppedUpZarAsync(MainframeDbContext db, Guid userId, CancellationToken ct)
+        => await db.PendingTopups
+            .Where(p => p.UserId == userId
+                     && (p.Status == TopUpStatus.Completed || p.Status == TopUpStatus.Pending))
+            .SumAsync(p => (decimal?)p.AmountZar, ct) ?? 0m;
+
+    /// <summary>
+    /// The refusal for a member who has reached their ceiling, or null when they have not.
+    ///
+    /// <para>
+    /// Every figure the sentence needs is in the body — the ceiling, what they have already put
+    /// in, and what is left — so the screen never has to compose a number from two requests.
+    /// Admins are exempt on the same terms they are exempt from the block rule: blueprint A.3
+    /// says admin credit is unlimited, and this endpoint is the member-facing PayFast flow.
+    /// </para>
+    /// </summary>
+    private static async Task<IResult?> RefuseCumulativeAsync(
+        MainframeDbContext db, Guid userId, decimal amountZar, TenantSettingsView s, bool isAdmin, CancellationToken ct)
+    {
+        if (isAdmin) return null;
+
+        var already = await ToppedUpZarAsync(db, userId, ct);
+        var remaining = Math.Max(s.TopupMaxZarPerMember - already, 0m);
+        if (amountZar <= remaining) return null;
+
+        return Results.BadRequest(new
+        {
+            error = "amount_exceeds_member_cap",
+            max_zar = s.TopupMaxZarPerMember,
+            already_zar = already,
+            remaining_zar = remaining,
+        });
     }
 
     /// <summary>

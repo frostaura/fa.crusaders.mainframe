@@ -240,7 +240,24 @@ public class MainframeDbContext : DbContext
             e.HasKey(p => p.Id);
             e.HasIndex(p => new { p.TenantId, p.UserId, p.CreatedAt });
             e.HasIndex(p => p.IdempotencyKey).IsUnique();
-            e.HasIndex(p => p.ExternalReference).IsUnique().HasFilter("\"ExternalReference\" IS NOT NULL");
+            // Unique PER TENANT, not globally.
+            //
+            // This column holds a PayFast pf_payment_id, which is unique within a merchant
+            // account and says nothing about any other club's. The index was global and
+            // tenant-blind — the same defect D2-B02 names on ledger_entries — so two clubs on
+            // one merchant account, or any two sandboxes with small repeating ids, collided
+            // here: the second club's completion raised 23505 on a table the caller was not
+            // even looking at, and the member was never credited for money PayFast took. Found
+            // by the cross-tenant fixture for D2-B02, which the ledger-side fix alone did not
+            // turn green.
+            //
+            // Composite rather than namespaced, unlike ledger_entries: that column is shared by
+            // four reference namespaces (topup:, adjust:, walkup:, the settlement references)
+            // and the prefix is what keeps them apart, whereas THIS column holds one kind of
+            // value and is quoted to the member in the failure email. A prefix here would put
+            // a GUID in front of the reference a member reads out over the phone.
+            e.HasIndex(p => new { p.TenantId, p.ExternalReference })
+                .IsUnique().HasFilter("\"ExternalReference\" IS NOT NULL");
             e.Property(p => p.AmountZar).HasColumnType("numeric(10,2)");
             // Same precision as ledger_entries.ConversionRate — the two hold the same number
             // and a narrower column here would silently round the rate the ledger then quotes.
