@@ -79,7 +79,7 @@ describe("a single-use link is spent exactly once", () => {
       </StrictMode>,
     );
 
-    expect(await screen.findByRole("heading", { name: /Email verified/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /Email confirmed/i })).toBeInTheDocument();
     expect(consumed(stub.calls, "/api/v1/auth/verify-email/")).toBe(1);
   });
 });

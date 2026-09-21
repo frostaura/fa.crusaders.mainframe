@@ -20,11 +20,11 @@ import {
   OFFLINE_DETAILS_SUMMARY,
   STANDING_HEADING,
   STANDING_LOADING,
-  BACK_TO_BOOKING_CODE,
+  CODE_CHOICE_STICKY,
   TIME_UNCERTAIN_NOTE,
   UNNAMED_DOOR,
-  WALK_UP_ON_NOTICE,
-  WALK_UP_STICKY_HINT,
+  CODE_TABS_LABEL,
+  NO_BOOKING_CODE_REASON,
   CLUB_TIME_NOTE,
   DOOR_SECTION_UNKNOWN,
   asOfMayHaveChanged,
@@ -198,9 +198,10 @@ describe("memberDoorCopy", () => {
       contactUnknownNotice(), DOOR_SECTION_CHECKING,
       flat(codeExpiredDeadEnd("network", CONTACT)), flat(codeExpiredDeadEnd("server", NO_CONTACT)),
       flat(codeExpiredDeadEnd("network", UNKNOWN_CONTACT)),
-      DOOR_SECTION_UNKNOWN, WALK_UP_STICKY_HINT, CLUB_TIME_NOTE,
+      DOOR_SECTION_UNKNOWN, CODE_CHOICE_STICKY, CLUB_TIME_NOTE,
       // R3-17, R3-30, R3-31: every sentence this round added, swept like every other.
-      TIME_UNCERTAIN_NOTE, WALK_UP_ON_NOTICE, BACK_TO_BOOKING_CODE,
+      // item 9: the three sentences the capsule tabs brought with them.
+      TIME_UNCERTAIN_NOTE, CODE_TABS_LABEL, NO_BOOKING_CODE_REASON,
       historyGroupLabel(6, 1), historyGroupLabel(2, 47),
       historyOfflineLine("2026-09-19T06:09:00Z", undefined, "2026-09-19T06:30:00Z"),
       asOfMayHaveChanged("09:46"), decisionAge(0), decisionAge(1), decisionAge(12),
@@ -312,7 +313,7 @@ describe("memberDoorCopy", () => {
   // --- the two dictionaries ------------------------------------------------------
 
   /**
-   * Same keys, because the member and the admin are looking at the same seven decisions
+   * Same keys, because the member and the admin are looking at the same eight decisions
    * a door can make; no shared sentence, because they are not the same reader.
    */
   it("covers every reason the admin dictionary covers", () => {
@@ -531,7 +532,8 @@ describe("memberDoorCopy", () => {
   it("keeps the code card's door clause on every arm where a door still opens", () => {
     for (const line of [
       standingFor({ policy: "active_member" }),
-      standingFor({ policy: "active_member", membership: "none", membership_detail: "none" }),
+      // Ruling 15 removed the no-membership arm from this list: a door does NOT still open
+      // for somebody the club has no record of, so the clause has nothing to describe.
       standingFor({ policy: "booking_window", is_club_admin: true }),
     ]) {
       expect(line.suppressesCodeClause).toBe(false);
@@ -1061,13 +1063,23 @@ describe("memberDoorCopy", () => {
    * arguing with itself. The mechanism is unchanged and is still stated; what the sentence
    * no longer does is finish on a promise as though the records were in order.
    */
-  it("does not tell a member with no membership row that theirs is not active", () => {
+  /**
+   * Ruling 15. R3-5's finding — that this member must not be told her membership is "not
+   * active" — still holds, because there is nothing to reactivate. What changed is the
+   * consequence: `GateAccess` used to walk past the membership check for a user with no row,
+   * and the backend now refuses her with her own reason. So the sentence names the difference
+   * from a membership the club has switched OFF, and states the refusal rather than denying
+   * one.
+   */
+  it("tells a member with no membership row that there is no record, not that theirs is off", () => {
     const line = standingFor({ policy: "active_member", membership: "none", membership_detail: "none" });
     expect(line.body).not.toMatch(/not active|until they change that/i);
-    // The mechanism, stated: a door here does not check for a membership row.
-    expect(line.body).toMatch(/don't check for one/i);
-    // R3-5: and never the bare promise on top of it.
+    expect(line.body).toMatch(/not the same as one it has turned off/i);
+    expect(line.body).toMatch(/no code of yours opens a door/i);
+    // R3-5's other half: never the bare promise, and now never any promise at all.
     expect(line.body).not.toMatch(/live member code of yours opens/i);
+    expect(line.suppressesCodeClause).toBe(true);
+    expect(line.offerMemberCode).toBe(false);
   });
 
   it("still applies the booking rule to a member with no membership row", () => {
@@ -1204,13 +1216,18 @@ describe("memberDoorCopy", () => {
    * rows meaning "fine, does not apply here". It is `attention` now: its own glyph, its own
    * colour, and the same word.
    */
-  it("never ticks a membership the club has nothing on file for", () => {
+  /**
+   * Ruling 15 turns this row from `attention` into a failure. It read "nothing on file, and
+   * nothing barring you", which was true only while the door walked past the check; with the
+   * hole closed, the absence of the record IS what is barring her, and a checklist that ticks
+   * past the actual answer is worse than no checklist.
+   */
+  it("fails a membership the club has nothing on file for, and says who fixes it", () => {
     const { rows } = buildDiagnosis({ ...HEALTHY, membership: "none" as const, membership_detail: "none" });
     const membership = rows.find((r) => r.key === "membership")!;
-    expect(membership.state).toBe("attention");
-    expect(membership.stateWord).toMatch(/unusual/i);
-    // R3-5, the half that is visible without a screen reader: not the grey n/a dash the
-    // two "does not apply here" rows draw.
+    expect(membership.state).toBe("failed");
+    expect(membership.value).toMatch(/the club has to add you/i);
+    // Not the grey n/a dash the two "does not apply here" rows draw.
     const notApplicable = rows.filter((r) => r.state === "neutral").map((r) => r.key);
     expect(notApplicable).not.toContain("membership");
   });
@@ -1650,7 +1667,8 @@ describe("memberDoorCopy", () => {
     });
     expect(flat(conclusion)).toContain("08:05");
     expect(flat(conclusion)).toMatch(/whatever rule a club applies/i);
-    expect(flat(conclusion)).toMatch(/use your member code instead/i);
+    // item 9: every sentence that names a control names the TAB, which is always on the page.
+    expect(flat(conclusion)).toMatch(/"Member code" at the top of this screen/i);
   });
 
   it("offers the member code only where the club's rule would admit it", () => {
@@ -1817,7 +1835,7 @@ describe("memberDoorCopy — no state contradicts itself", () => {
    *
    * <p>
    * <b>The lesson this file already carries, in a second place.</b> Eight rules sweep the
-   * same 4,752 states, and rebuilding the standing line, the decision card and the six-row
+   * same {@link EVERY_STATE} states, and rebuilding the standing line, the decision card and the six-row
    * self-check inside each of them is eight times the work for one set of answers — enough,
    * measured, to push a rule past vitest's five-second budget whenever the machine is busy
    * with another file, which reads as a flake and gets somebody to add a retry. The screens
@@ -1837,6 +1855,22 @@ describe("memberDoorCopy — no state contradicts itself", () => {
    * </p>
    */
   const SWEEP_MS = 20_000;
+
+  /**
+   * How many states this sweeps, asserted rather than written in prose.
+   *
+   * <p>
+   * The prose said "4,752" and the product had been 3,888 for some time — a number in a
+   * comment that nobody can run is a number that drifts the first time an axis moves, and
+   * this one moved again when ruling 15 added an eighth door decision. Derived from the axes,
+   * checked below, and quoted from here by the doc comments that used to hold a literal.
+   * </p>
+   */
+  const EVERY_STATE = 2 * 3 * REASONS.length * 3 * SHUT_STATES.length * 3 * 2;
+
+  it("sweeps every combination of the axes, and says how many that is", () => {
+    expect([...everyState()]).toHaveLength(EVERY_STATE);
+  });
 
   let screens: { state: State; screen: ReturnType<typeof screenFor> }[] | null = null;
   function everyScreen() {
@@ -1904,9 +1938,10 @@ describe("memberDoorCopy — no state contradicts itself", () => {
   it("always states a shut door the wire did report", () => {
     for (const { state, screen } of everyScreen()) {
       if (state.shut !== "some" && state.shut !== "all") continue;
-      // The membership arm outranks everything and deliberately says nothing else — the
-      // club has to move first, and a shut door is not what is standing in the way.
-      if (state.membership === "not_active") continue;
+      // The membership arms outrank everything and deliberately say nothing else — the club
+      // has to move first, and a shut door is not what is standing in the way. Both of them:
+      // a membership switched off, and (ruling 15) one that was never recorded.
+      if (state.membership !== "active") continue;
       const { standing } = screen;
       expect(standing.shutLine, `silent about doors_shut=${state.shut}`).toMatch(/has shut/);
     }
@@ -1953,7 +1988,7 @@ describe("memberDoorCopy — no state contradicts itself", () => {
       policy: "active_member", membership: "active", reason: "too_early", released: false,
       offline: false, codeKind: "booking", shut: "none", connection: "ok", liveCode: true, hasBooking: true,
     });
-    expect(decision.body).toMatch(/Use your member code instead/);
+    expect(decision.body).toMatch(/tap "Member code" at the top of this screen/);
   });
 
   /** And it stays the old sentence where there genuinely is nothing better to hold. */
@@ -2161,7 +2196,8 @@ describe("memberDoorCopy — no state contradicts itself", () => {
     for (const { state, screen } of everyScreen()) {
       if (state.membership !== "none") continue;
       const row = screen.diagnosis.rows.find((r) => r.key === "membership")!;
-      expect(row.state).toBe("attention");
+      // Ruling 15: a failure, not a curiosity. Never the grey "does not apply here".
+      expect(row.state).toBe("failed");
       expect(row.state).not.toBe("neutral");
     }
   }, SWEEP_MS);

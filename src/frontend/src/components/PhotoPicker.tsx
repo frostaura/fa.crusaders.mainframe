@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useRef, useState } from "react";
 import { Camera, Check, Loader2, RefreshCw, X } from "lucide-react";
 import { cn } from "../lib/utils";
 import { preparePhoto, PhotoError, PHOTO_MESSAGES } from "../lib/photo";
@@ -38,15 +38,38 @@ function revoke(url: string): void {
   try { URL.revokeObjectURL?.(url); } catch { /* nothing to release */ }
 }
 
+/**
+ * What a form can do to this control from outside: put the keyboard on it.
+ *
+ * <p>
+ * The form owns "is a photo required here", because only the form knows what it is submitting.
+ * When it refuses to submit for want of one, the member has to be taken to the field — and the
+ * field is an `sr-only` input, so nothing else on the page can find it. A handle is the one
+ * thing the parent needs and the only thing it gets.
+ * </p>
+ */
+export type PhotoPickerHandle = {
+  /** Focus the real input, scrolling it into view. The visible tile shows the ring via `peer`. */
+  focus: () => void;
+};
+
 export type PhotoPickerProps = {
   /** The prepared, upload-ready file, or null. Owned by the parent so the form can submit it. */
   value: File | null;
   onChange: (file: File | null) => void;
   /**
-   * Raised when preparation fails, so the parent can decide whether to show it inline here or
-   * alongside its other validation. Cleared (null) on every successful pick.
+   * The FORM's own complaint about this field — "please add a photo", and nothing else.
+   *
+   * <p>
+   * It shares one `role="alert"` slot with this control's own preparation failures, and that
+   * sharing is the point. It used to be the other way round: the picker raised its failures to
+   * the parent through an `onError` callback, the parent rendered them in a page-level `Alert`
+   * (which is `role="alert"`), and the picker went on rendering the same sentence in its own
+   * `role="alert"` paragraph. Two assertive regions, same words, one event — the same defect
+   * `Toast.tsx` records having paid for twice. One field, one message, one region.
+   * </p>
    */
-  onError?: (message: string | null) => void;
+  error?: string | null;
   /**
    * Raised while a picked photo is being decoded and re-encoded.
    *
@@ -63,16 +86,16 @@ export type PhotoPickerProps = {
   disabled?: boolean;
 };
 
-export function PhotoPicker({
+export const PhotoPicker = forwardRef<PhotoPickerHandle, PhotoPickerProps>(function PhotoPicker({
   value,
   onChange,
-  onError,
+  error,
   onBusyChange,
   label = "Photo of yourself",
   hint = "So other players can recognise you on court. Your face, clearly lit.",
   required,
   disabled,
-}: PhotoPickerProps) {
+}: PhotoPickerProps, handle) {
   const inputId = useId();
   const input = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -84,12 +107,19 @@ export function PhotoPicker({
   // a member tries stays resident for as long as the tab is open.
   useEffect(() => () => { if (preview) revoke(preview); }, [preview]);
 
+  /*
+    Deliberately NOT `preventScroll`. The whole point of the call is that the member is looking
+    at a submit button that has refused to do anything, and the reason is a field they may not
+    have scrolled to — on a 320 px viewport the picker is comfortably off-screen behind the
+    keyboard. Bringing it into view IS the message; the ring and the sentence are the detail.
+  */
+  useImperativeHandle(handle, () => ({ focus: () => input.current?.focus() }), []);
+
   const accept = useCallback(async (file: File | null | undefined) => {
     if (!file) return;
     setBusy(true);
     onBusyChange?.(true);
     setProblem(null);
-    onError?.(null);
     try {
       const prepared = await preparePhoto(file);
       setPreview(previous => {
@@ -102,7 +132,6 @@ export function PhotoPicker({
         ? PHOTO_MESSAGES[err.problem]
         : "We couldn't prepare that photo. Try a different one.";
       setProblem(message);
-      onError?.(message);
       onChange(null);
       setPreview(previous => {
         if (previous) revoke(previous);
@@ -115,7 +144,7 @@ export function PhotoPicker({
       // unchanged, no change event fires, and the control appears dead to a second attempt.
       if (input.current) input.current.value = "";
     }
-  }, [onChange, onError, onBusyChange]);
+  }, [onChange, onBusyChange]);
 
   const clear = () => {
     setPreview(previous => {
@@ -123,10 +152,17 @@ export function PhotoPicker({
       return null;
     });
     setProblem(null);
-    onError?.(null);
     onChange(null);
     if (input.current) input.current.value = "";
   };
+
+  /**
+   * One message, whoever noticed it. The picker's own preparation failure wins over the form's
+   * "please add a photo", because it is about the file the member has just chosen and the
+   * form's complaint is about the absence of one — they cannot both be current, and the
+   * picker's is the newer fact.
+   */
+  const message = problem ?? error ?? null;
 
   // Deliberately NOT `value && preview`. An object URL is a rendering convenience; whether the
   // member has chosen a photo is decided by whether there IS one. Tying the two together meant
@@ -157,7 +193,24 @@ export function PhotoPicker({
         id={inputId}
         type="file"
         accept="image/*"
-        required={required && !chosen}
+        /*
+         * `aria-required`, NEVER the `required` attribute, and this is the whole of D4's bug 1.
+         *
+         * `sr-only` is `position:absolute; width:1px; height:1px; clip-path:inset(50%)` — not
+         * `display:none` — so the control stays a live candidate for the browser's own
+         * constraint validation. With `required` on it Chrome refused to submit the form and
+         * had a 1x1 clipped element to draw its bubble on, which it will not do: measured
+         * `formValid: false`, `validationMessage: "Please select a file."`, zero alerts, zero
+         * console output. An applicant filled four fields, pressed Submit application, and the
+         * page did not move and said nothing, for ever. The form's own sentence — kinder than
+         * "Please select a file." and the one that names why a photo is wanted at all — was
+         * dead code, because `onSubmit` never fired.
+         *
+         * `aria-required` announces exactly the same fact to a screen reader and blocks
+         * nothing. The form does the checking; see `registrationCopy.PHOTO_REQUIRED`.
+         */
+        aria-required={required || undefined}
+        aria-invalid={message ? true : undefined}
         disabled={disabled || busy}
         /*
          * Named by the FIELD label, not by whichever <label for> happens to wrap the visible
@@ -167,7 +220,7 @@ export function PhotoPicker({
          * is actually for.
          */
         aria-labelledby={`${inputId}-label`}
-        aria-describedby={`${inputId}-hint${problem ? ` ${inputId}-error` : ""}`}
+        aria-describedby={`${inputId}-hint${message ? ` ${inputId}-error` : ""}`}
         /*
          * `peer`, so the visible control can show this input's focus.
          *
@@ -241,7 +294,7 @@ export function PhotoPicker({
             "peer-focus-visible:ring-2 peer-focus-visible:ring-accent-strong peer-focus-visible:ring-offset-2",
             dragging ? "border-accent-strong bg-accent-soft" : "border-control bg-bg-muted hover:bg-bg-muted/70",
             (disabled || busy) && "opacity-60",
-            problem && !dragging && "border-danger-strong",
+            message && !dragging && "border-danger-strong",
           )}
         >
           {busy ? (
@@ -265,9 +318,9 @@ export function PhotoPicker({
 
       <p id={`${inputId}-hint`} className="mt-1 text-xs text-text-muted">{hint}</p>
 
-      {problem && (
-        <p id={`${inputId}-error`} role="alert" className="mt-1 text-sm text-danger-strong">{problem}</p>
+      {message && (
+        <p id={`${inputId}-error`} role="alert" className="mt-1 text-sm text-danger-strong">{message}</p>
       )}
     </div>
   );
-}
+});

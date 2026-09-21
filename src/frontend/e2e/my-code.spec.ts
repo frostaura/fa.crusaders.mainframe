@@ -616,6 +616,12 @@ test("a club system that answers with an error does not fail the phone's own row
  * D3. Kayla, who has no membership row at all, scored six green ticks — "an active
  * membership ✓ Passed" for a rule she is not held to, beside "nothing on file ✓ Passed".
  * The glyph is what a person reads, so the glyph is what is counted here.
+ *
+ * <p>
+ * Ruling 15 moved the row from "unusual, tell the club" to a failure: the door used to walk
+ * straight past the membership check for a user with no row, and the backend now refuses her
+ * with a reason of her own. The tick rule is unchanged — it is the one this case exists for.
+ * </p>
  */
 test("a member with no membership on file is shown no tick for one", async ({ page }) => {
   await signIn(page);
@@ -634,25 +640,29 @@ test("a member with no membership on file is shown no tick for one", async ({ pa
     rows.filter((row) => row.textContent?.includes("✓")).length);
   // Her code and her signal, and nothing else. A rule is not a check she passed.
   expect(ticks).toBeLessThanOrEqual(2);
-  await expect(panel).toContainText("Unusual — tell the club");
+  await expect(panel).toContainText(/the club has to add you/);
   await expect(panel).toContainText(/no membership on file/);
+  // And never "not active": there is nothing to reinstate.
+  await expect(panel).not.toContainText(/not active/i);
 });
 
 /**
  * D13/D14, on the assembled page: the escape hatch a member has to be able to find, and
  * the record that was three steps away from the screen where the question gets asked.
  */
-test("the walk-up switch is a target, and the member's own record is one tap away", async ({ page }) => {
+test("the code tabs are a target, and the member's own record is one tap away", async ({ page }) => {
   await signIn(page);
   await serveApi(page, [...COMMON, { path: "/api/v1/me/door", body: door() }]);
 
   await page.setViewportSize({ width: 360, height: 780 });
   await page.goto("/my-code");
 
-  const label = page.locator('label[for="walk-up"]');
-  // 16px was the finding — a quarter the height of everything else on the page, on the one
-  // control a member reaches for when the code on screen is the wrong one.
-  expect((await label.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  // 16px was the finding against the checkbox this replaced — a quarter the height of
+  // everything else on the page, on the one control a member reaches for when the code on
+  // screen is the wrong one. Every segment is a fingertip.
+  for (const tab of await page.getByRole("tab").all()) {
+    expect((await tab.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  }
 
   const history = page.getByRole("link", { name: "Your door history" });
   await expect(history).toHaveAttribute("href", "/profile#door-history");
@@ -995,7 +1005,7 @@ test("a member holding a booking code is answered about that code, not about the
   // The window row is about the code on screen, not about a rule this club does not apply.
   await expect(panel).not.toContainText(/no window to wait for/);
   // And the one thing on this phone that might work is offered where she is looking.
-  await expect(panel.getByRole("button", { name: "Use your member code instead" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Switch to Member code" })).toBeVisible();
 });
 
 /**
@@ -1250,14 +1260,142 @@ test("the member-code switch says what it did and offers the way back", async ({
   ]);
 
   await page.goto("/my-code");
-  await page.getByRole("button", { name: "Use your member code instead" }).first().click();
+  await page.getByRole("button", { name: "Switch to Member code" }).first().click();
 
-  await expect(page.getByText(/You're on your member code, and will be for the rest of this visit/)).toBeVisible();
-  const back = page.getByRole("button", { name: "Back to your booking code" });
-  await expect(back).toBeVisible();
+  await expect(page.getByText(/keep getting your member code for the rest of this visit/)).toBeVisible();
+  // Item 9: the way back is a named tab at the top of the page, which is why R3-30's second
+  // button and its notice card are gone. It is selected-state, not a one-way door.
+  const back = page.getByRole("tab", { name: "Booking code" });
+  await expect(back).toHaveAttribute("aria-selected", "false");
   // 44px, like everything else a cold thumb has to find on this page.
   expect((await back.boundingBox())!.height).toBeGreaterThanOrEqual(44);
 
   await back.click();
-  await expect(page.getByText("Booking code", { exact: false }).first()).toBeVisible();
+  await expect(back).toHaveAttribute("aria-selected", "true");
+});
+
+/**
+ * Item 9, at the width that made the checkbox unfindable: the control that says WHICH code
+ * is on the glass was measured at y=1272 inside a 414px scroller at 320x568 — the last
+ * interactive thing on the page, two screens below the code it describes.
+ */
+test("the code choice is on the glass at 320x568, without scrolling", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [...COMMON, { path: "/api/v1/me/door", body: door() }]);
+
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/my-code");
+
+  const list = page.getByRole("tablist", { name: "Which code to show" });
+  const box = (await list.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(568);
+  // And nothing runs off the side at the narrowest width the product supports.
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+
+/**
+ * The contradiction D4 reproduced on two accounts: the card said "Walk-up code · any court"
+ * while the control that decided it said walk-up was off.
+ */
+test("never calls the code a walk-up code while a control says otherwise", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [
+    ...COMMON.filter((r) => r.path !== "/api/v1/me/qr/generate"),
+    {
+      method: "POST", path: "/api/v1/me/qr/generate",
+      body: { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true },
+    },
+    { path: "/api/v1/me/door", body: door({ next_booking: null, policy: "active_member" }) },
+  ]);
+
+  await page.goto("/my-code");
+  await expect(page.getByRole("tab", { name: "Member code" })).toHaveAttribute("aria-selected", "true");
+  expect(await page.locator("body").innerText()).not.toMatch(/walk-up code/i);
+});
+
+/**
+ * The capsule, under the three conditions that throw a design's carriers away.
+ *
+ * <p>
+ * Emulated with `page.emulateMedia` rather than `test.use`, and deliberately: a describe-level
+ * `test.use` on this file's re-exported `test` object was measured NOT applying —
+ * `matchMedia("(prefers-reduced-motion: reduce)").matches` came back `false` inside the test
+ * while the assertion failed for the right-looking reason. A media emulation nobody verified
+ * is a test that passes because the condition never arrived, which is worse than no test.
+ * Each case checks that the condition is actually in force before it measures anything.
+ * </p>
+ */
+test.describe("item 9 under the conditions that throw a design's carriers away", () => {
+  const MEMBER_CODE = { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true };
+
+  const routes = [
+    ...COMMON.filter((r) => r.path !== "/api/v1/me/qr/generate"),
+    { method: "POST" as const, path: "/api/v1/me/qr/generate", body: MEMBER_CODE },
+    { path: "/api/v1/me/door", body: door({ next_booking: null, policy: "active_member" }) },
+  ];
+
+  test("the thumb JUMPS rather than easing, which is not the same as easing quickly", async ({ page }) => {
+    await signIn(page);
+    await serveApi(page, routes);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/my-code");
+    await expect(page.getByRole("tablist", { name: "Which code to show" })).toBeVisible();
+
+    const seen = await page.evaluate(() => {
+      const span = document.querySelector('[role="tablist"] span[aria-hidden="true"]');
+      return {
+        inForce: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+        property: span ? getComputedStyle(span).transitionProperty : null,
+      };
+    });
+    expect(seen.inForce, "reduced motion was not actually emulated").toBe(true);
+    /*
+      `transition-property: none`, not a shortened duration. `index.css` records what the
+      shortcut costs: a 1 ms transition made a hovered cell SNAP one pixel instead of easing
+      it, which is worse than the motion it replaced. The duration stays declared and inert.
+    */
+    expect(seen.property).toBe("none");
+  });
+
+  test("keeps a boundary when every author fill is thrown away", async ({ page }) => {
+    await signIn(page);
+    await serveApi(page, [...COMMON, { path: "/api/v1/me/door", body: door() }]);
+    await page.emulateMedia({ forcedColors: "active" });
+    await page.goto("/my-code");
+    await expect(page.getByRole("tablist", { name: "Which code to show" })).toBeVisible();
+
+    const seen = await page.evaluate(() => ({
+      inForce: window.matchMedia("(forced-colors: active)").matches,
+      borders: [
+        getComputedStyle(document.querySelector('[role="tablist"]')!).borderTopColor,
+        getComputedStyle(document.querySelector('[role="tab"]')!).borderTopColor,
+      ],
+    }));
+    expect(seen.inForce, "forced colours were not actually emulated").toBe(true);
+    // A capsule with no edge is two words floating in a paragraph. Every primitive in this
+    // product carries `border border-transparent` so the OS has something to colour.
+    for (const colour of seen.borders) expect(colour).not.toBe("rgba(0, 0, 0, 0)");
+  });
+
+  test("at a 32px root it stacks rather than overflowing, and stays a fingertip", async ({ page }) => {
+    await signIn(page);
+    await serveApi(page, [...COMMON, { path: "/api/v1/me/door", body: door() }]);
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/my-code");
+    await expect(page.getByRole("tablist", { name: "Which code to show" })).toBeVisible();
+
+    await page.addStyleTag({ content: "html { font-size: 32px }" });
+    // A vertical tablist is still a tablist and still announces as one; its arrows become
+    // Up/Down per the APG. The flip is read off the laid-out boxes, never off a breakpoint,
+    // because what decides it is the text scale.
+    await expect(page.getByRole("tablist")).toHaveAttribute("aria-orientation", "vertical");
+    for (const tab of await page.getByRole("tab").all()) {
+      // 44px in PIXELS: a touch target is a fingertip and does not scale with the type.
+      expect((await tab.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth))
+      .toBeLessThanOrEqual(0);
+  });
 });

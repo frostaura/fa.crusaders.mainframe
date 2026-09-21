@@ -4,6 +4,8 @@ import { ApiError, endpoints, type PayFastFormField, type TopUpOptions } from ".
 import { Card } from "../components/Card";
 import { Button, Input, Label } from "../components/Button";
 import { formatCredits, formatRatePerRand, formatZar } from "../lib/utils";
+import { LOW_BALANCE_CREDITS, useBalance } from "../lib/balance";
+import { BALANCE_SENTENCE, balanceLevel } from "../lib/walletCopy";
 
 /**
  * Why an amount is not acceptable, or null when it is.
@@ -109,6 +111,13 @@ function reQuote(
 
 export default function TopUpPage() {
   const nav = useNavigate();
+  /*
+    Only to say WHY the member is here, never to gate anything: a balance that has not
+    loaded is `null`, which `balanceLevel` reads as nothing to warn about, and the form
+    behaves identically either way.
+  */
+  const { balance } = useBalance();
+  const emptyWallet = balanceLevel(balance, LOW_BALANCE_CREDITS) === "empty";
   const [options, setOptions] = useState<TopUpOptions | null>(null);
   const [amount, setAmount] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
@@ -185,7 +194,20 @@ export default function TopUpPage() {
     <div className="max-w-md mx-auto px-4">
       <Card>
         <h1 className="text-xl font-semibold mb-1">Top up</h1>
-        <p className="text-sm text-text-secondary mb-5">Pay in ZAR via PayFast — your wallet is credited in <strong>credits</strong> at your member-class rate.</p>
+        <p className="text-sm text-text-secondary mb-3">Pay in ZAR via PayFast — your wallet is credited in <strong>credits</strong> at your member-class rate.</p>
+        {/*
+          Why they are here, when the answer is "you cannot book anything". A member who has
+          followed an empty wallet to this screen has already been told once; saying it again
+          where the decision is made is what turns a form into an errand with a reason. It is
+          `role="status"`, not `alert`: it is a standing condition they arrived into, not an
+          event, and an alert would interrupt whatever the screen reader was saying about the
+          heading above it.
+        */}
+        {emptyWallet && (
+          <p role="status" className="mb-5 rounded-lg border-l-4 border-danger-strong bg-danger-soft px-3 py-2 text-sm text-danger-strong">
+            {BALANCE_SENTENCE.empty}
+          </p>
+        )}
         <form onSubmit={submit} className="space-y-4">
           <div>
             <Label>Amount (ZAR)</Label>

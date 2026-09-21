@@ -1,13 +1,16 @@
 import { Link } from "react-router-dom";
 import {
-  CalendarDays, ExternalLink, Facebook, Instagram, MapPin, QrCode, Trophy, Users, Wallet,
+  BookOpen, CalendarDays, ExternalLink, Facebook, Instagram, MapPin, QrCode, Trophy, Users, Wallet,
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { Card } from "../components/Card";
 // doors: admin
 import { AdminDoorsHomeRow } from "../components/doors/AdminDoorsHomeRow";
 // doors: member — one boolean, for one clause of one tile hint. See SignedInHome.
-import { useDoorsFlag } from "../components/member-door/useMemberDoor";
+import { useDoorsFlag, useMemberDoor } from "../components/member-door/useMemberDoor";
+// item 16 — the one pushed thing, and the always-reachable guide it links to.
+import { WhatsNextCard } from "../components/onboarding/WhatsNextCard";
+import { GUIDE_LINK_LABEL, GUIDE_PATH, GUIDE_TILE_HINT } from "../lib/onboardingCopy";
 
 /**
  * The club's front door, and — while both of Northwood Crusaders' own domains are parked — very
@@ -333,6 +336,12 @@ function SignedInHome({ isAdmin }: { isAdmin: boolean }) {
   // said — the same silence `describeDoor()` keeps, for the same reason. A failed read
   // leaves it silent, which is the safe half of the conditional.
   const doors = useDoorsFlag();
+  /*
+    Item 16 — the member's next booking, for the "what happens next" card. It is the same
+    `/me/door` read the flag above makes, so this costs one request rather than two; the hook
+    keeps its own answer and the card renders nothing at all without a booking.
+  */
+  const glance = useMemberDoor(true);
   const links = [
     { to: "/schedule", label: "Book a court", hint: "Today's grid across all four courts", icon: CalendarDays, primary: true },
     // QrCode, not Trophy. The code IS a QR code held up to a scanner; a trophy beside it
@@ -347,6 +356,9 @@ function SignedInHome({ isAdmin }: { isAdmin: boolean }) {
       icon: QrCode,
     },
     { to: "/wallet", label: "Wallet", hint: "Balance, top-ups and charges", icon: Wallet },
+    // Item 16's third recall point. A tile rather than a line of small print: for the audience
+    // the goal note names, the guide is a destination, not a footnote.
+    { to: GUIDE_PATH, label: GUIDE_LINK_LABEL, hint: GUIDE_TILE_HINT, icon: BookOpen },
     ...(isAdmin ? [{ to: "/admin/members", label: "Admin · Members", hint: "Approve applications and manage members", icon: Users }] : []),
   ];
 
@@ -356,6 +368,17 @@ function SignedInHome({ isAdmin }: { isAdmin: boolean }) {
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Crusaders Squash</h1>
         <p className="mt-1 text-text-secondary">What would you like to do?</p>
       </header>
+      {/*
+        Item 16 — the ONE pushed thing, and it is about a booking that exists rather than a
+        tour of a product. Above the tiles, because it is the answer to "what would you like
+        to do?" for somebody who has already decided. It renders nothing without a booking,
+        and nothing once dismissed for that booking.
+      */}
+      <WhatsNextCard
+        booking={glance.door?.next_booking}
+        timezone={glance.door?.timezone}
+        doors={doors}
+      />
       <div className="grid gap-3 sm:grid-cols-2">
         {/* doors: admin — one row, and ONLY when a door is silent, shut or unnamed (A2.6).
             On a normal day Home says nothing about doors at all: P7 is a rule about email and

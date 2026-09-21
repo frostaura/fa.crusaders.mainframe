@@ -74,7 +74,7 @@ describe("Login — a 403 is two different problems", () => {
     await signInAs("unverified@club.test", "Password123!");
 
     expect(await screen.findByText(/haven't confirmed your email address/i)).toBeInTheDocument();
-    expect(screen.queryByText(/isn't approved yet/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/waiting for the club to approve/i)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Resend the confirmation email/i }));
     await waitFor(() => expect(stub.calls.some((c) => c.path === "/api/v1/auth/resend-verification")).toBe(true));
@@ -88,7 +88,7 @@ describe("Login — a 403 is two different problems", () => {
     renderAt(<LoginPage />);
     await signInAs("pending@club.test", "Password123!");
 
-    expect(await screen.findByText(/isn't approved yet/i)).toBeInTheDocument();
+    expect(await screen.findByText(/waiting for the club to approve/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Resend the confirmation email/i })).not.toBeInTheDocument();
   });
 
@@ -101,7 +101,7 @@ describe("Login — a 403 is two different problems", () => {
     await signInAs("suspended@club.test", "Password123!");
 
     expect(await screen.findByText(/membership is suspended/i)).toBeInTheDocument();
-    expect(screen.queryByText(/isn't approved yet/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/waiting for the club to approve/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Resend the confirmation email/i })).not.toBeInTheDocument();
   });
 
@@ -111,7 +111,7 @@ describe("Login — a 403 is two different problems", () => {
     await signInAs("rejected@club.test", "Password123!");
 
     expect(await screen.findByText(/wasn't approved/i)).toBeInTheDocument();
-    expect(screen.queryByText(/isn't approved yet/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/waiting for the club to approve/i)).not.toBeInTheDocument();
     /*
       And it does not assert an email that this screen cannot know was sent.
 
@@ -162,7 +162,7 @@ describe("Login — a 403 is two different problems", () => {
   it.each([
     ["Suspended", /membership is suspended/i],
     ["Rejected", /wasn't approved/i],
-    ["Pending", /isn't approved yet/i],
+    ["Pending", /waiting for the club to approve/i],
   ])("gives a %s member a way to reach the club it just told them to speak to", async (status, sentence) => {
     stubFetch([err("/api/v1/auth/login", 403, {
       error: "not_approved",
@@ -297,11 +297,102 @@ describe("Register — one message per mistake", () => {
   };
 
   /**
-   * Submitted on the form rather than by clicking the button: jsdom leaves a `required` file
-   * input's `valueMissing` set even once a File has been assigned to it, so a click is swallowed
-   * by constraint validation and nothing under test ever runs. Real browsers do not do this.
+   * <b>Clicked, not submitted on the form — and the change is the regression guard.</b>
+   *
+   * <p>
+   * This used to dispatch `submit` on the form directly, with a note explaining that jsdom
+   * leaves a `required` file input's `valueMissing` set even once a File has been assigned, so
+   * a click is swallowed by constraint validation. That note was true, and it was describing
+   * D4's bug 1 from the inside: a real Chrome does the same thing for the same reason, on an
+   * `sr-only` input it cannot draw a bubble on, and the whole screen was therefore inert. The
+   * workaround made three tests pass over a form nobody could submit.
+   * </p>
+   *
+   * <p>
+   * Pressing the button is what a member does. If the `required` attribute ever comes back,
+   * every test in this block goes red rather than quietly routing around it.
+   * </p>
    */
-  const submit = () => fireEvent.submit(screen.getByRole("button", { name: /Submit application/i }).closest("form")!);
+  const submit = () => fireEvent.click(screen.getByRole("button", { name: /Submit application/i }));
+
+  /**
+   * D4 bug 1, at the unit level. The browser half of it — `required` on a 1x1 clipped input
+   * making Chrome refuse to submit with no bubble and no console line — is guarded in
+   * `e2e/register.spec.ts`; this is the half that says the form does its own checking and
+   * says so on the field.
+   */
+  it("says why it will not send an application with no photo, on the field, once", async () => {
+    const stub = stubFetch([
+      { method: "POST", path: "/api/v1/uploads/photo", body: { url: "/uploads/crusaders/photos/x.png" } },
+      { method: "POST", path: "/api/v1/auth/register", body: { user_id: "u1", status: "pending_email_verification" } },
+    ]);
+    renderAt(<RegisterPage />);
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Ada Lovelace" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ada@club.test" } });
+    fireEvent.change(screen.getByLabelText("Membership number"), { target: { value: "MEM-1001" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "Password123!" } });
+    submit();
+
+    const alerts = await screen.findAllByRole("alert");
+    // ONE region, not two. The picker used to raise its message to the page's own `Alert` as
+    // well as rendering it itself, and both carry role="alert".
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toHaveTextContent(/add a photo of yourself/i);
+    // Described by the message, so a screen reader hears it on the field and not only as it
+    // arrives — and the keyboard is put there, because on a phone the field is off-screen.
+    const field = screen.getByLabelText("Photo of yourself");
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    expect(field.getAttribute("aria-describedby")).toContain(alerts[0].id);
+    expect(document.activeElement).toBe(field);
+    // Nothing was sent: no photo upload, no registration.
+    expect(stub.calls).toHaveLength(0);
+  });
+
+  /**
+   * The mutant this kills: re-adding `required` to the file input. jsdom enforces constraint
+   * validation on a click exactly as Chrome does, so the assertion above would go red — and
+   * this one states the rule directly, because the attribute is the defect.
+   */
+  it("never puts the browser's own constraint validation on the hidden file input", async () => {
+    stubFetch([]);
+    renderAt(<RegisterPage />);
+    const field = screen.getByLabelText("Photo of yourself") as HTMLInputElement;
+    expect(field.required).toBe(false);
+    expect(field).toHaveAttribute("aria-required", "true");
+  });
+
+  it("clears the photo complaint the moment a photo is chosen", async () => {
+    stubFetch([]);
+    renderAt(<RegisterPage />);
+    // The four text fields carry the browser's own `required`, which is correct for a VISIBLE
+    // control — it has somewhere to draw its bubble. They have to be filled or the submit never
+    // reaches the handler, which is the point being made about the file input next door.
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Ada Lovelace" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ada@club.test" } });
+    fireEvent.change(screen.getByLabelText("Membership number"), { target: { value: "MEM-1001" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "Password123!" } });
+    submit();
+    await screen.findByText(/add a photo of yourself/i);
+
+    fireEvent.change(screen.getByLabelText("Photo of yourself"), {
+      target: { files: [new File(["x"], "me.png", { type: "image/png" })] },
+    });
+    await screen.findByText(/Photo ready/i);
+    expect(screen.queryByText(/add a photo of yourself/i)).not.toBeInTheDocument();
+  });
+
+  it("tells an applicant how long approval takes, on the screen they land on", async () => {
+    stubFetch([
+      { method: "POST", path: "/api/v1/uploads/photo", body: { url: "/uploads/crusaders/photos/x.png" } },
+      { method: "POST", path: "/api/v1/auth/register", body: { user_id: "u1", status: "pending_email_verification" } },
+    ]);
+    renderAt(<RegisterPage />);
+    await fill();
+    submit();
+
+    expect(await screen.findByText(/Check your inbox/i)).toBeInTheDocument();
+    expect(screen.getByText(/day or two/i)).toBeInTheDocument();
+  });
 
   it("names a taken membership number instead of telling the applicant to try again", async () => {
     stubFetch([

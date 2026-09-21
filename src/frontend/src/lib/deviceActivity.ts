@@ -58,10 +58,21 @@ export const DOOR_REFUSAL_REASONS: Record<string, string> = {
   method_not_supported: "The board asked in a way a door does not answer",
   /** A `gate_open` from a row whose kind is CourtBox. Mirrors `not_a_court_box`. */
   not_a_gate: "That board is a court box, not a door",
+  /**
+   * <b>Ruling 15.</b> A user with NO membership row at all — not suspended, not pending, not
+   * turned down: never recorded. `MembershipAccess.StatusIfBarredAsync` answers null for that
+   * user, so `GateAccess` used to walk straight past the membership check and, under the
+   * active-member policy, open the door for somebody the club has no record of. The backend
+   * closes it; this is what the door now says, and it is deliberately a different token from
+   * `member_not_active` because it is a different fact and a different fix — somebody has to
+   * ADD a membership, not reinstate one.
+   * </p>
+   */
+  no_membership: "No membership on file for that person",
 };
 
 /**
- * The same seven decisions as chip labels, for a reason-first row.
+ * The same eight decisions as chip labels, for a reason-first row.
  *
  * <p>
  * <b>Why here and not in a doors module.</b> {@link DOOR_REFUSAL_REASONS} is the sentence
@@ -88,6 +99,9 @@ export const DOOR_OUTCOME_CHIPS: Record<string, string> = {
   too_early: "Too early",
   method_not_supported: "Door fault",
   not_a_gate: "Wrong board",
+  // Ruling 15. "Not active" would be wrong twice over: there is nothing to reactivate, and an
+  // admin reading the chip would go looking for a membership row that does not exist.
+  no_membership: "No membership",
 };
 
 /**

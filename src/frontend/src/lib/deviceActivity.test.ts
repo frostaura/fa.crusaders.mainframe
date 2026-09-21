@@ -102,9 +102,12 @@ describe("describeActivityReason", () => {
   });
 
   it("has a sentence for every reason the door can give", () => {
-    // The set the API answers with, per the gate spec's Reasons table.
+    // The set the API answers with, per the gate spec's Reasons table. `no_membership` is
+    // ruling 15's: a user the club has NO membership row for used to walk past the check
+    // entirely, and the door now refuses with a reason of its own rather than borrowing
+    // `member_not_active` — a different fact, and a different fix.
     expect(Object.keys(DOOR_REFUSAL_REASONS).sort()).toEqual([
-      "member_not_active", "method_not_supported", "no_booking",
+      "member_not_active", "method_not_supported", "no_booking", "no_membership",
       "not_a_gate", "not_recognised", "ok", "too_early",
     ]);
   });
