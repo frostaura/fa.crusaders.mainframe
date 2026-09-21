@@ -531,6 +531,17 @@ wrapping, because the API binds them as a signed 64-bit value and silently
 ignores a negative or oversized one. Both are **omitted at zero**, so a healthy
 board's request stays byte-identical to the contract corpus's vector.
 
+**Where they actually go, and it is not the device row.** The server *logs* both
+against the device code and stores neither — a column would be an EF migration
+for a diagnostic, and the gate corpus's own vector says so. So they reach a
+server log and the native simulator's transcript, and **no console anywhere
+shows them**. That is still better than a counter nothing reads, which is what
+`events_lost` was until round G3; it is not what this section used to claim.
+Surfacing them belongs to whoever owns the admin console. The same is true of
+`GateApp::capForcedCloses()` — the count of release windows the hard cap ended,
+which is new in round G4 and reaches the simulator's `status` line and nothing
+else.
+
 **A refusal while the door is already released shows nothing**, and that is
 intended: solid outranks the three blinks, so the second member of a pair —
 refused while the first one's window is still open — sees a steady lamp. The door

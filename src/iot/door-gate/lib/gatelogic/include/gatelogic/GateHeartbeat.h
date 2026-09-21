@@ -109,8 +109,17 @@ constexpr uint32_t saturate(uint32_t count) {
 ///
 /// A distinct LED pattern was considered and rejected for both: this lamp is
 /// what tells a MEMBER their scan was seen, and a diagnostic blink on it is a
-/// refusal nobody can interpret. So the counts ride in the request, where an
-/// admin can read them off the device row.
+/// refusal nobody can interpret. So the counts ride in the request.
+///
+/// WHERE THEY ACTUALLY GO, SAID PROPERLY (round G4, H1). This used to say
+/// "where an admin can read them off the device row", and that was not true:
+/// the server LOGS both against the device code and STORES NEITHER — the gate
+/// corpus's own vector says so in as many words, because a column would be an
+/// EF migration for a diagnostic. So they reach a server log and the native
+/// simulator's transcript, and no console anywhere shows them. That is still
+/// better than a counter nothing reads, which is what this was before round
+/// G3; it is not what this comment claimed. Surfacing them belongs to whoever
+/// owns the admin console, and is owed rather than done.
 ///
 /// Omitted at zero because a healthy board is the overwhelming case and the
 /// contract corpus's request vector has neither field: a board that sent
