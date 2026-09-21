@@ -93,9 +93,32 @@ export function useMinutesSince(instant: string): number {
   return minutes;
 }
 
+/**
+ * <b>It said "572 minutes" beside a visible "9h 32m", and D-L5 is that gap.</b>
+ *
+ * <p>
+ * The two lines are the SAME sentence — one for the eye, one for the live region — and a
+ * screen-reader user reading over somebody's shoulder, or a member who has both on, was
+ * handed two different answers to "when does the door open for me". Ten hours expressed as
+ * a count of minutes is also not a unit anybody converts standing in a doorway, which is the
+ * argument `formatCountdown` already makes about a quarter of an hour.
+ * </p>
+ *
+ * <p>
+ * So it carries hours where `formatCountdown` carries hours, and it rounds the same way it
+ * does — DOWN, by truncation, because "the door opens in 10 hours" said nine and a half
+ * hours beforehand is a sentence that sends somebody home an hour early. Under a minute it
+ * still says so in words rather than counting.
+ * </p>
+ */
 export function spokenCountdown(seconds: number): string {
   if (seconds <= 0) return "now";
   if (seconds < 60) return "less than a minute";
-  const minutes = Math.round(seconds / 60);
-  return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+  const totalMinutes = Math.floor(seconds / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  const minutePart = minutes === 1 ? "1 minute" : `${minutes} minutes`;
+  if (hours === 0) return minutePart;
+  const hourPart = hours === 1 ? "1 hour" : `${hours} hours`;
+  return minutes === 0 ? hourPart : `${hourPart} ${minutePart}`;
 }

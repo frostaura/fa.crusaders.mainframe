@@ -192,7 +192,11 @@ describe("FullScreenQr", () => {
     // property read by both axes, which is also the only spelling jsdom stores verbatim —
     // `min()` with mixed units is invalid to its parser and silently dropped.
     const declared = square.style.getPropertyValue("--fsq-square");
-    expect(declared).toMatch(/^min\(100vw - 1rem, 100vh - [\d.]+rem\)$/);
+    // R3-36 (D-L2): the horizontal inset is gone. The symbol was 270px of a 390px glass and
+    // the 1rem was two of the missing pixels a side; the rest is `QrSvg`'s four-module quiet
+    // zone, which stays because it is what a scanner reads the finder patterns against. The
+    // width term is now the bare viewport.
+    expect(declared).toMatch(/^min\(100vw, 100vh - [\d.]+rem\)$/);
     expect(square.style.width).toBe(square.style.height);
     expect(square.style.width).toBe("var(--fsq-square)");
     expect(square.className).not.toContain("92vh");

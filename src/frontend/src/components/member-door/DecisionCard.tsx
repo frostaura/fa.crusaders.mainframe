@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Card } from "../Card";
 import { Button } from "../Button";
@@ -8,6 +9,7 @@ import type { MemberDoor, MemberDoorDecision } from "../../lib/api";
 import {
   DECISION_COLLAPSE_AFTER_MINUTES,
   DECISION_DISMISS,
+  type CodeOnScreen,
   type ContactKnowledge,
   type DecisionAction,
   type DecisionTone,
@@ -16,8 +18,10 @@ import {
   decisionAge,
   decisionStamp,
   describeDecision,
+  memberCodeOpensDoorNow,
 } from "../../lib/memberDoorCopy";
 import { spokenCountdown, useCountdownSeconds, useMinutesSince } from "./useCountdownSeconds";
+import { MEMBER_DOOR_ACTION_LINK } from "./links";
 
 /**
  * The member's own last door decision, as advice with one next action.
@@ -58,25 +62,106 @@ const TONE_TEXT: Record<DecisionTone, string> = {
   danger: "text-danger-strong",
 };
 
+/**
+ * Is this element out of sight — or is that a question this browser cannot answer? R3-29.
+ *
+ * <p>
+ * <b>It starts FALSE and becomes true only on the observer's own evidence, and that is what
+ * keeps the pin an enhancement.</b> The card it summarises is already on the page, already
+ * announced through `role="status"` and already reachable by scrolling; the pin exists
+ * because on a phone the card is below the fold. So a runtime that cannot answer the
+ * question — jsdom, or a browser with the API switched off — gets the page without the pin
+ * rather than a permanent second copy of a sentence nothing will ever retract, and the
+ * observer's first callback (one frame after mount) is what puts it up where it is needed.
+ * `IntersectionObserver` has shipped in every browser since 2019, so what this arm actually
+ * covers is the test environment.
+ * </p>
+ */
+function useOffScreen(node: HTMLElement | null): boolean {
+  const [off, setOff] = useState(false);
+  useEffect(() => {
+    if (!node) return;
+    if (typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => { for (const entry of entries) setOff(!entry.isIntersecting); },
+      // Half of it showing is showing. A one-pixel sliver of a 230px card at the bottom of
+      // the glass is not something anybody has read.
+      { threshold: 0.5 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [node]);
+  return off;
+}
+
+const PEEK_TONE: Record<DecisionTone, string> = {
+  success: "border-success-strong bg-success-soft text-success-strong",
+  info: "border-info-strong bg-info-soft text-info-strong",
+  warning: "border-warning-strong bg-warning-soft text-warning-strong",
+  danger: "border-danger-strong bg-danger-soft text-danger-strong",
+};
+
+/** Where {@link DecisionPeek} scrolls to, and the anchor the page's bottom padding is for. */
+export const DECISION_ANCHOR = "door-decision";
+
+/**
+ * The decision, pinned to the bottom of the glass while the card itself is out of sight.
+ * R3-29.
+ *
+ * <p>
+ * <b>Measured at 390×844: the card's top edge at y=829 against a 734px scrollport.</b> The
+ * most urgent thing the page can say — the club's own answer to "why didn't the door open"
+ * — was ninety-five pixels below the fold, on the screen of somebody standing at the door.
+ * </p>
+ *
+ * <p>
+ * <b>Pinned rather than moved, because moving it back above the code re-opens D10.</b> A
+ * decision arriving above the QR pushed it down 290px on a screen held against a scanner,
+ * and dismissing it pulled the QR back up; the first thing on this page has to be the code,
+ * and nothing that comes and goes may shift it. So the card stays where it is and one line
+ * of it sits on the glass until the member has actually seen it.
+ * </p>
+ *
+ * <p>
+ * <b>It is `aria-hidden` and out of the tab order, and that is what makes it safe.</b> The
+ * card carries `role="status"`, so a screen reader has already been told; a second
+ * announcement of the same sentence is the defect R3-26 names on the admin side. What is
+ * left is a purely visual affordance duplicating content reachable by scroll and by Tab —
+ * and it is phone-only, because there is no fold to be below on a desktop.
+ * </p>
+ */
+function DecisionPeek({ headline, tone }: { headline: string; tone: DecisionTone }) {
+  return (
+    <div
+      aria-hidden="true"
+      data-testid="decision-peek"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-bg-surface p-2 shadow-lg sm:hidden"
+    >
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={() => document.getElementById(DECISION_ANCHOR)?.scrollIntoView?.({ block: "center" })}
+        /* `min-h-11` like every other control on this page: it is pressed one-handed, in
+           the dark, by somebody who is not aiming — and the sweep in `e2e/my-code.spec.ts`
+           holds that rule with no exemptions, which is how this was caught at 36px. */
+        className={cn("flex min-h-11 w-full items-center gap-2 rounded-lg border-l-4 px-3 py-2 text-left text-sm", PEEK_TONE[tone])}
+      >
+        <span className="flex-1">{headline}</span>
+        <span className="shrink-0 text-xs text-text-muted">{"▾"}</span>
+      </button>
+    </div>
+  );
+}
+
 function ActionControl({ action }: { action: DecisionAction; }) {
   if (action.kind === "book_a_court") {
     return (
-      <Link
-        to="/schedule"
-        className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg text-sm font-medium bg-brand-strong text-brand-ink border border-brand-strong hover:bg-brand-strong/90 w-full sm:w-auto"
-      >
-        {action.label}
-      </Link>
+      <Link to="/schedule" className={MEMBER_DOOR_ACTION_LINK}>{action.label}</Link>
     );
   }
   if (action.kind === "refresh_the_code") return null;
   return (
-    <a
-      href={action.href}
-      className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg text-sm font-medium bg-brand-strong text-brand-ink border border-brand-strong hover:bg-brand-strong/90 w-full sm:w-auto"
-    >
-      {action.label}
-    </a>
+    <a href={action.href} className={MEMBER_DOOR_ACTION_LINK}>{action.label}</a>
   );
 }
 
@@ -93,10 +178,21 @@ export function DecisionCard(props: {
    * </p>
    */
   contact: ContactKnowledge;
+  /**
+   * Which of the member's two codes is on screen right now. R3-6.
+   *
+   * <p>
+   * The banner is about a scan that has already happened; this is about what the member is
+   * holding while they read it. `too_early` can only ever be a BOOKING code's refusal, so
+   * the two are frequently not the same code — and the sentence that tells somebody to wait
+   * nine and a half hours, over a member code that works now, is the one that ignored this.
+   * </p>
+   */
+  code: CodeOnScreen | null;
   onRefreshCode: () => void;
   onDismiss: () => void;
 }) {
-  const { decision, door, contact, onRefreshCode, onDismiss } = props;
+  const { decision, door, contact, code, onRefreshCode, onDismiss } = props;
   /**
    * The countdown belongs to the DECISION, and falls back to the booking only when the
    * decision carried no instant of its own.
@@ -131,6 +227,10 @@ export function DecisionCard(props: {
     // for it. Zero here would print "in the next 0 minutes" at a club that has no such rule.
     earlyEntryMinutes: door?.early_entry_minutes ?? null,
     contact,
+    // R3-6 — the two facts that turn "wait nine and a half hours" into "that was your
+    // booking code; this one works now".
+    memberCodeOpensDoor: memberCodeOpensDoorNow(door),
+    codeKind: code?.kind ?? null,
   };
   const copy = describeDecision(decision, { ...shared, countdown: seconds === null ? null : formatCountdown(seconds) });
   // The same sentence at whole-minute granularity, for the live region. A polite region
@@ -141,6 +241,13 @@ export function DecisionCard(props: {
   const refresh = copy.actions.find((a) => a.kind === "refresh_the_code");
   const stamp = `${decisionStamp(decision.door_name, decision.at, decision.delivered_at, zone)}`
     + ` · ${decisionAge(minutesOld)}`;
+  /**
+   * R3-29. A callback ref rather than `useRef`, because the observer has to be attached the
+   * moment the node exists — a `useRef` read in an effect is one render behind on the first
+   * paint, which on a card that appears by itself is the paint that matters.
+   */
+  const [node, setNode] = useState<HTMLDivElement | null>(null);
+  const offScreen = useOffScreen(node);
 
   if (collapsed) {
     /*
@@ -150,7 +257,14 @@ export function DecisionCard(props: {
       one they can.
     */
     return (
-      <Card className={cn("flex flex-wrap items-center justify-between gap-2 py-2", TONE_CHROME[copy.tone])} role="status">
+      // A collapsed card is five minutes old and is a record rather than news, so it gets no
+      // pin: R3-29 is about the member who has just been refused, not about the one who has
+      // had the answer on screen since before they walked round the building.
+      <Card
+        id={DECISION_ANCHOR}
+        className={cn("flex flex-wrap items-center justify-between gap-2 py-2", TONE_CHROME[copy.tone])}
+        role="status"
+      >
         <p className="text-sm">
           <span className={TONE_TEXT[copy.tone]}>{copy.headline}</span>{" "}
           <span className="text-text-muted">{stamp}</span>
@@ -161,8 +275,11 @@ export function DecisionCard(props: {
   }
 
   return (
+    <div ref={setNode}>
+    {offScreen && <DecisionPeek headline={copy.headline} tone={copy.tone} />}
     <Card
-      className={cn("space-y-3", TONE_CHROME[copy.tone])}
+      id={DECISION_ANCHOR}
+      className={cn("space-y-3 scroll-mt-20", TONE_CHROME[copy.tone])}
       role="status"
       aria-live="polite"
       aria-atomic="true"
@@ -206,5 +323,6 @@ export function DecisionCard(props: {
         <Button variant="outline" className="w-full sm:w-auto" onClick={onDismiss}>{DECISION_DISMISS}</Button>
       </div>
     </Card>
+    </div>
   );
 }

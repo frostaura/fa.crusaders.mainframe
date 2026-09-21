@@ -20,7 +20,10 @@ import {
   OFFLINE_DETAILS_SUMMARY,
   STANDING_HEADING,
   STANDING_LOADING,
+  BACK_TO_BOOKING_CODE,
+  TIME_UNCERTAIN_NOTE,
   UNNAMED_DOOR,
+  WALK_UP_ON_NOTICE,
   WALK_UP_STICKY_HINT,
   CLUB_TIME_NOTE,
   DOOR_SECTION_UNKNOWN,
@@ -40,7 +43,9 @@ import {
   describeStanding,
   formatWindowMinutes,
   historyChip,
+  historyGroupLabel,
   historyLine,
+  timeIsUncertain,
   historyOfflineLine,
   historyRetention,
   offlineDetailsBody,
@@ -49,6 +54,7 @@ import {
   offlineWithCode,
   standingFailed,
 } from "./memberDoorCopy";
+import { memberCodeOpensDoorNow, normaliseDoorsShut } from "./memberDoorCopy";
 import { DOOR_REFUSAL_REASONS } from "./deviceActivity";
 import { GATE_ROSTER_MAX_ENTRIES } from "./gateCopy";
 
@@ -193,6 +199,10 @@ describe("memberDoorCopy", () => {
       flat(codeExpiredDeadEnd("network", CONTACT)), flat(codeExpiredDeadEnd("server", NO_CONTACT)),
       flat(codeExpiredDeadEnd("network", UNKNOWN_CONTACT)),
       DOOR_SECTION_UNKNOWN, WALK_UP_STICKY_HINT, CLUB_TIME_NOTE,
+      // R3-17, R3-30, R3-31: every sentence this round added, swept like every other.
+      TIME_UNCERTAIN_NOTE, WALK_UP_ON_NOTICE, BACK_TO_BOOKING_CODE,
+      historyGroupLabel(6, 1), historyGroupLabel(2, 47),
+      historyOfflineLine("2026-09-19T06:09:00Z", undefined, "2026-09-19T06:30:00Z"),
       asOfMayHaveChanged("09:46"), decisionAge(0), decisionAge(1), decisionAge(12),
       HISTORY_TITLE, HISTORY_INTRO, HISTORY_P2_NOTICE, HISTORY_LOADING, HISTORY_FAILED,
       HISTORY_EMPTY, HISTORY_MORE_FAILED, HISTORY_OFFLINE_LINE, HISTORY_DELIVERY_ORDER,
@@ -647,6 +657,29 @@ describe("memberDoorCopy", () => {
         }
       }
     }
+    /*
+      R3-5 and R3-6 added two inputs, and the ban sweep has to reach the sentences they
+      unlock — the shut-door conclusion and the already-holding-it arm. APPENDED rather than
+      multiplied into the product above, for the reason this file already learned once: the
+      product is asked for fifteen times by the ban sweep alone, and multiplying it by eight
+      pushed a single `it.each` case past vitest's five-second budget whenever the machine
+      was busy with another file. Neither axis interacts with `codeWindow` or `lastRefusal`
+      in any arm, so the cross-product buys nothing the base shapes do not.
+    */
+    for (const shape of base) {
+      for (const doorsShut of ["none", "some", "all", "unknown"] as const) {
+        for (const memberCodeOpensDoor of [true, false]) {
+          out.push({
+            ...shape, doorsShut, memberCodeOpensDoor,
+            doorsShutNames: doorsShut === "some" ? ["Front door"] : undefined,
+            // One refusal beside them, so the arm that names a booking code the member is
+            // already holding is reached rather than merely constructed.
+            lastRefusal: { atClock: "09:46", reason: "too_early" },
+            codeKind: "ident" as const,
+          });
+        }
+      }
+    }
     return out;
   }
 
@@ -1021,10 +1054,20 @@ describe("memberDoorCopy", () => {
    * straight past the check. Telling that member the club has them as not active is the
    * page contradicting the door they are standing at.
    */
+  /**
+   * <b>R3-5 changed the second half of this.</b> It used to assert the promise —
+   * "A live member code of yours opens the club door" — directly after telling her the club
+   * has no record of her and that it is worth putting right, and the two read as the screen
+   * arguing with itself. The mechanism is unchanged and is still stated; what the sentence
+   * no longer does is finish on a promise as though the records were in order.
+   */
   it("does not tell a member with no membership row that theirs is not active", () => {
     const line = standingFor({ policy: "active_member", membership: "none", membership_detail: "none" });
     expect(line.body).not.toMatch(/not active|until they change that/i);
-    expect(line.body).toMatch(/opens the club door/i);
+    // The mechanism, stated: a door here does not check for a membership row.
+    expect(line.body).toMatch(/don't check for one/i);
+    // R3-5: and never the bare promise on top of it.
+    expect(line.body).not.toMatch(/live member code of yours opens/i);
   });
 
   it("still applies the booking rule to a member with no membership row", () => {
@@ -1154,11 +1197,22 @@ describe("memberDoorCopy", () => {
    * active membership ✓ Passed" for a rule she is not held to and "nothing on file ✓
    * Passed" for a state the club would want to know about.
    */
+  /**
+   * <b>R3-5: neutral was still the wrong shade.</b> Neutral draws the same grey dash as
+   * "not needed at this club", and the only thing separating the two was a state word that
+   * is `sr-only` — so a sighted member scanning the column saw a row that looked like the
+   * rows meaning "fine, does not apply here". It is `attention` now: its own glyph, its own
+   * colour, and the same word.
+   */
   it("never ticks a membership the club has nothing on file for", () => {
     const { rows } = buildDiagnosis({ ...HEALTHY, membership: "none" as const, membership_detail: "none" });
     const membership = rows.find((r) => r.key === "membership")!;
-    expect(membership.state).toBe("neutral");
+    expect(membership.state).toBe("attention");
     expect(membership.stateWord).toMatch(/unusual/i);
+    // R3-5, the half that is visible without a screen reader: not the grey n/a dash the
+    // two "does not apply here" rows draw.
+    const notApplicable = rows.filter((r) => r.state === "neutral").map((r) => r.key);
+    expect(notApplicable).not.toContain("membership");
   });
 
   /** The policy row states the club's rule. It is not a check and may never read as one. */
@@ -1384,8 +1438,13 @@ describe("memberDoorCopy", () => {
     for (const membership of ["active", "none"] as const) {
       const line = standingFor({ policy: "active_member", membership, membership_detail: membership });
       expect(line.body).not.toMatch(/code on this screen/i);
-      expect(line.body).toMatch(/live member code of yours/i);
     }
+    // The promise is still made where it is true: an active member at a club that opens for
+    // one, with nothing shut and a live code in hand. R3-5 removed it from the `none` arm
+    // alone — see the test above — and the two arms are asserted apart rather than together,
+    // because "both arms say the same thing" was the defect.
+    expect(standingFor({ policy: "active_member", membership: "active" }).body)
+      .toMatch(/live member code of yours/i);
   });
 
   /**
@@ -1600,4 +1659,510 @@ describe("memberDoorCopy", () => {
     });
     expect(flat(conclusion)).not.toMatch(/use your member code instead/i);
   });
+});
+
+/**
+ * The whole surface, in one table, held against itself. Round 3's central requirement.
+ *
+ * <p>
+ * <b>Every finding this round was the same shape.</b> Not a sentence that was wrong on its
+ * own, but two sentences that were each defensible and could not both be true of the member
+ * reading them: "the club has shut some of its doors" over "a live member code of yours
+ * opens the club door" (R3-4); "worth asking the club to put that right" over the same
+ * promise (R3-5); "too early, the door opens for you in 9h 30m" over "your member code opens
+ * the club door" (R3-6); a court window and a door window two hours apart, both introduced
+ * as what this code does (R3-7); "this code has run out, there's nothing on this screen for
+ * a door to read" over the promise again (R3-8). Five findings, one defect: nothing was
+ * asking whether the page agreed with itself.
+ * </p>
+ *
+ * <p>
+ * So this sweeps the product of the five axes the member surfaces actually fork on — the
+ * club's rule, what the club has on file, what the door last decided, which code is on the
+ * glass, and whether there is signal, a live code and an open door — and holds the sentences
+ * that state against every rule that can be written mechanically. It is a CONTRADICTION
+ * probe rather than a spelling test: it does not care what any arm says, only that no two
+ * arms say opposite things at once.
+ * </p>
+ *
+ * <p>
+ * The second half is the self-check, and the rule there is the one the reviewers kept
+ * catching: <b>the conclusion has to follow from the rows above it.</b> A checklist that
+ * fails a row and then concludes something else — or ticks six rows and then blames the
+ * scanner — is worse than no checklist, because the member acts on the conclusion and the
+ * rows are what they will be shown at the desk.
+ * </p>
+ */
+describe("memberDoorCopy — no state contradicts itself", () => {
+  const CONTACT = liveContact({ phone: "021 555 0134", email: "info@crusaders.co.za" });
+  const flat = sentenceText;
+
+  const BOOKING = {
+    starts_at: "2026-09-19T17:00:00Z",
+    ends_at: "2026-09-19T17:45:00Z",
+    court_number: 3,
+    door_opens_at: "2026-09-19T16:30:00Z",
+    door_closes_at: "2026-09-19T18:05:00Z",
+  };
+  const CODES = {
+    booking: { kind: "booking" as const, doorOpensAt: BOOKING.door_opens_at, doorClosesAt: BOOKING.door_closes_at },
+    ident: { kind: "ident" as const, doorOpensAt: null, doorClosesAt: null },
+    none: null,
+  };
+
+  /** Every `doors_shut` the wire can carry — INCLUDING the one it can fail to. R3-4. */
+  const SHUT_STATES = ["none", "some", "all", undefined] as const;
+  /** Every decision the endpoint can put on the card, plus the two it cannot name. */
+  const REASONS = [...Object.keys(DOOR_REFUSAL_REASONS), null, "some_new_token"];
+
+  type State = {
+    policy: "active_member" | "booking_window";
+    membership: "active" | "not_active" | "none";
+    reason: string | null;
+    released: boolean;
+    offline: boolean;
+    codeKind: "booking" | "ident" | "none";
+    shut: "none" | "some" | "all" | undefined;
+    connection: "ok" | "network" | "server";
+    liveCode: boolean;
+    hasBooking: boolean;
+  };
+
+  function* everyState(): Generator<State> {
+    for (const policy of ["active_member", "booking_window"] as const) {
+      for (const membership of ["active", "not_active", "none"] as const) {
+        for (const reason of REASONS) {
+          for (const codeKind of ["booking", "ident", "none"] as const) {
+            for (const shut of SHUT_STATES) {
+              for (const connection of ["ok", "network", "server"] as const) {
+                for (const liveCode of [true, false]) {
+                  yield {
+                    policy, membership, reason,
+                    released: reason === "ok",
+                    // The offline axis forks the OPEN only, so it is swept where it bites.
+                    offline: reason === "ok" && !liveCode,
+                    codeKind, shut, connection, liveCode,
+                    // A booking is what `booking_window` turns on, so it travels with the
+                    // code kind rather than as a seventh axis nobody reads.
+                    hasBooking: codeKind === "booking",
+                  };
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /** Everything this state puts in front of the member, as plain strings. */
+  function screenFor(state: State) {
+    const door = {
+      policy: state.policy,
+      membership: state.membership,
+      membership_detail: state.membership === "not_active" ? "suspended" : state.membership,
+      is_club_admin: false,
+      early_entry_minutes: state.policy === "booking_window" ? 30 : null,
+      next_booking: state.hasBooking ? BOOKING : null,
+      doors_shut: state.shut,
+      doors_shut_names: state.shut === "some" ? ["Front door"] : undefined,
+      timezone: "Africa/Johannesburg",
+    } as Parameters<typeof describeStanding>[0];
+    const code = CODES[state.codeKind];
+    const standing = describeStanding(door, code, { hasLiveCode: state.liveCode });
+    const memberCodeOpensDoor = memberCodeOpensDoorNow(door);
+    const decision = describeDecision(
+      { reason: state.reason, released: state.released, offline: state.offline },
+      {
+        countdown: "9h 30m", opensAtClock: "06:30", bookingStartsClock: "07:00",
+        earlyEntryMinutes: door.early_entry_minutes, contact: CONTACT,
+        memberCodeOpensDoor, codeKind: code?.kind ?? null,
+      },
+    );
+    const diagnosis = buildDiagnosis({
+      standingKnown: true,
+      membership: state.membership,
+      membership_detail: door.membership_detail,
+      policy: state.policy,
+      hasBooking: state.hasBooking,
+      bookingStartsClock: state.hasBooking ? "19:00" : null,
+      doorWindowOpen: state.hasBooking ? true : null,
+      opensAtClock: state.hasBooking ? "18:30" : null,
+      opensInWords: null,
+      codeSecondsLeft: state.liveCode ? 58 : 0,
+      connection: state.connection,
+      contact: CONTACT,
+      codeKind: code?.kind ?? null,
+      codeWindow: null,
+      lastRefusal: null,
+      offerMemberCode: standing.offerMemberCode,
+      doorsShut: normaliseDoorsShut(state.shut),
+      doorsShutNames: door.doors_shut_names,
+      memberCodeOpensDoor,
+    });
+    return {
+      standing,
+      decision,
+      diagnosis,
+      /** Everything the door section and the decision card say, in one blob. */
+      all: [
+        standing.body, standing.codeLine ?? "", standing.shutLine ?? "",
+        decision.headline, decision.body,
+      ].join(" "),
+    };
+  }
+
+  /**
+   * Every state, with the screen it produces, built ONCE.
+   *
+   * <p>
+   * <b>The lesson this file already carries, in a second place.</b> Eight rules sweep the
+   * same 4,752 states, and rebuilding the standing line, the decision card and the six-row
+   * self-check inside each of them is eight times the work for one set of answers — enough,
+   * measured, to push a rule past vitest's five-second budget whenever the machine is busy
+   * with another file, which reads as a flake and gets somebody to add a retry. The screens
+   * are pure functions of the state; there is nothing to rebuild.
+   * </p>
+   */
+  /**
+   * Headroom for the rules that sweep every state, measured rather than guessed.
+   *
+   * <p>
+   * The whole product is built once (see below) and the rule that happens to run first pays
+   * for it: measured at 1.8 s on an idle machine, and this repo's unit suite runs four
+   * lanes' worth of files in parallel on one laptop. Vitest's default five seconds is under
+   * three times the measured cost, which is not headroom — it is a test that passes alone
+   * and fails in the suite, reads as a flake, and gets a retry added to it. Twenty is about
+   * eleven times, and a rule that genuinely hangs still fails rather than running forever.
+   * </p>
+   */
+  const SWEEP_MS = 20_000;
+
+  let screens: { state: State; screen: ReturnType<typeof screenFor> }[] | null = null;
+  function everyScreen() {
+    return (screens ??= [...everyState()].map((state) => ({ state, screen: screenFor(state) })));
+  }
+
+  /** The one promise on this surface, and the only conditions under which it is true. */
+  const PROMISE = /A live member code of yours opens the club door/;
+  /**
+  * Every way this surface says the member is not getting in, or may not be.
+  *
+  * <p>
+  * <b>"Run out" is deliberately not here, and the first draft of this rule got it wrong.</b>
+  * `armNotRecognised` says "A code that has run out and a code that was never real look the
+  * same to a door… There's a fresh one below" — which is about the twelve characters that
+  * were REFUSED, not about the ones on the glass, and it points at a replacement. The
+  * contradiction R3-8 found is between the promise and the code card's own dead state, and
+  * that is caught by the `liveCode` assertion above rather than by hunting for a phrase.
+  * </p>
+  */
+  const WITHHOLDS = [
+    /has shut (its|some of its) doors/,
+    /no code of yours opens a door/,
+    /a door won't open for you/,
+    /nothing on this screen for a door/,
+  ];
+
+  /*
+    One test over every state rather than one test PER state. `it.each` over a five-axis
+    product is four and a half thousand named cases in the reporter for one rule, and the
+    per-case overhead is most of the file's runtime — which is what starves a neighbouring
+    file of vitest's five-second budget. The state is in the assertion message, so a failure
+    still names the exact combination that broke the rule.
+  */
+  it("never promises and withdraws in the same breath", () => {
+    for (const { state, screen } of everyScreen()) {
+      const { all } = screen;
+      if (!PROMISE.test(all)) continue;
+      const where = JSON.stringify(state);
+      // The promise is made. Every one of these is a reason it cannot be.
+      expect(state.shut, `promised an open door while the club had shut some — ${where}`).toBe("none");
+      expect(state.membership, `promised an open door to a member with no record — ${where}`).toBe("active");
+      expect(state.policy, `promised an any-member open under the booking rule — ${where}`).toBe("active_member");
+      expect(state.liveCode, `promised a live code on a screen that has none — ${where}`).toBe(true);
+      for (const withhold of WITHHOLDS) {
+        expect(all, `promised a door and withheld it (${withhold}) — ${where}`).not.toMatch(withhold);
+      }
+    }
+  }, SWEEP_MS);
+
+  /**
+   * R3-4, as a rule rather than as a sentence: a field that never arrived is not a club that
+   * has shut something. It is the defect that was on EVERY account's screen in the evidence,
+   * and the one that produced the R3-5 and R3-8 contradictions as a side effect.
+   */
+  it("says nothing whatever about shut doors when the wire did not say", () => {
+    for (const { state, screen } of everyScreen()) {
+      if (state.shut !== undefined && state.shut !== "none") continue;
+      const { all } = screen;
+      expect(all, `invented a shut door from doors_shut=${state.shut}`).not.toMatch(/has shut/);
+    }
+  }, SWEEP_MS);
+
+  /** And the other direction: a club that HAS shut doors is never silent about it. */
+  it("always states a shut door the wire did report", () => {
+    for (const { state, screen } of everyScreen()) {
+      if (state.shut !== "some" && state.shut !== "all") continue;
+      // The membership arm outranks everything and deliberately says nothing else — the
+      // club has to move first, and a shut door is not what is standing in the way.
+      if (state.membership === "not_active") continue;
+      const { standing } = screen;
+      expect(standing.shutLine, `silent about doors_shut=${state.shut}`).toMatch(/has shut/);
+    }
+  }, SWEEP_MS);
+
+  /** WIRE-R3 §5: when the club says which, the page says which. */
+  it("names the shut doors the wire named", () => {
+    const { standing } = screenFor({
+      policy: "active_member", membership: "active", reason: null, released: false, offline: false,
+      codeKind: "ident", shut: "some", connection: "ok", liveCode: true, hasBooking: false,
+    });
+    expect(standing.shutLine).toContain("Front door");
+  });
+
+  /**
+   * R3-6. `too_early` is only ever a BOOKING code's refusal — `OutsideItsOwnWindowAsync` is
+   * reached from the booking branch and nothing else — so at a club whose doors open for any
+   * active member it says nothing about whether the member may come in. "Wait nine and a half
+   * hours" over "your member code opens the door now" is two answers to one question.
+   */
+  it("never tells a member to wait out a window a code in their hand does not have", () => {
+    for (const { state, screen } of everyScreen()) {
+      if (state.reason !== "too_early") continue;
+      const { all, decision } = screen;
+      if (!/Too early — the door opens for you in/.test(decision.headline)) continue;
+      expect(all, "told them to wait while promising the other code works")
+        .not.toMatch(/member code .*opens the door now|do open — hold that one up/);
+    }
+  }, SWEEP_MS);
+
+  it("names the booking code, and the way out of it, where the member code works", () => {
+    const { decision } = screenFor({
+      policy: "active_member", membership: "active", reason: "too_early", released: false,
+      offline: false, codeKind: "ident", shut: "none", connection: "ok", liveCode: true, hasBooking: false,
+    });
+    expect(decision.headline).toMatch(/That was your booking code/);
+    // Already holding it: nothing to switch to, and saying so is the whole point.
+    expect(decision.body).toMatch(/code on this screen now is your member code/);
+    expect(decision.body).not.toMatch(/hold it up to the scanner again then/);
+  });
+
+  it("offers the switch instead when a booking code is the one on the glass", () => {
+    const { decision } = screenFor({
+      policy: "active_member", membership: "active", reason: "too_early", released: false,
+      offline: false, codeKind: "booking", shut: "none", connection: "ok", liveCode: true, hasBooking: true,
+    });
+    expect(decision.body).toMatch(/Use your member code instead/);
+  });
+
+  /** And it stays the old sentence where there genuinely is nothing better to hold. */
+  it("keeps the plain wait where no code of theirs opens the door yet", () => {
+    const { decision } = screenFor({
+      policy: "booking_window", membership: "active", reason: "too_early", released: false,
+      offline: false, codeKind: "booking", shut: "none", connection: "ok", liveCode: true, hasBooking: true,
+    });
+    expect(decision.headline).toMatch(/Too early/);
+    expect(decision.body).toMatch(/hold it up to the scanner again then/);
+  });
+
+  // --- the conclusion follows from the rows -------------------------------------------
+
+  /** What each row's own failure has to look like in the sentence underneath the list. */
+  const ROW_SUBJECT: Record<string, RegExp> = {
+    membership: /membership/i,
+    booking: /book/i,
+    window: /window|opens for you/i,
+    code: /code/i,
+    connection: /reach the club|answered with an error/i,
+  };
+
+  it("never concludes the all-clear while a row has failed", () => {
+    for (const { screen } of everyScreen()) {
+      const { diagnosis } = screen;
+      const failed = diagnosis.rows.filter((r) => r.state === "failed");
+      if (failed.length === 0) continue;
+      const text = flat(diagnosis.conclusion);
+      expect(text, `all-clear over ${failed.map((r) => r.key)}`)
+        .not.toMatch(/Everything on this phone looks right/);
+      // A conclusion that DECLINES to answer is the third legitimate outcome and is not a
+      // failure to follow from the rows: with the club unreachable, four of the six are
+      // unasked rather than fine, and the check says exactly that instead of picking the
+      // one row it could still see. What is banned is a confident answer about something
+      // else while a row is red.
+      if (/guessing about half of it|unanswered rather than fine/.test(text)) continue;
+      expect(
+        failed.some((r) => ROW_SUBJECT[r.key].test(text)),
+        `conclusion "${text}" names none of the failing rows ${failed.map((r) => r.key)}`,
+      ).toBe(true);
+    }
+  }, SWEEP_MS);
+
+  /**
+   * The other direction, and the one R3-5 was about: a conclusion may not assert a failure
+   * the rows did not find. "The club has your membership as suspended" over a membership row
+   * reading "active ✓ Passed" is the same defect pointing the other way.
+   */
+  it("never blames a row that passed", () => {
+    for (const { screen } of everyScreen()) {
+      const { diagnosis } = screen;
+      const text = flat(diagnosis.conclusion);
+      const by = Object.fromEntries(diagnosis.rows.map((r) => [r.key, r.state]));
+      if (by.membership === "passed") {
+        expect(text, "blamed a membership the check passed").not.toMatch(/has your membership as/i);
+        expect(text, "blamed a membership the check passed").not.toMatch(/no membership on file/i);
+      }
+      if (by.code === "passed") {
+        expect(text, "blamed a code the check passed").not.toMatch(/code you held up had run out/i);
+      }
+      if (by.connection === "passed") {
+        expect(text, "blamed a phone whose line the check passed").not.toMatch(/phone can't reach the club/i);
+      }
+    }
+  }, SWEEP_MS);
+
+  /**
+   * R3-5's own arm. A door the club has switched off is the likeliest reason a door did not
+   * open, and the check used to reach past it for a scanner that might need a wipe — on a
+   * page whose standing line was saying so ten pixels above.
+   */
+  it("names a shut door before it guesses at the scanner", () => {
+    for (const { state, screen } of everyScreen()) {
+      if (state.shut !== "some" && state.shut !== "all") continue;
+      // With the club unreachable the shut-door fact came from a read that has since failed,
+      // and the check says so rather than asserting it — the connection arm outranks this
+      // one on purpose. See `concludeFrom`.
+      if (state.connection !== "ok") continue;
+      const { diagnosis } = screen;
+      const text = flat(diagnosis.conclusion);
+      if (diagnosis.rows.some((r) => r.state === "failed")) continue;
+      expect(text, "guessed at the scanner with a door shut").not.toMatch(/scanner may need a wipe/);
+      expect(text).toMatch(/has shut/);
+    }
+  }, SWEEP_MS);
+
+  /** And never the reverse: a shut-door conclusion where nothing is shut. */
+  it("never invents a shut door in the conclusion either", () => {
+    for (const { state, screen } of everyScreen()) {
+      if (state.shut === "some" || state.shut === "all") continue;
+      expect(flat(screen.diagnosis.conclusion), `doors_shut=${state.shut}`)
+        .not.toMatch(/has shut (its|some of its) doors/);
+    }
+  }, SWEEP_MS);
+
+  /**
+   * <b>R3-3's member half, held as a rule rather than at one call site.</b> The finding is a
+   * CHR one — the shared formatter, and the admin screens that were labelling the browser's
+   * zone "club time" — but the member surfaces are where a reader is furthest from the club,
+   * and the rule this lane owes is that EVERY face here is written with the zone the response
+   * carried. The unit runner is pinned to the club's own zone, so a formatter reading the
+   * browser instead is invisible unless the fixture's zone differs from it; two are swept,
+   * one ahead of the club and one far behind, and every clock face has to move with them.
+   * </p>
+   */
+  it.each(["Europe/London", "America/Los_Angeles", "Pacific/Auckland"])(
+    "writes every member-door clock face in the club's zone, not the reader's — %s",
+    (timezone) => {
+      const booking = {
+        starts_at: "2099-01-01T17:00:00Z", ends_at: "2099-01-01T17:45:00Z", court_number: 3,
+        door_opens_at: "2099-01-01T16:30:00Z", door_closes_at: "2099-01-01T18:05:00Z",
+      };
+      const faces = (zone: string | undefined) => {
+        const line = describeStanding({
+          policy: "booking_window", membership: "active", membership_detail: "active",
+          is_club_admin: false, early_entry_minutes: 30, next_booking: booking,
+          doors_shut: "none", timezone: zone,
+        } as Parameters<typeof describeStanding>[0]);
+        return [
+          line.body,
+          decisionStamp("front-door", booking.door_opens_at, booking.door_closes_at, zone),
+          historyOfflineLine(booking.door_closes_at, zone, booking.starts_at),
+        ].join(" ");
+      };
+      // Africa/Johannesburg is the runner's pinned zone AND the club's default, so a
+      // formatter reading the browser produces exactly this string for every zone.
+      expect(faces(timezone)).not.toBe(faces("Africa/Johannesburg"));
+      // And the zone is honoured rather than merely different: 16:30Z is 18:30 in the club's
+      // own day and something else in each of these.
+      expect(faces(timezone)).not.toContain("18:30");
+    },
+  );
+
+  /** Six rows, always, whatever it was handed. A silently dropped row is an unasked question. */
+  it("asks the same six questions in every state", () => {
+    for (const { screen } of everyScreen()) {
+      const { diagnosis } = screen;
+      expect(diagnosis.rows.map((r) => r.key)).toEqual([
+        "membership", "policy", "booking", "window", "code", "connection",
+      ]);
+      expect(flat(diagnosis.conclusion).length).toBeGreaterThan(20);
+    }
+  }, SWEEP_MS);
+
+  /**
+   * <b>R3-5: the anomaly leads when nothing else won, rather than trailing a clean bill.</b>
+   * It was a clause on the end of "Everything on this phone looks right… its scanner may need
+   * a wipe" — a guess about hardware handed to somebody whose record the club does not have,
+   * with the only irregular thing the check found reduced to a footnote.
+   */
+  it("leads with the club's missing record rather than appending it to an all-clear", () => {
+    const healthy = {
+      standingKnown: true, membership: "none" as const, membership_detail: "none",
+      policy: "active_member" as const, hasBooking: false, bookingStartsClock: null,
+      doorWindowOpen: null, opensAtClock: null, opensInWords: null, codeSecondsLeft: 58,
+      connection: "ok" as const, contact: CONTACT, codeKind: null, codeWindow: null,
+      lastRefusal: null, offerMemberCode: false, doorsShut: "none" as const,
+      memberCodeOpensDoor: true,
+    };
+    const text = flat(buildDiagnosis(healthy).conclusion);
+    expect(text).toMatch(/^Nothing on this phone is wrong\./);
+    expect(text).toMatch(/no membership on file for you/);
+    // Never the scanner guess, and never the anomaly as an afterthought on one.
+    expect(text).not.toMatch(/scanner may need a wipe/);
+    expect(text).not.toMatch(/The club also has no membership/);
+    // And it still refuses to claim that is WHY: `StatusIfBarredAsync` answers null for a
+    // user with no membership row and `GateAccess` walks past the check, so a screen saying
+    // the door refused her for it would send her to the desk over the one thing that is not
+    // stopping her.
+    expect(text).toMatch(/probably not why you're outside/);
+  });
+
+  /**
+   * <b>R3-17.</b> `delivered_at` before `at` is the board's clock being wrong, not a journey
+   * that finished before it started: "the door told us at 19:22" about a 19:48 scan. The
+   * clause is withheld rather than printed, because a member reconciling their own record has
+   * been handed two numbers that cannot both be right.
+   */
+  it("withholds a delivery instant that predates the scan it reports", () => {
+    const impossible = decisionStamp("front-door", "2026-09-19T17:48:00Z", "2026-09-19T17:22:00Z");
+    expect(impossible).toContain("front-door");
+    expect(impossible).not.toMatch(/the club heard at/);
+    // The ordinary case is untouched: a real delivery delay is the answer to a real question.
+    expect(decisionStamp("front-door", "2026-09-19T17:22:00Z", "2026-09-19T17:48:00Z"))
+      .toMatch(/the club heard at 19:48/);
+  });
+
+  it("calls a clamped or impossible time approximate, and an ordinary one nothing", () => {
+    expect(timeIsUncertain({ at: "2026-09-19T17:48:00Z", delivered_at: "2026-09-19T17:22:00Z" })).toBe(true);
+    expect(timeIsUncertain({ at: "2026-09-19T17:48:00Z", time_uncertain: true })).toBe(true);
+    expect(timeIsUncertain({ at: "2026-09-19T17:22:00Z", delivered_at: "2026-09-19T17:48:00Z" })).toBe(false);
+    expect(timeIsUncertain({ at: "2026-09-19T17:22:00Z", delivered_at: null })).toBe(false);
+    // An unparseable instant is "this screen cannot tell", which is not "this is impossible".
+    expect(timeIsUncertain({ at: "not-a-date", delivered_at: "also-not" })).toBe(false);
+    expect(TIME_UNCERTAIN_NOTE).toMatch(/approximate/);
+  });
+
+  /**
+   * R3-5's visible half. A tick is a claim and a grey dash is "this does not apply here";
+   * a club with no record of the member is neither, and the only thing telling it from the
+   * dash was a state word that is `sr-only`.
+   */
+  it("draws a missing membership as a problem rather than as not-applicable", () => {
+    for (const { state, screen } of everyScreen()) {
+      if (state.membership !== "none") continue;
+      const row = screen.diagnosis.rows.find((r) => r.key === "membership")!;
+      expect(row.state).toBe("attention");
+      expect(row.state).not.toBe("neutral");
+    }
+  }, SWEEP_MS);
 });

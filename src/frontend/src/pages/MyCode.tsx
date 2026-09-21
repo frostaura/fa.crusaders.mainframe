@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { QrCode as QrIcon, RefreshCw } from "lucide-react";
 import { type MemberDoor, type MemberDoorsShut, type MyQrCode } from "../lib/api";
@@ -8,10 +8,12 @@ import { Card } from "../components/Card";
 import { Button } from "../components/Button";
 import { cn } from "../lib/utils";
 // doors: member
-import { type LastKnown, minutesSince, readLastKnown } from "../lib/lastKnown";
+import { type LastKnown, type LastKnownQr, minutesSince, readLastKnown } from "../lib/lastKnown";
 import {
+  BACK_TO_BOOKING_CODE,
   BOOKING_DOOR_WINDOW_CLOSED,
   CLUB_TIME_NOTE,
+  WALK_UP_ON_NOTICE,
   CONTACT_UNKNOWN,
   type CodeOnScreen,
   type ContactKnowledge,
@@ -31,6 +33,7 @@ import {
   staleContact,
 } from "../lib/memberDoorCopy";
 import { ClubContact } from "../components/member-door/ClubContact";
+import { MEMBER_DOOR_LINK_TAPPABLE } from "../components/member-door/links";
 import { QrSvg } from "../components/member-door/QrSvg";
 import { CopySentence } from "../components/member-door/CopySentence";
 import { DecisionCard } from "../components/member-door/DecisionCard";
@@ -119,7 +122,26 @@ import { useMemberDoor, useShownDecision } from "../components/member-door/useMe
  * when a padding, a gutter or a breakpoint elsewhere moves.
  * </p>
  */
-const QR_WIDTH = "w-full max-w-[320px]";
+/**
+ * <b>R3-29 (D-M2) adds the second bound, and it is a HEIGHT.</b>
+ *
+ * <p>
+ * At 320×568 the scrollport is 458px. A 288px square, its tap hint and the twelve characters
+ * under it put the readable code — the fallback a member reads back to the desk when the
+ * scanner will not take the symbol — and the "which code is this" label below the fold, on
+ * the one screen whose entire purpose is to be looked at. `min()` against a fraction of the
+ * viewport height is what keeps the whole of the code card's identity block on the glass at
+ * a short viewport while changing nothing at all at 844px, where `46vh` is 388 and the
+ * 320px ceiling still binds.
+ * </p>
+ *
+ * <p>
+ * It costs nothing at a scanner: the inline symbol is the preview, and the full-screen
+ * overlay — which is bounded by the viewport in both directions and reserves its column
+ * exactly — is what a member holds up.
+ * </p>
+ */
+const QR_WIDTH = "w-full max-w-[min(320px,46vh)]";
 
 /**
  * The code card's own width and padding, in PIXELS. D7's other half.
@@ -298,8 +320,23 @@ function describeKind(qr: MyQrCode, meaning: CodeMeaningInput): { headline: stri
     const when = bookingWhen(qr, meaning);
     return {
       headline: qr.court_number != null ? `Booking code · court ${qr.court_number}${when}` : `Booking code${when}`,
-      detail: "For your booking only — it works at that court, from a few minutes before your slot until it ends. "
-        + "At any other court it will not be recognised." + describeDoor(qr, meaning),
+      /*
+        <b>R3-7 — "from a few minutes before your slot until it ends" is gone, and it was the
+        only invented window on this page.</b> It sat a line above "it works at a door from
+        18:05 until 20:50" for a court at 20:15: two windows, two hours and ten minutes
+        apart, both introduced as what THIS code does, with nothing to say one was the
+        court's and the other the door's. The reviewer read it as the screen contradicting
+        itself, which is the right reading — a member cannot be expected to hold two
+        different windows for one twelve-character string.
+
+        The court's own activation window is not on this page's wire at all (the cue window
+        is a tenant setting no member endpoint carries), so "a few minutes" was the page
+        guessing. What the payload does carry is the DOOR window, exactly, and
+        `describeDoor` states it once. A sentence that is true and silent about a number is
+        better than a number nobody can reconcile.
+      */
+      detail: "For your booking only — it works at that court. At any other court it will not be recognised."
+        + describeDoor(qr, meaning),
     };
   }
   return {
@@ -448,6 +485,43 @@ function WalkUpSwitch(props: { walkUp: boolean; loading: boolean; onChoose: (nex
 }
 
 /**
+ * What the page says once the walk-up switch is on, and the way back. R3-30.
+ *
+ * <p>
+ * <b>"Use your member code instead" was a one-way door.</b> Three controls offered it — the
+ * closed-window card, the standing line, the self-check — and not one said what it had done
+ * or how to undo it. The only way back was a checkbox further down the page labelled "Walk
+ * up / pay for someone", which is a COURT errand: the member who had pressed a DOOR button
+ * had no reason to connect the two, and the booking code they came for was simply gone.
+ * </p>
+ *
+ * <p>
+ * It is the same switch underneath, so there is one lifetime rather than two — stated here
+ * in the words the checkbox uses, because a member who arrived by pressing a button on
+ * another card has not read the checkbox.
+ * </p>
+ *
+ * <p>
+ * Silent unless there is a booking to go back TO. A member with no upcoming booking would be
+ * offered a code the server will not mint, and the switch is then simply the walk-up switch
+ * doing what it says.
+ * </p>
+ */
+function WalkUpOnNotice(props: { loading: boolean; onBack: () => void }) {
+  return (
+    <Card className="flex flex-wrap items-center justify-between gap-3">
+      {/* The lifetime is IN this sentence rather than borrowed from the checkbox's hint:
+          two copies of "Stays on for the rest of this visit", two hundred pixels apart, is
+          the noise this round is about. One statement, in the place the member arrived. */}
+      <p className="text-sm text-text-secondary">{WALK_UP_ON_NOTICE}</p>
+      <Button variant="outline" className="w-full sm:w-auto" disabled={props.loading} onClick={props.onBack}>
+        {BACK_TO_BOOKING_CODE}
+      </Button>
+    </Card>
+  );
+}
+
+/**
  * The offer a member should not have to go looking for.
  *
  * <p>
@@ -570,7 +644,11 @@ export default function MyCodePage() {
   }
 
   return (
-    <div className="max-w-xl mx-auto space-y-6">
+    // R3-29: the pinned decision line is `position: fixed` at the bottom of the glass on a
+    // phone, so the page owes it room. Without the padding the club's own number — the last
+    // thing on the page and the thing a member outside a locked door reaches for — sits
+    // underneath it.
+    <div className={cn("max-w-xl mx-auto space-y-6", decisionToShow && "pb-24 sm:pb-0")}>
       {/*
         D8 — the code is the first thing in the page body, and everything that explains it
         comes after. It was a heading, a two-line subtitle and a decision card first, which
@@ -588,20 +666,32 @@ export default function MyCodePage() {
         contact={contact}
         loading={loading}
         secondsLeft={secondsLeft}
+        fallback={codeSecondsLeft === 0 ? usableCachedBookingCode(cached, qr?.code ?? null) : null}
         onRefresh={refetch}
       />
+
+      {/* R3-30 — the way back from a one-way door. See `WalkUpOnNotice`. */}
+      {walkUp && qr?.kind === "ident" && !!door?.next_booking && (
+        <WalkUpOnNotice loading={loading} onBack={() => chooseWalkUp(false)} />
+      )}
 
       {/*
         D10 — BELOW the code, not above it. A decision arriving used to push the QR down
         290 px on a screen somebody was holding against a scanner, and dismissing it pulled
         the QR back up again. Directly under the code is close enough to read without
         scrolling and cannot move it.
+
+        R3-29 — and at 390×844 it was measured at y=829 against a 734px scrollport, which is
+        95px below the fold: the most urgent thing on the page, invisible. It is PINNED
+        rather than moved, because moving it back above the code re-opens D10 exactly.
+        `DecisionPeek` is the pin.
       */}
       {decisionToShow && (
         <DecisionCard
           decision={decisionToShow}
           door={door}
           contact={contact}
+          code={code}
           onRefreshCode={refetch}
           onDismiss={dismiss}
         />
@@ -700,10 +790,7 @@ function DoorFooter({ doorsKnowledge, contact }: { doorsKnowledge: "yes" | "no" 
     <>
       {/* D14. The member own record was three steps away — avatar, Profile, scroll — from
           the screen where the question "did that actually work?" gets asked. */}
-      <Link
-        to={`/profile#${HISTORY_ANCHOR}`}
-        className="inline-flex items-center min-h-11 text-sm text-accent-strong underline underline-offset-2 hover:no-underline"
-      >
+      <Link to={`/profile#${HISTORY_ANCHOR}`} className={MEMBER_DOOR_LINK_TAPPABLE}>
         {HISTORY_LINK_LABEL}
       </Link>
       <ClubContact contact={contact} />
@@ -878,6 +965,38 @@ function bookingDoorWindowEnd(qr: MyQrCode | null): string | null {
 }
 
 /**
+ * A booking code the page still holds that has NOT run out. R3-8(b).
+ *
+ * <p>
+ * <b>The asymmetry between the two codes is the whole of this.</b> An ident code lives about
+ * a minute and rotates, so with no signal it dies and nothing can be done. A booking code is
+ * minted with the booking and is a stable token until the slot ends plus the grace window —
+ * it does not rotate, and the copy in the last-known store is byte-for-byte the code the door
+ * would accept. So the sixty seconds that kill one leave the other perfectly good, and a
+ * member whose ident code expired offline was being shown "there's nothing on this screen for
+ * a door to read" while a working booking code sat in `localStorage`.
+ * </p>
+ *
+ * <p>
+ * Both edges are checked, and against the ABSOLUTE instant the store keeps rather than
+ * against a lifetime — that is what {@link LastKnownQr.expiresAt} exists for. A code past its
+ * expiry, or past its door window, is not offered: a hopeful QR in the dark is the one thing
+ * this surface refuses to do. And it is never offered in place of a LIVE code, only in place
+ * of a dead one.
+ * </p>
+ */
+function usableCachedBookingCode(cached: LastKnown, deadCode: string | null): LastKnownQr | null {
+  const stored = cached.qr;
+  if (!stored || stored.value.kind !== "booking") return null;
+  if (stored.value.code === deadCode) return null;
+  const now = Date.now();
+  if (!(Date.parse(stored.value.expiresAt) > now)) return null;
+  const closes = stored.value.doorClosesAt ? Date.parse(stored.value.doorClosesAt) : null;
+  if (closes !== null && !Number.isNaN(closes) && closes <= now) return null;
+  return stored.value;
+}
+
+/**
  * Has EVERY read failed, at a club that has a door to talk about?
  *
  * <p>
@@ -914,12 +1033,33 @@ function CodeCard(props: {
   contact: ContactKnowledge;
   loading: boolean;
   secondsLeft: number;
+  /** R3-8(b) — a booking code from the last-known store that has NOT run out, or null. */
+  fallback: LastKnownQr | null;
   onRefresh: () => void;
 }) {
-  const { qr, meaning, error, failure, contact, loading, secondsLeft, onRefresh } = props;
+  const { qr, meaning, error, failure, contact, loading, secondsLeft, fallback, onRefresh } = props;
   // The overlay is this card's own state: it is the same symbol, bigger, and nothing
   // above needs to know it is open.
   const [full, setFull] = useState(false);
+  /**
+   * Where focus goes when the full-screen overlay closes. R3-10 (the MEM half).
+   *
+   * <p>
+   * <b>Escape, Done and the hardware back button all left focus on `<body>`.</b> For a
+   * keyboard user that is the top of the document: the next Tab starts from the skip link,
+   * so closing the code threw away their place on the page. For a screen-reader user it is
+   * worse — the dialog they were in vanished and nothing was announced in its place. Focus
+   * belongs on the control that opened the overlay, which is where they were standing.
+   * </p>
+   */
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  const wasFull = useRef(false);
+  useEffect(() => {
+    // Only on the true→false edge. Running on every render would steal focus from whatever
+    // the member has since tabbed to, and running on mount would take it on first paint.
+    if (wasFull.current && !full) trigger.current?.focus();
+    wasFull.current = full;
+  }, [full]);
   /**
    * D5 — a code at zero is not a code, and no version of it may look scannable.
    *
@@ -952,6 +1092,7 @@ function CodeCard(props: {
       ) : (
         <>
           {dead ? (
+            <>
             <div className="space-y-3 rounded-lg border border-danger-soft bg-danger-soft p-4 text-center">
               {deadForGood ? (
                 // D13: the club's number here is a link. This is the message a member reads
@@ -961,10 +1102,24 @@ function CodeCard(props: {
               ) : (
                 <p className="text-sm text-danger-strong">This code has run out. Getting a fresh one…</p>
               )}
+              {/*
+                R3-8(c) — ONE retry, not two. The footer's Refresh is suppressed while this
+                block is up (see below) and the loose `error` paragraph under the card is
+                too: a member with no signal was reading "This code has run out and can't be
+                renewed without signal… Try again", then "Run out · Refresh", then "Couldn't
+                get a code — the club's system couldn't be reached. Check your connection and
+                try again." Three sentences about one failure and two buttons that do the
+                same thing.
+              */}
               {deadForGood && (
                 <Button variant="outline" className="w-full sm:w-auto" onClick={onRefresh}>Try again</Button>
               )}
             </div>
+            {/* R3-8(b). A booking code does not rotate, so one still inside its window is a
+                code a door really will take — and it was sitting in the store unread while
+                the sentence above said there was nothing on this screen for a door. */}
+            {fallback && <CachedBookingCode code={fallback} />}
+            </>
           ) : (
             <>
               {/* The whole symbol is the target. A scanner in a dark doorway wants area and
@@ -976,6 +1131,7 @@ function CodeCard(props: {
                   necessary. */}
               <button
                 type="button"
+                ref={trigger}
                 aria-label="Show your code full screen"
                 onClick={() => setFull(true)}
                 className={cn("mx-auto block", QR_WIDTH)}
@@ -1039,17 +1195,26 @@ function CodeCard(props: {
             {/* Was `h-9` — 36px, pinned by the UX wireframe and exempted by name in the
                 e2e sweep. A reviewer found it anyway, one-handed in the dark, which is the
                 answer to the wireframe: `Button`'s own `h-11` is the floor everything else
-                on this page already meets. */}
-            <Button
-              variant="outline"
-              className="px-3 text-xs"
-              onClick={onRefresh}
-              disabled={loading}
-            >
-              <RefreshCw size={14} className={cn("mr-1", loading && "animate-spin motion-reduce:animate-none")} /> Refresh
-            </Button>
+                on this page already meets.
+
+                R3-8(c): gone while the dead block is up, because that block has its own
+                "Try again" and two buttons doing one thing, twelve pixels apart, is what a
+                member with no signal was handed. */}
+            {!deadForGood && (
+              <Button
+                variant="outline"
+                className="px-3 text-xs"
+                onClick={onRefresh}
+                disabled={loading}
+              >
+                <RefreshCw size={14} className={cn("mr-1", loading && "animate-spin motion-reduce:animate-none")} /> Refresh
+              </Button>
+            )}
           </div>
-          {error && <p className="text-xs text-danger-strong">{error}</p>}
+          {/* R3-8(c): and the second sentence about the same failure. `deadSentence` above
+              already says what went wrong AND whose fault it was, with the club's number as
+              a link; this one repeated it in a fourteen-pixel grey. */}
+          {error && !deadForGood && <p className="text-xs text-danger-strong">{error}</p>}
         </>
       )}
     </Card>
@@ -1076,6 +1241,40 @@ function CodeCard(props: {
       </FullScreenQr>
     )}
     </>
+  );
+}
+
+/**
+ * The booking code the page still holds, offered where the dead one was. R3-8(b).
+ *
+ * <p>
+ * It is drawn at full strength rather than dimmed, and that is the point rather than an
+ * oversight: unlike the offline page's cached ident code, this one is not a hopeful copy of
+ * something that has probably expired. A booking code does not rotate and this one is inside
+ * both of its own edges — see {@link usableCachedBookingCode} — so it is the code the door
+ * would take, and dimming it would tell a member in the dark to distrust the one thing on
+ * the screen that works.
+ * </p>
+ *
+ * <p>
+ * What it does NOT get is the full-screen gesture. That overlay is built around the live
+ * code's own countdown, and a second path into it carrying a code from a different source is
+ * two lifecycles in one control. The symbol here is the same size as the live one.
+ * </p>
+ */
+function CachedBookingCode({ code }: { code: LastKnownQr }) {
+  return (
+    <div className="space-y-3 rounded-lg border border-success-soft bg-success-soft p-4">
+      <p className="text-sm text-success-strong">
+        {"Your booking code is still good, and it doesn't need the club to renew it. Hold this one up instead."}
+      </p>
+      <div className={cn("mx-auto", QR_WIDTH)}>
+        <QrSvg value={code.code} className="w-full h-auto rounded-lg border border-border" />
+      </div>
+      <p className="mx-auto max-w-full break-all text-center font-mono text-2xl tracking-[0.25em]" aria-label="Your booking code">
+        {code.code}
+      </p>
+    </div>
   );
 }
 

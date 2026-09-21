@@ -16,6 +16,8 @@ import {
   standingFailed,
 } from "../../lib/memberDoorCopy";
 import { Button } from "../Button";
+import { cn } from "../../lib/utils";
+import { MEMBER_DOOR_ACTION_LINK, MEMBER_DOOR_LINK_TAPPABLE } from "./links";
 
 /**
  * "What opens the door for you right now" — the standing facts, below the QR.
@@ -59,13 +61,26 @@ export function StandingLine(props: {
   code: CodeOnScreen | null;
   /** When the answer on screen was read, for the staleness marker. ISO, or null while live. */
   staleSince: string | null;
+  /**
+   * Is there a code on this screen a door could read right now? R3-8.
+   *
+   * <p>
+   * <b>"A live member code of yours opens the club door" was rendered under a card reading
+   * "This code has run out and can't be renewed without signal."</b> The first sentence is
+   * about the club's rule and the second about the glass, and nothing said so — so a member
+   * standing in the dark with no code read a promise about one. The rule is still worth
+   * stating; what this flag withdraws is the last clause of it.
+   * </p>
+   */
+  hasLiveCode: boolean;
   /** Switches the page to the member's own code. E-H2 (3). */
   onUseMemberCode: () => void;
 }) {
   const { door, cached, cachedMinutesAgo, loading, failure, code, staleSince, onUseMemberCode } = props;
+  const codeState = { hasLiveCode: props.hasLiveCode };
 
   if (door) {
-    const line = describeStanding(door, code);
+    const line = describeStanding(door, code, codeState);
     return (
       <section className="space-y-2">
         <h2 className="text-sm font-medium">
@@ -92,7 +107,7 @@ export function StandingLine(props: {
           </Button>
         )}
         {line.action?.kind === "book_a_court" && (
-          <Link to="/schedule" className="inline-flex items-center min-h-11 text-sm text-accent-strong underline underline-offset-2 hover:no-underline">
+          <Link to="/schedule" className={MEMBER_DOOR_ACTION_LINK}>
             {line.action.label}
           </Link>
         )}
@@ -113,7 +128,7 @@ export function StandingLine(props: {
     );
   }
 
-  const cachedLine = cached ? describeStanding(cached.value, code) : null;
+  const cachedLine = cached ? describeStanding(cached.value, code, codeState) : null;
   return (
     <section className="space-y-2">
       <h2 className="text-sm font-medium">
@@ -152,7 +167,9 @@ export function StandingLine(props: {
 function OfflineHalf({ rosterMaxEntries }: { rosterMaxEntries: number | null }) {
   return (
     <details className="text-sm">
-      <summary className="inline-flex items-center min-h-11 cursor-pointer text-accent-strong">
+      {/* R3-36: it was accent-coloured with no underline, ten pixels from four underlined
+          links — the one interactive phrase on the block that did not look like the others. */}
+      <summary className={cn("cursor-pointer", MEMBER_DOOR_LINK_TAPPABLE)}>
         {OFFLINE_DETAILS_SUMMARY}
       </summary>
       <p className="mt-1 text-text-secondary">{offlineDetailsBody(rosterMaxEntries)}</p>

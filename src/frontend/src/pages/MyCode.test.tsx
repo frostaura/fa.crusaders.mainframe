@@ -1762,7 +1762,13 @@ describe("MyCode at a club with a door", () => {
     }));
 
     const line = await screen.findByText(/no membership on file for you/);
-    expect(line).toHaveTextContent(/A live member code of yours opens the club door/);
+    // R3-5: the mechanism, stated — and NOT the bare promise on top of it. It used to end
+    // "A live member code of yours opens the club door" directly after telling her the club
+    // has no record of her and that it is worth putting right, which reads as the screen
+    // arguing with itself. What the door does is still said; what it no longer does is
+    // finish on a promise as though the records were in order.
+    expect(line).toHaveTextContent(/This club's doors don't check for one/);
+    expect(line).not.toHaveTextContent(/A live member code of yours opens the club door/);
     // Neither neighbour's sentence: not "yours is active" and not "yours is not active".
     expect(line).not.toHaveTextContent(/Yours is active/);
     expect(screen.queryByText(/not active/i)).toBeNull();
@@ -2226,7 +2232,10 @@ describe("MyCode at a club with a door", () => {
 
     // The symbol fills what the card has, up to the size a scanner needs at arm's length.
     expect(qrBox.className).toContain("w-full");
-    expect(qrBox.className).toMatch(/max-w-\[\d+px\]/);
+    // R3-29 (D-M2) added a HEIGHT bound beside the px ceiling: at 320x568 a 288px square put
+    // the readable code and the "which code" label below the fold. `vh` is not `rem` — it is
+    // the viewport, not the reader's font — so the root-invariance rule above is untouched.
+    expect(qrBox.className).toMatch(/max-w-\[min\(\d+px,\d+vh\)\]/);
     // And the card is what is pinned: a px gutter off the viewport below `sm`, px padding
     // throughout. Both halves have to be here — a pinned symbol inside a rem-padded card is
     // the arrangement that overflowed.
@@ -2595,5 +2604,385 @@ describe("MyCode at a club with a door", () => {
     const hint = await screen.findByText(/Tap the code to fill the screen/);
     expect(hint.className).toContain("text-sm");
     expect(hint.className).not.toContain("text-xs");
+  });
+});
+
+
+/**
+ * Round 3's member findings, on the page rather than in the copy module.
+ *
+ * <p>
+ * Each of these is a sentence or a control that was defensible in isolation and wrong
+ * beside what the page drew next to it. The copy module's own table holds the sentences
+ * against each other; this holds the PAGE against what it renders — which is where a dead
+ * code sitting above a promise, two retry buttons for one failure, and focus landing on
+ * `<body>` actually live.
+ * </p>
+ */
+describe("MyCode — round 3", () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); forgetLastKnown(); cleanup(); });
+
+  const CODE = {
+    code: "7K3M9XQ2RD5A", kind: "booking", expires_in_seconds: 900, court_number: 3,
+    starts_at: "2026-09-19T17:00:00Z", doors: true,
+    door_opens_at: "2026-09-19T16:30:00Z", door_closes_at: "2026-09-19T18:05:00Z",
+  };
+  const EMPTY_HISTORY = { items: [], next_cursor: null, retention_days: 90, timezone: "Africa/Johannesburg" };
+
+  function renderBoth(door: Record<string, unknown>, code: Record<string, unknown> = CODE) {
+    const stub = stubFetch([
+      { method: "POST", path: "/api/v1/me/qr/generate", body: code },
+      { path: "/api/v1/me/door", body: door },
+      { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+    ]);
+    renderPage(<MyCodePage />);
+    return stub;
+  }
+
+  // --- R3-4: a field that never arrived is not a club that has shut something ----------
+
+  /**
+   * <b>It was on every account's screen in the round-3 evidence.</b> The review stack's API
+   * predated WIRE-R2 §4 and sent no `doors_shut` at all, so every sentence built from it
+   * compared `undefined` against `"none"`, failed, and fell through to the "some" arm —
+   * while the arm that picks the promise fell through the other way and said a live member
+   * code opens the club door. One missing field, two sentences, arguing with each other.
+   */
+  it("says nothing about shut doors when the response carried no doors_shut", async () => {
+    const door = memberDoorsOnFixture({ policy: "active_member" }) as Record<string, unknown>;
+    delete door.doors_shut;
+    renderBoth(door, { ...CODE, kind: "ident", court_number: null, starts_at: undefined,
+      door_opens_at: null, door_closes_at: null });
+
+    await screen.findByText(/What opens the door for you right now/);
+    expect(screen.queryByText(/has shut/)).toBeNull();
+    // And with the field unread, no promise either — the page does not know what it would
+    // be promising about.
+    expect(screen.queryByText(/A live member code of yours opens the club door/)).toBeNull();
+  });
+
+  /** WIRE-R3 §5: when the club says which doors, the member is told which. */
+  it("names the doors the club has shut", async () => {
+    renderBoth(memberDoorsOnFixture({
+      policy: "active_member", doors_shut: "some", doors_shut_names: ["Front door", "Side door"],
+    }));
+
+    expect(await screen.findByText(/Front door, and Side door|Front door and Side door/)).toBeInTheDocument();
+  });
+
+  // --- R3-7: one window, from the payload ---------------------------------------------
+
+  /**
+   * <b>"from a few minutes before your slot until it ends", a line above "it works at a door
+   * from 18:05 until 20:50", for a court at 20:15.</b> Two windows, two hours and ten minutes
+   * apart, both introduced as what THIS code does, with nothing to say one was the court's
+   * and the other the door's. The reviewer read it as the screen contradicting itself, which
+   * is the right reading — nobody holds two windows for one twelve-character string.
+   *
+   * <p>
+   * The court's own activation window is not on this page's wire at all (the cue window is a
+   * tenant setting no member endpoint carries), so "a few minutes" was the page guessing. The
+   * payload carries the DOOR window exactly, and it is the only clock window the card states.
+   * </p>
+   */
+  it("states one window for the code on screen, and takes it from the payload", async () => {
+    renderBoth(memberDoorsOnFixture({
+      policy: "booking_window", next_booking: memberDoorBookingFixture(),
+      // The disagreeing pair from the finding: 30 minutes of early entry against a door
+      // window that opens 130 minutes before the slot. Whichever the server means, the card
+      // may not invent a third answer beside it.
+      early_entry_minutes: 30,
+    }));
+
+    const detail = await screen.findByText(/For your booking only/);
+    expect(detail).not.toHaveTextContent(/a few minutes before your slot/);
+    expect(detail).not.toHaveTextContent(/until it ends/);
+    // Whatever clock faces the card carries, they are the payload's own — never a count of
+    // minutes derived from a different field.
+    const clocks = (detail.textContent ?? "").match(/\d{1,2}:\d{2}/g) ?? [];
+    for (const clock of clocks) {
+      expect(document.body.textContent).toContain(clock);
+    }
+    expect(detail.textContent).not.toMatch(/30 minutes/);
+  });
+
+  /**
+   * And where the card IS the source of door truth — `/me/door` did not land, so there is no
+   * standing line to carry the window — the window it states is the payload's own, both
+   * edges, once.
+   */
+  it("names the door window off door_opens_at and door_closes_at, and nothing else", async () => {
+    stubFetch([
+      { method: "POST", path: "/api/v1/me/qr/generate", body: {
+        ...CODE, door_opens_at: "2099-01-01T16:30:00Z", door_closes_at: "2099-01-01T18:05:00Z",
+      } },
+      unreachable("/api/v1/me/door"),
+      { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+    ]);
+    renderPage(<MyCodePage />);
+
+    const detail = await screen.findByText(/For your booking only/);
+    // 16:30Z and 18:05Z in the club's own day.
+    expect(detail).toHaveTextContent(/opens the club door from 18:30 until 20:05/);
+    // One "from … until", not two: the invented court window is what made it two.
+    expect((detail.textContent ?? "").match(/from \d{1,2}:\d{2}/g) ?? []).toHaveLength(1);
+    expect(detail).not.toHaveTextContent(/a few minutes before your slot/);
+  });
+
+  // --- R3-8: sixty seconds without signal --------------------------------------------
+
+  /**
+   * <b>Three sentences about one failure and two buttons that do the same thing.</b> The
+   * reviewer's offline run captured it verbatim: "This code has run out and can't be renewed
+   * without signal… Try again", then "Run out · Refresh", then "Couldn't get a code — the
+   * club's system couldn't be reached. Check your connection and try again."
+   */
+  it("says a dead code has died once, with one way to try again", async () => {
+    stubFetch([
+      {
+        method: "POST", path: "/api/v1/me/qr/generate",
+        respond: (() => {
+          let n = 0;
+          return () => {
+            n += 1;
+            if (n === 1) return { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 0, doors: true };
+            throw new TypeError("Failed to fetch");
+          };
+        })(),
+      },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture({ policy: "active_member" }) },
+      { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+    ]);
+    renderPage(<MyCodePage />);
+
+    await screen.findByText(/This code has run out/);
+    await waitFor(() => expect(screen.getByText(/can't be renewed without signal/)).toBeInTheDocument());
+    // ONE retry. The card footer's Refresh stands down while the dead block is up.
+    expect(screen.queryByRole("button", { name: /^Refresh$/ })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Try again" })).toHaveLength(1);
+    // ONE sentence about it.
+    expect(screen.queryByText(/Couldn't get a code/)).toBeNull();
+  });
+
+  /**
+   * <b>R3-8(a).</b> "A live member code of yours opens the club door" was rendered under a
+   * card reading "This code has run out and can't be renewed without signal. There's nothing
+   * on this screen for a door or a court box to read."
+   */
+  it("does not promise a live code on a screen that has none", async () => {
+    stubFetch([
+      {
+        method: "POST", path: "/api/v1/me/qr/generate",
+        body: { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 0, doors: true },
+      },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture({ policy: "active_member" }) },
+      { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+    ]);
+    renderPage(<MyCodePage />);
+
+    await screen.findByText(/This code has run out/);
+    expect(screen.queryByText(/A live member code of yours opens the club door/)).toBeNull();
+    // The club's rule is still worth stating; only the last clause is withdrawn.
+    expect(screen.getByText(/Your club opens its doors for any active member/)).toBeInTheDocument();
+  });
+
+  /**
+   * <b>R3-8(b).</b> An ident code lives about a minute and rotates; a booking code is minted
+   * with the booking and is a stable token until the slot ends plus the grace window. The
+   * sixty seconds that kill one leave the other perfectly good — and it was sitting in the
+   * last-known store, unread, under "there's nothing on this screen for a door to read".
+   */
+  it("offers a booking code it still holds when the live one has run out", async () => {
+    // Both edges in the future: a booking code past its own door window opens nothing, and
+    // offering one would be the hopeful QR in the dark this whole arm exists to refuse.
+    rememberQr({ ...CODE, expires_in_seconds: 3_600, door_closes_at: "2099-01-01T18:05:00Z" } as never);
+    stubFetch([
+      {
+        method: "POST", path: "/api/v1/me/qr/generate",
+        body: { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 0, doors: true },
+      },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture({ policy: "active_member" }) },
+      { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+    ]);
+    renderPage(<MyCodePage />);
+
+    await screen.findByText(/This code has run out/);
+    const fallback = await screen.findByLabelText("Your booking code");
+    expect(fallback).toHaveTextContent(CODE.code);
+    expect(screen.getByText(/Your booking code is still good/)).toBeInTheDocument();
+  });
+
+  /** And never a code from the store that has itself run out. A hopeful QR in the dark. */
+  it("offers nothing when the booking code it holds has run out too", async () => {
+    rememberQr({ ...CODE, expires_in_seconds: 0, door_closes_at: "2099-01-01T18:05:00Z" } as never);
+    stubFetch([
+      {
+        method: "POST", path: "/api/v1/me/qr/generate",
+        body: { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 0, doors: true },
+      },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture({ policy: "active_member" }) },
+      { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+    ]);
+    renderPage(<MyCodePage />);
+
+    await screen.findByText(/This code has run out/);
+    expect(screen.queryByLabelText("Your booking code")).toBeNull();
+  });
+
+  // --- R3-10: Escape from the full-screen code ----------------------------------------
+
+  /**
+   * <b>Escape, Done and the hardware back button all left focus on `<body>`.</b> For a
+   * keyboard user that is the top of the document — the next Tab starts from the skip link,
+   * so closing the code threw away their place on the page. Focus belongs on the control
+   * that opened the overlay.
+   */
+  it("gives focus back to the code when the full-screen view closes", async () => {
+    renderBoth(memberDoorsOnFixture({ policy: "active_member" }));
+
+    const trigger = await screen.findByRole("button", { name: "Show your code full screen" });
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole("dialog", { name: /full screen/i });
+    expect(dialog).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByRole("button", { name: "Show your code full screen" })).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
+  });
+
+  // --- R3-29: the most urgent thing was below the fold --------------------------------
+
+  /**
+   * <b>Measured at 390×844: the decision card's top edge at y=829 against a 734px
+   * scrollport.</b> The club's own answer to "why didn't the door open", ninety-five pixels
+   * below the fold, on the screen of somebody standing at the door.
+   *
+   * <p>
+   * It is PINNED rather than moved, because moving it back above the code re-opens D10 — a
+   * decision arriving pushed the QR down 290px on a screen held against a scanner. The card
+   * stays where it is; one line of it sits on the glass until the member has seen it.
+   * </p>
+   *
+   * <p>
+   * The observer is stubbed rather than polyfilled: what is being tested is what the page
+   * does with the answer, and jsdom lays nothing out, so a real observer here would report
+   * every element as invisible and prove nothing.
+   * </p>
+   */
+  function stubIntersection(): (visible: boolean) => void {
+    let fire: ((entries: { isIntersecting: boolean }[]) => void) | null = null;
+    class Stub {
+      constructor(cb: (entries: { isIntersecting: boolean }[]) => void) { fire = cb; }
+      observe() { /* the test drives it */ }
+      disconnect() { /* nothing held */ }
+    }
+    vi.stubGlobal("IntersectionObserver", Stub);
+    return (visible: boolean) => act(() => { fire?.([{ isIntersecting: visible }]); });
+  }
+
+  it("pins one line of the decision while the card itself is out of sight", async () => {
+    const intersect = stubIntersection();
+    renderBoth(memberDoorsOnFixture({
+      policy: "active_member",
+      last_decision: memberDoorDecisionFixture({ released: true, reason: "ok" }),
+    }));
+
+    await screen.findByText(/That is what the door's board reported doing/);
+    // Nothing pinned while the card is on screen — a second copy of a sentence the member
+    // is already reading is noise.
+    intersect(true);
+    expect(screen.queryByTestId("decision-peek")).toBeNull();
+
+    intersect(false);
+    const peek = screen.getByTestId("decision-peek");
+    expect(peek).toHaveTextContent("The lock released.");
+    // The card carries `role="status"`; a second announcement of the same sentence is the
+    // defect R3-26 names on the admin side. So the pin is out of the accessibility tree and
+    // out of the tab order, and is a visual affordance only.
+    expect(peek).toHaveAttribute("aria-hidden", "true");
+    expect(peek.querySelector("button")).toHaveAttribute("tabindex", "-1");
+    expect(peek.closest("[role=status]")).toBeNull();
+  });
+
+  /** And the page makes room for it, so the club's number is not underneath it. */
+  it("leaves room at the foot of the page for the pinned line", async () => {
+    stubIntersection();
+    renderBoth(memberDoorsOnFixture({
+      policy: "active_member",
+      last_decision: memberDoorDecisionFixture({ released: true, reason: "ok" }),
+    }));
+
+    await screen.findByText(/That is what the door's board reported doing/);
+    const heading = screen.getByRole("heading", { name: "Your code" });
+    expect(heading.parentElement!.className).toMatch(/pb-24/);
+  });
+
+  // --- R3-30: one control, one lifetime ------------------------------------------------
+
+  /**
+   * <b>"Use your member code instead" was a one-way door.</b> Three controls offered it and
+   * not one said what it had done or how to undo it; the only way back was a checkbox
+   * further down the page labelled for a COURT errand, which a member who had just pressed a
+   * door button has no reason to connect to their missing booking code.
+   */
+  it("offers the way back once the member code is the one on screen", async () => {
+    const stub = stubFetch([
+      {
+        method: "POST", path: "/api/v1/me/qr/generate",
+        respond: (req) => (req.path.includes("kind=ident")
+          ? { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true }
+          : CODE),
+      },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture({
+        policy: "active_member", next_booking: memberDoorBookingFixture(),
+      }) },
+      { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+    ]);
+    renderPage(<MyCodePage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Use your member code instead" }));
+    const back = await screen.findByRole("button", { name: "Back to your booking code" });
+    // The lifetime, said where the member arrived rather than only on the checkbox — and
+    // said ONCE: the checkbox's own hint is the promise about turning it on, this is the
+    // statement about it being on, and neither repeats the other.
+    expect(screen.getByText(/You're on your member code, and will be for the rest of this visit/))
+      .toBeInTheDocument();
+
+    fireEvent.click(back);
+    await waitFor(() => expect(readWalkUpChoice()).toBe(false));
+    await waitFor(() => {
+      expect(stub.calls.filter((c) => c.method === "POST" && !c.path.includes("kind=")).length)
+        .toBeGreaterThan(1);
+    });
+  });
+
+  /**
+   * And the lifetime the hint claims is the one the switch has. It is `sessionStorage`, so
+   * it survives a reload of the same tab and does not survive next Saturday.
+   */
+  it("keeps the member-code choice across a remount, as the hint says it does", async () => {
+    const stub = stubFetch([
+      {
+        method: "POST", path: "/api/v1/me/qr/generate",
+        respond: (req) => (req.path.includes("kind=ident")
+          ? { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true }
+          : CODE),
+      },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture({ policy: "active_member" }) },
+      { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+    ]);
+    renderPage(<MyCodePage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Use your member code instead" }));
+    await waitFor(() => expect(readWalkUpChoice()).toBe(true));
+
+    cleanup();
+    stub.calls.length = 0;
+    renderPage(<MyCodePage />);
+
+    await waitFor(() => {
+      expect(stub.calls.some((c) => c.method === "POST" && c.path.includes("kind=ident"))).toBe(true);
+    });
+    expect(stub.calls.filter((c) => c.method === "POST" && !c.path.includes("kind="))).toHaveLength(0);
   });
 });

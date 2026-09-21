@@ -19,11 +19,14 @@ import {
   HISTORY_RETRY,
   HISTORY_SHOW_MORE,
   HISTORY_TITLE,
+  TIME_UNCERTAIN_NOTE,
   UNNAMED_DOOR,
   historyAsOf,
   historyChip,
+  historyGroupLabel,
   historyLine,
   historyRetention,
+  timeIsUncertain,
 } from "../../lib/memberDoorCopy";
 
 /**
@@ -61,18 +64,101 @@ import {
 
 type Phase = "loading" | "ready" | "failed";
 
-function HistoryRow({ row, timezone }: { row: MemberDoorHistoryRow; timezone: string | undefined }) {
+/**
+ * Adjacent rows that are identical in every VISIBLE field, collapsed into one. R3-31.
+ *
+ * <p>
+ * <b>The member's own record showed six rows the same.</b> Same door, same minute, same
+ * outcome, same sentence — because a code held against a scanner fires repeatedly and every
+ * attempt is a row. Six copies of one line is a record nobody reads, and a member counting
+ * them concludes six separate things happened to them.
+ * </p>
+ *
+ * <p>
+ * <b>The grouping key is what the ROW DRAWS, not what the row is.</b> Two rows a minute
+ * apart that render the same clock face are indistinguishable on screen and are what the
+ * finding is about; two rows that differ in any drawn field are two rows and stay two,
+ * however close together. Building the key from the rendered strings is what keeps that
+ * true when a field is added to the row, rather than a second list of fields to remember to
+ * extend.
+ * </p>
+ *
+ * <p>
+ * Only ADJACENT rows collapse. The list is ordered on the delivery axis and a group that
+ * reached across an unrelated row in between would be the card reordering a member's own
+ * record to make it tidier.
+ * </p>
+ */
+type HistoryGroup = {
+  row: MemberDoorHistoryRow;
+  /** How many rows this one stands for, including itself. 1 for an ordinary row. */
+  count: number;
+  /** Seconds between the first and last of them, for the marker. */
+  spanSeconds: number;
+};
+
+function drawnKey(row: MemberDoorHistoryRow, timezone: string | undefined): string {
+  return [
+    clubDayAndClock(row.at, timezone),
+    row.door_name ?? UNNAMED_DOOR,
+    historyChip(row).label,
+    historyLine(row, timezone) ?? "",
+    timeIsUncertain(row) ? "approx" : "",
+    // A separator no rendered string can contain, so two rows cannot be made to look
+    // identical by a door name that happens to end where a chip label begins.
+  ].join("\u0000");
+}
+
+function groupHistoryRows(
+  rows: MemberDoorHistoryRow[], timezone: string | undefined,
+): HistoryGroup[] {
+  const out: HistoryGroup[] = [];
+  let key: string | null = null;
+  let firstAt = 0;
+  for (const row of rows) {
+    const next = drawnKey(row, timezone);
+    const at = Date.parse(row.at);
+    const last = out[out.length - 1];
+    if (last && next === key) {
+      last.count += 1;
+      // Both ends, because the rows are in delivery order and their own instants are not
+      // guaranteed to be — an offline burst arrives newest-delivered first.
+      const span = Number.isNaN(at) || Number.isNaN(firstAt) ? 0 : Math.abs(firstAt - at) / 1000;
+      last.spanSeconds = Math.max(last.spanSeconds, span);
+      continue;
+    }
+    key = next;
+    firstAt = at;
+    out.push({ row, count: 1, spanSeconds: 0 });
+  }
+  return out;
+}
+
+function HistoryRow({ group, timezone }: { group: HistoryGroup; timezone: string | undefined }) {
+  const { row, count, spanSeconds } = group;
   const chip = historyChip(row);
   const line = historyLine(row, timezone);
+  // R3-17. The server flags a clamped clock; the page can also see an impossible order for
+  // itself. Either way the member is told the minute is approximate rather than left to
+  // reconcile two numbers that cannot both be right.
+  const uncertain = timeIsUncertain(row);
   return (
     <li className="py-3 md:grid md:grid-cols-[auto_1fr_auto] md:items-baseline md:gap-3">
       {/* The club's day, not the viewer's. O1 — and stated once under the list, not here. */}
-      <p className="text-sm tabular-nums">{clubDayAndClock(row.at, timezone)}</p>
+      <p className="text-sm tabular-nums">
+        {uncertain && <span aria-hidden="true">~</span>}
+        {clubDayAndClock(row.at, timezone)}
+        {/* R3-31 — a de-duplication marker, never a total. See `historyGroupLabel`. */}
+        {count > 1 && <span className="ml-1.5 text-text-muted">{historyGroupLabel(count, spanSeconds)}</span>}
+      </p>
       <div className="flex items-center justify-between gap-2 md:contents">
         <p className="text-sm text-text-secondary">{row.door_name ?? UNNAMED_DOOR}</p>
         <Badge tone={chip.tone}>{chip.label}</Badge>
       </div>
       {line && <p className="text-xs text-text-muted md:col-start-2 md:col-span-2">{line}</p>}
+      {uncertain && (
+        <p className="text-xs text-warning-strong md:col-start-2 md:col-span-2">{TIME_UNCERTAIN_NOTE}</p>
+      )}
     </li>
   );
 }
@@ -208,7 +294,9 @@ export function DoorHistoryCard(props: { onlyWithRows?: boolean } = {}) {
         {phase === "ready" && rows.length > 0 && (
           <>
             <ul className="divide-y divide-border">
-              {rows.map((row, i) => <HistoryRow key={`${row.at}-${i}`} row={row} timezone={timezone} />)}
+              {groupHistoryRows(rows, timezone).map((group, i) => (
+                <HistoryRow key={`${group.row.at}-${i}`} group={group} timezone={timezone} />
+              ))}
             </ul>
             {/* Once per list. Every face in it is the club's day, which is the right choice
                 and an invisible one for a member reading it from anywhere else. */}

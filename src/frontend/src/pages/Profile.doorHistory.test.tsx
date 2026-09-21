@@ -622,4 +622,101 @@ describe("My door history", () => {
     expect(screen.queryByText(/08:04$/)).toBeNull();
     expect(screen.getByText("Times are the club's own.")).toBeInTheDocument();
   });
+
+  // --- R3-31: six rows identical in every visible field ------------------------------
+
+  /**
+   * <b>A scanner held against a code fires repeatedly, and every attempt is a row.</b> The
+   * reviewer's own record showed six of them — same door, same minute, same outcome, same
+   * sentence — which is a record nobody can read and, worse, one a member counts and
+   * concludes six separate things happened to them.
+   *
+   * <p>
+   * The collapse is on what the row DRAWS, not on what it is, so it can never hide a
+   * difference the member can see. And the marker is a de-duplication count, not a total:
+   * the card's own rule is that the moment it totals anything it has become entry
+   * statistics, which is asserted separately below and still holds.
+   * </p>
+   */
+  it("says six identical rows once, with a count and the span they fell in", async () => {
+    const burst = [0, 1, 2, 3, 4, 5].map((i) => memberDoorHistoryRowFixture({
+      at: `2026-09-19T06:04:0${i}Z`, released: false, reason: "not_recognised",
+    }));
+    renderProfile([
+      { path: "/api/v1/me/door/history", body: HISTORY({ items: burst }) },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+
+    await screen.findByText("Code not recognised");
+    expect(screen.getAllByText("Code not recognised")).toHaveLength(1);
+    expect(screen.getByText(/×6 within 5 seconds/)).toBeInTheDocument();
+  });
+
+  /** Rows that differ in anything a member can see are two rows, however close together. */
+  it("never collapses rows that do not look the same", async () => {
+    renderProfile([
+      {
+        path: "/api/v1/me/door/history",
+        body: HISTORY({ items: [
+          memberDoorHistoryRowFixture({ at: "2026-09-19T06:04:00Z", released: false, reason: "too_early" }),
+          memberDoorHistoryRowFixture({ at: "2026-09-19T06:04:01Z", released: false, reason: "not_recognised" }),
+        ] }),
+      },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+
+    await screen.findByText("Too early");
+    expect(screen.getByText("Code not recognised")).toBeInTheDocument();
+    expect(screen.queryByText(/×\d/)).toBeNull();
+  });
+
+  // --- R3-17: a time the door's own clock could not vouch for -------------------------
+
+  /**
+   * <b>"the door told us at 19:22" about a 19:48 scan.</b> A board has no real-time clock;
+   * it takes the time from the club and guesses while it is cut off, so a delivery instant
+   * earlier than the scan it reports is the clock being wrong rather than a journey that
+   * finished before it started. Printing it hands a member two numbers that cannot both be
+   * right, on the one screen that exists to let them check what happened.
+   */
+  it("withholds an impossible delivery order and calls the minute approximate", async () => {
+    renderProfile([
+      {
+        path: "/api/v1/me/door/history",
+        body: HISTORY({ items: [memberDoorOfflineHistoryRowFixture({
+          at: "2026-09-19T17:48:00Z", delivered_at: "2026-09-19T17:22:00Z",
+        })] }),
+      },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+
+    await screen.findByText(/From the door's own list/);
+    expect(screen.queryByText(/The club heard at/)).toBeNull();
+    expect(screen.getByText(/The door's clock was out/)).toBeInTheDocument();
+  });
+
+  /** The server's own flag is honoured too — it knows about a clamp this screen cannot see. */
+  it("honours the server's own time_uncertain flag", async () => {
+    renderProfile([
+      {
+        path: "/api/v1/me/door/history",
+        body: HISTORY({ items: [memberDoorHistoryRowFixture({ time_uncertain: true })] }),
+      },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+
+    await screen.findByText("Lock released");
+    expect(screen.getByText(/The door's clock was out/)).toBeInTheDocument();
+  });
+
+  /** And an ordinary row says nothing of the kind. A warning on every row is no warning. */
+  it("says nothing about a clock that was fine", async () => {
+    renderProfile([
+      { path: "/api/v1/me/door/history", body: HISTORY({ items: [memberDoorOfflineHistoryRowFixture()] }) },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+
+    await screen.findByText(/The club heard at 08:09/);
+    expect(screen.queryByText(/The door's clock was out/)).toBeNull();
+  });
 });
