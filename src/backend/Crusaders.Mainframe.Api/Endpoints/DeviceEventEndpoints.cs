@@ -303,7 +303,14 @@ public static class DeviceEventEndpoints
         CancellationToken ct)
     {
         var (device, refusal) = await DeviceIdentity.ResolveAsync(services.Db, batch.Mac, ct);
-        if (refusal is not null) return refusal;
+        if (refusal is not null)
+        {
+            // A board this club has not registered, on a route that does not auto-register.
+            // Worth a row: it is how a club finds out a box was re-flashed, swapped, or is
+            // pointed at the wrong club. Folded by code, because the MAC is the caller's.
+            services.Faults.UnregisteredMac(batch.Mac);
+            return refusal;
+        }
 
         var events = (batch.Events ?? []).Take(MaxBatch).ToList();
 
@@ -593,7 +600,7 @@ public static class DeviceEventEndpoints
     private static async Task<ActivationOutcome> ActivationOutcomeAsync(
         Device device, DeviceEventDto e, DateTimeOffset occurredAt, DeviceEventServices services, CancellationToken ct)
     {
-        var (db, _, codes, _, _, _, _, _, _) = services;
+        var (db, _, codes, _, _, _, _, _, _, _) = services;
 
         // Live at the scan, not at the upload: the roster token expires at the slot's end
         // plus grace, and a box offline past that is precisely the box whose evidence
@@ -851,7 +858,7 @@ public static class DeviceEventEndpoints
     private static async Task<ActivationOutcome> ReleaseOutcomeAsync(
         Device device, DeviceEventDto e, DateTimeOffset occurredAt, DeviceEventServices services, CancellationToken ct)
     {
-        var (db, _, _, _, bookings, _, _, _, _) = services;
+        var (db, _, _, _, bookings, _, _, _, _, _) = services;
         if (e.Court is not { } relay || relay < 0) return new ActivationOutcome("unpaired", null, ReleaseKind);
 
         var session = await db.DeviceEventReceipts.AsNoTracking()
@@ -950,7 +957,7 @@ public static class DeviceEventEndpoints
     /// </summary>
     private static async Task<SettleOutcome> SettleAsync(DeviceEventServices services, ActivationTarget t, CancellationToken ct)
     {
-        var (db, _, _, activation, bookings, settingsAccessor, _, _, _) = services;
+        var (db, _, _, activation, bookings, settingsAccessor, _, _, _, _) = services;
         var settings = await settingsAccessor.GetAsync(ct);
 
         for (var attempt = 0; attempt < 3; attempt++)
@@ -1095,7 +1102,7 @@ public static class DeviceEventEndpoints
         DeviceEventServices services, Device device, DeviceEventDto e, EventFacts time,
         ActivationOutcome? outcome, CancellationToken ct)
     {
-        var (db, tenant, _, _, _, _, _, _, _) = services;
+        var (db, tenant, _, _, _, _, _, _, _, _) = services;
 
         var receipt = new DeviceEventReceipt
         {
@@ -1690,7 +1697,9 @@ public sealed record DeviceEventServices(
     /// <summary>For the fault rows this route raises off the request thread. See <see cref="DeviceErrorService.InBackground"/>.</summary>
     IServiceScopeFactory Scopes,
     /// <summary>The logger factory those background writes report their own failures to.</summary>
-    ILoggerFactory Logs);
+    ILoggerFactory Logs,
+    /// <summary>The refusal sites' fault recorder. See <see cref="DeviceFaultSink"/>.</summary>
+    DeviceFaultSink Faults);
 
 /// <summary>
 /// One event as the box queued it. Names mirror <c>lib/eventq</c>'s wire form. <c>court</c> is

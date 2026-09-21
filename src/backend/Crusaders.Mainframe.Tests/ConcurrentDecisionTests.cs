@@ -483,7 +483,8 @@ public sealed class ConcurrentDecisionTests
             upload.ServiceProvider.GetRequiredService<TenantSettingsAccessor>(),
             upload.ServiceProvider.GetRequiredService<CourtLightStateService>(),
             upload.ServiceProvider.GetRequiredService<IServiceScopeFactory>(),
-            upload.ServiceProvider.GetRequiredService<ILoggerFactory>());
+            upload.ServiceProvider.GetRequiredService<ILoggerFactory>(),
+            upload.ServiceProvider.GetRequiredService<DeviceFaultSink>());
 
         var outcome = await DeviceEventEndpoints.ActivateOrReverseAsync(
             services, new LateActivation(court, stale, club.MemberId, "offline", scannedAt, 2_700_000), default);

@@ -26,7 +26,22 @@ public sealed record DeviceErrorReport(
     string? Detail = null,
     int? Court = null,
     int Count = 1,
-    DateTimeOffset? At = null);
+    DateTimeOffset? At = null,
+    /// <summary>
+    /// Fold every report of this code into ONE row for the club, ignoring which board or MAC
+    /// it came from.
+    ///
+    /// <para>
+    /// <b>This is the flood control for the codes whose subject is attacker-chosen.</b>
+    /// <c>unregistered_mac</c> is raised by anything holding the club's device key, once per
+    /// MAC it invents — so fingerprinting it on the MAC, as every other code is fingerprinted,
+    /// would let one key-holder open a thousand rows and bury the club's real faults under
+    /// them. Folded by code it is a single row whose count climbs and whose detail carries the
+    /// most recent MAC, which is also the more useful sentence: "412 boards you have not
+    /// registered tried to check in" rather than 412 rows saying one each.
+    /// </para>
+    /// </summary>
+    bool FoldByCode = false);
 
 /// <summary>
 /// The one writer of <c>device_errors</c> — GOAL item 7's ingest.
@@ -182,8 +197,12 @@ public sealed class DeviceErrorService
         DeviceErrorReport report, string code, string? detail, int count, DateTimeOffset at,
         CancellationToken ct)
     {
-        var fingerprint = DeviceErrorFingerprint.Of(
-            _tenant.TenantId, report.DeviceId, report.ClaimedMac, code, report.Court, detail);
+        // A folded code ignores the board AND the detail, so every report lands on one row.
+        // See DeviceErrorReport.FoldByCode for which codes need that and why.
+        var fingerprint = report.FoldByCode
+            ? DeviceErrorFingerprint.Of(_tenant.TenantId, null, null, code, null, null)
+            : DeviceErrorFingerprint.Of(
+                _tenant.TenantId, report.DeviceId, report.ClaimedMac, code, report.Court, detail);
         return await UpsertRawAsync(
             report, new Upsert(code, detail, report.Court, fingerprint, at, count), ct);
     }

@@ -58,7 +58,7 @@ public static class DeviceEndpoints
         ILoggerFactory logs,
         CancellationToken ct)
     {
-        var (db, tenant, settings, registry, codes, _, _, _) = services;
+        var (db, tenant, settings, registry, codes, _, _, _, faults) = services;
 
         // Validated BEFORE the MAC is resolved, so a firmware that believes in a device kind
         // this server does not have is told so whether or not its row already exists. The
@@ -71,7 +71,15 @@ public static class DeviceEndpoints
         }
 
         var (device, refusal) = await DeviceIdentity.ResolveOrRegisterAsync(db, registry, req.Mac, hintedKind, ct);
-        if (refusal is not null) return refusal;
+        if (refusal is not null)
+        {
+            // The only refusal this path can give that a club can act on: their ceiling of
+            // unacknowledged boards is full, so a real board they have just installed will not
+            // register until somebody names the ones already waiting. Folded by code — see
+            // DeviceFaultSink — because the MAC is the caller's to choose.
+            faults.TooManyUnacknowledged(req.Mac);
+            return refusal;
+        }
 
         // Read once. The roster's relative seconds are all measured from the same instant,
         // because the box anchors them to the moment it accepted this response.
@@ -724,7 +732,9 @@ public sealed record HeartbeatServices(
     CourtLightStateService Lights,
     /// <summary>For the fault rows this heartbeat raises off the request thread. See <see cref="DeviceErrorService.InBackground"/>.</summary>
     IServiceScopeFactory Scopes,
-    ILoggerFactory Logs);
+    ILoggerFactory Logs,
+    /// <summary>The refusal sites' fault recorder. See <see cref="DeviceFaultSink"/>.</summary>
+    DeviceFaultSink Faults);
 
 /// <summary>
 /// What a court box reports about itself. Only <c>mac</c> is required — it is the board's

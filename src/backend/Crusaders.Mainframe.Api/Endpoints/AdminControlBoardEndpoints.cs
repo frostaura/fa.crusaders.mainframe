@@ -56,9 +56,15 @@ public static class AdminControlBoardEndpoints
         var userId = ctx.User.Id();
         if (userId is null) return Results.Unauthorized();
 
+        // THE ROLES TRAVEL WITH THE TICKET, and without them this route was 403 for
+        // everybody — including the admin who had just minted the ticket one request earlier.
+        // The base IssueOneTime carries no role claims, so the handler's own IsInRole("admin")
+        // check could never pass. The check is right and stays: the purpose alone says which
+        // PATH a ticket opens, not who may open it, and a member who came by one must not be
+        // able to read the club's whole evening with it.
         var ticket = jwt.IssueOneTime(
             userId.Value, tenant.TenantId, tenant.TenantSlug,
-            TokenPurposes.ControlBoardStream, TokenPurposes.WalletStreamTicketTtl);
+            TokenPurposes.ControlBoardStream, TokenPurposes.WalletStreamTicketTtl, ["admin"]);
 
         return Results.Ok(new
         {

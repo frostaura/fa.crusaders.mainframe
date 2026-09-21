@@ -286,6 +286,7 @@ builder.Services.AddSingleton<Crusaders.Mainframe.Api.Services.Realtime.IRealtim
 // The one writer for the IoT error log. Scoped: it takes the request's DbContext and tenant,
 // and its background variant opens a scope of its own.
 builder.Services.AddScoped<DeviceErrorService>();
+builder.Services.AddScoped<DeviceFaultSink>();
 builder.Services.AddScoped<CourtLightStateService>();
 builder.Services.AddScoped<ControlBoardReader>();
 builder.Services.AddSingleton<AccessTokenRevocationList>();

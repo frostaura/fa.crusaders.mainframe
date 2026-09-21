@@ -98,6 +98,7 @@ public sealed class TestHost : IAsyncDisposable
                               Crusaders.Mainframe.Api.Services.Realtime.InProcessRealtimeBus>();
         services.AddScoped<CourtLightStateService>();
         services.AddScoped<DeviceErrorService>();
+        services.AddScoped<DeviceFaultSink>();
         services.AddScoped<ControlBoardReader>();
         services.AddScoped<ActivationPlumbing>();
         // Sign-out revocation. A singleton in the app too — a per-scope list would forget every

@@ -509,6 +509,87 @@ public sealed class DeviceRelayRestoreHttpTests
     }
 
     /// <summary>
+    /// A WALK-UP is restored too, and named.
+    ///
+    /// <para>
+    /// <b>It would be easy to leave out and impossible to notice.</b> A walk-up is a real
+    /// booking row — <c>CreateWalkUpAsync</c> writes one with the buyer as its user and the
+    /// purchase instant as both its start and its charge — so the restore predicate covers it
+    /// by construction rather than by a special case. But "by construction" is exactly the
+    /// kind of claim that stops being true when somebody adds a clause, and the member it
+    /// would strand is the one who has just paid cash at the box for the next forty minutes
+    /// and has no booking on any screen to point at.
+    /// </para>
+    ///
+    /// <para>
+    /// The only thing on the row that tells a walk-up from a booking is
+    /// <c>ChargedAt == StartsAt</c>, which is what the fixture reproduces.
+    /// </para>
+    ///
+    /// <para><b>Mutant:</b> add "and the booking was made before it started" to the predicate —
+    /// a plausible-looking guard that silently excludes every walk-up.</para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_walk_up_is_restored_just_as_a_booking_is()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+        using var factory = CreateFactory();
+        var box = await SeedAsync(factory, 1);
+
+        Guid bookingId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var now = TestHost.UtcNowStorable();
+            var booking = new Booking
+            {
+                TenantId = box.TenantId,
+                CourtId = box.CourtIds[1],
+                UserId = box.MemberId,
+                BookedByUserId = box.MemberId,
+                PaidByUserId = box.MemberId,
+                ActorUserId = box.MemberId,
+
+                // A walk-up starts the instant it is sold, and is charged at that same
+                // instant — one `now` serves both in CreateWalkUpAsync.
+                StartsAt = now.AddMinutes(-5),
+                ChargedAt = now.AddMinutes(-5),
+                EndsAt = now.AddMinutes(35),
+                SliceMinutes = 15,
+                SliceCount = 3,
+                AmountChargedCredits = 24m,
+                Status = BookingStatus.Booked,
+                CheckedInAt = now.AddMinutes(-5),
+                LightsOnCuedAt = now.AddMinutes(-5),
+            };
+            db.Bookings.Add(booking);
+            await db.SaveChangesAsync();
+            bookingId = booking.Id;
+        }
+
+        using var client = factory.CreateClient();
+        var element = Assert.Single(RelaysOf(await BeatAsync(client, box)));
+        var parts = element.Split('|');
+
+        Assert.Equal("0", parts[0]);
+        Assert.InRange(int.Parse(parts[1]), 34 * 60, 35 * 60 + 5);
+        Assert.Equal(bookingId.ToString("N")[..8], parts[2]);
+
+        // And the confirmation names the member who bought it, so the control board does not
+        // say "restored after power loss" against nobody for a court somebody is standing on.
+        await BeatAsync(client, box, new { restored_relays = 1 });
+
+        using var after = factory.Services.CreateScope();
+        var db2 = after.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var state = await db2.CourtLightStates.IgnoreQueryFilters().FirstAsync(s => s.CourtId == box.CourtIds[1]);
+
+        Assert.Equal(LightState.On, state.State);
+        Assert.Equal(LightCause.RestoreAfterPowerDip, state.Cause);
+        Assert.Equal(box.MemberId, state.CausedByUserId);
+        Assert.Equal(bookingId, state.BookingId);
+    }
+
+    /// <summary>
     /// The box's own <c>relay_state</c> report becomes the <c>confirmed</c> half of the
     /// control board — and an ABSENT key confirms nothing.
     ///
