@@ -626,20 +626,46 @@ def _members_with_a_door_window_open(door: Any, horizon_minutes: int) -> set:
     depends on how long the two `BackgroundService` waits took. So the member is
     CHOSEN from the database rather than picked by index and hoped about.
 
-    Conservative on `Status`: `Booked`, `NoShow` and `Completed` all still open
-    a door — `D8` and `D9` pin both of the last two — so all three count as
-    "this member has somewhere to be"."""
+    THE PREDICATE IS `GateAccess.HoldsALiveBookingAsync`'s, TRANSLATED, and the
+    translation is load-bearing in two places a looser one got wrong:
+
+      * `Booked`, `NoShow` and `Completed` all count. `D8` and `D9` pin the last
+        two: a swept no-show's code and a completed booking's code both still
+        open a door;
+      * the upper edge is `StartsAt + SliceMinutes x SliceCount + grace`, and
+        **NOT `EndsAt`**. `GateAccess` says why in full: the no-show sweep
+        TRUNCATES `EndsAt` to its own clock, so `EndsAt` is a second upper edge,
+        lower than the real one and wrong in two directions at once. A query
+        keyed on `EndsAt > now()` therefore reports a member as free while the
+        server still considers them due on a court — which is exactly how this
+        section's first two runs handed the `too_early` fixture to somebody the
+        relief rule then let in.
+
+    The two can only disagree across a settings change, which this section does
+    not make while it is reading."""
+    grace = int(door.settings.get("grace_window_minutes") or 0)
     rows = door.sql.run(
         f"""select distinct "UserId"::text from bookings where "Status" in (0,2,3) """
-        f"""and "StartsAt" <= now() + interval '{horizon_minutes} minutes' and "EndsAt" > now()""")
+        f"""and "StartsAt" <= now() + interval '{horizon_minutes} minutes' """
+        f"""and "StartsAt" + make_interval(mins => "SliceMinutes" * "SliceCount" + {grace}) >= now()""")
     return {line.strip() for line in rows.splitlines() if line.strip()}
 
 
-def _free_member(door: Any, busy: set, taken: set) -> dict:
-    """A spare member with nothing open at the door and nothing this section has
-    already given a booking to."""
+def _free_member(door: Any, busy: set) -> dict:
+    """A spare member with nothing open at the door.
+
+    ONE is enough, and asking for one rather than two is the difference between
+    a fixture that is normally available and one that normally is not: the
+    evening books for the spares on its own schedule and three of the four are
+    routinely mid-booking by the time this section runs.
+
+    The same member carries both policy fixtures, and the arithmetic is why. A
+    booking `H + 10` minutes out is outside the `active_member` horizon, so its
+    own code is `too_early`; it is also outside the narrower `booking_window`
+    horizon, so the same member's IDENT code is `no_booking`. Two refusals the
+    policy pair exists to distinguish, from one member and one booking."""
     for member in door.spare:
-        if member["user_id"] not in busy and member["user_id"] not in taken:
+        if member["user_id"] not in busy:
             return member
     raise StepFailed(
         "every spare member has a booking open at the door, so no `too_early` or `no_booking` "
@@ -697,13 +723,15 @@ def dsim_firmware(door: Any) -> None:
     # spare that is depends on how long the evening's two `BackgroundService` waits
     # took, which is exactly the hidden-wall-clock input this harness has been
     # bitten by three times.
+    # Read afresh: `horizon_minutes()` and the grace window below both come from
+    # here, the evening switches the policy twice before this point, and a stale
+    # `H` would pick the fixture against a rule the server is no longer applying.
+    door.read_settings()
     h = door.horizon_minutes()
     busy = _members_with_a_door_window_open(door, h)
-    holder = _free_member(door, busy, set())
-    stranger = _free_member(door, busy, {holder["user_id"]})
-    print(f"  [fixture] too_early holder {holder['user_id'][:8]}, no_booking stranger "
-          f"{stranger['user_id'][:8]}; {len(busy)} member(s) already have a door window open",
-          flush=True)
+    holder = _free_member(door, busy)
+    print(f"  [fixture] the too_early / no_booking member is {holder['user_id'][:8]}; "
+          f"{len(busy)} member(s) already have a door window open", flush=True)
     live = sc.admin_book(door.w, 3, door.w.m_user_id, sc.now_utc() + timedelta(minutes=5), 2,
                          "DSIM live booking")
     early = sc.admin_book(door.w, 4, holder["user_id"],
@@ -795,6 +823,25 @@ def dsim_firmware(door: Any) -> None:
         # footprint to two members.
         suspended = holder
         ident = _minted_ident(door, suspended["user_id"])
+        # THE FIXTURE, PROBED BEFORE THE FIRMWARE IS BLAMED FOR IT.
+        #
+        # `too_early` is the one refusal here whose fixture can rot underneath it:
+        # the relief rule opens the door for a code outside its own window when
+        # the holder's OTHER court is running, so a fixture handed to a member the
+        # evening happens to have booked answers `ok` — correctly — and reads as a
+        # firmware defect. It did, twice, before the member was chosen from the
+        # database rather than by index.
+        #
+        # So the API is asked first, through door_evening's own played client. The
+        # two assertions then say different things: this one is about the FIXTURE,
+        # and the one below is about the firmware agreeing with it.
+        probe = door.gate.scan(early_code)
+        chk("DSIM", "FIXTURE PROBE: the API itself answers `too_early` for this code, so the "
+                    "assertion below is about the firmware rather than about which member the "
+                    "evening happened to leave free",
+            probe.status == 200 and probe.get("opened") is False and probe.get("reason") == "too_early",
+            f"{probe.summary()} body={probe.text[:140]} member={holder['user_id'][:8]}")
+
         refusals = [
             ("a code that never existed", "ZZZZZZZZZZZZ", "not_recognised"),
             (f"a booking {h + 10} min out, before its own door window opens (H={h})", early_code,
@@ -826,11 +873,18 @@ def dsim_firmware(door: Any) -> None:
         # `no_booking`, which is the policy question and needs the narrower one.
         door.set_policy("booking_window")
         try:
-            stranger_ident = _minted_ident(door, stranger["user_id"])
+            # THE SAME MEMBER AND THE SAME BOOKING as the `too_early` fixture. A
+            # booking `H + 10` out is outside the active_member horizon, which is
+            # what makes its own code `too_early`; it is also outside the narrower
+            # booking_window one, which is what makes this member's IDENT code
+            # `no_booking`. Two refusals the policy pair exists to distinguish,
+            # from one fixture — and one member is all the evening usually leaves
+            # free by this point.
+            stranger_ident = _minted_ident(door, holder["user_id"])
             mark = sim.mark()
             r = sim.scan(stranger_ident)
-            chk("DSIM", "under booking_window, an active member with nothing booked -> the firmware "
-                        "refuses with `no_booking`",
+            chk("DSIM", "under booking_window, a member whose only booking is beyond the narrower "
+                        "horizon -> the firmware refuses with `no_booking`",
                 not r.flag("released") and r.get("reason") == "no_booking", r.raw)
             chk("DSIM", "  ...and the relay NEVER MOVES for `no_booking`", not sim.relay_moved(mark),
                 f"relay lines: {[l.raw for l in sim.since(mark, 'relay')]}")
