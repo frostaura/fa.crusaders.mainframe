@@ -203,7 +203,7 @@ export type LiveBalance = {
 export function useLiveBalance({
   enabled,
   transport,
-  policy = LIVE_BALANCE_POLICY,
+  policy: given,
   random = Math.random,
 }: {
   /** Authenticated, and not held behind the forced-password-change gate. */
@@ -212,6 +212,11 @@ export function useLiveBalance({
   policy?: LiveBalancePolicy;
   random?: () => number;
 }): LiveBalance {
+  // Defaulted here rather than in the parameter list so that a caller passing `undefined`
+  // — which `BalanceProvider` does on every render in production — gets the SAME object
+  // identity each time. A fresh default literal would be a new dependency of the connection
+  // effect on every render, which tears the stream down and reopens it, for ever.
+  const policy = given ?? LIVE_BALANCE_POLICY;
   const [balance, setBalance] = useState<number | null>(null);
   const [state, setState] = useState<LiveState>("loading");
   const [lastConfirmedAt, setLastConfirmedAt] = useState<number | null>(null);

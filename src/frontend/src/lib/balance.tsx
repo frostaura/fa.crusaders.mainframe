@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 import { useAuth } from "./auth";
-import { useLiveBalance, type BalanceDelta, type BalanceTransport, type LiveState } from "./liveBalance";
+import { useLiveBalance, type BalanceDelta, type BalanceTransport, type LiveBalancePolicy, type LiveState } from "./liveBalance";
 
 /** How low a balance has to be before the chip warns, in credits. Mirrors the amber threshold. */
 export const LOW_BALANCE_CREDITS = 50;
@@ -92,10 +92,21 @@ export function useBalance(): BalanceState {
   return ctx;
 }
 
-export function BalanceProvider({ children, transport }: {
+export function BalanceProvider({ children, transport, policy }: {
   children: React.ReactNode;
   /** For tests. Production uses the SSE transport, which is the programme's settled choice. */
   transport?: BalanceTransport;
+  /**
+   * For tests. The same state machine with its waits shortened.
+   *
+   * <p>
+   * A seam rather than fake timers everywhere: the reconnect, the idle close and the poll are
+   * three interleaved schedules, and a test that advances a fake clock through all three is
+   * asserting about its own arithmetic as much as about the machine. Shortening the policy
+   * keeps the machine identical and makes the test's waits real.
+   * </p>
+   */
+  policy?: LiveBalancePolicy;
 }) {
   const auth = useAuth();
   /**
@@ -121,6 +132,7 @@ export function BalanceProvider({ children, transport }: {
   const live = useLiveBalance({
     enabled: auth.status === "authenticated" && !gated,
     transport,
+    policy,
   });
 
   return (
