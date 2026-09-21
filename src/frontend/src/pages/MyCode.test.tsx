@@ -310,7 +310,7 @@ describe("MyCode", () => {
     renderPage(<MyCodePage />);
 
     expect(await screen.findByLabelText("Your code")).toHaveTextContent("ZZ9P4T6WQ8HN");
-    expect(screen.getByText("Walk-up code · any court")).toBeInTheDocument();
+    expect(screen.getByText("Member code · any court")).toBeInTheDocument();
     expect(screen.getByText(/pay for someone else's time/)).toBeInTheDocument();
     expect(screen.getByText(/Refreshes in 1m 00s/)).toBeInTheDocument();
   });
@@ -331,7 +331,7 @@ describe("MyCode", () => {
     // The default fetch asks for nothing: the server decides.
     expect(stub.calls[0].path).toBe("/api/v1/me/qr/generate");
 
-    fireEvent.click(screen.getByRole("checkbox", { name: /Walk up \/ pay for someone/ }));
+    fireEvent.click(screen.getByRole("tab", { name: "Member code" }));
 
     // Asked for outright, not hoped for. `kind=ident` is what makes the answer a
     // walk-up code rather than the booking code the default would hand back again.
@@ -339,7 +339,7 @@ describe("MyCode", () => {
       expect(stub.calls.some((c) => c.path === "/api/v1/me/qr/generate?kind=ident")).toBe(true);
     });
     expect(await screen.findByLabelText("Your code")).toHaveTextContent("ZZ9P4T6WQ8HN");
-    expect(screen.getByText("Walk-up code · any court")).toBeInTheDocument();
+    expect(screen.getByText("Member code · any court")).toBeInTheDocument();
     // And the QR carries that code, not the booking one still in the member's memory.
     expect(screen.getByRole("img", { name: "QR code ZZ9P4T6WQ8HN" })).toBeInTheDocument();
   });
@@ -350,10 +350,9 @@ describe("MyCode", () => {
     renderPage(<MyCodePage />);
     await screen.findByLabelText("Your code");
 
-    const toggle = screen.getByRole("checkbox", { name: /Walk up \/ pay for someone/ });
-    fireEvent.click(toggle);
-    await waitFor(() => expect(screen.getByText("Walk-up code · any court")).toBeInTheDocument());
-    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("tab", { name: "Member code" }));
+    await waitFor(() => expect(screen.getByText("Member code · any court")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("tab", { name: "Booking code" }));
 
     await waitFor(() => {
       expect(stub.calls.filter((c) => c.path === "/api/v1/me/qr/generate")).toHaveLength(2);
@@ -567,7 +566,7 @@ describe("MyCode", () => {
     // Nothing that offers the member a code, or implies one is coming.
     expect(screen.queryByLabelText("Your code")).toBeNull();
     expect(screen.queryByRole("img", { name: /QR code/ })).toBeNull();
-    expect(screen.queryByLabelText("Walk up / pay for someone")).toBeNull();
+    expect(screen.queryByRole("tablist")).toBeNull();
     expect(screen.queryByRole("button", { name: /Refresh/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Try again/ })).toBeNull();
     expect(screen.queryByText(/start a walk-up on a free court/)).toBeNull();
@@ -627,7 +626,7 @@ describe("MyCode", () => {
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByText(/membership is suspended/i)).toBeNull();
     // And the whole page is back, walk-up switch and all.
-    expect(screen.getByRole("checkbox", { name: /Walk up \/ pay for someone/ })).toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "Which code to show" })).toBeInTheDocument();
   });
 
   /**
@@ -708,7 +707,7 @@ describe("MyCode", () => {
     await advance(0);
 
     expect(screen.queryByLabelText("Your code")).toBeNull();
-    expect(screen.queryByLabelText("Walk up / pay for someone")).toBeNull();
+    expect(screen.queryByRole("tablist")).toBeNull();
     expect(screen.getByRole("alert")).toHaveTextContent(/membership is suspended/i);
   });
 
@@ -994,7 +993,7 @@ describe("MyCode at a club with a door", () => {
     // And the code card's own clause is gone, because it would be a second, vaguer copy.
     expect(screen.queryByText(/doors open earlier than its courts do/)).toBeNull();
     // With the offer to switch, which is what a member holding the wrong code needs.
-    expect(screen.getAllByRole("button", { name: "Use your member code instead" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Switch to Member code" }).length).toBeGreaterThan(0);
   });
 
   /**
@@ -1173,8 +1172,16 @@ describe("MyCode at a club with a door", () => {
       last_decision: memberDoorDecisionFixture({ reason: "no_booking" }),
     }));
 
-    const book = await screen.findByRole("link", { name: "Book a court" });
-    expect(book).toHaveAttribute("href", "/schedule");
+    /*
+      `findAll`, because the decision card and the standing line can both offer it — the
+      refusal says "you had no booking" and the standing rule says "this club wants one",
+      and they are the same act. Which of the two renders first is a timing accident, and a
+      `findBy` here resolved on whichever won the race. Every one of them must go to the
+      schedule; that is the rule this case is about.
+    */
+    const books = await screen.findAllByRole("link", { name: "Book a court" });
+    expect(books.length).toBeGreaterThan(0);
+    for (const book of books) expect(book).toHaveAttribute("href", "/schedule");
   });
 
   /**
@@ -2083,33 +2090,35 @@ describe("MyCode at a club with a door", () => {
     expect(screen.queryByText(/door/i)).toBeNull();
   });
 
-  // --- D13: the escape hatch, remembered and offered --------------------------------------
+  // --- item 9: the capsule tabs, remembered and offered ------------------------------------
 
-  it("gives the walk-up switch a target a thumb can hit in the dark", async () => {
+  it("gives every segment a target a thumb can hit in the dark", async () => {
     renderBoth(memberDoorsOnFixture());
     await screen.findByLabelText("Your code");
 
-    const label = screen.getByText("Walk up / pay for someone").closest("label")!;
-    // 16px was the finding. The whole row is the label and the whole row is the target.
-    expect(label.className).toContain("min-h-11");
-    expect(label.querySelector("input")).toBeTruthy();
+    // 16px was the finding against the checkbox this replaced. The floor is stated in
+    // PIXELS, not rem: a touch target is a fingertip and does not scale with the club's
+    // text setting, which is the same rule the header row already carries.
+    for (const tab of screen.getAllByRole("tab")) {
+      expect(tab.className).toContain("min-h-[44px]");
+    }
   });
 
   it("remembers the walk-up choice for the rest of the session", async () => {
     renderBoth(memberDoorsOnFixture(), IDENT_CODE);
     await screen.findByLabelText("Your code");
-    fireEvent.click(screen.getByRole("checkbox", { name: /Walk up \/ pay for someone/ }));
+    fireEvent.click(screen.getByRole("tab", { name: "Member code" }));
     await waitFor(() => expect(readWalkUpChoice()).toBe(true));
 
     cleanup();
     const stub = renderBoth(memberDoorsOnFixture(), IDENT_CODE);
     await screen.findByLabelText("Your code");
 
-    // The remembered choice decides the FIRST fetch, not merely the checkbox's tick.
+    // The remembered choice decides the FIRST fetch, not merely which segment looks selected.
     await waitFor(() => {
       expect(stub.calls.some((c) => c.method === "POST" && c.path.includes("kind=ident"))).toBe(true);
     });
-    expect(screen.getByRole("checkbox", { name: /Walk up \/ pay for someone/ })).toBeChecked();
+    expect(screen.getByRole("tab", { name: "Member code" })).toHaveAttribute("aria-selected", "true");
   });
 
   /**
@@ -2125,7 +2134,7 @@ describe("MyCode at a club with a door", () => {
 
     // CODE's door_closes_at is 18:05 — five minutes ago.
     expect(screen.getByText(/door window has closed/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Use your member code instead" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Switch to Member code" })).toBeInTheDocument();
   });
 
   it("says nothing of the sort while the window is still open", async () => {
@@ -2135,7 +2144,7 @@ describe("MyCode at a club with a door", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
 
     expect(screen.queryByText(/door window has closed/i)).toBeNull();
-    expect(screen.queryByRole("button", { name: "Use your member code instead" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Switch to Member code" })).toBeNull();
   });
 
   // --- D14: the member's own record, one tap away ------------------------------------------
@@ -2474,7 +2483,12 @@ describe("MyCode at a club with a door", () => {
     expect(qr).toBeLessThan(order(screen.getByText(/The lock released/)));
     expect(qr).toBeLessThan(order(screen.getByText(/Show this to the scanner/)));
     expect(qr).toBeLessThan(order(screen.getByRole("heading", { name: /What opens the door/ })));
-    expect(qr).toBeLessThan(order(screen.getByRole("checkbox", { name: /Walk up/ })));
+    /*
+      Item 9 moved the CHOICE above the code — it is what says which code is on the glass,
+      so it belongs above the glass — while everything that EXPLAINS the code stays below
+      it. The rule this case exists for is unchanged and is asserted on the sentences.
+    */
+    expect(order(screen.getByRole("tablist", { name: "Which code to show" }))).toBeLessThan(qr);
   });
 
   // --- D12: the full-screen overlay --------------------------------------------------
@@ -2583,19 +2597,16 @@ describe("MyCode at a club with a door", () => {
    * C17 — the checkbox's accessible NAME was thirty words long, because the whole
    * explanation sat inside the label. A screen-reader user tabbing past heard the entire
    * paragraph read out as the name of a checkbox, every time, with no way to skip to the
-   * state.
+   * state. The tabs keep that rule: the segment's name is two words, and the explanation
+   * is the panel underneath it.
    */
-  it("gives the walk-up switch a short name and its explanation as a description", async () => {
-    renderBoth(memberDoorsOnFixture());
-    const box = await screen.findByRole("checkbox", { name: "Walk up / pay for someone" });
+  it("keeps the segment names to two words and puts the explanation in the panel", async () => {
+    renderBoth(memberDoorsOnFixture(), IDENT_CODE);
+    const tab = await screen.findByRole("tab", { name: "Member code" });
+    expect(tab.textContent).toBe("Member code");
 
-    const describedBy = box.getAttribute("aria-describedby");
-    expect(describedBy).toBeTruthy();
-    const explanation = document.getElementById(describedBy!);
-    expect(explanation?.textContent).toMatch(/starting on a free court now/);
-    // The LOW note: it sticks, and it says so. A member who turns it on and finds it still
-    // on concludes the switch is broken; one who is told what it does concludes nothing.
-    expect(explanation?.textContent).toMatch(/Stays on for the rest of this visit/);
+    const panel = document.getElementById(tab.getAttribute("aria-controls")!);
+    expect(panel?.textContent).toMatch(/start on a free court now/);
   });
 
   /** The hint that explains the page's one gesture, at 14px rather than 12. */
@@ -2918,13 +2929,14 @@ describe("MyCode — round 3", () => {
     expect(heading.parentElement!.className).toMatch(/pb-24/);
   });
 
-  // --- R3-30: one control, one lifetime ------------------------------------------------
+  // --- R3-30 / item 9: one control, one lifetime ----------------------------------------
 
   /**
    * <b>"Use your member code instead" was a one-way door.</b> Three controls offered it and
    * not one said what it had done or how to undo it; the only way back was a checkbox
    * further down the page labelled for a COURT errand, which a member who had just pressed a
-   * door button has no reason to connect to their missing booking code.
+   * door button has no reason to connect to their missing booking code. Item 9 made the way
+   * back a named tab at the top of the page, and named the button after it.
    */
   it("offers the way back once the member code is the one on screen", async () => {
     const stub = stubFetch([
@@ -2941,12 +2953,15 @@ describe("MyCode — round 3", () => {
     ]);
     renderPage(<MyCodePage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Use your member code instead" }));
-    const back = await screen.findByRole("button", { name: "Back to your booking code" });
-    // The lifetime, said where the member arrived rather than only on the checkbox — and
-    // said ONCE: the checkbox's own hint is the promise about turning it on, this is the
-    // statement about it being on, and neither repeats the other.
-    expect(screen.getByText(/You're on your member code, and will be for the rest of this visit/))
+    // findAll for the reason the "Book a court" case carries: the closed-window card and
+    // the standing line both offer this act, and which lands first is a timing accident.
+    fireEvent.click((await screen.findAllByRole("button", { name: "Switch to Member code" }))[0]);
+    // The way back is the tab, at the top of the page, named for what it shows — which is
+    // why R3-30's second button and its notice card are gone. The lifetime is said ONCE, in
+    // the panel the member is already reading.
+    const back = await screen.findByRole("tab", { name: "Booking code" });
+    await waitFor(() => expect(back).toHaveAttribute("aria-selected", "false"));
+    expect(screen.getByText(/keep getting your member code for the rest of this visit/))
       .toBeInTheDocument();
 
     fireEvent.click(back);
@@ -2973,7 +2988,7 @@ describe("MyCode — round 3", () => {
       { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
     ]);
     renderPage(<MyCodePage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Use your member code instead" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "Switch to Member code" }))[0]);
     await waitFor(() => expect(readWalkUpChoice()).toBe(true));
 
     cleanup();

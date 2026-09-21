@@ -642,17 +642,19 @@ test("a member with no membership on file is shown no tick for one", async ({ pa
  * D13/D14, on the assembled page: the escape hatch a member has to be able to find, and
  * the record that was three steps away from the screen where the question gets asked.
  */
-test("the walk-up switch is a target, and the member's own record is one tap away", async ({ page }) => {
+test("the code tabs are a target, and the member's own record is one tap away", async ({ page }) => {
   await signIn(page);
   await serveApi(page, [...COMMON, { path: "/api/v1/me/door", body: door() }]);
 
   await page.setViewportSize({ width: 360, height: 780 });
   await page.goto("/my-code");
 
-  const label = page.locator('label[for="walk-up"]');
-  // 16px was the finding — a quarter the height of everything else on the page, on the one
-  // control a member reaches for when the code on screen is the wrong one.
-  expect((await label.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  // 16px was the finding against the checkbox this replaced — a quarter the height of
+  // everything else on the page, on the one control a member reaches for when the code on
+  // screen is the wrong one. Every segment is a fingertip.
+  for (const tab of await page.getByRole("tab").all()) {
+    expect((await tab.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  }
 
   const history = page.getByRole("link", { name: "Your door history" });
   await expect(history).toHaveAttribute("href", "/profile#door-history");
@@ -995,7 +997,7 @@ test("a member holding a booking code is answered about that code, not about the
   // The window row is about the code on screen, not about a rule this club does not apply.
   await expect(panel).not.toContainText(/no window to wait for/);
   // And the one thing on this phone that might work is offered where she is looking.
-  await expect(panel.getByRole("button", { name: "Use your member code instead" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Switch to Member code" })).toBeVisible();
 });
 
 /**
@@ -1250,14 +1252,57 @@ test("the member-code switch says what it did and offers the way back", async ({
   ]);
 
   await page.goto("/my-code");
-  await page.getByRole("button", { name: "Use your member code instead" }).first().click();
+  await page.getByRole("button", { name: "Switch to Member code" }).first().click();
 
-  await expect(page.getByText(/You're on your member code, and will be for the rest of this visit/)).toBeVisible();
-  const back = page.getByRole("button", { name: "Back to your booking code" });
-  await expect(back).toBeVisible();
+  await expect(page.getByText(/keep getting your member code for the rest of this visit/)).toBeVisible();
+  // Item 9: the way back is a named tab at the top of the page, which is why R3-30's second
+  // button and its notice card are gone. It is selected-state, not a one-way door.
+  const back = page.getByRole("tab", { name: "Booking code" });
+  await expect(back).toHaveAttribute("aria-selected", "false");
   // 44px, like everything else a cold thumb has to find on this page.
   expect((await back.boundingBox())!.height).toBeGreaterThanOrEqual(44);
 
   await back.click();
-  await expect(page.getByText("Booking code", { exact: false }).first()).toBeVisible();
+  await expect(back).toHaveAttribute("aria-selected", "true");
+});
+
+/**
+ * Item 9, at the width that made the checkbox unfindable: the control that says WHICH code
+ * is on the glass was measured at y=1272 inside a 414px scroller at 320x568 — the last
+ * interactive thing on the page, two screens below the code it describes.
+ */
+test("the code choice is on the glass at 320x568, without scrolling", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [...COMMON, { path: "/api/v1/me/door", body: door() }]);
+
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/my-code");
+
+  const list = page.getByRole("tablist", { name: "Which code to show" });
+  const box = (await list.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(568);
+  // And nothing runs off the side at the narrowest width the product supports.
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+
+/**
+ * The contradiction D4 reproduced on two accounts: the card said "Walk-up code · any court"
+ * while the control that decided it said walk-up was off.
+ */
+test("never calls the code a walk-up code while a control says otherwise", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [
+    ...COMMON.filter((r) => r.path !== "/api/v1/me/qr/generate"),
+    {
+      method: "POST", path: "/api/v1/me/qr/generate",
+      body: { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true },
+    },
+    { path: "/api/v1/me/door", body: door({ next_booking: null, policy: "active_member" }) },
+  ]);
+
+  await page.goto("/my-code");
+  await expect(page.getByRole("tab", { name: "Member code" })).toHaveAttribute("aria-selected", "true");
+  expect(await page.locator("body").innerText()).not.toMatch(/walk-up code/i);
 });

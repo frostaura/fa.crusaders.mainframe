@@ -86,6 +86,59 @@ export const BANNED_IN_MEMBER_DOOR_COPY = [
  */
 export const UNNAMED_DOOR = "a club door";
 
+// --- item 9: the capsule tabs, and the offer that should not need them ------------------
+
+/**
+ * <b>The set is TWO, and shipping three would have been a lie.</b> (GOAL item 9, D4 §5.1)
+ *
+ * <p>
+ * The wire has two kinds: `MyQrKind` is `"booking" | "ident"`, and the generate call sends
+ * `"ident"` or nothing at all. "Walk-up" is not a third code — it is one of the two things
+ * the member code is FOR, the other being paying for somebody else's time. A third segment
+ * would POST an identical request, receive an identical payload and draw an identical QR,
+ * and a member would find out at a court box that two of the three tabs were the same tab.
+ * So the member-code panel names both uses in words, which is what a twenty-pixel checkbox
+ * labelled "Walk up / pay for someone" was trying to do from two screens below the fold.
+ * </p>
+ */
+export const CODE_TABS_LABEL = "Which code to show";
+export const BOOKING_CODE_TAB = "Booking code";
+export const MEMBER_CODE_TAB = "Member code";
+
+/**
+ * Why the Booking code tab is dimmed — and note what it does NOT say.
+ *
+ * <p>
+ * It quotes no window. The court's own activation window is not on this page's wire (the cue
+ * window is a tenant setting no member endpoint carries), so "no booking starting in the next
+ * two hours" would be the page inventing a number. What the page genuinely knows is that it
+ * asked the server to choose and the server chose the member code — which is the server
+ * saying, in the only way it can, that there is no booking code to show right now.
+ * </p>
+ */
+export const NO_BOOKING_CODE_REASON = "The club has no booking of yours to make a code for at the moment."
+  + " A booking code appears here when one is close enough to use.";
+
+/*
+ * There is deliberately no MEMBER_CODE_PANEL sentence. The code card sitting inside the panel
+ * already names both uses — "start on a free court now, or pay for someone else's time" — and
+ * a caption above it introducing the tab in its own words is two spellings of one fact forty
+ * pixels apart. The card IS the panel; see `CodeChoice`.
+ */
+
+/**
+ * <b>The choice's lifetime, stated as the tabs actually behave.</b>
+ *
+ * <p>
+ * Shown only when the member has CHOSEN the member code, because that is the only choice
+ * that is remembered: the booking tab sends "let the server decide", which is the absence of
+ * a preference rather than the opposite one. See `lib/lastKnown.readWalkUpChoice` — same key,
+ * same `"1" | "0"` values, so a member mid-session across this deploy keeps their choice.
+ * </p>
+ */
+export const CODE_CHOICE_STICKY = "You'll keep getting your member code for the rest of this visit, until you"
+  + " tap Booking code.";
+
 /** The three answers the wire can carry. Anything else is {@link normaliseDoorsShut}'s fourth. */
 const DOORS_SHUT_VALUES: readonly MemberDoorsShut[] = ["none", "some", "all"];
 
@@ -492,8 +545,8 @@ function armTooEarly(ctx: DecisionContext): Arm {
       // She is ALREADY holding the right one. There is nothing to switch to and nothing to
       // wait for; what she needs is to be told the code on screen is not the refused one.
       ? "The code on this screen now is your member code, which this club's doors do open — hold that one up."
-      : `Your member code isn't tied to a booking and opens the door now — switch with`
-        + ` "${USE_MEMBER_CODE_INSTEAD}".`;
+      : `Your member code isn't tied to a booking and opens the door now — tap "${MEMBER_CODE_TAB}" at the`
+        + " top of this screen.";
     return {
       tone: "info",
       headline: "That was your booking code, which isn't live yet.",
@@ -1085,7 +1138,7 @@ function codeLineFor(code: CodeOnScreen | null, offerMemberCode: boolean, zone: 
   const from = bookingClock(code.doorOpensAt, zone);
   const until = bookingClock(code.doorClosesAt, zone);
   const swap = offerMemberCode
-    ? ` Your member code isn't tied to a booking — switch with "${USE_MEMBER_CODE_INSTEAD}".`
+    ? ` Your member code isn't tied to a booking — tap "${MEMBER_CODE_TAB}" at the top of this screen.`
     : "";
   return `The booking code on screen is bounded by its own window whatever rule a club applies: it works at a`
     + ` door from ${from} until ${until}, and not outside that.${swap}`;
@@ -1393,18 +1446,12 @@ export const DOOR_SECTION_CHECKING = "Checking whether this club's doors need an
 export const DOOR_SECTION_UNKNOWN = "This screen can't tell you what its doors need from you — or whether this"
   + " club has any. Whatever is written on the door is the way in until it can.";
 
-/**
- * The walk-up switch's own persistence, said out loud. LOW note.
- *
- * <p>
- * It is remembered for the rest of the browsing session (`sessionStorage`), which is a
- * deliberate window — long enough to survive a trip to the schedule and a phone that killed
- * the tab in a pocket, short enough that Tuesday's choice does not decide Saturday's code.
- * A member who turns it on and sees it still on tomorrow concludes it is broken; a member
- * who is told what it does concludes nothing.
- * </p>
+/*
+ * `WALK_UP_STICKY_HINT` lived here — "Stays on for the rest of this visit, until you turn it
+ * off." It described a checkbox, and the checkbox is gone (item 9). The same fact, in the
+ * words the tabs actually behave in, is `CODE_CHOICE_STICKY` at the top of this file; keeping
+ * a second spelling beside it is how two sentences about one rule come to disagree.
  */
-export const WALK_UP_STICKY_HINT = "Stays on for the rest of this visit, until you turn it off.";
 
 /**
  * D5 — a code that has run out and could not be replaced.
@@ -1849,8 +1896,8 @@ function concludeFromRefusal(input: DiagnosisInput, refusal: NonNullable<Diagnos
     + ` ${line}`;
   if (input.offerMemberCode) {
     // The one thing on this phone that might work, and the member has to be told it exists.
-    return plain(`${lead} Your member code isn't bounded by a booking — "${USE_MEMBER_CODE_INSTEAD}" below`
-      + " switches to it.");
+    return plain(`${lead} Your member code isn't bounded by a booking — "${MEMBER_CODE_TAB}" at the top of`
+      + " this screen shows it.");
   }
   /*
     R3-6, the other half. A member already holding the code this club's rule admits has
@@ -1934,7 +1981,7 @@ function concludeFrom(input: DiagnosisInput): Sentence {
   // and that window was the whole answer the check could not see. E-H2 (1).
   if (input.codeWindow && !input.codeWindow.open) {
     const swap = input.offerMemberCode
-      ? ` Your member code isn't bounded by a booking — "${USE_MEMBER_CODE_INSTEAD}" below switches to it.`
+      ? ` Your member code isn't bounded by a booking — "${MEMBER_CODE_TAB}" at the top of this screen shows it.`
       : "";
     return plain(`The booking code on screen doesn't work at a door until ${input.codeWindow.opensAtClock}, and`
       + ` a booking code has that window whatever rule a club applies.${swap}`);
@@ -2087,9 +2134,7 @@ export const HISTORY_REFRESH = "Refresh";
  */
 export const HISTORY_LINK_LABEL = "Your door history";
 
-// --- D13: the walk-up switch, and the offer that should not need it ---------------------
-
-export const WALK_UP_LABEL = "Walk up / pay for someone";
+// --- item 9: the door offer that used to point at a checkbox ----------------------------
 
 /**
  * What the page says when the booking code on screen has stopped opening a door.
@@ -2105,37 +2150,28 @@ export const WALK_UP_LABEL = "Walk up / pay for someone";
 export const BOOKING_DOOR_WINDOW_CLOSED = "Your booking's door window has closed, so this booking code won't"
   + " open a club door now.";
 
-export const USE_MEMBER_CODE_INSTEAD = "Use your member code instead";
-
 /**
- * The way BACK. R3-30 — and its absence was the whole of the finding.
+ * The button three cards offer, <b>named after the tab it moves to</b>. (item 9)
  *
  * <p>
- * <b>"Use your member code instead" was a one-way door.</b> Three separate controls offered
- * it — the closed-window card, the standing line, the self-check — and not one of them said
- * what it had done or how to undo it. The only way back was a sixteen-pixel checkbox further
- * down the page labelled "Walk up / pay for someone", which is a COURT errand: a member who
- * had switched to get through a door had no reason to connect the two, and the member most
- * likely to need their booking code back is the one who just pressed the other button.
+ * It used to read "Use your member code instead", and the sentences beside it quoted that
+ * string as the thing to look for. Two names for one act, on a page whose audience the goal
+ * note describes as not good with technology. The tab is now the persistent control and the
+ * one every sentence names; this button is the same act offered where the member is already
+ * reading, so it wears the same words.
  * </p>
  *
  * <p>
- * It is the same switch underneath — one control, two labels for its two directions — so
- * there is one lifetime to explain and {@link WALK_UP_STICKY_HINT} is where it is explained.
+ * <b>The way BACK is the tab, which is why R3-30's second label is gone.</b> That finding
+ * was that "Use your member code instead" was a one-way door: three controls offered it and
+ * none said how to undo it, because the only way back was a checkbox two screens down
+ * labelled for a court errand. The Booking code tab is at the top of the page, is named for
+ * what it shows, and states which code is on screen at all times — so `BACK_TO_BOOKING_CODE`
+ * and `WALK_UP_ON_NOTICE` described a mechanism that no longer exists and are deleted rather
+ * than left to fire with stale authority. {@link CODE_CHOICE_STICKY} carries the lifetime.
  * </p>
  */
-export const BACK_TO_BOOKING_CODE = "Back to your booking code";
-
-/**
- * What the page says once the switch is on, where the member is looking. R3-30.
- *
- * <p>
- * The lifetime is stated here as well as on the checkbox because a member who arrived by
- * pressing a button on a different card has not read the checkbox, and "why is my booking
- * code gone" is the question that follows otherwise.
- * </p>
- */
-export const WALK_UP_ON_NOTICE = "You're on your member code, and will be for the rest of this visit.";
+export const USE_MEMBER_CODE_INSTEAD = `Switch to ${MEMBER_CODE_TAB}`;
 
 /** The offline marker on a row: the door decided from the list it had already downloaded. */
 export const HISTORY_OFFLINE_LINE = "From the door's own list — it couldn't reach the club at the time.";

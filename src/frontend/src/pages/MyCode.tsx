@@ -10,10 +10,13 @@ import { cn } from "../lib/utils";
 // doors: member
 import { type LastKnown, type LastKnownQr, minutesSince, readLastKnown } from "../lib/lastKnown";
 import {
-  BACK_TO_BOOKING_CODE,
+  BOOKING_CODE_TAB,
   BOOKING_DOOR_WINDOW_CLOSED,
   CLUB_TIME_NOTE,
-  WALK_UP_ON_NOTICE,
+  CODE_CHOICE_STICKY,
+  CODE_TABS_LABEL,
+  MEMBER_CODE_TAB,
+  NO_BOOKING_CODE_REASON,
   CONTACT_UNKNOWN,
   type CodeOnScreen,
   type ContactKnowledge,
@@ -22,8 +25,6 @@ import {
   HISTORY_LINK_LABEL,
   type ReadFailure,
   USE_MEMBER_CODE_INSTEAD,
-  WALK_UP_LABEL,
-  WALK_UP_STICKY_HINT,
   codeExpiredDeadEnd,
   describeStanding,
   liveContact,
@@ -43,6 +44,7 @@ import { useBoundaryRefresh } from "../components/member-door/useBoundaryRefresh
 import { useCountdownSeconds } from "../components/member-door/useCountdownSeconds";
 import { useMemberCode } from "../components/member-door/useMemberCode";
 import { useMemberDoor, useShownDecision } from "../components/member-door/useMemberDoor";
+import { SegmentedTabs } from "../components/member-door/CodeTabs";
 
 /**
  * The member's code — what they hold up to the scanner on the court box, and at the
@@ -340,8 +342,17 @@ function describeKind(qr: MyQrCode, meaning: CodeMeaningInput): { headline: stri
     };
   }
   return {
-    headline: "Walk-up code · any court",
-    detail: "Identifies you at any court box: start a walk-up on a free court, or pay for someone else's time. "
+    /*
+      Item 9 / D4 bug 5(a). This read "Walk-up code · any court" while the control that
+      decided it said walk-up was OFF — measured on two accounts, and the commonest state
+      there is: the server picks `ident` for a member with no booking, and the checkbox
+      rendered off a separate flag. The headline now uses the same two words the selected
+      tab does, so the page cannot name one thing twice and disagree with itself. "Walk-up"
+      has not been lost — it is one of the two USES named in the sentence below, which is
+      what the twenty-pixel checkbox was trying to say from two screens down.
+    */
+    headline: "Member code · any court",
+    detail: "Identifies you at any court box: start on a free court now, or pay for someone else's time. "
       + "It is not tied to a booking." + describeDoor(qr, meaning),
   };
 }
@@ -361,9 +372,8 @@ function describeKind(qr: MyQrCode, meaning: CodeMeaningInput): { headline: stri
  * </p>
  *
  * <p>
- * A string from a function, not JSX text, for the reason {@link WalkUpSwitch} carries in
- * full: lizard's .tsx lexer desyncs on an odd number of bare apostrophes in JSX text, and
- * the file already spends its odd one.
+ * A string from a function, not JSX text: lizard's .tsx lexer desyncs on an odd number of
+ * bare apostrophes in JSX text, and the file already spends its odd one.
  * </p>
  */
 function subtitleFor(doors: boolean): string {
@@ -434,92 +444,129 @@ function BarredCard(props: {
   );
 }
 
+/** Which of the two codes a segment stands for. The wire has exactly these two kinds. */
+type CodeTab = "booking" | "member";
+
+const PANEL_ID: Record<CodeTab, string> = { booking: "panel-booking-code", member: "panel-member-code" };
+
 /**
- * The "walk up / pay for someone" switch.
+ * Does the club have a booking code to give this member right now — and the third answer.
  *
  * <p>
- * Without it, a member with a booking within a couple of hours is handed a booking code
- * and nothing else — and a booking code is refused at every court but its own, so walking
- * up to a free court or paying for a friend was a trip to the desk.
+ * <b>It is derived from what the server has already said, never from an invented window.</b>
+ * D4's design sketched "no booking starting in the next 2 hours"; that number is not on this
+ * page's wire and would be the page guessing. What IS knowable: asking with no `kind` means
+ * "you choose", so a server that chose `ident` has told us there is no booking code to show.
+ * Asking for `ident` outright tells us nothing about bookings, so that case is `unknown` —
+ * and `unknown` leaves the tab live, because the client's standing rule on this surface is to
+ * fail towards OFFERING rather than towards hiding (`lib/scheduleGrid.ts` records why).
  * </p>
  */
-function WalkUpSwitch(props: { walkUp: boolean; loading: boolean; onChoose: (next: boolean) => void }) {
-  const { walkUp, loading, onChoose } = props;
+function bookingCodeAvailable(qr: MyQrCode | null, memberChoice: boolean): "yes" | "no" | "unknown" {
+  if (qr?.kind === "booking") return "yes";
+  if (!memberChoice && qr?.kind === "ident") return "no";
+  return "unknown";
+}
+
+/**
+ * Item 9 — the code switch as a capsule tab control, and the fix for the contradiction.
+ *
+ * <p>
+ * <b>The selected segment is derived from the code on the glass, not from a remembered
+ * boolean.</b> That one change is the whole of D4's bug 5(a): the card headline read
+ * "Walk-up code · any court" while the switch labelled "Walk up / pay for someone" was
+ * unchecked — reproduced on two accounts — because `describeKind` rendered off `qr.kind`
+ * and the switch rendered off a separate `walkUp` flag. Two sources of truth for one fact,
+ * disagreeing in the commonest case there is: no booking, nothing chosen, server picks ident.
+ * The member's PREFERENCE still exists and is still remembered — it is the argument to the
+ * next fetch, not the state of the control.
+ * </p>
+ *
+ * <p>
+ * <b>Above the QR</b>, which is a real trade. The checkbox was deliberately moved below the
+ * code because it cost ~96 px of the first screen; the capsule is about half that, and unlike
+ * a checkbox it is the thing that SAYS which code you are holding, which belongs above the
+ * code rather than under it. It was measured at y=1272 inside a 414 px scroller at 320x568 —
+ * the last interactive thing on the page.
+ * </p>
+ */
+function CodeChoice(props: {
+  qr: MyQrCode | null;
+  /** The member has asked for the member code outright, rather than letting the server pick. */
+  memberChoice: boolean;
+  onChoose: (next: boolean) => void;
+  /** The code card. It IS the panel's content — see below. */
+  children: React.ReactNode;
+}) {
+  const { qr, memberChoice, onChoose, children } = props;
+  const selected: CodeTab = qr?.kind === "booking" ? "booking" : "member";
+  const available = bookingCodeAvailable(qr, memberChoice);
+  const bookingDisabled = available === "no";
+
   return (
-    <Card className="p-0 sm:p-0">
+    <div className="space-y-3">
+      <SegmentedTabs<CodeTab>
+        label={CODE_TABS_LABEL}
+        value={selected}
+        panelId={(v) => PANEL_ID[v]}
+        onChange={(next) => onChoose(next === "member")}
+        segments={[
+          {
+            value: "booking",
+            label: BOOKING_CODE_TAB,
+            disabled: bookingDisabled,
+            disabledReason: bookingDisabled ? NO_BOOKING_CODE_REASON : undefined,
+          },
+          { value: "member", label: MEMBER_CODE_TAB },
+        ]}
+      />
       {/*
-        C17 — the LABEL is the four-word name, and the explanation is beside it rather than
-        inside it. Wrapping the whole block in the label made the control's accessible name
-        thirty words long: a screen-reader user tabbing past heard the entire paragraph read
-        out as the name of a checkbox, every time, with no way to skip to the state. The
-        explanation is `aria-describedby` instead, which is announced after the name and
-        state and can be interrupted.
+        <b>The code card IS the panel, and that is what stops the page saying one thing
+        twice.</b> The card's own sentence already names both uses of a member code — "start
+        on a free court now, or pay for someone else's time" — so a panel that introduced the
+        tab in its own words put two spellings of one fact forty pixels apart, which is the
+        noise round 3 spent itself removing. `aria-controls` then points at the thing the tab
+        actually governs rather than at a caption above it.
 
-        The hit area stays generous — `min-h-11` plus the padding, on a row that is still
-        far bigger than the 16 px box it replaced — it is simply no longer the paragraph.
+        No `tabIndex={0}`: the APG asks for it only on a panel with nothing focusable in it,
+        and this one holds the full-screen control and the refresh.
       */}
-      <div className="p-4 sm:p-6">
-        <label htmlFor="walk-up" className="flex min-h-11 cursor-pointer items-center gap-3">
-          <input
-            id="walk-up"
-            type="checkbox"
-            className="h-5 w-5 shrink-0"
-            checked={walkUp}
-            disabled={loading}
-            aria-describedby="walk-up-why"
-            onChange={(e) => onChoose(e.target.checked)}
-          />
-          <span className="text-sm font-medium">{WALK_UP_LABEL}</span>
-        </label>
-        {/* A string literal, not JSX text, and it has to stay one: lizard's .tsx lexer
-            desyncs on an odd number of bare apostrophes in JSX TEXT, and this sentence
-            carries the file's odd one. Written as text here it swallows MyCodePage
-            whole and `make complexity` reports a function nobody wrote. */}
-        <p id="walk-up-why" className="pl-8 text-xs text-text-muted">
-          {"Shows the code that works at any court, even when you have a booking coming up — for starting on a "
-            + "free court now, or paying for someone else's time. " + WALK_UP_STICKY_HINT}
-        </p>
+      <div id={PANEL_ID[selected]} role="tabpanel" aria-labelledby={`tab-${selected}`} className="space-y-2">
+        {children}
+        {selected === "member" && memberChoice && (
+          <p className="text-xs text-text-muted">{CODE_CHOICE_STICKY}</p>
+        )}
+        {/*
+          The REASON is the tablist's — it renders it under the segments, visibly, and points
+          the dimmed tab's aria-describedby at it, so one sentence serves both readers. What
+          belongs here is the way out of the state, which is a page concern.
+
+          Deliberately NOT the bare "Book a court" the standing line offers under the
+          booking-window rule: the two can appear on one screen, and two identical links a
+          hundred pixels apart is a member wondering which one is which.
+        */}
+        {bookingDisabled && (
+          <p className="text-xs text-text-muted">
+            <Link to="/schedule" className="text-accent-strong underline underline-offset-2 hover:no-underline">
+              Book a court to get one
+            </Link>
+          </p>
+        )}
       </div>
-    </Card>
+    </div>
   );
 }
 
-/**
- * What the page says once the walk-up switch is on, and the way back. R3-30.
+/*
+ * `WalkUpOnNotice` stood here — a card saying "You're on your member code, and will be for the
+ * rest of this visit" with a "Back to your booking code" button, because R3-30 found that
+ * "Use your member code instead" was a one-way door: three controls offered it and the only
+ * way back was a checkbox two screens down labelled for a court errand.
  *
- * <p>
- * <b>"Use your member code instead" was a one-way door.</b> Three controls offered it — the
- * closed-window card, the standing line, the self-check — and not one said what it had done
- * or how to undo it. The only way back was a checkbox further down the page labelled "Walk
- * up / pay for someone", which is a COURT errand: the member who had pressed a DOOR button
- * had no reason to connect the two, and the booking code they came for was simply gone.
- * </p>
- *
- * <p>
- * It is the same switch underneath, so there is one lifetime rather than two — stated here
- * in the words the checkbox uses, because a member who arrived by pressing a button on
- * another card has not read the checkbox.
- * </p>
- *
- * <p>
- * Silent unless there is a booking to go back TO. A member with no upcoming booking would be
- * offered a code the server will not mint, and the switch is then simply the walk-up switch
- * doing what it says.
- * </p>
+ * The tabs ARE the way back, they are at the top of the page, and they name both directions
+ * — so the card described a mechanism that no longer exists. Its lifetime sentence lives in
+ * the member-code panel (`CODE_CHOICE_STICKY`), where the member is already reading.
  */
-function WalkUpOnNotice(props: { loading: boolean; onBack: () => void }) {
-  return (
-    <Card className="flex flex-wrap items-center justify-between gap-3">
-      {/* The lifetime is IN this sentence rather than borrowed from the checkbox's hint:
-          two copies of "Stays on for the rest of this visit", two hundred pixels apart, is
-          the noise this round is about. One statement, in the place the member arrived. */}
-      <p className="text-sm text-text-secondary">{WALK_UP_ON_NOTICE}</p>
-      <Button variant="outline" className="w-full sm:w-auto" disabled={props.loading} onClick={props.onBack}>
-        {BACK_TO_BOOKING_CODE}
-      </Button>
-    </Card>
-  );
-}
 
 /**
  * The offer a member should not have to go looking for.
@@ -658,22 +705,25 @@ export default function MyCodePage() {
       */}
       <h1 className="text-xl font-semibold">Your code</h1>
 
-      <CodeCard
-        qr={qr}
-        meaning={meaning}
-        error={error}
-        failure={doorRead.failure}
-        contact={contact}
-        loading={loading}
-        secondsLeft={secondsLeft}
-        fallback={codeSecondsLeft === 0 ? usableCachedBookingCode(cached, qr?.code ?? null) : null}
-        onRefresh={refetch}
-      />
-
-      {/* R3-30 — the way back from a one-way door. See `WalkUpOnNotice`. */}
-      {walkUp && qr?.kind === "ident" && !!door?.next_booking && (
-        <WalkUpOnNotice loading={loading} onBack={() => chooseWalkUp(false)} />
-      )}
+      {/*
+        Item 9 — the capsule tabs, between the heading and the code. See `CodeChoice`: the
+        selected segment is derived from the code on the glass, which is what stops the card
+        headline and the control disagreeing, and it is the first thing after the heading
+        because it is the thing that says WHICH code you are holding.
+      */}
+      <CodeChoice qr={qr} memberChoice={walkUp} onChoose={chooseWalkUp}>
+        <CodeCard
+          qr={qr}
+          meaning={meaning}
+          error={error}
+          failure={doorRead.failure}
+          contact={contact}
+          loading={loading}
+          secondsLeft={secondsLeft}
+          fallback={codeSecondsLeft === 0 ? usableCachedBookingCode(cached, qr?.code ?? null) : null}
+          onRefresh={refetch}
+        />
+      </CodeChoice>
 
       {/*
         D10 — BELOW the code, not above it. A decision arriving used to push the QR down
@@ -700,10 +750,6 @@ export default function MyCodePage() {
       <p className="text-sm text-text-secondary">{subtitleFor(doorsClub)}</p>
 
       {doorBlocks}
-
-      {/* Below the QR now: a walk-up is a court concept, and it cost ~96px of the first
-          screen at 360 — where what a member at a door came for is the code. */}
-      <WalkUpSwitch walkUp={walkUp} loading={loading} onChoose={chooseWalkUp} />
 
       {doorFooter}
     </div>

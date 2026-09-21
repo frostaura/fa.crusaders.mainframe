@@ -20,11 +20,11 @@ import {
   OFFLINE_DETAILS_SUMMARY,
   STANDING_HEADING,
   STANDING_LOADING,
-  BACK_TO_BOOKING_CODE,
+  CODE_CHOICE_STICKY,
   TIME_UNCERTAIN_NOTE,
   UNNAMED_DOOR,
-  WALK_UP_ON_NOTICE,
-  WALK_UP_STICKY_HINT,
+  CODE_TABS_LABEL,
+  NO_BOOKING_CODE_REASON,
   CLUB_TIME_NOTE,
   DOOR_SECTION_UNKNOWN,
   asOfMayHaveChanged,
@@ -198,9 +198,10 @@ describe("memberDoorCopy", () => {
       contactUnknownNotice(), DOOR_SECTION_CHECKING,
       flat(codeExpiredDeadEnd("network", CONTACT)), flat(codeExpiredDeadEnd("server", NO_CONTACT)),
       flat(codeExpiredDeadEnd("network", UNKNOWN_CONTACT)),
-      DOOR_SECTION_UNKNOWN, WALK_UP_STICKY_HINT, CLUB_TIME_NOTE,
+      DOOR_SECTION_UNKNOWN, CODE_CHOICE_STICKY, CLUB_TIME_NOTE,
       // R3-17, R3-30, R3-31: every sentence this round added, swept like every other.
-      TIME_UNCERTAIN_NOTE, WALK_UP_ON_NOTICE, BACK_TO_BOOKING_CODE,
+      // item 9: the three sentences the capsule tabs brought with them.
+      TIME_UNCERTAIN_NOTE, CODE_TABS_LABEL, NO_BOOKING_CODE_REASON,
       historyGroupLabel(6, 1), historyGroupLabel(2, 47),
       historyOfflineLine("2026-09-19T06:09:00Z", undefined, "2026-09-19T06:30:00Z"),
       asOfMayHaveChanged("09:46"), decisionAge(0), decisionAge(1), decisionAge(12),
@@ -1650,7 +1651,8 @@ describe("memberDoorCopy", () => {
     });
     expect(flat(conclusion)).toContain("08:05");
     expect(flat(conclusion)).toMatch(/whatever rule a club applies/i);
-    expect(flat(conclusion)).toMatch(/use your member code instead/i);
+    // item 9: every sentence that names a control names the TAB, which is always on the page.
+    expect(flat(conclusion)).toMatch(/"Member code" at the top of this screen/i);
   });
 
   it("offers the member code only where the club's rule would admit it", () => {
@@ -1953,7 +1955,7 @@ describe("memberDoorCopy — no state contradicts itself", () => {
       policy: "active_member", membership: "active", reason: "too_early", released: false,
       offline: false, codeKind: "booking", shut: "none", connection: "ok", liveCode: true, hasBooking: true,
     });
-    expect(decision.body).toMatch(/Use your member code instead/);
+    expect(decision.body).toMatch(/tap "Member code" at the top of this screen/);
   });
 
   /** And it stays the old sentence where there genuinely is nothing better to hold. */
