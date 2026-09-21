@@ -1376,3 +1376,68 @@ test.describe("One door's page, reachable with a thumb", () => {
     await expect(page.getByText(/You shut this door/)).toHaveCount(0);
   });
 });
+
+/**
+ * <b>A-L1 / C-L1 / B8 / R3-27 — the doors surface at a 32 px root font.</b>
+ *
+ * <p>
+ * This surface is built to 44 px throughout because it is used standing up in a club with a
+ * member waiting. Two things were not: the "Go to <door>" link in the attention summary, which
+ * is the whole point of naming one door rather than counting three, measured 17 px; and the
+ * club contact on a door's card, which is an email address with no break opportunity in it and
+ * pushed the whole page sideways.
+ * </p>
+ */
+test.describe("The doors pages at 320 px with a 32 px root font", () => {
+  const large = async (page: Page) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    await page.evaluate(() => { document.documentElement.style.fontSize = "32px"; });
+    await page.waitForTimeout(400);
+  };
+
+  test("gives the summary's link to a door the same 44 px as everything else", async ({ page }) => {
+    await openDoors(page, [door({ name: "Side door", enabled: false })]);
+    await large(page);
+
+    const link = page.getByRole("link", { name: "Go to Side door" });
+    await expect(link).toBeVisible();
+    const box = await link.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(43.5);
+    expect(box?.width ?? 0).toBeGreaterThanOrEqual(43.5);
+  });
+
+  test("does not let a club contact email push the door page sideways", async ({ page }) => {
+    // The fixture sorts by prefix LENGTH and these are the same path, so declaration order
+    // decides and the base route wins — the settings route is overridden in place instead.
+    // The fixture sorts by prefix LENGTH and both entries are the same path, so declaration
+    // order decides — an `extra` route for settings would lose to the base one. The whole
+    // route list is built here instead.
+    await signIn(page);
+    await serveApi(page, [
+      { path: "/api/v1/admin/settings/", body: { ...SETTINGS, club_contact_email: "treasurer@crusaderssquashclub.co.za" } },
+      ...routes([door()]).filter((r) => r.path !== "/api/v1/admin/settings/"),
+    ]);
+    await page.goto(`/admin/doors/${DOOR_ID}`);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await large(page);
+
+    await expect(page.getByText(/treasurer@crusaderssquashclub/)).toBeVisible();
+    const stuck = await page.evaluate(() => [...document.querySelectorAll("main *")]
+      .filter((el) => {
+        const e = el as HTMLElement;
+        // The app shell's own rem-scaled padding is the chrome lane's — see the same
+        // exclusion, with its measurement, in admin-devices.spec.ts.
+        if (e.classList.contains("flex-1") && e.classList.contains("min-h-0")) return false;
+        // `sr-only` is a 1 px clipped box by construction, so its content always "overflows"
+        // it. That is what the utility is; it is not a layout fault.
+        if (e.classList.contains("sr-only")) return false;
+        return e.scrollWidth - e.clientWidth > 1 && e.getBoundingClientRect().width > 0;
+      })
+      .map((el) => ({
+        over: (el as HTMLElement).scrollWidth - (el as HTMLElement).clientWidth,
+        cls: el.className?.toString().slice(0, 50) ?? "",
+        text: (el.textContent ?? "").trim().slice(0, 40),
+      })));
+    expect(stuck, `boxes that cannot hold their content: ${JSON.stringify(stuck)}`).toEqual([]);
+  });
+});

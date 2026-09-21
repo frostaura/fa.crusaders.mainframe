@@ -67,14 +67,25 @@ function KeyLine({ apiKey }: { apiKey: string }) {
   }
 
   return (
-    <div className="flex items-start gap-2">
+    // B7 / B11 / R3-27. Three things, all measured at 320 px with a 32 px root font — the
+    // large-text setting an older volunteer actually uses.
+    //
+    // `flex-wrap` and no `shrink-0`: the key and its two buttons were one unbreakable row,
+    // so the panel's min-content was wider than the phone and the WHOLE PAGE scrolled
+    // sideways. A row that can wrap costs a desktop nothing and is the same fix
+    // `ButtonMapEditor` carries one card along, for the same reason.
+    //
+    // `min-h-11` rather than `h-9`: 36 px against the 44 px the doors pages are built to,
+    // for the same volunteer in the same club — and a fixed height clips its own words once
+    // they wrap, which at this text size they do.
+    <div className="flex min-w-0 flex-wrap items-start gap-2">
       <code className="block min-w-0 flex-1 break-all rounded-lg bg-slate-100 p-2 font-mono text-xs" aria-label="Device API key">
         {revealed ? apiKey : maskKey(apiKey)}
       </code>
-      <Button variant="outline" className="h-9 shrink-0 px-2 text-xs" onClick={() => setRevealed((r) => !r)} aria-label={revealed ? "Hide device API key" : "Reveal device API key"}>
+      <Button variant="outline" className="min-h-11 px-2 text-xs" onClick={() => setRevealed((r) => !r)} aria-label={revealed ? "Hide device API key" : "Reveal device API key"}>
         <RevealIcon className="h-3.5 w-3.5" />
       </Button>
-      <Button variant="outline" className="h-9 shrink-0 px-2 text-xs" onClick={() => void copy()} aria-label="Copy device API key">
+      <Button variant="outline" className="min-h-11 px-2 text-xs" onClick={() => void copy()} aria-label="Copy device API key">
         <Copy className="mr-1 h-3.5 w-3.5" /> {copied ? "Copied" : "Copy"}
       </Button>
     </div>

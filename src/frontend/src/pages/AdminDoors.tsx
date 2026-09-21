@@ -310,7 +310,17 @@ function AdminDoorsPageBody() {
             {first?.doorId && (
               <>
                 {" "}
-                <Link to={`/admin/doors/${first.doorId}`} className="font-medium underline">
+                {/*
+                  A-L1 / C-L1 / R3-27: it measured 17 px tall. This is the control the
+                  summary exists to offer — the whole point of naming one door rather than
+                  counting three is that the reader can get to it — and it was a third of
+                  the 44 px every other control on this surface is built to. `inline-flex`
+                  with a minimum on BOTH axes, so a door called "A" is still a target.
+                */}
+                <Link
+                  to={`/admin/doors/${first.doorId}`}
+                  className="inline-flex min-h-11 min-w-11 items-center font-medium underline"
+                >
                   {`Go to ${first.doorName}`}
                 </Link>
               </>

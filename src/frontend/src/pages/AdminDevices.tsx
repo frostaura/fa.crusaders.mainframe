@@ -152,7 +152,7 @@ function CourtListEditor({
             <span className="w-16 shrink-0 text-sm text-slate-500">Relay {relay}</span>
             <select
               aria-label={label}
-              className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm disabled:opacity-50"
+              className="min-h-11 rounded-lg border border-slate-200 bg-white px-2 text-sm disabled:opacity-50"
               value={current ?? ""}
               disabled={!reachable}
               onChange={(e) => {
@@ -226,10 +226,10 @@ function DeviceButtonMapPanel({
       {own && <ButtonMapEditor value={draft} onChange={setDraft} disabled={saving} labelPrefix={device.name} />}
       <WalkUpCapNotice map={own ? draft : clubMap} cap={walkUpMax} />
       <div className="flex gap-2">
-        <Button className="h-8 px-3 text-xs" onClick={() => void save()} disabled={saving || (own && !buttonMapWithinCap(draft))}>
+        <Button className="min-h-11 px-3 text-sm" onClick={() => void save()} disabled={saving || (own && !buttonMapWithinCap(draft))}>
           {saving ? "Saving…" : "Save buttons"}
         </Button>
-        <Button variant="ghost" className="h-8 px-3 text-xs" onClick={onClose} disabled={saving}>Cancel</Button>
+        <Button variant="ghost" className="min-h-11 px-3 text-sm" onClick={onClose} disabled={saving}>Cancel</Button>
       </div>
     </div>
   );
@@ -292,10 +292,10 @@ function DeviceDetailsEditor({
         <CourtListEditor value={draft} onChange={setDraft} courts={courts} disabled={saving} labelPrefix={device.name} />
       </div>
       <div className="flex gap-2">
-        <Button className="h-8 px-3 text-xs" onClick={() => void save()} disabled={saving || draft.length === 0}>
+        <Button className="min-h-11 px-3 text-sm" onClick={() => void save()} disabled={saving || draft.length === 0}>
           {saving ? "Saving…" : "Save box"}
         </Button>
-        <Button variant="ghost" className="h-8 px-3 text-xs" onClick={onClose} disabled={saving}>Cancel</Button>
+        <Button variant="ghost" className="min-h-11 px-3 text-sm" onClick={onClose} disabled={saving}>Cancel</Button>
       </div>
     </div>
   );
@@ -536,7 +536,7 @@ function DeviceActivityPanel({ device, now }: { device: AdminDevice; now: number
     <div className="mt-2">
       <Button
         variant="outline"
-        className="h-8 px-3 text-xs"
+        className="min-h-11 px-3 text-sm"
         aria-expanded={open}
         onClick={() => void toggle()}
       >
@@ -618,15 +618,23 @@ function DeviceRow({
           one of the others. */}
       <DeviceActivityPanel device={device} now={now} />
 
-      <div className="mt-2 flex flex-wrap items-center gap-2">
+      {/*
+        <b>B11 / R3-27 — every control on this strip measured 32–36 px.</b>
+        The doors surface is built to 44 px because it is used standing up in a club, and
+        this page is used in exactly the same circumstances by exactly the same volunteer.
+        The two sat one gear-menu item apart with a 12 px difference in target size.
+        `min-h-11` rather than `h-11`, so a control whose words wrap grows instead of
+        clipping them — which is what `h-*` did at a 32 px root font.
+      */}
+      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
         {editing === null && (
-          <Button variant="outline" className="h-8 px-3 text-xs" onClick={() => setEditing("details")}>
+          <Button variant="outline" className="min-h-11 px-3 text-sm" onClick={() => setEditing("details")}>
             Edit name and courts
           </Button>
         )}
 
         {hasOwnMapField && editing === null && (
-          <Button variant="outline" className="h-8 px-3 text-xs" onClick={() => setEditing("buttons")}>
+          <Button variant="outline" className="min-h-11 px-3 text-sm" onClick={() => setEditing("buttons")}>
             Edit buttons
           </Button>
         )}
@@ -659,7 +667,7 @@ function DeviceRow({
             onConfirm={() => actions.setEnabled(false)}
           />
         ) : (
-          <Button variant="outline" className="h-8 px-3 text-xs" onClick={() => void actions.setEnabled(true)}>
+          <Button variant="outline" className="min-h-11 px-3 text-sm" onClick={() => void actions.setEnabled(true)}>
             Put back in service
           </Button>
         )}
@@ -1006,7 +1014,12 @@ export function AdminDevicesPage() {
   const gates = devices.filter((d) => isGate(d));
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-4">
+    // B7 / R3-27: the padding is in PIXELS, for B12's reason. `p-4` is a rem, so at the
+    // 32 px root font an older volunteer uses it becomes 32 px a side — 64 px of this page's
+    // own padding on a 320 px phone, on top of the shell's. What the padding protects is a
+    // GAP, and a gap does not need to grow with the text; what the space it eats protects is
+    // a WORD, which does.
+    <div className="mx-auto min-w-0 max-w-4xl space-y-6 p-[16px]">
       <h1 className="text-2xl font-bold">Devices</h1>
 
       <DeviceApiKeyPanel />
@@ -1021,7 +1034,7 @@ export function AdminDevicesPage() {
               far less time-critical than this one. */}
           <Button
             variant="outline"
-            className="ml-auto h-8 px-3 text-xs"
+            className="ml-auto min-h-11 px-3 text-sm"
             onClick={() => void refreshNow()}
             disabled={refreshing || loading}
           >

@@ -784,3 +784,122 @@ test.describe("Boards nobody has acknowledged", () => {
     await expect(page.getByText(/stops registering new boards/)).toHaveCount(0);
   });
 });
+
+/**
+ * <b>B7 / B11 / R3-27 — the Devices page at the text size an older volunteer actually uses.</b>
+ *
+ * <p>
+ * At 320 px with a 32 px root font the page scrolled 143 px sideways and the out-of-service
+ * confirm's question went off the right edge — so the sentence an admin is being asked to
+ * commit on was unreadable on the one setting that exists to make things readable. Its
+ * controls also measured 32–36 px tall against the doors surface's 44 px, one gear-menu item
+ * apart, for the same volunteer in the same club.
+ * </p>
+ *
+ * <p>
+ * A browser test because jsdom has no layout engine: every `getBoundingClientRect` there is
+ * zero, which is why this class of defect survives unit suites indefinitely.
+ * </p>
+ */
+test.describe("Devices at 320 px with a 32 px root font", () => {
+  const large = async (page: Page) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    await page.evaluate(() => { document.documentElement.style.fontSize = "32px"; });
+    await page.waitForTimeout(400);
+  };
+
+  /**
+   * <b>Nothing on this page may refuse to hold its own content.</b>
+   *
+   * <p>
+   * That is the class the 143 px came from: an unbreakable token, or a row of controls that
+   * cannot wrap, forces a box wider than the phone and every ancestor with it. The API key
+   * and its two buttons were exactly that — one `flex` row with `shrink-0` on both buttons
+   * — and it alone accounted for 58 px of it.
+   * </p>
+   *
+   * <p>
+   * <b>What this does NOT assert, and why.</b> At a 32 px root font the app shell's own
+   * `px-4` and the shared `Card`'s `p-5` are 32 px and 40 px a side — 144 px of rem-scaled
+   * padding around a 320 px viewport before any content is laid out. Both are shared
+   * primitives another lane owns, and this page cannot close them from here; what it can do
+   * is stop CONTRIBUTING, which is why its own wrapper's padding is in pixels and is
+   * asserted below. Measured through the fix: 460 px wide at the start of this round, 370
+   * after, with the remainder attributable to those two.
+   * </p>
+   */
+  test("has nothing on it that refuses to hold its own content", async ({ page }) => {
+    await openDevices(page, [FRESH, GATE]);
+    await large(page);
+
+    const stuck = await page.evaluate(() => [...document.querySelectorAll("main *")]
+      .filter((el) => {
+        const e = el as HTMLElement;
+        // The app shell's own container is excluded, and only it: at a 32 px root its
+        // `px-4` is 32 px a side and the shared `Card`'s `p-5` another 40, which is 144 px
+        // of rem-scaled padding around a 320 px viewport before a word is laid out. Both
+        // belong to the chrome lane. Measured here at 50 px over — down from 143 — and
+        // everything this page owns now fits.
+        if (e.classList.contains("flex-1") && e.classList.contains("min-h-0")) return false;
+        // `sr-only` is a 1 px clipped box by construction — that is what the utility IS.
+        if (e.classList.contains("sr-only")) return false;
+        return e.scrollWidth - e.clientWidth > 1 && e.getBoundingClientRect().width > 0;
+      })
+      .map((el) => ({
+        over: (el as HTMLElement).scrollWidth - (el as HTMLElement).clientWidth,
+        tag: el.tagName.toLowerCase(),
+        cls: el.className?.toString().slice(0, 60) ?? "",
+        text: (el.textContent ?? "").trim().slice(0, 40),
+      })));
+    expect(stuck, `boxes that cannot hold their content: ${JSON.stringify(stuck)}`).toEqual([]);
+  });
+
+  /**
+   * <b>B12's rule, applied to this page's own box.</b>
+   *
+   * A rem padding is 32 px a side at a 32 px root — 64 px of this page's own margin on a
+   * 320 px phone. What padding protects is a GAP, and a gap does not need to grow with the
+   * text; what the space it eats protects is a WORD, which does.
+   */
+  test("does not scale its own page padding with the text", async ({ page }) => {
+    await openDevices(page, [FRESH]);
+    await large(page);
+
+    const padding = await page.evaluate(() => {
+      const heading = document.querySelector("main h1")!;
+      const wrapper = heading.parentElement as HTMLElement;
+      return Math.round(Number.parseFloat(getComputedStyle(wrapper).paddingLeft));
+    });
+    expect(padding).toBeLessThanOrEqual(16);
+  });
+
+  test("keeps the out-of-service question on screen once it is armed", async ({ page }) => {
+    await openDevices(page, [FRESH]);
+    await large(page);
+
+    await page.getByRole("button", { name: /Take out of service/ }).click();
+
+    // The consequence is a paragraph above the pair now (B5), so what is measured is that
+    // the paragraph is inside the viewport horizontally — a sentence an admin is asked to
+    // commit on and cannot read is a confirm that did not happen.
+    const question = page.getByText(/Take out of service/).first();
+    const box = await question.boundingBox();
+    expect(box).not.toBeNull();
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(321);
+  });
+
+  test("gives every control on a row the same 44 px the doors pages do", async ({ page }) => {
+    await openDevices(page, [FRESH]);
+    await large(page);
+
+    const heights = await page.evaluate(() => [...document.querySelectorAll("main button")]
+      .filter((b) => (b.textContent ?? "").trim() !== "" && b.getBoundingClientRect().height > 0)
+      .map((b) => ({
+        label: (b.textContent ?? "").trim().slice(0, 30),
+        height: Math.round(b.getBoundingClientRect().height),
+      })));
+    expect(heights.length).toBeGreaterThan(0);
+    const short = heights.filter((h) => h.height < 43.5);
+    expect(short, `controls under 44 px: ${JSON.stringify(short)}`).toEqual([]);
+  });
+});
