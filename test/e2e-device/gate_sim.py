@@ -687,6 +687,78 @@ def _audit_count(door: Any, action: str, device_code: str) -> int:
     return int(raw or 0)
 
 
+def _dsim_clock_bases(door: Any, live_code: str) -> None:
+    """The offline-decide-then-upload cycle at clock bases the simulator's default
+    is not, INCLUDING one four seconds before the 49.7-day millis() wrap.
+
+    WHY THIS EXISTS, AND WHY IT IS NOT A NICETY. Round G4's C1 was an offline
+    record that every real board destroyed on upload: `Uptime64::seed` left the
+    accumulator R ms behind the raw `millis()` every event is stamped from, so
+    `tb::widen` underflowed and the batch went up with a stamp of about 1.8e19 —
+    which the server refuses, and which the drain then treats as a 4xx the board
+    caused and DROPS. R is `millis()` at `begin()`, and `--start-ms 0` is the
+    single value of it that makes the arithmetic come out right. It was this
+    harness's only value for the whole life of the simulator, so the one end-to-end
+    test of the door's offline evidence was green by construction.
+
+    The default is non-zero now (see `kDefaultStartMs` in the simulator), which is
+    what makes every step above a real test of it. This adds the OTHER base that
+    matters: the wrap, which is the normal case on a board that runs for months and
+    the one place widening has to do any work at all."""
+    # Four seconds before the rollover, so it happens DURING the scan-to-upload
+    # window rather than before the board has associated.
+    for label, start_ms in (("wrap-adjacent", 4_294_963_200), ("mid-range", 1_234_567)):
+        mac = ("02d2" + secrets.token_hex(4))[:12]
+        device_code = f"gate-{mac[-6:]}"
+        sim = GateSim(getattr(door.api, "base", ""), door.key, mac,
+                      door.api.log.parent, name=f"dsim-{start_ms}")
+        try:
+            sim.start(start_ms=start_ms)
+            first = sim.expect(lambda l: l.channel == "hb", 30.0, "the first heartbeat")
+            devices = sc.expect_status(
+                door.w.http.get("/api/v1/admin/devices/", token=door.w.admin_token),
+                200, "devices").json
+            row = next((x for x in devices if x.get("mac_address") == mac), None)
+            sim_id = (row or {}).get("id", "")
+            if not sim_id:
+                raise StepFailed(f"the {label} board did not register: {first.raw}")
+            sc.expect_status(door.w.http.patch(f"/api/v1/admin/devices/{sim_id}",
+                                               {"gate_key": f"sim-door-{start_ms}"},
+                                               token=door.w.admin_token),
+                             200, "name the door")
+            pushed = sim.force_heartbeat()
+            chk("DSIM", f"[{label}] a board whose millis() starts at {start_ms} loads its roster",
+                int(pushed.get("roster", "0")) >= 1, pushed.raw)
+
+            sim.wifi(False)
+            offline_from = sim.mark()
+            allowed = sim.scan(live_code)
+            chk("DSIM", f"[{label}] it decides from the cached roster and opens",
+                allowed.flag("released") and allowed.flag("queued"), allowed.raw)
+
+            reconnect = sim.mark()
+            sim.wifi(True)
+            drained = sim.maybe(lambda l: l.channel == "evq" and l.get("held") == "0", 40.0,
+                                reconnect)
+            # THE ASSERTION C1 WOULD HAVE FAILED. Not "the ring emptied" — a board
+            # that drops an event on a 400 empties its ring too, which is exactly
+            # how this stayed invisible. The evidence is the row SERVER-SIDE.
+            opens = _audit_count(door, "device.gate_open", device_code)
+            boots = _audit_count(door, "device.boot", device_code)
+            chk("DSIM", f"[{label}] AND THE RECORD SURVIVES THE UPLOAD: the offline open and the "
+                        f"boot event are both server-side, so the stamp the board widened was one "
+                        f"the server could actually read",
+                opens == 1 and boots == 1,
+                f"gate_open={opens} boot={boots} drained={drained.raw if drained else None} "
+                f"evq={[l.raw for l in sim.since(offline_from, 'evq')]}")
+            final = sim.status()
+            chk("DSIM", f"[{label}] ...and nothing was lost to a full or jammed ring on the way",
+                final.get("queued") == "0" and final.get("lost") == "0", final.raw)
+            REPORT.note(f"DSIM {label} board {device_code} (start_ms={start_ms}): {final.raw}")
+        finally:
+            sim.stop()
+
+
 def dsim_firmware(door: Any) -> None:
     """DSIM — the compiled door firmware, in the chain, against this run's own API.
 
@@ -1016,6 +1088,9 @@ def dsim_firmware(door: Any) -> None:
         REPORT.note(f"DSIM board {device_code}: {final.raw}")
     finally:
         sim.stop()
+
+    # -- D S 7 b : the same evening at clock bases that are not zero ---------
+    _dsim_clock_bases(door, live_code)
 
     # -- D S 8 : the release-overrun bound, MEASURED ------------------------
     numbers = measure_worst_case_release(workdir, door.key)

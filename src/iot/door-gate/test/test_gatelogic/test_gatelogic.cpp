@@ -1490,8 +1490,13 @@ private:
     /// a body that timed out, did not fit, or did not frame. It is the ONE
     /// shape `no_push` distinguishes, and no fake could express it before
     /// round G3 because the port returned a single number.
+    ///
+    /// THROUGH THE REAL RULE, not a hard-coded zero. Both HAL ports return
+    /// `statusForBody(peerStatus, <the failed read>)`, and a fake that pinned
+    /// the answer that rule used to give could never have shown that it was
+    /// wrong for a 4xx — which is G4 / C1's second half.
     void setBodyFailure(uint16_t peer, uint32_t lat) {
-      set(0U, "", lat);
+      set(gatelogic::statusForBody(peer, gatelogic::BodyResult::TooLarge), "", lat);
       peerStatus = peer;
     }
 
@@ -1551,7 +1556,10 @@ private:
   FakeScannerBytes* arrivals_ = nullptr;
   char arrivalText_[64] = {};
   char lastPath_[64] = {};
-  char lastBody_[256] = {};
+  /// Wider than any body this board renders, so an assertion about the bytes
+  /// that went on the wire is about the FIRMWARE's cap and not about this
+  /// fake's. devlink::kEventBodyCap is the real bound.
+  char lastBody_[640] = {};
   char answer_[512] = {};
   PathState path_[kMaxPaths] = {};
   Scripted script_[kMaxScripted] = {};
@@ -2974,6 +2982,84 @@ void test_app_a_404_on_events_keeps_the_backlog_and_retries_it() {
 }
 
 // ---------------------------------------------------------------------------
+// G4 / C1 — the uptime a real board's events actually go up with
+// ---------------------------------------------------------------------------
+
+/// The decimal number after the `n`th occurrence of `"<key>":` in `body`.
+/// UINT64_MAX when there is no such occurrence, which fails every assertion
+/// below rather than passing one by accident.
+uint64_t numberAfter(const char* body, const char* key, int occurrence) {
+  const char* at = body;
+  for (int i = 0; i <= occurrence; ++i) {
+    at = strstr(at, key);
+    if (at == nullptr) {
+      return UINT64_MAX;
+    }
+    at += strlen(key);
+  }
+  uint64_t value = 0U;
+  if (*at < '0' || *at > '9') {
+    return UINT64_MAX;
+  }
+  while (*at >= '0' && *at <= '9') {
+    value = value * 10ULL + static_cast<uint64_t>(*at - '0');
+    ++at;
+  }
+  return value;
+}
+
+void test_app_an_offline_record_is_stamped_with_an_uptime_the_server_can_read() {
+  // G4 / C1, AND THE REASON NOTHING EVER SAW IT: the simulator's default
+  // `--start-ms 0` is the one value of millis()-at-begin() that hides it.
+  //
+  // `begin()` seeded the accumulator's `last_` from millis() and left its total
+  // at ZERO, while every event was stamped with the RAW millis() reading. So on
+  // a board whose clock read R when begin() ran — which is EVERY ESP32, because
+  // the core's init, Serial.begin, NVS, the UART driver and WiFi.begin all run
+  // first — the batch's own uptime was R ms BEHIND every stamp in it, and
+  // tb::widen underflowed to about 1.8e19 for anything uploaded less than R ms
+  // after it was scanned. The server binds uptime_ms as a signed 64-bit and
+  // refuses the body: in production a bare 400, which this drain reads as "a
+  // 4xx the board caused" and DROPS — the offline entry is gone.
+  //
+  // Every base, because the wrap is the normal case on a board that runs for
+  // months and the seed is exactly where a wrap-time boot would land.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    Rig rig(kBases[i]);
+    rig.boot(true);
+    queueOfflineEvents(rig, 2U);
+
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.http.onPath(gatelogic::kPathEvents, 200U, "{\"accepted_through\":4294967295}", 0U);
+    rig.link.set(true);
+    // Straight back up: the upload happens a few passes after the scan, which
+    // is precisely the window the underflow lived in.
+    rig.runFor(2000UL);
+
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(gatelogic::kPathEvents, rig.http.lastPath(),
+                                     "the offline records have to reach /events at all");
+
+    const uint64_t batch = numberAfter(rig.http.lastBody(), "\"uptime_ms\":", 0);
+    const uint64_t stamp = numberAfter(rig.http.lastBody(), "\"uptime_ms\":", 1);
+    char message[192] = {};
+    snprintf(message, sizeof(message), "base %lu: event uptime %llu is ahead of the batch's %llu — %s",
+             static_cast<unsigned long>(kBases[i]), static_cast<unsigned long long>(stamp),
+             static_cast<unsigned long long>(batch), rig.http.lastBody());
+    TEST_ASSERT_TRUE_MESSAGE(stamp <= batch, message);
+
+    // AND IT IS A NUMBER THE SERVER'S COLUMN HOLDS. `long` is what binds
+    // `uptime_ms`, so anything past INT64_MAX is a 400 on the whole batch
+    // whatever the arithmetic meant by it.
+    TEST_ASSERT_TRUE_MESSAGE(batch <= 0x7FFFFFFFFFFFFFFFULL, message);
+    TEST_ASSERT_TRUE_MESSAGE(stamp <= 0x7FFFFFFFFFFFFFFFULL, message);
+
+    // And the event genuinely left: a board that kept it would pass the two
+    // assertions above on a body it never got to send.
+    TEST_ASSERT_TRUE_MESSAGE(rig.queue.empty(), "the acknowledged records have to leave the ring");
+  }
+}
+
+// ---------------------------------------------------------------------------
 // E3 — the response body, bounded by the caller's buffer and the call's clock
 // ---------------------------------------------------------------------------
 
@@ -3510,24 +3596,91 @@ void test_body_a_deadline_already_passed_is_a_transport_failure() {
   TEST_ASSERT_EQUAL_STRING("", out);
 }
 
-/// E1. The mapping, in the words the door uses. A whole body keeps whatever
-/// status the peer sent — including a refusal, which is authoritative — and
-/// anything else is 0, which is the one answer that sends a scan to the roster.
-void test_body_only_a_whole_body_keeps_the_servers_status() {
+/// E1, AMENDED BY G4 / C1. Where a status's MEANING lives decides whether a
+/// body that did not arrive can take it away.
+///
+/// A 2xx carries its decision in the body, so a 200 nobody could read is
+/// status 0 — "this board learned nothing" — which sends a scan to the roster.
+/// A 4xx and a 5xx carry theirs in the STATUS LINE, which is in the first bytes
+/// of the response and is known before any body byte is read, so they survive a
+/// body that did not.
+void test_body_a_failure_status_survives_a_body_that_did_not() {
   static_assert(gatelogic::statusForBody(200U, gatelogic::BodyResult::Ok) == 200U, "");
   static_assert(gatelogic::statusForBody(403U, gatelogic::BodyResult::Ok) == 403U, "");
   static_assert(gatelogic::statusForBody(200U, gatelogic::BodyResult::TooLarge) == 0U, "");
   static_assert(gatelogic::statusForBody(200U, gatelogic::BodyResult::Timeout) == 0U, "");
   static_assert(gatelogic::statusForBody(200U, gatelogic::BodyResult::Malformed) == 0U, "");
-  // A 403 whose body did not arrive is NOT an out-of-service verdict. The
-  // verdict is the status, and a status nobody finished reading is not one.
-  static_assert(gatelogic::statusForBody(403U, gatelogic::BodyResult::Timeout) == 0U, "");
+  static_assert(gatelogic::statusForBody(204U, gatelogic::BodyResult::TooLarge) == 0U, "");
+  static_assert(gatelogic::statusForBody(302U, gatelogic::BodyResult::TooLarge) == 0U, "");
+
+  // THE TWO THIS ROUND CHANGED, AND WHAT EACH ONE COST.
+  //
+  // A 403 is the club having taken this board out of service. Read as 0 it was
+  // an OUTAGE, so the board fell back to its roster and kept admitting every
+  // rostered member through the door the admin had just shut — for the whole
+  // six-hour staleness window, which is the exact thing the 403 rule exists to
+  // stop.
+  static_assert(gatelogic::statusForBody(403U, gatelogic::BodyResult::Timeout) == 403U, "");
+  static_assert(gatelogic::statusForBody(403U, gatelogic::BodyResult::TooLarge) == 403U, "");
+  static_assert(gatelogic::statusForBody(403U, gatelogic::BodyResult::Malformed) == 403U, "");
+
+  // A 400 on `/events` from a server in Development answers a binder refusal
+  // with a developer HTML page thousands of bytes long, against a 192-byte
+  // response buffer. Read as 0 that was Retry = keep, so the head of the ring
+  // was re-posted for ever and every door entry behind it never arrived.
+  static_assert(gatelogic::statusForBody(400U, gatelogic::BodyResult::TooLarge) == 400U, "");
+  static_assert(gatelogic::statusForBody(404U, gatelogic::BodyResult::TooLarge) == 404U, "");
+  static_assert(gatelogic::statusForBody(429U, gatelogic::BodyResult::Timeout) == 429U, "");
+  static_assert(gatelogic::statusForBody(503U, gatelogic::BodyResult::Malformed) == 503U, "");
 
   // AND THE PEER'S STATUS SURVIVES ANYWAY, for the one reader that needs it.
+  // `bodyFailed` is about a 2xx now as it always was: on a failure status the
+  // two agree, so a 403 whose body was lost is not counted as a no-push.
   static_assert(gatelogic::bodyFailed(gatelogic::HttpOutcome{0U, 200U}), "");
   static_assert(!gatelogic::bodyFailed(gatelogic::HttpOutcome{200U, 200U}), "");
   static_assert(!gatelogic::bodyFailed(gatelogic::noCall()), "");
   TEST_PASS();
+}
+
+/// G4 / C1. The same rule where it actually bites: a board taken out of service
+/// by an admin, answering a 403 whose body is larger than the buffer.
+void test_app_a_403_whose_body_did_not_fit_still_takes_the_board_out_of_service() {
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    Rig rig(kBases[i]);
+    rig.boot(true);
+
+    // A roster first, so there is something an out-of-service board could
+    // wrongly keep admitting from.
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.forceHeartbeat();
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, rig.roster.size(), "the scenario needs a live roster to lose");
+
+    // The admin presses the button. The body did not fit, so the READ failed —
+    // but the status line arrived, and the status line is the verdict.
+    rig.http.onPathBodyFailure(gatelogic::kPathGate, 403U, 0U);
+    rig.link.set(false);
+    rig.tick();
+    rig.link.set(true);
+    rig.scanner.feed("MEMBERTOKEN1\n");
+    rig.tick();
+    rig.tick();
+
+    TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(),
+                              "a 403 is a refusal whatever became of the body behind it");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, rig.roster.size(),
+                                    "and the roster goes with it, or the next link drop re-admits "
+                                    "every rostered member through a door an admin has shut");
+
+    // The mutant this kills: reading the 403 as status 0 sends the scan to the
+    // roster, which still holds the booking, and the door opens.
+    rig.link.set(false);
+    rig.tick();
+    rig.scanner.feed("MEMBERTOKEN1\n");
+    rig.tick();
+    rig.tick();
+    TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(),
+                              "an out-of-service board must admit nobody offline either");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -3933,6 +4086,7 @@ int main(int, char**) {
   RUN_TEST(test_app_a_heartbeat_whose_body_never_arrived_counts_as_a_no_push);
   RUN_TEST(test_app_a_draining_backlog_still_lets_the_member_at_the_door_through);
   RUN_TEST(test_app_a_404_on_events_keeps_the_backlog_and_retries_it);
+  RUN_TEST(test_app_an_offline_record_is_stamped_with_an_uptime_the_server_can_read);
   RUN_TEST(test_body_a_body_that_fits_arrives_whole_however_the_segments_fall);
   RUN_TEST(test_body_an_undeclared_length_ends_when_the_peer_closes);
   RUN_TEST(test_body_a_chunked_keep_alive_capture_is_read_by_its_framing_or_not_at_all);
@@ -3946,7 +4100,8 @@ int main(int, char**) {
   RUN_TEST(test_body_a_dribbling_peer_is_bounded_by_the_body_budget);
   RUN_TEST(test_config_the_worst_call_is_connect_plus_headers_plus_body);
   RUN_TEST(test_body_a_deadline_already_passed_is_a_transport_failure);
-  RUN_TEST(test_body_only_a_whole_body_keeps_the_servers_status);
+  RUN_TEST(test_body_a_failure_status_survives_a_body_that_did_not);
+  RUN_TEST(test_app_a_403_whose_body_did_not_fit_still_takes_the_board_out_of_service);
   RUN_TEST(test_heartbeat_body_carries_its_counters_only_when_there_are_some);
   RUN_TEST(test_app_a_heartbeat_that_pushed_no_roster_is_counted_and_reported);
   RUN_TEST(test_led_a_watchdog_that_would_not_arm_blinks_four_times_as_fast);

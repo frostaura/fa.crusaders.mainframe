@@ -112,6 +112,25 @@ constexpr char kDefaultStoreDir[] = ".gatestore";
 /// runs sharing one would share a device.
 constexpr char kDefaultMac[] = "02d0deadbeef";
 
+/// What the clock reads at launch unless a harness says otherwise.
+///
+/// NOT ZERO, AND THAT IS THE WHOLE POINT OF THE CONSTANT. Zero is the one value
+/// of millis()-at-begin() that no real board ever has: the Arduino core's init,
+/// `Serial.begin`, NVS, the UART driver and `WiFi.begin` all run before
+/// `gApp.begin()` does. It is also the one value that HID round G4's C1 — the
+/// uptime accumulator was seeded R ms behind the clock every event is stamped
+/// from, and with R = 0 the bug is arithmetically invisible. A simulator whose
+/// default is the single value that cannot occur in the field is a simulator
+/// that can be green by construction, and this one was, for every run of
+/// `door_evening.py` there has ever been.
+///
+/// The exact number is deliberately not round and is not load-bearing: nothing
+/// may come to depend on it. It is larger than a real board's few hundred
+/// milliseconds on purpose, because the window C1 lived in is R wide and a
+/// harness wants it visible rather than marginal. `--start-ms 0` still says
+/// zero, for a test that specifically wants it.
+constexpr uint32_t kDefaultStartMs = 4200U;
+
 volatile sig_atomic_t gStopRequested = 0;
 
 void onSignal(int) {
@@ -126,7 +145,8 @@ struct Options {
   /// What the clock reads at launch. 4294963200 puts the 49.7-day millis()
   /// rollover four seconds after startup, so a harness can assert "the lock
   /// still releases across the wrap" in one run instead of in seven weeks.
-  uint32_t startMs = 0U;
+  /// Defaults to kDefaultStartMs — see there for why it is not zero.
+  uint32_t startMs = kDefaultStartMs;
   /// Start with the radio down, so a harness can prove what a board does before
   /// it has ever loaded a roster.
   bool linkDown = false;
@@ -141,7 +161,9 @@ void usage() {
          "  --mac         this board's MAC as 12 lowercase hex (or GATE_MAC)\n"
          "  --store       directory for the event queue's persisted sequence\n"
          "  --start-ms    what the millis() clock reads at launch; 4294963200 puts\n"
-         "                the 49.7-day rollover four seconds from now\n"
+         "                the 49.7-day rollover four seconds from now. Defaults to\n"
+         "                a NON-ZERO value: zero is the one reading no real board\n"
+         "                has at begin(), and it is the one that hid G4's C1\n"
          "  --link-down   boot with the radio not associated\n"
          "console: 'scan <code>', 'rxerror', 'wifi up|down', 'status', 'quit'\n");
 }
