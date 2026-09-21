@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import {
   addDays, daysBetween, enumerateOccurrences, formatHhMm, inIntervalPhase, isSliceAligned,
   isoWeekStart, parseHhMm, rowsToCreate, slotsHeld, slotsPerOccurrence, validateRule,
-  weekdayIndex, weekdayOf,
+  clubToday, weekdayIndex, weekdayOf,
 } from "./scheduleRules";
 
 /**
@@ -85,6 +85,31 @@ describe.each(RUNNER_ZONES)("with the runner's own clock in %s", (runnerZone) =>
       // the next day. Getting this backwards shifts every other-week series by one week.
       expect(isoWeekStart("2026-10-11")).toBe("2026-10-05");
       expect(isoWeekStart("2026-10-12")).toBe("2026-10-12");
+    });
+  });
+
+  describe("the club's today", () => {
+    // 2026-09-21 22:30 UTC. It is already Tuesday the 22nd in Johannesburg (+02:00), still
+    // Monday the 21st in Chicago (-05:00), and Tuesday the 22nd in Auckland (+12:00).
+    const LATE = Date.parse("2026-09-21T22:30:00.000Z");
+
+    it("is the CLUB's calendar day, not the reader's and not UTC's", () => {
+      expect(clubToday("Africa/Johannesburg", LATE)).toBe("2026-09-22");
+      expect(clubToday("America/Chicago", LATE)).toBe("2026-09-21");
+      expect(clubToday("Pacific/Auckland", LATE)).toBe("2026-09-22");
+      // This is D3-B01..03's family: a grid whose "today" came out of UTC opened on
+      // yesterday every evening for a club east of Greenwich. The default date an admin is
+      // offered for a new series is the same question.
+      expect(clubToday("UTC", LATE)).toBe("2026-09-21");
+    });
+
+    it("falls back to the reader's own day rather than guessing a zone", () => {
+      // Nothing here may invent a club zone. With none known, the reader's own calendar day
+      // is the honest answer — and the editor's date field is editable, which is what makes
+      // that acceptable where a heading reading "club time" would not be.
+      process.env.TZ = runnerZone;
+      const own = new Date(LATE).toLocaleDateString("en-CA");
+      expect(clubToday(undefined, LATE)).toBe(own);
     });
   });
 

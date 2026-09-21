@@ -136,6 +136,35 @@ export function epochDay(date: string): number | null {
   return Math.round(utc / MS_PER_DAY);
 }
 
+/**
+ * The club's calendar day right now — `YYYY-MM-DD`, in the club's zone.
+ *
+ * <p>
+ * This is the one place in this module that starts from an instant, and it is the only one
+ * that legitimately can: "now" IS an instant, and the question is which calendar day the club
+ * is currently in. `en-CA` is used purely because its date format is ISO's; the club's reading
+ * format is `lib/scheduleCopy`'s business, not this function's.
+ * </p>
+ *
+ * <p>
+ * <b>With no zone it answers the reader's own day and never guesses one.</b> That is the same
+ * rule `lib/clubClock` follows, and here it is safe in a way a heading reading "club time"
+ * would not be: the value is only ever the default in an editable date field, so an admin
+ * whose browser is a day ahead of the club sees the wrong default and corrects it, rather than
+ * being told something false. D3-B01..03 are this question's other face — a grid whose "today"
+ * came out of UTC opened on yesterday every evening for a club east of Greenwich.
+ * </p>
+ */
+export function clubToday(timezone?: string, now: number = Date.now()): string {
+  try {
+    return new Date(now).toLocaleDateString("en-CA", timezone ? { timeZone: timezone } : undefined);
+  } catch {
+    // `toLocaleDateString` throws a RangeError on a zone this engine does not know, and the
+    // value comes from a settings column somebody typed. A throw here would blank the editor.
+    return new Date(now).toLocaleDateString("en-CA");
+  }
+}
+
 /** The inverse: a whole epoch day back to `YYYY-MM-DD`, read out of the UTC calendar. */
 export function fromEpochDay(days: number): string {
   const date = new Date(days * MS_PER_DAY);
