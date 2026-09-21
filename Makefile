@@ -160,16 +160,21 @@ build: lint build-iot
 # PlatformIO to `run` it would be asking it to build nothing and say so.
 #
 # The ENVIRONMENTS are named per project rather than looped, because they are
-# per project by nature — the court box has three targets and the gate has one,
-# and `pio run` with no `-e` would also build each project's native environments
-# for nothing. A fourth project is a fourth line here.
+# per project by nature — each board project has its boards AND its native
+# simulator, and `pio run` with no `-e` would also build each project's test
+# environments for nothing. A fourth project is a fourth line here.
+#
+# BOTH SIMULATORS ARE BUILT HERE, and both are needed by `make test-e2e-device`:
+# the court box's is the Mega half of `scenario.py`, and the gate's is the real
+# firmware in `door_evening.py`. Neither needs a secrets.h — a simulator takes
+# its API base URL and device key at run time.
 #
 # Both board projects `#error` without their own src/common/secrets.h, which is
 # gitignored. That is what stops an image being built with a blank in it; it also
 # means this target cannot run on a fresh checkout until both exist.
 build-iot: sweep-icloud
 	$(PIO) run -d $(IOT_DIR)/court-box -e court_mega -e court_bridge -e simulator
-	$(PIO) run -d $(IOT_DIR)/door-gate -e door_gate
+	$(PIO) run -d $(IOT_DIR)/door-gate -e door_gate -e simulator
 
 # Delete iCloud's fabricated `Name 2.h` / `program 3` copies from under src/iot.
 #
@@ -371,6 +376,11 @@ test-e2e:
 # connection, against which the firmware's reader timed out on EVERY call — no
 # roster, and a door that refused everyone, with nothing red anywhere.
 #
+# AND ITS `DSIM` SECTION RUNS THE REAL DOOR FIRMWARE, which is why the gate's
+# simulator is built on the line above it. `wire.py` reads the server the way a board
+# would; the simulator IS a board — the same GateApp loop, the same GateFlow status
+# table, the same ResponseBody de-chunker — over a real socket to the same API.
+#
 # Both print `finding-id -> assertion` and exit non-zero on any failed assertion. The
 # door needs `psql` on PATH (it places bookings at hours the admin API will not) and
 # it is run second, because it is the longer of the two and the shorter one failing
@@ -386,6 +396,7 @@ test-e2e:
 test-e2e-device:
 	"$(PIO)" run -d $(IOT_DIR)/court-box -e simulator
 	DOTNET="$${DOTNET:-dotnet}" PIO="$(PIO)" "$(PY)" test/e2e-device/scenario.py
+	"$(PIO)" run -d $(IOT_DIR)/door-gate -e simulator
 	DOTNET="$${DOTNET:-dotnet}" "$(PY)" test/e2e-device/door_evening.py
 
 # Service virtualization as plain processes.

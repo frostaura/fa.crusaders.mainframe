@@ -1,0 +1,425 @@
+// Crusaders Mainframe — the DOOR GATE's native simulator: the composition root.
+//
+// WHAT THIS IS FOR
+// ----------------
+// `test/e2e-device/door_evening.py` proves the door end of the device chain
+// against the real API, the real gateway and a real Postgres — and until this
+// binary existed, a PYTHON SCRIPT PLAYED THE WHOLE BOARD. Its own README said
+// so in as many words: *"The firmware's own decisions. `gatelogic` is
+// host-tested in `src/iot/door-gate/test/`. `wire.py` re-implements the
+// reader's framing rules to read the server the way a board would; it does not
+// execute the firmware."*
+//
+// That is the shape of gap the court box closed years ago with
+// `court-box/src/simulator`, and its header says why it matters: a stub only
+// ever agrees with itself, because both ends of the conversation are written
+// from one reading of the spec, so a misreading passes. This repository has
+// already paid for that twice — round G1 found four serious defects in the
+// gate's own `loop()` in one pass, because `build_src_filter = -<*>` meant
+// nothing could see it; round G3 found the API chunking every device route on a
+// kept-open socket, against which the real firmware's reader timed out on every
+// call, because no test in the tree read a real socket.
+//
+// So this is the SAME `gatelogic::GateApp` loop, the SAME `GateApi`, the SAME
+// `GateFlow` status table, the SAME `ResponseBody` framing and de-chunker, the
+// SAME `UnlockTimer` and `LockDriver` and `ScanAssembler` and `ScanDebounce`
+// and `LedPattern` the ESP32 runs — over `posix_gate_hal` and `posix_hal`
+// instead of `esp32_hal`, with a REAL socket to a REAL API. If the firmware
+// refuses a token, so does this; if the firmware releases the lock for three
+// seconds, so does this. That is what makes it evidence rather than a second
+// opinion.
+//
+// NOTHING PER-DOOR AND NOTHING SECRET IS COMPILED IN
+// --------------------------------------------------
+// The board gets its four values from a gitignored `src/common/secrets.h` and
+// `#error`s without it. This binary takes the two that matter — the API base
+// URL and the device API key — from FLAGS OR THE ENVIRONMENT, and the MAC too,
+// because a simulator with a credential baked into it is a credential in a
+// build directory and, one `make arduino-export` later, in a sketch folder.
+// `--device-key` is read but never printed: the transcript is an artefact CI
+// uploads on failure.
+//
+// The API base URL is checked against `gatelogic::isValidApiBaseUrl` AT
+// STARTUP, with the same grammar `src/gate/main.cpp` static_asserts at compile
+// time. A simulator that accepted a URL the firmware would refuse would be
+// testing a different firmware.
+//
+// WHAT THIS DELIBERATELY DOES NOT SIMULATE
+// ----------------------------------------
+//   * The WiFi radio. `ConsoleLink` is told up or down from the console,
+//     because a host socket is always there and "the router rebooted" has to be
+//     said rather than sensed. What the firmware DOES about it — the roster
+//     fallback, the heartbeat re-arm on the up edge, the spacing floor, the
+//     deferral debt — is all real.
+//   * The GM-series scanner's UART. Bytes arrive from a console line instead of
+//     from a 9600 baud module on GPIO 4. They arrive ONE AT A TIME through the
+//     real `ScanAssembler`, and a receive error can be injected, but the module
+//     itself is not here.
+//   * The physical relay and the lock. There is no coil, no contact and no
+//     readback — and there is no readback on the real board either, which is a
+//     hardware fact and not a simulator gap. What the pin was COMMANDED is
+//     printed, with its electrical level.
+//   * The watchdog's reset. `ConsoleWatchdog` prints the breach instead of
+//     killing the process, so the transcript carries the evidence.
+//   * NVS. The event queue's sequence high-water mark lives in a directory of
+//     files through `posix_hal::FileStore`, which cannot produce a torn write —
+//     `fakes::FakeStore` is where that case is exercised.
+//
+// THE CONSOLE
+// -----------
+// Deliberately not the wire: a person driving this by hand wants
+// `scan CODE`, and a harness that wants a real HTTP request has the API for it.
+//
+//   scan <code>     present <code> at the reader, as a line of scanner bytes
+//   rxerror         raise the UART's receive-error flag, as an overrun does
+//   wifi up|down    the radio associates or goes away
+//   status          one line of everything observable
+//   quit            stop, locking the door on the way out
+
+#include <signal.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#include "devapi/DeviceClient.h"
+#include "devlink/ApiBreaker.h"
+#include "fwversion/Version.h"
+#include "gatelogic/ApiBaseUrl.h"
+#include "gatelogic/GateApi.h"
+#include "gatelogic/GateApp.h"
+#include "gatelogic/GateConfig.h"
+#include "gatelogic/LedPattern.h"
+#include "gatelogic/LockDriver.h"
+#include "gatelogic/ScanAssembler.h"
+#include "gatelogic/ScanDebounce.h"
+#include "gatelogic/UnlockTimer.h"
+#include "posix_gate_hal/PosixGateHal.h"
+#include "posix_hal/FileStore.h"
+#include "posix_hal/PosixClock.h"
+#include "posix_hal/StdinLines.h"
+
+namespace {
+
+using namespace gatelogic;
+
+constexpr char kDefaultStoreDir[] = ".gatestore";
+
+/// Twelve lowercase hex, exactly as `WiFi.macAddress()` renders on the board.
+/// A default rather than a requirement so the binary can be run by hand; every
+/// harness passes one, because an unknown MAC auto-registers a Gate row and two
+/// runs sharing one would share a device.
+constexpr char kDefaultMac[] = "02d0deadbeef";
+
+volatile sig_atomic_t gStopRequested = 0;
+
+void onSignal(int) {
+  gStopRequested = 1;
+}
+
+struct Options {
+  const char* apiBase = nullptr;
+  const char* deviceKey = nullptr;
+  const char* mac = kDefaultMac;
+  const char* storeDir = kDefaultStoreDir;
+  /// What the clock reads at launch. 4294963200 puts the 49.7-day millis()
+  /// rollover four seconds after startup, so a harness can assert "the lock
+  /// still releases across the wrap" in one run instead of in seven weeks.
+  uint32_t startMs = 0U;
+  /// Start with the radio down, so a harness can prove what a board does before
+  /// it has ever loaded a roster.
+  bool linkDown = false;
+};
+
+void usage() {
+  printf("usage: gate-simulator --api-base URL --device-key KEY [--mac HEX12] [--store DIR]\n"
+         "                      [--start-ms MS] [--link-down]\n"
+         "  --api-base    http:// + an IPv4 literal + an optional :port, no trailing slash\n"
+         "                (or GATE_API_BASE). The SAME grammar the board static_asserts.\n"
+         "  --device-key  the tenant's device API key (or GATE_DEVICE_KEY). NEVER printed.\n"
+         "  --mac         this board's MAC as 12 lowercase hex (or GATE_MAC)\n"
+         "  --store       directory for the event queue's persisted sequence\n"
+         "  --start-ms    what the millis() clock reads at launch; 4294963200 puts\n"
+         "                the 49.7-day rollover four seconds from now\n"
+         "  --link-down   boot with the radio not associated\n"
+         "console: 'scan <code>', 'rxerror', 'wifi up|down', 'status', 'quit'\n");
+}
+
+bool parseOptions(int argc, char** argv, Options& out) {
+  for (int i = 1; i < argc; ++i) {
+    const bool hasValue = (i + 1) < argc;
+    if (strcmp(argv[i], "--api-base") == 0 && hasValue) {
+      out.apiBase = argv[++i];
+    } else if (strcmp(argv[i], "--device-key") == 0 && hasValue) {
+      out.deviceKey = argv[++i];
+    } else if (strcmp(argv[i], "--mac") == 0 && hasValue) {
+      out.mac = argv[++i];
+    } else if (strcmp(argv[i], "--store") == 0 && hasValue) {
+      out.storeDir = argv[++i];
+    } else if (strcmp(argv[i], "--start-ms") == 0 && hasValue) {
+      out.startMs = static_cast<uint32_t>(strtoul(argv[++i], nullptr, 10));
+    } else if (strcmp(argv[i], "--link-down") == 0) {
+      out.linkDown = true;
+    } else {
+      return false;
+    }
+  }
+  // The environment is the fallback for the two secrets-shaped values, so a
+  // harness never has to put a key in an argv a process listing shows.
+  if (out.apiBase == nullptr) {
+    out.apiBase = getenv("GATE_API_BASE");
+  }
+  if (out.deviceKey == nullptr) {
+    out.deviceKey = getenv("GATE_DEVICE_KEY");
+  }
+  const char* macEnv = getenv("GATE_MAC");
+  if (macEnv != nullptr && strcmp(out.mac, kDefaultMac) == 0) {
+    out.mac = macEnv;
+  }
+  return out.apiBase != nullptr && out.deviceKey != nullptr;
+}
+
+bool isTwelveLowerHex(const char* mac) {
+  if (mac == nullptr || strlen(mac) != 12U) {
+    return false;
+  }
+  for (size_t i = 0U; i < 12U; ++i) {
+    const char c = mac[i];
+    const bool digit = c >= '0' && c <= '9';
+    const bool lower = c >= 'a' && c <= 'f';
+    if (!digit && !lower) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// The loop's own idle, and it is the BOARD's number rather than a convenient
+/// one. `kIdleDelayMs` is the only delay in this firmware and it is one of the
+/// three terms in the release-overrun bound, so a simulator that idled for one
+/// millisecond would measure a bound the hardware does not have.
+void idle() {
+  timespec ts;
+  ts.tv_sec = 0;
+  ts.tv_nsec = static_cast<long>(kIdleDelayMs) * 1000000L;
+  static_cast<void>(nanosleep(&ts, nullptr));
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+  Options options;
+  if (!parseOptions(argc, argv, options)) {
+    usage();
+    return 2;
+  }
+  // THE SAME GRAMMAR THE BOARD STATIC_ASSERTS, checked at startup because this
+  // build has no compile-time literal to assert. A hostname is a DNS wait
+  // bounded by neither HTTP timeout; `https://` is accepted and then spoken as
+  // cleartext to :443; a trailing slash is a 404 that reads at the door as an
+  // outage.
+  if (!isValidApiBaseUrl(options.apiBase) || !apiBaseUrlFits(options.apiBase)) {
+    fprintf(stderr, "[sim] --api-base must be http:// + an IPv4 literal + an optional :port, with no "
+                    "trailing slash and no path — the same grammar src/gate/main.cpp static_asserts\n");
+    return 2;
+  }
+  if (!isTwelveLowerHex(options.mac)) {
+    fprintf(stderr, "[sim] --mac must be twelve lowercase hex characters, as WiFi.macAddress() "
+                    "renders on the board\n");
+    return 2;
+  }
+  if (strlen(options.deviceKey) > devapi::kMaxApiKeyLen) {
+    fprintf(stderr, "[sim] --device-key is longer than devapi::kMaxApiKeyLen — a truncated key is a "
+                    "401 that reads exactly like the wrong key\n");
+    return 2;
+  }
+
+  // `Bearer <key>`, rendered once, exactly as setupIdentity() does at boot.
+  static char authorization[devapi::kAuthorizationBufSize] = {};
+  if (devapi::renderAuthorization(authorization, sizeof(authorization), options.deviceKey) == 0U) {
+    fprintf(stderr, "[sim] the device key does not fit the Authorization buffer\n");
+    return 2;
+  }
+
+  // Ports first, then the app that borrows them; the same order as
+  // src/gate/main.cpp, and for the same reason.
+  posix_hal::PosixClock clock(options.startMs);
+  posix_hal::FileStore store;
+  posix_hal::StdinLines console;
+
+  // THE LEVELS COME FROM THE REAL POLARITY FUNCTIONS. `lockPinLevel` and
+  // `ledPinLevel` are the one place each composition is written down, and the
+  // transcript is one of the few places a person reads it back — so the
+  // simulator asks them rather than restating the answer.
+  posix_gate_hal::ConsolePinOut relayPin(
+      "relay", lockPinLevel(true, kGateConfig.relayActiveHigh, kGateConfig.unlockEnergisesRelay), clock);
+  posix_gate_hal::ConsolePinOut ledPin("led", ledPinLevel(true, kGateConfig.ledActiveHigh), clock);
+  posix_gate_hal::ConsoleScanner scanner;
+  posix_gate_hal::ConsoleLink link(clock);
+  posix_gate_hal::ConsoleWatchdog watchdog(kGateConfig.watchdogSeconds, clock);
+  posix_gate_hal::SocketHttpPort http(options.apiBase, authorization, clock);
+  posix_gate_hal::ConsoleDecisionLog decisions;
+
+  devlink::ApiBreaker breaker;
+  GateApi api(http, breaker, clock);
+
+  LockDriver lock(relayPin, kGateConfig.relayActiveHigh, kGateConfig.unlockEnergisesRelay);
+  UnlockTimer unlockTimer(kGateConfig.unlockHardCapMs);
+  LedPattern led;
+  ScanAssembler assembler;
+  ScanDebounce debounce;
+  GateQueue queue(&store);
+  GateRoster roster(kGateConfig.rosterMaxAgeMs);
+
+  static char heartbeatBody[kGateResponseCap] = {};
+
+  if (!store.begin(options.storeDir)) {
+    fprintf(stderr, "[sim] cannot use store directory %s\n", options.storeDir);
+    return 1;
+  }
+  static_cast<void>(console.begin());
+
+  GateApp::Ports ports;
+  ports.clock = &clock;
+  ports.scanner = &scanner;
+  ports.watchdog = &watchdog;
+  ports.link = &link;
+  ports.api = &api;
+  ports.breaker = &breaker;
+  ports.lock = &lock;
+  ports.unlock = &unlockTimer;
+  ports.led = &led;
+  ports.ledPin = &ledPin;
+  ports.ledActiveHigh = kGateConfig.ledActiveHigh;
+  ports.assembler = &assembler;
+  ports.debounce = &debounce;
+  ports.roster = &roster;
+  ports.queue = &queue;
+  // THE ONE PORT THE BOARD LEAVES NULL. A refusal reason reaches no surface on
+  // the hardware — see gatelogic/GatePorts.h — so on this build it reaches
+  // stdout, and that is what lets a harness assert that a given server reason
+  // produced a refusal rather than that a relay happened not to move.
+  ports.log = &decisions;
+  ports.mac = options.mac;
+  ports.firmwareVersion = fw::kFirmwareVersion;
+  ports.heartbeatBody = heartbeatBody;
+  ports.heartbeatBodyCap = sizeof(heartbeatBody);
+
+  GateApp app(ports);
+
+  // FIRST, before anything else can take time or fail, exactly as setup() does:
+  // the lock's LOCKED level into the output register before the pin drives it.
+  app.beginOutputs();
+  // The watchdog is a report rather than a reset here, so it always "arms" —
+  // and the lamp is therefore not showing the fault pattern, which is the state
+  // a healthy board is in.
+  app.setWatchdogArmed(true);
+
+  // Five lines, then nothing in the loop. The key is not among them.
+  printf("[sim] crusaders door-gate simulator %s\n", fw::kFirmwareVersion);
+  printf("[sim] mac=%s api=%s store=%s\n", options.mac, options.apiBase, options.storeDir);
+  printf("[sim] clock starts at %lu ms, idle %lu ms/pass, watchdog %us, worst call %lu ms\n",
+         static_cast<unsigned long>(options.startMs), static_cast<unsigned long>(kIdleDelayMs),
+         static_cast<unsigned>(kGateConfig.watchdogSeconds),
+         static_cast<unsigned long>(kWorstBlockingCallMs));
+  printf("[sim] unlock default %lu ms, hard cap %lu ms, heartbeat %lu ms, roster max age %lu ms\n",
+         static_cast<unsigned long>(kGateConfig.unlockDefaultMs),
+         static_cast<unsigned long>(kGateConfig.unlockHardCapMs),
+         static_cast<unsigned long>(kGateConfig.heartbeatMs),
+         static_cast<unsigned long>(kGateConfig.rosterMaxAgeMs));
+  printf("[sim] console: scan <code> | rxerror | wifi up|down | status | quit\n");
+  static_cast<void>(fflush(stdout));
+
+  static_cast<void>(signal(SIGINT, onSignal));
+  static_cast<void>(signal(SIGTERM, onSignal));
+
+  // The radio, BEFORE the logical boot, because `begin()` arms the first
+  // heartbeat as a fallback and `pumpLink`'s up edge is what re-arms it to now.
+  link.set(!options.linkDown);
+  app.begin();
+
+  // What the last pass observed, so a change is one line rather than a stream.
+  uint32_t lastRosterAge = 0U;
+  uint8_t lastRosterSize = 0U;
+  uint32_t lastUnlockMs = app.unlockMs();
+  uint32_t lastNoPush = 0U;
+  uint16_t lastQueued = 0U;
+  bool everReported = false;
+
+  while (gStopRequested == 0) {
+    app.pass();
+
+    // THE HEARTBEAT HAS NO PORT OF ITS OWN, and does not need one: everything a
+    // harness has to know about it is already public on GateApp and on the
+    // roster it filled. A re-anchored roster — its age dropping — is exactly
+    // "an accepted heartbeat adopted a push", which is the event worth a line.
+    const uint32_t age = roster.ageMs(clock.nowMs());
+    const uint8_t size = roster.size();
+    if (!everReported || age < lastRosterAge || size != lastRosterSize || app.unlockMs() != lastUnlockMs ||
+        app.noPushHeartbeats() != lastNoPush) {
+      printf("[hb] roster=%u age_ms=%lu unlock_ms=%lu no_push=%lu link=%d t=%lums\n",
+             static_cast<unsigned>(size), static_cast<unsigned long>(age),
+             static_cast<unsigned long>(app.unlockMs()), static_cast<unsigned long>(app.noPushHeartbeats()),
+             app.linkUp() ? 1 : 0, static_cast<unsigned long>(clock.nowMs()));
+      static_cast<void>(fflush(stdout));
+      everReported = true;
+    }
+    lastRosterAge = age;
+    lastRosterSize = size;
+    lastUnlockMs = app.unlockMs();
+    lastNoPush = app.noPushHeartbeats();
+
+    if (queue.size() != lastQueued) {
+      printf("[evq] held=%u lost=%lu t=%lums\n", static_cast<unsigned>(queue.size()),
+             static_cast<unsigned long>(queue.overflowed()), static_cast<unsigned long>(clock.nowMs()));
+      static_cast<void>(fflush(stdout));
+      lastQueued = queue.size();
+    }
+
+    while (console.poll()) {
+      const char* line = console.line();
+      if (strcmp(line, "quit") == 0) {
+        gStopRequested = 1;
+      } else if (strncmp(line, "scan ", 5U) == 0) {
+        scanner.feedLine(line + 5);
+      } else if (strcmp(line, "rxerror") == 0) {
+        scanner.injectRxError();
+      } else if (strcmp(line, "wifi up") == 0) {
+        link.set(true);
+      } else if (strcmp(line, "wifi down") == 0) {
+        link.set(false);
+      } else if (strcmp(line, "status") == 0) {
+        printf("[status] link=%d released=%d roster=%u age_ms=%lu unlock_ms=%lu queued=%u lost=%lu "
+               "no_push=%lu calls=%lu worst_call_ms=%lu worst_gap_ms=%lu wdt_breaches=%lu "
+               "dropped_scan_bytes=%lu t=%lums\n",
+               app.linkUp() ? 1 : 0, lock.released() ? 1 : 0, static_cast<unsigned>(roster.size()),
+               static_cast<unsigned long>(roster.ageMs(clock.nowMs())),
+               static_cast<unsigned long>(app.unlockMs()), static_cast<unsigned>(queue.size()),
+               static_cast<unsigned long>(queue.overflowed()),
+               static_cast<unsigned long>(app.noPushHeartbeats()), static_cast<unsigned long>(http.calls()),
+               static_cast<unsigned long>(http.worstCallMs()),
+               static_cast<unsigned long>(watchdog.worstGapMs()),
+               static_cast<unsigned long>(watchdog.breaches()),
+               static_cast<unsigned long>(scanner.droppedBytes()), static_cast<unsigned long>(clock.nowMs()));
+        static_cast<void>(fflush(stdout));
+      } else {
+        printf("[sim] unknown command: %s\n", line);
+        static_cast<void>(fflush(stdout));
+      }
+    }
+
+    idle();
+  }
+
+  // LOCKED on the way out. A simulator that left its "relay" believing the door
+  // was open would hand the next run a state the hardware cannot be in, and it
+  // is the one habit this whole system is built around.
+  lock.set(false);
+  printf("[sim] stopped after %lu calls, worst call %lu ms, worst unkicked gap %lu ms, "
+         "%lu watchdog breach(es)\n",
+         static_cast<unsigned long>(http.calls()), static_cast<unsigned long>(http.worstCallMs()),
+         static_cast<unsigned long>(watchdog.worstGapMs()), static_cast<unsigned long>(watchdog.breaches()));
+  static_cast<void>(fflush(stdout));
+  return 0;
+}
