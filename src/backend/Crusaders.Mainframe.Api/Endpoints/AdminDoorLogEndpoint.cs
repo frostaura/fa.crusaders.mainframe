@@ -116,9 +116,16 @@ public static class AdminDoorLogEndpoint
             // DoorLogQuery.Filtered for why it is counted without the cursor.
             total = await query.Filtered(db).CountAsync(ct),
 
-            // The range this server actually resolved, in the club's own offset, and the zone
-            // it was resolved in — so the page states the window in words above the rows rather
-            // than inferring one from a period name it sent (A4, O1).
+            // The range this server actually resolved, and the zone it was resolved IN — so the
+            // page states the window in words above the rows rather than inferring one from the
+            // period name it sent (A4, O1).
+            //
+            // BOTH EDGES ARE UTC INSTANTS, and `timezone` is what a console renders them with.
+            // DoorLogQuery normalises every resolved edge with `.ToUniversalTime()` because
+            // Npgsql refuses a non-zero offset on a `timestamptz`, and the same value is what
+            // the query ran against — so the range on the wire is the range that was read,
+            // rather than a second rendering of it that could disagree. The club's own offset is
+            // never lost: it is `timezone`, and the export's filename is written through it.
             range = new { from = query.From, to = query.To },
             timezone = query.Timezone,
 

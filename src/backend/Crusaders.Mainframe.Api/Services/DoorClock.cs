@@ -56,10 +56,13 @@ public static class DoorClock
     /// offset that is in force AT THAT INSTANT rather than the one in force now.
     ///
     /// <para>
-    /// The wire keeps the club's own offset deliberately — it is what lets a page say "since
-    /// 00:00 club time" rather than converting and guessing — and every caller that puts the
-    /// value in a query parameter calls <c>.ToUniversalTime()</c> first, because Npgsql refuses
-    /// a non-zero offset on a <c>timestamptz</c>. See <c>memory/gotchas-postgres-offsets.md</c>.
+    /// <b>The value returned carries the club's offset; every caller normalises it before use.</b>
+    /// The offset is what makes this method's arithmetic right across a DST change, and it is
+    /// dropped the moment the instant leaves: Npgsql refuses a non-zero offset on a
+    /// <c>timestamptz</c> (see <c>memory/gotchas-postgres-offsets.md</c>), so the query runs on
+    /// UTC and the <c>range</c> the log reports is the same UTC pair it read. A page saying
+    /// "since 00:00 club time" renders that pair through the response's own <c>timezone</c>,
+    /// which is the only reading that survives an admin in another zone.
     /// </para>
     /// </summary>
     public static DateTimeOffset StartOfLocalDay(TimeZoneInfo zone, DateOnly day)
