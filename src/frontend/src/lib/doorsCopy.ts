@@ -202,6 +202,23 @@ export function doorSetupChip(device: AdminDoorDevice): DoorChip | null {
 }
 
 /**
+ * Who shut this door, and when — A5's replacement for "You shut this door."
+ *
+ * <p>
+ * <b>Never "you", on any arm.</b> A club has several admins; the sentence was true for at
+ * most one of them and there was no way to tell from the screen which. Both facts are
+ * optional on the wire, so all four arms exist and none of them invents an actor.
+ * </p>
+ */
+export function doorShutAttribution(device: AdminDoorDevice, timezone: string): string {
+  const who = device.shut_by_name ?? null;
+  const at = device.out_of_service_since ? clubDayAndClock(device.out_of_service_since, timezone) : null;
+  if (who === null && at === null) return "This door is shut.";
+  if (who === null) return `This door was shut on ${at}.`;
+  return at === null ? `Shut by ${who}.` : `Shut by ${who} at ${at}.`;
+}
+
+/**
  * The paragraph under the chips: what this state MEANS for this door right now.
  *
  * <p>
@@ -212,7 +229,10 @@ export function doorSetupChip(device: AdminDoorDevice): DoorChip | null {
  * </p>
  */
 export function doorStateNotice(device: AdminDoorDevice, online: boolean, timezone: string): string {
-  if (!device.enabled) return `You shut this door. ${doorShutNotice()}`;
+  // A5: it said "You shut this door." to every admin who opened the page — false for all but
+  // one of them, and unfalsifiable for the reader. The audit row has always carried the
+  // actor; WIRE-R2 §2 puts the name on the door row, so the screen can say who and when.
+  if (!device.enabled) return `${doorShutAttribution(device, timezone)} ${doorShutNotice()}`;
   const named = device.gate_key !== null;
   if (online) {
     if (named) {

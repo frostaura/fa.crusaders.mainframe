@@ -15,6 +15,15 @@ export type DoorSummary = {
   name: string;
   enabled: boolean;
   online: boolean;
+  /**
+   * Has this door a `gate_key` — which is to say, is it sent a list at all?
+   *
+   * B3: an unnamed gate's heartbeat answers `roster: []`, so "keeps admitting booked members
+   * from the list it last downloaded" is flatly false of it — and that is what the fleet
+   * confirm said about every unreachable door in the club. The fleet control cannot ask the
+   * device rows directly (it renders from this summary), so the fact travels with them.
+   */
+  named: boolean;
   /** True while this door is one a shut-all shut, as opposed to one an admin shut on its own. */
   shutByFleet: boolean;
 };
@@ -205,6 +214,7 @@ function summarise(view: DoorsView): DoorsChrome {
       name: row.device.name,
       enabled: row.device.enabled,
       online,
+      named: row.device.gate_key !== null,
       // A door is "shut together" only while a shut-all is standing. Without this the page
       // cannot tell a fleet shut from a door somebody shut on its own, which is the whole
       // of C1 — "Reopen all 3" against a club where only an individually-shut door was shut

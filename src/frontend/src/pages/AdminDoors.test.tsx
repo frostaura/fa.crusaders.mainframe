@@ -145,9 +145,11 @@ describe("the doors surface", () => {
     it("says a shut door opens for nobody AND that a cut-off one keeps admitting", async () => {
       openDoors([doorFixture({ enabled: false })]);
 
-      const notice = await screen.findByText(/You shut this door/);
+      const notice = await screen.findByText(/This door is shut\./);
       expect(notice).toHaveTextContent("opens for nobody");
       expect(notice).toHaveTextContent("keeps admitting members with a booking");
+      // A5: never "you" — a club has several admins and this was true of at most one.
+      expect(notice.textContent).not.toContain("You shut");
     });
 
     /** A door that has never called in holds no list, so there is no time to print. */
@@ -672,8 +674,14 @@ describe("the doors surface", () => {
       // layer and once in an aria-hidden width sentinel, which is what stops the button
       // resizing as it arms. Both carry the same sentence, and it is the sentence that is
       // being held here.
-      expect(screen.getAllByText(/Shut this door\? A door that can reach the club opens for nobody/)[0])
-        .toHaveTextContent(/a door marks nobody as having arrived/);
+      // B3 / B5: the consequence is generated from THIS door's situation — in contact and
+      // named — and is ≤25 words. The old confirm described the pair in the abstract, so a
+      // door that is in contact was told about doors that are not.
+      expect(screen.getAllByText("Shut this door? It hears this at once and opens for nobody.")[0])
+        .toBeInTheDocument();
+      // And the long explanation is still on the page, beside the control, as plain text.
+      expect(screen.getByText(/refuses every scan at this door from the instant the switch is thrown/))
+        .toHaveTextContent("a door marks nobody as having arrived");
       fireEvent.click(confirm);
 
       await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
@@ -699,18 +707,47 @@ describe("the doors surface", () => {
 
       fireEvent.click(await screen.findByRole("button", { name: "Reopen this door — Side door" }));
       const confirm = await screen.findByRole("button", { name: "Reopen this door — Side door — tap again to confirm" });
-      expect(screen.getAllByText(/Reopen this door\?/)[0])
-        .toHaveTextContent("from the very next scan — there is no wait");
+      expect(screen.getAllByText("Reopen this door? It opens for members again from the very next scan.")[0])
+        .toBeInTheDocument();
       fireEvent.click(confirm);
 
       await waitFor(() => expect(stub.calls.find((c) => c.method === "PATCH")?.raw).toBe('{"enabled":true}'));
     });
 
-    it("says a shut door is shut, above its own control", async () => {
-      openDoor([doorFixture({ enabled: false, name: "Front door" })]);
+    /**
+     * <b>B3.</b> An unnamed door is sent an EMPTY list, so it opens for nobody while it is
+     * offline — and the confirm told it, on the control that shuts it, that it "keeps
+     * admitting booked members from the list it last downloaded". Every door in a club is in
+     * this state on install day.
+     */
+    it("never tells an unnamed, unreachable door it keeps admitting members", async () => {
+      openDoor([doorFixture({ gate_key: null, last_seen_at: ago(3600) })]);
 
-      expect(await screen.findByText(/Front door is shut/))
-        .toHaveTextContent("It opens for nobody that can reach the club's server.");
+      fireEvent.click(await screen.findByRole("button", { name: /^Shut this door/ }));
+      // `findAllByText`: ConfirmButton renders its confirm label twice — once visibly and
+      // once in an aria-hidden width sentinel that stops the button resizing as it arms.
+      const armed = (await screen.findAllByText(/^Shut this door\? Nothing can reach it/))[0];
+      expect(armed).toHaveTextContent("with no saved list it already opens for nobody");
+      expect(armed.textContent).not.toContain("admitting booked members");
+    });
+
+    /**
+     * <b>B8.</b> "It opens for nobody that can reach the club's server" attaches its relative
+     * clause to "nobody" and so reads as its own opposite, on the standing notice above the
+     * control that undoes it.
+     * <b>A5.</b> And it said "You shut this door." to every admin in the club.
+     */
+    it("says a shut door is shut, who shut it, and nothing that reads backwards", async () => {
+      openDoor([doorFixture({
+        enabled: false, name: "Front door", shut_by_name: "Priya Naidoo",
+        out_of_service_since: new Date("2026-09-20T19:40:00Z").toISOString(),
+      })]);
+
+      const notice = await screen.findByText(/Front door is shut/);
+      expect(notice).toHaveTextContent("The club's server is refusing every scan at this door.");
+      expect(notice).toHaveTextContent("Shut by Priya Naidoo on");
+      expect(document.body.textContent).not.toContain("opens for nobody that can reach");
+      expect(document.body.textContent).not.toContain("You shut this door");
     });
 
     /**
@@ -726,14 +763,17 @@ describe("the doors surface", () => {
 
       fireEvent.click(await screen.findByRole("button", { name: "Delete this door — Front door" }));
       const armed = await screen.findByRole("button", { name: "Delete this door — Front door — tap again to confirm" });
-      // C10 / A12: the confirm names the location note and the power-cut answer as things
-      // it destroys — they were the two facts an admin had most recently taken the trouble
-      // to write down, and the old sentence ("The door re-registers on its next heartbeat
-      // with no name") mentioned neither.
-      expect(screen.getAllByText(/Delete this door\? Everything written down about it goes/))
-        .not.toHaveLength(0);
-      expect(screen.getAllByText(/Delete this door\? Everything written down about it goes/)[0])
+      // A2 / B5: the confirm is ≤25 words and answers the question a reviewer went looking
+      // for — what happens to the door's past scans. It is NOT "the whole history goes",
+      // which is what the old confirm left an admin to infer by listing three things and
+      // stopping.
+      expect(screen.getAllByText(/Delete this door\? Its name, its place and its power answer go/)[0])
+        .toHaveTextContent("Its past scans stay in the club log under its old name");
+      // C10 / A12: everything that no longer fits is still on the page beside the control.
+      expect(screen.getByText(/Deleting Front door throws away/))
         .toHaveTextContent("what the lock does with no power");
+      expect(screen.getByText(/Deleting Front door throws away/))
+        .toHaveTextContent("Its past scans are NOT deleted");
       expect(screen.queryByText(/The box re-registers/)).toBeNull();
 
       fireEvent.click(armed);
@@ -753,14 +793,52 @@ describe("the doors surface", () => {
       expect(screen.queryByRole("button", { name: /Shut all doors/ })).toBeNull();
     });
 
-    it("names the count and both halves before it does anything", async () => {
+    /**
+     * <b>B3 / B5 at fleet scale.</b> The old confirm was 45 words describing every door as
+     * both reachable and cut off at once, inside an 8-second auto-disarm. The doors a club
+     * has are countable: when the club can reach all of them the sentence says so and stops.
+     */
+    it("says what it will do to the doors this club actually has", async () => {
       openDoors([doorFixture(), doorFixture({ id: OTHER_ID, name: "Front door", gate_key: "front-door" })]);
 
       fireEvent.click(await screen.findByRole("button", { name: /^Shut all doors — every door the club has open — 2 of 2/ }));
-      await screen.findByRole("button", { name: /^Shut all doors — every door the club has open — 2 of 2/ });
       const label = screen.getAllByText(/Shut all 2 doors\?/)[0];
-      expect(label).toHaveTextContent("keeps admitting booked members from the list it last downloaded");
-      expect(label).toHaveTextContent("up to six hours");
+      expect(label).toHaveTextContent("Every one of them opens for nobody from this click.");
+      expect(label.textContent).not.toContain("admitting booked members");
+      // The long version is still on the page, beside the control.
+      expect(screen.getByText(/Shutting every door takes effect at the club's server at once/))
+        .toHaveTextContent("for up to six hours");
+    });
+
+    it("counts the doors that cannot hear it, and only when there are some", async () => {
+      openDoors([
+        doorFixture(),
+        doorFixture({
+          id: OTHER_ID, name: "Front door", gate_key: "front-door",
+          last_seen_at: new Date(Date.now() - 3_600_000).toISOString(),
+        }),
+      ]);
+
+      fireEvent.click(await screen.findByRole("button", { name: /^Shut all doors/ }));
+      expect(screen.getAllByText(/Shut all 2 doors\?/)[0]).toHaveTextContent(
+        "1 cannot be reached and keeps admitting booked members from its saved list for six hours.",
+      );
+    });
+
+    /** And an unreachable door with no name holds no list, so it is never said to admit anybody. */
+    it("does not promise a cached list for an unnamed door that cannot be reached", async () => {
+      openDoors([
+        doorFixture(),
+        doorFixture({
+          id: OTHER_ID, name: "Door gate", gate_key: null,
+          last_seen_at: new Date(Date.now() - 3_600_000).toISOString(),
+        }),
+      ]);
+
+      fireEvent.click(await screen.findByRole("button", { name: /^Shut all doors/ }));
+      const label = screen.getAllByText(/Shut all 2 doors\?/)[0];
+      expect(label).toHaveTextContent("with no saved list it opens for nobody anyway");
+      expect(label.textContent).not.toContain("admitting booked members");
     });
 
     /**

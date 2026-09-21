@@ -8,6 +8,8 @@ import {
   doorOutcomeChip, doorQuietNotice, doorRefusalSpikeNotice, doorRetentionNotice,
   doorScanCountHeading, doorScanCountLine, doorSetupChip, doorSignalChip, doorStaleChecksNotice,
   doorStateChip, doorStateNotice, doorsAttentionSummary, describePowerLoss, spellAge,
+  doorDisplayName, doorPickerLabel, doorRowIdentity, doorRowName, doorShutAttribution,
+  REMOVED_DOOR_UNNAMED,
 } from "./doorsCopy";
 import { doorShutNotice } from "./gateCopy";
 import { type AdminDoorDevice, type DeviceActivityEntry, type DoorSignal } from "./api";
@@ -235,9 +237,43 @@ describe("doorStateNotice", () => {
    */
   it("shut: prefixes the one shut notice rather than restating it", () => {
     const notice = doorStateNotice(door({ enabled: false }), true, TZ);
-    expect(notice).toBe(`You shut this door. ${doorShutNotice()}`);
+    expect(notice).toBe(`This door is shut. ${doorShutNotice()}`);
     expect(notice).toContain("opens for nobody");
     expect(notice).toContain("keeps admitting members with a booking");
+  });
+
+  /**
+   * <b>A5 — "You shut this door." was shown to every admin in the club.</b>
+   *
+   * It is true of at most one of them, there is nothing on the screen that says which, and
+   * the audit row has carried the actor since the gate shipped. WIRE-R2 §2 puts the name on
+   * the door row so the state paragraph can say who and when.
+   */
+  it("shut: names who shut it and when, and never says 'you'", () => {
+    const shut = door({
+      enabled: false, shut_by_name: "Priya Naidoo",
+      out_of_service_since: "2026-09-20T19:40:00Z",
+    });
+    expect(doorStateNotice(shut, true, TZ)).toContain("Shut by Priya Naidoo at Sun 20 Sept, 19:40.");
+    for (const variant of [shut, door({ enabled: false }), door({ enabled: false, shut_by_name: "Priya Naidoo" })]) {
+      expect(doorStateNotice(variant, true, TZ).toLowerCase()).not.toContain("you shut");
+    }
+  });
+
+  /** All four arms, and not one of them invents an actor or a time it does not have. */
+  it("shut: says only what the payload actually carries", () => {
+    expect(doorShutAttribution(door({ enabled: false }), TZ)).toBe("This door is shut.");
+    expect(doorShutAttribution(door({ enabled: false, shut_by_name: "Priya Naidoo" }), TZ))
+      .toBe("Shut by Priya Naidoo.");
+    expect(doorShutAttribution(door({ enabled: false, out_of_service_since: "2026-09-20T19:40:00Z" }), TZ))
+      .toBe("This door was shut on Sun 20 Sept, 19:40.");
+    for (const notice of [
+      doorShutAttribution(door({ enabled: false }), TZ),
+      doorShutAttribution(door({ enabled: false, shut_by_name: "Priya Naidoo" }), TZ),
+    ]) {
+      expect(notice).not.toContain("null");
+      expect(notice).not.toContain("undefined");
+    }
   });
 
   it("every branch states both halves of its conditional", () => {
@@ -741,6 +777,89 @@ describe("the whole surface's vocabulary", () => {
         expect(sentence, sentence).not.toContain(leak);
       }
     }
+  });
+});
+
+/**
+ * <b>A1 / A2 — what a row calls a door that is gone.</b>
+ *
+ * The page read `entry.door.name` and a deleted door turned the whole club log white for
+ * every admin. The ruling is that the history survives the board: the row carries what it
+ * stored at write time, so the screen names it and says it has since been removed.
+ */
+describe("doorRowIdentity / doorRowName", () => {
+  it("uses the name the row stored, and says the board is gone", () => {
+    expect(doorRowName({ id: null, name: "Side door", gate_key: "side-door", removed: true }))
+      .toBe("Side door — a door that has since been removed");
+  });
+
+  it("falls back to the stored key when the row has no name", () => {
+    expect(doorRowName({ id: null, name: null, gate_key: "side-door", removed: true }))
+      .toBe("side-door — a door that has since been removed");
+  });
+
+  it("says only that it is gone when the row stored neither", () => {
+    expect(doorRowName({ id: null, name: null, gate_key: null, removed: true }))
+      .toBe(REMOVED_DOOR_UNNAMED);
+  });
+
+  /** The shape WIRE-R2 §1 says can never happen, which is the shape that shipped. */
+  it("treats a missing door as removed rather than throwing", () => {
+    for (const door of [null, undefined]) {
+      expect(doorRowName(door)).toBe(REMOVED_DOOR_UNNAMED);
+      expect(doorRowIdentity(door).removed).toBe(true);
+      expect(doorRowIdentity(door).id).toBeNull();
+    }
+  });
+
+  /** No arm renders the word "null", an empty string, or a link to a page that is gone. */
+  it("never renders a null, an empty label or a dead link", () => {
+    const shapes = [
+      null, undefined, {}, { id: null }, { removed: true },
+      { id: null, name: null, gate_key: null, removed: true },
+      { id: "x", name: "", gate_key: "", removed: false },
+    ];
+    for (const door of shapes) {
+      const identity = doorRowIdentity(door);
+      expect(identity.label.trim()).not.toBe("");
+      expect(identity.label).not.toContain("null");
+      expect(identity.label).not.toContain("undefined");
+      if (identity.removed) expect(doorRowName(door)).toContain("removed");
+    }
+    expect(doorRowIdentity({ id: null, name: "Side door", removed: true }).id).toBeNull();
+  });
+
+  it("names a live door plainly, with no removal clause", () => {
+    expect(doorRowName({ id: "abc", name: "Front door", gate_key: "front-door", removed: false }))
+      .toBe("Front door");
+  });
+});
+
+/**
+ * <b>A11 — "Door gate" is what `DeviceRegistryService` calls every gate that registers
+ * itself.</b> It is a placeholder, and presenting it as the club's own word for one board
+ * names none of the five in the same state.
+ */
+describe("doorDisplayName / doorPickerLabel", () => {
+  it("replaces the placeholder with something that identifies one board", () => {
+    expect(doorDisplayName({ name: "Door gate", device_code: "gate-44c103" }))
+      .toBe("Unnamed scanner (gate-44c103)");
+  });
+
+  it("leaves a name the club actually chose alone", () => {
+    expect(doorDisplayName({ name: "Front door", device_code: "gate-44c103" })).toBe("Front door");
+  });
+
+  it("does not render an empty parenthesis for a board with no code", () => {
+    expect(doorDisplayName({ name: "Door gate", device_code: null })).toBe("Unnamed scanner");
+    expect(doorDisplayName({ name: null, device_code: null })).toBe("Unnamed scanner");
+  });
+
+  it("does not contradict itself in the picker", () => {
+    expect(doorPickerLabel({ name: "Unnamed scanner (gate-44c103)", gate_key: null }))
+      .toBe("Unnamed scanner (gate-44c103)");
+    expect(doorPickerLabel({ name: "Front door", gate_key: "front-door" })).toBe("Front door (front-door)");
+    expect(doorPickerLabel({ name: "Front door", gate_key: null })).toBe("Front door — no door name yet");
   });
 });
 

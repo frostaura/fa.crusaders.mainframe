@@ -7,7 +7,8 @@ import {
   doorPowerLossUnknownFooter, doorReopenConfirm, doorShutConfirm, doorShutNotice,
   doorFleetNoChangeNotice, doorFleetReopenLabel, doorShutStandingNotice, doorsShutBannerLine,
   doorsShutIndividuallyBanner, doorsStayShutNotice, gateDeleteConfirm, gateDeleteStandingNotice,
-  gateOfflineFallbackNotice, type ShutDoorFact,
+  gateOfflineFallbackNotice, type DoorSituation, type ShutDoorFact,
+  doorAlreadyNotice, doorReopenConsequence, doorShutConsequence,
   unnamedGateOfflineNotice,
 } from "./gateCopy";
 import { GATE_ACCESS_POLICIES } from "./api";
@@ -163,109 +164,150 @@ describe("doorShutNotice", () => {
 });
 
 /**
- * The confirm is shorter than the notice it produces and must not out-promise it. The box
- * pair disagreed twice, at different call sites, about what the very next click would do.
+ * <b>B3 / B5 — the armed consequence, generated from the door's ACTUAL situation.</b>
+ *
+ * <p>
+ * Every confirm on this surface used to describe the PAIR in the abstract: "a door that can
+ * reach the club … one that has also lost the network …". So a door that IS in contact was
+ * told about doors that are not, and — the finding that makes this a matrix rather than a
+ * rewrite — a door that has <b>never been named</b>, sent an EMPTY list and opening for
+ * nobody while it is offline, was told on the control that shuts it that it "keeps admitting
+ * booked members from the list it last downloaded".
+ * </p>
+ *
+ * <p>
+ * <b>And ≤25 words.</b> The fleet confirm was 45 words inside an 8-second auto-disarm, which
+ * a screen reader takes about thirteen seconds to read aloud. The timer is gone (B5's
+ * ruling), but a consequence nobody finishes is still a consequence nobody read. The long
+ * explanation is plain page text beside the control.
+ * </p>
  */
-describe("doorShutConfirm", () => {
-  it("is exactly this", () => {
-    expect(doorShutConfirm()).toBe(
-      "Shut this door? A door that can reach the club opens for nobody from this click. One that"
-      + " has also lost the network keeps admitting booked members from the list it last downloaded"
-      + " for up to six hours. No booking and no no-show penalty changes, and a door marks nobody"
-      + " as having arrived.",
+describe("the armed consequence, over contact × named × enabled", () => {
+  const SITUATIONS: DoorSituation[] = [
+    { online: true, named: true },
+    { online: true, named: false },
+    { online: false, named: true },
+    { online: false, named: false },
+  ];
+
+  const words = (s: string) => s.trim().split(/\s+/).length;
+
+  /** B5. Twenty-five words is the bound; every arm of every generator is inside it. */
+  it("is never longer than 25 words, on any door, for any action", () => {
+    for (const door of SITUATIONS) {
+      expect(words(doorShutConsequence(door))).toBeLessThanOrEqual(25);
+      expect(words(doorReopenConsequence(door))).toBeLessThanOrEqual(25);
+    }
+    expect(words(gateDeleteConfirm())).toBeLessThanOrEqual(25);
+    for (const count of [1, 3, 9]) {
+      expect(words(doorFleetShutConfirm(count))).toBeLessThanOrEqual(25);
+      expect(words(doorFleetShutConfirm(count, SITUATIONS.slice(2)))).toBeLessThanOrEqual(25);
+      expect(words(doorFleetReopenConfirm(count))).toBeLessThanOrEqual(25);
+      expect(words(doorFleetReopenConfirm(count, [{ online: false, named: true }]))).toBeLessThanOrEqual(25);
+    }
+  });
+
+  /**
+   * <b>The rule B3 names explicitly.</b> An unnamed door holds no list, so no sentence
+   * anywhere may say it goes on admitting anybody.
+   */
+  it("never tells an unnamed door it keeps admitting booked members", () => {
+    for (const door of SITUATIONS.filter((d) => !d.named)) {
+      expect(doorShutConsequence(door).toLowerCase()).not.toContain("admitting booked members");
+      expect(doorReopenConsequence(door).toLowerCase()).not.toContain("admitting booked members");
+    }
+    // The unnamed door that cannot be reached is the one the false sentence was written
+    // about, so it says out loud what it actually holds: nothing.
+    expect(doorShutConsequence({ online: false, named: false })).toContain("no saved list");
+    expect(doorReopenConsequence({ online: false, named: false })).toContain("no saved list");
+    expect(doorFleetShutConfirm(2, [{ online: false, named: false }]).toLowerCase())
+      .not.toContain("admitting booked members");
+  });
+
+  /**
+   * <b>And the other half of B3.</b> A door that IS in contact gets the in-contact sentence
+   * and nothing else — the reopen confirm already worked this way (C5) and the shut confirm
+   * did not.
+   */
+  it("says one thing, and only that thing, to a door that is in contact", () => {
+    for (const door of SITUATIONS.filter((d) => d.online)) {
+      const shut = doorShutConsequence(door);
+      expect(shut).toBe("Shut this door? It hears this at once and opens for nobody.");
+      expect(shut.toLowerCase()).not.toContain("lost the network");
+      expect(shut.toLowerCase()).not.toContain("six hours");
+      const reopen = doorReopenConsequence(door);
+      expect(reopen).toBe("Reopen this door? It opens for members again from the very next scan.");
+      expect(reopen.toLowerCase()).not.toContain("cached list");
+      expect(reopen.toLowerCase()).not.toContain("nothing can reach");
+    }
+  });
+
+  /** A named door that cannot hear is the one case where the cache clause is true. */
+  it("gives the cached-list clause to exactly the door it is true of", () => {
+    expect(doorShutConsequence({ online: false, named: true })).toBe(
+      "Shut this door? Nothing can reach it, so it keeps admitting booked members from its saved"
+      + " list for up to six hours.",
+    );
+    expect(doorReopenConsequence({ online: false, named: true })).toBe(
+      "Reopen this door? Nothing can reach it. It has been admitting booked members from its saved"
+      + " list all along.",
     );
   });
 
-  it("carries all three halves the notice carries, compressed rather than dropped", () => {
-    const confirm = doorShutConfirm();
-    expect(confirm).toContain("can reach the club opens for nobody");
-    expect(confirm).toContain("the list it last downloaded");
-    expect(confirm).toContain("up to six hours");
-    expect(confirm).toContain("No booking and no no-show penalty changes");
+  it("says what is actually true of an unnamed door that cannot be reached", () => {
+    expect(doorShutConsequence({ online: false, named: false })).toBe(
+      "Shut this door? Nothing can reach it, and with no saved list it already opens for nobody.",
+    );
+    expect(doorReopenConsequence({ online: false, named: false })).toBe(
+      "Reopen this door? Nothing can reach it, and with no saved list it opens for nobody until it"
+      + " calls in.",
+    );
   });
 
   /**
-   * The confirm and the notice must agree about the cut-off door, which is the half a
-   * shorter sentence drops first — and dropping it is what would make this a promise the
-   * click cannot keep.
+   * <b>A1.4 still holds.</b> `AdminDevices` shipped "Take out of service" over this same
+   * PATCH; two names for one mechanism is the failure this module's header documents. Every
+   * arm opens with the words on the button it is attached to.
    */
-  it("does not claim more than the notice the click produces", () => {
-    const confirm = doorShutConfirm();
-    expect(confirm).not.toContain("stops opening");
-    expect(confirm).toContain("has also lost the network");
-    expect(doorShutNotice()).toContain("has also lost the network");
-  });
-
-  /** A1.1 again: the denial is here too, because the confirm is what an admin actually reads. */
-  it("denies the arrival claim without the banned tokens", () => {
-    expect(doorShutConfirm()).toContain("a door marks nobody as having arrived");
-    expect(doorShutConfirm().toLowerCase()).not.toContain("check-in");
-    expect(doorShutConfirm().toLowerCase()).not.toContain("attendance");
-  });
-
-  /**
-   * <b>A1.4: one name for the 403 path on a gate.</b> `AdminDevices` shipped "Take out of
-   * service" over this same PATCH. Two names for one mechanism is the failure this module's
-   * own header documents, one level up — so the vocabulary is "Shut" / "Reopen" everywhere a
-   * DOOR is meant, and the confirm opens with the words on the button.
-   */
-  it("opens with the words on the button, not with the court box's vocabulary", () => {
-    expect(doorShutConfirm().startsWith(`${DOOR_SHUT_LABEL}?`)).toBe(true);
-    expect(doorShutConfirm()).not.toContain("Out of service");
+  it("opens with the words on the button, on every arm", () => {
+    for (const door of SITUATIONS) {
+      expect(doorShutConsequence(door).startsWith(`${DOOR_SHUT_LABEL}?`)).toBe(true);
+      expect(doorReopenConsequence(door).startsWith(`${DOOR_REOPEN_LABEL}?`)).toBe(true);
+      expect(doorShutConsequence(door)).not.toContain("Out of service");
+    }
     expect(DOOR_SHUT_LABEL).toBe("Shut this door");
     expect(DOOR_REOPEN_LABEL).toBe("Reopen this door");
   });
-});
 
-/**
- * Reopening, whose honest half is the OPPOSITE of shutting's.
- *
- * <p>
- * A scan is a pull, so reopening applies at a reachable door on the very next scan with no
- * heartbeat wait — there is nothing to queue and nothing to deliver. The cut-off door is the
- * inverted arm: it never stopped admitting booked members, so "reopened" changes nothing
- * there and saying "the doors are open again" flatly would be a claim about a board nobody
- * can reach.
- * </p>
- */
-describe("doorReopenConfirm", () => {
-  it("is exactly this, for a door the club can reach", () => {
-    expect(doorReopenConfirm(true)).toBe(
-      "Reopen this door? A door that can reach the club opens for members again from the very next"
-      + " scan — there is no wait. A door that has lost the network has been admitting booked"
-      + " members from its cached list all along, and nothing changes there.",
-    );
-  });
-
-  it("states both halves, and the reachable half has no wait in it", () => {
-    const confirm = doorReopenConfirm(true);
-    expect(confirm).toContain("from the very next scan — there is no wait");
-    expect(confirm).toContain("has lost the network has been admitting booked members");
-    // The one thing a reopen must never imply: that anything was delivered to a board.
-    expect(confirm.toLowerCase()).not.toContain("heartbeat");
-  });
-
-  /**
-   * C5. This promised "from the very next scan" to every door, including one nothing can
-   * reach — a promise about a machine that is not listening, on the control an admin presses
-   * when they are already worried about that door.
-   */
-  it("promises nothing about the very next scan at a door that is not reporting", () => {
-    const confirm = doorReopenConfirm(false);
-    expect(confirm).not.toContain("very next scan");
-    expect(confirm).toContain("Nothing can reach this door");
-    expect(confirm).toContain("will not know it is open again until it calls in");
-    // And the half that IS true of it today, so the sentence is not only a refusal.
-    expect(confirm).toContain("admitting booked members from its cached list all along");
+  /** `doorShutConfirm` / `doorReopenConfirm` are the call sites' names for the same words. */
+  it("is the same sentence whichever name a call site uses", () => {
+    for (const door of SITUATIONS) {
+      expect(doorShutConfirm(door)).toBe(doorShutConsequence(door));
+      expect(doorReopenConfirm(door)).toBe(doorReopenConsequence(door));
+    }
   });
 });
 
 describe("the fleet confirms", () => {
-  it("name the count and both halves, shutting", () => {
+  it("say what happens when the club can reach every door", () => {
     expect(doorFleetShutConfirm(4)).toBe(
-      "Shut all 4 doors? Every door that can reach the club's server opens for nobody from this"
-      + " click. Any door that has lost the network keeps admitting booked members from the list it"
-      + " last downloaded for up to six hours. No booking and no no-show penalty changes.",
+      "Shut all 4 doors? Every one of them opens for nobody from this click.",
+    );
+    expect(doorFleetReopenConfirm(2)).toBe(
+      "Reopen the 2 doors that were shut together? Each one opens for members again from its very"
+      + " next scan.",
+    );
+  });
+
+  /** B3 at fleet scale: the doors this club has are countable, so the confirm counts them. */
+  it("count the doors that cannot hear it, rather than describing doors in general", () => {
+    expect(doorFleetShutConfirm(4, [{ online: false, named: true }])).toBe(
+      "Shut all 4 doors? 1 cannot be reached and keeps admitting booked members from its saved"
+      + " list for six hours.",
+    );
+    expect(doorFleetReopenConfirm(3, [{ online: false, named: true }])).toBe(
+      "Reopen the 3 doors that were shut together? 2 open from the very next scan; 1 cannot be"
+      + " reached and has not heard it.",
     );
   });
 
@@ -274,26 +316,21 @@ describe("the fleet confirms", () => {
    * that reopens only what a shut-all shut. An admin who had shut one door on its own read
    * "all 3", pressed it, and got `{"doors": []}` and the words "0 doors reopened".
    */
-  it("name the count they will actually reopen, reopening", () => {
-    expect(doorFleetReopenConfirm(2)).toBe(
-      "Reopen the 2 doors that were shut together? Every one of them that can reach the club's"
-      + " server opens for members again from the very next scan. Any that has lost the network has"
-      + " been admitting booked members from its cached list all along.",
-    );
-  });
-
-  it("names the doors that will stay shut, before the tap rather than after", () => {
-    const confirm = doorFleetReopenConfirm(2, ["Front door"]);
-    expect(confirm).toContain("Front door stays shut");
-    expect(confirm).toContain("Reopen it from its page");
-  });
-
-  /** A club with one door reads a sentence about its door, not "all 1 doors". */
   it("do not say 'all 1 doors' to a club with one door", () => {
     expect(doorFleetShutConfirm(1)).toContain("the club's one door");
     expect(doorFleetShutConfirm(1)).not.toContain("all 1");
     expect(doorFleetReopenConfirm(1)).toContain("the one door that was shut together");
     expect(doorFleetReopenConfirm(1)).not.toContain("all 1");
+  });
+
+  /**
+   * B5: the doors that will STAY shut are named beside the control as page text, never
+   * folded into the armed consequence — that clause is what made the fleet confirm 45 words.
+   */
+  it("leave the doors that stay shut to the notice beside the control", () => {
+    expect(doorFleetReopenConfirm(2)).not.toContain("stays shut");
+    expect(doorsStayShutNotice(["Front door"])).toContain("Front door stays shut");
+    expect(doorsStayShutNotice(["Front door"])).toContain("Reopen it from its page");
   });
 });
 
@@ -394,16 +431,75 @@ describe("doorExitIsMechanical", () => {
 describe("doorShutStandingNotice", () => {
   it("names the door and when it was shut, where the payload says when", () => {
     expect(doorShutStandingNotice("front-door", "Tue 19:40")).toBe(
-      "front-door is shut. It opens for nobody that can reach the club's server. It was shut on"
+      "front-door is shut. The club's server is refusing every scan at this door. It was shut on"
       + " Tue 19:40.",
     );
   });
 
   it("still says the door is shut when nothing recorded when", () => {
     const notice = doorShutStandingNotice("front-door", null);
-    expect(notice).toBe("front-door is shut. It opens for nobody that can reach the club's server.");
+    expect(notice).toBe("front-door is shut. The club's server is refusing every scan at this door.");
     expect(notice).not.toContain("It was shut on");
     expect(notice).not.toContain("null");
+  });
+
+  /**
+   * <b>B8 — the sentence that parsed as its own opposite.</b> "It opens for nobody that can
+   * reach the club's server" attaches its relative clause to "nobody", so a reader gets
+   * "the only people it opens for are the ones who can reach the server" — the exact
+   * inverse, on the standing notice above the control that undoes it. Said with the server
+   * as the subject there is nothing left to misparse.
+   */
+  it("never says the thing that reads backwards", () => {
+    for (const since of ["Tue 19:40", null]) {
+      expect(doorShutStandingNotice("front-door", since))
+        .not.toContain("opens for nobody that can reach");
+    }
+  });
+
+  /**
+   * <b>A5.</b> The page told every admin in the club "You shut this door." — false for all
+   * but one of them, and unfalsifiable for the reader.
+   */
+  it("names who shut it, where the API says who", () => {
+    expect(doorShutStandingNotice("front-door", "Tue 19:40", "Priya Naidoo"))
+      .toBe("front-door is shut. The club's server is refusing every scan at this door. Shut by"
+        + " Priya Naidoo on Tue 19:40.");
+    expect(doorShutStandingNotice("front-door", null, "Priya Naidoo"))
+      .toContain("Shut by Priya Naidoo.");
+  });
+
+  it("says nobody rather than 'you' when the API did not say who", () => {
+    const notice = doorShutStandingNotice("front-door", "Tue 19:40");
+    expect(notice.toLowerCase()).not.toContain("you shut");
+    expect(notice).not.toContain("Shut by");
+  });
+});
+
+/** B10 — a write that changed nothing, said as what it is rather than as success. */
+describe("doorAlreadyNotice", () => {
+  it("names who had already shut it, and when", () => {
+    expect(doorAlreadyNotice("Side door", true, "Priya Naidoo", "Sat 20 Sep, 21:48")).toBe(
+      "Nothing changed — Side door was already shut. It was shut by Priya Naidoo on Sat 20 Sep, 21:48.",
+    );
+  });
+
+  it("says only what it knows when the API named nobody", () => {
+    expect(doorAlreadyNotice("Side door", true)).toBe("Nothing changed — Side door was already shut.");
+    expect(doorAlreadyNotice("Side door", true, null, "21:48")).toContain("It was shut on 21:48.");
+  });
+
+  it("has an already-open arm, because a stale tab can reopen an open door too", () => {
+    expect(doorAlreadyNotice("Side door", false)).toBe("Nothing changed — Side door was already open.");
+  });
+
+  /** It must never read as success: the whole defect is a click that reported work it did not do. */
+  it("never reports the action as done", () => {
+    for (const notice of [doorAlreadyNotice("Side door", true, "Priya Naidoo", "21:48"), doorAlreadyNotice("Side door", false)]) {
+      expect(notice).toContain("Nothing changed");
+      expect(notice.toLowerCase()).not.toContain("is shut.");
+      expect(notice.toLowerCase()).not.toContain("is open again");
+    }
   });
 });
 
@@ -535,28 +631,52 @@ describe("doorsStayShutNotice", () => {
  * door's name is what is actually lost and has to be redone.
  */
 describe("gateDeleteConfirm", () => {
-  it("says the door comes straight back, and comes back with nothing filled in", () => {
-    const confirm = gateDeleteConfirm();
-    expect(confirm).toContain("reappears here as a new door with nothing filled in");
-    expect(confirm).toContain("Unplug it if you meant to retire it");
+  /**
+   * <b>A2 — the question this confirm did not answer, and it is the one that matters.</b>
+   *
+   * The confirm named the three things it destroys and stopped, so an admin deleting a door
+   * had every reason to believe its scan history went with it. It does not: the rows stay in
+   * the club log under the name they stored until the club's own retention rule takes them
+   * (WIRE-R2 §1). A reviewer read this confirm and concluded the history was destroyed.
+   */
+  it("says what happens to the door's past scans", () => {
+    expect(gateDeleteConfirm()).toContain("Its past scans stay in the club log under its old name");
+  });
+
+  /** B5: ≤25 words. Everything longer is page text beside the control (A12 / C10). */
+  it("names everything it destroys, without becoming a paragraph", () => {
+    const confirm = gateDeleteConfirm().toLowerCase();
+    expect(confirm).toContain("its name");
+    expect(confirm).toContain("its place");
+    expect(confirm).toContain("its power answer");
+    expect(gateDeleteConfirm().trim().split(/\s+/).length).toBeLessThanOrEqual(25);
   });
 
   /**
-   * C10. The confirm listed the name and stopped, so the two facts an admin had most
-   * recently taken the trouble to write down — where the board is, and what the lock does
-   * with no power — were destroyed without being mentioned.
+   * C10 / A12: what no longer fits in the confirm has NOT been dropped — it is on the page,
+   * permanently, beside the control, where a screen-reader user meets it before arming.
    */
-  it("names everything it destroys, not only the door's name", () => {
-    const confirm = gateDeleteConfirm().toLowerCase();
-    expect(confirm).toContain("its name");
-    expect(confirm).toContain("where the board is");
-    expect(confirm).toContain("what the lock does with no power");
+  it("hands the rest to the standing notice rather than losing it", () => {
+    const notice = gateDeleteStandingNotice("Side door", 90).toLowerCase();
+    expect(notice).toContain("where the board");
+    expect(notice).toContain("what the lock does with no power");
+    expect(notice).toContain("still has the club's key");
+    expect(notice).toContain("reappears here as a new door with nothing filled in");
+    expect(notice).toContain("unplug it if you meant to retire it");
+    // A2 again, with the club's own number rather than a guessed 90.
+    expect(notice).toContain("are not deleted");
+    expect(notice).toContain("the club's 90-day rule");
+  });
+
+  it("names the setting rather than a number when the retention read failed", () => {
+    const notice = gateDeleteStandingNotice("Side door");
+    expect(notice).toContain("the club's retention rule");
+    expect(notice).not.toMatch(/\d/);
   });
 
   it("does not read as a revocation", () => {
-    const confirm = gateDeleteConfirm().toLowerCase();
-    expect(confirm).not.toContain("really delete");
-    expect(confirm).toContain("still has the club's key");
+    expect(gateDeleteConfirm().toLowerCase()).not.toContain("really delete");
+    expect(gateDeleteStandingNotice("Side door").toLowerCase()).toContain("still has the club's key");
   });
 
   /**
