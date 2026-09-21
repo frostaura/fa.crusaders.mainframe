@@ -45,7 +45,8 @@
  * --------------
  *   1. Hashed build assets (/assets/*) — immutable by construction, Vite puts the content hash
  *      in the filename — cache-first, with the activate sweep removing what a new build no
- *      longer names.
+ *      longer names. The ones `index.html` names are fetched at INSTALL time; see
+ *      `precacheBuild` for why waiting for first use is not good enough.
  *   2. Navigations — network-first with the cached shell as the fallback. Network-first because
  *      a stale index.html pointing at deleted asset hashes is a white screen, and a white
  *      screen is worse than a slow one.
@@ -72,7 +73,7 @@ const OWNED = [SHELL_CACHE, ASSET_CACHE];
  */
 const CACHE_PREFIX = "crusaders-";
 
-/** The shell itself. Asset filenames are hashed at build time, so they are cached on first use. */
+/** The shell itself. The hashed build assets are read out of it at install — `precacheBuild`. */
 const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/favicon.svg", "/icon-192.png"];
 
 /**
@@ -127,12 +128,63 @@ async function purgeOwnedCaches(keep = []) {
   );
 }
 
+/**
+ * The build's own entry files, cached at INSTALL rather than on first use. (R3-9 / D-H3)
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * The shell used to be `index.html` and the icons, and the note here said the hashed assets
+ * "are cached on first use". They are not — not on the visit that installs this worker, which
+ * is the only visit most members ever make before they need it:
+ *
+ *   - A page load fetches `/assets/index-<hash>.js` as part of parsing the document. That
+ *     happens BEFORE `load`, which is when `lib/pwa` registers this file, so the request never
+ *     passes through a worker and never reaches a cache.
+ *   - The next cold start with no signal then served a cached `index.html` whose only script
+ *     could not be fetched: a blank page, from a home-screen icon, which is worse than the
+ *     browser's own offline page because it looks like the app is broken rather than like the
+ *     phone has no signal.
+ *   - It came right on the THIRD visit, once a controlled load had fetched the script through
+ *     the worker — so it worked sometimes, for reasons no member could see.
+ *
+ * The filenames are content-hashed, so there is no list to keep: the document names them, and
+ * the document is fetched fresh. Failures are swallowed per URL — an install that throws leaves
+ * the app with no offline support at all, and a missing font is not worth that.
+ *
+ * FONTS ARE NOT INCLUDED, deliberately. They are named by the stylesheet rather than by the
+ * document, and a missing web font renders in the fallback face: a legible page rather than no
+ * page. They land in the cache on first use like anything else once this worker is in control.
+ */
+async function precacheBuild() {
+  try {
+    const response = await fetch("/index.html", { cache: "no-cache" });
+    if (!response.ok) return;
+    const html = await response.text();
+    // Every /assets/ path the document names, in a `src`, an `href` or a modulepreload.
+    const named = html.match(/\/assets\/[A-Za-z0-9._-]+/g) || [];
+    await Promise.all([...new Set(named)].map(async (url) => {
+      try {
+        const asset = await fetch(url);
+        // Through `cachePut`, not `cache.add`: one chokepoint decides what may be stored, and
+        // a second path into the cache is how the rule above gets quietly broken.
+        await cachePut(ASSET_CACHE, new Request(url), asset);
+      } catch {
+        // One asset that will not fetch must not cost the others their place.
+      }
+    }));
+  } catch {
+    // Installed with no network, or behind a captive portal. There is nothing to precache and
+    // nothing to be done about it; first use will fill the cache instead.
+  }
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(SHELL_CACHE);
     // Individually, not addAll: addAll is atomic, so one 404 on one file throws the whole
     // install away and the app silently has no offline support at all.
     await Promise.all(SHELL.map((url) => cache.add(url).catch(() => undefined)));
+    await precacheBuild();
     await self.skipWaiting();
   })());
 });
