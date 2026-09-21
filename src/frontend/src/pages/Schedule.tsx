@@ -267,7 +267,10 @@ export default function SchedulePage() {
         />
       )}
 
-      {selection?.api.active && (
+      {/* The bar appears while anything IS selected, never merely because the mode is on. An
+          action strip reading "0 slots selected" with two dead buttons on it is furniture, and
+          it costs the last row of the grid the padding it reserves. */}
+      {selection && selection.keys.length > 0 && (
         <SelectionBar
           keys={selection.keys} day={day} slotsByCourt={slotsByCourt}
           onClear={selection.clear} onBook={() => setBulk("book")} onCancel={() => setBulk("cancel")}
