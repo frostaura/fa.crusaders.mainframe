@@ -913,7 +913,9 @@ and re-run `make arduino-export`.**
 | `GATE_LED_PIN` | {define("GATE_LED_PIN")} | The lamp — the board's entire user interface. |
 | `GATE_LED_ACTIVE_HIGH` | {define("GATE_LED_ACTIVE_HIGH")} | 1 if HIGH lights it. |
 | `GATE_UNLOCK_DEFAULT_MS` | {define("GATE_UNLOCK_DEFAULT_MS")} | Release time until the first heartbeat tells the board the club's own. |
-| `GATE_UNLOCK_HARD_CAP_MS` | {define("GATE_UNLOCK_HARD_CAP_MS")} | A safety bound, not a default: the lock can never stay released longer than this, whatever the server answers and however often somebody scans. |
+| `GATE_UNLOCK_HARD_CAP_MS` | {define("GATE_UNLOCK_HARD_CAP_MS")} | A safety bound, not a default: the longest ONE release window may last, whatever the server answers and however often somebody scans. On its own it bounds the WINDOW and not the door — the two dwells below are what make it bound the door. |
+| `GATE_RELOCK_DWELL_MS` | {define("GATE_RELOCK_DWELL_MS")} | After a window the hard cap ended, the lock stays locked for at least this long and no grant may energise the relay inside it. Without it the cap closed a window and the very next scan opened a fresh one in the same pass — relay OFF and ON at the same millisecond, so the strike never dropped and the door never relatched. |
+| `GATE_MIN_RELOCK_MS` | {define("GATE_MIN_RELOCK_MS")} | The same floor after ANY close, so two back-to-back members are two openings rather than one continuous one. Long enough for a strike to drop or a maglock to re-magnetise; short enough that the second member does not notice it. |
 | `GATE_WATCHDOG_SECONDS` | {define("GATE_WATCHDOG_SECONDS")} | Task watchdog period. |
 | `HEARTBEAT_INTERVAL_MS` | {define("HEARTBEAT_INTERVAL_MS")} | Starting cadence. The tenant's own is adopted from the first response. |
 | `ROSTER_MAX_AGE_MS` | {define("ROSTER_MAX_AGE_MS")} | 6 h. A roster older than this admits **nobody**, however good the match looks. |

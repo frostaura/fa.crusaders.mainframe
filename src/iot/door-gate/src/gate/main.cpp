@@ -199,7 +199,8 @@ devlink::ApiBreaker gBreaker;
 GateApi gApi(gHttp, gBreaker, gClock);
 
 LockDriver gLock(gRelayPin, kGateConfig.relayActiveHigh, kGateConfig.unlockEnergisesRelay);
-UnlockTimer gUnlock(kGateConfig.unlockHardCapMs);
+UnlockTimer gUnlock(kGateConfig.unlockHardCapMs, kGateConfig.minRelockMs,
+                    kGateConfig.relockDwellMs);
 LedPattern gLed;
 ScanAssembler gAssembler;
 ScanDebounce gDebounce;

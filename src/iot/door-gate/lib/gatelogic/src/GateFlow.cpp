@@ -165,4 +165,22 @@ ScanDecision refuseUnreadable(bool offline) {
   return decision;
 }
 
+ScanDecision refuseRelocking(bool offline) {
+  ScanDecision decision;
+  setReason(decision, kReasonRelocking);
+  decision.queueEvent = offline;
+  decision.eventKind = eventq::Kind::UnknownScan;
+  return decision;
+}
+
+void markRelocking(ScanDecision& decision) {
+  decision.released = false;
+  decision.unlockMs = 0U;
+  // The RECORD changes too, not just the lamp. An event still saying `gate_open`
+  // would be this board reporting an opening it refused, which is the one thing
+  // an audit trail must never contain.
+  decision.eventKind = eventq::Kind::UnknownScan;
+  setReason(decision, kReasonRelocking);
+}
+
 } // namespace gatelogic

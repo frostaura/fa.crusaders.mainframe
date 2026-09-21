@@ -68,6 +68,43 @@
 // README.md carries that sentence in those words, and it is pinned below by
 // `test_app_a_release_outlives_its_deadline_by_at_most_one_blocking_call`.
 //
+// AND THE HARD CAP BOUNDS A WINDOW, NOT THE DOOR — G4's A1
+// --------------------------------------------------------
+// Everything above is about ONE window. The cap closes a window and the next
+// accepted scan opens a fresh one, legally, and on this loop the two land in
+// the SAME pass: `afterBlocking()` pumps the lock, and the decision that call
+// produced is applied two lines later. Measured on the compiled simulator with
+// two alternating tokens every 50 ms, the relay was written OFF and ON at the
+// same millisecond and the door never physically relatched. `UnlockTimer` now
+// guarantees dark time after every close and refuses a grant inside it; see
+// that header for the two dwells and why a cap-forced close earns the longer.
+//
+// AND WHAT BOUNDS A CALL, SAID WITHOUT FLATTERING IT — G4's A3
+// ------------------------------------------------------------
+// `kWorstBlockingCallMs` is the sum of three budgets the port HONOURS, and two
+// of the three are genuinely ours: the connect is `select()`-bounded and the
+// body takes an absolute deadline sampled after the headers return. The HEADER
+// phase is the core's `HTTPClient::setTimeout`, which is an INTER-BYTE timeout:
+// a peer sending one byte every three seconds resets it for ever, `POST()`
+// cannot be interrupted from here, and no number in GateConfig.h bounds it.
+//
+// So on the BOARD the true worst case against a dribbling peer is not 12 010 ms
+// — it is the WATCHDOG, which fires at GATE_WATCHDOG_SECONDS and resets the
+// part. A door released for the full cap when that happens is released for the
+// cap plus up to the watchdog period plus the boot that follows, and the boot
+// is what actually takes the lock back (`beginOutputs()` writes LOCKED before
+// the pin drives). With this image's numbers: 30 s + 15 s + a boot of roughly
+// half a second, so ABOUT 45.5 SECONDS, against the 42.01 s the three budgets
+// alone imply. Both numbers are true of different peers and the larger one is
+// the one to plan a door around.
+//
+// Giving the whole call one absolute deadline would collapse this, and it is
+// not available: the ESP32 core exposes no way to abort a `POST()` in flight.
+// The simulator's `SocketHttpPort` bounds its own header read, so the
+// simulator's measured numbers are the THREE-BUDGET case and cannot reproduce
+// the watchdog one — stated here rather than left for somebody to discover by
+// comparing a transcript with a board.
+//
 // No Arduino headers, no heap, no String. Compiles for Xtensa and the host.
 
 #ifndef CRUSADERS_GATELOGIC_GATEAPP_H
@@ -210,6 +247,9 @@ public:
   /// Saturates rather than wrapping. See GateHeartbeat.h.
   uint32_t noPushHeartbeats() const { return noPushHeartbeats_; }
 
+  /// Release windows the hard cap ended, since boot. See the member.
+  uint32_t capForcedCloses() const { return capForcedCloses_; }
+
   /// The two since-boot counters exactly as the next request will carry them.
   GateDiagnostics diagnostics() const {
     return GateDiagnostics{noPushHeartbeats_, saturate(queue_.overflowed())};
@@ -258,7 +298,10 @@ private:
   /// Applies a decision to the door and the lamp, and answers with what the
   /// lock was ACTUALLY given after both bounds — which is what the queued event
   /// has to carry, not what was asked for.
-  uint32_t apply(const ScanDecision& decision, uint32_t nowMs);
+  /// Non-const: a decision that asked for the door can come back REFUSED, when
+  /// the lock turns out to still be relatching — see `markRelocking` and round
+  /// G4's A1. The caller records what actually happened, not what was decided.
+  uint32_t apply(ScanDecision& decision, uint32_t nowMs);
 
   void queue(const ScanDecision& decision, const char* subject, uint32_t nowMs, uint32_t grantedMs);
 
@@ -329,6 +372,20 @@ private:
   /// Heartbeats the server answered that pushed no roster. A diagnostic with no
   /// effect on any decision this class makes; saturating, never wrapping.
   uint32_t noPushHeartbeats_ = 0U;
+
+  /// Release windows the HARD CAP ended, since boot (round G4, A1).
+  ///
+  /// A rising count is somebody holding a door open — a phone taped to the
+  /// reader, a scanner jammed against a frame, or two codes being alternated —
+  /// and it is the only number on this board that says so. Saturating.
+  ///
+  /// NOT ON THE WIRE, and said plainly rather than implied: there is no event
+  /// kind for it and no heartbeat field, both of which are wire changes with
+  /// corpus vectors and a backend behind them. It reaches the native
+  /// simulator's `status` line and the host suite, and the `relocking` refusals
+  /// the dwell produces afterwards DO reach the queue when the board is
+  /// offline. Putting it on the wire is owed.
+  uint32_t capForcedCloses_ = 0U;
 
   /// What the last heartbeat said a release should last. The build-flag default
   /// until the first accepted one, which is what makes a board that has never

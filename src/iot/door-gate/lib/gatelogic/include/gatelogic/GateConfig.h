@@ -75,10 +75,52 @@
 #ifndef GATE_UNLOCK_DEFAULT_MS
 #define GATE_UNLOCK_DEFAULT_MS 3000UL
 #endif
-/// The lock can never stay released longer than this, whatever the server
-/// answers and however often somebody scans. A safety bound, not a default.
+/// The longest ONE release window may last, whatever the server answers and
+/// however often somebody scans. A safety bound, not a default.
+///
+/// IT IS A BOUND ON A WINDOW AND NOT, ON ITS OWN, A BOUND ON THE DOOR. Round
+/// G4's A1: the cap closed the window and the very next accepted scan opened a
+/// fresh one, in the same pass, so the relay went OFF and ON at the same
+/// millisecond and the lock never physically relatched. Two alternating tokens
+/// offered every 50 ms held a measured door open for ever, one legal window at
+/// a time, with no single request breaking any rule. GATE_RELOCK_DWELL_MS below
+/// is what turns this into a bound on the door.
 #ifndef GATE_UNLOCK_HARD_CAP_MS
 #define GATE_UNLOCK_HARD_CAP_MS 30000UL
+#endif
+/// After a window the HARD CAP ended, the lock stays locked for at least this
+/// long and no grant may energise the relay inside it.
+///
+/// WHY A CAP-FORCED CLOSE EARNS A LONG ONE. That close is the board overruling
+/// somebody who has been holding a door open for the whole cap, and the point of
+/// overruling them is that the door shuts. A dwell shorter than a door-closer's
+/// swing is a door that never actually closes between two windows, which is the
+/// same outcome the cap exists to prevent, reached more slowly.
+///
+/// Three seconds, which is GATE_UNLOCK_DEFAULT_MS: the door is shut for at least
+/// as long as an ordinary grant holds it open. It is longer than any electric
+/// strike or maglock needs to relatch and longer than a normal doorway's closer
+/// takes to swing, and it costs a legitimate member who scans inside it one
+/// re-scan — which is what the denial blink tells them to do.
+#ifndef GATE_RELOCK_DWELL_MS
+#define GATE_RELOCK_DWELL_MS 3000UL
+#endif
+/// After ANY close, the floor on how long the lock is actually locked.
+///
+/// WHY EVERY CLOSE AND NOT ONLY A CAP-FORCED ONE. `pass()` calls `pumpLock()`
+/// from `afterBlocking()` and then applies the decision the blocking call
+/// produced, so a scan answered `opened` by the API lands in the SAME call that
+/// just closed the window — relay OFF and ON at the same millisecond, measured.
+/// A lock that is de-energised for zero milliseconds was never de-energised: the
+/// strike does not drop, the maglock does not release its armature, and two
+/// back-to-back members are one continuous opening with two audit rows.
+///
+/// 400 ms is a relatch floor rather than a door-closing time — an electric
+/// strike drops in tens of milliseconds and a maglock re-magnetises in about
+/// 300 — so it is long enough to be real and short enough that a second member
+/// arriving behind the first does not notice it.
+#ifndef GATE_MIN_RELOCK_MS
+#define GATE_MIN_RELOCK_MS 400UL
 #endif
 #ifndef GATE_MAX_TOKEN_LEN
 #define GATE_MAX_TOKEN_LEN 20
@@ -321,6 +363,10 @@ struct GateConfig {
 
   uint32_t unlockDefaultMs;
   uint32_t unlockHardCapMs;
+  /// The dark time a cap-forced close guarantees, and the floor under every
+  /// close. See the two macros above for why there are two of them.
+  uint32_t relockDwellMs;
+  uint32_t minRelockMs;
   uint32_t rosterMaxAgeMs;
   uint32_t heartbeatMs;
   uint16_t eventQueueSlots;
@@ -339,6 +385,8 @@ inline constexpr GateConfig kGateConfig = {
     GATE_LED_ACTIVE_HIGH != 0,
     static_cast<uint32_t>(GATE_UNLOCK_DEFAULT_MS),
     static_cast<uint32_t>(GATE_UNLOCK_HARD_CAP_MS),
+    static_cast<uint32_t>(GATE_RELOCK_DWELL_MS),
+    static_cast<uint32_t>(GATE_MIN_RELOCK_MS),
     static_cast<uint32_t>(ROSTER_MAX_AGE_MS),
     static_cast<uint32_t>(HEARTBEAT_INTERVAL_MS),
     static_cast<uint16_t>(EVENTQ_SLOTS),
@@ -376,6 +424,28 @@ static_assert(kGateConfig.unlockDefaultMs >= kMinUnlockMs,
               "GATE_UNLOCK_DEFAULT_MS below one second is a door that clicks and stays shut");
 static_assert(kGateConfig.unlockDefaultMs <= kGateConfig.unlockHardCapMs,
               "GATE_UNLOCK_DEFAULT_MS is longer than the hard cap, so the default could never apply");
+
+/// THE TWO DWELLS ARE WHAT MAKE THE HARD CAP A BOUND ON THE DOOR (round G4, A1).
+///
+/// A dwell of zero is the shipped defect exactly: the relay writes OFF and ON in
+/// one pass and the lock is never de-energised at all. A dwell of one pass is
+/// not meaningfully different — the ESP32 writes both levels inside 10 ms and no
+/// strike or maglock responds to that — so the floor is stated in the terms the
+/// hardware is specified in rather than in passes.
+static_assert(kGateConfig.minRelockMs >= 100UL,
+              "GATE_MIN_RELOCK_MS below a strike's own relatch time is a lock that is never actually "
+              "de-energised between two windows — see round G4's A1");
+static_assert(kGateConfig.relockDwellMs >= kGateConfig.minRelockMs,
+              "a cap-forced close must dwell at least as long as an ordinary one: it is the close "
+              "that overrules somebody holding the door open");
+
+/// And the cap plus its dwell is a DUTY CYCLE, which is the sentence that
+/// actually bounds the door. Anything approaching the roster's staleness window
+/// would mean a board could be held open for a meaningful part of the time it
+/// trusts its own cache for.
+static_assert(kGateConfig.relockDwellMs <= kGateConfig.unlockHardCapMs,
+              "a relock dwell longer than the cap itself would make a busy door spend most of its "
+              "time refusing members who have done nothing wrong");
 
 static_assert(kGateConfig.rosterMaxAgeMs > 0UL,
               "a roster with no maximum age eventually admits a booking cancelled last week");

@@ -218,7 +218,7 @@ void GateApp::refuseUnreadableLine() {
   // The SAME judgement a scan makes — the radio AND the breaker. Asking about
   // the radio alone queued nothing while the host was down, which is the one
   // window in which an unreadable scan is worth knowing about.
-  const ScanDecision decision = refuseUnreadable(attempt(now) == Attempt::RosterOnly);
+  ScanDecision decision = refuseUnreadable(attempt(now) == Attempt::RosterOnly);
   const uint32_t granted = apply(decision, now);
   queue(decision, "", now, granted);
   // No token: the bytes were discarded rather than truncated, and a token cut
@@ -235,7 +235,15 @@ void GateApp::decideScan(const char* token) {
   }
 
   ScanDecision decision;
-  if (attempt(asked) == Attempt::Online) {
+  const Attempt how = attempt(asked);
+  if (unlock_.relocking(asked)) {
+    // THE LOCK HAS NOT FINISHED RELATCHING (round G4, A1). Refused here rather
+    // than asked about, on exactly the debounce's precedent above: a scan this
+    // board cannot honour is not a question for the API, and a 200 answering
+    // `opened` would put a door opening in the server's trail that did not
+    // happen. The member gets the denial blink and scans again.
+    decision = refuseRelocking(how == Attempt::RosterOnly);
+  } else if (how == Attempt::Online) {
     beforeBlocking();
     decision = api_.scan(mac_, token, unlockMs_, kGateConfig.unlockHardCapMs);
     afterBlocking();
@@ -282,16 +290,31 @@ void GateApp::report(const ScanDecision& decision, const char* token, uint32_t n
   log_->decided(decision, token, grantedMs, nowMs);
 }
 
-uint32_t GateApp::apply(const ScanDecision& decision, uint32_t nowMs) {
+uint32_t GateApp::apply(ScanDecision& decision, uint32_t nowMs) {
   if (!decision.released) {
     led_.cue(LedCue::Denied, nowMs);
     return 0U;
   }
-  if (unlock_.request(nowMs, decision.unlockMs)) {
+  switch (unlock_.request(nowMs, decision.unlockMs)) {
+  case UnlockTimer::Grant::Opened:
     // The opening edge. A re-arm changes only when the door closes, and writing
     // the relay again for a door that is already open would be a click the
     // member reads as a second decision.
     lock_.set(true);
+    break;
+  case UnlockTimer::Grant::Extended:
+    break;
+  case UnlockTimer::Grant::Relocking:
+    // A1's SECOND HALF, and the one that catches the measured case. `pass()`
+    // pumps the lock out of `afterBlocking()` and applies this decision two
+    // lines later, so a window can close inside the very call that granted
+    // this — which is how a relay was measured writing OFF and ON at the same
+    // millisecond, for ever. The decision is rewritten rather than dropped:
+    // the lamp denies, the log says `relocking`, and an offline record says a
+    // scan was refused rather than that a door opened.
+    markRelocking(decision);
+    led_.cue(LedCue::Denied, nowMs);
+    return 0U;
   }
   led_.setReleased(true);
   return unlock_.remainingMs(nowMs);
@@ -317,11 +340,21 @@ void GateApp::queue(const ScanDecision& decision, const char* subject, uint32_t 
 // --- the lock, the link and the lamp ----------------------------------------
 
 void GateApp::pumpLock() {
-  if (!unlock_.tick(clock_.nowMs())) {
+  const UnlockTimer::Close closed = unlock_.tick(clock_.nowMs());
+  if (closed == UnlockTimer::Close::None) {
     return;
   }
   lock_.set(false);
   led_.setReleased(false);
+  if (closed == UnlockTimer::Close::CapForced) {
+    // A WINDOW THAT RAN THE WHOLE HARD CAP. Counted rather than queued, and
+    // that is a stated limitation rather than an oversight: the event queue has
+    // no kind for it, a new kind is a wire change needing a corpus vector and a
+    // backend that tolerates it, and this lane already carries one. What exists
+    // is this counter, the `relocking` refusals the dwell then produces — which
+    // DO reach the queue offline — and the decision log the simulator prints.
+    capForcedCloses_ = saturatingIncrement(capForcedCloses_);
+  }
 }
 
 void GateApp::pumpLink() {

@@ -294,7 +294,7 @@ public:
         watchdog_(kGateConfig.watchdogSeconds, clock_), http_(options.apiBase, authorization_, clock_),
         api_(http_, breaker_, clock_),
         lock_(relayPin_, kGateConfig.relayActiveHigh, kGateConfig.unlockEnergisesRelay),
-        unlockTimer_(kGateConfig.unlockHardCapMs), queue_(&store_), roster_(kGateConfig.rosterMaxAgeMs),
+        unlockTimer_(kGateConfig.unlockHardCapMs, kGateConfig.minRelockMs, kGateConfig.relockDwellMs), queue_(&store_), roster_(kGateConfig.rosterMaxAgeMs),
         app_(wire()) {}
 
   /// `Bearer <key>`, rendered once, exactly as setupIdentity() does at boot.
@@ -420,6 +420,18 @@ private:
     lastUnlockMs_ = app_.unlockMs();
     lastNoPush_ = app_.noPushHeartbeats();
 
+    // A WINDOW THE HARD CAP ENDED. Printed rather than left to `status`, because
+    // it is an EVENT — somebody is holding this door open — and a transcript
+    // that only carried the final total could not say when. Round G4, A1.
+    if (app_.capForcedCloses() != lastCapped_) {
+      lastCapped_ = app_.capForcedCloses();
+      printf("[cap] window ended by the hard cap, total=%lu, lock dark for %lums t=%lums\n",
+             static_cast<unsigned long>(lastCapped_),
+             static_cast<unsigned long>(kGateConfig.relockDwellMs),
+             static_cast<unsigned long>(clock_.nowMs()));
+      static_cast<void>(fflush(stdout));
+    }
+
     if (queue_.size() != lastQueued_) {
       printf("[evq] held=%u lost=%lu t=%lums\n", static_cast<unsigned>(queue_.size()),
              static_cast<unsigned long>(queue_.overflowed()), static_cast<unsigned long>(clock_.nowMs()));
@@ -430,10 +442,12 @@ private:
 
   void status() {
     printf(
-        "[status] link=%d released=%d roster=%u age_ms=%lu unlock_ms=%lu queued=%u lost=%lu "
-        "no_push=%lu calls=%lu worst_call_ms=%lu worst_gap_ms=%lu wdt_breaches=%lu "
+        "[status] link=%d released=%d relocking_ms=%lu capped=%lu roster=%u age_ms=%lu unlock_ms=%lu "
+        "queued=%u lost=%lu no_push=%lu calls=%lu worst_call_ms=%lu worst_gap_ms=%lu wdt_breaches=%lu "
         "dropped_scan_bytes=%lu t=%lums\n",
-        app_.linkUp() ? 1 : 0, lock_.released() ? 1 : 0, static_cast<unsigned>(roster_.size()),
+        app_.linkUp() ? 1 : 0, lock_.released() ? 1 : 0,
+        static_cast<unsigned long>(unlockTimer_.relockingForMs(clock_.nowMs())),
+        static_cast<unsigned long>(app_.capForcedCloses()), static_cast<unsigned>(roster_.size()),
         static_cast<unsigned long>(roster_.ageMs(clock_.nowMs())),
         static_cast<unsigned long>(app_.unlockMs()), static_cast<unsigned>(queue_.size()),
         static_cast<unsigned long>(queue_.overflowed()), static_cast<unsigned long>(app_.noPushHeartbeats()),
@@ -502,6 +516,7 @@ private:
 
   GateApp app_;
 
+  uint32_t lastCapped_ = 0U;
   uint32_t lastRosterAge_ = 0U;
   uint32_t lastUnlockMs_ = 0U;
   uint32_t lastNoPush_ = 0U;

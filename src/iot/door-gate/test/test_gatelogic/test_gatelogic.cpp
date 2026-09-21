@@ -65,6 +65,8 @@ constexpr uint32_t kBases[] = {kBaseZero, kBaseMid, kBaseWrapSoon, kBaseWrapNow}
 constexpr size_t kBaseCount = sizeof(kBases) / sizeof(kBases[0]);
 
 constexpr uint32_t kCapMs = gatelogic::kGateConfig.unlockHardCapMs;
+constexpr uint32_t kDwellMs = gatelogic::kGateConfig.relockDwellMs;
+constexpr uint32_t kMinRelockMs = gatelogic::kGateConfig.minRelockMs;
 constexpr uint32_t kDefaultMs = gatelogic::kGateConfig.unlockDefaultMs;
 
 using Cache = roster::Roster<gatelogic::kGateRosterEntries>;
@@ -295,21 +297,29 @@ void test_lock_set_drives_the_level_its_wiring_calls_for() {
 // UnlockTimer — the release window and its two bounds
 // ---------------------------------------------------------------------------
 
+/// A timer wired the way the board wires it, so a test can never accidentally
+/// build one without the dwells that make the hard cap a bound on the DOOR.
+gatelogic::UnlockTimer boardTimer() {
+  return gatelogic::UnlockTimer(kCapMs, kMinRelockMs, kDwellMs);
+}
+
 void test_unlock_opens_once_and_closes_once_at_every_clock_base() {
   for (size_t b = 0U; b < kBaseCount; ++b) {
     const uint32_t base = kBases[b];
-    gatelogic::UnlockTimer timer(kCapMs);
+    gatelogic::UnlockTimer timer = boardTimer();
 
-    TEST_ASSERT_TRUE_MESSAGE(timer.request(base, 3000U), "the first request is the opening edge");
+    TEST_ASSERT_TRUE_MESSAGE(timer.request(base, 3000U) == gatelogic::UnlockTimer::Grant::Opened,
+                             "the first request is the opening edge");
     TEST_ASSERT_TRUE(timer.released());
-    TEST_ASSERT_FALSE(timer.tick(base + 2999U));
+    TEST_ASSERT_TRUE(timer.tick(base + 2999U) == gatelogic::UnlockTimer::Close::None);
     TEST_ASSERT_TRUE(timer.released());
 
-    TEST_ASSERT_TRUE_MESSAGE(timer.tick(base + 3000U), "the deadline is the closing edge");
+    TEST_ASSERT_TRUE_MESSAGE(timer.tick(base + 3000U) == gatelogic::UnlockTimer::Close::WindowEnded,
+                             "the deadline is the closing edge");
     TEST_ASSERT_FALSE(timer.released());
     // Exactly once. A second edge would queue a second event and write the
     // relay again for a door that is already shut.
-    TEST_ASSERT_FALSE(timer.tick(base + 3001U));
+    TEST_ASSERT_TRUE(timer.tick(base + 3001U) == gatelogic::UnlockTimer::Close::None);
   }
 }
 
@@ -321,19 +331,21 @@ void test_unlock_opens_once_and_closes_once_at_every_clock_base() {
 void test_unlock_a_re_arm_never_shortens_the_window() {
   for (size_t b = 0U; b < kBaseCount; ++b) {
     const uint32_t base = kBases[b];
-    gatelogic::UnlockTimer timer(kCapMs);
+    gatelogic::UnlockTimer timer = boardTimer();
 
     static_cast<void>(timer.request(base, 10000U));
     // A shorter grant, one second in. 9 s are left; a 1 s grant must not win.
-    TEST_ASSERT_FALSE_MESSAGE(timer.request(base + 1000U, 1000U), "a re-arm is not an opening edge");
+    TEST_ASSERT_TRUE_MESSAGE(timer.request(base + 1000U, 1000U) ==
+                                 gatelogic::UnlockTimer::Grant::Extended,
+                             "a re-arm is not an opening edge");
     TEST_ASSERT_EQUAL_UINT32(9000U, timer.remainingMs(base + 1000U));
-    TEST_ASSERT_FALSE(timer.tick(base + 9999U));
-    TEST_ASSERT_TRUE(timer.tick(base + 10000U));
+    TEST_ASSERT_TRUE(timer.tick(base + 9999U) == gatelogic::UnlockTimer::Close::None);
+    TEST_ASSERT_TRUE(timer.tick(base + 10000U) == gatelogic::UnlockTimer::Close::WindowEnded);
 
     // A LONGER grant does extend.
-    gatelogic::UnlockTimer other(kCapMs);
+    gatelogic::UnlockTimer other = boardTimer();
     static_cast<void>(other.request(base, 3000U));
-    TEST_ASSERT_FALSE(other.request(base + 1000U, 5000U));
+    TEST_ASSERT_TRUE(other.request(base + 1000U, 5000U) == gatelogic::UnlockTimer::Grant::Extended);
     TEST_ASSERT_EQUAL_UINT32(5000U, other.remainingMs(base + 1000U));
   }
 }
@@ -349,16 +361,16 @@ void test_unlock_the_hard_cap_bounds_both_one_answer_and_the_whole_window() {
   for (size_t b = 0U; b < kBaseCount; ++b) {
     const uint32_t base = kBases[b];
 
-    gatelogic::UnlockTimer single(kCapMs);
+    gatelogic::UnlockTimer single = boardTimer();
     static_cast<void>(single.request(base, 600000U)); // ten minutes, asked for once
     TEST_ASSERT_EQUAL_UINT32(kCapMs, single.remainingMs(base));
-    TEST_ASSERT_TRUE(single.tick(base + kCapMs));
+    TEST_ASSERT_TRUE(single.tick(base + kCapMs) == gatelogic::UnlockTimer::Close::CapForced);
 
-    gatelogic::UnlockTimer repeated(kCapMs);
+    gatelogic::UnlockTimer repeated = boardTimer();
     static_cast<void>(repeated.request(base, 3000U));
     // Somebody scanning every two seconds, forever.
     for (uint32_t t = 2000U; t <= 120000U; t += 2000U) {
-      if (repeated.tick(base + t)) {
+      if (repeated.tick(base + t) != gatelogic::UnlockTimer::Close::None) {
         break;
       }
       static_cast<void>(repeated.request(base + t, 3000U));
@@ -370,8 +382,136 @@ void test_unlock_the_hard_cap_bounds_both_one_answer_and_the_whole_window() {
   }
 }
 
+/// G4 / A1, CRITICAL, AND THE TEST ABOVE IS WHY IT SURVIVED THREE ROUNDS.
+///
+/// That test `break`s at the first close, so all it can ever prove is that ONE
+/// window shuts. The cap is a bound on a WINDOW, and the very next accepted scan
+/// opens a fresh one — legally. Measured on the real simulator with two
+/// alternating tokens every 50 ms: relay OFF at t=31034 ms and ON at t=31034 ms,
+/// dark for 0 ms, then +42 ms, then +45 ms, for ever. The door physically never
+/// relocked and no single request broke any rule.
+///
+/// So this one KEEPS SCANNING past the cap, for two minutes of simulated time,
+/// at every clock base and at both cadences the finder used — the one-token one
+/// that the debounce's phase happened to save, and the two-token one it does
+/// not. What it measures is the thing that matters to a lock: DARK TIME.
+void test_unlock_a_capped_window_is_followed_by_real_dark_time() {
+  struct Row {
+    const char* label;
+    uint32_t everyMs; ///< how often a decision is offered
+  };
+  const Row rows[] = {
+      {"a decision every pass — two alternating tokens, no debounce", 10U},
+      {"a decision every 2010 ms — one token, at the debounce's own cadence", 2010U},
+  };
+
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    for (const Row& row : rows) {
+      gatelogic::UnlockTimer timer = boardTimer();
+      static_cast<void>(timer.request(kBases[b], 3000U));
+
+      uint32_t releasedFor = 0U;          ///< longest continuous released stretch
+      uint32_t darkAfterCap = 0U;         ///< dark time following the FIRST capped close
+      uint32_t openedAt = kBases[b];      ///< start of the current released stretch
+      uint32_t closedAt = 0U;
+      bool capped = false;
+      bool reopenedAfterCap = false;
+
+      for (uint32_t t = 10U; t <= 120000U; t += 10U) {
+        const uint32_t now = kBases[b] + t;
+        // THE BOARD'S OWN ORDER: `pass()` pumps the lock — including out of
+        // `afterBlocking()`, inside the very call that decided the scan — and
+        // then applies the decision. Any other order here would be testing a
+        // loop this firmware does not have.
+        const gatelogic::UnlockTimer::Close closed = timer.tick(now);
+        if (closed != gatelogic::UnlockTimer::Close::None) {
+          closedAt = now;
+          const uint32_t held = tb::since(now, openedAt);
+          if (held > releasedFor) {
+            releasedFor = held;
+          }
+          if (closed == gatelogic::UnlockTimer::Close::CapForced && !capped) {
+            capped = true;
+          }
+        }
+        if ((t % row.everyMs) < 10U) {
+          const gatelogic::UnlockTimer::Grant grant = timer.request(now, 3000U);
+          if (grant == gatelogic::UnlockTimer::Grant::Opened) {
+            openedAt = now;
+            if (capped && !reopenedAfterCap) {
+              reopenedAfterCap = true;
+              darkAfterCap = tb::since(now, closedAt);
+            }
+          }
+        }
+      }
+
+      char message[224] = {};
+      snprintf(message, sizeof(message), "base %lu, %s: longest release %lu ms, dark after the cap %lu ms",
+               static_cast<unsigned long>(kBases[b]), row.label, static_cast<unsigned long>(releasedFor),
+               static_cast<unsigned long>(darkAfterCap));
+
+      TEST_ASSERT_TRUE_MESSAGE(capped, message);
+      // THE BOUND ON THE WINDOW, which held before this round and still does.
+      TEST_ASSERT_TRUE_MESSAGE(releasedFor <= kCapMs, message);
+      // THE BOUND ON THE DOOR, which did not exist. A relay written OFF and ON
+      // at the same millisecond is a lock that was never de-energised: the
+      // strike does not drop and the maglock keeps its armature.
+      TEST_ASSERT_TRUE_MESSAGE(reopenedAfterCap, message);
+      TEST_ASSERT_TRUE_MESSAGE(darkAfterCap >= kDwellMs, message);
+    }
+  }
+}
+
+/// G4 / A1's other half: EVERY close owes dark time, not only a capped one.
+///
+/// `pass()` calls `pumpLock()` out of `afterBlocking()` and applies the
+/// decision that blocking call produced two lines later, so an ordinary
+/// three-second window can close in the same pass that an API-approved scan
+/// re-opens it. Two back-to-back members would be one continuous opening with
+/// two audit rows and a lock that never moved.
+void test_unlock_any_close_guarantees_the_lock_actually_relatches() {
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    const uint32_t base = kBases[b];
+    gatelogic::UnlockTimer timer = boardTimer();
+
+    static_cast<void>(timer.request(base, 3000U));
+    TEST_ASSERT_TRUE(timer.tick(base + 3000U) == gatelogic::UnlockTimer::Close::WindowEnded);
+
+    // The same millisecond, which is the measured case.
+    TEST_ASSERT_TRUE_MESSAGE(timer.request(base + 3000U, 3000U) ==
+                                 gatelogic::UnlockTimer::Grant::Relocking,
+                             "a relay written OFF and ON at one instant was never de-energised");
+    TEST_ASSERT_FALSE(timer.released());
+    TEST_ASSERT_TRUE(timer.relocking(base + 3000U));
+    TEST_ASSERT_EQUAL_UINT32(kMinRelockMs, timer.relockingForMs(base + 3000U));
+
+    // One millisecond short of the floor is still refused...
+    TEST_ASSERT_TRUE(timer.request(base + 3000U + kMinRelockMs - 1U, 3000U) ==
+                     gatelogic::UnlockTimer::Grant::Relocking);
+    // ...and at the floor the member comes in.
+    TEST_ASSERT_TRUE(timer.request(base + 3000U + kMinRelockMs, 3000U) ==
+                     gatelogic::UnlockTimer::Grant::Opened);
+    TEST_ASSERT_TRUE(timer.released());
+    TEST_ASSERT_FALSE_MESSAGE(timer.relocking(base + 3000U + kMinRelockMs),
+                              "a dwell is about a CLOSED door and must not survive the open");
+
+    // AND THE FLOOR IS NOT THE DWELL. A capped close owes the longer one, so
+    // the two constants cannot be collapsed into one by a later edit without
+    // this going red.
+    gatelogic::UnlockTimer capped = boardTimer();
+    static_cast<void>(capped.request(base, kCapMs));
+    TEST_ASSERT_TRUE(capped.tick(base + kCapMs) == gatelogic::UnlockTimer::Close::CapForced);
+    TEST_ASSERT_EQUAL_UINT32(kDwellMs, capped.relockingForMs(base + kCapMs));
+    TEST_ASSERT_TRUE(capped.request(base + kCapMs + kDwellMs - 1U, 3000U) ==
+                     gatelogic::UnlockTimer::Grant::Relocking);
+    TEST_ASSERT_TRUE(capped.request(base + kCapMs + kDwellMs, 3000U) ==
+                     gatelogic::UnlockTimer::Grant::Opened);
+  }
+}
+
 void test_unlock_reports_how_long_it_has_been_released() {
-  gatelogic::UnlockTimer timer(kCapMs);
+  gatelogic::UnlockTimer timer = boardTimer();
   static_cast<void>(timer.request(kBaseWrapSoon, 3000U));
   TEST_ASSERT_EQUAL_UINT32(0U, timer.releasedForMs(kBaseWrapSoon));
   // Across the wrap: 0xFFFFF000 + 0x2000 has wrapped to 0x1000.
@@ -1270,6 +1410,12 @@ public:
     return had;
   }
 
+  /// Everything fed has been read. A scenario that offers a token on a cadence
+  /// asks this first: a pass the UPLOAD took reads no scanner bytes at all, so
+  /// feeding regardless slowly fills this fake's buffer and fails the scenario
+  /// on a fixture limit rather than on what it is about.
+  bool drained() const { return head_ >= count_; }
+
 private:
   fakes::FakeClock& clock_;
   uint8_t buf_[512] = {};
@@ -1652,7 +1798,9 @@ struct Rig {
   explicit Rig(uint32_t base)
       : clock(base), watchdog(clock), scanner(clock), http(clock), api(http, breaker, clock),
         lock(relayPin, gatelogic::kGateConfig.relayActiveHigh, gatelogic::kGateConfig.unlockEnergisesRelay),
-        unlock(gatelogic::kGateConfig.unlockHardCapMs), roster(gatelogic::kGateConfig.rosterMaxAgeMs),
+        unlock(gatelogic::kGateConfig.unlockHardCapMs, gatelogic::kGateConfig.minRelockMs,
+               gatelogic::kGateConfig.relockDwellMs),
+        roster(gatelogic::kGateConfig.rosterMaxAgeMs),
         queue(&store), app(wire()) {}
 
   gatelogic::GateApp::Ports wire() {
@@ -1780,6 +1928,11 @@ struct Rig {
 
 constexpr char kOpenThreeSeconds[] = "{\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":3}";
 
+/// The contract's widest grant. Used where a scenario must not have a window
+/// CLOSE inside it — the relock dwell (round G4, A1) is a second rule with its
+/// own test, and a scenario about the call budget must not be decided by it.
+constexpr char kOpenThirtySeconds[] = "{\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":30}";
+
 /// What the body above grants, as a number the assertions derive from rather
 /// than repeat. A one-field probe that changed the body's seconds and left the
 /// assertions alone is what asked for this.
@@ -1864,7 +2017,12 @@ void test_app_a_pass_makes_at_most_one_blocking_call() {
   Rig rig(kBaseMid);
   rig.boot(true);
   rig.http.setLatency(gatelogic::kWorstBlockingCallMs);
-  rig.http.answer(200U, kOpenThreeSeconds);
+  // THE WIDEST GRANT, so no window CLOSES between two twelve-second calls. With
+  // a three-second one the first member's window ends inside the second call,
+  // the lock starts relatching, and the third scan is refused without a call —
+  // correctly, by A1's dwell, which is a different rule with its own test. A
+  // scenario about the call budget must not be decided by it.
+  rig.http.answer(200U, kOpenThirtySeconds);
 
   // Three complete tokens, all in the buffer before the pass begins.
   rig.scanner.feed("TOKENAAAAAAA\nTOKENBBBBBBB\nTOKENCCCCCCC\n");
@@ -2982,6 +3140,214 @@ void test_app_a_404_on_events_keeps_the_backlog_and_retries_it() {
 }
 
 // ---------------------------------------------------------------------------
+// G4 / A1 — the hard cap, through the whole loop rather than through the timer
+// ---------------------------------------------------------------------------
+
+/// THE SEQUENCE THE FINDER MEASURED ON THE REAL SIMULATOR, in the rig.
+///
+/// Two alternating tokens defeat the single-slot debounce, so a decision is
+/// offered on every pass. `pass()` pumps the lock out of `afterBlocking()` and
+/// applies the decision that call produced two lines later, so the close and
+/// the re-open land in ONE pass: relay OFF at t=31034 ms and ON at t=31034 ms,
+/// measured, then +42 ms, then +45 ms, for ever. The door never relocked.
+///
+/// Sampling `released()` once per pass is deliberately the WEAKEST observation
+/// that can see this, and that is the point: a within-pass OFF/ON is invisible
+/// to it, so the shipped firmware reads here as "released, every pass, for two
+/// minutes" — which is exactly what it was.
+void test_app_two_alternating_tokens_cannot_hold_the_door_open_for_ever() {
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    Rig rig(kBases[b]);
+    rig.boot(true);
+    rig.http.setLatency(0U);
+    rig.http.onPath(gatelogic::kPathGate, 200U, kOpenThreeSeconds, 0U);
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.http.onPath(gatelogic::kPathEvents, 200U, "{\"accepted_through\":4294967295}", 0U);
+
+    uint32_t releasedRun = 0U;
+    uint32_t longestReleased = 0U;
+    uint32_t darkRun = 0U;
+    uint32_t longestDarkAfterCap = 0U;
+    bool everCapped = false;
+
+    const uint32_t start = rig.clock.value();
+    uint32_t previous = start;
+    uint32_t alternate = 0U;
+    // SAMPLED INSIDE THE LOOP, because the decision log is a ring of 32 and
+    // this scenario makes several thousand decisions: the dwell's refusals
+    // happen right after each cap and are long gone from the ring by the end.
+    bool sawRelocking = false;
+    while (tb::since(rig.clock.value(), start) < 120000UL) {
+      if (rig.scanner.drained()) {
+        rig.scanner.feed((alternate % 2U) == 0U ? "TOKENAAAAAAA\n" : "TOKENBBBBBBB\n");
+        ++alternate;
+      }
+      rig.tick();
+      if (rig.log.count() > 0U && strcmp(rig.log.last().reason, gatelogic::kReasonRelocking) == 0) {
+        sawRelocking = true;
+      }
+      // MEASURED OFF THE CLOCK, not counted in passes: the scanner fake charges
+      // a millisecond a byte, exactly as 9600 baud does, so a pass is not a
+      // fixed length and counting them would measure the wrong thing.
+      const uint32_t elapsed = tb::since(rig.clock.value(), previous);
+      previous = rig.clock.value();
+      if (rig.lock.released()) {
+        releasedRun += elapsed;
+        if (releasedRun > longestReleased) {
+          longestReleased = releasedRun;
+        }
+        darkRun = 0U;
+      } else {
+        darkRun += elapsed;
+        releasedRun = 0U;
+        if (rig.app.capForcedCloses() > 0U) {
+          everCapped = true;
+          if (darkRun > longestDarkAfterCap) {
+            longestDarkAfterCap = darkRun;
+          }
+        }
+      }
+    }
+
+    char message[224] = {};
+    snprintf(message, sizeof(message),
+             "base %lu: longest continuous release %lu ms, longest dark after a cap %lu ms, "
+             "cap-forced closes %lu",
+             static_cast<unsigned long>(kBases[b]), static_cast<unsigned long>(longestReleased),
+             static_cast<unsigned long>(longestDarkAfterCap),
+             static_cast<unsigned long>(rig.app.capForcedCloses()));
+
+    TEST_ASSERT_TRUE_MESSAGE(everCapped, message);
+    // The window bound, which held before this round — stated as the firmware's
+    // own documented overrun rather than as a tight number, because the relay
+    // write waits for whatever pass the deadline falls inside. See GateApp.h.
+    TEST_ASSERT_TRUE_MESSAGE(longestReleased <= kCapMs + gatelogic::kWorstBlockingCallMs +
+                                                    gatelogic::kIdleDelayMs,
+                             message);
+    // The DOOR bound, which did not exist: after the cap overrules them, the
+    // lock is genuinely de-energised for long enough to relatch.
+    TEST_ASSERT_TRUE_MESSAGE(longestDarkAfterCap >= kDwellMs, message);
+    // AND THE MEMBER IS TOLD, rather than the scan vanishing. The dwell's
+    // refusals are recorded with their own reason, so a desk reading the trail
+    // sees "somebody is holding this door open" rather than nothing at all.
+    TEST_ASSERT_TRUE_MESSAGE(sawRelocking, "a scan refused by the dwell must be answered, not lost");
+  }
+}
+
+/// A1. A scan that meets the dwell is refused WITHOUT asking the API, on the
+/// debounce's own precedent — and, offline, the record it queues says a scan
+/// was refused rather than that a door opened.
+void test_app_a_scan_inside_the_relock_dwell_costs_no_call_and_records_no_opening() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  rig.http.setLatency(0U);
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+  rig.forceHeartbeat();
+
+  // Offline, so the roster decides and the record is queued.
+  rig.link.set(false);
+  rig.tick();
+  const uint16_t queuedBefore = rig.queue.size();
+
+  rig.scanner.feed("MEMBERTOKEN1\n");
+  rig.tick();
+  rig.tick();
+  TEST_ASSERT_TRUE_MESSAGE(rig.lock.released(), "the scenario needs the door to open first");
+
+  // Let the window end, then scan again inside the dwell. A DIFFERENT token, so
+  // the debounce is not what refuses it.
+  rig.runFor(gatelogic::kGateConfig.unlockDefaultMs + 2U * gatelogic::kIdleDelayMs);
+  TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(), "the window has to have closed");
+
+  rig.scanner.feed("MEMBERTOKEN1\n");
+  rig.tick();
+  rig.tick();
+
+  TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(), "the lock must stay de-energised through the dwell");
+  TEST_ASSERT_EQUAL_STRING_MESSAGE(gatelogic::kReasonRelocking, rig.log.last().reason,
+                                   "the member is told why, in a word that is about the door");
+  TEST_ASSERT_FALSE_MESSAGE(rig.log.last().released, "and the log must not claim a release");
+
+  // The queued record: an `unknown_scan`, never a `gate_open` for a door that
+  // did not move. Read off the ring's growth plus the decision's own flag.
+  TEST_ASSERT_TRUE_MESSAGE(rig.log.last().queued, "an offline refusal is still evidence");
+  TEST_ASSERT_TRUE(rig.queue.size() > queuedBefore);
+}
+
+/// A1. ONLINE, the dwell refuses BEFORE the API is asked — the debounce's own
+/// precedent. Two things turn on it: a `/gate` call spent on a door that cannot
+/// open is the pass spent on nothing, and a 200 answering `opened` would put a
+/// door opening in the server's audit trail that did not happen.
+void test_app_a_scan_inside_the_relock_dwell_never_reaches_the_api() {
+  Rig rig(kBaseMid);
+  rig.boot(true);
+  rig.http.setLatency(0U);
+  rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+  rig.http.onPath(gatelogic::kPathGate, 200U, kOpenThreeSeconds, 0U);
+  rig.forceHeartbeat();
+
+  rig.scanner.feed("MEMBERTOKEN1\n");
+  rig.tick();
+  rig.tick();
+  TEST_ASSERT_TRUE_MESSAGE(rig.lock.released(), "the scenario needs the door to open first");
+  rig.runFor(gatelogic::kGateConfig.unlockDefaultMs + 2U * gatelogic::kIdleDelayMs);
+  TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(), "the window has to have closed");
+
+  const uint32_t gateCallsBefore = rig.http.callsTo(gatelogic::kPathGate);
+  rig.scanner.feed("MEMBERTOKEN1\n");
+  rig.tick();
+  rig.tick();
+
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(gateCallsBefore, rig.http.callsTo(gatelogic::kPathGate),
+                                   "a scan the board cannot honour is not a question for the API");
+  TEST_ASSERT_FALSE(rig.lock.released());
+  TEST_ASSERT_EQUAL_STRING(gatelogic::kReasonRelocking, rig.log.last().reason);
+}
+
+/// A1's SECOND HALF, and the exact interleaving the finder measured: the window
+/// closes INSIDE the blocking call that decided the next scan.
+///
+/// `pass()` calls `pumpLock()` from `afterBlocking()` and applies the decision
+/// two lines later, so a twelve-second `/gate` call that starts while the door
+/// is open returns to find the window over — and the API has said `opened`. The
+/// relay would be written OFF and ON at the same millisecond. The pre-check
+/// above cannot see this one: at the instant the scan was decided, the door was
+/// still released and there was no dwell to meet.
+void test_app_a_window_that_closes_inside_the_call_that_granted_the_next_one() {
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    Rig rig(kBases[b]);
+    rig.boot(true);
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.forceHeartbeat();
+    // A WHOLE WORST-CASE CALL, which is what makes the window end inside it.
+    rig.http.onPath(gatelogic::kPathGate, 200U, kOpenThreeSeconds, gatelogic::kWorstBlockingCallMs);
+
+    rig.scanner.feed("TOKENAAAAAAA\n");
+    rig.tick();
+    rig.tick();
+    TEST_ASSERT_TRUE_MESSAGE(rig.lock.released(), "the first member has to get in");
+
+    // The second member, decided while the door is still open, granted by the
+    // API, and applied after the first member's window has ended.
+    rig.scanner.feed("TOKENBBBBBBB\n");
+    rig.tick();
+    rig.tick();
+
+    char message[160] = {};
+    snprintf(message, sizeof(message), "base %lu: reason=%s released=%d", static_cast<unsigned long>(kBases[b]),
+             rig.log.last().reason, rig.log.last().released ? 1 : 0);
+
+    TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(), message);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(gatelogic::kReasonRelocking, rig.log.last().reason, message);
+    // AND THE RECORD SAYS SO. A decision left claiming `released` would have
+    // this board report an opening it refused — the one thing an audit trail
+    // must never contain.
+    TEST_ASSERT_FALSE_MESSAGE(rig.log.last().released, message);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, rig.log.last().grantedMs, message);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // G4 / C1 — the uptime a real board's events actually go up with
 // ---------------------------------------------------------------------------
 
@@ -4014,6 +4380,8 @@ int main(int, char**) {
   RUN_TEST(test_unlock_opens_once_and_closes_once_at_every_clock_base);
   RUN_TEST(test_unlock_a_re_arm_never_shortens_the_window);
   RUN_TEST(test_unlock_the_hard_cap_bounds_both_one_answer_and_the_whole_window);
+  RUN_TEST(test_unlock_a_capped_window_is_followed_by_real_dark_time);
+  RUN_TEST(test_unlock_any_close_guarantees_the_lock_actually_relatches);
   RUN_TEST(test_unlock_reports_how_long_it_has_been_released);
 
   RUN_TEST(test_scan_assembles_a_line_and_treats_crlf_as_one_terminator);
@@ -4086,6 +4454,10 @@ int main(int, char**) {
   RUN_TEST(test_app_a_heartbeat_whose_body_never_arrived_counts_as_a_no_push);
   RUN_TEST(test_app_a_draining_backlog_still_lets_the_member_at_the_door_through);
   RUN_TEST(test_app_a_404_on_events_keeps_the_backlog_and_retries_it);
+  RUN_TEST(test_app_two_alternating_tokens_cannot_hold_the_door_open_for_ever);
+  RUN_TEST(test_app_a_scan_inside_the_relock_dwell_costs_no_call_and_records_no_opening);
+  RUN_TEST(test_app_a_scan_inside_the_relock_dwell_never_reaches_the_api);
+  RUN_TEST(test_app_a_window_that_closes_inside_the_call_that_granted_the_next_one);
   RUN_TEST(test_app_an_offline_record_is_stamped_with_an_uptime_the_server_can_read);
   RUN_TEST(test_body_a_body_that_fits_arrives_whole_however_the_segments_fall);
   RUN_TEST(test_body_an_undeclared_length_ends_when_the_peer_closes);

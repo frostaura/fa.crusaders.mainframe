@@ -46,7 +46,9 @@ so the headers still compile with no build system at all.
 | `GATE_UNLOCK_ENERGISES_RELAY` | 1 | **the lock's wiring**: 1 if an energised coil *releases* the lock |
 | `GATE_LED_PIN` / `GATE_LED_ACTIVE_HIGH` | 27 / 1 | the lamp and its polarity |
 | `GATE_UNLOCK_DEFAULT_MS` | 3000 | release time until the first heartbeat |
-| `GATE_UNLOCK_HARD_CAP_MS` | 30000 | the lock can never stay released longer |
+| `GATE_UNLOCK_HARD_CAP_MS` | 30000 | the longest ONE release window may last. On its own this is not a bound on the DOOR — see *the hard cap is a bound on a window* below |
+| `GATE_RELOCK_DWELL_MS` | 3000 | after a window the hard cap ended, the lock stays locked for at least this long and no grant may energise the relay inside it |
+| `GATE_MIN_RELOCK_MS` | 400 | the same, after ANY close: the floor that makes sure the lock is actually de-energised between two windows |
 | `GATE_MAX_TOKEN_LEN` | 20 | `= roster::kMaxTokenLen`, asserted |
 | `GATE_WATCHDOG_SECONDS` | 15 | task watchdog period; **asserted** to exceed one worst-case HTTP call. Was 12, when a call was two phases rather than three. |
 | `HEARTBEAT_INTERVAL_MS` | 30000 | starting cadence; the tenant's is adopted |
@@ -328,6 +330,70 @@ timeout, so a peer sending one byte every three seconds resets it forever, and
 there is no way to interrupt `POST()` from here. A peer that dribbles headers
 can hold one call past the bound. That case is the **watchdog's**, deliberately,
 and it is why the watchdog exists rather than being belt and braces.
+
+**So the board's true worst case is the watchdog's number, not the budgets'**
+(round G4, A3). Against a peer that dribbles headers the call is unbounded by
+anything in `GateConfig.h`; what ends it is `GATE_WATCHDOG_SECONDS`, which
+resets the part. A door released for the full cap when that happens stays
+released for the cap, plus up to the watchdog period, plus the boot that follows
+— and the boot is what actually takes the lock back, because `beginOutputs()`
+writes the LOCKED level into the output register before the pin ever drives.
+With this image's numbers:
+
+| | against a slow-but-answering peer | against a peer that dribbles headers |
+|---|---|---|
+| one blocking call | 12 000 ms | unbounded; ends at the watchdog |
+| physical release, 30 s grant | **42 010 ms** | **≈ 45 500 ms** (30 000 + 15 000 + boot) |
+
+Both are true, of different peers, and **the larger one is the number to plan a
+door around**. Giving the whole call one absolute deadline would collapse the
+second into the first and is not available: the ESP32 core exposes no way to
+abort a `POST()` in flight. The native simulator's `SocketHttpPort` bounds its
+own header read, so the measured figures above are the three-budget case and the
+simulator **cannot** reproduce the watchdog one — said here rather than left for
+somebody to find by comparing a transcript against a board.
+
+### The hard cap is a bound on a window; two dwells make it a bound on the door
+
+Round G4, finding A1. `GATE_UNLOCK_HARD_CAP_MS` bounds one release *window* two
+ways — no single answer may ask for more, and no sequence of re-arms may push a
+deadline past the cap measured from the moment the door first opened. Both held.
+Neither bounded the **door**, because the cap closed the window and the very
+next accepted scan opened a fresh one, legally.
+
+On a board the two happen in the *same pass*: `pass()` calls `pumpLock()` out of
+`afterBlocking()` and applies the decision that blocking call produced two lines
+later. Measured against the compiled simulator with two alternating tokens
+offered every 50 ms — which defeats the single-slot debounce — the relay went
+**OFF at t=31034 ms and ON at t=31034 ms**, dark for **0 ms**, then again at
++42 ms and +45 ms, for ever. A relay de-energised for zero milliseconds was
+never de-energised: the strike does not drop and the maglock keeps its armature.
+The door physically never relocked, and no single request broke any rule. One
+token alone was saved only by the debounce's *phase*, which is a coincidence of
+cadence rather than a rule.
+
+So a close now guarantees dark time, and a grant inside it is **refused**:
+
+| | after | for | because |
+|---|---|---|---|
+| `GATE_MIN_RELOCK_MS` | any close | 400 ms | long enough for a strike to drop or a maglock to re-magnetise, short enough that a second member behind the first does not notice it |
+| `GATE_RELOCK_DWELL_MS` | a close the **cap** forced | 3000 ms | that close is the board overruling somebody who has held the door open for the whole cap, and the point of overruling them is that the door shuts. It is `GATE_UNLOCK_DEFAULT_MS`: the door is shut for at least as long as an ordinary grant holds it open |
+
+A refused scan is **answered, never swallowed**: the lamp gives the denial cue,
+the decision carries the reason `relocking`, and offline it is queued as an
+`unknown_scan` — never as a `gate_open` for a door that did not move. It is
+refused **before the API is asked**, on the debounce's own precedent, so the
+server never writes an `opened` row for an opening that did not happen and the
+pass is not spent on a question whose answer cannot be acted on.
+
+**What is NOT on the wire, said plainly.** A window the cap ended increments
+`GateApp::capForcedCloses()`, which reaches the native simulator's `status` line
+and the host suite and **nothing else**. There is no event kind for it and no
+heartbeat field; both are wire changes needing a corpus vector and a backend
+that tolerates them. The `relocking` refusals the dwell then produces *do* reach
+the queue when the board is offline, so an evening of somebody holding a door
+open is not invisible — but the cap itself is not a number an admin can read.
+Putting it on the wire is owed.
 
 **The release window is timed from after the call that granted it**, on every
 branch. It was timed from before, which made a 2.9-second round trip on a
