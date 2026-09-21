@@ -1,6 +1,7 @@
 import { ApiError } from "./api";
 import { RELAYS } from "../components/ButtonMapEditor";
 import { GATE_KEY_MAX_LENGTH } from "./gateCopy";
+import { LOCATION_NOTE_MAX_LENGTH } from "../components/doors/DoorCardFields";
 import {
   DEVICE_ALERT_COOLDOWN_MAX_MINUTES, DEVICE_ALERT_COOLDOWN_MIN_MINUTES,
   GATE_EARLY_ENTRY_MAX_MINUTES, GATE_EARLY_ENTRY_MIN_MINUTES,
@@ -52,6 +53,44 @@ const DEVICE_ERROR_TEXT: Record<string, string> = {
   // pasted value or a row edited from somewhere else. It had no entry at all and fell through
   // to the underscore swap — "gate key too long", which names no bound and no field.
   gate_key_too_long: `A door name is at most ${GATE_KEY_MAX_LENGTH} characters. Shorten it and save again.`,
+  /**
+   * The third of the kind refusals, and it had no entry at all.
+   *
+   * The API has answered this since the door-card migration landed and nothing rendered a
+   * sentence for it — an admin met the raw token. It became reachable in practice when the
+   * door page's two editors became one (A19): a single save now carries the door-card
+   * fields as well as the name, so a row that turned out to be a court box is refused on
+   * THESE rather than on `gate_key`, and this is the sentence they get.
+   */
+  door_fields_on_a_court_box: "Where the board is, and what its lock does with no power, are things"
+    + " only a door has — and this row is a court box. Refresh the page; if the board really is a"
+    + " door, delete the row and let it register itself again.",
+  location_note_too_long: `Where the board is has to be at most ${LOCATION_NOTE_MAX_LENGTH} characters. Shorten it and save again.`,
+  power_loss_behaviour_unknown: "What this door does with no power has to be one of the three"
+    + " answers on the form. Pick one and save again.",
+
+  // --- the club door log's own refusals ------------------------------------------------
+  //
+  // E3: a mistyped range used to answer 200 with the FULL unfiltered result, so an admin who
+  // fat-fingered a date exported everything believing it narrowed. The API refuses now, and
+  // these are the sentences those refusals reach a person as — without them the page shows
+  // its generic "could not be read", which says nothing about which field to look at.
+  from_invalid: "That start date could not be read, so the scans below were not narrowed to it."
+    + " Pick a range from the When list.",
+  to_invalid: "That end date could not be read, so the scans below were not narrowed to it."
+    + " Pick a range from the When list.",
+  cursor_invalid: "This page of older scans could not be read. Press Refresh to start the list again.",
+  outcome_invalid: "That is not an outcome a door records. Set Outcome back to All outcomes.",
+
+  // --- the club's public contact (B10 / C12) -------------------------------------------
+  //
+  // The console validates both before it sends, so these reach an admin only through a
+  // hand-edited settings document or a value saved from somewhere else — and the value is
+  // printed on the card that goes on a wall, which is why the server checks at all.
+  club_contact_phone_invalid: "A club phone number can hold digits, spaces and + - ( ) , and needs"
+    + " at least five digits. Check it and save again.",
+  club_contact_email_invalid: "That is not an email address the club can be reached at. Check it"
+    + " and save again.",
 
   // The three tenant numbers, each named with the bound the API holds, because
   // "out of range" alone leaves an admin guessing which end they went past.

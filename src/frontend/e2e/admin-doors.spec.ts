@@ -97,7 +97,18 @@ function doorsView(doors: Record<string, unknown>[], options: DoorsOptions = {})
   return {
     day_started_at: new Date(new Date().setHours(0, 0, 0, 0)).toISOString(),
     timezone: "Africa/Johannesburg",
-    shut_all_active: doors.some((d) => d.enabled === false),
+    // C1 / WIRE-R1 §4: a shut-all is standing only when a shut-all shut something. This
+    // used to be `doors.some(d => !d.enabled)`, which made a door shut on its OWN look like
+    // a fleet shut — the exact conflation that produced "Reopen all 3" over a request that
+    // reopened none of them, and the reason no browser test could see the bug.
+    shut_all_active: doors.some((d) => d.enabled === false && d.shut_by_shut_all_at != null),
+    // NAMED, not counted. The fleet control reads its label and its confirm off these.
+    shut_together: doors
+      .filter((d) => d.enabled === false && d.shut_by_shut_all_at != null)
+      .map((d) => ({ id: d.id, name: d.name, gate_key: d.gate_key })),
+    shut_individually: doors
+      .filter((d) => d.enabled === false && d.shut_by_shut_all_at == null)
+      .map((d) => ({ id: d.id, name: d.name, gate_key: d.gate_key })),
     doors: doors.map((device) => ({
       device,
       today: options.today && String(device.id) in options.today
@@ -115,7 +126,7 @@ function routes(doors: Record<string, unknown>[], extra: ApiRoute[] = [], option
     { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], count: 0 } },
     { path: "/api/v1/admin/members", body: [] },
     { path: "/api/v1/admin/settings/", body: SETTINGS },
-    { path: `/api/v1/admin/devices/${DOOR_ID}/activity`, body: { items: [] } },
+    { path: `/api/v1/admin/devices/${DOOR_ID}/activity`, body: { items: [], events: [] } },
     { path: "/api/v1/admin/doors/activity", body: { items: [], next_cursor: null, retention_days: 90 } },
     { path: "/api/v1/admin/doors", body: doorsView(doors, options) },
     ...extra,
@@ -260,7 +271,7 @@ test.describe("Shutting every door", () => {
       },
     ]);
 
-    await page.getByRole("button", { name: /Shut every door the club has open/ }).click();
+    await page.getByRole("button", { name: /— every door the club has open/ }).click();
     await page.getByRole("button", { name: /tap again to confirm/ }).click();
 
     const heading = page.getByRole("heading", { name: /2 doors shut — 1 confirmed, 1 not/ });
@@ -294,7 +305,7 @@ test.describe("Shutting every door", () => {
       },
     ]);
 
-    await page.getByRole("button", { name: /Shut every door the club has open/ }).click();
+    await page.getByRole("button", { name: /— every door the club has open/ }).click();
     await page.getByRole("button", { name: /tap again to confirm/ }).click();
 
     const line = page.getByText(/confirmed — heard from/);
@@ -312,8 +323,12 @@ test.describe("Shutting every door", () => {
     ]);
 
     await expect(page.getByText("2 doors · 1 open, 1 shut")).toBeVisible();
-    await expect(page.getByRole("button", { name: /Shut every door the club has open — 1 of 2/ })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Reopen every door the club shut together/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Shut the 1 door still open — every door the club has open — 1 of 2/ })).toBeVisible();
+    // C1: Front door was shut on its OWN, and `reopen-all` reopens only what a shut-all
+    // shut — so a fleet reopen here would answer `{"doors":[]}` and print "0 doors
+    // reopened". It is not offered; the panel says where the way back actually is.
+    await expect(page.getByRole("button", { name: /shut together/ })).toHaveCount(0);
+    await expect(page.getByText(/Front door was shut on its own/)).toBeVisible();
   });
 
   /**
@@ -327,9 +342,14 @@ test.describe("Shutting every door", () => {
     await page.goto("/admin/settings");
 
     const banner = page.getByRole("alert");
-    await expect(banner).toContainText("1 of 1 door is shut.");
-    await expect(banner).toContainText("Members can't get in.");
-    await expect(page.getByRole("link", { name: "Reopen all doors" })).toHaveAttribute("href", "/admin/doors");
+    await expect(banner).toContainText("1 of 1 door shut");
+    // C2: the phrase is banned outright — a shut door the club cannot reach has not heard
+    // the refusal and goes on admitting booked members from its saved list.
+    await expect(banner).not.toContainText("can't get in");
+    // C1: shut on its own, so a fleet reopen would reopen nothing and is not offered.
+    await expect(banner).toContainText("would not touch these");
+    await expect(page.getByRole("link", { name: "Side door" }))
+      .toHaveAttribute("href", `/admin/doors/${DOOR_ID}`);
   });
 });
 
@@ -346,7 +366,7 @@ test.describe("One door's page", () => {
     ]);
 
     await expect(page.getByText("Needs a door name")).toBeVisible();
-    await page.getByRole("button", { name: "Edit name and door name" }).click();
+    await page.getByRole("button", { name: /^Edit / }).click();
     await page.getByLabel("Name", { exact: true }).fill("Front door");
     await page.getByLabel("Door name", { exact: true }).fill("front-door");
 
@@ -360,11 +380,14 @@ test.describe("One door's page", () => {
         body: { ...unnamed, name: "Front door", gate_key: "front-door", auto_registered: false },
       },
     ]));
-    await page.getByRole("button", { name: "Save door" }).click();
+    await page.getByRole("button", { name: /Save this door/ }).click();
 
     // Name and door key in one call, and no court_numbers — the API refuses that field here.
-    expect(JSON.parse((await patch).postData() ?? "{}")).toEqual({ name: "Front door", gate_key: "front-door" });
-    await expect(page.getByRole("status").first()).toContainText("Front door is the front-door door.");
+    expect(JSON.parse((await patch).postData() ?? "{}")).toEqual({
+      name: "Front door", gate_key: "front-door", location_note: "", power_loss_behaviour: "not_established",
+    });
+    await expect(page.getByRole("status").first())
+      .toContainText("Front door saved. It is the front-door door");
   });
 
   /**
@@ -399,11 +422,16 @@ test.describe("One door's page", () => {
     await expect(page.getByText(/front-door · gate-0a1b2c/)).toBeVisible();
 
     const patch = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/admin/devices/"));
-    await page.getByRole("button", { name: "Edit name and door name" }).click();
+    await page.getByRole("button", { name: /^Edit / }).click();
     await page.getByLabel("Door name", { exact: true }).fill("   ");
-    await page.getByRole("button", { name: "Save door" }).click();
+    await page.getByRole("button", { name: /Save this door/ }).click();
 
-    expect(JSON.parse((await patch).postData() ?? "{}")).toEqual({ name: "Front door", gate_key: "" });
+    // A19: one form over all four writable fields, so one PATCH carrying all four. `""`,
+    // not `null`, on both two-valued fields — a null is what the API reads as "leave it
+    // alone", and that is what the page used to send while reporting a success.
+    expect(JSON.parse((await patch).postData() ?? "{}")).toEqual({
+      name: "Front door", gate_key: "", location_note: "", power_loss_behaviour: "not_established",
+    });
     await expect(page.getByText(/no door name yet · gate-0a1b2c/)).toBeVisible();
     // And what the club has just given up: an unnamed door is sent an empty list, so it has
     // no offline fallback at all.
@@ -420,7 +448,7 @@ test.describe("One door's page", () => {
 
     const notice = page.getByText(/^The club is not alerted about its silence/);
     await expect(notice).toBeVisible();
-    await expect(notice).toContainText("can still reach the API hears that refusal and opens for nobody");
+    await expect(notice).toContainText("can still reach the club hears that refusal and opens for nobody");
     await expect(notice).toContainText("has also lost the network never hears it");
     await expect(notice).toContainText("up to six hours");
     // A1.1: the denial survives P5's ban on the tokens.
@@ -430,9 +458,10 @@ test.describe("One door's page", () => {
     // And none of the court box's copy, which is false of a door in every clause.
     await expect(notice).not.toContainText("refunded in full");
     await expect(page.getByText(/The API refuses this box/)).toHaveCount(0);
+    await expect(notice).not.toContainText("the API");
 
     // A1.4: one name for the 403 path on a gate.
-    await expect(page.getByRole("button", { name: "Shut Front door" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Shut this door — Front door" })).toBeVisible();
     await expect(page.getByRole("button", { name: /Take out of service/ })).toHaveCount(0);
   });
 
@@ -443,8 +472,8 @@ test.describe("One door's page", () => {
     ]);
 
     const patch = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/admin/devices/"));
-    await page.getByRole("button", { name: "Shut Front door" }).click();
-    await page.getByRole("button", { name: "Shut Front door — tap again to confirm" }).click();
+    await page.getByRole("button", { name: "Shut this door — Front door" }).click();
+    await page.getByRole("button", { name: "Shut this door — Front door — tap again to confirm" }).click();
 
     expect((await patch).postData()).toBe('{"enabled":false}');
   });
@@ -471,10 +500,15 @@ test.describe("One door's page", () => {
   test("says a deleted door comes back unnamed", async ({ page }) => {
     await openDoor(page, [door({ name: "Front door" })]);
 
-    await page.getByRole("button", { name: "Delete Front door" }).click();
-    await expect(page.getByRole("button", { name: "Delete Front door — tap again to confirm" })).toBeVisible();
-    await expect(page.getByText("Delete? The door re-registers on its next heartbeat with no name.").first())
-      .toBeVisible();
+    await page.getByRole("button", { name: "Delete this door — Front door" }).click();
+    await expect(page.getByRole("button", { name: "Delete this door — Front door — tap again to confirm" })).toBeVisible();
+    // The armed button IS the confirm sentence — asserted on the control rather than on a
+    // text node, because the width sentinel carries the same words invisibly.
+    const armed = page.getByRole("button", { name: "Delete this door — Front door — tap again to confirm" });
+    await expect(armed).toBeVisible();
+    // C10: the two facts the old sentence destroyed without ever mentioning them.
+    await expect(armed).toContainText("what the lock does with no power");
+    await expect(armed).toContainText("where the board is");
   });
 
   /** Fifty rows of decisions, each carrying a member name of a length nobody controls. */
@@ -585,15 +619,20 @@ test.describe("The club door log", () => {
   test("says at the button what a downloaded file carries", async ({ page }) => {
     await openLog(page, [logRow()]);
 
-    await expect(page.getByText(/members' names included/)).toContainText("outside the club's 90-day rule");
+    // B3 / A15: the note promised "the same rows as this page" over a file that holds
+    // everything matching the filters — 50 on screen, 165 in the reviewer's download.
+    const note = page.getByText(/every scan matching the filters above/);
+    await expect(note).toContainText("not just the rows on this page");
+    await expect(note).toContainText("outside the club's 90-day rule");
+    await expect(page.getByText(/same rows as this page/)).toHaveCount(0);
   });
 
   /** The one-door empty case — the answer to the spec's own question. */
   test("answers an empty one-door range with the possibility an admin came to check", async ({ page }) => {
     await openLog(page, [], [], `/admin/doors/log?door=${DOOR_ID}`);
 
-    await expect(page.getByText(/No scans at the Side door between/))
-      .toContainText("its board may not be reaching the club");
+    await expect(page.getByText(/No scans at Side door between/))
+      .toContainText("It is reporting, so the club is hearing from it");
   });
 
   test("keeps the page inside the phone with a long member name on every row", async ({ page }) => {
@@ -625,7 +664,10 @@ test.describe("The printable door card", () => {
     })]));
     await page.goto(`/admin/doors/${DOOR_ID}/card`);
 
-    await expect(page.getByRole("heading", { name: "side-door" })).toBeVisible();
+    // B22 / C13: the club's OWN name for the door is the headline, slug beneath. The
+    // heading used to BE the slug — "side-door" in 36 px on a card taped to a wall.
+    await expect(page.getByRole("heading", { name: "Side door" })).toBeVisible();
+    await expect(page.getByText("side-door", { exact: true })).toBeVisible();
     await expect(page.getByText("gate-0a1b2c")).toBeVisible();
     await expect(page.getByText("In the cupboard above the fuse board")).toBeVisible();
     await expect(page.getByText(/RELEASED/)).toBeVisible();
@@ -644,12 +686,170 @@ test.describe("The printable door card", () => {
     await signIn(page);
     await serveApi(page, routes([door()]));
     await page.goto(`/admin/doors/${DOOR_ID}/card`);
-    await expect(page.getByRole("heading", { name: "side-door" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Side door" })).toBeVisible();
 
     await page.emulateMedia({ media: "print" });
     await expect(page.locator("header")).toBeHidden();
     await expect(page.getByRole("button", { name: /Print/ })).toBeHidden();
-    await expect(page.getByRole("heading", { name: "side-door" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Side door" })).toBeVisible();
     await page.emulateMedia({ media: "screen" });
   });
+});
+
+/**
+ * <b>B7 / C6 — the armed confirm was clipped, and only a browser can say so.</b>
+ *
+ * <p>
+ * Five reviewers drove the real product; two of them, independently, found that arming any
+ * destructive doors control produced a box of the same 44 px it had at rest with four lines of
+ * consequence inside it. Measured on a phone: `clientHeight 44, scrollHeight 106`. What was cut
+ * off was not decoration — it was the half of the sentence that says a door which has lost the
+ * network keeps admitting booked members for up to six hours, i.e. the part that decides whether
+ * shutting the door does what the admin thinks it does.
+ * </p>
+ *
+ * <p>
+ * <b>Why the vitest suite could not see it and this can.</b> jsdom computes no layout at all, so
+ * `scrollHeight` and `clientHeight` are both 0 there and any assertion about them passes on a
+ * component that clips everything. `components/confirm-button-armed.test.tsx` holds the three
+ * DOM properties the pixels depend on — no `overflow-hidden`, the showing label in normal flow,
+ * a caller's fixed `h-11` refused — and this is the measurement itself. Both are needed: the
+ * jsdom half runs on every commit and names the cause, this half proves the effect.
+ * </p>
+ *
+ * <p>
+ * Two widths, because the failure was width-dependent: the narrower the control, the more lines
+ * the consequence takes and the more of it a fixed height swallowed. 360 px is the narrowest
+ * phone the product supports and 768 px is where the doors grid becomes two columns, which makes
+ * each control narrow again on a screen nobody thinks of as small.
+ * </p>
+ */
+test.describe("An armed doors confirm fits the words it is showing", () => {
+  const WIDTHS = [
+    { label: "360 px", width: 360, height: 740 },
+    { label: "768 px", width: 768, height: 1024 },
+  ];
+
+  /**
+   * The control is armed; measure it rather than look at it.
+   *
+   * `scrollHeight <= clientHeight + 1` is the whole finding — a control whose content is taller
+   * than its box is a control hiding part of what it is about to do. The 1 px allowance is for
+   * sub-pixel rounding of a fractional line height, nothing more; the failure this catches was
+   * 52 to 62 px over.
+   *
+   * 14 px is the other half: the type was `text-xs`, and a 12 px consequence on a phone is the
+   * reason it needed four lines in the first place.
+   */
+  /**
+   * <b>Found by shape, not by wording.</b> Every `ConfirmButton` is a wrapper holding its
+   * control and the polite live region that replaced `aria-pressed`, so this selector is every
+   * two-step confirm on the page and nothing else.
+   *
+   * <p>
+   * An earlier draft of this sweep named each control by its label, and the labels changed
+   * under it inside one afternoon — "Delete Front door" became "Delete this door — Front door"
+   * while this was being written. A layout guarantee that only holds for the wording it was
+   * written against is not a guarantee; a control that arrives on this screen next month gets
+   * measured by this test without anybody remembering to add it.
+   * </p>
+   */
+  const CONFIRMS = 'div:has(> span[aria-live="polite"])';
+
+  /**
+   * Arm every confirm on the page in turn, measure it, and put it back.
+   *
+   * `scrollHeight <= clientHeight + 1` is the whole finding — a control whose content is taller
+   * than its box is a control hiding part of what it is about to do. The 1 px allowance is for
+   * sub-pixel rounding of a fractional line height, nothing more; the failure this catches was
+   * 52 to 62 px over. 14 px is the other half: the type was `text-xs`, and a 12 px consequence
+   * on a phone is the reason it needed four lines in the first place.
+   */
+  async function everyConfirmFits(page: Page, expected: number) {
+    const wrappers = page.locator(CONFIRMS);
+    await expect(wrappers).toHaveCount(expected);
+
+    for (let i = 0; i < expected; i += 1) {
+      const wrapper = wrappers.nth(i);
+      const control = wrapper.locator("> button").first();
+      // `innerText`, not `textContent`: the width sentinel inside the control is
+      // visibility-hidden and carries a copy of BOTH labels, which textContent would hand back.
+      const idleText = (await control.evaluate((el) => (el as HTMLElement).innerText)).trim();
+
+      await control.click();
+      // Armed: the wrapper now holds the control and its Cancel.
+      await expect(wrapper.locator("> button")).toHaveCount(2);
+
+      const measured = await control.evaluate((el) => ({
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+        fontSize: Number.parseFloat(getComputedStyle(el).fontSize),
+        shown: (el as HTMLElement).innerText.trim(),
+        pressed: el.getAttribute("aria-pressed"),
+        name: el.getAttribute("aria-label"),
+      }));
+
+      expect(measured.shown, `confirm ${i} ("${idleText}") shows no consequence`).not.toBe(idleText);
+      expect(
+        measured.scrollHeight,
+        `confirm ${i} ("${idleText}") clips its own words: scrollHeight ${measured.scrollHeight}`
+        + ` > clientHeight ${measured.clientHeight}`,
+      ).toBeLessThanOrEqual(measured.clientHeight + 1);
+      expect(measured.fontSize, `confirm ${i} ("${idleText}") is smaller than 14 px`)
+        .toBeGreaterThanOrEqual(14);
+      // B6: "pressed" is the word for done, and nothing has been done yet.
+      expect(measured.pressed, `confirm ${i} ("${idleText}") claims a pressed state`).toBeNull();
+      // B16: whatever the call site adds, the words on the control come first.
+      if (measured.name !== null) {
+        expect(measured.name.startsWith(idleText), `"${measured.name}" does not open with "${idleText}"`)
+          .toBe(true);
+      }
+      // B6 again: the consequence is announced, not left to the visual alone.
+      expect((await wrapper.locator('span[aria-live="polite"]').innerText()).trim().length)
+        .toBeGreaterThan(0);
+
+      // C10: a visible way out, at a real touch size.
+      const cancel = wrapper.locator("> button").nth(1);
+      await expect(cancel).toBeVisible();
+      expect((await cancel.boundingBox())!.height, `confirm ${i}'s Cancel is under 44 px`)
+        .toBeGreaterThanOrEqual(44);
+
+      await cancel.click();
+      await expect(wrapper.locator("> button")).toHaveCount(1);
+    }
+  }
+
+  for (const size of WIDTHS) {
+    test(`every confirm on the doors overview does at ${size.label}`, async ({ page }) => {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      // One door open and one shut BY A SHUT-ALL, so the fleet panel renders both halves at
+      // once. `shut_by_shut_all_at` is what makes the Reopen exist — C1: a door shut on its
+      // own is not something `reopen-all` touches, so no control for it is offered.
+      await openDoors(page, [
+        door(),
+        door({
+          id: OTHER_ID, name: "Front door", gate_key: "front-door", enabled: false,
+          shut_by_shut_all_at: ago(120),
+        }),
+      ]);
+
+      await everyConfirmFits(page, 2);
+    });
+
+    test(`every confirm on an open door's page does at ${size.label}`, async ({ page }) => {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      await openDoor(page, [door({ name: "Front door" })]);
+
+      // Shut this door, and Delete.
+      await everyConfirmFits(page, 2);
+    });
+
+    test(`a shut door's reopen confirm does at ${size.label}`, async ({ page }) => {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      await openDoor(page, [door({ name: "Front door", enabled: false })]);
+
+      // Reopen this door, and Delete.
+      await everyConfirmFits(page, 2);
+    });
+  }
 });

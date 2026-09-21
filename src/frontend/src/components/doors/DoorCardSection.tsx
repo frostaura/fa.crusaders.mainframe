@@ -1,13 +1,21 @@
 import { Link } from "react-router-dom";
 import { Card } from "../Card";
 import { Button } from "../Button";
-import { DoorCardEditor, DoorCardRead } from "./DoorCardFields";
+import { DoorCardRead } from "./DoorCardFields";
+import { GateDetailsEditor } from "./GateDetailsEditor";
 import { UNNAMED_GATE } from "../../lib/gateCopy";
 import { type AdminDoorDevice, type AdminSettings, type PowerLossBehaviour } from "../../lib/api";
 
 /**
  * The door card, between the feed and the controls — because the person reading it is
  * usually about to walk to the board.
+ *
+ * <p>
+ * <b>The page's ONE edit affordance (A19).</b> There used to be two — "Edit name and door
+ * name" under the controls and "Edit" here — over four fields of one row that all travel on
+ * one PATCH. A hurried reviewer edited through one and could not find where the other fields
+ * lived. Everything writable about the door is now behind this button.
+ * </p>
  */
 export function DoorCardSection({ door, settings, editing, onEdit, onClose, onSave }: {
   door: AdminDoorDevice;
@@ -15,14 +23,16 @@ export function DoorCardSection({ door, settings, editing, onEdit, onClose, onSa
   editing: boolean;
   onEdit: () => void;
   onClose: () => void;
-  onSave: (note: string, behaviour: PowerLossBehaviour) => Promise<boolean>;
+  onSave: (fields: {
+    name: string; gateKey: string; note: string; behaviour: PowerLossBehaviour;
+  }) => Promise<boolean>;
 }) {
   return (
     <section aria-labelledby="door-card-heading" className="space-y-2">
       <h2 id="door-card-heading" className="text-lg font-semibold">Door card</h2>
       <Card className="space-y-4">
         {editing ? (
-          <DoorCardEditor door={door} onSave={onSave} onClose={onClose} />
+          <GateDetailsEditor device={door} onSave={onSave} onClose={onClose} />
         ) : (
           <>
             <DoorCardRead door={door} />
@@ -34,7 +44,12 @@ export function DoorCardSection({ door, settings, editing, onEdit, onClose, onSa
             </dl>
             <ClubContact settings={settings} />
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={onEdit}>Edit</Button>
+              {/* The door's NAME in the accessible name: three "Manage"-shaped controls on
+                  one admin's screen all reading "Edit" is reviewer B's repeated-link
+                  finding one control along. */}
+              <Button variant="outline" onClick={onEdit} aria-label={`Edit ${door.name}`}>
+                Edit this door
+              </Button>
               <Link
                 to={`/admin/doors/${door.id}/card`}
                 className="inline-flex min-h-11 items-center rounded-lg border border-control px-5 text-sm font-medium"

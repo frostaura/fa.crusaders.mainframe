@@ -125,19 +125,39 @@ describe("ConfirmButton", () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
-  it("stays armed indefinitely unless a caller asks for a timeout", async () => {
+  /**
+   * <b>This used to pin the opposite rule</b> — "stays armed indefinitely unless a caller
+   * asks for a timeout" — and the reasoning behind that is worth keeping, because it is
+   * what stops 8000 from being a re-run of the defect it replaced.
+   *
+   * <p>
+   * The default was 3000 once. On the booking grid that meant a member who paused to read
+   * "Reserve for 50.00 cr?" tapped a control that had already gone back to idle: the second
+   * tap re-armed instead of confirming, no request left the browser, nothing on screen said
+   * why, and a slow reader could tap for ever without booking anything. A confirmation
+   * exists to be read, and one with a stopwatch on it punishes the people who read it. So
+   * the timer was removed altogether.
+   * </p>
+   *
+   * <p>
+   * That traded the defect for its mirror image, which two reviewers found on the doors
+   * screens (B9/C10): an armed destructive control on an admin screen stayed armed for
+   * ever, one tap from whoever touched the screen next. 8000 is the answer, and it is not
+   * 3000 again for three reasons — the booking grid no longer uses this control at all; the
+   * armed control now grows to fit its consequence at 14 px rather than clipping it into a
+   * 44 px box, so the reading is possible inside the window; and a visible Cancel stands
+   * beside it, so leaving early is a control rather than a guess.
+   * </p>
+   */
+  it("disarms itself after eight seconds when no caller says otherwise", async () => {
     vi.useFakeTimers();
     try {
       const onConfirm = vi.fn();
-      // No armedTimeoutMs. The default used to be 3000, and on the booking grid that
-      // meant a member who paused to read "Reserve for 50.00 cr?" tapped a control that
-      // had already gone back to idle: the second tap re-armed instead of confirming, no
-      // request left the browser, and a slow reader could tap for ever without booking.
       render(<ConfirmButton idleLabel="Revoke" confirmLabel="Really revoke?" onConfirm={onConfirm} />);
 
       act(() => { fireEvent.click(screen.getByRole("button", { name: "Revoke" })); });
-      act(() => { vi.advanceTimersByTime(30_000); });
-
+      // Long enough to read the consequence: still armed most of the way through.
+      act(() => { vi.advanceTimersByTime(7_000); });
       expect(screen.getByRole("button", { name: "Really revoke?" })).toBeInTheDocument();
       act(() => { fireEvent.click(screen.getByRole("button", { name: "Really revoke?" })); });
       expect(onConfirm).toHaveBeenCalledTimes(1);

@@ -80,9 +80,38 @@ export function Button({
  * only one of them is a control. See `control` in lib/tokens.ts.
  * </p>
  */
+/**
+ * <b>No `focus:outline-none` (B8), and the reason is measured rather than argued.</b>
+ *
+ * <p>
+ * Reviewer B tabbed through the door log's three filter selects and reported no visible
+ * focus indication at all, with a screenshot of a focused select and an unfocused one that
+ * are pixel-identical. Two things were true at once, and only one of them was guessed:
+ * </p>
+ *
+ * <ol>
+ *   <li>`focus:outline-none` compiles to <code>outline: 2px solid transparent</code> at
+ *       (0,2,0), which beats this product's house focus rule — the <code>:focus-visible</code>
+ *       block in `index.css`, at (0,1,0) — so a field opted out of the one focus indicator
+ *       every other control in the product has, and got a FLUSH ring instead of the offset
+ *       outline, which against an existing 1 px border reads as a slightly thicker border.</li>
+ *   <li>The replacement ring is a `box-shadow`, and `index.css`'s base layer puts `select` in
+ *       the set that transitions `box-shadow` over 200 ms. Measured in Chromium on the built
+ *       stylesheet: at t=0 after focus the computed box-shadow is
+ *       <code>rgba(0,0,0,0) 0 0 0 0</code> three times over, and only at t=600 ms is it
+ *       <code>rgb(0,73,141) 0 0 0 2px</code>. The outline is not in that transition list, so
+ *       it is the half that was instant — and it was the half that had been switched off.</li>
+ * </ol>
+ *
+ * <p>
+ * Dropping `outline-none` restores the offset, instant, product-wide indicator and keeps the
+ * ring as a second cue. Same probe after the change: <code>outline: rgb(0,73,141) 2px
+ * solid</code> immediately on focus.
+ * </p>
+ */
 export const fieldClassName = cn(
   "w-full h-11 px-3 rounded-lg border border-control bg-bg-surface text-text-primary placeholder:text-text-muted",
-  "focus:outline-none focus:ring-2 focus:ring-accent-strong focus:border-accent-strong",
+  "focus:ring-2 focus:ring-accent-strong focus:border-accent-strong",
 );
 
 export function Input({ className, ...props }: React.InputHTMLAttributes<HTMLInputElement>) {

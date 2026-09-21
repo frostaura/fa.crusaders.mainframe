@@ -3,9 +3,12 @@ import { Card } from "../Card";
 import { Alert } from "../Alert";
 import { ConfirmButton } from "../ConfirmButton";
 import { FleetResultPanel, type FleetResultState } from "./FleetResultPanel";
-import { doorFleetReopenConfirm, doorFleetShutConfirm } from "../../lib/gateCopy";
+import {
+  doorFleetReopenConfirm, doorFleetReopenLabel, doorFleetShutConfirm, doorsStayShutNotice,
+} from "../../lib/gateCopy";
 import { describeDeviceError } from "../../lib/deviceErrors";
-import { doorEndpoints, type AdminDoorDevice } from "../../lib/api";
+import { doorEndpoints } from "../../lib/api";
+import { type DoorsChrome } from "./useDoorsChrome";
 
 /** What the count line says about a club whose doors are not all in one state. */
 function tally(total: number, open: number): string {
@@ -25,6 +28,43 @@ const FLEET_FAILED = "Nothing was shut. The club's server refused the request an
   + " all-or-nothing change, so every door is exactly as it was.";
 
 /**
+ * The fleet write, out here rather than inside the component.
+ *
+ * <p>
+ * It reads the clock — the result panel is a RECEIPT for one instant and must never drift
+ * "confirmed 12s ago" into "confirmed 10m ago" — and a clock read in a function declared
+ * inside a render body is what `react-hooks/purity` refuses, correctly. Lifting it out is
+ * the honest fix; a `useCallback` around it would only have moved the early return.
+ * </p>
+ */
+async function fleetAction(action: "shut" | "reopen", context: {
+  /** The names the page already knows, for an API that does not send `left_shut` yet. */
+  leftShutFallback: { id: string; name: string; gate_key: string | null }[];
+  reload: () => Promise<void>;
+  onResult: (result: FleetResultState | null) => void;
+  onError: (message: string | null) => void;
+}) {
+  context.onError(null);
+  try {
+    const answer = action === "shut"
+      ? await doorEndpoints.doorsShutAll()
+      : await doorEndpoints.doorsReopenAll();
+    context.onResult({
+      action,
+      doors: answer.doors,
+      // The server's own list where it sends one (WIRE-W1 / C1's `left_shut`); the names
+      // the page already knows otherwise, so the result is never silent about them.
+      leftShut: answer.left_shut ?? context.leftShutFallback,
+      at: Date.now(),
+    });
+    await context.reload();
+  } catch (e) {
+    context.onResult(null);
+    context.onError(describeDeviceError(e, FLEET_FAILED));
+  }
+}
+
+/**
  * Shut every door, or reopen the ones a shut-all shut.
  *
  * <p>
@@ -34,14 +74,26 @@ const FLEET_FAILED = "Nothing was shut. The club's server refused the request an
  * </p>
  *
  * <p>
- * <b>The partial state renders BOTH controls.</b> Two of four shut is the state an admin
- * arrives in after an incident, and a single button that said "Shut all doors" there would
- * name a number that is wrong: the label counts what is still open, and a Reopen control
- * stands beside it so the way back is on the same screen as the way in.
+ * <b>The Reopen control exists ONLY while a shut-all is standing (C1).</b> It used to render
+ * whenever any door was shut, labelled "Reopen all 3" from the club's total — but
+ * `reopen-all` reopens only the doors a shut-all shut, so an admin who had shut one door on
+ * its own and pressed it got `{"doors": []}`, the words "0 doors reopened", and no
+ * explanation at all. Worse, after shut-one → shut-all → reopen-all the individually shut
+ * door silently stayed shut with nothing on screen saying so. The semantics are right and
+ * stay; what changes is that the control now exists only when it will do something, is
+ * labelled with the number it will actually reopen, and NAMES the doors that will stay shut
+ * before it is pressed as well as after.
+ * </p>
+ *
+ * <p>
+ * <b>Both controls are rendered in the partial state.</b> Two of four shut is the state an
+ * admin arrives in after an incident, and a single button that said "Shut all doors" there
+ * would name a number that is wrong: the label counts what is still open.
  * </p>
  */
-export function FleetShutPanel({ doors, loading, failed, reload, onRetry }: {
-  doors: AdminDoorDevice[];
+export function FleetShutPanel({ chrome, loading, failed, reload, onRetry }: {
+  /** The one shut-state source. See `useDoorsChrome` — this panel never derives its own. */
+  chrome: DoorsChrome;
   loading: boolean;
   failed: boolean;
   reload: () => Promise<void>;
@@ -50,23 +102,23 @@ export function FleetShutPanel({ doors, loading, failed, reload, onRetry }: {
   const [result, setResult] = useState<FleetResultState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  if (!loading && !failed && doors.length === 0) return null;
+  const open = chrome.doors.filter((d) => d.enabled).length;
+  const shutTogether = chrome.doors.filter((d) => !d.enabled && d.shutByFleet);
+  const shutAlone = chrome.doors.filter((d) => !d.enabled && !d.shutByFleet);
+  const stayingShut = shutAlone.map((d) => d.name);
+  // The names the result panel falls back to when the API does not send `left_shut` yet, so
+  // a zero-change reopen still NAMES the doors it left alone rather than printing
+  // "0 doors reopened" and stopping (C1).
+  const leftShutFallback = shutAlone.map((d) => ({ id: d.id, name: d.name, gate_key: null }));
 
-  const open = doors.filter((d) => d.enabled).length;
+  const run = (action: "shut" | "reopen") => fleetAction(action, {
+    leftShutFallback,
+    reload,
+    onResult: setResult,
+    onError: setError,
+  });
 
-  const run = async (action: "shut" | "reopen") => {
-    setError(null);
-    try {
-      const answer = action === "shut"
-        ? await doorEndpoints.doorsShutAll()
-        : await doorEndpoints.doorsReopenAll();
-      setResult({ action, doors: answer.doors, at: Date.now() });
-      await reload();
-    } catch (e) {
-      setResult(null);
-      setError(describeDeviceError(e, FLEET_FAILED));
-    }
-  };
+  if (!loading && !failed && chrome.total === 0) return null;
 
   return (
     <section aria-labelledby="fleet-shut-heading">
@@ -75,13 +127,13 @@ export function FleetShutPanel({ doors, loading, failed, reload, onRetry }: {
         {failed ? (
           <>
             <Alert tone="danger">Couldn't load the club's doors, so nothing can be shut from here.</Alert>
-            <button type="button" onClick={onRetry} className="h-11 rounded-lg border border-control px-5 text-sm font-medium">
+            <button type="button" onClick={onRetry} className="min-h-11 rounded-lg border border-control px-5 text-sm font-medium">
               Try again
             </button>
           </>
         ) : (
           <>
-            <p className="text-xs text-text-muted">{loading ? "Loading the club's doors…" : tally(doors.length, open)}</p>
+            <p className="text-xs text-text-muted">{loading ? "Loading the club's doors…" : tally(chrome.total, open)}</p>
             <p className="text-sm text-text-secondary">
               Shutting every door takes effect at the club's server at once. Each door finds out the next
               time it reaches the server; a door that has lost the network never finds out, and keeps
@@ -92,24 +144,39 @@ export function FleetShutPanel({ doors, loading, failed, reload, onRetry }: {
             <div className="space-y-2">
               {open > 0 && (
                 <ConfirmButton
-                  idleLabel={open === doors.length ? "Shut all doors" : `Shut the ${open} ${open === 1 ? "door" : "doors"} still open`}
+                  idleLabel={open === chrome.total ? "Shut all doors" : `Shut the ${open} ${open === 1 ? "door" : "doors"} still open`}
                   confirmLabel={doorFleetShutConfirm(open)}
-                  ariaLabel={`Shut every door the club has open — ${open} of ${doors.length}`}
+                  ariaLabel={`every door the club has open — ${open} of ${chrome.total}`}
                   onConfirm={() => run("shut")}
                   tone="danger"
                   disabled={loading}
-                  className="h-11 w-full"
+                  className="min-h-11 w-full"
                 />
               )}
-              {doors.length > open && (
-                <ConfirmButton
-                  idleLabel={open === 0 ? "Reopen all doors" : `Reopen all ${doors.length}`}
-                  confirmLabel={doorFleetReopenConfirm(doors.length)}
-                  ariaLabel={`Reopen every door the club shut together — ${doors.length}`}
-                  onConfirm={() => run("reopen")}
-                  disabled={loading}
-                  className="h-11 w-full"
-                />
+              {shutTogether.length > 0 && (
+                <>
+                  <ConfirmButton
+                    idleLabel={doorFleetReopenLabel(shutTogether.length)}
+                    confirmLabel={doorFleetReopenConfirm(shutTogether.length, stayingShut)}
+                    ariaLabel={`every door the club shut together — ${shutTogether.length}`}
+                    onConfirm={() => run("reopen")}
+                    disabled={loading}
+                    className="min-h-11 w-full"
+                  />
+                  {/* Beside the control, at rest, not hidden until armed (A12). A consequence
+                      an admin only meets after committing to the first tap is a consequence
+                      the screen did not really state. */}
+                  {doorsStayShutNotice(stayingShut) && (
+                    <p className="text-sm text-text-secondary">{doorsStayShutNotice(stayingShut)}</p>
+                  )}
+                </>
+              )}
+              {shutTogether.length === 0 && shutAlone.length > 0 && (
+                <p className="text-sm text-text-secondary">
+                  {`${stayingShut.join(", ")} ${shutAlone.length === 1 ? "was" : "were"} shut`}
+                  {shutAlone.length === 1 ? " on its own" : " one at a time"}
+                  {`, so there is nothing here to reopen together. Reopen ${shutAlone.length === 1 ? "it" : "them"} from ${shutAlone.length === 1 ? "its" : "their"} own page.`}
+                </p>
               )}
             </div>
           </>

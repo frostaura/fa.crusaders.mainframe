@@ -23,7 +23,14 @@ export function DoorChips({ device, online, signals }: {
   /** Empty on the detail header, where signals get their own full notices instead. */
   signals?: DoorSignal[];
 }) {
+  // C2: <b>Shut AND Not reporting are BOTH shown.</b> `doorStateChip` collapses them —
+  // shut outranks liveness, so a door that is shut and unreachable wore only "Shut", and
+  // the screen then had no way to say the thing that actually matters about it: it has not
+  // heard the refusal, and it goes on admitting booked members from its saved list for up
+  // to six hours. Caught by looking at a rendered overview where the banner said "2
+  // confirmed, 1 not yet" over three tiles that all looked identical.
   const chips: DoorChip[] = [doorStateChip(device, online)];
+  if (!device.enabled && !online) chips.push({ label: "Not reporting", tone: "danger" });
   const setup = doorSetupChip(device);
   if (setup) chips.push(setup);
   for (const signal of signals ?? []) chips.push(doorSignalChip(signal.kind));

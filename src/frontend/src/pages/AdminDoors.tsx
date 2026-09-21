@@ -4,10 +4,13 @@ import { Button } from "../components/Button";
 import { Alert } from "../components/Alert";
 import { DoorTile } from "../components/doors/DoorTile";
 import { FleetShutPanel } from "../components/doors/FleetShutPanel";
+import {
+  attentionRankOf, publishDoorsView, summariseDoors, type DoorsChrome,
+} from "../components/doors/useDoorsChrome";
 import { useTicker } from "../lib/useTicker";
 import { isOnline, offlineAfterSecondsFor, relative } from "../lib/deviceLiveness";
 import {
-  DOORS_EMPTY_HINT, DOORS_EMPTY_NOTICE, DOORS_READ_FAILED, doorNeedsAttention,
+  DOORS_EMPTY_HINT, DOORS_EMPTY_NOTICE, DOORS_READ_FAILED, doorAttentionReason,
   doorStaleChecksNotice, doorsAttentionSummary,
 } from "../lib/doorsCopy";
 import { doorEndpoints, endpoints, type DoorRow, type DoorsView } from "../lib/api";
@@ -24,7 +27,7 @@ import { doorEndpoints, endpoints, type DoorRow, type DoorsView } from "../lib/a
  * <p>
  * <b>Colour comes from `AdminSettings.tsx`, not from `AdminDevices.tsx`.</b> Devices uses raw
  * `slate-*` / `amber-*` / `emerald-*` classes throughout and sizes every button at 32 px;
- * this surface is tokens only and `h-11` only, because it is used standing up.
+ * this surface is tokens only and 44 px minimum, because it is used standing up.
  * </p>
  *
  * <p>
@@ -32,6 +35,13 @@ import { doorEndpoints, endpoints, type DoorRow, type DoorsView } from "../lib/a
  * count is a footfall ranking, which is the exact shape P3 exists to prevent — and the first
  * person to sort it has built the attendance report nobody agreed to. Order is
  * needs-attention first, then alphabetical.
+ * </p>
+ *
+ * <p>
+ * <b>One shut-state source (C3).</b> The page's read is pushed into `useDoorsChrome` on
+ * every poll and after every action, and the banner in the chrome, this page's own summary
+ * and the fleet result panel all render from it. Three independent readers is how an admin
+ * came to see three different door counts on one screen.
  * </p>
  */
 
@@ -44,18 +54,23 @@ import { doorEndpoints, endpoints, type DoorRow, type DoorsView } from "../lib/a
  */
 const REFRESH_MS = 15_000;
 
-/** Needs-attention first — silent, then shut, then unnamed — then alphabetical by name. */
-function attentionRank(row: DoorRow, now: number): number {
-  const online = isOnline(row.device, offlineAfterSecondsFor(row.device, null), now);
-  if (row.device.enabled && !online) return 0;
-  if (!row.device.enabled) return 1;
-  if (row.device.gate_key === null) return 2;
-  return 3;
+/**
+ * Needs-attention first — silent, then shut, then unnamed, then signalling — then
+ * alphabetical by name.
+ *
+ * A3: a door flagged "Refusing a lot" used to rank alongside a healthy one, so on a phone a
+ * front door turning away thirty scans in twenty minutes sat below the fold under three
+ * doors with nothing wrong with them.
+ */
+function attentionRank(row: DoorRow, tenantHeartbeat: number | null, now: number): number {
+  const online = isOnline(row.device, offlineAfterSecondsFor(row.device, tenantHeartbeat), now);
+  const attention = doorAttentionReason(row.device, online, row.signals);
+  return attention ? attentionRankOf(attention) : 4;
 }
 
-function sortRows(rows: DoorRow[], now: number): DoorRow[] {
+function sortRows(rows: DoorRow[], tenantHeartbeat: number | null, now: number): DoorRow[] {
   return [...rows].sort((a, b) => {
-    const rank = attentionRank(a, now) - attentionRank(b, now);
+    const rank = attentionRank(a, tenantHeartbeat, now) - attentionRank(b, tenantHeartbeat, now);
     if (rank !== 0) return rank;
     return a.device.name.localeCompare(b.device.name);
   });
@@ -63,6 +78,7 @@ function sortRows(rows: DoorRow[], now: number): DoorRow[] {
 
 export function AdminDoorsPage() {
   const [view, setView] = useState<DoorsView | null>(null);
+  const [chrome, setChrome] = useState<DoorsChrome | null>(null);
   const [tenantHeartbeat, setTenantHeartbeat] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -74,6 +90,10 @@ export function AdminDoorsPage() {
   const read = useCallback(async () => {
     const next = await doorEndpoints.doors();
     setView(next);
+    setChrome(summariseDoors(next));
+    // The chrome's banner subscribes to this. Without it the banner is a second, staler
+    // reader of the same fact — C3.
+    publishDoorsView(next);
     setFailed(false);
     setFailures(0);
     setCheckedAt(Date.now());
@@ -85,6 +105,7 @@ export function AdminDoorsPage() {
     } catch {
       setFailed(true);
       setView(null);
+      setChrome(null);
     } finally {
       setLoading(false);
     }
@@ -133,24 +154,28 @@ export function AdminDoorsPage() {
     try { await read(); } catch { setFailures((n) => n + 1); } finally { setRefreshing(false); }
   };
 
-  const rows = view ? sortRows(view.doors, now) : [];
+  const rows = view ? sortRows(view.doors, tenantHeartbeat, now) : [];
   const attention = rows
-    .map((row) => doorNeedsAttention(
+    .map((row) => doorAttentionReason(
       row.device,
       isOnline(row.device, offlineAfterSecondsFor(row.device, tenantHeartbeat), now),
+      row.signals,
     ))
-    .filter((reason): reason is string => reason !== null);
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+    .map((entry) => entry.reason);
   const summary = doorsAttentionSummary(attention);
-  const stale = doorStaleChecksNotice(
-    failures,
-    checkedAt === null ? 0 : Math.max(0, Math.round((now - checkedAt) / 1000)),
-  );
+  const secondsSinceRead = checkedAt === null ? 0 : Math.max(0, Math.round((now - checkedAt) / 1000));
+  const stale = doorStaleChecksNotice(failures, secondsSinceRead);
 
   return (
     <div className="space-y-6">
       <header className="space-y-2 sm:flex sm:items-start sm:justify-between sm:gap-4 sm:space-y-0">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Doors</h1>
+          {/* A16: the header said "Checked 12s ago" confidently for the whole ~30 s a failed
+              poll took to be noticed, while the banner below it said something else. Both
+              now count from the same `checkedAt` against the same tick, so the two ages on
+              one screen cannot disagree. */}
           <p className="text-xs text-text-muted">
             {checkedAt === null ? "Checking…" : `Checked ${relative(new Date(checkedAt).toISOString(), now)}`}
             {` · re-reads every ${REFRESH_MS / 1000} seconds while this tab is in front`}
@@ -193,13 +218,16 @@ export function AdminDoorsPage() {
       ) : (
         <>
           <FleetShutPanel
-            doors={rows.map((row) => row.device)}
+            chrome={chrome ?? summariseDoors(view!)}
             loading={loading}
             failed={failed}
             reload={read}
             onRetry={() => void load()}
           />
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {/* `items-stretch` and an internal footer: B18. Tiles misaligned whenever one door
+              carried more chips than its neighbour, so three cards in a row ended with their
+              scan counts at three different heights and the eye had to hunt for each. */}
+          <div className="grid items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {rows.map((row) => (
               <DoorTile
                 key={row.device.id}

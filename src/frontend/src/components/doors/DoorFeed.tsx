@@ -1,13 +1,25 @@
 import { Link } from "react-router-dom";
 import { Card } from "../Card";
 import { DoorFeedRow } from "./DoorFeedRow";
-import { ACTIVITY_READ_FAILED, activityEmptyNotice } from "../../lib/deviceActivity";
-import { doorQuietNotice } from "../../lib/doorsCopy";
-import { DEVICE_ACTIVITY_LIMIT, type AdminDoorDevice, type DeviceActivityEntry } from "../../lib/api";
+import { ACTIVITY_READ_FAILED, activityEmptyNotice, isDoorScan } from "../../lib/deviceActivity";
+import {
+  DOOR_EVENTS_NOTE, doorEventRows, doorQuietNotice, doorScanCountHeading, doorScanCountLine,
+} from "../../lib/doorsCopy";
+import { clubDayAndClock } from "../../lib/clubClock";
+import {
+  DEVICE_ACTIVITY_LIMIT, type AdminDoorDevice, type DeviceActivityEntry, type DoorEventEntry,
+  type DoorToday,
+} from "../../lib/api";
 
 /** The three states of one read, travelling together because they are one read. */
 export type FeedRead = {
   entries: DeviceActivityEntry[] | null;
+  /**
+   * The non-scan events, where the API serves them separately. `undefined` means this API
+   * does not send them yet and the feed derives its own from `entries` — see
+   * {@link doorEventRows}. The page must be right against both backends.
+   */
+  events?: DoorEventEntry[] | null;
   loading: boolean;
   error: string | null;
 };
@@ -25,25 +37,49 @@ export type FeedClock = { now: number; dayStartedAt: string; timezone: string };
  * door is dead. `ActivityBody` already gets this right on Devices and the order is the whole
  * of why.
  * </p>
+ *
+ * <p>
+ * <b>And the list is SCANS ONLY (B1).</b> The activity route answers every audit row that
+ * carries this board's `device_id`, which includes admin edits, registrations, boots and
+ * club-wide shuts. Mixed into the scans they were rendered as green "Refused" chips and
+ * counted as refusals, so a door with thirteen edits and no scans reported "13 refused
+ * scans, newest 1 min ago" while the club log and the CSV showed none for it. The scans
+ * list, the club log, the CSV and the overview counters are four views of ONE set, and this
+ * is where the front end holds up its end of that.
+ * </p>
  */
 function FeedBody({ read, clock }: { read: FeedRead; clock: FeedClock }) {
   if (read.loading) return <p className="text-sm text-text-secondary">Loading…</p>;
   if (read.error) return <p className="text-sm text-danger-strong">{read.error || ACTIVITY_READ_FAILED}</p>;
-  const entries = read.entries ?? [];
-  if (entries.length === 0) return <p className="text-sm text-text-secondary">{activityEmptyNotice(true)}</p>;
-  const quiet = doorQuietNotice(entries[0].at, clock.dayStartedAt, clock.now, clock.timezone);
+  const scans = (read.entries ?? []).filter(isDoorScan);
+  if (scans.length === 0) return <p className="text-sm text-text-secondary">{activityEmptyNotice(true)}</p>;
+  /**
+   * The newest SCAN, which is not `scans[0]`.
+   *
+   * The list is ordered, paged and counted on the DELIVERY axis, so an offline row that was
+   * decided at 18:40 and uploaded at 21:05 sits above rows scanned at 20:00. Reading the
+   * first row's `at` as "the newest scan" would tell a club its door had been quiet since
+   * 18:40 on an evening it was busy — the quiet notice is precisely the sentence that must
+   * not be computed off a sort key it does not share.
+   */
+  const newest = scans.reduce((max, row) => (row.at > max ? row.at : max), scans[0].at);
+  const quiet = doorQuietNotice(newest, clock.dayStartedAt, clock.now, clock.timezone);
   return (
     <>
       {quiet && <p role="status" className="rounded-lg bg-warning-soft px-3 py-2 text-sm text-warning-strong">{quiet}</p>}
       <ul>
-        {entries.map((entry, i) => (
+        {scans.map((entry, i) => (
           <DoorFeedRow key={`${entry.at}-${entry.action}-${i}`} entry={entry} now={clock.now} />
         ))}
       </ul>
       {/* Only when the read came back FULL. "Showing the 50 most recent" over four rows is
           a sentence that is not true, and the one it is standing in for — "there may be more
-          than this" — is exactly what an admin needs to know only when there are. */}
-      {entries.length >= DEVICE_ACTIVITY_LIMIT && (
+          than this" — is exactly what an admin needs to know only when there are.
+
+          Counted against the RAW read, not against the scans left after filtering: the API's
+          limit applies to rows, so a page of 50 rows that were mostly admin edits genuinely
+          has more scans behind it even though few are on screen. */}
+      {(read.entries?.length ?? 0) >= DEVICE_ACTIVITY_LIMIT && (
         <p className="text-xs text-text-muted">{`Showing the ${DEVICE_ACTIVITY_LIMIT} most recent.`}</p>
       )}
     </>
@@ -51,31 +87,93 @@ function FeedBody({ read, clock }: { read: FeedRead; clock: FeedClock }) {
 }
 
 /**
- * One door's recent scans, open on arrival.
+ * The things that happened TO this door, as opposed to the scans AT it.
+ *
+ * <p>
+ * <b>Neutral, unchipped, and never counted (B1's ruling).</b> These are the rows that used
+ * to be painted as refusals. They belong on the page — an admin diagnosing a door wants to
+ * know somebody renamed it four minutes ago — but they are a different kind of fact from a
+ * scan, and the heading is what says so. An action this build has never seen lands here too,
+ * as "Unrecognised event" with its raw token, rather than being guessed at or dropped.
+ * </p>
+ */
+function DoorEvents({ read }: { read: FeedRead }) {
+  if (read.loading || read.error) return null;
+  const rows = doorEventRows(read.entries, read.events);
+  if (rows.length === 0) return null;
+  return (
+    <section aria-labelledby="door-events-heading" className="space-y-2">
+      <h2 id="door-events-heading" className="text-lg font-semibold">Door events</h2>
+      <Card className="space-y-2">
+        <p className="text-sm text-text-secondary">{DOOR_EVENTS_NOTE}</p>
+        <ul>
+          {rows.map((row, i) => (
+            <li key={`${row.at}-${i}`} className="border-t border-border py-2 first:border-t-0">
+              <div className="flex flex-wrap items-baseline gap-2">
+                {/* The raw token only on an UNRECOGNISED row: on a recognised one the
+                    sentence already says what happened, and on an unrecognised one the token
+                    is the only thing a reader can report upstream. There is no actor on the
+                    wire (WIRE-R1 §1), so no row names one. */}
+                <span className="min-w-0 break-words text-sm text-text-secondary">
+                  {row.token ? `${row.text} · ${row.token}` : row.text}
+                </span>
+                <time dateTime={row.at} className="ml-auto shrink-0 text-xs text-text-muted">
+                  {clubDayAndClock(row.at)}
+                </time>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </section>
+  );
+}
+
+/**
+ * One door's recent scans, open on arrival, with the day's own two numbers above them.
  *
  * <p>
  * <b>Not collapsed, unlike the panel on `/admin/devices`.</b> That one is shut by default
  * because a club with eight boards would make eight extra calls on a list page for panels
  * nobody opened. This page is one door and the feed is why it was opened.
  * </p>
+ *
+ * <p>
+ * A18: the day totals are here as well as on the tile. An admin who has followed a link from
+ * an email, or typed the URL, arrives on this page without having seen the overview, and
+ * "how many people came through today" is the second question they have.
+ * </p>
  */
-export function DoorFeed({ door, read, clock }: {
+export function DoorFeed({ door, today, read, clock }: {
   door: AdminDoorDevice;
+  /** The server's own count for the club's day. Null when the counting failed — never a zero. */
+  today: DoorToday | null;
   read: FeedRead;
   clock: FeedClock;
 }) {
   return (
-    <section aria-labelledby="door-feed-heading" className="space-y-2">
-      <h2 id="door-feed-heading" className="text-lg font-semibold">Scans at this door</h2>
-      <Card className="space-y-3">
-        <FeedBody read={read} clock={clock} />
-        <Link
-          to={`/admin/doors/log?door=${encodeURIComponent(door.id)}`}
-          className="inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-control px-5 text-sm font-medium"
-        >
-          All scans at this door
-        </Link>
-      </Card>
-    </section>
+    // `min-w-0`: this is a grid item, and a grid item's default `min-width: auto` makes it
+    // refuse to shrink below its content's min-content width. See the note on the grid in
+    // `AdminDoorsDetail` — measured at 98 px of whole-page sideways scroll at 360 px with a
+    // 32 px root font.
+    <div className="min-w-0 space-y-6">
+      <section aria-labelledby="door-feed-heading" className="space-y-2">
+        <h2 id="door-feed-heading" className="text-lg font-semibold">Scans at this door</h2>
+        <Card className="space-y-3">
+          <div>
+            <p className="text-xs text-text-muted">{doorScanCountHeading(clock.dayStartedAt, clock.timezone)}</p>
+            <p className="text-sm text-text-secondary">{doorScanCountLine(today)}</p>
+          </div>
+          <FeedBody read={read} clock={clock} />
+          <Link
+            to={`/admin/doors/log?door=${encodeURIComponent(door.id)}`}
+            className="inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-control px-5 text-sm font-medium"
+          >
+            All scans at this door
+          </Link>
+        </Card>
+      </section>
+      <DoorEvents read={read} />
+    </div>
   );
 }

@@ -200,6 +200,58 @@ describe("a control's boundary can actually be seen", () => {
 });
 
 /**
+ * The "cannot save yet" Save button, which nothing measured before it was a pair. (B5)
+ *
+ * <p>
+ * The settings screen's Save took the browser's own disabled styling — the base `Button`
+ * applies `disabled:opacity-50` over `info.strong` on `info.soft` — and its label measured
+ * <b>2.27:1</b>. That is the control carrying the only explanation of why a form will not
+ * save, on a page 5 400 px tall, greyed to the point of illegibility. It is also, with
+ * `disabled`, out of the tab order entirely.
+ * </p>
+ *
+ * <p>
+ * The replacement is a state, not an absence: `warning.strong` on `warning.soft`, with a
+ * `warning.strong` boundary so SC 1.4.11 is met by the edge as well as the fill. Measured
+ * here so that a future palette move cannot quietly put it back where it was — the old
+ * value's own ratio is pinned as the floor nobody may return to.
+ * </p>
+ */
+describe("a Save that cannot save is still readable", () => {
+  /** SC 1.4.11 — the visual boundary of a user-interface component. */
+  const AA_NON_TEXT = 3;
+
+  it("warning.strong on warning.soft carries the label", () => {
+    expect(contrast(palette.warning.strong, palette.warning.soft)).toBeGreaterThanOrEqual(AA_BODY);
+  });
+
+  it("its boundary is visible against the card it sits on", () => {
+    expect(contrast(palette.warning.strong, palette.bg.surface)).toBeGreaterThanOrEqual(AA_NON_TEXT);
+  });
+
+  /**
+   * The measured regression, as a floor. `info.strong` at half opacity over `info.soft` is
+   * what the disabled button actually rendered; compositing it back onto the card gives the
+   * 2.27:1 a reviewer measured on screen. Whatever the blocked treatment becomes, it must be
+   * a long way clear of this.
+   */
+  it("is nothing like the greyed-out button it replaces", () => {
+    const faded = over(palette.info.strong, palette.info.soft, 0.5);
+    expect(contrast(faded, palette.info.soft)).toBeLessThan(AA_NON_TEXT);
+    expect(contrast(palette.warning.strong, palette.warning.soft))
+      .toBeGreaterThan(contrast(faded, palette.info.soft));
+  });
+});
+
+/** `hex` painted at `alpha` over `onto` — what `opacity-50` on a filled button really shows. */
+function over(hex: string, onto: string, alpha: number): string {
+  const channel = (value: string, offset: number) => parseInt(value.replace("#", "").slice(offset, offset + 2), 16);
+  const mixed = [0, 2, 4].map((offset) =>
+    Math.round(channel(hex, offset) * alpha + channel(onto, offset) * (1 - alpha)));
+  return `#${mixed.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/**
  * Every consumer still derives from the token module.
  *
  * These are the tests that would have caught the three-way drift. Each one fails the moment

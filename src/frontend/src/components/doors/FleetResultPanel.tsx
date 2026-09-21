@@ -1,18 +1,21 @@
 import { useEffect, useRef } from "react";
+import { Link } from "react-router-dom";
 import { Card } from "../Card";
 import { Badge } from "../Button";
 import { relative } from "../../lib/deviceLiveness";
 import {
-  doorConfirmedLine, doorExitIsMechanical, doorNotConfirmedLine, doorPowerLossLine,
-  doorPowerLossUnknownFooter,
+  UNNAMED_GATE, doorConfirmedLine, doorExitIsMechanical, doorFleetNoChangeNotice,
+  doorNotConfirmedLine, doorPowerLossLine, doorPowerLossUnknownFooter, doorsStayShutNotice,
 } from "../../lib/gateCopy";
-import { UNNAMED_GATE } from "../../lib/gateCopy";
+import { clubClock } from "../../lib/clubClock";
 import { type FleetDoorResult } from "../../lib/api";
 
 /** A result is a receipt for an instant, so it carries the instant it was taken at. */
 export type FleetResultState = {
   action: "shut" | "reopen";
   doors: FleetDoorResult[];
+  /** The doors this request deliberately did not touch, NAMED (C1). Never a silent omission. */
+  leftShut: { id: string; name: string; gate_key: string | null }[];
   /** `Date.now()` at the moment the server answered — frozen, never re-read. */
   at: number;
 };
@@ -44,9 +47,7 @@ function heading(state: FleetResultState): string {
 
 function ResultRow({ door, state }: { door: FleetDoorResult; state: FleetResultState }) {
   const ok = confirmed(door, state.at);
-  const clock = door.last_seen_at
-    ? new Date(door.last_seen_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false })
-    : null;
+  const clock = door.last_seen_at ? clubClock(door.last_seen_at) : null;
   return (
     <li className="border-t border-border py-3 first:border-t-0 sm:grid sm:grid-cols-[220px_minmax(0,1fr)_240px] sm:gap-4">
       <p className="min-w-0 break-words font-medium">
@@ -92,15 +93,40 @@ export function FleetResultPanel({ state }: { state: FleetResultState }) {
   useEffect(() => { headingRef.current?.focus(); }, [state]);
 
   const anyUnknown = state.doors.some((d) => (d.power_loss_behaviour ?? "not_established") === "not_established");
-  const taken = new Date(state.at).toLocaleTimeString("en-GB", { hour12: false });
+  const taken = clubClock(state.at);
 
+  const staying = doorsStayShutNotice(state.leftShut.map((d) => d.name));
   return (
     <Card className="mt-4 space-y-3">
       <h3 ref={headingRef} tabIndex={-1} className="text-base font-semibold">{heading(state)}</h3>
       <p className="text-xs text-text-muted">{taken}</p>
+      {/* C1. A result that changed nothing used to print "0 doors reopened" and stop, which
+          is the sentence that sent a reviewer looking for a broken endpoint. A zero-change
+          result now never prints without the reason it was zero. */}
+      {state.doors.length === 0 && (
+        <p className="text-sm text-text-secondary">{doorFleetNoChangeNotice(state.action)}</p>
+      )}
       <ul>
         {state.doors.map((door) => <ResultRow key={door.id} door={door} state={state} />)}
       </ul>
+      {/* Named and linked, not counted: "1 door stayed shut" sends nobody anywhere. */}
+      {staying && (
+        <div className="space-y-1 border-t border-border pt-3">
+          <p className="text-sm text-text-secondary">{staying}</p>
+          <ul className="flex flex-wrap gap-2">
+            {state.leftShut.map((door) => (
+              <li key={door.id}>
+                <Link
+                  to={`/admin/doors/${door.id}`}
+                  className="inline-flex min-h-11 items-center text-sm font-medium text-accent-strong underline"
+                >
+                  {door.name}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {anyUnknown && <p className="text-sm text-text-secondary">{doorPowerLossUnknownFooter()}</p>}
       <p className="border-t border-border pt-3 text-sm text-text-secondary">{doorExitIsMechanical()}</p>
     </Card>

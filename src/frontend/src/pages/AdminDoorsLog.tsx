@@ -8,10 +8,12 @@ import { DoorFeedRow } from "../components/doors/DoorFeedRow";
 import { useTicker } from "../lib/useTicker";
 import {
   LOG_EMPTY_FILTERED, LOG_EMPTY_FILTERED_HINT, LOG_EMPTY_NOTHING, LOG_OLDER_FAILED,
-  LOG_READ_FAILED, doorCsvNotice, doorExhaustedNotice, doorLogEmptyOneDoor, doorLogHowToRead,
-  doorRetentionNotice,
+  LOG_READ_FAILED, doorCsvDownloaded, doorCsvNotice, doorExhaustedNotice, doorLogEmptyOneDoor,
+  doorLogHowToRead, doorRetentionNotice,
 } from "../lib/doorsCopy";
-import { DOOR_OUTCOME_CHIPS } from "../lib/deviceActivity";
+import { clubClock, clubDayAndClock } from "../lib/clubClock";
+import { isOnline, offlineAfterSecondsFor } from "../lib/deviceLiveness";
+import { DOOR_OUTCOME_CHIPS, isDoorScan } from "../lib/deviceActivity";
 import { UNNAMED_GATE } from "../lib/gateCopy";
 import { describeDeviceError } from "../lib/deviceErrors";
 import {
@@ -62,17 +64,51 @@ function filtersOf(params: URLSearchParams): DoorLogFilters {
   return { door, outcome, reason, from: fromFor(params.get("range") ?? "24h") };
 }
 
-/** Which empty sentence is true here — narrowed, one door, or genuinely nothing. */
-function emptySentence(params: URLSearchParams, doorName: string | null): string[] {
+/**
+ * Which empty sentence is true here — narrowed, one door, or genuinely nothing.
+ *
+ * C7: the one-door sentence used to assert "its board may not be reaching the club" whatever
+ * the door was doing, so an admin filtering a perfectly healthy door to an empty range was
+ * sent to look for a fault that did not exist. `online` is that door's real liveness, read
+ * from the same doors view the picker's options come from.
+ */
+function emptySentence(
+  params: URLSearchParams, doorName: string | null, online: boolean | null,
+): string[] {
   if (doorName) {
-    const from = fromFor(params.get("range") ?? "24h");
-    const face = new Date(from).toLocaleString("en-GB", { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false });
-    return [doorLogEmptyOneDoor(doorName, face)];
+    // B20: the boundary carries its date. "Fri 18:40" against a 30-day range names four
+    // Fridays and the reader cannot tell which one the filter starts at.
+    const face = clubDayAndClock(fromFor(params.get("range") ?? "24h"));
+    return [doorLogEmptyOneDoor(doorName, face, online)];
   }
   const narrowed = (params.get("outcome") ?? "") !== "" || (params.get("reason") ?? "") !== ""
     || (params.get("range") ?? "24h") !== "24h";
   if (narrowed) return [LOG_EMPTY_FILTERED, LOG_EMPTY_FILTERED_HINT];
   return [LOG_EMPTY_NOTHING];
+}
+
+/** One option in the door picker. The display NAME is mandatory; the slug may be absent. */
+type PickerDoor = { id: string; name: string; gate_key: string | null };
+
+/**
+ * The doors the picker offers — from the doors read, or from the rows on screen (A6).
+ *
+ * <p>
+ * With the doors read failed the picker silently collapsed to "All doors" alone, which is
+ * indistinguishable from a club that has one door, and a `?door=` already in the URL had no
+ * option to select so the control read "All doors" while the list was filtered to one. The
+ * rows themselves each carry `{id, name, gate_key}` for their own door, so a filtered view
+ * can always name at least the doors it is showing. The page says beside the control that
+ * the list may be short rather than pretending it is complete.
+ * </p>
+ */
+function doorOptions(view: DoorsView | null, rows: DoorLogEntry[] | null): PickerDoor[] {
+  if (view) return view.doors.map(({ device }) => ({ id: device.id, name: device.name, gate_key: device.gate_key }));
+  const seen = new Map<string, PickerDoor>();
+  for (const row of rows ?? []) {
+    if (!seen.has(row.door.id)) seen.set(row.door.id, row.door);
+  }
+  return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function AdminDoorsLogPage() {
@@ -173,14 +209,17 @@ export function AdminDoorsLogPage() {
   const download = async () => {
     setDownloading(true);
     try {
-      const { blob, filename } = await doorEndpoints.doorActivityCsv(activeFilters ?? filtersOf(params));
+      const { blob, filename, rows: counted, truncated } = await doorEndpoints.doorActivityCsv(activeFilters ?? filtersOf(params));
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       link.download = filename;
       link.click();
       URL.revokeObjectURL(url);
-      toast.push({ tone: "success", text: `${rows?.length ?? 0} scans downloaded.` });
+      // B3: the SERVER's row count, never the length of the list on screen. The toast said
+      // "50 scans downloaded" over a 165-row file, and that number is the one an admin
+      // repeats to a committee.
+      toast.push({ tone: "success", text: doorCsvDownloaded(counted, truncated), durationMs: 8000 });
     } catch (e) {
       toast.push({ tone: "danger", text: describeDeviceError(e, "Could not build that CSV.") });
     } finally {
@@ -190,7 +229,21 @@ export function AdminDoorsLogPage() {
 
   const [banner1, banner2] = doorLogHowToRead();
   const doorId = params.get("door") ?? "";
-  const doorName = doors?.doors.find((d) => d.device.id === doorId)?.device.name ?? null;
+  /**
+   * The chosen door, by DISPLAY NAME first (A5).
+   *
+   * The picker labelled a door that has a display name but no slug as
+   * "gate-44c103 — no door name yet", which is the board's MAC fragment where the admin's
+   * own word for it was available all along. `name` is always present; `gate_key` may not be.
+   */
+  const chosen = doors?.doors.find((d) => d.device.id === doorId) ?? null;
+  const pickerDoors = doorOptions(doors, rows);
+  /** The rows that ARE scans — see the note beside the count below (B1). */
+  const scans = (rows ?? []).filter(isDoorScan);
+  const doorName = chosen?.device.name ?? pickerDoors.find((d) => d.id === doorId)?.name ?? null;
+  const doorOnline = chosen
+    ? isOnline(chosen.device, offlineAfterSecondsFor(chosen.device, null), now)
+    : null;
 
   return (
     <div className="space-y-6">
@@ -199,7 +252,7 @@ export function AdminDoorsLogPage() {
           <Link to="/admin/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">← Doors</Link>
           <h1 className="text-2xl font-bold tracking-tight">All scans, all doors</h1>
           <p className="text-xs text-text-muted">
-            {readAt === null ? "Reading…" : `Read at ${new Date(readAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false })}`}
+            {readAt === null ? "Reading…" : `Read at ${clubClock(readAt)}`}
           </p>
         </div>
         <Button variant="outline" onClick={() => void load()} disabled={loading}>
@@ -207,20 +260,35 @@ export function AdminDoorsLogPage() {
         </Button>
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="space-y-4 lg:order-1">
+      {/* `min-w-0` on the grid and its columns: a grid item defaults to `min-width: auto`
+          and so refuses to shrink below its content's min-content width. Same fault, same
+          fix and the same measurement as the door page — see the note there. */}
+      <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-w-0 space-y-4 lg:order-1">
           <fieldset className="grid gap-3 sm:grid-cols-3">
             <legend className="sr-only">Filter these scans</legend>
             <div>
               <Label htmlFor={`${base}-door`}>Door</Label>
               <Select id={`${base}-door`} value={doorId} onChange={(e) => setFilter("door", e.target.value)}>
                 <option value="">All doors</option>
-                {doors?.doors.map(({ device }) => (
+                {/* A5: the DISPLAY name first, always. A door with a name and no slug was
+                    labelled "gate-44c103 — no door name yet", which is a MAC fragment where
+                    the admin's own word for it was sitting in `name` the whole time.
+                    A6: when the doors read fails the options collapse to "All doors" alone,
+                    which silently looked like a club with one door — so the chosen door keeps
+                    its own option, and the picker says why it is short. */}
+                {pickerDoors.map((device) => (
                   <option key={device.id} value={device.id}>
-                    {device.gate_key ? `${device.name} (${device.gate_key})` : `${device.device_code} — ${UNNAMED_GATE}`}
+                    {device.gate_key ? `${device.name} (${device.gate_key})` : `${device.name} — ${UNNAMED_GATE}`}
                   </option>
                 ))}
               </Select>
+              {doors === null && (
+                <p className="mt-1 text-xs text-warning-strong">
+                  The club's doors could not be read, so this list may be short. The scans below are
+                  unaffected.
+                </p>
+              )}
             </div>
             <div>
               <Label htmlFor={`${base}-range`}>When</Label>
@@ -277,9 +345,9 @@ export function AdminDoorsLogPage() {
             </div>
           ) : loading ? (
             <p className="text-sm text-text-secondary">Loading the club's door scans…</p>
-          ) : (rows?.length ?? 0) === 0 ? (
+          ) : scans.length === 0 ? (
             <div className="space-y-2">
-              {emptySentence(params, doorName).map((sentence) => (
+              {emptySentence(params, doorName, doorOnline).map((sentence) => (
                 <p key={sentence} className="text-sm text-text-secondary">{sentence}</p>
               ))}
               {doorName && (
@@ -290,23 +358,36 @@ export function AdminDoorsLogPage() {
             </div>
           ) : (
             <>
+              {/*
+                B1's "four views of ONE set", held on this side too.
+
+                The server already narrows this route to scans — it is why the reviewer's
+                club log showed no rows for a door whose own page claimed thirteen refusals.
+                But the count here is a CLAIM an admin quotes, and the door's own feed made
+                exactly this mistake by counting whatever arrived. Counting what is actually
+                a scan costs one filter and cannot be wrong; trusting the route is a promise
+                about somebody else's code.
+              */}
               <p role="status" className="text-sm text-text-secondary">
-                {`${rows!.length} ${rows!.length === 1 ? "scan" : "scans"}, newest first`}
+                {`${scans.length} ${scans.length === 1 ? "scan" : "scans"}, newest first`}
               </p>
               <Card>
                 <ul>
-                  {rows!.map((entry, i) => (
+                  {scans.map((entry, i) => (
                     <DoorFeedRow
                       key={`${entry.at}-${entry.action}-${i}`}
                       entry={entry}
                       now={now}
-                      doorName={entry.door.gate_key ?? entry.door.name}
+                      // B17 / A5: the door's DISPLAY name, which is what an admin calls it.
+                      // This printed the slug, so a log read after an incident named every
+                      // row "front-door" where the club says "Front door".
+                      doorName={entry.door.name}
                       innerRef={i > 0 && i === appendedFrom ? appendedRef : undefined}
                     />
                   ))}
                 </ul>
               </Card>
-              {olderFailed && <Alert tone="danger">{`${LOG_OLDER_FAILED} The ${rows!.length} above are still correct.`}</Alert>}
+              {olderFailed && <Alert tone="danger">{`${LOG_OLDER_FAILED} The ${scans.length} above are still correct.`}</Alert>}
               {cursor ? (
                 <Button variant="outline" className="w-full" onClick={() => void loadOlder()} disabled={loadingOlder}>
                   {olderFailed ? "Try again" : loadingOlder ? "Loading…" : "Load older scans"}
@@ -320,7 +401,7 @@ export function AdminDoorsLogPage() {
 
         {/* Never dismissible. Dismissing it is how it stops being true for the next reader, who
             is usually somebody reading a log after an incident. */}
-        <aside aria-labelledby="how-to-read" className="lg:order-2">
+        <aside aria-labelledby="how-to-read" className="min-w-0 lg:order-2">
           <Card className="space-y-3">
             <h2 id="how-to-read" className="text-base font-semibold">How to read this log</h2>
             <p className="text-sm text-text-secondary">{banner1}</p>

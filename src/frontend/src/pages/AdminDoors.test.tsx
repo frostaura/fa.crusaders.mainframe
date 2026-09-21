@@ -118,8 +118,28 @@ describe("the doors surface", () => {
       openDoors([doorFixture({ last_seen_at: ago(6 * 60) })]);
 
       const notice = await screen.findByText(/arrives only when it calls in again/);
-      expect(notice).toHaveTextContent("goes stale at");
+      expect(notice).toHaveTextContent(/goes stale on \w{3} \d{1,2}/);
       expect(notice).toHaveTextContent("opens for members with a booking");
+    });
+
+    /**
+     * <b>C2, on the tile.</b> `doorStateChip` collapses liveness into "Shut", because shut
+     * outranks liveness — which is right for a door the club can reach and hides the only
+     * thing that matters about one it cannot. Found by looking at a rendered overview where
+     * the banner said "2 confirmed, 1 not yet" over three tiles that looked identical.
+     */
+    it("wears Shut AND Not reporting when both are true", async () => {
+      openDoors([doorFixture({ enabled: false, last_seen_at: ago(3600) })]);
+
+      expect(await screen.findByText("Shut")).toBeInTheDocument();
+      expect(screen.getByText("Not reporting")).toBeInTheDocument();
+    });
+
+    it("wears only Shut when the club can still reach it", async () => {
+      openDoors([doorFixture({ enabled: false, last_seen_at: ago(12) })]);
+
+      expect(await screen.findByText("Shut")).toBeInTheDocument();
+      expect(screen.queryByText("Not reporting")).toBeNull();
     });
 
     it("says a shut door opens for nobody AND that a cut-off one keeps admitting", async () => {
@@ -278,8 +298,17 @@ describe("the doors surface", () => {
       expect(notice).toHaveTextContent("people do not scan again when a door opens");
       expect(notice).toHaveTextContent("cannot tell a stuck door from");
       expect(notice).toHaveTextContent("The release is set to 3 seconds.");
-      expect(screen.getByRole("link", { name: /Change the release under Admin settings/ }))
-        .toHaveAttribute("href", "/admin/settings");
+      /**
+       * <b>A9.</b> This linked to a bare `/admin/settings`, which lands an admin at the top
+       * of a page about 5 400 px long with no indication which of its forty fields the
+       * signal meant — the reviewer scrolled looking for it. The hash is the settings page's
+       * own `#setting-<key>` convention: it scrolls the field into view, moves focus to it
+       * and highlights it. The door's name is in the link text because three
+       * identically-worded links on one admin's screen is reviewer B's repeated-link
+       * finding.
+       */
+      expect(screen.getByRole("link", { name: /Change how long the lock is released — Front door/ }))
+        .toHaveAttribute("href", "/admin/settings#setting-gate-unlock-seconds");
     });
 
     /**
@@ -357,7 +386,13 @@ describe("the doors surface", () => {
     it("marks an offline open as the board's own decision, at the scan's own time", async () => {
       const at = "2026-09-19T18:04:00Z";
       openDoor([doorFixture()], {
-        activity: [activityFixture({ at, action: "device.gate_open", reason: null, offline: true })],
+        // WIRE-R1 §2: `delivered_at` is non-null on offline rows ONLY, so an offline fixture
+        // that omitted it would be a shape the API cannot emit — and the row's whole point
+        // is that it carries TWO instants.
+        activity: [activityFixture({
+          at, action: "device.gate_open", reason: null, offline: true,
+          delivered_at: "2026-09-19T18:31:00Z",
+        })],
       });
 
       expect(await screen.findByText("Offline")).toBeInTheDocument();
@@ -365,7 +400,60 @@ describe("the doors surface", () => {
       const feed = screen.getByRole("region", { name: "Scans at this door" });
       const when = within(feed).getByText(/ago$/);
       expect(when).toHaveAttribute("datetime", at);
-      expect(when.getAttribute("title")).toContain("decided at the door at");
+      /**
+       * <b>A4.</b> "Last heard from 21:00" beside a scan "decided at the door at 21:25"
+       * reads as a contradiction until the row says the two are different facts. It said so
+       * only in a `title`, which is invisible on a phone and to a screen reader — so the
+       * sentence is in the row now, and it names the delivery as well as the scan.
+       *
+       * A13: day before month, 24-hour clock. A second format on this page rendered
+       * "9/19/26, 9:25 PM" through `utils.formatInstant`, which passes `undefined` as the
+       * locale.
+       */
+      expect(when.getAttribute("title")).toContain("Decided at the door at");
+      expect(within(feed).getByText(/Decided at the door at/)).toHaveTextContent(
+        "the door told us at",
+      );
+      expect(when.getAttribute("title")).not.toMatch(/\d{1,2}\/\d{1,2}\/\d{2}/);
+      expect(when.getAttribute("title")).not.toMatch(/\b[AP]M\b/);
+    });
+
+    /**
+     * <b>A4's other half.</b> Where the API carries a `delivered_at`, the row says WHEN the
+     * club was told rather than only that it was told later.
+     */
+    it("names the delivery time on an offline row when the API carries one", async () => {
+      const at = "2026-09-19T18:04:00Z";
+      openDoor([doorFixture()], {
+        activity: [activityFixture({
+          at, action: "device.gate_open", reason: null, offline: true,
+          delivered_at: "2026-09-19T18:31:00Z",
+        })],
+      });
+
+      const feed = await screen.findByRole("region", { name: "Scans at this door" });
+      // Both instants, in WIRE-R1 §2's own words. An /events upload IS contact, so
+      // `last_seen_at` moving PAST a scan it delivered is not a contradiction — which is
+      // exactly why the row has to say which instant is which rather than showing one.
+      expect(within(feed).getByText(/Decided at the door at/))
+        .toHaveTextContent("Decided at the door at 20:04 \u2014 the door told us at 20:31.");
+    });
+
+    /**
+     * WIRE-R1 §2: "Never render a delay for delivered_at null." A row the club decided as it
+     * happened has ONE instant, and inventing a second is the same class of falsehood as
+     * the contradiction A4 was raised about — the first draft of this fix filled the gap
+     * with "the club was told when the door next called in", which is a delay that row
+     * never had.
+     */
+    it("invents no delivery time for a row the club decided as it happened", async () => {
+      openDoor([doorFixture()], {
+        activity: [activityFixture({ at: "2026-09-19T18:04:00Z", delivered_at: null })],
+      });
+
+      const feed = await screen.findByRole("region", { name: "Scans at this door" });
+      expect(within(feed).queryByText(/told us at/)).toBeNull();
+      expect(within(feed).queryByText(/Decided at the door at/)).toBeNull();
     });
 
     /**
@@ -450,7 +538,7 @@ describe("the doors surface", () => {
     it("is a radio group of exactly three real answers, with no placeholder", async () => {
       openDoor([doorFixture()]);
 
-      fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
       const radios = screen.getAllByRole("radio");
       expect(radios).toHaveLength(3);
       expect(screen.getByRole("radio", { name: /Not established/ })).toBeChecked();
@@ -463,15 +551,19 @@ describe("the doors surface", () => {
         { initialEntries: [`/admin/doors/${DOOR_ID}`] },
       );
 
-      fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
       fireEvent.change(screen.getByLabelText("Where this board is"), {
         target: { value: "  In the cupboard above the fuse board  " },
       });
       fireEvent.click(screen.getByRole("radio", { name: /Released/ }));
-      fireEvent.click(screen.getByRole("button", { name: "Save door card" }));
+      fireEvent.click(screen.getByRole("button", { name: /Save this door/ }));
 
       await waitFor(() => {
+        // A19: one form, one PATCH, all four fields. `name` and `gate_key` ride along
+        // unchanged — the API applies a value it is given whether or not it differs.
         expect(stub.calls.find((c) => c.method === "PATCH")?.body).toEqual({
+          name: "Side door",
+          gate_key: "side-door",
           location_note: "In the cupboard above the fuse board",
           power_loss_behaviour: "released",
         });
@@ -483,7 +575,7 @@ describe("the doors surface", () => {
     it("holds the note to the 200 characters the API stores", async () => {
       openDoor([doorFixture()]);
 
-      fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
       expect(screen.getByLabelText("Where this board is")).toHaveAttribute("maxLength", "200");
     });
 
@@ -519,7 +611,12 @@ describe("the doors surface", () => {
     it("carries what somebody standing at the door needs, and a printed date", async () => {
       openCard({ club_contact_phone: "076 226 1390" });
 
-      expect(await screen.findByRole("heading", { name: "side-door" })).toBeInTheDocument();
+      // B22 / C13: the club's OWN name for the door is the headline, and the slug goes
+      // beneath it. The heading used to BE the slug — "side-door" in 36 px on a card taped
+      // to a wall, which is the one word neither a member nor a volunteer uses for it. The
+      // slug stays on the sheet: it is what a scan is recorded against.
+      expect(await screen.findByRole("heading", { name: "Side door" })).toBeInTheDocument();
+      expect(screen.getByText("side-door")).toBeInTheDocument();
       expect(screen.getByText("gate-0a1b2c")).toBeInTheDocument();
       expect(screen.getByText("5ccf7f0a1b2c")).toBeInTheDocument();
       expect(screen.getByText(/In the cupboard above the fuse board/)).toBeInTheDocument();
@@ -535,7 +632,7 @@ describe("the doors surface", () => {
     it("carries no club API key and no member name", async () => {
       openCard();
 
-      await screen.findByRole("heading", { name: "side-door" });
+      await screen.findByRole("heading", { name: "Side door" });
       expect(document.body.textContent).not.toContain("crsdr_live");
       expect(document.body.textContent).not.toContain("Ada Lovelace");
     });
@@ -543,7 +640,7 @@ describe("the doors surface", () => {
     it("hides its own chrome from the printed sheet", async () => {
       openCard();
 
-      await screen.findByRole("heading", { name: "side-door" });
+      await screen.findByRole("heading", { name: "Side door" });
       const button = screen.getByRole("button", { name: /Print/ });
       expect(button.closest("[data-print-hide]")).not.toBeNull();
     });
@@ -563,10 +660,10 @@ describe("the doors surface", () => {
         { initialEntries: [`/admin/doors/${DOOR_ID}`] },
       );
 
-      fireEvent.click(await screen.findByRole("button", { name: "Shut Side door" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Shut this door — Side door" }));
       expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(0);
 
-      const confirm = await screen.findByRole("button", { name: "Shut Side door — tap again to confirm" });
+      const confirm = await screen.findByRole("button", { name: "Shut this door — Side door — tap again to confirm" });
       // The consequence is on screen, in the confirm label the button is now showing. It is
       // not in the accessible NAME because `ConfirmButton`'s aria-label replaces its
       // contents — which is why the same sentence is also rendered above the control, where
@@ -575,7 +672,7 @@ describe("the doors surface", () => {
       // layer and once in an aria-hidden width sentinel, which is what stops the button
       // resizing as it arms. Both carry the same sentence, and it is the sentence that is
       // being held here.
-      expect(screen.getAllByText(/Shut this door\? A door that can reach the API opens for nobody/)[0])
+      expect(screen.getAllByText(/Shut this door\? A door that can reach the club opens for nobody/)[0])
         .toHaveTextContent(/a door marks nobody as having arrived/);
       fireEvent.click(confirm);
 
@@ -600,8 +697,8 @@ describe("the doors surface", () => {
         { initialEntries: [`/admin/doors/${DOOR_ID}`] },
       );
 
-      fireEvent.click(await screen.findByRole("button", { name: "Reopen Side door" }));
-      const confirm = await screen.findByRole("button", { name: "Reopen Side door — tap again to confirm" });
+      fireEvent.click(await screen.findByRole("button", { name: "Reopen this door — Side door" }));
+      const confirm = await screen.findByRole("button", { name: "Reopen this door — Side door — tap again to confirm" });
       expect(screen.getAllByText(/Reopen this door\?/)[0])
         .toHaveTextContent("from the very next scan — there is no wait");
       fireEvent.click(confirm);
@@ -627,10 +724,16 @@ describe("the doors surface", () => {
         { initialEntries: [`/admin/doors/${DOOR_ID}`] },
       );
 
-      fireEvent.click(await screen.findByRole("button", { name: "Delete Front door" }));
-      const armed = await screen.findByRole("button", { name: "Delete Front door — tap again to confirm" });
-      expect(screen.getAllByText("Delete? The door re-registers on its next heartbeat with no name."))
+      fireEvent.click(await screen.findByRole("button", { name: "Delete this door — Front door" }));
+      const armed = await screen.findByRole("button", { name: "Delete this door — Front door — tap again to confirm" });
+      // C10 / A12: the confirm names the location note and the power-cut answer as things
+      // it destroys — they were the two facts an admin had most recently taken the trouble
+      // to write down, and the old sentence ("The door re-registers on its next heartbeat
+      // with no name") mentioned neither.
+      expect(screen.getAllByText(/Delete this door\? Everything written down about it goes/))
         .not.toHaveLength(0);
+      expect(screen.getAllByText(/Delete this door\? Everything written down about it goes/)[0])
+        .toHaveTextContent("what the lock does with no power");
       expect(screen.queryByText(/The box re-registers/)).toBeNull();
 
       fireEvent.click(armed);
@@ -653,8 +756,8 @@ describe("the doors surface", () => {
     it("names the count and both halves before it does anything", async () => {
       openDoors([doorFixture(), doorFixture({ id: OTHER_ID, name: "Front door", gate_key: "front-door" })]);
 
-      fireEvent.click(await screen.findByRole("button", { name: /Shut every door the club has open — 2 of 2/ }));
-      await screen.findByRole("button", { name: /Shut every door the club has open — 2 of 2 — tap again to confirm/ });
+      fireEvent.click(await screen.findByRole("button", { name: /^Shut all doors — every door the club has open — 2 of 2/ }));
+      await screen.findByRole("button", { name: /^Shut all doors — every door the club has open — 2 of 2/ });
       const label = screen.getAllByText(/Shut all 2 doors\?/)[0];
       expect(label).toHaveTextContent("keeps admitting booked members from the list it last downloaded");
       expect(label).toHaveTextContent("up to six hours");
@@ -671,7 +774,7 @@ describe("the doors surface", () => {
         doorFixture({ id: OTHER_ID, name: "Front door", gate_key: "front-door", last_seen_at: ago(6 * 3600), power_loss_behaviour: "released" }),
       ]);
 
-      fireEvent.click(await screen.findByRole("button", { name: /Shut every door/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Shut .* — every door the club has open/ }));
       fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
 
       const heading = await screen.findByRole("heading", { name: /2 doors shut — 1 confirmed, 1 not/ });
@@ -692,7 +795,7 @@ describe("the doors surface", () => {
     it("marks an unconfirmed door as NOT CONFIRMED in words", async () => {
       openDoors([doorFixture({ last_seen_at: ago(6 * 3600) })]);
 
-      fireEvent.click(await screen.findByRole("button", { name: /Shut every door/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Shut .* — every door the club has open/ }));
       fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
 
       expect(await screen.findByText("NOT CONFIRMED")).toBeInTheDocument();
@@ -707,7 +810,7 @@ describe("the doors surface", () => {
       ]);
       renderPage(<AdminDoorsPage />);
 
-      fireEvent.click(await screen.findByRole("button", { name: /Shut every door/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Shut .* — every door the club has open/ }));
       fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
 
       expect(await screen.findByText(/Nothing was shut/))
@@ -719,15 +822,41 @@ describe("the doors surface", () => {
      * arrives in after an incident, and a single "Shut all doors" there would name a number
      * that is wrong.
      */
-    it("counts what is still open and offers the way back beside it", async () => {
+    /**
+     * <b>C1 — the fleet Reopen exists only while a shut-all is standing.</b>
+     *
+     * It used to render whenever any door was shut, labelled from the club's TOTAL: "Reopen
+     * all 3". But `reopen-all` reopens only what a shut-all shut, so an admin who had shut
+     * one door on its own pressed it and got `{"doors": []}`, the words "0 doors reopened",
+     * and no explanation whatever. The semantics are right and stay; the control now exists
+     * only when it will do something, and the panel says where the way back actually is.
+     */
+    it("offers no fleet reopen for a door shut on its own, and says where to reopen it", async () => {
       openDoors([
         doorFixture(),
         doorFixture({ id: OTHER_ID, name: "Front door", gate_key: "front-door", enabled: false }),
       ]);
 
       expect(await screen.findByText("2 doors · 1 open, 1 shut")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /Shut every door the club has open — 1 of 2/ })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /Reopen every door the club shut together — 2/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Shut the 1 door still open — every door the club has open — 1 of 2/ })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Reopen the/ })).toBeNull();
+      expect(screen.getByText(/Front door was shut on its own/))
+        .toHaveTextContent("Reopen it from its own page");
+    });
+
+    /** And it DOES render, with the true count, once a shut-all is standing. */
+    it("labels the fleet reopen with what it will actually reopen", async () => {
+      openDoors([
+        doorFixture({ shut_by_shut_all_at: ago(120), enabled: false }),
+        doorFixture({
+          id: OTHER_ID, name: "Front door", gate_key: "front-door", enabled: false,
+          shut_by_shut_all_at: ago(120),
+        }),
+      ]);
+
+      expect(await screen.findByRole("button", {
+        name: /^Reopen the 2 doors shut together — every door the club shut together — 2/,
+      })).toBeInTheDocument();
     });
 
     /**
@@ -748,11 +877,11 @@ describe("the doors surface", () => {
         method: "PATCH", path: `/api/v1/admin/devices/${OTHER_ID}`, body: { enabled: false },
       });
 
-      fireEvent.click(await screen.findByRole("button", { name: /Shut every door/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Shut .* — every door the club has open/ }));
       fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
       await screen.findByRole("heading", { name: /doors shut/ });
 
-      fireEvent.click(await screen.findByRole("button", { name: /Reopen every door/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Reopen the .* — every door the club shut together/ }));
       fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
 
       await waitFor(() => {
@@ -773,19 +902,27 @@ describe("the doors surface", () => {
         { initialEntries: [`/admin/doors/${DOOR_ID}`] },
       );
 
-      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door name/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
       fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Front door" } });
       fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "front-door" } });
-      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Save this door/ }));
 
       await waitFor(() => {
         const patch = stub.calls.find((c) => c.method === "PATCH");
         expect(patch?.path).toBe(`/api/v1/admin/devices/${DOOR_ID}`);
-        // Exactly these two, and no court_numbers: the API refuses that field on a Gate row.
-        expect(patch?.body).toEqual({ name: "Front door", gate_key: "front-door" });
+        // A19: ONE form over all four writable fields, so ONE PATCH carrying all four. They
+        // have always travelled on this same endpoint, so two forms and two saves bought
+        // nothing and cost a hurried admin the ability to find the second half.
+        // Still no court_numbers: the API refuses that field on a Gate row.
+        expect(patch?.body).toEqual({
+          name: "Front door",
+          gate_key: "front-door",
+          location_note: "",
+          power_loss_behaviour: "not_established",
+        });
         expect(patch?.raw).not.toContain("court_numbers");
       });
-      expect(await screen.findByText(/Front door is the front-door door/)).toBeInTheDocument();
+      expect(await screen.findByText(/Front door saved\. It is the front-door door/)).toBeInTheDocument();
     });
 
     it("trims the door name before sending it", async () => {
@@ -795,9 +932,9 @@ describe("the doors surface", () => {
         { initialEntries: [`/admin/doors/${DOOR_ID}`] },
       );
 
-      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door name/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
       fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "  front-door  " } });
-      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Save this door/ }));
 
       await waitFor(() => {
         expect(stub.calls.find((c) => c.method === "PATCH")?.body).toMatchObject({ gate_key: "front-door" });
@@ -817,19 +954,23 @@ describe("the doors surface", () => {
         { initialEntries: [`/admin/doors/${DOOR_ID}`] },
       );
 
-      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door name/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
       expect(screen.getByLabelText("Door name")).toHaveValue("front-door");
       fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "   " } });
-      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Save this door/ }));
 
       await waitFor(() => {
-        expect(stub.calls.find((c) => c.method === "PATCH")?.raw).toBe('{"name":"Front door","gate_key":""}');
+        // `""`, not `null`: the API reads a null on this field as "leave it alone", which is
+        // what the page used to send while reporting a success. `location_note` binds the
+        // same two-valued way and rides the same PATCH (A19).
+        expect(stub.calls.find((c) => c.method === "PATCH")?.raw)
+          .toBe('{"name":"Front door","gate_key":"","location_note":"","power_loss_behaviour":"not_established"}');
       });
       await waitFor(() => expect(server.current()[0].gate_key).toBeNull());
       // The toast says what has actually been given up, rather than reporting a success that
       // reads as if the door were now named something: an unnamed door is sent an empty list,
       // so it stops working the moment it loses the network.
-      expect(await screen.findByText(/Front door has no door name\. Until you name this door/))
+      expect(await screen.findByText(/Front door saved, and it has no door name\. Until you name this door/))
         .toHaveTextContent("only works while it can reach the server");
       // And the state paragraph agrees with it, which is the pair that has disagreed before.
       expect(screen.getByText(/It has no door name, so it is sent an empty list/)).toBeInTheDocument();
@@ -839,7 +980,7 @@ describe("the doors surface", () => {
     it("holds the door name to the 64 characters the API stores", async () => {
       openDoor([doorFixture()]);
 
-      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door name/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
       expect(screen.getByLabelText("Door name")).toHaveAttribute("maxLength", "64");
     });
 
@@ -851,16 +992,16 @@ describe("the doors surface", () => {
         { initialEntries: [`/admin/doors/${DOOR_ID}`] },
       );
 
-      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door name/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
       fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "x".repeat(65) } });
-      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Save this door/ }));
 
       expect(await screen.findByText(/A door name is at most 64 characters/)).toBeInTheDocument();
       // A refused PATCH applies nothing.
       expect(server.current()[0].gate_key).toBe("front-door");
 
       fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "y".repeat(64) } });
-      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Save this door/ }));
       await waitFor(() => expect(server.current()[0].gate_key).toBe("y".repeat(64)));
     });
 
@@ -876,15 +1017,19 @@ describe("the doors surface", () => {
         { initialEntries: [`/admin/doors/${DOOR_ID}`] },
       );
 
-      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door name/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
       fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "side-door" } });
-      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Save this door/ }));
 
-      expect(await screen.findByText(/A door name only belongs on a door gate, and this row is a court box/))
+      // A19 moved WHICH refusal this is: the one save now carries the door-card fields as
+      // well as the name, and the API answers `door_fields_on_a_court_box` before it looks
+      // at `gate_key`. That token had no copy at all and fell through to the raw string —
+      // found by this test after the forms were merged, and fixed in `deviceErrors`.
+      expect(await screen.findByText(/only a door has — and this row is a court box/))
         .toHaveTextContent(/delete the row and let it register itself again/);
-      expect(screen.queryByText(/gate key not a gate/)).toBeNull();
+      expect(screen.queryByText(/door fields on a court box/)).toBeNull();
       // The editor stays open, because the save did not go through.
-      expect(screen.getByRole("button", { name: /Save door/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Save this door/ })).toBeInTheDocument();
     });
 
     /**
@@ -900,9 +1045,9 @@ describe("the doors surface", () => {
       );
 
       expect(await screen.findByText("Needs a door name")).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: /Edit name and door name/ }));
+      fireEvent.click(screen.getByRole("button", { name: /^Edit / }));
       fireEvent.change(screen.getByLabelText("Door name"), { target: { value: "front-door" } });
-      fireEvent.click(screen.getByRole("button", { name: /Save door/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Save this door/ }));
 
       await waitFor(() => expect(server.current()[0].auto_registered).toBe(false));
       await waitFor(() => expect(screen.queryByText("Needs a door name")).toBeNull());
@@ -916,7 +1061,7 @@ describe("the doors surface", () => {
     it("says why the door name matters without claiming it is the only identifier", async () => {
       openDoor([doorFixture()]);
 
-      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door name/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
       const hint = screen.getByText(/Which door this board is on/);
       expect(hint).toHaveTextContent("this is how the record names the door");
       expect(hint).toHaveTextContent("Without it a scan is recorded against the board code alone");
@@ -929,7 +1074,7 @@ describe("the doors surface", () => {
     it("offers no court list, no button map and no kind selector", async () => {
       openDoor([doorFixture()]);
 
-      fireEvent.click(await screen.findByRole("button", { name: /Edit name and door name/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
       expect(screen.queryByLabelText(/relay A court/)).toBeNull();
       expect(screen.queryByLabelText(/button /)).toBeNull();
       expect(screen.queryByLabelText(/kind/i)).toBeNull();

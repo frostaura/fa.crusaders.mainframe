@@ -2,14 +2,20 @@ import { describe, expect, it } from "vitest";
 import {
   DOORS_EMPTY_HINT, DOORS_EMPTY_NOTICE, DOORS_READ_FAILED, LOG_EMPTY_FILTERED,
   LOG_EMPTY_FILTERED_HINT, LOG_EMPTY_NOTHING, LOG_READ_FAILED, LOG_OLDER_FAILED,
-  doorCsvNotice, doorExhaustedNotice, doorLogEmptyOneDoor, doorLogHowToRead,
-  doorMayNotBeReleasingNotice, doorNeedsAttention, doorOutcomeChip, doorQuietNotice,
-  doorRefusalSpikeNotice, doorRetentionNotice, doorScanCountHeading, doorScanCountLine,
-  doorSetupChip, doorSignalChip, doorStaleChecksNotice, doorStateChip, doorStateNotice,
-  doorsAttentionSummary, describePowerLoss, spellAge,
+  DOOR_EVENTS_NOTE, NO_REASON_RECORDED,
+  doorAttentionReason, doorCsvDownloaded, doorCsvNotice, doorExhaustedNotice,
+  doorLogEmptyOneDoor, doorLogHowToRead, doorMayNotBeReleasingNotice, doorNeedsAttention,
+  doorOutcomeChip, doorQuietNotice, doorRefusalSpikeNotice, doorRetentionNotice,
+  doorScanCountHeading, doorScanCountLine, doorSetupChip, doorSignalChip, doorStaleChecksNotice,
+  doorStateChip, doorStateNotice, doorsAttentionSummary, describePowerLoss, spellAge,
 } from "./doorsCopy";
 import { doorShutNotice } from "./gateCopy";
-import { type AdminDoorDevice, type DeviceActivityEntry } from "./api";
+import { type AdminDoorDevice, type DeviceActivityEntry, type DoorSignal } from "./api";
+
+/** A door signal, for the arms that take one. The payload carries no member, by construction. */
+function signal(kind: DoorSignal["kind"]): DoorSignal {
+  return { kind, since: "2026-09-19T10:00:00Z", until: "2026-09-19T10:20:00Z", scans: 11 };
+}
 
 /**
  * Every sentence the doors surface says about a door, pinned.
@@ -66,6 +72,9 @@ function everySentence(): string[] {
       doorNeedsAttention(reachable, online) ?? "",
       doorNeedsAttention(door({ gate_key: null }), online) ?? "",
       doorNeedsAttention(door({ enabled: false }), online) ?? "",
+      // A3: signals are an attention reason now, so their sentences join the matrix.
+      doorAttentionReason(reachable, online, [signal("refusal_spike")])?.reason ?? "",
+      doorAttentionReason(reachable, online, [signal("may_not_be_releasing")])?.reason ?? "",
     ]),
     doorSetupChip(door({ gate_key: null }))?.label ?? "",
     doorScanCountHeading("2026-09-19T00:00:00Z", TZ),
@@ -81,9 +90,18 @@ function everySentence(): string[] {
     doorRetentionNotice(null),
     doorCsvNotice(90),
     doorCsvNotice(null),
+    doorCsvDownloaded(165),
+    doorCsvDownloaded(1),
+    doorCsvDownloaded(null),
+    doorCsvDownloaded(10_000, true),
     doorExhaustedNotice(90),
     doorExhaustedNotice(null),
-    doorLogEmptyOneDoor("side door", "Mon 00:00"),
+    // C7 — all three arms, including the one that says the screen does not know.
+    doorLogEmptyOneDoor("Side door", "Mon 14 Sep, 00:00", true),
+    doorLogEmptyOneDoor("Side door", "Mon 14 Sep, 00:00", false),
+    doorLogEmptyOneDoor("Side door", "Mon 14 Sep, 00:00", null),
+    DOOR_EVENTS_NOTE,
+    NO_REASON_RECORDED,
     doorsAttentionSummary(["Side door has not been heard from since 04:12."]) ?? "",
     said(doorStaleChecksNotice(2, 47)),
     DOORS_READ_FAILED, DOORS_EMPTY_NOTICE, DOORS_EMPTY_HINT,
@@ -172,13 +190,26 @@ describe("doorStateNotice", () => {
    * The stale time is `last_seen_at` + six hours, which is the firmware's own
    * `ROSTER_MAX_AGE_MS` and derivable from the payload the screen already holds. An admin
    * standing in a club at 09:00 needs a clock face, not "six hours after its last call".
+   *
+   * <b>A7: with its DAY.</b> Six hours after a last call at 21:00 is 03:00 tomorrow, and an
+   * admin reading "goes stale at 03:00" at nine in the morning cannot tell whether it
+   * already has.
    */
-  it("not reporting and named: says a change waits, and when the cached list dies", () => {
+  it("not reporting and named: says a change waits, and when — and which day — the cached list dies", () => {
     expect(doorStateNotice(door({ last_seen_at: "2026-09-19T04:12:00Z" }), false, TZ)).toBe(
       "Nothing can reach it. A change you make now arrives only when it calls in again. Until then"
       + " it opens for members with a booking, from the list it last downloaded, and that list goes"
-      + " stale at 10:12.",
+      + " stale on Sat 19 Sept, 10:12.",
     );
+  });
+
+  /** The case A7 was actually found in: a last call at 21:00, stale after midnight. */
+  it("names the next day when the list outlives the one it was downloaded on", () => {
+    // This fixture's TZ is UTC, so 19:00 + 6 h is 01:00 the NEXT day — and the day is the
+    // whole point: "goes stale at 01:00", read at nine in the morning, cannot be told from
+    // one that expired eight hours ago.
+    const notice = doorStateNotice(door({ last_seen_at: "2026-09-19T19:00:00Z" }), false, TZ);
+    expect(notice).toContain("goes stale on Sun 20 Sept, 01:00");
   });
 
   /** A row that has never called in holds no list, so there is no time to print. */
@@ -257,11 +288,19 @@ describe("doorQuietNotice", () => {
    * is the club's calendar day rather than a magic threshold. It states the fact and does not
    * editorialise: a door with no scans is normal at 09:00 and a question at 20:00.
    */
-  it("names the day and the gap when the newest scan is on an earlier club day", () => {
+  /**
+   * B20: the weekday carries its DATE. "Wed 18:40" is unambiguous over a 24-hour window and
+   * ambiguous over the 7- and 30-day ranges this surface offers, where four Wednesdays are
+   * in range and the reader cannot tell which one is meant.
+   */
+  it("names the day, the date and the gap when the newest scan is on an earlier club day", () => {
     const notice = doorQuietNotice("2026-09-16T18:40:00Z", "2026-09-19T00:00:00Z", NOW, TZ);
     expect(notice).toContain("No scans at this door since");
-    expect(notice).toContain("Wed 18:40");
+    expect(notice).toContain("Wed 16 Sept, 18:40");
     expect(notice).toContain("3 days");
+    // A13: day before month and a 24-hour clock, never "9/16/26, 6:40 PM".
+    expect(notice).not.toMatch(/\d{1,2}\/\d{1,2}\/\d{2}/);
+    expect(notice).not.toMatch(/\b[AP]M\b/i);
   });
 
   it("says nothing when there has been a scan today", () => {
@@ -416,11 +455,59 @@ describe("doorRetentionNotice / doorCsvNotice", () => {
    * one action on this surface that moves data past every guard the product has.
    */
   it("says the export carries names and leaves the club's rule behind it", () => {
-    expect(doorCsvNotice(90)).toContain("members' names included");
+    expect(doorCsvNotice(90)).toContain("Members' names are in it");
     expect(doorCsvNotice(90)).toContain("outside the club's 90-day rule");
-    // And the same honesty with no number to state.
+    // And the same honesty about the retention number with none to state. (The 10,000-row
+    // cap is still named — it is this file's own constant, not the club's setting.)
     expect(doorCsvNotice(null)).toContain("outside the club's retention rule");
-    expect(doorCsvNotice(null)).not.toMatch(/\d/);
+    expect(doorCsvNotice(null)).not.toMatch(/\b\d+-day\b/);
+  });
+
+  /**
+   * B3 / A15. The note promised "the same rows as this page", which was simply untrue: the
+   * page shows one cursor page of 50 and the reviewer's file held 165 rows. It is the same
+   * FILTERS over everything matching them — a better promise, and the true one.
+   */
+  it("promises the filters rather than the page, and names the cap", () => {
+    const notice = doorCsvNotice(90);
+    expect(notice).not.toContain("same rows as this page");
+    expect(notice).toContain("every scan matching the filters above");
+    expect(notice).toContain("not just the rows on this page");
+    expect(notice).toContain("10,000");
+  });
+
+  /**
+   * B3's other half. The toast announced the length of the list on screen — "50 scans
+   * downloaded" over a 165-row file — and that is the number an admin repeats to a
+   * committee.
+   */
+  describe("doorCsvDownloaded", () => {
+    it("announces the server's own count", () => {
+      expect(doorCsvDownloaded(165)).toBe("165 scans downloaded.");
+      expect(doorCsvDownloaded(1)).toBe("1 scan downloaded.");
+    });
+
+    it("carries NO number rather than a wrong one when the server did not send it", () => {
+      const notice = doorCsvDownloaded(null);
+      expect(notice).not.toMatch(/\d/);
+      expect(notice).toContain("may be more than this page shows");
+    });
+
+    /**
+     * Truncation comes from the server's own `X-Crusaders-Truncated` (WIRE-R1 §7), never
+     * from comparing the count to a cap this side holds — a client that decides "this looks
+     * like the limit" is wrong the day the server's limit moves.
+     */
+    it("says so when the SERVER says the file was truncated", () => {
+      const notice = doorCsvDownloaded(10_000, true);
+      expect(notice).toContain("as many as one file holds");
+      expect(notice).toContain("older scans in this range were left out");
+      expect(notice).toContain("Narrow the range");
+    });
+
+    it("says nothing about a limit when the server did not flag one", () => {
+      expect(doorCsvDownloaded(10_000, false)).toBe("10000 scans downloaded.");
+    });
   });
 });
 
@@ -435,10 +522,26 @@ describe("the log's states", () => {
    * an answer that is a SUGGESTION, because an empty result for one door has two causes and
    * the screen cannot tell them apart.
    */
-  it("answers the one-door empty case with the possibility an admin came to check", () => {
-    const notice = doorLogEmptyOneDoor("side door", "Mon 00:00");
-    expect(notice).toContain("No scans at the side door between Mon 00:00 and now");
-    expect(notice).toContain("its board may not be reaching the club");
+  /**
+   * C7. The suggestion used to be ASSERTED whatever the door was doing, so an admin who
+   * filtered a perfectly healthy door to a quiet range was told its board might not be
+   * reaching the club and sent to look for a fault that did not exist. It is derived from
+   * the door's own liveness now — and the third arm says the screen does not know rather
+   * than guessing either way.
+   */
+  it("derives the one-door empty case from that door's real liveness", () => {
+    const reporting = doorLogEmptyOneDoor("Side door", "Mon 14 Sept, 00:00", true);
+    expect(reporting).toContain("No scans at Side door between Mon 14 Sept, 00:00 and now");
+    expect(reporting).toContain("It is reporting, so the club is hearing from it");
+    expect(reporting).not.toContain("may not be reaching the club");
+    expect(reporting).not.toContain("would not know");
+
+    const silent = doorLogEmptyOneDoor("Side door", "Mon 14 Sept, 00:00", false);
+    expect(silent).toContain("Nothing can reach it");
+    expect(silent).toContain("the club would not know");
+
+    const unknown = doorLogEmptyOneDoor("Side door", "Mon 14 Sept, 00:00", null);
+    expect(unknown).toContain("cannot say whether that board is reaching the club");
   });
 
   it("tells a narrowed filter how to widen, and an unfiltered emptiness plainly", () => {
@@ -494,6 +597,31 @@ describe("the overview's own states", () => {
  * fires on a dead board ever appears.
  * </p>
  */
+/**
+ * <b>C2's family, one screen along — found by looking at a rendered overview.</b>
+ *
+ * The banner correctly read "3 of 3 doors shut — 2 confirmed, 1 not yet", and the attention
+ * line directly under it said "Side door is shut. Nobody gets in through it." about a door
+ * the club had not heard from in an hour. A shut door that cannot be reached has not heard
+ * the refusal: it goes on admitting members with a booking from the list it last
+ * downloaded, for up to six hours. Two sentences on one screen, contradicting each other
+ * about the same door.
+ */
+describe("doorAttentionReason, on a shut door nothing can reach", () => {
+  it("does not claim nobody gets in through a door that has not been told", () => {
+    const silent = doorAttentionReason(door({ enabled: false, name: "Side door" }), false, [])!;
+    expect(silent.kind).toBe("shut");
+    expect(silent.reason).not.toContain("Nobody gets in");
+    expect(silent.reason).toContain("nothing can reach it");
+    expect(silent.reason).toContain("may not have been told");
+  });
+
+  it("still says it plainly for a shut door the club CAN reach", () => {
+    const reachable = doorAttentionReason(door({ enabled: false, name: "Side door" }), true, [])!;
+    expect(reachable.reason).toBe("Side door is shut. Nobody gets in through it.");
+  });
+});
+
 describe("doorNeedsAttention", () => {
   it("names the three states that need somebody, in the words Home uses", () => {
     expect(doorNeedsAttention(door({ last_seen_at: "2026-09-19T04:12:00Z" }), false))

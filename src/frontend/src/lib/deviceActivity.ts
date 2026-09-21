@@ -1,4 +1,4 @@
-import { type DeviceActivityEntry } from "./api";
+import { type DeviceActivityEntry, type DoorEventEntry } from "./api";
 
 /**
  * Everything the Devices page says about a board's own trail, and about boards nobody has
@@ -89,6 +89,175 @@ export const DOOR_OUTCOME_CHIPS: Record<string, string> = {
   method_not_supported: "Door fault",
   not_a_gate: "Wrong board",
 };
+
+/**
+ * What KIND of thing one audit row is — and the reason this function exists at all.
+ *
+ * <p>
+ * <b>The defect it closes (B1 / A2 / C4).</b> `GET /admin/devices/{id}/activity` returns
+ * every audit row carrying this board's `device_id`, which is not the same set as "scans at
+ * this door": an admin editing a door writes `device.updated`, a board powering on writes
+ * `device.boot`, a club-wide shut writes `doors.shut_all`. The feed had no notion of a
+ * non-scan row, so it fell through to a catch-all that painted each of them as a
+ * <b>green "Refused"</b> chip — editing a door's name added a refusal to its own page, and
+ * a door with thirteen admin edits and zero scans reported "13 refused scans, newest 1 min
+ * ago" while the club log and the CSV correctly showed none. Two reviewers found it
+ * independently and a third confirmed the cause.
+ * </p>
+ *
+ * <p>
+ * <b>Four arms, and the fourth is the point.</b> A released scan and a refused scan are
+ * outcomes. An action this build recognises but which decided nothing is an EVENT — neutral,
+ * never chipped, never counted. An action this build has never seen is
+ * <b>`unknown`</b>: the set grows from the firmware and the backend, never from this screen,
+ * so the honest render is a neutral "Unrecognised event" row carrying the raw token, and
+ * never a guess at an outcome. Guessing is exactly what shipped.
+ * </p>
+ */
+export type DoorRowKind = "released" | "refused" | "event" | "unknown";
+
+/**
+ * A board's own uploads that are a REFUSAL, not an open.
+ *
+ * `device.gate_open` alone is an open the board decided while cut off. `device.gate_open_`
+ * plus an outcome — `device.gate_open_not_a_gate` — is that same upload REFUSED by the
+ * server after the fact, and it is written by the same path one suffix along. It humanised
+ * to "Gate open not a gate" and chipped green, which is the family of the bug above rather
+ * than a separate one.
+ */
+const OFFLINE_OPEN_ACTION = "device.gate_open";
+
+/**
+ * Non-scan actions the door surfaces can meet, and what each one IS in a volunteer's words.
+ *
+ * <p>
+ * Enumerated rather than pattern-matched, because the whole failure here was a pattern that
+ * matched things it had never been shown. `src/lib/door-actions.test.ts` reads the backend's
+ * own sources at test time and fails if any action it can emit is missing from this map or
+ * from the scan rules above it — so a new backend action lands as a red test on the screen
+ * that has to render it, rather than as a green "Refused" chip in a club.
+ * </p>
+ */
+export const DOOR_EVENT_WORDS: Record<string, string> = {
+  "device.registered": "The board registered itself",
+  "device.auto_registered": "The board registered itself",
+  "device.updated": "This door's details or state were changed",
+  "device.deleted": "This door was deleted",
+  "device.boot": "Board started up",
+  "device.api_key_regenerated": "The club's device key was replaced",
+  "device.event_time_clamped": "The board's clock was out and was corrected",
+  "doors.shut_all": "Every door was shut together",
+  "doors.reopened_all": "The doors shut together were reopened",
+  "doors.log_exported": "Someone downloaded the door log",
+  /** A court box's own rows. A gate never writes these; the dictionary is shared. */
+  "device.activation": "Court activated",
+  "device.release": "Court released",
+  "device.release_unpaired": "Court released with nothing paired",
+  "device.turnstile_spun": "Turnstile spun",
+  "device.their_private_business": "A scan the club does not record",
+};
+
+/**
+ * Which of the four this row is.
+ *
+ * Prefix rules only where the backend genuinely builds an action by concatenation
+ * (`gate.denied_<reason>`, `device.gate_open_<outcome>`, `device.activation_<outcome>`) —
+ * everywhere else it is an exact lookup, so an action nobody has written copy for reaches
+ * the `unknown` arm instead of borrowing somebody else's.
+ */
+export function classifyDoorRow(entry: DeviceActivityEntry): DoorRowKind {
+  const action = entry.action.trim();
+  if (action === "gate.opened" || action === OFFLINE_OPEN_ACTION) return "released";
+  if (action.startsWith("gate.denied")) return "refused";
+  if (action === "device.unknown_scan") return "refused";
+  // The refused half of an offline upload — see OFFLINE_OPEN_ACTION.
+  if (action.startsWith(`${OFFLINE_OPEN_ACTION}_`)) return "refused";
+  if (DOOR_EVENT_WORDS[action]) return "event";
+  // `device.activation_<outcome>` and `device.release_<outcome>`: a court box's rows, which
+  // are events on any screen that meets them and are never a door's outcome.
+  if (action.startsWith("device.activation_") || action.startsWith("device.release_")) return "event";
+  return "unknown";
+}
+
+/** True for the rows that ARE a scan decision — the only rows a door count may include. */
+export function isDoorScan(entry: DeviceActivityEntry): boolean {
+  const kind = classifyDoorRow(entry);
+  return kind === "released" || kind === "refused";
+}
+
+/**
+ * What a non-scan row reads as, and the honest arm when this build has never seen it.
+ *
+ * "Unrecognised event" rather than a humanised guess: `humanise("doors.shut_all")` gives
+ * "Shut all", which reads as something a reader can act on and is not. The raw token travels
+ * with it as the row's `title`, so whoever has to report a new action upstream still has it.
+ */
+export function describeDoorEvent(entry: DeviceActivityEntry): string {
+  return DOOR_EVENT_WORDS[entry.action.trim()] ?? UNRECOGNISED_EVENT;
+}
+
+export const UNRECOGNISED_EVENT = "Unrecognised event";
+
+/**
+ * The separate `events` array the door feed now reads, humanised.
+ *
+ * <p>
+ * The backend serves these as `{at, kind, actor_name|null}` with kinds such as `registered`,
+ * `renamed`, `details_changed`, `shut`, `reopened`, `shut_all`, `reopened_all`. They are the
+ * same facts as the `device.*` rows above, said in the door's own vocabulary rather than the
+ * audit trail's — so both spellings are answered here and a kind nobody has written copy for
+ * takes the same neutral arm as an unknown action.
+ * </p>
+ */
+export const DOOR_EVENT_KIND_WORDS: Record<string, string> = {
+  registered: "The board registered itself",
+  /**
+   * ONE kind for four things, and the copy must not pretend otherwise.
+   *
+   * The backend writes `device.updated` for a rename, a details change, a shut and a reopen
+   * alike, and records nothing that says which. "Someone renamed this door" over a shut
+   * would be a guess rendered as a fact — this round's own defect in a new place — so the
+   * sentence says what is actually known and points at the fields above it.
+   */
+  edited: "This door's details or state were changed",
+  removed: "This door was deleted",
+  clock_corrected: "The board's clock was out and was corrected",
+  unrecognised: UNRECOGNISED_EVENT,
+};
+
+export function describeDoorEventKind(event: DoorEventEntry): string {
+  return DOOR_EVENT_KIND_WORDS[event.kind.trim()] ?? UNRECOGNISED_EVENT;
+}
+
+/**
+ * The nine actions that ARE a scan, exactly as the backend enumerates them.
+ *
+ * <p>
+ * Held as a literal set as well as by the rules in {@link classifyDoorRow}, so
+ * `door-actions.test.ts` can assert the two agree in BOTH directions: no scan action is
+ * classified as an event, and no event action is classified as a scan. A prefix rule that
+ * silently widened would otherwise be invisible until a club saw a green "Refused".
+ * </p>
+ */
+export const DOOR_SCAN_ACTIONS = [
+  "gate.opened",
+  "gate.denied_not_recognised",
+  "gate.denied_member_not_active",
+  "gate.denied_no_booking",
+  "gate.denied_too_early",
+  "gate.denied_method_not_supported",
+  "gate.denied_not_a_gate",
+  "device.gate_open",
+  "device.unknown_scan",
+] as const;
+
+/**
+ * Actions that are CLUB-wide rather than a door's, and never appear on a door's own feed.
+ *
+ * Kept in the dictionary all the same: they reached the feed before the backend separated
+ * the two arrays, and a screen that met one again should read it rather than guess at it.
+ */
+export const DOOR_FLEET_ACTIONS = ["doors.shut_all", "doors.reopened_all", "doors.log_exported"] as const;
 
 /**
  * What an OFFLINE grant reads as: the board decided, and uploaded the row afterwards.

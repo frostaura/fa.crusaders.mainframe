@@ -112,10 +112,25 @@ describe("the in-app half of the new-application notification", () => {
     expect(strip.className).toContain("lg:hidden");
     expect(strip.className).not.toContain("md:hidden");
 
-    // And the cluster holding the gear cannot be squeezed by anything to its left, which
-    // is what put it under the right edge in the first place.
+    // And the cluster holding the gear cannot end up under the right edge, which is what
+    // put it there in the first place.
+    //
+    // This asserted `shrink-0` on the cluster, and `shrink-0` was the wrong instrument —
+    // see the comment on the cluster in `Layout.tsx`. It stopped the nav squeezing the
+    // cluster and, at the same time, stopped the cluster from ever being given a width
+    // narrow enough to wrap within: measured in Chromium at a 180 px CSS viewport (a 360 px
+    // phone at 200 % zoom) the cluster held one 167 px line inside a 148 px box and the gear
+    // went off the edge anyway. What holds the rule now is that the ROW wraps — a cluster
+    // that does not fit beside the nav takes a line of its own at full width — and that the
+    // cluster wraps inside itself, so the gear moves down rather than out.
     const gear = screen.getByRole("button", { name: "Open menu" });
-    expect(gear.parentElement!.parentElement!.className).toContain("shrink-0");
+    const cluster = gear.parentElement!.parentElement!;
+    expect(cluster.className).toContain("flex-wrap");
+    expect(cluster.className).toContain("min-w-0");
+    expect(cluster.parentElement!.className).toContain("flex-wrap");
+    // A fixed height cannot hold a row that has been allowed to wrap: it would clip the
+    // second line instead of growing to it.
+    expect(cluster.parentElement!.className).not.toMatch(/\bh-14\b/);
   });
 
   it("asks for nothing, and shows nothing, for a member who is not an admin", async () => {

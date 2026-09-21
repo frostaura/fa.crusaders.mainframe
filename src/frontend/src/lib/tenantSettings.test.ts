@@ -1,10 +1,14 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import {
+  CLUB_CONTACT_EMAIL_MAX_LENGTH, CLUB_CONTACT_PHONE_MAX_LENGTH,
   DEVICE_ALERT_COOLDOWN_MAX_MINUTES, DEVICE_ALERT_COOLDOWN_MIN_MINUTES,
-  DOOR_BOOKING_HORIZON_MAX_MINUTES, GATE_EARLY_ENTRY_MAX_MINUTES, GATE_EARLY_ENTRY_MIN_MINUTES,
-  GATE_UNLOCK_MAX_SECONDS, GATE_UNLOCK_MIN_SECONDS, deviceNumbersComplaint,
-  describeOfflineAfter, doorBookingHorizonMinutes, formatDayHours, gateSettingsComplaint,
-  offlineAfterSeconds, operatingHoursComplaint, parseDayHours, timezoneOptions,
+  DOOR_BOOKING_HORIZON_MAX_MINUTES, DOOR_REFUSAL_SPIKE_MAX_COUNT, DOOR_REFUSAL_SPIKE_MIN_COUNT,
+  GATE_EARLY_ENTRY_MAX_MINUTES, GATE_EARLY_ENTRY_MIN_MINUTES,
+  GATE_UNLOCK_MAX_SECONDS, GATE_UNLOCK_MIN_SECONDS, clubContactEmailComplaint,
+  clubContactPhoneComplaint, deviceNumbersComplaint,
+  describeOfflineAfter, doorBookingHorizonMinutes, doorSettingComplaints, doorSettingsComplaint,
+  formatDayHours, gateSettingComplaints, gateSettingsComplaint,
+  offlineAfterSeconds, operatingHoursComplaint, parseDayHours, settingAnchorId, timezoneOptions,
 } from "./tenantSettings";
 
 /**
@@ -355,5 +359,172 @@ describe("deviceNumbersComplaint", () => {
    */
   it("is quiet when the API never sent the key", () => {
     expect(deviceNumbersComplaint({ device_alert_cooldown_minutes: undefined })).toBeNull();
+  });
+});
+
+/**
+ * <b>The club's contact details, which are printed on a wall.</b> (B10 / C12)
+ *
+ * <p>
+ * Both inputs sit outside a <code>&lt;form&gt;</code>, so the browser's own validation never
+ * runs — and the page had none of its own, so anything typed was saved. The value then goes
+ * onto the printable door card that is put up beside the door and into the sentence a member
+ * reads when a door has just turned them away. Those are the two moments at which a club is
+ * least able to afford an address that is not one.
+ * </p>
+ *
+ * <p>
+ * <b>Empty is not invalid.</b> A club that has recorded no number is a state the member
+ * surfaces have copy for, and refusing it would make "no contact" impossible to express.
+ * </p>
+ */
+describe("clubContactPhoneComplaint", () => {
+  it("accepts the shapes a South African club actually writes", () => {
+    for (const phone of [
+      "076 226 1390", "+27 76 226 1390", "021-555-0134", "(021) 555 0134",
+      "0215550134", "+27 (0)21 555 0134, 076 226 1390",
+    ]) {
+      expect(clubContactPhoneComplaint(phone), phone).toBeNull();
+    }
+  });
+
+  it("allows empty and whitespace-only, which is a club with no number", () => {
+    expect(clubContactPhoneComplaint("")).toBeNull();
+    expect(clubContactPhoneComplaint("   ")).toBeNull();
+  });
+
+  /**
+   * Anything outside digits, space and `+ - ( ) ,`. A letter is the common typo (an admin
+   * writing "ask Sue") and an emoji is what a reviewer actually got saved and printed.
+   */
+  it("refuses characters no telephone has", () => {
+    for (const phone of ["076 226 1390 🎾", "ask Sue", "076-CALL", "076<script>", "021.555.0134"]) {
+      expect(clubContactPhoneComplaint(phone), phone).not.toBeNull();
+    }
+  });
+
+  /**
+   * The bound, exactly at it and one past it — read off the constant, because a test that
+   * restates 32 passes while the two of them disagree.
+   */
+  it("holds the length bound from the constant, measured after the trim", () => {
+    const atBound = "0".repeat(CLUB_CONTACT_PHONE_MAX_LENGTH);
+    expect(clubContactPhoneComplaint(atBound)).toBeNull();
+    expect(clubContactPhoneComplaint(` ${atBound} `)).toBeNull();
+    expect(clubContactPhoneComplaint("0".repeat(CLUB_CONTACT_PHONE_MAX_LENGTH + 1)))
+      .toContain(String(CLUB_CONTACT_PHONE_MAX_LENGTH));
+  });
+});
+
+describe("clubContactEmailComplaint", () => {
+  it("accepts addresses a club would give out", () => {
+    for (const email of [
+      "squash@example.co.za", "info@crusaders.co.za", "club.secretary@northwood-crusaders.com",
+      "bookings+doors@example.org", "a@b.co",
+    ]) {
+      expect(clubContactEmailComplaint(email), email).toBeNull();
+    }
+  });
+
+  it("allows empty, which is a club that gives out no address", () => {
+    expect(clubContactEmailComplaint("")).toBeNull();
+    expect(clubContactEmailComplaint("  ")).toBeNull();
+  });
+
+  /**
+   * The shapes that reach a printed card and are not addresses: a bare word, a missing
+   * domain, a missing local part, a space in the middle, two @s, and a hostname with no dot —
+   * which is the one a naive `includes("@")` check lets straight through.
+   */
+  it("refuses what is not an address", () => {
+    for (const email of [
+      "squash at example", "squash@", "@example.co.za", "squash@example",
+      "squash example@co.za", "a@b@c.co.za", "squash@.co.za", "squash@example..co.za",
+    ]) {
+      expect(clubContactEmailComplaint(email), email).not.toBeNull();
+    }
+  });
+
+  it("holds the length bound from the constant, measured after the trim", () => {
+    const tail = "@example.co.za";
+    const local = "a".repeat(CLUB_CONTACT_EMAIL_MAX_LENGTH - tail.length);
+    expect(clubContactEmailComplaint(local + tail)).toBeNull();
+    expect(clubContactEmailComplaint(`a${local}${tail}`))
+      .toContain(String(CLUB_CONTACT_EMAIL_MAX_LENGTH));
+  });
+});
+
+/**
+ * <b>A complaint has to know which field it is about.</b>
+ *
+ * <p>
+ * The string helpers answer "can this be saved", which is all a disabled button needed. A
+ * message tied to its own input, and a summary that links back to it, need the KEY — so the
+ * keyed form is the real answer and the string form is its first message. Keeping the string
+ * form derived rather than parallel is what stops the two of them drifting.
+ * </p>
+ */
+describe("the keyed complaints", () => {
+  const gate = { gate_unlock_seconds: 3, gate_access_policy: "active_member", gate_early_entry_minutes: 30 };
+  const door = {
+    door_log_retention_days: 90, door_refusal_spike_count: 8, door_refusal_spike_minutes: 20,
+    club_contact_phone: "076 226 1390", club_contact_email: "squash@example.co.za",
+  };
+
+  it("names the key the bad value sits on", () => {
+    expect(gateSettingComplaints({ ...gate, gate_unlock_seconds: 45 }))
+      .toEqual([{ key: "gate_unlock_seconds", message: gateSettingsComplaint({ ...gate, gate_unlock_seconds: 45 })! }]);
+    expect(doorSettingComplaints({ ...door, club_contact_email: "nope" })[0].key)
+      .toBe("club_contact_email");
+    expect(doorSettingComplaints({ ...door, door_refusal_spike_count: DOOR_REFUSAL_SPIKE_MAX_COUNT + 1 })[0].key)
+      .toBe("door_refusal_spike_count");
+  });
+
+  /**
+   * <b>Every bad field, not only the first.</b> The string form stops at one because a
+   * disabled button can only carry one reason; a summary that stopped at one would send an
+   * admin back down the page once per mistake.
+   */
+  it("reports all of them at once", () => {
+    const complaints = doorSettingComplaints({
+      ...door,
+      door_log_retention_days: 1,
+      door_refusal_spike_count: DOOR_REFUSAL_SPIKE_MIN_COUNT - 1,
+      club_contact_phone: "ask Sue",
+    });
+    expect(complaints.map((c) => c.key)).toEqual([
+      "door_log_retention_days", "door_refusal_spike_count", "club_contact_phone",
+    ]);
+  });
+
+  it("stays quiet on a document that is entirely fine", () => {
+    expect(gateSettingComplaints(gate)).toEqual([]);
+    expect(doorSettingComplaints(door)).toEqual([]);
+    expect(doorSettingComplaints({})).toEqual([]);
+  });
+
+  /** The string form is the keyed form's first message, by construction rather than by copy. */
+  it("keeps the two forms in step", () => {
+    const broken = { ...door, door_log_retention_days: 1 };
+    expect(doorSettingsComplaint(broken)).toBe(doorSettingComplaints(broken)[0].message);
+    expect(doorSettingsComplaint(door)).toBeNull();
+  });
+});
+
+/**
+ * The anchor a deep link lands on. (A9)
+ *
+ * <p>
+ * The doors page sends an admin to "change the release under Admin settings" and that page is
+ * about 5 400 px tall, so the link landed them at the top with one number to find. The id is
+ * derived from the settings key rather than written out per field, so the mechanism covers
+ * every setting rather than the one that prompted it.
+ * </p>
+ */
+describe("settingAnchorId", () => {
+  it("derives the id from the key, so any setting can be linked to", () => {
+    expect(settingAnchorId("gate_unlock_seconds")).toBe("setting-gate-unlock-seconds");
+    expect(settingAnchorId("club_contact_email")).toBe("setting-club-contact-email");
+    expect(settingAnchorId("door_refusal_spike_minutes")).toBe("setting-door-refusal-spike-minutes");
   });
 });

@@ -34,15 +34,23 @@ export function DoorTile({ row, now, tenantHeartbeat, timezone, dayStartedAt }: 
   const online = isOnline(device, offlineAfterSecondsFor(device, tenantHeartbeat), now);
   const nameId = `door-${device.id}-name`;
   return (
-    <Card>
-      <article aria-labelledby={nameId} className="space-y-3">
+    // B18. The tiles are a grid row and were sized by their own content, so a door carrying
+    // two signal chips pushed its own body down and left its neighbours' scan counts at a
+    // different height from its own — three cards in a row ending in three places. The card
+    // now fills its grid cell, the chip row RESERVES its height whether or not there are
+    // chips, and the counts block is pushed to the bottom with `mt-auto`, so the footers of
+    // every tile in a row line up whatever is above them.
+    <Card className="h-full">
+      <article aria-labelledby={nameId} className="flex h-full flex-col space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <h3 id={nameId} className="min-w-0 break-words text-base font-semibold">
             <Link to={`/admin/doors/${device.id}`} className="inline-flex min-h-11 items-center text-accent-strong">
               {device.name}
             </Link>
           </h3>
-          <DoorChips device={device} online={online} signals={row.signals} />
+          <span className="min-h-7">
+            <DoorChips device={device} online={online} signals={row.signals} />
+          </span>
         </div>
 
         <p className="min-w-0 break-words text-xs text-text-muted">
@@ -55,7 +63,7 @@ export function DoorTile({ row, now, tenantHeartbeat, timezone, dayStartedAt }: 
           {doorStateNotice(device, online, timezone)}
         </p>
 
-        <div className="border-t border-border pt-3">
+        <div className="mt-auto border-t border-border pt-3">
           <p className="text-xs text-text-muted">{doorScanCountHeading(dayStartedAt, timezone)}</p>
           <p className="text-sm text-text-secondary">{doorScanCountLine(row.today)}</p>
           {device.running_version && (

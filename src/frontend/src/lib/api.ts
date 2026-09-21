@@ -710,10 +710,75 @@ export type DeviceActivityEntry = {
   reason: string | null;
   /** True when the BOARD decided this by itself and uploaded the row afterwards. */
   offline: boolean;
+  /**
+   * When the club was TOLD about an offline row, as opposed to when the scan happened.
+   *
+   * <p>
+   * A4: a reviewer read "Last heard from 21:00" beside scans "decided at the door at 21:25"
+   * and could not reconcile them, because an offline row is stamped with the SCAN and
+   * arrives whenever the board next calls in. The two are different facts and the row says
+   * so. Optional — where the API does not carry it the copy says the club was told when the
+   * door next called in, which is true without naming a time it does not have.
+   * </p>
+   */
+  delivered_at?: string | null;
+  /**
+   * `at` is the SCAN instant; `delivered_at` is when the club was told, and is non-null on
+   * offline rows ONLY. Lists are ordered, paged and counted on the DELIVERY axis, so an
+   * offline row's `at` may be older than the rows around it — which is not a sorting fault
+   * and must not be rendered as one.
+   */
   /** The member, when `SubjectUserId` resolved to one. Null on an unknown code and on a boot. */
   member: DeviceActivityMember | null;
   /** First eight hex of the code's SHA-256 (B4) — the only thing that correlates two scans of one unknown code. */
   fingerprint: string | null;
+};
+
+/**
+ * Something that happened TO a door, as opposed to a scan AT one.
+ *
+ * <p>
+ * <b>It exists because the two were one list and the screen could not tell them apart.</b>
+ * `GET /admin/devices/{id}/activity` returns every audit row carrying the board's
+ * `device_id`, so an admin's own edit (`device.updated`) arrived in the same array as a
+ * refusal and was rendered as a green "Refused" chip — a door with thirteen edits and no
+ * scans reported "13 refused scans". The backend now separates them; this is the second
+ * half.
+ * </p>
+ *
+ * <p>
+ * <b>Optional on the way in, on purpose.</b> The page must be correct against an API that
+ * does not send it yet, so the feed derives its own event rows from `items` when `events` is
+ * absent and shows them exactly the same way. A shape that only works against the new
+ * backend is a page that is wrong for as long as the two lanes are out of step.
+ * </p>
+ */
+export type DoorEventEntry = {
+  at: string;
+  /** The raw audit token, carried so an unrecognised event is still reportable upstream. */
+  action: string;
+  /**
+   * `registered` · `edited` · `removed` · `clock_corrected` · `unrecognised`.
+   *
+   * <p>
+   * <b>`edited` is ONE kind covering rename, details change, shut and reopen</b> — the
+   * backend writes `device.updated` for all four and does not record which. So the copy for
+   * it says what is true ("this door's details or state changed") rather than guessing at a
+   * verb; a row reading "Someone renamed this door" over a shut would be this round's own
+   * defect in a new place. There is no actor on the wire, so no row names one.
+   * </p>
+   */
+  kind: string;
+};
+
+/**
+ * What the per-board activity route answers: the scans, and — where the API is new enough —
+ * the non-scan events beside them rather than mixed into them.
+ */
+export type DeviceActivityPage = {
+  items: DeviceActivityEntry[];
+  /** Always present for a gate; `[]` for a court box. Optional only for an older API. */
+  events?: DoorEventEntry[];
 };
 
 /**
@@ -1607,7 +1672,7 @@ export const endpoints = {
    * </p>
    */
   adminDeviceActivity: (id: string, limit = DEVICE_ACTIVITY_LIMIT) =>
-    api.get<{ items: DeviceActivityEntry[] }>(`/api/v1/admin/devices/${id}/activity${qs({ limit })}`),
+    api.get<DeviceActivityPage>(`/api/v1/admin/devices/${id}/activity${qs({ limit })}`),
 
   // Admin: the club's one device API key.
   adminDeviceApiKey: () => api.get<DeviceApiKey>("/api/v1/admin/devices/api-key"),
@@ -1715,6 +1780,20 @@ export type AdminDoorDevice = AdminDevice & {
   power_loss_behaviour?: PowerLossBehaviour;
   /** When this door was shut, for the standing notice. Null while it is open. */
   out_of_service_since?: string | null;
+  /**
+   * When a SHUT-ALL shut this door, as opposed to an admin shutting it on its own
+   * (WIRE-W1 §5's `shut_by_shut_all_at`). Null on a door shut individually.
+   *
+   * <p>
+   * C1: `reopen-all` reopens only what a shut-all shut, and the UI has to be able to say
+   * which doors those are BEFORE the request — the fleet Reopen control is labelled with
+   * the count it will actually reopen, and the confirm names the doors that will stay shut.
+   * Without this the page can only read the tenant-wide `shut_all_active`, which cannot
+   * distinguish a door shut on its own while a shut-all is standing. `undefined` means this
+   * API does not carry it yet and the page falls back to the flag.
+   * </p>
+   */
+  shut_by_shut_all_at?: string | null;
 };
 
 /**
@@ -1767,6 +1846,20 @@ export type DoorsView = {
   timezone: string;
   /** True while any door is shut by a shut-all — the club-wide banner's whole input (A1.5). */
   shut_all_active: boolean;
+  /**
+   * The two halves of "shut", NAMED rather than counted (C1).
+   *
+   * <p>
+   * `reopen-all` reopens only what a shut-all shut, so the UI has to be able to say which
+   * doors those are BEFORE the request: the fleet Reopen exists only while `shut_together`
+   * is non-empty and is labelled with that count, and `shut_individually` is what the
+   * confirm and the result name as staying shut. Optional here only so the page is correct
+   * against an API that has not landed them yet — it then falls back to the per-door
+   * `shut_by_shut_all_at`, and to the tenant-wide flag after that.
+   * </p>
+   */
+  shut_together?: { id: string; name: string; gate_key: string | null }[];
+  shut_individually?: { id: string; name: string; gate_key: string | null }[];
   /** Name ascending, stable. There is no sort parameter and no sort control. */
   doors: DoorRow[];
 };
@@ -1819,7 +1912,18 @@ export type FleetDoorResult = {
   power_loss_behaviour: PowerLossBehaviour;
 };
 
-export type FleetResult = { doors: FleetDoorResult[] };
+/**
+ * A shut-all / reopen-all answer.
+ *
+ * `left_shut` is C1's ruling made structural: a reopen-all that leaves doors shut says which
+ * ones, so a zero-change result can never print "0 doors reopened" with no reason. Optional
+ * because the backend lane lands it separately — the page names the doors it already knows
+ * about when the field is absent, rather than going silent.
+ */
+export type FleetResult = {
+  doors: FleetDoorResult[];
+  left_shut?: { id: string; name: string; gate_key: string | null }[];
+};
 
 function doorLogQuery(f: DoorLogFilters): string {
   return qs({
@@ -1850,14 +1954,27 @@ export const doorEndpoints = {
    * once already on the wallet CSV, and this is the same fix, not a new one.
    * </p>
    */
-  doorActivityCsv: async (filters: DoorLogFilters = {}): Promise<{ blob: Blob; filename: string }> => {
+  doorActivityCsv: async (
+    filters: DoorLogFilters = {},
+  ): Promise<{ blob: Blob; filename: string; rows: number | null; truncated: boolean }> => {
     const res = await fetchWithTimeout(doorEndpoints.doorActivityCsvUrl(filters), {
       headers: { ...(tokenStore.get() ? { authorization: `Bearer ${tokenStore.get()}` } : {}) },
     });
     if (!res.ok) throw await failureFrom(res);
     const disposition = res.headers.get("content-disposition") ?? "";
     const match = /filename="?([^"]+)"?/.exec(disposition);
-    return { blob: await res.blob(), filename: match?.[1] ?? "door-log.csv" };
+    // B3: the real row count, from the server, or NULL. The page announced the length of
+    // the list on screen — "50 scans downloaded" over a 165-row file — because that was the
+    // only number it had. `null` is the honest answer against an API that does not send the
+    // header; the copy then carries no number at all rather than the wrong one.
+    const header = res.headers.get("x-crusaders-rows");
+    const counted = Number(header);
+    const rows = header !== null && Number.isFinite(counted) && counted >= 0 ? counted : null;
+    // `X-Crusaders-Truncated` rather than comparing the count to a cap this side holds: the
+    // cap is the server's, and a client that decides "this looks like the limit" is wrong
+    // the day the server's limit moves.
+    const truncated = (res.headers.get("x-crusaders-truncated") ?? "").toLowerCase() === "true";
+    return { blob: await res.blob(), filename: match?.[1] ?? "door-log.csv", rows, truncated };
   },
 
   /**
@@ -1889,6 +2006,11 @@ export const doorEndpoints = {
    */
   doorFieldsSave: (
     id: string,
-    req: { location_note?: string; power_loss_behaviour?: PowerLossBehaviour },
+    req: {
+      name?: string;
+      gate_key?: string;
+      location_note?: string;
+      power_loss_behaviour?: PowerLossBehaviour;
+    },
   ) => api.patch<AdminDoorDevice>(`/api/v1/admin/devices/${id}`, { ...req }),
 };
