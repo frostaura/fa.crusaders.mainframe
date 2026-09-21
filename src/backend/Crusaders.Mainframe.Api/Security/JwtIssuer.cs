@@ -9,7 +9,30 @@ namespace Crusaders.Mainframe.Api.Security;
 public interface IJwtIssuer
 {
     string IssueAccess(Guid userId, Guid tenantId, string tenantSlug, IEnumerable<string> roles);
+
+    /// <summary>A purpose-scoped ticket carrying no roles — the wallet stream's, where the subject is the holder and there is nothing to be a role about.</summary>
     string IssueOneTime(Guid userId, Guid tenantId, string tenantSlug, string purpose, TimeSpan ttl);
+
+    /// <summary>
+    /// A purpose-scoped ticket that still says what the holder IS.
+    ///
+    /// <para>
+    /// <b>An admin stream needs this and the roleless overload cannot give it.</b> The ticket is
+    /// the only credential on a stream route — <c>EventSource</c> cannot set an
+    /// <c>Authorization</c> header — so the role policy cannot be what admits the request, and
+    /// the handler has to check the role itself. A ticket minted without roles makes that check
+    /// fail for everyone, including the admin who minted it, and the route is then 403 for its
+    /// entire audience with nothing logged anywhere.
+    /// </para>
+    ///
+    /// <para>
+    /// It carries no more authority than the roleless one: the purpose is accepted on exactly
+    /// one path (<see cref="TokenPurposes.IsValidFor"/>), so the role inside it cannot be spent
+    /// anywhere else.
+    /// </para>
+    /// </summary>
+    string IssueOneTime(
+        Guid userId, Guid tenantId, string tenantSlug, string purpose, TimeSpan ttl, IEnumerable<string> roles);
 }
 
 public sealed class JwtIssuer : IJwtIssuer
@@ -45,6 +68,10 @@ public sealed class JwtIssuer : IJwtIssuer
 
     public string IssueOneTime(Guid userId, Guid tenantId, string tenantSlug, string purpose, TimeSpan ttl)
         => Issue(userId, tenantId, tenantSlug, purpose, ttl, Array.Empty<string>());
+
+    public string IssueOneTime(
+        Guid userId, Guid tenantId, string tenantSlug, string purpose, TimeSpan ttl, IEnumerable<string> roles)
+        => Issue(userId, tenantId, tenantSlug, purpose, ttl, roles);
 
     private string Issue(Guid userId, Guid tenantId, string tenantSlug, string purpose, TimeSpan ttl, IEnumerable<string> roles)
     {

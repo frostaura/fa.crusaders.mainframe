@@ -762,3 +762,479 @@ public sealed class MonitoringErrorsHttpTests
         Assert.Equal(2, critical.TrimEnd('\r', '\n').Split("\r\n").Length);
     }
 }
+
+/// <summary>
+/// <c>GET /api/v1/admin/monitoring/summary</c> — the club's estate in one read.
+///
+/// <para>
+/// <b>Its counts are the club's, not the list's.</b> The list answers a filtered question; this
+/// answers the unfiltered one — how much is open, right now, at each severity — because that is
+/// the number a page puts in its heading. A summary computed from whatever chip happened to be
+/// selected is a summary that changes when somebody clicks.
+/// </para>
+/// </summary>
+[Collection(HttpTestCollection.Name)]
+public sealed class MonitoringSummaryHttpTests
+{
+    private readonly PostgresFixture _pg;
+
+    public MonitoringSummaryHttpTests(PostgresFixture pg) => _pg = pg;
+
+    private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
+
+    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+
+    private Task<ControlBoardClub> SeedAsync(TestWebAppFactory factory, string prefix)
+        => ControlBoardClub.SeedAsync(factory, prefix, MonitoringFixture.Settings);
+
+    /// <summary>
+    /// A club with nothing wrong answers a whole envelope of zeros and a NULL worst offender.
+    /// Null rather than an empty object, because "the worst board is —" with a blank after it is
+    /// a sentence a page renders, and null is a state it can branch on.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_healthy_club_has_no_worst_offender_rather_than_a_blank_one()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory, "sumclean");
+        await club.AddBoxAsync(factory, "box-sum01", [1], lastSeenAt: DateTimeOffset.UtcNow);
+
+        var body = await club.AdminClient(factory).GetFromJsonAsync<JsonElement>(MonitoringFixture.SummaryPath);
+
+        Assert.Equal(0, body.GetProperty("open").GetProperty("error").GetInt32());
+        Assert.Empty(body.GetProperty("by_device").EnumerateArray());
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("worst_offender").ValueKind);
+        Assert.Equal(0, body.GetProperty("last_24h").GetProperty("opened").GetInt32());
+        Assert.Equal(0, body.GetProperty("last_24h").GetProperty("resolved").GetInt32());
+    }
+
+    /// <summary>
+    /// Two boards, one of them badly off. The counts are open-only, the per-board block names
+    /// its worst severity, and the worst offender is the one with the most open faults.
+    /// </summary>
+    [SkippableFact]
+    public async Task Two_boards_and_the_worse_one_is_named()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory, "sumtwo");
+        var now = DateTimeOffset.UtcNow;
+        var bad = await club.AddBoxAsync(factory, "box-sum02", [1], lastSeenAt: now);
+        var mild = await club.AddBoxAsync(factory, "box-sum03", [2], lastSeenAt: now);
+
+        await MonitoringFixture.AddErrorAsync(factory, club, DeviceErrorCodes.MegaLinkLost, new ErrorRow { DeviceId = bad });
+        await MonitoringFixture.AddErrorAsync(factory, club, DeviceErrorCodes.WdtReset, new ErrorRow { DeviceId = bad });
+        await MonitoringFixture.AddErrorAsync(factory, club, DeviceErrorCodes.HttpTimeout, new ErrorRow { DeviceId = bad });
+        await MonitoringFixture.AddErrorAsync(factory, club, DeviceErrorCodes.LcdResync, new ErrorRow { DeviceId = mild });
+
+        // Resolved yesterday — open is open, and a closed fault is not one.
+        await MonitoringFixture.AddErrorAsync(
+            factory, club, DeviceErrorCodes.RelayCmdDropped,
+            new ErrorRow { DeviceId = mild, ResolvedAt = now.AddHours(-2), ResolvedByUserId = club.AdminUserId });
+
+        var body = await club.AdminClient(factory).GetFromJsonAsync<JsonElement>(MonitoringFixture.SummaryPath);
+
+        var open = body.GetProperty("open");
+        Assert.Equal(1, open.GetProperty("critical").GetInt32());
+        Assert.Equal(1, open.GetProperty("error").GetInt32());
+        Assert.Equal(2, open.GetProperty("warning").GetInt32());
+        Assert.Equal(0, open.GetProperty("info").GetInt32());
+
+        var boards = body.GetProperty("by_device").EnumerateArray().ToList();
+        Assert.Equal(2, boards.Count);
+
+        // Worst first, which is the order an admin would walk the club in.
+        Assert.Equal("box-sum02", boards[0].GetProperty("device_code").GetString());
+        Assert.Equal(3, boards[0].GetProperty("open").GetInt32());
+        Assert.Equal("critical", boards[0].GetProperty("worst").GetString());
+        Assert.Equal("online", boards[0].GetProperty("link").GetString());
+        Assert.Equal(1, boards[1].GetProperty("open").GetInt32());
+        Assert.Equal("warning", boards[1].GetProperty("worst").GetString());
+
+        Assert.Equal("box-sum02", body.GetProperty("worst_offender").GetProperty("device_code").GetString());
+        Assert.Equal(3, body.GetProperty("worst_offender").GetProperty("open").GetInt32());
+
+        Assert.Equal(5, body.GetProperty("last_24h").GetProperty("opened").GetInt32());
+        Assert.Equal(1, body.GetProperty("last_24h").GetProperty("resolved").GetInt32());
+    }
+
+    /// <summary>
+    /// <b>The per-board list is deliberately shorter than the count above it, and that is not a
+    /// discrepancy.</b> A fault with no board — an authentication failure has none by
+    /// construction — is counted in <c>open</c> and cannot appear under a board, because
+    /// inventing a board for it would attribute a stranger's bad key to a club's own hardware.
+    /// The list, with no device filter, is where it is found.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_fault_with_no_board_counts_as_open_and_is_charged_to_no_board()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory, "sumorphan");
+        await MonitoringFixture.AddErrorAsync(
+            factory, club, DeviceErrorCodes.AuthFailed,
+            new ErrorRow { Source = DeviceErrorSource.Server, ClaimedMac = "ffeeddccbbaa" });
+
+        var body = await club.AdminClient(factory).GetFromJsonAsync<JsonElement>(MonitoringFixture.SummaryPath);
+
+        Assert.Equal(1, body.GetProperty("open").GetProperty("error").GetInt32());
+        Assert.Empty(body.GetProperty("by_device").EnumerateArray());
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("worst_offender").ValueKind);
+    }
+
+    /// <summary>
+    /// D2-B29, on this surface. A club that asked for a 600-second heartbeat gets boxes running
+    /// at 300, so the band is derived from 300 — otherwise the fault list and the control board
+    /// say two different things about the same silent box and neither is obviously wrong.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_band_comes_from_the_effective_heartbeat_not_the_configured_one()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ControlBoardClub.SeedAsync(
+            factory, "sumeff",
+            """{"slice_minutes":15,"timezone":"UTC","heartbeat_seconds":600}""");
+        var now = DateTimeOffset.UtcNow;
+
+        // 1000 s of silence. Against the CONFIGURED 600 x 3 = 1800 it is merely silent; against
+        // the EFFECTIVE 300 x 3 = 900 it is offline, which is what the boxes actually do.
+        var quiet = await club.AddBoxAsync(factory, "box-sum04", [1], lastSeenAt: now.AddSeconds(-1000));
+        var shut = await club.AddBoxAsync(
+            factory, "box-sum05", [2], lastSeenAt: now, enabled: false, outOfServiceSince: now.AddHours(-1));
+
+        await MonitoringFixture.AddErrorAsync(factory, club, DeviceErrorCodes.MegaLinkLost, new ErrorRow { DeviceId = quiet });
+        await MonitoringFixture.AddErrorAsync(factory, club, DeviceErrorCodes.MegaLinkLost, new ErrorRow { DeviceId = shut });
+
+        var body = await club.AdminClient(factory).GetFromJsonAsync<JsonElement>(MonitoringFixture.SummaryPath);
+        var boards = body.GetProperty("by_device").EnumerateArray()
+            .ToDictionary(b => b.GetProperty("device_code").GetString()!, b => b.GetProperty("link").GetString());
+
+        Assert.Equal("offline", boards["box-sum04"]);
+
+        // The club's own decision outranks the board's chatter: a board an admin shut is out of
+        // service even while it is heartbeating.
+        Assert.Equal("out_of_service", boards["box-sum05"]);
+    }
+
+    /// <summary>A club's summary never counts another club's faults.</summary>
+    [SkippableFact]
+    public async Task A_clubs_summary_never_counts_another_clubs_faults()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var mine = await SeedAsync(factory, "summine");
+        var theirs = await SeedAsync(factory, "sumtheirs");
+
+        var theirBox = await theirs.AddBoxAsync(factory, "box-sumtheirs", [1], lastSeenAt: DateTimeOffset.UtcNow);
+        await MonitoringFixture.AddErrorAsync(factory, theirs, DeviceErrorCodes.MegaLinkLost, new ErrorRow { DeviceId = theirBox });
+
+        var body = await mine.AdminClient(factory).GetFromJsonAsync<JsonElement>(MonitoringFixture.SummaryPath);
+
+        Assert.Equal(0, body.GetProperty("open").GetProperty("critical").GetInt32());
+        Assert.Empty(body.GetProperty("by_device").EnumerateArray());
+        Assert.DoesNotContain("box-sumtheirs", JsonSerializer.Serialize(body), StringComparison.Ordinal);
+    }
+}
+
+/// <summary>
+/// Resolving a fault — one at a time, and a list at a time.
+///
+/// <para>
+/// <b>Three answers, and the two refusals are deliberately different.</b> A fault this club does
+/// not have is <c>404</c>; a fault somebody else already closed is <c>409</c>, because the row
+/// IS there, an admin can see who closed it, and answering "not found" for a row on their screen
+/// is how two admins in one club start distrusting the page. The bulk route is per-item and
+/// never all-or-nothing: the honest answer to a list of checkboxes is a list of outcomes.
+/// </para>
+/// </summary>
+[Collection(HttpTestCollection.Name)]
+public sealed class MonitoringResolveHttpTests
+{
+    private readonly PostgresFixture _pg;
+
+    public MonitoringResolveHttpTests(PostgresFixture pg) => _pg = pg;
+
+    private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
+
+    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+
+    private Task<ControlBoardClub> SeedAsync(TestWebAppFactory factory, string prefix)
+        => ControlBoardClub.SeedAsync(factory, prefix, MonitoringFixture.Settings);
+
+    private static HttpContent Note(string? note) => JsonContent.Create(new { note });
+
+    /// <summary>
+    /// The row comes back resolved, named and noted — the SAME shape the list hands out, so a
+    /// console can replace the row it was clicked in rather than re-fetching the page.
+    /// </summary>
+    [SkippableFact]
+    public async Task Resolving_answers_the_whole_row_and_writes_the_trail()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory, "resone");
+        var box = await club.AddBoxAsync(factory, "box-res01", [1], lastSeenAt: DateTimeOffset.UtcNow);
+        var id = await MonitoringFixture.AddErrorAsync(
+            factory, club, DeviceErrorCodes.LcdI2cTimeout, new ErrorRow { DeviceId = box });
+
+        var response = await club.AdminClient(factory)
+            .PostAsync(MonitoringFixture.ResolvePath(id), Note("reseated the ribbon cable"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var row = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(id, row.GetProperty("id").GetGuid());
+        Assert.NotEqual(JsonValueKind.Null, row.GetProperty("resolved_at").ValueKind);
+        Assert.Equal("Board Admin", row.GetProperty("resolved_by_name").GetString());
+        Assert.Equal("reseated the ribbon cable", row.GetProperty("resolution_note").GetString());
+        Assert.Equal(DeviceErrorCodes.HeadlineOf(DeviceErrorCodes.LcdI2cTimeout), row.GetProperty("headline").GetString());
+
+        // It leaves the fault list's default question, which is the visible effect.
+        var open = await club.AdminClient(factory).GetFromJsonAsync<JsonElement>(MonitoringFixture.ErrorsPath);
+        Assert.Empty(MonitoringFixture.Rows(open));
+
+        // And the club's trail says who did it. Not a door action — a board's health is not a
+        // door action, which is the defect DoorAuditActions is named after.
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var audit = await db.AuditLogs.IgnoreQueryFilters().AsNoTracking()
+            .Where(a => a.TenantId == club.TenantId && a.Action == AdminMonitoringEndpoints.ResolvedAction)
+            .SingleAsync();
+        Assert.Equal(club.AdminUserId, audit.ActorUserId);
+        Assert.Contains(id.ToString(), audit.DetailsJson!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A second resolve is <c>409 already_resolved</c> and changes NOTHING — not the resolver,
+    /// not the note, not the instant. Two admins clicking at once must not let the second
+    /// overwrite the first's record of what was actually done.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_second_resolve_is_a_conflict_and_overwrites_nothing()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory, "restwice");
+        var box = await club.AddBoxAsync(factory, "box-res02", [1], lastSeenAt: DateTimeOffset.UtcNow);
+        var id = await MonitoringFixture.AddErrorAsync(
+            factory, club, DeviceErrorCodes.WdtReset, new ErrorRow { DeviceId = box });
+
+        var client = club.AdminClient(factory);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync(MonitoringFixture.ResolvePath(id), Note("first"))).StatusCode);
+
+        var second = await client.PostAsync(MonitoringFixture.ResolvePath(id), Note("second"));
+        Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+        Assert.Equal(
+            AdminMonitoringEndpoints.AlreadyResolved,
+            (await second.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+
+        Assert.Equal("first", (await MonitoringFixture.ReadAsync(factory, id))!.ResolutionNote);
+    }
+
+    /// <summary>
+    /// A fault this club does not have — including another club's, which is the case that
+    /// matters. Non-committal on purpose: the refusal must not tell an admin whether the id
+    /// exists somewhere else.
+    /// </summary>
+    [SkippableFact]
+    public async Task An_unknown_or_foreign_fault_is_not_found_and_is_untouched()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var mine = await SeedAsync(factory, "resmine");
+        var theirs = await SeedAsync(factory, "restheirs");
+        var theirBox = await theirs.AddBoxAsync(factory, "box-res03", [1], lastSeenAt: DateTimeOffset.UtcNow);
+        var theirFault = await MonitoringFixture.AddErrorAsync(
+            factory, theirs, DeviceErrorCodes.MegaLinkLost, new ErrorRow { DeviceId = theirBox });
+
+        var client = mine.AdminClient(factory);
+
+        var invented = await client.PostAsync(MonitoringFixture.ResolvePath(Guid.NewGuid()), Note("x"));
+        Assert.Equal(HttpStatusCode.NotFound, invented.StatusCode);
+
+        var foreign = await client.PostAsync(MonitoringFixture.ResolvePath(theirFault), Note("x"));
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+        Assert.Equal(
+            AdminMonitoringEndpoints.ErrorNotFound,
+            (await foreign.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+
+        // Their fault is exactly as open as it was.
+        Assert.Null((await MonitoringFixture.ReadAsync(factory, theirFault))!.ResolvedAt);
+    }
+
+    /// <summary>A member cannot close a fault. It is the club's record of its own estate.</summary>
+    [SkippableFact]
+    public async Task A_member_may_not_resolve_a_fault()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory, "resrole");
+        var box = await club.AddBoxAsync(factory, "box-res04", [1], lastSeenAt: DateTimeOffset.UtcNow);
+        var id = await MonitoringFixture.AddErrorAsync(
+            factory, club, DeviceErrorCodes.MegaLinkLost, new ErrorRow { DeviceId = box });
+
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            (await club.MemberClient(factory).PostAsync(MonitoringFixture.ResolvePath(id), Note("x"))).StatusCode);
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            (await club.MemberClient(factory).PostAsync(MonitoringFixture.BulkPath, JsonContent.Create(new { ids = new[] { id } }))).StatusCode);
+
+        Assert.Null((await MonitoringFixture.ReadAsync(factory, id))!.ResolvedAt);
+    }
+
+    /// <summary>
+    /// The note is bounded to the column, truncated rather than refused — and the row that comes
+    /// back carries the STORED note, so the console shows the admin exactly what was kept rather
+    /// than the longer thing they typed beside a row that disagrees with it.
+    /// </summary>
+    [SkippableFact]
+    public async Task An_over_long_note_is_truncated_and_the_response_says_what_was_kept()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory, "resnote");
+        var box = await club.AddBoxAsync(factory, "box-res05", [1], lastSeenAt: DateTimeOffset.UtcNow);
+        var id = await MonitoringFixture.AddErrorAsync(
+            factory, club, DeviceErrorCodes.HttpTimeout, new ErrorRow { DeviceId = box });
+
+        var essay = new string('n', DeviceError.MaxDetailLength + 400);
+        var response = await club.AdminClient(factory).PostAsync(MonitoringFixture.ResolvePath(id), Note(essay));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var kept = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("resolution_note").GetString();
+
+        Assert.Equal(DeviceError.MaxDetailLength, kept!.Length);
+        Assert.Equal(kept, (await MonitoringFixture.ReadAsync(factory, id))!.ResolutionNote);
+    }
+
+    /// <summary>A resolve with no note at all is a resolve. A fault an admin simply attended to needs no sentence.</summary>
+    [SkippableFact]
+    public async Task A_resolve_with_no_note_is_still_a_resolve()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory, "resnonote");
+        var box = await club.AddBoxAsync(factory, "box-res06", [1], lastSeenAt: DateTimeOffset.UtcNow);
+        var id = await MonitoringFixture.AddErrorAsync(
+            factory, club, DeviceErrorCodes.Boot, new ErrorRow { DeviceId = box });
+
+        var response = await club.AdminClient(factory).PostAsync(MonitoringFixture.ResolvePath(id), Note(null));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(
+            JsonValueKind.Null,
+            (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("resolution_note").ValueKind);
+        Assert.NotNull((await MonitoringFixture.ReadAsync(factory, id))!.ResolvedAt);
+    }
+
+    // ---- the bulk route --------------------------------------------------------------
+
+    /// <summary>
+    /// <b>Per-item, in request order, and never all-or-nothing.</b> One open fault, one somebody
+    /// already closed, and one that belongs to another club: three different outcomes in one
+    /// <c>200</c>, and the two that could not be resolved do not cost the one that could. The
+    /// mutant is a transactional batch, where the foreign id takes the other two down with it.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_bulk_resolve_answers_each_item_in_request_order()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory, "resbulk");
+        var theirs = await SeedAsync(factory, "resbulkx");
+        var box = await club.AddBoxAsync(factory, "box-res07", [1], lastSeenAt: DateTimeOffset.UtcNow);
+        var theirBox = await theirs.AddBoxAsync(factory, "box-res08", [1], lastSeenAt: DateTimeOffset.UtcNow);
+        var now = DateTimeOffset.UtcNow;
+
+        var open = await MonitoringFixture.AddErrorAsync(
+            factory, club, DeviceErrorCodes.MegaLinkLost, new ErrorRow { DeviceId = box });
+        var closed = await MonitoringFixture.AddErrorAsync(
+            factory, club, DeviceErrorCodes.LcdResync,
+            new ErrorRow { DeviceId = box, ResolvedAt = now.AddHours(-1), ResolvedByUserId = club.AdminUserId });
+        var foreign = await MonitoringFixture.AddErrorAsync(
+            factory, theirs, DeviceErrorCodes.WdtReset, new ErrorRow { DeviceId = theirBox });
+        var second = await MonitoringFixture.AddErrorAsync(
+            factory, club, DeviceErrorCodes.HttpTimeout, new ErrorRow { DeviceId = box });
+
+        // Deliberately ordered so the failure sits in the MIDDLE: an implementation that stops
+        // at the first problem passes a test where the problem is last.
+        var ids = new[] { open, closed, foreign, second };
+
+        var response = await club.AdminClient(factory)
+            .PostAsync(MonitoringFixture.BulkPath, JsonContent.Create(new { ids, note = "swept the club" }));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(4, body.GetProperty("requested").GetInt32());
+        Assert.Equal(2, body.GetProperty("succeeded").GetInt32());
+        Assert.Equal(2, body.GetProperty("failed").GetInt32());
+
+        var results = body.GetProperty("results").EnumerateArray().ToList();
+        Assert.Equal(ids, results.Select(r => r.GetProperty("id").GetGuid()));
+        Assert.Equal(AdminMonitoringEndpoints.ResolvedStatus, results[0].GetProperty("status").GetString());
+        Assert.Equal(AdminMonitoringEndpoints.AlreadyResolved, results[1].GetProperty("status").GetString());
+        Assert.Equal(AdminMonitoringEndpoints.FailedStatus, results[2].GetProperty("status").GetString());
+        Assert.Equal(AdminMonitoringEndpoints.ErrorNotFound, results[2].GetProperty("error").GetString());
+        Assert.Equal(AdminMonitoringEndpoints.ResolvedStatus, results[3].GetProperty("status").GetString());
+
+        // The effects, not just the report: two closed here, the other club's untouched, and
+        // the one that was already closed keeps the resolver it already had.
+        Assert.Equal("swept the club", (await MonitoringFixture.ReadAsync(factory, open))!.ResolutionNote);
+        Assert.Equal("swept the club", (await MonitoringFixture.ReadAsync(factory, second))!.ResolutionNote);
+        Assert.Null((await MonitoringFixture.ReadAsync(factory, foreign))!.ResolvedAt);
+        Assert.Null((await MonitoringFixture.ReadAsync(factory, closed))!.ResolutionNote);
+    }
+
+    /// <summary>
+    /// The batch is bounded, the refusal NAMES the bound, and an empty list is its own refusal.
+    /// A console that has to discover a ceiling by hitting it will hit it in front of an admin.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_batch_is_bounded_and_the_refusal_states_the_bound()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory, "resbound");
+        var client = club.AdminClient(factory);
+
+        var tooMany = Enumerable.Range(0, AdminMonitoringEndpoints.MaxBulkIds + 1).Select(_ => Guid.NewGuid()).ToArray();
+        var refused = await client.PostAsync(MonitoringFixture.BulkPath, JsonContent.Create(new { ids = tooMany }));
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+
+        var body = await refused.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(AdminMonitoringEndpoints.TooManyIds, body.GetProperty("error").GetString());
+        Assert.Equal(AdminMonitoringEndpoints.MaxBulkIds, body.GetProperty("max_ids").GetInt32());
+
+        var empty = await client.PostAsync(MonitoringFixture.BulkPath, JsonContent.Create(new { ids = Array.Empty<Guid>() }));
+        Assert.Equal(HttpStatusCode.BadRequest, empty.StatusCode);
+        Assert.Equal(
+            AdminMonitoringEndpoints.NoIds,
+            (await empty.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+
+        // A list naming one fault twice is a console bug, and answering it twice hides it.
+        var twin = Guid.NewGuid();
+        var duplicated = await client.PostAsync(
+            MonitoringFixture.BulkPath, JsonContent.Create(new { ids = new[] { twin, twin } }));
+        Assert.Equal(HttpStatusCode.BadRequest, duplicated.StatusCode);
+        Assert.Equal(
+            AdminMonitoringEndpoints.DuplicateId,
+            (await duplicated.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+    }
+}

@@ -502,6 +502,16 @@ public static class AdminMonitoringEndpoints
     /// <summary>
     /// Mints the one-minute, purpose-scoped credential the stream is opened with. Minted by a
     /// POST so it never reaches an access log — see <see cref="TokenPurposes.WalletStream"/>.
+    ///
+    /// <para>
+    /// <b>The ticket carries the admin role, and it has to.</b> The role policy cannot be what
+    /// admits a stream request — the credential is in the query string, because
+    /// <c>EventSource</c> cannot set a header — so the role is checked inside
+    /// <see cref="StreamAsync"/>, against this token. A roleless ticket makes that check fail
+    /// for the admin who just minted it, which is a route that is 403 to its entire audience
+    /// with nothing logged anywhere. The route itself is already admin-only, so the claim
+    /// records what this caller was found to be rather than granting them anything.
+    /// </para>
     /// </summary>
     private static IResult MintTicket(HttpContext ctx, IJwtIssuer jwt, ITenantContext tenant)
     {
@@ -510,7 +520,7 @@ public static class AdminMonitoringEndpoints
 
         var ticket = jwt.IssueOneTime(
             userId.Value, tenant.TenantId, tenant.TenantSlug,
-            TokenPurposes.MonitoringStream, TokenPurposes.WalletStreamTicketTtl);
+            TokenPurposes.MonitoringStream, TokenPurposes.WalletStreamTicketTtl, ["admin"]);
 
         return Results.Ok(new
         {
