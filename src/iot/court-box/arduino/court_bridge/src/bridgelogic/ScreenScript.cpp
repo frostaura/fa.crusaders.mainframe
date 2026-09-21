@@ -55,9 +55,9 @@ struct ScreenSpec {
 constexpr HoldClass holdClassFor(uint16_t holdSeconds) {
   return holdSeconds == kChoiceSeconds
              ? HoldClass::Choice
-             : (holdSeconds == kCardSeconds ? HoldClass::Card
-                                            : (holdSeconds == kWaitSeconds ? HoldClass::Wait
-                                                                           : HoldClass::Revert));
+             : (holdSeconds == kCardSeconds
+                    ? HoldClass::Card
+                    : (holdSeconds == kWaitSeconds ? HoldClass::Wait : HoldClass::Revert));
 }
 
 constexpr RowSpec kBlank = {"", RowArg::None, ""};

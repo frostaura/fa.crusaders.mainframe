@@ -66,9 +66,9 @@
 #include <stdint.h>
 
 #include "bridgelogic/WallClock.h"
-#include "devlink/LcdSettings.h"
 #include "court/ButtonMap.h"
 #include "court/Session.h"
+#include "devlink/LcdSettings.h"
 #include "protocol/Protocol.h"
 
 namespace bridgelogic {

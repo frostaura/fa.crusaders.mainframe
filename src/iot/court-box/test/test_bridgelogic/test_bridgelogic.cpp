@@ -1290,7 +1290,8 @@ void test_corpus_member_display_names_the_member_or_greets_them_anyway() {
   // Present. The greeting is the member's only confirmation that the box knows
   // who they are, and it never changes what they are granted.
   size_t n = bodyOf(responseVector("activate-response-ok-named"), body, sizeof(body));
-  bridgelogic::ActivationResult r = flow.onActivateResponse(200U, body, n, kCorpusCourts, devlink::kMaxCourts);
+  bridgelogic::ActivationResult r =
+      flow.onActivateResponse(200U, body, n, kCorpusCourts, devlink::kMaxCourts);
   TEST_ASSERT_TRUE(r.outcome.action == court::Action::TurnOn);
   TEST_ASSERT_EQUAL_UINT8(2U, r.outcome.court); // court_number 3 of [1,2,3,4]
   bridgelogic::readMemberDisplay(body, n, facts);
@@ -1368,7 +1369,8 @@ void test_corpus_the_relay_restore_vectors_parse_exactly_as_declared() {
 
   // Two relays to restore, with their booking references.
   size_t n = bodyOf(responseVector("heartbeat-response-relays-restore"), body, sizeof(body));
-  TEST_ASSERT_TRUE(devlink::parseRelayRestore(body, n, restored, bridgelogic::kStateCourts, count, &rejected));
+  TEST_ASSERT_TRUE(
+      devlink::parseRelayRestore(body, n, restored, bridgelogic::kStateCourts, count, &rejected));
   TEST_ASSERT_EQUAL_UINT8(2U, count);
   TEST_ASSERT_EQUAL_UINT8(0U, rejected);
   TEST_ASSERT_EQUAL_UINT8(0U, restored[0].relay);
@@ -1384,7 +1386,8 @@ void test_corpus_the_relay_restore_vectors_parse_exactly_as_declared() {
   count = 0xFFU;
   rejected = 0xFFU;
   n = bodyOf(responseVector("heartbeat-response-relays-empty"), body, sizeof(body));
-  TEST_ASSERT_TRUE(devlink::parseRelayRestore(body, n, restored, bridgelogic::kStateCourts, count, &rejected));
+  TEST_ASSERT_TRUE(
+      devlink::parseRelayRestore(body, n, restored, bridgelogic::kStateCourts, count, &rejected));
   TEST_ASSERT_EQUAL_UINT8(0U, count);
   TEST_ASSERT_EQUAL_UINT8(0U, rejected);
 
@@ -1397,7 +1400,8 @@ void test_corpus_the_relay_restore_vectors_parse_exactly_as_declared() {
   // diagnostic that silently drops what it could not read is a contract drift
   // nobody hears about.
   n = bodyOf(responseVector("heartbeat-response-relays-malformed"), body, sizeof(body));
-  TEST_ASSERT_TRUE(devlink::parseRelayRestore(body, n, restored, bridgelogic::kStateCourts, count, &rejected));
+  TEST_ASSERT_TRUE(
+      devlink::parseRelayRestore(body, n, restored, bridgelogic::kStateCourts, count, &rejected));
   TEST_ASSERT_EQUAL_UINT8(1U, count);
   TEST_ASSERT_EQUAL_UINT8(2U, rejected);
   TEST_ASSERT_EQUAL_UINT8(1U, restored[0].relay);
@@ -1407,7 +1411,8 @@ void test_corpus_the_relay_restore_vectors_parse_exactly_as_declared() {
   // believes and the clamp is the device's, applied once at the point of use.
   // Narrowing it here would make the two halves of a disagreement invisible.
   n = bodyOf(responseVector("heartbeat-response-relays-over-cap"), body, sizeof(body));
-  TEST_ASSERT_TRUE(devlink::parseRelayRestore(body, n, restored, bridgelogic::kStateCourts, count, &rejected));
+  TEST_ASSERT_TRUE(
+      devlink::parseRelayRestore(body, n, restored, bridgelogic::kStateCourts, count, &rejected));
   TEST_ASSERT_EQUAL_UINT8(1U, count);
   TEST_ASSERT_EQUAL_UINT32(9999U, restored[0].remainingSeconds);
   TEST_ASSERT_TRUE(restored[0].remainingSeconds > proto::kRelayHardCapSeconds);
@@ -2512,8 +2517,7 @@ void test_activate_reads_every_field_it_acts_on_from_the_top_level() {
 
   // A field of the wrong JSON type is absent, not coerced.
   const char quoted[] = "{\"activated\":\"true\"}";
-  TEST_ASSERT_TRUE(
-      flow.onActivateResponse(200U, quoted, len(quoted), kCourts, kCourtCount).fallbackToRoster);
+  TEST_ASSERT_TRUE(flow.onActivateResponse(200U, quoted, len(quoted), kCourts, kCourtCount).fallbackToRoster);
 }
 
 void test_walkup_reads_every_field_it_acts_on_from_the_top_level() {
@@ -2536,7 +2540,8 @@ void test_walkup_reads_every_field_it_acts_on_from_the_top_level() {
   TEST_ASSERT_FALSE(r.outcome.recognised);
 
   // `opens_at` — what the member is told to come back for.
-  const char opens[] = "{\"error\":\"club_closed\",\"detail\":{\"opens_at\":\"23:59\"},\"opens_at\":\"06:00\"}";
+  const char opens[] =
+      "{\"error\":\"club_closed\",\"detail\":{\"opens_at\":\"23:59\"},\"opens_at\":\"06:00\"}";
   r = bridgelogic::onWalkUpResponse(400U, opens, len(opens), 1U, 30U);
   TEST_ASSERT_NOT_NULL(strstr(r.outcome.line2, "06:00"));
   TEST_ASSERT_NULL(strstr(r.outcome.line2, "23:59"));
@@ -2554,8 +2559,7 @@ void test_the_flat_scan_is_kept_where_it_is_genuinely_wanted() {
   // heartbeat; a decoy in `activated` costs a lit court.
   const char body[] = "{\"config\":{\"slice_minutes\":15,\"button_map\":[\"court:A\",\"minutes:30\"]}}";
   TEST_ASSERT_NOT_EQUAL(devapi::json::kNotFound, devapi::json::findArray(body, len(body), "button_map"));
-  TEST_ASSERT_EQUAL(devapi::json::kNotFound,
-                    devapi::json::findTopLevelArray(body, len(body), "button_map"));
+  TEST_ASSERT_EQUAL(devapi::json::kNotFound, devapi::json::findTopLevelArray(body, len(body), "button_map"));
 
   // `accepted_through` IS narrowed, at its call site in the composition root's
   // drainEvents: it decides which queued attendance events are dropped, and
@@ -2567,7 +2571,6 @@ void test_the_flat_scan_is_kept_where_it_is_genuinely_wanted() {
   TEST_ASSERT_TRUE(devapi::json::topLevelUnsignedField(ack, len(ack), "accepted_through", through));
   TEST_ASSERT_EQUAL_UINT32(4U, through);
 }
-
 
 // ---------------------------------------------------------------------------
 // B8 — a real per-boot id on this box's events
@@ -2615,7 +2618,6 @@ void test_this_boot_has_an_identity_and_it_is_never_the_wires_absent_value() {
   TEST_ASSERT_NULL(strstr(legacy, "boot_id"));
 }
 
-
 // ---------------------------------------------------------------------------
 // B6 — the wall clock the box borrows, and the blank when it cannot
 // ---------------------------------------------------------------------------
@@ -2638,14 +2640,14 @@ void test_server_time_is_read_as_club_local_wall_time_or_refused() {
   second = 12345U;
   TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom(nullptr, second));
   TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("", second));
-  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21T18:45", second));      // truncated
-  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026/09/21T18:45:07", second));   // wrong separators
-  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21X18:45:07", second));   // wrong date/time mark
-  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21Tab:45:07", second));   // not a digit
-  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("20x6-09-21T18:45:07", second));   // nor in the date
-  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21T24:00:00", second));   // out of range
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21T18:45", second));    // truncated
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026/09/21T18:45:07", second)); // wrong separators
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21X18:45:07", second)); // wrong date/time mark
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21Tab:45:07", second)); // not a digit
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("20x6-09-21T18:45:07", second)); // nor in the date
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21T24:00:00", second)); // out of range
   TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21T18:60:07", second));
-  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21T18:45:60", second));   // leap second
+  TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21T18:45:60", second)); // leap second
   TEST_ASSERT_FALSE(bridgelogic::secondOfDayFrom("2026-09-21T-8:45:07", second));
   TEST_ASSERT_EQUAL_UINT32(12345U, second);
 }
@@ -2742,7 +2744,6 @@ void test_a_clock_nobody_has_confirmed_for_too_long_blanks_rather_than_lies() {
     TEST_ASSERT_FALSE(clock.trusted(base + window + 1U + (5UL * 60000UL) + 1U));
   }
 }
-
 
 // ---------------------------------------------------------------------------
 // B4 — the layout contract, over EVERY screen at once
