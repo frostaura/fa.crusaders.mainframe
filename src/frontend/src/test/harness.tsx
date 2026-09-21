@@ -883,6 +883,10 @@ function matchesLogFilters(
   if (door && String(entryDoor.id) !== door) return false;
   if (removedDoor && String(entryDoor.gate_key ?? entryDoor.name ?? "") !== removedDoor) return false;
   if (outcome && !doorOutcomeOf(entry).includes(outcome)) return false;
+  // The API narrows by reason too, and this stub did not — so a page filtering to "Too early"
+  // was handed every row and could claim any behaviour it liked about the result.
+  const reason = query.get("reason");
+  if (reason && String(entry.reason ?? "") !== reason) return false;
   // The retention clamp the API applies, so a page that states a range states a real one.
   if (at < Math.max(range.from, floor)) return false;
   return at <= range.to;

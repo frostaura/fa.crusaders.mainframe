@@ -275,13 +275,16 @@ const OFFLINE_OPENED = "Lock released while offline";
  * What an offline refusal reads as.
  *
  * <p>
- * It names nobody and it says why it names nobody. An offline board that does not find a
- * code in its cached roster has no way to resolve it to a member — there is nothing to
- * identify, which is a different thing from a member the club failed to identify. "Unknown
- * member" would claim the second.
+ * <b>E-L2 / WIRE-R2 §3.</b> It rendered as "Refused / No reason recorded", which reads as a
+ * gap in the trail. There is no gap: the board looked the code up in the list it last
+ * downloaded and did not find it, and that IS the reason. It is also why the row names
+ * nobody — an unmatched code resolves to nothing at all, which is a different thing from a
+ * member the club failed to identify, and "Unknown member" would claim the second. The one
+ * line that reconciles the naming and the not-naming is {@link OFFLINE_WHO_NOTE}, printed
+ * once beside the rows rather than repeated on each of them.
  * </p>
  */
-const OFFLINE_REFUSED = "Refused while offline — the door cannot say who";
+const OFFLINE_REFUSED = "Code not on the door's saved list";
 
 /** Actions this screen has written copy for. Anything else is humanised — see below. */
 const ACTION_WORDS: Record<string, string> = {

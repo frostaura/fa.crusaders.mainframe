@@ -1556,7 +1556,9 @@ describe("AdminDevices", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Box activity" }));
 
       expect(await screen.findByText(/Unknown code · 9ab0cd12/)).toBeInTheDocument();
-      expect(screen.getByText(/the door cannot say who/)).toBeInTheDocument();
+      // E-L2 / WIRE-R2 §3: the board looked the code up in the list it last downloaded and
+      // did not find it. That IS the reason, and "No reason recorded" read as a gap.
+      expect(screen.getByText(/Code not on the door's saved list/)).toBeInTheDocument();
       // And not a member the club failed to identify, which is a different claim.
       expect(document.body.textContent).not.toContain("Unknown member");
     });

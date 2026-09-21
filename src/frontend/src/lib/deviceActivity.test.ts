@@ -128,14 +128,21 @@ describe("describeActivityReason", () => {
   });
 
   /**
-   * And the offline refusal names NOBODY, because the door genuinely cannot: an offline
-   * board that does not find a code in its roster has no way to resolve it to a member.
-   * Saying "unknown member" would read as a member the club failed to identify; the truth
-   * is that there is nothing to identify.
+   * <b>E-L2 / WIRE-R2 §3.</b> It rendered as "Refused / No reason recorded", which reads as a
+   * gap in the trail. There is no gap: the board looked the code up in the list it last
+   * downloaded and did not find it, and that IS the reason.
+   *
+   * <p>
+   * It also names nobody, because the door genuinely cannot — an unmatched code resolves to
+   * nothing at all, which is a different thing from a member the club failed to identify.
+   * That half is now one line beside the rows ({@link OFFLINE_WHO_NOTE}) rather than repeated
+   * on every one of them.
+   * </p>
    */
-  it("says an offline refusal cannot name anybody", () => {
+  it("says an offline refusal was a code the door's list did not hold", () => {
     const words = describeActivityReason(entry({ action: "device.unknown_scan", reason: null, offline: true }));
-    expect(words).toBe("Refused while offline — the door cannot say who");
+    expect(words).toBe("Code not on the door's saved list");
+    expect(words).not.toContain("No reason recorded");
   });
 
   /** A reason nobody has copy for is still shown, readably — same rule as an action. */

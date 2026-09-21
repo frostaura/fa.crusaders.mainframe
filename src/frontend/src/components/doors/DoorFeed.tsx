@@ -3,7 +3,8 @@ import { Card } from "../Card";
 import { DoorFeedRow } from "./DoorFeedRow";
 import { ACTIVITY_READ_FAILED, activityEmptyNotice, isDoorScan } from "../../lib/deviceActivity";
 import {
-  DOOR_EVENTS_NOTE, doorEventRows, doorQuietNotice, doorScanCountHeading, doorScanCountLine,
+  DOOR_EVENTS_NOTE, OFFLINE_WHO_NOTE, doorEventRows, doorQuietNotice, doorScanCountHeading,
+  doorScanCountLine,
 } from "../../lib/doorsCopy";
 import { clubDayAndClock } from "../../lib/clubClock";
 import {
@@ -64,12 +65,24 @@ function FeedBody({ read, clock }: { read: FeedRead; clock: FeedClock }) {
    */
   const newest = scans.reduce((max, row) => (row.at > max ? row.at : max), scans[0].at);
   const quiet = doorQuietNotice(newest, clock.dayStartedAt, clock.now, clock.timezone);
+  // A3: said once, where the offline rows are. A reviewer read nine of them — some naming a
+  // member, some not — with nothing on the page to reconcile the two. The list IS the
+  // reconciliation: a code on it resolves to its holder, a code that is not resolves to
+  // nothing at all.
+  const anyOffline = scans.some((entry) => entry.offline);
   return (
     <>
       {quiet && <p role="status" className="rounded-lg bg-warning-soft px-3 py-2 text-sm text-warning-strong">{quiet}</p>}
+      {anyOffline && <p className="text-xs text-text-muted">{OFFLINE_WHO_NOTE}</p>}
       <ul>
         {scans.map((entry, i) => (
-          <DoorFeedRow key={`${entry.at}-${entry.action}-${i}`} entry={entry} now={clock.now} />
+          <DoorFeedRow
+            key={`${entry.at}-${entry.action}-${i}`}
+            entry={entry}
+            now={clock.now}
+            // A7 / O1: the CLUB's zone, from the same read the counts come from.
+            timezone={clock.timezone}
+          />
         ))}
       </ul>
       {/* Only when the read came back FULL. "Showing the 50 most recent" over four rows is

@@ -57,7 +57,6 @@ class DoorsErrorBoundaryInner extends Component<BoundaryProps, BoundaryState> {
     // hears about until a reviewer finds it again. There is no error-reporting service in
     // this product, so the console is where it goes.
     this.props.onError?.(error);
-    // eslint-disable-next-line no-console -- the only channel this product has for a caught render fault
     console.error("A doors page failed to render.", error);
   }
 

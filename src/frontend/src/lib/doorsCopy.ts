@@ -146,6 +146,37 @@ export function doorPickerLabel(device: { name: string; gate_key: string | null 
   return `${device.name} — ${UNNAMED_GATE}`;
 }
 
+/**
+ * What the picker's "Removed doors" group calls one of them (A2).
+ *
+ * The stored name, else the stored key, else the key the rows were written against — which
+ * is at least a string an admin can match against a board they remember.
+ */
+export function removedDoorName(door: { key: string; name?: string | null; gate_key?: string | null }): string {
+  const name = (door.name ?? "").trim();
+  if (name !== "" && name !== GATE_PLACEHOLDER_NAME) return name;
+  const key = (door.gate_key ?? "").trim();
+  return key !== "" ? key : door.key;
+}
+
+/**
+ * <b>A6 — "50 scans, newest first" read as a total, and the file had 70.</b>
+ *
+ * <p>
+ * It was the length of one cursor page, printed as if it were the answer to the question the
+ * page exists to answer, and it is the number an admin repeats to a committee. WIRE-R2 §3
+ * gives the log a `total` for the filtered range, so the heading can say how much of it is on
+ * screen. Where the API sends no total the sentence says "so far" rather than inventing one —
+ * falling back to the page length is how the wrong number got printed in the first place.
+ * </p>
+ */
+export function doorLogCountLine(showing: number, total: number | null): string {
+  const scans = showing === 1 ? "scan" : "scans";
+  if (total === null) return `Showing ${showing} ${scans} so far, newest first.`;
+  if (showing >= total) return `Showing all ${plural(total, "scan")} in this range, newest first.`;
+  return `Showing ${showing} of ${plural(total, "scan")} in this range, newest first.`;
+}
+
 /** The row's whole door clause — the name, and the removal said once after it. */
 export function doorRowName(door: DoorLogDoor | null | undefined): string {
   const identity = doorRowIdentity(door);
@@ -699,16 +730,48 @@ export const NO_REASON_RECORDED = "No reason recorded";
  * the door next called in", which invents a delay for a row that had none.
  * </p>
  */
-export function doorScanTiming(at: string, deliveredAt: string | null | undefined): string {
-  if (!deliveredAt) return clubInstant(at);
-  return `Decided at the door at ${clubClock(at)} — the door told us at ${clubClock(deliveredAt)}.`;
+export function doorScanTiming(
+  at: string, deliveredAt: string | null | undefined, timezone?: string,
+): string | null {
+  // A7: the row prints the clock face itself now, so a row with ONE instant has nothing left
+  // for this line to add and returns null rather than repeating the time underneath itself.
+  if (!deliveredAt) return null;
+  const decided = clubClock(at, timezone);
+  const told = clubClock(deliveredAt, timezone);
+  // A3: "decided at the door at 09:38 — the door told us at 09:38" is one fact printed
+  // twice, and nine rows of it taught a reviewer to read the pair as a clock disagreeing
+  // with itself. When the two land in one minute the row says so in words and prints one.
+  if (decided === told) return `Decided at the door at ${decided}, and the club heard within the minute.`;
+  return `Decided at the door at ${decided} — the door told us at ${told}.`;
 }
 
 /** The long form, for a `title` where the fact has to arrive once and completely. */
-export function doorScanTimingLong(at: string, deliveredAt: string | null | undefined): string {
-  if (!deliveredAt) return clubInstant(at);
-  return `Decided at the door at ${clubInstant(at)} — the door told us at ${clubInstant(deliveredAt)}.`;
+export function doorScanTimingLong(
+  at: string, deliveredAt: string | null | undefined, timezone?: string,
+): string {
+  if (!deliveredAt) return clubInstant(at, timezone);
+  const decided = clubInstant(at, timezone);
+  const told = clubInstant(deliveredAt, timezone);
+  if (clubClock(at, timezone) === clubClock(deliveredAt, timezone)) {
+    return `Decided at the door at ${decided}, and the club heard within the minute.`;
+  }
+  return `Decided at the door at ${decided} — the door told us at ${told}.`;
 }
+
+/**
+ * Why some offline rows name a member and others cannot (A3).
+ *
+ * <p>
+ * A reviewer read nine offline rows where some carried a name and some said the door could
+ * not say who, and there was nothing on the page to reconcile them. It is not a fault and it
+ * is not a privacy setting: a cut-off board decides from the list it last downloaded, so a
+ * code that IS on that list resolves to its holder and a code that is not resolves to
+ * nothing at all. Said once, where the offline rows are, rather than left to be inferred.
+ * </p>
+ */
+export const OFFLINE_WHO_NOTE = "An offline row names somebody when the code was on the door's saved"
+  + " list — that is what the list is. A code that is not on it resolves to nobody at all, so the"
+  + " door has no name to record.";
 
 /**
  * What the "Door events" block is, said once at the top of it.

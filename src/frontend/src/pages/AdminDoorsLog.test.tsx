@@ -107,7 +107,7 @@ describe("the club door log", () => {
   it("renders no table and no sort control at all", async () => {
     open([doorLogFixture()]);
 
-    await screen.findByText(/scans?, newest first/);
+    await screen.findByText(/newest first/);
     expect(document.querySelector("table")).toBeNull();
     expect(screen.queryByRole("button", { name: /sort/i })).toBeNull();
     expect(screen.queryByRole("columnheader")).toBeNull();
@@ -115,23 +115,85 @@ describe("the club door log", () => {
 
   // --- the filters ----------------------------------------------------------------
 
-  it("defaults to the last 24 hours and asks the API for that range", async () => {
+  /**
+   * <b>A4.</b> The page used to build "now minus 24 hours" itself and send a `from` — a
+   * second opinion about the club's day, and a different instant every time it was called,
+   * which is why the CSV had to be handed the list's own copy of it. The range is the
+   * server's now: one parameter, resolved in the club's zone.
+   */
+  it("defaults to the last 24 hours and asks the server to resolve it", async () => {
     const { stub } = open([doorLogFixture()]);
 
-    await screen.findByText(/scans?, newest first/);
+    await screen.findByText(/newest first/);
     expect(screen.getByLabelText("When")).toHaveValue("24h");
-    const read = stub.calls.find((c) => c.path.includes("/doors/activity"));
-    const from = new URL(`http://x${read!.path}`).searchParams.get("from");
-    const hoursAgo = (Date.now() - new Date(from!).getTime()) / 3_600_000;
-    expect(hoursAgo).toBeGreaterThan(23.9);
-    expect(hoursAgo).toBeLessThan(24.1);
+    const read = new URL(`http://x${stub.calls.find((c) => c.path.includes("/doors/activity"))!.path}`);
+    expect(read.searchParams.get("period")).toBe("last_24h");
+    expect(read.searchParams.get("from")).toBeNull();
+    expect(read.searchParams.get("day")).toBeNull();
+  });
+
+  /**
+   * <b>A4 — the six ways a club actually asks "when".</b> "Last 24 hours" is rolling, and a
+   * chair exporting "yesterday's" scans after an incident was handed half of yesterday and
+   * half of today with nothing on the page saying so.
+   */
+  it("offers Today, Yesterday and a specific day as well as the rolling windows", async () => {
+    open([doorLogFixture()]);
+
+    await screen.findByLabelText("When");
+    for (const label of ["Today", "Yesterday", "Last 24 hours", "Last 7 days", "Last 30 days", "A specific day"]) {
+      expect(screen.getByRole("option", { name: label })).toBeInTheDocument();
+    }
+  });
+
+  it("sends the club-local period the club picked, and never two ranges at once", async () => {
+    const { stub } = open([doorLogFixture()], {}, ["/admin/doors/log?range=yesterday"]);
+
+    // Yesterday genuinely holds none of today's rows, so the page settles on its empty state
+    // — which is itself the point: the window is a calendar day, not a rolling 24 hours.
+    await screen.findByText(/No scans/);
+    const read = new URL(`http://x${stub.calls.find((c) => c.path.includes("/doors/activity"))!.path}`);
+    expect(read.searchParams.get("period")).toBe("yesterday");
+    // WIRE-R2 §3: more than one of period / day / from-to is a 400 `range_conflict`.
+    expect(read.searchParams.get("day")).toBeNull();
+    expect(read.searchParams.get("from")).toBeNull();
+  });
+
+  it("asks for one club-local day, by day, once a day is chosen", async () => {
+    const { stub } = open([doorLogFixture()], {}, ["/admin/doors/log?range=day&day=2026-09-20"]);
+
+    await screen.findByLabelText("Which day");
+    const read = new URL(`http://x${stub.calls.filter((c) => c.path.includes("/doors/activity")).at(-1)!.path}`);
+    expect(read.searchParams.get("day")).toBe("2026-09-20");
+    expect(read.searchParams.get("period")).toBeNull();
+  });
+
+  /** A typo in a shared link is not turned into a failed read: the API answers 400 `day_invalid`. */
+  it("does not send a malformed day", async () => {
+    const { stub } = open([doorLogFixture()], {}, ["/admin/doors/log?range=day&day=20-09-2026"]);
+
+    await screen.findByLabelText("Which day");
+    const read = new URL(`http://x${stub.calls.find((c) => c.path.includes("/doors/activity"))!.path}`);
+    expect(read.searchParams.get("day")).toBeNull();
+    expect(read.searchParams.get("period")).toBe("last_24h");
+  });
+
+  /**
+   * <b>A4's other half.</b> The page states the range the SERVER resolved, in words, above
+   * the rows — not a second client-side computation, which is a different instant from the
+   * one the rows were read with.
+   */
+  it("states the exact resolved range in words, from the server's own answer", async () => {
+    open([doorLogFixture()], {}, ["/admin/doors/log?range=yesterday"]);
+
+    expect(await screen.findByText(/^Scans from .* to .*, club time\.$/)).toBeInTheDocument();
   });
 
   /** Query-string filters are what let a door page pre-filter and a link be shareable. */
   it("reads its filters out of the query string", async () => {
     const { stub } = open([doorLogFixture()], {}, [`/admin/doors/log?door=${DOOR_ID}`]);
 
-    await screen.findByText(/scans?, newest first/);
+    await screen.findByText(/newest first/);
     expect(screen.getByLabelText("Door")).toHaveValue(DOOR_ID);
     expect(stub.calls.find((c) => c.path.includes("/doors/activity"))!.path).toContain(`door=${DOOR_ID}`);
   });
@@ -139,7 +201,7 @@ describe("the club door log", () => {
   it("re-reads immediately on a filter change, with no Apply button", async () => {
     const { stub } = open([doorLogFixture()]);
 
-    await screen.findByText(/scans?, newest first/);
+    await screen.findByText(/newest first/);
     const before = stub.calls.filter((c) => c.path.includes("/doors/activity")).length;
     fireEvent.change(screen.getByLabelText("When"), { target: { value: "7d" } });
 
@@ -173,9 +235,31 @@ describe("the club door log", () => {
     ]);
     renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/doors/log"] });
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Nothing at the doors has changed");
+    /*
+     * C5: the failure goes through the ONE polite region this page has, rather than through a
+     * second live region beside it. The reviewer's finding was the mirror of this — the count
+     * lived in a `role="status"` that existed only while there were rows, so narrowing the log
+     * to an EMPTY result announced nothing at all. One region, four outcomes, always mounted.
+     */
+    expect(await screen.findByRole("status")).toHaveTextContent("Nothing at the doors has changed");
+    expect(screen.queryAllByRole("status")).toHaveLength(1);
     expect(screen.queryByText(/No scans at any door/)).toBeNull();
     expect(screen.queryByText(/No scans match those filters/)).toBeNull();
+  });
+
+  /**
+   * <b>C5 — the region is there before there is anything to say, and stays.</b> It is removed
+   * regions that announce nothing; a region that is merely empty announces its next value.
+   */
+  it("keeps one polite region through loading, a result and an empty result", async () => {
+    open([doorLogFixture()]);
+
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/newest first/));
+
+    fireEvent.change(screen.getByLabelText("Outcome"), { target: { value: "too_early" } });
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("No scans match those filters."));
+    expect(screen.getAllByRole("status")).toHaveLength(1);
   });
 
   it("says nothing happened when nothing happened", async () => {
@@ -227,10 +311,10 @@ describe("the club door log", () => {
   it("appends older scans rather than replacing them, and moves focus to the first new row", async () => {
     open(manyRows(4), { pageSize: 2 });
 
-    await screen.findByText("2 scans, newest first");
+    await screen.findByText(/Showing 2 of 4 scans in this range, newest first./);
     fireEvent.click(screen.getByRole("button", { name: "Load older scans" }));
 
-    await waitFor(() => expect(screen.getByText("4 scans, newest first")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Showing all 4 scans in this range/)).toBeInTheDocument());
     const rows = screen.getAllByRole("listitem");
     expect(rows).toHaveLength(4);
     expect(rows[2]).toHaveFocus();
@@ -252,7 +336,7 @@ describe("the club door log", () => {
     ]);
     renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/doors/log"] });
 
-    await screen.findByText("2 scans, newest first");
+    await screen.findByText(/Showing 2 scans so far/);
     fireEvent.click(screen.getByRole("button", { name: "Load older scans" }));
 
     expect(await screen.findByText(/Older scans could not be read/))
@@ -265,7 +349,7 @@ describe("the club door log", () => {
   it("drops the button and says so when the range is exhausted", async () => {
     open(manyRows(2), { pageSize: 50, retentionDays: 90 });
 
-    await screen.findByText("2 scans, newest first");
+    await screen.findByText(/Showing all 2 scans in this range/);
     expect(screen.queryByRole("button", { name: "Load older scans" })).toBeNull();
     expect(screen.getByText(/That is everything kept for this range/))
       .toHaveTextContent("Scans older than 90 days are deleted.");
@@ -280,7 +364,7 @@ describe("the club door log", () => {
   it("asks for the CSV with byte-identical filters to the list", async () => {
     const { stub } = open([doorLogFixture()], {}, [`/admin/doors/log?door=${DOOR_ID}&range=7d`]);
 
-    await screen.findByText(/scans?, newest first/);
+    await screen.findByText(/newest first/);
     const listQuery = new URL(`http://x${stub.calls.find((c) => c.path.includes("/doors/activity"))!.path}`).search;
 
     fireEvent.click(screen.getByRole("button", { name: "Download CSV" }));
@@ -299,7 +383,7 @@ describe("the club door log", () => {
   it("fetches the CSV with the bearer token rather than navigating to it", async () => {
     const { stub } = open([doorLogFixture()]);
 
-    await screen.findByText(/scans?, newest first/);
+    await screen.findByText(/newest first/);
     fireEvent.click(screen.getByRole("button", { name: "Download CSV" }));
 
     await waitFor(() => {
@@ -388,7 +472,7 @@ describe("the club door log", () => {
       doorLogFixture({ at: ago(120), action: "doors.shut_all", reason: null }),
     ]);
 
-    expect(await screen.findByText("1 scan, newest first")).toBeInTheDocument();
+    expect(await screen.findByText(/Showing 1 scan so far/)).toBeInTheDocument();
     expect(screen.queryByText(/Someone changed this door's details/)).toBeNull();
     expect(screen.queryByText(/Every door was shut together/)).toBeNull();
   });
@@ -484,7 +568,7 @@ describe("the club door log", () => {
   it("survives a row with no door at all rather than blanking the page", async () => {
     open([doorLogFixture({ door: null })]);
 
-    expect(await screen.findByText(/scans?, newest first/)).toBeInTheDocument();
+    expect(await screen.findByText(/newest first/)).toBeInTheDocument();
     expect(screen.getByRole("list")).toHaveTextContent(/since been removed/i);
   });
 
@@ -500,7 +584,7 @@ describe("the club door log", () => {
       action: "gate.denied_no_booking",
     })]);
 
-    expect(await screen.findByText(/scans?, newest first/)).toBeInTheDocument();
+    expect(await screen.findByText(/newest first/)).toBeInTheDocument();
     expect(screen.getByRole("list")).toHaveTextContent(/door that has since been removed/i);
   });
 
@@ -513,11 +597,167 @@ describe("the club door log", () => {
       doorLogFixture({ at: ago(180), door: { id: null, name: null, gate_key: null, removed: true } }),
     ], { pageSize: 2 });
 
-    await screen.findByText(/2 scans/);
+    await screen.findByText(/Showing 2 of 4 scans/);
     fireEvent.click(screen.getByRole("button", { name: "Load older scans" }));
 
     await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(4));
     expect(screen.getByRole("list")).toHaveTextContent(/since been removed/i);
+  });
+
+  /**
+   * <b>A2 — deleting a door made its whole history unreachable from this page.</b>
+   *
+   * Its own page 404s, it was not in this picker, and a reviewer reading the delete confirm
+   * concluded the records had been destroyed. They had not: the rows stay under the name they
+   * stored until the club's retention rule takes them. This is how somebody gets to them.
+   */
+  it("offers the doors that are gone, in their own group, by the name their rows stored", async () => {
+    open([doorLogFixture()], { removedDoors: [{ key: "side-door", name: "Side door", gate_key: "side-door" }] });
+
+    const group = await screen.findByRole("group", { name: "Removed doors" });
+    expect(group).toHaveTextContent("Side door");
+  });
+
+  it("filters to a removed door by the key its rows stored, never by an id it has not got", async () => {
+    const { stub } = open([doorLogFixture()], {
+      removedDoors: [{ key: "side-door", name: "Side door", gate_key: "side-door" }],
+    });
+
+    await screen.findByRole("group", { name: "Removed doors" });
+    fireEvent.change(screen.getByLabelText("Door"), { target: { value: "removed:side-door" } });
+
+    await waitFor(() => {
+      const read = new URL(`http://x${stub.calls.filter((c) => c.path.includes("/doors/activity")).at(-1)!.path}`);
+      expect(read.searchParams.get("removed_door")).toBe("side-door");
+      // Never both: the API answers 400 for the pair (WIRE-R2 §1).
+      expect(read.searchParams.get("door")).toBeNull();
+    });
+  });
+
+  /** A removed door has no page, so the page does not offer to send anybody to one. */
+  it("does not link a removed door to a door page that is gone", async () => {
+    open([], {
+      removedDoors: [{ key: "side-door", name: "Side door", gate_key: "side-door" }],
+    }, ["/admin/doors/log?removed_door=side-door"]);
+
+    await screen.findByText(/No scans at Side door/);
+    expect(screen.queryByRole("link", { name: "Check it on Doors" })).toBeNull();
+  });
+
+  // --- A6: the count that read as a total ------------------------------------------
+
+  /**
+   * "50 scans, newest first" over a 70-row range. It was the length of one cursor page
+   * printed as the answer to the question the page exists to answer, and it is the number an
+   * admin repeats to a committee.
+   */
+  it("says how much of the range is on screen, not how many rows it has", async () => {
+    open(manyRows(4), { pageSize: 2 });
+
+    expect(await screen.findByText("Showing 2 of 4 scans in this range, newest first."))
+      .toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("2 scans, newest first");
+  });
+
+  it("says 'so far' rather than inventing a total the API did not send", async () => {
+    const whoami = signIn({ isAdmin: true });
+    stubFetch([
+      { path: "/api/v1/whoami", body: whoami },
+      { path: "/api/v1/wallet", body: { balance_credits: 0 } },
+      { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
+      {
+        path: "/api/v1/admin/doors/activity",
+        body: { items: [doorLogFixture()], next_cursor: null, retention_days: 90 },
+      },
+      { path: "/api/v1/admin/doors", status: 503, body: {} },
+    ]);
+    renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/doors/log"] });
+
+    expect(await screen.findByText("Showing 1 scan so far, newest first.")).toBeInTheDocument();
+  });
+
+  /**
+   * <b>B1, one field along.</b> This page counts what IS a scan rather than trusting the
+   * route. So if it filtered anything out of what arrived, the server's total counts rows
+   * this page would not show — it is not a number about scans and is not stated.
+   */
+  it("drops the server's total when it filtered rows out of the page", async () => {
+    open([
+      doorLogFixture(),
+      doorLogFixture({ at: ago(60), action: "device.updated", reason: null }),
+    ]);
+
+    expect(await screen.findByText("Showing 1 scan so far, newest first.")).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("of 2 scans");
+  });
+
+  // --- A7 / E-M5: the time a touch user can actually see ---------------------------
+
+  /**
+   * Every row printed "6m ago" and kept the exact time in a `title` — invisible on a phone,
+   * invisible to a screen reader, invisible to touch. "What time did that happen" is the
+   * committee's question and the screen would not answer it.
+   */
+  it("shows the club-local clock face on every row, with the age beneath it", async () => {
+    open([doorLogFixture({ at: new Date(Date.now() - 300_000).toISOString() })]);
+
+    const row = (await screen.findAllByRole("listitem"))[0];
+    expect(row.textContent).toMatch(/\d{2}:\d{2}/);
+    expect(row).toHaveTextContent("5m ago");
+  });
+
+  it("adds the day when the row is not today's", async () => {
+    open([doorLogFixture({ at: new Date(Date.now() - 3 * 86_400_000).toISOString() })], {},
+      ["/admin/doors/log?range=7d"]);
+
+    const row = (await screen.findAllByRole("listitem"))[0];
+    // "Fri 18 Sept, 11:18" — B20: a weekday always carries its date, because the log ranges
+    // over thirty days and four Fridays are in it.
+    expect(row.textContent).toMatch(/\w{3} \d{1,2} \w{3,4}, \d{2}:\d{2}/);
+    expect(row).toHaveTextContent("3d ago");
+  });
+
+  // --- C4: the buttons that dropped focus to <body> --------------------------------
+
+  /**
+   * <b>Every re-rendering button on this surface blurred to `&lt;body&gt;`.</b> The cause is
+   * the same each time: a browser blurs a disabled element, so disabling the control an admin
+   * has just pressed throws their place away. The nodes stay mounted and enabled; `aria-busy`
+   * says what they are doing and the handler guards the double press.
+   */
+  it("keeps focus on Refresh while it is re-reading", async () => {
+    open([doorLogFixture()]);
+
+    const refresh = await screen.findByRole("button", { name: "Refresh" });
+    refresh.focus();
+    fireEvent.click(refresh);
+
+    expect(document.activeElement).not.toBe(document.body);
+    expect(screen.getByRole("button", { name: /Refresh|Reading/ })).toHaveFocus();
+  });
+
+  it("keeps focus on Download CSV while it is preparing", async () => {
+    open([doorLogFixture()]);
+
+    const download = await screen.findByRole("button", { name: "Download CSV" });
+    download.focus();
+    fireEvent.click(download);
+
+    expect(document.activeElement).not.toBe(document.body);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Download CSV" })).toHaveFocus());
+  });
+
+  /** And on the last page, where the button itself unmounts, focus lands on the notice. */
+  it("never drops focus to the body when the last page exhausts the range", async () => {
+    open(manyRows(3), { pageSize: 2 });
+
+    await screen.findByText(/Showing 2 of 3/);
+    const older = screen.getByRole("button", { name: "Load older scans" });
+    older.focus();
+    fireEvent.click(older);
+
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(3));
+    expect(document.activeElement).not.toBe(document.body);
   });
 
   // --- staleness ------------------------------------------------------------------

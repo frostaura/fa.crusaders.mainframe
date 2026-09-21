@@ -400,8 +400,12 @@ describe("the doors surface", () => {
       expect(await screen.findByText("Offline")).toBeInTheDocument();
       expect(screen.getByText(/Lock released while offline/)).toBeInTheDocument();
       const feed = screen.getByRole("region", { name: "Scans at this door" });
-      const when = within(feed).getByText(/ago$/);
+      // A7: the `<time>` carries the clock face AND the age now, in two spans, so the age is
+      // no longer the element's own text node. `closest("time")` is what pins the instant.
+      const when = within(feed).getByText(/ago$/).closest("time")!;
       expect(when).toHaveAttribute("datetime", at);
+      // And the exact time is VISIBLE, not only in the title — the whole of A7.
+      expect(when.textContent).toMatch(/\d{2}:\d{2}/);
       /**
        * <b>A4.</b> "Last heard from 21:00" beside a scan "decided at the door at 21:25"
        * reads as a contradiction until the row says the two are different facts. It said so
@@ -418,6 +422,26 @@ describe("the doors surface", () => {
       );
       expect(when.getAttribute("title")).not.toMatch(/\d{1,2}\/\d{1,2}\/\d{2}/);
       expect(when.getAttribute("title")).not.toMatch(/\b[AP]M\b/);
+    });
+
+    /**
+     * <b>A3.</b> "Decided at the door at 09:38 — the door told us at 09:38" is one fact
+     * printed twice, and nine rows of it taught a reviewer to read the pair as a clock
+     * disagreeing with itself. When the two land in one minute the row prints ONE time and
+     * says the club heard within it.
+     */
+    it("prints one time when the scan and the delivery are in the same minute", async () => {
+      openDoor([doorFixture()], {
+        activity: [activityFixture({
+          at: "2026-09-19T18:04:02Z", action: "device.gate_open", reason: null, offline: true,
+          delivered_at: "2026-09-19T18:04:51Z",
+        })],
+      });
+
+      const feed = await screen.findByRole("region", { name: "Scans at this door" });
+      expect(within(feed).getByText(/Decided at the door at/))
+        .toHaveTextContent("and the club heard within the minute");
+      expect(within(feed).queryByText(/the door told us at/)).toBeNull();
     });
 
     /**
@@ -459,10 +483,12 @@ describe("the doors surface", () => {
     });
 
     /**
-     * An offline refusal names nobody, because the door genuinely cannot: a board deciding
-     * from its cached list has nothing to resolve an unrecognised code against.
+     * <b>E-L2 / A3.</b> It rendered as "Refused / No reason recorded", which reads as a gap in
+     * the trail; there is no gap. And a reviewer read nine offline rows where some named a
+     * member and some did not, with nothing on the page to reconcile them — the list IS the
+     * reconciliation, and it is said once beside the rows rather than on each of them.
      */
-    it("says an offline refusal cannot say who, and shows the code's fingerprint", async () => {
+    it("says an offline refusal was a code the door's list did not hold, and why it names nobody", async () => {
       openDoor([doorFixture()], {
         activity: [activityFixture({
           action: "device.unknown_scan", reason: null, offline: true, member: null, fingerprint: "9ab0cd12",
@@ -470,8 +496,11 @@ describe("the doors surface", () => {
       });
 
       expect(await screen.findByText(/Unknown code · 9ab0cd12/)).toBeInTheDocument();
-      expect(screen.getByText(/the door cannot say who/)).toBeInTheDocument();
+      expect(screen.getByText(/Code not on the door's saved list/)).toBeInTheDocument();
+      expect(screen.getByText(/An offline row names somebody when the code was on the door's saved list/))
+        .toHaveTextContent("resolves to nobody at all");
       expect(document.body.textContent).not.toContain("Unknown member");
+      expect(document.body.textContent).not.toContain("No reason recorded");
     });
 
     it("says when the newest scan is on an earlier club day, and still shows the rows", async () => {
