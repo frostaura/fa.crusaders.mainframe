@@ -1,7 +1,7 @@
 # `src/iot/court-box` — court-control firmware
 
 Firmware for the Crusaders court box: a **WeMos Mega 2560 + onboard ESP8266**
-driving four court-light relays, a 20×4 LCD (2004A, driven as 16×2), an
+driving four court-light relays, a **20×4 LCD (2004A, driven as 20×4)**, an
 eight-button panel and a QR scanner.
 
 One of the PlatformIO projects under `src/iot`. The device-agnostic libraries it
@@ -126,7 +126,7 @@ exist for development and CI.
 
 | When | Glass |
 |---|---|
-| After the `court_mega` upload, run DIPs | `CRUSADERS COURTS / SCAN TO START` — the Mega's own idle text, and proof the Mega is alive |
+| After the `court_mega` upload, run DIPs | `CRUSADERS COURTS` / `SCAN YOUR CODE` — the Mega's **own** landing screen, painted from `courtlogic::ScreenBuffer` with no frame involved, and proof the Mega is alive. On a 2004A row 2 shows the live court state and row 3 the action row |
 | During the `court_bridge` upload and the monitor | **Nothing new.** DIP 1 and 2 are off, so the ESP's UART is on the USB socket and the Mega is not on the other end of it. Watch the monitor, not the glass. |
 | Run DIPs restored, box on the WiFi | `CONNECTED / SCAN TO START` — and the box appears on the admin Devices page by itself within one heartbeat, with its court numbers against it |
 | Run DIPs restored, box **not** on the WiFi | `CRUSADERS COURTS / SCAN TO START` — the two halves are talking and the radio is not. Check the SSID and password. |
@@ -155,7 +155,7 @@ The Mega is 8 KB of SRAM driving relays. So the split is deliberate:
 | | ATmega2560 | ESP8266 |
 |---|---|---|
 | **Role** | thin I/O, near-static | all the brains |
-| **Owns** | buttons, scanner framing, relay drive, LCD, **independent auto-off timer** | protocol, state machine, device auth, heartbeat, roster cache, event queue |
+| **Owns** | buttons, scanner framing, relay drive, the LCD — **the landing screen and every screen deadline** — and the **independent auto-off timer** | protocol, state machine, device auth, heartbeat, roster cache, event queue, and **the words on every screen** |
 
 Both are flashed over USB, by DIP switch, and neither can be flashed over the
 network: the ATmega's ESP sits on **Serial3**, not the Serial0 bootloader port,
@@ -172,6 +172,11 @@ The Mega's auto-off timer is independent on purpose: if the ESP hangs, the WiFi
 drops and the backend dies, **the lights still go off**. In the system this
 replaces, the off command was scheduled inside an Excel macro on a Windows PC —
 close the workbook mid-session and a court burned until somebody noticed.
+
+**The screen-revert deadline is on the Mega for exactly the same reason**, and
+that is why it was moved: a timer that returns the glass to the landing screen
+is useless if it lives on the half whose crash is what left the screen stuck.
+See *About the display* above.
 
 Two things stand behind that timer on the Mega itself:
 
@@ -226,10 +231,78 @@ Two things stand behind that timer on the Mega itself:
 
 ### About the display
 
-The physical panel is a **2004A (20×4)**, but the firmware drives it as **16×2**
-by decision — safety over screen real estate, and it works on either panel. The
-geometry is a compile-time constant (`LCD_COLS` / `LCD_ROWS`), so widening it
-later is a one-line change plus a corpus update, not a rewrite.
+The physical panel is a **2004A (20×4)** and the firmware now drives it as
+**20×4**. **Nothing about the wiring changed** — it is the same PCF8574 backpack
+at the same I²C address on the same two pins. What changed is two build flags,
+`-DLCD_COLS=20 -DLCD_ROWS=4` in `platformio.ini`'s `[lcd]` block, which
+`hal::kDisplayCols` / `kDisplayRows` read and from which `court::kLineLen` is
+**derived**. That derivation is the fix: the width used to be hardcoded at 16 in
+`court/Session.h` while the flags said something else, so the panel's geometry
+lived in two places that could disagree — and on the 2004A that is actually
+fitted, the hardcoded number won and four columns of every line were
+unreachable.
+
+#### The safe-subset contract — what makes widening it safe
+
+**Rows 0 and 1, truncated at column 16, must still be a complete and correct
+message on every screen.** Rows 2–3, and the columns past 16, carry
+**enrichment only**. A 1602 fitted by mistake then degrades to exactly the old
+behaviour rather than to half a sentence — which is the property the 16×2
+decision was originally taken for, kept, and now stated as a contract instead of
+as a build flag. `court::kSafeSubsetCols` is the 16, and a `static_assert`
+refuses a panel narrower than it, because that would make the contract
+unsatisfiable rather than merely degraded.
+
+**The host suite builds at the same 20×4.** A host build at 16×2 proving a
+firmware built at 20×4 proves the degraded path and calls it the real one. The
+degraded path is proven by the contract instead — a test over the whole screen
+table at once — which needs no second build.
+
+**Somebody still has to look at the panel before a club box is flashed.**
+Everything here is right for a 2004A and silently wrong for a 1602, where rows
+2–3 and columns 17–20 write into DDRAM that is off-glass. The contract makes
+that a *degraded* screen rather than a *lying* one, which is what makes shipping
+it reasonable — not a reason to skip the look. It is on
+[`docs/go-live-checklist.md`](../../../docs/go-live-checklist.md).
+
+#### The four-row layout
+
+Zones never swap meaning between screens, so a member learns where to look once:
+
+| Row | Carries |
+|---|---|
+| 0 | **title** — what is true |
+| 1 | **detail** — the number, or the reason |
+| 2 | **live court state** (or secondary detail) — rendered from `RelayGuard`, which is the authority on every court's remaining time, so it costs **zero** link bandwidth |
+| 3 | **action row** — what to press, plus a **countdown or a clock** in the right-hand five columns, never both |
+
+**No custom glyphs, deliberately.** The countdown is plain digits. A progress bar
+would cost CGRAM that the I²C re-sync path has to restore after every bus wedge,
+and it carries no information the digits do not.
+
+#### The landing screen and every screen deadline live on the Mega
+
+**The ESP is the half that goes away** — that is the founding argument of the
+whole Mega/ESP split below, and it applies to the glass exactly as it applies to
+the relay auto-off timer. A screen-revert timer on the ESP is a timer that stops
+when the ESP crashes, and every stuck screen is a screen whose only possible
+rescuer is the half that just failed.
+
+So `courtlogic::ScreenBuffer` owns the landing screen, the overlay deadline, the
+hint row and the live court row. Every screen the bridge paints is an
+**overlay** that cannot outlive its deadline, and the deadline is clamped by the
+**decoder** into [1, 120] seconds — on the way in, out of reach of any
+configuration. What does **not** move here is the **copy**: verdict wording is
+exactly the thing a club changes its mind about, and the Mega is the half that
+cannot be reflashed without a screwdriver. Words stay on the ESP; mechanism
+lives on the Mega.
+
+The bug this closes was a refusal screen that never left the panel with every
+button dead behind it, and it was intermittent *by membership status*, which is
+why it survived review. The grammar is in
+[`docs/specs/device-serial-protocol.md`](../../../docs/specs/device-serial-protocol.md)
+— `!ROW` stages, `!SHOW` commits atomically, `!IDLE` says what the status row
+says, `!MAP` gives each relay its club court number.
 
 ### Relays — an open safety question
 
@@ -286,7 +359,9 @@ lives is whether a *different* device would want it unchanged.
 lib/           THIS box — no other device wants these
   protocol/    Mega <-> ESP serial codec
   courtlogic/  the Mega's behaviour: auto-off timer, debounce, scan framing,
-               auth window, frame dispatch — everything main.cpp does NOT do
+               auth window, frame dispatch, and ScreenBuffer — the landing
+               screen, the overlay deadline, the hint row and the live court
+               row — everything main.cpp does NOT do
   court/       what a scan means; the button map; the walk-up pad
   bridgelogic/ the ESP's decisions ABOUT THIS BOX: the online-then-roster scan
                flow, the auth window, walk-up request + nonce, relight, the !ON
@@ -303,7 +378,9 @@ src/
   simulator/     native device simulator — the same lib/ over posix_hal
 test/          Unity tests for THIS project, run on the host. The shared
                libraries have their own suite in ../shared/test; `make test-iot`
-               runs both and 279 tests is the whole of it.
+               runs both, and that pair is the whole of it. No count is quoted
+               here on purpose — a number in a README is stale the next time
+               anybody adds a test, and it was never evidence in the first place.
 tools/         strict compile gate (covers every project under src/iot), corpus
                generators, the Arduino sketch exporter
 arduino/       GENERATED Arduino IDE sketches — the flashing route. Never hand-edited;
