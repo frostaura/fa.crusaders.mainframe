@@ -55,7 +55,11 @@ describe("the code tabs", () => {
     await screen.findByLabelText("Your code");
 
     expect(screen.getByRole("tablist", { name: "Which code to show" })).toBeInTheDocument();
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Booking code", "Member code"]);
+    // Accessible names, not `textContent`: the shared primitive measures its stacking decision
+    // off a hidden, out-of-flow copy of each label, which `textContent` counts twice and no
+    // reader — eye or ear — ever sees once.
+    const names = screen.getAllByRole("tab").map((t) => t.getAttribute("aria-label") ?? t.firstChild?.textContent);
+    expect(names).toEqual(["Booking code", "Member code"]);
   });
 
   /**
@@ -120,32 +124,13 @@ describe("the code tabs", () => {
     await waitFor(() => expect(codeRequests(stub).some((c) => c.path.includes("kind=ident"))).toBe(true));
   });
 
-  it("wraps with the arrows and jumps with Home and End", async () => {
-    serve(BOOKING, memberDoorsOnFixture({ next_booking: memberDoorBookingFixture() }));
-    renderPage(<MyCodePage />);
-    await screen.findByLabelText("Your code");
-
-    const list = screen.getByRole("tablist", { name: "Which code to show" });
-    const [booking, member] = screen.getAllByRole("tab");
-    booking.focus();
-    fireEvent.keyDown(list, { key: "ArrowLeft" });
-    expect(document.activeElement).toBe(member);
-    fireEvent.keyDown(list, { key: "Home" });
-    expect(document.activeElement).toBe(booking);
-    fireEvent.keyDown(list, { key: "End" });
-    expect(document.activeElement).toBe(member);
-  });
-
-  /** Roving tabindex: one stop for the group, on whichever segment is selected. */
-  it("puts one tab stop on the group", async () => {
-    serve(IDENT);
-    renderPage(<MyCodePage />);
-    await screen.findByLabelText("Your code");
-
-    const tabs = screen.getAllByRole("tab");
-    expect(tabs.filter((t) => t.getAttribute("tabindex") === "0")).toHaveLength(1);
-    expect(screen.getByRole("tab", { name: "Member code" })).toHaveAttribute("tabindex", "0");
-  });
+  /*
+    Wrapping arrows, Home/End and the single roving tab stop were asserted here too while the
+    page owned a local copy of the control. They are gone, not lost: the page now renders the
+    shared `SegmentedTabs`, and `components/segmented-tabs.test.tsx` holds those rules against
+    the one implementation. What stays in THIS file is everything the primitive cannot see —
+    which code arrives, what a keystroke costs, and what the page says about either.
+  */
 
   /**
    * <b>Dimmed and focusable, never hidden.</b> A tab that vanishes teaches a member the app

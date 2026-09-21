@@ -2611,7 +2611,10 @@ describe("MyCode at a club with a door", () => {
   it("keeps the segment names to two words and puts the explanation in the panel", async () => {
     renderBoth(memberDoorsOnFixture(), IDENT_CODE);
     const tab = await screen.findByRole("tab", { name: "Member code" });
-    expect(tab.textContent).toBe("Member code");
+    // The accessible NAME, not `textContent`: the shared primitive carries a hidden,
+    // out-of-flow copy of the label that it measures the stacked/side-by-side decision from,
+    // and `textContent` counts it while nothing a person uses does.
+    expect(tab).toHaveAccessibleName("Member code");
 
     const panel = document.getElementById(tab.getAttribute("aria-controls")!);
     expect(panel?.textContent).toMatch(/start on a free court now/);

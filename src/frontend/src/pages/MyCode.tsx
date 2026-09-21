@@ -44,7 +44,7 @@ import { useBoundaryRefresh } from "../components/member-door/useBoundaryRefresh
 import { useCountdownSeconds } from "../components/member-door/useCountdownSeconds";
 import { useMemberCode } from "../components/member-door/useMemberCode";
 import { useMemberDoor, useShownDecision } from "../components/member-door/useMemberDoor";
-import { SegmentedTabs } from "../components/member-door/CodeTabs";
+import { SegmentedTabs } from "../components/SegmentedTabs";
 // item 16 — the pushed card about the booking in hand, and the way to the whole guide.
 import { WhatsNextCard } from "../components/onboarding/WhatsNextCard";
 import { GUIDE_FROM_CODE, GUIDE_PATH } from "../lib/onboardingCopy";
@@ -513,6 +513,12 @@ function CodeChoice(props: {
         value={selected}
         panelId={(v) => PANEL_ID[v]}
         onChange={(next) => onChoose(next === "member")}
+        /*
+          Drawn, not `sr-only`. This is the one place the two lanes that built the capsule
+          disagreed, and the drawn sentence is why a member who taps the dim tab learns
+          anything at all — see `showDisabledReasons` on the primitive.
+        */
+        showDisabledReasons
         segments={[
           {
             value: "booking",
@@ -534,7 +540,7 @@ function CodeChoice(props: {
         No `tabIndex={0}`: the APG asks for it only on a panel with nothing focusable in it,
         and this one holds the full-screen control and the refresh.
       */}
-      <div id={PANEL_ID[selected]} role="tabpanel" aria-labelledby={`tab-${selected}`} className="space-y-2">
+      <div id={PANEL_ID[selected]} role="tabpanel" aria-labelledby={`segment-${PANEL_ID[selected]}`} className="space-y-2">
         {children}
         {selected === "member" && memberChoice && (
           <p className="text-xs text-text-muted">{CODE_CHOICE_STICKY}</p>
