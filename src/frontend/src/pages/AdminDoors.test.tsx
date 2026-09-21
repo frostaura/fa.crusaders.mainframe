@@ -373,7 +373,10 @@ describe("the doors surface", () => {
       });
 
       expect(await screen.findByText(/A code was accepted three times in under a minute/))
-        .toHaveTextContent("The lock is released for 3 seconds.");
+        // Ruling 5 / GOAL item 2: the shipping default moved from 3 seconds to 15. The
+        // sentence is generated from the club's own number, so what this pins is that it
+        // quotes the number rather than a constant — and the number is now the new default.
+        .toHaveTextContent("The lock is released for 15 seconds.");
       expect(screen.getByRole("link", { name: /Change how long the lock is released — Side door/ }))
         .toHaveAttribute("href", "/admin/settings#setting-gate-unlock-seconds");
     });
