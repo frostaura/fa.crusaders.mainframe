@@ -88,7 +88,9 @@ public sealed class TestHost : IAsyncDisposable
         // service the app does not would be the divergence this comment exists to prevent.
         // LightsCueTests constructs NullRelayClient directly to pin the interface's shape.
         services.AddMemoryCache();
-        services.AddSingleton<BalanceBroadcaster>();
+        services.AddSingleton<Crusaders.Mainframe.Api.Services.Realtime.IRealtimeBus,
+            Crusaders.Mainframe.Api.Services.Realtime.InProcessRealtimeBus>();
+        services.AddScoped<Crusaders.Mainframe.Api.Services.Realtime.RealtimeOutbox>();
         // Sign-out revocation. A singleton in the app too — a per-scope list would forget every
         // sign-out the moment the request that made it ended.
         services.AddSingleton<AccessTokenRevocationList>();

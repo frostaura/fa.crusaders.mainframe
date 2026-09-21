@@ -40,6 +40,13 @@ public class MainframeDbContext : DbContext
     public DbSet<WebAuthnCredential> WebAuthnCredentials => Set<WebAuthnCredential>();
     public DbSet<AccessCode> AccessCodes => Set<AccessCode>();
 
+    // GOAL item 3. Three tables rather than a column on Membership, because the goal says a
+    // member may be in SEVERAL groups and "most restrictive wins" is only a real question when
+    // they can be.
+    public DbSet<MemberGroup> MemberGroups => Set<MemberGroup>();
+    public DbSet<MemberGroupWindow> MemberGroupWindows => Set<MemberGroupWindow>();
+    public DbSet<MemberGroupMember> MemberGroupMembers => Set<MemberGroupMember>();
+
     /// <summary>
     /// Builds the model, including the global query filter on every tenant-scoped entity.
     /// </summary>
@@ -122,6 +129,7 @@ public class MainframeDbContext : DbContext
         });
 
         ConfigureDevices(modelBuilder);
+        ConfigureMemberGroups(modelBuilder);
         ConfigureAccessCodes(modelBuilder);
 
         modelBuilder.Entity<Court>(e =>
@@ -269,6 +277,63 @@ public class MainframeDbContext : DbContext
             e.Property(p => p.Status).HasConversion<int>();
             e.Property(p => p.FailureReason).HasMaxLength(512);
             e.HasQueryFilter(p => p.TenantId == _tenant.TenantId);
+        });
+    }
+
+    /// <summary>
+    /// The three member-group tables (GOAL item 3), lifted out of <c>OnModelCreating</c> for the
+    /// same reason <see cref="ConfigureDevices"/> was: that method is at its stated 200-line
+    /// ceiling and every new table lands in it.
+    /// </summary>
+    private void ConfigureMemberGroups(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<MemberGroup>(e =>
+        {
+            e.ToTable("member_groups");
+            e.HasKey(g => g.Id);
+            e.Property(g => g.Name).HasMaxLength(GroupRules.MaxNameLength).IsRequired();
+            e.Property(g => g.Description).HasMaxLength(GroupRules.MaxDescriptionLength);
+            e.Property(g => g.Status).HasConversion<int>();
+            e.Property(g => g.PricingMode).HasConversion<int>();
+            // Same precision as courts.SlicePriceCredits: the two hold the same kind of number,
+            // and a narrower column here would round a price the ledger then quotes.
+            e.Property(g => g.FlatSlicePriceCredits).HasColumnType("numeric(10,2)");
+            e.HasIndex(g => new { g.TenantId, g.Status });
+            // The database is the last place a nonsense price can be refused, which is the whole
+            // lesson of D2-B06: the settings PUT was not the only way a negative one got in.
+            e.ToTable(t => t.HasCheckConstraint(
+                "ck_member_groups_pricing",
+                "(\"PricingMode\" = 0) "
+                + "OR (\"PricingMode\" = 1 AND \"PriceMultiplierBps\" BETWEEN 0 AND 1000000) "
+                + "OR (\"PricingMode\" = 2 AND \"FlatSlicePriceCredits\" IS NOT NULL "
+                + "AND \"FlatSlicePriceCredits\" >= 0)"));
+            e.HasQueryFilter(g => g.TenantId == _tenant.TenantId);
+        });
+
+        modelBuilder.Entity<MemberGroupWindow>(e =>
+        {
+            e.ToTable("member_group_windows");
+            e.HasKey(w => w.Id);
+            // The grid's read: every window of a member's groups for one weekday.
+            e.HasIndex(w => new { w.TenantId, w.GroupId, w.DayOfWeek });
+            e.Property(w => w.DayOfWeek).HasConversion<int>();
+            // No midnight crossing: refused rather than silently wrapped, because a window that
+            // wraps is two windows and nothing downstream reads it as two.
+            e.ToTable(t => t.HasCheckConstraint(
+                "ck_member_group_windows_range",
+                "\"StartMinute\" >= 0 AND \"EndMinute\" <= 1440 AND \"EndMinute\" > \"StartMinute\""));
+            e.HasQueryFilter(w => w.TenantId == _tenant.TenantId);
+        });
+
+        modelBuilder.Entity<MemberGroupMember>(e =>
+        {
+            e.ToTable("member_group_members");
+            e.HasKey(m => m.Id);
+            // Makes a double-add a no-op rather than a duplicate rule.
+            e.HasIndex(m => new { m.TenantId, m.GroupId, m.UserId }).IsUnique();
+            // And this is the one the GRID uses, on every read of every member's own rules.
+            e.HasIndex(m => new { m.TenantId, m.UserId });
+            e.HasQueryFilter(m => m.TenantId == _tenant.TenantId);
         });
     }
 

@@ -96,6 +96,7 @@ public class LedgerEntryTypeCoverageTests
     [InlineData(LedgerEntryType.AdminAdjustment, 5)]
     [InlineData(LedgerEntryType.PaymentReversal, 6)]
     [InlineData(LedgerEntryType.LightsPurchase, 7)]
+    [InlineData(LedgerEntryType.AdminTopUp, 8)]
     public void Ledger_type_values_are_stable(LedgerEntryType type, int expected)
     {
         Assert.Equal(expected, (int)type);
@@ -109,6 +110,6 @@ public class LedgerEntryTypeCoverageTests
     [Fact]
     public void The_number_of_ledger_types_is_pinned()
     {
-        Assert.Equal(8, AllMembers.Length);
+        Assert.Equal(9, AllMembers.Length);
     }
 }

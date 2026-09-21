@@ -5,6 +5,7 @@ using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Security;
 using Crusaders.Mainframe.Api.Services;
+using Crusaders.Mainframe.Api.Services.Realtime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 
@@ -68,41 +69,14 @@ public static class WalletEndpoints
         // Server-Sent Events stream of the current user's balance. Pushes the latest balance
         // whenever any ledger entry posts for this user. Used by the BalanceProvider on the
         // client so admin top-ups land in the member's session without a reload.
-        g.MapGet("/wallet/stream", async (HttpContext ctx, LedgerService ledger, BalanceBroadcaster broadcaster, CancellationToken ct) =>
-        {
-            var userId = ctx.User.Id() ?? Guid.Empty;
-            if (userId == Guid.Empty) { ctx.Response.StatusCode = 401; return; }
-
-            ctx.Response.Headers["Content-Type"] = "text/event-stream";
-            ctx.Response.Headers["Cache-Control"] = "no-cache, no-transform";
-            ctx.Response.Headers["Connection"] = "keep-alive";
-            // nginx defaults buffer proxied responses; this header disables that for SSE.
-            ctx.Response.Headers["X-Accel-Buffering"] = "no";
-
-            Channel<decimal>? channel = null;
-            try
-            {
-                channel = await SubscribeThenSendAsync(
-                    broadcaster, userId,
-                    () => ledger.GetBalanceAsync(userId, ct),
-                    balance => WriteEventAsync(ctx, balance, ct));
-
-                await PumpAsync(
-                    channel.Reader,
-                    KeepAliveInterval,
-                    (balance, token) => WriteEventAsync(ctx, balance, token),
-                    token => WriteKeepAliveAsync(ctx, token),
-                    ct);
-            }
-            catch (OperationCanceledException) { /* client disconnect */ }
-            finally
-            {
-                if (channel is not null) broadcaster.Unsubscribe(userId, channel);
-            }
-        });
+        g.MapGet("/wallet/stream", StreamAsync);
 
         // Admin: manual credit adjustment
-        var admin = app.MapGroup("/api/v1/admin/credit").RequireAuthorization(p => p.RequireRole("admin"));
+        // The one route in the API that moves money by hand, and the only limiter on it was the
+        // global 600/min per IP. A desk that can be scripted is a desk that can be drained.
+        var admin = app.MapGroup("/api/v1/admin/credit")
+            .RequireAuthorization(p => p.RequireRole("admin"))
+            .RequireRateLimiting(Security.RateLimitPolicies.Auth);
 
         // The handler is a named method rather than an inline lambda: it is the most
         // consequential route in this file - it moves a member's balance by hand - and
@@ -111,6 +85,77 @@ public static class WalletEndpoints
         admin.MapPost("/{userId:guid}/adjust", AdjustAsync);
 
         return app;
+    }
+
+    /// <summary>
+    /// The member's own live balance, as Server-Sent Events.
+    ///
+    /// <para>
+    /// A named method rather than an inline lambda for the reason the adjust handler already
+    /// gives: lizard scores the whole <c>MapWalletEndpoints</c> registration as one function, so
+    /// a handler's branches are charged to the registration.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Two frames per movement.</b> <see cref="LedgerService"/> publishes the legacy unnamed
+    /// <c>data:</c> frame that today's client listens for as <c>message</c>, and a named
+    /// <c>balance</c> frame carrying <c>delta_credits</c> and <c>reason</c> beside it. The
+    /// stream itself is a transport and does not know the difference: it writes whatever the bus
+    /// hands it, so a third frame shape costs nothing here.
+    /// </para>
+    ///
+    /// <para>
+    /// The opening frame is still the plain balance, because a client that has just connected
+    /// has no delta to animate — it has a number to show.
+    /// </para>
+    /// </summary>
+    private static async Task StreamAsync(
+        HttpContext ctx,
+        LedgerService ledger,
+        IRealtimeBus bus,
+        ITenantContext tenant,
+        TenantSettingsAccessor settings,
+        CancellationToken ct)
+    {
+        var userId = ctx.User.Id() ?? Guid.Empty;
+        if (userId == Guid.Empty) { ctx.Response.StatusCode = 401; return; }
+
+        ctx.Response.Headers["Content-Type"] = "text/event-stream";
+        ctx.Response.Headers["Cache-Control"] = "no-cache, no-transform";
+        ctx.Response.Headers["Connection"] = "keep-alive";
+        // nginx defaults buffer proxied responses; this header disables that for SSE.
+        ctx.Response.Headers["X-Accel-Buffering"] = "no";
+
+        // The club's own keep-alive, clamped. RealtimeSettings is where the relationship between
+        // this number and nginx's unset-and-therefore-60-second proxy_read_timeout is written
+        // down, and why the ceiling is 55 rather than a round minute.
+        var keepAlive = KeepAliveOverride ?? RealtimeSettings.KeepAlive(await settings.GetAsync(ct));
+        var topic = RealtimeTopic.Wallet(tenant.TenantId, userId);
+
+        Channel<RealtimeMessage>? channel = null;
+        try
+        {
+            channel = await SseStream.SubscribeThenSendAsync(
+                bus, topic,
+                async () => await WriteFrameAsync(
+                    ctx,
+                    new RealtimeMessage(
+                        string.Empty,
+                        JsonSerializer.Serialize(new { balance_credits = await ledger.GetBalanceAsync(userId, ct) })),
+                    ct));
+
+            await SseStream.PumpAsync(
+                channel.Reader,
+                keepAlive,
+                (frame, token) => WriteFrameAsync(ctx, frame, token),
+                token => WriteKeepAliveAsync(ctx, token),
+                ct);
+        }
+        catch (OperationCanceledException) { /* client disconnect */ }
+        finally
+        {
+            if (channel is not null) bus.Unsubscribe(topic, channel);
+        }
     }
 
     /// <summary>Mints the one-minute, stream-scoped credential the SSE connection is opened with.</summary>
@@ -174,65 +219,162 @@ public static class WalletEndpoints
         CancellationToken ct)
     {
         var (ledger, db, tenant, email, loggerFactory) = services;
-            if (req.AmountCredits == 0) return Results.BadRequest(new { error = "amount_zero" });
-            if (string.IsNullOrWhiteSpace(req.Reason)) return Results.BadRequest(new { error = "reason_required" });
-            if (RefuseAmount(req.AmountCredits) is { } bad2) return bad2;
-            var reference = IdempotencyReference(tenant.TenantId, req.IdempotencyKey);
-            if (reference is { Length: 0 }) return Results.BadRequest(new { error = "idempotency_key_invalid" });
-            var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
-            if (user is null) return Results.NotFound();
-            if (await RefuseRelatedBooking(db, userId, req.RelatedBookingId, ct) is { } bad) return bad;
+        var logger = loggerFactory.CreateLogger("CreditAdjustment");
 
-            // A double-click on the desk's Apply button posted the movement twice, and a
-            // slow club connection with four impatient clicks posted it four times: 44
-            // credits granted where 11 were typed. Money is ledger-only, so a duplicated
-            // row IS the wrong balance, and there is nothing on the ledger to say which of
-            // the identical rows was the mistake.
-            if (reference is not null && await ExistingAdjustmentAsync(db, reference, ct) is { } already)
-                return AdjustmentResult(already, await ledger.GetBalanceAsync(userId, ct));
+        if (req.AmountCredits == 0) return Results.BadRequest(new { error = "amount_zero" });
+        if (string.IsNullOrWhiteSpace(req.Reason)) return Results.BadRequest(new { error = "reason_required" });
+        if (RefuseAmount(req.AmountCredits) is { } badAmount) return badAmount;
 
-            LedgerEntry entry;
-            try
+        if (AdminCreditReasons.Resolve(req.ReasonCodeEither, logger) is not { } kind)
+        {
+            return Results.BadRequest(new { error = "reason_code_invalid", valid = AdminCreditReasons.All });
+        }
+        // A top-up is money the club TOOK. A negative one is a refund or a correction and has a
+        // code of its own; mixing signs inside a directional bucket is what makes a per-row
+        // listing unreadable and a revenue figure a guess.
+        if (kind.Type == LedgerEntryType.AdminTopUp && req.AmountCredits < 0)
+        {
+            return Results.BadRequest(new { error = "amount_must_be_positive_for_top_up" });
+        }
+
+        var reference = IdempotencyReference(tenant.TenantId, req.IdempotencyKey);
+        if (reference is { Length: 0 }) return Results.BadRequest(new { error = "idempotency_key_invalid" });
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
+        if (user is null) return Results.NotFound();
+        if (await RefuseRelatedBooking(db, userId, req.RelatedBookingId, ct) is { } badBooking) return badBooking;
+
+        var balanceBefore = await ledger.GetBalanceAsync(userId, ct);
+
+        // A double-click on the desk's Apply button posted the movement twice, and a slow club
+        // connection with four impatient clicks posted it four times: 44 credits granted where
+        // 11 were typed. Money is ledger-only, so a duplicated row IS the wrong balance, and
+        // there is nothing on the ledger to say which of the identical rows was the mistake.
+        if (reference is not null && await ExistingAdjustmentAsync(db, reference, ct) is { } already)
+        {
+            return Replay(already, req, kind, balanceBefore, user);
+        }
+
+        LedgerEntry entry;
+        try
+        {
+            entry = await ledger.PostAsync(new LedgerPosting(
+                UserId: userId,
+                Type: kind.Type,
+                AmountCredits: req.AmountCredits,
+                ActorUserId: ctx.User.Id() ?? Guid.Empty,
+                // Naming the booking is what nets this adjustment, per leg, against a late
+                // box upload's automatic reversal of the same no-show, instead of correcting
+                // the member twice. See BookingService.SettledLegsAsync and the settlement
+                // model's I3/I4.
+                RelatedBookingId: req.RelatedBookingId,
+                Reason: req.Reason,
+                ExternalReference: reference), ct);
+        }
+        catch (DbUpdateException) when (reference is not null)
+        {
+            // The lookup above loses the race when both clicks are in flight at once, which is
+            // exactly what a double-click produces. The unique filtered index on
+            // ExternalReference is what actually holds the line; this turns its violation into
+            // the same answer the first request got, so the desk sees one success rather than a
+            // 500 beside a movement that did happen.
+            db.ChangeTracker.Clear();
+            var raced = await ExistingAdjustmentAsync(db, reference, ct);
+            if (raced is null) throw;
+            return Replay(raced, req, kind, balanceBefore, user);
+        }
+
+        var balanceAfter = await ledger.GetBalanceAsync(userId, ct);
+
+        // D2-B08. The ONE by-hand money movement in the system wrote nothing to the club's audit
+        // trail, while a member-class change and a password reset both write one. Reconstructing
+        // "who moved what by hand" meant joining ledger_entries on Type and trusting
+        // ActorUserId — which for every system posting is the empty Guid (D2-B41).
+        //
+        // The two balance figures are the point: an adjustment is only reviewable if the row says
+        // where it took the member FROM and TO, and re-deriving that later means replaying every
+        // row that has landed since.
+        db.AuditLogs.Add(new Domain.AuditLog
+        {
+            TenantId = tenant.TenantId,
+            ActorUserId = ctx.User.Id() ?? Guid.Empty,
+            SubjectUserId = userId,
+            Action = AdminCreditReasons.AuditAction,
+            IpAddress = ctx.Connection.RemoteIpAddress?.ToString(),
+            UserAgent = ctx.Request.Headers.UserAgent.ToString() is { Length: > 0 } ua ? ua : null,
+            DetailsJson = JsonSerializer.Serialize(new
             {
-                entry = await ledger.PostAsync(new LedgerPosting(
-                    UserId: userId,
-                    Type: LedgerEntryType.AdminAdjustment,
-                    AmountCredits: req.AmountCredits,
-                    ActorUserId: ctx.User.Id() ?? Guid.Empty,
-                    // Naming the booking is what nets this adjustment, per leg, against a late
-                    // box upload's automatic reversal of the same no-show, instead of correcting
-                    // the member twice. See BookingService.SettledLegsAsync and the settlement
-                    // model's I3/I4.
-                    RelatedBookingId: req.RelatedBookingId,
-                    Reason: req.Reason,
-                    ExternalReference: reference), ct);
-            }
-            catch (DbUpdateException) when (reference is not null)
+                user_id = userId,
+                entry_id = entry.Id,
+                entry_type = kind.Type.ToString(),
+                amount_credits = req.AmountCredits,
+                reason = req.Reason,
+                reason_code = kind.Code,
+                balance_before_credits = balanceBefore,
+                balance_after_credits = balanceAfter,
+                related_booking_id = req.RelatedBookingId,
+                idempotency_key = req.IdempotencyKey,
+            }),
+        });
+        await db.SaveChangesAsync(ct);
+
+        // "Every player-affecting event sends an email" — and an admin moving a member's balance
+        // by hand is about as player-affecting as it gets. Nothing was sent, so the first a
+        // member knew of a desk adjustment was the next time they opened their wallet. Background
+        // dispatch: an admin is waiting on this form and SMTP is not what decides whether the
+        // movement stands.
+        Crusaders.Mainframe.Api.Email.EmailDispatch.InBackground(
+            email, logger,
+            Crusaders.Mainframe.Api.Email.EmailTemplates.CreditAdjustment(
+                user.Email, entry.AmountCredits, balanceAfter, req.Reason),
+            $"credit adjustment {entry.Id}");
+
+        return AdjustmentResult(entry, kind, balanceBefore, balanceAfter, user);
+    }
+
+    /// <summary>
+    /// What a reused idempotency key answers.
+    ///
+    /// <para>
+    /// <b>D2-B10.</b> The replay matched on <c>ExternalReference</c> alone and compared nothing
+    /// else, so adjusting +11 with key <c>k1</c> and then +110 with <c>k1</c> answered 200 with
+    /// <c>amount_credits: 11</c>. A console that mints one key per FORM SESSION rather than per
+    /// INTENDED MOVEMENT therefore silently discarded a corrected amount — and the admin was
+    /// told it had been applied.
+    /// </para>
+    ///
+    /// <para>
+    /// A matching payload replays, exactly as before, because that is what a retried request is.
+    /// A changed one is <c>409 idempotency_key_reused</c> carrying what is actually stored, for
+    /// the admin to look at: silently discarding the correction is the worse of the two failures,
+    /// and it is the one that leaves no trace.
+    /// </para>
+    /// </summary>
+    private static IResult Replay(
+        LedgerEntry stored, AdjustRequest req, AdminCreditReasons.Kind kind, decimal balanceBefore, Domain.User user)
+    {
+        var same = stored.AmountCredits == req.AmountCredits
+                && stored.Type == kind.Type
+                && stored.RelatedBookingId == req.RelatedBookingId;
+
+        if (!same)
+        {
+            return Results.Json(new
             {
-                // The lookup above loses the race when both clicks are in flight at once,
-                // which is exactly what a double-click produces. The unique filtered index
-                // on ExternalReference is what actually holds the line; this turns its
-                // violation into the same answer the first request got, so the desk sees
-                // one success rather than a 500 beside a movement that did happen.
-                db.ChangeTracker.Clear();
-                var raced = await ExistingAdjustmentAsync(db, reference, ct);
-                if (raced is null) throw;
-                return AdjustmentResult(raced, await ledger.GetBalanceAsync(userId, ct));
-            }
-            var balanceAfter = await ledger.GetBalanceAsync(userId, ct);
+                error = "idempotency_key_reused",
+                stored = new
+                {
+                    amount_credits = stored.AmountCredits,
+                    type = stored.Type.ToString(),
+                    reason = stored.Reason,
+                    at = stored.CreatedAt,
+                },
+            }, statusCode: StatusCodes.Status409Conflict);
+        }
 
-            // "Every player-affecting event sends an email" — and an admin moving a member's
-            // balance by hand is about as player-affecting as it gets. Nothing was sent, so
-            // the first a member knew of a desk adjustment was the next time they opened
-            // their wallet. Background dispatch: an admin is waiting on this form and SMTP
-            // is not what decides whether the movement stands.
-            Crusaders.Mainframe.Api.Email.EmailDispatch.InBackground(
-                email, loggerFactory.CreateLogger("CreditAdjustment"),
-                Crusaders.Mainframe.Api.Email.EmailTemplates.CreditAdjustment(
-                    user.Email, entry.AmountCredits, balanceAfter, req.Reason),
-                $"credit adjustment {entry.Id}");
-
-            return AdjustmentResult(entry, balanceAfter);
+        // The stored movement already happened, so the balance it left behind is the one before
+        // it plus itself — read back rather than recomputed, so a replay quotes the same pair the
+        // original did.
+        return AdjustmentResult(stored, kind, balanceBefore - stored.AmountCredits, balanceBefore, user);
     }
 
     /// <summary>
@@ -274,13 +416,21 @@ public static class WalletEndpoints
     // Block body, not an expression body: lizard's C# parser reads the `{` of an object
     // initialiser as the end of the function and dumps the whole rest of the file into a
     // *global* pseudo-function whose reported length trips `-L 200`. See memory/gotchas.md.
-    private static IResult AdjustmentResult(LedgerEntry entry, decimal balanceAfter)
+    private static IResult AdjustmentResult(
+        LedgerEntry entry, AdminCreditReasons.Kind kind, decimal balanceBefore, decimal balanceAfter, Domain.User user)
     {
         return Results.Ok(new
         {
             entry_id = entry.Id,
+            type = entry.Type.ToString(),
+            reason_code = kind.Code,
             amount_credits = entry.AmountCredits,
+            // balance_before is here because the admin has to read back what they just did, and
+            // because the console's confirmation ("Priya: 40.00 -> 240.00") must not be composed
+            // client-side from a number it fetched separately and may have fetched before.
+            balance_before_credits = balanceBefore,
             balance_after_credits = balanceAfter,
+            member = new { user_id = user.Id, email = user.Email },
         });
     }
 
@@ -315,23 +465,31 @@ public static class WalletEndpoints
         return payer == userId ? null : Results.BadRequest(new { error = "booking_not_members" });
     }
 
-    private static async Task WriteEventAsync(HttpContext ctx, decimal balance, CancellationToken ct)
+    /// <summary>
+    /// One frame on the wire. An empty <see cref="RealtimeMessage.Event"/> writes the legacy
+    /// unnamed frame — which <c>balance.tsx</c> listens for as <c>message</c> and which is kept
+    /// verbatim through the rollout — and anything else writes a named event a client can
+    /// <c>addEventListener</c> on.
+    /// </summary>
+    private static async Task WriteFrameAsync(HttpContext ctx, RealtimeMessage frame, CancellationToken ct)
     {
-        var payload = JsonSerializer.Serialize(new { balance_credits = balance });
-        await ctx.Response.WriteAsync($"data: {payload}\n\n", ct);
+        var line = string.IsNullOrEmpty(frame.Event)
+            ? $"data: {frame.JsonPayload}\n\n"
+            : $"event: {frame.Event}\ndata: {frame.JsonPayload}\n\n";
+        await ctx.Response.WriteAsync(line, ct);
         await ctx.Response.Body.FlushAsync(ct);
     }
 
     /// <summary>
-    /// How long the stream stays quiet before it writes a keep-alive.
+    /// Forces the keep-alive interval, so the loop can be exercised at millisecond speed.
     ///
     /// <para>
-    /// Settable so the loop can be exercised at millisecond speed. Production never
-    /// changes it: 25s sits under the 60s idle timeout nginx and every cloud load
-    /// balancer in front of this API default to.
+    /// Null in production, where the interval comes from <c>sse_keepalive_seconds</c> through
+    /// <see cref="RealtimeSettings.KeepAlive"/> — it is a configurable number, so it is a tenant
+    /// setting, like every other one.
     /// </para>
     /// </summary>
-    internal static TimeSpan KeepAliveInterval { get; set; } = TimeSpan.FromSeconds(25);
+    internal static TimeSpan? KeepAliveOverride { get; set; }
 
     /// <summary>
     /// The keep-alive, written as a NAMED event rather than an SSE comment.
@@ -352,95 +510,6 @@ public static class WalletEndpoints
         await ctx.Response.Body.FlushAsync(ct);
     }
 
-    /// <summary>
-    /// Takes the subscription, then sends the balance the stream opens on.
-    ///
-    /// <para>
-    /// The order is the whole point, and it used to be the other way round: the balance was
-    /// read, written, and only then was the subscription taken. A ledger movement that
-    /// committed inside that window — the round trip of a database read — had no subscriber
-    /// to publish to and was simply gone, and the member's chip then sat on a figure that was
-    /// already out of date for as long as nothing else moved. It is a far narrower window
-    /// than the keep-alive defect this endpoint was fixed for, but it is the same failure and
-    /// it leaves the same wrong number on the screen. Subscribing first cannot lose it: the
-    /// movement is queued, and the balance read afterwards already reflects it, so the worst
-    /// case is the same figure written twice.
-    /// </para>
-    /// </summary>
-    internal static async Task<Channel<decimal>> SubscribeThenSendAsync(
-        BalanceBroadcaster broadcaster,
-        Guid userId,
-        Func<Task<decimal>> readBalance,
-        Func<decimal, Task> write)
-    {
-        var channel = broadcaster.Subscribe(userId);
-        try
-        {
-            await write(await readBalance());
-            return channel;
-        }
-        catch
-        {
-            // The caller never gets the channel, so it could never unsubscribe it.
-            broadcaster.Unsubscribe(userId, channel);
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// Writes every published balance to one open SSE response, with a keep-alive
-    /// whenever the member's balance has been still for <paramref name="keepAlive"/>.
-    ///
-    /// <para>
-    /// This loop used to race a fresh <c>ReadAsync</c> against a fresh
-    /// <c>PeriodicTimer.WaitForNextTickAsync</c> on every turn and abandon the loser, which
-    /// broke the live balance twice over. An abandoned <c>ReadAsync</c> stays queued on the
-    /// channel as a reader, so the next published balance was handed to a task nobody was
-    /// awaiting and vanished — the member watched a stale figure until they reloaded. And
-    /// <c>PeriodicTimer</c> permits exactly one outstanding waiter, so the turn after a
-    /// balance <i>was</i> delivered threw <c>InvalidOperationException</c> out of the
-    /// handler, after the response had started: an unhandled 500 in the log and a torn
-    /// stream. Between them, a session was deaf from its first keep-alive onward.
-    /// </para>
-    ///
-    /// <para>
-    /// Nothing is abandoned here. <c>WaitToReadAsync</c> observes availability without
-    /// consuming anything, so the only way an item leaves the channel is
-    /// <c>TryRead</c> on the line that writes it; and the wait is ended by a linked
-    /// <c>CancellationTokenSource</c>, which deregisters the waiter rather than orphaning
-    /// it. The inner drain matters because the channel is bounded with
-    /// <c>DropOldest</c> — several movements can land while one write is in flight.
-    /// </para>
-    /// </summary>
-    internal static async Task PumpAsync(
-        ChannelReader<decimal> reader,
-        TimeSpan keepAlive,
-        Func<decimal, CancellationToken, Task> writeBalance,
-        Func<CancellationToken, Task> writeKeepAlive,
-        CancellationToken ct)
-    {
-        while (!ct.IsCancellationRequested)
-        {
-            bool more;
-            using (var quiet = CancellationTokenSource.CreateLinkedTokenSource(ct))
-            {
-                quiet.CancelAfter(keepAlive);
-                try
-                {
-                    more = await reader.WaitToReadAsync(quiet.Token);
-                }
-                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-                {
-                    await writeKeepAlive(ct);
-                    continue;
-                }
-            }
-
-            // The broadcaster completed the channel — the subscription is over.
-            if (!more) return;
-            while (reader.TryRead(out var balance)) await writeBalance(balance, ct);
-        }
-    }
 }
 
 /// <summary><paramref name="RelatedBookingId"/> is optional: set it when the adjustment compensates for a specific booking.</summary>
@@ -476,8 +545,34 @@ public sealed record AdjustServices(
 /// by hand has nothing to retry — but then nothing stops a repeat.
 /// </para>
 /// </summary>
+/// <param name="ReasonCode">
+/// WHAT KIND of by-hand movement this is — see <see cref="AdminCreditReasons"/>. The three
+/// top-up codes post an <c>AdminTopUp</c> and count as revenue; the other four post an
+/// <c>AdminAdjustment</c> and do not.
+///
+/// <para>
+/// Nullable for one release only, read as <c>other</c> and logged as deprecated, because the
+/// console gains the field in the same wave and every build already in the field would otherwise
+/// start failing the moment this deploys.
+/// </para>
+/// </param>
 public sealed record AdjustRequest(
     decimal AmountCredits,
     string Reason,
     Guid? RelatedBookingId = null,
-    string? IdempotencyKey = null);
+    string? IdempotencyKey = null,
+    string? ReasonCode = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("reason_code")] string? ReasonCodeSnake = null)
+{
+    /// <summary>
+    /// The code the caller sent under either spelling.
+    ///
+    /// <para>
+    /// Both bind for the reason the settings PUT already documents at length: this API's GET
+    /// answers snake_case and its bodies bind camelCase, and the cost of a client picking the
+    /// wrong side is not an error — it is <c>null</c>, which here would silently downgrade a cash
+    /// top-up to a goodwill adjustment and quietly drop it out of the club's revenue.
+    /// </para>
+    /// </summary>
+    public string? ReasonCodeEither => ReasonCode ?? ReasonCodeSnake;
+}

@@ -35,12 +35,22 @@ public sealed class BookingService
     private readonly IEmailService _email;
     private readonly IEventBus _bus;
     private readonly AccessCodeService _codes;
+    /// <summary>
+    /// Holds this request's "tell the world" work until the transaction that produced it has
+    /// committed. Handed to every <see cref="PayerLock"/> this service opens; see
+    /// <see cref="Realtime.RealtimeOutbox"/> for what publishing before the commit cost.
+    /// </summary>
+    private readonly Realtime.RealtimeOutbox _outbox;
     private readonly ILogger<BookingService> _logger;
 
     public BookingService(
         MainframeDbContext db, ITenantContext tenant, LedgerService ledger, TenantSettingsAccessor settings,
-        IEmailService email, IEventBus bus, AccessCodeService codes, ILogger<BookingService> logger)
-    { _db = db; _tenant = tenant; _ledger = ledger; _settings = settings; _email = email; _bus = bus; _codes = codes; _logger = logger; }
+        IEmailService email, IEventBus bus, AccessCodeService codes, Realtime.RealtimeOutbox outbox,
+        ILogger<BookingService> logger)
+    {
+        _db = db; _tenant = tenant; _ledger = ledger; _settings = settings; _email = email; _bus = bus;
+        _codes = codes; _outbox = outbox; _logger = logger;
+    }
 
     /// <summary>
     /// A booking nobody is overriding anything for — the member's own, or an admin's
@@ -529,7 +539,7 @@ public sealed class BookingService
         // So the authoritative check happens here, under a lock on the payer, in the same
         // transaction as the debit. See PayerLock for why it locks the payer rather than the
         // court, and why the key is derived rather than hashed.
-        await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, userId, ct);
+        await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, userId, _outbox, ct);
 
         var openingBalance = await _ledger.GetBalanceAsync(userId, ct);
 
@@ -1167,7 +1177,7 @@ public sealed class BookingService
         var tail = await DisplacementAsync(booking, actorUserId, now, provisionalLitEnd, ct);
         var postings = legs.Postings.Concat(tail.Postings).ToList();
 
-        await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, payerUserId, ct);
+        await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, payerUserId, _outbox, ct);
 
         try
         {
@@ -2136,7 +2146,7 @@ public sealed class BookingService
             // within it, so a caller already holding a lock on this payer — the walk-up
             // path commits and releases the booker's before activating, but a future
             // caller that does not would simply nest — cannot deadlock against itself.
-            await using var volunteerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, reassignTo.Value, ct);
+            await using var volunteerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, reassignTo.Value, _outbox, ct);
 
             var volunteerBalance = await _ledger.GetBalanceAsync(reassignTo.Value, ct);
             if (volunteerBalance < booking.AmountChargedCredits)
@@ -2223,7 +2233,7 @@ public sealed class BookingService
         // uncharged bookings could otherwise have both activated at once and finish
         // negative. Same reentrancy note as the volunteer lock above. A refusal below
         // returns without committing, which rolls back — nothing to unwind.
-        await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, payerUserId, ct);
+        await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, payerUserId, _outbox, ct);
 
         var balance = await _ledger.GetBalanceAsync(payerUserId, ct);
         if (balance < booking.AmountChargedCredits)

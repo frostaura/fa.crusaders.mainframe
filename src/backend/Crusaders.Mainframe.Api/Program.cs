@@ -277,7 +277,14 @@ builder.Services.AddScoped<DeviceRegistryService>();
 builder.Services.AddScoped<DeviceKeyResolver>();
 builder.Services.AddScoped<TenantSecretsAccessor>();
 builder.Services.AddScoped<IPaymentProvider, Crusaders.Mainframe.Api.Payments.PayFast.PayFastProvider>();
-builder.Services.AddSingleton<BalanceBroadcaster>();
+// The fan-out behind every SSE stream. Singleton, so subscriptions survive across requests;
+// in-process, which is correct for the single backend container docker-compose.prod.yml runs
+// and which DeploymentPostureTests is what stops a compose file quietly contradicting.
+builder.Services.AddSingleton<Crusaders.Mainframe.Api.Services.Realtime.IRealtimeBus,
+    Crusaders.Mainframe.Api.Services.Realtime.InProcessRealtimeBus>();
+// SCOPED, not singleton: it holds one request's unpublished frames until that request's
+// transaction commits. See RealtimeOutbox for what publishing before the commit cost.
+builder.Services.AddScoped<Crusaders.Mainframe.Api.Services.Realtime.RealtimeOutbox>();
 builder.Services.AddSingleton<AccessTokenRevocationList>();
 builder.Services.AddScoped<LedgerService>();
 builder.Services.AddScoped<ScheduleService>();

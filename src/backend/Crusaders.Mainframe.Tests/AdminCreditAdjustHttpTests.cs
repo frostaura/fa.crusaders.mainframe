@@ -311,4 +311,288 @@ public sealed class AdminCreditAdjustHttpTests
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
         Assert.Equal(-5m, await BalanceAsync(factory, seeded));
     }
+
+    // ---- "Admins top me up" — the capability, made honest -------------------
+
+    private static Task<HttpResponseMessage> TopUpAsync(
+        HttpClient client, Seeded s, decimal amount, string reasonCode, string? idempotencyKey = null)
+    {
+        return client.PostAsJsonAsync($"/api/v1/admin/credit/{s.MemberUserId}/adjust", new
+        {
+            amountCredits = amount,
+            reason = "R200 cash at the desk, receipt 0412",
+            reasonCode,
+            idempotencyKey,
+        });
+    }
+
+    private static async Task<LedgerEntryType> LastTypeAsync(TestWebAppFactory factory, Seeded s)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        return await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.TenantId == s.TenantId && l.UserId == s.MemberUserId)
+            .OrderByDescending(l => l.CreatedAt).Select(l => l.Type).FirstAsync();
+    }
+
+    /// <summary>
+    /// Cash at the desk is REVENUE.
+    ///
+    /// <para>
+    /// <c>docs/specs/reporting.md</c> defines Revenue as <c>top_up</c> net of
+    /// <c>payment_reversal</c>, and an <c>AdminAdjustment</c> sits in the Adjustment bucket — so
+    /// before this, every rand the club took over the counter was invisible to the club's own
+    /// revenue figure. The three top-up codes now post an <c>AdminTopUp</c>, which lives in the
+    /// Funding bucket beside a PayFast top-up, because a R200 note and a R200 card payment are
+    /// the same event to the club's books.
+    /// </para>
+    /// </summary>
+    [SkippableTheory]
+    [InlineData("top_up_cash")]
+    [InlineData("top_up_eft")]
+    [InlineData("top_up_card_offline")]
+    public async Task A_desk_top_up_posts_an_AdminTopUp_and_counts_as_funding(string code)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var res = await TopUpAsync(client, seeded, 200m, code);
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+
+        var body = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("AdminTopUp", body.GetProperty("type").GetString());
+        Assert.Equal(code, body.GetProperty("reason_code").GetString());
+        Assert.Equal(200m, body.GetProperty("amount_credits").GetDecimal());
+
+        // The admin reads back where they took the member FROM and TO, in one answer, rather
+        // than composing it client-side from a figure fetched before the movement.
+        Assert.Equal(0m, body.GetProperty("balance_before_credits").GetDecimal());
+        Assert.Equal(200m, body.GetProperty("balance_after_credits").GetDecimal());
+
+        Assert.Equal(LedgerEntryType.AdminTopUp, await LastTypeAsync(factory, seeded));
+        Assert.Contains(LedgerEntryType.AdminTopUp, LedgerEntryTypes.Funding);
+    }
+
+    /// <summary>And a goodwill credit is not revenue, which is the other half of the same rule.</summary>
+    [SkippableTheory]
+    [InlineData("goodwill")]
+    [InlineData("correction")]
+    [InlineData("refund_outside_system")]
+    [InlineData("other")]
+    public async Task A_gesture_posts_an_AdminAdjustment_and_does_not(string code)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var res = await TopUpAsync(client, seeded, 50m, code);
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        Assert.Equal("AdminAdjustment",
+            (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("type").GetString());
+        Assert.Equal(LedgerEntryType.AdminAdjustment, await LastTypeAsync(factory, seeded));
+    }
+
+    /// <summary>
+    /// A top-up is money the club TOOK, so it is strictly positive. A negative one is a refund or
+    /// a correction and has codes of its own; mixing signs inside a directional bucket is what
+    /// makes a per-row listing unreadable.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_negative_top_up_is_refused()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var res = await TopUpAsync(client, seeded, -200m, "top_up_cash");
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+        Assert.Equal("amount_must_be_positive_for_top_up",
+            (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+        Assert.Equal(0m, await BalanceAsync(factory, seeded));
+    }
+
+    /// <summary>An unknown code is refused with the whole valid set, so a client never has to guess.</summary>
+    [SkippableFact]
+    public async Task An_unknown_reason_code_is_refused_with_the_valid_set()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var res = await TopUpAsync(client, seeded, 200m, "cash-ish");
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+
+        var body = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("reason_code_invalid", body.GetProperty("error").GetString());
+        Assert.Equal(7, body.GetProperty("valid").GetArrayLength());
+    }
+
+    /// <summary>
+    /// The grace release: a console that has not been updated yet still works, and its movement
+    /// lands exactly where it used to.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_request_carrying_no_reason_code_still_works_for_one_release()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var res = await AdjustAsync(client, seeded, 11m, "an older console", idempotencyKey: null);
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+
+        var body = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("AdminAdjustment", body.GetProperty("type").GetString());
+        Assert.Equal("other", body.GetProperty("reason_code").GetString());
+    }
+
+    /// <summary>The code binds under the snake_case spelling too — see AdjustRequest.ReasonCodeEither.</summary>
+    [SkippableFact]
+    public async Task The_reason_code_binds_under_either_spelling()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var res = await client.PostAsJsonAsync($"/api/v1/admin/credit/{seeded.MemberUserId}/adjust", new
+        {
+            amountCredits = 200m,
+            reason = "cash at the desk",
+            reason_code = "top_up_cash",
+        });
+
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        Assert.Equal("AdminTopUp",
+            (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("type").GetString());
+    }
+
+    /// <summary>
+    /// <b>D2-B10.</b> The replay matched on the reference alone, so +11 under key k1 followed by
+    /// +110 under k1 answered 200 with <c>amount_credits: 11</c> — the admin corrected the amount,
+    /// pressed Apply, and was told it had been applied.
+    /// </summary>
+    [SkippableFact]
+    public async Task Reusing_a_key_with_a_different_amount_is_refused_rather_than_silently_replayed()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        Assert.Equal(HttpStatusCode.OK, (await AdjustAsync(client, seeded, 11m, "typo", "k1")).StatusCode);
+
+        var corrected = await AdjustAsync(client, seeded, 110m, "the amount I meant", "k1");
+        Assert.Equal(HttpStatusCode.Conflict, corrected.StatusCode);
+
+        var body = await corrected.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("idempotency_key_reused", body.GetProperty("error").GetString());
+        Assert.Equal(11m, body.GetProperty("stored").GetProperty("amount_credits").GetDecimal());
+
+        // And nothing moved on the second attempt.
+        Assert.Equal(11m, await BalanceAsync(factory, seeded));
+    }
+
+    /// <summary>The same key with the same payload is still a retry, and still replays.</summary>
+    [SkippableFact]
+    public async Task Reusing_a_key_with_the_same_payload_replays()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        Assert.Equal(HttpStatusCode.OK, (await AdjustAsync(client, seeded, 11m, "once", "k1")).StatusCode);
+
+        var again = await AdjustAsync(client, seeded, 11m, "once", "k1");
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+
+        var body = await again.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(11m, body.GetProperty("amount_credits").GetDecimal());
+        Assert.Equal(0m, body.GetProperty("balance_before_credits").GetDecimal());
+        Assert.Equal(11m, body.GetProperty("balance_after_credits").GetDecimal());
+        Assert.Equal(11m, await BalanceAsync(factory, seeded));
+    }
+
+    /// <summary>
+    /// <b>D2-B08.</b> The one by-hand money movement in the system wrote nothing to the club's
+    /// audit trail, while a member-class change and a password reset both write one. The two
+    /// balance figures are the point: an adjustment is only reviewable if the row says where it
+    /// took the member from and to.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_by_hand_movement_writes_an_audit_row_carrying_both_balances()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        Assert.Equal(HttpStatusCode.OK, (await TopUpAsync(client, seeded, 200m, "top_up_cash")).StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var row = Assert.Single(await db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == seeded.TenantId && a.Action == "credit.adjusted").ToListAsync());
+
+        Assert.Equal(seeded.AdminUserId, row.ActorUserId);
+        Assert.Equal(seeded.MemberUserId, row.SubjectUserId);
+
+        var details = JsonDocument.Parse(row.DetailsJson!).RootElement;
+        Assert.Equal("AdminTopUp", details.GetProperty("entry_type").GetString());
+        Assert.Equal("top_up_cash", details.GetProperty("reason_code").GetString());
+        Assert.Equal(0m, details.GetProperty("balance_before_credits").GetDecimal());
+        Assert.Equal(200m, details.GetProperty("balance_after_credits").GetDecimal());
+    }
+
+    /// <summary>
+    /// And the member is told, live. GOAL item 8 asks the credits badge to animate when funds
+    /// ARRIVE, which a bare new-total cannot distinguish from a refund — so the named frame
+    /// carries the delta and the reason.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_desk_top_up_reaches_the_members_live_wallet_with_a_delta_and_a_reason()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var bus = factory.Services.GetRequiredService<Crusaders.Mainframe.Api.Services.Realtime.IRealtimeBus>();
+        var topic = Crusaders.Mainframe.Api.Services.Realtime.RealtimeTopic.Wallet(
+            seeded.TenantId, seeded.MemberUserId);
+        var channel = bus.Subscribe(topic);
+
+        try
+        {
+            Assert.Equal(HttpStatusCode.OK, (await TopUpAsync(client, seeded, 200m, "top_up_cash")).StatusCode);
+
+            var frames = new List<Crusaders.Mainframe.Api.Services.Realtime.RealtimeMessage>();
+            while (channel.Reader.TryRead(out var frame)) frames.Add(frame);
+
+            var named = Assert.Single(frames, f => f.Event == "balance");
+            Assert.Contains("\"delta_credits\":200", named.JsonPayload);
+            Assert.Contains("\"reason\":\"admin_top_up\"", named.JsonPayload);
+        }
+        finally
+        {
+            bus.Unsubscribe(topic, channel);
+        }
+    }
 }
