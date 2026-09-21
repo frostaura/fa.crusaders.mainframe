@@ -206,7 +206,7 @@ function DoorControls({ door, displayName, actions, online, shutAt, timezone }: 
         <div className="space-y-2 border-t border-border pt-4">
           {/* The consequence is rendered as page text as well as on the confirm, because
               `ConfirmButton`'s aria-label replaces its contents: without this sentence a
-              screen-reader user arming the control hears only "tap again to confirm". */}
+              screen-reader user arming the control hears only "choose again to confirm". */}
           <p className="text-sm text-text-secondary">{gateDeleteStandingNotice(displayName)}</p>
           <ConfirmButton
             idleLabel="Delete this door"

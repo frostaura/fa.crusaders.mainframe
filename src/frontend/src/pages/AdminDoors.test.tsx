@@ -1762,7 +1762,7 @@ describe("the door pages, round 3", () => {
     openDoor([doorFixture()]);
 
     fireEvent.click(await screen.findByRole("button", { name: /Shut this door/ }));
-    fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
 
     const reopen = await screen.findByRole("button", { name: /Reopen this door/ });
     await waitFor(() => expect(document.activeElement).not.toBe(document.body));
@@ -1862,7 +1862,7 @@ describe("a door page acting on a state that has moved", () => {
     // Somebody else shuts it between the arm and the confirm — the exact window a tab left
     // open overnight is permanently inside.
     server.current()[0].enabled = false;
-    fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
 
     expect(await screen.findByText(/shut or reopened by somebody else/)).toBeInTheDocument();
     // Nothing was written: the server refused before applying, so the door is as the other
@@ -2002,7 +2002,7 @@ describe("the club's own clock, on every doors face", () => {
     renderPage(<AdminDoorsPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Shut all doors|Shut the/ }));
-    fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
 
     // 04:09 UTC is 16:09 in Auckland and 06:09 in Johannesburg — the fixture's zone is the
     // one that must win, whatever zone the test runner is pinned to.
