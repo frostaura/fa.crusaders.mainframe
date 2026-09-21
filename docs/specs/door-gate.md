@@ -112,7 +112,7 @@ deliberately *not* the 200 a decision gets, because none of them is a decision:
   "kind": "gate",
   "gate_key": "front-door",
   "heartbeat_seconds": 60,
-  "gate": { "unlock_seconds": 3 },
+  "gate": { "unlock_seconds": 15 },
   "roster": ["7Q3F9KM2XZ8B|0|1800|5400"]
 }
 ```
@@ -265,7 +265,7 @@ the door is offline.*
 
 ```
 Request   {"mac":"…","method":"qr","token":"7Q3F9KM2XZ8B"}
-Opened    {"opened":true,"reason":"ok","unlock_seconds":3}
+Opened    {"opened":true,"reason":"ok","unlock_seconds":15}
 Refused   {"opened":false,"reason":"<code>","unlock_seconds":0}
 ```
 
@@ -810,13 +810,20 @@ board, the answer is physical, the same way §11's is.
 
 | Key | Default | Range | Meaning |
 |---|---|---|---|
-| `gate_unlock_seconds` | 3 | 1–30 | how long the lock is released per open |
+| `gate_unlock_seconds` | 15 | 1–30 | how long the lock is released per open |
 | `gate_access_policy` | `active_member` | `active_member` \| `booking_window` | who may open a door |
 | `gate_early_entry_minutes` | 30 | 0–240 | how long before a booking its holder may enter |
 | `device_alert_cooldown_minutes` | 60 | 5–1440 | how long before the same board may mail the club again |
 
-Three seconds is long enough to push a door and short enough that it has shut again before
-the next person reaches it. Thirty minutes is the club's own habit — a member due on court at
+**Fifteen seconds, and it was three.** Three is how long a lock takes to throw; it is not how
+long a person takes to notice a lamp go solid, move a bag to the other hand, reach for a handle
+and pull a door that opens towards them. A member who is half a second slow scans again, and at
+a door that is offline that second scan is a second record for one arrival. The safety bound is
+unchanged — the club may still set anything in [1, 30], and the firmware caps every release at
+thirty seconds whatever the server answers (§11.2) — so a club that wants Carl's three back sets
+three and has it on the next heartbeat with no reflash. What the number governs is the ordinary
+open and the window before the server has spoken at all. §11a.6 carries the two consequences of
+raising it, because neither is cosmetic. Thirty minutes is the club's own habit — a member due on court at
 six arrives at half past five to change — and it is deliberately much longer than
 `activation_cue_window_minutes`, because getting into the *building* early is ordinary and
 getting the *lights* on early is somebody else's court.
@@ -1187,15 +1194,15 @@ Three things, and they are worth stating here because they are the reason the fl
    **The physical release can nonetheless overrun that deadline, by at most one blocking
    call.** The loop cannot read the clock while it is inside an HTTP request, so a deadline
    that falls during one is serviced when the call returns. The bound is therefore
-   *deadline + one call's worth*, and that call's worth is the **connect timeout plus the
-   response timeout** — two separate budgets, which is the trap. They are four seconds each,
-   so one call is **8 seconds**, or **8 010 ms** counting the loop's ≤10 ms idle; the
-   worst case across a whole pass is **38.01 s**. Those are the firmware project's own
-   numbers and its README is where the split and the compile-time assertion tying them to the
-   watchdog period live — quoted here so the two documents cannot disagree, and not
-   re-derived. The earlier sentence here — that the relay can *never* stay released longer
-   than the cap — was the deadline's property stated as the relay's, and the earlier
-   arithmetic quoted one four-second budget where there are two.
+   *deadline + one call's worth*, and a call is **three** budgets, not two — the connect, the
+   status line and headers, and the response body, four seconds each. One call is therefore
+   **12 000 ms**, or **12 010 ms** counting the loop's ≤10 ms idle, and the worst case against
+   the thirty-second cap is **42.01 s**. §11a.1 sets out the three phases and where each
+   number comes from; §11a.2 sets out the larger bound that applies to a peer this firmware
+   cannot budget at all. The earlier sentence here — that the relay can *never* stay released
+   longer than the cap — was the deadline's property stated as the relay's; the earlier
+   arithmetic quoted one four-second budget where there are two, and then two where there are
+   three.
 
 3. **The two polarity flags are independent, and both are tested in all four combinations.**
 
@@ -1225,6 +1232,237 @@ on the lock being fail-safe, per the first sentence of this section. The wiring 
 turns this into instructions for a person with a screwdriver belongs in the firmware
 project's own README, beside the flags it documents; it is not restated here, because a
 wiring fact written in two places is a wiring fact that will disagree with itself.
+
+---
+
+## 11a. The board's own rules — what the firmware decides before the server is asked
+
+Everything above §11 is the SERVER's half of the contract. This section is the board's, and it
+is here because four of its rules are now visible to a club — two refusal words a desk will read
+in a trail, a bound a technician measures with a stopwatch, and a field the deduplication key
+rests on. Each sentence is checkable in `src/iot/door-gate`, and the pins are named beside it
+rather than in §12's table, which is deliberately the server half only.
+
+### 11a.1 One blocking call per pass, in three phases
+
+The loop makes **at most one** blocking HTTP call per pass and kicks the watchdog immediately
+before and immediately after it (`lib/gatelogic/GateApp.h:39`, `src/GateApp.cpp:223`), so the
+longest the watchdog countdown ever runs unkicked is one worst-case call. A pass with three
+complete tokens in the UART buffer decides one of them and leaves the other two for the passes
+that follow, ten milliseconds apart (`src/GateApp.cpp:279`).
+
+A call is **three** budgets on one peer, because the ESP32 core applies the first two separately
+and the third is this firmware's own:
+
+| Phase | Budget | Where it is applied |
+|---|---|---|
+| TCP connect | 4 000 ms — `kHttpConnectTimeoutMs` (`GateConfig.h:273`) | `HTTPClient::setConnectTimeout` |
+| status line + headers | 4 000 ms — `kHttpResponseTimeoutMs` (`GateConfig.h:283`) | `HTTPClient::setTimeout` |
+| response body | 4 000 ms — `kHttpBodyBudgetMs` (`GateConfig.h:298`) | `gatelogic::readBody`, on a deadline sampled **after** the headers return |
+
+`kWorstBlockingCallMs` is their sum, derived and never written out, so changing a budget moves
+everything built on it together: **12 000 ms** (`GateConfig.h:310`).
+
+**The body's budget is separate on purpose.** It used to share one deadline computed from the
+instant the whole call started, so a connect and a header phase that between them spent eight
+seconds left a 4.6 KB roster a deadline already in the past — and a roster that was arriving
+perfectly well was reported as a transport failure (`GateConfig.h:285`). That is a door with no
+offline fallback, produced by a slow evening.
+
+**The header budget is honest about what it is not.** `setTimeout` is an *inter-byte* timeout: a
+peer that dribbles one byte every three seconds resets it forever, `POST()` cannot be interrupted
+from this firmware, and no number in `GateConfig.h` bounds that case (`GateApp.h:82`). Two of the
+three phases are genuinely bounded here; the header phase is bounded only nominally, which is
+what §11a.2 exists for.
+
+What the three budgets bound is the **physical** release:
+`kMaxPhysicalReleaseMs = 30 000 (the hard cap) + 12 000 (one call in flight) + 10 (the pass tick)
+= 42 010 ms` (`GateConfig.h:416`). Raising the default from 3 s to 15 s did **not** move it: the
+first term is the cap, which no single answer and no sequence of re-arms may pass. A release that
+exceeds it means the loop did not get back to its own lock inside the budget the whole arithmetic
+rests on, and the board reports it as a `relock_overdue` fault (`src/GateApp.cpp:510`) — which
+was a sentence in three files and a literal in one test while nothing on the board compared it to
+what the relay actually did.
+
+*Pinned by* `test_config_the_worst_call_is_connect_plus_headers_plus_body`,
+`test_app_a_release_outlives_its_deadline_by_at_most_one_blocking_call`,
+`test_app_the_watchdog_is_kicked_around_every_blocking_call`.
+
+### 11a.2 The watchdog bound, term by term
+
+Against a peer that dribbles headers the true bound is not 42.01 s — it is the **watchdog**, and
+the reset that follows it. The arithmetic, rather than the total:
+
+```
+  the release window, bounded by GATE_UNLOCK_HARD_CAP_MS        30 000 ms
++ the task watchdog period, GATE_WATCHDOG_SECONDS                15 000 ms
++ the boot that follows it, which is what takes the lock back      ~500 ms
+---------------------------------------------------------------------------
+                                                          about 45 500 ms
+```
+
+- **30 s** is the cap (`GateConfig.h:108`), bounded again by a `static_assert` into the
+  contract's own [1 s, 30 s] (`GateConfig.h:528`).
+- **15 s** is `GATE_WATCHDOG_SECONDS` (`GateConfig.h:173`). It is not a free number: a
+  `static_assert` requires it to exceed one worst-case call plus a whole pass's margin —
+  `15 000 ≥ 12 000 + 2 000` (`kWatchdogMarginMs`, `GateConfig.h:316`; the assert,
+  `GateConfig.h:616`). **Eight seconds against an eight-second call was a guaranteed reset loop**
+  — the board panicked before the call it was waiting on could return, booted, and did it again,
+  never loading a roster and admitting nobody. Twelve was right for a two-phase call and is not
+  right for a three-phase one, which is why the assert moved with the third budget.
+- **~0.5 s** is the boot, and it is the term that ends the release: `beginOutputs()` writes the
+  LOCKED level into the output register *before* the pin drives anything, first of all in
+  `setup()` (`src/gate/main.cpp:411`, `src/GateApp.cpp:37`). Nothing else takes the lock back,
+  because nothing else is running.
+
+**No code on this board can report the 45.5-second case**, and that is stated rather than left to
+be inferred: the part has reset, so `relock_overdue` is unreachable for it (`src/GateApp.cpp:506`).
+It shows up on the *next* boot as two fault codes — `wdt_reset`, meaning this board has been reset
+by its watchdog at least once in a row, and `boot_reason_task_wdt`, this one boot's cause
+(`src/GateApp.cpp:92`; the reason table, `src/gate/main.cpp:263`) — and as a held-back first call
+(`BootRecovery.h`), so a dribbling peer cannot be reached again within a second of every reset.
+
+**The simulator cannot reproduce it.** Its `SocketHttpPort` bounds its own header read, so every
+number the simulator measures is the three-budget case (`GateApp.h:100`). Both numbers are true of
+different peers and the larger one is the one to plan a door around.
+
+*Pinned by* `test_app_a_dead_api_host_never_starves_the_watchdog_or_the_lock`,
+`test_app_a_board_the_watchdog_reset_holds_its_first_call_back`,
+`test_boot_recovery_backs_off_only_after_a_watchdog_reset`.
+
+### 11a.3 The re-lock dwell is measured from the moment the lock RE-ENGAGES
+
+**From the close, not from the unlock command**, and the difference is the whole release
+duration. `UnlockTimer::tick` arms the dwell at the instant the window ends — the same instant
+the relay is written open (`lib/gatelogic/UnlockTimer.h:162`; the relay write,
+`src/GateApp.cpp:484`). Measuring it from the unlock command would let a door be re-opened before
+it had physically latched, which is precisely the defect the dwell was added to close.
+
+Two lengths, because two closes mean different things:
+
+| Close | Dwell | Why |
+|---|---|---|
+| ordinary — the granted window ran out | `GATE_MIN_RELOCK_MS`, **400 ms** (`GateConfig.h:155`) | a relatch floor: a strike drops in tens of milliseconds, a maglock re-magnetises in about 300. Short enough that a second member arriving behind the first does not notice it |
+| the HARD CAP forced it | `GATE_RELOCK_DWELL_MS`, **3 000 ms** (`GateConfig.h:138`) | that close is the board overruling somebody who has held the door open for the whole cap, and the point of overruling them is that the door shuts. Sized against a doorway's closer, not against the release time |
+
+**The dwell is no longer "the same number as the default", and that justification is gone rather
+than quietly falsified.** It was 3 000 ms because the default was 3 000 ms; the default is 15 000
+now and the dwell is still 3 000, because the two answer different questions. A longer dwell is a
+queue of innocent members refused for something one person did; a fifteen-second one would be a
+door refusing a queue for a quarter of a minute. The relation is asserted both ways
+(`GateConfig.h:542` and `:553`) and pinned in `test_config_defaults_are_carls_wiring`.
+
+**Why any dwell at all.** The cap bounds a *window*, and the next accepted scan opens a fresh one
+— legally. On this loop the two land in the **same pass**, because `pass()` pumps the lock out of
+`afterBlocking()` and applies the decision that call produced two lines later
+(`src/GateApp.cpp:229`). Measured on the compiled simulator with two alternating tokens every
+50 ms: the relay was written OFF and ON at the same millisecond, dark for 0 ms, for ever. A relay
+de-energised for zero milliseconds was never de-energised — the strike does not drop and the
+maglock keeps its armature — so the door physically never relocked, with no single request
+breaking any rule.
+
+*Pinned by* `test_unlock_a_capped_window_is_followed_by_real_dark_time`,
+`test_unlock_any_close_guarantees_the_lock_actually_relatches`.
+
+### 11a.4 `relocking` and `too_fast` — two refusals that are not about the member
+
+Every other reason in §5 is a statement about the person at the door. These two are statements
+about the board, and they have distinct words for a reason a desk cares about: a trail full of
+`relocking` reads "somebody is holding this door open", and a trail full of `too_fast` reads "this
+door is being hammered". Neither is "your code does not work"
+(`lib/gatelogic/GateFlow.h:120` and `:127`).
+
+| | `relocking` | `too_fast` |
+|---|---|---|
+| **When** | the lock has not finished relatching — §11a.3's dwell is still running (`src/GateApp.cpp:366`) | this board will not ask the server again yet: `kMinScanCallSpacingMs`, a **250 ms** floor under `/gate` calls whatever token asks for one (`GateConfig.h:244`; the branch, `src/GateApp.cpp:372`) |
+| **Is the API asked?** | **No.** Refused before the call, on the debounce's precedent — a 200 answering `opened` would put a door opening in the server's audit trail that did not happen, and a whole blocking call spent to be told yes about a door that cannot open is the pass spent on nothing | **No**, by definition |
+| **Answered from the roster instead?** | No | **No, deliberately.** The roster does not know about a membership barred this morning, so letting a throttle send a scan there would be this board's own rate limiting opening a door the API would have refused |
+| **What the member sees** | the denial blink — three fast blinks, the same as every other refusal (`src/GateApp.cpp:437`). The door does not say which refusal it is and there is no pattern to look for | the same |
+| **What the server is told** | **nothing at the time.** Offline, the refusal is queued as an `unknown_scan` (`GateFlow.cpp:190`, `src/GateApp.cpp:465`) and reaches §6's path later; online, nothing — the API can see for itself that it was not asked | **nothing, ever.** `refuseTooFast(false)` never queues (`src/GateApp.cpp:386`): this branch only runs while the board is ONLINE, and a ring filling with a board's notes to itself is the eviction problem with a different cause |
+
+Neither word is on the wire as a `reason`. Both are board vocabulary with no server equivalent,
+and the server never answers either (`GateFlow.h:103`).
+
+**`relocking` is applied twice, and the second time is not redundant.** A scan can be decided
+before the dwell exists and applied after it does, because the pass that closes a window is very
+often the pass that applies the decision a blocking call inside it produced. So a decision that
+came back `released` is **rewritten** into the refusal rather than dropped: the lamp denies, and an
+offline record says a scan was refused rather than that a door opened (`markRelocking`,
+`GateFlow.cpp:206`; the call site, `src/GateApp.cpp:449`). An event still saying `gate_open` for a
+door that never moved is the one thing an audit trail must never contain.
+
+**Why 250 ms costs a legitimate member nothing.** Two members arriving together are hundreds of
+milliseconds apart at best, and one member holding a phone at the reader is suppressed by the
+two-second debounce instead (`kScanDebounceMs`, `GateConfig.h:210`). The debounce alone was not
+enough and that is what the floor is for: it remembers recently-decided tokens, so **alternating
+two tokens defeated it completely** — every scan differed from the one before, nothing was
+suppressed, and the board made a measured ~18 POSTs a second to `/gate`. A code taped beside a
+reader plus a member's own phone is enough to produce it. The debounce now remembers four
+(`kDebounceSlots`, `GateConfig.h:226`) — four people at one door inside one window — and the floor
+is what bounds somebody rotating five.
+
+*Pinned by* `test_app_a_scan_inside_the_relock_dwell_costs_no_call_and_records_no_opening`,
+`test_app_a_scan_inside_the_relock_dwell_never_reaches_the_api`,
+`test_app_alternating_tokens_cannot_hammer_the_gate_endpoint`,
+`test_app_a_rate_limited_scan_is_refused_rather_than_decided_from_the_roster`.
+
+### 11a.5 `boot_id` — the third field of the idempotency key
+
+Every event-upload body a gate sends carries `boot_id`: a per-boot random 32-bit value drawn once
+before the loop from `esp_random()`, and **never zero** (`src/gate/main.cpp:211`). It is a
+de-duplication tag, not a credential — nothing turns on it being unpredictable, only on two
+consecutive boots of one board not colliding.
+
+**`(device, seq)` alone was not enough, and the failure was silent.** The server deduplicates on a
+**permanent** unique index; the board's event ring is RAM-only so no event survives a reboot; and
+`seq` resumes from one checkpoint record in flash, written in blocks of 64. Erase or tear that
+record and the board renumbers from 1 — so every event of the next evening is receipted as a
+duplicate and discarded, **including the `boot` event the firmware queues precisely so an operator
+can see that a board restarted**. Two boards accidentally sharing a MAC dedup each other the same
+way (`shared/lib/devlink/include/devlink/EventUpload.h:65`). The key is
+`(tenant, device, boot_id, seq)` now (`Persistence/MainframeDbContext.cs:344`), so a renumbered
+board collides with nothing and a genuine retry still carries the same three fields and is still
+deduplicated.
+
+**An absent `boot_id` is read as 0**, which is exactly what `(device, seq)` always meant
+(`Endpoints/DeviceEventEndpoints.cs:1374`, and the record's default at `:1390`). That is the
+compatibility hinge rather than a convenience: a **court box**, whose composition root passes 0,
+renders the body it has always rendered byte for byte, and every image flashed before this change
+keeps working. A gate always passes a non-zero one, and a composition root that forgot it would be
+degraded rather than broken.
+
+*Pinned by* `test_app_every_uploaded_batch_carries_this_boots_identity`,
+`test_app_two_boots_that_both_start_at_seq_one_are_told_apart`, and on the server side by
+`DeviceEventHttpTests.A_batch_with_no_boot_id_deduplicates_exactly_as_it_always_did` and
+`DeviceGateProtocolCorpusTests` (which asserts both the carried value and the legacy 0).
+
+### 11a.6 Fifteen seconds is not a cosmetic change
+
+`GATE_UNLOCK_DEFAULT_MS` is **15 000 ms** (`GateConfig.h:95`) and was Carl's `delay(3000)`. The
+bounds did not move: [1 s, 30 s] on the server's clamp and on the board's, and the 30-second hard
+cap stands (`GateConfig.h:108`, `:528`). Two things follow that are worth writing down, because
+they are the reason this is not a number swap.
+
+**The hard cap bounds the TOTAL release across re-arms, so a longer grant buys fewer of them.**
+No deadline may ever fall later than the cap measured from the moment the door **first** opened
+(`UnlockTimer.h:19`; the arithmetic, `UnlockTimer.h:148`). A member at a fifteen-second door gets
+**one** extension from back-to-back scans and no more: the first scan opens the lock until
+t = 15 s; a second at t = 14 s carries the deadline to t = 29 s; a third arriving just before that
+gets only the ~1 s left of the cap; and the scan after it is refused `relocking`, because the
+cap-forced close owes the door three seconds of dark time. **At the old three-second default the
+identical rule allowed nine extensions.** That is the safe direction and it stays — nobody who
+scans once notices it, and somebody holding a phone at the reader reaches the cap nine times
+faster and then meets the dwell, which is what the cap and the dwell are for.
+
+**The dwell-versus-unlock distinction in §11a.3 stops being invisible.** While both numbers were
+three seconds, a reader could not tell "how long the door is open" from "how long a held-open door
+must stay shut", and the header said outright that the dwell *was* the default. They are different
+numbers with different jobs now, and a later edit that re-collapses them fails a test.
+
+*Pinned by* `test_config_defaults_are_carls_wiring`,
+`test_config_the_default_is_only_what_runs_until_the_server_answers` (the default is adoptable
+over, at every clock base, which is what makes it safe to raise),
+`test_unlock_the_hard_cap_bounds_both_one_answer_and_the_whole_window`.
 
 ---
 
@@ -1336,11 +1574,12 @@ new sentence above with no row is the defect this table exists to expose.
 - The pre-`setup()` reset window in §11.1, for the same reason: it is decided by the relay
   module's input bias and is measured on a bench, not asserted in a test.
 - Every sentence about what the *firmware* does: §11's release-deadline overrun bound, the
-  polarity combinations and the watchdog budget, and §7's right-hand column — what a board
-  does with a `403` versus with a timeout. Those are pinned in `src/iot/door-gate`'s own host
-  tests. What is pinned here is the SERVER half: that a board out of service really is
-  refused `403` on the heartbeat and the scan. Restating the claim here and pinning it there
-  is the split this table is honest about rather than hiding.
+  polarity combinations and the watchdog budget, **the whole of §11a**, and §7's right-hand
+  column — what a board does with a `403` versus with a timeout. Those are pinned in
+  `src/iot/door-gate`'s own host tests, which is why §11a names its pins inline rather than
+  adding rows here. What is pinned in this table is the SERVER half: that a board out of
+  service really is refused `403` on the heartbeat and the scan. Restating the claim here and
+  pinning it there is the split this table is honest about rather than hiding.
 - §7's residual and all of §10a: they are statements about what the system does **not**
   guarantee, and a test cannot pin an absence of a guarantee. They are here so that nobody
   infers the guarantee from the surrounding text.
@@ -1646,7 +1885,7 @@ if a club's door ever outgrows a day's rows per page, which at a racquet club it
 | **A second admin is told who shut the door**, by hand or by the fleet, and reopening clears it | `DoorEventChangeHttpTests.A_second_admin_is_told_who_shut_the_door_and_reopening_clears_it`, `…A_fleet_shut_records_who_shut_each_door_and_a_fleet_reopen_clears_it` |
 | No admin of another club is ever named on this club's door or its events | `DoorEventChangeHttpTests.Another_clubs_admin_is_never_named_on_this_clubs_door`, `…An_event_whose_actor_belongs_to_another_club_names_nobody` |
 | The member is told which clock the club's times are in | `MeDoorHttpTests.The_member_is_told_which_clock_the_clubs_times_are_in` |
-| **No shipped file turns on the dev sign-in block, and the seeded admin cannot exist outside Development** | `DeploymentPostureTests.No_shipped_compose_file_turns_on_the_dev_sign_in_block` (four files), `…The_frontend_image_defaults_the_dev_sign_in_block_off`, `…The_development_seeder_is_called_from_one_place_and_only_under_Development` |
+| **No shipped file turns on the dev sign-in block, and the seeded admin cannot exist outside Development** | `DeploymentPostureTests.No_shipped_compose_file_turns_on_the_dev_sign_in_block` (four files), `…The_frontend_image_cannot_be_asked_for_the_dev_sign_in_block`, `…The_development_seeder_is_called_from_one_place_and_only_under_Development` |
 | Every row names its door, and an unnamed door's `gate_key` is null rather than absent | `AdminDoorLogHttpTests.Every_row_names_the_door_it_happened_at`, `…A_row_from_an_unnamed_door_carries_a_null_gate_key_rather_than_vanishing` |
 | The filters are door, outcome (a closed set of three) and reason (both vocabularies) | `AdminDoorLogHttpTests.The_door_filter_narrows_to_one_board`, `…The_outcome_filter_is_a_closed_set_of_three`, `…An_outcome_outside_the_closed_set_is_refused`, `…The_reason_filter_reaches_both_vocabularies` |
 | **There is no member filter, under any spelling** | `AdminDoorLogHttpTests.No_parameter_named_after_a_member_changes_anything` (five names, by id and by name, byte-identical answers) |
