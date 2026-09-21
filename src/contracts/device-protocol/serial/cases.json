@@ -546,6 +546,235 @@
       },
       "cap": 3,
       "bytes": ""
+    },
+    {
+      "id": "enc-row",
+      "kind": "encode_v2",
+      "note": "One staged row. !ROW never paints: !SHOW is what commits, so a half-written screen is never on the glass.",
+      "frame": {
+        "verb": "ROW",
+        "args": [
+          "0",
+          "CRUSADERS COURTS"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!ROW,0,CRUSADERS COURTS*00\n"
+    },
+    {
+      "id": "enc-row-wide",
+      "kind": "encode_v2",
+      "note": "Twenty columns, the full width of the fitted 2004A. kMaxArgLen is 24, so the widest row still fits an argument.",
+      "frame": {
+        "verb": "ROW",
+        "args": [
+          "3",
+          "READY          19:42"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!ROW,3,READY          19:42*06\n"
+    },
+    {
+      "id": "enc-row-escape",
+      "kind": "encode_v2",
+      "note": "A row carrying the frame's own delimiters. ',' and '%' escape; '*' does not need to, because the checksum delimiter is found by position from the end.",
+      "frame": {
+        "verb": "ROW",
+        "args": [
+          "1",
+          "A,B*C%D"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!ROW,1,A%2CB*C%25D*23\n"
+    },
+    {
+      "id": "enc-show",
+      "kind": "encode_v2",
+      "note": "Commit the staged rows and hold them for ten seconds, flag bit0 asking for the countdown in row 3.",
+      "frame": {
+        "verb": "SHOW",
+        "args": [
+          "10",
+          "1"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!SHOW,10,1*33\n"
+    },
+    {
+      "id": "enc-show-clamp-high",
+      "kind": "encode_v2",
+      "note": "No screen may outlive two minutes. Clamped, never refused — the same rule ON's duration follows.",
+      "frame": {
+        "verb": "SHOW",
+        "args": [
+          "9999",
+          "0"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!SHOW,120,0*00\n"
+    },
+    {
+      "id": "enc-show-clamp-low",
+      "kind": "encode_v2",
+      "note": "A zero hold would be a permanent screen wearing a timeout's clothes; it clamps up to one second, exactly as ON's zero clamps to kRelayMinSeconds.",
+      "frame": {
+        "verb": "SHOW",
+        "args": [
+          "0",
+          "0"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!SHOW,1,0*02\n"
+    },
+    {
+      "id": "enc-idle",
+      "kind": "encode_v2",
+      "note": "The landing screen's row 3: bit0 WiFi up, bit1 API reachable, bit2 clock valid, bit3 restore pending — and the club's wall time.",
+      "frame": {
+        "verb": "IDLE",
+        "args": [
+          "7",
+          "1942"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!IDLE,7,1942*3D\n"
+    },
+    {
+      "id": "enc-idle-noclock",
+      "kind": "encode_v2",
+      "note": "WiFi up, API judged down, clock not trusted. A blank clock is honest; a stale one is not.",
+      "frame": {
+        "verb": "IDLE",
+        "args": [
+          "1",
+          "----"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!IDLE,1,----*35\n"
+    },
+    {
+      "id": "enc-map",
+      "kind": "encode_v2",
+      "note": "Relay index to the club's court number, so the glass can name the court the member is standing at.",
+      "frame": {
+        "verb": "MAP",
+        "args": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!MAP,1,2,3,4*58\n"
+    },
+    {
+      "id": "enc-map-unmapped",
+      "kind": "encode_v2",
+      "note": "Zero is unmapped: a box driving two courts renders the other two cells blank rather than as court zero.",
+      "frame": {
+        "verb": "MAP",
+        "args": [
+          "1",
+          "2",
+          "0",
+          "0"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!MAP,1,2,0,0*5F\n"
+    },
+    {
+      "id": "enc-pong-counters",
+      "kind": "encode_v2",
+      "note": "The Mega's three since-boot counters ride the ping answer: frames it could not put on the wire, lines that did not decode, presses dropped with the window shut.",
+      "frame": {
+        "verb": "PONG",
+        "args": [
+          "2.0.0",
+          "3600",
+          "4",
+          "7",
+          "12"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!PONG,2.0.0,3600,4,7,12*0D\n"
+    },
+    {
+      "id": "enc-pong-legacy-shape",
+      "kind": "encode_v2",
+      "note": "A Mega that has not been reflashed still answers with two arguments, and the bridge must still read it.",
+      "frame": {
+        "verb": "PONG",
+        "args": [
+          "2.0.0",
+          "3600"
+        ]
+      },
+      "cap": 4096,
+      "bytes": "!PONG,2.0.0,3600*21\n"
+    },
+    {
+      "id": "encl-row-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "ROW",
+        "args": [
+          "0",
+          "X"
+        ]
+      },
+      "cap": 4096,
+      "bytes": ""
+    },
+    {
+      "id": "encl-show-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "SHOW",
+        "args": [
+          "10",
+          "0"
+        ]
+      },
+      "cap": 4096,
+      "bytes": ""
+    },
+    {
+      "id": "encl-idle-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "IDLE",
+        "args": [
+          "0",
+          "----"
+        ]
+      },
+      "cap": 4096,
+      "bytes": ""
+    },
+    {
+      "id": "encl-map-has-no-legacy-form",
+      "kind": "encode_legacy",
+      "frame": {
+        "verb": "MAP",
+        "args": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ]
+      },
+      "cap": 4096,
+      "bytes": ""
     }
   ],
   "decode": [
@@ -1684,6 +1913,296 @@
       "expect": [
         {
           "error": "BADFRAME"
+        }
+      ]
+    },
+    {
+      "id": "dec-row",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!ROW,2,A -- B 32 C -- D  7*4A\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "ROW",
+            "args": [
+              "2",
+              "A -- B 32 C -- D  7"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-row-escape",
+      "kind": "decode",
+      "note": "The escaped delimiters survive the round trip byte for byte.",
+      "link": "downlink",
+      "chunks": [
+        "!ROW,1,A%2CB*C%25D*23\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "ROW",
+            "args": [
+              "1",
+              "A,B*C%D"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-row-badrow",
+      "kind": "decode",
+      "note": "There is no row 4. Refused, never folded onto row 3: a row the panel does not have is a peer that disagrees about the hardware.",
+      "link": "downlink",
+      "chunks": [
+        "!ROW,4,X*26\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "dec-row-negative-row",
+      "kind": "decode",
+      "note": "A row index is an index, not a quantity.",
+      "link": "downlink",
+      "chunks": [
+        "!ROW,-1,X*0E\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "dec-row-toolong",
+      "kind": "decode",
+      "note": "Twenty-five characters does not fit kMaxArgLen. Refused rather than truncated: half a message is a different message.",
+      "link": "downlink",
+      "chunks": [
+        "!ROW,0,ABCDEFGHIJKLMNOPQRSTUVWXY*3B\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "dec-row-split",
+      "kind": "decode",
+      "note": "One frame delivered in three UART reads.",
+      "link": "downlink",
+      "chunks": [
+        "!ROW,0,CRU",
+        "SADERS C",
+        "OURTS*00\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "ROW",
+            "args": [
+              "0",
+              "CRUSADERS COURTS"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-show",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!SHOW,10,1*33\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "SHOW",
+            "args": [
+              "10",
+              "1"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-show-clamp-high",
+      "kind": "decode",
+      "note": "The two-minute clamp is the Mega's, applied on the way IN. No screen a bridge paints — including one from a firmware that does not exist yet — can persist past it.",
+      "link": "downlink",
+      "chunks": [
+        "!SHOW,9999,0*33\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "SHOW",
+            "args": [
+              "120",
+              "0"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-show-clamp-low",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!SHOW,0,1*02\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "SHOW",
+            "args": [
+              "1",
+              "1"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-show-argc",
+      "kind": "decode",
+      "note": "The flags argument is not optional: a missing one read as zero would silently drop the countdown.",
+      "link": "downlink",
+      "chunks": [
+        "!SHOW,10*2E\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "dec-idle",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!IDLE,7,1942*3D\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "IDLE",
+            "args": [
+              "7",
+              "1942"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-idle-noclock",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!IDLE,1,----*35\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "IDLE",
+            "args": [
+              "1",
+              "----"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-map",
+      "kind": "decode",
+      "link": "downlink",
+      "chunks": [
+        "!MAP,1,2,3,4*58\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "MAP",
+            "args": [
+              "1",
+              "2",
+              "3",
+              "4"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-map-argc",
+      "kind": "decode",
+      "note": "Four relays, four numbers. A short map would leave one court naming the previous tenant's number.",
+      "link": "downlink",
+      "chunks": [
+        "!MAP,1,2,3*40\n"
+      ],
+      "expect": [
+        {
+          "error": "BADARG"
+        }
+      ]
+    },
+    {
+      "id": "dec-pong-counters",
+      "kind": "decode",
+      "link": "uplink",
+      "chunks": [
+        "!PONG,2.0.0,3600,4,7,12*0D\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "PONG",
+            "args": [
+              "2.0.0",
+              "3600",
+              "4",
+              "7",
+              "12"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec-pong-legacy-shape",
+      "kind": "decode",
+      "note": "Two arguments still decode. The counters are additive, so a bridge flashed ahead of its Mega is not a bridge that stops hearing PONG.",
+      "link": "uplink",
+      "chunks": [
+        "!PONG,2.0.0,3600*21\n"
+      ],
+      "expect": [
+        {
+          "frame": {
+            "verb": "PONG",
+            "args": [
+              "2.0.0",
+              "3600"
+            ]
+          }
         }
       ]
     }

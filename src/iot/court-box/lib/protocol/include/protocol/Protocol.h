@@ -79,6 +79,41 @@ inline constexpr uint16_t kRelayMinSeconds = 1;
 /// legacy protocol arms the buttons as a side effect of showing that prompt.
 inline constexpr uint16_t kAuthDefaultSeconds = 30;
 
+/// Rows the overlay protocol can address, 0-3.
+///
+/// A PROTOCOL constant, not a display one: the wire must mean the same thing
+/// whatever panel is fitted, so `!ROW,3` is a well-formed frame on a box built
+/// for a 1602 and the DISPLAY layer is what drops a row it does not have. The
+/// two are held together by a static_assert on the device side
+/// (courtlogic/CourtBox.cpp), which is where a header that knows about both
+/// belongs — the same rule bridgelogic/RosterTokenFits.h follows.
+inline constexpr uint8_t kMaxRows = 4;
+
+/// The bounds on a `!SHOW` hold, and the whole of GOAL items 11 and 15.
+///
+/// Every screen the bridge paints is an OVERLAY with a deadline, and the
+/// deadline is clamped HERE — on the way in, by the Mega, out of reach of any
+/// configuration. No screen a bridge paints can persist past two minutes:
+/// not one from a future firmware, not one from a confused firmware, and not
+/// one from a bridge that has stopped running at all. That is the structural
+/// version of "put a timeout on every screen", which is the version that
+/// survives somebody adding a screen and forgetting.
+///
+/// The lower bound exists for the same reason kRelayMinSeconds does: zero is a
+/// permanent screen wearing a timeout's clothes if any consumer reads it as
+/// "no limit".
+inline constexpr uint16_t kShowHoldMinSeconds = 1;
+inline constexpr uint16_t kShowHoldMaxSeconds = 120;
+
+/// What `!IDLE` carries instead of `hhmm` when the box does not trust its
+/// clock. A blank clock is honest; a stale one is not.
+inline constexpr char kNoClock[] = "----";
+
+#ifdef LCD_HOLD_MAX_MS
+static_assert(LCD_HOLD_MAX_MS == static_cast<uint32_t>(kShowHoldMaxSeconds) * 1000UL,
+              "kShowHoldMaxSeconds and the court_mega build flag have drifted apart");
+#endif
+
 #ifdef RELAY_HARD_CAP_MS
 static_assert(RELAY_HARD_CAP_MS == 5400000UL,
               "kRelayHardCapSeconds and the court_mega build flag have drifted apart");
@@ -108,9 +143,18 @@ enum class Verb : uint8_t {
   Pong,
   Evt,
   Err,
+  // APPEND-ONLY BELOW THIS LINE. kVerbSpecs is indexed by the value, so a new
+  // verb goes at the END and nothing is ever reordered — which is why these
+  // four downlink verbs sit after the uplink block rather than with their own
+  // direction. Direction is kVerbSpecs's business and the decoder's, not the
+  // enum's ordering.
+  Row,  ///< Downlink. Stage one row of the pending overlay. Paints nothing.
+  Show, ///< Downlink. Commit the staged rows atomically and arm their deadline.
+  Idle, ///< Downlink. What the Mega-rendered landing screen's status row says.
+  Map,  ///< Downlink. The club court number behind each relay index.
 };
 
-inline constexpr size_t kVerbCount = 14;
+inline constexpr size_t kVerbCount = 18;
 
 /// Courts are A-D. Making this an enum rather than a char means a Frame cannot
 /// carry a court that does not exist; NOCOURT is a decode-time verdict about
@@ -146,20 +190,42 @@ struct VerbSpec {
   char name[6]; ///< Wire spelling. "STATE" is the longest at 5 + NUL.
   uint8_t minArgs;
   uint8_t maxArgs;
-  int8_t courtArg;     ///< Index of the A-D court argument, -1 if the verb has none.
-  int8_t secondsArg;   ///< Index of a clamped duration argument, -1 if none.
-  uint16_t minSeconds; ///< Lower clamp for that duration. AUTH allows 0: it disarms.
-  bool legacy;         ///< Has a spelling in Carl's dialect. Everything v2 ADDS does not.
+  int8_t courtArg;   ///< Index of the A-D court argument, -1 if the verb has none.
+  int8_t secondsArg; ///< Index of a clamped duration argument, -1 if none.
+  /// Lower clamp for that duration. AUTH allows 0: it disarms.
+  uint16_t minSeconds;
+  /// Upper clamp for it. A FIELD rather than one global constant because the
+  /// two durations on this wire bound different things: a relay duration is
+  /// bounded by the ninety-minute hard cap that stops an unattended court
+  /// burning, and a screen hold is bounded by the two minutes that stop a
+  /// screen becoming permanent. One constant serving both would have let a
+  /// `!SHOW,5400` stand on the glass for an hour and a half.
+  uint16_t maxSeconds;
+  bool legacy; ///< Has a spelling in Carl's dialect. Everything v2 ADDS does not.
 };
 
 inline constexpr VerbSpec kVerbSpecs[kVerbCount] = {
-    {Verb::Unknown, "", 0, 0, -1, -1, 0, false},    {Verb::On, "ON", 2, 2, 0, 1, kRelayMinSeconds, true},
-    {Verb::Off, "OFF", 1, 1, 0, -1, 0, true},       {Verb::Ext, "EXT", 2, 2, 0, 1, kRelayMinSeconds, false},
-    {Verb::Lcd, "LCD", 2, 2, -1, -1, 0, true},      {Verb::Auth, "AUTH", 1, 1, -1, 0, 0, false},
-    {Verb::Rst, "RST", 0, 0, -1, -1, 0, true},      {Verb::Ping, "PING", 0, 0, -1, -1, 0, false},
-    {Verb::Btn, "BTN", 1, 1, -1, -1, 0, true},      {Verb::Scan, "SCAN", 1, 1, -1, -1, 0, true},
-    {Verb::State, "STATE", 5, 5, -1, -1, 0, false}, {Verb::Pong, "PONG", 2, 2, -1, -1, 0, false},
-    {Verb::Evt, "EVT", 2, 2, -1, -1, 0, false},     {Verb::Err, "ERR", 1, 1, -1, -1, 0, false},
+    {Verb::Unknown, "", 0, 0, -1, -1, 0, 0, false},
+    {Verb::On, "ON", 2, 2, 0, 1, kRelayMinSeconds, kRelayHardCapSeconds, true},
+    {Verb::Off, "OFF", 1, 1, 0, -1, 0, 0, true},
+    {Verb::Ext, "EXT", 2, 2, 0, 1, kRelayMinSeconds, kRelayHardCapSeconds, false},
+    {Verb::Lcd, "LCD", 2, 2, -1, -1, 0, 0, true},
+    {Verb::Auth, "AUTH", 1, 1, -1, 0, 0, kRelayHardCapSeconds, false},
+    {Verb::Rst, "RST", 0, 0, -1, -1, 0, 0, true},
+    {Verb::Ping, "PING", 0, 0, -1, -1, 0, 0, false},
+    {Verb::Btn, "BTN", 1, 1, -1, -1, 0, 0, true},
+    {Verb::Scan, "SCAN", 1, 1, -1, -1, 0, 0, true},
+    {Verb::State, "STATE", 5, 5, -1, -1, 0, 0, false},
+    // PONG takes two arguments or five. The three counters are ADDITIVE: a
+    // bridge flashed ahead of the Mega it is wired to must still read the
+    // answer, and the Mega is the half that cannot be reflashed over the air.
+    {Verb::Pong, "PONG", 2, 5, -1, -1, 0, 0, false},
+    {Verb::Evt, "EVT", 2, 2, -1, -1, 0, 0, false},
+    {Verb::Err, "ERR", 1, 1, -1, -1, 0, 0, false},
+    {Verb::Row, "ROW", 2, 2, -1, -1, 0, 0, false},
+    {Verb::Show, "SHOW", 2, 2, -1, 0, kShowHoldMinSeconds, kShowHoldMaxSeconds, false},
+    {Verb::Idle, "IDLE", 2, 2, -1, -1, 0, 0, false},
+    {Verb::Map, "MAP", 4, 4, -1, -1, 0, 0, false},
 };
 
 /// kVerbSpecs is indexed by the Verb value, so a row in the wrong place would
@@ -187,6 +253,21 @@ static_assert(kVerbSpecs[static_cast<size_t>(Verb::On)].secondsArg == 1,
               "ON's duration must be the clamped argument");
 static_assert(kVerbSpecs[static_cast<size_t>(Verb::On)].minSeconds >= kRelayMinSeconds,
               "ON must not be clampable down to zero seconds");
+static_assert(kVerbSpecs[static_cast<size_t>(Verb::On)].maxSeconds == kRelayHardCapSeconds,
+              "ON's duration must still be bounded by the relay hard cap");
+
+// The other half of the safety rule, for the screen. If someone widens SHOW's
+// clamp, the build stops here rather than a refusal screen standing on the
+// glass all evening with every button dead behind it — which is the failure
+// this verb was added to make unrepresentable.
+static_assert(kVerbSpecs[static_cast<size_t>(Verb::Show)].secondsArg == 0,
+              "SHOW's hold must be the clamped argument");
+static_assert(kVerbSpecs[static_cast<size_t>(Verb::Show)].maxSeconds == kShowHoldMaxSeconds,
+              "SHOW's hold must be bounded by kShowHoldMaxSeconds");
+static_assert(kVerbSpecs[static_cast<size_t>(Verb::Show)].minSeconds >= kShowHoldMinSeconds,
+              "SHOW must not be clampable down to a zero-second hold");
+static_assert(kVerbSpecs[static_cast<size_t>(Verb::Row)].maxArgs == 2,
+              "ROW carries a row index and a row of text, and nothing else");
 
 /// Grammar row for a verb. Verb::Unknown's row for anything out of range.
 const VerbSpec& specOf(Verb v);
@@ -283,7 +364,46 @@ public:
 
   /// Two display lines. Text longer than kMaxArgLen is truncated — the panel is
   /// driven as 16 columns, so this loses nothing a player would have seen.
+  ///
+  /// STILL SUPPORTED AND STILL THE SHORT PATH. It stages rows 0 and 1 and
+  /// commits them with the default hold, so a bridge that only ever sends
+  /// `!LCD` can no longer produce a screen that never leaves. That is the
+  /// point of routing it through the same deadline: the fix holds for an
+  /// un-upgraded bridge, not only for the one this change ships with.
   static Frame lcd(const char* line1, const char* line2);
+
+  /// Stage one row of the pending overlay. Paints NOTHING: `!SHOW` commits.
+  ///
+  /// Returns an EMPTY frame for a row the protocol does not have. Refused
+  /// rather than folded onto the last row, on the same rule scan() follows: a
+  /// peer addressing row 4 disagrees with this one about the hardware, and
+  /// quietly writing its text somewhere else would hide that disagreement
+  /// behind a screen that merely looks wrong.
+  ///
+  /// Text longer than kMaxArgLen truncates, exactly as lcd()'s does.
+  static Frame row(uint8_t row, const char* text);
+
+  /// Commit the staged rows atomically and hold them for `seconds`.
+  ///
+  /// `seconds` is clamped into [kShowHoldMinSeconds, kShowHoldMaxSeconds] —
+  /// clamped, never refused, because a refused hold is a screen with no
+  /// deadline at all and that is the bug. `flags` bit0 asks for the countdown
+  /// in row 3's right-hand columns.
+  static Frame show(uint32_t seconds, uint8_t flags);
+
+  /// What the Mega-rendered landing screen's status row should say.
+  ///
+  /// `flags`: bit0 WiFi up, bit1 API reachable, bit2 clock trusted, bit3 a
+  /// power-dip restore is still pending. `hhmm` is four digits of club-local
+  /// wall time, or kNoClock when the box does not trust its clock.
+  static Frame idle(uint8_t flags, const char* hhmm);
+
+  /// The club's court number behind each relay index; 0 is unmapped.
+  ///
+  /// Values are clamped into [0, 9999]: a court number is a label the club
+  /// chose, and one that will not fit four columns of a character LCD is a
+  /// label this glass cannot show whatever it does.
+  static Frame map(const int16_t numbers[4]);
 
   /// Accept button input for `seconds`. 0 disarms, so there is no lower clamp.
   static Frame auth(uint16_t seconds);
@@ -303,6 +423,16 @@ public:
   static Frame state(uint8_t mask, const uint16_t remaining[4]);
 
   static Frame pong(const char* version, uint32_t uptimeSeconds);
+
+  /// The same answer, carrying the Mega's three since-boot counters.
+  ///
+  /// They exist on the Mega already (CourtBox's diagnostics) and nothing off
+  /// the board could read them, so a climbing "presses thrown away because the
+  /// window was shut" — a stuck button, or a bridge that stopped sending
+  /// `!AUTH` — was invisible from the office. The bridge diffs them per
+  /// heartbeat and reports the delta as a fault.
+  static Frame pong(const char* version, uint32_t uptimeSeconds, uint16_t txDropped, uint16_t rxErrors,
+                    uint16_t unauthorised);
   static Frame evt(const char* name, const char* detail);
   static Frame err(DecodeError code);
 
