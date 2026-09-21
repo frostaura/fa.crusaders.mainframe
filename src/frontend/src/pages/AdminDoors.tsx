@@ -6,6 +6,7 @@ import { DoorTile } from "../components/doors/DoorTile";
 import { FleetShutPanel } from "../components/doors/FleetShutPanel";
 import {
   DOORS_PAGE_INTERVAL_MS, attentionRankOf, refreshDoorsView, storeCheckedSince, useDoorsStore,
+  type DoorsState,
 } from "../components/doors/useDoorsChrome";
 import { useTicker } from "../lib/useTicker";
 import { isOnline, offlineAfterSecondsFor, relative } from "../lib/deviceLiveness";
@@ -74,11 +75,105 @@ function sortRows(rows: DoorRow[]): DoorRow[] {
  */
 const SUSPEND_LIVENESS_AFTER_FAILURES = 2;
 
+/**
+ * The club's own numbers this page interprets, or nulls where the settings read failed.
+ *
+ * Out of the body with {@link DoorsList} below it: the page component is a loader and a
+ * layout, and every `??` inside it is a branch the complexity gate counts against a
+ * function whose job is neither.
+ */
+function pageSettingsOf(settings: AdminSettings | null) {
+  return {
+    heartbeat: settings?.heartbeat_seconds ?? null,
+    signals: {
+      spikeMinutes: settings?.door_refusal_spike_minutes ?? null,
+      unlockSeconds: settings?.gate_unlock_seconds ?? null,
+    },
+  };
+}
+
+/**
+ * The doors themselves, once the page has decided which of its four states it is in.
+ *
+ * <p>
+ * A component rather than a chain of ternaries inside the page body, and the order of the
+ * three guards is load-bearing rather than tidy: a FAILED read that rendered "no doors"
+ * would be making a claim about the club out of a fact about the request, and an admin who
+ * reads "no doors" while a door is shut goes to look for a board that is fine.
+ * </p>
+ */
+function DoorsList({ store, rows, now, livenessOf, settings }: {
+  /**
+   * The store's own snapshot, whole.
+   *
+   * Not four loose props: `view`, `chrome`, `loading` and `failed` are one read, and the
+   * fleet panel below renders from the SAME summary the chrome banner does. Re-deriving one
+   * here would make this a second reader of the shut state, which is C3 — three readers, one
+   * screen, three different door counts.
+   */
+  store: DoorsState;
+  rows: DoorRow[];
+  now: number;
+  livenessOf: (row: DoorRow) => boolean | null;
+  settings: { spikeMinutes: number | null; unlockSeconds: number | null };
+}) {
+  const { view, chrome, loading, failed } = store;
+  if (failed && view === null) {
+    return (
+      <div className="space-y-3">
+        <Alert tone="danger">{DOORS_READ_FAILED}</Alert>
+        <Button variant="outline" onClick={() => void refreshDoorsView()}>Try again</Button>
+      </div>
+    );
+  }
+  if (loading) return <p className="text-sm text-text-secondary">Loading the club's doors…</p>;
+  if (rows.length === 0) {
+    return (
+      <div className="space-y-2">
+        <p className="text-sm text-text-secondary">{DOORS_EMPTY_NOTICE}</p>
+        <p className="text-sm text-text-muted">{DOORS_EMPTY_HINT}</p>
+        <Link to="/admin/devices" className="inline-flex min-h-11 items-center text-sm text-accent-strong">
+          Go to Devices
+        </Link>
+      </div>
+    );
+  }
+  return (
+    <>
+      <FleetShutPanel
+        chrome={chrome}
+        loading={loading}
+        failed={false}
+        reload={refreshDoorsView}
+        onRetry={() => void refreshDoorsView()}
+      />
+      {/* `items-stretch` and an internal footer: B18. Tiles misaligned whenever one door
+          carried more chips than its neighbour, so three cards in a row ended with their
+          scan counts at three different heights and the eye had to hunt for each. */}
+      <div className="grid items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {rows.map((row) => (
+          <DoorTile
+            key={row.device.id}
+            row={row}
+            now={now}
+            // A8: `null` means "this page cannot currently say". The tile suppresses every
+            // liveness claim rather than deriving one from a frozen age.
+            online={livenessOf(row)}
+            timezone={view!.timezone}
+            dayStartedAt={view!.day_started_at}
+            settings={settings}
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
 function AdminDoorsPageBody() {
   // E-L6 / B2: ONE reader. The page, the chrome banner and the gear badge all subscribe to
   // this store, and it makes one request no matter how many of them mount at once.
   const store = useDoorsStore(true, DOORS_PAGE_INTERVAL_MS);
-  const { view, chrome, loading, failed, failures, checkedAt } = store;
+  const { view, failures, checkedAt } = store;
   const [settings, setSettings] = useState<AdminSettings | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   /** C4: what Refresh says back, so pressing it offline is not silence. */
@@ -97,11 +192,7 @@ function AdminDoorsPageBody() {
     return () => { cancelled = true; };
   }, []);
 
-  const tenantHeartbeat = settings?.heartbeat_seconds ?? null;
-  const signalSettings = {
-    spikeMinutes: settings?.door_refusal_spike_minutes ?? null,
-    unlockSeconds: settings?.gate_unlock_seconds ?? null,
-  };
+  const { heartbeat: tenantHeartbeat, signals: signalSettings } = pageSettingsOf(settings);
 
   /**
    * A8 / C4: Refresh answers immediately, whether or not the club is reachable.
@@ -203,53 +294,14 @@ function AdminDoorsPageBody() {
         )}
       </div>
 
-      {/* Failed read before empty, always. An admin who reads "no doors" while a door is shut
-          goes to look for a board that is fine — a worse false claim than the members page's,
-          which is the rule pages/admin-failed-read.test.tsx exists to hold. */}
-      {failed && view === null ? (
-        <div className="space-y-3">
-          <Alert tone="danger">{DOORS_READ_FAILED}</Alert>
-          <Button variant="outline" onClick={() => void refreshDoorsView()}>Try again</Button>
-        </div>
-      ) : loading ? (
-        <p className="text-sm text-text-secondary">Loading the club's doors…</p>
-      ) : rows.length === 0 ? (
-        <div className="space-y-2">
-          <p className="text-sm text-text-secondary">{DOORS_EMPTY_NOTICE}</p>
-          <p className="text-sm text-text-muted">{DOORS_EMPTY_HINT}</p>
-          <Link to="/admin/devices" className="inline-flex min-h-11 items-center text-sm text-accent-strong">
-            Go to Devices
-          </Link>
-        </div>
-      ) : (
-        <>
-          <FleetShutPanel
-            chrome={chrome}
-            loading={loading}
-            failed={failed && view === null}
-            reload={refreshDoorsView}
-            onRetry={() => void refreshDoorsView()}
-          />
-          {/* `items-stretch` and an internal footer: B18. Tiles misaligned whenever one door
-              carried more chips than its neighbour, so three cards in a row ended with their
-              scan counts at three different heights and the eye had to hunt for each. */}
-          <div className="grid items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {rows.map((row) => (
-              <DoorTile
-                key={row.device.id}
-                row={row}
-                now={now}
-                // A8: `null` means "this page cannot currently say". The tile suppresses
-                // every liveness claim rather than deriving one from a frozen age.
-                online={livenessOf(row)}
-                timezone={view!.timezone}
-                dayStartedAt={view!.day_started_at}
-                settings={signalSettings}
-              />
-            ))}
-          </div>
-        </>
-      )}
+      {/* Failed read before empty, always — see {@link DoorsList}, which owns the order. */}
+      <DoorsList
+        store={store}
+        rows={rows}
+        now={now}
+        livenessOf={livenessOf}
+        settings={signalSettings}
+      />
 
       <p className="text-sm">
         <Link to="/admin/devices" className="inline-flex min-h-11 items-center text-accent-strong">

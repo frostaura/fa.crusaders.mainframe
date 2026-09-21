@@ -869,24 +869,40 @@ function applyFleet(state: DoorsState, enabled: boolean) {
   };
 }
 
+/**
+ * Whether one row survives the DOOR half of the filters.
+ *
+ * Split out of {@link matchesLogFilters} for the complexity gate, and the seam is the
+ * honest one: which door a row belongs to is one question (and, since a board can be
+ * deleted, two parameters), and what happened at it is another.
+ */
+function matchesLogDoor(entry: Record<string, unknown>, query: URLSearchParams): boolean {
+  const entryDoor = (entry.door ?? {}) as Record<string, unknown>;
+  const door = query.get("door");
+  if (door && String(entryDoor.id) !== door) return false;
+  // WIRE-R2 §1: a deleted board has no id, so its rows are reached by the key the row stored.
+  const removedDoor = query.get("removed_door");
+  return !removedDoor || String(entryDoor.gate_key ?? entryDoor.name ?? "") === removedDoor;
+}
+
+/** Whether one row survives the OUTCOME half — the bucket and the exact reason. */
+function matchesLogOutcome(entry: Record<string, unknown>, query: URLSearchParams): boolean {
+  const outcome = query.get("outcome");
+  if (outcome && !doorOutcomeOf(entry).includes(outcome)) return false;
+  // The API narrows by reason too, and this stub did not — so a page filtering to "Too early"
+  // was handed every row and could claim any behaviour it liked about the result.
+  const reason = query.get("reason");
+  return !reason || String(entry.reason ?? "") === reason;
+}
+
 /** Whether one log row survives the filters in this query string. */
 function matchesLogFilters(
   entry: Record<string, unknown>, query: URLSearchParams, floor: number,
   range: { from: number; to: number },
 ): boolean {
+  if (!matchesLogDoor(entry, query)) return false;
+  if (!matchesLogOutcome(entry, query)) return false;
   const at = new Date(String(entry.at)).getTime();
-  const entryDoor = (entry.door ?? {}) as Record<string, unknown>;
-  const door = query.get("door");
-  // WIRE-R2 §1: a deleted board has no id, so its rows are reached by the key the row stored.
-  const removedDoor = query.get("removed_door");
-  const outcome = query.get("outcome");
-  if (door && String(entryDoor.id) !== door) return false;
-  if (removedDoor && String(entryDoor.gate_key ?? entryDoor.name ?? "") !== removedDoor) return false;
-  if (outcome && !doorOutcomeOf(entry).includes(outcome)) return false;
-  // The API narrows by reason too, and this stub did not — so a page filtering to "Too early"
-  // was handed every row and could claim any behaviour it liked about the result.
-  const reason = query.get("reason");
-  if (reason && String(entry.reason ?? "") !== reason) return false;
   // The retention clamp the API applies, so a page that states a range states a real one.
   if (at < Math.max(range.from, floor)) return false;
   return at <= range.to;
