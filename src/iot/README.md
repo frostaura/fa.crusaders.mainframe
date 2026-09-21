@@ -10,7 +10,13 @@ libraries, and nothing else.
 | [`tools/`](tools/) | Project-neutral firmware tooling: the Arduino IDE exporter (`--project`, or every project) and the iCloud duplicate sweep. Nothing here knows about one board. |
 | [`shared/`](shared/) | The libraries every Crusaders device needs and no device owns: rollover-safe time, the HAL ports and their fakes, hex, the firmware-version string, the device API client, the event queue, the roster cache, and `devlink` — the heartbeat body, the event-upload body, the roster push and the API circuit breaker. Builds for **no board at all**; its `platformio.ini` carries host test environments only. |
 | [`court-box/`](court-box/) | The **court light box**: WeMos Mega 2560 + onboard ESP8266, four court-light relays, an LCD, a button panel and a QR scanner — plus the native simulator and the generated Arduino IDE sketches that are the flashing route. Everything here is true of *this* hardware. Start at [`court-box/README.md`](court-box/README.md). |
-| [`door-gate/`](door-gate/) | The **door gate**: one ESP32 per door, a QR scanner on `Serial2`, one relay on the lock and one LED — plus the generated Arduino IDE sketch that is its flashing route. Pull-only, online-first with a roster fallback, and a lock asserted LOCKED before its pin is ever an output. Start at [`door-gate/README.md`](door-gate/README.md). |
+| [`door-gate/`](door-gate/) | The **door gate**: one ESP32 per door, a QR scanner on `Serial2`, one relay on the lock and one LED — plus its own native simulator and the generated Arduino IDE sketch that is its flashing route. Pull-only, online-first with a roster fallback, and a lock asserted LOCKED before its pin is ever an output. Start at [`door-gate/README.md`](door-gate/README.md). |
+
+**Both board projects have a native simulator**, and the two exist for the same
+reason: a stub only ever agrees with itself, because both ends of the
+conversation get written from one reading of the spec. The court box's is the
+Mega half behind a TCP socket; the gate's is the whole board, making real HTTP
+calls to a real API. `test/e2e-device/` drives both.
 
 A firmware project reaches the shared libraries with one line in its own
 `platformio.ini`:

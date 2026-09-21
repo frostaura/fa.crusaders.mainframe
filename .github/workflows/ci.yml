@@ -404,8 +404,8 @@ jobs:
       # broke. The espressif32 platform is a few hundred megabytes of Xtensa
       # toolchain on a cold cache; the pio-boards cache entry above is keyed on
       # every project's platformio.ini, so a pin change is what re-downloads it.
-      - name: Build door_gate
-        run: pio run -d src/iot/door-gate -e door_gate
+      - name: Build door_gate and the door simulator
+        run: pio run -d src/iot/door-gate -e door_gate -e simulator
 
       # The Arduino IDE is the DEPLOYMENT route for EVERY board here and both
       # arduino/ trees are generated, so a source or platformio.ini change that was
@@ -460,13 +460,38 @@ jobs:
       # The simulator is what the .NET integration tests talk to, so "it links"
       # is not enough — it has to come up and bind its socket. --port 0 asks the
       # kernel for a free one, so this cannot collide with anything on a runner.
-      - name: Simulator starts and binds
+      - name: Court-box simulator starts and binds
         run: |
           set -euo pipefail
           out=$(timeout 10s src/iot/court-box/.pio/build/simulator/program \
                   --port 0 --store "$RUNNER_TEMP/simstore" </dev/null || true)
           echo "$out"
           echo "$out" | grep -q '^\[sim\] listening on 127\.0\.0\.1:[0-9]\+$'
+
+      # The door's equivalent, and it asserts the one thing "it links" cannot:
+      # that the LOCKED level is in the output register BEFORE the relay pin
+      # drives anything. On a board wired the other way round the obvious
+      # ordering is a door that clicks open on every boot, and the e2e job below
+      # is where the rest of this binary's behaviour is proved.
+      #
+      # 192.0.2.10 is TEST-NET-1 and answers nothing, which is the point: the
+      # startup path being checked runs before the first heartbeat, and a
+      # simulator that needed a reachable API to print its banner would be a
+      # smoke test that only passes with a server behind it. The key is a
+      # throwaway and is read from the environment rather than argv.
+      - name: Door simulator starts with the lock asserted LOCKED
+        run: |
+          set -euo pipefail
+          out=$(GATE_DEVICE_KEY=ci-build-only-not-a-real-key timeout 5s \
+                  src/iot/door-gate/.pio/build/simulator/program \
+                  --api-base http://192.0.2.10:8088 --mac 02d0deadbeef \
+                  --store "$RUNNER_TEMP/gatestore" </dev/null || true)
+          echo "$out"
+          echo "$out" | grep -q '^\[relay\] OFF level=LOW (register only, pin not driving) t='
+          echo "$out" | grep -q '^\[relay\] driving, level=LOW (OFF) t='
+          echo "$out" | grep -q '^\[sim\] crusaders door-gate simulator 1\.0\.0$'
+          # The key must not reach the transcript: CI uploads it as an artifact.
+          ! echo "$out" | grep -q 'ci-build-only-not-a-real-key'
 
   # ============================================================================
   # End-to-end device proof — the real API, a real Postgres, the firmware's native
