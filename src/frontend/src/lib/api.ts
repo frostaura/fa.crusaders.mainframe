@@ -529,6 +529,54 @@ export type AdminSettings = {
   club_contact_phone?: string;
   /** ≤254 chars, may be empty. The same, by mail. */
   club_contact_email?: string;
+
+  // ---------------------------------------------------------------------------------------
+  // eco — everything this release made configurable (ruling 13, D2 §14).
+  //
+  // ALL optional, and that is load-bearing rather than cautious: three backend lanes are
+  // writing these keys in parallel with the screen that reads them, so an API that does not
+  // serve one gets no row for it and no complaint about it. Bounds, labels and the sentences
+  // live in `lib/ecoSettings.ts`, which is where a test walks them against D2's table.
+  // ---------------------------------------------------------------------------------------
+
+  /** 5–120, default 10. GOAL item 1: how long the box's screen holds a result before it
+   *  goes back to "Scan code to get started". Reaches the box on its next heartbeat. */
+  lcd_revert_seconds?: number;
+  /** 0–60, default 10. GOAL item 18: how long the box stays ready for the next person to
+   *  scan, with the time left shown. 0 turns rapid scanning off. */
+  rapid_scan_window_seconds?: number;
+  /** 0–96, default 4. GOAL item 19, in SLOTS (ruling 3). 0 = no limit; admins are exempt.
+   *  Composes with {@link AdminSettings.member_per_day_max_minutes} — most restrictive wins. */
+  member_max_slots_per_day?: number;
+  /** 1–500, default 100. How many slots one bulk book or cancel may carry. */
+  admin_bulk_max_items?: number;
+  /** 7–365, default 60. How far ahead a repeating booking is written into the diary. Must
+   *  be ≥ `advance_booking_days`, or a member books into a league night that does not exist. */
+  schedule_materialisation_days?: number;
+  /** 100–20000, default 2000. The refusal that stops one mistyped end date holding the club. */
+  schedule_max_rows_per_change?: number;
+  /** 7–730, default 90. Resolved faults are deleted after this; open ones are aged out and
+   *  KEPT, so the club's own count of open faults stays honest. */
+  device_error_retention_days?: number;
+  /** 20–2000, default 200. Past this, one board's new faults are counted rather than kept. */
+  device_error_max_open_rows?: number;
+  /** 5–55, default 25. Under the gateway's 60-second idle close, which is the whole reason
+   *  for the upper bound — above it a live connection drops and reconnects for ever. */
+  sse_keepalive_seconds?: number;
+  /** 1–10, default 3. Consecutive live-connection failures before a screen falls back to
+   *  re-reading on a timer — and says on screen that it has. */
+  realtime_fallback_after_failures?: number;
+  /** 5–120, default 10. The control board's timer, once the live connection is given up on. */
+  realtime_poll_seconds_control_board?: number;
+  /** 30–3600, default 300. A full re-read, so a wall screen that missed one update is wrong
+   *  for at most this long rather than for the rest of the evening. */
+  control_board_resync_seconds?: number;
+  /** `thumbs` (default) or `marks` — ruling 4. Destructive confirms are exempt and keep the
+   *  action's own icon and the danger treatment whichever is chosen. */
+  action_glyphs?: "thumbs" | "marks";
+  /** GOAL item 6's kill switch, default true. False makes the trace route answer 404 —
+   *  never 403, which would confirm the surface exists and that this member has one. */
+  member_trace_enabled?: boolean;
 };
 
 /**
@@ -1823,6 +1871,22 @@ export const endpoints = {
     ...(req.door_refusal_spike_minutes !== undefined ? { doorRefusalSpikeMinutes: req.door_refusal_spike_minutes } : {}),
     ...(req.club_contact_phone !== undefined ? { clubContactPhone: req.club_contact_phone } : {}),
     ...(req.club_contact_email !== undefined ? { clubContactEmail: req.club_contact_email } : {}),
+    // eco — ruling 13's keys, on the same omitted-means-unchanged terms as everything above,
+    // which is what lets one Save button carry them against an API that serves only some.
+    ...(req.lcd_revert_seconds !== undefined ? { lcdRevertSeconds: req.lcd_revert_seconds } : {}),
+    ...(req.rapid_scan_window_seconds !== undefined ? { rapidScanWindowSeconds: req.rapid_scan_window_seconds } : {}),
+    ...(req.member_max_slots_per_day !== undefined ? { memberMaxSlotsPerDay: req.member_max_slots_per_day } : {}),
+    ...(req.admin_bulk_max_items !== undefined ? { adminBulkMaxItems: req.admin_bulk_max_items } : {}),
+    ...(req.schedule_materialisation_days !== undefined ? { scheduleMaterialisationDays: req.schedule_materialisation_days } : {}),
+    ...(req.schedule_max_rows_per_change !== undefined ? { scheduleMaxRowsPerChange: req.schedule_max_rows_per_change } : {}),
+    ...(req.device_error_retention_days !== undefined ? { deviceErrorRetentionDays: req.device_error_retention_days } : {}),
+    ...(req.device_error_max_open_rows !== undefined ? { deviceErrorMaxOpenRows: req.device_error_max_open_rows } : {}),
+    ...(req.sse_keepalive_seconds !== undefined ? { sseKeepaliveSeconds: req.sse_keepalive_seconds } : {}),
+    ...(req.realtime_fallback_after_failures !== undefined ? { realtimeFallbackAfterFailures: req.realtime_fallback_after_failures } : {}),
+    ...(req.realtime_poll_seconds_control_board !== undefined ? { realtimePollSecondsControlBoard: req.realtime_poll_seconds_control_board } : {}),
+    ...(req.control_board_resync_seconds !== undefined ? { controlBoardResyncSeconds: req.control_board_resync_seconds } : {}),
+    ...(req.action_glyphs !== undefined ? { actionGlyphs: req.action_glyphs } : {}),
+    ...(req.member_trace_enabled !== undefined ? { memberTraceEnabled: req.member_trace_enabled } : {}),
   }),
 
   // Admin: devices.

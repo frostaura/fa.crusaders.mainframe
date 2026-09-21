@@ -16,6 +16,14 @@ import {
   gateSettingComplaints, operatingHoursComplaint, parseDayHours, settingAnchorId, timezoneOptions,
   type DayHours, type DayKey, type SettingComplaint,
 } from "../lib/tenantSettings";
+// eco — ruling 13. The bounds, the labels and the sentences for every number this release
+// made configurable, in one module so a field's `min` cannot drift from the bound the save
+// is validated against.
+import {
+  ACTION_GLYPHS_HINT, ACTION_GLYPH_CHOICES, ACTION_GLYPH_LABEL, CAP_RULES, DEVICE_TIMING_RULES,
+  ECO_SETTING_LABELS, MEMBER_TRACE_HINT, MEMBER_TRACE_LABEL, MONITORING_RULES, REALTIME_RULES,
+  SCHEDULE_RULES, ecoSettingComplaints, type NumericSettingRule,
+} from "../lib/ecoSettings";
 import {
   GATE_POLICY_LABELS, describeCourtSettingDoorReach, describeDoorBookingHorizon, describeEarlyEntry,
   describeGatePolicy, gateOfflineFallbackNotice,
@@ -108,6 +116,10 @@ const SETTING_LABELS: Record<string, string> = {
   club_contact_email: "Club contact email",
   retention_years: "Keep usage history for (years)",
   no_show_lookback_days: "No-show sweep looks back (days)",
+  // eco — ruling 13. Every number this release made configurable, spread in from the module
+  // that also holds its bound and its sentence, so a key cannot have a row here and no rule
+  // there (or the reverse, which is the one that ships).
+  ...ECO_SETTING_LABELS,
 };
 
 /** The five above that a person types words into rather than a number. */
@@ -153,6 +165,9 @@ function blockersOf(
     ...(cooldown ? [{ key: "device_alert_cooldown_minutes", message: cooldown }] : []),
     ...gateSettingComplaints(settings),
     ...doorSettingComplaints(settings),
+    // eco — the new keys' bounds, plus the one cross-field rule whose failure appears weeks
+    // later: a member booking past the horizon repeating bookings are written to.
+    ...ecoSettingComplaints(settings as unknown as Record<string, unknown>),
   ].filter((complaint) => !emptied.has(complaint.key));
 
   const dayRow: Blocker[] = hours
@@ -202,6 +217,9 @@ const SECTION_IDS = {
   boxes: "settings-court-boxes",
   doors: "settings-door-gates",
   records: "settings-records",
+  screens: "settings-box-screens",
+  limits: "settings-limits",
+  monitoring: "settings-monitoring",
   courts: "settings-courts",
 } as const;
 
@@ -215,6 +233,9 @@ const SECTION_ORDER: ReadonlyArray<readonly [string, string]> = [
   [SECTION_IDS.boxes, "Court boxes & identification"],
   [SECTION_IDS.doors, "Door gates"],
   [SECTION_IDS.records, "Records"],
+  [SECTION_IDS.screens, "Box screens & scanning"],
+  [SECTION_IDS.limits, "Limits & confirmations"],
+  [SECTION_IDS.monitoring, "Monitoring & live updates"],
   [SECTION_IDS.courts, "Courts"],
 ];
 
@@ -552,8 +573,78 @@ export default function AdminSettingsPage() {
                 onChange={(e) => setSettings({ ...settings, no_show_lookback_days: toNumber(e.target.value) })} />
             </Field>
           </div>
-          <SaveBar blockers={blockers} saving={saving} onSave={save} onFocusSetting={focusSetting} />
         </SettingsSection>
+
+        {/* eco — ruling 13's three new blocks, between Records and Courts. Save moves to the
+            bottom of the last of them, so it is still the last thing on the document. */}
+        <EcoSection
+          id={SECTION_IDS.screens}
+          title="Box screens & scanning"
+          lede="What the court box's screen does, and how long it waits. A box picks these up on its next heartbeat, so a change reaches the courts within a minute rather than instantly."
+          rules={DEVICE_TIMING_RULES}
+          settings={settings}
+          onChange={setSettings}
+        />
+
+        <EcoSection
+          id={SECTION_IDS.limits}
+          title="Limits & confirmations"
+          lede="How much one member may hold in a day, how much an admin may do in one press, and what yes and no look like."
+          rules={[...CAP_RULES, ...SCHEDULE_RULES]}
+          settings={settings}
+          onChange={setSettings}
+        >
+          {/*
+            The two caps compose, and neither field alone would say so. A club that sets 4
+            slots and leaves the minutes at 60 has set an hour — the most restrictive of the
+            two is what a member meets, a group may lower either and may never raise one, and
+            admins are exempt from both (ruling 3).
+          */}
+          <p className="text-sm text-text-secondary">
+            {capsSentence(settings)}
+          </p>
+          <Field settingKey="action_glyphs" label={SETTING_LABELS.action_glyphs} hint={ACTION_GLYPHS_HINT}>
+            <select
+              value={settings.action_glyphs ?? "thumbs"}
+              onChange={(e) => setSettings({ ...settings, action_glyphs: e.target.value as "thumbs" | "marks" })}
+              className={fieldClassName}
+            >
+              {ACTION_GLYPH_CHOICES.map((choice) => (
+                <option key={choice} value={choice}>{ACTION_GLYPH_LABEL[choice]}</option>
+              ))}
+            </select>
+          </Field>
+        </EcoSection>
+
+        <EcoSection
+          id={SECTION_IDS.monitoring}
+          title="Monitoring & live updates"
+          lede="How long the club keeps what its boards report, and how screens that show it stay current."
+          rules={[...MONITORING_RULES, ...REALTIME_RULES]}
+          settings={settings}
+          onChange={setSettings}
+        >
+          {/*
+            A switch rather than a number, and it is the most consequential control on this
+            page: off, the per-person night page is not there at all. Rendered only where the
+            API actually serves the key, because a switch bound to `undefined` is a switch
+            that reads "off" about a feature that is on.
+          */}
+          {settings.member_trace_enabled !== undefined && (
+            <Field settingKey="member_trace_enabled" label={MEMBER_TRACE_LABEL} hint={MEMBER_TRACE_HINT}>
+              <label className="inline-flex min-h-11 items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="h-5 w-5"
+                  checked={settings.member_trace_enabled}
+                  onChange={(e) => setSettings({ ...settings, member_trace_enabled: e.target.checked })}
+                />
+                {settings.member_trace_enabled ? "On — every look is recorded" : "Off — the page is not there"}
+              </label>
+            </Field>
+          )}
+          <SaveBar blockers={blockers} saving={saving} onSave={save} onFocusSetting={focusSetting} />
+        </EcoSection>
 
         <CourtsSection courts={courts} reload={load} />
       </div>
@@ -1139,6 +1230,101 @@ function DoorRecordsBlock({ settings, set }: {
  * bound is the context the complaint is read in. (B5)
  * </p>
  */
+/**
+ * The two per-day caps, in one sentence, because neither field alone says how they compose.
+ *
+ * <p>
+ * Ruling 3: Dean asked for SLOTS, the number already on disk is MINUTES, and both stay — the
+ * most restrictive of the two is what a member meets. A club that sets "4 slots" and leaves
+ * the minutes at 60 has set an hour and would never learn it from either field.
+ * </p>
+ *
+ * <p>
+ * Three arms, and the third is the one that matters while the backend is being built: where
+ * the slots key has not shipped, the sentence says what is true — the minutes cap alone —
+ * rather than quoting a default this console invented.
+ * </p>
+ */
+function capsSentence(settings: AdminSettings): string {
+  const slots = settings.member_max_slots_per_day;
+  const minutes = settings.member_per_day_max_minutes;
+  const slice = settings.slice_minutes;
+  const minutesClause = Number.isFinite(minutes) && minutes > 0
+    ? `${minutes} minutes a day`
+    : null;
+  if (slots === undefined) {
+    return minutesClause
+      ? `Today a member may hold ${minutesClause}. Admins are not limited.`
+      : "Members are not limited by time today, and admins never are.";
+  }
+  const slotsClause = slots > 0 ? `${slots} slot${slots === 1 ? "" : "s"} a day` : null;
+  if (!slotsClause && !minutesClause) return "No per-day limit at all — a member may hold as much as the club is open for.";
+  if (!slotsClause) return `Only the time limit applies: ${minutesClause}. Admins are not limited.`;
+  if (!minutesClause) return `Only the slot limit applies: ${slotsClause}. Admins are not limited.`;
+  const asMinutes = Number.isFinite(slice) && slice > 0 ? slots * slice : null;
+  const which = asMinutes === null
+    ? "Whichever is stricter is what a member meets."
+    : asMinutes <= minutes
+      ? `${slotsClause} is ${asMinutes} minutes, so the slot limit is the one a member meets.`
+      : `${minutesClause} is stricter than ${slotsClause}, so the time limit is the one a member meets.`;
+  return `A member may hold ${slotsClause} and ${minutesClause}. ${which} A group may lower either and may never raise one. Admins are not limited.`;
+}
+
+/**
+ * A block of the new numeric settings, rendered from {@link NumericSettingRule}s.
+ *
+ * <p>
+ * Rendered from the table rather than written out field by field, deliberately: twelve new
+ * numbers written by hand is twelve chances for a field's `min` to disagree with the bound
+ * the save is validated against, which is exactly the failure that produces a save refused
+ * with a message nobody on the screen can act on.
+ * </p>
+ *
+ * <p>
+ * A rule whose key the API does not serve renders NO field. An input bound to `undefined` is
+ * an uncontrolled input that React warns about and that silently sends nothing — and a row
+ * for a setting the club does not have is a row somebody edits and then cannot save.
+ * </p>
+ */
+function EcoSection({ id, title, lede, rules, settings, onChange, children }: {
+  id: string;
+  title: string;
+  lede: string;
+  rules: readonly NumericSettingRule[];
+  settings: AdminSettings;
+  onChange: (next: AdminSettings) => void;
+  children?: React.ReactNode;
+}) {
+  const held = settings as unknown as Record<string, unknown>;
+  const present = rules.filter((rule) => held[rule.key] !== undefined);
+  return (
+    <SettingsSection id={id} title={title}>
+      <p className="text-sm text-text-secondary">{lede}</p>
+      {present.length === 0 && (
+        /* Both halves: the club's system has not got these yet, and that is not the same as
+           the club having turned them off. */
+        <p className="text-sm text-text-muted">
+          The club&rsquo;s system is not serving these settings yet, so there is nothing to change here.
+        </p>
+      )}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {present.map((rule) => (
+          <Field key={rule.key} settingKey={rule.key} label={rule.label} hint={rule.hint}>
+            <Input
+              type="number"
+              min={rule.min}
+              max={rule.max}
+              value={shown(held[rule.key] as number)}
+              onChange={(e) => onChange({ ...settings, [rule.key]: toNumber(e.target.value) })}
+            />
+          </Field>
+        ))}
+      </div>
+      {children}
+    </SettingsSection>
+  );
+}
+
 function Field({ label, hint, settingKey, children }: {
   label: string;
   hint?: string;
