@@ -1198,11 +1198,17 @@ export type MemberDoorDecision = {
    * from what the board wrote at the time.
    *
    * <p>
-   * The club's `gate_key` first, the board's own display name second, the key stored on
-   * the row for a board since deleted, and null only when none of those survives. It used
-   * to be whatever the offline upload happened to carry, which for an offline row was
-   * nothing — so a named door's own rows reached the member unnamed. Null now genuinely
-   * means unknown, and `UNNAMED_DOOR` is what a member reads for it.
+   * <b>WIRE-R2 §4 reverses the wave-1 order, and A12 is why.</b> It was `gate_key` first, so
+   * a member's own history showed the raw key `front-door` for the door an admin sees as
+   * "Front door" — two names for one door, and the member got the one nobody says out loud.
+   * The rule is now: the board's display Name, unless that name is the auto-registration
+   * placeholder ("Door gate"), which is not a name anybody chose; else the `gate_key`; else
+   * null. A board since deleted keeps whatever the row stored at write time.
+   * </p>
+   *
+   * <p>
+   * Null genuinely means unknown, and `UNNAMED_DOOR` is what a member reads for it. Never a
+   * device id, never a MAC, never a fingerprint, never a token.
    * </p>
    */
   door_name: string | null;
@@ -1234,9 +1240,50 @@ export type MemberDoorDecision = {
   opens_at: string | null;
 };
 
+/**
+ * How much of this club's door estate is shut right now. WIRE-R2 §4.
+ *
+ * <p>
+ * <b>Why a third value rather than a boolean.</b> A club with two doors and one of them shut
+ * is neither "the doors work" nor "the doors are shut", and the page owes a member standing
+ * outside the sentence that is true of the building they are at. Collapsing it either way is
+ * how "a live code of yours opens the club door" came to be shown at a club whose only usable
+ * door was shut.
+ * </p>
+ */
+export type MemberDoorsShut = "none" | "some" | "all";
+
 export type MemberDoor = {
-  /** False, or absent on an older API, means the page says NOTHING about doors. */
+  /**
+   * Does this club have door scanners AT ALL — any gate row, enabled or not. WIRE-R2 §4.
+   *
+   * <p>
+   * <b>This reverses what the field meant in wave 1</b>, where it was "at least one ENABLED
+   * gate". Under that reading a club that had shut every door went silent about doors on the
+   * one evening a member most needed to be told something: the history section vanished, the
+   * standing line disappeared, and `/my-code` reverted to court-only copy in front of somebody
+   * standing at a locked door. Whether a door is shut is {@link MemberDoor.doors_shut}'s
+   * answer, and it is a different question from whether the club owns one.
+   * </p>
+   *
+   * <p>
+   * False, or absent on an older API, still means the page says NOTHING about doors.
+   * </p>
+   */
   doors: boolean;
+  /** None, some or all of the club's doors are shut. See {@link MemberDoorsShut}. */
+  doors_shut: MemberDoorsShut;
+  /**
+   * The club's own IANA zone, so every clock face on this surface is the club's day.
+   *
+   * <p>
+   * O1: the member surfaces formatted their times in the VIEWER's zone and the admin ones in
+   * the club's, so a member abroad and the admin reading the same scan in the club's log saw
+   * two different times for one event. One formatter, `lib/clubClock`, and this is what it is
+   * given.
+   * </p>
+   */
+  timezone: string;
   policy: MemberDoorPolicy;
   membership: MemberDoorMembership;
   /** The same fact as `membership`, at the resolution that says which not-active it is. */
@@ -1251,16 +1298,36 @@ export type MemberDoor = {
    * </p>
    */
   is_club_admin: boolean;
-  next_booking: MemberDoorBooking | null;
   /**
-   * `gate_early_entry_minutes`, clamped server-side to 0..240. The page never clamps it.
+   * The member's next upcoming live booking, with NO horizon limit. WIRE-R2 §4.
    *
    * <p>
-   * Zero is a real setting, not an absent one, and the sentence that names a window has to
-   * have a wordless arm for it.
+   * It used to be bounded by the same horizon the door applies, so a member with a court
+   * tomorrow was sent a null and told, correctly but uselessly, that nothing of theirs was
+   * booked soon enough for a door — with no way to find out when the door WOULD open for the
+   * booking they had. A booking days away is still the answer to "when does this let me in",
+   * and the page already knows how to name a window it cannot use yet.
    * </p>
    */
-  early_entry_minutes: number;
+  next_booking: MemberDoorBooking | null;
+  /**
+   * `gate_early_entry_minutes`, clamped server-side to 0..240 — and NULL unless the policy is
+   * `booking_window`. WIRE-R2 §4.
+   *
+   * <p>
+   * <b>E-H3: under `active_member` the number is real and means nothing here.</b> A booking
+   * code's door window under that policy is `StartsAt −` the roster horizon, not early entry,
+   * so a page that printed the early-entry minutes beside an 08:05 derived from something else
+   * was offering a member an explanation that does not add up. Null is the honest shape: there
+   * is no early-entry window in force, so there is no number to print.
+   * </p>
+   *
+   * <p>
+   * Zero, under `booking_window`, is a real setting rather than an absent one, and the sentence
+   * that names a window still has to have a wordless arm for it.
+   * </p>
+   */
+  early_entry_minutes: number | null;
   /** How many bookings a cut-off door's cached list holds. The firmware and the API share it. */
   roster_max_entries: number;
   contact: MemberDoorContact;
@@ -1296,6 +1363,8 @@ export type MemberDoorHistory = {
   next_cursor: string | null;
   /** How long the club keeps these, so the page states a number it was given. */
   retention_days: number;
+  /** The club's own zone. WIRE-R2 §4 — every clock face in this list is the club's day. */
+  timezone: string;
 };
 
 // --- end doors: member -----------------------------------------------------------

@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "../Button";
+import { formatCountdown } from "../../lib/countdown";
+import type { Sentence } from "../../lib/memberDoorCopy";
+import { CopySentence } from "./CopySentence";
 
 /**
  * The code, full-bleed, at the largest area the screen can give it.
@@ -19,9 +22,88 @@ import { Button } from "../Button";
  * anything a member sees. It is released on close, on unmount and when the page is
  * hidden.
  * </p>
+ *
+ * <p>
+ * <b>It carries the code's own clock, and it does not close itself. D12.</b> A member
+ * holding this up to a scanner had no way to tell a code with ten minutes left from one
+ * with four seconds — and when the code did die, the overlay vanished on its own, putting
+ * them back on a page led by a stale green banner with nothing to say what had happened.
+ * The countdown is here now, and death is a state of this overlay rather than the end of
+ * it.
+ * </p>
  */
-export function FullScreenQr(props: { code: string; children: React.ReactNode; onClose: () => void }) {
-  const { code, children, onClose } = props;
+/**
+ * Everything in this column that is not the symbol, in `rem`, itemised.
+ *
+ * <p>
+ * The square is bounded on BOTH axes in one expression — `min(100vw-1rem, 100vh-RESERVE)` —
+ * because `min(92vw, 92vh)` in landscape is a square as tall as the whole viewport with a
+ * code line and a button still to place under it. A `justify-center` column then overflows
+ * at both ends: the symbol's top quiet zone goes off the top of the glass and Done goes off
+ * the bottom.
+ * </p>
+ *
+ * <p>
+ * <b>It is itemised because a reserve written as one number is a number nobody knows to
+ * change.</b> It was `6.5rem`, correct for a code line and a button; D12 then added the
+ * countdown between them and the landscape symbol went back to −6px, with nothing in the
+ * source connecting the new line to the old constant. Each part below names the class it
+ * measures, so adding a line to this overlay means adding a row here — and the landscape
+ * case in `e2e/my-code.spec.ts` fails until it is.
+ * </p>
+ */
+const COLUMN_RESERVE = [
+  0.5,  // `p-2` above the symbol
+  0.5,  // `gap-2` under it
+  1.75, // the code line, `text-lg` on a 1.75rem line box
+  0.5,  // `gap-2`
+  1.25, // the countdown, `text-sm` on a 1.25rem line box
+  0.5,  // `gap-2`
+  2.75, // Done, `min-h-11`
+  0.5,  // `p-2` below it
+].reduce((a, b) => a + b, 0);
+
+/**
+ * The square: as wide as the glass allows, as tall as what is left after {@link COLUMN_RESERVE}.
+ *
+ * <p>
+ * An inline `style` rather than an arbitrary Tailwind class, and the reason is mechanical:
+ * Tailwind generates CSS by scanning the source for literal class strings, so a class name
+ * built from a template literal produces NO rule at all — silently, with the element left
+ * unsized and the symbol collapsed. A value this overlay computes has to travel as a value.
+ * </p>
+ *
+ * <p>
+ * It travels as a CUSTOM PROPERTY that `width` and `height` then both read, for two
+ * reasons. One length, declared once, cannot come apart into a rectangle. And a custom
+ * property is stored verbatim by every CSS implementation, including jsdom's — which parses
+ * `min()` with mixed units as invalid and silently drops it, so a plain `width: min(…)`
+ * inline style reads back as the empty string in the unit tests and cannot be asserted on
+ * at all. The property is declared on the same element that reads it, so there is no
+ * inherited fallback to paint if it ever goes missing.
+ * </p>
+ */
+const SQUARE = `min(100vw - 1rem, 100vh - ${COLUMN_RESERVE}rem)`;
+
+/** The square as a style object: declared once, read twice. See {@link SQUARE}. */
+const SQUARE_BOX = { "--fsq-square": SQUARE, width: "var(--fsq-square)" } as React.CSSProperties;
+const SQUARE_BOTH = { ...SQUARE_BOX, height: "var(--fsq-square)" } as React.CSSProperties;
+
+export function FullScreenQr(props: {
+  code: string;
+  children: React.ReactNode;
+  /** Seconds left on the code, for the one clock a member at a scanner can see. D12. */
+  secondsLeft: number;
+  /** The code has run out. The symbol is replaced rather than dimmed — see the page's D5. */
+  dead: boolean;
+  /** A replacement is genuinely in flight. "Getting a fresh one" is only true while it is. */
+  renewing: boolean;
+  /** What to say when it is dead and cannot be renewed, with the club's number as a link. */
+  deadSentence: Sentence;
+  onTryAgain: () => void;
+  onClose: () => void;
+}) {
+  const { code, children, secondsLeft, dead, renewing, deadSentence, onTryAgain, onClose } = props;
   const dialog = useRef<HTMLDivElement | null>(null);
   /** Our own history entry's marker while it is the current one. See the effect below. */
   const entry = useRef<number | null>(null);
@@ -124,11 +206,89 @@ export function FullScreenQr(props: { code: string; children: React.ReactNode; o
     close.current();
   }, []);
 
+  /**
+   * Escape closes it, and Tab cannot leave it. C9 / D14.
+   *
+   * <p>
+   * <b>`aria-modal="true"` was a claim this overlay did not honour.</b> Tab walked straight
+   * out of it and through the page underneath — the header, the tab strip, every link on
+   * the code page — while a screen reader went on announcing a dialog. For a keyboard or
+   * screen-reader user that is worse than no dialog semantics at all: the promise is what
+   * stops them looking for the way out.
+   * </p>
+   *
+   * <p>
+   * The trap is a keydown handler rather than a focus-sentinel pair because this overlay has
+   * at most three focusable things in it and a wrapping cycle over them is exactly what a
+   * member expects. Back still closes only the overlay — that is the popstate effect above,
+   * and nothing here touches it.
+   * </p>
+   */
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") dismiss(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { dismiss(); return; }
+      if (e.key !== "Tab") return;
+      const root = dialog.current;
+      if (!root) return;
+      const stops = [...root.querySelectorAll<HTMLElement>("a[href], button:not([disabled]), [tabindex]")]
+        .filter((el) => el.tabIndex >= 0 && el !== root);
+      // Nothing to move between: the dialog itself keeps focus rather than handing it to
+      // the page it is covering.
+      if (stops.length === 0) { e.preventDefault(); root.focus(); return; }
+      const first = stops[0];
+      const last = stops[stops.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || active === root)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      } else if (!e.shiftKey && active === root) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [dismiss]);
+
+  /**
+   * The page behind it is `inert`, and the background does not scroll. C9 / D14.
+   *
+   * <p>
+   * `inert` is what makes the claim true for every input method at once — pointer, caret
+   * browsing, screen-reader virtual cursor, and the find-in-page a Tab trap does not reach.
+   * The scroll lock is the pointer half of the same finding: dragging on the overlay moved
+   * the page underneath it, so a member closed the code and found themselves somewhere else
+   * on the page than where they left.
+   * </p>
+   *
+   * <p>
+   * Both are restored to what they were rather than to a default. Another overlay may own
+   * them, and clearing somebody else's lock on the way out is how a page ends up permanently
+   * unscrollable.
+   * </p>
+   */
+  useEffect(() => {
+    const self = dialog.current;
+    // Every SIBLING of this overlay, rather than `#root` by name. The portal renders into
+    // `document.body`, so the app's mount point is one of these — and naming it `#root`
+    // ties a correctness property to an id that exists in `index.html` and in no test
+    // harness, which is a guard that quietly does nothing wherever it is not production.
+    const behind = [...document.body.children].filter((node) => node !== self);
+    const was = behind.map((node) => node.hasAttribute("inert"));
+    for (const node of behind) node.setAttribute("inert", "");
+    const body = document.body;
+    const wasOverflow = body.style.overflow;
+    body.style.overflow = "hidden";
+    return () => {
+      // Restored to what each one WAS, not to a default: another overlay may own an inert
+      // sibling, and clearing somebody else's is how a page ends up permanently unusable.
+      behind.forEach((node, i) => { if (!was[i]) node.removeAttribute("inert"); });
+      body.style.overflow = wasOverflow;
+    };
+  }, []);
 
   useEffect(() => {
     let sentinel: { release: () => Promise<void> } | null = null;
@@ -191,20 +351,66 @@ export function FullScreenQr(props: { code: string; children: React.ReactNode; o
         control. Reserving the rest of the column here is what keeps every part of this
         overlay on the glass.
 
-        `6.5rem` rather than a pixel count: what is being reserved is the code line plus
-        the button plus the gaps, and every one of those scales with the root font — which
-        is the whole of why this page broke at 32px in the first place.
+        `rem` rather than a pixel count: what is being reserved is the code line plus the
+        countdown plus the button plus the gaps, and every one of those scales with the root
+        font — which is the whole of why this page broke at 32px in the first place. The
+        parts are enumerated in {@link COLUMN_RESERVE}, because a reserve written as one
+        number is a number the next person to add a line does not know to change: that is
+        precisely what happened when D12's countdown arrived under a `6.5rem` that predated
+        it, and the symbol's top quiet zone went back off the glass in landscape.
       */}
-      <div
-        className="w-[min(100vw-1rem,100vh-6.5rem)] h-[min(100vw-1rem,100vh-6.5rem)] shrink-0"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {children}
-      </div>
+      {dead ? (
+        /*
+          D12 — the dead state lives HERE rather than back on the page. The symbol is
+          replaced rather than dimmed, for the reason the inline card carries in full: forty
+          per cent opacity is still a scannable QR, and a member held one up in the dark
+          repeatedly while the screen promised a refresh that could not happen.
+        */
+        <div
+          style={SQUARE_BOX}
+          className="max-w-full space-y-3 rounded-lg border border-danger-soft bg-danger-soft p-4 text-center"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {renewing ? (
+            <p className="text-sm text-danger-strong">This code has run out. Getting a fresh one…</p>
+          ) : (
+            <>
+              <CopySentence sentence={deadSentence} className="text-sm text-danger-strong" />
+              <Button variant="outline" className="min-h-11" onClick={(e) => { e.stopPropagation(); onTryAgain(); }}>
+                Try again
+              </Button>
+            </>
+          )}
+        </div>
+      ) : (
+        <div
+          style={SQUARE_BOTH}
+          /*
+            It may SHRINK, and that is the safety valve rather than the design. The reserve
+            above is exact for the column as it stands, but a code that wraps to two lines at
+            a large root font, or a button a shared component grows by a pixel, would put the
+            symbol back off the top of the glass. `min-h-0` lets flex take the difference out
+            of the square instead; the SVG's own `preserveAspectRatio` keeps the symbol square
+            and centred inside whatever box is left, so it degrades to smaller rather than to
+            clipped.
+          */
+          className="min-h-0"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {children}
+        </div>
+      )}
       {/* `break-all`: twelve monospaced characters at 0.25em tracking are wider than a
           360px phone once the root font is turned up, and a code that runs off the edge is
           a code nobody can read back to the desk. */}
-      <p className="max-w-full break-all text-center font-mono text-lg tracking-[0.25em] text-black">{code}</p>
+      {!dead && (
+        <p className="max-w-full break-all text-center font-mono text-lg tracking-[0.25em] text-black">{code}</p>
+      )}
+      {/* D12. The one clock a member holding this against a scanner can see. Black on white
+          like everything else here — a muted grey is light the scanner does not get back. */}
+      {!dead && (
+        <p className="shrink-0 text-center text-sm text-black">Refreshes in {formatCountdown(secondsLeft)}</p>
+      )}
       <Button variant="outline" className="shrink-0 min-h-11" onClick={(e) => { e.stopPropagation(); dismiss(); }}>
         Done
       </Button>

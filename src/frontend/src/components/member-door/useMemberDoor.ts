@@ -55,6 +55,8 @@ export type MemberDoorRead = {
   failure: ReadFailure | null;
   /** No answer has landed yet and one is in flight. */
   loading: boolean;
+  /** When the answer in `door` was read. ISO, or null if none has ever landed. D6. */
+  readAt: string | null;
   /** Read now, ignoring the pacing. What `The door didn't open` and Try again call. */
   refresh: () => Promise<void>;
 };
@@ -101,6 +103,8 @@ function nextGap(failures: number, door: MemberDoor | null, openedAt: number): n
 
 export function useMemberDoor(enabled: boolean): MemberDoorRead {
   const [door, setDoor] = useState<MemberDoor | null>(null);
+  /** D6 — when `door` was read, so a page serving it through a failure can say how old it is. */
+  const [readAt, setReadAt] = useState<string | null>(null);
   const [failure, setFailure] = useState<ReadFailure | null>(null);
   const [loading, setLoading] = useState(enabled);
   const [visible, setVisible] = useState(isVisible);
@@ -120,6 +124,7 @@ export function useMemberDoor(enabled: boolean): MemberDoorRead {
       failures.current = 0;
       doorNow.current = next;
       setDoor(next);
+      setReadAt(new Date().toISOString());
       setFailure(null);
       // Written on every success, so a cold start with no signal paints something.
       rememberDoor(next);
@@ -171,7 +176,7 @@ export function useMemberDoor(enabled: boolean): MemberDoorRead {
     return () => clearTimeout(timer);
   }, [enabled, visible, settled, refresh, openedAt]);
 
-  return { door, failed: failure !== null, failure, loading, refresh };
+  return { door, failed: failure !== null, failure, loading, readAt, refresh };
 }
 
 /**
@@ -222,28 +227,41 @@ export function useShownDecision(door: MemberDoor | null, refreshCode: () => voi
 }
 
 /**
- * Does this club have a door at all — nothing more.
+ * Does this club have a door at all — nothing more, and in THREE answers.
  *
  * <p>
- * For the Home tile, which forks one clause of one hint on it and must not grow a poll to
- * do so. It is seeded from the last-known store so a returning member gets the right hint
- * before the request lands, and a failure leaves it false: a club with no door is the
- * SILENT case, and telling a club that has no door that its code opens one is the same
- * falsehood as the reverse, pointing the other way.
+ * For the Home tile, which forks one clause of one hint on it, and for the Profile page's
+ * door-history section. It is seeded from the last-known store so a returning member gets
+ * the right answer before the request lands.
+ * </p>
+ *
+ * <p>
+ * <b>D11: a failed read used to answer "no", and that deleted a member's own record.</b> A
+ * `/me/door` that did not land left this false, so the Profile page rendered no door history
+ * at all — for a member whose history endpoint was working perfectly and had rows in it. The
+ * club with no door must stay SILENT, which is why the flag exists; a club this page could
+ * not ask about is a different thing and now says so, and the history card decides for itself
+ * from rows it actually has.
  * </p>
  */
-export function useDoorsFlag(): boolean {
-  const [doors, setDoors] = useState(() => readLastKnown().door?.value.doors === true);
+export type DoorsKnowledge = "yes" | "no" | "unknown";
+
+export function useDoorsFlag(): DoorsKnowledge {
+  const [doors, setDoors] = useState<DoorsKnowledge>(
+    () => (readLastKnown().door?.value.doors === true ? "yes" : "unknown"),
+  );
 
   useEffect(() => {
     let live = true;
     endpoints.meDoor()
       .then((next) => {
         if (!live) return;
-        setDoors(next.doors === true);
+        setDoors(next.doors === true ? "yes" : "no");
         rememberDoor(next);
       })
-      .catch(() => { /* silent by design — see the note above */ });
+      // Still silent — but silent about the DOOR, not about the member's own record. The
+      // caller is told the question went unanswered rather than answered "no".
+      .catch(() => { if (live) setDoors("unknown"); });
     return () => { live = false; };
   }, []);
 

@@ -69,26 +69,19 @@ export function secondsUntil(deadline: Deadline): number {
  * by somebody holding a phone in one hand in the dark.
  * </p>
  */
-/**
- * A clock time, in the viewer's own locale, on a 24-hour face.
+/*
+ * `formatClock` and `formatDayAndClock` used to live here, and they were the SECOND clock
+ * formatter in this product.
  *
- * <p>
- * One definition, because the alternative is what this repo already found once: a
- * hand-built `${h}:${m}` beside an `Intl` one, disagreeing about midnight and about every
- * locale that does not write a colon. `hourCycle: "h23"` so 00:15 is not `24:15`.
- * </p>
+ * O1: they formatted in the viewer's own zone, while `lib/clubClock` — which every admin
+ * door surface uses — formats in the club's. One event, two screens, two different times,
+ * and neither screen said which zone it had written. `/me/door` and `/me/door/history` now
+ * carry `timezone` (WIRE-R2 §4), so the member surfaces call `clubClock` / `clubDayAndClock`
+ * with the club's own zone and there is exactly one clock face in the product.
+ *
+ * What stays here is what is genuinely about DURATION rather than about a face on a clock:
+ * the two-clock deadline, the reading off it, and the countdown's shape.
  */
-export function formatClock(utc: string): string {
-  return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
-    .format(new Date(utc));
-}
-
-/** A date and a clock time — `Fri 19 Sep · 06:04` — for a row in a member's own record. */
-export function formatDayAndClock(utc: string): string {
-  const day = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "2-digit", month: "short" })
-    .format(new Date(utc));
-  return `${day} · ${formatClock(utc)}`;
-}
 
 export function formatCountdown(seconds: number): string {
   if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;

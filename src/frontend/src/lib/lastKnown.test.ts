@@ -45,6 +45,11 @@ describe("lastKnown", () => {
 
   const DOOR = {
     doors: true,
+    // WIRE-R2 §4. Both are stored, and both have to be: a cached record that lost
+    // `doors_shut` reads as "none", which is the page going back to promising a member that
+    // a shut door opens for them — see LAST_KNOWN_VERSION's note on why v2 is discarded.
+    doors_shut: "some" as const,
+    timezone: "Africa/Johannesburg",
     policy: "booking_window" as const,
     membership: "active" as const,
     membership_detail: "active",
@@ -127,6 +132,11 @@ describe("lastKnown", () => {
     ["early_entry_minutes", 30],
     ["roster_max_entries", 48],
     ["door_log_retention_days", 90],
+    // WIRE-R2 §4. Dropping either is a sentence a member reads and acts on: a lost
+    // `doors_shut` promises that a shut door opens, and a lost `timezone` silently puts
+    // every cached clock face back on the VIEWER's day.
+    ["doors_shut", "some"],
+    ["timezone", "Africa/Johannesburg"],
   ])("remembers %s, which the page reads for a sentence", (key, expected) => {
     rememberDoor(DOOR);
     expect(readLastKnown().door!.value[key as keyof LastKnownDoor]).toBe(expected);
@@ -256,7 +266,7 @@ describe("lastKnown", () => {
     rememberDoor(DOOR);
     const raw = JSON.parse(window.localStorage.getItem(LAST_KNOWN_KEY)!);
     expect(raw.version).toBe(LAST_KNOWN_VERSION);
-    expect(LAST_KNOWN_VERSION).toBe(2);
+    expect(LAST_KNOWN_VERSION).toBe(3);
   });
 
   it("forgets everything on request", () => {

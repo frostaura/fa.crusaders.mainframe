@@ -41,6 +41,12 @@ const CONTACT = { phone: "021 555 0134", email: "info@crusaders.co.za" };
 function door(over: Record<string, unknown> = {}) {
   return {
     doors: true,
+    // WIRE-R2 §4. `doors` means "this club has scanners" now, enabled or not, and how many
+    // of them are shut is a separate question with three answers.
+    doors_shut: "none",
+    // The club's own zone, so every face on this surface is the club's day rather than
+    // whichever one the reader's phone happens to be in. O1.
+    timezone: "Africa/Johannesburg",
     policy: "booking_window",
     membership: "active",
     membership_detail: "active",
@@ -84,11 +90,33 @@ function decision(over: Record<string, unknown> = {}) {
   };
 }
 
+/** `GET /me/door/history` with nothing in it — what the self-check reads when pressed. */
+const EMPTY_HISTORY = {
+  items: [], next_cursor: null, retention_days: 90, timezone: "Africa/Johannesburg",
+};
+
 const COMMON = [
   { path: "/api/v1/whoami", body: SESSION_MEMBER },
   { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
   { method: "POST", path: "/api/v1/me/qr/generate", body: CODE },
+  // E-H2 (2) — the self-check reads the club's own record. Stubbed here rather than per
+  // test because `serveApi` is strict and an unstubbed call fails the test it appears in,
+  // which for a control every one of these presses would be all of them.
+  { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
 ];
+
+/**
+ * An instant a few seconds ago.
+ *
+ * <p>
+ * The decision fixtures below are pinned to 2099 so a booking's window never drifts into
+ * the past while the suite runs. A DECISION is the opposite case: the server sends one only
+ * inside a two-minute window, the card reads its own age off it (D6), and the self-check
+ * will only lead with a refusal inside fifteen minutes — so a decision stamped 2099 is a
+ * response the endpoint cannot produce and a card that is permanently in the future.
+ * </p>
+ */
+const recent = () => new Date(Date.now() - 20_000).toISOString();
 
 /**
  * The redirect, which is the half of the rename that keeps every existing link working.
@@ -473,6 +501,13 @@ for (const [name, size] of [
 
     // And bigger than the inline one, which is the only reason to open it.
     expect(Math.min(qr.width, qr.height)).toBeGreaterThan(200);
+    // SQUARE, which is the part the reserve buys rather than the shrink valve.
+    //
+    // The box may shrink so that nothing is ever pushed off the glass, and that valve alone
+    // keeps the two assertions above true however wrong the reserve is — it just letterboxes
+    // the symbol inside a box that is no longer a square. So the reserve is held here: it is
+    // right exactly when the box the symbol is given is the size the symbol wants.
+    expect(Math.abs(qr.width - qr.height)).toBeLessThanOrEqual(1);
 
     const done = dialog.getByRole("button", { name: "Done" });
     const doneBox = (await done.boundingBox())!;
@@ -622,4 +657,363 @@ test("the walk-up switch is a target, and the member's own record is one tap awa
   const history = page.getByRole("link", { name: "Your door history" });
   await expect(history).toHaveAttribute("href", "/profile#door-history");
   expect((await history.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+});
+
+// --- round 2 ------------------------------------------------------------------------
+
+/**
+ * D8. The page opened with a heading, a two-line subtitle and, when there was one, a
+ * decision card — so at 320×568, the smallest screen this product supports, the QR was
+ * entirely below the fold. A member standing at a scanner had to scroll to find the one
+ * thing they opened the page for, one-handed, in the dark.
+ *
+ * <p>
+ * jsdom has no layout, so the unit test can only hold document order. This is the fold
+ * itself, measured, with a decision card on the page because that is the case that pushed
+ * the QR furthest down.
+ * </p>
+ */
+test("the code is fully above the fold at 320x568, decision card and all", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [...COMMON, {
+    path: "/api/v1/me/door",
+    body: door({ last_decision: decision({ reason: "ok", released: true, at: recent() }) }),
+  }]);
+
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/my-code");
+  await expect(page.getByLabel("Your code", { exact: true })).toBeVisible();
+
+  const qr = (await page.getByRole("img", { name: /QR code/ }).boundingBox())!;
+  expect(qr.y).toBeGreaterThanOrEqual(0);
+  expect(qr.y + qr.height).toBeLessThanOrEqual(568);
+  // And it did not get there by shrinking to nothing: a symbol a scanner cannot read at
+  // arm's length is not above the fold in any sense that helps.
+  expect(qr.width).toBeGreaterThanOrEqual(200);
+
+  /*
+    The same rule at a 32px root, stated against the part of the screen this page is given.
+
+    At that root the symbol is NOT on the glass, and the arithmetic says why: the app header
+    and tab strip take 306px of a 568px screen, leaving `<main>` 262px for a 254px symbol
+    plus a heading plus every gap. That is reviewer B12's finding — "the header and tab bar
+    take 54% of a 320×568 screen at a 32px root" — it lives in `components/Layout.tsx`, and
+    a sibling lane owns it. Asserting the viewport fold here would make this case fail for
+    their defect and pass for mine.
+
+    So what is held is this page's own contribution: measured from the top of the scrolling
+    area, the whole symbol sits inside one screen's height. The moment the chrome gives this
+    page a screen to work with, the code is on it — and if the page ever starts adding a
+    block above its own symbol again, this fails first.
+  */
+  await page.addStyleTag({ content: "html { font-size: 32px !important; }" });
+  await page.waitForTimeout(150);
+  const fits = await page.evaluate(() => {
+    const main = document.querySelector("main")!.getBoundingClientRect();
+    const symbol = document.querySelector('svg[aria-label^="QR code"]')!.getBoundingClientRect();
+    return Math.round(symbol.bottom - main.top);
+  });
+  expect(fits).toBeLessThanOrEqual(568);
+});
+
+/**
+ * D10. A decision arriving moved the QR down 290 px — on a screen somebody was holding
+ * against a scanner — and dismissing it moved the QR back up. Both directions are the same
+ * defect: nothing that comes and goes may move the code.
+ */
+test("nothing that arrives or leaves moves the QR", async ({ page }) => {
+  await signIn(page);
+  // The door read answers WITHOUT a decision first, and with one from the second call on.
+  // The page polls it, so the card genuinely arrives under the member's thumb rather than
+  // being there from the first paint — which is the event the finding is about.
+  let doorReads = 0;
+  await serveApi(page, COMMON);
+  await page.route("**/api/v1/me/door", (route) => {
+    doorReads += 1;
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(doorReads > 1
+        ? door({ last_decision: decision({ reason: "ok", released: true, at: recent() }) })
+        : door()),
+    });
+  });
+
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/my-code");
+  const qr = page.getByRole("img", { name: /QR code/ });
+  await expect(qr).toBeVisible();
+
+  /*
+    Where the symbol sits in the SCROLLED CONTENT, not in the viewport.
+
+    The two are the same number for as long as nobody scrolls, and the arrival case below
+    checks both — which is the case the finding is about, a card appearing under a thumb
+    holding the phone still. Dismissal is not: the control sits below the fold at 320×568, so
+    pressing it scrolls the page there, and a viewport-relative reading afterwards reports
+    that scroll as a 429px layout jump. Reading the content position asks the question the
+    finding actually asks — did the layout move the code — rather than the question the test
+    harness's own scrolling happens to answer.
+
+    It has to find the scroller rather than ask the window, and that is not a detail: this
+    app scrolls inside `<main class="overflow-auto">`, so `window.scrollY` is nought on every
+    route and a `window.scrollTo` does nothing at all. A helper written against the window
+    reads every scroll of this page as a layout jump, which is how this assertion came to be
+    measuring the harness.
+
+    And the scroller is found by its OVERFLOW, not by whether its content is taller than its
+    box. Every wrapper between the symbol and `<main>` is taller than the box it sits in —
+    that is what it means to be inside something that scrolls — so the first-overflowing
+    test stops one element short, on a div whose `scrollTop` is permanently nought. It reads
+    the right number for a position and silently does nothing at all when asked to scroll.
+  */
+  const contentY = async () => Math.round(await qr.evaluate((el) => {
+    let scroller = el.parentElement;
+    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) {
+      scroller = scroller.parentElement;
+    }
+    if (!scroller) return el.getBoundingClientRect().top + window.scrollY;
+    return el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+  }));
+  const toTop = () => qr.evaluate((el) => {
+    let scroller = el.parentElement;
+    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) {
+      scroller = scroller.parentElement;
+    }
+    scroller?.scrollTo(0, 0);
+    window.scrollTo(0, 0);
+  });
+  const viewportY = async () => Math.round((await qr.boundingBox())!.y);
+
+  const before = await contentY();
+  const beforeInView = await viewportY();
+
+  const card = page.getByText("The lock released.");
+  await expect(card).toBeVisible({ timeout: 15_000 });
+  expect(await contentY()).toBe(before);
+  // Arrival moves nothing at all, on a page nobody has scrolled: this is the 290px jump.
+  expect(await viewportY()).toBe(beforeInView);
+
+  await page.getByRole("button", { name: "Dismiss" }).click();
+  await expect(card).toBeHidden();
+  expect(await contentY()).toBe(before);
+  // And back where the member was, the fold is where it was: the code has not been pulled
+  // up the page by the card's removal either.
+  await toTop();
+  expect(await viewportY()).toBe(beforeInView);
+});
+
+/**
+ * D7. The symbol got SMALLER as the reader's text got bigger — 190 px at a 32 px root
+ * against 254 px at the default — because every container between it and the viewport pads
+ * in `rem`. A member who has turned the type up has done so because reading is hard, and
+ * the product answered by shrinking the one thing on the page that is not text.
+ */
+test("the QR never shrinks when the root font grows", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [...COMMON, { path: "/api/v1/me/door", body: door() }]);
+
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/my-code");
+  const qr = page.getByRole("img", { name: /QR code/ });
+  await expect(qr).toBeVisible();
+  const normal = (await qr.boundingBox())!.width;
+
+  await page.addStyleTag({ content: "html { font-size: 32px !important; }" });
+  await page.waitForTimeout(150);
+  const large = (await qr.boundingBox())!.width;
+
+  // Not merely "no smaller": the SAME. Every length between the glass and the symbol is a
+  // pixel or a viewport unit now, so there is nothing left in the chain for a root font to
+  // move — and "no smaller" would also be satisfied by a symbol that grew off the edge of
+  // the screen, which is how the first fix for this passed while breaking the page.
+  expect(large).toBe(normal);
+  // And still on the glass, which is the constraint the old expression was honouring.
+  const box = (await qr.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(-1);
+  expect(box.x + box.width).toBeLessThanOrEqual(321);
+});
+
+/**
+ * D12. The overlay was rendered on `qr && !dead`, so the moment the code ran out it
+ * unmounted itself: a member holding the phone against a scanner had the screen go back to
+ * the page by itself, with no explanation, led by whatever card happened to be at the top.
+ */
+test("the full-screen code shows its countdown, and says so rather than closing when it dies", async ({ page }) => {
+  await signIn(page);
+  // Five seconds on the first code and nothing behind it: the member with no signal.
+  let codes = 0;
+  await serveApi(page, [
+    { path: "/api/v1/whoami", body: SESSION_MEMBER },
+    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/me/door", body: door() },
+    { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+  ]);
+  await page.route("**/api/v1/me/qr/generate", (route) => {
+    codes += 1;
+    return codes > 1
+      ? route.abort("failed")
+      : route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ...CODE, expires_in_seconds: 5 }),
+      });
+  });
+
+  await page.goto("/my-code");
+  await page.getByRole("button", { name: "Show your code full screen" }).click();
+  const dialog = page.getByRole("dialog", { name: /full screen/i });
+  await expect(dialog).toContainText(/Refreshes in \d/);
+
+  // Past its expiry and past the pacing gap that bounds the one replacement attempt.
+  await expect(dialog).toContainText(/This code has run out/, { timeout: 30_000 });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText(/nothing on this screen for a door or a court box to read/);
+  await expect(dialog.getByRole("button", { name: "Try again" })).toBeVisible();
+  // And the club's number in it is pressable, not text to memorise in the dark. D13.
+  await expect(dialog.getByRole("link", { name: CONTACT.phone })).toHaveAttribute("href", "tel:0215550134");
+});
+
+/**
+ * C9 / D14. `aria-modal="true"` was a claim this overlay did not honour: Tab walked
+ * straight out of it and through the page underneath, and dragging on it scrolled the page
+ * behind — so a member closed the code and found themselves somewhere else on the page
+ * than where they left it.
+ */
+test("the full-screen code traps Tab, inerts the page behind it and locks the scroll", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [...COMMON, { path: "/api/v1/me/door", body: door() }]);
+
+  await page.setViewportSize({ width: 360, height: 640 });
+  await page.goto("/my-code");
+  await expect(page.getByLabel("Your code", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Show your code full screen" }).click();
+  await expect(page.getByRole("dialog", { name: /full screen/i })).toBeVisible();
+
+  // Every sibling of the overlay is inert, so a pointer, a caret browser, a screen
+  // reader's virtual cursor and find-in-page all stop at it — not only Tab.
+  const inert = await page.evaluate(() =>
+    [...document.body.children]
+      .filter((n) => n.getAttribute("role") !== "dialog")
+      .every((n) => n.hasAttribute("inert")));
+  expect(inert).toBe(true);
+  expect(await page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+
+  // Six presses round a dialog with one stop: focus never leaves it.
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press("Tab");
+    const inside = await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]'));
+    expect(inside).toBe(true);
+  }
+
+  // Back still closes only the overlay, and the page is usable again afterwards.
+  await page.goBack();
+  await expect(page.getByRole("dialog", { name: /full screen/i })).toBeHidden();
+  await expect(page).toHaveURL(/\/my-code$/);
+  expect(await page.evaluate(() => document.body.style.overflow)).toBe("");
+  const released = await page.evaluate(() =>
+    [...document.body.children].every((n) => !n.hasAttribute("inert")));
+  expect(released).toBe(true);
+});
+
+/**
+ * B4 / E-H1. `/my-code` stayed affirmative — "a live code of yours opens the club door" —
+ * while the club's only usable door was shut. `doors` means "this club has scanners" now,
+ * so the page no longer goes silent on the evening a member most needs telling something;
+ * what it must not do is promise.
+ */
+for (const shut of ["some", "all"] as const) {
+  test(`a member is told when ${shut} of the club's doors are shut, and promised nothing`, async ({ page }) => {
+    await signIn(page);
+    await serveApi(page, [...COMMON, {
+      path: "/api/v1/me/door",
+      body: door({ policy: "active_member", early_entry_minutes: null, next_booking: null, doors_shut: shut }),
+    }]);
+
+    await page.goto("/my-code");
+
+    await expect(page.getByText(/The club has shut/)).toContainText(/turns every code away/);
+    // Both halves: a door that has LOST the network decides from the list it downloaded
+    // earlier, and this screen cannot see which of those a door is doing.
+    await expect(page.getByText(/The club has shut/)).toContainText(/lost the network/);
+    await expect(page.getByText("A live member code of yours opens the club door.")).toHaveCount(0);
+    // The section is still there, which is the half `doors` used to get wrong.
+    await expect(page.getByText("What opens the door for you right now")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Your door history" })).toBeVisible();
+  });
+}
+
+/**
+ * E-H2, assembled. Lerato: a club that opens for any active member, a booking for
+ * tomorrow, and the BOOKING code for it on screen — which is bounded by its own window
+ * under every one of a club's rules. She was told "Your booking — not needed at this club",
+ * "The door's window — no window to wait for" and "whatever went wrong is at the door",
+ * beside seventeen `too_early` refusals in the club's own record.
+ */
+test("a member holding a booking code is answered about that code, not about their membership", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [
+    { path: "/api/v1/whoami", body: SESSION_MEMBER },
+    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { method: "POST", path: "/api/v1/me/qr/generate", body: CODE },
+    {
+      path: "/api/v1/me/door",
+      body: door({ policy: "active_member", early_entry_minutes: null, next_booking: null }),
+    },
+    {
+      path: "/api/v1/me/door/history",
+      body: {
+        ...EMPTY_HISTORY,
+        items: [{
+          at: recent(), delivered_at: null, door_name: "front-door",
+          released: false, reason: "too_early", offline: false,
+        }],
+      },
+    },
+  ]);
+
+  await page.goto("/my-code");
+
+  // The standing section says which code each fact is about, rather than leaving a member
+  // to decide the screen has contradicted itself.
+  await expect(page.getByText(/The booking code on screen is bounded by its own window/))
+    .toContainText(/whatever rule a club applies/);
+
+  await page.getByRole("button", { name: "The door didn't open" }).click();
+  const panel = page.getByRole("group", { name: /work out why/i });
+  // The conclusion LEADS with what the club wrote down.
+  await expect(panel).toContainText(/club's own record/);
+  await expect(panel).toContainText(/The booking that code belonged to hadn't opened the door yet/);
+  await expect(panel).not.toContainText(/whatever went wrong is at the door/);
+  // The window row is about the code on screen, not about a rule this club does not apply.
+  await expect(panel).not.toContainText(/no window to wait for/);
+  // And the one thing on this phone that might work is offered where she is looking.
+  await expect(panel.getByRole("button", { name: "Use your member code instead" })).toBeVisible();
+});
+
+/**
+ * D1. Each read failing alone was handled well; the two failing together reverted the page
+ * to court-only copy — no door section, no self-check, no history link and not one `tel:`
+ * on the screen, for the member standing at the door in the dark.
+ */
+test("both reads failing still leaves a door section, a self-check and a way to a human", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [
+    { path: "/api/v1/whoami", body: SESSION_MEMBER },
+    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+  ]);
+  await page.route("**/api/v1/me/qr/generate", (route) => route.abort("failed"));
+  await page.route("**/api/v1/me/door", (route) => route.abort("failed"));
+
+  await page.goto("/my-code");
+
+  await expect(page.getByText("What opens the door for you right now")).toBeVisible();
+  await expect(page.getByRole("button", { name: "The door didn't open" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Your door history" })).toBeVisible();
+  // It says what it could not do, and claims nothing about the club — including whether
+  // the club has a door at all.
+  await expect(page.getByText(/can't tell you what its doors need from you/))
+    .toContainText(/or whether this club has any/);
+  await expect(page.getByText(/hasn't given the app a number/)).toHaveCount(0);
 });

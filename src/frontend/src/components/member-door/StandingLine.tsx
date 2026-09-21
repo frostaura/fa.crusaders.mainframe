@@ -1,15 +1,21 @@
 import { Link } from "react-router-dom";
 import type { MemberDoor } from "../../lib/api";
 import type { LastKnownDoor } from "../../lib/lastKnown";
+import { clubClock } from "../../lib/clubClock";
 import {
+  type CodeOnScreen,
+  DOOR_SECTION_UNKNOWN,
   OFFLINE_DETAILS_SUMMARY,
   STANDING_HEADING,
   STANDING_LOADING,
+  USE_MEMBER_CODE_INSTEAD,
   type ReadFailure,
+  asOfMayHaveChanged,
   describeStanding,
   offlineDetailsBody,
   standingFailed,
 } from "../../lib/memberDoorCopy";
+import { Button } from "../Button";
 
 /**
  * "What opens the door for you right now" — the standing facts, below the QR.
@@ -25,6 +31,13 @@ import {
  * not carry one, which is why `describeDoor()` on the code card names the rule without
  * claiming to know it. That difference is the whole reason both exist, and why the code
  * card's clause is restored the moment this line is absent, stale or failed.
+ * </p>
+ *
+ * <p>
+ * <b>Four states, not three, and the fourth is D1.</b> A live answer, a live answer this
+ * page can no longer re-read, a cached one, and — new — no answer of any kind at a page
+ * whose every read has failed. That last one used to render nothing at all, on the screen
+ * of the one member who most needed a sentence.
  * </p>
  */
 export function StandingLine(props: {
@@ -42,15 +55,42 @@ export function StandingLine(props: {
    * </p>
    */
   failure: ReadFailure | null;
+  /** Which of the member's two codes is on screen, so a sentence can say which it is about. */
+  code: CodeOnScreen | null;
+  /** When the answer on screen was read, for the staleness marker. ISO, or null while live. */
+  staleSince: string | null;
+  /** Switches the page to the member's own code. E-H2 (3). */
+  onUseMemberCode: () => void;
 }) {
-  const { door, cached, cachedMinutesAgo, loading, failure } = props;
+  const { door, cached, cachedMinutesAgo, loading, failure, code, staleSince, onUseMemberCode } = props;
 
   if (door) {
-    const line = describeStanding(door);
+    const line = describeStanding(door, code);
     return (
       <section className="space-y-2">
-        <h2 className="text-sm font-medium">{STANDING_HEADING}</h2>
+        <h2 className="text-sm font-medium">
+          {STANDING_HEADING}
+          {/*
+            D6. `useMemberDoor` keeps the last good answer when a later read fails, which is
+            right — throwing away a true answer because the next request did not land would
+            leave the member with less. What was wrong is that it went on being rendered in
+            the present tense with nothing to say it was from ten minutes ago, beside a code
+            card saying "this code has run out". A cached fact carries its age.
+          */}
+          {staleSince && (
+            <span className="font-normal text-text-muted"> — {asOfMayHaveChanged(clubClock(staleSince, door.timezone))}</span>
+          )}
+        </h2>
         <p className="text-sm text-text-secondary">{line.body}</p>
+        {/* E-H2 / D5: which code each sentence is about, and when its window runs. */}
+        {line.codeLine && <p className="text-sm text-text-secondary">{line.codeLine}</p>}
+        {/* B4 / E-H1: both halves of what a shut door does, and nothing promised. */}
+        {line.shutLine && <p className="text-sm text-warning-strong">{line.shutLine}</p>}
+        {line.offerMemberCode && (
+          <Button variant="outline" className="w-full sm:w-auto" onClick={onUseMemberCode}>
+            {USE_MEMBER_CODE_INSTEAD}
+          </Button>
+        )}
         {line.action?.kind === "book_a_court" && (
           <Link to="/schedule" className="inline-flex items-center min-h-11 text-sm text-accent-strong underline underline-offset-2 hover:no-underline">
             {line.action.label}
@@ -73,21 +113,27 @@ export function StandingLine(props: {
     );
   }
 
-  const cachedLine = cached ? describeStanding(cached.value) : null;
+  const cachedLine = cached ? describeStanding(cached.value, code) : null;
   return (
     <section className="space-y-2">
       <h2 className="text-sm font-medium">
         {STANDING_HEADING} — <span className="text-text-muted">can't check</span>
       </h2>
       <p className="text-sm text-text-secondary">
-        {standingFailed(
-          cachedLine ? { body: cachedLine.body, minutesAgo: cachedMinutesAgo } : null,
-          // A read that has neither succeeded nor failed cannot reach this arm, but the
-          // type allows it; "network" is the safer of the two to assume, because it is the
-          // one that offers the member something to do.
-          failure ?? "network",
-        )}
+        {cachedLine || failure
+          ? standingFailed(
+            cachedLine ? { body: cachedLine.body, minutesAgo: cachedMinutesAgo } : null,
+            // A read that has neither succeeded nor failed cannot reach this arm, but the
+            // type allows it; "network" is the safer of the two to assume, because it is the
+            // one that offers the member something to do.
+            failure ?? "network",
+          )
+          // D1's fourth state: nothing has ever landed AND nothing failed loudly enough to
+          // name a culprit. The page says what it could not do and claims nothing about the
+          // club — including whether it owns a door at all.
+          : DOOR_SECTION_UNKNOWN}
       </p>
+      {cachedLine?.shutLine && <p className="text-sm text-warning-strong">{cachedLine.shutLine}</p>}
       {cachedLine && <OfflineHalf rosterMaxEntries={cached?.value.roster_max_entries ?? null} />}
     </section>
   );

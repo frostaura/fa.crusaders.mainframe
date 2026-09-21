@@ -1,9 +1,9 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { QrCode as QrIcon, RefreshCw } from "lucide-react";
-import { type MemberDoor, type MyQrCode } from "../lib/api";
-import { encodeQr, qrPath } from "../lib/qr";
-import { formatClock, formatCountdown } from "../lib/countdown";
+import { type MemberDoor, type MemberDoorsShut, type MyQrCode } from "../lib/api";
+import { formatCountdown } from "../lib/countdown";
+import { clubClock } from "../lib/clubClock";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
 import { cn } from "../lib/utils";
@@ -11,7 +11,9 @@ import { cn } from "../lib/utils";
 import { type LastKnown, minutesSince, readLastKnown } from "../lib/lastKnown";
 import {
   BOOKING_DOOR_WINDOW_CLOSED,
+  CLUB_TIME_NOTE,
   CONTACT_UNKNOWN,
+  type CodeOnScreen,
   type ContactKnowledge,
   DOOR_SECTION_CHECKING,
   HISTORY_ANCHOR,
@@ -19,6 +21,7 @@ import {
   type ReadFailure,
   USE_MEMBER_CODE_INSTEAD,
   WALK_UP_LABEL,
+  WALK_UP_STICKY_HINT,
   codeExpiredDeadEnd,
   describeStanding,
   liveContact,
@@ -28,6 +31,8 @@ import {
   staleContact,
 } from "../lib/memberDoorCopy";
 import { ClubContact } from "../components/member-door/ClubContact";
+import { QrSvg } from "../components/member-door/QrSvg";
+import { CopySentence } from "../components/member-door/CopySentence";
 import { DecisionCard } from "../components/member-door/DecisionCard";
 import { FullScreenQr } from "../components/member-door/FullScreenQr";
 import { DoorSection } from "../components/member-door/DoorSection";
@@ -84,32 +89,80 @@ import { useMemberDoor, useShownDecision } from "../components/member-door/useMe
  * </p>
  */
 
-const QUIET_ZONE = 4;
-
-/** A QR symbol for `value`, black on white regardless of theme — scanners want contrast, not tokens. */
-export function QrSvg({ value, className }: { value: string; className?: string }) {
-  const matrix = useMemo(() => encodeQr(value), [value]);
-  const extent = matrix.size + QUIET_ZONE * 2;
-  return (
-    <svg
-      viewBox={`0 0 ${extent} ${extent}`}
-      role="img"
-      aria-label={`QR code ${value}`}
-      shapeRendering="crispEdges"
-      className={className}
-    >
-      <rect width={extent} height={extent} fill="#ffffff" />
-      <path d={qrPath(matrix, QUIET_ZONE)} fill="#000000" />
-    </svg>
-  );
-}
+/**
+ * How wide the inline QR is — D7, and every length in it is deliberate.
+ *
+ * <p>
+ * <b>The defect: the symbol got SMALLER as the reader's text got bigger.</b> Measured at
+ * 320 px with a 32 px root font it came out at 190 px against 254 px at the default, because
+ * every container between it and the viewport pads in `rem`: the page column's `px-4`, then
+ * the card's `p-4`, each doubling as the root grew. A member who has turned the type up has
+ * done so because reading is hard, and the product answered by shrinking the one thing on
+ * the page that is not text.
+ * </p>
+ *
+ * <p>
+ * <b>The first fix reached past the card and overshot it.</b> Writing the width as
+ * `min(100vw - 64px, 20rem)` made the symbol root-invariant by subtracting the page gutter
+ * and the card padding as they measure AT THE DEFAULT ROOT — but the page gutter is
+ * `Layout`'s `px-4`, it is rem, and at a 32 px root it is 32 px a side rather than 16. The
+ * symbol then wanted 296 px inside a card that had 262 px to give, the card's min-content
+ * width dragged the whole page column 34 px wider than its parent, and the card's right edge
+ * went off the glass. A length that guesses at another component's padding is wrong twice:
+ * once here, and again the day that component changes it.
+ * </p>
+ *
+ * <p>
+ * <b>So the symbol takes the card's inner width, and the CARD is what is pinned.</b> See
+ * {@link CODE_CARD_BOX}. The two lengths below are then the only two that matter — fill
+ * what the card has, up to the size a scanner needs at arm's length — and neither can drift
+ * when a padding, a gutter or a breakpoint elsewhere moves.
+ * </p>
+ */
+const QR_WIDTH = "w-full max-w-[320px]";
 
 /**
- * One clock face for the whole product, in `lib/countdown.ts` — not a second `Intl`
- * formatter here. A hand-built sibling is what this repo already found once, disagreeing
- * with its twin about midnight.
+ * The code card's own width and padding, in PIXELS. D7's other half.
+ *
+ * <p>
+ * `Card`'s own `p-4 sm:p-6` is the right default everywhere else in the product. On this one
+ * card it is what ate 64 px of a 320 px screen at a 32 px root — padding around a QR code is
+ * not type and has no reason to scale with it.
+ * </p>
+ *
+ * <p>
+ * <b>Below `sm` the card sizes itself from the viewport, which is what makes the symbol
+ * root-invariant.</b> `100vw - 32px` is a 16 px gutter a side that does not grow with the
+ * root, and `354px` is that same card at its ceiling — 320 px of symbol, 16 px of padding a
+ * side and the 1 px border. When the reader's root font makes the page gutter wider than
+ * 16 px the card is wider than the column's content box, the column takes its min-content
+ * width, and the card lands hard against the gutter instead of inside it. That is the
+ * intended outcome: the gutter is whitespace, and the symbol is the page.
+ * </p>
+ *
+ * <p>
+ * From `sm` up the card fills the column as every other card does, because there the 320 px
+ * ceiling is doing the bounding and a card narrower than its neighbours would be a visible
+ * change to a layout no finding complained about.
+ * </p>
  */
-const formatStart = formatClock;
+const CODE_CARD_BOX = "w-[min(100vw-32px,354px)] sm:w-full p-[16px] sm:p-[24px]";
+
+/**
+ * One clock face for the whole product, in `lib/clubClock.ts` — not a second `Intl`
+ * formatter here. A hand-built sibling is what this repo already found once, disagreeing
+ * with its twin about midnight; O1 found the second, subtler one, where the member surfaces
+ * wrote the viewer's zone and the admin ones the club's.
+ *
+ * <p>
+ * The zone is threaded through because `/me/door` now carries it (WIRE-R2 §4). Undefined —
+ * the club has not answered yet — falls back to the browser's, which for a member standing
+ * in the club is the same zone; what is never done is to guess a named one.
+ * </p>
+ */
+function formatStart(instant: string, zone?: string): string {
+  return clubClock(instant, zone);
+}
 
 /**
  * What this code does at the club's DOOR, or nothing at all.
@@ -146,12 +199,17 @@ const formatStart = formatClock;
  * `/me/qr/generate` is a different request and survives a `/me/door` that did not.
  * </p>
  */
-function describeDoor(qr: MyQrCode, suppressed = false): string {
-  if (suppressed) return "";
+function describeDoor(qr: MyQrCode, meaning: CodeMeaningInput): string {
+  if (meaning.suppressed) return "";
   if (qr.doors !== true) return "";
+  // B4 / E-H1. A club with doors shut is not a club with no doors, so the page does not go
+  // silent — but this clause is the one place on the card that PROMISES, and a promise is
+  // exactly what cannot be made about a door somebody has switched off. The standing line
+  // below carries both halves of what a shut door does; this one stands down.
+  if (meaning.doorsShut !== "none") return "";
   if (qr.kind !== "booking") return " It also opens the club door whenever the club's door rules allow.";
   if (!qr.door_opens_at) return "";
-  const until = qr.door_closes_at ? formatStart(qr.door_closes_at) : null;
+  const until = qr.door_closes_at ? formatStart(qr.door_closes_at, meaning.timezone) : null;
   const end = until ?? "shortly after your booking ends";
   // The reviewer read "from a few minutes before your slot" and "opens the club door from
   // 19:50" in one paragraph, over a booking at 22:00 — two hours and ten minutes apart,
@@ -159,7 +217,45 @@ function describeDoor(qr: MyQrCode, suppressed = false): string {
   // door's is the club's own early-entry setting, and the sentence now says which is which
   // rather than leaving a member to decide the screen has contradicted itself.
   return ` The club's doors open earlier than its courts do: this code opens the club door from`
-    + ` ${formatStart(qr.door_opens_at)} until ${end}.`;
+    + ` ${formatStart(qr.door_opens_at, meaning.timezone)} until ${end}.`;
+}
+
+/** What the card needs to know beyond the code itself to describe it truthfully. */
+type CodeMeaningInput = {
+  /** Is the standing line below already saying this, or better? See `describeDoor`. */
+  suppressed: boolean;
+  /** None, some or all of the club's doors are shut. B4. */
+  doorsShut: MemberDoorsShut;
+  /** The club's own zone, or undefined while the page has not been told it. O1. */
+  timezone?: string;
+  /** When the booking this code belongs to ends, when the page has been told. D4. */
+  bookingEndsAt: string | null;
+};
+
+/**
+ * A booking code's headline, in the tense the clock is actually in. D4.
+ *
+ * <p>
+ * It read "Booking code · court 3 · starts 10:15" for the whole of a booking that had begun
+ * at 10:15 — so a member glancing at the phone at 10:40, mid-game, was told their court
+ * starts in the past. A heading in the wrong tense is read as the wrong booking.
+ * </p>
+ *
+ * <p>
+ * The end time comes from `/me/door`'s `next_booking` and only when it is the SAME booking
+ * this code is for, matched on its start. A code's own `door_closes_at` is the booking's end
+ * PLUS the club's grace window, so printing it as "ends" would tell a member their court
+ * runs a quarter of an hour longer than it does.
+ * </p>
+ */
+function bookingWhen(qr: MyQrCode, meaning: CodeMeaningInput): string {
+  if (!qr.starts_at) return "";
+  const startsAt = Date.parse(qr.starts_at);
+  if (Number.isNaN(startsAt) || startsAt > Date.now()) {
+    return ` · starts ${formatStart(qr.starts_at, meaning.timezone)}`;
+  }
+  const ends = meaning.bookingEndsAt ? ` · ends ${formatStart(meaning.bookingEndsAt, meaning.timezone)}` : "";
+  return ` · on now${ends}`;
 }
 
 /**
@@ -182,19 +278,34 @@ function describeDoor(qr: MyQrCode, suppressed = false): string {
  * or adds nothing at a club that has none.
  * </p>
  */
-function describeKind(qr: MyQrCode, suppressDoorClause = false): { headline: string; detail: string } {
+/**
+ * Does this card put a clock face in front of the member?
+ *
+ * <p>
+ * Asked of the rendered sentences rather than of the code's kind, because the clocks come
+ * from three places — the booking's start, its end, and the door window — under conditions
+ * that do not line up with booking-versus-ident. Reading the strings the card is about to
+ * draw is not a heuristic here: "is there a time on this card" is literally the question,
+ * and it stays right when a fourth clock is added to one of those sentences.
+ * </p>
+ */
+function showsAClock(meaning: { headline: string; detail: string }): boolean {
+  return /\d{1,2}:\d{2}/.test(`${meaning.headline} ${meaning.detail}`);
+}
+
+function describeKind(qr: MyQrCode, meaning: CodeMeaningInput): { headline: string; detail: string } {
   if (qr.kind === "booking") {
-    const when = qr.starts_at ? ` · starts ${formatStart(qr.starts_at)}` : "";
+    const when = bookingWhen(qr, meaning);
     return {
       headline: qr.court_number != null ? `Booking code · court ${qr.court_number}${when}` : `Booking code${when}`,
       detail: "For your booking only — it works at that court, from a few minutes before your slot until it ends. "
-        + "At any other court it will not be recognised." + describeDoor(qr, suppressDoorClause),
+        + "At any other court it will not be recognised." + describeDoor(qr, meaning),
     };
   }
   return {
     headline: "Walk-up code · any court",
     detail: "Identifies you at any court box: start a walk-up on a free court, or pay for someone else's time. "
-      + "It is not tied to a booking." + describeDoor(qr, suppressDoorClause),
+      + "It is not tied to a booking." + describeDoor(qr, meaning),
   };
 }
 
@@ -300,34 +411,38 @@ function WalkUpSwitch(props: { walkUp: boolean; loading: boolean; onChoose: (nex
   return (
     <Card className="p-0 sm:p-0">
       {/*
-        The WHOLE row is the label and the whole row is the target. It was a 16px checkbox
-        with its name in text beside it — a target a quarter the height of everything else
-        on this page, on the one control a member reaches for when the code on screen is
-        the wrong one. `min-h-11` on a label that wraps the input makes the padding, the
-        heading and the explanation all part of the hit area, which is both bigger than 44
-        and the shape a thumb actually lands in.
+        C17 — the LABEL is the four-word name, and the explanation is beside it rather than
+        inside it. Wrapping the whole block in the label made the control's accessible name
+        thirty words long: a screen-reader user tabbing past heard the entire paragraph read
+        out as the name of a checkbox, every time, with no way to skip to the state. The
+        explanation is `aria-describedby` instead, which is announced after the name and
+        state and can be interrupted.
+
+        The hit area stays generous — `min-h-11` plus the padding, on a row that is still
+        far bigger than the 16 px box it replaced — it is simply no longer the paragraph.
       */}
-      <label htmlFor="walk-up" className="flex min-h-11 cursor-pointer items-start gap-3 p-4 sm:p-6">
-        <input
-          id="walk-up"
-          type="checkbox"
-          className="mt-0.5 h-5 w-5 shrink-0"
-          checked={walkUp}
-          disabled={loading}
-          onChange={(e) => onChoose(e.target.checked)}
-        />
-        <div className="min-w-0">
-          <span className="block text-sm font-medium">{WALK_UP_LABEL}</span>
-          {/* A string literal, not JSX text, and it has to stay one: lizard's .tsx lexer
-              desyncs on an odd number of bare apostrophes in JSX TEXT, and this sentence
-              carries the file's odd one. Written as text here it swallows MyCodePage
-              whole and `make complexity` reports a function nobody wrote. */}
-          <p className="text-xs text-text-muted">
-            {"Shows the code that works at any court, even when you have a booking coming up — for starting on a "
-              + "free court now, or paying for someone else's time."}
-          </p>
-        </div>
-      </label>
+      <div className="p-4 sm:p-6">
+        <label htmlFor="walk-up" className="flex min-h-11 cursor-pointer items-center gap-3">
+          <input
+            id="walk-up"
+            type="checkbox"
+            className="h-5 w-5 shrink-0"
+            checked={walkUp}
+            disabled={loading}
+            aria-describedby="walk-up-why"
+            onChange={(e) => onChoose(e.target.checked)}
+          />
+          <span className="text-sm font-medium">{WALK_UP_LABEL}</span>
+        </label>
+        {/* A string literal, not JSX text, and it has to stay one: lizard's .tsx lexer
+            desyncs on an odd number of bare apostrophes in JSX TEXT, and this sentence
+            carries the file's odd one. Written as text here it swallows MyCodePage
+            whole and `make complexity` reports a function nobody wrote. */}
+        <p id="walk-up-why" className="pl-8 text-xs text-text-muted">
+          {"Shows the code that works at any court, even when you have a booking coming up — for starting on a "
+            + "free court now, or paying for someone else's time. " + WALK_UP_STICKY_HINT}
+        </p>
+      </div>
     </Card>
   );
 }
@@ -377,9 +492,21 @@ export default function MyCodePage() {
   const [cached] = useState(() => readLastKnown());
 
   const { shown: shownDecision, dismiss } = useShownDecision(door, refetch);
-  const { doorsClub, contact, meaning } = doorFacts(door, qr, cached);
+  const facts = doorFacts(door, qr, cached, doorRead.failed && !!error);
+  const { doorsClub, doorsKnowledge, contact, meaning, code } = facts;
   /** A decision is only ever about a door, so a club with none has none to show. */
   const decisionToShow = doorsClub ? shownDecision : null;
+  /**
+   * D6 — when the door facts on screen were read, or null while they are the live answer.
+   *
+   * <p>
+   * `useMemberDoor` keeps the last good answer through a failure, which is right. What is
+   * not right is rendering it in the present tense afterwards with nothing to say how old it
+   * is, which is what a member saw beside "this code has run out" with no signal.
+   * </p>
+   */
+  const staleSince = door && doorRead.failure ? doorRead.readAt : null;
+  const switchToMemberCode = useCallback(() => chooseWalkUp(true), [chooseWalkUp]);
 
   /** Re-read at every instant the page has been told something changes at. D4. */
   useBoundaryRefresh(
@@ -407,27 +534,51 @@ export default function MyCodePage() {
   // After every hook, so none is skipped. BarredCard says why it replaces the whole page.
   if (barred !== null) return <BarredCard reason={barred} error={error} loading={loading} onCheckAgain={refetch} />;
 
+  const doorBlocks = (
+    <DoorBlocks
+      doorsClub={doorsClub}
+      doorsKnowledge={doorsKnowledge}
+      door={door}
+      cached={cached}
+      doorRead={doorRead}
+      contact={contact}
+      code={code}
+      staleSince={staleSince}
+      codeSecondsLeft={codeSecondsLeft}
+      windowClosedOffer={bookingDoorWindowClosed && !walkUp}
+      onUseMemberCode={switchToMemberCode}
+      onRefreshCode={refetchAsync}
+    />
+  );
+  const doorFooter = <DoorFooter doorsKnowledge={doorsKnowledge} contact={contact} />;
+
   // Every read has failed and there is nothing live to show — see OfflinePage.
   if (everythingFailed({ error, qr, doorFailed: doorRead.failed, doorsClub })) {
-    return <OfflinePage cached={cached} contact={contact} loading={loading} onTryAgain={refetch} />;
+    return (
+      <OfflinePage cached={cached} contact={contact} loading={loading} onTryAgain={refetch}>
+        {/*
+          D1 — the door section and the way to the member's own record are NOT the code
+          read's dependants, and this page used to be where they both disappeared. Every
+          sentence in here is already about a door; dropping the one block that states what
+          this club's doors need, and the one link to what the club has recorded about this
+          member, left the offline page saying less than it knew.
+        */}
+        {doorBlocks}
+        {doorFooter}
+      </OfflinePage>
+    );
   }
 
   return (
     <div className="max-w-xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Your code</h1>
-        <p className="text-sm text-text-secondary">{subtitleFor(doorsClub)}</p>
-      </div>
-
-      {decisionToShow && (
-        <DecisionCard
-          decision={decisionToShow}
-          door={door}
-          contact={contact}
-          onRefreshCode={refetch}
-          onDismiss={dismiss}
-        />
-      )}
+      {/*
+        D8 — the code is the first thing in the page body, and everything that explains it
+        comes after. It was a heading, a two-line subtitle and a decision card first, which
+        at 320×568 put the QR entirely below the fold: a member at a scanner had to scroll to
+        find the one thing they opened the page for. The heading stays — a page with no h1 is
+        a page a screen-reader user cannot place — and it is one compact line.
+      */}
+      <h1 className="text-xl font-semibold">Your code</h1>
 
       <CodeCard
         qr={qr}
@@ -440,23 +591,31 @@ export default function MyCodePage() {
         onRefresh={refetch}
       />
 
-      <DoorBlocks
-        doorsClub={doorsClub}
-        door={door}
-        cached={cached}
-        doorRead={doorRead}
-        contact={contact}
-        codeSecondsLeft={codeSecondsLeft}
-        windowClosedOffer={bookingDoorWindowClosed && !walkUp}
-        onUseMemberCode={() => chooseWalkUp(true)}
-        onRefreshCode={refetchAsync}
-      />
+      {/*
+        D10 — BELOW the code, not above it. A decision arriving used to push the QR down
+        290 px on a screen somebody was holding against a scanner, and dismissing it pulled
+        the QR back up again. Directly under the code is close enough to read without
+        scrolling and cannot move it.
+      */}
+      {decisionToShow && (
+        <DecisionCard
+          decision={decisionToShow}
+          door={door}
+          contact={contact}
+          onRefreshCode={refetch}
+          onDismiss={dismiss}
+        />
+      )}
+
+      <p className="text-sm text-text-secondary">{subtitleFor(doorsClub)}</p>
+
+      {doorBlocks}
 
       {/* Below the QR now: a walk-up is a court concept, and it cost ~96px of the first
           screen at 360 — where what a member at a door came for is the code. */}
       <WalkUpSwitch walkUp={walkUp} loading={loading} onChoose={chooseWalkUp} />
 
-      <DoorFooter doorsClub={doorsClub} contact={contact} />
+      {doorFooter}
     </div>
   );
 }
@@ -475,19 +634,26 @@ export default function MyCodePage() {
  */
 function DoorBlocks(props: {
   doorsClub: boolean;
+  /** Yes, no, or — D1 — this page never found out. */
+  doorsKnowledge: "yes" | "no" | "unknown";
   door: MemberDoor | null;
   cached: LastKnown;
   doorRead: ReturnType<typeof useMemberDoor>;
   contact: ContactKnowledge;
+  code: CodeOnScreen | null;
+  staleSince: string | null;
   codeSecondsLeft: number;
   /** Has the booking code on screen stopped opening a door, with a better one to offer? */
   windowClosedOffer: boolean;
   onUseMemberCode: () => void;
   onRefreshCode: () => Promise<void>;
 }) {
-  const { doorsClub, doorRead, windowClosedOffer, onUseMemberCode } = props;
+  const { doorsClub, doorsKnowledge, doorRead, windowClosedOffer, onUseMemberCode } = props;
 
-  if (!doorsClub) {
+  // D1. "Unknown" renders the section, because the section's failed arm is where the
+  // "couldn't check" sentence and the last-known contact live. Only a club the page has
+  // been TOLD has no door goes silent.
+  if (!doorsClub && doorsKnowledge !== "unknown") {
     // D9. While the one read that answers "does this club even have a door" is still in
     // flight, the page used to render the court-only page with total confidence and then
     // grow a whole section under the member thumb four seconds later. Saying that a
@@ -507,19 +673,29 @@ function DoorBlocks(props: {
         cached={props.cached}
         doorRead={doorRead}
         contact={props.contact}
+        code={props.code}
+        staleSince={props.staleSince}
         codeSecondsLeft={props.codeSecondsLeft}
         onRefreshCode={props.onRefreshCode}
+        onUseMemberCode={onUseMemberCode}
       />
     </>
   );
 }
 
 /**
- * The two things at the foot of the page, both silent at a club with no door: the way to
- * the member own record, and the way to a human.
+ * The two things at the foot of the page: the way to the member's own record, and the way
+ * to a human.
+ *
+ * <p>
+ * <b>D1 — "unknown" is not "no".</b> Both used to be silent, so a page whose every read had
+ * failed offered a member standing at a locked door no number, no address and no way to
+ * their own history. The club's contact is the one thing on this page that is still worth
+ * something from a cache, and it was the one thing the failure state dropped.
+ * </p>
  */
-function DoorFooter({ doorsClub, contact }: { doorsClub: boolean; contact: ContactKnowledge }) {
-  if (!doorsClub) return null;
+function DoorFooter({ doorsKnowledge, contact }: { doorsKnowledge: "yes" | "no" | "unknown"; contact: ContactKnowledge }) {
+  if (doorsKnowledge === "no") return null;
   return (
     <>
       {/* D14. The member own record was three steps away — avatar, Profile, scroll — from
@@ -533,6 +709,65 @@ function DoorFooter({ doorsClub, contact }: { doorsClub: boolean; contact: Conta
       <ClubContact contact={contact} />
     </>
   );
+}
+
+/**
+ * The club's number, in THREE states rather than two nulls.
+ *
+ * <p>
+ * The shape this replaced ended `?? { phone: null, email: null }`, so a read that never
+ * landed came out looking exactly like a club that has set neither — and every surface
+ * downstream went on to state the second as a fact to somebody standing outside a locked
+ * building. A remembered number keeps its age, so it is offered as a number from earlier
+ * rather than as the current one. See {@link ContactKnowledge}.
+ * </p>
+ */
+function contactFrom(door: MemberDoor | null, remembered: LastKnown["door"]): ContactKnowledge {
+  if (door) return liveContact(door.contact);
+  if (remembered) return staleContact(remembered.value.contact, minutesSince(remembered.savedAt));
+  return CONTACT_UNKNOWN;
+}
+
+/**
+ * Does this club have a door at all — and D1's THIRD answer when nobody knows.
+ *
+ * <p>
+ * The live answer wins outright, including when it is `false`: a club that has just retired
+ * its gate must go silent. With no live answer either fallback will do, and they are ORed
+ * rather than ranked — both are the same claim from two different reads, and a member at a
+ * door is not served by the page forgetting one of them.
+ * </p>
+ *
+ * <p>
+ * <b>`unknown` is not `no`.</b> It is what the page has when every read has failed and
+ * nothing was ever cached, and it used to be spelled `false` — which is an answer, and the
+ * wrong one. A club this phone has never heard anything about is not a club with no door.
+ * </p>
+ */
+function doorsKnowledgeOf(
+  door: MemberDoor | null,
+  qr: MyQrCode | null,
+  remembered: LastKnown["door"],
+  failed: boolean,
+): "yes" | "no" | "unknown" {
+  const known = door ? door.doors : (qr?.doors === true || remembered?.value.doors === true);
+  if (known) return "yes";
+  return failed ? "unknown" : "no";
+}
+
+/**
+ * D4 — the end of the booking THIS code is for, and of no other.
+ *
+ * <p>
+ * `next_booking` is the member's next one, which the moment a court has finished is a
+ * different booking entirely: taking its end for the end of the code on screen is how a
+ * card came to read "on now · ends" against a slot that was over.
+ * </p>
+ */
+function bookingEndsAtFor(door: MemberDoor | null, qr: MyQrCode): string | null {
+  const next = door?.next_booking;
+  if (!next || next.starts_at !== qr.starts_at) return null;
+  return next.ends_at;
 }
 
 /**
@@ -553,28 +788,53 @@ function DoorFooter({ doorsClub, contact }: { doorsClub: boolean; contact: Conta
  * </p>
  *
  * <p>
- * <b>The contact is where the same shape was WRONG, and one `??` chain hid it.</b> It
- * ended `?? { phone: null, email: null }`, so a read that never landed came out looking
- * exactly like a club that has set neither — and every surface downstream went on to
- * state the second as a fact to somebody standing outside a locked building. The three
- * states are now carried in the type rather than collapsed into two nulls, and the
- * last-known one keeps its age so it is offered as a number from earlier rather than as
- * the current one. See {@link ContactKnowledge}.
+ * <b>The contact is where the same shape was WRONG</b>, and it is {@link contactFrom}'s
+ * now — along with {@link bookingEndsAtFor} and the one source both `doorsShut` and
+ * `timezone` are read from. Each was an optional chain with a default on the end, inline
+ * among six others, and together they took this function past the complexity gate: at
+ * twenty-five branches in twenty-three lines, "a render nobody can check by reading" had
+ * simply moved down here.
  * </p>
  */
-function doorFacts(door: MemberDoor | null, qr: MyQrCode | null, cached: LastKnown) {
+function doorFacts(door: MemberDoor | null, qr: MyQrCode | null, cached: LastKnown, failed: boolean) {
   const remembered = cached.door ?? null;
-  let contact: ContactKnowledge = CONTACT_UNKNOWN;
-  if (door) contact = liveContact(door.contact);
-  else if (remembered) contact = staleContact(remembered.value.contact, minutesSince(remembered.savedAt));
+  const contact = contactFrom(door, remembered);
 
-  const standing = door ? describeStanding(door) : null;
+  const standingSource = door ?? remembered?.value ?? null;
+  const code = codeOnScreen(qr);
+  const standing = standingSource ? describeStanding(standingSource, code) : null;
+  const doorsKnowledge = doorsKnowledgeOf(door, qr, remembered, failed);
+  /*
+    One source for both of these, rather than the same `(door ?? remembered?.value)?.x ?? y`
+    chain spelled out three times. It was spelled out three times, and two of the copies fed
+    the standing sentences while the third fed the code card — which is how two halves of one
+    screen come to disagree about whether the club has shut its doors.
+  */
+  const doorsShut = standingSource?.doors_shut ?? "none";
+  const timezone = standingSource?.timezone;
   return {
-    doorsClub: door ? door.doors : (qr?.doors === true || remembered?.value.doors === true),
+    doorsKnowledge,
+    doorsClub: doorsKnowledge === "yes",
     contact,
+    code,
+    doorsShut,
+    timezone,
     // The de-duplication rule, stated once. See describeDoor.
-    meaning: qr ? describeKind(qr, !!standing?.suppressesCodeClause) : null,
+    meaning: qr
+      ? describeKind(qr, {
+        suppressed: !!standing?.suppressesCodeClause,
+        doorsShut,
+        timezone,
+        bookingEndsAt: bookingEndsAtFor(door, qr),
+      })
+      : null,
   };
+}
+
+/** Which of the member's two codes is on screen, in the shape the copy module reads. */
+function codeOnScreen(qr: MyQrCode | null): CodeOnScreen | null {
+  if (!qr) return null;
+  return { kind: qr.kind, doorOpensAt: qr.door_opens_at ?? null, doorClosesAt: qr.door_closes_at ?? null };
 }
 
 /**
@@ -678,9 +938,10 @@ function CodeCard(props: {
    */
   const dead = !!qr && secondsLeft === 0;
   const deadForGood = dead && !loading;
+  const deadSentence = codeExpiredDeadEnd(failure ?? "network", contact);
   return (
     <>
-    <Card className="space-y-5">
+    <Card className={cn("space-y-5", CODE_CARD_BOX)}>
       {error && !qr ? (
         <div className="space-y-3">
           <p className="text-sm text-danger-strong">{error}</p>
@@ -692,11 +953,14 @@ function CodeCard(props: {
         <>
           {dead ? (
             <div className="space-y-3 rounded-lg border border-danger-soft bg-danger-soft p-4 text-center">
-              <p className="text-sm text-danger-strong">
-                {deadForGood
-                  ? codeExpiredDeadEnd(failure ?? "network", contact)
-                  : "This code has run out. Getting a fresh one…"}
-              </p>
+              {deadForGood ? (
+                // D13: the club's number here is a link. This is the message a member reads
+                // holding a dead code at a door in the dark — the single worst place in the
+                // product to make somebody memorise a phone number.
+                <CopySentence sentence={deadSentence} className="text-sm text-danger-strong" />
+              ) : (
+                <p className="text-sm text-danger-strong">This code has run out. Getting a fresh one…</p>
+              )}
               {deadForGood && (
                 <Button variant="outline" className="w-full sm:w-auto" onClick={onRefresh}>Try again</Button>
               )}
@@ -707,20 +971,21 @@ function CodeCard(props: {
                   brightness before anything else, and a member holding a phone one-handed
                   should not have to find a small control to get them.
 
-                  `max-w-[min(20rem,100%)]`, not `max-w-xs`. Tailwind's `xs` is 20rem, and a
-                  rem is whatever the reader has set: at a root font of 32px it resolved to
-                  640px inside a 360px phone, the symbol ran off both edges and the whole
-                  page scrolled sideways. The `min()` keeps the 320px intent at a default
-                  root and clamps to the column at any other. */}
+                  The width is the card's inner width, and the CARD is pinned in pixels —
+                  see QR_WIDTH and CODE_CARD_BOX for the measurements that made that
+                  necessary. */}
               <button
                 type="button"
                 aria-label="Show your code full screen"
                 onClick={() => setFull(true)}
-                className="mx-auto block w-full max-w-[min(20rem,100%)]"
+                className={cn("mx-auto block", QR_WIDTH)}
               >
                 <QrSvg value={qr.code} className="w-full h-auto rounded-lg border border-border" />
               </button>
-              <p className="text-center text-xs text-text-muted">{"⤢ Tap the code to fill the screen"}</p>
+              {/* 14px, not 12. It is the hint that explains the one gesture on the page,
+                  and at 12px a reviewer holding the phone at arm's length in a doorway did
+                  not read it at all. */}
+              <p className="text-center text-sm text-text-muted">{"⤢ Tap the code to fill the screen"}</p>
             </>
           )}
 
@@ -746,6 +1011,21 @@ function CodeCard(props: {
               </p>
               <p className="text-base font-medium">{meaning!.headline}</p>
               <p className="text-sm text-text-secondary">{meaning!.detail}</p>
+              {/*
+                Whose clock, said once, where a clock is actually shown.
+
+                This card prints "starts 17:00", "on now · ends 17:45" and the door window,
+                and said nothing about which zone any of them were in — the same gap the
+                history list had, and the one O1 closed by making every face on this surface
+                the CLUB's day. A member travelling, or on a phone that guessed its zone
+                wrong, had no way to know that. The test is whether a clock face is on the
+                card rather than which code it is: a booking code always carries one, an
+                ident code at a club with door windows sometimes does, and a note about
+                times on a card showing no time is noise.
+              */}
+              {showsAClock(meaning!) && (
+                <p className="text-xs text-text-muted">{CLUB_TIME_NOTE}</p>
+              )}
             </div>
           )}
 
@@ -773,8 +1053,25 @@ function CodeCard(props: {
         </>
       )}
     </Card>
-    {full && qr && !dead && (
-      <FullScreenQr code={qr.code} onClose={() => setFull(false)}>
+    {/*
+      D12 — it stays open when the code dies, and says so.
+
+      It used to be `qr && !dead`, so the overlay UNMOUNTED the moment the code ran out:
+      a member holding the phone against a scanner in the dark had the screen go back to
+      the page by itself, with no explanation, led by whatever card happened to be at the
+      top. Closing is the member's gesture; the overlay's job when the code dies is to say
+      that it has, in the place they are already looking.
+    */}
+    {full && qr && (
+      <FullScreenQr
+        code={qr.code}
+        secondsLeft={secondsLeft}
+        dead={dead}
+        renewing={dead && loading}
+        deadSentence={deadSentence}
+        onTryAgain={onRefresh}
+        onClose={() => setFull(false)}
+      >
         <QrSvg value={qr.code} className="w-full h-full" />
       </FullScreenQr>
     )}
@@ -815,8 +1112,10 @@ function OfflinePage(props: {
   contact: ContactKnowledge;
   loading: boolean;
   onTryAgain: () => void;
+  /** D1 — the door section and the history link, which do not belong to the code read. */
+  children?: React.ReactNode;
 }) {
-  const { cached, contact, loading, onTryAgain } = props;
+  const { cached, contact, loading, onTryAgain, children } = props;
   const code = cached.qr;
   // Read once, on mount, through a lazy initialiser: the clock is not pure to read in a
   // render, and this page has nothing that should make a dead code come back to life
@@ -826,46 +1125,49 @@ function OfflinePage(props: {
     && cached.door?.value.policy === "active_member"
     && !cached.door?.value.next_booking;
 
+  const zone = cached.door?.value.timezone;
   const sentence = identDeadEnd
     ? offlineIdentDeadEnd(contact)
     : live
-      ? offlineWithCode({
-        fetchedAtClock: formatStart(code!.savedAt),
+      ? { text: offlineWithCode({
+        fetchedAtClock: formatStart(code!.savedAt, zone),
         minutesAgo: minutesSince(code!.savedAt),
         kind: code!.value.kind,
-      })
+      }), link: null, tail: "" }
       : offlineNoCode(contact);
 
   const showQr = live && !identDeadEnd;
 
   return (
     <div className="max-w-xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Your code</h1>
-        {/* The DOORS subtitle, always: this page is only ever reached at a doors club,
-            and the code card's own `doors` flag is unavailable here because the request
-            that carries it is the one that failed. Telling a member standing at a door
-            with no signal to go and find a court box is the whole of what this page
-            exists to stop. */}
-        <p className="text-sm text-text-secondary">{subtitleFor(true)}</p>
-      </div>
+      {/* D8 — the code first here too. A member with no signal is at a door by definition. */}
+      <h1 className="text-xl font-semibold">Your code</h1>
 
       <Card className="space-y-5 border-l-4 border-warning-strong bg-warning-soft">
-        <p className="text-sm text-warning-strong">{sentence}</p>
+        {/* D13: the number in this sentence is a link, as it is everywhere else. */}
+        <CopySentence sentence={sentence} className="text-sm text-warning-strong" />
         <Button variant="outline" onClick={onTryAgain} disabled={loading}>Try again</Button>
       </Card>
 
+      {/* The DOORS subtitle, always — and below the code, per D8. This page is only ever
+          reached at a doors club, and the code card's own `doors` flag is unavailable here
+          because the request that carries it is the one that failed. Telling a member
+          standing at a door with no signal to go and find a court box is the whole of what
+          this page exists to stop. */}
+      <p className="text-sm text-text-secondary">{subtitleFor(true)}</p>
+
       {showQr && (
-        <Card className="space-y-5">
+        // D7 — the same px padding as the live card, for the same reason.
+        <Card className={cn("space-y-5", CODE_CARD_BOX)}>
           {/* The reduced opacity IS the message, and the sentence above says so in words:
               colour and weight are never the only signal for anything on this page. This
               QR is still LIVE — that is the arm's precondition — so unlike the expired one
               it is meant to be scannable, and 60% is the most it can be dimmed and stay so.
 
-              `min(20rem,100%)` for the reason the card above carries in full: `max-w-xs`
-              is 20 REM, and a reader who has turned the root font up got a 640px symbol
-              inside a 360px phone. */}
-          <div className="mx-auto w-full max-w-[min(20rem,100%)] opacity-60">
+              {QR_WIDTH} for the reason the card above carries in full — and it is the same
+              constant rather than a second expression, because a member with no signal is
+              exactly the member least able to work around a symbol that has shrunk. */}
+          <div className={cn("mx-auto opacity-60", QR_WIDTH)}>
             <QrSvg value={code!.value.code} className="w-full h-auto rounded-lg border border-border" />
           </div>
           <div className="text-center space-y-1">
@@ -876,7 +1178,17 @@ function OfflinePage(props: {
         </Card>
       )}
 
-      <ClubContact contact={contact} />
+      {/*
+        D1 — the door section, the history link and the club's contact, handed down by the
+        page. Every sentence on this page is already about a door; the blocks that state
+        what this club's doors need and what the club has recorded about this member do not
+        belong to the code read, and this is where they used to disappear.
+
+        The contact comes down with them rather than being rendered here as well: this page
+        is only ever reached at a club the page KNOWS has doors, so `DoorFooter` always
+        draws it, and a second copy was two places to keep one rule.
+      */}
+      {children}
     </div>
   );
 }

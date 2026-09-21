@@ -1,11 +1,19 @@
 import { GATE_ROSTER_MAX_ENTRIES } from "./gateCopy";
-import { formatClock, formatCountdown } from "./countdown";
+import { formatCountdown } from "./countdown";
+// O1 — ONE clock formatter for the whole product. This module used to reach for
+// `countdown.formatClock`, which formats in the VIEWER's zone; the admin surfaces used
+// `clubClock`, which formats in the club's. A member abroad and the admin reading the same
+// scan in the club's log therefore saw two different times for one event, and neither screen
+// said which zone it was writing in. `/me/door` and `/me/door/history` now carry `timezone`
+// (WIRE-R2 §4), so every face here is the club's day.
+import { clubClock, clubDayAndClock } from "./clubClock";
 import type {
   MemberDoorBooking,
   MemberDoorContact,
   MemberDoorMembership,
   MemberDoorMembershipDetail,
   MemberDoorPolicy,
+  MemberDoorsShut,
 } from "./api";
 
 /**
@@ -99,12 +107,25 @@ type ActionKind = DecisionAction["kind"];
  * each other. Both halves are pinned by the matrix test.
  * </p>
  */
+/**
+ * <b>D2: every one of these has to be true without knowing WHICH code was held up.</b>
+ *
+ * <p>
+ * `too_early` read "Your court hadn't opened the door yet", and a member with no court
+ * booked at all read it beside seventeen such rows: the refusals came from a BOOKING code
+ * for the following day, which is bounded by its own window under every one of a club's
+ * rules. A row is a record of a scan, and the record does not carry which of the member's
+ * two codes made it — so a sentence that names "your court" is asserting something this
+ * list cannot know. "The booking that code belonged to" is true whichever code it was,
+ * because it is a statement about the code rather than about the reader's day.
+ * </p>
+ */
 export const MEMBER_DOOR_REASON_LINES: Record<string, string> = {
   ok: "Your code was accepted and the door's board reported releasing its lock.",
   not_recognised: "Your code had run out, or wasn't one of this club's.",
   member_not_active: "The club had your membership as not active.",
   no_booking: "You had no court booked that the door would open for.",
-  too_early: "Your court hadn't opened the door yet.",
+  too_early: "The booking that code belonged to hadn't opened the door yet.",
   method_not_supported: "The board at that door asked something a door doesn't answer — nothing you did caused it.",
   not_a_gate: "That board is a court box rather than a door, so it was never going to open for your code.",
 };
@@ -234,16 +255,66 @@ export function contactLine(contact: MemberDoorContact): string | null {
 }
 
 /**
+ * A sentence with at most one thing in it a thumb can press. D13.
+ *
+ * <p>
+ * <b>The club's number was set as plain text in the two places a member reads it at their
+ * lowest ebb</b> — the self-check's conclusion, and the message under a code that has run
+ * out — while the same number ten centimetres below, in the page footer, was a working
+ * `tel:` link. A number somebody has to memorise and re-type one-handed in the dark is a
+ * number they do not call. There is no reason for a sentence to be a string rather than
+ * three fields, and every reason for the middle field to be a link.
+ * </p>
+ *
+ * <p>
+ * `text` and `tail` are plain prose; `link` is rendered as an anchor between them, or
+ * dropped when there is nothing to press. {@link sentenceText} flattens the three back to
+ * one string, which is what the ban-list sweep and the copy tests read.
+ * </p>
+ */
+export type CopyLink = { href: string; text: string };
+export type Sentence = { text: string; link: CopyLink | null; tail: string };
+
+/** A sentence with nothing to press. */
+function plain(text: string): Sentence {
+  return { text, link: null, tail: "" };
+}
+
+/** The three fields as the one string a reader sees. Every copy probe goes through this. */
+export function sentenceText(sentence: Sentence): string {
+  return `${sentence.text}${sentence.link?.text ?? ""}${sentence.tail}`;
+}
+
+/** A phone number as a dialable link, or an address as a mail one. */
+function contactLink(contact: MemberDoorContact): CopyLink | null {
+  if (contact.phone) return { href: telHref(contact.phone), text: contact.phone };
+  if (contact.email) return { href: `mailto:${contact.email}`, text: contact.email };
+  return null;
+}
+
+/**
  * The sentence that closes a conclusion: a number, an address, the door notice — or an
  * admission that the page could not find out which of those this club is.
+ *
+ * <p>
+ * The number and the address are LINKS rather than text. See {@link Sentence}.
+ * </p>
  */
-function reachTheClub(known: ContactKnowledge): string {
+function reachTheClub(known: ContactKnowledge): Sentence {
   const contact = known.contact;
-  if (!contact) return "This screen couldn't load the club's number just now, so whatever is written on the door"
-    + " is the way in until it can.";
-  if (contact.phone) return `Phone the club on ${contact.phone}.`;
-  if (contact.email) return `Write to the club at ${contact.email}.`;
-  return "Whatever is written on the door is the only way from here.";
+  if (!contact) {
+    return plain("This screen couldn't load the club's number just now, so whatever is written on the door"
+      + " is the way in until it can.");
+  }
+  if (contact.phone) return { text: "Phone the club on ", link: contactLink(contact), tail: "." };
+  if (contact.email) return { text: "Write to the club at ", link: contactLink(contact), tail: "." };
+  return plain("Whatever is written on the door is the only way from here.");
+}
+
+/** A sentence, then the way to a human. One link, at the end, where a thumb expects it. */
+function withReach(lead: string, known: ContactKnowledge): Sentence {
+  const reach = reachTheClub(known);
+  return { text: `${lead} ${reach.text}`, link: reach.link, tail: reach.tail };
 }
 
 // --- the decision card ---------------------------------------------------------------
@@ -260,10 +331,12 @@ export type DecisionContext = {
    *
    * <p>
    * Zero means "the club has no early-entry window set", which is a real setting and not
-   * an absent field; see {@link armNoBooking} for the sentence it earns.
+   * an absent field; see {@link armNoBooking} for the sentence it earns. NULL means the
+   * club's policy is not `booking_window` at all, so there is no such window in force and
+   * no number to print — E-H3, and the same wordless arm covers both.
    * </p>
    */
-  earlyEntryMinutes: number;
+  earlyEntryMinutes: number | null;
   contact: ContactKnowledge;
 };
 
@@ -372,13 +445,18 @@ export function formatWindowMinutes(minutes: number): string {
  * How near a booking has to be, said with the club's own number when it has one.
  *
  * <p>
- * Both halves. A club with `gate_early_entry_minutes` at zero has no window to name, and
- * "nothing booked in the next 0 minutes" is not a sentence — it is what a page prints when
- * it treats a real setting as an absent field. The wordless form is the floor.
+ * Three halves now. A club with `gate_early_entry_minutes` at zero has no window to name,
+ * and "nothing booked in the next 0 minutes" is not a sentence — it is what a page prints
+ * when it treats a real setting as an absent field. NULL is the third, and it is E-H3: the
+ * endpoint sends no early-entry number at all unless the policy is `booking_window`,
+ * because under the other one the door's window is computed from something else entirely
+ * and printing this number would explain an 08:05 it did not produce.
  * </p>
  */
-function bookingNearness(earlyEntryMinutes: number): string {
-  if (earlyEntryMinutes > 0) return `in the next ${formatWindowMinutes(earlyEntryMinutes)}`;
+function bookingNearness(earlyEntryMinutes: number | null): string {
+  if (earlyEntryMinutes !== null && earlyEntryMinutes > 0) {
+    return `in the next ${formatWindowMinutes(earlyEntryMinutes)}`;
+  }
   return "soon enough for a door to open";
 }
 
@@ -526,9 +604,47 @@ export function describeDecision(
  * zero.
  * </p>
  */
-export function decisionStamp(doorName: string | null, at: string, deliveredAt: string | null = null): string {
-  const stamp = `${doorName ?? UNNAMED_DOOR} · ${formatClock(at)}`;
-  return deliveredAt ? `${stamp} · the club heard at ${formatClock(deliveredAt)}` : stamp;
+export function decisionStamp(
+  doorName: string | null,
+  at: string,
+  deliveredAt: string | null = null,
+  timezone?: string,
+): string {
+  const stamp = `${doorName ?? UNNAMED_DOOR} · ${clubClock(at, timezone)}`;
+  return deliveredAt ? `${stamp} · the club heard at ${clubClock(deliveredAt, timezone)}` : stamp;
+}
+
+/**
+ * How long ago a decision was taken, beside the card that is still showing it. D6.
+ *
+ * <p>
+ * The card stays until it is superseded or dismissed, which is right — a card that vanishes
+ * mid-sentence while a cold member is reading it is the defect that rule exists to prevent.
+ * What was missing is that it stayed at full size and full confidence for as long as the
+ * page was open: a green "The lock released · 10:02" was still the largest thing on the
+ * screen twenty minutes later, over a code that had since run out. A record that is still on
+ * screen has to say how old it is.
+ * </p>
+ */
+export function decisionAge(minutesAgo: number): string {
+  if (minutesAgo <= 0) return "just now";
+  return minutesAgo === 1 ? "1 min ago" : `${minutesAgo} min ago`;
+}
+
+/** After this many minutes the decision card collapses to one line. D6, amending A3.2. */
+export const DECISION_COLLAPSE_AFTER_MINUTES = 5;
+
+/**
+ * The marker on any fact this page is serving from an earlier read. D6.
+ *
+ * <p>
+ * A cached standing line rendered in the present tense beside "this code has run out" is the
+ * page presenting an answer from ten minutes ago as the current one. The age and the caveat
+ * travel together — the age alone reads as a timestamp rather than as a warning.
+ * </p>
+ */
+export function asOfMayHaveChanged(clock: string): string {
+  return `as of ${clock} — may have changed`;
 }
 
 /** Dropping the card is the member's call, so the control says what it does. */
@@ -541,6 +657,41 @@ export const STANDING_LOADING = "Checking what opens the door for you…";
 
 export type StandingLine = {
   body: string;
+  /**
+   * The second sentence: what the code ON SCREEN does at a door, or when the member's next
+   * booking will open one. Null when neither is worth a line. E-H2, D5, and the LOW note
+   * that a member with a booking outside the door's horizon was never told when it opens.
+   *
+   * <p>
+   * <b>D5: "opens the club door from 08:05 until 10:50" sat directly above "any active
+   * member… opens the club door", and the two read as a contradiction</b> — because nothing
+   * said the first was about the booking code on screen and the second about the member's
+   * other code. A booking code is bounded by its own window under EVERY one of a club's door
+   * rules, which is the fact neither sentence carried.
+   * </p>
+   */
+  codeLine: string | null;
+  /**
+   * The third: how much of this club's door estate is shut. Null when none of it is.
+   *
+   * <p>
+   * B4 / E-H1. `doors` now means "this club has scanners", so a club that has shut every
+   * door no longer goes silent — it says so, in a sentence with both halves: a shut door
+   * that can reach the club's system turns every code away, and one that has lost the
+   * network decides from the list it downloaded earlier, which this screen cannot see.
+   * </p>
+   */
+  shutLine: string | null;
+  /**
+   * Would the club's own rule let this member's MEMBER code through right now? E-H2 (3).
+   *
+   * <p>
+   * The offer to switch codes is worth making only when there is something better to switch
+   * to. A member under `booking_window` with no booking gains nothing from an ident code,
+   * and offering it would send them to a door that will refuse that one too.
+   * </p>
+   */
+  offerMemberCode: boolean;
   /** Does this sentence carry a clock window of its own? */
   hasClockWindow: boolean;
   /**
@@ -596,11 +747,41 @@ export const MEMBERSHIP_DETAIL_WORDS: Record<string, string> = {
 /** The fallback for a status this build has never heard of — `lapsed`, one day. */
 const MEMBERSHIP_DETAIL_FALLBACK = "not active";
 
+/**
+ * The shut half, or nothing. B4 / E-H1.
+ *
+ * <p>
+ * <b>Both halves, and nothing promised.</b> A door the club has shut refuses every code
+ * while it can still reach the club's system — that is the half the page must say, because
+ * it was saying the opposite. The other half is that a shut door which has LOST the network
+ * falls back to the list of bookings it downloaded before it was shut, and this screen has
+ * no way to know whether that has happened. Claiming nobody gets in would be as false as
+ * the promise it replaces, so the sentence states the mechanism and declines to predict it.
+ * </p>
+ *
+ * <p>
+ * The wire carries no count (WIRE-R2 §4 sends `none | some | all`), so neither does this.
+ * "N of its doors" would be a number the page made up.
+ * </p>
+ */
+function shutLineFor(shut: MemberDoorsShut): string | null {
+  if (shut === "none") return null;
+  const which = shut === "all"
+    ? "The club has shut its doors for now."
+    : "The club has shut some of its doors for now.";
+  return `${which} A shut door turns every code away for as long as it can reach the club's system. One that`
+    + " has lost the network falls back to the list of bookings it downloaded earlier, and this screen can't"
+    + " see which of those a door is doing.";
+}
+
 /** The membership half, which outranks every other: the club has to move first. */
 function standingNotActive(rule: string, detail: MemberDoorMembershipDetail): StandingLine {
   const word = MEMBERSHIP_DETAIL_WORDS[detail] ?? MEMBERSHIP_DETAIL_FALLBACK;
   return {
     body: `${rule} The club has yours as ${word}, so no code of yours opens a door until they change that.`,
+    codeLine: null,
+    shutLine: null,
+    offerMemberCode: false,
     hasClockWindow: false,
     // The contradiction arm: the code card must not promise a window over this sentence.
     suppressesCodeClause: true,
@@ -618,33 +799,122 @@ function standingNotActive(rule: string, detail: MemberDoorMembershipDetail): St
  * cut-off door decides from holds bookings, and an admin is not in it.
  * </p>
  */
-function standingClubAdmin(): StandingLine {
+function standingClubAdmin(shut: MemberDoorsShut): StandingLine {
+  const opens = shut !== "none"
+    // Nothing is promised while ANY door is shut: the carve-out is about the BOOKING check,
+    // and a shut door never reaches it — so "a door opens for you" is a promise about a
+    // building this screen cannot vouch for.
+    ? "You're a club admin, so the booking rule is not what stands between you and a door."
+    : "You're a club admin, so a door opens for you without one — but only a door that can still reach the"
+      + " club's system. A door that has lost the network decides from a list of bookings, not admins.";
   return {
-    body: `${BOOKING_RULE} You're a club admin, so a door opens for you without one — but only a door that`
-      + " can still reach the club's system. A door that has lost the network decides from a list of"
-      + " bookings, not admins.",
+    body: `${BOOKING_RULE} ${opens}`,
+    codeLine: null,
+    shutLine: shutLineFor(shut),
+    // Under this policy the member code is admitted by the carve-out itself, so offering a
+    // switch to it buys nothing the member does not already have.
+    offerMemberCode: false,
     hasClockWindow: false,
     // No clock window to duplicate, and nothing to contradict: a door does open for this
     // member, so the code card's clause is the only place the times can come from.
-    suppressesCodeClause: false,
+    suppressesCodeClause: shut !== "none",
     action: null,
   };
 }
 
-function standingBooking(booking: MemberDoorBooking): StandingLine {
-  const starts = formatClock(booking.starts_at);
+function standingBooking(booking: MemberDoorBooking, shut: MemberDoorsShut, zone: string | undefined): StandingLine {
+  const starts = bookingClock(booking.starts_at, zone);
   const court = booking.court_number === null ? "" : ` on court ${booking.court_number}`;
   const opensAt = Date.parse(booking.door_opens_at);
   const open = !Number.isNaN(opensAt) && opensAt <= Date.now();
-  const window = open
-    ? `the door opens for you now, until your code for it runs out at ${formatClock(booking.door_closes_at)}.`
-    : `the door opens for you from ${formatClock(booking.door_opens_at)}.`;
+  // With ANY door shut there is no "the door opens for you" to state — the member may well
+  // walk up to one of the shut ones — so the sentence becomes a fact about the CODE's own
+  // window, which stays true whichever door they reach.
+  const window = shut !== "none"
+    ? `its code works at a door from ${bookingClock(booking.door_opens_at, zone)} until`
+      + ` ${bookingClock(booking.door_closes_at, zone)}.`
+    : open
+      ? `the door opens for you now, until your code for it runs out at`
+        + ` ${bookingClock(booking.door_closes_at, zone)}.`
+      : `the door opens for you from ${bookingClock(booking.door_opens_at, zone)}.`;
   return {
     body: `${BOOKING_RULE} Yours is at ${starts}${court}, and ${window}`,
+    codeLine: null,
+    shutLine: shutLineFor(shut),
+    offerMemberCode: false,
     hasClockWindow: true,
     suppressesCodeClause: true,
     action: null,
   };
+}
+
+/**
+ * A booking's clock face — with its DAY when it is not today.
+ *
+ * <p>
+ * `next_booking` has no horizon any more (WIRE-R2 §4), which is the fix for a member with a
+ * court tomorrow being told only that nothing of theirs was booked soon enough. The cost of
+ * that fix is that a bare "08:05" can now mean a time three days away, so anything outside
+ * the club's own today carries its date.
+ * </p>
+ */
+function bookingClock(iso: string, zone: string | undefined): string {
+  return isClubToday(iso, zone) ? clubClock(iso, zone) : clubDayAndClock(iso, zone);
+}
+
+/** Is this moment inside the club's own current day? Never the viewer's. */
+function isClubToday(iso: string, zone: string | undefined): boolean {
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return true;
+  const day = (value: number) =>
+    new Date(value).toLocaleDateString("en-GB", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: zone });
+  return day(at) === day(Date.now());
+}
+
+/** What the code ON SCREEN is, so a sentence can say which code it is about. E-H2, D5. */
+export type CodeOnScreen = {
+  kind: "booking" | "ident";
+  /** Both edges of a booking code's own door window; null on a member code. */
+  doorOpensAt: string | null;
+  doorClosesAt: string | null;
+};
+
+/**
+ * The second sentence: what the code on screen does at a door, said as a fact about THAT
+ * code rather than about the member's day. E-H2 (1), D5.
+ *
+ * <p>
+ * Silent on a member code, where the standing line above already is the whole answer, and
+ * silent on a booking code the response sent no window for — an invented window is worse
+ * than a missing sentence.
+ * </p>
+ */
+function codeLineFor(code: CodeOnScreen | null, offerMemberCode: boolean, zone: string | undefined): string | null {
+  if (!code || code.kind !== "booking" || !code.doorOpensAt || !code.doorClosesAt) return null;
+  const from = bookingClock(code.doorOpensAt, zone);
+  const until = bookingClock(code.doorClosesAt, zone);
+  const swap = offerMemberCode
+    ? ` Your member code isn't tied to a booking — switch with "${USE_MEMBER_CODE_INSTEAD}".`
+    : "";
+  return `The booking code on screen is bounded by its own window whatever rule a club applies: it works at a`
+    + ` door from ${from} until ${until}, and not outside that.${swap}`;
+}
+
+/**
+ * When the door will open for a booking the member has but is not holding the code for.
+ *
+ * <p>
+ * The LOW note behind it: a member with a court tomorrow, at a club that opens for any
+ * active member, was never told when that booking's own code starts working — the standing
+ * line had no reason to mention a booking under this policy, and the code card was showing
+ * a member code. `next_booking` reaches further than the door's horizon now, so the page
+ * can answer it.
+ * </p>
+ */
+function nextBookingLine(booking: MemberDoorBooking, zone: string | undefined): string {
+  const court = booking.court_number === null ? "" : ` on court ${booking.court_number}`;
+  return `You have a court at ${bookingClock(booking.starts_at, zone)}${court}. Its own booking code works at a`
+    + ` door from ${bookingClock(booking.door_opens_at, zone)}.`;
 }
 
 /** Everything the endpoint sends that bears on what opens a door for this member. */
@@ -653,8 +923,13 @@ export type StandingInput = {
   membership: MemberDoorMembership;
   membership_detail: MemberDoorMembershipDetail;
   is_club_admin: boolean;
-  early_entry_minutes: number;
+  /** Null unless the policy is `booking_window`. WIRE-R2 §4; see E-H3. */
+  early_entry_minutes: number | null;
   next_booking: MemberDoorBooking | null;
+  /** None, some or all of this club's doors are shut. B4 / E-H1. */
+  doors_shut: MemberDoorsShut;
+  /** The club's own zone, so every clock face here is the club's day. O1. */
+  timezone?: string;
 };
 
 /**
@@ -676,32 +951,19 @@ export type StandingInput = {
  * than a state of this member's, and W2.2 closes it on the admin's side, not here.
  * </p>
  */
-export function describeStanding(door: StandingInput): StandingLine {
+export function describeStanding(door: StandingInput, code: CodeOnScreen | null = null): StandingLine {
   const rule = door.policy === "active_member" ? ACTIVE_MEMBER_RULE : BOOKING_RULE;
+  const shut = door.doors_shut;
   if (door.membership === "not_active") return standingNotActive(rule, door.membership_detail);
-  if (door.policy === "active_member") {
-    return {
-      // Three states, and `none` gets its own rather than borrowing either neighbour's.
-      // "Yours is active" would be as false as "yours is not active" — the club has
-      // nothing on file at all — and the door opens regardless, so the sentence has to
-      // say both halves.
-      body: door.membership === "none"
-        ? `${ACTIVE_MEMBER_RULE} The club has no membership on file for you, which is not the same as one it`
-          + " has turned off — so a live code of yours still opens the club door. Worth asking the club to"
-          + " put that right."
-        : `${ACTIVE_MEMBER_RULE} Yours is active, so a live code of yours opens the club door.`,
-      hasClockWindow: false,
-      // The one arm where the clause EARNS its place: this line has no clock times and
-      // the code card does.
-      suppressesCodeClause: false,
-      action: null,
-    };
-  }
-  if (door.is_club_admin) return standingClubAdmin();
+  if (door.policy === "active_member") return standingActiveMember(door, code, shut);
+  if (door.is_club_admin) return standingClubAdmin(shut);
   if (!door.next_booking) {
     return {
       body: `${BOOKING_RULE} You have nothing booked ${bookingNearness(door.early_entry_minutes)}, so a door`
         + " won't open for you.",
+      codeLine: null,
+      shutLine: shutLineFor(shut),
+      offerMemberCode: false,
       hasClockWindow: false,
       // The other contradiction arm. An ident code's clause reads "whenever the club's
       // door rules allow", directly over a sentence saying a door will not open at all.
@@ -709,7 +971,58 @@ export function describeStanding(door: StandingInput): StandingLine {
       action: { kind: "book_a_court", label: ACTION_LABELS.book_a_court },
     };
   }
-  return standingBooking(door.next_booking);
+  return standingBooking(door.next_booking, shut, door.timezone);
+}
+
+/**
+ * The arm B4 was about: a club that opens for any active member, with its doors shut.
+ *
+ * <p>
+ * "A live code of yours opens the club door" was shown, unqualified, while the club's only
+ * usable door was shut — a promise the building could not keep, on the screen somebody was
+ * holding up to it. The membership half is still true and still worth saying; what changes
+ * is that the page stops finishing the sentence with a door it cannot vouch for.
+ * </p>
+ */
+function standingActiveMember(door: StandingInput, code: CodeOnScreen | null, shut: MemberDoorsShut): StandingLine {
+  // The club's rule would let this member's MEMBER code through: there is genuinely
+  // something better to offer somebody holding a booking code outside its window.
+  const offerMemberCode = code?.kind === "booking";
+  // Three states, and `none` gets its own rather than borrowing either neighbour's.
+  // "Yours is active" would be as false as "yours is not active" — the club has nothing on
+  // file at all — and the door opens regardless, so the sentence has to say both halves.
+  const standing = door.membership === "none"
+    ? "The club has no membership on file for you, which is not the same as one it has turned off. Worth"
+      + " asking the club to put that right."
+    : "Yours is active.";
+  const consequence = shut === "all"
+    // Nothing is promised. The membership is not what stands in the way; a shut door is.
+    ? "Nothing about your membership stands between you and a door."
+    : shut === "some"
+      // Not "opens the club door": some of them will not, and the member cannot tell which
+      // one they are walking up to. What is true is what their membership does and does not
+      // decide, and `shutLine` states the rest.
+      ? "Nothing about your membership stands in the way at the ones the club has left open."
+      : "A live member code of yours opens the club door.";
+  const nextBooking = !code && door.next_booking ? nextBookingLine(door.next_booking, door.timezone) : null;
+  const codeLine = codeLineFor(code, offerMemberCode, door.timezone) ?? nextBooking;
+  return {
+    body: `${ACTIVE_MEMBER_RULE} ${standing} ${consequence}`,
+    codeLine,
+    shutLine: shutLineFor(shut),
+    offerMemberCode,
+    hasClockWindow: false,
+    // The one arm where the code card's clause EARNS its place: this line has no clock
+    // times and the code card does. It is suppressed only when this line has grown a clock
+    // of its own — which is exactly the duplication the rule exists for — or when a shut
+    // door has made the clause's promise one the page will not make.
+    //
+    // NOT on `!!code`. A member code on screen produces no `codeLine` at all, and
+    // suppressing on its mere existence deleted the only sentence on the page that carried
+    // the door's clock times.
+    suppressesCodeClause: shut !== "none" || !!codeLine,
+    action: null,
+  };
 }
 
 /**
@@ -755,8 +1068,13 @@ export function standingFailed(
 ): string {
   const lead = failureLead(failure);
   if (!cached) {
-    return `${lead} This screen can't tell you what its doors need. The code below is the last one it`
-      + " managed to get.";
+    // <b>D1: this arm used to end "The code below is the last one it managed to get", and
+    // the whole point of the finding is that there may be no code below.</b> When BOTH
+    // reads fail on a cold start the page has neither a code nor a door answer, and a
+    // sentence that points at one is the screen inventing something for a member standing
+    // in the dark. What it can say is what it could not do — including that it does not
+    // know whether this club owns a door at all — and where the way in is meanwhile.
+    return `${lead} ${DOOR_SECTION_UNKNOWN}`;
   }
   const ago = cached.minutesAgo <= 1 ? "A minute ago" : `${cached.minutesAgo} minutes ago`;
   return `${lead} ${ago} it said: ${cached.body} That may have changed since.`;
@@ -782,6 +1100,41 @@ export function standingFailed(
 export const DOOR_SECTION_CHECKING = "Checking whether this club's doors need anything from you…";
 
 /**
+ * D1 — what the page says when BOTH of its reads have failed and it has never heard an
+ * answer about this club's doors.
+ *
+ * <p>
+ * <b>The defect: each read failing alone was handled well, and the two failing together
+ * deleted the whole subject.</b> With no code and no door answer the page fell back to
+ * court-only copy — no door section, no self-check, no link to the member's own record, and
+ * not one `tel:` or `mailto:` anywhere on the screen. The member standing at the door in
+ * the dark, who is the entire reason this surface exists, was the one member it said
+ * nothing to.
+ * </p>
+ *
+ * <p>
+ * It is careful about which way it is ignorant. It does not say this club has doors — it has
+ * never been told that — and it does not say it has none either. What it can say is that it
+ * could not find out, and that whatever the club last gave it is below.
+ * </p>
+ */
+export const DOOR_SECTION_UNKNOWN = "This screen can't tell you what its doors need from you — or whether this"
+  + " club has any. Whatever is written on the door is the way in until it can.";
+
+/**
+ * The walk-up switch's own persistence, said out loud. LOW note.
+ *
+ * <p>
+ * It is remembered for the rest of the browsing session (`sessionStorage`), which is a
+ * deliberate window — long enough to survive a trip to the schedule and a phone that killed
+ * the tab in a pocket, short enough that Tuesday's choice does not decide Saturday's code.
+ * A member who turns it on and sees it still on tomorrow concludes it is broken; a member
+ * who is told what it does concludes nothing.
+ * </p>
+ */
+export const WALK_UP_STICKY_HINT = "Stays on for the rest of this visit, until you turn it off.";
+
+/**
  * D5 — a code that has run out and could not be replaced.
  *
  * <p>
@@ -792,12 +1145,12 @@ export const DOOR_SECTION_CHECKING = "Checking whether this club's doors need an
  * "refreshing" was not true.
  * </p>
  */
-export function codeExpiredDeadEnd(failure: ReadFailure, contact: ContactKnowledge): string {
+export function codeExpiredDeadEnd(failure: ReadFailure, contact: ContactKnowledge): Sentence {
   const why = failure === "network"
     ? "This code has run out and can't be renewed without signal."
     : "This code has run out, and the club's system answered with an error when this screen asked for"
       + " another — that part is not your phone.";
-  return `${why} There's nothing on this screen for a door or a court box to read. ${reachTheClub(contact)}`;
+  return withReach(`${why} There's nothing on this screen for a door or a court box to read.`, contact);
 }
 
 // --- the offline half of the conditional (P6) ------------------------------------------
@@ -862,9 +1215,9 @@ export function offlineWithCode(input: { fetchedAtClock: string; minutesAgo: num
 }
 
 /** No live code and no way to get one. No QR is drawn: a dead QR in the dark is cruelty. */
-export function offlineNoCode(contact: ContactKnowledge): string {
-  return "Your phone can't reach the club, and the code it last had has run out. There's nothing this screen"
-    + ` can do from here. ${reachTheClub(contact)}`;
+export function offlineNoCode(contact: ContactKnowledge): Sentence {
+  return withReach("Your phone can't reach the club, and the code it last had has run out. There's nothing this"
+    + " screen can do from here.", contact);
 }
 
 /**
@@ -879,10 +1232,10 @@ export function offlineNoCode(contact: ContactKnowledge): string {
  * a hopeful QR.
  * </p>
  */
-export function offlineIdentDeadEnd(contact: ContactKnowledge): string {
-  return "Your phone can't reach the club. The code on this screen lasts about a minute, and a door that has"
-    + " also lost the network only opens for members with a court booked — which you don't have right now."
-    + ` ${reachTheClub(contact)}`;
+export function offlineIdentDeadEnd(contact: ContactKnowledge): Sentence {
+  return withReach("Your phone can't reach the club. The code on this screen lasts about a minute, and a door"
+    + " that has also lost the network only opens for members with a court booked — which you don't have right"
+    + " now.", contact);
 }
 
 // --- the self-diagnosis --------------------------------------------------------------
@@ -994,6 +1347,35 @@ export type DiagnosisInput = {
   codeSecondsLeft: number;
   connection: DiagnosisConnection;
   contact: ContactKnowledge;
+  /**
+   * Which of the member's two codes is on screen RIGHT NOW. E-H2 (1).
+   *
+   * <p>
+   * <b>The check ignored it, and that was the whole of the Lerato finding.</b> A member at a
+   * club that opens for any active member, holding a BOOKING code for the following day, was
+   * told "Your booking — not needed at this club", "The door's window — no window to wait
+   * for" and "whatever went wrong is at the door", beside seventeen `too_early` refusals in
+   * the club's own record. Every row was true of her membership and none was true of the
+   * twelve characters she had held up: a booking code is bounded by its own window under
+   * every one of a club's door rules, and that window was the answer.
+   * </p>
+   */
+  codeKind: "booking" | "ident" | null;
+  /** The window of the code on screen, when it is a booking code the API sent one for. */
+  codeWindow: { open: boolean; opensAtClock: string; closesAtClock: string } | null;
+  /**
+   * The club's OWN record of a recent refusal, which outranks anything this phone can see.
+   *
+   * <p>
+   * E-H2 (2). The check never consulted it, so it could conclude "everything on this phone
+   * looks right, so whatever went wrong is at the door" while the club's record said in so
+   * many words why the door had refused. A checklist that contradicts the evidence it could
+   * have read is worse than no checklist.
+   * </p>
+   */
+  lastRefusal: { atClock: string; reason: string | null } | null;
+  /** Would the club's rule admit this member's MEMBER code right now? E-H2 (3). */
+  offerMemberCode: boolean;
 };
 
 function row(key: DiagnosisKey, state: DiagnosisState, value: string, stateWord?: string): DiagnosisRow {
@@ -1006,13 +1388,34 @@ function row(key: DiagnosisKey, state: DiagnosisState, value: string, stateWord?
  * not apply.
  */
 function bookingRow(input: DiagnosisInput): DiagnosisRow {
-  if (input.policy === "active_member") return row("booking", "neutral", "not needed at this club");
+  if (input.policy === "active_member") {
+    // A club that asks for no booking still hands out booking codes, and one of them may be
+    // the code on screen. "Not needed at this club" full stop reads as "this cannot be it".
+    return input.codeKind === "booking"
+      ? row("booking", "neutral", "not needed at this club — but the code on screen belongs to one")
+      : row("booking", "neutral", "not needed at this club");
+  }
   if (!input.hasBooking) return row("booking", "failed", "none starting soon");
   return row("booking", "passed", input.bookingStartsClock ?? "one coming up");
 }
 
-/** No window is not an open window. A dash, not a tick. */
+/**
+ * The window row — and it is about the code ON SCREEN before it is about the member.
+ *
+ * <p>
+ * E-H2 (1). "No window to wait for" was scored for a member holding a booking code with a
+ * window of its own, because the row only ever looked at the member's standing. A booking
+ * code has a door window under every policy; whether the club asks for a booking decides
+ * nothing about that.
+ * </p>
+ */
 function windowRow(input: DiagnosisInput): DiagnosisRow {
+  const code = input.codeWindow;
+  if (code) {
+    return code.open
+      ? row("window", "passed", `this booking code works at a door until ${code.closesAtClock}`)
+      : row("window", "attention", `this booking code works at a door from ${code.opensAtClock}`);
+  }
   if (input.doorWindowOpen === null) return row("window", "neutral", "no window to wait for");
   if (input.doorWindowOpen) return row("window", "passed", "open for you now");
   return row("window", "attention", `opens for you at ${input.opensAtClock ?? "a time the club sets"}`);
@@ -1112,13 +1515,39 @@ function diagnosisRows(input: DiagnosisInput): DiagnosisRow[] {
  * to show", and never blank: an empty answer is what the whole control exists to replace.
  * </p>
  */
-function concludeFrom(input: DiagnosisInput): string {
-  const reach = reachTheClub(input.contact);
+/**
+ * The club's own record of what happened, which is evidence and outranks every inference
+ * this phone can make about itself. E-H2 (2).
+ *
+ * <p>
+ * It leads because it is the only line on the whole control that is not a guess. The
+ * conclusion that used to win in its place — "everything on this phone looks right, so
+ * whatever went wrong is at the door" — was shown to a member whose last seventeen scans
+ * the club had recorded as refused, for a reason the club had written down.
+ * </p>
+ */
+function concludeFromRefusal(input: DiagnosisInput, refusal: NonNullable<DiagnosisInput["lastRefusal"]>): Sentence {
+  const line = MEMBER_DOOR_REASON_LINES[reasonKey(refusal.reason)]
+    ?? "The club's record doesn't say why in a way this screen understands.";
+  const lead = `The club's own record says the last code held up at a door, at ${refusal.atClock}, was refused:`
+    + ` ${line}`;
+  if (input.offerMemberCode) {
+    // The one thing on this phone that might work, and the member has to be told it exists.
+    return plain(`${lead} Your member code isn't bounded by a booking — "${USE_MEMBER_CODE_INSTEAD}" below`
+      + " switches to it.");
+  }
+  return withReach(lead, input.contact);
+}
+
+function concludeFrom(input: DiagnosisInput): Sentence {
   if (input.membership === "not_active") {
     const word = MEMBERSHIP_DETAIL_WORDS[input.membership_detail] ?? MEMBERSHIP_DETAIL_FALLBACK;
-    return `The club has your membership as ${word}. That's the whole reason, and only the club can`
-      + ` change it. ${reach}`;
+    return withReach(`The club has your membership as ${word}. That's the whole reason, and only the club can`
+      + " change it.", input.contact);
   }
+  // Second, and above the connection arm: a refusal the club WROTE DOWN is a fact, and a
+  // read that has failed since does not make it less of one.
+  if (input.lastRefusal) return concludeFromRefusal(input, input.lastRefusal);
   if (input.connection !== "ok") {
     // <b>"Guessing about half of it" was doing two jobs and one of them badly.</b> When
     // the club's answer never landed at all, four of the six rows are not a guess — they
@@ -1129,47 +1558,91 @@ function concludeFrom(input: DiagnosisInput): string {
       ? "this check is guessing about half of it"
       : "four of these six are unanswered rather than fine";
     return input.connection === "network"
-      ? `Your phone can't reach the club, so ${scope}. Move somewhere with signal, or reach the club`
-        + ` another way. ${reach}`
+      ? withReach(`Your phone can't reach the club, so ${scope}. Move somewhere with signal, or reach the club`
+        + " another way.", input.contact)
       // The other half of the same silence, and a different thing to do about it. The
       // member's phone worked; the answer it brought back was an error.
-      : `The club's system answered with an error, so ${scope}. That part is not your phone, and there's`
-        + ` nothing on it to fix. ${reach}`;
+      : withReach(`The club's system answered with an error, so ${scope}. That part is not your phone, and`
+        + " there's nothing on it to fix.", input.contact);
   }
   // Nothing below this line is knowable without the club's answer, and three of the four
   // arms would fire off a DEFAULT if it were let through. Unreachable in practice — an
   // unknown standing means a read failed — but the type allows it and a silent wrong
   // answer is what this whole control exists to replace. See `standingKnown`.
   if (!input.standingKnown) {
-    return "This screen never got the club's answer about your membership or your bookings, so four of these"
-      + ` six are unanswered rather than fine. ${reach}`;
+    return withReach("This screen never got the club's answer about your membership or your bookings, so four"
+      + " of these six are unanswered rather than fine.", input.contact);
   }
+  // The club's own rule first: under `booking_window` a member with nothing booked is
+  // refused whatever code they hold and whatever its window says, so naming the code's
+  // window here would send them to wait for a time that will not help them.
   if (input.policy === "booking_window" && !input.hasBooking) {
-    return "This club's doors open only for members with a court booked, and you have none starting soon."
-      + " Book one from the schedule.";
+    return plain("This club's doors open only for members with a court booked, and you have none starting soon."
+      + " Book one from the schedule.");
+  }
+  // Then the twelve characters on screen, and this is the Lerato arm: at a club whose doors
+  // open for any active member all day, a BOOKING code is still bounded by its own window,
+  // and that window was the whole answer the check could not see. E-H2 (1).
+  if (input.codeWindow && !input.codeWindow.open) {
+    const swap = input.offerMemberCode
+      ? ` Your member code isn't bounded by a booking — "${USE_MEMBER_CODE_INSTEAD}" below switches to it.`
+      : "";
+    return plain(`The booking code on screen doesn't work at a door until ${input.codeWindow.opensAtClock}, and`
+      + ` a booking code has that window whatever rule a club applies.${swap}`);
   }
   if (input.doorWindowOpen === false) {
     const when = input.opensAtClock ? ` at ${input.opensAtClock}` : "";
     const soon = input.opensInWords ? `, in ${input.opensInWords}` : "";
-    return `The door's window hasn't opened yet. It opens for you${when}${soon}. Everything else is fine —`
-      + " hold your code up to the scanner again then.";
+    return plain(`The door's window hasn't opened yet. It opens for you${when}${soon}. Everything else is fine —`
+      + " hold your code up to the scanner again then.");
   }
   if (input.codeSecondsLeft <= 0) {
-    return "The code you held up had run out. There's a fresh one on this screen now — try that one.";
+    return plain("The code you held up had run out. There's a fresh one on this screen now — try that one.");
   }
-  // The all-clear, plus the one anomaly that is worth a member's breath but is not
-  // stopping them. It goes HERE rather than higher up the order on purpose: a missing
-  // membership row bars nobody, so hoisting it would send somebody to the desk over a
-  // thing that is not the reason the door stayed shut.
-  const onFile = input.membership === "none"
-    ? " The club also has no membership on file for you, which is unusual — worth saying while you have them."
-    : "";
-  return "Everything on this phone looks right, so whatever went wrong is at the door: it may have lost the"
-    + ` club's network, or its scanner may need a wipe. ${reach}${onFile}`;
+  const reach = reachTheClub(input.contact);
+  return {
+    text: "Everything on this phone looks right, so whatever went wrong is at the door: it may have lost the"
+      + ` club's network, or its scanner may need a wipe. ${reach.text}`,
+    link: reach.link,
+    tail: reach.tail,
+  };
 }
 
-export function buildDiagnosis(input: DiagnosisInput): { rows: DiagnosisRow[]; conclusion: string } {
-  return { rows: diagnosisRows(input), conclusion: concludeFrom(input) };
+/**
+ * The one anomaly that is worth a member's breath but is never the reason they are outside.
+ *
+ * <p>
+ * <b>It is a TAIL on whichever conclusion won, not an arm of its own.</b> A club with no
+ * membership row for somebody bars nobody — under `active_member` it is the club's own
+ * record that is incomplete — so hoisting it up the order would send a member to the desk
+ * over a thing that is not why the door stayed shut. That much was already right.
+ * </p>
+ *
+ * <p>
+ * <b>What was wrong is that it was written into ONE arm.</b> It hung off the all-clear, so
+ * the moment any other arm won — and after E-H2 a member holding a booking code outside its
+ * window wins the code-window arm every time — the club's own missing row was silently
+ * dropped, on the one screen where a member is already asking the club a question. Kayla is
+ * exactly that case: nothing on file, a booking code on screen, and a conclusion that never
+ * mentioned it. Appending it here means the order of the arms can be rearranged again
+ * without any of them quietly losing it.
+ * </p>
+ */
+function withMembershipAnomaly(input: DiagnosisInput, conclusion: Sentence): Sentence {
+  // `standingKnown` guards it because "none" is only a fact when the club answered. A
+  // cached or absent standing reads as "none" through the same field, and telling somebody
+  // the club has nothing on file for them on the strength of a read that never landed is
+  // the class of invention this whole surface is built against.
+  if (!input.standingKnown || input.membership !== "none") return conclusion;
+  return {
+    ...conclusion,
+    tail: `${conclusion.tail} The club also has no membership on file for you, which is unusual — worth`
+      + " saying while you have them.",
+  };
+}
+
+export function buildDiagnosis(input: DiagnosisInput): { rows: DiagnosisRow[]; conclusion: Sentence } {
+  return { rows: diagnosisRows(input), conclusion: withMembershipAnomaly(input, concludeFrom(input)) };
 }
 
 // --- my door history -------------------------------------------------------------------
@@ -1252,9 +1725,9 @@ export const USE_MEMBER_CODE_INSTEAD = "Use your member code instead";
 export const HISTORY_OFFLINE_LINE = "From the door's own list — it couldn't reach the club at the time.";
 
 /** The same, with the instant the club finally heard. See `MemberDoorHistoryRow.delivered_at`. */
-export function historyOfflineLine(deliveredAt: string | null): string {
+export function historyOfflineLine(deliveredAt: string | null, timezone?: string): string {
   if (!deliveredAt) return HISTORY_OFFLINE_LINE;
-  return `${HISTORY_OFFLINE_LINE} The club heard at ${formatClock(deliveredAt)}.`;
+  return `${HISTORY_OFFLINE_LINE} The club heard at ${clubClock(deliveredAt, timezone)}.`;
 }
 
 /**
@@ -1309,11 +1782,24 @@ export function historyChip(row: { reason: string | null; released: boolean; off
 /** The sentence under a row, or nothing when the chip has already said all there is. */
 export function historyLine(
   row: { reason: string | null; released: boolean; offline: boolean; delivered_at?: string | null },
+  timezone?: string,
 ): string | null {
-  if (row.offline) return historyOfflineLine(row.delivered_at ?? null);
+  if (row.offline) return historyOfflineLine(row.delivered_at ?? null, timezone);
   if (row.released) return null;
   return MEMBER_DOOR_REASON_LINES[reasonKey(row.reason)] ?? null;
 }
+
+/**
+ * Which clock these times are on, said once per list rather than on every row. LOW note.
+ *
+ * <p>
+ * Every face on this surface is the CLUB's day (O1), which is the right choice and an
+ * invisible one: a member reading their own history from another country sees times that
+ * are neither their phone's nor labelled. One line under the list costs nothing and removes
+ * the whole question.
+ * </p>
+ */
+export const CLUB_TIME_NOTE = "Times are the club's own.";
 
 /** The retention, from the server, or the honest absence of one. Never a fabricated number. */
 export function historyRetention(days: number | null): string {

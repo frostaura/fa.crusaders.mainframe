@@ -1030,6 +1030,15 @@ export function applyDoorPatch(
 export function memberDoorFixture(overrides: Record<string, unknown> = {}) {
   return {
     doors: false,
+    // WIRE-R2 §4. `none` is the default because a club that has shut a door has DONE
+    // something, and a fixture should not silently describe a club in that state — the
+    // shut arms are the interesting ones and a test that wants them asks.
+    doors_shut: "none",
+    // The club under test is in Johannesburg, and `vite.config.ts` pins the RUNNER to the
+    // same zone. That is deliberate and it is not laziness: a fixture whose zone differs
+    // from the runner's proves the zone is being threaded, and `memberDoorAbroadFixture`
+    // is what does that. Here the two agreeing keeps every clock assertion readable.
+    timezone: "Africa/Johannesburg",
     policy: "active_member",
     membership: "active",
     // The same fact at the resolution that says WHICH not-active it is. The two move
@@ -1038,8 +1047,12 @@ export function memberDoorFixture(overrides: Record<string, unknown> = {}) {
     membership_detail: "active",
     is_club_admin: false,
     next_booking: null,
-    // `gate_early_entry_minutes`' own default, clamped server-side to 0..240.
-    early_entry_minutes: 30,
+    // NULL, because the default policy above is `active_member` and WIRE-R2 §4 sends this
+    // number only under `booking_window`. A fixture that carried 30 here would let a page
+    // print an early-entry window at a club that has no such rule — E-H3, which is exactly
+    // the defect the wire change closes. `memberDoorsOnFixture({ policy: "booking_window",
+    // early_entry_minutes: 30 })` is how a test asks for one.
+    early_entry_minutes: null,
     // `DeviceGateRosterBuilder.GateRosterMaxEntries`, which the firmware shares.
     roster_max_entries: 48,
     contact: { phone: "021 555 0134", email: "info@crusaders.co.za" },
@@ -1092,6 +1105,29 @@ export function memberDoorsOnFixture(overrides: Record<string, unknown> = {}) {
 }
 
 /**
+ * A club whose doors ARE its policy's other half: `booking_window`, with an early-entry
+ * window on it. The pair moves together (WIRE-R2 §4) and spelling both at each call site is
+ * how one of them ends up describing a shape the endpoint cannot emit.
+ */
+export function memberDoorBookingPolicyFixture(overrides: Record<string, unknown> = {}) {
+  return memberDoorsOnFixture({ policy: "booking_window", early_entry_minutes: 30, ...overrides });
+}
+
+/**
+ * A club in a zone that is NOT the runner's.
+ *
+ * <p>
+ * `vite.config.ts` pins the runner to Africa/Johannesburg, which is also the club under
+ * test's zone — so a clock assertion against the default fixture passes whether or not the
+ * zone is threaded at all. This one is two hours behind, which is the only way to prove
+ * that a member reading their own history from anywhere reads the CLUB's day. O1.
+ * </p>
+ */
+export function memberDoorAbroadFixture(overrides: Record<string, unknown> = {}) {
+  return memberDoorsOnFixture({ timezone: "Europe/London", ...overrides });
+}
+
+/**
  * One `last_decision`, as the endpoint shapes it.
  *
  * <p>
@@ -1102,7 +1138,13 @@ export function memberDoorsOnFixture(overrides: Record<string, unknown> = {}) {
  */
 export function memberDoorDecisionFixture(overrides: Record<string, unknown> = {}) {
   return {
-    at: "2026-09-19T06:04:00Z",
+    // RECENT, not a fixed date, and that is a correctness point rather than convenience.
+    // `MeDoorEndpoints` returns `last_decision` only inside a 120-second fetch window, so a
+    // fixture stamped two days ago describes a response the endpoint cannot produce — and
+    // with D6 the card now reads its own age off this field and collapses to one line after
+    // five minutes, so every such fixture was silently testing the collapsed state. Thirty
+    // seconds is inside the server's window and inside the card's full-size window.
+    at: new Date(Date.now() - 30_000).toISOString(),
     // Null unless the door decided it OFFLINE — a row the door asked the club about has
     // no delivery to state, and a fixture that carried one would let a page render a
     // journey the row never made. `memberDoorOfflineDecisionFixture` is the other arm.
@@ -1164,7 +1206,9 @@ export function memberDoorOfflineDecisionFixture(overrides: Record<string, unkno
     released: true,
     reason: "ok",
     offline: true,
-    delivered_at: "2026-09-19T06:09:00Z",
+    // Relative for the reason `at` is — and five seconds after it, so the delivery is
+    // plainly later than the scan without pushing the card into its collapsed state.
+    delivered_at: new Date(Date.now() - 25_000).toISOString(),
     ...overrides,
   });
 }

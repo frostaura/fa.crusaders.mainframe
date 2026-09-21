@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { deadlineAt, deadlineFor, formatClock, formatCountdown, formatDayAndClock, secondsUntil } from "./countdown";
+import { deadlineAt, deadlineFor, formatCountdown, secondsUntil } from "./countdown";
 
 /**
  * The clock that every countdown on the member's surfaces reads from.
@@ -109,33 +109,24 @@ describe("countdown", () => {
   });
 
   /**
-   * The clock face. The hour is the VIEWER's, so only the shape is pinned — the same
-   * convention every existing test of this product's clock times uses.
+   * O1 — this module no longer owns a clock face, and nothing here may grow one back.
+   *
+   * <p>
+   * `formatClock` and `formatDayAndClock` lived here and formatted in the VIEWER's zone,
+   * beside `lib/clubClock`, which formats in the club's. Two formatters is two answers for
+   * one scan. The member surfaces read `clubClock` with the zone `/me/door` now carries, and
+   * this file keeps only what is about duration. A re-added `Intl.DateTimeFormat` here is the
+   * defect coming back, so the probe is on the source rather than on a behaviour.
+   * </p>
    */
-  describe("formatClock", () => {
-    it("renders a 24-hour clock time", () => {
-      expect(formatClock("2026-09-19T06:04:00Z")).toMatch(/^\d{2}:\d{2}$/);
-    });
-
-    /** `h23`, not `h24`: a club that opens at midnight must not read as `24:15`. */
-    it("writes midnight as 00, not 24", () => {
-      const midnight = formatClock(new Date(2026, 8, 19, 0, 15).toISOString());
-      expect(midnight).toBe("00:15");
-    });
-  });
-
-  describe("formatDayAndClock", () => {
-    /**
-     * The weekday and month ORDER is the viewer's locale, so it is not pinned — only
-     * that all four parts are present and the clock is on the far side of the separator.
-     * A member scanning their own record needs the day, because two rows an hour apart on
-     * different days are otherwise indistinguishable.
-     */
-    it("renders a weekday, a date and a clock time for a row in a member's own record", () => {
-      const rendered = formatDayAndClock(new Date(2026, 8, 19, 6, 4).toISOString());
-      expect(rendered).toMatch(/^\D*\w{3}\D*19\D*· 06:04$/);
-      expect(rendered).toContain("19");
-      expect(rendered).toMatch(/· 06:04$/);
-    });
+  it("holds no clock face of its own — there is one in the product, in lib/clubClock", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const source = readFileSync(join(__dirname, "countdown.ts"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    expect(source).not.toMatch(/DateTimeFormat|toLocaleTimeString|toLocaleDateString/);
+    const module = await import("./countdown");
+    expect(Object.keys(module).sort()).toEqual(["deadlineAt", "deadlineFor", "formatCountdown", "secondsUntil"]);
   });
 });
