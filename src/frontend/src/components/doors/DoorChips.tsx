@@ -53,19 +53,18 @@ export function DoorChips({ device, online, signals }: {
   return (
     <span className="flex flex-wrap items-center gap-1.5">
       {/*
-        C-M7 / R3-26: the log's rows have said "Outcome: Refused" to a screen reader since
-        B17, and these — the chips that carry the whole state of a door on the overview —
-        were bare spans. Tabbing a doors page read "Side door. Shut. Not told yet." as three
-        unattached words with nothing saying what kind of fact any of them was. The prefix is
-        on the FIRST chip only: it labels the group, and repeating it before each of three
-        chips is the noise that teaches somebody to skip the row.
-      */}
-      {/*
-        <b>Beside the badges, not inside the first one.</b> Inside, the prefix becomes part
-        of that badge's own text — so the badge reads "Status: Reporting" to every exact
-        text query in the suite and to speech control, which is the WCAG 2.5.3 failure
-        `ConfirmButton` documents at length, one component along. A sibling labels the group
-        and leaves each chip's own words alone.
+        <b>C-M7 / R3-26 — the chips that carry a door's whole state were bare spans.</b>
+
+        The log's rows have said "Outcome: Refused" to a screen reader since B17. Tabbing the
+        overview read "Side door. Shut. Not told yet." as three unattached words with nothing
+        saying what kind of fact any of them was.
+
+        It labels the group from BESIDE the badges rather than from inside the first one.
+        Inside, the prefix becomes part of that badge's own text — the badge then reads
+        "Status: Reporting" to every exact text query in the suite and to speech control,
+        which is the WCAG 2.5.3 failure `ConfirmButton` documents at length, one component
+        along. Said once rather than before each of three chips, which is the noise that
+        teaches somebody to skip the row.
       */}
       <span className="sr-only">Status: </span>
       {chips.map((chip) => <Badge key={chip.label} tone={chip.tone}>{chip.label}</Badge>)}
