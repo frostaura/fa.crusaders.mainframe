@@ -220,6 +220,54 @@ public sealed record DoorClub(
         await db.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// One of the board's OWN rows — a registration, an admin edit, a clock correction — with
+    /// its actor and the <c>changes</c> list a <c>device.updated</c> now records. The other half
+    /// of <see cref="WriteRowAsync"/>, which writes scans.
+    /// </summary>
+    public async Task WriteEventRowAsync(
+        TestWebAppFactory factory, Guid deviceId, string action, DateTimeOffset at,
+        Guid actorUserId, IReadOnlyList<string> changes)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+
+        var details = new Dictionary<string, object?> { ["device_id"] = deviceId };
+
+        // Omitted rather than empty when the caller names none, so a fixture can reproduce a row
+        // written BEFORE the list existed — which is the case DoorAuditActions.OtherChange is
+        // for, and an empty array would be a different document.
+        if (changes.Count > 0) details["changes"] = changes;
+
+        db.AuditLogs.Add(new AuditLog
+        {
+            TenantId = TenantId,
+            ActorUserId = actorUserId,
+            SubjectUserId = null,
+            Action = action,
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(details),
+            CreatedAt = at.ToUniversalTime(),
+        });
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Writes <see cref="Device.ShutByUserId"/> directly — for the cross-tenant case, where the
+    /// point is a guid that could not have got there through any route.
+    /// </summary>
+    public async Task SetShutByAsync(TestWebAppFactory factory, Guid deviceId, Guid userId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        // IgnoreQueryFilters, like AuditRowsAsync: a scope created outside a request has no
+        // tenant resolved, so the global filter excludes every row and the read finds nothing.
+        var device = await db.Devices.IgnoreQueryFilters().FirstAsync(d => d.Id == deviceId);
+        device.Enabled = false;
+        device.OutOfServiceSince = DateTimeOffset.UtcNow;
+        device.ShutByUserId = userId;
+        await db.SaveChangesAsync();
+    }
+
     /// <summary>This club's audit rows for one action — the trail as a test reads it.</summary>
     public async Task<List<AuditLog>> AuditRowsAsync(TestWebAppFactory factory, string action)
     {
