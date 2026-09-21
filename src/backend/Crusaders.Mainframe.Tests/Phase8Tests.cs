@@ -392,9 +392,12 @@ public class Phase8Tests
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
         await ledger.PostAsync(new LedgerPosting(host.LeaguePlayerUser.Id, LedgerEntryType.TopUp, 100m, host.LeaguePlayerUser.Id), default);
 
-        // Booked by PlayerUser (Regular). Use admin actor so peak-hours/per-day cap don't interfere.
+        // Booked by PlayerUser (Regular). Use an admin actor so peak-hours/per-day cap don't
+        // interfere — STATED now rather than inferred from actorId != userId (D2-B13), which is
+        // where this test used to get the exemption from without asking for it.
         var startsAt = TestHost.BookableSlot(2);
-        var created = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.AdminUser.Id, startsAt, 1, default);
+        var payer = new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, ActorIsAdmin: true);
+        var created = (BookingResult.Ok)await booking.CreateAsync(host.Courts[0].Id, payer, startsAt, 1, default);
 
         // At the court, LeaguePlayerUser presses "I'll pay" — charge goes to them.
         var charge = await booking.ChargeOnActivationAsync(created.Booking.Id, payerOverrideUserId: host.LeaguePlayerUser.Id, actorUserId: host.PlayerUser.Id, default);
