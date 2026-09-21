@@ -130,6 +130,80 @@ export function doorBookingHorizonMinutes(settings: {
   return Math.max(early, Math.min(roster + cue, DOOR_BOOKING_HORIZON_MAX_MINUTES));
 }
 
+/** The fields the door horizon is derived from, and nothing else. */
+export type DoorHorizonFields = {
+  gate_access_policy: string;
+  gate_early_entry_minutes: number;
+  roster_window_minutes: number;
+  activation_cue_window_minutes: number;
+};
+
+/**
+ * Not just the number — WHICH fields on screen produced it. (C13)
+ *
+ * <p>
+ * <b>The finding this exists for.</b> The settings page prints "a booking QR opens a door
+ * from 130 minutes before the booking" directly under a field reading "Early entry: 30", and
+ * reviewer C edited the early-entry field and watched the sentence not move. It was not a
+ * stale render — under `active_member` the number genuinely is read from two OTHER fields, on
+ * a different card, under a heading that says "Court boxes". So the sentence was correct,
+ * unresponsive to the control beside it, and silent about why: three properties that together
+ * read as a bug and send an admin to change the wrong thing.
+ * </p>
+ *
+ * <p>
+ * The answer is not to make it respond to early entry — that would be a lie — but to say what
+ * it responds to. This returns the KEYS; the page turns them into the captions those fields
+ * are actually wearing, for the same reason {@link SettingComplaint} carries no label: one
+ * vocabulary, on the screen, not two.
+ * </p>
+ */
+export type DoorHorizonBasis = {
+  /** What {@link doorBookingHorizonMinutes} answers, repeated so callers need one call. */
+  minutes: number;
+  /** The keys the answer is read from, in the order they combine. Never empty. */
+  from: string[];
+  /**
+   * What the two court windows would give on their own, under the open policy — the number
+   * the floor is being compared against. Null under `booking_window`, where they play no part.
+   */
+  courtWindowsMinutes: number | null;
+  /** True when `gate_early_entry_minutes` is the floor that wins rather than a floor that does not. */
+  floorGoverns: boolean;
+  /** The floor's own value, whether or not it governs. */
+  floorMinutes: number;
+  /** True when the court windows were cut by {@link DOOR_BOOKING_HORIZON_MAX_MINUTES}. */
+  capped: boolean;
+};
+
+export function doorBookingHorizonBasis(settings: DoorHorizonFields): DoorHorizonBasis {
+  const early = clamp(settings.gate_early_entry_minutes, GATE_EARLY_ENTRY_MIN_MINUTES, GATE_EARLY_ENTRY_MAX_MINUTES);
+  if (settings.gate_access_policy === "booking_window") {
+    return {
+      minutes: early,
+      from: ["gate_early_entry_minutes"],
+      courtWindowsMinutes: null,
+      floorGoverns: true,
+      floorMinutes: early,
+      capped: false,
+    };
+  }
+  const roster = clamp(settings.roster_window_minutes, ROSTER_WINDOW_MIN_MINUTES, ROSTER_WINDOW_MAX_MINUTES);
+  const cue = clamp(settings.activation_cue_window_minutes, ACTIVATION_CUE_MIN_MINUTES, ACTIVATION_CUE_MAX_MINUTES);
+  const courtWindows = Math.min(roster + cue, DOOR_BOOKING_HORIZON_MAX_MINUTES);
+  const floorGoverns = early >= courtWindows;
+  return {
+    minutes: Math.max(early, courtWindows),
+    from: floorGoverns
+      ? ["gate_early_entry_minutes"]
+      : ["roster_window_minutes", "activation_cue_window_minutes"],
+    courtWindowsMinutes: courtWindows,
+    floorGoverns,
+    floorMinutes: early,
+    capped: roster + cue > DOOR_BOOKING_HORIZON_MAX_MINUTES,
+  };
+}
+
 /** A settings value as the API would read it: whole, inside its bounds, and never NaN. */
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
