@@ -3,6 +3,7 @@ import { ApiError, endpoints, setPasswordChangeRequiredHandler, setUnauthorizedH
 import { loginWithPasskey as runPasskeyLogin } from "./webauthn";
 import { clearOfflineCache } from "./pwa";
 import { forgetLastKnown } from "./lastKnown";
+import { forgetClubZone } from "./clubZone";
 
 type AuthState =
   | { status: "loading" }
@@ -231,6 +232,10 @@ function rememberIdentity(userId: string): void {
 function forgetIdentity(): void {
   try { window.localStorage?.removeItem(LAST_IDENTITY_KEY); } catch { /* nothing to do */ }
   forgetLastKnown();
+  // R3-3 — and the club goes too. The remembered zone is the CLUB's, not the member's, and a
+  // club-desk tablet is one browser profile shared by whoever holds it; a second club's admin
+  // signing in on it must not read the first club's midnight until their own payload lands.
+  forgetClubZone();
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {

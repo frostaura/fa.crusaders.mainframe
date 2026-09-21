@@ -384,6 +384,72 @@ test.describe("B12 — the chrome at a large root font size", () => {
 });
 
 /**
+ * A-M11 / R3-29 — the header is ONE row on a phone.
+ *
+ * <p>
+ * Measured at 360×700: the row was 80 px tall with the wallet chip, the avatar and the gear on
+ * a line of their own, for a member and for an admin alike — 126 px of chrome before the page
+ * begins. On the member's code page that is what pushes the door-decision banner, the most
+ * urgent thing on the screen, below the fold; at 390 px the identical header is 56 px.
+ * </p>
+ *
+ * <p>
+ * <b>Both sessions, because they are different headers.</b> An admin has six section tabs and a
+ * doors badge; a member has three tabs and no gear items. The cluster on the right is what
+ * wraps, and it is not the same width in the two cases.
+ * </p>
+ *
+ * <p>
+ * At a 32 px root font size the row legitimately takes two lines — the words are genuinely
+ * wider than the phone by then, and B12 above measures what that must cost. This is the
+ * ordinary text size, where it cost 24 px for nothing.
+ * </p>
+ */
+test.describe("A-M11 — the header on a phone", () => {
+  for (const width of [320, 360, 375]) {
+    for (const admin of [true, false]) {
+      test(`is a single row at ${width} px for ${admin ? "an admin" : "a member"}`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 700 });
+        await signIn(page);
+        await serveApi(page, admin ? routes() : memberRoutes());
+        await page.goto("/my-code");
+        await expect(page.getByRole("button", { name: /Open menu/ })).toBeVisible();
+
+        const row = await page.evaluate(() => {
+          const el = document.querySelector("header > div") as HTMLElement;
+          // Anything with width: the inline nav is `hidden` below `lg` and measures 0×0, which
+          // is not on a line at all.
+          const boxes = [...el.children]
+            .map((k) => k.getBoundingClientRect())
+            .filter((box) => box.width > 0);
+          return {
+            height: Math.round(el.getBoundingClientRect().height),
+            // Every item shares a line when the lowest top is above the highest bottom.
+            // NOT "how many distinct tops": `items-center` gives a 44 px chip and a 24 px
+            // link different tops on the same row, which read as two lines on the desktop
+            // project and as one on the mobile one — a measurement that depended on which
+            // project ran it.
+            lowestTop: Math.round(Math.max(...boxes.map((b) => b.top))),
+            highestBottom: Math.round(Math.min(...boxes.map((b) => b.bottom))),
+            kids: [...el.children].map((k) => {
+              const b = k.getBoundingClientRect();
+              return `${k.tagName}@${Math.round(b.x)},${Math.round(b.y)} w${Math.round(b.width)}`;
+            }),
+          };
+        });
+
+        expect(
+          row.lowestTop,
+          `the header row wrapped: ${JSON.stringify(row.kids)}`,
+        ).toBeLessThan(row.highestBottom);
+        // 56 px is the row at every ordinary width; 80 is what the wrap cost.
+        expect(row.height, `the header row is ${row.height} px tall`).toBeLessThanOrEqual(60);
+      });
+    }
+  }
+});
+
+/**
  * B13 — the offline error toast covered the tab bar, which on a phone is the only way
  * between sections. `top-[100px]` was a guess at the header's height and it is wrong at any
  * text size but one; `Layout` publishes what the header actually measures.
@@ -398,6 +464,10 @@ test.describe("B13 — where a toast lands", () => {
       await page.getByRole("button", { name: "Add court" }).click();
       const toast = page.getByRole("status").filter({ hasText: "Court name is required." });
       await expect(toast).toBeVisible();
+      // Measured once it has ARRIVED. The strip animates in from 12 px below its resting place
+      // now that it is anchored to the bottom, so an entry frame is 12 px past the bottom edge
+      // and a measurement that races it reads as a toast hanging off the screen.
+      await expect(toast).toHaveCSS("opacity", "1");
 
       const geometry = await page.evaluate(() => {
         const header = document.querySelector("header")!.getBoundingClientRect();
@@ -405,10 +475,35 @@ test.describe("B13 — where a toast lands", () => {
         const box = [...document.querySelectorAll('[role="status"]')]
           .find((n) => (n as HTMLElement).innerText.includes("Court name is required"))!
           .getBoundingClientRect();
-        return { toastTop: box.top, headerBottom: header.bottom, stripBottom: strip.bottom };
+        const heading = document.querySelector("#main-content h1")!.getBoundingClientRect();
+        return {
+          toastTop: box.top, toastBottom: box.bottom,
+          headerBottom: header.bottom, stripBottom: strip.bottom,
+          headingBottom: heading.bottom, viewport: window.innerHeight,
+        };
       });
       expect(geometry.toastTop).toBeGreaterThanOrEqual(geometry.headerBottom);
       expect(geometry.toastTop).toBeGreaterThanOrEqual(geometry.stripBottom);
+
+      /**
+       * R3-28 / B10 — and it is nowhere near the line it argues with.
+       *
+       * <p>
+       * Under the chrome is exactly where this product puts a page's own status line, and a
+       * failure toast landing on top of one is a screen where the only two sentences that
+       * matter are stacked, with the wrong one on top. The far edge of the screen is the one
+       * place no heading, chip or status line lives — so the assertion is that the strip is in
+       * the bottom half and clear of the page's heading, which is what a top anchor cannot be.
+       * </p>
+       */
+      expect(
+        geometry.toastTop,
+        `the toast starts at y=${Math.round(geometry.toastTop)} of ${geometry.viewport} — it is anchored to the top`,
+      ).toBeGreaterThan(geometry.viewport / 2);
+      expect(geometry.toastTop, "the toast covers the page's own heading")
+        .toBeGreaterThan(geometry.headingBottom);
+      // And still on screen, safe-area inset and all.
+      expect(geometry.toastBottom).toBeLessThanOrEqual(geometry.viewport);
     });
   }
 });

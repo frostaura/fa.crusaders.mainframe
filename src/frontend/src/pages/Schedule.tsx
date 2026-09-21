@@ -171,12 +171,31 @@ export default function SchedulePage() {
 
   return (
     <div className="space-y-4">
+      {/*
+        C-M8 / R3-35 — this page had NO heading of any kind.
+
+        <p>
+        Reviewer C walked it with a screen reader and found nothing to navigate by: no h1, no
+        h2, nothing — on the screen a member opens most often, whose content is a grid of two
+        hundred cells. A reader that jumps by heading has no way in, and the route announcer
+        above it moves focus to `#main-content h1` on every navigation, so arriving here from
+        anywhere else dropped the keyboard on `&lt;body&gt;` as well. It is the only route in
+        the product that was missing one.
+        </p>
+      */}
+      <h1 className="text-xl font-semibold">Bookings</h1>
+
       <DayBar
         date={date} bounds={dateBounds} loading={loading}
         onDate={setDate} onRefresh={load}
       />
 
       {error && <Card><p className="text-sm text-danger-strong">{error}</p></Card>}
+
+      {/* The grid's own heading. `sr-only` because what it names is already legible to anybody
+          who can see it — the court names are the column headers — and what it buys is the
+          second level a reader jumps to, plus a name for the region the grid lives in. */}
+      {day && <h2 className="sr-only">Courts and times</h2>}
 
       {day && (
         <ScheduleBoard

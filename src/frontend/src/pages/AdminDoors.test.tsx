@@ -883,7 +883,7 @@ describe("the doors surface", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Shut this door — Side door" }));
       expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(0);
 
-      const confirm = await screen.findByRole("button", { name: "Shut this door — Side door — tap again to confirm" });
+      const confirm = await screen.findByRole("button", { name: "Shut this door — Side door — choose again to confirm" });
       // The consequence is on screen, in the confirm label the button is now showing. It is
       // not in the accessible NAME because `ConfirmButton`'s aria-label replaces its
       // contents — which is why the same sentence is also rendered above the control, where
@@ -924,7 +924,7 @@ describe("the doors surface", () => {
       );
 
       fireEvent.click(await screen.findByRole("button", { name: "Reopen this door — Side door" }));
-      const confirm = await screen.findByRole("button", { name: "Reopen this door — Side door — tap again to confirm" });
+      const confirm = await screen.findByRole("button", { name: "Reopen this door — Side door — choose again to confirm" });
       expect(screen.getAllByText("Reopen this door? It opens for members again from the very next scan.")[0])
         .toBeInTheDocument();
       fireEvent.click(confirm);
@@ -980,7 +980,7 @@ describe("the doors surface", () => {
       );
 
       fireEvent.click(await screen.findByRole("button", { name: "Delete this door — Front door" }));
-      const armed = await screen.findByRole("button", { name: "Delete this door — Front door — tap again to confirm" });
+      const armed = await screen.findByRole("button", { name: "Delete this door — Front door — choose again to confirm" });
       // A2 / B5: the confirm is ≤25 words and answers the question a reviewer went looking
       // for — what happens to the door's past scans. It is NOT "the whole history goes",
       // which is what the old confirm left an admin to infer by listing three things and
@@ -1182,7 +1182,7 @@ describe("the doors surface", () => {
       );
 
       fireEvent.click(await screen.findByRole("button", { name: /^Shut this door/ }));
-      fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
 
       expect(await screen.findByText(/Side door is shut\./)).toBeInTheDocument();
       expect(screen.queryByText(/Nothing changed/)).toBeNull();
@@ -1252,7 +1252,7 @@ describe("the doors surface", () => {
       );
 
       fireEvent.click(await screen.findByRole("button", { name: /^Shut this door/ }));
-      fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
 
       // The button returning to its other label is the same thing it does after real work,
       // so what the admin is TOLD is the whole fix.
@@ -1351,7 +1351,7 @@ describe("the doors surface", () => {
       ]);
 
       fireEvent.click(await screen.findByRole("button", { name: /^Shut .* — every door the club has open/ }));
-      fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
 
       const heading = await screen.findByRole("heading", { name: /2 doors shut — 1 confirmed, 1 not/ });
       expect(heading).toHaveFocus();
@@ -1372,7 +1372,7 @@ describe("the doors surface", () => {
       openDoors([doorFixture({ last_seen_at: ago(6 * 3600) })]);
 
       fireEvent.click(await screen.findByRole("button", { name: /^Shut .* — every door the club has open/ }));
-      fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
 
       expect(await screen.findByText("NOT CONFIRMED")).toBeInTheDocument();
     });
@@ -1387,7 +1387,7 @@ describe("the doors surface", () => {
       renderPage(<AdminDoorsPage />);
 
       fireEvent.click(await screen.findByRole("button", { name: /^Shut .* — every door the club has open/ }));
-      fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
 
       expect(await screen.findByText(/Nothing was shut/))
         .toHaveTextContent("every door is exactly as it was");
@@ -1454,11 +1454,11 @@ describe("the doors surface", () => {
       });
 
       fireEvent.click(await screen.findByRole("button", { name: /^Shut .* — every door the club has open/ }));
-      fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
       await screen.findByRole("heading", { name: /doors shut/ });
 
       fireEvent.click(await screen.findByRole("button", { name: /^Reopen the .* — every door the club shut together/ }));
-      fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
 
       await waitFor(() => {
         const rows = server.current();

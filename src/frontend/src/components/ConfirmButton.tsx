@@ -2,6 +2,7 @@ import { Children, isValidElement, useContext, useEffect, useRef, useState } fro
 import { UNSAFE_LocationContext } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { cn } from "../lib/utils";
+import { focusAfterAction, pageHeading } from "../lib/focusAfterAction";
 
 export type ConfirmTone = "info" | "danger";
 
@@ -61,6 +62,40 @@ type ConfirmButtonProps = {
    */
   armedTimeoutMs?: number;
   disabled?: boolean;
+  /**
+   * What the action is ABOUT, as a noun: "Side door", "Carl's key", "the 2 doors still open".
+   *
+   * <p>
+   * <b>C-M3.</b> The way out was named <code>"Keep it open — Shut this door"</code>: a control
+   * whose whole job is to NOT do the thing, named after the thing, with the destructive verb
+   * inside its own accessible name. Heard in a list of controls that is at best confusing and
+   * at worst the wrong button. Named for the subject it becomes "Keep it open — Side door",
+   * which says what is being kept and never says "shut" at all.
+   * </p>
+   *
+   * <p>
+   * Separate from {@link ariaLabel} because the two answer different questions: `ariaLabel` is
+   * what the ACTION is ("Shut Side door"), and this is what it is about. Additive and optional
+   * — a call site that says nothing keeps the old name, which is the trigger's label.
+   * </p>
+   */
+  subject?: string;
+  /**
+   * Where focus goes once the action has finished. (R3-10)
+   *
+   * <p>
+   * Called repeatedly for about a second after the action settles, so it may name something
+   * the update has not rendered yet — the Reopen button that replaces the Shut button, the
+   * status heading that now says what happened. Return `null` until it exists.
+   * </p>
+   *
+   * <p>
+   * Optional, and the default is not "nothing": a call site that says nothing lands on the
+   * page's own <code>&lt;h1&gt;</code> rather than on <code>&lt;body&gt;</code>, which is what
+   * reviewer C measured. It never overrides a page that moves focus itself.
+   * </p>
+   */
+  focusAfter?: () => HTMLElement | null | undefined;
   /**
    * What this button acts ON, in a sentence, for assistive tech.
    *
@@ -163,7 +198,7 @@ function accessibleName(idleText: string, context: string | undefined): string |
  * consequence is now a paragraph above it rather than its label. Two buttons reading the same
  * thing one above the other would be fine on screen and useless in a list of controls, so the
  * name carries the context the call site gave AND says which of the two states it is in:
- * "Shut this door — Side door — tap again to confirm".
+ * "Shut this door — Side door — choose again to confirm".
  * </p>
  *
  * <p>
@@ -173,10 +208,29 @@ function accessibleName(idleText: string, context: string | undefined): string |
  * </p>
  */
 function confirmName(idleText: string, context: string | undefined, consequence: string): string | undefined {
-  if (context) return `${composeName(idleText, context)} — tap again to confirm`;
+  if (context) return `${composeName(idleText, context)} — ${CONFIRM_AGAIN}`;
   if (!consequence) return undefined;
   return composeName(idleText, consequence);
 }
+
+/**
+ * The armed suffix, in words that are true for every way of pressing a button. (C-M4)
+ *
+ * <p>
+ * It said "tap again to confirm". Reviewer C was on a keyboard and had not tapped anything;
+ * the same sentence is read out to a screen-reader user driving a desktop with no touchscreen
+ * at all, and to a speech-control user who says the control's name. "Tap" is one of three ways
+ * in, named as though it were the only one — and on the control where being sure what you are
+ * about to do matters most.
+ * </p>
+ *
+ * <p>
+ * "Choose" covers a tap, a click, Enter, Space and a spoken command without naming any of
+ * them. The word "again" is the load-bearing half and it survives, so a test matching
+ * <code>/again to confirm/</code> holds across the change.
+ * </p>
+ */
+const CONFIRM_AGAIN = "choose again to confirm";
 
 /**
  * The visible label, then the context — unless the context already opens with the label.
@@ -366,6 +420,8 @@ export function ConfirmButton({
   armedClassName = "bg-armed-strong text-armed-ink",
   disabled = false,
   ariaLabel,
+  subject,
+  focusAfter,
 }: ConfirmButtonProps) {
   const [armed, setArmed] = useState(false);
   const [pending, setPending] = useState(false);
@@ -503,7 +559,13 @@ export function ConfirmButton({
     // it is the only thing that tells a listener the control has become TWO controls, and it
     // is also what keeps this region's text from being character-identical to the paragraph
     // on screen — a `getByText` for the consequence would otherwise match both.
-    say(`${textOf(confirmLabel)} Choose the same button again to confirm, or Cancel to stop.`);
+    //
+    // A-M8 / B9: it said "…or Cancel to stop" on a control whose way out is labelled "Keep it
+    // open". There is no Cancel on that screen, so a listener was told to find a button that
+    // does not exist — and the one word they could have searched for was the one word the
+    // sentence did not contain. It reads the REAL labels now, in the order the two buttons
+    // are in, and it names neither a tap nor a key (C-M4).
+    say(`${textOf(confirmLabel)} Two buttons now: ${cancelLabel} to stop, or ${textOf(idleLabel)} to go ahead.`);
   };
 
   const confirm = async () => {
@@ -518,6 +580,18 @@ export function ConfirmButton({
         setPending(false);
         setArmed(false);
       }
+      /**
+       * R3-10 — and OUTSIDE the `mounted` guard, which is the whole point.
+       *
+       * <p>
+       * The control that did the thing is usually the thing that goes: "Shut this door" is
+       * replaced by "Reopen this door", so `triggerRef` is null by the time the effect above
+       * runs and focus is left on `<body>`. `focusAfterAction` outlives this component, waits
+       * for the caller's target to be rendered, and declines if anything else has claimed
+       * focus in the meantime — including this control's own restored trigger.
+       * </p>
+       */
+      focusAfterAction(focusAfter ?? pageHeading);
     }
   };
 
@@ -556,9 +630,59 @@ export function ConfirmButton({
             * which is what made a 45-word sentence a layout problem instead of a sentence.
             */}
           <p className="col-span-full text-sm leading-snug text-text-primary">{confirmLabel}</p>
+          {/**
+            * The way out comes FIRST, and that is C-H1. (C-H1 / B5 / C10)
+            *
+            * <p>
+            * Focus lands on this button when the control arms, because it is the safe one. It
+            * was also the LAST thing in the group, so the natural Tab out of it left the group
+            * entirely: the armed state blurred, cancelled itself silently, and dropped the
+            * keyboard on "Delete this door" — the next control on the page, and the most
+            * destructive one. The confirm was behind it, reachable only by Shift+Tab, which is
+            * not a thing anybody tries when the obvious key appears to have cancelled.
+            * </p>
+            *
+            * <p>
+            * Safe first, destructive second, focus on the first: Tab now reaches the other
+            * option, exactly as it does in a two-button dialog, and leaving the pair in either
+            * direction is a deliberate departure rather than a mis-step.
+            * </p>
+            *
+            * <p>
+            * <b>Named by its own label plus the SUBJECT.</b> "Cancel" alone, heard in a list of
+            * controls, names nothing — and `Keep it open — Shut this door` (C-M3) names it
+            * after the thing it refuses to do. `subject` is a noun, so the name says what is
+            * being kept. It also keeps this button's name from being a superstring of the
+            * control's, which is what made every `getByRole("button", { name: /…/ })` in the
+            * suite match two elements the moment a control armed.
+            * </p>
+            */}
+          <button
+            ref={cancelRef}
+            type="button"
+            disabled={pending}
+            data-confirm="stop"
+            aria-label={`${cancelLabel} — ${subject ?? idleText}`}
+            onClick={(e) => { e.stopPropagation(); cancel(); }}
+            className={cn(CONTROL_CLASS, "border-control bg-bg-surface text-text-secondary")}
+          >
+            {cancelLabel}
+          </button>
           <button
             type="button"
             disabled={disabled || pending}
+            /**
+             * B5, forced colours — the two buttons were identical without it.
+             *
+             * <p>
+             * Windows High Contrast throws away every author colour, so the orange confirm and
+             * the white cancel became two identically-bordered boxes with different words in
+             * them. `index.css` gives this attribute a heavier edge in that mode: the
+             * distinction survives the colours being taken away, which is the whole
+             * requirement. Nothing here depends on it in ordinary rendering.
+             * </p>
+             */
+            data-confirm="go"
             aria-label={confirmName(idleText, ariaLabel, consequence)}
             // No `aria-pressed`. It was set to the armed flag, so a screen reader said
             // "pressed" on a control that had done nothing yet — the word for "done" used for
@@ -576,34 +700,6 @@ export function ConfirmButton({
                 <span>Working…</span>
               </span>
             ) : idleLabel}
-          </button>
-          {/**
-            * The way out, beside the thing it is a way out of. (B5 / C10)
-            *
-            * <p>
-            * Side by side rather than stacked, because the finding was that the Cancel was
-            * below the fold — at 320×568 by 19 px, and at a 32 px root font size by 1 061 px.
-            * Two buttons on one row are as tall as one button; one above the other is twice
-            * as far from the top of the block.
-            * </p>
-            *
-            * <p>
-            * <b>Named by its own label plus the trigger's, never by the composed name.</b>
-            * "Cancel" alone, heard in a list of controls, names nothing — but
-            * `Cancel — <the whole accessible name>` makes this button's name a superstring of
-            * the control's, and every `getByRole("button", { name: /…/ })` in the suite then
-            * matched two elements the moment the control armed.
-            * </p>
-            */}
-          <button
-            ref={cancelRef}
-            type="button"
-            disabled={pending}
-            aria-label={`${cancelLabel} — ${idleText}`}
-            onClick={(e) => { e.stopPropagation(); cancel(); }}
-            className={cn(CONTROL_CLASS, "border-control bg-bg-surface text-text-secondary")}
-          >
-            {cancelLabel}
           </button>
         </>
       ) : (

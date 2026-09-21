@@ -32,7 +32,14 @@ export default defineConfig({
     // member would read ("opens for you at 18:30"). Without this the runner's own zone decides
     // the answer: green on a Mac in SAST, red on a CI runner in UTC, and nothing in the failure
     // says why. Pinned here rather than in each test so the next one cannot forget.
-    env: { TZ: "Africa/Johannesburg" },
+    //
+    // R3-3 — and the pin is also a blind spot, so it has a door in it. The club's zone IS the
+    // runner's zone, so a doors formatter that silently used the browser's produced exactly the
+    // same string as one that used the club's, and the whole suite agreed with a screen that was
+    // a day out in Auckland. `VITEST_TZ=Pacific/Auckland npx vitest run src/lib/clubClock.test.ts`
+    // runs a suite somewhere else on purpose. It is NOT `TZ`: a CI image that exports TZ=UTC
+    // would otherwise silently unpin every clock assertion in the product.
+    env: { TZ: process.env.VITEST_TZ ?? "Africa/Johannesburg" },
     setupFiles: ["./src/test/setup.ts"],
 
     // vitest's default include is `**/*.{test,spec}.?(c|m)[jt]s?(x)` from the project

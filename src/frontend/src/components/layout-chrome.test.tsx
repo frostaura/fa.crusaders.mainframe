@@ -96,6 +96,31 @@ describe("the skip link", () => {
     expect(main).toHaveFocus();
   });
 
+  /**
+   * C-L4 / R3-35 — and the public landing page gets one too.
+   *
+   * <p>
+   * The link was added to the signed-in shell, and `Layout` returns before that shell on two
+   * branches. One of them is the club's own front door: the longest page in the product — a
+   * hero, four sections, a map link and a footer — and the first page anybody sees. A keyboard
+   * user arriving there had no way past its navigation to its content, and `#main-content`
+   * did not exist for the route announcer to land on either.
+   * </p>
+   */
+  it("is there on the signed-out landing page, which is a different shell", async () => {
+    signOut();
+    stubFetch([{ path: "/api/v1/whoami", body: { is_authenticated: false, is_admin: false, tenant_slug: "crusaders", tenant_id: "t", user_id: null } }]);
+    renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: ["/"] });
+
+    const skip = await screen.findByRole("link", { name: "Skip to main content" });
+    expect(focusableInOrder()[0], "the skip link is not the first thing a keyboard reaches").toBe(skip);
+
+    fireEvent.click(skip);
+    const main = document.querySelector("main")!;
+    expect(main).toHaveAttribute("id", "main-content");
+    expect(main).toHaveFocus();
+  });
+
   /** It costs a sighted mouse user no pixels until it is focused. */
   it("is invisible until it is focused", async () => {
     chrome({ isAdmin: true });

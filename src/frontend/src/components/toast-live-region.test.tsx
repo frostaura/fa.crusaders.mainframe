@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { act, render, screen } from "@testing-library/react";
-import { ToastProvider, useToast } from "./Toast";
+import { NOTHING_CHANGED, ToastProvider, useToast } from "./Toast";
 
 /**
  * C10 — a toast was announced twice, and nothing in the DOM looked wrong.
@@ -42,23 +42,63 @@ describe("the toast viewport", () => {
   });
 
   /**
-   * B13 — it sits BELOW the chrome rather than on top of it.
+   * R3-28 / B10 — it is anchored to the BOTTOM, away from the line it contradicts.
    *
    * <p>
-   * <code>top-[100px]</code> was a guess at the header's height. At a 32 px root font size
-   * the header plus the section tab strip is taller than that, so the offline error toast
-   * covered the tab bar — the only way between sections a phone has. `Layout` measures its
-   * own header and publishes `--app-chrome-height`; a constant is right on exactly one
-   * device, and it was not the one the finding was raised on. The fallback of 0 is correct
-   * for the screens with no chrome at all — login, the public landing — which are the
-   * screens where 100 px had nothing to clear.
+   * B13 moved it off a guessed <code>top-[100px]</code> and under the measured chrome, which
+   * fixed it covering the tab strip. Under the chrome is still where the page puts the thing
+   * the toast argues with: reviewer B failed a shut and read "Could not shut that door." sitting
+   * on top of the door's own status line. The far edge of the screen is the one place no
+   * heading, chip or status line in this product lives.
+   * </p>
+   *
+   * <p>
+   * The geometry itself — that it clears the header and does not cover the page's heading — is
+   * measured in a real engine by `e2e/app-chrome.spec.ts`; jsdom has no layout.
    * </p>
    */
-  it("is anchored below whatever the chrome actually measures", () => {
+  it("is anchored to the bottom of the screen, clear of the safe area", () => {
     const { container } = render(<ToastProvider><Raise text="Offline." /></ToastProvider>);
 
     const viewport = container.parentElement!.querySelector<HTMLElement>(".fixed")!;
-    expect(viewport.style.top).toBe("calc(var(--app-chrome-height, 0px) + 12px)");
-    expect(viewport.className).not.toContain("top-[100px]");
+    expect(viewport.className).toContain("bottom-[calc(env(safe-area-inset-bottom,0px)+12px)]");
+    expect(viewport.className).not.toMatch(/(^|\s)top-/);
+    expect(viewport.style.top).toBe("");
+  });
+
+  /**
+   * R3-28 — a failure that can say the world is unchanged. (B10)
+   *
+   * <p>
+   * "Could not shut that door." answers the wrong question. The admin is looking at a status
+   * line that still says the old thing and has no way to tell whether it is stale or correct.
+   * Opt-in and never inferred from the tone: a request that timed out after the server
+   * committed it failed and changed everything, so only a caller that knows may say it.
+   * </p>
+   */
+  it("can say that nothing changed, and does not say it uninvited", () => {
+    function Raiser() {
+      const toast = useToast();
+      return (
+        <>
+          <button type="button" onClick={() => toast.push({ tone: "danger", text: "Could not shut that door.", unchanged: true })}>
+            Failed, unchanged
+          </button>
+          <button type="button" onClick={() => toast.push({ tone: "danger", text: "Could not shut that door." })}>
+            Failed, unknown
+          </button>
+        </>
+      );
+    }
+
+    render(<ToastProvider><Raiser /></ToastProvider>);
+
+    act(() => { screen.getByRole("button", { name: "Failed, unknown" }).click(); });
+    expect(screen.getByRole("status")).toHaveTextContent("Could not shut that door.");
+    expect(screen.getByRole("status")).not.toHaveTextContent(NOTHING_CHANGED);
+
+    act(() => { screen.getByRole("button", { name: "Failed, unchanged" }).click(); });
+    const said = screen.getAllByRole("status").map((n) => n.textContent ?? "");
+    expect(said.some((text) => text.includes(`Could not shut that door.${NOTHING_CHANGED}`))).toBe(true);
   });
 });

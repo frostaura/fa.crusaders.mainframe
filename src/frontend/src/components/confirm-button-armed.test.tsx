@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
@@ -70,7 +71,7 @@ describe("ConfirmButton — the armed state", () => {
     expect(liveRegion().textContent).toBe("");
 
     armByPressing(trigger);
-    const confirm = screen.getByRole("button", { name: /tap again to confirm/ });
+    const confirm = screen.getByRole("button", { name: /again to confirm/ });
     // Not "pressed". Not "not pressed" either — the attribute must be gone, because
     // aria-pressed=false on a control that is not a toggle is its own lie.
     expect(confirm).not.toHaveAttribute("aria-pressed");
@@ -145,11 +146,11 @@ describe("ConfirmButton — the armed state", () => {
     expect(idle.getAttribute("aria-label")!.startsWith("Shut all doors")).toBe(true);
 
     armByPressing(idle);
-    const confirm = screen.getByRole("button", { name: /tap again to confirm/ });
+    const confirm = screen.getByRole("button", { name: /again to confirm/ });
     expect(confirm.textContent).toBe("Shut all doors");
     expect(confirm).toHaveAttribute(
       "aria-label",
-      "Shut all doors — Shut every door the club has open — 3 of 3 — tap again to confirm",
+      "Shut all doors — Shut every door the club has open — 3 of 3 — choose again to confirm",
     );
   });
 
@@ -170,7 +171,7 @@ describe("ConfirmButton — the armed state", () => {
 
     const idle = screen.getByRole("button", { name: "Delete Front door" });
     armByPressing(idle);
-    const confirm = screen.getByRole("button", { name: "Delete Front door — tap again to confirm" });
+    const confirm = screen.getByRole("button", { name: "Delete Front door — choose again to confirm" });
     expect(confirm.getAttribute("aria-label")!.startsWith("Delete")).toBe(true);
   });
 
@@ -395,6 +396,200 @@ describe("ConfirmButton — the armed state", () => {
     fireEvent.click(screen.getByRole("button", { name: "Go to bookings" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: /^Cancel/ })).toBeNull());
     expect(screen.getByRole("button", { name: "Shut this door" })).toBeInTheDocument();
+  });
+
+  /**
+   * C-H1 (HIGH). <b>The natural Tab out of the armed pair went out of the PAIR.</b>
+   *
+   * <p>
+   * Focus lands on the safe button when the control arms, and that button used to be the LAST
+   * thing in the group — so reviewer C pressed Tab, the group blurred, the control cancelled
+   * itself silently, and the keyboard landed on "Delete this door", the next and most
+   * destructive control on the page. The confirm was behind the cancel, reachable only by
+   * Shift+Tab. Two wrong answers to one keypress: the armed state vanished without a word, and
+   * where it left you was worse than where you were.
+   * </p>
+   *
+   * <p>
+   * jsdom does not implement Tab, so what is held here is the DOM ORDER that decides where Tab
+   * goes, plus the blur rule that decides whether moving inside the pair cancels it. A real
+   * Tab, in a real engine, is `e2e/confirm-armed.spec.ts`.
+   * </p>
+   */
+  it("puts the way out first, so the natural Tab reaches the other option instead of leaving", () => {
+    const onConfirm = vi.fn();
+    const { container } = render(
+      <ConfirmButton
+        idleLabel="Shut this door"
+        confirmLabel={FLEET_CONFIRM}
+        cancelLabel="Keep it open"
+        subject="Side door"
+        ariaLabel="Shut Side door"
+        onConfirm={onConfirm}
+      />,
+    );
+
+    armByPressing(screen.getByRole("button", { name: "Shut this door — Shut Side door" }));
+
+    const buttons = [...container.querySelectorAll("button")];
+    const cancel = screen.getByRole("button", { name: "Keep it open — Side door" });
+    const confirm = screen.getByRole("button", { name: /again to confirm/ });
+    // Safe first, destructive second — and focus on the first, so Tab goes to the second.
+    expect(buttons).toEqual([cancel, confirm]);
+    expect(cancel).toHaveFocus();
+
+    // That Tab, as the browser delivers it: a focusout of the cancel whose relatedTarget is
+    // the confirm. It must not cancel — this is focus moving WITHIN the control.
+    fireEvent.blur(cancel, { relatedTarget: confirm });
+    expect(screen.getByRole("button", { name: /again to confirm/ })).toBeInTheDocument();
+    expect(liveRegion().textContent).not.toBe("Cancelled — nothing was changed.");
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  /**
+   * C-M3 (MED). The way out was named after the thing it refuses to do.
+   *
+   * <p>
+   * "Keep it open — Shut this door": a control whose whole job is to not shut the door, with
+   * the word "shut" in its own accessible name, heard in a list of controls that all say some
+   * variant of the same thing. Named for the SUBJECT it says what is being kept.
+   * </p>
+   */
+  it("names the way out for the subject, never for the button beside it", () => {
+    render(
+      <ConfirmButton
+        idleLabel="Shut this door"
+        confirmLabel={FLEET_CONFIRM}
+        cancelLabel="Keep it open"
+        subject="Side door"
+        ariaLabel="Shut Side door"
+        onConfirm={() => {}}
+      />,
+    );
+
+    armByPressing(screen.getByRole("button", { name: "Shut this door — Shut Side door" }));
+    const cancel = screen.getByRole("button", { name: "Keep it open — Side door" });
+    expect(cancel.getAttribute("aria-label")).toBe("Keep it open — Side door");
+    // The destructive verb is not in the name of the button that refuses it.
+    expect(cancel.getAttribute("aria-label")).not.toMatch(/shut/i);
+  });
+
+  /**
+   * A-M8 / B9 (MED). The live hint told a listener to press a button that was not there.
+   *
+   * <p>
+   * It said "…or Cancel to stop" on every control, including the four doors controls whose way
+   * out is labelled "Keep it open", "Leave it shut", "Keep them open" or "Leave them shut".
+   * The one word a listener could have searched the screen for was the one word the sentence
+   * did not contain.
+   * </p>
+   */
+  it("says the real labels, in the order the buttons are in, and names no way of pressing them", () => {
+    render(
+      <ConfirmButton
+        idleLabel="Shut this door"
+        confirmLabel="Shut Side door? It opens for nobody from this click."
+        cancelLabel="Keep it open"
+        ariaLabel="Shut Side door"
+        onConfirm={() => {}}
+      />,
+    );
+
+    armByPressing(screen.getByRole("button", { name: "Shut this door — Shut Side door" }));
+    const said = liveRegion().textContent ?? "";
+    expect(said).toContain("Keep it open to stop");
+    expect(said).toContain("Shut this door to go ahead");
+    // No button on this screen says "Cancel", so the hint may not either.
+    expect(said).not.toContain("Cancel");
+    // C-M4 — true for a keyboard, a screen reader and speech control, not only for a thumb.
+    expect(said).not.toMatch(/\btap\b/i);
+    expect(screen.getByRole("button", { name: /again to confirm/ }).getAttribute("aria-label"))
+      .not.toMatch(/\btap\b/i);
+  });
+
+  /**
+   * R3-10 / C-C2 (CRITICAL). After a confirmed action focus went to `&lt;body&gt;`.
+   *
+   * <p>
+   * The control that acts is usually the control that disappears — "Shut this door" is replaced
+   * by "Reopen this door" — so the component's own focus restore has nothing left to restore
+   * to, and the next Tab starts again at the top of the document. The caller names where focus
+   * belongs; a caller that names nothing gets the page's heading, never the body.
+   * </p>
+   */
+  it("lands focus on the caller's target after the acting control has gone", async () => {
+    function Page() {
+      const [shut, setShut] = useState(false);
+      return (
+        <main id="main-content">
+          <h1>Side door</h1>
+          {shut
+            ? <button type="button" id="reopen">Reopen this door</button>
+            : (
+              <ConfirmButton
+                idleLabel="Shut this door"
+                confirmLabel="Shut Side door?"
+                onConfirm={() => { setShut(true); }}
+                focusAfter={() => document.getElementById("reopen")}
+              />
+            )}
+        </main>
+      );
+    }
+
+    render(<Page />);
+    armByPressing(screen.getByRole("button", { name: "Shut this door" }));
+    fireEvent.click(screen.getByRole("button", { name: /Shut Side door\?/ }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Reopen this door" })).toHaveFocus());
+  });
+
+  it("falls back to the page's heading rather than the body when the caller names nothing", async () => {
+    function Page() {
+      const [gone, setGone] = useState(false);
+      return (
+        <main id="main-content">
+          <h1>Side door</h1>
+          {gone ? <p>It is shut.</p> : (
+            <ConfirmButton idleLabel="Shut this door" confirmLabel="Shut Side door?" onConfirm={() => { setGone(true); }} />
+          )}
+        </main>
+      );
+    }
+
+    render(<Page />);
+    armByPressing(screen.getByRole("button", { name: "Shut this door" }));
+    fireEvent.click(screen.getByRole("button", { name: /Shut Side door\?/ }));
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Side door" })).toHaveFocus());
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  /** And it never competes with a page that moves focus itself — the page wins. */
+  it("leaves focus alone when the page has claimed it", async () => {
+    function Page() {
+      const receipt = useRef<HTMLHeadingElement>(null);
+      const [done, setDone] = useState(false);
+      useEffect(() => { if (done) receipt.current?.focus(); }, [done]);
+      return (
+        <main id="main-content">
+          <h1>Doors</h1>
+          {done && <h2 tabIndex={-1} ref={receipt}>3 doors shut</h2>}
+          {!done && (
+            <ConfirmButton idleLabel="Shut all doors" confirmLabel="Shut all 3?" onConfirm={() => { setDone(true); }} />
+          )}
+        </main>
+      );
+    }
+
+    render(<Page />);
+    armByPressing(screen.getByRole("button", { name: "Shut all doors" }));
+    fireEvent.click(screen.getByRole("button", { name: /Shut all 3\?/ }));
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "3 doors shut" })).toHaveFocus());
+    // Give the retry loop its whole window to change its mind. It must not.
+    await act(async () => { await new Promise((r) => setTimeout(r, 300)); });
+    expect(screen.getByRole("heading", { name: "3 doors shut" })).toHaveFocus();
   });
 
   /**
