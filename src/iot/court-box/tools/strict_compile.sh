@@ -124,10 +124,22 @@ if [ ${#SOURCES[@]} -eq 0 ]; then
   exit 1
 fi
 
+# A header compiled STANDALONE is the main file, and clang — which is what `g++` is on a
+# Mac — then reports every namespace-scope constant in it as unused, because nothing in
+# that one translation unit reads it. GCC does not, so CI was green and every Mac was red
+# on the same four hal headers, which is how a local gate stops being run. Only that one
+# diagnostic, only for headers, only under clang; a .cpp keeps it everywhere.
+HEADER_ONLY=()
+if "$CXX" --version 2>/dev/null | grep -qi clang; then
+  HEADER_ONLY=(-Wno-unused-const-variable)
+fi
+
 echo "strict_compile: ${#SOURCES[@]} file(s), ${#INCLUDES[@]} include dir(s)"
 fail=0
 for f in "${SOURCES[@]}"; do
-  if ! "$CXX" "$STD" "${STRICT[@]}" "${INCLUDES[@]}" -x c++ "$f" 2>&1; then
+  extra=()
+  case "$f" in *.h) extra=("${HEADER_ONLY[@]+"${HEADER_ONLY[@]}"}") ;; esac
+  if ! "$CXX" "$STD" "${STRICT[@]}" "${extra[@]+"${extra[@]}"}" "${INCLUDES[@]}" -x c++ "$f" 2>&1; then
     echo "  FAIL $f"
     fail=1
   fi
