@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider, readLastIdentity, useAuth } from "./lib/auth";
 import Layout from "./components/Layout";
@@ -35,6 +35,20 @@ import NotFoundPage from "./pages/NotFound";
 import { Card } from "./components/Card";
 import { Button } from "./components/Button";
 import { RouteAnnouncer } from "./components/RouteAnnouncer";
+
+/**
+ * The primitives preview — development only, and dropped from the production bundle.
+ *
+ * <p>
+ * `import.meta.env.DEV` is replaced with a literal at build time, so the ternary folds to
+ * `null`, the route below disappears, and the dynamic import is never reachable. It exists
+ * because `SegmentedTabs` and the feedback theme have geometry that only a layout engine can
+ * answer — a measured thumb, a control that flips to a vertical tablist when the labels stop
+ * fitting, a 44 px target at a 32 px root font — and jsdom reports every offset as 0. The
+ * Playwright suite runs `npm run dev`, which is where the route exists.
+ * </p>
+ */
+const DevPrimitivesPage = import.meta.env.DEV ? lazy(() => import("./pages/DevPrimitives")) : null;
 
 export default function App() {
   return (
@@ -94,6 +108,12 @@ export default function App() {
             <Route path="/admin/doors/:id/card" element={<RequireAuth admin><AdminDoorsCardPage /></RequireAuth>} />
             <Route path="/admin/settings" element={<RequireAuth admin><AdminSettingsPage /></RequireAuth>} />
             <Route path="/admin/ledger" element={<RequireAuth admin><AdminLedgerPage /></RequireAuth>} />
+            {DevPrimitivesPage && (
+              <Route
+                path="/dev/primitives"
+                element={<Suspense fallback={null}><DevPrimitivesPage /></Suspense>}
+              />
+            )}
             {/* A real 404, not a redirect. The catch-all used to send every unknown path to the
                 marketing page, which is how a dead link in an email looked like a working one. */}
             <Route path="*" element={<NotFoundPage />} />

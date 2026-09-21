@@ -65,6 +65,12 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   ["/admin/doors/:id/card", "Door card"],
   ["/admin/settings", "Admin settings"],
   ["/admin/ledger", "Transactions"],
+  /**
+   * Development only — the route is registered behind `import.meta.env.DEV` and is not in the
+   * production bundle. It is named here because the suite guard reconciles this table against
+   * every `path=` in `App.tsx`, and a route with no name fails it.
+   */
+  ["/dev/primitives", "Primitives"],
 ];
 
 /** What the catch-all route renders, so it is what an unmatched path is called. */
