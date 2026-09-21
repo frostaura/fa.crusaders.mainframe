@@ -110,17 +110,47 @@
 //
 // WHY THE SEQUENCE NUMBER PERSISTS AND THE QUEUE'S CONTENTS NEED NOT
 // ------------------------------------------------------------------
-// `seq` is the idempotency key, and the API enforces it with a PERMANENT unique
-// index on (tenant, device, seq): a number seen before is silently receipted as
-// a duplicate, forever, not merely for a while. So a box that restarted its
-// numbering at 1 after a power cut would have every event up to its old
-// high-water discarded as a duplicate — and under charge-at-booking that is the
-// no-show sweep refunding-and-penalising members who actually played.
+// `seq` is part of the idempotency key, and the API enforces it with a
+// PERMANENT unique index: a number seen before is silently receipted as a
+// duplicate, forever, not merely for a while. So a box that restarted its
+// numbering at 1 would have every event up to its old high-water discarded as a
+// duplicate — and under charge-at-booking that is the no-show sweep
+// refunding-and-penalising members who actually played.
 //
 // It is therefore checkpointed to the store in blocks — see
 // kSeqCheckpointStride — rather than on every push, which would wear the flash
 // out. A reboot resumes from the checkpoint, which is at or AHEAD of the true
 // last value: skipping sequence numbers is free, reusing one is a lost event.
+//
+// AND THE CHECKPOINT WAS THE WHOLE DEFENCE, WHICH IS ROUND G4's C2
+// -----------------------------------------------------------------
+// This file was resting a permanent server-side index on ONE record in flash,
+// and calling it a guarantee. It is not one: a reflash, a wiped NVS partition,
+// a torn write, or a board whose store simply does not come up, and `begin()`
+// reads an absent mark, starts at 1 — correctly, because refusing to start
+// would brick a door over a bookkeeping detail — and the server then discards
+// the WHOLE of the next evening as duplicates. Including the `boot` event this
+// queue exists to make an unexplained gap explainable with. The board sees a
+// clean 200 covering everything it sent and releases its ring, so the evidence
+// is gone from both ends and nothing anywhere says so.
+//
+// The key is (device, boot_id, seq) now. `boot_id` is a per-boot random 32-bit
+// value the COMPOSITION ROOT supplies — `esp_random()` on the board, the clock
+// and the pid in the simulator — and it rides at the top of the upload body
+// beside the MAC. A renumbered board collides with nothing; a genuine retry
+// still carries the same three fields and is still deduplicated; and two boards
+// that end up sharing a MAC stop deduping each other's evidence away.
+//
+// It also changes what this checkpoint IS. It is no longer the thing
+// correctness rests on — it is an optimisation that keeps the numbers in a long
+// run monotonic, and losing it now costs a gap rather than an evening. That is
+// a smaller promise honestly kept, rather than a large one that was not.
+//
+// ZERO MEANS "NO BOOT IDENTITY", and the server reads an absent field the same
+// way, which is exactly what (device, seq) always meant. The COURT BOX passes
+// zero and its wire body is byte-for-byte what it has always been — so this
+// defect is still open on that device, and closing it there is a wire change to
+// the http/ corpus family rather than something this file can do.
 //
 // THIS IS THE ONLY THING THE BRIDGE PERSISTS. The device credential, the WiFi
 // details and the API base URL are compiled into the image as of firmware

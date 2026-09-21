@@ -25,7 +25,8 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// <para>
 /// <b>Idempotency is the whole design.</b> A box may upload an event, lose the link before
 /// reading the response, and upload it again — that is the normal shape of an unreliable
-/// network rather than an error. <c>(device_id, seq)</c> is the key, and the filtered unique
+/// network rather than an error. <c>(device_id, boot_id, seq)</c> is the key — see
+/// <see cref="DeviceEventBatch"/> for why a boot identity is part of it — and the filtered unique
 /// index on <see cref="LedgerEntry.ExternalReference"/> is what makes a retry safe rather
 /// than a double charge.
 /// </para>
@@ -231,7 +232,10 @@ public static class DeviceEventEndpoints
         long acceptedThrough = 0;
         var recorded = 0;
 
-        var alreadyRecorded = await SeenAsync(services.Db, device!, events, ct);
+        // WITHIN THIS BOOT. See DeviceEventBatch.BootId: a board that renumbered from 1
+        // after a torn checkpoint is a different boot rather than a retry, and reading its
+        // whole evening as duplicates is what this field exists to stop.
+        var alreadyRecorded = await SeenAsync(services.Db, device!, events, batch.BootId, ct);
 
         foreach (var e in events.OrderBy(e => e.Seq))
         {
@@ -273,7 +277,7 @@ public static class DeviceEventEndpoints
                     _ => null,
                 };
 
-                if (await RecordAsync(services, device!, e, time, outcome, ct)) recorded++;
+                if (await RecordAsync(services, device!, e, time, outcome, batch.BootId, ct)) recorded++;
             }
 
             acceptedThrough = e.Seq;
@@ -364,11 +368,12 @@ public static class DeviceEventEndpoints
     /// with a full ring, and 32 round trips to answer "seen this?" is 32 round trips.
     /// </summary>
     private static async Task<HashSet<long>> SeenAsync(
-        MainframeDbContext db, Device device, List<DeviceEventDto> events, CancellationToken ct)
+        MainframeDbContext db, Device device, List<DeviceEventDto> events, long bootId,
+        CancellationToken ct)
     {
         var offered = events.Select(e => e.Seq).ToList();
         var seen = await db.DeviceEventReceipts
-            .Where(r => r.DeviceId == device.Id && offered.Contains(r.Seq))
+            .Where(r => r.DeviceId == device.Id && r.BootId == bootId && offered.Contains(r.Seq))
             .Select(r => r.Seq)
             .ToListAsync(ct);
         return seen.ToHashSet();
@@ -750,7 +755,7 @@ public static class DeviceEventEndpoints
 
     /// <summary>
     /// Writes one event's receipt and audit rows and saves them — its own unit of work, see
-    /// <see cref="UploadAsync"/>. False when the unique index on (tenant, device, seq)
+    /// <see cref="UploadAsync"/>. False when the unique index on (tenant, device, boot_id, seq)
     /// refused the receipt: two uploads of the same batch were in flight together, the other
     /// one recorded this event, and the box is told it is accepted because it is. Any
     /// activation this event carried has already been applied, idempotently, by whichever
@@ -758,7 +763,7 @@ public static class DeviceEventEndpoints
     /// </summary>
     private static async Task<bool> RecordAsync(
         DeviceEventServices services, Device device, DeviceEventDto e, EventFacts time,
-        ActivationOutcome? outcome, CancellationToken ct)
+        ActivationOutcome? outcome, long bootId, CancellationToken ct)
     {
         var (db, tenant, _, _, _, _) = services;
 
@@ -766,6 +771,7 @@ public static class DeviceEventEndpoints
         {
             TenantId = tenant.TenantId,
             DeviceId = device.Id,
+            BootId = bootId,
             Seq = e.Seq,
             Kind = time.Kind,
             OccurredAt = time.OccurredAt,
@@ -796,6 +802,11 @@ public static class DeviceEventEndpoints
             // the console as `door: null`, which the log page dereferenced (A1 / E-C1 / C1).
             // See DoorRowDoor.
             door_name = device.Name,
+
+            // WHICH BOOT THE SEQUENCE BELONGS TO. Without it a trail shows `seq 1` twice
+            // and nothing to tell the two apart, which is exactly the confusion the key
+            // change exists to end.
+            boot_id = bootId,
             seq = e.Seq,
             kind = time.Kind,
             court = e.Court,
@@ -906,7 +917,7 @@ public static class DeviceEventEndpoints
     }
 
     /// <summary>
-    /// The unique index on (tenant, device, seq) refusing a concurrent duplicate, as distinct
+    /// The unique index on (tenant, device, boot_id, seq) refusing a concurrent duplicate, as
     /// from any other reason a save can fail.
     /// </summary>
     private static bool IsDuplicateReceipt(DbUpdateException ex) =>
@@ -1333,11 +1344,38 @@ public sealed record DeviceEventDto(
 /// <summary>
 /// A batch, plus the box's uptime at the moment it sent them — which is what turns each
 /// event's own uptime into "this happened N seconds ago".
+///
+/// <para>
+/// <b><c>boot_id</c> is the third field of the idempotency key, and it is here because
+/// <c>(device, seq)</c> was not one.</b> A box's ring is RAM-only, so no event survives a
+/// reboot; <c>seq</c> resumes from a single checkpoint record in the board's flash, written
+/// in blocks of 64. Erase or tear that record — a reflash, a wiped NVS partition, a torn
+/// write — and the board renumbers from 1, against the PERMANENT unique index this table
+/// carries. Every event of the next evening is then silently receipted as a duplicate and
+/// discarded, <i>including</i> the <c>boot</c> event the firmware queues precisely so that
+/// an operator can see the board restarted. Two boards accidentally sharing a MAC dedup
+/// each other the same way.
+/// </para>
+///
+/// <para>
+/// So the board sends a per-boot random 32-bit value and the key is
+/// <c>(tenant, device, boot_id, seq)</c>. <b>Absent means 0</b>, which is exactly the
+/// behaviour <c>(device, seq)</c> always had: a court box, whose renderer omits the field,
+/// and every gate image flashed before this change share one boot identity and dedup
+/// against themselves as before. <c>long</c> rather than <c>int</c> because the value is a
+/// full unsigned 32-bit number, up to 4294967295.
+/// </para>
+///
+/// <para>
+/// <c>accepted_through</c> is unchanged by this: a board holds one boot's events at a time,
+/// so the highest sequence number in a batch means what it always meant.
+/// </para>
 /// </summary>
 public sealed record DeviceEventBatch(
     [property: JsonPropertyName("mac")] string? Mac,
     [property: JsonPropertyName("uptime_ms")] long UptimeMs,
-    [property: JsonPropertyName("events")] IReadOnlyList<DeviceEventDto>? Events);
+    [property: JsonPropertyName("events")] IReadOnlyList<DeviceEventDto>? Events,
+    [property: JsonPropertyName("boot_id")] long BootId = 0);
 
 /// <summary>
 /// What a box asks for when somebody buys court time at it. <c>court</c> is the court

@@ -93,7 +93,7 @@ void test_a_gate_open_renders_through_the_shared_event_body() {
   TEST_ASSERT_TRUE(event.setSubject("7Q3F9KM2XZ8B"));
 
   char body[devlink::kEventBodyCap] = {};
-  const size_t written = devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 86400000ULL, event);
+  const size_t written = devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 0U, 86400000ULL, event);
   TEST_ASSERT_TRUE(written > 0U);
   TEST_ASSERT_NOT_NULL(strstr(body, "\"kind\":\"gate_open\""));
   TEST_ASSERT_NOT_NULL(strstr(body, "\"court\":-1"));

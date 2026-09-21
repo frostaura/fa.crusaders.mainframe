@@ -33,7 +33,7 @@ bool isTwelveLowerHex(const char* mac) {
 
 } // namespace
 
-size_t renderEventBody(char* out, size_t cap, const char* mac, uint64_t nowUptimeMs,
+size_t renderEventBody(char* out, size_t cap, const char* mac, uint32_t bootId, uint64_t nowUptimeMs,
                        const eventq::Event& event) {
   if (out == nullptr || cap == 0U) {
     return 0U;
@@ -65,6 +65,16 @@ size_t renderEventBody(char* out, size_t cap, const char* mac, uint64_t nowUptim
     snprintf(methodJson, sizeof(methodJson), "\"%s\"", method);
   }
 
+  // OMITTED AT ZERO, exactly as the two heartbeat counters are, and for a
+  // compatibility reason rather than a tidiness one: the server reads an absent
+  // `boot_id` as 0, so a court box — which passes 0 — renders the body it has
+  // always rendered, byte for byte, and no board in the field has to be
+  // reflashed for this key to start working on the gates.
+  char bootJson[24] = {};
+  if (bootId != 0U) {
+    snprintf(bootJson, sizeof(bootJson), ",\"boot_id\":%lu", static_cast<unsigned long>(bootId));
+  }
+
   char batchUptime[21] = {};
   char eventUptime[21] = {};
   if (tb::formatU64(nowUptimeMs, batchUptime, sizeof(batchUptime)) == 0U ||
@@ -74,9 +84,10 @@ size_t renderEventBody(char* out, size_t cap, const char* mac, uint64_t nowUptim
 
   const int written = snprintf(
       out, cap,
-      "{\"mac\":\"%s\",\"uptime_ms\":%s,\"events\":[{\"seq\":%lu,\"uptime_ms\":%s,"
+      "{\"mac\":\"%s\"%s,\"uptime_ms\":%s,\"events\":[{\"seq\":%lu,\"uptime_ms\":%s,"
       "\"kind\":\"%s\",\"court\":%d,\"method\":%s,\"subject\":\"%s\",\"duration_ms\":%lu}]}",
-      mac, batchUptime, static_cast<unsigned long>(event.seq), eventUptime, eventq::kindName(event.kind),
+      mac, bootJson, batchUptime, static_cast<unsigned long>(event.seq), eventUptime,
+      eventq::kindName(event.kind),
       event.court == eventq::Event::kNoCourt ? -1 : static_cast<int>(event.court), methodJson, subject,
       static_cast<unsigned long>(event.durationMs));
   if (written < 0 || static_cast<size_t>(written) >= cap) {

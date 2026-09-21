@@ -14,7 +14,7 @@ GateApp::GateApp(const Ports& ports)
       api_(*ports.api), breaker_(*ports.breaker), lock_(*ports.lock), unlock_(*ports.unlock),
       led_(*ports.led), ledPin_(*ports.ledPin), assembler_(*ports.assembler), debounce_(*ports.debounce),
       roster_(*ports.roster), queue_(*ports.queue), log_(ports.log), mac_(ports.mac),
-      firmwareVersion_(ports.firmwareVersion), heartbeatBody_(ports.heartbeatBody),
+      firmwareVersion_(ports.firmwareVersion), bootId_(ports.bootId), heartbeatBody_(ports.heartbeatBody),
       heartbeatBodyCap_(ports.heartbeatBodyCap), ledActiveHigh_(ports.ledActiveHigh) {
 }
 
@@ -456,7 +456,7 @@ void GateApp::pumpEvents() {
   }
 
   char body[devlink::kEventBodyCap];
-  if (devlink::renderEventBody(body, sizeof(body), mac_, uptime_.value(), event) == 0U) {
+  if (devlink::renderEventBody(body, sizeof(body), mac_, bootId_, uptime_.value(), event) == 0U) {
     // Unrenderable. The caps make this unreachable, but KEEPING it would pin
     // every later event behind it forever and the board would stop reporting
     // anything at all.

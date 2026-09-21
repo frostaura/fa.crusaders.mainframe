@@ -190,6 +190,14 @@ public sealed class DeviceEventHttpTests
     private static object BatchAt(long uptimeMs, params object[] events) => new { uptime_ms = uptimeMs, events };
 
     /// <summary>
+    /// A batch from a NAMED BOOT. Most tests here do not care and send none, which is the
+    /// legacy shape and means boot 0 — see <see cref="DeviceEventBatch"/>. A test about the
+    /// idempotency key does care, because that is the whole question.
+    /// </summary>
+    private static object BatchFromBoot(long bootId, params object[] events) =>
+        new { boot_id = bootId, uptime_ms = 600_000L, events };
+
+    /// <summary>
     /// The five-field walk-up body: the court NUMBER the member selected and the box's
     /// per-purchase nonce, the same on every retry of the same purchase.
     /// </summary>
@@ -335,6 +343,122 @@ public sealed class DeviceEventHttpTests
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         Assert.Equal(2, await db.DeviceEventReceipts.IgnoreQueryFilters().CountAsync(r => r.DeviceId == box.DeviceId));
+    }
+
+    /// <summary>
+    /// G4 / C2, AND IT IS THE REASON <c>boot_id</c> EXISTS.
+    ///
+    /// <para>
+    /// A board's ring is RAM-only and its <c>seq</c> resumes from one checkpoint record in
+    /// flash. Erase or tear that record — a reflash, a wiped NVS partition, a torn write —
+    /// and the board renumbers from 1 against a PERMANENT unique index: under
+    /// <c>(device, seq)</c> the whole of the next evening came back as duplicates and was
+    /// discarded, <i>including</i> the <c>boot</c> event that exists to tell an operator the
+    /// board restarted. The board sees a clean 200 with <c>accepted_through</c> covering
+    /// everything it sent and releases its ring, so the evidence is gone from both ends.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_board_that_renumbered_after_a_torn_sequence_mark_is_not_deduped_away()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var client = factory.CreateClient();
+
+        // An evening's work, from the boot that is about to end.
+        await client.SendAsync(FromBox(box, EventsPath,
+            BatchFromBoot(0x9AD1_F0F0, Activation(1), Activation(2), Activation(3))));
+
+        // The board reboots, its checkpoint is gone, and it starts again at 1.
+        var afterReboot = await client.SendAsync(FromBox(box, EventsPath,
+            BatchFromBoot(0x2BCD_1234, Activation(1, subject: "tok-alice"), Activation(2, subject: "tok-alice"))));
+
+        Assert.Equal(HttpStatusCode.OK, afterReboot.StatusCode);
+        var body = await afterReboot.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(2, body.GetProperty("accepted_through").GetInt64());
+        Assert.Equal(2, body.GetProperty("recorded").GetInt32());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.Equal(5, await db.DeviceEventReceipts.IgnoreQueryFilters()
+            .CountAsync(r => r.DeviceId == box.DeviceId));
+
+        // AND A RETRY WITHIN A BOOT IS STILL A RETRY. The whole point of the key is that it
+        // keeps deduplicating what it always deduplicated.
+        var retry = await client.SendAsync(FromBox(box, EventsPath,
+            BatchFromBoot(0x2BCD_1234, Activation(1), Activation(2))));
+        Assert.Equal(0, (await retry.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("recorded").GetInt32());
+        Assert.Equal(5, await db.DeviceEventReceipts.IgnoreQueryFilters()
+            .CountAsync(r => r.DeviceId == box.DeviceId));
+    }
+
+    /// <summary>
+    /// C2's compatibility half. A body with NO <c>boot_id</c> is boot 0, which is exactly
+    /// what <c>(device, seq)</c> always meant — so a court box, whose renderer omits the
+    /// field, and every gate image flashed before this change keep deduplicating against
+    /// themselves, and legacy rows (backfilled to 0) keep matching the boards that wrote them.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_batch_with_no_boot_id_deduplicates_exactly_as_it_always_did()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var client = factory.CreateClient();
+
+        await client.SendAsync(FromBox(box, EventsPath, Batch(Activation(1), Activation(2))));
+        var again = await client.SendAsync(FromBox(box, EventsPath, Batch(Activation(1), Activation(2))));
+        Assert.Equal(0, (await again.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("recorded").GetInt32());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var receipts = await db.DeviceEventReceipts.IgnoreQueryFilters()
+            .Where(r => r.DeviceId == box.DeviceId).ToListAsync();
+        Assert.Equal(2, receipts.Count);
+        Assert.All(receipts, r => Assert.Equal(0, r.BootId));
+
+        // An explicit 0 is the same boot as an absent one, which is what makes the backfill
+        // a compatibility statement rather than a placeholder.
+        var explicitZero = await client.SendAsync(FromBox(box, EventsPath,
+            BatchFromBoot(0, Activation(1), Activation(2))));
+        Assert.Equal(0, (await explicitZero.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("recorded").GetInt32());
+
+        // And a NAMED boot is a different board-life: the same sequence numbers record again.
+        var named = await client.SendAsync(FromBox(box, EventsPath,
+            BatchFromBoot(0x7777_0001, Activation(1), Activation(2))));
+        Assert.Equal(2, (await named.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("recorded").GetInt32());
+    }
+
+    /// <summary>
+    /// C2's other half, which M1 reported separately: two boards that end up on one MAC —
+    /// a cloned image, a spare flashed from a backup, a MAC typed into a config twice —
+    /// resolve to ONE device row and were deduping each other's evidence away. Different
+    /// boots are different board-lives whether they are two boots of one board or two boards.
+    /// </summary>
+    [SkippableFact]
+    public async Task Two_boards_sharing_one_mac_no_longer_suppress_each_others_records()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var box = await SeedAsync(factory);
+        var client = factory.CreateClient();
+
+        var first = await client.SendAsync(FromBox(box, EventsPath,
+            BatchFromBoot(0x1111_1111, Activation(1), Activation(2))));
+        var second = await client.SendAsync(FromBox(box, EventsPath,
+            BatchFromBoot(0x2222_2222, Activation(1), Activation(2))));
+
+        Assert.Equal(2, (await first.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("recorded").GetInt32());
+        Assert.Equal(2, (await second.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("recorded").GetInt32());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.Equal(4, await db.DeviceEventReceipts.IgnoreQueryFilters()
+            .CountAsync(r => r.DeviceId == box.DeviceId));
     }
 
     [SkippableFact]

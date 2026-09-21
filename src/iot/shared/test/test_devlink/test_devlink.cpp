@@ -507,7 +507,7 @@ void test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap() {
   const uint64_t now = wrap + 20000ULL;
 
   char body[devlink::kEventBodyCap] = {};
-  const size_t len = devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", now, event);
+  const size_t len = devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 0U, now, event);
   TEST_ASSERT_TRUE(len > 0U);
   TEST_ASSERT_EQUAL_size_t(strlen(body), len);
   TEST_ASSERT_NOT_NULL(strstr(body, "{\"mac\":\"5ccf7f0a1b2c\","));
@@ -521,7 +521,7 @@ void test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap() {
 
   // The ordinary case is unchanged: no wrap, no widening.
   event.uptimeMs = 90000UL;
-  TEST_ASSERT_TRUE(devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 120000ULL, event) > 0U);
+  TEST_ASSERT_TRUE(devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 0U, 120000ULL, event) > 0U);
   TEST_ASSERT_NOT_NULL(strstr(body, "\"uptime_ms\":120000,"));
   TEST_ASSERT_NOT_NULL(strstr(body, "\"uptime_ms\":90000,"));
 
@@ -532,7 +532,7 @@ void test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap() {
   release.kind = eventq::Kind::Release;
   release.court = eventq::Event::kNoCourt;
   release.uptimeMs = 1000UL;
-  TEST_ASSERT_TRUE(devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 2000ULL, release) > 0U);
+  TEST_ASSERT_TRUE(devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 0U, 2000ULL, release) > 0U);
   TEST_ASSERT_NOT_NULL(strstr(body, "\"method\":null"));
   TEST_ASSERT_NOT_NULL(strstr(body, "\"court\":-1"));
 
@@ -540,12 +540,12 @@ void test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap() {
   // drain path drops the event as one the box caused.
   char tiny[24] = {};
   TEST_ASSERT_EQUAL_size_t(0U,
-                           devlink::renderEventBody(tiny, sizeof(tiny), "5ccf7f0a1b2c", 2000ULL, release));
+                           devlink::renderEventBody(tiny, sizeof(tiny), "5ccf7f0a1b2c", 0U, 2000ULL, release));
   TEST_ASSERT_EQUAL_STRING("", tiny);
 
   // And never without a MAC: an events batch that names no device is one the
   // server cannot file against a box.
-  TEST_ASSERT_EQUAL_size_t(0U, devlink::renderEventBody(body, sizeof(body), "", 2000ULL, release));
+  TEST_ASSERT_EQUAL_size_t(0U, devlink::renderEventBody(body, sizeof(body), "", 0U, 2000ULL, release));
 
   // NOR WITH ONE THAT IS NOT A MAC (round G4, B1). It is the only other `%s` in
   // this body, and both composition roots render it from dc::hex::encodeLower,
@@ -561,7 +561,7 @@ void test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap() {
   };
   for (size_t i = 0U; i < sizeof(kNotAMac) / sizeof(kNotAMac[0]); ++i) {
     TEST_ASSERT_EQUAL_size_t_MESSAGE(
-        0U, devlink::renderEventBody(body, sizeof(body), kNotAMac[i], 2000ULL, release), kNotAMac[i]);
+        0U, devlink::renderEventBody(body, sizeof(body), kNotAMac[i], 0U, 2000ULL, release), kNotAMac[i]);
     TEST_ASSERT_EQUAL_STRING_MESSAGE("", body, kNotAMac[i]);
   }
 }
@@ -595,7 +595,7 @@ void test_the_event_body_escapes_a_subject_whatever_bytes_are_in_it() {
     event.subjectLen = length;
 
     char body[devlink::kEventBodyCap] = {};
-    const size_t written = devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 2000ULL, event);
+    const size_t written = devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 0U, 2000ULL, event);
     TEST_ASSERT_TRUE_MESSAGE(written > 0U, "a subject inside the cap must always render");
 
     // Ten keys and four quoted values: twenty-eight quotes that are not

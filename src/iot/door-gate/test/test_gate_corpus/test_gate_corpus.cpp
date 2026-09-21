@@ -205,9 +205,17 @@ void executeScanRequest(const char* expected, size_t expectedLen, const char* ma
 /// An open the gate decided from its own roster while offline, as the events
 /// endpoint's body — rendered by the SAME device-agnostic renderer the court
 /// box uses, which is the point of it being device-agnostic.
-void executeGateOpenEventRequest(const char* expected, size_t expectedLen, const char* mac) {
+void executeGateOpenEventRequest(const char* expected, size_t expectedLen, const char* mac,
+                                 eventq::Kind kind) {
   uint32_t batchUptime = 0U;
-  TEST_ASSERT_TRUE(devapi::json::unsignedField(expected, expectedLen, "uptime_ms", batchUptime));
+  TEST_ASSERT_TRUE(devapi::json::topLevelUnsignedField(expected, expectedLen, "uptime_ms", batchUptime));
+
+  // THE BOOT IDENTITY, read from the vector rather than invented (round G4,
+  // C2). Absent means ZERO, and zero is what the renderer omits — which is the
+  // whole of the compatibility story and is why one vector carries it and one
+  // does not.
+  uint32_t bootId = 0U;
+  static_cast<void>(devapi::json::topLevelUnsignedField(expected, expectedLen, "boot_id", bootId));
 
   // Everything below is read from INSIDE the `events` array, so the batch's own
   // `uptime_ms` above cannot be mistaken for the event's.
@@ -225,18 +233,37 @@ void executeGateOpenEventRequest(const char* expected, size_t expectedLen, const
   TEST_ASSERT_TRUE(devapi::json::unsignedField(inner, innerLen, "duration_ms", value));
   event.durationMs = value;
 
-  char kind[24] = {};
-  TEST_ASSERT_TRUE(devapi::json::stringField(inner, innerLen, "kind", kind, sizeof(kind)));
-  TEST_ASSERT_EQUAL_STRING(eventq::kindName(eventq::Kind::GateOpen), kind);
-  event.kind = eventq::Kind::GateOpen;
+  char kindName[24] = {};
+  TEST_ASSERT_TRUE(devapi::json::stringField(inner, innerLen, "kind", kindName, sizeof(kindName)));
+  TEST_ASSERT_EQUAL_STRING(eventq::kindName(kind), kindName);
+  event.kind = kind;
 
   char method[16] = {};
   TEST_ASSERT_TRUE(devapi::json::stringField(inner, innerLen, "method", method, sizeof(method)));
   TEST_ASSERT_EQUAL_STRING(eventq::methodName(eventq::Method::Qr), method);
   event.method = eventq::Method::Qr;
 
+  // DECODED, because `devapi::json` is a SCANNER and copies escape pairs
+  // verbatim — it says so, and half-decoding is how a value that differs from
+  // what the server sent gets acted on as fact. The corpus's own writer escaped
+  // these bytes (round G4, B1), so an executor that wants the bytes a member
+  // actually scanned has to undo exactly that. Two escapes are all this corpus
+  // can contain, and anything else is a vector nobody has agreed to.
+  char escaped[(eventq::kMaxSubjectLen * 2U) + 1U] = {};
+  TEST_ASSERT_TRUE(devapi::json::stringField(inner, innerLen, "subject", escaped, sizeof(escaped)));
   char subject[eventq::kMaxSubjectLen + 1U] = {};
-  TEST_ASSERT_TRUE(devapi::json::stringField(inner, innerLen, "subject", subject, sizeof(subject)));
+  size_t out = 0U;
+  for (size_t i = 0U; escaped[i] != '\0'; ++i) {
+    if (escaped[i] == '\\') {
+      ++i;
+      TEST_ASSERT_TRUE_MESSAGE(escaped[i] == '"' || escaped[i] == '\\',
+                               "this corpus only ever escapes a quote or a backslash");
+    }
+    TEST_ASSERT_TRUE(out < eventq::kMaxSubjectLen);
+    subject[out] = escaped[i];
+    ++out;
+  }
+  subject[out] = '\0';
   TEST_ASSERT_TRUE(event.setSubject(subject));
 
   // A door is not on a court, so the court field is the queue's "not one court"
@@ -246,7 +273,8 @@ void executeGateOpenEventRequest(const char* expected, size_t expectedLen, const
   TEST_ASSERT_EQUAL_UINT8(eventq::Event::kNoCourt, event.court);
 
   char rendered[devlink::kEventBodyCap] = {};
-  const size_t written = devlink::renderEventBody(rendered, sizeof(rendered), mac, batchUptime, event);
+  const size_t written =
+      devlink::renderEventBody(rendered, sizeof(rendered), mac, bootId, batchUptime, event);
   TEST_ASSERT_EQUAL_size_t(expectedLen, written);
   TEST_ASSERT_EQUAL_STRING(expected, rendered);
 }
@@ -300,7 +328,17 @@ void test_every_request_vector_is_rendered_byte_for_byte() {
       executeScanRequest(expected, expectedLen, mac);
     } else if (strcmp(id, "gate-events-request-gate-open") == 0) {
       TEST_ASSERT_EQUAL_STRING(gatelogic::kPathEvents, path);
-      executeGateOpenEventRequest(expected, expectedLen, mac);
+      executeGateOpenEventRequest(expected, expectedLen, mac, eventq::Kind::GateOpen);
+    } else if (strcmp(id, "gate-events-request-no-boot-id") == 0) {
+      // THE COMPATIBILITY SHAPE (round G4, C2). A boot id of 0 omits the field
+      // entirely, and the server reads an absent one as 0 — which is exactly
+      // what (device, seq) always meant. That is what lets the court box, whose
+      // composition root passes 0, keep rendering the body it always has, and
+      // what lets a gate flashed before this change keep working. The vector
+      // also carries a `"` in its subject, so the escaping round G4's B1 added
+      // is pinned on the wire rather than only in a fuzz loop.
+      TEST_ASSERT_EQUAL_STRING(gatelogic::kPathEvents, path);
+      executeGateOpenEventRequest(expected, expectedLen, mac, eventq::Kind::UnknownScan);
     } else {
       // Never a skip. A vector this build does not recognise is a contract this
       // build does not implement, and saying so is the whole point.

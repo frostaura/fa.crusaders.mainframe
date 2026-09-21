@@ -751,7 +751,7 @@ void test_render_no_scanned_subject_can_forge_a_field_in_the_event_body() {
     static_cast<void>(event.setSubject(kHostile[i]));
 
     char body[devlink::kEventBodyCap] = {};
-    const size_t written = devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 2000ULL, event);
+    const size_t written = devlink::renderEventBody(body, sizeof(body), "5ccf7f0a1b2c", 0U, 2000ULL, event);
     char message[384] = {};
     snprintf(message, sizeof(message), "subject %s produced %s", kHostile[i], body);
     TEST_ASSERT_TRUE_MESSAGE(written > 0U, message);
@@ -1975,8 +1975,8 @@ private:
 
 /// One whole board, wired the way main.cpp wires it.
 struct Rig {
-  explicit Rig(uint32_t base)
-      : clock(base), watchdog(clock), scanner(clock), http(clock), api(http, breaker, clock),
+  explicit Rig(uint32_t base, uint32_t boot = 0xC0FFEE01UL)
+      : bootId(boot), clock(base), watchdog(clock), scanner(clock), http(clock), api(http, breaker, clock),
         lock(relayPin, gatelogic::kGateConfig.relayActiveHigh, gatelogic::kGateConfig.unlockEnergisesRelay),
         unlock(gatelogic::kGateConfig.unlockHardCapMs, gatelogic::kGateConfig.minRelockMs,
                gatelogic::kGateConfig.relockDwellMs),
@@ -2005,6 +2005,11 @@ struct Rig {
     ports.log = &log;
     ports.mac = "5ccf7f0a1b2c";
     ports.firmwareVersion = "1.0.0";
+    // A LITERAL, and that is the reason it is a port (round G4, C2). The board draws
+    // this from `esp_random()` and the simulator from the clock and the pid; a class
+    // that reached for either could only be tested against itself, and a boot identity
+    // a test cannot pin is a deduplication rule no test can prove.
+    ports.bootId = bootId;
     ports.heartbeatBody = heartbeatBody;
     ports.heartbeatBodyCap = sizeof(heartbeatBody);
     return ports;
@@ -2084,6 +2089,7 @@ struct Rig {
     }
   }
 
+  uint32_t bootId;
   fakes::FakeClock clock;
   FakeWatchdog watchdog;
   FakeLink link;
@@ -3398,6 +3404,62 @@ void test_gate_response_takes_its_duration_and_reason_from_the_top_level_too() {
   decision = gatelogic::onGateResponse(200U, noDuration, strlen(noDuration), kDefaultMs, kCapMs);
   TEST_ASSERT_TRUE(decision.released);
   TEST_ASSERT_EQUAL_UINT32_MESSAGE(kDefaultMs, decision.unlockMs, noDuration);
+}
+
+// ---------------------------------------------------------------------------
+// G4 / C2 — the boot identity every batch carries
+// ---------------------------------------------------------------------------
+
+/// C2. Every uploaded batch names the boot it came from, so a board that
+/// renumbered from 1 after a torn sequence mark is a different board-life
+/// rather than an evening of duplicates.
+void test_app_every_uploaded_batch_carries_this_boots_identity() {
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    Rig rig(kBases[b], 0x2BCD1234UL);
+    rig.boot(true);
+    queueOfflineEvents(rig, 1U);
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.http.onPath(gatelogic::kPathEvents, 200U, "{\"accepted_through\":4294967295}", 0U);
+    rig.link.set(true);
+    rig.runFor(2000UL);
+
+    TEST_ASSERT_EQUAL_STRING(gatelogic::kPathEvents, rig.http.lastPath());
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(rig.http.lastBody(), "\"boot_id\":734859828,"),
+                                 rig.http.lastBody());
+    // IMMEDIATELY AFTER THE MAC, because the corpus pins the bytes and not the
+    // keys: a field in the wrong place is a body the byte-identity test fails.
+    TEST_ASSERT_NOT_NULL_MESSAGE(
+        strstr(rig.http.lastBody(), "{\"mac\":\"5ccf7f0a1b2c\",\"boot_id\":734859828,\"uptime_ms\":"),
+        rig.http.lastBody());
+    TEST_ASSERT_EQUAL_UINT32(0x2BCD1234UL, rig.app.bootId());
+  }
+}
+
+/// C2. Two boots of one board that BOTH renumbered from 1 are distinguishable
+/// on the wire — which is the whole property, said as a difference rather than
+/// as a field being present.
+void test_app_two_boots_that_both_start_at_seq_one_are_told_apart() {
+  char first[640] = {};
+  char second[640] = {};
+  const uint32_t boots[] = {0x1111'1111UL, 0x2222'2222UL};
+
+  for (size_t i = 0U; i < 2U; ++i) {
+    Rig rig(kBaseMid, boots[i]);
+    rig.boot(true);
+    // A FRESH STORE per rig, so the sequence really does restart at 1 — which
+    // is the state a torn or erased `evq_seq` mark leaves a board in.
+    queueOfflineEvents(rig, 1U);
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, kHealthyHeartbeat, 0U);
+    rig.http.onPath(gatelogic::kPathEvents, 200U, "{\"accepted_through\":4294967295}", 0U);
+    rig.link.set(true);
+    rig.runFor(2000UL);
+    strncpy(i == 0U ? first : second, rig.http.lastBody(), 639U);
+  }
+
+  TEST_ASSERT_NOT_NULL_MESSAGE(strstr(first, "\"seq\":2,"), first);
+  TEST_ASSERT_NOT_NULL_MESSAGE(strstr(second, "\"seq\":2,"), second);
+  TEST_ASSERT_TRUE_MESSAGE(strcmp(first, second) != 0,
+                           "two boots that both renumbered must not send identical batches");
 }
 
 // ---------------------------------------------------------------------------
@@ -4792,6 +4854,8 @@ int main(int, char**) {
   RUN_TEST(test_app_a_404_on_events_keeps_the_backlog_and_retries_it);
   RUN_TEST(test_gate_response_reads_only_the_top_level_object);
   RUN_TEST(test_gate_response_takes_its_duration_and_reason_from_the_top_level_too);
+  RUN_TEST(test_app_every_uploaded_batch_carries_this_boots_identity);
+  RUN_TEST(test_app_two_boots_that_both_start_at_seq_one_are_told_apart);
   RUN_TEST(test_app_a_corrupt_line_gives_the_member_an_answer);
   RUN_TEST(test_app_line_noise_cannot_strobe_the_lamp_or_fill_the_ring);
   RUN_TEST(test_app_two_alternating_tokens_cannot_hold_the_door_open_for_ever);

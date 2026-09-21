@@ -178,6 +178,21 @@ public:
     const char* mac = nullptr;
     const char* firmwareVersion = nullptr;
 
+    /// THIS BOOT'S IDENTITY, and the third field of the server's idempotency
+    /// key (round G4, C2). A per-boot random 32-bit value: `esp_random()` on
+    /// the board, a flag or the clock in the simulator, a literal in a test.
+    ///
+    /// It is a PORT rather than something this class generates, for the reason
+    /// everything else here is: a class that reached for a platform RNG could
+    /// only ever be tested against itself, and a boot identity a test cannot
+    /// pin is a deduplication rule no test can prove.
+    ///
+    /// Zero means "this board has no boot identity", which omits the field and
+    /// gives the server exactly the (device, seq) behaviour it always had — so
+    /// a composition root that forgets this is degraded rather than broken.
+    /// The gate's does not forget; the assert in `begin()` is what says so.
+    uint32_t bootId = 0U;
+
     /// The heartbeat response buffer. Owned by the composition root and static
     /// there, because the contract allows 4096 bytes and a 4.6 KB local under a
     /// blocking HTTP call is a crash that reads as a random reset.
@@ -249,6 +264,10 @@ public:
 
   /// Release windows the hard cap ended, since boot. See the member.
   uint32_t capForcedCloses() const { return capForcedCloses_; }
+
+  /// This boot's identity, as every uploaded batch carries it. Observable so a
+  /// test and the simulator's console can say WHICH boot a record belongs to.
+  uint32_t bootId() const { return bootId_; }
 
   /// The two since-boot counters exactly as the next request will carry them.
   GateDiagnostics diagnostics() const {
@@ -336,6 +355,8 @@ private:
 
   const char* mac_;
   const char* firmwareVersion_;
+  /// This boot's identity, from the composition root. See Ports::bootId.
+  uint32_t bootId_;
   char* heartbeatBody_;
   size_t heartbeatBodyCap_;
   bool ledActiveHigh_;

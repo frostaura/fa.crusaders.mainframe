@@ -31,8 +31,34 @@ public sealed class DeviceEventReceipt : ITenantScoped
 
     public Guid DeviceId { get; set; }
 
-    /// <summary>The box's own monotonic sequence number. Never reused by a given device —
-    /// that is what <c>eventq</c>'s persisted high-water mark exists to guarantee.</summary>
+    /// <summary>
+    /// Which BOOT of that box the sequence number belongs to, or 0 for a board that does not
+    /// send one.
+    ///
+    /// <para>
+    /// <b>It is here because <c>(device, seq)</c> was not an idempotency key.</b> The box's
+    /// ring is RAM-only, so no event survives a reboot, and <c>seq</c> resumes from a single
+    /// checkpoint record in the board's flash written in blocks of 64. Erase or tear that
+    /// record — a reflash, a wiped NVS partition, a torn write — and the board renumbers from
+    /// 1, against the PERMANENT unique index below: every event of the next evening is then
+    /// silently receipted as a duplicate and discarded, <i>including</i> the <c>boot</c> event
+    /// the firmware queues so that an operator can see the board restarted. Two boards
+    /// accidentally sharing a MAC dedup each other the same way.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>0 means "no boot identity", which is exactly the old behaviour.</b> A court box,
+    /// whose renderer omits the field, and every gate image flashed before this change share
+    /// one boot identity and dedup against themselves as before — and legacy rows are
+    /// backfilled to 0 by the migration, so they keep deduplicating against the boards that
+    /// wrote them.
+    /// </para>
+    /// </summary>
+    public long BootId { get; set; }
+
+    /// <summary>The box's own monotonic sequence number. Never reused WITHIN A BOOT — and a
+    /// reboot is made distinguishable by <see cref="BootId"/> rather than made impossible,
+    /// because <c>eventq</c>'s checkpointed high-water mark is best-effort by design.</summary>
     public long Seq { get; set; }
 
     /// <summary>What kind of event it was, for diagnostics on the receipt alone.</summary>

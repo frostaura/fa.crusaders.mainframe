@@ -52,6 +52,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_random.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -189,6 +190,27 @@ esp32_hal::Esp32PinOut gLedPin(kGateConfig.ledPin);
 /// key's tenant.
 char gMacHex[dc::hex::encodedSize(6U)];
 
+/// THIS BOOT'S IDENTITY, drawn once before the loop and never again.
+///
+/// The third field of the server's idempotency key — see `Ports::bootId` and
+/// round G4's C2. `esp_random()` is the hardware RNG; it is seeded from RF
+/// noise once the radio is up and from an entropy pool before that, and both
+/// are far better than this needs to be. The requirement is only that two
+/// consecutive boots of one board, and two boards that happen to share a MAC,
+/// do not collide — not that anybody could not guess it. Nothing turns on it
+/// being unpredictable: it is a de-duplication tag, not a credential.
+///
+/// NEVER ZERO. Zero is the wire's "this board has no boot identity", which
+/// omits the field and gives the server the old (device, seq) behaviour, so a
+/// one-in-four-billion draw of zero would silently put one boot of one board
+/// back on the defect this exists to close.
+uint32_t drawBootId() {
+  const uint32_t drawn = esp_random();
+  return drawn == 0U ? 1U : drawn;
+}
+
+uint32_t gBootId = drawBootId();
+
 /// `Bearer <DEVICE_API_KEY>`, rendered once at boot. Held rather than rebuilt
 /// per call because it is the same string for the life of the image and the
 /// heap it would churn is shared with the network stack.
@@ -241,6 +263,7 @@ GateApp::Ports wire() {
   ports.log = nullptr;
   ports.mac = gMacHex;
   ports.firmwareVersion = fw::kFirmwareVersion;
+  ports.bootId = gBootId;
   ports.heartbeatBody = gHeartbeatBody;
   ports.heartbeatBodyCap = sizeof(gHeartbeatBody);
   return ports;

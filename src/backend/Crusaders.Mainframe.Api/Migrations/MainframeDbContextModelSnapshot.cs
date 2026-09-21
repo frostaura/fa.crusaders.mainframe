@@ -411,6 +411,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<Guid?>("BookingId")
                         .HasColumnType("uuid");
 
+                    b.Property<long>("BootId")
+                        .HasColumnType("bigint");
+
                     b.Property<int?>("Court")
                         .HasColumnType("integer");
 
@@ -436,7 +439,7 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "DeviceId", "Seq")
+                    b.HasIndex("TenantId", "DeviceId", "BootId", "Seq")
                         .IsUnique();
 
                     b.HasIndex("TenantId", "DeviceId", "Court", "OccurredAt");

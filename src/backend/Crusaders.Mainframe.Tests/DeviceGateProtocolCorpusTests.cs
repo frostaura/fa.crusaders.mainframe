@@ -147,6 +147,27 @@ public class DeviceGateProtocolCorpusTests
         // must not carry a court index a later `release` could pair against.
         Assert.Equal(-1, queued.Court);
         Assert.Equal("7Q3F9KM2XZ8B", queued.Subject);
+
+        // THE BOOT IDENTITY, which is the third field of the idempotency key (round G4, C2)
+        // and is the whole reason this vector changed. It binds as a full unsigned 32-bit
+        // number: an `int` property would have taken anything over 2147483647 to a 400 on the
+        // WHOLE batch, which for a value the board draws at random is one board-life in two.
+        Assert.Equal(2596069104L, batch.BootId);
+
+        // AND ABSENT MEANS ZERO, which is exactly what (device, seq) always meant. That is
+        // what lets a court box — whose renderer omits the field — and every gate image
+        // flashed before this change keep deduplicating against themselves. A binding that
+        // made this nullable, or that threw, would be a flag day for every board in the field.
+        var legacy = JsonSerializer.Deserialize<DeviceEventBatch>(
+            Body("requests", "gate-events-request-no-boot-id"))!;
+        Assert.Equal(0L, legacy.BootId);
+        var refusal = Assert.Single(legacy.Events!);
+        Assert.Equal(DeviceEventEndpoints.UnknownScanKind, refusal.Kind);
+
+        // And the subject the firmware ESCAPED (round G4, B1) arrives as the bytes that were
+        // scanned, not as the bytes that were sent: a quote inside a token is a quote, and a
+        // corpus that only ever carried safe subjects would be pinning nothing.
+        Assert.Equal("A\"B", refusal.Subject);
     }
 
     // ---- Response bodies ---------------------------------------------------

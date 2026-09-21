@@ -78,6 +78,7 @@
 
 #include <signal.h>
 #include <stdint.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -150,7 +151,33 @@ struct Options {
   /// Start with the radio down, so a harness can prove what a board does before
   /// it has ever loaded a roster.
   bool linkDown = false;
+  /// THIS BOOT'S IDENTITY, the third field of the server's idempotency key
+  /// (round G4, C2). `esp_random()` on the board; SEEDABLE here, because a
+  /// harness that wants to prove "the same board, restarted, is not deduped
+  /// away" has to be able to say which boot is which — and one that wants to
+  /// prove the opposite has to be able to repeat one. Zero means "draw one",
+  /// which is what a run that does not care gets.
+  uint32_t bootId = 0U;
 };
+
+/// A boot identity for a run that did not name one.
+///
+/// NOT `rand()`. The requirement is that two consecutive runs of one simulator
+/// — and two simulators a harness gave the same MAC — do not collide, and a
+/// PRNG seeded from a one-second clock gives two processes started in the same
+/// second the same answer. The clock's nanoseconds and the pid are what
+/// actually differ between two runs of this binary.
+uint32_t drawBootId() {
+  timespec now;
+  static_cast<void>(clock_gettime(CLOCK_REALTIME, &now));
+  const uint32_t mixed = static_cast<uint32_t>(now.tv_nsec) ^
+                         (static_cast<uint32_t>(now.tv_sec) << 11) ^
+                         (static_cast<uint32_t>(getpid()) * 2654435761UL);
+  // Never zero: zero is the wire's "this board has no boot identity", which
+  // omits the field and hands the server the (device, seq) behaviour C2 exists
+  // to close.
+  return mixed == 0U ? 1U : mixed;
+}
 
 void usage() {
   printf("usage: gate-simulator --api-base URL --device-key KEY [--mac HEX12] [--store DIR]\n"
@@ -164,6 +191,9 @@ void usage() {
          "                the 49.7-day rollover four seconds from now. Defaults to\n"
          "                a NON-ZERO value: zero is the one reading no real board\n"
          "                has at begin(), and it is the one that hid G4's C1\n"
+         "  --boot-id     this boot's identity, the third field of the server's\n"
+         "                idempotency key. Drawn from the clock and the pid when\n"
+         "                absent; give one to repeat or to distinguish a boot\n"
          "  --link-down   boot with the radio not associated\n"
          "console: 'scan <code>', 'rxerror', 'wifi up|down', 'status', 'quit'\n");
 }
@@ -189,6 +219,10 @@ bool parseArgument(int argc, char** argv, int& i, Options& out) {
   }
   if (takeValue(argc, argv, i, "--start-ms", &value)) {
     out.startMs = static_cast<uint32_t>(strtoul(value, nullptr, 10));
+    return true;
+  }
+  if (takeValue(argc, argv, i, "--boot-id", &value)) {
+    out.bootId = static_cast<uint32_t>(strtoul(value, nullptr, 10));
     return true;
   }
   if (strcmp(argv[i], "--link-down") == 0) {
@@ -220,6 +254,9 @@ bool parseOptions(int argc, char** argv, Options& out) {
     }
   }
   applyEnvironment(out);
+  if (out.bootId == 0U) {
+    out.bootId = drawBootId();
+  }
   return out.apiBase != nullptr && out.deviceKey != nullptr;
 }
 
@@ -377,6 +414,7 @@ private:
     ports.log = &decisions_;
     ports.mac = options_.mac;
     ports.firmwareVersion = fw::kFirmwareVersion;
+    ports.bootId = options_.bootId;
     ports.heartbeatBody = heartbeatBody_;
     ports.heartbeatBodyCap = sizeof(heartbeatBody_);
     return ports;
@@ -385,7 +423,8 @@ private:
   /// Five lines at boot, then nothing in the loop. The key is not among them.
   void banner() {
     printf("[sim] crusaders door-gate simulator %s\n", fw::kFirmwareVersion);
-    printf("[sim] mac=%s api=%s store=%s\n", options_.mac, options_.apiBase, options_.storeDir);
+    printf("[sim] mac=%s api=%s store=%s boot_id=%lu\n", options_.mac, options_.apiBase,
+           options_.storeDir, static_cast<unsigned long>(options_.bootId));
     printf("[sim] clock starts at %lu ms, idle %lu ms/pass, watchdog %us, worst call %lu ms\n",
            static_cast<unsigned long>(options_.startMs), static_cast<unsigned long>(kIdleDelayMs),
            static_cast<unsigned>(kGateConfig.watchdogSeconds),
