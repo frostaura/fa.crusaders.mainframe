@@ -384,7 +384,58 @@ export type ScheduleSlot = {
   /** What the booking cost. Null for another member's booking, for the same reason. */
   amountChargedCredits: number | null;
 };
-export type ScheduleCourt = { id: string; courtNumber: number; name: string; slicePriceCredits: number };
+export type ScheduleCourt = {
+  id: string; courtNumber: number; name: string;
+  /**
+   * THIS VIEWER's price for one slice on this court.
+   *
+   * <p>
+   * D2 §4.2 makes the group price the most restrictive — i.e. the highest — of the groups the
+   * member is in, and D2 §4.4 computes it server-side. The shape does not change and the client
+   * needs no edit to be correct: it is already the only price the grid renders. Written down
+   * because "the court's price" and "your price" are now two different numbers and only one of
+   * them belongs on a member's screen.
+   * </p>
+   */
+  slicePriceCredits: number;
+  /**
+   * D2-B34. A court the club has retired still carries bookings, and dropping it from the grid
+   * hid them from the members who had paid for them. It is rendered and inert instead. Absent
+   * on an older API, which is why it is `!== false` that the grid tests, never `=== true`.
+   */
+  isActive?: boolean;
+};
+
+/**
+ * `/schedule`'s `rules` block — this viewer's own booking rules, for THIS club day.
+ *
+ * <p>
+ * D2 §4.4. Every field is optional because the backend that computes them is being built
+ * alongside this screen; `lib/gridRules` is the only thing that reads this type, and it treats
+ * every absent field as "no rule", never as "refused". Both spellings of every key are
+ * accepted there — see that module for why.
+ * </p>
+ */
+export type ScheduleRulesWire = {
+  clubDay?: string;
+  groups?: { id?: string; name?: string; description?: string | null }[];
+  /** The intersection of the viewer's groups' windows with the club's hours, for this weekday. */
+  allowedWindows?: { start: string; end: string }[];
+  clubHours?: { start: string; end: string } | null;
+  slicePriceCredits?: number | null;
+  maxSlotsPerDay?: number | null;
+  maxMinutesPerDay?: number | null;
+  bookedSlotsToday?: number | null;
+  bookedMinutesToday?: number | null;
+  /** `min(slot headroom, floor(minute headroom / sliceMinutes))`, floored at 0. Null for an admin. */
+  remainingToday?: number | null;
+  advanceBookingDays?: number | null;
+  /** True ⇒ no cap and no window applies, and `remainingToday` is null rather than a number. */
+  adminExempt?: boolean;
+  /** D2 §4.3 — the member's groups have no overlapping window at all on this weekday. */
+  emptyWindowReason?: { groups: string[]; day: string } | null;
+};
+
 export type ScheduleDay = {
   date: string; timezone: string; sliceMinutes: number;
   /** The club's opening and closing for THIS day, minutes past local midnight — per weekday, not a flat pair. */
@@ -404,6 +455,8 @@ export type ScheduleDay = {
    */
   peakStartMinute?: number | null; peakEndMinute?: number | null;
   peakAdvanceHoursForRegular?: number; viewerMayBookPeak?: boolean;
+  /** Items 3 + 19, in one read. Absent on a server that does not know about groups or slot caps. */
+  rules?: ScheduleRulesWire;
   courts: ScheduleCourt[]; slots: ScheduleSlot[]
 };
 
