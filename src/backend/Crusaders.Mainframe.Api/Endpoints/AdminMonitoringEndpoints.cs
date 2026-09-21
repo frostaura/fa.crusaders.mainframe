@@ -138,10 +138,7 @@ public static class AdminMonitoringEndpoints
         // admin quotes in a committee meeting. The counts are a breakdown of the same set, so
         // the chips and the heading above them cannot disagree.
         var filtered = query.Filtered(db);
-        var counts = await filtered
-            .GroupBy(e => e.Severity)
-            .Select(g => new { Severity = g.Key, Count = g.Count() })
-            .ToListAsync(ct);
+        var counts = await CountsAsync(filtered, ct);
 
         return Results.Ok(new
         {
@@ -160,10 +157,29 @@ public static class AdminMonitoringEndpoints
         });
     }
 
-    /// <summary>The four severities, always all four and always present — an absent key reads as "unknown", which is not what a zero means.</summary>
-    private static object Counts(IEnumerable<dynamic> grouped)
+    /// <summary>
+    /// How many rows of each severity a set holds, grouped in the database rather than counted
+    /// four times. Block body for the lizard reason in <c>memory/gotchas.md</c> — the <c>{</c>
+    /// of the projection's initialiser ends the function as far as its C# parser is concerned.
+    /// </summary>
+    private static async Task<Dictionary<DeviceErrorSeverity, int>> CountsAsync(
+        IQueryable<DeviceError> rows, CancellationToken ct)
     {
-        var counts = grouped.ToDictionary(g => (DeviceErrorSeverity)g.Severity, g => (int)g.Count);
+        return await rows.GroupBy(e => e.Severity).Select(g => new { Severity = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(g => g.Severity, g => g.Count, ct);
+    }
+
+    /// <summary>
+    /// The four severities, always all four and always present.
+    ///
+    /// <para>
+    /// An absent key is not a zero on a wire: a page reading <c>counts.critical</c> and finding
+    /// nothing there cannot tell "none" from "this server did not say", and on this surface
+    /// those are the two sentences that must never be confused.
+    /// </para>
+    /// </summary>
+    private static object Counts(IReadOnlyDictionary<DeviceErrorSeverity, int> counts)
+    {
         return new
         {
             critical = counts.GetValueOrDefault(DeviceErrorSeverity.Critical),
@@ -566,12 +582,7 @@ public static class AdminMonitoringEndpoints
     /// <summary>The club's open faults by severity, as the stream's opening frame.</summary>
     private static async Task<RealtimeMessage> OpeningCountsAsync(MainframeDbContext db, CancellationToken ct)
     {
-        var counts = await db.DeviceErrors.AsNoTracking()
-            .Where(e => e.ResolvedAt == null)
-            .GroupBy(e => e.Severity)
-            .Select(g => new { Severity = g.Key, Count = g.Count() })
-            .ToListAsync(ct);
-
+        var counts = await CountsAsync(db.DeviceErrors.AsNoTracking().Where(e => e.ResolvedAt == null), ct);
         return new RealtimeMessage("counts", JsonSerializer.Serialize(Counts(counts)));
     }
 }
