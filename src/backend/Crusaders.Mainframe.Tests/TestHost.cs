@@ -89,6 +89,17 @@ public sealed class TestHost : IAsyncDisposable
         // LightsCueTests constructs NullRelayClient directly to pin the interface's shape.
         services.AddMemoryCache();
         services.AddSingleton<BalanceBroadcaster>();
+
+        // The two-stream fan-out and the light-state projection the activation path now
+        // writes. Registered here as well as in Program.cs because this host builds its own
+        // container: a service missing from one of the two is a suite that passes while the
+        // application cannot start, or the reverse.
+        services.AddSingleton<Crusaders.Mainframe.Api.Services.Realtime.IRealtimeBus,
+                              Crusaders.Mainframe.Api.Services.Realtime.InProcessRealtimeBus>();
+        services.AddScoped<CourtLightStateService>();
+        services.AddScoped<DeviceErrorService>();
+        services.AddScoped<ControlBoardReader>();
+        services.AddScoped<ActivationPlumbing>();
         // Sign-out revocation. A singleton in the app too — a per-scope list would forget every
         // sign-out the moment the request that made it ended.
         services.AddSingleton<AccessTokenRevocationList>();
