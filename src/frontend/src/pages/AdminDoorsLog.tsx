@@ -456,8 +456,38 @@ function AdminDoorsLogPageBody() {
    */
   const chosen = doors?.doors.find((d) => d.device.id === doorId) ?? null;
   const pickerDoors = doorOptions(doors, rows);
-  /** The rows that ARE scans — see the note beside the count below (B1). */
-  const scans = (rows ?? []).filter(isDoorScan);
+  /**
+   * The rows that ARE scans — see the note beside the count below (B1) — <b>in the order the
+   * page prints them (E8 / R3-17).</b>
+   *
+   * <p>
+   * The list says "newest first" and it was not. Lists are ordered, paged and counted on the
+   * DELIVERY axis (WIRE-R1 §2), each row prints its SCAN instant (A7), and an offline row
+   * delivered at 21:05 for a scan decided at 18:40 therefore sat above rows scanned at 20:00.
+   * A reader checking a log after an incident reads the column of times, finds it out of
+   * order, and stops trusting the page — which is the whole value of the page.
+   * </p>
+   *
+   * <p>
+   * WIRE-R3 §2 settles it: the sort key is the instant that is displayed. This side holds up
+   * its end by ordering what it shows by what it prints. It is a stable sort over the rows
+   * already in hand, so it re-orders only where the page would otherwise be printing an order
+   * that is not the one it claims — and never invents rows or drops them.
+   * </p>
+   */
+  const scans = (rows ?? []).filter(isDoorScan)
+    .map((entry, i) => ({ entry, i }))
+    .sort((a, b) => (a.entry.at === b.entry.at ? a.i - b.i : b.entry.at.localeCompare(a.entry.at)))
+    .map(({ entry }) => entry);
+  /**
+   * Which row "Load older scans" appended first, AFTER the sort — C4's focus target.
+   *
+   * It used to be a position in the unsorted list, which is a different row once the list is
+   * ordered by what it prints. Identity rather than index: the appended entry itself is found
+   * in the sorted array.
+   */
+  const firstAppended = appendedFrom > 0 ? (rows ?? [])[appendedFrom] ?? null : null;
+  const appendedAt = firstAppended === null ? -1 : scans.indexOf(firstAppended);
   const removedDoorKey = params.get("removed_door") ?? "";
   const chosenRemoved = page.removedDoors.find((d) => d.key === removedDoorKey) ?? null;
   const doorName = chosen ? doorDisplayName(chosen.device)
@@ -809,7 +839,7 @@ function AdminDoorsLogPageBody() {
                       // A7 / O1: the CLUB's zone, from this read. One formatter on this
                       // surface, always given a zone where the API supplies one.
                       timezone={page.timezone}
-                      innerRef={i > 0 && i === appendedFrom ? appendedRef : undefined}
+                      innerRef={i > 0 && i === appendedAt ? appendedRef : undefined}
                     />
                   ))}
                 </ul>

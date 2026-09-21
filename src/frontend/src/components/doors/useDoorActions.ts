@@ -94,7 +94,26 @@ export function useDoorActions(
         // C11: this tab caused what the next read will find, so the banner states it
         // politely rather than interrupting the admin who just pressed the button.
         markOwnDoorsAction();
-        const answer = await doorEndpoints.doorSetEnabled(door.id, enabled);
+        /**
+         * <b>B13 / R3-34 — a tab acts on a state that is hours old.</b>
+         *
+         * <p>
+         * `unchanged: true` catches only the case where the door is already where this click
+         * would put it. It cannot catch the other one: somebody else shut the door and
+         * reopened it since this tab read, or this tab has been in the background all night
+         * and the screen the admin is looking at is a photograph. The write then lands on a
+         * door whose state nobody on this screen has seen, and the console reports success.
+         * </p>
+         *
+         * <p>
+         * The expectation is what the page last READ — which is `door.enabled`, the value the
+         * control was rendered from and the value the admin acted on — so the server can
+         * refuse with 409 `door_changed` rather than quietly winning. It is the negation of
+         * the request by construction: a control offering "Shut" was rendered from an open
+         * door.
+         * </p>
+         */
+        const answer = await doorEndpoints.doorSetEnabled(door.id, enabled, door.enabled);
         /**
          * <b>B10 — a tab left open overnight "shut" a door somebody else had already shut,
          * and was told it had worked.</b>
@@ -134,6 +153,11 @@ export function useDoorActions(
           text: describeDeviceError(e, enabled ? "Could not reopen that door." : "Could not shut that door."),
           durationMs: 8000,
         });
+        // R3-34: a 409 means the door is not where this page thinks it is, so the next thing
+        // the admin reads has to be the truth rather than the stale render they just acted
+        // on. Re-read on every failure, not only on the conflict: a refusal is exactly when
+        // a screen is least entitled to go on asserting what it was showing.
+        await context.reload();
       }
     },
 

@@ -9,7 +9,8 @@ import {
   doorScanCountHeading, doorScanCountLine, doorSetupChip, doorSignalChip, doorStaleChecksNotice,
   doorStateChip, doorStateNotice, doorsAttentionSummary, describePowerLoss, spellAge,
   doorDisplayName, doorPickerLabel, doorRowIdentity, doorRowName, doorShutAttribution,
-  REMOVED_DOOR_UNNAMED, doorShutHeard, doorShutHeardLine,
+  REMOVED_DOOR_UNNAMED, doorShutHeard, doorShutHeardLine, doorTimeIsUncertain, doorScanTiming,
+  doorEventRows, doorEventText,
 } from "./doorsCopy";
 import { doorShutNotice } from "./gateCopy";
 import { type AdminDoorDevice, type DeviceActivityEntry, type DoorSignal } from "./api";
@@ -1009,5 +1010,165 @@ describe("doorStateNotice, on a shut door (R3-1)", () => {
   it("keeps the generic both-halves paragraph where the API cannot say", () => {
     const notice = doorStateNotice(door({ enabled: false }), false, TZ)!;
     expect(notice).toContain(doorShutNotice());
+  });
+});
+
+
+/**
+ * <b>A-H4 / R3-25 — "Since 00:00 — 13 released · 12 refused" over a door nothing can reach.</b>
+ *
+ * <p>
+ * These are the club's counts of what it was TOLD. A door that has lost the network goes on
+ * deciding scans from its cached list and delivers them whenever it next calls in, so on an
+ * unreachable door the pair is a floor rather than a total — and an admin reading it as a
+ * total concludes a busy evening was a quiet one.
+ * </p>
+ */
+describe("doorScanCountLine, on a door the club cannot reach", () => {
+  it("prints the pair bare only while the door is reporting", () => {
+    expect(doorScanCountLine({ released: 13, refused: 12 }, true))
+      .toBe("13 released · 12 refused");
+  });
+
+  it("qualifies it when nothing can reach the door", () => {
+    expect(doorScanCountLine({ released: 13, refused: 12 }, false))
+      .toBe("13 released · 12 refused — as far as the club has heard");
+  });
+
+  it("qualifies it when the page cannot say either way", () => {
+    // A8: `null` is "this page cannot currently say". A page that cannot tell whether the
+    // door is reporting cannot tell whether the counts are complete.
+    expect(doorScanCountLine({ released: 1, refused: 0 }, null))
+      .toContain("as far as the club has heard");
+  });
+
+  it("still says the read failed rather than qualifying a number it does not have", () => {
+    expect(doorScanCountLine(null, false)).toBe("Today's scans could not be read.");
+  });
+});
+
+/**
+ * <b>E8 / C-H4 / A-H1 / R3-17 — "the door told us at 19:22" about a 19:48 scan.</b>
+ *
+ * <p>
+ * A board has no real-time clock: it reports an offset from its own boot. A drifted one hands
+ * the server a scan instant from the future or the past, the server writes
+ * `device.event_time_clamped` about it, and the row printed the two instants in an order that
+ * cannot have happened. A reader who meets that either believes it or stops trusting every
+ * time on the page.
+ * </p>
+ */
+describe("doorTimeIsUncertain", () => {
+  it("catches the impossible order from the instants alone", () => {
+    // The shape the reviewer met, and the one an OLDER API cannot flag.
+    expect(doorTimeIsUncertain({
+      at: "2026-09-19T19:48:00Z", delivered_at: "2026-09-19T19:22:00Z",
+    })).toBe(true);
+  });
+
+  it("takes the wire's flag for the case the instants cannot show", () => {
+    // A CLAMPED time comes out plausible — that is what clamping does — so the flag is the
+    // only evidence there is.
+    expect(doorTimeIsUncertain({
+      at: "2026-09-19T19:22:00Z", delivered_at: "2026-09-19T19:48:00Z", time_uncertain: true,
+    })).toBe(true);
+  });
+
+  it("leaves an ordinary offline row alone", () => {
+    expect(doorTimeIsUncertain({
+      at: "2026-09-19T18:40:00Z", delivered_at: "2026-09-19T21:05:00Z",
+    })).toBe(false);
+    expect(doorTimeIsUncertain({ at: "2026-09-19T18:40:00Z" })).toBe(false);
+    // Absent is not true: an API that has not said has not said the row is doubtful.
+    expect(doorTimeIsUncertain({ at: "2026-09-19T18:40:00Z", delivered_at: null })).toBe(false);
+  });
+});
+
+describe("doorScanTiming, on a row whose clock was out", () => {
+  it("never prints an order that cannot have happened", () => {
+    const line = doorScanTiming(
+      "2026-09-19T19:48:00Z", "2026-09-19T19:22:00Z", "Africa/Johannesburg", true,
+    )!;
+    expect(line).toContain("The door's clock was out, so this time is approximate.");
+    // The impossible sequence, in the words that produced it.
+    expect(line).not.toContain("the door told us at");
+    // The DELIVERY instant is the server's own clock and is sound, so it is still stated.
+    expect(line).toContain("The club was told at 21:22");
+  });
+
+  it("leaves a sound offline row saying both instants, in order", () => {
+    expect(doorScanTiming("2026-09-19T16:40:00Z", "2026-09-19T19:05:00Z", "Africa/Johannesburg"))
+      .toBe("Decided at the door at 18:40 — the door told us at 21:05.");
+  });
+});
+
+/**
+ * <b>A-L4 / R3-17 — nine identical "clock was corrected" rows at one minute.</b>
+ *
+ * They filled a door's whole event block and said one thing nine times, so the rename and the
+ * shut an admin had come to find were pushed off the screen by a board with a drifting clock.
+ */
+describe("doorEventRows grouping", () => {
+  const clockRow = (seconds: number) => ({
+    at: `2026-09-19T19:22:${String(seconds).padStart(2, "0")}Z`,
+    action: "device.event_time_clamped",
+    kind: "clock_corrected",
+    change: "clock_corrected",
+  });
+
+  it("collapses identical events inside one minute and carries the count", () => {
+    const rows = doorEventRows(null, [0, 1, 2, 3, 9].map(clockRow));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].count).toBe(5);
+    expect(doorEventText(rows[0])).toContain("5 times");
+    // The NEWEST of the group, so the collapsed row sorts where the most recent would have.
+    expect(rows[0].at).toBe("2026-09-19T19:22:09Z");
+  });
+
+  it("does not collapse two different things, however close together", () => {
+    const rows = doorEventRows(null, [
+      clockRow(0),
+      { at: "2026-09-19T19:22:01Z", action: "device.updated", kind: "edited", change: "shut" },
+    ]);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.count === 1)).toBe(true);
+  });
+
+  it("does not collapse the same event in two different minutes", () => {
+    const rows = doorEventRows(null, [
+      clockRow(0),
+      { ...clockRow(0), at: "2026-09-19T19:23:00Z" },
+    ]);
+    expect(rows).toHaveLength(2);
+  });
+
+  it("takes the server's own count where it has already grouped them", () => {
+    const rows = doorEventRows(null, [{ ...clockRow(0), count: 9 }]);
+    expect(rows[0].count).toBe(9);
+    expect(doorEventText(rows[0])).toContain("9 times");
+  });
+
+  it("adds no multiplier to a row that stands for itself", () => {
+    const rows = doorEventRows(null, [clockRow(0)]);
+    expect(doorEventText(rows[0])).not.toContain("times");
+  });
+});
+
+/**
+ * WIRE-R3 §6 renames two of the change words. Rows written under both spellings are inside
+ * retention at the same time, so a screen that knows only one renders the other as
+ * "Unrecognised event" — the honest arm for a genuinely unknown action, and the wrong answer
+ * for one we have words for.
+ */
+describe("the two spellings WIRE-R3 renamed", () => {
+  it("reads details_changed and deleted as well as details and removed", () => {
+    const at = "2026-09-19T19:22:00Z";
+    const say = (change: string) => doorEventRows(null, [{
+      at, action: "device.updated", kind: "edited", change, actor_name: "Priya Naidoo",
+    }])[0].text;
+    expect(say("details_changed")).toBe("Details changed by Priya Naidoo");
+    expect(say("details")).toBe("Details changed by Priya Naidoo");
+    expect(say("deleted")).toBe("Deleted by Priya Naidoo");
+    expect(say("removed")).toBe("Deleted by Priya Naidoo");
   });
 });

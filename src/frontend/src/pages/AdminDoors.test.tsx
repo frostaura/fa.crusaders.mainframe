@@ -898,12 +898,16 @@ describe("the doors surface", () => {
       expect(screen.getAllByText("Shut this door? It hears this at once and opens for nobody.")[0])
         .toBeInTheDocument();
       // And the long explanation is still on the page, beside the control, as plain text.
-      expect(screen.getByText(/refuses every scan at this door from the instant the switch is thrown/))
+      expect(screen.getByText(/refuses every scan at it from the instant the switch is thrown/))
         .toHaveTextContent("a door marks nobody as having arrived");
       fireEvent.click(confirm);
 
       await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
-      expect(stub.calls.find((c) => c.method === "PATCH")!.raw).toBe('{"enabled":false}');
+      // B13 / R3-34: the write carries what this page last READ, so a door somebody else has
+      // moved since is refused with 409 `door_changed` rather than quietly overwritten. It
+      // is still ONLY those two keys — no court fields, no name, no gate key.
+      expect(stub.calls.find((c) => c.method === "PATCH")!.raw)
+        .toBe('{"enabled":false,"expected_enabled":true}');
     });
 
     /** Never "Take out of service" on a door, and never the box's consequence. */
@@ -929,7 +933,8 @@ describe("the doors surface", () => {
         .toBeInTheDocument();
       fireEvent.click(confirm);
 
-      await waitFor(() => expect(stub.calls.find((c) => c.method === "PATCH")?.raw).toBe('{"enabled":true}'));
+      await waitFor(() => expect(stub.calls.find((c) => c.method === "PATCH")?.raw)
+        .toBe('{"enabled":true,"expected_enabled":false}'));
     });
 
     /**
@@ -1823,5 +1828,48 @@ describe("the door pages, round 3", () => {
 
     expect(await screen.findByText(/That door is not on the club's list/)).toBeInTheDocument();
     expect(document.body.textContent).not.toContain("The doors could not be read");
+  });
+});
+
+
+/**
+ * <b>B13 / R3-34 — a background tab acts on a state that is hours old.</b>
+ *
+ * <p>
+ * `unchanged: true` catches only the case where the door is already where the click would put
+ * it. It cannot catch the other one: somebody else shut the door and reopened it since this
+ * tab read, or the tab has been in the background all night and the screen the admin is
+ * looking at is a photograph. The write then lands on a door whose state nobody on this
+ * screen has seen, and the console reports success.
+ * </p>
+ */
+describe("a door page acting on a state that has moved", () => {
+  beforeEach(() => { vi.useRealTimers(); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("says the door changed since this page looked, and changes nothing", async () => {
+    const server = doorsServer([doorFixture()]);
+    const stub = stubFetch([
+      { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
+      ...server.routes,
+    ]);
+    renderPage(
+      <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+      { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Shut this door/ }));
+    // Somebody else shuts it between the arm and the confirm — the exact window a tab left
+    // open overnight is permanently inside.
+    server.current()[0].enabled = false;
+    fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
+
+    expect(await screen.findByText(/shut or reopened by somebody else/)).toBeInTheDocument();
+    // Nothing was written: the server refused before applying, so the door is as the other
+    // admin left it rather than as this tab's stale render would have had it.
+    await waitFor(() => {
+      expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(1);
+    });
+    expect(server.current()[0].enabled).toBe(false);
   });
 });

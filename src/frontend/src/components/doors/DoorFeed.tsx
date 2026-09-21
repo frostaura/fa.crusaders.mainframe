@@ -4,8 +4,8 @@ import { Card } from "../Card";
 import { DoorFeedRow } from "./DoorFeedRow";
 import { ACTIVITY_READ_FAILED, activityEmptyNotice, isDoorScan } from "../../lib/deviceActivity";
 import {
-  DOOR_EVENTS_NOTE, OFFLINE_WHO_NOTE, doorEventRows, doorQuietNotice, doorScanCountHeading,
-  doorScanCountLine,
+  DOOR_EVENTS_NOTE, OFFLINE_WHO_NOTE, doorEventRows, doorEventText, doorQuietNotice,
+  doorScanCountHeading, doorScanCountLine,
 } from "../../lib/doorsCopy";
 import { clubDayAndClock } from "../../lib/clubClock";
 import {
@@ -27,7 +27,18 @@ export type FeedRead = {
 };
 
 /** The instant, and the club's own day — everything the quiet notice needs. */
-export type FeedClock = { now: number; dayStartedAt: string; timezone: string };
+export type FeedClock = {
+  now: number;
+  dayStartedAt: string;
+  timezone: string;
+  /**
+   * Whether this door is reporting — A-H4 / R3-25.
+   *
+   * The day's two numbers are what the club was TOLD, and an unreachable door goes on
+   * deciding scans it has not delivered yet. Printed unqualified they read as a total.
+   */
+  online?: boolean | null;
+};
 
 /**
  * What the feed is showing right now, once its four states are collapsed into one read.
@@ -158,8 +169,11 @@ function DoorEvents({ read, timezone }: { read: FeedRead; timezone: string }) {
                     is the only thing a reader can report upstream. Who did it is in the
                     sentence itself where the API says (WIRE-R2 §2's `actor_name`) — see
                     {@link doorEventRows}. */}
+                {/* A-L4 / R3-17: the COUNT, where several identical events were collapsed
+                    into one row. Nine "the board's clock was out and was corrected" rows at
+                    one minute filled this whole block and said one thing nine times. */}
                 <span className="min-w-0 break-words text-sm text-text-secondary">
-                  {row.token ? `${row.text} · ${row.token}` : row.text}
+                  {row.token ? `${doorEventText(row)} · ${row.token}` : doorEventText(row)}
                 </span>
                 {/* A7 / E-M5 / O1: the CLUB's zone, exactly as the scan rows above get.
                     This list was the one reading the VIEWER's clock, so an admin reading
@@ -214,7 +228,7 @@ export function DoorFeed({ door, today, read, clock }: {
         <Card className="space-y-3">
           <div>
             <p className="text-xs text-text-muted">{doorScanCountHeading(clock.dayStartedAt, clock.timezone)}</p>
-            <p className="text-sm text-text-secondary">{doorScanCountLine(today)}</p>
+            <p className="text-sm text-text-secondary">{doorScanCountLine(today, clock.online ?? true)}</p>
           </div>
           <FeedBody
             read={read}

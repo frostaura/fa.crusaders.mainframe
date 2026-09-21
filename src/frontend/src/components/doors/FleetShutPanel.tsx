@@ -157,7 +157,10 @@ export function FleetShutPanel({ chrome, loading, failed, reload, onRetry }: {
                 <ConfirmButton
                   idleLabel={open === chrome.total ? "Shut all doors" : `Shut the ${open} ${open === 1 ? "door" : "doors"} still open`}
                   cancelLabel="Keep them open"
-                  confirmLabel={doorFleetShutConfirm(open, shutUnreachable)}
+                  // B6 / C-L2 / R3-23: the club's TOTAL as well as the count this will shut.
+                  // "Shut all 2 doors?" over a club of three is false twice — it is not all
+                  // of them, and it tells a reader the control reaches every door there is.
+                  confirmLabel={doorFleetShutConfirm(open, shutUnreachable, chrome.total)}
                   ariaLabel={`every door the club has open — ${open} of ${chrome.total}`}
                   onConfirm={() => run("shut")}
                   tone="danger"

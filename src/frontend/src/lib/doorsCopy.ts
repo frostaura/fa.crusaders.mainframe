@@ -523,9 +523,18 @@ export function doorScanCountHeading(dayStartedAt: string, timezone: string): st
  * for a board that is fine.
  * </p>
  */
-export function doorScanCountLine(today: DoorToday | null): string {
+export function doorScanCountLine(today: DoorToday | null, online: boolean | null = true): string {
   if (today === null) return "Today's scans could not be read.";
-  return `${today.released} released · ${today.refused} refused`;
+  const counts = `${today.released} released · ${today.refused} refused`;
+  // <b>A-H4 / R3-25 — "Since 00:00 — 13 released · 12 refused" printed as complete, over a
+  // door nothing could reach.</b> These are the club's counts of what it was TOLD, and a
+  // door that has lost the network goes on deciding scans from its cached list and delivers
+  // them whenever it next calls in. So on an unreachable door the pair is a floor, not a
+  // total, and an admin reading it as a total concludes a busy evening was a quiet one. The
+  // `null` arm takes the same qualifier: a page that cannot say whether the door is
+  // reporting cannot say the counts are complete either.
+  if (online === true) return counts;
+  return `${counts} — as far as the club has heard`;
 }
 
 /**
@@ -1070,9 +1079,47 @@ export const NO_REASON_RECORDED = "No reason recorded";
  * the door next called in", which invents a delay for a row that had none.
  * </p>
  */
+/**
+ * <b>E8 / C-H4 / A-H1 / R3-17 — "the door told us at 19:22" about a 19:48 scan.</b>
+ *
+ * <p>
+ * A board has no real-time clock. It reports an offset from its own boot, and a board whose
+ * clock has drifted hands the server a scan instant from the future or the past — which is
+ * why the server writes `device.event_time_clamped` about it. The row said nothing, and
+ * printed the two instants in an order that cannot have happened: delivered BEFORE decided.
+ * A reader who meets that has two choices, and both are wrong — believe it, or stop trusting
+ * every time on the page.
+ * </p>
+ *
+ * <p>
+ * <b>The guard runs from the instants themselves as well as from the flag</b>, so a row an
+ * older API cannot mark is still never printed in an impossible order. `time_uncertain` adds
+ * the case the instants cannot show: a time the server CLAMPED, which comes out plausible
+ * precisely because it was corrected.
+ * </p>
+ */
+export function doorTimeIsUncertain(entry: {
+  at: string; delivered_at?: string | null; time_uncertain?: boolean;
+}): boolean {
+  if (entry.time_uncertain === true) return true;
+  if (!entry.delivered_at) return false;
+  // Strictly earlier. Equal is the ordinary case of a row decided and delivered in one call.
+  return new Date(entry.delivered_at).getTime() < new Date(entry.at).getTime();
+}
+
+/** What a row whose own clock is in doubt says about its time, wherever that time is shown. */
+export const TIME_UNCERTAIN_NOTE = "The door's clock was out, so this time is approximate.";
+
 export function doorScanTiming(
-  at: string, deliveredAt: string | null | undefined, timezone?: string,
+  at: string, deliveredAt: string | null | undefined, timezone?: string, uncertain = false,
 ): string | null {
+  // R3-17: an uncertain row never prints the pair as a sequence. The DELIVERY instant is the
+  // server's own clock and is sound; the scan instant is the board's and is not, so the row
+  // says which is which rather than implying an order between them.
+  if (uncertain) {
+    if (!deliveredAt) return TIME_UNCERTAIN_NOTE;
+    return `${TIME_UNCERTAIN_NOTE} The club was told at ${clubClock(deliveredAt, timezone)}.`;
+  }
   // A7: the row prints the clock face itself now, so a row with ONE instant has nothing left
   // for this line to add and returns null rather than repeating the time underneath itself.
   if (!deliveredAt) return null;
@@ -1087,8 +1134,15 @@ export function doorScanTiming(
 
 /** The long form, for a `title` where the fact has to arrive once and completely. */
 export function doorScanTimingLong(
-  at: string, deliveredAt: string | null | undefined, timezone?: string,
+  at: string, deliveredAt: string | null | undefined, timezone?: string, uncertain = false,
 ): string {
+  // R3-17: the accessible name is where the fact has to arrive once and completely, so the
+  // doubt travels with it. A `title` a sighted reader can hover and a name a screen-reader
+  // user hears must not disagree about whether a time can be trusted.
+  if (uncertain) {
+    const told = deliveredAt ? ` The club was told at ${clubInstant(deliveredAt, timezone)}.` : "";
+    return `${clubInstant(at, timezone)}. ${TIME_UNCERTAIN_NOTE}${told}`;
+  }
   if (!deliveredAt) return clubInstant(at, timezone);
   const decided = clubInstant(at, timezone);
   const told = clubInstant(deliveredAt, timezone);
@@ -1156,34 +1210,70 @@ export function doorRowRender(entry: DeviceActivityEntry): DoorRowRender {
  * because during the changeover a row can legitimately arrive down both paths.
  * </p>
  */
+export type DoorEventRow = {
+  at: string;
+  text: string;
+  token: string | null;
+  /**
+   * How many identical events this row stands for (A-L4 / R3-17 / WIRE-R3 §6).
+   *
+   * 1 for an ordinary row. The server groups and sends a `count`; this side also collapses
+   * rows that are identical in BOTH the words and the minute, because nine "the board's
+   * clock was out and was corrected" rows at one minute filled a door's whole event block
+   * and said one thing nine times — and they arrive that way from any backend that has not
+   * grouped them yet.
+   */
+  count: number;
+};
+
+/** A row's minute, which is the window identical events are collapsed within. */
+function minuteOf(at: string): string {
+  return at.slice(0, 16);
+}
+
 export function doorEventRows(
   items: DeviceActivityEntry[] | null, events: DoorEventEntry[] | null | undefined,
-): { at: string; text: string; token: string | null }[] {
+): DoorEventRow[] {
   // The raw token travels with an UNRECOGNISED row only. On a recognised one it is noise —
   // the sentence already says what happened — and on an unrecognised one it is the only
   // thing a reader can report upstream.
-  const rows = (events ?? []).map((e) => ({
+  const rows: DoorEventRow[] = (events ?? []).map((e) => ({
     at: e.at,
     // A5 / E-L3: `change` where the API sends it, `kind` where it does not. Nine identical
     // "this door's details or state were changed" rows told an admin nothing, and the actor
     // has been on the audit row since the gate shipped.
     text: describeDoorEventChange(e),
     token: describeDoorEventKind(e) === UNRECOGNISED_EVENT && !e.change ? e.action : null,
+    // The server's own count where it has grouped them, never invented from rows that merely
+    // look alike — a count is a claim about what happened, not about what is on screen.
+    count: typeof e.count === "number" && e.count > 0 ? e.count : 1,
   }));
   for (const entry of items ?? []) {
     if (isDoorScan(entry)) continue;
     const text = describeDoorEvent(entry);
-    rows.push({ at: entry.at, text, token: text === UNRECOGNISED_EVENT ? entry.action : null });
+    rows.push({
+      at: entry.at, text, token: text === UNRECOGNISED_EVENT ? entry.action : null, count: 1,
+    });
   }
-  const seen = new Set<string>();
-  return rows
-    .filter((row) => {
-      const key = `${row.at}|${row.text}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .sort((a, b) => b.at.localeCompare(a.at));
+  // A-L4: identical words, identical minute → one row carrying the count. The exact-instant
+  // dedupe this replaces existed for the changeover (a row arriving down both paths) and did
+  // nothing for nine rows a second apart, which is the shape a clock correction actually has.
+  const byKey = new Map<string, DoorEventRow>();
+  for (const row of rows) {
+    const key = `${minuteOf(row.at)}|${row.text}`;
+    const seen = byKey.get(key);
+    if (!seen) { byKey.set(key, { ...row }); continue; }
+    // Keep the NEWEST instant of the group, so the collapsed row sorts where the most recent
+    // of them would have.
+    if (row.at > seen.at) seen.at = row.at;
+    seen.count += row.count;
+  }
+  return [...byKey.values()].sort((a, b) => b.at.localeCompare(a.at));
+}
+
+/** "Details changed by Priya Naidoo" · "The board's clock was out and was corrected — 9 times". */
+export function doorEventText(row: DoorEventRow): string {
+  return row.count > 1 ? `${row.text} — ${row.count} times` : row.text;
 }
 
 /** The door-card value as a heading reads it. An unknown value is the honest default. */

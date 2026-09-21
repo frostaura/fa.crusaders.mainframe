@@ -150,7 +150,7 @@ export function DoorTile({ row, now, online, timezone, dayStartedAt, settings }:
 
         <div className="mt-auto border-t border-border pt-3">
           <p className="text-xs text-text-muted">{doorScanCountHeading(dayStartedAt, timezone)}</p>
-          <p className="text-sm text-text-secondary">{doorScanCountLine(row.today)}</p>
+          <p className="text-sm text-text-secondary">{doorScanCountLine(row.today, online)}</p>
           {device.running_version && (
             <p className="mt-1 text-xs text-text-muted">{`firmware ${device.running_version}`}</p>
           )}

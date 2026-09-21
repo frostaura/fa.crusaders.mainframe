@@ -1,7 +1,9 @@
 import { Badge } from "../Button";
 import { relative } from "../../lib/deviceLiveness";
 import { clubRowTime } from "../../lib/clubClock";
-import { doorRowRender, doorScanTiming, doorScanTimingLong } from "../../lib/doorsCopy";
+import {
+  doorRowRender, doorScanTiming, doorScanTimingLong, doorTimeIsUncertain,
+} from "../../lib/doorsCopy";
 import { describeActivityWho } from "../../lib/deviceActivity";
 import { type DeviceActivityEntry } from "../../lib/api";
 
@@ -32,6 +34,15 @@ import { type DeviceActivityEntry } from "../../lib/api";
  * moment the club heard (A4).
  * </p>
  */
+/**
+ * How much of a door's name one log row prints (A-M10 / R3-22).
+ *
+ * Long enough that every real club name fits whole — "Front door", "Side gate", "Squash hall
+ * north" — and short enough that the 64-character slug somebody pasted does not take the
+ * reason off the line on all fifty rows.
+ */
+export const DOOR_NAME_ON_A_ROW = 28;
+
 export function DoorFeedRow({ entry, now, doorName, timezone, innerRef }: {
   entry: DeviceActivityEntry;
   now: number;
@@ -54,7 +65,20 @@ export function DoorFeedRow({ entry, now, doorName, timezone, innerRef }: {
 }) {
   const render = doorRowRender(entry);
   const who = describeActivityWho(entry);
-  const detail = [doorName, render.detail].filter((part) => part).join(" · ");
+  /**
+   * <b>A-M10 / R3-22 — a long door name rendered in full on every row.</b>
+   *
+   * A `gate_key` may be 64 characters of somebody's own naming scheme and a display name 128,
+   * and the log repeats it on all fifty rows — so one door with a long name pushed the reason
+   * off the visible line on every row of the page. Truncated for the eye, complete in the
+   * `title` and in the accessible name, so nothing is actually hidden: the row's whole detail
+   * clause is what the screen reader gets.
+   */
+  const shownDoorName = doorName && doorName.length > DOOR_NAME_ON_A_ROW
+    ? `${doorName.slice(0, DOOR_NAME_ON_A_ROW - 1).trimEnd()}…`
+    : doorName;
+  const detail = [shownDoorName, render.detail].filter((part) => part).join(" · ");
+  const detailFull = [doorName, render.detail].filter((part) => part).join(" · ");
   /**
    * A4. "decided at the door at 21:25" beside "last heard from 21:00" read as a
    * contradiction until the row said the two are different facts: an offline row is stamped
@@ -64,8 +88,18 @@ export function DoorFeedRow({ entry, now, doorName, timezone, innerRef }: {
    * `delivered_at` is non-null on offline rows only, so a null row has one instant and the
    * copy reports one. It never invents a delay.
    */
-  const title = doorScanTimingLong(entry.at, entry.delivered_at, timezone);
-  const timing = doorScanTiming(entry.at, entry.delivered_at, timezone);
+  /**
+   * <b>E8 / C-H4 / A-H1 / R3-17 — this row's own clock may be wrong, and it says so.</b>
+   *
+   * A board has no RTC. The server already wrote `device.event_time_clamped` about a drifted
+   * one, and the row printed the two instants in an order that cannot have happened —
+   * "decided at 19:48, the door told us at 19:22". WIRE-R3 §2 flags the row; the guard also
+   * runs from the instants themselves so an older API cannot produce the impossible order
+   * either.
+   */
+  const uncertain = doorTimeIsUncertain(entry);
+  const title = doorScanTimingLong(entry.at, entry.delivered_at, timezone, uncertain);
+  const timing = doorScanTiming(entry.at, entry.delivered_at, timezone, uncertain);
   /**
    * A7 / E-M5: the CLOCK FACE, visibly, with the day when the row is not today's.
    *
@@ -113,13 +147,34 @@ export function DoorFeedRow({ entry, now, doorName, timezone, innerRef }: {
           aria-live="off"
           className="ml-auto shrink-0 text-right text-xs text-text-muted"
         >
-          <span aria-hidden="true" className="block text-sm tabular-nums text-text-secondary">{face}</span>
+          {/* R3-17: the approximation is marked ON the face, not only in a sentence below
+              it — a reader scanning a column of times takes the column at face value, and
+              the one row whose time is a guess has to look different in that column. */}
+          <span aria-hidden="true" className="block text-sm tabular-nums text-text-secondary">
+            {uncertain ? `~${face}` : face}
+          </span>
           <span aria-hidden="true" className="block">{relative(entry.at, now)}</span>
         </time>
       </div>
       {detail && (
-        <p className="mt-0.5 min-w-0 break-words text-sm text-text-secondary">
-          <span className="sr-only">{doorName ? "Door and reason: " : "Reason: "}</span>{detail}
+        <p
+          className="mt-0.5 min-w-0 break-words text-sm text-text-secondary"
+          // A-M10 / R3-22: the whole name, for a pointer.
+          title={detail === detailFull ? undefined : detailFull}
+        >
+          <span className="sr-only">{doorName ? "Door and reason: " : "Reason: "}</span>
+          {/*
+            The full clause is rendered a SECOND time, visually hidden, only where the
+            visible one was actually shortened. Unconditionally it would put every reason on
+            the page twice in the accessibility tree — and in every `getByText` — for the
+            sake of a truncation that had not happened.
+          */}
+          {detail === detailFull ? detail : (
+            <>
+              <span className="sr-only">{detailFull}</span>
+              <span aria-hidden="true">{detail}</span>
+            </>
+          )}
         </p>
       )}
       {/* Said in the row, not only in a `title`: a tooltip is invisible on a phone and to a

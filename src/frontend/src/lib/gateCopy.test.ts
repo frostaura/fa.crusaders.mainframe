@@ -81,13 +81,39 @@ describe("NEW_GATE_BADGE", () => {
 describe("doorShutNotice", () => {
   it("is exactly this", () => {
     expect(doorShutNotice()).toBe(
-      "The club is not alerted about its silence, and the club's system refuses every scan at"
-      + " this door from the instant the switch is thrown. A door that can still reach the club hears"
+      "Shutting a door refuses every scan at it from the instant the switch is thrown, at the"
+      + " club's server. A shut door is expected to be quiet, so the club stops raising its silence"
+      + " as a fault while it is shut. A door that can still reach the club hears"
       + " that refusal and opens for nobody, with no fall back to its saved list. A door that has also"
       + " lost the network never hears it, and keeps admitting members with a booking from the list it"
       + " last downloaded until that goes stale, which takes up to six hours. Bookings, refunds and"
       + " no-show penalties are untouched either way, and a door marks nobody as having arrived.",
     );
+  });
+
+  /**
+   * <b>B4 / R3-24 — it opened with a clause that had no subject and was not about the block
+   * it headed.</b>
+   *
+   * <p>
+   * Under "Shutting or removing this door" a volunteer's first sentence was "The club is not
+   * alerted about its silence, and…": "its" is a door nobody has mentioned yet, and ALERTS
+   * are not what the block is about. It is also a consequence of shutting stated as a
+   * standing fact about the club. Both halves are still said — the refusal AND the alert
+   * suppression — in that order, each with its subject.
+   * </p>
+   *
+   * <p>
+   * The suppression claim is verified rather than assumed: `PeripheralHealthWorker` reads
+   * `db.Devices.Where(d => d.Enabled)`, so a shut door genuinely raises no silence alert.
+   * </p>
+   */
+  it("opens with what shutting does, and names its subject", () => {
+    const notice = doorShutNotice();
+    expect(notice.startsWith("Shutting a door refuses every scan at it")).toBe(true);
+    // The alert half is kept, second, and attached to a subject.
+    expect(notice).toContain("A shut door is expected to be quiet");
+    expect(notice).toContain("stops raising its silence as a fault");
   });
 
   /**
@@ -1148,5 +1174,32 @@ describe("GATE_KEY_MAX_LENGTH", () => {
   /** Mirrors the API's `gate_key` column — `HasMaxLength(64)`. */
   it("is the API's own bound", () => {
     expect(GATE_KEY_MAX_LENGTH).toBe(64);
+  });
+});
+
+
+/**
+ * <b>B6 / C-L2 / R3-23 — "Shut all 2 doors?" in a club with three.</b>
+ *
+ * <p>
+ * False twice: it is not all of them, and a reader with one door already shut is told the
+ * control reaches every door the club has. The idle label has counted what is still open
+ * since C1; the confirm — the sentence somebody commits on — had not caught up.
+ * </p>
+ */
+describe("doorFleetShutConfirm, in a club that is not all one way", () => {
+  it("counts what is still open when that is not the whole club", () => {
+    expect(doorFleetShutConfirm(2, [], 3)).toContain("Shut the 2 doors still open?");
+    expect(doorFleetShutConfirm(2, [], 3)).not.toContain("all 2 doors");
+  });
+
+  it("still says all of them when it really is all of them", () => {
+    expect(doorFleetShutConfirm(3, [], 3)).toContain("Shut all 3 doors?");
+    // And the one-door club keeps its own words rather than "all 1 doors".
+    expect(doorFleetShutConfirm(1, [], 1)).toContain("the club's one door");
+  });
+
+  it("names one door correctly when it is the only one left open", () => {
+    expect(doorFleetShutConfirm(1, [], 4)).toContain("Shut the 1 door still open?");
   });
 });

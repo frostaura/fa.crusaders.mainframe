@@ -161,8 +161,15 @@ export function unnamedGateOfflineNotice(): string {
  * </p>
  */
 export function doorShutNotice(): string {
-  return "The club is not alerted about its silence, and the club's system refuses every scan at"
-    + " this door from the instant the switch is thrown. A door that can still reach the club hears"
+  // <b>B4 / R3-24 — it opened "The club is not alerted about its silence…".</b> Under a
+  // heading reading "Shutting or removing this door" that sentence has no subject a reader
+  // can attach it to: "its" is a door nobody has mentioned yet, and the first thing a
+  // volunteer met on the block was a clause about ALERTS, which is not what the block is
+  // about. It is also stated as an unconditional fact about the club when it is a
+  // consequence of shutting — so it is said second, in full, and with its subject.
+  return "Shutting a door refuses every scan at it from the instant the switch is thrown, at the"
+    + " club's server. A shut door is expected to be quiet, so the club stops raising its silence"
+    + " as a fault while it is shut. A door that can still reach the club hears"
     + " that refusal and opens for nobody, with no fall back to its saved list. A door that has also"
     + " lost the network never hears it, and keeps admitting members with a booking from the list it"
     + " last downloaded until that goes stale, which takes up to six hours. Bookings, refunds and"
@@ -302,8 +309,16 @@ function allDoors(count: number): string {
  * per-door result screen instead of a toast.
  * </p>
  */
-export function doorFleetShutConfirm(count: number, unreachable: DoorSituation[] = []): string {
-  const head = `Shut ${allDoors(count)}?`;
+export function doorFleetShutConfirm(
+  count: number, unreachable: DoorSituation[] = [], total = count,
+): string {
+  // <b>B6 / C-L2 / R3-23.</b> "Shut all 2 doors?" over a club of three is false twice: it is
+  // not all of them, and a reader who has one door already shut is being told the control
+  // reaches every door the club has. The idle label has counted what is still open since C1;
+  // the confirm — the sentence somebody commits on — had not caught up.
+  const head = total > count
+    ? `Shut the ${count} ${count === 1 ? "door" : "doors"} still open?`
+    : `Shut ${allDoors(count)}?`;
   // B3, at fleet scale. The old sentence described every door as both reachable and cut off
   // at once. The doors this club actually has are countable, so the confirm counts them.
   if (unreachable.length === 0) return `${head} Every one of them opens for nobody from this click.`;

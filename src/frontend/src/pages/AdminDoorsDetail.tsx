@@ -354,7 +354,7 @@ function AdminDoorsDetailPageBody() {
             read={{
               entries: read.entries, events: read.events, loading: read.feedLoading, error: read.feedError,
             }}
-            clock={{ now, dayStartedAt: read.view!.day_started_at, timezone }}
+            clock={{ now, dayStartedAt: read.view!.day_started_at, timezone, online }}
           />
         </div>
       </div>
