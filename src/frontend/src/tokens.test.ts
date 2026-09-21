@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import config from "../tailwind.config";
-import { chartColors, channels, palette, rootCssVariables, themeable } from "./lib/tokens";
+import { chartColors, channels, motion, palette, rootCssVariables, themeable } from "./lib/tokens";
 
 /**
  * The tokens, measured — and the copies of them, pinned.
@@ -191,8 +191,10 @@ describe("a control's boundary can actually be seen", () => {
       const body = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
       // A className string that dresses a control — h-11 is this product's control height —
       // and still reaches for the decorative border.
-      for (const m of body.matchAll(/"[^"]*\bh-11\b[^"]*"/g)) {
-        if (/\bborder-border\b/.test(m[0])) offenders.push(`${file.split("/src/")[1]}: ${m[0].slice(0, 70)}`);
+      // `h-11` OR the pixel floor that replaced it on the primitives (B12): a control that
+      // stopped expressing its height in rem must not fall out of this check by doing so.
+      for (const m of body.matchAll(/"[^"]*(?:\bh-11\b|min-h-\[44px\])[^"]*"/g)) {
+        if (/\bborder-border\b/.test(m[0])) offenders.push(`${relativeToSrc(file)}: ${m[0].slice(0, 70)}`);
       }
     }
     expect(offenders).toEqual([]);
@@ -329,12 +331,100 @@ describe("nothing keeps its own copy of the palette", () => {
         // in the club's palette is a QR that fails a marginal read in a dark doorway.
         // `CourtCode.tsx` used to be the name of the first of these.
         if (file.endsWith("MyCode.tsx") || file.endsWith("FullScreenQr.tsx")) continue;
-        offenders.push(`${file.split("/src/")[1]}: ${m[0]}`);
+        offenders.push(`${relativeToSrc(file)}: ${m[0]}`);
       }
     }
     expect(offenders).toEqual([]);
   });
 });
+
+/**
+ * Timing is a token too, and it drifts exactly the way colour did.
+ *
+ * <p>
+ * Before the action-feedback theme this system held two durations in the Tailwind theme, one
+ * easing curve as a literal in `index.css`, and a third duration — `duration-300 ease-out` —
+ * alone inside `Toast.tsx`. That third one is the whole point of the source check below: it
+ * was not wrong, it was simply somewhere nobody would look, which is the state every one of
+ * the palette's three copies was in before they came apart.
+ * </p>
+ */
+describe("nothing keeps its own copy of the timing", () => {
+  it("the Tailwind theme is the motion block, not a transcription of it", () => {
+    const extend = (config.theme?.extend ?? {}) as Record<string, unknown>;
+    expect(extend.transitionDuration).toBe(motion.duration);
+    expect(extend.transitionTimingFunction).toBe(motion.easing);
+  });
+
+  it("every duration is a parseable millisecond value", () => {
+    for (const [name, value] of Object.entries(motion.duration)) {
+      expect(value, name).toMatch(/^\d+ms$/);
+      expect(Number.parseInt(value, 10), name).toBeGreaterThan(0);
+    }
+  });
+
+  it("every easing is a cubic-bezier, so a use site can never fall back to `ease`", () => {
+    for (const [name, value] of Object.entries(motion.easing)) {
+      expect(value, name).toMatch(/^cubic-bezier\([-\d., ]+\)$/);
+    }
+  });
+
+  /**
+   * The hold is the one number outside the M3 band and it is outside it deliberately —
+   * pinned so a later tidy-up cannot "correct" it back into the band and silently delete the
+   * only reason an older member sees their own confirmation at all.
+   */
+  it("keeps the hold long enough to be read, not short enough to be fashionable", () => {
+    expect(Number.parseInt(motion.duration.hold, 10)).toBeGreaterThanOrEqual(1000);
+  });
+
+  it("every keyframe the theme declares has an animation that uses it, and vice versa", () => {
+    const extend = (config.theme?.extend ?? {}) as Record<string, unknown>;
+    const keyframes = Object.keys((extend.keyframes ?? {}) as object);
+    const animations = (extend.animation ?? {}) as Record<string, string>;
+    expect(keyframes.sort()).toEqual(Object.keys(animations).sort());
+    // The shorthand has to NAME the keyframe, or the class compiles and animates nothing —
+    // which looks exactly like reduced motion being honoured and is not.
+    for (const [name, shorthand] of Object.entries(animations)) {
+      expect(shorthand.startsWith(`${name} `), `${name}: ${shorthand}`).toBe(true);
+    }
+  });
+
+  it("no component writes a timing of its own", () => {
+    /*
+     * A `duration-[…]`, `ease-[…]` or a bare numeric `duration-N` in a component is a fourth
+     * copy with a different spelling: unreachable from TypeScript, invisible in the theme, and
+     * not covered by the reduced-motion block that knows the named ones. `Toast.tsx`'s
+     * `duration-300` was exactly that and nothing failed for as long as it existed.
+     */
+    const named = new Set(Object.keys(motion.duration));
+    const offenders: string[] = [];
+    for (const file of listSources("components").concat(listSources("pages"))) {
+      if (file.endsWith(".test.ts") || file.endsWith(".test.tsx")) continue;
+      const body = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
+      for (const m of body.matchAll(/\b(?:motion-reduce:|hover:|focus:|group-hover:)*(duration|ease)-(\[[^\]]+\]|[\w.]+)/g)) {
+        const [, kind, value] = m;
+        if (kind === "duration" && named.has(value)) continue;
+        if (kind === "ease" && (value === "out" || value === "in" || value === "standard" || value === "linear")) continue;
+        offenders.push(`${relativeToSrc(file)}: ${m[0]}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
+/**
+ * A source file, named the way a reader can act on.
+ *
+ * `file.split("/src/")[1]` was the first cut and it is wrong on any checkout whose own path
+ * contains a `src` segment — a worktree under `~/src/…` reported every offender as
+ * "crusaders-wt/eco-ui", which names a directory rather than the file that has to change.
+ * The LAST `/src/` is this frontend's own.
+ */
+function relativeToSrc(file: string): string {
+  const at = file.lastIndexOf("/src/");
+  return at < 0 ? file : file.slice(at + 5);
+}
 
 /** The .ts/.tsx files directly under one of the frontend's source folders. */
 function listSources(folder: string): string[] {

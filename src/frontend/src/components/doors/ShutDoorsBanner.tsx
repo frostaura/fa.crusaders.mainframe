@@ -85,7 +85,14 @@ export function ShutDoorsBanner({ chrome }: { chrome: DoorsChrome }) {
    * is still worth carrying everywhere (it is the standing reminder the club has no
    * auto-reopen); only the link stands down where the page beneath it can do the job.
    */
-  const onDoorsPage = pathname.startsWith("/admin/doors");
+  /*
+   * BOTH paths, since the doors overview moved under Monitoring (D3 §3.1).
+   *
+   * `/admin/doors` is now a permanent redirect to `/admin/monitoring/doors`, so a check for
+   * the old prefix alone answers "no" on the very page this link is a dead control on — which
+   * is the C17-21 defect below, reintroduced by the move rather than by anything here.
+   */
+  const onDoorsPage = pathname.startsWith("/admin/doors") || pathname.startsWith("/admin/monitoring/doors");
   const byFleet = shut.filter((d) => d.shutByFleet);
   const sentence = byFleet.length > 0
     ? doorsShutBannerLine(shut, chrome.total)

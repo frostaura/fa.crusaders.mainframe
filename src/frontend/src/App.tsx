@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Suspense, lazy, useEffect, useState } from "react";
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AuthProvider, readLastIdentity, useAuth } from "./lib/auth";
 import Layout from "./components/Layout";
 import { ToastProvider } from "./components/Toast";
 import { BalanceProvider } from "./lib/balance";
 import { ProfileProvider } from "./lib/profile";
+import { ClubUiProvider } from "./lib/ClubUiProvider";
 import HomePage from "./pages/Home";
 import LoginPage from "./pages/Login";
 import RegisterPage from "./pages/Register";
@@ -35,6 +36,21 @@ import NotFoundPage from "./pages/NotFound";
 import { Card } from "./components/Card";
 import { Button } from "./components/Button";
 import { RouteAnnouncer } from "./components/RouteAnnouncer";
+import { MonitoringPlaceholder } from "./components/monitoring/MonitoringSection";
+
+/**
+ * The primitives preview — development only, and dropped from the production bundle.
+ *
+ * <p>
+ * `import.meta.env.DEV` is replaced with a literal at build time, so the ternary folds to
+ * `null`, the route below disappears, and the dynamic import is never reachable. It exists
+ * because `SegmentedTabs` and the feedback theme have geometry that only a layout engine can
+ * answer — a measured thumb, a control that flips to a vertical tablist when the labels stop
+ * fitting, a 44 px target at a 32 px root font — and jsdom reports every offset as 0. The
+ * Playwright suite runs `npm run dev`, which is where the route exists.
+ * </p>
+ */
+const DevPrimitivesPage = import.meta.env.DEV ? lazy(() => import("./pages/DevPrimitives")) : null;
 
 export default function App() {
   return (
@@ -48,6 +64,10 @@ export default function App() {
       <RouteAnnouncer />
       <AuthProvider>
         <ProfileProvider>
+        {/* Inside ProfileProvider, because that is where the club's glyph choice arrives, and
+            outside everything that draws one — so a sign-in button and a booking confirm wear
+            the same marks. Absent or unrecognised, it is the default; never "the other one". */}
+        <ClubUiProvider>
         <BalanceProvider>
         <ToastProvider>
         <Routes>
@@ -87,16 +107,54 @@ export default function App() {
             <Route path="/admin/members" element={<RequireAuth admin><AdminMembersPage /></RequireAuth>} />
             <Route path="/admin/webhooks" element={<RequireAuth admin><AdminWebhooksPage /></RequireAuth>} />
             <Route path="/admin/biometric" element={<Navigate to="/admin/members" replace />} />
-            <Route path="/admin/devices" element={<RequireAuth admin><AdminDevicesPage /></RequireAuth>} />
-            {/* doors: admin. `/log` is declared BEFORE `/:id` or it resolves as a door id and
-                the club log becomes a 404 nobody can explain. `/card` is a child of a door
-                because it is that door's card, and its back link says so. */}
-            <Route path="/admin/doors" element={<RequireAuth admin><AdminDoorsPage /></RequireAuth>} />
-            <Route path="/admin/doors/log" element={<RequireAuth admin><AdminDoorsLogPage /></RequireAuth>} />
-            <Route path="/admin/doors/:id" element={<RequireAuth admin><AdminDoorsDetailPage /></RequireAuth>} />
-            <Route path="/admin/doors/:id/card" element={<RequireAuth admin><AdminDoorsCardPage /></RequireAuth>} />
+            {/*
+              MONITORING (D3 §3.1, ruling 10) — one home for "how is the hardware doing".
+
+              Doors was a top-level tab and Devices was buried in the gear menu, while the two
+              pages already linked to each other across that boundary. The section is the new
+              home; the pages themselves have NOT moved on disk, so these routes point at the
+              same components they always did and the admin lane moves the files when it builds
+              the rest of the section.
+
+              `/log` is declared BEFORE `/:id` or it resolves as a door id and the club log
+              becomes a 404 nobody can explain. `/card` is a child of a door because it is that
+              door's card, and its back link says so.
+            */}
+            <Route path="/admin/monitoring" element={<RequireAuth admin><MonitoringPlaceholder title="Control board" what="The live court board" /></RequireAuth>} />
+            <Route path="/admin/monitoring/doors" element={<RequireAuth admin><AdminDoorsPage /></RequireAuth>} />
+            <Route path="/admin/monitoring/doors/log" element={<RequireAuth admin><AdminDoorsLogPage /></RequireAuth>} />
+            <Route path="/admin/monitoring/doors/:id" element={<RequireAuth admin><AdminDoorsDetailPage /></RequireAuth>} />
+            <Route path="/admin/monitoring/doors/:id/card" element={<RequireAuth admin><AdminDoorsCardPage /></RequireAuth>} />
+            <Route path="/admin/monitoring/devices" element={<RequireAuth admin><AdminDevicesPage /></RequireAuth>} />
+            <Route path="/admin/monitoring/faults" element={<RequireAuth admin><MonitoringPlaceholder title="Faults" what="The board fault log" /></RequireAuth>} />
+            <Route path="/admin/monitoring/night" element={<RequireAuth admin><MonitoringPlaceholder title="A person's night" what="The per-person trace" /></RequireAuth>} />
+            <Route path="/admin/monitoring/changes" element={<RequireAuth admin><MonitoringPlaceholder title="Change record" what="The admin change record" /></RequireAuth>} />
+
+            {/*
+              PERMANENT redirects, not deletions — the same decision, and the same reason, as
+              `/court-code` above.
+
+              These URLs are in outage emails, in bookmarks, and printed on the door card that
+              lives in a cupboard beside the board. `AdminDeviceApiKeyPanel`'s pairing
+              instructions point at one of them. A dead link in an email is how somebody ends
+              up at a 404 while standing in front of a door that will not open.
+
+              `:id` and `:id/card` are declared after `/log` here too: the ordering trap is
+              the router's, not the destination's.
+            */}
+            <Route path="/admin/devices" element={<RedirectKeepingQuery to="/admin/monitoring/devices" />} />
+            <Route path="/admin/doors" element={<RedirectKeepingQuery to="/admin/monitoring/doors" />} />
+            <Route path="/admin/doors/log" element={<RedirectKeepingQuery to="/admin/monitoring/doors/log" />} />
+            <Route path="/admin/doors/:id" element={<RedirectDoor />} />
+            <Route path="/admin/doors/:id/card" element={<RedirectDoor card />} />
             <Route path="/admin/settings" element={<RequireAuth admin><AdminSettingsPage /></RequireAuth>} />
             <Route path="/admin/ledger" element={<RequireAuth admin><AdminLedgerPage /></RequireAuth>} />
+            {DevPrimitivesPage && (
+              <Route
+                path="/dev/primitives"
+                element={<Suspense fallback={null}><DevPrimitivesPage /></Suspense>}
+              />
+            )}
             {/* A real 404, not a redirect. The catch-all used to send every unknown path to the
                 marketing page, which is how a dead link in an email looked like a working one. */}
             <Route path="*" element={<NotFoundPage />} />
@@ -104,10 +162,43 @@ export default function App() {
         </Routes>
         </ToastProvider>
         </BalanceProvider>
+        </ClubUiProvider>
         </ProfileProvider>
       </AuthProvider>
     </BrowserRouter>
   );
+}
+
+/**
+ * A redirect that keeps the QUERY STRING, because a bare one throws it away.
+ *
+ * <p>
+ * `<Navigate to="/new" replace />` discards `location.search`, and the door log's whole
+ * filter state lives there. Measured: `/admin/doors/log?door=<id>` landed on the new path
+ * with no filter, so a link an admin had sent a colleague — or a "check this door" link out
+ * of an outage email, which is the reason these redirects exist at all — arrived showing
+ * every scan in the club. The hash goes across too, for the same reason `focusFragmentTarget`
+ * exists.
+ * </p>
+ */
+function RedirectKeepingQuery({ to }: { to: string }) {
+  const { search, hash } = useLocation();
+  return <Navigate to={`${to}${search}${hash}`} replace />;
+}
+
+/**
+ * One door's old URL, carried to its new one with the id intact.
+ *
+ * <p>
+ * A bare `<Navigate to="/admin/monitoring/doors" replace />` would have been simpler and would
+ * have thrown the id away — a bookmark to one door landing on the fleet list, which is the
+ * failure a redirect exists to prevent. `useParams` is the whole of it.
+ * </p>
+ */
+function RedirectDoor({ card = false }: { card?: boolean }) {
+  const { id } = useParams();
+  const base = `/admin/monitoring/doors/${id ?? ""}`;
+  return <RedirectKeepingQuery to={card ? `${base}/card` : base} />;
 }
 
 /**

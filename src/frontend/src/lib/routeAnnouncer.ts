@@ -60,13 +60,34 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   ["/admin/members", "Members"],
   ["/admin/webhooks", "Webhooks"],
   ["/admin/biometric", "Members"],
+  /**
+   * The old admin paths. Still named, because they are still ROUTES — permanent redirects
+   * rather than deletions (D3 §3.1), and the title is set before the redirect resolves.
+   */
   ["/admin/devices", "Devices"],
   ["/admin/doors", "Doors"],
   ["/admin/doors/log", "Door log"],
   ["/admin/doors/:id", "Door"],
   ["/admin/doors/:id/card", "Door card"],
+  // Monitoring (D3 §3.1). The section index is the control board, so it is named for what an
+  // admin opens it to look at rather than for the section.
+  ["/admin/monitoring", "Control board"],
+  ["/admin/monitoring/doors", "Doors"],
+  ["/admin/monitoring/doors/log", "Door log"],
+  ["/admin/monitoring/doors/:id", "Door"],
+  ["/admin/monitoring/doors/:id/card", "Door card"],
+  ["/admin/monitoring/devices", "Boards"],
+  ["/admin/monitoring/faults", "Faults"],
+  ["/admin/monitoring/night", "A person's night"],
+  ["/admin/monitoring/changes", "Change record"],
   ["/admin/settings", "Admin settings"],
   ["/admin/ledger", "Transactions"],
+  /**
+   * Development only — the route is registered behind `import.meta.env.DEV` and is not in the
+   * production bundle. It is named here because the suite guard reconciles this table against
+   * every `path=` in `App.tsx`, and a route with no name fails it.
+   */
+  ["/dev/primitives", "Primitives"],
 ];
 
 /** What the catch-all route renders, so it is what an unmatched path is called. */

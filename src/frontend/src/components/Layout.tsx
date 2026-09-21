@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { DoorClosed, LogOut, Settings as SettingsIcon, Wallet as WalletIcon, Webhook as WebhookIcon, Cpu } from "lucide-react";
+import { LogOut, Settings as SettingsIcon, Webhook as WebhookIcon } from "lucide-react";
 import { ShutDoorsBanner } from "./doors/ShutDoorsBanner";
 import { useDoorsChrome } from "./doors/useDoorsChrome";
 import { endpoints } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { tokenStore } from "../lib/api";
-import { LOW_BALANCE_CREDITS, useBalance, walletLabel } from "../lib/balance";
+import { CreditsBadge } from "./CreditsBadge";
 import { useProfile } from "../lib/profile";
 import { ScrollArea } from "./ScrollArea";
 import { pendingApplicationsVersion, subscribePendingApplications } from "../lib/pendingApplications";
-import { cn, formatCredits } from "../lib/utils";
+import { cn } from "../lib/utils";
 
 /**
  * How many membership applications are sitting unreviewed — the in-app half of §2.3's
@@ -58,7 +58,6 @@ export default function Layout() {
   const auth = useAuth();
   const nav = useNavigate();
   const location = useLocation();
-  const { balance, loading } = useBalance();
   const { profile } = useProfile();
   const pendingApplications = usePendingApplicationCount(
     auth.status === "authenticated" && auth.isAdmin,
@@ -185,7 +184,7 @@ export default function Layout() {
   if (headerless) {
     return (
       <div className="h-full flex flex-col">
-        <main className="flex-1 min-h-0 flex flex-col overflow-auto"><div className="max-w-5xl w-full mx-auto px-4 py-6 flex-1 min-h-0 flex flex-col"><Outlet /></div></main>
+        <main className="flex-1 min-h-0 flex flex-col overflow-auto"><div className="max-w-5xl w-full mx-auto px-[16px] py-[24px] flex-1 min-h-0 flex flex-col"><Outlet /></div></main>
       </div>
     );
   }
@@ -318,55 +317,17 @@ export default function Layout() {
             the club name may truncate and the wallet chip may wrap, the gear may not vanish.
           */}
           <div className="ml-auto flex flex-wrap justify-end items-center gap-[8px] min-w-0">
-            {auth.status === "authenticated" && (
-              <NavLink
-                to="/wallet"
-                className={({ isActive }) => cn(
-                  // C16 — 36 px is not a touch target. `h-11` (44 px) on a coarse pointer
-                  // only: the constraint is a fingertip, and a 44 px chip in a desktop
-                  // header is a chip that has stopped being a chip.
-                  //
-                  // B12 — the cap and the truncation both GO, and the box is sized in
-                  // pixels like everything else in this row.
-                  //
-                  // `max-w-[35vw]` with `truncate` on the figure was the D6 fix, and at a
-                  // 32 px root font size reviewer B measured what it actually produced: a
-                  // balance of 0 rendered as "0…". A wallet chip that abbreviates the one
-                  // number it exists to show has stopped being a wallet chip — and the
-                  // reason it needed a cap was that its own height and padding were rem,
-                  // so it grew with the text and squeezed the gear off the row. With the
-                  // box in pixels the chip is about as wide as its digits, and `shrink-0`
-                  // lets the cluster WRAP it onto a line of its own rather than compress
-                  // it. The whole number, always, on one line, whatever the text size.
-                  "inline-flex shrink-0 items-center gap-[6px] min-h-[36px] [@media(pointer:coarse)]:min-h-[44px] px-[12px] rounded-lg text-sm font-medium tabular-nums whitespace-nowrap transition-colors max-w-[calc(100vw-32px)]",
-                  balance !== null && balance < LOW_BALANCE_CREDITS
-                    ? "bg-warning-soft text-warning-strong hover:bg-warning-soft/80"
-                    : "bg-success-soft text-success-strong hover:bg-success-soft/80",
-                  isActive && "ring-1 ring-accent-strong/30",
-                )}
-                /*
-                  The NUMBER, in the name.
+            {/*
+              The wallet chip is its own component now (item 8).
 
-                  This was `aria-label="Wallet balance"`, and an aria-label REPLACES an
-                  element's contents as its accessible name — so a screen reader announced
-                  "Wallet balance, link" and the balance itself, the only reason the chip
-                  exists, was never read out at all. It is also the only place in the chrome
-                  that says whether a member can afford to book.
-
-                  The low-balance state goes in too. It is carried visually by the chip turning
-                  amber, and a colour is not an announcement.
-                */
-                aria-label={walletLabel(balance, loading)}
-                title={loading ? "Refreshing balance…" : "Wallet balance — tap to top up"}
-              >
-                <WalletIcon size={14} strokeWidth={2.25} className="shrink-0" />
-                {/* aria-hidden: the label above already says the number, and the visible text
-                    abbreviates it to "cr", which is not a word. No `truncate`: B12 — it cut
-                    a balance of 0 down to "0…", which is the one thing this chip must never
-                    do. The cluster wraps instead. */}
-                <span aria-hidden="true">{balance === null ? "— cr" : formatCredits(balance)}</span>
-              </NavLink>
-            )}
+              It stopped being a `NavLink` with a class on it: it counts up, it crosses three
+              colour states rather than two, it breathes a finite number of times at zero, it
+              raises exactly one toast when the club pays a member, and it says so when the
+              figure it shows is no longer live. A hundred lines of that inside the header is a
+              hundred lines nobody can test on its own — `CreditsBadge.tsx` carries the whole
+              of the reasoning, including the B12 measurements this markup used to hold.
+            */}
+            {auth.status === "authenticated" && <CreditsBadge />}
             {auth.status === "authenticated" && (
               <NavLink
                 to="/profile"
@@ -442,7 +403,10 @@ export default function Layout() {
           document, so the next Tab lands back on the club name and the skip link has
           achieved nothing. */}
       <main id="main-content" tabIndex={-1} className="flex-1 min-h-0 flex flex-col overflow-auto"><div className={cn(
-        "w-full mx-auto px-4 py-6 flex-1 min-h-0 flex flex-col",
+        /* B12 — pixels. The page gutter is the last thing that should eat a 320 px screen when
+           the club turns the text up; at a 32 px root `px-4 py-6` was 32 px a side and 48 px
+           top and bottom, which is a fifth of the width gone before any content. */
+        "w-full mx-auto px-[16px] py-[24px] flex-1 min-h-0 flex flex-col",
         location.pathname.startsWith("/admin/") ? "max-w-7xl" : "max-w-5xl",
       )}>
         {/*
@@ -520,14 +484,28 @@ function pendingApplicationsLabel(count: number): string {
 }
 
 /**
- * doors: admin — the attention count, as a sentence.
+ * What needs an admin's attention in Monitoring, as a sentence.
  *
- * Three call sites now say it: the gear's accessible name, the Doors menu item's badge and
- * the Doors tab's badge. It was written out twice before and the third copy is what turned
- * a wording into a function.
+ * <p>
+ * It was `doorsAttentionLabel` and it counted doors, because doors was all there was. The
+ * badge moves to the Monitoring tab with the section (D3 §3.1), so it has to say BOTH halves
+ * — "2 doors need attention and 1 board has a fault" — or an admin who sees a number and
+ * finds every door fine concludes the badge is wrong.
+ * </p>
+ *
+ * <p>
+ * `faults` is optional and defaults to 0. <b>Unknown is not zero</b> in general, but here the
+ * fault store does not exist yet: the count has no source, and a badge is a cue rather than a
+ * claim, so the honest thing is to count what we can count and say only that. The admin lane
+ * passes the real number when the store lands, and this sentence grows its second half
+ * without any caller changing.
+ * </p>
  */
-function doorsAttentionLabel(count: number): string {
-  return `${count} ${count === 1 ? "door needs" : "doors need"} attention`;
+export function monitoringAttentionLabel(doors: number, faults = 0): string {
+  const parts: string[] = [];
+  if (doors > 0) parts.push(`${doors} ${doors === 1 ? "door needs" : "doors need"} attention`);
+  if (faults > 0) parts.push(`${faults} ${faults === 1 ? "board has" : "boards have"} a fault`);
+  return parts.join(" and ");
 }
 
 /**
@@ -556,13 +534,15 @@ function SectionTabs({ isAdmin, pendingApplications, doorsNeedingAttention }: {
           badge={{ count: pendingApplications, label: pendingApplicationsLabel(pendingApplications) }}
         />
       )}
-      {/* A20 — Doors is a named destination rather than a 6 px dot on a cog.
-          See the measurement note on the `lg` nav in `Layout`. */}
+      {/* A20 — a named destination rather than a 6 px dot on a cog. D3 §3.1 — and it is
+          Monitoring now, not Doors: the doors overview, the boards, the faults and the
+          control board are one subject, and Devices was in a gear menu linking to a
+          top-level tab, which is what proved the split was wrong. Six tabs stay six tabs. */}
       {isAdmin && (
         <NavTab
-          to="/admin/doors"
-          label="Doors"
-          badge={{ count: doorsNeedingAttention, label: doorsAttentionLabel(doorsNeedingAttention) }}
+          to="/admin/monitoring"
+          label="Monitoring"
+          badge={{ count: doorsNeedingAttention, label: monitoringAttentionLabel(doorsNeedingAttention) }}
         />
       )}
       <NavTab to="/reports" label="Reports" />
@@ -733,7 +713,7 @@ function SettingsMenu({ isAdmin, doorsNeedingAttention, onSignOut }: {
            colour alone is never the signal. */
         aria-label={doorsNeedingAttention === 0
           ? "Open menu"
-          : `Open menu — ${doorsAttentionLabel(doorsNeedingAttention)}`}
+          : `Open menu — ${monitoringAttentionLabel(doorsNeedingAttention)}`}
         aria-haspopup="menu"
         aria-expanded={open}
         // 44 px in PIXELS, not `w-11`/`h-11`. The rem form doubled to 88 px at a 32 px root
@@ -764,19 +744,16 @@ function SettingsMenu({ isAdmin, doorsNeedingAttention, onSignOut }: {
         >
           {isAdmin && (
             <>
-              {/* doors: admin — first, above Devices. Ordered by urgency of use rather than
-                  alphabetically: Doors is opened standing in a club with a member waiting,
-                  Webhooks twice a year. `DoorClosed`, not `DoorOpen` — an open door is a
-                  state claim this product cannot make, two lines above the page whose whole
-                  discipline is not making it. */}
-              <MenuLink
-                to="/admin/doors"
-                onNavigate={() => setOpen(false)}
-                icon={<DoorClosed size={16} />}
-                label="Doors"
-                badge={{ count: doorsNeedingAttention, label: doorsAttentionLabel(doorsNeedingAttention) }}
-              />
-              <MenuLink to="/admin/devices" onNavigate={() => setOpen(false)} icon={<Cpu size={16} />} label="Devices" />
+              {/*
+                D3 §3.1 — Doors and Devices are GONE from here, and that is the point.
+
+                They are destinations, not settings, and they now live under the Monitoring
+                tab beside the boards and the faults. What is left in this menu is the two
+                things that really are configuration. The gear keeps its attention dot,
+                because the menu is still a route to Monitoring on a phone where the tab strip
+                has scrolled — the dot says "there is something to look at", and the
+                accessible name above says what.
+              */}
               <MenuLink to="/admin/settings" onNavigate={() => setOpen(false)} icon={<SettingsIcon size={16} />} label="Admin settings" />
               <MenuLink to="/admin/webhooks" onNavigate={() => setOpen(false)} icon={<WebhookIcon size={16} />} label="Webhooks" />
               <div className="border-t border-border" />

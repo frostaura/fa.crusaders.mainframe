@@ -1039,6 +1039,18 @@ export type MyProfile = {
   photo_url: string | null;
   status: string | null;
   must_change_password?: boolean;
+  /**
+   * The club's glyph set for confirm/decline buttons — `"thumbs"` or `"marks"`.
+   *
+   * <p>
+   * A tenant setting, riding on the payload that already reaches every signed-in screen
+   * rather than on a second request for one string. <b>Optional, and its absence is the
+   * commonest case</b>: an API that predates the key sends nothing, and
+   * <code>readActionGlyphSet</code> answers the default. Anything unrecognised is also the
+   * default — unknown is never "the other one".
+   * </p>
+   */
+  action_glyphs?: string;
 };
 
 export type MemberClass = "Regular" | "LeagueOrSenior";

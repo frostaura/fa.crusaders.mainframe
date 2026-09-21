@@ -51,7 +51,47 @@ describe("the wallet chip says the balance out loud", () => {
   it("reads a zero balance as a number rather than falling through to unavailable", () => {
     // `balance || "unavailable"` would be the natural bug here, and zero is the balance a
     // member most needs to hear.
-    expect(walletLabel(0, false)).toContain("0.00 credits");
-    expect(walletLabel(0, false)).toMatch(/running low/i);
+    expect(walletLabel(0, false)).toContain("0 credits");
+    expect(walletLabel(0, false)).not.toMatch(/unavailable/i);
+  });
+
+  /**
+   * Empty is not low, and this assertion used to say the opposite.
+   *
+   * <p>
+   * There were two arms, so at exactly 0.00 a member was told their balance was "running low".
+   * It is not low, it is empty, and they cannot book anything at all — measured on a real
+   * account, with the grid behind it offering 31 green "Available" cells and the chip in the
+   * same amber as 49.99. Three states, three sentences, three looks.
+   * </p>
+   */
+  it("tells an empty wallet the truth instead of calling it low", () => {
+    expect(walletLabel(0, false)).not.toMatch(/running low/i);
+    expect(walletLabel(0, false)).toMatch(/can't book until you top up/i);
+    // Both halves: the arm below it still fires, or the fix has simply moved the boundary.
+    expect(walletLabel(0.01, false)).toMatch(/running low/i);
+    // A rounding trap: 0.004 prints as "0.00" and is NOT <= 0, so it is genuinely low rather
+    // than empty. The member has a fraction of a credit and still cannot book; saying "low"
+    // is the honest half of that and the dialog carries the rest.
+    expect(walletLabel(0.004, false)).toMatch(/running low/i);
+    expect(walletLabel(-25, false)).toMatch(/can't book until you top up/i);
+  });
+
+  /**
+   * A stream that has silently died leaves a confident stale number with nothing to say so.
+   * That is the same class of defect the server-side silence detector was added to fix.
+   */
+  it("never claims a polled figure is live", () => {
+    expect(walletLabel(472, false, "degraded")).toMatch(/checked every 30 seconds/i);
+    expect(walletLabel(472, false, "live")).not.toMatch(/checked every/i);
+    // The suffix reaches every arm, not just the healthy one.
+    expect(walletLabel(0, false, "degraded")).toMatch(/checked every 30 seconds/i);
+    expect(walletLabel(12.5, false, "degraded")).toMatch(/checked every 30 seconds/i);
+  });
+
+  it("keeps the two-argument form every existing caller uses", () => {
+    // Additive: a dozen call sites and this file's own tests pass two arguments, and the
+    // honesty suffix defaults to saying nothing.
+    expect(walletLabel(472, false)).toBe("Wallet balance 472.00 credits. Tap to top up.");
   });
 });

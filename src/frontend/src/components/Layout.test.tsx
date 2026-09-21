@@ -5,6 +5,7 @@ import Layout from "./Layout";
 import { AuthProvider } from "../lib/auth";
 import { BalanceProvider } from "../lib/balance";
 import { ProfileProvider } from "../lib/profile";
+import { ToastProvider } from "./Toast";
 import { memberFixture, signIn, signOut, stubFetch } from "../test/harness";
 
 /**
@@ -39,7 +40,19 @@ function renderChrome() {
       <AuthProvider>
         <ProfileProvider>
           <BalanceProvider>
-            <Layout />
+            {/*
+              The chrome needs a `ToastProvider` now, and that is the wallet chip's doing.
+
+              An admin topping a member up reaches that member's phone over the stream, and a
+              number silently changing in a header corner is not an announcement — a NavLink's
+              `aria-label` changing is not inside a live region and no screen reader reads it.
+              The chip raises exactly one toast for a movement it did not cause, so the toast
+              is the accessibility requirement rather than decoration, and the provider is a
+              real dependency of the header rather than test scaffolding.
+            */}
+            <ToastProvider>
+              <Layout />
+            </ToastProvider>
           </BalanceProvider>
         </ProfileProvider>
       </AuthProvider>

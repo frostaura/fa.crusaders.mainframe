@@ -313,7 +313,19 @@ describe("ConfirmButton — the armed state", () => {
     // "Cancel" alone, heard out of context in a list of controls, names nothing.
     expect(cancel.tagName).toBe("BUTTON");
     expect(cancel).toHaveAttribute("type", "button");
-    expect(cancel.getAttribute("aria-label")).toBe("Cancel — Shut all doors");
+    /*
+     * C-M3, the half that was still open — and this assertion used to hold the defect.
+     *
+     * It read `"Cancel — Shut all doors"`: the way out, named after the thing it refuses to
+     * do, with the destructive verb inside its own accessible name. That is precisely the
+     * failure `subject` was added for, and this call site passes its context through
+     * `ariaLabel` instead — so it fell through to the idle label and kept it.
+     *
+     * `confirmSubject` drops the words the two share ("Shut") and leaves the noun phrase. See
+     * its own tests for the doors console's "Keep it open — Side door".
+     */
+    expect(cancel.getAttribute("aria-label")).toBe("Cancel — every door the club has open — 3 of 3");
+    expect(cancel.getAttribute("aria-label")).not.toMatch(/shut/i);
     // 44 px. A get-out that is harder to hit than the destructive control beside it is not one.
     expect(cancel.className).toContain("min-h-11");
 
@@ -617,9 +629,23 @@ describe("ConfirmButton — the armed state", () => {
     armByPressing(screen.getByRole("button", { name: "Revoke" }));
     fireEvent.click(screen.getByRole("button", { name: "Revoke — Really revoke?" }));
 
-    const spinner = container.querySelector("svg")!;
+    /*
+     * Scoped to the CONFIRM button and to the spinner's own class, rather than to "the first
+     * SVG in the container".
+     *
+     * The bare query was unambiguous while the control drew exactly one SVG, and item 12
+     * briefly put a decline glyph on the way out — earlier in the DOM — so it started
+     * measuring the glyph and reporting that the spinner had lost its reduced-motion class.
+     * The glyph came back out again (the armed pair's columns are ~84 px at 320 and a 16 px
+     * mark plus its gap broke "Cancel" over three lines), but the lesson stands: ask for the
+     * spinner where the spinner is.
+     */
+    const working = screen.getByRole("button", { name: "Revoke — Really revoke?" });
+    const spinner = working.querySelector("svg.animate-spin")!;
     expect(spinner).toBeTruthy();
     expect(spinner.getAttribute("class")).toContain("motion-reduce:animate-none");
+    // And it is still the only mark this control draws while it is working.
+    expect(container.querySelectorAll("svg")).toHaveLength(1);
     // And the way out stays on screen while the action is in flight, disabled rather than
     // removed: a button that unmounts under a focused finger drops focus to <body>.
     expect(screen.getByRole("button", { name: /^Cancel/ })).toBeDisabled();

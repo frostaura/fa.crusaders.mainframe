@@ -131,7 +131,9 @@ describe("the settings menu's keyboard contract", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Open menu/ }));
 
     const items = screen.getAllByRole("menuitem");
-    expect(items[0]).toHaveTextContent("Doors");
+    // "Admin settings" since D3 §3.1 took Doors and Devices out of this menu and into the
+    // Monitoring section. What is under test is the focus move, not which item is first.
+    expect(items[0]).toHaveTextContent("Admin settings");
     await waitFor(() => expect(items[0]).toHaveFocus());
   });
 
@@ -146,8 +148,6 @@ describe("the settings menu's keyboard contract", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Open menu/ }));
 
     const destinations = [
-      ["Doors", "/admin/doors"],
-      ["Devices", "/admin/devices"],
       ["Admin settings", "/admin/settings"],
       ["Webhooks", "/admin/webhooks"],
     ] as const;
