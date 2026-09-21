@@ -2670,6 +2670,65 @@ describe("MyCode — round 3", () => {
     expect(await screen.findByText(/Front door, and Side door|Front door and Side door/)).toBeInTheDocument();
   });
 
+  // --- R3-7: one window, from the payload ---------------------------------------------
+
+  /**
+   * <b>"from a few minutes before your slot until it ends", a line above "it works at a door
+   * from 18:05 until 20:50", for a court at 20:15.</b> Two windows, two hours and ten minutes
+   * apart, both introduced as what THIS code does, with nothing to say one was the court's
+   * and the other the door's. The reviewer read it as the screen contradicting itself, which
+   * is the right reading — nobody holds two windows for one twelve-character string.
+   *
+   * <p>
+   * The court's own activation window is not on this page's wire at all (the cue window is a
+   * tenant setting no member endpoint carries), so "a few minutes" was the page guessing. The
+   * payload carries the DOOR window exactly, and it is the only clock window the card states.
+   * </p>
+   */
+  it("states one window for the code on screen, and takes it from the payload", async () => {
+    renderBoth(memberDoorsOnFixture({
+      policy: "booking_window", next_booking: memberDoorBookingFixture(),
+      // The disagreeing pair from the finding: 30 minutes of early entry against a door
+      // window that opens 130 minutes before the slot. Whichever the server means, the card
+      // may not invent a third answer beside it.
+      early_entry_minutes: 30,
+    }));
+
+    const detail = await screen.findByText(/For your booking only/);
+    expect(detail).not.toHaveTextContent(/a few minutes before your slot/);
+    expect(detail).not.toHaveTextContent(/until it ends/);
+    // Whatever clock faces the card carries, they are the payload's own — never a count of
+    // minutes derived from a different field.
+    const clocks = (detail.textContent ?? "").match(/\d{1,2}:\d{2}/g) ?? [];
+    for (const clock of clocks) {
+      expect(document.body.textContent).toContain(clock);
+    }
+    expect(detail.textContent).not.toMatch(/30 minutes/);
+  });
+
+  /**
+   * And where the card IS the source of door truth — `/me/door` did not land, so there is no
+   * standing line to carry the window — the window it states is the payload's own, both
+   * edges, once.
+   */
+  it("names the door window off door_opens_at and door_closes_at, and nothing else", async () => {
+    stubFetch([
+      { method: "POST", path: "/api/v1/me/qr/generate", body: {
+        ...CODE, door_opens_at: "2099-01-01T16:30:00Z", door_closes_at: "2099-01-01T18:05:00Z",
+      } },
+      unreachable("/api/v1/me/door"),
+      { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+    ]);
+    renderPage(<MyCodePage />);
+
+    const detail = await screen.findByText(/For your booking only/);
+    // 16:30Z and 18:05Z in the club's own day.
+    expect(detail).toHaveTextContent(/opens the club door from 18:30 until 20:05/);
+    // One "from … until", not two: the invented court window is what made it two.
+    expect((detail.textContent ?? "").match(/from \d{1,2}:\d{2}/g) ?? []).toHaveLength(1);
+    expect(detail).not.toHaveTextContent(/a few minutes before your slot/);
+  });
+
   // --- R3-8: sixty seconds without signal --------------------------------------------
 
   /**

@@ -45,6 +45,7 @@ import {
   historyChip,
   historyGroupLabel,
   historyLine,
+  timeIsUncertain,
   historyOfflineLine,
   historyRetention,
   offlineDetailsBody,
@@ -651,18 +652,31 @@ describe("memberDoorCopy", () => {
       for (const codeWindow of [null, OPEN_CODE_WINDOW, SHUT_CODE_WINDOW]) {
         for (const lastRefusal of [null, ...REFUSALS]) {
           for (const offerMemberCode of [true, false]) {
-            // R3-5 and R3-6 added two inputs, and the ban sweep has to reach the sentences
-            // they unlock: the shut-door conclusion and the already-holding-it arm.
-            for (const doorsShut of ["none", "some", "all", "unknown"] as const) {
-              for (const memberCodeOpensDoor of [true, false]) {
-                out.push({
-                  ...shape, codeWindow, lastRefusal, offerMemberCode, doorsShut,
-                  doorsShutNames: doorsShut === "some" ? ["Front door"] : undefined,
-                  memberCodeOpensDoor,
-                });
-              }
-            }
+            out.push({ ...shape, codeWindow, lastRefusal, offerMemberCode });
           }
+        }
+      }
+    }
+    /*
+      R3-5 and R3-6 added two inputs, and the ban sweep has to reach the sentences they
+      unlock — the shut-door conclusion and the already-holding-it arm. APPENDED rather than
+      multiplied into the product above, for the reason this file already learned once: the
+      product is asked for fifteen times by the ban sweep alone, and multiplying it by eight
+      pushed a single `it.each` case past vitest's five-second budget whenever the machine
+      was busy with another file. Neither axis interacts with `codeWindow` or `lastRefusal`
+      in any arm, so the cross-product buys nothing the base shapes do not.
+    */
+    for (const shape of base) {
+      for (const doorsShut of ["none", "some", "all", "unknown"] as const) {
+        for (const memberCodeOpensDoor of [true, false]) {
+          out.push({
+            ...shape, doorsShut, memberCodeOpensDoor,
+            doorsShutNames: doorsShut === "some" ? ["Front door"] : undefined,
+            // One refusal beside them, so the arm that names a booking code the member is
+            // already holding is reached rather than merely constructed.
+            lastRefusal: { atClock: "09:46", reason: "too_early" },
+            codeKind: "ident" as const,
+          });
         }
       }
     }
@@ -1819,21 +1833,28 @@ describe("memberDoorCopy — no state contradicts itself", () => {
     /nothing on this screen for a door/,
   ];
 
-  it.each([...everyState()].map((s) => [JSON.stringify(s), s] as const))(
-    "never promises and withdraws in the same breath — %s",
-    (_name, state) => {
+  /*
+    One test over every state rather than one test PER state. `it.each` over a five-axis
+    product is four and a half thousand named cases in the reporter for one rule, and the
+    per-case overhead is most of the file's runtime — which is what starves a neighbouring
+    file of vitest's five-second budget. The state is in the assertion message, so a failure
+    still names the exact combination that broke the rule.
+  */
+  it("never promises and withdraws in the same breath", () => {
+    for (const state of everyState()) {
       const { all } = screenFor(state);
-      if (!PROMISE.test(all)) return;
+      if (!PROMISE.test(all)) continue;
+      const where = JSON.stringify(state);
       // The promise is made. Every one of these is a reason it cannot be.
-      expect(state.shut, "promised an open door while the club had shut some").toBe("none");
-      expect(state.membership, "promised an open door to a member with no record").toBe("active");
-      expect(state.policy, "promised an any-member open under the booking rule").toBe("active_member");
-      expect(state.liveCode, "promised a live code on a screen that has none").toBe(true);
+      expect(state.shut, `promised an open door while the club had shut some — ${where}`).toBe("none");
+      expect(state.membership, `promised an open door to a member with no record — ${where}`).toBe("active");
+      expect(state.policy, `promised an any-member open under the booking rule — ${where}`).toBe("active_member");
+      expect(state.liveCode, `promised a live code on a screen that has none — ${where}`).toBe(true);
       for (const withhold of WITHHOLDS) {
-        expect(all, `promised a door and withheld it: ${withhold}`).not.toMatch(withhold);
+        expect(all, `promised a door and withheld it (${withhold}) — ${where}`).not.toMatch(withhold);
       }
-    },
-  );
+    }
+  });
 
   /**
    * R3-4, as a rule rather than as a sentence: a field that never arrived is not a club that
@@ -1998,6 +2019,44 @@ describe("memberDoorCopy — no state contradicts itself", () => {
     }
   });
 
+  /**
+   * <b>R3-3's member half, held as a rule rather than at one call site.</b> The finding is a
+   * CHR one — the shared formatter, and the admin screens that were labelling the browser's
+   * zone "club time" — but the member surfaces are where a reader is furthest from the club,
+   * and the rule this lane owes is that EVERY face here is written with the zone the response
+   * carried. The unit runner is pinned to the club's own zone, so a formatter reading the
+   * browser instead is invisible unless the fixture's zone differs from it; two are swept,
+   * one ahead of the club and one far behind, and every clock face has to move with them.
+   * </p>
+   */
+  it.each(["Europe/London", "America/Los_Angeles", "Pacific/Auckland"])(
+    "writes every member-door clock face in the club's zone, not the reader's — %s",
+    (timezone) => {
+      const booking = {
+        starts_at: "2099-01-01T17:00:00Z", ends_at: "2099-01-01T17:45:00Z", court_number: 3,
+        door_opens_at: "2099-01-01T16:30:00Z", door_closes_at: "2099-01-01T18:05:00Z",
+      };
+      const faces = (zone: string | undefined) => {
+        const line = describeStanding({
+          policy: "booking_window", membership: "active", membership_detail: "active",
+          is_club_admin: false, early_entry_minutes: 30, next_booking: booking,
+          doors_shut: "none", timezone: zone,
+        } as Parameters<typeof describeStanding>[0]);
+        return [
+          line.body,
+          decisionStamp("front-door", booking.door_opens_at, booking.door_closes_at, zone),
+          historyOfflineLine(booking.door_closes_at, zone, booking.starts_at),
+        ].join(" ");
+      };
+      // Africa/Johannesburg is the runner's pinned zone AND the club's default, so a
+      // formatter reading the browser produces exactly this string for every zone.
+      expect(faces(timezone)).not.toBe(faces("Africa/Johannesburg"));
+      // And the zone is honoured rather than merely different: 16:30Z is 18:30 in the club's
+      // own day and something else in each of these.
+      expect(faces(timezone)).not.toContain("18:30");
+    },
+  );
+
   /** Six rows, always, whatever it was handed. A silently dropped row is an unasked question. */
   it("asks the same six questions in every state", () => {
     for (const state of everyState()) {
@@ -2007,6 +2066,59 @@ describe("memberDoorCopy — no state contradicts itself", () => {
       ]);
       expect(flat(diagnosis.conclusion).length).toBeGreaterThan(20);
     }
+  });
+
+  /**
+   * <b>R3-5: the anomaly leads when nothing else won, rather than trailing a clean bill.</b>
+   * It was a clause on the end of "Everything on this phone looks right… its scanner may need
+   * a wipe" — a guess about hardware handed to somebody whose record the club does not have,
+   * with the only irregular thing the check found reduced to a footnote.
+   */
+  it("leads with the club's missing record rather than appending it to an all-clear", () => {
+    const healthy = {
+      standingKnown: true, membership: "none" as const, membership_detail: "none",
+      policy: "active_member" as const, hasBooking: false, bookingStartsClock: null,
+      doorWindowOpen: null, opensAtClock: null, opensInWords: null, codeSecondsLeft: 58,
+      connection: "ok" as const, contact: CONTACT, codeKind: null, codeWindow: null,
+      lastRefusal: null, offerMemberCode: false, doorsShut: "none" as const,
+      memberCodeOpensDoor: true,
+    };
+    const text = flat(buildDiagnosis(healthy).conclusion);
+    expect(text).toMatch(/^Nothing on this phone is wrong\./);
+    expect(text).toMatch(/no membership on file for you/);
+    // Never the scanner guess, and never the anomaly as an afterthought on one.
+    expect(text).not.toMatch(/scanner may need a wipe/);
+    expect(text).not.toMatch(/The club also has no membership/);
+    // And it still refuses to claim that is WHY: `StatusIfBarredAsync` answers null for a
+    // user with no membership row and `GateAccess` walks past the check, so a screen saying
+    // the door refused her for it would send her to the desk over the one thing that is not
+    // stopping her.
+    expect(text).toMatch(/probably not why you're outside/);
+  });
+
+  /**
+   * <b>R3-17.</b> `delivered_at` before `at` is the board's clock being wrong, not a journey
+   * that finished before it started: "the door told us at 19:22" about a 19:48 scan. The
+   * clause is withheld rather than printed, because a member reconciling their own record has
+   * been handed two numbers that cannot both be right.
+   */
+  it("withholds a delivery instant that predates the scan it reports", () => {
+    const impossible = decisionStamp("front-door", "2026-09-19T17:48:00Z", "2026-09-19T17:22:00Z");
+    expect(impossible).toContain("front-door");
+    expect(impossible).not.toMatch(/the club heard at/);
+    // The ordinary case is untouched: a real delivery delay is the answer to a real question.
+    expect(decisionStamp("front-door", "2026-09-19T17:22:00Z", "2026-09-19T17:48:00Z"))
+      .toMatch(/the club heard at 19:48/);
+  });
+
+  it("calls a clamped or impossible time approximate, and an ordinary one nothing", () => {
+    expect(timeIsUncertain({ at: "2026-09-19T17:48:00Z", delivered_at: "2026-09-19T17:22:00Z" })).toBe(true);
+    expect(timeIsUncertain({ at: "2026-09-19T17:48:00Z", time_uncertain: true })).toBe(true);
+    expect(timeIsUncertain({ at: "2026-09-19T17:22:00Z", delivered_at: "2026-09-19T17:48:00Z" })).toBe(false);
+    expect(timeIsUncertain({ at: "2026-09-19T17:22:00Z", delivered_at: null })).toBe(false);
+    // An unparseable instant is "this screen cannot tell", which is not "this is impossible".
+    expect(timeIsUncertain({ at: "not-a-date", delivered_at: "also-not" })).toBe(false);
+    expect(TIME_UNCERTAIN_NOTE).toMatch(/approximate/);
   });
 
   /**

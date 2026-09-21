@@ -1017,3 +1017,227 @@ test("both reads failing still leaves a door section, a self-check and a way to 
     .toContainText(/or whether this club has any/);
   await expect(page.getByText(/hasn't given the app a number/)).toHaveCount(0);
 });
+
+/**
+ * <b>R3-4.</b> The round-3 review stack's API predated WIRE-R2 §4 and sent no `doors_shut`
+ * at all, so every sentence built from it compared `undefined` against `"none"`, failed, and
+ * fell through to the "some" arm — while the arm that picks the promise fell through the
+ * other way. Every account in the evidence read "The club has shut some of its doors for
+ * now" above "A live member code of yours opens the club door", at a club that had shut
+ * nothing. One missing field, two sentences, arguing with each other.
+ */
+test("a response with no doors_shut says nothing about shut doors, and promises nothing", async ({ page }) => {
+  await signIn(page);
+  const partial = door({ policy: "active_member", early_entry_minutes: null, next_booking: null });
+  delete (partial as Record<string, unknown>).doors_shut;
+  await serveApi(page, [...COMMON, { path: "/api/v1/me/door", body: partial }]);
+
+  await page.goto("/my-code");
+
+  await expect(page.getByText("What opens the door for you right now")).toBeVisible();
+  await expect(page.getByText(/The club has shut/)).toHaveCount(0);
+  await expect(page.getByText("A live member code of yours opens the club door.")).toHaveCount(0);
+});
+
+/** WIRE-R3 §5: the club knows which doors it shut, and the member cannot tell by looking. */
+test("a member is told which doors the club has shut", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [...COMMON, {
+    path: "/api/v1/me/door",
+    body: door({
+      policy: "active_member", early_entry_minutes: null, next_booking: null,
+      doors_shut: "some", doors_shut_names: ["Front door", "Side door"],
+    }),
+  }]);
+
+  await page.goto("/my-code");
+  await expect(page.getByText(/The club has shut some/)).toContainText("Front door");
+  await expect(page.getByText(/The club has shut some/)).toContainText("Side door");
+});
+
+/**
+ * <b>R3-6, assembled.</b> Lerato, at a club that opens for any active member, holding her
+ * WALK-UP code, with a `too_early` refusal on her BOOKING code in the club's record: "Too
+ * early — the door opens for you in 9h 30m… hold it up to the scanner again then", directly
+ * above "Yours is active. A live member code of yours opens the club door."
+ *
+ * <p>
+ * `too_early` is only ever a booking code's refusal — `GateAccess.OutsideItsOwnWindowAsync`
+ * is reached from the `BookingActivation` branch and nothing else — so at this club it says
+ * nothing whatever about whether she may come in. The banner has to be about the code that
+ * was refused, and the answer is in her hand.
+ * </p>
+ */
+test("a too-early booking refusal names the code it was about, not the member's night", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [
+    { path: "/api/v1/whoami", body: SESSION_MEMBER },
+    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    // The WALK-UP code is the one on screen: an ident code, which this club's doors open.
+    {
+      method: "POST", path: "/api/v1/me/qr/generate",
+      body: { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true },
+    },
+    {
+      path: "/api/v1/me/door",
+      body: door({
+        policy: "active_member", early_entry_minutes: null, next_booking: null,
+        last_decision: decision({ at: recent(), reason: "too_early", opens_at: "2099-01-01T16:30:00Z" }),
+      }),
+    },
+    {
+      path: "/api/v1/me/door/history",
+      body: {
+        ...EMPTY_HISTORY,
+        items: [{
+          at: recent(), delivered_at: null, door_name: "front-door",
+          released: false, reason: "too_early", offline: false,
+        }],
+      },
+    },
+  ]);
+
+  await page.goto("/my-code");
+
+  const card = page.getByRole("status").filter({ hasText: "booking code" });
+  await expect(card).toContainText("That was your booking code, which isn't live yet.");
+  await expect(card).toContainText(/code on this screen now is your member code/);
+  // Never the nine-and-a-half-hour wait over a code that works now.
+  await expect(card).not.toContainText(/hold it up to the scanner again then/);
+
+  await page.getByRole("button", { name: "The door didn't open" }).click();
+  const panel = page.getByRole("group", { name: /work out why/i });
+  await expect(panel).toContainText(/club's own record/);
+  // And it does not finish by sending her to the desk over a code she is already holding.
+  await expect(panel).toContainText(/hold that one up/);
+  await expect(panel).not.toContainText(/Phone the club on/);
+});
+
+/**
+ * <b>R3-8, as the reviewer's offline run captured it.</b> Sixty seconds without signal and
+ * the ident code dies: "This code has run out and can't be renewed without signal… Try
+ * again", then "Run out · Refresh", then "Couldn't get a code — the club's system couldn't be
+ * reached. Check your connection and try again." Three sentences about one failure and two
+ * buttons that do the same thing — and, below them, "A live member code of yours opens the
+ * club door."
+ */
+test("a code that dies with no signal says so once, offers one retry and promises nothing", async ({ page }) => {
+  await signIn(page);
+  let generated = 0;
+  await serveApi(page, [
+    { path: "/api/v1/whoami", body: SESSION_MEMBER },
+    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+    {
+      method: "POST", path: "/api/v1/me/qr/generate",
+      respond: () => {
+        generated += 1;
+        // The first answer is a code that is already spent — which is what a member holding
+        // a sixty-second code through a dead minute is left with — and every renewal after
+        // it fails, which is what no signal means.
+        if (generated === 1) return { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 0, doors: true };
+        return null;
+      },
+      status: 503,
+    },
+    { path: "/api/v1/me/door", body: door({ policy: "active_member", early_entry_minutes: null, next_booking: null }) },
+  ]);
+
+  await page.goto("/my-code");
+
+  await expect(page.getByText(/This code has run out/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Refresh", exact: true })).toHaveCount(0);
+  await expect(page.getByText("A live member code of yours opens the club door.")).toHaveCount(0);
+  // The club's rule is still stated — only the clause about a code that is not there goes.
+  await expect(page.getByText(/Your club opens its doors for any active member/)).toBeVisible();
+});
+
+/**
+ * <b>R3-10, the MEM half.</b> Escape, Done and the hardware back button all left focus on
+ * `<body>`: for a keyboard user that is the top of the document, so closing the code threw
+ * away their place on the page, and for a screen-reader user the dialog simply vanished with
+ * nothing announced in its place.
+ */
+test("closing the full-screen code by Escape puts focus back on the code", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [...COMMON, { path: "/api/v1/me/door", body: door() }]);
+
+  await page.goto("/my-code");
+  await page.getByRole("button", { name: "Show your code full screen" }).click();
+  await expect(page.getByRole("dialog", { name: /full screen/i })).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  const focused = await page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.tagName);
+  expect(focused).toBe("Show your code full screen");
+});
+
+/**
+ * <b>R3-29.</b> Measured at 390×844 by the reviewer: the decision card's top edge at y=829
+ * against a 734px scrollport — the club's own answer to "why didn't the door open", ninety-five
+ * pixels below the fold, on the screen of somebody standing at the door.
+ *
+ * <p>
+ * It is pinned rather than moved, because moving it above the code re-opens D10. What is
+ * asserted here is the outcome rather than the mechanism: with the card off the glass, one
+ * line of it is on the glass.
+ * </p>
+ */
+test("a decision below the fold is still on the glass", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [...COMMON, {
+    path: "/api/v1/me/door",
+    body: door({ last_decision: decision({ reason: "ok", released: true, at: recent() }) }),
+  }]);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/my-code");
+  await expect(page.getByText("The lock released.").first()).toBeVisible();
+
+  const visible = await page.evaluate(() => {
+    const card = document.getElementById("door-decision")!.getBoundingClientRect();
+    const peek = document.querySelector('[data-testid="decision-peek"]')?.getBoundingClientRect() ?? null;
+    return {
+      cardOnGlass: card.top < innerHeight && card.bottom > 0,
+      peekOnGlass: !!peek && peek.top < innerHeight && peek.bottom > 0,
+    };
+  });
+  // One of the two, always. Either the card itself is readable without scrolling, or the
+  // pinned line is — never neither, which is what the reviewer photographed.
+  expect(visible.cardOnGlass || visible.peekOnGlass).toBe(true);
+});
+
+/**
+ * <b>R3-30.</b> "Use your member code instead" was a one-way door: three controls offered
+ * it, none said what it had done, and the only way back was a checkbox further down the page
+ * labelled for a COURT errand.
+ */
+test("the member-code switch says what it did and offers the way back", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [
+    { path: "/api/v1/whoami", body: SESSION_MEMBER },
+    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+    {
+      method: "POST", path: "/api/v1/me/qr/generate",
+      respond: (req) => (req.path.includes("kind=ident")
+        ? { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true }
+        : CODE),
+    },
+    { path: "/api/v1/me/door", body: door({ policy: "active_member", early_entry_minutes: null }) },
+  ]);
+
+  await page.goto("/my-code");
+  await page.getByRole("button", { name: "Use your member code instead" }).first().click();
+
+  await expect(page.getByText(/You're on your member code, and will be for the rest of this visit/)).toBeVisible();
+  const back = page.getByRole("button", { name: "Back to your booking code" });
+  await expect(back).toBeVisible();
+  // 44px, like everything else a cold thumb has to find on this page.
+  expect((await back.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+
+  await back.click();
+  await expect(page.getByText("Booking code", { exact: false }).first()).toBeVisible();
+});
