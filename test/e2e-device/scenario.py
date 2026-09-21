@@ -1000,7 +1000,19 @@ class Simulator:
             time.sleep(0.05)
 
     def expect_landing(self, timeout: float, mark: int = 0) -> LcdFrame:
-        """The landing screen, which is the only screen with no deadline on it."""
+        """The landing screen, which is the only screen with no deadline on it.
+
+        IT ASKS WHAT THE GLASS SAYS, NOT WHETHER IT REPAINTED. The simulator's
+        console display writes stdout only when the grid actually CHANGES — a
+        court box repaints its rows on a schedule and echoing every identical
+        repaint would bury the relay and protocol lines in the same transcript —
+        so `!RST` while the landing screen is already up produces no `[lcd]`
+        line at all. Waiting for a frame there is waiting for a repaint that
+        correctly never comes, and it is the wrong question: this predicate is
+        about a steady state, and the steady state may already be true."""
+        already = self.screen()
+        if already.row(0) == lcd_pad(IDLE_ROW0) and already.row(1) == lcd_pad(IDLE_ROW1):
+            return already
         return self.expect_screen(
             lambda f: f.row(0) == lcd_pad(IDLE_ROW0) and f.row(1) == lcd_pad(IDLE_ROW1),
             timeout, "the landing screen", mark)
@@ -2318,11 +2330,22 @@ def main() -> int:
             run_step(lambda: money_leg(w, mb), "money")
         if sim:
             run_step(lambda: mega_half(sim), "M-serial")
-            # THE GLASS, at an ordinary clock base and again four seconds before
-            # the 49.7-day millis() rollover. Every deadline in these steps is a
+        run_step(lambda: no_show_sweep(w), "H5")
+        if sim:
+            # THE GLASS GOES LAST, and the ordering is load-bearing rather than
+            # tidy. These steps spend real seconds waiting for real deadlines —
+            # a ten-second hold, a five-second one, a three-second hint, and
+            # without --quick the two-minute ceiling — and every booking this
+            # run created is anchored to the wall clock. Run between the
+            # bookings and the sweep, they push B7's grace window past the
+            # point the sweep's arithmetic is written for, and the failure
+            # reads as a no-show defect rather than as a slow test. It is the
+            # tree's oldest test trap and this is the shape it takes here.
+            #
+            # At an ordinary clock base AND four seconds before the 49.7-day
+            # millis() rollover: every deadline in these steps is a
             # tb::Deadline, and a box that has been up for forty-nine days and
-            # reboots is the NORMAL case for a machine in a cupboard rather than
-            # an edge case — so the wrap is a fixture here, not a footnote.
+            # reboots is the NORMAL case for a machine in a cupboard.
             run_step(lambda: glass_steps(sim, "ordinary clock", args.quick), "E-LCD")
             wrap = Simulator(cfg, name="simulator-wrap", start_ms=MILLIS_WRAP_START_MS)
             try:
@@ -2332,7 +2355,6 @@ def main() -> int:
                          "E-LCD")
             finally:
                 wrap.stop()
-        run_step(lambda: no_show_sweep(w), "H5")
     except StepFailed as e:
         REPORT.check("infra", f"environment: {e}", False)
     finally:
