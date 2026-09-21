@@ -64,13 +64,32 @@ export function DoorTile({ row, now, online, timezone, dayStartedAt, settings }:
     <Card className="h-full">
       <article aria-labelledby={nameId} className="flex h-full flex-col space-y-3">
         {/*
-          B14. The header was `flex-wrap … justify-between`, so whether the chips sat beside
-          the name or wrapped under it depended on how long the name happened to be — at
-          tablet width a club's four cards showed four different header layouts. A two-column
-          grid puts the chips in the same place on every card, and the chip column is sized to
-          its own content so a long name shortens the name rather than moving the chips.
+          <b>B14, and the correction the look pass forced on it.</b>
+
+          The header was `flex-wrap … justify-between`, so whether the chips sat beside the
+          name or wrapped under it depended on how long the name happened to be — at tablet
+          width a club's four cards showed four different header layouts, and an admin
+          scanning them had to find the state chip in a different place on each. B14 made it
+          a two-column grid.
+
+          That grid painted a chip ON TOP of the name at 320 px with a 32 px root font — the
+          large-text setting an older volunteer actually uses. "Sid[Reporting]e door", over
+          the one control a card exists to offer. A grid has fixed tracks, so with the chips
+          alone wider than the card there was nowhere for them to go: the name column
+          (correctly `minmax(0,1fr)`) collapsed to nothing and its text spilled out
+          underneath. Making the chip track shrinkable did not help — a badge is one
+          unbreakable word, and its min-content width is what it is.
+
+          Neither did letting the header wrap on demand, which is B14 coming straight back:
+          a card with two chips wrapped and its neighbour with one did not, so three cards in
+          a row laid out three ways again.
+
+          So the chips have a row of their own, always. Every card is laid out identically at
+          every text size — which is what B14 actually asked for, more completely than the
+          grid delivered — and two boxes that are never on the same line cannot collide. The
+          reading order is the honest one as well: the door, then what is true of it.
         */}
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+        <div className="space-y-2">
           <h3 id={nameId} className="min-w-0 break-words text-base font-semibold">
             {/*
               A13: `min-w-11`. A door called "A" gave a 34 px link — under the 44 px target
@@ -85,9 +104,11 @@ export function DoorTile({ row, now, online, timezone, dayStartedAt, settings }:
               {name}
             </Link>
           </h3>
-          <span className="min-h-7 justify-self-end">
+          {/* The height is reserved whether or not there are chips, so a door with two and
+              its neighbour with none still line their bodies up (B18's family). */}
+          <div className="min-h-7">
             <DoorChips device={device} online={online} signals={row.signals} />
-          </span>
+          </div>
         </div>
 
         <p className="min-w-0 break-words text-xs text-text-muted">

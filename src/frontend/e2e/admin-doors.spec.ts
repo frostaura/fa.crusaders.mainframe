@@ -1218,6 +1218,81 @@ test.describe("The overview under a thumb", () => {
   });
 
   /**
+   * <b>Found in the look pass, at the size the look pass exists for.</b>
+   *
+   * <p>
+   * At 320 px with a 32 px root font — the large-text setting an older volunteer actually
+   * uses — the state chip painted ON TOP of the door's name: "Sid[Reporting]e door". The
+   * card header is a two-column grid whose chip column is `auto`, so it refuses to shrink;
+   * the name column, correctly `minmax(0,1fr)`, collapsed to nothing and its text spilled
+   * out under the chip. B14 put the chips in that grid so four cards at tablet width stop
+   * laying their headers out four different ways, and that is still right — what was wrong
+   * is a track that cannot give anything back.
+   * </p>
+   *
+   * <p>
+   * Not a jsdom test, and not a class-name test: this is two boxes overlapping, which only
+   * a browser with a layout can answer. It is also not a WIDTH problem — 320 px at 16 px
+   * root is fine and 820 px at 32 px root is not — so no viewport breakpoint fixes it.
+   * </p>
+   */
+  for (const size of [
+    { label: "320 px at a 32 px root", width: 320, height: 640, root: 32 },
+    { label: "820 px at a 32 px root", width: 820, height: 1180, root: 32 },
+  ]) {
+    test(`never paints a chip over a door's name at ${size.label}`, async ({ page }) => {
+      await openDoors(page, [door({ name: "Side door" })]);
+      await page.setViewportSize({ width: size.width, height: size.height });
+      await page.evaluate((px) => { document.documentElement.style.fontSize = `${px}px`; }, size.root);
+      await page.waitForTimeout(400);
+
+      const name = await page.getByRole("link", { name: "Side door" }).boundingBox();
+      const chip = await page.getByText("Reporting", { exact: true }).boundingBox();
+      const overlaps = !!name && !!chip
+        && name.x < chip.x + chip.width && chip.x < name.x + name.width
+        && name.y < chip.y + chip.height && chip.y < name.y + name.height;
+      expect(overlaps).toBe(false);
+      // And the card still holds the page inside the phone.
+      const overflow = await page.evaluate(() => {
+        const main = document.querySelector("main")!;
+        return { scroll: main.scrollWidth, client: main.clientWidth };
+      });
+      expect(overflow.scroll).toBeLessThanOrEqual(overflow.client + 1);
+    });
+  }
+
+  /**
+   * <b>B14, which the first attempt at the overlap fix walked straight back into.</b>
+   *
+   * <p>
+   * Letting the header wrap on demand put a two-chip card's chips on their own line and a
+   * one-chip card's beside its name — three cards in a row laid out three ways, which is
+   * the finding, verbatim. The chips have a row of their own on every card now, so this
+   * measures what an admin scanning a row of cards actually relies on: the state chip is in
+   * the same place relative to the card whatever is in it.
+   * </p>
+   */
+  test("puts every card's chips in the same place, whatever each card carries", async ({ page }) => {
+    await openDoors(page, [
+      door({ name: "Alpha door", gate_key: "alpha" }),
+      door({ id: OTHER_ID, name: "A", gate_key: null }),
+      door({ id: "99999999-9999-9999-9999-99999999bbbb", name: "The changing room corridor door", gate_key: "corridor" }),
+    ]);
+    await page.setViewportSize({ width: 820, height: 1180 });
+    await page.waitForTimeout(400);
+
+    const offsets: number[] = [];
+    for (const name of ["Alpha door", "A", "The changing room corridor door"]) {
+      const card = page.getByRole("article", { name, exact: true });
+      const chip = await card.getByText(/Reporting|Needs a door name/).first().boundingBox();
+      const box = await card.boundingBox();
+      offsets.push(Math.round((chip?.y ?? 0) - (box?.y ?? 0)));
+    }
+    expect(offsets).toHaveLength(3);
+    expect(new Set(offsets).size).toBe(1);
+  });
+
+  /**
    * <b>A8.</b> With the ADMIN's phone off the network every age went on ticking from a frozen
    * read, doors flipped one by one to "Not reporting", and the page asserted "nothing can
    * reach it" about boards that were, as far as anybody knew, fine.
