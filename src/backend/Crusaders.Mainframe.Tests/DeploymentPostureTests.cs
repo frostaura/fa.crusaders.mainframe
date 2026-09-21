@@ -291,16 +291,23 @@ public sealed class DeploymentPostureTests
     }
 
     /// <summary>
-    /// And the Dockerfile that actually builds the image defaults it off, so a build that says
-    /// nothing about the flag — which is every build CI runs — produces a bundle without the
-    /// block in it.
+    /// And the Dockerfile that actually builds the image offers NO such argument. It used to
+    /// default one to <c>false</c>, which reads as safe and is not: a default is an invitation
+    /// to override it, from a <c>.env</c> file nobody reviews. The page itself no longer reads
+    /// the flag either — the block is behind <c>import.meta.env.DEV</c> and nothing else, so
+    /// there is no value of anything that puts it in a production bundle.
     /// </summary>
     [Fact]
-    public void The_frontend_image_defaults_the_dev_sign_in_block_off()
+    public void The_frontend_image_cannot_be_asked_for_the_dev_sign_in_block()
     {
-        var dockerfile = Read("src", "frontend", "Dockerfile");
+        var setting = Read("src", "frontend", "Dockerfile").Split('\n')
+            .Where(line => !line.TrimStart().StartsWith('#'))
+            .Where(line => line.Contains(DevLoginFlag, StringComparison.Ordinal));
+        Assert.Empty(setting);
 
-        Assert.Matches(new Regex($@"(?m)^ARG\s+{DevLoginFlag}=false\s*$"), dockerfile);
+        var login = Read("src", "frontend", "src", "pages", "Login.tsx");
+        Assert.DoesNotContain(DevLoginFlag, login, StringComparison.Ordinal);
+        Assert.Contains("import.meta.env.DEV && (", login, StringComparison.Ordinal);
 
         // The CI workflow is the other half: it must not pass the arg at all. A default of
         // false that every real build overrides would be a default in name only.

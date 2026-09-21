@@ -329,7 +329,7 @@ export default function LoginPage() {
           </>
         )}
 
-        {(import.meta.env.DEV || import.meta.env.VITE_SHOW_DEV_LOGIN === "true") && (
+        {import.meta.env.DEV && (
           <div className="mt-6 pt-4 border-t border-border">
             <p className="text-xs text-text-muted mb-2">Dev shortcuts</p>
             <Button variant="outline" type="button" onClick={devAdminLogin} disabled={loading} className="w-full">
