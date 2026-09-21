@@ -13,6 +13,7 @@ import {
   signIn,
   signOut,
   stubFetch,
+  unreachable,
   type StubRoute,
 } from "../test/harness";
 import { forgetLastKnown } from "../lib/lastKnown";
@@ -491,5 +492,134 @@ describe("My door history", () => {
     expect(await screen.findByText(/Couldn't load any more/)).toBeInTheDocument();
     // The record itself survives. The failed read is a sentence beside it, not instead of it.
     expect([...document.querySelectorAll("#door-history li")].length).toBe(1);
+  });
+
+  // --- D11: this card belongs to its OWN read ----------------------------------------
+
+  /**
+   * <b>A `/me/door` that failed used to delete the member's whole record from their own
+   * page.</b> The flag that gates this card answered `false` on any error, so one unlucky
+   * request — a dropped connection, a 500, a gateway restart — read as "this club has no
+   * doors", and a member whose history endpoint was answering perfectly and had rows in it
+   * was shown nothing at all. The two reads are independent and this card is gated on what
+   * it can see for itself.
+   */
+  it("shows the member's rows even when the door read fails", async () => {
+    renderProfile([
+      { path: "/api/v1/me/door/history", body: HISTORY() },
+      unreachable("/api/v1/me/door"),
+    ]);
+
+    expect(await screen.findByText("My door history")).toBeInTheDocument();
+    expect(await screen.findByText("Lock released")).toBeInTheDocument();
+  });
+
+  /**
+   * And the other half of the same rule, which is why it is not simply "always render".
+   * With the door question unanswered AND nothing of the member's own to show, the card
+   * says nothing — a member of a club that has never owned a door must not be told they
+   * have no door history.
+   */
+  it("stays silent when the door read fails and the member has no rows", async () => {
+    renderProfile([
+      { path: "/api/v1/me/door/history", body: HISTORY({ items: [] }) },
+      unreachable("/api/v1/me/door"),
+    ]);
+
+    await screen.findByLabelText("Full name");
+    await waitFor(() => expect(screen.getByText("Passkeys")).toBeInTheDocument());
+    expect(screen.queryByText("My door history")).toBeNull();
+  });
+
+  // --- D9 / C15: landing on the section, and what a screen reader hears ---------------
+
+  /**
+   * D9. `/profile#door-history` scrolled, and the browser's own anchor jump put the heading
+   * at y = −29 on one viewport and y = −335 on another — because the card mounts and then
+   * grows by several hundred pixels as its rows arrive underneath the jump. So the scroll
+   * happens once the rows are in, and it moves FOCUS as well as the viewport: without that
+   * a screen-reader user who followed the link is still at the top of the page with no idea
+   * anything happened.
+   */
+  it("focuses the section heading when the page is opened at its anchor", async () => {
+    window.history.replaceState(null, "", `/profile#door-history`);
+    try {
+      renderProfile([
+        { path: "/api/v1/me/door/history", body: HISTORY() },
+        { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+      ]);
+
+      const heading = await screen.findByText("My door history");
+      await waitFor(() => expect(document.activeElement).toBe(heading));
+      // In the tab order only as a target: a heading that takes a Tab stop of its own is a
+      // stop every keyboard user pays for on every visit.
+      expect(heading.getAttribute("tabindex")).toBe("-1");
+    } finally {
+      window.history.replaceState(null, "", "/");
+    }
+  });
+
+  it("does not steal focus when the page was not opened at its anchor", async () => {
+    renderProfile([
+      { path: "/api/v1/me/door/history", body: HISTORY() },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+
+    const heading = await screen.findByText("My door history");
+    await screen.findByText("Lock released");
+    expect(document.activeElement).not.toBe(heading);
+  });
+
+  /** C15 — a named region, so it can be found in a landmark list and announced on arrival. */
+  it("is a named region", async () => {
+    renderProfile([
+      { path: "/api/v1/me/door/history", body: HISTORY() },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+
+    const region = await screen.findByRole("region", { name: "My door history" });
+    expect(region.id).toBe("door-history");
+  });
+
+  /**
+   * C15's other half, and the one a sighted reader never sees. The permanent explanation of
+   * what "Lock released" means sat in `role="status"` — a LIVE region — so a screen reader
+   * announced the whole paragraph as an update every time the section rendered, including
+   * on arrival from the `/my-code` link. A live region is for something that has just
+   * changed; a sentence that has been true since the card was written is not that.
+   */
+  it("keeps its permanent explanation out of a live region", async () => {
+    renderProfile([
+      { path: "/api/v1/me/door/history", body: HISTORY() },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+
+    const notice = await screen.findByText(/There's no sensor on the door/);
+    expect(notice.getAttribute("role")).toBeNull();
+    expect(notice.getAttribute("aria-live")).toBeNull();
+    expect(notice.closest("[role=status],[aria-live]")).toBeNull();
+  });
+
+  // --- O1 and the LOW list ------------------------------------------------------------
+
+  /**
+   * Every face in this list is the CLUB's day, off the `timezone` the same read carries
+   * (WIRE-R2 §4) — which is the right choice and an invisible one for a member reading
+   * their record from anywhere else. One line under the list removes the whole question.
+   */
+  it("writes every row in the club's own day, and says so once", async () => {
+    renderProfile([
+      // Two hours behind the club, so a row written in the viewer's zone would read 08:04
+      // where the club's own log reads 06:04. The runner is pinned to the club's zone, so
+      // this is the only way the difference is visible at all.
+      { path: "/api/v1/me/door/history", body: HISTORY({ timezone: "Europe/London" }) },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+    ]);
+
+    await screen.findByText("Lock released");
+    // 06:04Z is 08:04 in Johannesburg and 07:04 in London.
+    expect(screen.getByText(/07:04$/)).toBeInTheDocument();
+    expect(screen.queryByText(/08:04$/)).toBeNull();
+    expect(screen.getByText("Times are the club's own.")).toBeInTheDocument();
   });
 });

@@ -214,14 +214,21 @@ export function FullScreenQr(props: {
    * </p>
    */
   useEffect(() => {
-    const root = document.getElementById("root");
-    const wasInert = root?.inert ?? false;
+    const self = dialog.current;
+    // Every SIBLING of this overlay, rather than `#root` by name. The portal renders into
+    // `document.body`, so the app's mount point is one of these — and naming it `#root`
+    // ties a correctness property to an id that exists in `index.html` and in no test
+    // harness, which is a guard that quietly does nothing wherever it is not production.
+    const behind = [...document.body.children].filter((node) => node !== self);
+    const was = behind.map((node) => node.hasAttribute("inert"));
+    for (const node of behind) node.setAttribute("inert", "");
     const body = document.body;
     const wasOverflow = body.style.overflow;
-    if (root) root.inert = true;
     body.style.overflow = "hidden";
     return () => {
-      if (root) root.inert = wasInert;
+      // Restored to what each one WAS, not to a default: another overlay may own an inert
+      // sibling, and clearing somebody else's is how a page ends up permanently unusable.
+      behind.forEach((node, i) => { if (!was[i]) node.removeAttribute("inert"); });
       body.style.overflow = wasOverflow;
     };
   }, []);

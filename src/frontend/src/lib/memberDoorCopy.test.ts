@@ -149,8 +149,41 @@ describe("memberDoorCopy", () => {
     } as Parameters<typeof describeStanding>[0], code);
   }
 
-  /** Every sentence this module can produce, for the probes that must sweep all of them. */
+  /**
+   * Every sentence this module can produce, for the probes that must sweep all of them.
+   *
+   * <p>
+   * Memoised, and that is not premature optimisation. The sweep is a product of eight axes
+   * — policy, membership, detail, admin, early entry, booking, `doors_shut`, code on screen
+   * — and the ban list alone asks for the whole of it fifteen times, once per banned
+   * substring. Recomputed each time, it pushed single `it.each` cases past vitest's
+   * five-second budget whenever the machine was busy with another file, which reads as a
+   * flake rather than as an expensive fixture and gets somebody to add a retry.
+   * </p>
+   */
+  let sentences: string[] | null = null;
   function everySentence(): string[] {
+    return (sentences ??= buildEverySentence());
+  }
+
+  /**
+   * The same list, lowercased once.
+   *
+   * <p>
+   * The ban sweep is fifteen cases over fifty thousand sentences, and lowercasing each
+   * sentence inside each case is three quarters of a million string allocations that
+   * produce the same fifty thousand results every time. Measured: 2.5 s for the first case
+   * and half a second for each of the fourteen after it, which on a busy machine is enough
+   * to push a NEIGHBOURING file's test past vitest's five-second budget — a failure that
+   * points at innocent code and reads as a flake.
+   * </p>
+   */
+  let lowered: string[] | null = null;
+  function everySentenceLowercased(): string[] {
+    return (lowered ??= everySentence().map((sentence) => sentence.toLowerCase()));
+  }
+
+  function buildEverySentence(): string[] {
     const out: string[] = [
       ...Object.values(MEMBER_DOOR_REASON_LINES),
       ...Object.values(DIAGNOSIS_ROW_LABELS),
@@ -198,10 +231,16 @@ describe("memberDoorCopy", () => {
     out.push(offlineDetailsBody(12), offlineDetailsBody(null));
     for (const policy of ["active_member", "booking_window"] as const) {
       for (const membership of ["active", "not_active", "none"] as const) {
-        for (const detail of ["active", "pending_approval", "rejected", "suspended", "none", "lapsed_with_grace"]) {
+        // Three details rather than six, and three early-entry numbers rather than six.
+        // Both axes change exactly one word of one arm — `MEMBERSHIP_DETAIL_WORDS` and
+        // `formatWindowMinutes` — and each has its own one-field probe further down; what
+        // the cross-product buys here is the fallback arm firing beside every other axis,
+        // which a representative three do. The full product was 15,552 standing lines per
+        // call and it is what made this file expensive enough to starve its neighbours.
+        for (const detail of ["active", "suspended", "lapsed_with_grace"]) {
           for (const is_club_admin of [true, false]) {
             // `null` is E-H3's shape: no early-entry window in force under this policy.
-            for (const early_entry_minutes of [0, 1, 30, 90, 240, null]) {
+            for (const early_entry_minutes of [0, 90, null]) {
               for (const next_booking of [null, BOOKING]) {
                 // B4 / E-H1 and E-H2 (1): both new axes, swept like every other, because a
                 // sentence that only exists for a shut door is still a sentence this module
@@ -240,9 +279,12 @@ describe("memberDoorCopy", () => {
   });
 
   it.each(BANNED_IN_MEMBER_DOOR_COPY)("never produces %s from any sentence it can build", (banned) => {
-    for (const sentence of everySentence()) {
-      expect(sentence.toLowerCase()).not.toContain(banned.toLowerCase());
-    }
+    const needle = banned.toLowerCase();
+    // `find` then one assertion, rather than an assertion per sentence: fifty thousand
+    // passing `expect` calls cost more than the sweep itself, and the one that matters —
+    // the sentence that broke the rule — is named either way.
+    const offender = everySentenceLowercased().find((sentence) => sentence.includes(needle));
+    expect(offender, `a sentence this module can build says "${banned}"`).toBeUndefined();
   });
 
   /**

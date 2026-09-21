@@ -1068,8 +1068,13 @@ export function standingFailed(
 ): string {
   const lead = failureLead(failure);
   if (!cached) {
-    return `${lead} This screen can't tell you what its doors need. The code below is the last one it`
-      + " managed to get.";
+    // <b>D1: this arm used to end "The code below is the last one it managed to get", and
+    // the whole point of the finding is that there may be no code below.</b> When BOTH
+    // reads fail on a cold start the page has neither a code nor a door answer, and a
+    // sentence that points at one is the screen inventing something for a member standing
+    // in the dark. What it can say is what it could not do — including that it does not
+    // know whether this club owns a door at all — and where the way in is meanwhile.
+    return `${lead} ${DOOR_SECTION_UNKNOWN}`;
   }
   const ago = cached.minutesAgo <= 1 ? "A minute ago" : `${cached.minutesAgo} minutes ago`;
   return `${lead} ${ago} it said: ${cached.body} That may have changed since.`;
@@ -1113,8 +1118,8 @@ export const DOOR_SECTION_CHECKING = "Checking whether this club's doors need an
  * could not find out, and that whatever the club last gave it is below.
  * </p>
  */
-export const DOOR_SECTION_UNKNOWN = "This screen couldn't reach the club, so it can't tell you what its doors"
-  + " need from you — or whether it has any. Whatever is written on the door is the way in until it can.";
+export const DOOR_SECTION_UNKNOWN = "This screen can't tell you what its doors need from you — or whether this"
+  + " club has any. Whatever is written on the door is the way in until it can.";
 
 /**
  * The walk-up switch's own persistence, said out loud. LOW note.

@@ -142,7 +142,12 @@ export function DoorHistoryCard(props: { onlyWithRows?: boolean } = {}) {
     const node = heading.current;
     if (!node) return;
     node.focus({ preventScroll: true });
-    node.scrollIntoView({ block: "start", behavior: "auto" });
+    // Guarded, and not as a formality. `scrollIntoView` is absent in jsdom and in some
+    // embedded webviews, and an effect that throws is re-thrown by React during commit and
+    // takes the whole tree down with it — so an unguarded convenience here would blank the
+    // member's Profile page on any browser that lacks it. Focus is the half that matters
+    // and it has already happened.
+    node.scrollIntoView?.({ block: "start", behavior: "auto" });
   }, [phase]);
 
   // D11's other half: with the door question unanswered, this card speaks only when it has

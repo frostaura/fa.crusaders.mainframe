@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import MyCodePage from "./MyCode";
 import { encodeQr, qrPath } from "../lib/qr";
 import {
@@ -805,6 +805,13 @@ describe("MyCode at a club with a door", () => {
 
   const fakeClock = () => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
   const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+  /**
+   * A second at a time, the way a real clock does. One long jump processes the timers due
+   * inside it but does not always let each fetch's promise chain settle before the next is
+   * scheduled, so a chain of re-fetches comes out short by one — an artefact of the jump
+   * rather than of the page. The sibling of the helper in the first describe.
+   */
+  const advanceSecondsHere = async (seconds: number) => { for (let i = 0; i < seconds; i++) await advance(1_000); };
 
   const CODE = {
     code: "7K3M9XQ2RD5A",
@@ -2205,5 +2212,327 @@ describe("MyCode at a club with a door", () => {
     expect(qr.className).not.toContain("max-w-xs");
     // And the card's own padding is in pixels, which is the other half of the same fix.
     expect(qr.closest("div.rounded-lg")?.className ?? "").not.toContain("max-w-[min(20rem,100%)]");
+  });
+
+  // --- D1: the door section does not belong to the code read -------------------------
+  //
+  // Each read failing ALONE was handled well, and the two failing together deleted the
+  // whole subject: no door section, no self-check, no link to the member's own record, and
+  // not one tel: or mailto: anywhere on the screen — for the member standing at the door in
+  // the dark, who is the entire reason this surface exists. So the matrix is swept rather
+  // than sampled: two reads, each failing or landing, times a last-known store that is
+  // there or is not.
+
+  /** Every combination of the two reads, with and without something cached. */
+  const READ_COMBINATIONS = [
+    ["both reads land", false, false],
+    ["the code read fails", true, false],
+    ["the door read fails", false, true],
+    ["both reads fail", true, true],
+  ] as const;
+
+  function seedCache() {
+    rememberQr({ ...CODE, expires_in_seconds: 900 } as never);
+    rememberDoor(memberDoorsOnFixture({ policy: "booking_window", next_booking: BOOKING }) as never);
+  }
+
+  it.each(READ_COMBINATIONS.flatMap(([name, codeFails, doorFails]) =>
+    [true, false].map((cached) => [`${name}, ${cached ? "with" : "without"} a cached copy`, codeFails, doorFails, cached] as const)))(
+    "keeps the door section, the self-check, the history link and a way to a human when %s",
+    async (_name, codeFails, doorFails, cached) => {
+      if (cached) seedCache();
+      stubFetch([
+        codeFails
+          ? unreachable("/api/v1/me/qr/generate", "POST")
+          : { method: "POST", path: "/api/v1/me/qr/generate", body: CODE },
+        doorFails
+          ? unreachable("/api/v1/me/door")
+          : { path: "/api/v1/me/door", body: memberDoorsOnFixture({ policy: "booking_window", next_booking: BOOKING }) },
+        { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+      ]);
+      renderPage(<MyCodePage />);
+
+      // The door section exists in every one of the eight, whatever it can say in it.
+      await screen.findByRole("heading", { name: /What opens the door for you right now/ });
+      // The self-check exists, because "the door didn't open" is the question this page is
+      // for and no read failing makes it stop being asked.
+      expect(screen.getByRole("button", { name: "The door didn't open" })).toBeInTheDocument();
+      // The member's own record is one tap away.
+      expect(screen.getByRole("link", { name: "Your door history" })).toBeInTheDocument();
+      // And a way to a human: either a real link, or an honest admission that the page
+      // could not find one — never silence, and never a false negative about the club.
+      const reachable = screen.queryAllByRole("link").some((a) => /^(tel|mailto):/.test(a.getAttribute("href") ?? ""));
+      const admitted = !!document.body.textContent?.match(/couldn't load the club's number|couldn't reach the club/i);
+      expect(reachable || admitted).toBe(true);
+    },
+  );
+
+  /**
+   * And the shape of the one that used to be silent: both reads failed and nothing was ever
+   * cached, so the page had never been told this club HAS a door. It must not conclude that
+   * it has none — that is an answer, and the page does not have one.
+   */
+  it("says it could not find out, rather than that the club has no door, when it never heard either read", async () => {
+    stubFetch([
+      unreachable("/api/v1/me/qr/generate", "POST"),
+      unreachable("/api/v1/me/door"),
+      { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+    ]);
+    renderPage(<MyCodePage />);
+
+    expect(await screen.findByText(/can't tell you what its doors need from you/i))
+      .toHaveTextContent(/or whether this club has any/i);
+    // It does not invent a club with no door, and it does not invent one with doors either.
+    expect(screen.queryByText(/opens the club door/)).toBeNull();
+  });
+
+  /** A club that has genuinely ANSWERED that it has no door stays silent, as it always has. */
+  it("still says nothing at all once the club has answered that it has no door", async () => {
+    stubFetch([
+      unreachable("/api/v1/me/qr/generate", "POST"),
+      { path: "/api/v1/me/door", body: memberDoorFixture() },
+      { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+    ]);
+    renderPage(<MyCodePage />);
+
+    await screen.findByText(/Couldn't get a code/);
+    expect(screen.queryByRole("heading", { name: /What opens the door for you right now/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Your door history" })).toBeNull();
+  });
+
+  // --- D6: a fact from earlier carries its age --------------------------------------
+
+  /**
+   * `useMemberDoor` keeps the last good answer when a later read fails, which is right —
+   * throwing away a true answer because the next request did not land leaves the member
+   * with less. What was wrong is that it went on being rendered in the present tense, with
+   * nothing to say it was from ten minutes ago, beside a code card saying "Run out".
+   */
+  it("says nothing about the age of door facts it can still re-read", async () => {
+    renderBoth(memberDoorsOnFixture({ policy: "active_member" }));
+
+    const heading = await screen.findByRole("heading", { name: /What opens the door for you right now/ });
+    expect(heading.textContent).not.toMatch(/may have changed/);
+  });
+
+  it("marks the door facts as from earlier once it can no longer re-read them", async () => {
+    let doorReads = 0;
+    stubFetch([
+      { method: "POST", path: "/api/v1/me/qr/generate", body: CODE },
+      {
+        path: "/api/v1/me/door",
+        respond: () => {
+          doorReads += 1;
+          // The FIRST read lands, so the page holds a true answer; every one after it
+          // fails, which is the state `useMemberDoor` deliberately keeps that answer
+          // through — and the state in which it used to go on being rendered in the
+          // present tense with nothing to say how old it was.
+          if (doorReads > 1) throw new TypeError("Failed to fetch");
+          return memberDoorsOnFixture({ policy: "active_member" });
+        },
+      },
+      { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+    ]);
+    renderPage(<MyCodePage />);
+
+    await screen.findByRole("heading", { name: /What opens the door for you right now/ });
+    fireEvent.click(screen.getByRole("button", { name: "The door didn't open" }));
+    await waitFor(() => expect(doorReads).toBeGreaterThan(1));
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: /What opens the door for you right now/ }).textContent)
+        .toMatch(/as of \d{2}:\d{2} — may have changed/));
+    // And the sentence itself is still the club's own answer, not an apology in its place.
+    expect(screen.getByText(/Your club opens its doors for any active member/)).toBeInTheDocument();
+  });
+
+  /**
+   * D6, amending A3.2. The card stays until it is superseded or dismissed — a card that
+   * vanishes mid-sentence while a cold member is reading it is the defect that rule exists
+   * for. What A3.2 did not say is that it then stayed at full size and full confidence for
+   * as long as the page was open: a green "The lock released · 10:02" was still the largest
+   * thing on the screen twenty minutes later, over a code that had since run out.
+   */
+  it("ages the decision card and collapses it to one line, still dismissible", async () => {
+    renderBoth(memberDoorsOnFixture({
+      last_decision: memberDoorOfflineDecisionFixture({
+        at: new Date(Date.now() - 12 * 60_000).toISOString(),
+        delivered_at: new Date(Date.now() - 11 * 60_000).toISOString(),
+      }),
+    }));
+
+    expect(await screen.findByText(/12 min ago/)).toBeInTheDocument();
+    // Collapsed: the body of the card is gone, the headline and the stamp are not.
+    expect(screen.getByText(/The lock released/)).toBeInTheDocument();
+    expect(screen.queryByText(/There is no sensor on a door here/)).toBeNull();
+    // And it can still be got rid of. A collapsed card a member cannot dismiss is worse
+    // than a big one they can.
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+  });
+
+  it("keeps a fresh decision at full size, with its body and its age", async () => {
+    renderBoth(memberDoorsOnFixture({
+      last_decision: memberDoorDecisionFixture({ released: true, reason: "ok" }),
+    }));
+
+    expect(await screen.findByText(/There is no sensor on a door here/)).toBeInTheDocument();
+    expect(screen.getByText(/just now/)).toBeInTheDocument();
+  });
+
+  // --- D8 / D10: the code is first, and nothing that comes and goes may move it --------
+
+  /**
+   * <b>D8.</b> The page opened with a heading, a two-line subtitle and a decision card, so
+   * at 320×568 the QR was entirely below the fold: a member at a scanner had to scroll to
+   * find the one thing they opened the page for. jsdom has no layout, so what is held here
+   * is DOCUMENT ORDER — the QR before every explanation — and the Playwright spec measures
+   * the fold itself.
+   *
+   * <p>
+   * <b>D10</b> is the same edit from the other side: a decision arriving moved the QR down
+   * 290 px on a screen somebody was holding against a scanner, and dismissing it moved the
+   * QR back up. Below the code it cannot.
+   * </p>
+   */
+  it("puts the code before every explanation of it, with or without a decision", async () => {
+    renderBoth(memberDoorsOnFixture({
+      last_decision: memberDoorDecisionFixture({ released: true, reason: "ok" }),
+    }));
+
+    await screen.findByText(/The lock released/);
+    const order = (node: Element | null) => [...document.querySelectorAll("*")].indexOf(node!);
+    const qr = order(screen.getByRole("img", { name: /QR code/ }));
+    expect(qr).toBeLessThan(order(screen.getByText(/The lock released/)));
+    expect(qr).toBeLessThan(order(screen.getByText(/Show this to the scanner/)));
+    expect(qr).toBeLessThan(order(screen.getByRole("heading", { name: /What opens the door/ })));
+    expect(qr).toBeLessThan(order(screen.getByRole("checkbox", { name: /Walk up/ })));
+  });
+
+  // --- D12: the full-screen overlay --------------------------------------------------
+
+  it("shows the code's own countdown on the full-screen overlay", async () => {
+    renderBoth(memberDoorsOnFixture());
+    fireEvent.click(await screen.findByRole("button", { name: "Show your code full screen" }));
+
+    const dialog = await screen.findByRole("dialog", { name: /full screen/i });
+    expect(dialog).toHaveTextContent(/Refreshes in 15m 00s/);
+  });
+
+  /**
+   * <b>It used to close itself.</b> The overlay was rendered on `qr && !dead`, so the moment
+   * the code ran out it unmounted: a member holding the phone against a scanner in the dark
+   * had the screen go back to the page by itself, with no explanation, led by whatever card
+   * happened to be at the top. Closing is the member's gesture.
+   */
+  it("stays open when the code dies, and says so where the member is already looking", async () => {
+    fakeClock();
+    // One code, five seconds on it, and every attempt to replace it refused — which is the
+    // member with no signal, holding the phone against a scanner in the dark.
+    let served = 0;
+    stubFetch([
+      {
+        method: "POST",
+        path: "/api/v1/me/qr/generate",
+        respond: () => {
+          served += 1;
+          if (served > 1) throw new TypeError("Failed to fetch");
+          return { ...CODE, expires_in_seconds: 5 };
+        },
+      },
+      { path: "/api/v1/me/door", body: memberDoorsOnFixture() },
+      { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
+    ]);
+    renderPage(<MyCodePage />);
+    await advance(0);
+
+    // `fireEvent` and `advance`, never `findBy`: the async matchers poll on real timers and
+    // deadlock against the fake clock this file runs its expiry tests on.
+    fireEvent.click(screen.getByRole("button", { name: "Show your code full screen" }));
+    await advance(0);
+    expect(screen.getByRole("dialog", { name: /full screen/i })).toBeInTheDocument();
+
+    // Past its expiry, and past the pacing gap that bounds the replacement attempt.
+    await advanceSecondsHere(20);
+
+    const dialog = screen.getByRole("dialog", { name: /full screen/i });
+    expect(dialog).toHaveTextContent(/This code has run out/);
+    expect(dialog).toHaveTextContent(/nothing on this screen for a door or a court box to read/i);
+    // The dead symbol is REPLACED, not dimmed: 40% opacity is a QR that still decodes, and
+    // a member held one up repeatedly while a screen promised a refresh that could not
+    // happen.
+    expect(within(dialog).queryByRole("img", { name: /QR code/ })).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  });
+
+  // --- C9 / D14: the dialog honours what it claims -----------------------------------
+
+  /**
+   * `aria-modal="true"` was a claim this overlay did not honour: Tab walked straight out of
+   * it and through the page underneath — the header, the tab strip, every link on the code
+   * page — while a screen reader went on announcing a dialog. For a keyboard or
+   * screen-reader user that is worse than no dialog semantics at all, because the promise is
+   * what stops them looking for the way out.
+   */
+  it("inerts the page behind the full-screen code and locks the background scroll", async () => {
+    renderBoth(memberDoorsOnFixture());
+    fireEvent.click(await screen.findByRole("button", { name: "Show your code full screen" }));
+    await screen.findByRole("dialog", { name: /full screen/i });
+
+    // Every sibling of the overlay, so the guard does not depend on an id that exists in
+    // index.html and in no test harness.
+    const behind = [...document.body.children].filter((n) => n.getAttribute("role") !== "dialog");
+    expect(behind.length).toBeGreaterThan(0);
+    expect(behind.every((n) => n.hasAttribute("inert"))).toBe(true);
+    expect(document.body.style.overflow).toBe("hidden");
+
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // Restored to what it was, not to a default: another overlay may own them, and
+    // clearing somebody else's lock is how a page ends up permanently unscrollable.
+    expect([...document.body.children].some((n) => n.hasAttribute("inert"))).toBe(false);
+    expect(document.body.style.overflow).toBe("");
+  });
+
+  it("keeps Tab inside the full-screen code", async () => {
+    renderBoth(memberDoorsOnFixture());
+    fireEvent.click(await screen.findByRole("button", { name: "Show your code full screen" }));
+    const dialog = await screen.findByRole("dialog", { name: /full screen/i });
+    const done = within(dialog).getByRole("button", { name: "Done" });
+
+    // From the dialog itself, forward, to its only stop.
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(done);
+    // And from the last stop, forward, back round to the first rather than out to the page.
+    done.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
+  // --- C17 and the LOW list ------------------------------------------------------------
+
+  /**
+   * C17 — the checkbox's accessible NAME was thirty words long, because the whole
+   * explanation sat inside the label. A screen-reader user tabbing past heard the entire
+   * paragraph read out as the name of a checkbox, every time, with no way to skip to the
+   * state.
+   */
+  it("gives the walk-up switch a short name and its explanation as a description", async () => {
+    renderBoth(memberDoorsOnFixture());
+    const box = await screen.findByRole("checkbox", { name: "Walk up / pay for someone" });
+
+    const describedBy = box.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    const explanation = document.getElementById(describedBy!);
+    expect(explanation?.textContent).toMatch(/starting on a free court now/);
+    // The LOW note: it sticks, and it says so. A member who turns it on and finds it still
+    // on concludes the switch is broken; one who is told what it does concludes nothing.
+    expect(explanation?.textContent).toMatch(/Stays on for the rest of this visit/);
+  });
+
+  /** The hint that explains the page's one gesture, at 14px rather than 12. */
+  it("sets the fill-the-screen hint at 14px", async () => {
+    renderBoth(memberDoorsOnFixture());
+    const hint = await screen.findByText(/Tap the code to fill the screen/);
+    expect(hint.className).toContain("text-sm");
+    expect(hint.className).not.toContain("text-xs");
   });
 });
