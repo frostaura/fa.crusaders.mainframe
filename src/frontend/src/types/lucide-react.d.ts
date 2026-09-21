@@ -96,6 +96,9 @@ declare module "lucide-react" {
   // making it. `Printer` is the door card's one control.
   export const DoorClosed: LucideIcon;
   export const Printer: LucideIcon;
+  // item 16 — the onboarding guide's home tile, and the "what happens next" card's heading.
+  export const BookOpen: LucideIcon;
+  export const CalendarCheck: LucideIcon;
 }
 
 // NOTE FOR THE NEXT PERSON WHO ADDS AN ICON: you have to add it above.

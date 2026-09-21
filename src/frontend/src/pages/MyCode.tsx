@@ -45,6 +45,9 @@ import { useCountdownSeconds } from "../components/member-door/useCountdownSecon
 import { useMemberCode } from "../components/member-door/useMemberCode";
 import { useMemberDoor, useShownDecision } from "../components/member-door/useMemberDoor";
 import { SegmentedTabs } from "../components/member-door/CodeTabs";
+// item 16 — the pushed card about the booking in hand, and the way to the whole guide.
+import { WhatsNextCard } from "../components/onboarding/WhatsNextCard";
+import { GUIDE_FROM_CODE, GUIDE_PATH } from "../lib/onboardingCopy";
 
 /**
  * The member's code — what they hold up to the scanner on the court box, and at the
@@ -748,6 +751,27 @@ export default function MyCodePage() {
       )}
 
       <p className="text-sm text-text-secondary">{subtitleFor(doorsClub)}</p>
+
+      {/*
+        Item 16, both halves, directly under the sentence that says what the code is FOR.
+
+        The card is about the booking in hand and is the same component Home renders — one
+        dismissal, one lifetime, two places a member might be standing when they need it. The
+        link is the guide's second recall point, and it is the reason the three sentences in
+        the guide about "if something does not work" are reachable from the screen where
+        something is not working.
+      */}
+      <WhatsNextCard
+        booking={door?.next_booking}
+        timezone={door?.timezone}
+        doors={doorsKnowledge}
+      />
+      <Link
+        to={GUIDE_PATH}
+        className={MEMBER_DOOR_LINK_TAPPABLE}
+      >
+        {GUIDE_FROM_CODE}
+      </Link>
 
       {doorBlocks}
 

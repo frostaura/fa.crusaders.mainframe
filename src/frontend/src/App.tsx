@@ -23,6 +23,7 @@ import AdminSettingsPage from "./pages/AdminSettings";
 import AdminLedgerPage from "./pages/AdminLedger";
 import ProfilePage from "./pages/Profile";
 import MyCodePage from "./pages/MyCode";
+import HowItWorksPage from "./pages/HowItWorks";
 import ReportsPage from "./pages/Reports";
 import { AdminDevicesPage } from "./pages/AdminDevices";
 // doors: admin — the four doors routes and their pages, in one block.
@@ -74,6 +75,13 @@ export default function App() {
                 holding a phone at a locked door. */}
             <Route path="/my-code" element={<RequireAuth><MyCodePage /></RequireAuth>} />
             <Route path="/court-code" element={<Navigate to="/my-code" replace />} />
+            {/*
+              Item 16. Deliberately NOT behind RequireAuth: a member who cannot get their
+              password to work, and an applicant waiting for approval, are exactly the people
+              wondering how any of this works. It reads one thing — whether the club has
+              doors — and that read answers "unknown" for them, which promises nothing.
+            */}
+            <Route path="/how-it-works" element={<HowItWorksPage />} />
             {/* end doors: member */}
             <Route path="/reports" element={<RequireAuth><ReportsPage /></RequireAuth>} />
             <Route path="/admin/members" element={<RequireAuth admin><AdminMembersPage /></RequireAuth>} />

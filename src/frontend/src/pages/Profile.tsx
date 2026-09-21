@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { Camera, Fingerprint, Loader2, Plus, Trash2 } from "lucide-react";
 import { endpoints, ApiError, type WebAuthnCredentialRow } from "../lib/api";
 import { useProfile } from "../lib/profile";
@@ -14,6 +15,8 @@ import { describeFailure } from "../lib/errors";
 // as their record. Gated on the club having a door at all; see MemberDoorHistory below.
 import { DoorHistoryCard } from "../components/member-door/DoorHistoryCard";
 import { useDoorsFlag } from "../components/member-door/useMemberDoor";
+// item 16 — the guide's third recall point. See the note beside the link.
+import { GUIDE_LINK_LABEL, GUIDE_PATH, GUIDE_TILE_HINT } from "../lib/onboardingCopy";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
@@ -204,6 +207,19 @@ export default function ProfilePage() {
       <PasswordCard />
       <MemberDoorHistory />
       <PasskeysCard />
+
+      {/*
+        Item 16's third recall point. NN/g's requirement is that dismissible help stay
+        reachable from a permanent place; the other two are the home tile and the link under
+        the code. This is the one a member reaches for when they are already looking for
+        "where is the thing that explains this", which for most people is the account screen.
+      */}
+      <p className="text-sm text-text-secondary">
+        <Link to={GUIDE_PATH} className="inline-flex min-h-11 items-center text-accent-strong underline underline-offset-2 hover:no-underline">
+          {GUIDE_LINK_LABEL}
+        </Link>
+        {" — "}{GUIDE_TILE_HINT.toLowerCase()}.
+      </p>
     </div>
   );
 }
