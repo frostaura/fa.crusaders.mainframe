@@ -27,6 +27,7 @@
 #include <unity.h>
 
 #include "bridgelogic/AuthPolicy.h"
+#include "bridgelogic/BootId.h"
 #include "bridgelogic/MegaLink.h"
 #include "bridgelogic/OnRetry.h"
 #include "bridgelogic/Relight.h"
@@ -2325,6 +2326,53 @@ void test_the_flat_scan_is_kept_where_it_is_genuinely_wanted() {
   TEST_ASSERT_EQUAL_UINT32(4U, through);
 }
 
+
+// ---------------------------------------------------------------------------
+// B8 — a real per-boot id on this box's events
+// ---------------------------------------------------------------------------
+
+void test_this_boot_has_an_identity_and_it_is_never_the_wires_absent_value() {
+  // Zero is the wire's "this board has no boot identity": renderEventBody omits
+  // the field and the server falls back to (device, seq), which is the defect
+  // round G4's C2 describes. A one-in-four-billion draw must not put one boot of
+  // one board back on it.
+  TEST_ASSERT_EQUAL_UINT32(bridgelogic::kBootIdForZeroDraw, bridgelogic::bootIdFrom(0U));
+  TEST_ASSERT_NOT_EQUAL(0U, bridgelogic::bootIdFrom(0U));
+
+  // Everything else is carried through unchanged: the value is a de-duplication
+  // tag, and folding draws together would make collisions MORE likely.
+  TEST_ASSERT_EQUAL_UINT32(1U, bridgelogic::bootIdFrom(1U));
+  TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFFUL, bridgelogic::bootIdFrom(0xFFFFFFFFUL));
+  TEST_ASSERT_EQUAL_UINT32(0x5A5A5A5AUL, bridgelogic::bootIdFrom(0x5A5A5A5AUL));
+
+  // And it reaches the wire. The same event, the same seq, two boots: the
+  // bodies must differ, or a renumbered board's whole evening is receipted as
+  // duplicates of the previous one's.
+  eventq::Event event;
+  event.kind = eventq::Kind::Activation;
+  event.court = 1U;
+  event.method = eventq::Method::Qr;
+  event.durationMs = 2700000UL;
+  event.uptimeMs = 1000U;
+  event.seq = 7U;
+  static_cast<void>(event.setSubject("TOKALICE"));
+
+  char first[devlink::kEventBodyCap] = {};
+  char second[devlink::kEventBodyCap] = {};
+  TEST_ASSERT_TRUE(devlink::renderEventBody(first, sizeof(first), "aabbccddeeff",
+                                            bridgelogic::bootIdFrom(0x11223344UL), 2000U, event) > 0U);
+  TEST_ASSERT_TRUE(devlink::renderEventBody(second, sizeof(second), "aabbccddeeff",
+                                            bridgelogic::bootIdFrom(0x55667788UL), 2000U, event) > 0U);
+  TEST_ASSERT_NOT_NULL(strstr(first, "boot_id"));
+  TEST_ASSERT_TRUE(strcmp(first, second) != 0);
+
+  // Zero is what the box used to send, and it omits the field entirely — which
+  // is the compatibility hinge, and is why passing 0 fixed nothing.
+  char legacy[devlink::kEventBodyCap] = {};
+  TEST_ASSERT_TRUE(devlink::renderEventBody(legacy, sizeof(legacy), "aabbccddeeff", 0U, 2000U, event) > 0U);
+  TEST_ASSERT_NULL(strstr(legacy, "boot_id"));
+}
+
 } // namespace
 
 void setUp() {
@@ -2409,6 +2457,7 @@ int main(int, char**) {
   RUN_TEST(test_activate_reads_every_field_it_acts_on_from_the_top_level);
   RUN_TEST(test_walkup_reads_every_field_it_acts_on_from_the_top_level);
   RUN_TEST(test_the_flat_scan_is_kept_where_it_is_genuinely_wanted);
+  RUN_TEST(test_this_boot_has_an_identity_and_it_is_never_the_wires_absent_value);
   RUN_TEST(test_relight_adopts_the_megas_remaining_seconds_so_a_lost_ext_is_re_sent);
   RUN_TEST(test_state_seconds_parse_decimal_and_refuse_everything_else);
   RUN_TEST(test_a_rescan_on_a_court_this_box_already_lit_is_not_a_second_grant);

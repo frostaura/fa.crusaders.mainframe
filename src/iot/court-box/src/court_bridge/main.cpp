@@ -88,6 +88,7 @@
 #include "arduino_hal/LittleFsStore.h"
 #include "arduino_hal/SerialTransport.h"
 #include "bridgelogic/AuthPolicy.h"
+#include "bridgelogic/BootId.h"
 #include "bridgelogic/MegaLink.h"
 #include "bridgelogic/OnRetry.h"
 #include "bridgelogic/Relight.h"
@@ -216,6 +217,24 @@ char gMacHex[dc::hex::encodedSize(6U)];
 /// per call because it is the same string for the life of the image and the
 /// heap it would churn is shared with the network stack.
 char gAuthHeader[devapi::kAuthorizationBufSize] = {};
+
+/// THIS BOOT'S IDENTITY — the third field of the server's idempotency key.
+///
+/// Drawn once in setup(), after WiFi.begin(), and read-only thereafter. The ESP
+/// hardware RNG (RANDOM_REG32) is fed by RF noise and is only well distributed
+/// once the radio is up, which is why it is not a static initialiser: this is a
+/// de-duplication tag rather than a credential, so "well distributed enough
+/// that two consecutive boots differ" is the whole requirement, but drawing it
+/// before WiFi.begin() would not even meet that.
+///
+/// Zero is the wire's "no boot identity" and is what this file used to pass. It
+/// omits the field, the server falls back to (device, seq), and a torn
+/// sequence checkpoint therefore renumbers the box from 1 and has every event
+/// of the next evening receipted as a duplicate — including the `boot` event
+/// queued so an operator can see the restart. Under charge-at-booking that is
+/// the no-show sweep refunding and penalising members who played. The
+/// never-zero rule is bridgelogic::bootIdFrom's, where a test can reach it.
+uint32_t gBootId = bridgelogic::kBootIdForZeroDraw;
 
 /// The Mega's uptime from the last `!PONG`, so a restart can be detected and
 /// the identity screen repainted. The Mega clears its screen on reset.
@@ -1013,13 +1032,11 @@ void drainEvents(uint32_t nowMs) {
   // filtered out of the host test build, so a wrap bug here is a wrap bug no
   // test can reach (review 3, finding 25).
   char body[devlink::kEventBodyCap];
-  // BOOT ID 0, WHICH OMITS THE FIELD AND KEEPS THIS BOX'S WIRE BODY EXACTLY
-  // AS IT HAS ALWAYS BEEN. The server reads an absent `boot_id` as 0, which is
-  // what (device, seq) always meant — so nothing about this box changes, and
-  // nothing about it is fixed either: the torn-mark renumbering round G4's C2
-  // describes is a court-box defect too, and closing it here is a wire change
-  // to the http/ corpus family and a second lane's work. Owed, not done.
-  if (devlink::renderEventBody(body, sizeof(body), gMacHex, 0U, gUptime.value(), event) == 0U) {
+  // THIS BOOT'S ID, not the literal 0 that stood here with a comment saying the
+  // fix was owed. 0 omits the field and gives the server the old (device, seq)
+  // key, so the torn-checkpoint renumbering round G4's C2 describes was a
+  // court-box defect exactly as it was a gate defect. See gBootId.
+  if (devlink::renderEventBody(body, sizeof(body), gMacHex, gBootId, gUptime.value(), event) == 0U) {
     // Unrenderable. The caps make this unreachable — the longest possible body
     // is well under half the buffer — but if it ever happened, KEEPING the event
     // would pin every later one behind it forever and the box would stop
@@ -1148,6 +1165,9 @@ void setup() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   setupIdentity();
+
+  // After WiFi.begin(), because RANDOM_REG32 is fed by RF noise. See gBootId.
+  gBootId = bridgelogic::bootIdFrom(RANDOM_REG32);
 
   const uint32_t now = gClock.nowMs();
   gUptime.seed(now);
