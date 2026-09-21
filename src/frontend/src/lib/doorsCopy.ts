@@ -188,12 +188,96 @@ export function removedDoorsCapNotice(shown: number): string | null {
  * falling back to the page length is how the wrong number got printed in the first place.
  * </p>
  */
-export function doorLogCountLine(showing: number, total: number | null): string {
+export function doorLogCountLine(
+  showing: number, total: number | null, more = true,
+): string {
   const scans = showing === 1 ? "scan" : "scans";
-  if (total === null) return `Showing ${showing} ${scans} so far, newest first.`;
+  if (total === null) {
+    // A-M9 / R3-20: "so far" was printed at the END of the list too, so an admin who had
+    // pressed "Load older scans" until it went away still could not tell whether they were
+    // looking at all of them. `more` is whether the API handed back another cursor — the one
+    // fact that settles it — and with no cursor left the page HAS the total: it is what is
+    // on screen. It is not invented from a page length; it is the end of the range.
+    return more
+      ? `Showing ${showing} ${scans} so far, newest first.`
+      : `Showing all ${showing} ${scans} in this range, newest first.`;
+  }
   if (showing >= total) return `Showing all ${plural(total, "scan")} in this range, newest first.`;
   return `Showing ${showing} of ${plural(total, "scan")} in this range, newest first.`;
 }
+
+/**
+ * <b>E6 / R3-19 — the heading said "All scans, all doors" over a filtered log.</b>
+ *
+ * <p>
+ * It is the one line a reader takes the page's meaning from, it is what a printed or
+ * screenshotted page is read as afterwards, and it was a constant. An admin filtering to one
+ * door's refusals on Tuesday, screenshotting it for a committee, handed over a picture headed
+ * "All scans, all doors" — which is a caption that contradicts its own contents.
+ * </p>
+ *
+ * <p>
+ * Every clause is omitted when the filter is at its default, so the unfiltered page reads
+ * exactly as it always did and an admin who has narrowed nothing is not made to read a
+ * sentence about it.
+ * </p>
+ */
+export function doorLogHeading(filters: {
+  doorName: string | null;
+  outcomeLabel: string | null;
+  rangeLabel: string | null;
+}): string {
+  const what = filters.outcomeLabel ? `${filters.outcomeLabel} scans` : "All scans";
+  const where = filters.doorName ? `at ${filters.doorName}` : "all doors";
+  const head = `${what}, ${where}`;
+  return filters.rangeLabel ? `${head} — ${filters.rangeLabel.toLowerCase()}` : head;
+}
+
+/**
+ * <b>A-C2 / R3-13 — a stale door link, and the three lies it told at once.</b>
+ *
+ * <p>
+ * `/admin/doors/log?door=<an id that is no longer a door>` showed "All doors" in the picker,
+ * "No scans at any door in the last 24 hours" on the page, and exported a nought-row CSV
+ * under the ordinary filename. Each of those is a claim about the CLUB derived from a filter
+ * pointing at nothing — and the sentence in the middle is the one a committee reads as "the
+ * doors recorded nothing that night".
+ * </p>
+ *
+ * <p>
+ * The link is not rare: it is what every bookmark, every emailed link and every browser
+ * history entry pointing at a door becomes the day that board is replaced. The rows are still
+ * there — deleting a door deletes no scans — and the sentence says both halves: this filter
+ * matches nothing, and the records were not destroyed.
+ * </p>
+ */
+export const LOG_DOOR_GONE = "That door is no longer on the club's list, so this filter matches"
+  + " nothing. It is not that nothing happened: a deleted door's past scans are kept until the"
+  + " club's retention rule takes them.";
+
+export const LOG_DOOR_GONE_HINT = "Pick it under “Removed doors” if it is there, or choose All"
+  + " doors.";
+
+/**
+ * Said where the CSV button is, instead of the button, while the filter names no real door.
+ *
+ * A-C2's third lie: the export ran, produced a nought-row file under the ordinary filename,
+ * and said nothing. A file named for the club's whole log and holding nothing is the worst of
+ * the three, because it outlives the screen that produced it.
+ */
+export const LOG_CSV_BLOCKED_DOOR_GONE = "There is nothing to export while the door filter names"
+  + " a door the club no longer has — a file of nought rows under the usual name is worse than"
+  + " no file.";
+
+/**
+ * <b>A-L3 / R3-12 — "A specific day" with no day chosen listed the last 24 hours.</b>
+ *
+ * The page fell back to its default period, so the When control said one thing and the rows
+ * were another — and the rows were a rolling window presented as a calendar day. It asks for
+ * the day instead and lists nothing.
+ */
+export const LOG_PICK_A_DAY = "Pick a day to see its scans. Nothing is listed until you do — the"
+  + " rows below would be the last 24 hours, which is not the day you asked for.";
 
 /** The row's whole door clause — the name, and the removal said once after it. */
 export function doorRowName(door: DoorLogDoor | null | undefined): string {
@@ -669,6 +753,45 @@ export function doorCsvDownloaded(rows: number | null, truncated = false): strin
       + " in this range were left out. Narrow the range to get the rest.";
   }
   return `${plural(rows, "scan")} downloaded.`;
+}
+
+/**
+ * <b>A-H2 / R3-14 — the export failed and there was no word of it anywhere.</b>
+ *
+ * <p>
+ * Offline, or on a 500, the button went back to "Download CSV" and nothing else on the page
+ * changed. The toast the handler pushes is not enough on its own and the reviewer proved why:
+ * it floats above the content, it times out, and on the one action whose whole output is a
+ * file that either exists or does not, a message that has already gone is the same as no
+ * message. So the failure is also stated beside the button, where it stays until the next
+ * attempt, and it says the thing a toast never said — that no file was written.
+ * </p>
+ */
+export function doorCsvFailed(reason: string): string {
+  return `${reason} No file was downloaded — nothing has been exported, and nothing at the doors`
+    + " has changed. Try again, or narrow the range if this keeps happening.";
+}
+
+/**
+ * <b>A-M7 / R3-14 — a door was deleted and the next screen said nothing about it.</b>
+ *
+ * <p>
+ * The toast is pushed and then the page navigates, which unmounts the toast host's contents
+ * on the route change — so the confirmation for the single most destructive control on the
+ * surface was, in practice, invisible. An admin arrived back at a list of doors with one
+ * fewer row and no statement that the club had done it, which on a page that also polls looks
+ * exactly like a board that has dropped off.
+ * </p>
+ *
+ * <p>
+ * It carries the two facts a delete's own confirm promised: the scans are not gone, and the
+ * board is not locked out.
+ * </p>
+ */
+export function doorDeletedNotice(name: string): string {
+  return `${name} was deleted. Its past scans are still in the club log under its old name, and`
+    + " the board still has the club's key — it reappears here as a new door with nothing filled"
+    + " in the next time it calls in. Unplug it if you meant to retire it.";
 }
 
 /** Under the last row, when there is no further cursor. */

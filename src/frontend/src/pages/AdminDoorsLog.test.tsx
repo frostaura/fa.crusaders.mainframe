@@ -169,13 +169,42 @@ describe("the club door log", () => {
   });
 
   /** A typo in a shared link is not turned into a failed read: the API answers 400 `day_invalid`. */
-  it("does not send a malformed day", async () => {
+  /**
+   * <b>A-L3 / R3-12 supersedes the second half of this.</b>
+   *
+   * A malformed `?day=` still never reaches the API — that part is unchanged and is why the
+   * request is checked at all. What has changed is what the page does INSTEAD: it used to
+   * fall back to `period=last_24h`, so the When control read "A specific day" over a rolling
+   * window, with nothing on the page reconciling the two. It asks for the day now and lists
+   * nothing.
+   */
+  it("does not send a malformed day, and does not quietly list something else", async () => {
     const { stub } = open([doorLogFixture()], {}, ["/admin/doors/log?range=day&day=20-09-2026"]);
 
     await screen.findByLabelText("Which day");
-    const read = new URL(`http://x${stub.calls.find((c) => c.path.includes("/doors/activity"))!.path}`);
-    expect(read.searchParams.get("day")).toBeNull();
-    expect(read.searchParams.get("period")).toBe("last_24h");
+    expect(stub.calls.find((c) => c.path.includes("/doors/activity"))).toBeUndefined();
+    expect(screen.getByRole("status")).toHaveTextContent("Pick a day to see its scans");
+    expect(document.body.textContent).not.toContain("Showing 1 scan");
+  });
+
+  /**
+   * <b>C-H2 / R3-12 — the date field could not be typed into.</b>
+   *
+   * Every keystroke went to the query string, so a typed date published `day=2`, `day=20`,
+   * `day=200920-02-06` … to a bookmarkable URL, one request each, losing the reader's place
+   * in between. The field holds its own draft and only a complete club day is committed.
+   */
+  it("does not commit a half-typed day to the URL", async () => {
+    const { stub } = open([doorLogFixture()], {}, ["/admin/doors/log?range=day"]);
+
+    const field = await screen.findByLabelText("Which day");
+    fireEvent.change(field, { target: { value: "200920-02-06" } });
+    fireEvent.change(field, { target: { value: "2026-09-20" } });
+
+    const days = stub.calls
+      .filter((c) => c.path.includes("/doors/activity"))
+      .map((c) => new URL(`http://x${c.path}`).searchParams.get("day"));
+    expect(days).toEqual(["2026-09-20"]);
   });
 
   /**
@@ -505,7 +534,9 @@ describe("the club door log", () => {
       doorLogFixture({ at: ago(120), action: "doors.shut_all", reason: null }),
     ]);
 
-    expect(await screen.findByText(/Showing 1 scan so far/)).toBeInTheDocument();
+    // R3-20: "so far" at the END of a list is what the reviewer could not get past — there
+    // is no further cursor here, so the page knows it is showing all of them.
+    expect(await screen.findByText(/Showing all 1 scan in this range/)).toBeInTheDocument();
     expect(screen.queryByText(/Someone changed this door's details/)).toBeNull();
     expect(screen.queryByText(/Every door was shut together/)).toBeNull();
   });
@@ -775,7 +806,10 @@ describe("the club door log", () => {
     ]);
     renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/doors/log"] });
 
-    expect(await screen.findByText("Showing 1 scan so far, newest first.")).toBeInTheDocument();
+    // R3-20: no total from the API AND no further cursor — so the page does know, and says
+    // "all". "So far" is reserved for a list that genuinely has more behind it.
+    expect(await screen.findByText("Showing all 1 scan in this range, newest first."))
+      .toBeInTheDocument();
   });
 
   /**
@@ -789,7 +823,8 @@ describe("the club door log", () => {
       doorLogFixture({ at: ago(60), action: "device.updated", reason: null }),
     ]);
 
-    expect(await screen.findByText("Showing 1 scan so far, newest first.")).toBeInTheDocument();
+    expect(await screen.findByText("Showing all 1 scan in this range, newest first."))
+      .toBeInTheDocument();
     expect(document.body.textContent).not.toContain("of 2 scans");
   });
 
@@ -874,5 +909,167 @@ describe("the club door log", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(stub.calls.filter((c) => c.path.includes("/doors/activity")).length).toBe(before);
     vi.useRealTimers();
+  });
+});
+
+/**
+ * <b>A-C2 / R3-13 — the stale door link, and the three lies it told at once.</b>
+ *
+ * <p>
+ * A bookmark, an emailed link or a browser-history entry pointing at a door becomes this the
+ * day that board is replaced. The picker showed "All doors", the page said "No scans at any
+ * door in the last 24 hours", and the CSV exported nought rows under the ordinary filename.
+ * The middle one is the sentence a committee reads as "the doors recorded nothing that
+ * night", and the records were there the whole time.
+ * </p>
+ */
+describe("the club door log, filtered to a door that is gone", () => {
+  beforeEach(() => { vi.useRealTimers(); });
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  const GONE = "11111111-2222-3333-4444-555555555555";
+
+  const openGone = (opts: { refuses: boolean }) => {
+    const server = doorsServer([doorFixture()], { activity: [] });
+    const whoami = signIn({ isAdmin: true });
+    const routes = [
+      { path: "/api/v1/whoami", body: whoami },
+      { path: "/api/v1/wallet", body: { balance_credits: 0 } },
+      { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
+      ...server.routes,
+    ];
+    if (opts.refuses) {
+      // WIRE-R3 §4, as the backend lane is landing it.
+      routes.push({
+        path: "/api/v1/admin/doors/activity",
+        status: 400,
+        body: { error: "door_not_found" },
+      } as (typeof routes)[number]);
+    }
+    const stub = stubFetch(routes);
+    renderPage(<AdminDoorsLogPage />, { initialEntries: [`/admin/doors/log?door=${GONE}`] });
+    return { stub };
+  };
+
+  it("says the door is gone rather than that nothing happened at any door", async () => {
+    openGone({ refuses: true });
+
+    expect(await screen.findByText(/no longer on the club's list/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("No scans at any door");
+    // The half a committee needs: the records were not destroyed with the board.
+    expect(document.body.textContent).toContain("past scans are kept");
+  });
+
+  /**
+   * <b>And against the backend that is deployed today.</b> An older API answers 200 with an
+   * empty page for an unknown id — which is the exact shape that produced "No scans at any
+   * door". A fix that only works once the backend lands is a page that is wrong for as long
+   * as the two lanes are out of step.
+   */
+  it("says the same thing when the API answers 200 and nothing", async () => {
+    openGone({ refuses: false });
+
+    expect(await screen.findByText(/no longer on the club's list/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("No scans at any door");
+  });
+
+  it("does not offer an export that would write a nought-row file under the usual name", async () => {
+    openGone({ refuses: true });
+
+    await screen.findByText(/no longer on the club's list/);
+    expect(screen.queryByRole("button", { name: /Download CSV/ })).toBeNull();
+    expect(document.body.textContent).toContain("nothing to export");
+  });
+
+  it("offers the way out, and taking it shows the club's doors again", async () => {
+    openGone({ refuses: true });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Show all doors" }));
+
+    await waitFor(() => {
+      expect(document.body.textContent).not.toContain("no longer on the club's list");
+    });
+  });
+});
+
+/**
+ * <b>E6 / R3-19 — the heading was a constant over a filtered page.</b>
+ *
+ * It is the line a screenshot of this page is read as afterwards, and an admin who filtered
+ * to one door's refusals and sent it to a committee sent a picture captioned "All scans, all
+ * doors".
+ */
+describe("the club door log's heading", () => {
+  beforeEach(() => { vi.useRealTimers(); });
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  const openAt = (entry: string) => {
+    const server = doorsServer([doorFixture()], { activity: [doorLogFixture()] });
+    const whoami = signIn({ isAdmin: true });
+    stubFetch([
+      { path: "/api/v1/whoami", body: whoami },
+      { path: "/api/v1/wallet", body: { balance_credits: 0 } },
+      { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
+      ...server.routes,
+    ]);
+    renderPage(<AdminDoorsLogPage />, { initialEntries: [entry] });
+  };
+
+  it("still reads All scans, all doors when nothing is narrowed", async () => {
+    openAt("/admin/doors/log");
+
+    expect(await screen.findByRole("heading", { level: 1 }))
+      .toHaveTextContent("All scans, all doors");
+  });
+
+  it("names the door, the outcome and the range it is actually showing", async () => {
+    openAt(`/admin/doors/log?door=${DOOR_ID}&outcome=refused&range=yesterday`);
+
+    const heading = await screen.findByRole("heading", { level: 1 });
+    expect(heading).toHaveTextContent("Refused scans, at Side door — yesterday");
+    expect(heading.textContent).not.toContain("all doors");
+  });
+});
+
+/**
+ * <b>A-H2 / R3-14 — the export failed and the page said nothing at all.</b>
+ *
+ * <p>
+ * Offline, or on a 500, the button went back to "Download CSV" and the screen was identical
+ * before and after. The handler does push a toast — but a toast floats above the content and
+ * times out, and on the one action whose whole output is a file that either exists or does
+ * not, a message that has already gone is the same as no message. The reviewer pressed it
+ * offline and could not tell the failure from a browser that had saved the file silently.
+ * </p>
+ */
+describe("the club door log's export, when it fails", () => {
+  beforeEach(() => { vi.useRealTimers(); });
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  it("says so on the page, and says that no file was written", async () => {
+    const server = doorsServer([doorFixture()], { activity: [doorLogFixture()] });
+    const whoami = signIn({ isAdmin: true });
+    stubFetch([
+      { path: "/api/v1/whoami", body: whoami },
+      { path: "/api/v1/wallet", body: { balance_credits: 0 } },
+      { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
+      // BEFORE the server's own CSV route: the stub sorts by prefix LENGTH and these two are
+      // the same path, so declaration order decides and the first one wins.
+      { path: "/api/v1/admin/doors/activity.csv", status: 500, body: { error: "boom" } },
+      ...server.routes,
+    ]);
+    renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/doors/log"] });
+
+    fireEvent.click(await screen.findByRole("button", { name: /Download CSV/ }));
+
+    // TWO of them, and that is the assertion: the toast (which floats and times out) AND a
+    // sentence in the page's own flow beside the button, which is what is still there when an
+    // admin looks for the file. The page one is the `role="alert"` inside `#main-content`;
+    // finding exactly one there is what proves the toast is not being counted as the fix.
+    await screen.findAllByText(/No file was downloaded/);
+    const onPage = screen.getByRole("button", { name: /Download CSV/ })
+      .parentElement!.querySelector('[role="alert"]')!;
+    expect(onPage.textContent).toContain("No file was downloaded");
+    expect(onPage.textContent).toContain("nothing at the doors has changed");
   });
 });
