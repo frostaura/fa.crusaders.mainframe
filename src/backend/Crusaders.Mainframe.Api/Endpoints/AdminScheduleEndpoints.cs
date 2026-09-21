@@ -6,43 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
 
-/// <summary>One date of a schedule, skipped or re-timed.</summary>
-public sealed record ScheduleOccurrenceRequest(
-    bool Skip = false, string? Start = null, string? End = null, string? Reason = null);
-
-/// <summary>Ending a series. <c>effectiveFrom</c> is clamped to never be earlier than the club's today.</summary>
-public sealed record ScheduleEndRequest(DateOnly? EffectiveFrom = null, string? Reason = null);
-
-/// <summary>A this-and-future edit.</summary>
-public sealed record ScheduleUpdateRequest(
-    string? Name, string? Label, IReadOnlyList<string>? Days, string? Start, string? End,
-    DateOnly? StartDate, DateOnly? EndDate, short IntervalWeeks = 1,
-    IReadOnlyList<Guid>? Courts = null, DateOnly? EffectiveFrom = null, string? Reason = null)
-{
-    public ScheduleRequest AsRequest()
-        => new(Name, Label, Days, Start, End, StartDate, EndDate, IntervalWeeks, Courts);
-}
-
-
-/// <summary>
-/// Everything a schedule handler resolves from the container, bound as one parameter.
-///
-/// <para>
-/// <b>Not tidiness — the complexity gate caps a signature at six arguments</b>
-/// (<c>lizard -a 6</c> in the Makefile), and a schedule write genuinely needs the context, the
-/// settings, the service, the recorder and the tenant alongside its request body and its
-/// cancellation token. <c>[AsParameters]</c> is the framework's own answer to that, and it
-/// keeps the alternative — resolving services out of <c>HttpContext.RequestServices</c> by
-/// hand — out of the handlers, where it would hide the dependencies from the DI graph.
-/// </para>
-/// </summary>
-public sealed record ScheduleDeps(
-    MainframeDbContext Db,
-    TenantSettingsAccessor Settings,
-    BookingScheduleService Schedules,
-    AdminChangeRecorder Recorder,
-    ITenantContext Tenant);
-
 /// <summary>
 /// GOAL item 14's wire — "schedule bookings over a calendar… for example league matches or
 /// practice. Repeating schedule support. Verification of no overlap… Past remains unchanged".
@@ -330,25 +293,10 @@ public static class AdminScheduleEndpoints
         var view = await settings.GetAsync(ct);
         var (zone, _, _) = DoorClock.ZoneOf(view);
 
-        if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", null,
-                System.Globalization.DateTimeStyles.None, out var occurrenceDate))
-        {
-            return Results.BadRequest(new { error = DoorPeriod.DayInvalid });
-        }
+        var (occurrenceDate, row, guard) = await ResolveOccurrenceAsync(id, date, zone, db, ct);
+        if (guard is not null) return guard;
 
-        var row = await db.BookingSchedules.FirstOrDefaultAsync(s => s.Id == id, ct);
-        if (row is null) return Results.NotFound(new { error = ScheduleRequestParsing.NotFound });
-
-        if (ScheduleClock.InstantAt(zone, occurrenceDate, row.StartMinute) <= DateTimeOffset.UtcNow)
-        {
-            return Results.Conflict(new
-            {
-                error = ScheduleRequestParsing.OccurrenceInPast,
-                occurrence_date = occurrenceDate,
-            });
-        }
-
-        var (start, end, timesBad) = OverrideTimes(req, row, view);
+        var (start, end, timesBad) = OverrideTimes(req, row!, view);
         if (timesBad is { } bad) return bad;
 
         var actorId = ctx.User.Id() ?? Guid.Empty;
@@ -357,7 +305,7 @@ public static class AdminScheduleEndpoints
 
         var exception = existing ?? new BookingScheduleException
         {
-            TenantId = row.TenantId,
+            TenantId = row!.TenantId,
             ScheduleId = id,
             OccurrenceDate = occurrenceDate,
             CreatedByUserId = actorId,
@@ -376,7 +324,7 @@ public static class AdminScheduleEndpoints
             ActorUserId: actorId,
             SubjectKind: AdminChangeSubjects.Schedule,
             SubjectId: id,
-            SubjectLabel: row.Name,
+            SubjectLabel: row!.Name,
             Reason: exception.Reason,
             After: req.Skip
                 ? new { occurrence_date = occurrenceDate.ToString("yyyy-MM-dd") }
@@ -391,7 +339,7 @@ public static class AdminScheduleEndpoints
         // The date's own rows go, then the series is written again — which re-creates this
         // date at the overridden times, or not at all if it was skipped.
         await schedules.CancelOccurrenceAsync(id, occurrenceDate, ct);
-        var outcome = await schedules.MaterialiseAsync(row, ct);
+        var outcome = await schedules.MaterialiseAsync(row!, ct);
 
         return Results.Ok(new
         {
@@ -399,6 +347,45 @@ public static class AdminScheduleEndpoints
             status = req.Skip ? "skipped" : "overridden",
             rows_created = outcome.RowsWritten,
         });
+    }
+
+    /// <summary>
+    /// The date and the schedule an occurrence route names, or the refusal that stops it.
+    ///
+    /// <para>
+    /// Three guards, extracted from the handler because together they put it past the
+    /// complexity gate: the date must parse, the schedule must be this club's, and the
+    /// occurrence must not have started. The last is the one that matters — a date that was
+    /// played, checked into, or that had a member's booking cancelled to make room for it is a
+    /// fact, and a schedule edit must not rewrite the evidence.
+    /// </para>
+    /// </summary>
+    private static async Task<(DateOnly Date, BookingSchedule? Schedule, IResult? Refusal)>
+        ResolveOccurrenceAsync(
+            Guid id, string date, TimeZoneInfo zone, MainframeDbContext db, CancellationToken ct)
+    {
+        if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", null,
+                System.Globalization.DateTimeStyles.None, out var occurrenceDate))
+        {
+            return (default, null, Results.BadRequest(new { error = DoorPeriod.DayInvalid }));
+        }
+
+        var row = await db.BookingSchedules.FirstOrDefaultAsync(s => s.Id == id, ct);
+        if (row is null)
+        {
+            return (occurrenceDate, null, Results.NotFound(new { error = ScheduleRequestParsing.NotFound }));
+        }
+
+        if (ScheduleClock.InstantAt(zone, occurrenceDate, row.StartMinute) <= DateTimeOffset.UtcNow)
+        {
+            return (occurrenceDate, row, Results.Conflict(new
+            {
+                error = ScheduleRequestParsing.OccurrenceInPast,
+                occurrence_date = occurrenceDate,
+            }));
+        }
+
+        return (occurrenceDate, row, null);
     }
 
     private static async Task<IResult> EndAsync(
@@ -544,48 +531,75 @@ public static class AdminScheduleEndpoints
     }
 
     /// <summary>The changed-keys snapshot the change record diffs. snake_case, to match the renderer.</summary>
-    private static object Snapshot(ScheduleSpec spec) => new
+    private static object Snapshot(ScheduleSpec spec)
     {
-        name = spec.Name,
-        label = spec.Label,
-        days_of_week = spec.DaysOfWeek,
-        start_minute = spec.StartMinute,
-        end_minute = spec.EndMinute,
-        start_date = spec.StartDate.ToString("yyyy-MM-dd"),
-        end_date = spec.EndDate?.ToString("yyyy-MM-dd"),
-        interval_weeks = spec.IntervalWeeks,
-        courts = spec.CourtIds.Count,
-    };
+        // Block body rather than an expression body, for the lizard reason in
+        // memory/gotchas.md: lizard's C# parser cannot follow an expression body whose
+        // value carries braces (`=> new { … }`, `=> x switch { … }`). It loses scope and
+        // emits a *global* pseudo-function spanning the whole FILE, which then trips the
+        // 200-line gate on any file long enough to matter.
+        return new
+        {
+            name = spec.Name,
+            label = spec.Label,
+            days_of_week = spec.DaysOfWeek,
+            start_minute = spec.StartMinute,
+            end_minute = spec.EndMinute,
+            start_date = spec.StartDate.ToString("yyyy-MM-dd"),
+            end_date = spec.EndDate?.ToString("yyyy-MM-dd"),
+            interval_weeks = spec.IntervalWeeks,
+            courts = spec.CourtIds.Count,
+        };
+    }
 
-    private static object ProjectPreview(SchedulePreview preview, TenantSettingsView view) => new
+    private static object ProjectPreview(SchedulePreview preview, TenantSettingsView view)
     {
-        occurrences = preview.Occurrences,
-        first = preview.First,
-        last = preview.Last,
-        rows_to_create = preview.RowsToCreate,
-        max_rows = ScheduleSettings.MaxRowsPerChange(view),
-        conflicts = preview.Conflicts.Select(ProjectConflict).ToList(),
-    };
+        // Block body rather than an expression body, for the lizard reason in
+        // memory/gotchas.md: lizard's C# parser cannot follow an expression body whose
+        // value carries braces (`=> new { … }`, `=> x switch { … }`). It loses scope and
+        // emits a *global* pseudo-function spanning the whole FILE, which then trips the
+        // 200-line gate on any file long enough to matter.
+        return new
+        {
+            occurrences = preview.Occurrences,
+            first = preview.First,
+            last = preview.Last,
+            rows_to_create = preview.RowsToCreate,
+            max_rows = ScheduleSettings.MaxRowsPerChange(view),
+            conflicts = preview.Conflicts.Select(ProjectConflict).ToList(),
+        };
+    }
 
-    private static object ProjectConflict(ScheduleConflict c) => new
+    private static object ProjectConflict(ScheduleConflict c)
     {
-        occurrence_date = c.OccurrenceDate,
-        court_id = c.CourtId,
-        court_name = c.CourtName,
-        starts_at = c.StartsAt,
-        ends_at = c.EndsAt,
-        booking_id = c.BookingId,
-        status = c.Status,
-        kind = c.Kind,
-        label = c.Label,
-        member_name = c.MemberName,
-        amount_credits = c.AmountCredits,
-        would_refund_credits = c.WouldRefundCredits,
-    };
+        // Block body rather than an expression body, for the lizard reason in
+        // memory/gotchas.md: lizard's C# parser cannot follow an expression body whose
+        // value carries braces (`=> new { … }`, `=> x switch { … }`). It loses scope and
+        // emits a *global* pseudo-function spanning the whole FILE, which then trips the
+        // 200-line gate on any file long enough to matter.
+        return new
+        {
+            occurrence_date = c.OccurrenceDate,
+            court_id = c.CourtId,
+            court_name = c.CourtName,
+            starts_at = c.StartsAt,
+            ends_at = c.EndsAt,
+            booking_id = c.BookingId,
+            status = c.Status,
+            kind = c.Kind,
+            label = c.Label,
+            member_name = c.MemberName,
+            amount_credits = c.AmountCredits,
+            would_refund_credits = c.WouldRefundCredits,
+        };
+    }
 
     private static object Project(
         BookingSchedule s, IReadOnlyDictionary<Guid, List<(Guid Id, string Name)>> courts,
-        IReadOnlyDictionary<Guid, string> names, TimeZoneInfo zone) => new
+        IReadOnlyDictionary<Guid, string> names, TimeZoneInfo zone)
+    {
+        // Block body for the lizard reason — see Snapshot above.
+        return new
         {
             id = s.Id,
             name = s.Name,
@@ -603,6 +617,7 @@ public static class AdminScheduleEndpoints
             created_by_name = PersonNames.Of(s.CreatedByUserId, names),
             created_at = s.CreatedAt,
         };
+    }
 
     /// <summary>
     /// The next date this rule produces after now, or null when the series has run out.

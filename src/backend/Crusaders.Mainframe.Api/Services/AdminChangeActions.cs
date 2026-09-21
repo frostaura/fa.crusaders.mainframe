@@ -1,42 +1,6 @@
 namespace Crusaders.Mainframe.Api.Services;
 
 /// <summary>
-/// The areas an <see cref="Domain.AdminChangeLog"/> row can belong to. A closed set: the read
-/// endpoint refuses <c>?area=</c> outside it rather than answering an empty list, because an
-/// admin reading "no changes" about a filter the server did not understand is being told
-/// something false.
-/// </summary>
-public static class AdminChangeAreas
-{
-    public const string Schedule = "schedule";
-    public const string Booking = "booking";
-    public const string Credit = "credit";
-    public const string Group = "group";
-    public const string Member = "member";
-    public const string Setting = "setting";
-    public const string Device = "device";
-
-    public static readonly string[] All = [Schedule, Booking, Credit, Group, Member, Setting, Device];
-}
-
-/// <summary>
-/// What an <see cref="Domain.AdminChangeLog"/> row's <c>SubjectKind</c> may be. Closed for the
-/// same reason the areas are.
-/// </summary>
-public static class AdminChangeSubjects
-{
-    public const string User = "user";
-    public const string Schedule = "schedule";
-    public const string Booking = "booking";
-    public const string Group = "group";
-    public const string Device = "device";
-    public const string Setting = "setting";
-    public const string Court = "court";
-
-    public static readonly string[] All = [User, Schedule, Booking, Group, Device, Setting, Court];
-}
-
-/// <summary>
 /// Every action the club's own change record can carry, stated once and in full — the
 /// <see cref="DoorAuditActions"/> discipline applied to a second vocabulary.
 ///
@@ -161,22 +125,30 @@ public static class AdminChangeActions
     ];
 
     /// <summary>The area an action belongs to, or null when the action is not one of ours.</summary>
-    public static string? AreaOf(string action) => action switch
+    public static string? AreaOf(string action)
     {
-        ScheduleCreated or ScheduleUpdatedFuture or ScheduleOccurrenceSkipped
-            or ScheduleOccurrenceOverridden or ScheduleEnded => AdminChangeAreas.Schedule,
-        BookingsBulkCancelled or BookingsBulkBooked or BookingCancelledByAdmin
-            or BookingBlocked or BookingBlockLifted => AdminChangeAreas.Booking,
-        CreditAdjusted or CreditToppedUp => AdminChangeAreas.Credit,
-        GroupCreated or GroupUpdated or GroupArchived or GroupMembersChanged => AdminChangeAreas.Group,
-        MemberClassChanged or MemberApproved or MemberRejected or MemberSuspended
-            or MemberReactivated or MemberPasswordReset or MemberTraceViewed => AdminChangeAreas.Member,
-        SettingsUpdated or CourtCreated or CourtUpdated or CourtDeactivated
-            or ChangesExported => AdminChangeAreas.Setting,
-        DeviceUpdated or DeviceDeleted or DeviceApiKeyRegenerated or DoorsShutAll
-            or DoorsReopenedAll or MonitoringErrorResolved => AdminChangeAreas.Device,
-        _ => null,
-    };
+        // Block body rather than an expression body, for the lizard reason in
+        // memory/gotchas.md. lizard's C# parser cannot follow `=> x switch { … }`: it
+        // loses scope and emits a *global* pseudo-function spanning the whole FILE,
+        // which then trips the 200-line function gate on any file long enough to
+        // matter. A block body parses cleanly and costs two lines.
+        return action switch
+        {
+            ScheduleCreated or ScheduleUpdatedFuture or ScheduleOccurrenceSkipped
+                or ScheduleOccurrenceOverridden or ScheduleEnded => AdminChangeAreas.Schedule,
+            BookingsBulkCancelled or BookingsBulkBooked or BookingCancelledByAdmin
+                or BookingBlocked or BookingBlockLifted => AdminChangeAreas.Booking,
+            CreditAdjusted or CreditToppedUp => AdminChangeAreas.Credit,
+            GroupCreated or GroupUpdated or GroupArchived or GroupMembersChanged => AdminChangeAreas.Group,
+            MemberClassChanged or MemberApproved or MemberRejected or MemberSuspended
+                or MemberReactivated or MemberPasswordReset or MemberTraceViewed => AdminChangeAreas.Member,
+            SettingsUpdated or CourtCreated or CourtUpdated or CourtDeactivated
+                or ChangesExported => AdminChangeAreas.Setting,
+            DeviceUpdated or DeviceDeleted or DeviceApiKeyRegenerated or DoorsShutAll
+                or DoorsReopenedAll or MonitoringErrorResolved => AdminChangeAreas.Device,
+            _ => null,
+        };
+    }
 
     /// <summary>
     /// The sentence a volunteer admin reads, composed here rather than in the browser.

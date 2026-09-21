@@ -133,8 +133,21 @@ public static class AdminChangeDiff
                 return value.GetRawText();
         }
 
-        if (value.ValueKind != JsonValueKind.Number) return value.GetRawText();
+        return value.ValueKind == JsonValueKind.Number ? Number(field, value) : value.GetRawText();
+    }
 
+    /// <summary>
+    /// A NUMBER in the words its field name implies — <c>start_minute</c> as a clock,
+    /// <c>*_minutes</c> as a duration, <c>days_of_week</c> as weekday names.
+    ///
+    /// <para>
+    /// Split out of <see cref="Render"/> because the two do different jobs: that one decides
+    /// what KIND of value this is, this one decides what a number MEANS here. Keeping them in
+    /// one method put both decisions past the complexity gate and made either harder to read.
+    /// </para>
+    /// </summary>
+    private static string? Number(string field, JsonElement value)
+    {
         if (field.EndsWith("_minute", StringComparison.Ordinal)
             && value.TryGetInt32(out var minute) && minute is >= 0 and <= MinutesPerDay)
         {

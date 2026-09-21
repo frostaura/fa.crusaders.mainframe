@@ -5,59 +5,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Services;
 
-/// <summary>What happened to one booking in a bulk cancel. A closed set.</summary>
-public static class BulkCancelStatuses
-{
-    /// <summary>It was booked and now is not. The money moved.</summary>
-    public const string Cancelled = "cancelled";
-
-    /// <summary>
-    /// It was already gone — and this is a SUCCESS, not a failure.
-    ///
-    /// <para>
-    /// <b>The whole reason bulk cancel needs its own outcome vocabulary.</b>
-    /// <c>CancelAsync</c> answers <c>NotFound</c> for a row that is not <c>Booked</c>, so a
-    /// retried batch whose first attempt half-landed would report its own successes as errors.
-    /// An admin reading "6 failed" about 6 bookings they successfully cancelled forty seconds
-    /// ago will cancel something else to compensate.
-    /// </para>
-    /// </summary>
-    public const string AlreadyCancelled = "already_cancelled";
-
-    /// <summary>
-    /// It was an admin block, so it was lifted rather than cancelled.
-    ///
-    /// <para>
-    /// The admin ticked cells on a grid; they should not have to know that two of them are a
-    /// different kind of row with no money in it.
-    /// </para>
-    /// </summary>
-    public const string BlockLifted = "block_lifted";
-
-    /// <summary>Nothing happened, and <c>error</c> says why.</summary>
-    public const string Failed = "failed";
-}
-
-/// <summary>What happened to one item in a bulk book. A closed set.</summary>
-public static class BulkBookStatuses
-{
-    public const string Booked = "booked";
-
-    /// <summary>A free-text guest, which has no wallet — written as an admin block that charges nobody.</summary>
-    public const string Blocked = "blocked";
-
-    /// <summary>This exact item already landed under this idempotency key. A retry, answered honestly.</summary>
-    public const string Duplicate = "duplicate";
-
-    public const string Failed = "failed";
-}
-
-/// <summary>One booking an admin ticked, and whether the penalty is waived for it specifically.</summary>
-public readonly record struct BulkCancelItem(Guid BookingId, bool? WaivePenalty);
-
-/// <summary>One slot an admin wants booked.</summary>
-public readonly record struct BulkBookItem(Guid CourtId, DateTimeOffset StartsAt, int SliceCount);
-
 /// <summary>
 /// Items 5 and 13 — an admin ticking a list of grid cells and cancelling or booking all of them.
 ///
@@ -147,7 +94,7 @@ public sealed class AdminBulkBookingService
         foreach (var item in items)
         {
             var result = await CancelOneAsync(
-                item, idempotencyKey, reason, waivePenaltyDefault, actorId, context, ct);
+                item, new BulkCancelBatch(idempotencyKey, reason, waivePenaltyDefault, actorId), context, ct);
             refunded += result.RefundCredits;
             penalty += result.PenaltyCredits;
             results.Add(result);
@@ -162,9 +109,11 @@ public sealed class AdminBulkBookingService
     /// for.
     /// </summary>
     private async Task<BulkCancelResult> CancelOneAsync(
-        BulkCancelItem item, string idempotencyKey, string reason, bool waivePenaltyDefault,
-        Guid actorId, BulkContext context, CancellationToken ct)
+        BulkCancelItem item, BulkCancelBatch batch, BulkContext context, CancellationToken ct)
     {
+        var (idempotencyKey, reason, waivePenaltyDefault, actorId) =
+            (batch.IdempotencyKey, batch.Reason, batch.WaivePenaltyDefault, batch.ActorId);
+
         // Re-resolved through the tenant-filtered DbSet and never trusted from the client.
         //
         // This matters more here than anywhere: GET /api/v1/schedule hands every member every
@@ -360,21 +309,28 @@ public sealed class AdminBulkBookingService
     /// console already maps these to sentences, and a second spelling of "slot taken" would be
     /// a sentence it has never heard of.
     /// </summary>
-    private static string RefusalCodeOf(BookingResult result) => result switch
+    private static string RefusalCodeOf(BookingResult result)
     {
-        BookingResult.NotFound => "court_not_found",
-        BookingResult.PastTime => "past_time",
-        BookingResult.TooFarAhead => "too_far_ahead",
-        BookingResult.SlotTaken => "slot_taken",
-        BookingResult.InsufficientBalance => "insufficient_balance",
-        BookingResult.PeakHoursLeagueOnly => "peak_hours_league_only",
-        BookingResult.PerDayCapExceeded => "per_day_cap_exceeded",
-        BookingResult.OutOfHours => "out_of_hours",
-        BookingResult.NoTimeAvailable => "no_time_available",
-        BookingResult.InvalidDuration => "invalid_duration",
-        BookingResult.DuplicateRequest => "duplicate_request",
-        _ => "booking_failed",
-    };
+        // Block body rather than an expression body, for the lizard reason in
+        // memory/gotchas.md. lizard's C# parser cannot follow `=> x switch { … }`: it loses
+        // scope and emits a *global* pseudo-function spanning the whole FILE, which then trips
+        // the 200-line function gate on any file long enough to matter.
+        return result switch
+        {
+            BookingResult.NotFound => "court_not_found",
+            BookingResult.PastTime => "past_time",
+            BookingResult.TooFarAhead => "too_far_ahead",
+            BookingResult.SlotTaken => "slot_taken",
+            BookingResult.InsufficientBalance => "insufficient_balance",
+            BookingResult.PeakHoursLeagueOnly => "peak_hours_league_only",
+            BookingResult.PerDayCapExceeded => "per_day_cap_exceeded",
+            BookingResult.OutOfHours => "out_of_hours",
+            BookingResult.NoTimeAvailable => "no_time_available",
+            BookingResult.InvalidDuration => "invalid_duration",
+            BookingResult.DuplicateRequest => "duplicate_request",
+            _ => "booking_failed",
+        };
+    }
 
     /// <summary>Every name and court title one batch's result rows need, in two reads rather than 2n.</summary>
     private async Task<BulkContext> ContextForAsync(IReadOnlyList<Guid> bookingIds, CancellationToken ct)
@@ -404,53 +360,3 @@ public sealed class AdminBulkBookingService
             Error: null);
     }
 }
-
-/// <summary>Who the batch is booking for, and how. Resolved from the request's <c>on_behalf</c>.</summary>
-/// <param name="PayerUserId">Null means a free-text guest, which becomes an admin block charging nobody.</param>
-/// <param name="GuestName">The label a guest block carries, or the note beside a member's booking.</param>
-/// <param name="AdminNote">Set only when a guest name accompanies a real member.</param>
-public readonly record struct BulkBookRequestContext(
-    Guid? PayerUserId, string? GuestName, string? AdminNote, bool AllowNegativeBalance, string IdempotencyKey);
-
-/// <summary>One row of a bulk cancel's answer.</summary>
-public sealed record BulkCancelResult(
-    Guid BookingId, string Status, decimal RefundCredits, decimal PenaltyCredits,
-    string? MemberName, string? CourtName, DateTimeOffset? StartsAt, string? Error)
-{
-    public static BulkCancelResult Failure(Guid bookingId, string error)
-        => new(bookingId, BulkCancelStatuses.Failed, 0m, 0m, null, null, null, error);
-
-    /// <summary>Whether this outcome is one the admin should read as having worked.</summary>
-    public bool Succeeded => Status != BulkCancelStatuses.Failed;
-}
-
-/// <summary>A whole bulk cancel's answer.</summary>
-public sealed record BulkCancelOutcome(
-    IReadOnlyList<BulkCancelResult> Results, decimal TotalRefundedCredits, decimal TotalPenaltyCredits);
-
-/// <summary>One row of a bulk book's answer.</summary>
-public sealed record BulkBookResult(
-    int Index, string Status, Guid? BookingId, string? CourtName,
-    DateTimeOffset? StartsAt, DateTimeOffset? EndsAt, decimal AmountCredits, string? Error)
-{
-    public static BulkBookResult Booked(int index, Booking booking, string? courtName, decimal amount)
-        => new(index, BulkBookStatuses.Booked, booking.Id, courtName,
-            booking.StartsAt, booking.EndsAt, amount, null);
-
-    public static BulkBookResult Blocked(int index, Booking booking, string? courtName)
-        => new(index, BulkBookStatuses.Blocked, booking.Id, courtName,
-            booking.StartsAt, booking.EndsAt, 0m, null);
-
-    public static BulkBookResult Replay(int index, Booking booking, string? courtName)
-        => new(index, BulkBookStatuses.Duplicate, booking.Id, courtName,
-            booking.StartsAt, booking.EndsAt, 0m, null);
-
-    public static BulkBookResult Failure(int index, string error, string? courtName, DateTimeOffset startsAt)
-        => new(index, BulkBookStatuses.Failed, null, courtName, startsAt, null, 0m, error);
-
-    public bool Succeeded => Status != BulkBookStatuses.Failed;
-}
-
-/// <summary>A whole bulk book's answer.</summary>
-public sealed record BulkBookOutcome(
-    IReadOnlyList<BulkBookResult> Results, decimal TotalChargedCredits, int? HaltedAt, string? HaltedReason);

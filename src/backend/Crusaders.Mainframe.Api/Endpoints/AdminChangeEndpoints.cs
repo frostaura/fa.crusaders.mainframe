@@ -103,22 +103,30 @@ public static class AdminChangeEndpoints
     /// anonymised or removed. Resolving it here would undo that.
     /// </para>
     /// </summary>
-    private static object Project(AdminChangeLog row) => new
+    private static object Project(AdminChangeLog row)
     {
-        id = row.Id,
-        occurred_at = row.OccurredAt,
-        actor = new { user_id = row.ActorUserId, name = row.ActorName, email = row.ActorEmail },
-        area = row.Area,
-        action = row.Action,
-        headline = AdminChangeActions.Headline(row.Action, row.SubjectLabel),
-        subject = row.SubjectKind is null && row.SubjectId is null && row.SubjectLabel is null
-            ? null
-            : new { kind = row.SubjectKind, id = row.SubjectId, label = row.SubjectLabel },
-        reason = row.Reason,
-        changes = AdminChangeDiff.Of(row.BeforeJson, row.AfterJson)
-            .Select(f => new { field = f.Field, label = f.Label, before = f.Before, after = f.After })
-            .ToList(),
-    };
+        // Block body rather than an expression body, for the lizard reason in
+        // memory/gotchas.md: lizard's C# parser cannot follow an expression body whose
+        // value carries braces (`=> new { … }`, `=> x switch { … }`). It loses scope and
+        // emits a *global* pseudo-function spanning the whole FILE, which then trips the
+        // 200-line gate on any file long enough to matter.
+        return new
+        {
+            id = row.Id,
+            occurred_at = row.OccurredAt,
+            actor = new { user_id = row.ActorUserId, name = row.ActorName, email = row.ActorEmail },
+            area = row.Area,
+            action = row.Action,
+            headline = AdminChangeActions.Headline(row.Action, row.SubjectLabel),
+            subject = row.SubjectKind is null && row.SubjectId is null && row.SubjectLabel is null
+                ? null
+                : new { kind = row.SubjectKind, id = row.SubjectId, label = row.SubjectLabel },
+            reason = row.Reason,
+            changes = AdminChangeDiff.Of(row.BeforeJson, row.AfterJson)
+                .Select(f => new { field = f.Field, label = f.Label, before = f.Before, after = f.After })
+                .ToList(),
+        };
+    }
 
     /// <summary>
     /// The same range as a file.

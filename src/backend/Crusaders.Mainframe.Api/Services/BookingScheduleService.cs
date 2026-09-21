@@ -5,26 +5,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Services;
 
-/// <summary>The rule an admin described, before it is a row.</summary>
-public sealed record ScheduleSpec(
-    string Name, string Label, int DaysOfWeek, int StartMinute, int EndMinute,
-    DateOnly StartDate, DateOnly? EndDate, short IntervalWeeks, IReadOnlyList<Guid> CourtIds);
-
-/// <summary>One booking or block that already holds court-time a schedule wants.</summary>
-public sealed record ScheduleConflict(
-    DateOnly OccurrenceDate, Guid CourtId, string? CourtName,
-    DateTimeOffset StartsAt, DateTimeOffset EndsAt,
-    Guid BookingId, string Status, string Kind, string? Label,
-    string? MemberName, decimal AmountCredits, decimal WouldRefundCredits);
-
-/// <summary>The dry run: what a rule would produce, and what already stands in its way.</summary>
-public sealed record SchedulePreview(
-    int Occurrences, DateOnly? First, DateOnly? Last, int RowsToCreate,
-    IReadOnlyList<ScheduleConflict> Conflicts);
-
-/// <summary>How many occurrence rows a materialisation wrote, and how far it got.</summary>
-public sealed record MaterialisationOutcome(int RowsWritten, DateTimeOffset? MaterialisedThrough, int Collisions);
-
 /// <summary>
 /// GOAL item 14 — repeating court bookings, verified against everything that already holds a
 /// court, and never silently overwriting any of it.
@@ -142,7 +122,8 @@ public sealed class BookingScheduleService
                 foreach (var clash in candidates.Where(b =>
                              b.CourtId == court && b.StartsAt < to && b.EndsAt > from))
                 {
-                    conflicts.Add(await DescribeAsync(occurrence.Date, clash, courts, names, labels, actorId, ct));
+                    conflicts.Add(await DescribeAsync(
+                        occurrence.Date, clash, new ConflictNames(courts, names, labels), actorId, ct));
                 }
             }
         }
@@ -161,10 +142,10 @@ public sealed class BookingScheduleService
     /// </para>
     /// </summary>
     private async Task<ScheduleConflict> DescribeAsync(
-        DateOnly date, Booking clash, IReadOnlyDictionary<Guid, string> courts,
-        IReadOnlyDictionary<Guid, string> names, IReadOnlyDictionary<Guid, string> labels,
-        Guid actorId, CancellationToken ct)
+        DateOnly date, Booking clash, ConflictNames lookups, Guid actorId, CancellationToken ct)
     {
+        var (courts, names, labels) = (lookups.Courts, lookups.Members, lookups.Schedules);
+
         var isBlock = clash.Status == BookingStatus.AdminBlock;
         var quote = isBlock ? null : await _bookings.QuoteCancellationAsync(clash.Id, actorId, actorIsAdmin: true, ct);
 
@@ -198,20 +179,28 @@ public sealed class BookingScheduleService
             .ToDictionaryAsync(s => s.Id, s => s.Name, ct);
     }
 
-    private static string StatusWord(BookingStatus status) => status switch
+    private static string StatusWord(BookingStatus status)
     {
-        BookingStatus.Booked => "booked",
-        BookingStatus.NoShow => "no_show",
-        BookingStatus.Completed => "completed",
-        BookingStatus.AdminBlock => "block",
-        _ => "cancelled",
-    };
+        // Block body rather than an expression body, for the lizard reason in
+        // memory/gotchas.md — see RefusalCodeOf in AdminBulkBookingService for the mechanism.
+        return status switch
+        {
+            BookingStatus.Booked => "booked",
+            BookingStatus.NoShow => "no_show",
+            BookingStatus.Completed => "completed",
+            BookingStatus.AdminBlock => "block",
+            _ => "cancelled",
+        };
+    }
 
     // ------------------------------------------------------------------ writing
 
     /// <summary>Builds the row a spec describes. Not saved.</summary>
-    public static BookingSchedule ToRow(ScheduleSpec spec, Guid actorId) => new()
+    public static BookingSchedule ToRow(ScheduleSpec spec, Guid actorId)
     {
+        // Block body for the lizard reason in memory/gotchas.md — see StatusWord below.
+        return new BookingSchedule
+        {
         Name = spec.Name,
         Label = spec.Label,
         DaysOfWeek = spec.DaysOfWeek,
@@ -221,7 +210,8 @@ public sealed class BookingScheduleService
         EndDate = spec.EndDate,
         IntervalWeeks = spec.IntervalWeeks,
         CreatedByUserId = actorId,
-    };
+        };
+    }
 
     /// <summary>
     /// Writes every occurrence inside the horizon that is not already there and has not

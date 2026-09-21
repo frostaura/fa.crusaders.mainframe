@@ -157,58 +157,7 @@ public class MainframeDbContext : DbContext
             e.HasQueryFilter(c => c.TenantId == _tenant.TenantId);
         });
 
-        modelBuilder.Entity<Booking>(e =>
-        {
-            e.ToTable("bookings");
-            e.HasKey(b => b.Id);
-            e.HasIndex(b => new { b.TenantId, b.CourtId, b.StartsAt });
-            e.HasIndex(b => new { b.TenantId, b.UserId, b.StartsAt });
-            e.Property(b => b.AmountChargedCredits).HasColumnType("numeric(10,2)");
-            e.Property(b => b.Status).HasConversion<int>();
-            // How "edit this and future" finds an occurrence's rows, and how the grid learns
-            // which league night a block belongs to. StartsAt last so the index also serves
-            // "everything this schedule has ahead of now".
-            e.HasIndex(b => new { b.TenantId, b.ScheduleId, b.StartsAt });
-            e.Property(b => b.AdminNote).HasMaxLength(128);
-            e.Property(b => b.BlockLabel).HasMaxLength(128);
-            e.Property(b => b.CancellationReason).HasMaxLength(512);
-            e.Property(b => b.Version).IsConcurrencyToken();
-            e.HasQueryFilter(b => b.TenantId == _tenant.TenantId);
-        });
-
-        modelBuilder.Entity<LedgerEntry>(e =>
-        {
-            e.ToTable("ledger_entries");
-            e.HasKey(l => l.Id);
-            e.HasIndex(l => new { l.TenantId, l.UserId, l.CreatedAt });
-
-            // The night trace asks "what did this person do" in BOTH directions — as the
-            // subject of a movement and as the actor of one — because an admin adjusting
-            // somebody's credits belongs on that member's night AND on the admin's own. The
-            // subject half is served by the index above; without this one the actor half is a
-            // sequential scan of the club's entire ledger.
-            e.HasIndex(l => new { l.TenantId, l.ActorUserId, l.CreatedAt });
-
-            e.HasIndex(l => l.ExternalReference).IsUnique().HasFilter("\"ExternalReference\" IS NOT NULL");
-            e.Property(l => l.AmountCredits).HasColumnType("numeric(10,2)");
-            e.Property(l => l.ZarPaid).HasColumnType("numeric(10,2)");
-            e.Property(l => l.ConversionRate).HasColumnType("numeric(8,4)");
-            e.Property(l => l.Type).HasConversion<int>();
-
-            // A CHECK constraint on the enum's range. The column is a plain integer, so
-            // without this a bad write — a bug, a bad migration, a hand-run UPDATE —
-            // persists a value no code can interpret, and it lands in net_credits while
-            // matching no bucket. The database is the last place that can refuse it.
-            //
-            // Widen this when the enum grows: LedgerEntryTypeCoverageTests pins the count,
-            // so the two cannot drift apart silently.
-            e.ToTable(t => t.HasCheckConstraint(
-                "ck_ledger_entries_type_range",
-                $"\"Type\" BETWEEN 0 AND {(int)Enum.GetValues<LedgerEntryType>().Max()}"));
-            e.Property(l => l.Reason).HasMaxLength(512);
-            e.Property(l => l.ExternalReference).HasMaxLength(255);
-            e.HasQueryFilter(l => l.TenantId == _tenant.TenantId);
-        });
+        ConfigureBookingsAndLedger(modelBuilder);
 
         ConfigureAuditLog(modelBuilder);
         ConfigureAdminChangeLog(modelBuilder);
@@ -431,6 +380,72 @@ public class MainframeDbContext : DbContext
     /// <c>memory/gotchas.md</c> on the complexity tooling.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// The two tables the money model hangs off, configured together.
+    ///
+    /// <para>
+    /// Extracted from <c>OnModelCreating</c> when the schedule and trace indexes pushed it
+    /// past the complexity gate's 200-line ceiling. They belong together for a reason
+    /// beyond arithmetic: a booking row and its ledger row flush in one unit of work, and
+    /// the concurrency token on one is what makes the other safe.
+    /// </para>
+    /// </summary>
+    private void ConfigureBookingsAndLedger(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Booking>(e =>
+        {
+            e.ToTable("bookings");
+            e.HasKey(b => b.Id);
+            e.HasIndex(b => new { b.TenantId, b.CourtId, b.StartsAt });
+            e.HasIndex(b => new { b.TenantId, b.UserId, b.StartsAt });
+            e.Property(b => b.AmountChargedCredits).HasColumnType("numeric(10,2)");
+            e.Property(b => b.Status).HasConversion<int>();
+            // How "edit this and future" finds an occurrence's rows, and how the grid learns
+            // which league night a block belongs to. StartsAt last so the index also serves
+            // "everything this schedule has ahead of now".
+            e.HasIndex(b => new { b.TenantId, b.ScheduleId, b.StartsAt });
+            e.Property(b => b.AdminNote).HasMaxLength(128);
+            e.Property(b => b.BlockLabel).HasMaxLength(128);
+            e.Property(b => b.CancellationReason).HasMaxLength(512);
+            e.Property(b => b.Version).IsConcurrencyToken();
+            e.HasQueryFilter(b => b.TenantId == _tenant.TenantId);
+        });
+
+        modelBuilder.Entity<LedgerEntry>(e =>
+        {
+            e.ToTable("ledger_entries");
+            e.HasKey(l => l.Id);
+            e.HasIndex(l => new { l.TenantId, l.UserId, l.CreatedAt });
+
+            // The night trace asks "what did this person do" in BOTH directions — as the
+            // subject of a movement and as the actor of one — because an admin adjusting
+            // somebody's credits belongs on that member's night AND on the admin's own. The
+            // subject half is served by the index above; without this one the actor half is a
+            // sequential scan of the club's entire ledger.
+            e.HasIndex(l => new { l.TenantId, l.ActorUserId, l.CreatedAt });
+
+            e.HasIndex(l => l.ExternalReference).IsUnique().HasFilter("\"ExternalReference\" IS NOT NULL");
+            e.Property(l => l.AmountCredits).HasColumnType("numeric(10,2)");
+            e.Property(l => l.ZarPaid).HasColumnType("numeric(10,2)");
+            e.Property(l => l.ConversionRate).HasColumnType("numeric(8,4)");
+            e.Property(l => l.Type).HasConversion<int>();
+
+            // A CHECK constraint on the enum's range. The column is a plain integer, so
+            // without this a bad write — a bug, a bad migration, a hand-run UPDATE —
+            // persists a value no code can interpret, and it lands in net_credits while
+            // matching no bucket. The database is the last place that can refuse it.
+            //
+            // Widen this when the enum grows: LedgerEntryTypeCoverageTests pins the count,
+            // so the two cannot drift apart silently.
+            e.ToTable(t => t.HasCheckConstraint(
+                "ck_ledger_entries_type_range",
+                $"\"Type\" BETWEEN 0 AND {(int)Enum.GetValues<LedgerEntryType>().Max()}"));
+            e.Property(l => l.Reason).HasMaxLength(512);
+            e.Property(l => l.ExternalReference).HasMaxLength(255);
+            e.HasQueryFilter(l => l.TenantId == _tenant.TenantId);
+        });
+    }
+
     private void ConfigureAuditLog(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<AuditLog>(e =>

@@ -55,30 +55,11 @@ public static class ScheduleRequestParsing
     public static (ScheduleSpec? Spec, IResult? Refusal) Parse(
         ScheduleRequest req, TenantSettingsView view)
     {
-        var name = req.Name?.Trim();
-        if (name is null || name.Length is < MinNameLength or > MaxNameLength)
-            return (null, Results.BadRequest(new { error = NameInvalid }));
+        var (name, label, mask, identityBad) = Identity(req);
+        if (identityBad is not null) return (null, identityBad);
 
-        var label = req.Label?.Trim();
-        if (label is null || label.Length is 0 or > MaxLabelLength)
-            return (null, Results.BadRequest(new { error = LabelInvalid }));
-
-        var (mask, daysBad) = Mask(req.Days);
-        if (daysBad) return (null, Results.BadRequest(new { error = DaysInvalid, days = OperatingHours.DayKeys }));
-
-        var start = Minutes(req.Start);
-        var end = Minutes(req.End);
-        if (start is null || end is null || start >= end || end > BookingSchedule.MinutesPerDay)
-            return (null, Results.BadRequest(new { error = TimeRangeInvalid }));
-
-        // Slice alignment is enforced HERE even though a member's own booking is not yet
-        // checked for it (D2-B15). A schedule is the thing that would systematically produce
-        // off-grid rows: eleven league nights on two courts at 18:05–20:50 would blank two
-        // extra grid cells every week for a season, because the grid's overlap rule blanks any
-        // cell a booking touches. One mistyped time, a season of lost inventory.
-        var slice = Math.Max(view.SliceMinutes, 1);
-        if (start.Value % slice != 0 || (end.Value - start.Value) % slice != 0)
-            return (null, Results.BadRequest(new { error = NotSliceAligned, slice_minutes = slice }));
+        var (start, end, timesBad) = Window(req, view);
+        if (timesBad is not null) return (null, timesBad);
 
         if (req.IntervalWeeks is < 1 or > BookingSchedule.MaxIntervalWeeks)
             return (null, Results.BadRequest(new
@@ -98,8 +79,72 @@ public static class ScheduleRequestParsing
             return (null, Results.BadRequest(new { error = CourtsInvalid }));
 
         return (new ScheduleSpec(
-            name, label, mask, start.Value, end.Value, startDate, req.EndDate,
+            name!, label!, mask, start!.Value, end!.Value, startDate, req.EndDate,
             req.IntervalWeeks, courts), null);
+    }
+
+    /// <summary>
+    /// What the club calls this schedule, what the grid shows, and which weekdays it falls on
+    /// — or the refusal.
+    ///
+    /// <para>
+    /// Extracted from <see cref="Parse"/> for the complexity gate. The three travel together:
+    /// they are what a schedule IS to an admin reading a calendar, before any arithmetic.
+    /// </para>
+    /// </summary>
+    private static (string? Name, string? Label, int Mask, IResult? Refusal) Identity(ScheduleRequest req)
+    {
+        var name = req.Name?.Trim();
+        if (name is null || name.Length is < MinNameLength or > MaxNameLength)
+        {
+            return (null, null, 0, Results.BadRequest(new { error = NameInvalid }));
+        }
+
+        var label = req.Label?.Trim();
+        if (label is null || label.Length is 0 or > MaxLabelLength)
+        {
+            return (null, null, 0, Results.BadRequest(new { error = LabelInvalid }));
+        }
+
+        var (mask, daysBad) = Mask(req.Days);
+        return daysBad
+            ? (null, null, 0, Results.BadRequest(new { error = DaysInvalid, days = OperatingHours.DayKeys }))
+            : (name, label, mask, null);
+    }
+
+    /// <summary>
+    /// The occurrence's local window, in minutes past midnight — or the refusal.
+    ///
+    /// <para>
+    /// Split out of <see cref="Parse"/>, which was past the complexity gate with eight
+    /// independent ways to be wrong in one method.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Slice alignment is enforced here even though a member's own booking is not yet
+    /// checked for it (D2-B15).</b> A schedule is the thing that would systematically produce
+    /// off-grid rows: eleven league nights on two courts at 18:05–20:50 would blank two extra
+    /// grid cells every week for a season, because the grid's overlap rule blanks any cell a
+    /// booking touches. One mistyped time, a season of lost inventory.
+    /// </para>
+    /// </summary>
+    private static (int? Start, int? End, IResult? Refusal) Window(
+        ScheduleRequest req, TenantSettingsView view)
+    {
+        var start = Minutes(req.Start);
+        var end = Minutes(req.End);
+        if (start is null || end is null || start >= end || end > BookingSchedule.MinutesPerDay)
+        {
+            return (null, null, Results.BadRequest(new { error = TimeRangeInvalid }));
+        }
+
+        var slice = Math.Max(view.SliceMinutes, 1);
+        if (start.Value % slice != 0 || (end.Value - start.Value) % slice != 0)
+        {
+            return (null, null, Results.BadRequest(new { error = NotSliceAligned, slice_minutes = slice }));
+        }
+
+        return (start, end, null);
     }
 
     /// <summary>

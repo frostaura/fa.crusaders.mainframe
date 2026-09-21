@@ -79,6 +79,80 @@ public sealed record AdminChangeQuery(
         "kept indefinitely — these records cannot be deleted, including by admins";
 
     /// <summary>
+    /// A uuid query parameter, and whether it was present and unreadable.
+    ///
+    /// <para>
+    /// Present-and-unreadable is a REFUSAL, never a silent null: <c>?actor=notauuid</c>
+    /// answering 200 with the whole club's record, under a heading naming one admin, is the
+    /// <c>door_invalid</c> defect at a different parameter.
+    /// </para>
+    /// </summary>
+    private static (Guid? Value, bool Invalid) Id(HttpRequest request, string name)
+    {
+        var text = Text(request, name);
+        if (text is null) return (null, false);
+        return Guid.TryParse(text, out var parsed) ? (parsed, false) : (null, true);
+    }
+
+    /// <summary>
+    /// Where in the list to start and how much to take — the cursor refused when malformed, the
+    /// limit clamped by the caller.
+    ///
+    /// <para>
+    /// A malformed cursor is a <c>400</c> rather than page one: a console that truncated it
+    /// would otherwise get page one back labelled as page nine, and an admin walks a list that
+    /// silently restarted.
+    /// </para>
+    /// </summary>
+    private static (AdminChangeCursor? Cursor, int? Limit, string? Error) Paging(HttpRequest request)
+    {
+        var cursorText = Text(request, "cursor");
+        var cursor = AdminChangeCursor.Parse(cursorText);
+        if (cursorText is not null && cursor is null) return (null, null, CursorInvalid);
+
+        var limitText = Text(request, "limit");
+        if (limitText is null) return (cursor, null, null);
+
+        return int.TryParse(limitText, out var parsed)
+            ? (cursor, parsed, null)
+            : (null, null, LimitInvalid);
+    }
+
+    /// <summary>
+    /// The five closed-set filters, each REFUSED when it is not one of ours.
+    ///
+    /// <para>
+    /// Split out of <see cref="Parse"/> because the two halves answer different questions —
+    /// "which rows" and "which page of them" — and together they were past the complexity
+    /// gate. Every refusal here is a VOCABULARY refusal: <c>?area=bookings</c> (plural, which
+    /// is what a console sends first) answering <c>200</c> with an empty list reads as "this
+    /// club's admins changed no bookings", which is a different and false sentence.
+    /// </para>
+    /// </summary>
+    private static ((string? Area, string? Action, Guid? Actor, string? SubjectKind, Guid? SubjectId) Filters,
+        string? Error) Filters(HttpRequest request)
+    {
+        var none = ((string?)null, (string?)null, (Guid?)null, (string?)null, (Guid?)null);
+
+        var area = Text(request, "area");
+        if (area is not null && Array.IndexOf(AdminChangeAreas.All, area) < 0) return (none, AreaInvalid);
+
+        var action = Text(request, "action");
+        if (action is not null && Array.IndexOf(AdminChangeActions.All, action) < 0) return (none, ActionInvalid);
+
+        var (actor, actorBad) = Id(request, "actor");
+        if (actorBad) return (none, ActorInvalid);
+
+        var subjectKind = Text(request, "subject_kind");
+        if (subjectKind is not null && Array.IndexOf(AdminChangeSubjects.All, subjectKind) < 0)
+            return (none, SubjectKindInvalid);
+
+        var (subjectId, subjectBad) = Id(request, "subject_id");
+        if (subjectBad) return (none, SubjectIdInvalid);
+
+        return ((area, action, actor, subjectKind, subjectId), null);
+    }
+    /// <summary>
     /// Reads the query string. Refuses the five closed sets and the three malformed-value
     /// cases; clamps the limit and the range.
     /// </summary>
@@ -87,31 +161,9 @@ public sealed record AdminChangeQuery(
     {
         var (zone, timezone, _) = DoorClock.ZoneOf(settings);
 
-        var area = Text(request, "area");
-        if (area is not null && Array.IndexOf(AdminChangeAreas.All, area) < 0) return (null, AreaInvalid);
-
-        var action = Text(request, "action");
-        if (action is not null && Array.IndexOf(AdminChangeActions.All, action) < 0) return (null, ActionInvalid);
-
-        var actorText = Text(request, "actor");
-        Guid? actor = null;
-        if (actorText is not null)
-        {
-            if (!Guid.TryParse(actorText, out var parsedActor)) return (null, ActorInvalid);
-            actor = parsedActor;
-        }
-
-        var subjectKind = Text(request, "subject_kind");
-        if (subjectKind is not null && Array.IndexOf(AdminChangeSubjects.All, subjectKind) < 0)
-            return (null, SubjectKindInvalid);
-
-        var subjectText = Text(request, "subject_id");
-        Guid? subjectId = null;
-        if (subjectText is not null)
-        {
-            if (!Guid.TryParse(subjectText, out var parsedSubject)) return (null, SubjectIdInvalid);
-            subjectId = parsedSubject;
-        }
+        var (filters, filterError) = Filters(request);
+        if (filterError is not null) return (null, filterError);
+        var (area, action, actor, subjectKind, subjectId) = filters;
 
         // A schedule's own view is a subject filter the ROUTE supplies, not one the caller
         // names, so it overrides rather than combines.
@@ -138,17 +190,8 @@ public sealed record AdminChangeQuery(
         if (from < Floor) from = Floor;
         if (to < from) to = from;
 
-        var cursorText = Text(request, "cursor");
-        var cursor = AdminChangeCursor.Parse(cursorText);
-        if (cursorText is not null && cursor is null) return (null, CursorInvalid);
-
-        var limitText = Text(request, "limit");
-        int? limit = null;
-        if (limitText is not null)
-        {
-            if (!int.TryParse(limitText, out var parsedLimit)) return (null, LimitInvalid);
-            limit = parsedLimit;
-        }
+        var (cursor, limit, pagingError) = Paging(request);
+        if (pagingError is not null) return (null, pagingError);
 
         return (new AdminChangeQuery(
             Area: area, Action: action, Actor: actor, SubjectKind: subjectKind, SubjectId: subjectId,
@@ -258,37 +301,5 @@ public sealed record AdminChangeQuery(
             System.Globalization.DateTimeStyles.RoundtripKind, out var parsed)
             ? (parsed, false)
             : (null, true);
-    }
-}
-
-/// <summary>
-/// A page boundary in the change record: the instant and the id of the last row returned.
-///
-/// <para>
-/// Keyed on <c>(OccurredAt, Id)</c>, which is exactly what <see cref="AdminChangeQuery.Apply"/>
-/// orders by. Opaque on the wire so a console cannot construct one and cannot come to depend on
-/// its shape, and a malformed one is a <c>400</c> rather than a silent page one — a console
-/// that truncated a cursor would otherwise get page one back labelled as page nine.
-/// </para>
-/// </summary>
-public sealed record AdminChangeCursor(DateTimeOffset At, Guid Id)
-{
-    public string Encode()
-        => Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{At.UtcTicks}:{Id:N}"));
-
-    public static AdminChangeCursor? Parse(string? encoded)
-    {
-        if (string.IsNullOrWhiteSpace(encoded)) return null;
-        try
-        {
-            var parts = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(encoded)).Split(':');
-            if (parts.Length != 2) return null;
-            if (!long.TryParse(parts[0], out var ticks) || !Guid.TryParseExact(parts[1], "N", out var id)) return null;
-            return new AdminChangeCursor(new DateTimeOffset(ticks, TimeSpan.Zero), id);
-        }
-        catch (FormatException)
-        {
-            return null;
-        }
     }
 }

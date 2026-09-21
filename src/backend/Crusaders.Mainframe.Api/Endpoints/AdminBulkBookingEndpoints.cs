@@ -18,6 +18,24 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// loads.
 /// </para>
 /// </summary>
+/// <summary>
+/// Everything a bulk handler resolves from the container, bound as one parameter.
+///
+/// <para>
+/// The complexity gate caps a signature at six arguments (<c>lizard -a 6</c>), and a bulk
+/// write genuinely needs the context, the settings, the service, the recorder, the db and the
+/// ledger alongside its body and its token. <c>[AsParameters]</c> is the framework's own
+/// answer; resolving out of <c>HttpContext.RequestServices</c> by hand would hide the
+/// dependencies from the DI graph instead.
+/// </para>
+/// </summary>
+public sealed record BulkDeps(
+    AdminBulkBookingService Bulk,
+    TenantSettingsAccessor Settings,
+    AdminChangeRecorder Recorder,
+    MainframeDbContext Db,
+    LedgerService Ledger);
+
 public static class AdminBulkBookingEndpoints
 {
     public static IEndpointRouteBuilder MapAdminBulkBookingEndpoints(this IEndpointRouteBuilder app)
@@ -35,11 +53,10 @@ public static class AdminBulkBookingEndpoints
     // ------------------------------------------------------------------ cancel
 
     private static async Task<IResult> CancelAsync(
-        BulkCancelRequest req, HttpContext ctx, AdminBulkBookingService bulk,
-        TenantSettingsAccessor settings, AdminChangeRecorder recorder,
-        MainframeDbContext db, CancellationToken ct)
+        BulkCancelRequest req, HttpContext ctx, [AsParameters] BulkDeps deps, CancellationToken ct)
     {
-        var view = await settings.GetAsync(ct);
+        var (bulk, recorder, db) = (deps.Bulk, deps.Recorder, deps.Db);
+        var view = await deps.Settings.GetAsync(ct);
         var items = req.Items ?? [];
 
         if (Validate(req.IdempotencyKey, items.Count, BulkSettings.MaxItems(view)) is { } bad)
@@ -109,11 +126,10 @@ public static class AdminBulkBookingEndpoints
     // ------------------------------------------------------------------ book
 
     private static async Task<IResult> BookAsync(
-        BulkBookRequest req, HttpContext ctx, AdminBulkBookingService bulk,
-        TenantSettingsAccessor settings, AdminChangeRecorder recorder,
-        MainframeDbContext db, LedgerService ledger, CancellationToken ct)
+        BulkBookRequest req, HttpContext ctx, [AsParameters] BulkDeps deps, CancellationToken ct)
     {
-        var view = await settings.GetAsync(ct);
+        var (bulk, recorder, db, ledger) = (deps.Bulk, deps.Recorder, deps.Db, deps.Ledger);
+        var view = await deps.Settings.GetAsync(ct);
         var items = req.Items ?? [];
 
         if (Validate(req.IdempotencyKey, items.Count, BulkSettings.MaxItems(view)) is { } bad)
