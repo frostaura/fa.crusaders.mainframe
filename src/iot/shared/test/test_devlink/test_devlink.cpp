@@ -38,6 +38,7 @@
 #include "devlink/ApiBreaker.h"
 #include "devlink/Cadence.h"
 #include "devlink/EventUpload.h"
+#include "devlink/LcdSettings.h"
 #include "devlink/RosterSync.h"
 #include "eventq/Event.h"
 #include "roster/Roster.h"
@@ -624,6 +625,275 @@ void test_the_event_body_escapes_a_subject_whatever_bytes_are_in_it() {
   }
 }
 
+// -------------------------------------------------------------------------
+// LcdSettings — the nine operator settings inside the heartbeat's `config`
+// -------------------------------------------------------------------------
+//
+// THE HOUSE RULE, nine times over: the server may NARROW, the box CLAMPS, and
+// an ABSENT key changes nothing. Every one of these is a number an admin types
+// into a web form, and none of them may be able to blank what an earlier
+// heartbeat configured or to refuse the eight beside it.
+
+/// All nine at once, at values that are not the defaults and are inside every
+/// bound, out of the NESTED `config` object — which is where the court box
+/// already reads `slice_minutes` and `walk_up_max_minutes` from.
+void test_lcd_settings_adopts_all_nine_from_the_nested_config() {
+  const char body[] = "{\"server_time\":\"2023-11-14T22:13:20+00:00\",\"tenant_slug\":\"crusaders\","
+                      "\"heartbeat_seconds\":60,"
+                      "\"config\":{\"slice_minutes\":15,\"walk_up_max_minutes\":60,"
+                      "\"lcd_revert_seconds\":25,\"lcd_choice_seconds\":45,\"lcd_card_seconds\":6,"
+                      "\"lcd_hint_seconds\":7,\"scan_memory_seconds\":200,"
+                      "\"clock_trust_minutes\":240,\"relay_restore_enabled\":false,"
+                      "\"device_fault_reporting\":false,\"device_fault_max_per_hour\":75},"
+                      "\"roster\":[]}";
+
+  devlink::LcdSettings s;
+  TEST_ASSERT_TRUE(devlink::parseLcdSettings(body, len(body), s));
+  TEST_ASSERT_EQUAL_UINT32(25000UL, s.revertMs);
+  TEST_ASSERT_EQUAL_UINT32(45000UL, s.choiceMs);
+  TEST_ASSERT_EQUAL_UINT32(6000UL, s.cardMs);
+  TEST_ASSERT_EQUAL_UINT32(7000UL, s.hintMs);
+  TEST_ASSERT_EQUAL_UINT32(200000UL, s.scanMemoryMs);
+  TEST_ASSERT_EQUAL_UINT32(240UL * 60000UL, s.clockTrustMs);
+  TEST_ASSERT_FALSE(s.relayRestoreEnabled);
+  TEST_ASSERT_FALSE(s.faultReporting);
+  TEST_ASSERT_EQUAL_UINT16(75U, s.faultMaxPerHour);
+}
+
+/// Every key at BOTH bounds and one past each. A value out of range is CLAMPED
+/// and never refuses the eight beside it — a club that typed 600 into one box
+/// must not thereby lose its button map, its card dwell and its fault rate.
+void test_lcd_settings_clamps_each_key_at_both_bounds_and_past_them() {
+  const char low[] = "{\"config\":{\"lcd_revert_seconds\":3,\"lcd_choice_seconds\":5,"
+                     "\"lcd_card_seconds\":1,\"lcd_hint_seconds\":1,\"scan_memory_seconds\":5,"
+                     "\"clock_trust_minutes\":5,\"device_fault_max_per_hour\":1}}";
+  devlink::LcdSettings s;
+  TEST_ASSERT_TRUE(devlink::parseLcdSettings(low, len(low), s));
+  TEST_ASSERT_EQUAL_UINT32(3000UL, s.revertMs);
+  TEST_ASSERT_EQUAL_UINT32(5000UL, s.choiceMs);
+  TEST_ASSERT_EQUAL_UINT32(1000UL, s.cardMs);
+  TEST_ASSERT_EQUAL_UINT32(1000UL, s.hintMs);
+  TEST_ASSERT_EQUAL_UINT32(5000UL, s.scanMemoryMs);
+  TEST_ASSERT_EQUAL_UINT32(5UL * 60000UL, s.clockTrustMs);
+  TEST_ASSERT_EQUAL_UINT16(1U, s.faultMaxPerHour);
+
+  const char high[] = "{\"config\":{\"lcd_revert_seconds\":60,\"lcd_choice_seconds\":60,"
+                      "\"lcd_card_seconds\":10,\"lcd_hint_seconds\":10,\"scan_memory_seconds\":300,"
+                      "\"clock_trust_minutes\":1440,\"device_fault_max_per_hour\":120}}";
+  TEST_ASSERT_TRUE(devlink::parseLcdSettings(high, len(high), s));
+  TEST_ASSERT_EQUAL_UINT32(60000UL, s.revertMs);
+  TEST_ASSERT_EQUAL_UINT32(60000UL, s.choiceMs);
+  TEST_ASSERT_EQUAL_UINT32(10000UL, s.cardMs);
+  TEST_ASSERT_EQUAL_UINT32(10000UL, s.hintMs);
+  TEST_ASSERT_EQUAL_UINT32(300000UL, s.scanMemoryMs);
+  TEST_ASSERT_EQUAL_UINT32(1440UL * 60000UL, s.clockTrustMs);
+  TEST_ASSERT_EQUAL_UINT16(120U, s.faultMaxPerHour);
+
+  // One BELOW every floor: clamped up, not refused, not left alone.
+  const char under[] = "{\"config\":{\"lcd_revert_seconds\":2,\"lcd_choice_seconds\":4,"
+                       "\"lcd_card_seconds\":0,\"lcd_hint_seconds\":0,\"scan_memory_seconds\":0,"
+                       "\"clock_trust_minutes\":4,\"device_fault_max_per_hour\":0}}";
+  TEST_ASSERT_TRUE(devlink::parseLcdSettings(under, len(under), s));
+  TEST_ASSERT_EQUAL_UINT32(3000UL, s.revertMs);
+  TEST_ASSERT_EQUAL_UINT32(5000UL, s.choiceMs);
+  TEST_ASSERT_EQUAL_UINT32(1000UL, s.cardMs);
+  TEST_ASSERT_EQUAL_UINT32(1000UL, s.hintMs);
+  TEST_ASSERT_EQUAL_UINT32(5000UL, s.scanMemoryMs); // the choice floor, via the invariant
+  TEST_ASSERT_EQUAL_UINT32(5UL * 60000UL, s.clockTrustMs);
+  TEST_ASSERT_EQUAL_UINT16(1U, s.faultMaxPerHour);
+
+  // One ABOVE every ceiling, and a value whose milliseconds would wrap a
+  // uint32_t if it were multiplied before it was bounded — the Cadence rule:
+  // clamp in seconds FIRST or 4,300,000 becomes a plausible small number.
+  const char over[] = "{\"config\":{\"lcd_revert_seconds\":61,\"lcd_choice_seconds\":4300000,"
+                      "\"lcd_card_seconds\":11,\"lcd_hint_seconds\":11,\"scan_memory_seconds\":4300000,"
+                      "\"clock_trust_minutes\":4300000,\"device_fault_max_per_hour\":121}}";
+  TEST_ASSERT_TRUE(devlink::parseLcdSettings(over, len(over), s));
+  TEST_ASSERT_EQUAL_UINT32(60000UL, s.revertMs);
+  TEST_ASSERT_EQUAL_UINT32(60000UL, s.choiceMs);
+  TEST_ASSERT_EQUAL_UINT32(10000UL, s.cardMs);
+  TEST_ASSERT_EQUAL_UINT32(10000UL, s.hintMs);
+  TEST_ASSERT_EQUAL_UINT32(300000UL, s.scanMemoryMs);
+  TEST_ASSERT_EQUAL_UINT32(1440UL * 60000UL, s.clockTrustMs);
+  TEST_ASSERT_EQUAL_UINT16(120U, s.faultMaxPerHour);
+}
+
+/// An absent key leaves that setting exactly where it was. This is what stops
+/// an older API blanking what a newer one configured — and it is per KEY, not
+/// per response: a `config` carrying one of the nine adopts one and leaves
+/// eight alone.
+void test_lcd_settings_an_absent_key_leaves_that_setting_alone() {
+  devlink::LcdSettings s;
+  const char one[] = "{\"config\":{\"lcd_card_seconds\":9}}";
+  TEST_ASSERT_TRUE(devlink::parseLcdSettings(one, len(one), s));
+  TEST_ASSERT_EQUAL_UINT32(9000UL, s.cardMs);
+  TEST_ASSERT_EQUAL_UINT32(devlink::kLcdRevertDefaultMs, s.revertMs);
+  TEST_ASSERT_EQUAL_UINT32(devlink::kLcdChoiceDefaultMs, s.choiceMs);
+  TEST_ASSERT_EQUAL_UINT32(devlink::kLcdHintDefaultMs, s.hintMs);
+  TEST_ASSERT_EQUAL_UINT32(devlink::kScanMemoryDefaultMs, s.scanMemoryMs);
+  TEST_ASSERT_EQUAL_UINT32(devlink::kClockTrustDefaultMs, s.clockTrustMs);
+  TEST_ASSERT_TRUE(s.relayRestoreEnabled);
+  TEST_ASSERT_TRUE(s.faultReporting);
+  TEST_ASSERT_EQUAL_UINT16(devlink::kFaultMaxPerHourDefault, s.faultMaxPerHour);
+
+  // A `config` with none of the nine, a `config` that is not an object, and no
+  // `config` at all: false, and every adopted value survives untouched.
+  const char none[] = "{\"config\":{\"slice_minutes\":15,\"button_map\":[\"court:A\"]},\"roster\":[]}";
+  TEST_ASSERT_FALSE(devlink::parseLcdSettings(none, len(none), s));
+  TEST_ASSERT_EQUAL_UINT32(9000UL, s.cardMs);
+
+  const char notObject[] = "{\"config\":42,\"lcd_card_seconds\":1}";
+  TEST_ASSERT_FALSE(devlink::parseLcdSettings(notObject, len(notObject), s));
+  TEST_ASSERT_EQUAL_UINT32(9000UL, s.cardMs);
+
+  const char absent[] = "{\"heartbeat_seconds\":60,\"roster\":[]}";
+  TEST_ASSERT_FALSE(devlink::parseLcdSettings(absent, len(absent), s));
+  TEST_ASSERT_EQUAL_UINT32(9000UL, s.cardMs);
+
+  TEST_ASSERT_FALSE(devlink::parseLcdSettings(nullptr, 32U, s));
+}
+
+/// THE CROSS-KEY INVARIANT, and it is load-bearing. `scan_memory_seconds` is
+/// how long the bridge remembers who scanned; `lcd_choice_seconds` is how long
+/// the pad keeps their selection on screen. If the pad outlives the memory, a
+/// member who scans, wanders off and comes back finds their selection still
+/// showing while the bridge has forgotten who they are — and the NEXT person's
+/// presses buy on that member's token.
+///
+/// RAISED, NEVER LOWERED. Lowering `lcd_choice_seconds` to fit would shorten a
+/// window somebody may be standing in front of mid-purchase.
+void test_lcd_settings_raise_scan_memory_and_never_lower_the_choice_window() {
+  devlink::LcdSettings s;
+
+  // The pad is told to hold for a minute while the memory is told 10 s.
+  const char inverted[] = "{\"config\":{\"lcd_choice_seconds\":60,\"scan_memory_seconds\":10}}";
+  TEST_ASSERT_TRUE(devlink::parseLcdSettings(inverted, len(inverted), s));
+  TEST_ASSERT_EQUAL_UINT32(60000UL, s.choiceMs); // untouched
+  TEST_ASSERT_EQUAL_UINT32(60000UL, s.scanMemoryMs);
+  TEST_ASSERT_TRUE(s.scanMemoryMs >= s.choiceMs);
+
+  // And ACROSS heartbeats, which is the case a per-response check would miss:
+  // a later response raises only the choice window, and the memory it was
+  // already carrying has to come up with it.
+  devlink::LcdSettings later;
+  const char memoryFirst[] = "{\"config\":{\"scan_memory_seconds\":20}}";
+  TEST_ASSERT_TRUE(devlink::parseLcdSettings(memoryFirst, len(memoryFirst), later));
+  TEST_ASSERT_EQUAL_UINT32(20000UL, later.scanMemoryMs);
+  const char choiceOnly[] = "{\"config\":{\"lcd_choice_seconds\":50}}";
+  TEST_ASSERT_TRUE(devlink::parseLcdSettings(choiceOnly, len(choiceOnly), later));
+  TEST_ASSERT_EQUAL_UINT32(50000UL, later.choiceMs);
+  TEST_ASSERT_EQUAL_UINT32(50000UL, later.scanMemoryMs);
+
+  // The compile-time pair holds too, which is what the static_assert in the
+  // header pins; asserted here as well so a reader of the suite can see it.
+  TEST_ASSERT_TRUE(devlink::kScanMemoryDefaultMs >= devlink::kLcdChoiceDefaultMs);
+}
+
+/// A DECOY AT A DEEPER LEVEL, before AND after the real key. `devapi::json`'s
+/// flat scan is depended upon elsewhere and takes the FIRST match in document
+/// order, so a `config` read flatly would take a number out of the roster, the
+/// button map or any object a later contract nests — which is round G4's B2
+/// with a screen timeout instead of a lock. These are read one level deep,
+/// from the TOP-LEVEL `config` and nowhere else.
+void test_lcd_settings_a_decoy_at_a_deeper_level_is_not_adopted() {
+  devlink::LcdSettings s;
+
+  // Before: a nested object inside `config` naming every key.
+  const char before[] = "{\"config\":{\"vendor\":{\"lcd_revert_seconds\":59,\"lcd_card_seconds\":9,"
+                        "\"device_fault_max_per_hour\":119,\"relay_restore_enabled\":false},"
+                        "\"lcd_revert_seconds\":30,\"lcd_card_seconds\":4,"
+                        "\"device_fault_max_per_hour\":30}}";
+  TEST_ASSERT_TRUE(devlink::parseLcdSettings(before, len(before), s));
+  TEST_ASSERT_EQUAL_UINT32(30000UL, s.revertMs);
+  TEST_ASSERT_EQUAL_UINT32(4000UL, s.cardMs);
+  TEST_ASSERT_EQUAL_UINT16(30U, s.faultMaxPerHour);
+  TEST_ASSERT_TRUE(s.relayRestoreEnabled); // the decoy's false never reached it
+
+  // After: the real key first, the decoy behind it — the case a scan bounded
+  // at the START of the object but not at its END would still get wrong.
+  devlink::LcdSettings after;
+  const char afterBody[] = "{\"config\":{\"lcd_hint_seconds\":5,"
+                           "\"vendor\":{\"lcd_hint_seconds\":9}},"
+                           "\"lcd_hint_seconds\":8,\"diagnostics\":{\"lcd_hint_seconds\":2}}";
+  TEST_ASSERT_TRUE(devlink::parseLcdSettings(afterBody, len(afterBody), after));
+  TEST_ASSERT_EQUAL_UINT32(5000UL, after.hintMs);
+
+  // A TOP-LEVEL key of the same name is not a config key either: these are
+  // `config` members, and a club that grows a top-level `lcd_card_seconds`
+  // must not silently start driving the screen from it.
+  devlink::LcdSettings topLevel;
+  const char outside[] = "{\"lcd_card_seconds\":9,\"config\":{\"slice_minutes\":15}}";
+  TEST_ASSERT_FALSE(devlink::parseLcdSettings(outside, len(outside), topLevel));
+  TEST_ASSERT_EQUAL_UINT32(devlink::kLcdCardDefaultMs, topLevel.cardMs);
+
+  // AND A CONFIG OBJECT NESTED SOMEWHERE ELSE IS NOT THE CONFIG OBJECT. A
+  // `config` inside the roster or a vendor block, placed before the real one,
+  // is what the flat scan would have read.
+  devlink::LcdSettings nested;
+  const char nestedConfig[] = "{\"vendor\":{\"config\":{\"lcd_card_seconds\":9}},"
+                              "\"config\":{\"lcd_card_seconds\":4}}";
+  TEST_ASSERT_TRUE(devlink::parseLcdSettings(nestedConfig, len(nestedConfig), nested));
+  TEST_ASSERT_EQUAL_UINT32(4000UL, nested.cardMs);
+}
+
+/// The wrong JSON type, a quoted integer, and a body cut off inside `config`.
+/// Every one is reported as ABSENCE — "learned nothing" — and never as a
+/// default, because a default here would blank a setting an admin chose.
+void test_lcd_settings_a_wrong_type_or_a_cut_body_adopts_nothing() {
+  devlink::LcdSettings s;
+  const char seeded[] = "{\"config\":{\"lcd_revert_seconds\":25,\"relay_restore_enabled\":false,"
+                        "\"device_fault_max_per_hour\":75}}";
+  TEST_ASSERT_TRUE(devlink::parseLcdSettings(seeded, len(seeded), s));
+
+  static const char* kUnreadable[] = {
+      "{\"config\":{\"lcd_revert_seconds\":\"30\"}}",        // quoted integer
+      "{\"config\":{\"lcd_revert_seconds\":null}}",          // null
+      "{\"config\":{\"lcd_revert_seconds\":[30]}}",          // an array
+      "{\"config\":{\"lcd_revert_seconds\":{\"v\":30}}}",    // an object
+      "{\"config\":{\"lcd_revert_seconds\":-30}}",           // signed
+      "{\"config\":{\"relay_restore_enabled\":\"true\"}}",   // a quoted boolean
+      "{\"config\":{\"relay_restore_enabled\":1}}",          // 1 is not `true`
+      "{\"config\":{\"device_fault_reporting\":\"false\"}}", // the same, the other flag
+  };
+  for (size_t i = 0U; i < sizeof(kUnreadable) / sizeof(kUnreadable[0]); ++i) {
+    devlink::LcdSettings probe = s;
+    TEST_ASSERT_FALSE_MESSAGE(devlink::parseLcdSettings(kUnreadable[i], strlen(kUnreadable[i]), probe),
+                              kUnreadable[i]);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(25000UL, probe.revertMs, kUnreadable[i]);
+    TEST_ASSERT_FALSE_MESSAGE(probe.relayRestoreEnabled, kUnreadable[i]);
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(75U, probe.faultMaxPerHour, kUnreadable[i]);
+  }
+
+  // A FRACTION IS READ AS ITS INTEGER PART, and that is devapi's behaviour
+  // rather than this parser's: `readUnsigned` stops at the `.` and reports the
+  // digits it took, so `30.5` adopts 30. `devapi::json::unsignedField`'s own
+  // doc comment says it is false when "the value is not a bare integer", and
+  // 30.5 is not one — every caller of it in this tree inherits the same
+  // narrowing, `heartbeat_seconds` and `granted_seconds` included. Pinned here
+  // as what actually happens rather than left to look like a passing case;
+  // fixing it is devapi's, not devlink's.
+  {
+    devlink::LcdSettings fraction = s;
+    const char body[] = "{\"config\":{\"lcd_revert_seconds\":30.5}}";
+    TEST_ASSERT_TRUE(devlink::parseLcdSettings(body, len(body), fraction));
+    TEST_ASSERT_EQUAL_UINT32(30000UL, fraction.revertMs);
+  }
+
+  // Cut inside the config object, and cut inside one of its strings. The
+  // object never balances, so there is no `config` to read — which is the
+  // right answer: half a settings block is not a settings block.
+  static const char* kCut[] = {
+      "{\"config\":{\"lcd_revert_seconds\":30",
+      "{\"config\":{\"lcd_revert_seconds\":30,\"device_code\":\"court-bo",
+      "{\"config\":{",
+  };
+  for (size_t i = 0U; i < sizeof(kCut) / sizeof(kCut[0]); ++i) {
+    devlink::LcdSettings probe = s;
+    TEST_ASSERT_FALSE_MESSAGE(devlink::parseLcdSettings(kCut[i], strlen(kCut[i]), probe), kCut[i]);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(25000UL, probe.revertMs, kCut[i]);
+  }
+}
+
 void test_heartbeat_body_names_the_box_and_survives_the_millis_wrap() {
   // The one field an auto-registering backend keys everything off. It was a
   // snprintf in the composition root, which `pio test` cannot see — so this is
@@ -686,6 +956,13 @@ int main(int, char**) {
   RUN_TEST(test_heartbeat_interval_is_adopted_and_bounded);
   RUN_TEST(test_a_tenant_slug_that_names_a_key_hides_nothing);
   RUN_TEST(test_a_button_map_element_that_names_a_key_hides_nothing);
+
+  RUN_TEST(test_lcd_settings_adopts_all_nine_from_the_nested_config);
+  RUN_TEST(test_lcd_settings_clamps_each_key_at_both_bounds_and_past_them);
+  RUN_TEST(test_lcd_settings_an_absent_key_leaves_that_setting_alone);
+  RUN_TEST(test_lcd_settings_raise_scan_memory_and_never_lower_the_choice_window);
+  RUN_TEST(test_lcd_settings_a_decoy_at_a_deeper_level_is_not_adopted);
+  RUN_TEST(test_lcd_settings_a_wrong_type_or_a_cut_body_adopts_nothing);
 
   RUN_TEST(test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap);
   RUN_TEST(test_the_event_body_escapes_a_subject_whatever_bytes_are_in_it);

@@ -1,0 +1,116 @@
+#include "devlink/LcdSettings.h"
+
+#include "devapi/Json.h"
+
+namespace devlink {
+namespace {
+
+/// Bounds a wire value in ITS OWN UNIT and multiplies afterwards, which is the
+/// whole of `parseHeartbeatInterval`'s reasoning: bounding after the multiply
+/// lets a body claiming 4,300,000 wrap a uint32_t into a plausible small
+/// number, and a small number for a screen timeout is adopted in silence.
+uint32_t bounded(uint32_t value, uint32_t lo, uint32_t hi) {
+  return value > hi ? hi : (value < lo ? lo : value);
+}
+
+/// One duration key. False — with `outMs` untouched — when the key is absent
+/// from this object or is not a bare unsigned integer.
+bool adoptDuration(const char* cfg, size_t len, const char* key, const uint32_t bounds[2], uint32_t scale,
+                   uint32_t& outMs) {
+  uint32_t value = 0U;
+  if (!devapi::json::topLevelUnsignedField(cfg, len, key, value)) {
+    return false;
+  }
+  outMs = bounded(value, bounds[0], bounds[1]) * scale;
+  return true;
+}
+
+constexpr uint32_t kSecond = 1000UL;
+constexpr uint32_t kMinute = 60000UL;
+
+const uint32_t kRevertBounds[2] = {kLcdRevertMinSeconds, kLcdRevertMaxSeconds};
+const uint32_t kChoiceBounds[2] = {kLcdChoiceMinSeconds, kLcdChoiceMaxSeconds};
+const uint32_t kCardBounds[2] = {kLcdCardMinSeconds, kLcdCardMaxSeconds};
+const uint32_t kHintBounds[2] = {kLcdHintMinSeconds, kLcdHintMaxSeconds};
+/// The FLOOR here is the smallest `lcd_choice_seconds` can ever be; the real
+/// floor is whatever it currently is, and the invariant below raises to it.
+const uint32_t kScanMemoryBounds[2] = {kLcdChoiceMinSeconds, kScanMemoryMaxSeconds};
+const uint32_t kClockTrustBounds[2] = {kClockTrustMinMinutes, kClockTrustMaxMinutes};
+
+/// The six durations. Split from the three flags so neither function carries
+/// the whole of `config` on its own branch count.
+bool adoptDurations(const char* cfg, size_t len, LcdSettings& out) {
+  bool any = false;
+  any = adoptDuration(cfg, len, "lcd_revert_seconds", kRevertBounds, kSecond, out.revertMs) || any;
+  any = adoptDuration(cfg, len, "lcd_choice_seconds", kChoiceBounds, kSecond, out.choiceMs) || any;
+  any = adoptDuration(cfg, len, "lcd_card_seconds", kCardBounds, kSecond, out.cardMs) || any;
+  any = adoptDuration(cfg, len, "lcd_hint_seconds", kHintBounds, kSecond, out.hintMs) || any;
+  any = adoptDuration(cfg, len, "scan_memory_seconds", kScanMemoryBounds, kSecond, out.scanMemoryMs) || any;
+  any = adoptDuration(cfg, len, "clock_trust_minutes", kClockTrustBounds, kMinute, out.clockTrustMs) || any;
+  return any;
+}
+
+/// The two booleans and the one count.
+///
+/// `topLevelBoolField` reports a quoted "true" and a bare `1` as ABSENT, for
+/// the same reason a quoted integer is absent: this is a scanner, and a caller
+/// that guessed at a type would turn a contract drift into a silently disabled
+/// safety behaviour.
+bool adoptFlags(const char* cfg, size_t len, LcdSettings& out) {
+  bool any = false;
+
+  bool flag = false;
+  if (devapi::json::topLevelBoolField(cfg, len, "relay_restore_enabled", flag)) {
+    out.relayRestoreEnabled = flag;
+    any = true;
+  }
+  if (devapi::json::topLevelBoolField(cfg, len, "device_fault_reporting", flag)) {
+    out.faultReporting = flag;
+    any = true;
+  }
+
+  uint32_t perHour = 0U;
+  if (devapi::json::topLevelUnsignedField(cfg, len, "device_fault_max_per_hour", perHour)) {
+    out.faultMaxPerHour = static_cast<uint16_t>(bounded(perHour, kMinFaultMaxPerHour, kMaxFaultMaxPerHour));
+    any = true;
+  }
+
+  return any;
+}
+
+} // namespace
+
+bool parseLcdSettings(const char* body, size_t len, LcdSettings& out) {
+  // RAISED, NEVER LOWERED, and re-established on every path out of this
+  // function — including the ones that adopt nothing, because the invariant
+  // has to hold ACROSS heartbeats. Lowering `choiceMs` to fit would shorten a
+  // window somebody may be standing in front of mid-purchase; raising the
+  // memory costs nothing anybody can see.
+  //
+  // Declared here as a lambda-free local step so there is exactly one place it
+  // happens and no path can skip it.
+  bool adopted = false;
+
+  size_t innerLen = 0U;
+  const size_t at = body == nullptr ? devapi::json::kNotFound
+                                    : devapi::json::findTopLevelObject(body, len, "config", innerLen);
+  if (at != devapi::json::kNotFound && at > 0U) {
+    // The WHOLE object, braces included: `findTopLevelObject` answers the first
+    // byte INSIDE it, and the readers below need a complete object to treat as
+    // their own outermost one. That is what makes them exactly one level deep —
+    // a decoy nested inside `config`, before or after the real key, is skipped
+    // whole rather than matched.
+    const char* cfg = body + at - 1U;
+    const size_t cfgLen = innerLen + 2U;
+    const bool durations = adoptDurations(cfg, cfgLen, out);
+    const bool flags = adoptFlags(cfg, cfgLen, out);
+    adopted = durations || flags;
+  }
+
+  if (out.scanMemoryMs < out.choiceMs) {
+    out.scanMemoryMs = out.choiceMs;
+  }
+  return adopted;
+}
+
+} // namespace devlink
