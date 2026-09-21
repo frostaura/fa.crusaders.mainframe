@@ -67,6 +67,7 @@ from urllib.parse import urlsplit
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+import gate_sim  # noqa: E402  - the DSIM section: the COMPILED firmware, in this chain
 import scenario as sc  # noqa: E402  - the bootstrap this file is a second scenario on
 import wire  # noqa: E402
 
@@ -1464,6 +1465,7 @@ def evening(d: Door, gateway: Optional[Gateway]) -> None:
     run_step(lambda: d15_out_of_service(d, booking), "D15")
     run_step(lambda: d16_cross_kind(d, booking), "D16")
     run_step(lambda: da_activity(d), "B5")
+    run_step(lambda: gate_sim.dsim_firmware(d), "DSIM")
     run_step(lambda: dw_wire(d, booking, gateway), "E1")
     run_step(lambda: d17_the_trail(d, booking), "D17")
 

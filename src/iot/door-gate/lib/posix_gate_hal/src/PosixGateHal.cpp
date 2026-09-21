@@ -462,46 +462,26 @@ bool writeAll(int fd, const char* data, size_t len, hal::IClock& clock, uint32_t
   return true;
 }
 
-} // namespace
+/// Everything one request is, so `sendRequest` takes four arguments rather
+/// than seven. The complexity gate's argument limit is six and it is right
+/// here: four `const char*`s in a row is four a caller can transpose silently.
+struct Request {
+  const Endpoint& endpoint;
+  const char* path;
+  const char* authorization;
+  const char* body;
+};
 
-gatelogic::HttpOutcome SocketHttpPort::post(const char* path, const char* body, char* out, size_t outCap) {
-  if (baseUrl_ == nullptr || authorization_ == nullptr || authorization_[0] == '\0') {
-    return gatelogic::noCall();
-  }
-
-  // Sized from the same grammar the board static_asserts API_BASE_URL against,
-  // so "the base URL fits" is decided in the same place for both builds.
-  char url[gatelogic::kUrlBufSize];
-  const int written = snprintf(url, sizeof(url), "%s%s", baseUrl_, path);
-  if (written < 0 || static_cast<size_t>(written) >= sizeof(url)) {
-    return gatelogic::noCall();
-  }
-
-  Endpoint endpoint;
-  if (!splitBaseUrl(baseUrl_, endpoint)) {
-    return gatelogic::noCall();
-  }
-
-  const uint32_t startedAt = clock_.nowMs();
-  ++calls_;
-
-  // PHASE ONE: the TCP connect, bounded by kHttpConnectTimeoutMs.
-  const int fd = connectBounded(endpoint, clock_, startedAt + gatelogic::kHttpConnectTimeoutMs);
-  if (fd < 0) {
-    const uint32_t spent = tb::since(clock_.nowMs(), startedAt);
-    if (spent > worstCallMs_) {
-      worstCallMs_ = spent;
-    }
-    return gatelogic::noCall();
-  }
-
-  // HTTP/1.0 WITH `Connection: close`, WHICH IS WHAT THE SHIPPED FIRMWARE ASKS
-  // FOR. `Esp32HttpPort` gets it from `useHTTP10(true)` + `setReuse(false)`;
-  // there is no HTTPClient here, so it is spelled out. Kestrel answers every
-  // device route `Transfer-Encoding: chunked` on a kept-open socket to a 1.1
-  // client, and a reader that stops when the peer closes never stops — which is
-  // round G3's critical, and why the request below is 1.0 and the reader
-  // de-chunks anyway.
+/// PHASE ONE AND A HALF: the whole request, written out.
+///
+/// HTTP/1.0 WITH `Connection: close`, WHICH IS WHAT THE SHIPPED FIRMWARE ASKS
+/// FOR. `Esp32HttpPort` gets it from `useHTTP10(true)` + `setReuse(false)`;
+/// there is no HTTPClient here, so it is spelled out. Kestrel answers every
+/// device route `Transfer-Encoding: chunked` on a kept-open socket to a 1.1
+/// client, and a reader that stops when the peer closes never stops — which is
+/// round G3's critical, and why the request below is 1.0 and the reader
+/// de-chunks anyway.
+bool sendRequest(int fd, const Request& request_, hal::IClock& clock, uint32_t writeDeadline) {
   char request[512];
   const int head =
       snprintf(request, sizeof(request),
@@ -512,38 +492,71 @@ gatelogic::HttpOutcome SocketHttpPort::post(const char* path, const char* body, 
                "Content-Length: %zu\r\n"
                "Connection: close\r\n"
                "\r\n",
-               path, endpoint.host, static_cast<unsigned>(endpoint.port), authorization_, strlen(body));
-  gatelogic::HttpOutcome outcome = gatelogic::noCall();
-  if (head > 0 && static_cast<size_t>(head) < sizeof(request) &&
-      writeAll(fd, request, static_cast<size_t>(head), clock_,
-               startedAt + gatelogic::kHttpConnectTimeoutMs + gatelogic::kHttpResponseTimeoutMs) &&
-      writeAll(fd, body, strlen(body), clock_,
-               startedAt + gatelogic::kHttpConnectTimeoutMs + gatelogic::kHttpResponseTimeoutMs)) {
-    SocketStream stream(fd);
-    Headers headers;
-    // PHASE TWO: the status line and the headers, on their own budget sampled
-    // from the moment the connect returned.
-    const uint32_t headersFrom = clock_.nowMs();
-    if (readHeaders(stream, clock_, headersFrom + gatelogic::kHttpResponseTimeoutMs, headers)) {
-      // PHASE THREE: the body, on a budget sampled AFTER the headers returned
-      // and never from the instant the whole call started — round G2 did the
-      // latter and handed a perfectly good 4.6 KB roster a deadline already in
-      // the past. The SAME `gatelogic::readBody` the board runs, framed by the
-      // SAME `gatelogic::frameFromHeaders`.
-      gatelogic::BodyResult read = gatelogic::BodyResult::Ok;
-      if (out != nullptr && outCap > 0U) {
-        out[0] = '\0';
-        const gatelogic::BodyFrame frame =
-            gatelogic::frameFromHeaders(headers.contentLength, headers.chunked);
-        read = gatelogic::readBody(stream, clock_, clock_.nowMs() + gatelogic::kHttpBodyBudgetMs, frame, out,
-                                   outCap);
-      }
-      const uint16_t peerStatus = static_cast<uint16_t>(headers.status);
-      outcome = gatelogic::HttpOutcome{gatelogic::statusForBody(peerStatus, read), peerStatus};
-    }
+               request_.path, request_.endpoint.host, static_cast<unsigned>(request_.endpoint.port),
+               request_.authorization, strlen(request_.body));
+  if (head <= 0 || static_cast<size_t>(head) >= sizeof(request)) {
+    return false;
+  }
+  return writeAll(fd, request, static_cast<size_t>(head), clock, writeDeadline) &&
+         writeAll(fd, request_.body, strlen(request_.body), clock, writeDeadline);
+}
+
+/// PHASES TWO AND THREE: the headers on their own budget, then the body on its
+/// own, sampled AFTER the headers returned and never from the instant the whole
+/// call started — round G2 did the latter and handed a perfectly good 4.6 KB
+/// roster a deadline already in the past.
+///
+/// The body is read by the REAL `gatelogic::readBody`, framed by the REAL
+/// `gatelogic::frameFromHeaders`.
+gatelogic::HttpOutcome readResponse(int fd, hal::IClock& clock, char* out, size_t outCap) {
+  SocketStream stream(fd);
+  Headers headers;
+  const uint32_t headersFrom = clock.nowMs();
+  if (!readHeaders(stream, clock, headersFrom + gatelogic::kHttpResponseTimeoutMs, headers)) {
+    return gatelogic::noCall();
+  }
+  gatelogic::BodyResult read = gatelogic::BodyResult::Ok;
+  if (out != nullptr && outCap > 0U) {
+    out[0] = '\0';
+    const gatelogic::BodyFrame frame = gatelogic::frameFromHeaders(headers.contentLength, headers.chunked);
+    read =
+        gatelogic::readBody(stream, clock, clock.nowMs() + gatelogic::kHttpBodyBudgetMs, frame, out, outCap);
+  }
+  const uint16_t peerStatus = static_cast<uint16_t>(headers.status);
+  return gatelogic::HttpOutcome{gatelogic::statusForBody(peerStatus, read), peerStatus};
+}
+
+} // namespace
+
+gatelogic::HttpOutcome SocketHttpPort::post(const char* path, const char* body, char* out, size_t outCap) {
+  Endpoint endpoint;
+  // The URL buffer is sized from the same grammar the board static_asserts
+  // API_BASE_URL against, so "the base URL fits" is decided in the same place
+  // for both builds. It is rendered only to be measured: this port dials an
+  // address and a path rather than a URL.
+  char url[gatelogic::kUrlBufSize];
+  const int written = baseUrl_ == nullptr ? -1 : snprintf(url, sizeof(url), "%s%s", baseUrl_, path);
+  if (authorization_ == nullptr || authorization_[0] == '\0' || written < 0 ||
+      static_cast<size_t>(written) >= sizeof(url) || !splitBaseUrl(baseUrl_, endpoint)) {
+    return gatelogic::noCall();
   }
 
-  static_cast<void>(::close(fd));
+  const uint32_t startedAt = clock_.nowMs();
+  ++calls_;
+  gatelogic::HttpOutcome outcome = gatelogic::noCall();
+
+  // PHASE ONE: the TCP connect, bounded by kHttpConnectTimeoutMs.
+  const int fd = connectBounded(endpoint, clock_, startedAt + gatelogic::kHttpConnectTimeoutMs);
+  if (fd >= 0) {
+    const uint32_t writeDeadline =
+        startedAt + gatelogic::kHttpConnectTimeoutMs + gatelogic::kHttpResponseTimeoutMs;
+    const Request request{endpoint, path, authorization_, body};
+    if (sendRequest(fd, request, clock_, writeDeadline)) {
+      outcome = readResponse(fd, clock_, out, outCap);
+    }
+    static_cast<void>(::close(fd));
+  }
+
   const uint32_t spent = tb::since(clock_.nowMs(), startedAt);
   if (spent > worstCallMs_) {
     worstCallMs_ = spent;
