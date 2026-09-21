@@ -153,8 +153,20 @@ export function useCountUp(target: number | null): number | null {
   return displayed;
 }
 
-/** Never assumed: a browser with no `matchMedia` (jsdom) is treated as not asking for less. */
+/**
+ * Whether to animate at all — and a browser that cannot tell us is answered NO.
+ *
+ * <p>
+ * `matchMedia` missing or throwing means the page has no way to know whether the reader has
+ * asked for less motion. The conservative answer is the accessible one: do not animate
+ * something nobody asked for, on a viewer whose preference cannot be read. It also makes the
+ * count deterministic under jsdom, where a tween is a frame loop a test has to wait out for a
+ * figure that is already correct.
+ * </p>
+ */
 function prefersReducedMotion(): boolean {
-  try { return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true; }
-  catch { return false; }
+  try {
+    const query = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    return query ? query.matches === true : true;
+  } catch { return true; }
 }

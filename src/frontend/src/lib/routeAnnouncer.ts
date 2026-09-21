@@ -54,6 +54,8 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   ["/change-password", "Change password"],
   ["/my-code", "My code"],
   ["/court-code", "My code"],
+  // item 16 — the always-reachable guide.
+  ["/how-it-works", "How it works"],
   ["/reports", "Reports"],
   ["/admin/members", "Members"],
   ["/admin/webhooks", "Webhooks"],

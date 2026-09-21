@@ -201,7 +201,7 @@ type ActionKind = DecisionAction["kind"];
  *
  * <p>
  * Same keys as `deviceActivity.DOOR_REFUSAL_REASONS` — the member and the admin are
- * looking at the same seven decisions a door can make — and not one shared sentence,
+ * looking at the same eight decisions a door can make — and not one shared sentence,
  * because they are not the same reader and the two files must not be copy-pasted into
  * each other. Both halves are pinned by the matrix test.
  * </p>
@@ -227,6 +227,9 @@ export const MEMBER_DOOR_REASON_LINES: Record<string, string> = {
   too_early: "The booking that code belonged to hadn't opened the door yet.",
   method_not_supported: "The board at that door asked something a door doesn't answer — nothing you did caused it.",
   not_a_gate: "That board is a court box rather than a door, so it was never going to open for your code.",
+  // Ruling 15. Deliberately not "not active": there is nothing to reactivate. The club has
+  // never recorded a membership for this person, and the fix is somebody adding one.
+  no_membership: "The club had no membership on file for you.",
 };
 
 // --- club contact ------------------------------------------------------------------
@@ -624,6 +627,27 @@ function armNotActive(): Arm {
   };
 }
 
+/**
+ * <b>Ruling 15 — and it is a different card from `armNotActive` on purpose.</b>
+ *
+ * <p>
+ * "Not active" tells a member to ask the club to turn something back on. There is nothing to
+ * turn back on: the club has never recorded them, which is an administrative gap rather than
+ * a decision anybody took about them. Sending somebody to the desk to argue about a
+ * suspension they do not have is how a five-minute errand becomes an argument, and the
+ * sentence that avoids it costs nothing.
+ * </p>
+ */
+function armNoMembership(): Arm {
+  return {
+    tone: "danger",
+    headline: "The club has no membership on file for you.",
+    body: "That is not the same as one it has turned off — there is simply no record, so the door has nothing to"
+      + " check you against. Somebody at the club has to add you; there is nothing to fix on this phone.",
+    wants: ["call_the_club"],
+  };
+}
+
 function armNotRecognised(): Arm {
   return {
     tone: "warning",
@@ -683,6 +707,7 @@ const ARMS: Record<string, (ctx: DecisionContext) => Arm> = {
   too_early: armTooEarly,
   no_booking: armNoBooking,
   member_not_active: armNotActive,
+  no_membership: armNoMembership,
   not_recognised: armNotRecognised,
   method_not_supported: armBoardFault,
   not_a_gate: armBoardFault,
@@ -1278,27 +1303,34 @@ export function describeStanding(
 const MEMBERSHIP_NOT_THE_OBSTACLE = "Nothing about your membership stands between you and a door.";
 
 /**
- * <b>R3-5: what a member the club has NO membership row for is told.</b>
+ * <b>What a member the club has NO membership row for is told — and it changed with ruling 15.</b>
  *
  * <p>
- * The old sentence ended "…Worth asking the club to put that right." and was then followed,
- * in the same paragraph, by "A live member code of yours opens the club door." A member read
- * a problem and a promise back to back with nothing connecting them, and had no way to tell
- * whether the missing record was why she was standing outside.
+ * <b>R3-5, the first half, still stands.</b> The sentence used to end "…Worth asking the club
+ * to put that right." and was then followed, in the same paragraph, by "A live member code of
+ * yours opens the club door." A member read a problem and a promise back to back with nothing
+ * connecting them, and no way to tell whether the missing record was why they were standing
+ * outside.
  * </p>
  *
  * <p>
- * <b>It is not why, and this sentence says so rather than implying either answer.</b>
- * `MembershipAccess.StatusIfBarredAsync` answers null for a user with no membership row and
- * `GateAccess` walks straight past the check, so under this policy the door opens for her —
- * that is the hole W2.2 closes on the admin's side, and it is exactly the thing worth saying
- * out loud to the person it is about. What the page may not do is finish on the bare promise
- * as though the club's records were in order.
+ * <b>What changed is the answer to that question.</b> R3-5 resolved it as "no" and said so:
+ * `MembershipAccess.StatusIfBarredAsync` answered null for a user with no membership row,
+ * `GateAccess` walked straight past the check, and under this policy the door opened for her.
+ * That was a hole in the product rather than a state of hers — and ruling 15 closes it, so the
+ * door now refuses with its own reason (`no_membership`). The sentence that told her it was
+ * not what kept her out is therefore no longer true, and is replaced rather than softened.
+ * </p>
+ *
+ * <p>
+ * <b>It names the difference from a membership the club has turned OFF,</b> because that is
+ * the difference that decides what she says at the desk: there is nothing to reinstate, and
+ * somebody has to add her. A member sent to argue about a suspension she does not have is a
+ * five-minute errand turned into an argument.
  * </p>
  */
 const NO_MEMBERSHIP_ON_FILE = "The club has no membership on file for you, which is not the same as one it has"
-  + " turned off. This club's doors don't check for one, so it isn't what keeps you out — but it is worth"
-  + " asking the club to put right.";
+  + " turned off — there is simply no record. Until somebody at the club adds you, no code of yours opens a door.";
 
 function standingActiveMember(
   door: StandingInput,
@@ -1311,12 +1343,12 @@ function standingActiveMember(
   const offerMemberCode = code?.kind === "booking";
   // Three states, and `none` gets its own rather than borrowing either neighbour's.
   // "Yours is active" would be as false as "yours is not active" — the club has nothing on
-  // file at all — and the door opens regardless, so the sentence has to say both halves.
+  // file at all — and what the door does about that is its own sentence (ruling 15).
   const standing = door.membership === "none" ? NO_MEMBERSHIP_ON_FILE : "Yours is active.";
-  // The promise is made on ONE arm and withheld on the rest — and on the R3-5 arm the
-  // membership sentence above has already said what this club's doors do and do not check,
-  // so there is no consequence clause at all. Repeating the promise after it is what made
-  // the two read as a contradiction, and repeating the denial would be saying it twice.
+  // The promise is made on ONE arm and withheld on the rest — and on the no-membership arm
+  // the sentence above has already said that no code opens a door, so there is no consequence
+  // clause at all. Repeating the promise after it is what made the two read as a
+  // contradiction, and repeating the denial would be saying it twice.
   const consequence = door.membership === "none"
     ? ""
     : shut === "all" || shut === "unknown" || !codeState.hasLiveCode
@@ -1331,6 +1363,23 @@ function standingActiveMember(
         : " A live member code of yours opens the club door.";
   const nextBooking = !code && door.next_booking ? nextBookingLine(door.next_booking, door.timezone) : null;
   const codeLine = codeLineFor(code, offerMemberCode, door.timezone) ?? nextBooking;
+  /*
+    Ruling 15. With no membership on file the club has to move first, exactly as it does for a
+    membership it has switched off — so this arm behaves like `standingNotActive`: no window,
+    no offer of the other code (both are refused), and the code card's clause suppressed so it
+    cannot promise a door over a sentence saying none will open.
+  */
+  if (door.membership === "none") {
+    return {
+      body: `${ACTIVE_MEMBER_RULE} ${standing}`,
+      codeLine: null,
+      shutLine: null,
+      offerMemberCode: false,
+      hasClockWindow: false,
+      suppressesCodeClause: true,
+      action: null,
+    };
+  }
   return {
     body: `${ACTIVE_MEMBER_RULE} ${standing}${consequence}`,
     codeLine,
@@ -1829,7 +1878,14 @@ function membershipRow(input: DiagnosisInput): DiagnosisRow {
     return row("membership", "failed", MEMBERSHIP_DETAIL_WORDS[input.membership_detail] ?? MEMBERSHIP_DETAIL_FALLBACK);
   }
   if (input.membership === "none") {
-    return row("membership", "attention", "nothing on file, and nothing barring you", "Unusual — tell the club");
+    /*
+      Ruling 15. This read "nothing on file, and nothing barring you" with an `attention`
+      state, which was true while `GateAccess` walked past the membership check for a user it
+      had no row for. The backend closes that hole, so the row fails: there IS something
+      barring her, and it is the absence of the record. A checklist that ticks past the
+      actual answer is worse than no checklist.
+    */
+    return row("membership", "failed", "nothing on file — the club has to add you");
   }
   return row("membership", "passed", "active");
 }
@@ -2240,6 +2296,7 @@ const CHIP_LABELS: Record<string, string> = {
   too_early: "Too early",
   method_not_supported: "Door misconfigured",
   not_a_gate: "Door misconfigured",
+  no_membership: "No membership on file",
 };
 
 const CHIP_TONES: Record<string, ChipTone> = {
@@ -2249,6 +2306,7 @@ const CHIP_TONES: Record<string, ChipTone> = {
   too_early: "info",
   method_not_supported: "danger",
   not_a_gate: "danger",
+  no_membership: "danger",
 };
 
 /**

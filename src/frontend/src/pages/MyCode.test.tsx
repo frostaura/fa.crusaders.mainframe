@@ -1396,11 +1396,23 @@ describe("MyCode at a club with a door", () => {
   });
 
   /**
-   * And the row that must NOT fail. A member with no membership row is not barred — the
-   * door lets them in — so failing this row would hand them "that's the whole reason"
-   * about a rule nothing applies to them, while whatever is really wrong goes unnamed.
+   * <b>Ruling 15 reversed this case, and the reversal is the point.</b>
+   *
+   * <p>
+   * It used to assert that the row neither passed nor failed, because a member with no
+   * membership row was not barred — `MembershipAccess.StatusIfBarredAsync` answered null and
+   * `GateAccess` walked straight past the check, so the door opened for somebody the club had
+   * no record of. That was a hole in the product, not a state of hers, and the backend closes
+   * it: no membership row is now refused with its own reason.
+   * </p>
+   *
+   * <p>
+   * So the row fails, and the sentence still refuses to say "not active" — there is nothing to
+   * reactivate, and sending her to the desk to argue about a suspension she does not have is
+   * how a five-minute errand becomes an argument. It names who fixes it instead.
+   * </p>
    */
-  it("neither passes nor fails the membership row for a member the club has nothing on file for", async () => {
+  it("fails the membership row for a member the club has nothing on file for, without calling it inactive", async () => {
     renderBoth(memberDoorsOnFixture({
       policy: "booking_window", next_booking: BOOKING,
       membership: "none", membership_detail: "none",
@@ -1412,13 +1424,11 @@ describe("MyCode at a club with a door", () => {
 
     const panel = screen.getByRole("group", { name: /work out why/i });
     const row = [...panel.querySelectorAll("li")].find((li) => li.textContent?.includes("Your membership"));
-    // D3: neither a failure — nothing is barring her — nor a tick, which would be this
-    // screen telling somebody the club has no record of that her records are in order.
     expect(row?.textContent).not.toContain("Passed");
-    expect(row?.textContent).not.toContain("Failed");
-    expect(row?.textContent).toContain("Unusual — tell the club");
-    expect(row?.textContent).toContain("nothing barring you");
-    expect(panel.textContent).not.toMatch(/that's the whole reason/i);
+    expect(row?.textContent).toContain("Failed");
+    expect(row?.textContent).toContain("the club has to add you");
+    // Never "not active": there is no membership to reinstate.
+    expect(row?.textContent).not.toMatch(/not active|suspended/i);
   });
 
   /**
@@ -1763,28 +1773,26 @@ describe("MyCode at a club with a door", () => {
    * contradict the door. `StatusIfBarredAsync` answers null for that member, so
    * `GateAccess` walks past the check and the door opens.
    */
-  it("does not tell a member with no membership row that theirs is not active", async () => {
+  /**
+   * R3-5 said this member must not be told her membership is "not active", and that still
+   * holds — there is nothing to reactivate. Ruling 15 changed the second half: the door used
+   * to open for her (`StatusIfBarredAsync` answered null and the check was skipped), and the
+   * backend now refuses her with a reason of her own. So the sentence names the difference
+   * from a membership the club has switched OFF, and states the refusal rather than denying
+   * one — and it still never finishes on a promise.
+   */
+  it("tells a member with no membership row there is no record, not that theirs is off", async () => {
     renderBoth(memberDoorsOnFixture({
       policy: "active_member", membership: "none", membership_detail: "none",
     }));
 
     const line = await screen.findByText(/no membership on file for you/);
-    // R3-5: the mechanism, stated — and NOT the bare promise on top of it. It used to end
-    // "A live member code of yours opens the club door" directly after telling her the club
-    // has no record of her and that it is worth putting right, which reads as the screen
-    // arguing with itself. What the door does is still said; what it no longer does is
-    // finish on a promise as though the records were in order.
-    expect(line).toHaveTextContent(/This club's doors don't check for one/);
+    expect(line).toHaveTextContent(/not the same as one it has turned off/);
+    expect(line).toHaveTextContent(/no code of yours opens a door/);
     expect(line).not.toHaveTextContent(/A live member code of yours opens the club door/);
     // Neither neighbour's sentence: not "yours is active" and not "yours is not active".
     expect(line).not.toHaveTextContent(/Yours is active/);
     expect(screen.queryByText(/not active/i)).toBeNull();
-    // And the door's clock times are still on the page — in the sentence that says WHICH
-    // code they belong to, because the code on screen here is a booking code. E-H2 (1).
-    expect(screen.getByText(/The booking code on screen is bounded by its own window/))
-      // The DAY travels with the clock when the window is not today — `next_booking` has no
-      // horizon any more, so a bare "18:30" could mean a time three days out.
-      .toHaveTextContent(/works at a door from .*\d{2}:\d{2} until .*\d{2}:\d{2}/);
   });
 
   // --- early_entry_minutes: the club's own number --------------------------------------
