@@ -1203,6 +1203,207 @@ void test_heartbeat_body_names_the_box_and_survives_the_millis_wrap() {
   TEST_ASSERT_EQUAL_size_t(0U, devlink::renderHeartbeatBody(body, sizeof(body), nullptr, "2.0.0", 1000ULL));
 }
 
+/// THE COMPATIBILITY HINGE. A box with nothing to report renders the body it
+/// has always rendered, BYTE FOR BYTE — which is what keeps the contract
+/// corpus's `heartbeat-request` vector true and keeps every image already in
+/// the field valid. Both new fields are omitted at their nothing value, exactly
+/// as `boot_id`, `no_push` and `events_lost` are.
+void test_heartbeat_body_with_nothing_to_report_is_byte_identical() {
+  char body[devlink::kHeartbeatBodyCap] = {};
+  const char* kAlways = "{\"mac\":\"5ccf7f0a1b2c\",\"firmware_version\":\"2.0.0\",\"uptime_ms\":86400000}";
+
+  // The five-argument call every composition root makes today.
+  TEST_ASSERT_TRUE(devlink::renderHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "2.0.0", 86400000ULL) >
+                   0U);
+  TEST_ASSERT_EQUAL_STRING(kAlways, body);
+
+  // And an explicitly empty report: zero restored, no relay-state array at all.
+  const devlink::HeartbeatReport quiet;
+  TEST_ASSERT_EQUAL_UINT8(0U, quiet.restoredRelays);
+  TEST_ASSERT_TRUE(
+      devlink::renderHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "2.0.0", 86400000ULL, quiet) > 0U);
+  TEST_ASSERT_EQUAL_STRING(kAlways, body);
+}
+
+/// `restored_relays` — how many relays this box re-energised from the last
+/// restore. It is how the server learns the restore LANDED: a served restore
+/// followed by a zero is the row an admin must see, because it means a court is
+/// dark that should not be.
+///
+/// OMITTED AT ZERO, which the server reads as zero, so the two say the same
+/// thing and the quiet body stays byte-identical to what the field already
+/// sends.
+void test_heartbeat_body_reports_how_many_relays_it_restored() {
+  char body[devlink::kHeartbeatBodyCap] = {};
+  devlink::HeartbeatReport report;
+  report.restoredRelays = 2U;
+
+  TEST_ASSERT_TRUE(
+      devlink::renderHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "2.0.0", 90000ULL, report) > 0U);
+  TEST_ASSERT_EQUAL_STRING("{\"mac\":\"5ccf7f0a1b2c\",\"firmware_version\":\"2.0.0\",\"uptime_ms\":90000,"
+                           "\"restored_relays\":2}",
+                           body);
+
+  // Position is part of the shape: after `uptime_ms`, before `relay_state`.
+  report.restoredRelays = 0U;
+  TEST_ASSERT_TRUE(
+      devlink::renderHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "2.0.0", 90000ULL, report) > 0U);
+  TEST_ASSERT_NULL(strstr(body, "restored_relays"));
+}
+
+/// `relay_state` — what the box BELIEVES is closed, so the server can stop
+/// guessing. The Mega publishes `!STATE,<mask>,<remA>..<remD>` on every change
+/// and every ten seconds, and until now it reached nobody outside the box: the
+/// admin console could only ever say what it BELIEVED it had granted.
+///
+/// The same pipe-delimited string array as the restore, for the same heapless
+/// reason, and rendered from a plain array the caller passes — devlink must not
+/// know what a court is.
+void test_heartbeat_body_carries_the_relays_the_box_believes_are_closed() {
+  char body[devlink::kHeartbeatBodyCap] = {};
+  devlink::RelayState state[devlink::kMaxRelayStateElements];
+  state[0].relay = 0U;
+  state[0].remainingSeconds = 1834U;
+  state[1].relay = 2U;
+  state[1].remainingSeconds = 600U;
+
+  devlink::HeartbeatReport report;
+  report.relayState = state;
+  report.relayStateCount = 2U;
+
+  TEST_ASSERT_TRUE(
+      devlink::renderHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "2.0.0", 90000ULL, report) > 0U);
+  TEST_ASSERT_EQUAL_STRING("{\"mac\":\"5ccf7f0a1b2c\",\"firmware_version\":\"2.0.0\",\"uptime_ms\":90000,"
+                           "\"relay_state\":[\"0|1834\",\"2|600\"]}",
+                           body);
+
+  // Both fields together, in their pinned order.
+  report.restoredRelays = 2U;
+  TEST_ASSERT_TRUE(
+      devlink::renderHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "2.0.0", 90000ULL, report) > 0U);
+  TEST_ASSERT_EQUAL_STRING("{\"mac\":\"5ccf7f0a1b2c\",\"firmware_version\":\"2.0.0\",\"uptime_ms\":90000,"
+                           "\"restored_relays\":2,\"relay_state\":[\"0|1834\",\"2|600\"]}",
+                           body);
+
+  // THREE STATES, NOT TWO. An absent key is "this firmware does not report
+  // relay state"; an EMPTY ARRAY is "this box believes nothing is closed". A
+  // control board that could not tell those apart would show a dark court as
+  // unknown and an unknown court as dark.
+  devlink::HeartbeatReport nothingOn;
+  nothingOn.relayState = state;
+  nothingOn.relayStateCount = 0U;
+  TEST_ASSERT_TRUE(
+      devlink::renderHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "2.0.0", 90000ULL, nothingOn) > 0U);
+  TEST_ASSERT_NOT_NULL(strstr(body, "\"relay_state\":[]}"));
+
+  devlink::HeartbeatReport doesNotReport;
+  TEST_ASSERT_TRUE(devlink::renderHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "2.0.0", 90000ULL,
+                                                doesNotReport) > 0U);
+  TEST_ASSERT_NULL(strstr(body, "relay_state"));
+
+  // The remainder is the box's own, from `!STATE`, and goes up UNCAPPED for the
+  // same reason the restore's comes down uncapped: the server is being told
+  // what this board believes, not what a relay cap allows.
+  devlink::RelayState wide[devlink::kMaxRelayStateElements];
+  wide[0].relay = 3U;
+  wide[0].remainingSeconds = 4294967295UL;
+  devlink::HeartbeatReport widest;
+  widest.relayState = wide;
+  widest.relayStateCount = 1U;
+  TEST_ASSERT_TRUE(
+      devlink::renderHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "2.0.0", 90000ULL, widest) > 0U);
+  TEST_ASSERT_NOT_NULL(strstr(body, "\"relay_state\":[\"3|4294967295\"]}"));
+}
+
+/// A DIAGNOSTIC MUST NEVER BE ABLE TO STOP A HEARTBEAT, and that is the exact
+/// mirror of the server-side rule that made `no_push` a `long?` rather than an
+/// `int?`: a counter out of range must not answer 400 for the whole heartbeat
+/// and take the roster down with it. On this side the same sentence means a
+/// caller that hands the renderer a relay index the grammar cannot express, or
+/// more elements than the buffer is sized for, still gets a heartbeat — because
+/// a box that cannot heartbeat has no court list and refuses every scan.
+void test_heartbeat_body_never_lets_a_diagnostic_cost_the_heartbeat() {
+  char body[devlink::kHeartbeatBodyCap] = {};
+  devlink::RelayState state[devlink::kMaxRelayStateElements];
+  state[0].relay = 9U; // no such relay
+  state[0].remainingSeconds = 100U;
+  state[1].relay = 1U;
+  state[1].remainingSeconds = 500U;
+
+  devlink::HeartbeatReport report;
+  report.relayState = state;
+  report.relayStateCount = 2U;
+  TEST_ASSERT_TRUE(
+      devlink::renderHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "2.0.0", 90000ULL, report) > 0U);
+  TEST_ASSERT_NOT_NULL(strstr(body, "\"relay_state\":[\"1|500\"]}"));
+  TEST_ASSERT_NULL(strstr(body, "9|100"));
+
+  // More elements than the cap the buffer is sized for: the extras are dropped
+  // and the heartbeat still goes.
+  devlink::HeartbeatReport tooMany;
+  tooMany.relayState = state;
+  tooMany.relayStateCount = 200U;
+  const size_t written =
+      devlink::renderHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "2.0.0", 90000ULL, tooMany);
+  TEST_ASSERT_TRUE(written > 0U);
+  TEST_ASSERT_EQUAL_size_t(strlen(body), written);
+
+  // A count with a null pointer is a caller bug that must also not cost the
+  // heartbeat: the key is simply absent.
+  devlink::HeartbeatReport lying;
+  lying.relayStateCount = 3U;
+  TEST_ASSERT_TRUE(
+      devlink::renderHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "2.0.0", 90000ULL, lying) > 0U);
+  TEST_ASSERT_NULL(strstr(body, "relay_state"));
+}
+
+/// The worst case fits kHeartbeatBodyCap, and a buffer that cannot hold the
+/// body gets NOTHING rather than half of one — the renderer's existing
+/// contract, extended over the two new fields. A half-rendered object is a 400
+/// the box cannot read, and a box that cannot heartbeat has no court list.
+void test_heartbeat_body_worst_case_fits_and_a_short_buffer_gets_nothing() {
+  devlink::RelayState state[devlink::kMaxRelayStateElements];
+  for (uint8_t i = 0U; i < devlink::kMaxRelayStateElements; ++i) {
+    state[i].relay = i;
+    state[i].remainingSeconds = 4294967295UL;
+  }
+  devlink::HeartbeatReport worst;
+  worst.restoredRelays = 255U;
+  worst.relayState = state;
+  worst.relayStateCount = devlink::kMaxRelayStateElements;
+
+  char body[devlink::kHeartbeatBodyCap] = {};
+  // A sixteen-character version, which is the budget the cap is computed
+  // against, and a uptime past 2^32 so both 64-bit paths are in the worst case.
+  const size_t written = devlink::renderHeartbeatBody(body, sizeof(body), "5ccf7f0a1b2c", "255.255.255-rc99",
+                                                      0xFFFFFFFFFFFFFFFFULL, worst);
+  TEST_ASSERT_TRUE_MESSAGE(written > 0U, "the worst case must fit kHeartbeatBodyCap");
+  TEST_ASSERT_EQUAL_size_t(strlen(body), written);
+  TEST_ASSERT_NOT_NULL(strstr(body, "\"uptime_ms\":18446744073709551615,"));
+  TEST_ASSERT_NOT_NULL(strstr(body, "\"restored_relays\":255,"));
+  TEST_ASSERT_NOT_NULL(strstr(body, "\"relay_state\":[\"0|4294967295\",\"1|4294967295\","
+                                    "\"2|4294967295\",\"3|4294967295\"]}"));
+
+  // One byte short of that body: refused, and `out` emptied.
+  char tight[256] = {};
+  TEST_ASSERT_EQUAL_size_t(0U,
+                           devlink::renderHeartbeatBody(tight, written, "5ccf7f0a1b2c", "255.255.255-rc99",
+                                                        0xFFFFFFFFFFFFFFFFULL, worst));
+  TEST_ASSERT_EQUAL_STRING("", tight);
+
+  // And the same at every clock base the suites use, so nothing in the new
+  // fields can have smuggled a 32-bit conversion in beside the uptime.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    char each[devlink::kHeartbeatBodyCap] = {};
+    const uint64_t uptime = 0x100000000ULL + kBases[i];
+    TEST_ASSERT_TRUE(
+        devlink::renderHeartbeatBody(each, sizeof(each), "5ccf7f0a1b2c", "2.0.0", uptime, worst) > 0U);
+    char expected[32] = {};
+    snprintf(expected, sizeof(expected), "\"uptime_ms\":%llu,", static_cast<unsigned long long>(uptime));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(each, expected), each);
+  }
+}
+
 } // namespace
 
 void setUp() {
@@ -1258,6 +1459,11 @@ int main(int, char**) {
   RUN_TEST(test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap);
   RUN_TEST(test_the_event_body_escapes_a_subject_whatever_bytes_are_in_it);
   RUN_TEST(test_heartbeat_body_names_the_box_and_survives_the_millis_wrap);
+  RUN_TEST(test_heartbeat_body_with_nothing_to_report_is_byte_identical);
+  RUN_TEST(test_heartbeat_body_reports_how_many_relays_it_restored);
+  RUN_TEST(test_heartbeat_body_carries_the_relays_the_box_believes_are_closed);
+  RUN_TEST(test_heartbeat_body_never_lets_a_diagnostic_cost_the_heartbeat);
+  RUN_TEST(test_heartbeat_body_worst_case_fits_and_a_short_buffer_gets_nothing);
 
   return UNITY_END();
 }
