@@ -61,7 +61,7 @@ CourtBox::CourtBox(const CourtPorts& ports, proto::LegacyDialect legacy)
     : scanner_(ports.scanner), bridge_(ports.bridge), clock_(ports.clock), relays_(ports.relay),
       screens_(ports.display), panel_(ports.buttons), scan_(), auth_(), rx_(proto::Link::Downlink, legacy),
       uptime_(), stateDue_(), lastMask_(0U), overrunPending_(false), txBuf_(), txDropped_(0U), rxErrors_(0U),
-      unauthorised_(0U), oversizeScans_(0U) {
+      unauthorised_(0U), oversizeScans_(0U), corruptScans_(0U), lastScanRejects_(0U) {
 }
 
 void CourtBox::begin() {
@@ -109,18 +109,24 @@ void CourtBox::drainBridge(uint32_t nowMs) {
 void CourtBox::drainScanner(uint32_t nowMs) {
   uint8_t byte = 0U;
   for (uint16_t i = 0U; i < kBytesPerPass && scanner_.read(byte); ++i) {
-    if (!scan_.feed(byte)) {
+    const bool complete = scan_.feed(byte);
+    reportScanRejects();
+    if (!complete) {
       continue;
     }
     const proto::Frame frame = proto::Frame::scan(scan_.code());
     if (frame.empty()) {
-      // Frame::scan() refuses a code that does not fit rather than truncating
-      // it, and so does ScanAssembler. Both refusals are counted here because a
-      // scanner that has started emitting long payloads is a fault an admin
-      // needs to see, not a member behaving oddly.
+      // Belt and braces, and say so honestly: ScanAssembler's own cap is
+      // proto::kMaxArgLen, so a code it accepted always fits a `!SCAN`
+      // argument and this branch is unreachable today. It stays because the
+      // two caps are separate constants and the failure it guards against —
+      // a truncated member code, which does not fail but identifies SOMEBODY
+      // ELSE, with the ledger debit following it — is not one to leave to a
+      // pair of numbers agreeing by habit.
       if (oversizeScans_ < UINT16_MAX) {
         ++oversizeScans_;
       }
+      sendScanReject("OVERSIZE", oversizeScans_);
       continue;
     }
     static_cast<void>(sendFrame(frame));
@@ -139,6 +145,50 @@ void CourtBox::drainScanner(uint32_t nowMs) {
     screens_.stageRow(3U, "");
     screens_.show(kDefaultHoldMs / 1000UL, kShowCountdown, nowMs);
   }
+}
+
+/// A line the assembler threw away, said out loud.
+///
+/// IT WAS COUNTED AND NOTHING COULD READ IT — the same defect as the three
+/// counters `!PONG` now carries, and a worse one, because the count that was
+/// being kept here could never move: `oversizeScans_` only ever incremented on
+/// `Frame::scan` refusing a code, and ScanAssembler's own cap is the same
+/// constant, so it refuses first and `feed()` simply never completes. A
+/// scanner emitting long payloads, or a corrupted line off a 9600 baud UART,
+/// produced no frame, no count and no record of any kind.
+///
+/// TWO NAMES, not one, because they are two different site visits. OVERSIZE is
+/// a scanner configured to append a suffix or read a different symbology;
+/// SCANJUNK is a cable, a connector or interference, and the second is the one
+/// that also explains a member whose code "sometimes does not work".
+void CourtBox::reportScanRejects() {
+  const uint16_t rejected = scan_.rejectedLines();
+  if (rejected == lastScanRejects_) {
+    return;
+  }
+  lastScanRejects_ = rejected;
+  if (scan_.lastReject() == ScanReject::TooLong) {
+    if (oversizeScans_ < UINT16_MAX) {
+      ++oversizeScans_;
+    }
+    sendScanReject("OVERSIZE", oversizeScans_);
+    return;
+  }
+  if (corruptScans_ < UINT16_MAX) {
+    ++corruptScans_;
+  }
+  sendScanReject("SCANJUNK", corruptScans_);
+}
+
+void CourtBox::sendScanReject(const char* name, uint16_t count) {
+  // The member sees NOTHING for either, deliberately. Both are faults of the
+  // reader, not of the code presented, and sending somebody holding a racquet
+  // to the desk for something they cannot fix is worse than silence — the
+  // scanner will read the next attempt or it will not, and the club finds out
+  // from the fault, which is where the fix actually is.
+  proto::Arg digits;
+  digits.setU32(count);
+  static_cast<void>(sendFrame(proto::Frame::evt(name, digits.c_str())));
 }
 
 void CourtBox::pollButtons(uint32_t nowMs) {

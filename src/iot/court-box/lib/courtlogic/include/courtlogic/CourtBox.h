@@ -138,8 +138,14 @@ public:
   /// stopped sending `!AUTH` and every press is being thrown away".
   uint16_t unauthorisedPresses() const { return unauthorised_; }
 
-  /// Complete scanner lines refused by proto::Frame::scan() as too long.
+  /// Scanner lines thrown away as too long — a reader configured for a
+  /// different symbology, or one appending a suffix.
   uint16_t oversizeScans() const { return oversizeScans_; }
+
+  /// Scanner lines thrown away as corrupt: a byte outside the payload set on a
+  /// 9600 baud line. A cable, a connector or interference — and the count that
+  /// explains a member whose code "sometimes does not work".
+  uint16_t corruptScans() const { return corruptScans_; }
 
   const ScreenBuffer& screens() const { return screens_; }
 
@@ -176,6 +182,8 @@ private:
   bool sendFrame(const proto::Frame& frame);
 
   void sendCourtEvent(const char* name, proto::Court court);
+  void reportScanRejects();
+  void sendScanReject(const char* name, uint16_t count);
 
   hal::IScannerPort& scanner_;
   hal::ITransport& bridge_;
@@ -209,6 +217,11 @@ private:
   uint16_t rxErrors_;
   uint16_t unauthorised_;
   uint16_t oversizeScans_;
+  uint16_t corruptScans_;
+
+  /// ScanAssembler's own reject count as of the last pass, so an INCREASE is
+  /// what produces an event. The assembler counts; this is what notices.
+  uint16_t lastScanRejects_;
 };
 
 } // namespace courtlogic

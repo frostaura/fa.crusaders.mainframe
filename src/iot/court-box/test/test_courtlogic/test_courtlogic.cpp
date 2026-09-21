@@ -1284,6 +1284,63 @@ void test_box_a_scan_pre_empts_a_screen_that_is_still_counting_down(void) {
   TEST_ASSERT_TRUE(sentLineStarting(b.bridge, "!SCAN,MEM-0043"));
 }
 
+void test_box_an_oversize_scan_is_reported_not_only_counted(void) {
+  Box b(kBaseMid);
+
+  // Longer than a `!SCAN` argument can carry. REFUSED, never truncated: a
+  // truncated member code identifies a DIFFERENT member, and the one thing
+  // worse than a scan nobody can read is a scan read as somebody else.
+  char oversize[proto::kMaxArgLen + 8U];
+  for (size_t i = 0U; i < sizeof(oversize) - 3U; ++i) {
+    oversize[i] = '9';
+  }
+  oversize[sizeof(oversize) - 3U] = '\r';
+  oversize[sizeof(oversize) - 2U] = '\n';
+  oversize[sizeof(oversize) - 1U] = '\0';
+  TEST_ASSERT_TRUE(b.scanner.feed(oversize));
+  b.step(kBaseMid + 1U);
+
+  TEST_ASSERT_EQUAL_UINT16(1U, b.box.oversizeScans());
+  TEST_ASSERT_FALSE_MESSAGE(sentLineStarting(b.bridge, "!SCAN"),
+                            "a code that did not fit went out truncated");
+  // It was counted and nothing could read it, and the count could never even
+  // move: it only ever incremented on proto::Frame::scan refusing a code, and
+  // ScanAssembler's cap is the SAME constant, so the assembler refuses first
+  // and feed() never completes. A scanner emitting long payloads produced no
+  // frame, no count and no record of any kind.
+  // The count nothing off the board could read. It does not fit `!PONG`, which
+  // is at kMaxArgs exactly with the three it already carries, and a scanner
+  // that has started emitting long payloads is rare enough to be event-shaped.
+  TEST_ASSERT_TRUE(sentLineStarting(b.bridge, "!EVT,OVERSIZE,1"));
+
+  // The member sees nothing, deliberately: this is a scanner fault, and
+  // telling somebody holding a racquet that their code was too long sends them
+  // to the desk for something they cannot fix.
+  TEST_ASSERT_EQUAL_STRING(padded(courtlogic::kIdleLine1), b.display.row(0U));
+}
+
+void test_box_a_corrupt_scanner_line_is_reported_under_its_own_name(void) {
+  Box b(kBaseMid);
+
+  // A byte outside the payload set on a 9600 baud line: a cable, a connector,
+  // or interference. TWO names rather than one, because OVERSIZE and SCANJUNK
+  // are two different site visits — and the second is the one that explains a
+  // member whose code "sometimes does not work".
+  TEST_ASSERT_TRUE(b.scanner.feed("MEM-\x01\x02 0042\r\n"));
+  b.step(kBaseMid + 1U);
+
+  TEST_ASSERT_EQUAL_UINT16(1U, b.box.corruptScans());
+  TEST_ASSERT_EQUAL_UINT16(0U, b.box.oversizeScans());
+  TEST_ASSERT_TRUE(sentLineStarting(b.bridge, "!EVT,SCANJUNK,1"));
+  TEST_ASSERT_FALSE(sentLineStarting(b.bridge, "!SCAN"));
+
+  // The good scan after it still works: one bad line costs that line.
+  TEST_ASSERT_TRUE(b.scanner.feed("MEM-0042\r\n"));
+  b.step(kBaseMid + 2U);
+  TEST_ASSERT_TRUE(sentLineStarting(b.bridge, "!SCAN,MEM-0042"));
+  TEST_ASSERT_EQUAL_UINT16(1U, b.box.corruptScans());
+}
+
 void test_box_pong_carries_the_counters_nothing_could_read(void) {
   Box b(kBaseMid);
 
@@ -1335,6 +1392,8 @@ int main(int, char**) {
   RUN_TEST(test_box_an_untrusted_clock_is_blank_not_stale);
   RUN_TEST(test_box_a_screen_is_committed_in_one_piece);
   RUN_TEST(test_box_a_scan_pre_empts_a_screen_that_is_still_counting_down);
+  RUN_TEST(test_box_an_oversize_scan_is_reported_not_only_counted);
+  RUN_TEST(test_box_a_corrupt_scanner_line_is_reported_under_its_own_name);
   RUN_TEST(test_box_pong_carries_the_counters_nothing_could_read);
   RUN_TEST(test_box_silence_after_a_scan_returns_to_idle_at_ten_seconds);
 

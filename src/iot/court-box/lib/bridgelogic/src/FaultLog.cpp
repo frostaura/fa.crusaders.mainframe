@@ -9,14 +9,14 @@ namespace {
 /// enum rather than in a switch for the reason proto::errorName's table is: a
 /// new fault cannot be added without also giving it a name.
 constexpr const char* kFaultNames[kFaultCount] = {
-    "serial_badcrc",      "serial_badframe",    "serial_overrun_rx",   "serial_overrun_tx",
-    "serial_badverb",     "serial_badarg",      "serial_nocourt",      "mega_link_lost",
-    "mega_link_back",     "on_not_acked",       "ext_refused",         "relay_cmd_dropped",
-    "restore_failed",     "scan_oversize",      "button_unauthorised", "lcd_i2c_timeout",
-    "lcd_resync",         "wdt_reset",          "queue_overflow",      "queue_no_push",
-    "queue_events_lost",  "store_write_failed", "clock_corrected",     "roster_rejected",
-    "http_4xx",           "http_5xx",           "http_timeout",        "api_breaker_open",
-    "heartbeat_rejected", "fault_overflow",
+    "serial_badcrc",    "serial_badframe",    "serial_overrun_rx",  "serial_overrun_tx",
+    "serial_badverb",   "serial_badarg",      "serial_nocourt",     "mega_link_lost",
+    "mega_link_back",   "on_not_acked",       "ext_refused",        "relay_cmd_dropped",
+    "restore_failed",   "scan_oversize",      "scanner_uart_error", "button_unauthorised",
+    "lcd_i2c_timeout",  "lcd_resync",         "wdt_reset",          "queue_overflow",
+    "queue_no_push",    "queue_events_lost",  "store_write_failed", "clock_corrected",
+    "roster_rejected",  "http_4xx",           "http_5xx",           "http_timeout",
+    "api_breaker_open", "heartbeat_rejected", "fault_overflow",
 };
 
 /// One return statement and recursion, not a loop: the generated sketches

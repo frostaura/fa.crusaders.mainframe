@@ -98,6 +98,11 @@ enum class Fault : uint8_t {
 
   // The panel and the scanner.
   ScanOversize,
+  /// A corrupt line off the scanner's UART. A cable, a connector or
+  /// interference — and the count that explains a member whose code
+  /// "sometimes does not work". The Mega reports it as `!EVT,SCANJUNK,<n>`;
+  /// nothing counted it at all until it did.
+  ScannerUartError,
   ButtonUnauthorised,
   LcdI2cTimeout,
   LcdResync,
