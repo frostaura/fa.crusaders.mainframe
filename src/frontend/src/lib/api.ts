@@ -753,6 +753,23 @@ export type DeviceActivityEntry = {
  * backend is a page that is wrong for as long as the two lanes are out of step.
  * </p>
  */
+/**
+ * WIRE-R2 §2's `change` vocabulary — what an event actually WAS.
+ *
+ * <p>
+ * `kind` could not say. The backend wrote `device.updated` for a rename, a details change, a
+ * shut and a reopen alike, so nine identical "details or state were changed" rows sat on one
+ * door's page and told an admin nothing (A5). The server now derives `change` from the audit
+ * details it writes, and `other` is the honest arm for a row written before it did.
+ * </p>
+ */
+export const DOOR_EVENT_CHANGES = [
+  "registered", "renamed", "details", "shut", "reopened", "shut_all", "reopened_all",
+  "removed", "clock_corrected", "other",
+] as const;
+
+export type DoorEventChange = (typeof DOOR_EVENT_CHANGES)[number];
+
 export type DoorEventEntry = {
   at: string;
   /** The raw audit token, carried so an unrecognised event is still reportable upstream. */
@@ -761,14 +778,30 @@ export type DoorEventEntry = {
    * `registered` · `edited` · `removed` · `clock_corrected` · `unrecognised`.
    *
    * <p>
-   * <b>`edited` is ONE kind covering rename, details change, shut and reopen</b> — the
-   * backend writes `device.updated` for all four and does not record which. So the copy for
-   * it says what is true ("this door's details or state changed") rather than guessing at a
-   * verb; a row reading "Someone renamed this door" over a shut would be this round's own
-   * defect in a new place. There is no actor on the wire, so no row names one.
+   * Kept for compatibility (WIRE-R2 §2) and no longer the field the copy is chosen by:
+   * `edited` was ONE kind covering rename, details change, shut and reopen, so the screen
+   * could only say "this door's details or state changed" about all four. {@link change} is
+   * what a row is rendered from now; `kind` is what an older API still sends.
    * </p>
    */
   kind: string;
+  /**
+   * What actually changed, where the API is new enough to say (WIRE-R2 §2).
+   *
+   * Absent on an older API, in which case the page falls back to `kind` and says the broad
+   * thing rather than guessing a verb it does not have.
+   */
+  change?: DoorEventChange | string;
+  /**
+   * The admin who did it, or null for a board-side event.
+   *
+   * <p>
+   * Admins see admins: this is the club's own admin audit, not member tracking, and P3 is
+   * about members. A5's finding was a card reading "You shut this door." to every admin in
+   * the club, including the four who did not.
+   * </p>
+   */
+  actor_name?: string | null;
 };
 
 /**
@@ -1863,6 +1896,16 @@ export type AdminDoorDevice = AdminDevice & {
    * </p>
    */
   shut_by_shut_all_at?: string | null;
+  /**
+   * WHO shut this door (WIRE-R2 §2), or null where the API does not carry it.
+   *
+   * <p>
+   * A5: the state paragraph read "You shut this door." to every admin who opened the page,
+   * which is false for all but one of them and unfalsifiable for the reader. The audit row
+   * has always had the actor; the door row now carries the name.
+   * </p>
+   */
+  shut_by_name?: string | null;
 };
 
 /**
@@ -1933,16 +1976,66 @@ export type DoorsView = {
   doors: DoorRow[];
 };
 
-/** One club-log row: a device activity entry plus which door it happened at. */
-export type DoorLogEntry = DeviceActivityEntry & {
-  door: { id: string; name: string; gate_key: string | null };
+/**
+ * Which door a log row happened at — <b>every field nullable, including the door itself.</b>
+ *
+ * <p>
+ * <b>A1 / E-C1 / C1, the one critical of this round, and it is a type.</b> `door` was
+ * `{id: string; name: string; gate_key: string|null}`, the page read `entry.door.name`, and a
+ * reviewer deleting a door turned `/admin/doors/log` into a blank white page for the whole
+ * club — reached four ways, one of them "Load older scans" with no link and no warning. The
+ * rows outlive the board: deleting a door deletes no scans (WIRE-R2 §1).
+ * </p>
+ *
+ * <p>
+ * <b>The wire promises this is never null and the type does not believe it.</b> That promise
+ * is exactly what the page trusted. `id` is null for a board that is gone; `name` and
+ * `gate_key` are whatever the row stored at write time, and an old row may carry neither. So
+ * every field is optional-or-null here and the compiler makes each reader say what it does
+ * about that — see {@link import("./doorsCopy").doorRowName}.
+ * </p>
+ */
+export type DoorLogDoor = {
+  /** Null once the board has been deleted. There is no page to link to then. */
+  id?: string | null;
+  /** The display name stored on the row. Null on a row written before names were stored. */
+  name?: string | null;
+  gate_key?: string | null;
+  /** True once the board is gone. Absent on an older API, which means "not known to be". */
+  removed?: boolean;
 };
+
+export type DoorLogEntry = DeviceActivityEntry & {
+  door?: DoorLogDoor | null;
+};
+
+/**
+ * A door that is GONE but still has rows inside retention (WIRE-R2 §1).
+ *
+ * `key` is the stored device id as written on the row, which is what `?removed_door=` takes —
+ * a deleted board has no `id` to filter by, and A2's ruling is that its history stays
+ * reachable rather than becoming a database query.
+ */
+export type RemovedDoor = { key: string; name?: string | null; gate_key?: string | null };
 
 export type DoorLogPage = {
   items: DoorLogEntry[];
   next_cursor: string | null;
   /** The club's own retention setting, so the page states a number it did not guess. */
   retention_days: number;
+  /**
+   * The COUNT for the filtered range, where the API can give one (WIRE-R2 §3).
+   *
+   * A6: "50 scans, newest first" reads as a total, and the reviewer's file had 70. Optional,
+   * because a page that has no total must say "Showing 50 so far" rather than invent one.
+   */
+  total?: number;
+  /** The club's zone, so every row on this page is written in ONE clock (A7 / O1). */
+  timezone?: string;
+  /** The range the SERVER resolved, which is the only range the page may state (A4). */
+  range?: { from: string; to: string };
+  /** Deleted doors with rows still in range, for the picker's "Removed doors" group (A2). */
+  removed_doors?: RemovedDoor[];
 };
 
 /**
@@ -1957,13 +2050,33 @@ export type DoorLogPage = {
 export type DoorLogFilters = {
   /** A device id. */
   door?: string;
+  /** A REMOVED door's stored key (WIRE-R2 §1). Never sent together with `door`. */
+  removed_door?: string;
   from?: string;
   to?: string;
+  /**
+   * A club-local period, resolved SERVER-side (WIRE-R2 §3).
+   *
+   * <p>
+   * A4: "Last 24 hours" is a rolling window and the page had no way to ask for yesterday or
+   * for one day — a chair exporting "yesterday's" scans was handed half of yesterday and
+   * half of today. The club's midnight is the server's to compute: a browser's is a
+   * different instant for any admin travelling or with a wrong device clock.
+   * </p>
+   */
+  period?: DoorLogPeriod;
+  /** One club-local day, `YYYY-MM-DD`. Never sent together with `period` or from/to. */
+  day?: string;
   outcome?: "released" | "refused" | "offline";
   reason?: string;
   cursor?: string;
   limit?: number;
 };
+
+/** The five named periods. `day` is the sixth choice and is its own parameter. */
+export const DOOR_LOG_PERIODS = ["today", "yesterday", "last_24h", "last_7d", "last_30d"] as const;
+
+export type DoorLogPeriod = (typeof DOOR_LOG_PERIODS)[number];
 
 /** One door's line in a shut-all / reopen-all result, as the server saw it at that instant. */
 export type FleetDoorResult = {
@@ -1996,7 +2109,12 @@ export type FleetResult = {
 
 function doorLogQuery(f: DoorLogFilters): string {
   return qs({
-    door: f.door, from: f.from, to: f.to, outcome: f.outcome, reason: f.reason,
+    door: f.door, removed_door: f.removed_door,
+    // `period` / `day` / from-to are mutually exclusive: more than one is a 400
+    // `range_conflict` at the API (WIRE-R2 §3), so the page sends exactly one and the
+    // builder does not quietly merge them.
+    period: f.period, day: f.day, from: f.from, to: f.to,
+    outcome: f.outcome, reason: f.reason,
     cursor: f.cursor, limit: f.limit !== undefined ? String(f.limit) : undefined,
   });
 }
@@ -2081,5 +2199,39 @@ export const doorEndpoints = {
       location_note?: string;
       power_loss_behaviour?: PowerLossBehaviour;
     },
-  ) => api.patch<AdminDoorDevice>(`/api/v1/admin/devices/${id}`, { ...req }),
+  ) => api.patch<DoorPatchResult>(`/api/v1/admin/devices/${id}`, { ...req }),
+
+  /**
+   * Shut one door, or reopen it — the same PATCH, typed for the answer it can now give.
+   *
+   * <p>
+   * <b>B10.</b> A tab left open overnight "shut" a door somebody else had already shut and
+   * reported success, so the screen taught an admin that their click had done something.
+   * WIRE-R2 §2: a PATCH that changes nothing answers 200 `unchanged: true` with the CURRENT
+   * `shut_by_name` / `out_of_service_since`, which is the only way the page can say who
+   * actually did it and when.
+   * </p>
+   *
+   * <p>
+   * It goes through the doors block rather than {@link endpoints.adminDeviceUpdate} because
+   * the extra field is a doors contract; the Devices page's own call site is unchanged and
+   * still typed as it was.
+   * </p>
+   */
+  doorSetEnabled: (id: string, enabled: boolean) =>
+    api.patch<DoorPatchResult>(`/api/v1/admin/devices/${id}`, { enabled }),
 };
+
+/**
+ * What a door PATCH answers: the row, plus whether it changed anything (WIRE-R2 §2).
+ *
+ * <p>
+ * <b>Read the VALUE, never the presence.</b> The field is on every DeviceView the API
+ * serves — `false` on a list row and on a PATCH that did work, `true` only on a no-op — so
+ * `"unchanged" in answer` is true of every door the club has and would report every shut as
+ * a shut that had already happened. It stays optional here for an older API that does not
+ * send it at all, and an absent field means the same thing a `false` does: the page says
+ * what it did rather than claiming the door was already in that state.
+ * </p>
+ */
+export type DoorPatchResult = AdminDoorDevice & { unchanged?: boolean };

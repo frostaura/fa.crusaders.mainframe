@@ -7,6 +7,7 @@ import { PrintSheet } from "../components/doors/PrintSheet";
 import { DOORS_READ_FAILED, describePowerLoss } from "../lib/doorsCopy";
 import { clubDate } from "../lib/clubClock";
 import { UNNAMED_GATE } from "../lib/gateCopy";
+import { withDoorsBoundary } from "../components/doors/DoorsErrorBoundary";
 import { doorEndpoints, endpoints, type AdminDoorDevice, type AdminSettings } from "../lib/api";
 
 /**
@@ -30,7 +31,7 @@ import { doorEndpoints, endpoints, type AdminDoorDevice, type AdminSettings } fr
  * outlives the fact it states, and an undated one is read as current for ever.
  * </p>
  */
-export function AdminDoorsCardPage() {
+function AdminDoorsCardPageBody() {
   const { id = "" } = useParams();
   const [door, setDoor] = useState<AdminDoorDevice | null>(null);
   const [settings, setSettings] = useState<AdminSettings | null>(null);
@@ -125,6 +126,9 @@ export function AdminDoorsCardPage() {
     </div>
   );
 }
+
+/** A1: see {@link AdminDoorsLogPage}. Every doors route is exported through the boundary. */
+export const AdminDoorsCardPage = withDoorsBoundary(AdminDoorsCardPageBody);
 
 function CardFact({ label, value }: { label: string; value: string }) {
   return (

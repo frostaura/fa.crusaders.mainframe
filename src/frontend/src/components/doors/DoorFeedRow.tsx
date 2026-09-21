@@ -1,5 +1,6 @@
 import { Badge } from "../Button";
 import { relative } from "../../lib/deviceLiveness";
+import { clubRowTime } from "../../lib/clubClock";
 import { doorRowRender, doorScanTiming, doorScanTimingLong } from "../../lib/doorsCopy";
 import { describeActivityWho } from "../../lib/deviceActivity";
 import { type DeviceActivityEntry } from "../../lib/api";
@@ -31,11 +32,19 @@ import { type DeviceActivityEntry } from "../../lib/api";
  * moment the club heard (A4).
  * </p>
  */
-export function DoorFeedRow({ entry, now, doorName, innerRef }: {
+export function DoorFeedRow({ entry, now, doorName, timezone, innerRef }: {
   entry: DeviceActivityEntry;
   now: number;
   /** Set on the club log, where a row has to say which door it was. Absent on a door's own feed. */
   doorName?: string;
+  /**
+   * The CLUB's zone, from whichever read produced this row (A7 / O1).
+   *
+   * Not optional in practice and optional in the type only so a caller that genuinely has no
+   * read yet falls back to the browser's zone — which, for a volunteer standing in the club,
+   * is the same zone. What is never done is to guess a named one.
+   */
+  timezone?: string;
   /**
    * The log's "load older" moves focus to the FIRST APPENDED row, so a keyboard user is not
    * returned to the top of a list that just grew. Only that one row is given a ref, and the
@@ -55,8 +64,17 @@ export function DoorFeedRow({ entry, now, doorName, innerRef }: {
    * `delivered_at` is non-null on offline rows only, so a null row has one instant and the
    * copy reports one. It never invents a delay.
    */
-  const title = doorScanTimingLong(entry.at, entry.delivered_at);
-  const timing = entry.delivered_at ? doorScanTiming(entry.at, entry.delivered_at) : null;
+  const title = doorScanTimingLong(entry.at, entry.delivered_at, timezone);
+  const timing = doorScanTiming(entry.at, entry.delivered_at, timezone);
+  /**
+   * A7 / E-M5: the CLOCK FACE, visibly, with the day when the row is not today's.
+   *
+   * The row printed "6m ago" and kept the exact time in a `title` — invisible on a phone,
+   * invisible to a screen reader, invisible to touch. "What time did that happen" is the
+   * committee's question and the screen would not answer it. The relative age is still here,
+   * second, because it is what makes the page feel live.
+   */
+  const face = clubRowTime(entry.at, now, timezone);
   return (
     <li
       ref={innerRef}
@@ -84,8 +102,19 @@ export function DoorFeedRow({ entry, now, doorName, innerRef }: {
         <span className="min-w-0 break-words text-sm text-text-secondary">
           {who ? <><span className="sr-only">Whose code: </span>{who}</> : ""}
         </span>
-        <time dateTime={entry.at} title={title} className="ml-auto shrink-0 text-xs text-text-muted">
-          <span className="sr-only">When: </span>{relative(entry.at, now)}
+        {/* A7: the clock face first and visibly; the relative age beneath it, quieter. The
+            accessible name carries the long form so the fact still arrives once and
+            completely — `aria-live="off"` because the age ticks and a row that rewrites
+            itself every second interrupts the page somebody is reading. */}
+        <time
+          dateTime={entry.at}
+          title={title}
+          aria-label={`When: ${title}`}
+          aria-live="off"
+          className="ml-auto shrink-0 text-right text-xs text-text-muted"
+        >
+          <span aria-hidden="true" className="block text-sm tabular-nums text-text-secondary">{face}</span>
+          <span aria-hidden="true" className="block">{relative(entry.at, now)}</span>
         </time>
       </div>
       {detail && (

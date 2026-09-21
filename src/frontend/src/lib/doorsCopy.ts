@@ -1,13 +1,13 @@
 import {
   DOOR_OUTCOME_CHIPS, UNRECOGNISED_EVENT, classifyDoorRow, describeActivityReason,
-  describeDoorEvent, describeDoorEventKind, isDoorScan, type DoorRowKind,
+  describeDoorEvent, describeDoorEventChange, describeDoorEventKind, isDoorScan, type DoorRowKind,
 } from "./deviceActivity";
 // A13 — one club-locale formatter for the whole surface. See lib/clubClock.ts.
 import { clubClock, clubDayAndClock, clubInstant } from "./clubClock";
-import { POWER_LOSS_LABELS, doorShutNotice } from "./gateCopy";
+import { POWER_LOSS_LABELS, UNNAMED_GATE, doorShutNotice } from "./gateCopy";
 import {
-  type AdminDoorDevice, type DeviceActivityEntry, type DoorEventEntry, type DoorSignal,
-  type DoorToday,
+  type AdminDoorDevice, type DeviceActivityEntry, type DoorEventEntry, type DoorLogDoor,
+  type DoorSignal, type DoorToday,
 } from "./api";
 
 /**
@@ -54,6 +54,155 @@ export function spellAge(ago: string): string {
 /** A chip is a word and a tone. Colour is never the signal; the word is. */
 export type DoorChip = { label: string; tone: "success" | "danger" | "muted" | "warning" };
 
+// --- who a door is, on a row and in a heading -------------------------------------
+
+/**
+ * The name `DeviceRegistryService` gives a gate the moment it registers itself.
+ *
+ * <p>
+ * <b>A11: it is a placeholder, not a name, and the screens presented it as one.</b> A door
+ * nobody had named rendered as the heading "Door gate", the identity line "no door name yet"
+ * and the chip "Needs a door name" — three different vocabularies for one state, the loudest
+ * of which was a word the club never chose and cannot tell apart from the other four doors
+ * in the same state.
+ * </p>
+ */
+export const GATE_PLACEHOLDER_NAME = "Door gate";
+
+/**
+ * What to call a door on screen — its own name, or what it actually is (A11).
+ *
+ * `Unnamed scanner (gate-44c103)` names exactly one board and says the naming is outstanding
+ * in the same breath, which is what "Door gate" could do neither of.
+ */
+export function doorDisplayName(device: { name?: string | null; device_code?: string | null }): string {
+  const name = (device.name ?? "").trim();
+  if (name !== "" && name !== GATE_PLACEHOLDER_NAME) return name;
+  const code = (device.device_code ?? "").trim();
+  return code === "" ? "Unnamed scanner" : `Unnamed scanner (${code})`;
+}
+
+/**
+ * What a log row says about the door it happened at, including a door that is GONE.
+ *
+ * <p>
+ * <b>A1 / A2 / E-C1 / C1.</b> The page read `entry.door.name` and a deleted door turned the
+ * whole club log white. The ruling is that the history survives the board: the row carries
+ * what it stored at write time, and the screen names it and says it has been removed rather
+ * than either crashing or silently dropping the rows.
+ * </p>
+ *
+ * <p>
+ * Four arms and no guessing. A stored display name is the best answer; a stored `gate_key`
+ * is the next; a row that has neither says only that the door is gone; and `door` missing
+ * altogether is treated as removed, because a scan that happened at no door is not a state
+ * this product can produce and "removed" is the only honest reading of it.
+ * </p>
+ */
+export type DoorRowIdentity = {
+  /** What to print. Never empty, never `undefined`, never the word "null". */
+  label: string;
+  /** Said once beside the name, so a reader is not left wondering why it has no link. */
+  removed: boolean;
+  /** The door's own page, or null — a removed door has none, and a dead link is worse. */
+  id: string | null;
+};
+
+/** Said beside a removed door's name. A row is not dropped and is not left unexplained. */
+export const REMOVED_DOOR_NOTE = "a door that has since been removed";
+
+/** When the row stored no name and no key either — all that is left is that it is gone. */
+export const REMOVED_DOOR_UNNAMED = "A door that has since been removed";
+
+export function doorRowIdentity(door: DoorLogDoor | null | undefined): DoorRowIdentity {
+  // `door` absent is the shape WIRE-R2 §1 says cannot happen, and it is the shape that
+  // shipped. Trusting that promise is the defect, not the mitigation.
+  const removed = door == null || door.removed === true;
+  const name = (door?.name ?? "").trim();
+  const key = (door?.gate_key ?? "").trim();
+  const id = door?.id ?? null;
+  if (name !== "" && name !== GATE_PLACEHOLDER_NAME) return { label: name, removed, id };
+  if (key !== "") return { label: key, removed, id };
+  if (removed) return { label: REMOVED_DOOR_UNNAMED, removed, id: null };
+  return { label: "An unnamed door", removed, id };
+}
+
+/** True of the name {@link doorDisplayName} builds for a door nobody has named. */
+function isUnnamedScanner(name: string): boolean {
+  return name.startsWith("Unnamed scanner");
+}
+
+/**
+ * One option in the log's door picker.
+ *
+ * A11: a door nobody has named reads "Unnamed scanner (gate-0a1b2c)" and stops there. The
+ * old label — "Door gate — no door name yet" — presented the placeholder as the club's word
+ * for the board AND then contradicted it, in one option, on the control an admin picks a
+ * door with.
+ */
+export function doorPickerLabel(device: { name: string; gate_key: string | null }): string {
+  if (device.gate_key) return `${device.name} (${device.gate_key})`;
+  if (isUnnamedScanner(device.name)) return device.name;
+  return `${device.name} — ${UNNAMED_GATE}`;
+}
+
+/**
+ * What the picker's "Removed doors" group calls one of them (A2).
+ *
+ * The stored name, else the stored key, else the key the rows were written against — which
+ * is at least a string an admin can match against a board they remember.
+ */
+export function removedDoorName(door: { key: string; name?: string | null; gate_key?: string | null }): string {
+  const name = (door.name ?? "").trim();
+  if (name !== "" && name !== GATE_PLACEHOLDER_NAME) return name;
+  const key = (door.gate_key ?? "").trim();
+  return key !== "" ? key : door.key;
+}
+
+/**
+ * <b>The server caps this list at 50, so a full one is not a complete one.</b>
+ *
+ * <p>
+ * A picker that lists fifty removed doors and stops looks exactly like a club that has
+ * removed fifty doors — and the one an admin is hunting for after an incident is, by
+ * definition, the one that is not in the list. The same class of falsehood as A6's count,
+ * one control along: a page length presented as a total.
+ * </p>
+ */
+export const REMOVED_DOORS_CAP = 50;
+
+export function removedDoorsCapNotice(shown: number): string | null {
+  return shown < REMOVED_DOORS_CAP
+    ? null
+    : `These are the ${REMOVED_DOORS_CAP} most recently removed doors. There may be more.`;
+}
+
+/**
+ * <b>A6 — "50 scans, newest first" read as a total, and the file had 70.</b>
+ *
+ * <p>
+ * It was the length of one cursor page, printed as if it were the answer to the question the
+ * page exists to answer, and it is the number an admin repeats to a committee. WIRE-R2 §3
+ * gives the log a `total` for the filtered range, so the heading can say how much of it is on
+ * screen. Where the API sends no total the sentence says "so far" rather than inventing one —
+ * falling back to the page length is how the wrong number got printed in the first place.
+ * </p>
+ */
+export function doorLogCountLine(showing: number, total: number | null): string {
+  const scans = showing === 1 ? "scan" : "scans";
+  if (total === null) return `Showing ${showing} ${scans} so far, newest first.`;
+  if (showing >= total) return `Showing all ${plural(total, "scan")} in this range, newest first.`;
+  return `Showing ${showing} of ${plural(total, "scan")} in this range, newest first.`;
+}
+
+/** The row's whole door clause — the name, and the removal said once after it. */
+export function doorRowName(door: DoorLogDoor | null | undefined): string {
+  const identity = doorRowIdentity(door);
+  if (!identity.removed) return identity.label;
+  if (identity.label === REMOVED_DOOR_UNNAMED) return REMOVED_DOOR_UNNAMED;
+  return `${identity.label} — ${REMOVED_DOOR_NOTE}`;
+}
+
 /** How long a cached roster lives on a board. Mirrors the firmware's `ROSTER_MAX_AGE_MS`. */
 const ROSTER_MAX_AGE_MS = 6 * 3_600_000;
 
@@ -79,10 +228,27 @@ function plural(count: number, noun: string): string {
  * matters.
  * </p>
  */
-export function doorStateChip(device: AdminDoorDevice, online: boolean): DoorChip {
+export function doorStateChip(device: AdminDoorDevice, online: boolean | null): DoorChip | null {
   if (!device.enabled) return { label: "Shut", tone: "muted" };
+  // A8: `null` is "this page cannot currently say". While the reads themselves are failing,
+  // "Not reporting" is a claim about a DOOR derived from a frozen age — the thing that has
+  // gone quiet is the browser. A chip that says nothing is better than one that is wrong,
+  // and the page carries the sentence explaining why the chips are missing.
+  if (online === null) return null;
   return online ? { label: "Reporting", tone: "success" } : { label: "Not reporting", tone: "danger" };
 }
+
+/**
+ * What a page says about itself once it cannot read (A8).
+ *
+ * The subject is THIS PAGE, not the doors. With an admin's phone off the network every age on
+ * the screen went on ticking from a frozen read, doors flipped one by one to "Not reporting",
+ * and the page asserted "nothing can reach it" about boards that were, as far as anybody
+ * knew, fine.
+ */
+export const DOORS_LIVENESS_SUSPENDED = "This page can't reach the club right now, so it can't say"
+  + " whether the doors are reporting. What each door was doing at the last successful check is"
+  + " still shown, with the time it was checked.";
 
 /**
  * The second chip, and it is a second DIMENSION rather than a fourth value (D2 / A2.2).
@@ -102,6 +268,23 @@ export function doorSetupChip(device: AdminDoorDevice): DoorChip | null {
 }
 
 /**
+ * Who shut this door, and when — A5's replacement for "You shut this door."
+ *
+ * <p>
+ * <b>Never "you", on any arm.</b> A club has several admins; the sentence was true for at
+ * most one of them and there was no way to tell from the screen which. Both facts are
+ * optional on the wire, so all four arms exist and none of them invents an actor.
+ * </p>
+ */
+export function doorShutAttribution(device: AdminDoorDevice, timezone: string): string {
+  const who = device.shut_by_name ?? null;
+  const at = device.out_of_service_since ? clubDayAndClock(device.out_of_service_since, timezone) : null;
+  if (who === null && at === null) return "This door is shut.";
+  if (who === null) return `This door was shut on ${at}.`;
+  return at === null ? `Shut by ${who}.` : `Shut by ${who} at ${at}.`;
+}
+
+/**
  * The paragraph under the chips: what this state MEANS for this door right now.
  *
  * <p>
@@ -111,8 +294,18 @@ export function doorSetupChip(device: AdminDoorDevice): DoorChip | null {
  * an admin standing in a club at 09:00 needs a time, not an interval to add up.
  * </p>
  */
-export function doorStateNotice(device: AdminDoorDevice, online: boolean, timezone: string): string {
-  if (!device.enabled) return `You shut this door. ${doorShutNotice()}`;
+export function doorStateNotice(
+  device: AdminDoorDevice, online: boolean | null, timezone: string,
+): string | null {
+  // A8: with the reads themselves failing, every sentence below is derived from a frozen age
+  // and would be a claim about a door made out of a fact about the browser. Null rather than
+  // {@link DOORS_LIVENESS_SUSPENDED}: the page says that ONCE, above the cards, and a copy
+  // of it on every tile is the same sentence four times on one screen.
+  if (online === null && device.enabled) return null;
+  // A5: it said "You shut this door." to every admin who opened the page — false for all but
+  // one of them, and unfalsifiable for the reader. The audit row has always carried the
+  // actor; WIRE-R2 §2 puts the name on the door row, so the screen can say who and when.
+  if (!device.enabled) return `${doorShutAttribution(device, timezone)} ${doorShutNotice()}`;
   const named = device.gate_key !== null;
   if (online) {
     if (named) {
@@ -198,6 +391,59 @@ export function doorSignalChip(kind: DoorSignal["kind"]): DoorChip {
     ? { label: "Refusing a lot", tone: "warning" }
     : { label: "May not be releasing", tone: "warning" };
 }
+
+/**
+ * <b>A9 / B9 — a signal, explained, on the card it appears on.</b>
+ *
+ * <p>
+ * The chips were unexplained on the overview: an admin met "May not be releasing" as two
+ * words on a tile, with the explanation on a page they had not opened. Worse, the signals and
+ * their advice survived a state that makes them meaningless — "usually a dirty scanner" on a
+ * door the club shut hours ago, and "change how long the lock is released" on a door that has
+ * not been heard from since.
+ * </p>
+ *
+ * <p>
+ * <b>Null is the answer for a shut or unreachable door, and for one this page cannot judge.</b>
+ * A signal is a reading of the last N minutes of scans; on a shut door those scans are all
+ * refusals the club itself caused, and on a cut-off door the club has not seen the recent ones
+ * at all. The reading is not wrong so much as about a different question, and the honest thing
+ * is to say what the door's state is instead.
+ * </p>
+ */
+export type DoorSignalLine = {
+  text: string;
+  /** The `#setting-…` hash the action links to, or null where the action is not a setting. */
+  settingHash: string | null;
+  action: string;
+};
+
+export function doorSignalLine(
+  device: AdminDoorDevice, online: boolean | null, signal: DoorSignal, settings: SignalNumbers,
+): DoorSignalLine | null {
+  if (!device.enabled || online !== true) return null;
+  if (signal.kind === "refusal_spike") {
+    if (settings.spikeMinutes === null) return null;
+    return {
+      text: `Turned away ${plural(signal.scans, "scan")} in the last ${plural(settings.spikeMinutes, "minute")}`
+        + " — usually a dirty scanner, an expired code, or a stricter door policy than people expect.",
+      settingHash: null,
+      action: "Look at the reasons",
+    };
+  }
+  const release = settings.unlockSeconds === null
+    ? "How long the lock is released is under Admin settings."
+    : `The lock is released for ${plural(settings.unlockSeconds, "second")}.`;
+  return {
+    text: `A code was accepted three times in under a minute, and people do not scan again when a door`
+      + ` opens. ${release}`,
+    settingHash: "#setting-gate-unlock-seconds",
+    action: "Change how long the lock is released",
+  };
+}
+
+/** The club's own numbers a signal sentence needs, or nulls where the settings read failed. */
+export type SignalNumbers = { spikeMinutes: number | null; unlockSeconds: number | null };
 
 /**
  * S1 — a door turning people away.
@@ -409,7 +655,7 @@ export function doorStaleChecksNotice(failures: number, secondsSinceRead: number
  * is a state they created and already know about.
  * </p>
  */
-export function doorNeedsAttention(device: AdminDoorDevice, online: boolean): string | null {
+export function doorNeedsAttention(device: AdminDoorDevice, online: boolean | null): string | null {
   return doorAttentionReason(device, online, [])?.reason ?? null;
 }
 
@@ -417,6 +663,15 @@ export function doorNeedsAttention(device: AdminDoorDevice, online: boolean): st
 export type DoorAttention = {
   kind: "silent" | "shut" | "unnamed" | "signal";
   reason: string;
+  /**
+   * WHICH door, so the summary above the tiles can LINK to it (A10).
+   *
+   * The overview used to re-sort by severity every poll so the door that needed somebody was
+   * first — and cards swapped under a thumb already on its way down. Name order is stable
+   * now, and the summary is what carries the reader to the right card.
+   */
+  doorId: string;
+  doorName: string;
 };
 
 /**
@@ -450,33 +705,45 @@ export type DoorAttention = {
  * </p>
  */
 export function doorAttentionReason(
-  device: AdminDoorDevice, online: boolean, signals: DoorSignal[],
+  device: AdminDoorDevice, online: boolean | null, signals: DoorSignal[],
 ): DoorAttention | null {
+  const where = { doorId: device.id, doorName: doorDisplayName(device) };
+  const name = where.doorName;
   if (!device.enabled) {
     // C2's family, one screen along. "Nobody gets in through it" was said of every shut
     // door — including one the club cannot reach, which has not heard the refusal and goes
     // on admitting booked members from its saved list. Found by looking at a rendered
     // overview where the banner correctly said "1 not yet" and the line under it flatly
     // contradicted it about the same door.
+    // A8: `null` is "this page cannot say", and it takes the SHUT sentence without the
+    // liveness clause — shut is a state the page read, not one it derived from an age.
+    if (online === null) return { ...where, kind: "shut", reason: `${name} is shut.` };
     if (!online) {
       return {
+        ...where,
         kind: "shut",
-        reason: `${device.name} is shut, but nothing can reach it — it may not have been told.`,
+        reason: `${name} is shut, but nothing can reach it — it may not have been told.`,
       };
     }
-    return { kind: "shut", reason: `${device.name} is shut. Nobody gets in through it.` };
+    return { ...where, kind: "shut", reason: `${name} is shut. Nobody gets in through it.` };
   }
   if (device.gate_key === null) {
-    return { kind: "unnamed", reason: "A door still has no name, so it opens nothing while it is offline." };
-  }
-  if (!online) return { kind: "silent", reason: `${device.name} has not been heard from.` };
-  const signal = signals[0];
-  if (signal) {
     return {
+      ...where,
+      kind: "unnamed",
+      reason: `${name} still has no name, so it opens nothing while it is offline.`,
+    };
+  }
+  // A8: not "has not been heard from" while the thing that cannot hear is this browser.
+  if (online === false) return { ...where, kind: "silent", reason: `${name} has not been heard from.` };
+  const signal = signals[0];
+  if (signal && online === true) {
+    return {
+      ...where,
       kind: "signal",
       reason: signal.kind === "refusal_spike"
-        ? `${device.name} is turning a lot of scans away.`
-        : `${device.name} may not be releasing.`,
+        ? `${name} is turning a lot of scans away.`
+        : `${name} may not be releasing.`,
     };
   }
   return null;
@@ -579,16 +846,48 @@ export const NO_REASON_RECORDED = "No reason recorded";
  * the door next called in", which invents a delay for a row that had none.
  * </p>
  */
-export function doorScanTiming(at: string, deliveredAt: string | null | undefined): string {
-  if (!deliveredAt) return clubInstant(at);
-  return `Decided at the door at ${clubClock(at)} — the door told us at ${clubClock(deliveredAt)}.`;
+export function doorScanTiming(
+  at: string, deliveredAt: string | null | undefined, timezone?: string,
+): string | null {
+  // A7: the row prints the clock face itself now, so a row with ONE instant has nothing left
+  // for this line to add and returns null rather than repeating the time underneath itself.
+  if (!deliveredAt) return null;
+  const decided = clubClock(at, timezone);
+  const told = clubClock(deliveredAt, timezone);
+  // A3: "decided at the door at 09:38 — the door told us at 09:38" is one fact printed
+  // twice, and nine rows of it taught a reviewer to read the pair as a clock disagreeing
+  // with itself. When the two land in one minute the row says so in words and prints one.
+  if (decided === told) return `Decided at the door at ${decided}, and the club heard within the minute.`;
+  return `Decided at the door at ${decided} — the door told us at ${told}.`;
 }
 
 /** The long form, for a `title` where the fact has to arrive once and completely. */
-export function doorScanTimingLong(at: string, deliveredAt: string | null | undefined): string {
-  if (!deliveredAt) return clubInstant(at);
-  return `Decided at the door at ${clubInstant(at)} — the door told us at ${clubInstant(deliveredAt)}.`;
+export function doorScanTimingLong(
+  at: string, deliveredAt: string | null | undefined, timezone?: string,
+): string {
+  if (!deliveredAt) return clubInstant(at, timezone);
+  const decided = clubInstant(at, timezone);
+  const told = clubInstant(deliveredAt, timezone);
+  if (clubClock(at, timezone) === clubClock(deliveredAt, timezone)) {
+    return `Decided at the door at ${decided}, and the club heard within the minute.`;
+  }
+  return `Decided at the door at ${decided} — the door told us at ${told}.`;
 }
+
+/**
+ * Why some offline rows name a member and others cannot (A3).
+ *
+ * <p>
+ * A reviewer read nine offline rows where some carried a name and some said the door could
+ * not say who, and there was nothing on the page to reconcile them. It is not a fault and it
+ * is not a privacy setting: a cut-off board decides from the list it last downloaded, so a
+ * code that IS on that list resolves to its holder and a code that is not resolves to
+ * nothing at all. Said once, where the offline rows are, rather than left to be inferred.
+ * </p>
+ */
+export const OFFLINE_WHO_NOTE = "An offline row names somebody when the code was on the door's saved"
+  + " list — that is what the list is. A code that is not on it resolves to nobody at all, so the"
+  + " door has no name to record.";
 
 /**
  * What the "Door events" block is, said once at the top of it.
@@ -641,8 +940,11 @@ export function doorEventRows(
   // thing a reader can report upstream.
   const rows = (events ?? []).map((e) => ({
     at: e.at,
-    text: describeDoorEventKind(e),
-    token: describeDoorEventKind(e) === UNRECOGNISED_EVENT ? e.action : null,
+    // A5 / E-L3: `change` where the API sends it, `kind` where it does not. Nine identical
+    // "this door's details or state were changed" rows told an admin nothing, and the actor
+    // has been on the audit row since the gate shipped.
+    text: describeDoorEventChange(e),
+    token: describeDoorEventKind(e) === UNRECOGNISED_EVENT && !e.change ? e.action : null,
   }));
   for (const entry of items ?? []) {
     if (isDoorScan(entry)) continue;

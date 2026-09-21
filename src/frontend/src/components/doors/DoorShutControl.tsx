@@ -1,8 +1,8 @@
 import { Alert } from "../Alert";
 import { ConfirmButton } from "../ConfirmButton";
 import {
-  DOOR_REOPEN_LABEL, DOOR_SHUT_LABEL, doorReopenConfirm, doorShutConfirm,
-  doorShutNotice, doorShutStandingNotice,
+  DOOR_REOPEN_LABEL, DOOR_SHUT_LABEL, doorReopenConfirm, doorShutConfirm, doorShutNotice,
+  doorShutOfflineNotice, doorShutStandingNotice, type DoorSituation,
 } from "../../lib/gateCopy";
 import { type AdminDoorDevice } from "../../lib/api";
 
@@ -38,22 +38,34 @@ export function DoorShutControl({ door, onDone, shutAt, online }: {
    */
   online: boolean;
 }) {
+  // B3: ONE situation object, and every armed consequence below is generated from it. The
+  // confirms used to describe the pair in the abstract, so a door in contact was told about
+  // doors that are not — and an unnamed door, which holds no list at all, was told it goes
+  // on admitting booked members from one.
+  const situation: DoorSituation = { online, named: door.gate_key !== null };
   if (!door.enabled) {
     return (
       <div className="space-y-3">
-        <Alert tone="danger">{doorShutStandingNotice(door.name, shutAt)}</Alert>
+        {/*
+          C11, one screen along from the club-wide banner it was written about. A shut door
+          is a STANDING fact, and this sat in an assertive region on a page that re-reads
+          itself every fifteen seconds. What is standing is polite; only a change somebody
+          else caused earns an interruption, and the store is what knows whose change it
+          was. The colour and the left rule stay — this is still a refusal to look at, it
+          is just not shouted over whatever the reader was in the middle of.
+        */}
+        <Alert tone="danger" role="status">
+          {doorShutStandingNotice(door.name, shutAt, door.shut_by_name ?? null)}
+        </Alert>
         {/* C2 / C5: shut AND not reporting are two facts and both are shown. A shut door
-            nobody can reach has not heard the refusal and goes on admitting booked members
-            from its cached list — the state the club-wide banner used to deny outright. */}
+            nobody can reach has not heard the refusal — and what it does next depends on
+            whether it was ever named, which is B3's whole finding. */}
         {!online && (
-          <p className="text-sm text-warning-strong">
-            {`Nothing can reach ${door.name}, so it has not been told. It may still be admitting booked`
-              + " members from the list it last downloaded, for up to six hours after its last call."}
-          </p>
+          <p className="text-sm text-warning-strong">{doorShutOfflineNotice(door.name, situation.named)}</p>
         )}
         <ConfirmButton
           idleLabel={DOOR_REOPEN_LABEL}
-          confirmLabel={doorReopenConfirm(online)}
+          confirmLabel={doorReopenConfirm(situation)}
           ariaLabel={door.name}
           onConfirm={() => onDone(true)}
           className="min-h-11 w-full"
@@ -65,11 +77,13 @@ export function DoorShutControl({ door, onDone, shutAt, online }: {
     <div className="space-y-3">
       {/* A14: the power-loss sentence used to be printed here AND on the door card directly
           above, twice on one screen. The card is where it belongs — it has the room to say
-          it is a property of the lock and not of this app. */}
+          it is a property of the lock and not of this app.
+          B5: this is the LONG explanation, as plain page text beside the control. The armed
+          consequence is ≤25 words and is generated from this door's own situation. */}
       <p className="text-sm text-text-secondary">{doorShutNotice()}</p>
       <ConfirmButton
         idleLabel={DOOR_SHUT_LABEL}
-        confirmLabel={doorShutConfirm()}
+        confirmLabel={doorShutConfirm(situation)}
         ariaLabel={door.name}
         onConfirm={() => onDone(false)}
         tone="danger"

@@ -75,7 +75,20 @@ export function GateDetailsEditor({ device, onSave, onClose }: {
     <div className="space-y-4">
       <div>
         <Label htmlFor={nameId}>Name</Label>
-        <Input id={nameId} value={name} onChange={(e) => setName(e.target.value)} placeholder="Door gate" disabled={saving} />
+        {/* C4: focus the FIRST field when the editor opens. The trigger that opened it is
+            hidden rather than unmounted (see `DoorCardSection`), so without this a keyboard
+            user is left on a control that is no longer visible and a screen-reader user hears
+            nothing at all about a form that has just appeared. */}
+        {/* eslint-disable-next-line jsx-a11y/no-autofocus -- the editor is opened by an
+            explicit press, which is exactly the case autofocus is correct for */}
+        <Input
+          id={nameId}
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Door gate"
+          disabled={saving}
+        />
       </div>
       <div>
         <Label htmlFor={keyId}>Door name</Label>

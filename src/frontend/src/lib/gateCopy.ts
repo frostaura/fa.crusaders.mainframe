@@ -159,58 +159,83 @@ export function doorShutNotice(): string {
 export const DOOR_SHUT_LABEL = "Shut this door";
 export const DOOR_REOPEN_LABEL = "Reopen this door";
 
+// --- B3 / B5 / C2: what an armed control says, generated from the door's situation -----
+
 /**
- * The confirm label for shutting a door.
+ * The door's ACTUAL situation — the only input any armed consequence is written from.
  *
  * <p>
- * Shorter than the notice — a confirm has room for one clause per consequence — but it must
- * not out-promise it, and it must not UNDER-promise it either: the pair on the box side
- * disagreed twice, at different call sites, about what the very next click would do. All
- * three halves that vary are here, compressed: the reachable door that stops opening, the
- * cut-off door that does not, and the fact that nothing settles.
+ * <b>B3, and it is the finding this whole section exists for.</b> Every confirm on this
+ * surface described the PAIR in the abstract — "a door that can reach the club … one that has
+ * also lost the network …" — so a door that is in contact was told about doors that are not,
+ * and, far worse, a door that <b>has never been named</b> was told it "keeps admitting booked
+ * members from the list it last downloaded". An unnamed gate is sent an EMPTY list: it opens
+ * for nobody while it is offline, and the screen said the opposite on the control that shuts
+ * it. One function, one matrix test, and no call site that can choose its own words.
  * </p>
  *
  * <p>
- * It opens with the words on the button rather than with "Out of service?", which is what it
- * used to say — a confirm whose first word is not the word on the control it is attached to
- * reads as a different control.
+ * <b>And B5: ≤25 words, always.</b> The armed fleet confirm was 45 words inside an 8-second
+ * auto-disarm, which a screen reader takes ~13 seconds to read. There is no timer any more
+ * (the chrome lane owns that), but a consequence nobody finishes reading is still a
+ * consequence nobody read. The long explanation is plain page text beside the control, where
+ * it can be as long as it needs to be.
  * </p>
  */
-export function doorShutConfirm(): string {
-  return `${DOOR_SHUT_LABEL}? A door that can reach the club opens for nobody from this click. One`
-    + " that has also lost the network keeps admitting booked members from the list it last"
-    + " downloaded for up to six hours. No booking and no no-show penalty changes, and a door marks"
-    + " nobody as having arrived.";
+export type DoorSituation = {
+  /** Can the club reach this door right now? The first question, and it settles most of them. */
+  online: boolean;
+  /**
+   * Has it a door name — which is to say, is it sent a list at all?
+   *
+   * A heartbeat for a gate whose `GateKey` is null answers `roster: []`. "Keeps admitting
+   * booked members" is flatly false of such a door, and that is the sentence that shipped.
+   */
+  named: boolean;
+};
+
+/** Six hours, said once, in the words every arm uses. */
+const CACHE_CLAUSE = "keeps admitting booked members from its saved list for up to six hours";
+
+/**
+ * What shutting THIS door does, in ≤25 words.
+ *
+ * Three arms and no pair-in-the-abstract: a door in contact hears the refusal and that is the
+ * whole answer for it; a named door that cannot hear keeps its cached list; an unnamed one
+ * has no list to keep.
+ */
+export function doorShutConsequence(door: DoorSituation): string {
+  if (door.online) return `${DOOR_SHUT_LABEL}? It hears this at once and opens for nobody.`;
+  if (door.named) return `${DOOR_SHUT_LABEL}? Nothing can reach it, so it ${CACHE_CLAUSE}.`;
+  return `${DOOR_SHUT_LABEL}? Nothing can reach it, and with no saved list it already opens for nobody.`;
 }
 
 /**
- * The confirm label for reopening a door, whose honest half is the OPPOSITE of shutting's.
+ * What reopening THIS door does — the same three arms, inverted.
  *
- * <p>
- * A scan is a pull, so a reachable door opens for members again on the very next scan — there
- * is nothing to queue, nothing to deliver, and no heartbeat to wait for. Saying "it picks
- * this up on its next heartbeat" here, as the door editors correctly say of a NAME, would
- * invent a delay the mechanism does not have.
- * </p>
- *
- * <p>
- * And the cut-off door inverts: it never stopped admitting booked members from its cached
- * list, so nothing changes there and the reopen is not news to it.
- * </p>
+ * C5's fix generalised: "from the very next scan" is a promise about a machine that is
+ * listening, and only the first arm's door is.
  */
-export function doorReopenConfirm(online = true): string {
-  // C5. This promised "from the very next scan" to every door, including one nobody can
-  // reach — which is a promise about a machine that is not listening. The reachable arm is
-  // unchanged because it was right; the unreachable arm now says what is actually true of
-  // THIS door rather than describing the pair in the abstract.
-  if (!online) {
-    return `${DOOR_REOPEN_LABEL}? Nothing can reach this door, so it will not know it is open again`
-      + " until it calls in. It has been admitting booked members from its cached list all along,"
-      + " and that does not change today.";
+export function doorReopenConsequence(door: DoorSituation): string {
+  if (door.online) return `${DOOR_REOPEN_LABEL}? It opens for members again from the very next scan.`;
+  if (door.named) {
+    return `${DOOR_REOPEN_LABEL}? Nothing can reach it. It has been admitting booked members from its`
+      + " saved list all along.";
   }
-  return `${DOOR_REOPEN_LABEL}? A door that can reach the club opens for members again from the very`
-    + " next scan — there is no wait. A door that has lost the network has been admitting booked"
-    + " members from its cached list all along, and nothing changes there.";
+  return `${DOOR_REOPEN_LABEL}? Nothing can reach it, and with no saved list it opens for nobody until`
+    + " it calls in.";
+}
+
+/**
+ * The confirm label for shutting a door. Kept as a name for the call sites; the words are
+ * {@link doorShutConsequence}'s.
+ */
+export function doorShutConfirm(door: DoorSituation): string {
+  return doorShutConsequence(door);
+}
+
+export function doorReopenConfirm(door: DoorSituation): string {
+  return doorReopenConsequence(door);
 }
 
 /** "all 4 doors" · "the club's one door" — never "all 1 doors". */
@@ -228,10 +253,22 @@ function allDoors(count: number): string {
  * per-door result screen instead of a toast.
  * </p>
  */
-export function doorFleetShutConfirm(count: number): string {
-  return `Shut ${allDoors(count)}? Every door that can reach the club's server opens for nobody from`
-    + " this click. Any door that has lost the network keeps admitting booked members from the list"
-    + " it last downloaded for up to six hours. No booking and no no-show penalty changes.";
+export function doorFleetShutConfirm(count: number, unreachable: DoorSituation[] = []): string {
+  const head = `Shut ${allDoors(count)}?`;
+  // B3, at fleet scale. The old sentence described every door as both reachable and cut off
+  // at once. The doors this club actually has are countable, so the confirm counts them.
+  if (unreachable.length === 0) return `${head} Every one of them opens for nobody from this click.`;
+  const listed = unreachable.filter((d) => d.named).length;
+  const missed = `${unreachable.length} cannot be reached`;
+  const opens = unreachable.length === 1 ? "it opens" : "they open";
+  if (listed === 0) return `${head} ${missed}, and with no saved list ${opens} for nobody anyway.`;
+  // "for six hours" rather than the per-door clause's "for up to six hours": the fleet head
+  // is longer, and B5's bound is 25 words for the whole sentence, not per clause.
+  const some = listed === unreachable.length ? "" : `${listed} of them `;
+  const admit = listed === 1
+    ? "keeps admitting booked members from its saved list"
+    : "keep admitting booked members from their saved lists";
+  return `${head} ${missed} and ${some}${admit} for six hours.`;
 }
 
 /**
@@ -243,15 +280,18 @@ export function doorFleetShutConfirm(count: number): string {
  * all 3" over a request that reopened none of them.
  * </p>
  */
-export function doorFleetReopenConfirm(count: number, staying: string[] = []): string {
-  const stays = doorsStayShutNotice(staying);
+export function doorFleetReopenConfirm(count: number, unreachable: DoorSituation[] = []): string {
   const head = count === 1
     ? "Reopen the one door that was shut together?"
     : `Reopen the ${count} doors that were shut together?`;
-  const body = " Every one of them that can reach the club's server opens for members again from the"
-    + " very next scan. Any that has lost the network has been admitting booked members from its"
-    + " cached list all along.";
-  return stays ? `${head}${body} ${stays}` : `${head}${body}`;
+  // B5: the doors that stay shut are NAMED beside the control as page text
+  // ({@link doorsStayShutNotice}), not folded into the armed consequence — the fleet confirm
+  // was 45 words inside an 8-second window, and this is the clause that made it so.
+  if (unreachable.length === 0) return `${head} Each one opens for members again from its very next scan.`;
+  const rest = count - unreachable.length;
+  const opened = rest === 0 ? "" : `${rest} open from the very next scan; `;
+  const heard = unreachable.length === 1 ? "has" : "have";
+  return `${head} ${opened}${unreachable.length} cannot be reached and ${heard} not heard it.`;
 }
 
 /**
@@ -348,9 +388,59 @@ export function doorExitIsMechanical(): string {
  * not carry it still has to say the door is shut. A dangling "It was shut on" with nothing
  * after it would read as a rendering fault.
  */
-export function doorShutStandingNotice(name: string, since: string | null): string {
-  const head = `${name} is shut. It opens for nobody that can reach the club's server.`;
-  return since === null ? head : `${head} It was shut on ${since}.`;
+export function doorShutStandingNotice(
+  name: string, since: string | null, shutBy: string | null = null,
+): string {
+  // B8. "It opens for nobody that can reach the club's server" parses as its own opposite —
+  // the relative clause attaches to "nobody", so the sentence reads as "the only people it
+  // opens for are the ones who can reach the server". Said the other way round there is
+  // nothing to misparse: the subject is the server, and it is refusing.
+  const head = `${name} is shut. The club's server is refusing every scan at this door.`;
+  // A5: WHO and WHEN, not "you". The state paragraph told every admin in the club that they
+  // personally had shut it.
+  if (since === null) return shutBy === null ? head : `${head} Shut by ${shutBy}.`;
+  return shutBy === null ? `${head} It was shut on ${since}.` : `${head} Shut by ${shutBy} on ${since}.`;
+}
+
+/**
+ * The warning above a SHUT door's control when nothing can reach it (C2 / B3).
+ *
+ * <p>
+ * It said, of every such door, that it "may still be admitting booked members from the list
+ * it last downloaded". True of a named door. Flatly false of an unnamed one, which is sent an
+ * empty list and opens for nobody the moment it loses the network — and every door in a club
+ * is unnamed on install day.
+ * </p>
+ */
+export function doorShutOfflineNotice(name: string, named: boolean): string {
+  const head = `Nothing can reach ${name}, so it has not been told.`;
+  if (!named) {
+    return `${head} It has no door name, so it holds no saved list: it opens for nobody until it is`
+      + " back, shut or not.";
+  }
+  return `${head} It may still be admitting booked members from the list it last downloaded, for up`
+    + " to six hours after its last call.";
+}
+
+/**
+ * A write that changed nothing, said as what it is (B10).
+ *
+ * <p>
+ * A tab left open overnight armed "Shut this door" against a door somebody else had shut at
+ * 21:48, and the screen reported success — so the admin learned that their click had done
+ * something, and the club has no way to find out from this screen that it had not. WIRE-R2
+ * §2 answers such a PATCH with `unchanged: true` and the CURRENT shut facts, which is the
+ * only reason this sentence can name anybody.
+ * </p>
+ */
+export function doorAlreadyNotice(
+  name: string, shut: boolean, shutBy: string | null = null, at: string | null = null,
+): string {
+  const head = `Nothing changed — ${name} was already ${shut ? "shut" : "open"}.`;
+  if (!shut) return head;
+  if (shutBy === null && at === null) return head;
+  if (shutBy === null) return `${head} It was shut on ${at}.`;
+  return at === null ? `${head} It was shut by ${shutBy}.` : `${head} It was shut by ${shutBy} on ${at}.`;
 }
 
 /**
@@ -472,10 +562,13 @@ export function doorFleetNoChangeNotice(action: "shut" | "reopen"): string {
  * </p>
  */
 export function gateDeleteConfirm(): string {
-  return "Delete this door? Everything written down about it goes — its name, where the board is,"
-    + " and what the lock does with no power. The board still has the club's key, so it reappears"
-    + " here as a new door with nothing filled in the next time it calls in. Unplug it if you meant"
-    + " to retire it.";
+  // A2 / B5. The old confirm was 55 words and said only that the NAME, the location and the
+  // power answer go — so an admin deleting a door had every reason to think they were
+  // deleting its history too. They are not: the scans stay in the club log until the club's
+  // own retention rule takes them (WIRE-R2 §1). The ruling is that the confirm says so and
+  // that everything else moves to the page text beside it.
+  return "Delete this door? Its name, its place and its power answer go. Its past scans stay in the"
+    + " club log under its old name.";
 }
 
 /**
@@ -490,11 +583,20 @@ export function gateDeleteConfirm(): string {
  * took the trouble to write down.
  * </p>
  */
-export function gateDeleteStandingNotice(name: string): string {
+export function gateDeleteStandingNotice(name: string, retentionDays: number | null = null): string {
+  // A2: the sentence a reviewer went looking for and did not find. Deleting a door does NOT
+  // delete its scans — the rows stay under the name they stored until the club's own rule
+  // takes them — and an admin who believes otherwise either deletes to destroy records that
+  // survive anyway, or refuses to delete a board that is in a skip.
+  const kept = retentionDays === null
+    ? "the club's retention rule"
+    : `the club's ${retentionDays}-day rule`;
   return `Deleting ${name} throws away everything written down about it — its name, where the board`
-    + " is, and what the lock does with no power. It does not lock the board out: it still has the"
-    + " club's key, so it reappears here as a new door with nothing filled in the next time it calls"
-    + " in. Unplug it if you meant to retire it.";
+    + " is, and what the lock does with no power. Its past scans are NOT deleted: they stay in the"
+    + ` club log under its old name until ${kept} takes them, and the log lists it under “Removed`
+    + " doors”. It does not lock the board out either: it still has the club's key, so it reappears"
+    + " here as a new door with nothing filled in the next time it calls in. Unplug it if you meant"
+    + " to retire it.";
 }
 
 /** What each access policy is called on the settings screen. */

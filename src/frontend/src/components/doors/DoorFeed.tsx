@@ -1,9 +1,11 @@
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Card } from "../Card";
 import { DoorFeedRow } from "./DoorFeedRow";
 import { ACTIVITY_READ_FAILED, activityEmptyNotice, isDoorScan } from "../../lib/deviceActivity";
 import {
-  DOOR_EVENTS_NOTE, doorEventRows, doorQuietNotice, doorScanCountHeading, doorScanCountLine,
+  DOOR_EVENTS_NOTE, OFFLINE_WHO_NOTE, doorEventRows, doorQuietNotice, doorScanCountHeading,
+  doorScanCountLine,
 } from "../../lib/doorsCopy";
 import { clubDayAndClock } from "../../lib/clubClock";
 import {
@@ -48,7 +50,21 @@ export type FeedClock = { now: number; dayStartedAt: string; timezone: string };
  * is where the front end holds up its end of that.
  * </p>
  */
-function FeedBody({ read, clock }: { read: FeedRead; clock: FeedClock }) {
+/**
+ * How many scans the feed opens with (B6).
+ *
+ * Ten answers "what just happened at this door", which is why somebody opened the page; the
+ * rest is one press away. Fifty rows pushed the door's own controls 5 231 px down a phone.
+ */
+export const FEED_FIRST_PAGE = 10;
+
+function FeedBody({ read, clock, expanded, onExpand, firstMoreRef }: {
+  read: FeedRead;
+  clock: FeedClock;
+  expanded: boolean;
+  onExpand: () => void;
+  firstMoreRef: React.Ref<HTMLLIElement>;
+}) {
   if (read.loading) return <p className="text-sm text-text-secondary">Loading…</p>;
   if (read.error) return <p className="text-sm text-danger-strong">{read.error || ACTIVITY_READ_FAILED}</p>;
   const scans = (read.entries ?? []).filter(isDoorScan);
@@ -64,14 +80,41 @@ function FeedBody({ read, clock }: { read: FeedRead; clock: FeedClock }) {
    */
   const newest = scans.reduce((max, row) => (row.at > max ? row.at : max), scans[0].at);
   const quiet = doorQuietNotice(newest, clock.dayStartedAt, clock.now, clock.timezone);
+  // A3: said once, where the offline rows are. A reviewer read nine of them — some naming a
+  // member, some not — with nothing on the page to reconcile the two. The list IS the
+  // reconciliation: a code on it resolves to its holder, a code that is not resolves to
+  // nothing at all.
+  const anyOffline = scans.some((entry) => entry.offline);
+  const shown = expanded ? scans : scans.slice(0, FEED_FIRST_PAGE);
   return (
     <>
       {quiet && <p role="status" className="rounded-lg bg-warning-soft px-3 py-2 text-sm text-warning-strong">{quiet}</p>}
+      {anyOffline && <p className="text-xs text-text-muted">{OFFLINE_WHO_NOTE}</p>}
       <ul>
-        {scans.map((entry, i) => (
-          <DoorFeedRow key={`${entry.at}-${entry.action}-${i}`} entry={entry} now={clock.now} />
+        {shown.map((entry, i) => (
+          <DoorFeedRow
+            key={`${entry.at}-${entry.action}-${i}`}
+            entry={entry}
+            now={clock.now}
+            // A7 / O1: the CLUB's zone, from the same read the counts come from.
+            timezone={clock.timezone}
+            // C4: focus the first row this press revealed, so a keyboard user is not
+            // returned to the top of a list that grew under them.
+            innerRef={i === FEED_FIRST_PAGE ? firstMoreRef : undefined}
+          />
         ))}
       </ul>
+      {/* B6: the controls used to be BELOW all of this — 5 231 px down on a phone. Ten rows
+          answers "what just happened at this door" and the rest is one press away. */}
+      {!expanded && scans.length > FEED_FIRST_PAGE && (
+        <button
+          type="button"
+          onClick={onExpand}
+          className="min-h-11 w-full rounded-lg border border-control px-5 text-sm font-medium"
+        >
+          {`Show the other ${scans.length - FEED_FIRST_PAGE} scans`}
+        </button>
+      )}
       {/* Only when the read came back FULL. "Showing the 50 most recent" over four rows is
           a sentence that is not true, and the one it is standing in for — "there may be more
           than this" — is exactly what an admin needs to know only when there are.
@@ -97,7 +140,7 @@ function FeedBody({ read, clock }: { read: FeedRead; clock: FeedClock }) {
  * as "Unrecognised event" with its raw token, rather than being guessed at or dropped.
  * </p>
  */
-function DoorEvents({ read }: { read: FeedRead }) {
+function DoorEvents({ read, timezone }: { read: FeedRead; timezone: string }) {
   if (read.loading || read.error) return null;
   const rows = doorEventRows(read.entries, read.events);
   if (rows.length === 0) return null;
@@ -112,13 +155,18 @@ function DoorEvents({ read }: { read: FeedRead }) {
               <div className="flex flex-wrap items-baseline gap-2">
                 {/* The raw token only on an UNRECOGNISED row: on a recognised one the
                     sentence already says what happened, and on an unrecognised one the token
-                    is the only thing a reader can report upstream. There is no actor on the
-                    wire (WIRE-R1 §1), so no row names one. */}
+                    is the only thing a reader can report upstream. Who did it is in the
+                    sentence itself where the API says (WIRE-R2 §2's `actor_name`) — see
+                    {@link doorEventRows}. */}
                 <span className="min-w-0 break-words text-sm text-text-secondary">
                   {row.token ? `${row.text} · ${row.token}` : row.text}
                 </span>
+                {/* A7 / E-M5 / O1: the CLUB's zone, exactly as the scan rows above get.
+                    This list was the one reading the VIEWER's clock, so an admin reading
+                    from anywhere else saw the shut and the scans it explains dated
+                    differently — and on a club five hours away, on different days. */}
                 <time dateTime={row.at} className="ml-auto shrink-0 text-xs text-text-muted">
-                  {clubDayAndClock(row.at)}
+                  {clubDayAndClock(row.at, timezone)}
                 </time>
               </div>
             </li>
@@ -151,6 +199,10 @@ export function DoorFeed({ door, today, read, clock }: {
   read: FeedRead;
   clock: FeedClock;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const firstMoreRef = useRef<HTMLLIElement>(null);
+  // C4: after the press, the first row it revealed takes focus.
+  useEffect(() => { if (expanded) firstMoreRef.current?.focus(); }, [expanded]);
   return (
     // `min-w-0`: this is a grid item, and a grid item's default `min-width: auto` makes it
     // refuse to shrink below its content's min-content width. See the note on the grid in
@@ -164,7 +216,13 @@ export function DoorFeed({ door, today, read, clock }: {
             <p className="text-xs text-text-muted">{doorScanCountHeading(clock.dayStartedAt, clock.timezone)}</p>
             <p className="text-sm text-text-secondary">{doorScanCountLine(today)}</p>
           </div>
-          <FeedBody read={read} clock={clock} />
+          <FeedBody
+            read={read}
+            clock={clock}
+            expanded={expanded}
+            onExpand={() => setExpanded(true)}
+            firstMoreRef={firstMoreRef}
+          />
           <Link
             to={`/admin/doors/log?door=${encodeURIComponent(door.id)}`}
             className="inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-control px-5 text-sm font-medium"
@@ -173,7 +231,7 @@ export function DoorFeed({ door, today, read, clock }: {
           </Link>
         </Card>
       </section>
-      <DoorEvents read={read} />
+      <DoorEvents read={read} timezone={clock.timezone} />
     </div>
   );
 }

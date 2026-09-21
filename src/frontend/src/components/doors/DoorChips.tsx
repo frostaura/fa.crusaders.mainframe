@@ -19,7 +19,8 @@ import { type AdminDoorDevice, type DoorSignal } from "../../lib/api";
  */
 export function DoorChips({ device, online, signals }: {
   device: AdminDoorDevice;
-  online: boolean;
+  /** `null` = this page cannot currently say (A8). No liveness chip is drawn at all then. */
+  online: boolean | null;
   /** Empty on the detail header, where signals get their own full notices instead. */
   signals?: DoorSignal[];
 }) {
@@ -29,11 +30,17 @@ export function DoorChips({ device, online, signals }: {
   // heard the refusal, and it goes on admitting booked members from its saved list for up
   // to six hours. Caught by looking at a rendered overview where the banner said "2
   // confirmed, 1 not yet" over three tiles that all looked identical.
-  const chips: DoorChip[] = [doorStateChip(device, online)];
-  if (!device.enabled && !online) chips.push({ label: "Not reporting", tone: "danger" });
+  const state = doorStateChip(device, online);
+  const chips: DoorChip[] = state ? [state] : [];
+  if (!device.enabled && online === false) chips.push({ label: "Not reporting", tone: "danger" });
   const setup = doorSetupChip(device);
   if (setup) chips.push(setup);
-  for (const signal of signals ?? []) chips.push(doorSignalChip(signal.kind));
+  // B9 / A9: a signal chip is a reading of recent scans, and on a shut or unreachable door
+  // those scans are refusals the club caused or scans the club has not seen. The chip goes
+  // with its explanation rather than surviving on its own.
+  if (device.enabled && online === true) {
+    for (const signal of signals ?? []) chips.push(doorSignalChip(signal.kind));
+  }
   return (
     <span className="flex flex-wrap items-center gap-1.5">
       {chips.map((chip) => <Badge key={chip.label} tone={chip.tone}>{chip.label}</Badge>)}

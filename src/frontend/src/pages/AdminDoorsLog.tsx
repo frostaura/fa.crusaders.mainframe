@@ -8,16 +8,18 @@ import { DoorFeedRow } from "../components/doors/DoorFeedRow";
 import { useTicker } from "../lib/useTicker";
 import {
   LOG_EMPTY_FILTERED, LOG_EMPTY_FILTERED_HINT, LOG_EMPTY_NOTHING, LOG_OLDER_FAILED,
-  LOG_READ_FAILED, doorCsvDownloaded, doorCsvNotice, doorExhaustedNotice, doorLogEmptyOneDoor,
-  doorLogHowToRead, doorRetentionNotice,
+  LOG_READ_FAILED, OFFLINE_WHO_NOTE, doorCsvDownloaded, doorCsvNotice, doorDisplayName,
+  doorExhaustedNotice, doorLogCountLine, doorLogEmptyOneDoor, doorLogHowToRead, doorPickerLabel,
+  doorRetentionNotice, doorRowIdentity, doorRowName, removedDoorName, removedDoorsCapNotice,
 } from "../lib/doorsCopy";
-import { clubClock, clubDayAndClock } from "../lib/clubClock";
+import { clubClock, clubDayAndClock, clubRangeInWords } from "../lib/clubClock";
 import { isOnline, offlineAfterSecondsFor } from "../lib/deviceLiveness";
 import { DOOR_OUTCOME_CHIPS, isDoorScan } from "../lib/deviceActivity";
-import { UNNAMED_GATE } from "../lib/gateCopy";
 import { describeDeviceError } from "../lib/deviceErrors";
+import { withDoorsBoundary } from "../components/doors/DoorsErrorBoundary";
 import {
-  doorEndpoints, type DoorLogEntry, type DoorLogFilters, type DoorsView,
+  doorEndpoints, type DoorLogEntry, type DoorLogFilters, type DoorLogPeriod, type DoorsView,
+  type RemovedDoor,
 } from "../lib/api";
 
 /**
@@ -45,23 +47,75 @@ import {
  * </p>
  */
 
-const RANGES: Record<string, { label: string; hours: number | null }> = {
-  "24h": { label: "Last 24 hours", hours: 24 },
-  "7d": { label: "Last 7 days", hours: 24 * 7 },
-  "30d": { label: "Last 30 days", hours: 24 * 30 },
-};
+/**
+ * <b>A4 — the six ways a club actually asks "when".</b>
+ *
+ * <p>
+ * The page offered three rolling windows and nothing else, so there was no way to ask for
+ * yesterday or for one particular day: a chair exporting "yesterday's" scans after an
+ * incident was handed half of yesterday and half of today, and nothing on the page or in the
+ * filename said so. Today, Yesterday and a specific day are CALENDAR questions and the club's
+ * midnight is the server's to compute — a browser's is a different instant for any admin
+ * travelling or with a device clock that is out.
+ * </p>
+ *
+ * <p>
+ * The URL values are kept short and the wire values are WIRE-R2 §3's, so an existing
+ * `?range=24h` link a committee member was sent still resolves to the same window.
+ * </p>
+ */
+const RANGES: { value: string; label: string; period: DoorLogPeriod | null }[] = [
+  { value: "today", label: "Today", period: "today" },
+  { value: "yesterday", label: "Yesterday", period: "yesterday" },
+  { value: "24h", label: "Last 24 hours", period: "last_24h" },
+  { value: "7d", label: "Last 7 days", period: "last_7d" },
+  { value: "30d", label: "Last 30 days", period: "last_30d" },
+  // `period: null` — this one carries its answer in `?day=` instead.
+  { value: "day", label: "A specific day", period: null },
+];
 
-function fromFor(range: string): string {
-  const hours = RANGES[range]?.hours ?? 24;
-  return new Date(Date.now() - hours * 3_600_000).toISOString();
+const DEFAULT_RANGE = "24h";
+
+function periodFor(range: string): DoorLogPeriod {
+  return RANGES.find((r) => r.value === range)?.period ?? "last_24h";
 }
 
-/** The filters as the request carries them — one source for the list AND the CSV. */
+/** `YYYY-MM-DD`, which is the only thing the API accepts and the only thing a date input emits. */
+function isClubDay(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+/**
+ * The filters as the request carries them — one source for the list AND the CSV.
+ *
+ * <p>
+ * <b>It no longer computes a `from`.</b> It used to build "now minus 24 hours" on the client,
+ * which is a second opinion about the club's day and a different instant every time it is
+ * called — the CSV had to be handed the list's own copy for exactly that reason. The range is
+ * the server's now, one parameter, resolved in the club's zone, and the page states back what
+ * the server says it resolved rather than what it asked for.
+ * </p>
+ *
+ * <p>
+ * `period`, `day` and from/to are mutually exclusive — more than one is a 400 `range_conflict`
+ * — so exactly one is ever sent.
+ * </p>
+ */
 function filtersOf(params: URLSearchParams): DoorLogFilters {
   const door = params.get("door") ?? undefined;
+  const removedDoor = params.get("removed_door") ?? undefined;
   const outcome = (params.get("outcome") ?? undefined) as DoorLogFilters["outcome"];
   const reason = params.get("reason") ?? undefined;
-  return { door, outcome, reason, from: fromFor(params.get("range") ?? "24h") };
+  const range = params.get("range") ?? DEFAULT_RANGE;
+  const day = params.get("day") ?? "";
+  // A malformed `?day=` is not sent at all: the API answers 400 `day_invalid` and the page
+  // has no business turning a typo in a shared link into a failed read.
+  const when: DoorLogFilters = range === "day" && isClubDay(day)
+    ? { day }
+    : { period: periodFor(range) };
+  // A2: a removed door has no id, so it is filtered by the key its rows stored. Never both.
+  const which = removedDoor ? { removed_door: removedDoor } : { door };
+  return { ...which, outcome, reason, ...when };
 }
 
 /**
@@ -74,15 +128,18 @@ function filtersOf(params: URLSearchParams): DoorLogFilters {
  */
 function emptySentence(
   params: URLSearchParams, doorName: string | null, online: boolean | null,
+  range: { from: string; to: string } | null, timezone: string | undefined,
 ): string[] {
   if (doorName) {
     // B20: the boundary carries its date. "Fri 18:40" against a 30-day range names four
     // Fridays and the reader cannot tell which one the filter starts at.
-    const face = clubDayAndClock(fromFor(params.get("range") ?? "24h"));
+    // A4: and it is the range the SERVER resolved, not a second client-side "24 hours ago" —
+    // that was a different instant from the one the rows were read with.
+    const face = range ? clubDayAndClock(range.from, timezone) : "the start of this range";
     return [doorLogEmptyOneDoor(doorName, face, online)];
   }
   const narrowed = (params.get("outcome") ?? "") !== "" || (params.get("reason") ?? "") !== ""
-    || (params.get("range") ?? "24h") !== "24h";
+    || (params.get("range") ?? DEFAULT_RANGE) !== DEFAULT_RANGE;
   if (narrowed) return [LOG_EMPTY_FILTERED, LOG_EMPTY_FILTERED_HINT];
   return [LOG_EMPTY_NOTHING];
 }
@@ -103,15 +160,23 @@ type PickerDoor = { id: string; name: string; gate_key: string | null };
  * </p>
  */
 function doorOptions(view: DoorsView | null, rows: DoorLogEntry[] | null): PickerDoor[] {
-  if (view) return view.doors.map(({ device }) => ({ id: device.id, name: device.name, gate_key: device.gate_key }));
+  if (view) {
+    return view.doors.map(({ device }) => ({
+      id: device.id, name: doorDisplayName(device), gate_key: device.gate_key,
+    }));
+  }
   const seen = new Map<string, PickerDoor>();
   for (const row of rows ?? []) {
-    if (!seen.has(row.door.id)) seen.set(row.door.id, row.door);
+    // A1: a row whose door is gone has no id to key on and no page to offer. It is named in
+    // the rows and in the "Removed doors" group below, never as a live door to filter to.
+    const id = row.door?.id;
+    if (!id || seen.has(id)) continue;
+    seen.set(id, { id, name: doorRowIdentity(row.door).label, gate_key: row.door?.gate_key ?? null });
   }
   return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function AdminDoorsLogPage() {
+function AdminDoorsLogPageBody() {
   const toast = useToast();
   const now = useTicker(true);
   const [params, setParams] = useSearchParams();
@@ -136,7 +201,25 @@ export function AdminDoorsLogPage() {
    * </p>
    */
   const [activeFilters, setActiveFilters] = useState<DoorLogFilters | null>(null);
+  /**
+   * The COUNT for the range, the range the server resolved, its zone, and the doors that are
+   * gone — WIRE-R2 §3's four new fields, held together because they arrive together.
+   *
+   * <p>
+   * A6: "50 scans, newest first" read as a total over a 70-row range, and that is the number
+   * an admin quotes to a committee. A4: the range is the SERVER's, because a second
+   * client-side "24 hours ago" is a different instant from the one the rows were read with.
+   * </p>
+   */
+  const [page, setPage] = useState<{
+    total: number | null;
+    timezone: string | undefined;
+    range: { from: string; to: string } | null;
+    removedDoors: RemovedDoor[];
+  }>({ total: null, timezone: undefined, range: null, removedDoors: [] });
   const appendedRef = useRef<HTMLLIElement>(null);
+  /** C4: the node that must survive a re-render with focus on it. See the note at the control. */
+  const exhaustedRef = useRef<HTMLParagraphElement>(null);
   /**
    * Which row "Load older scans" appended first — state, not a ref.
    *
@@ -154,11 +237,20 @@ export function AdminDoorsLogPage() {
     setOlderFailed(false);
     try {
       const asked = filtersOf(new URLSearchParams(query));
-      const page = await doorEndpoints.doorActivity(asked);
+      const read = await doorEndpoints.doorActivity(asked);
       setActiveFilters(asked);
-      setRows(page.items);
-      setCursor(page.next_cursor);
-      setRetention(page.retention_days);
+      setRows(read.items);
+      setCursor(read.next_cursor);
+      setRetention(read.retention_days);
+      setPage({
+        // `?? null` and never `?? items.length`: an API that sends no total leaves the page
+        // saying "Showing 50 so far", which is honest. Falling back to the page length is
+        // how "50 scans" came to be printed over a 70-row range in the first place.
+        total: typeof read.total === "number" ? read.total : null,
+        timezone: read.timezone,
+        range: read.range ?? null,
+        removedDoors: read.removed_doors ?? [],
+      });
       setFailed(false);
       setReadAt(Date.now());
     } catch {
@@ -179,8 +271,19 @@ export function AdminDoorsLogPage() {
     return () => { cancelled = true; };
   }, []);
 
-  /** Focus the first appended row, so a keyboard user is not returned to the top of a list that grew. */
-  useEffect(() => { appendedRef.current?.focus(); }, [rows]);
+  /**
+   * <b>C4: focus the first appended row</b>, so a keyboard user is not returned to the top of
+   * a list that just grew — and so the "Load older scans" button, which unmounts once the
+   * range is exhausted, never drops focus to `<body>`.
+   *
+   * The fallback matters as much as the main case: on the LAST page there may be no new row
+   * with the ref (a final page of zero), and then the exhausted notice takes the focus. It is
+   * the only other node that is guaranteed to exist at that moment.
+   */
+  useEffect(() => {
+    if (appendedRef.current) { appendedRef.current.focus(); return; }
+    if (appendedFrom > 0 && !cursor) exhaustedRef.current?.focus();
+  }, [rows, appendedFrom, cursor]);
 
   const setFilter = (key: string, value: string) => {
     const next = new URLSearchParams(params);
@@ -191,14 +294,17 @@ export function AdminDoorsLogPage() {
   };
 
   const loadOlder = async () => {
-    if (!cursor) return;
+    // C4: guarded here rather than with `disabled`. A browser blurs a disabled element, so
+    // disabling the control an admin has just activated drops focus to `<body>` — which is
+    // exactly what the reviewer measured on every re-rendering button on this surface.
+    if (!cursor || loadingOlder) return;
     setLoadingOlder(true);
     setOlderFailed(false);
     try {
-      const page = await doorEndpoints.doorActivity({ ...(activeFilters ?? filtersOf(params)), cursor });
+      const older = await doorEndpoints.doorActivity({ ...(activeFilters ?? filtersOf(params)), cursor });
       setAppendedFrom(rows?.length ?? 0);
-      setRows([...(rows ?? []), ...page.items]);
-      setCursor(page.next_cursor);
+      setRows([...(rows ?? []), ...older.items]);
+      setCursor(older.next_cursor);
     } catch {
       setOlderFailed(true);
     } finally {
@@ -207,6 +313,7 @@ export function AdminDoorsLogPage() {
   };
 
   const download = async () => {
+    if (downloading) return;
     setDownloading(true);
     try {
       const { blob, filename, rows: counted, truncated } = await doorEndpoints.doorActivityCsv(activeFilters ?? filtersOf(params));
@@ -240,10 +347,39 @@ export function AdminDoorsLogPage() {
   const pickerDoors = doorOptions(doors, rows);
   /** The rows that ARE scans — see the note beside the count below (B1). */
   const scans = (rows ?? []).filter(isDoorScan);
-  const doorName = chosen?.device.name ?? pickerDoors.find((d) => d.id === doorId)?.name ?? null;
+  const removedDoorKey = params.get("removed_door") ?? "";
+  const chosenRemoved = page.removedDoors.find((d) => d.key === removedDoorKey) ?? null;
+  const doorName = chosen ? doorDisplayName(chosen.device)
+    : chosenRemoved ? removedDoorName(chosenRemoved)
+      : pickerDoors.find((d) => d.id === doorId)?.name ?? null;
   const doorOnline = chosen
     ? isOnline(chosen.device, offlineAfterSecondsFor(chosen.device, null), now)
     : null;
+  /**
+   * <b>C5 — the ONE sentence the polite region always carries.</b>
+   *
+   * The count lived in a `role="status"` that only existed while there were rows, so
+   * filtering the log to an EMPTY result announced nothing at all: the region was removed
+   * from the document and a screen-reader user was left on a page that had silently changed
+   * under them. One region, always mounted, and every one of the four outcomes writes to it.
+   */
+  /**
+   * <b>B1, one field along.</b> The route serves scans, and this page counts what IS a scan
+   * rather than trusting that — the door's own feed made exactly the opposite mistake and
+   * reported "13 refused scans" over thirteen admin edits. So if this page has filtered
+   * anything out of what arrived, the server's `total` counts rows this page would not show:
+   * it is not a number about scans, and it is not stated. "Showing 50 so far" is the honest
+   * fallback, which is also what an API that sends no total gets.
+   */
+  const trustedTotal = rows !== null && rows.length === scans.length ? page.total : null;
+  const resultSentence = failed ? LOG_READ_FAILED
+    : loading ? "Reading the log…"
+      // The FIRST sentence only. The rest of an empty state is a hint about what to do next,
+      // which is page text; the region carries the RESULT.
+      : scans.length === 0 ? emptySentence(params, doorName, doorOnline, page.range, page.timezone)[0]
+        : doorLogCountLine(scans.length, trustedTotal);
+  /** A3: said once, where the offline rows are, rather than repeated on each of them. */
+  const anyOffline = scans.some((entry) => entry.offline);
 
   return (
     <div className="space-y-6">
@@ -252,10 +388,16 @@ export function AdminDoorsLogPage() {
           <Link to="/admin/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">← Doors</Link>
           <h1 className="text-2xl font-bold tracking-tight">All scans, all doors</h1>
           <p className="text-xs text-text-muted">
-            {readAt === null ? "Reading…" : `Read at ${clubClock(readAt)}`}
+            {readAt === null ? "Reading…" : `Read at ${clubClock(readAt, page.timezone)} club time`}
           </p>
         </div>
-        <Button variant="outline" onClick={() => void load()} disabled={loading}>
+        {/*
+          C4: NOT `disabled` while loading. A browser blurs a disabled element, so disabling
+          the control an admin has just pressed moves focus to `<body>` — measured on every
+          re-rendering button on this surface. The node stays mounted and enabled, the label
+          changes, `aria-busy` says what it is doing, and the handler guards the double press.
+        */}
+        <Button variant="outline" onClick={() => { if (!loading) void load(); }} aria-busy={loading}>
           {loading ? "Reading…" : "Refresh"}
         </Button>
       </header>
@@ -269,7 +411,21 @@ export function AdminDoorsLogPage() {
             <legend className="sr-only">Filter these scans</legend>
             <div>
               <Label htmlFor={`${base}-door`}>Door</Label>
-              <Select id={`${base}-door`} value={doorId} onChange={(e) => setFilter("door", e.target.value)}>
+              <Select
+                id={`${base}-door`}
+                value={removedDoorKey ? `removed:${removedDoorKey}` : doorId}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  const next = new URLSearchParams(params);
+                  next.delete("door");
+                  next.delete("removed_door");
+                  // A2: a deleted board has no id, so its rows are reached by the key they
+                  // stored. Never both parameters — the API answers 400 for the pair.
+                  if (value.startsWith("removed:")) next.set("removed_door", value.slice("removed:".length));
+                  else if (value !== "") next.set("door", value);
+                  setParams(next, { replace: true });
+                }}
+              >
                 <option value="">All doors</option>
                 {/* A5: the DISPLAY name first, always. A door with a name and no slug was
                     labelled "gate-44c103 — no door name yet", which is a MAC fragment where
@@ -278,11 +434,33 @@ export function AdminDoorsLogPage() {
                     which silently looked like a club with one door — so the chosen door keeps
                     its own option, and the picker says why it is short. */}
                 {pickerDoors.map((device) => (
-                  <option key={device.id} value={device.id}>
-                    {device.gate_key ? `${device.name} (${device.gate_key})` : `${device.name} — ${UNNAMED_GATE}`}
-                  </option>
+                  <option key={device.id} value={device.id}>{doorPickerLabel(device)}</option>
                 ))}
+                {/*
+                  A2 — the doors that are GONE, and the reason this group exists.
+
+                  Deleting a door made its whole history unreachable from this page: the
+                  door's own page 404s, it was not in this picker, and a reviewer concluded
+                  the records had been destroyed. They had not. The rows stay until the club's
+                  retention rule takes them, and this is how somebody gets to them.
+                */}
+                {page.removedDoors.length > 0 && (
+                  <optgroup label="Removed doors">
+                    {page.removedDoors.map((door) => (
+                      <option key={door.key} value={`removed:${door.key}`}>{removedDoorName(door)}</option>
+                    ))}
+                  </optgroup>
+                )}
               </Select>
+              {/* The server caps this list, and a full one is not a complete one: fifty
+                  removed doors and a full stop looks exactly like a club that removed
+                  fifty. The one an admin is hunting for after an incident is the one that
+                  is not in the list. */}
+              {removedDoorsCapNotice(page.removedDoors.length) && (
+                <p className="mt-1 text-xs text-text-muted">
+                  {removedDoorsCapNotice(page.removedDoors.length)}
+                </p>
+              )}
               {doors === null && (
                 <p className="mt-1 text-xs text-warning-strong">
                   The club's doors could not be read, so this list may be short. The scans below are
@@ -292,9 +470,31 @@ export function AdminDoorsLogPage() {
             </div>
             <div>
               <Label htmlFor={`${base}-range`}>When</Label>
-              <Select id={`${base}-range`} value={params.get("range") ?? "24h"} onChange={(e) => setFilter("range", e.target.value)}>
-                {Object.entries(RANGES).map(([key, { label }]) => <option key={key} value={key}>{label}</option>)}
+              <Select
+                id={`${base}-range`}
+                value={params.get("range") ?? DEFAULT_RANGE}
+                onChange={(e) => setFilter("range", e.target.value)}
+              >
+                {RANGES.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
               </Select>
+              {/* A4: the sixth choice is a calendar question, so it takes a date. The input
+                  appears only when it is the answer being given — a date field standing beside
+                  a rolling window reads as a second, contradictory filter. */}
+              {(params.get("range") ?? DEFAULT_RANGE) === "day" && (
+                <>
+                  <Label htmlFor={`${base}-day`} className="mt-2 block">Which day</Label>
+                  <input
+                    id={`${base}-day`}
+                    type="date"
+                    value={params.get("day") ?? ""}
+                    onChange={(e) => setFilter("day", e.target.value)}
+                    className="min-h-11 w-full rounded-lg border border-control bg-bg-surface px-3 text-sm"
+                  />
+                  {!isClubDay(params.get("day") ?? "") && (
+                    <p className="mt-1 text-xs text-text-muted">Pick a day to narrow the log to it.</p>
+                  )}
+                </>
+              )}
             </div>
             <div>
               <Label htmlFor={`${base}-outcome`}>Outcome</Label>
@@ -332,25 +532,53 @@ export function AdminDoorsLogPage() {
           </p>
 
           <div className="space-y-2">
-            <Button variant="outline" onClick={() => void download()} disabled={downloading || loading} aria-busy={downloading}>
+            {/* C4: enabled throughout, for the reason on Refresh above — `disabled` blurs. */}
+            <Button variant="outline" onClick={() => void download()} aria-busy={downloading}>
               {downloading ? "Preparing…" : "Download CSV"}
             </Button>
             <p className="text-xs text-text-muted">{doorCsvNotice(retention)}</p>
           </div>
 
+          {/*
+            C5 — ONE polite region, always mounted, carrying whatever this read amounts to.
+
+            The count used to live in a `role="status"` that existed only while there were
+            rows, so narrowing the log to an EMPTY result announced nothing at all: the region
+            was removed from the document and a screen-reader user was left on a page that had
+            silently changed under them. All four outcomes — reading, failed, empty, counted —
+            write here, and nothing else on this page carries a live role.
+
+            C15: it holds only the RESULT. The permanent explanations (how to read the log, the
+            retention rule, what the CSV carries) are plain text elsewhere — a standing
+            paragraph inside a live region is announced as an update on every visit.
+          */}
+          <p
+            role="status"
+            className={failed
+              ? "rounded-lg border-l-4 border-danger-strong bg-danger-soft px-3 py-2.5 text-sm text-danger-strong"
+              : "text-sm text-text-secondary"}
+          >
+            {resultSentence}
+          </p>
+
+          {/* A4: the range the SERVER resolved, in words, above the rows. "Last 24 hours" is
+              rolling, and a chair exporting "yesterday" was handed half of yesterday and half
+              of today with nothing on the page saying so. */}
+          {!failed && clubRangeInWords(page.range, page.timezone) && (
+            <p className="text-xs text-text-muted">{clubRangeInWords(page.range, page.timezone)}</p>
+          )}
+
           {failed ? (
-            <div className="space-y-3">
-              <Alert tone="danger">{LOG_READ_FAILED}</Alert>
-              <Button variant="outline" onClick={() => void load()}>Try again</Button>
-            </div>
-          ) : loading ? (
-            <p className="text-sm text-text-secondary">Loading the club's door scans…</p>
-          ) : scans.length === 0 ? (
+            <Button variant="outline" onClick={() => void load()}>Try again</Button>
+          ) : loading ? null : scans.length === 0 ? (
             <div className="space-y-2">
-              {emptySentence(params, doorName, doorOnline).map((sentence) => (
+              {/* The FIRST sentence is in the region above — printing it twice is how the
+                  reviewer's screen reader heard the empty state and the sighted reader read
+                  it two inches apart. Only what the region did not carry is repeated here. */}
+              {emptySentence(params, doorName, doorOnline, page.range, page.timezone).slice(1).map((sentence) => (
                 <p key={sentence} className="text-sm text-text-secondary">{sentence}</p>
               ))}
-              {doorName && (
+              {doorName && !chosenRemoved && (
                 <Link to="/admin/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">
                   Check it on Doors
                 </Link>
@@ -358,19 +586,9 @@ export function AdminDoorsLogPage() {
             </div>
           ) : (
             <>
-              {/*
-                B1's "four views of ONE set", held on this side too.
-
-                The server already narrows this route to scans — it is why the reviewer's
-                club log showed no rows for a door whose own page claimed thirteen refusals.
-                But the count here is a CLAIM an admin quotes, and the door's own feed made
-                exactly this mistake by counting whatever arrived. Counting what is actually
-                a scan costs one filter and cannot be wrong; trusting the route is a promise
-                about somebody else's code.
-              */}
-              <p role="status" className="text-sm text-text-secondary">
-                {`${scans.length} ${scans.length === 1 ? "scan" : "scans"}, newest first`}
-              </p>
+              {/* A3: said once, beside the offline rows, rather than left to be inferred from
+                  nine rows where some name a member and some do not. */}
+              {anyOffline && <p className="text-xs text-text-muted">{OFFLINE_WHO_NOTE}</p>}
               <Card>
                 <ul>
                   {scans.map((entry, i) => (
@@ -381,7 +599,13 @@ export function AdminDoorsLogPage() {
                       // B17 / A5: the door's DISPLAY name, which is what an admin calls it.
                       // This printed the slug, so a log read after an incident named every
                       // row "front-door" where the club says "Front door".
-                      doorName={entry.door.name}
+                      // A1: and it is `doorRowName` rather than `.name`, because a row whose
+                      // board has been deleted carries nulls — reading `.name` off that is
+                      // the blank white page three reviewers found.
+                      doorName={doorRowName(entry.door)}
+                      // A7 / O1: the CLUB's zone, from this read. One formatter on this
+                      // surface, always given a zone where the API supplies one.
+                      timezone={page.timezone}
                       innerRef={i > 0 && i === appendedFrom ? appendedRef : undefined}
                     />
                   ))}
@@ -389,11 +613,15 @@ export function AdminDoorsLogPage() {
               </Card>
               {olderFailed && <Alert tone="danger">{`${LOG_OLDER_FAILED} The ${scans.length} above are still correct.`}</Alert>}
               {cursor ? (
-                <Button variant="outline" className="w-full" onClick={() => void loadOlder()} disabled={loadingOlder}>
+                <Button variant="outline" className="w-full" onClick={() => void loadOlder()} aria-busy={loadingOlder}>
                   {olderFailed ? "Try again" : loadingOlder ? "Loading…" : "Load older scans"}
                 </Button>
               ) : (
-                <p className="text-sm text-text-muted">{doorExhaustedNotice(retention)}</p>
+                // C4: `tabIndex={-1}` so that on the LAST page — where the button above
+                // unmounts — focus has somewhere to land other than `<body>`. See the effect.
+                <p ref={exhaustedRef} tabIndex={-1} className="text-sm text-text-muted">
+                  {doorExhaustedNotice(retention)}
+                </p>
               )}
             </>
           )}
@@ -413,3 +641,10 @@ export function AdminDoorsLogPage() {
     </div>
   );
 }
+
+/**
+ * A1 / E-C1 / C1: THE page the critical was found on. Exported through the doors error
+ * boundary, so a rendering fault shows a heading, a sentence and a way back instead of the
+ * blank white document a deleted door produced for the whole club.
+ */
+export const AdminDoorsLogPage = withDoorsBoundary(AdminDoorsLogPageBody);

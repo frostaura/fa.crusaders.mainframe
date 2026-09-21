@@ -718,15 +718,88 @@ function doorOutcomeOf(entry: Record<string, unknown>): string[] {
 /** Everything one doors server is holding, so its three jobs can be functions rather than closures. */
 type DoorsState = {
   doors: Record<string, unknown>[];
+  /** A resolved range pinned by the fixture, or undefined to let the stub compute one. */
+  range?: { from: string; to: string };
   activity: Record<string, unknown>[];
   rows: Record<string, DoorsServerRow>;
   retentionDays: number;
   pageSize: number;
   timezone: string;
   dayStartedAt: string;
+  /** Deleted doors with rows still inside retention (WIRE-R2 §1). */
+  removedDoors: { key: string; name?: string | null; gate_key?: string | null }[];
   /** Which doors a shut-all shut, which is what makes reopen-all selective. */
   shutByFleet: Set<string>;
 };
+
+/**
+ * How far this zone is from UTC at this instant, milliseconds.
+ *
+ * The club's midnight is the SERVER's to compute (WIRE-R2 §3) and the mock has to compute it
+ * the same way, or a page that states a resolved range states one the API would never send.
+ */
+function zoneOffsetMs(at: number, timeZone: string): number {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+    timeZone, hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).formatToParts(new Date(at)).map((p) => [p.type, p.value]));
+  const asUtc = Date.UTC(
+    Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+    Number(parts.hour) % 24, Number(parts.minute), Number(parts.second),
+  );
+  return asUtc - Math.floor(at / 1000) * 1000;
+}
+
+/** Club-local midnight of the day containing `at`, as an instant. */
+function clubMidnight(at: number, timeZone: string): number {
+  const offset = zoneOffsetMs(at, timeZone);
+  const local = at + offset;
+  return local - (local % 86_400_000) - offset;
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * The resolved range for one query, or the API's own refusal (WIRE-R2 §3).
+ *
+ * <p>
+ * A4: "Last 24 hours" is rolling and the page had no way to ask for yesterday or for one
+ * day, so a chair exporting "yesterday" was handed half of yesterday and half of today.
+ * `period` and `day` are resolved HERE, in the club's zone, because a browser's midnight is
+ * a different instant for any admin travelling or with a wrong device clock.
+ * </p>
+ */
+function resolveLogRange(
+  query: URLSearchParams, state: DoorsState,
+): { from: number; to: number } | StubRefusal {
+  const period = query.get("period");
+  const day = query.get("day");
+  const from = query.get("from");
+  const to = query.get("to");
+  const given = [period !== null, day !== null, from !== null || to !== null].filter(Boolean).length;
+  if (given > 1) return refuse(400, { error: "range_conflict" });
+  const now = Date.now();
+  if (day !== null) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return refuse(400, { error: "day_invalid" });
+    const start = clubMidnight(new Date(`${day}T12:00:00Z`).getTime(), state.timezone);
+    return { from: start, to: Math.min(start + DAY_MS, now) };
+  }
+  if (period !== null) return resolvePeriod(period, now, state);
+  return { from: from ? new Date(from).getTime() : now - DAY_MS, to: to ? new Date(to).getTime() : now };
+}
+
+function resolvePeriod(
+  period: string, now: number, state: DoorsState,
+): { from: number; to: number } | StubRefusal {
+  const midnight = clubMidnight(now, state.timezone);
+  if (period === "today") return { from: midnight, to: now };
+  if (period === "yesterday") return { from: clubMidnight(midnight - 1, state.timezone), to: midnight };
+  if (period === "last_24h") return { from: now - DAY_MS, to: now };
+  if (period === "last_7d") return { from: now - 7 * DAY_MS, to: now };
+  if (period === "last_30d") return { from: now - 30 * DAY_MS, to: now };
+  return refuse(400, { error: "period_invalid" });
+}
 
 /** `GET /admin/doors`. */
 function doorsView(state: DoorsState) {
@@ -798,27 +871,53 @@ function applyFleet(state: DoorsState, enabled: boolean) {
   };
 }
 
-/** Whether one log row survives the filters in this query string. */
-function matchesLogFilters(entry: Record<string, unknown>, query: URLSearchParams, floor: number): boolean {
-  const at = new Date(String(entry.at)).getTime();
+/**
+ * Whether one row survives the DOOR half of the filters.
+ *
+ * Split out of {@link matchesLogFilters} for the complexity gate, and the seam is the
+ * honest one: which door a row belongs to is one question (and, since a board can be
+ * deleted, two parameters), and what happened at it is another.
+ */
+function matchesLogDoor(entry: Record<string, unknown>, query: URLSearchParams): boolean {
   const entryDoor = (entry.door ?? {}) as Record<string, unknown>;
   const door = query.get("door");
-  const outcome = query.get("outcome");
-  const from = query.get("from");
-  const to = query.get("to");
   if (door && String(entryDoor.id) !== door) return false;
+  // WIRE-R2 §1: a deleted board has no id, so its rows are reached by the key the row stored.
+  const removedDoor = query.get("removed_door");
+  return !removedDoor || String(entryDoor.gate_key ?? entryDoor.name ?? "") === removedDoor;
+}
+
+/** Whether one row survives the OUTCOME half — the bucket and the exact reason. */
+function matchesLogOutcome(entry: Record<string, unknown>, query: URLSearchParams): boolean {
+  const outcome = query.get("outcome");
   if (outcome && !doorOutcomeOf(entry).includes(outcome)) return false;
+  // The API narrows by reason too, and this stub did not — so a page filtering to "Too early"
+  // was handed every row and could claim any behaviour it liked about the result.
+  const reason = query.get("reason");
+  return !reason || String(entry.reason ?? "") === reason;
+}
+
+/** Whether one log row survives the filters in this query string. */
+function matchesLogFilters(
+  entry: Record<string, unknown>, query: URLSearchParams, floor: number,
+  range: { from: number; to: number },
+): boolean {
+  if (!matchesLogDoor(entry, query)) return false;
+  if (!matchesLogOutcome(entry, query)) return false;
+  const at = new Date(String(entry.at)).getTime();
   // The retention clamp the API applies, so a page that states a range states a real one.
-  if (from && at < Math.max(new Date(from).getTime(), floor)) return false;
-  if (to && at > new Date(to).getTime()) return false;
-  return at >= floor;
+  if (at < Math.max(range.from, floor)) return false;
+  return at <= range.to;
 }
 
 /** `GET /admin/doors/activity`, cursor-paged. */
 function doorsLogPage(state: DoorsState, path: string) {
   const query = new URLSearchParams(path.split("?")[1] ?? "");
-  const floor = Date.now() - state.retentionDays * 86_400_000;
-  const matched = state.activity.filter((entry) => matchesLogFilters(entry, query, floor));
+  const resolved = resolveLogRange(query, state);
+  if (!("from" in resolved)) return resolved;
+  const range = resolved;
+  const floor = Date.now() - state.retentionDays * DAY_MS;
+  const matched = state.activity.filter((entry) => matchesLogFilters(entry, query, floor, range));
   const start = Number(query.get("cursor") ?? 0);
   const next = start + state.pageSize;
   return {
@@ -828,6 +927,18 @@ function doorsLogPage(state: DoorsState, path: string) {
     // function below it into one. See the note inside `stubFetch`.
     next_cursor: matched.length > next ? String(next) : null,
     retention_days: state.retentionDays,
+    // WIRE-R2 §3. A6: the heading read "50 scans, newest first" over a 70-row range, which
+    // is the number an admin quotes to a committee.
+    total: matched.length,
+    timezone: state.timezone,
+    // UTC instants, as the API sends them. A fixture may pin the pair outright; see the
+    // `range` option, which exists so a test can put the club's midnight on the far side of
+    // UTC's and see which one the page prints.
+    range: state.range ?? {
+      from: new Date(Math.max(range.from, floor)).toISOString(),
+      to: new Date(range.to).toISOString(),
+    },
+    removed_doors: state.removedDoors,
   };
 }
 
@@ -854,8 +965,16 @@ function doorsDeviceRoute(state: DoorsState, path: string) {
     (DOOR_SCAN_ACTIONS as readonly string[]).includes(String(e.action));
   return {
     items: mine.filter(isScan),
-    events: mine.filter((e) => !isScan(e))
-      .map((e) => ({ at: e.at, action: e.action, kind: doorEventKindOf(String(e.action)) })),
+    // WIRE-R2 §2: `kind` stays for compatibility and `change` is what the screen renders
+    // from. A5: nine identical "details or state were changed" rows told an admin nothing,
+    // and the card said "You shut this door" to four admins who had not.
+    events: mine.filter((e) => !isScan(e)).map((e) => ({
+      at: e.at,
+      action: e.action,
+      kind: doorEventKindOf(String(e.action)),
+      change: e.change ?? doorEventChangeOf(String(e.action)),
+      actor_name: e.actor_name ?? null,
+    })),
   };
 }
 
@@ -872,6 +991,25 @@ function doorEventKindOf(action: string): string {
   return DOOR_EVENT_KINDS[action] ?? "unrecognised";
 }
 
+/**
+ * WIRE-R2 §2's `change`, as the server derives it from the audit details.
+ *
+ * `device.updated` lands on `other` here unless the fixture says which of the four it was —
+ * which is exactly the old-row case the copy has to stay honest about.
+ */
+const DOOR_EVENT_CHANGE_BY_ACTION: Record<string, string> = {
+  "device.auto_registered": "registered",
+  "device.registered": "registered",
+  "device.deleted": "removed",
+  "device.event_time_clamped": "clock_corrected",
+  "doors.shut_all": "shut_all",
+  "doors.reopened_all": "reopened_all",
+};
+
+function doorEventChangeOf(action: string): string {
+  return DOOR_EVENT_CHANGE_BY_ACTION[action] ?? "other";
+}
+
 /** The devices PATCH, applying and refusing what the API applies and refuses. */
 function doorsPatchRoute(state: DoorsState, path: string, body: unknown) {
   const patch = (body ?? {}) as Record<string, unknown>;
@@ -880,7 +1018,13 @@ function doorsPatchRoute(state: DoorsState, path: string, body: unknown) {
   if (index < 0) return refuse(404, { error: "not_found" });
   const refusal = refuseDoorPatch(state.doors[index], patch);
   if (refusal) return refusal;
-  state.doors[index] = applyDoorPatch(state.doors[index], patch);
+  const before = state.doors[index];
+  // B10 / WIRE-R2 §2: a PATCH that changes nothing answers 200 `unchanged: true` with the
+  // CURRENT shut facts. A stale tab "shut" an already-shut door and was told it had worked.
+  if (patch.enabled !== undefined && patch.enabled === before.enabled) {
+    return { ...before, unchanged: true };
+  }
+  state.doors[index] = applyDoorPatch(before, patch);
   // An individual shut is NOT a fleet shut, so reopen-all must leave it alone.
   if (patch.enabled === false) state.shutByFleet.delete(id);
   return state.doors[index];
@@ -912,6 +1056,16 @@ export function doorsServer(
     dayStartedAt?: string;
     /** The page size the cursor pages at, so a test can produce a second page from four rows. */
     pageSize?: number;
+    /** Deleted doors that still have rows in range (WIRE-R2 §1), for the picker's own group. */
+    removedDoors?: { key: string; name?: string | null; gate_key?: string | null }[];
+    /**
+     * The resolved range, verbatim, instead of the one this stub would compute.
+     *
+     * For fixtures that need a SPECIFIC pair of instants — the backend sends these as UTC
+     * (`…Z`), and a club whose wall clock is hours away from UTC is the only fixture that
+     * can tell a page rendering them in the club's zone from one printing them raw.
+     */
+    range?: { from: string; to: string };
   } = {},
 ): DoorsServer {
   // Defaults as one object rather than seven `??`s: each of those is a branch lizard counts,
@@ -923,6 +1077,7 @@ export function doorsServer(
     pageSize: 50,
     timezone: "Africa/Johannesburg",
     dayStartedAt: new Date(new Date().setHours(0, 0, 0, 0)).toISOString(),
+    removedDoors: [],
     ...options,
     doors: initial.map((d) => ({ ...d })),
     // Seeded from the fixture's own `shut_by_shut_all_at`, so a test can start from a club
@@ -1004,10 +1159,21 @@ export function applyDoorPatch(
   }
   if (typeof patch.power_loss_behaviour === "string") next.power_loss_behaviour = patch.power_loss_behaviour;
   // `UpdateAsync` stamps the transition; the standing notice reads it.
-  if (patch.enabled === false && row.enabled !== false) next.out_of_service_since = new Date().toISOString();
-  if (patch.enabled === true) next.out_of_service_since = null;
+  if (patch.enabled === false && row.enabled !== false) {
+    next.out_of_service_since = new Date().toISOString();
+    // A5 / WIRE-R2 §2: WHO, not "you". The card said "You shut this door." to every admin in
+    // the club, which is false for all but one of them and unfalsifiable for the reader.
+    next.shut_by_name = row.shut_by_name ?? ACTING_ADMIN_NAME;
+  }
+  if (patch.enabled === true) {
+    next.out_of_service_since = null;
+    next.shut_by_name = null;
+  }
   return next;
 }
+
+/** The admin this stub acts as, so a shut can be attributed to a name rather than to "you". */
+export const ACTING_ADMIN_NAME = "Priya Naidoo";
 
 // --- doors: member ---------------------------------------------------------------
 

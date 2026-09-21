@@ -67,6 +67,61 @@ export function clubInstant(iso: string | number | Date, timezone?: string): str
   return `${day}, ${clubClock(date, timezone)}`;
 }
 
+/**
+ * What a ROW prints: the clock face, plus the day when the row is not today's.
+ *
+ * <p>
+ * <b>A7 / E-M5.</b> Every row on every doors surface printed a relative age — "6m ago",
+ * "2d ago" — with the exact time available only in a `title`. A `title` is invisible on a
+ * phone, invisible to a screen reader, and invisible to anyone using touch, which is every
+ * admin this surface was designed for. The question a committee asks is "what time did that
+ * happen", and the screen would not answer it.
+ * </p>
+ *
+ * <p>
+ * <b>Relative age stays, as the SECOND thing on the row.</b> It is what makes a page feel
+ * live, and "2 minutes ago" is the right answer to a different question. It is the ordering
+ * that was wrong, not the presence.
+ * </p>
+ *
+ * <p>
+ * <b>And the zone is the club's, always.</b> O1: this surface had two clock formatters and
+ * the feed did not pass a timezone to either, so an admin reading the log from a laptop in
+ * another zone got their own midnight against the club's day boundary. The API sends
+ * `timezone` on `/admin/doors` and, since WIRE-R2 §3, on the log too; every caller passes it.
+ * </p>
+ */
+export function clubRowTime(iso: string | number | Date, now: number, timezone?: string): string {
+  const date = new Date(iso);
+  return isSameClubDay(date, new Date(now), timezone) ? clubClock(date, timezone) : clubDayAndClock(date, timezone);
+}
+
+/** Two instants in the CLUB's calendar day — never the browser's. */
+function isSameClubDay(a: Date, b: Date, timezone?: string): boolean {
+  const face = (d: Date) => d.toLocaleDateString(CLUB_LOCALE, {
+    day: "2-digit", month: "2-digit", year: "numeric", timeZone: timezone,
+  });
+  return face(a) === face(b);
+}
+
+/**
+ * The resolved range, in words, above the rows (A4).
+ *
+ * <p>
+ * "Last 24 hours" is a rolling window and the page offered no way to ask for yesterday or for
+ * one day, so a chair exporting "yesterday's" scans was handed half of yesterday and half of
+ * today and had no way to tell. The range the SERVER resolved is the only range the page may
+ * state — a second client-side computation of "24 hours ago" is a different instant from the
+ * one the rows were read with, which is the defect the CSV filter already had to close.
+ * </p>
+ */
+export function clubRangeInWords(
+  range: { from: string; to: string } | null | undefined, timezone?: string,
+): string | null {
+  if (!range) return null;
+  return `Scans from ${clubDayAndClock(range.from, timezone)} to ${clubDayAndClock(range.to, timezone)}, club time.`;
+}
+
 /** "19 September 2026" — a date with no clock, for the printed card's own footer. */
 export function clubDate(iso: string | number | Date, timezone?: string): string {
   return new Date(iso).toLocaleDateString(CLUB_LOCALE, {

@@ -8,7 +8,7 @@ import {
 } from "../../lib/gateCopy";
 import { describeDeviceError } from "../../lib/deviceErrors";
 import { doorEndpoints } from "../../lib/api";
-import { type DoorsChrome } from "./useDoorsChrome";
+import { markOwnDoorsAction, type DoorsChrome } from "./useDoorsChrome";
 
 /** What the count line says about a club whose doors are not all in one state. */
 function tally(total: number, open: number): string {
@@ -46,6 +46,9 @@ async function fleetAction(action: "shut" | "reopen", context: {
 }) {
   context.onError(null);
   try {
+    // C11: the biggest change on this surface, and the one an admin is most plainly
+    // looking at the result of. Polite for them; assertive for everybody else's tab.
+    markOwnDoorsAction();
     const answer = action === "shut"
       ? await doorEndpoints.doorsShutAll()
       : await doorEndpoints.doorsReopenAll();
@@ -106,6 +109,14 @@ export function FleetShutPanel({ chrome, loading, failed, reload, onRetry }: {
   const shutTogether = chrome.doors.filter((d) => !d.enabled && d.shutByFleet);
   const shutAlone = chrome.doors.filter((d) => !d.enabled && !d.shutByFleet);
   const stayingShut = shutAlone.map((d) => d.name);
+  // B3 at fleet scale: the doors this club actually has are countable, so the armed
+  // consequence counts the ones that cannot hear it rather than describing doors in general
+  // — and it distinguishes a named door, which keeps its cached list, from an unnamed one,
+  // which holds nothing at all.
+  const situationsOf = (doors: typeof chrome.doors) =>
+    doors.filter((d) => !d.online).map((d) => ({ online: false, named: d.named }));
+  const shutUnreachable = situationsOf(chrome.doors.filter((d) => d.enabled));
+  const reopenUnreachable = situationsOf(shutTogether);
   // The names the result panel falls back to when the API does not send `left_shut` yet, so
   // a zero-change reopen still NAMES the doors it left alone rather than printing
   // "0 doors reopened" and stopping (C1).
@@ -145,7 +156,7 @@ export function FleetShutPanel({ chrome, loading, failed, reload, onRetry }: {
               {open > 0 && (
                 <ConfirmButton
                   idleLabel={open === chrome.total ? "Shut all doors" : `Shut the ${open} ${open === 1 ? "door" : "doors"} still open`}
-                  confirmLabel={doorFleetShutConfirm(open)}
+                  confirmLabel={doorFleetShutConfirm(open, shutUnreachable)}
                   ariaLabel={`every door the club has open — ${open} of ${chrome.total}`}
                   onConfirm={() => run("shut")}
                   tone="danger"
@@ -157,7 +168,7 @@ export function FleetShutPanel({ chrome, loading, failed, reload, onRetry }: {
                 <>
                   <ConfirmButton
                     idleLabel={doorFleetReopenLabel(shutTogether.length)}
-                    confirmLabel={doorFleetReopenConfirm(shutTogether.length, stayingShut)}
+                    confirmLabel={doorFleetReopenConfirm(shutTogether.length, reopenUnreachable)}
                     ariaLabel={`every door the club shut together — ${shutTogether.length}`}
                     onConfirm={() => run("reopen")}
                     disabled={loading}

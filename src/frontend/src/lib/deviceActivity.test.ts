@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { DeviceActivityEntry } from "./api";
+import type { DeviceActivityEntry, DoorEventEntry } from "./api";
 import {
   DOOR_OUTCOME_CHIPS,
   DOOR_REFUSAL_REASONS,
@@ -10,6 +10,8 @@ import {
   describeActivityAction,
   describeActivityReason,
   describeActivityWho,
+  DOOR_EVENT_CHANGE_WORDS,
+  describeDoorEventChange,
   unacknowledgedBoardsNotice,
 } from "./deviceActivity";
 
@@ -128,14 +130,21 @@ describe("describeActivityReason", () => {
   });
 
   /**
-   * And the offline refusal names NOBODY, because the door genuinely cannot: an offline
-   * board that does not find a code in its roster has no way to resolve it to a member.
-   * Saying "unknown member" would read as a member the club failed to identify; the truth
-   * is that there is nothing to identify.
+   * <b>E-L2 / WIRE-R2 §3.</b> It rendered as "Refused / No reason recorded", which reads as a
+   * gap in the trail. There is no gap: the board looked the code up in the list it last
+   * downloaded and did not find it, and that IS the reason.
+   *
+   * <p>
+   * It also names nobody, because the door genuinely cannot — an unmatched code resolves to
+   * nothing at all, which is a different thing from a member the club failed to identify.
+   * That half is now one line beside the rows ({@link OFFLINE_WHO_NOTE}) rather than repeated
+   * on every one of them.
+   * </p>
    */
-  it("says an offline refusal cannot name anybody", () => {
+  it("says an offline refusal was a code the door's list did not hold", () => {
     const words = describeActivityReason(entry({ action: "device.unknown_scan", reason: null, offline: true }));
-    expect(words).toBe("Refused while offline — the door cannot say who");
+    expect(words).toBe("Code not on the door's saved list");
+    expect(words).not.toContain("No reason recorded");
   });
 
   /** A reason nobody has copy for is still shown, readably — same rule as an action. */
@@ -304,6 +313,75 @@ describe("DOOR_OUTCOME_CHIPS", () => {
   it("keeps every label short enough to be a chip", () => {
     for (const [reason, chip] of Object.entries(DOOR_OUTCOME_CHIPS)) {
       expect(chip.length, reason).toBeLessThanOrEqual(16);
+    }
+  });
+});
+
+/**
+ * <b>A5 / E-M6 / WIRE-R2 §2 — what actually changed, and who changed it.</b>
+ *
+ * <p>
+ * `kind` could not say: the backend wrote `device.updated` for a rename, a details change, a
+ * shut and a reopen alike, so a reviewer met nine identical rows reading "this door's details
+ * or state were changed" and learned nothing from any of them — while the door card told
+ * every admin in the club "You shut this door."
+ * </p>
+ */
+describe("describeDoorEventChange", () => {
+  const event = (over: Partial<DoorEventEntry> = {}): DoorEventEntry => ({
+    at: "2026-09-20T19:40:00Z", action: "device.updated", kind: "edited", ...over,
+  });
+
+  it("says which of the four an edit was, and who did it", () => {
+    expect(describeDoorEventChange(event({ change: "shut", actor_name: "Priya Naidoo" })))
+      .toBe("Shut by Priya Naidoo");
+    expect(describeDoorEventChange(event({ change: "renamed", actor_name: "Ruth Adams" })))
+      .toBe("Renamed by Ruth Adams");
+    expect(describeDoorEventChange(event({ change: "reopened", actor_name: "Ruth Adams" })))
+      .toBe("Reopened by Ruth Adams");
+    expect(describeDoorEventChange(event({ change: "details", actor_name: "Ruth Adams" })))
+      .toBe("Details changed by Ruth Adams");
+  });
+
+  /** A row written before the server recorded which. Broad, and true — never a guessed verb. */
+  it("says the broad thing for an edit nobody classified", () => {
+    expect(describeDoorEventChange(event({ change: "other", actor_name: "Ruth Adams" })))
+      .toBe("Details or state changed by Ruth Adams");
+  });
+
+  /** An older API sends no `change` at all, and `kind` is all it has to say. */
+  it("falls back to the kind against an API that does not carry a change", () => {
+    expect(describeDoorEventChange(event())).toBe("This door's details or state were changed");
+  });
+
+  /**
+   * A board-side event has no actor and must not be given one: "The board registered itself
+   * by Priya Naidoo" is a sentence about a thing that did not happen.
+   */
+  it("names nobody for something a board did to itself", () => {
+    expect(describeDoorEventChange(event({ change: "registered", actor_name: "Priya Naidoo" })))
+      .toBe("The board registered itself");
+    expect(describeDoorEventChange(event({ change: "clock_corrected", actor_name: "Priya Naidoo" })))
+      .toBe("The board's clock was out and was corrected");
+  });
+
+  it("names nobody where the API named nobody", () => {
+    expect(describeDoorEventChange(event({ change: "shut", actor_name: null }))).toBe("Shut");
+    expect(describeDoorEventChange(event({ change: "shut" }))).toBe("Shut");
+  });
+
+  /** A change this build has never seen reads out rather than borrowing somebody else's words. */
+  it("does not guess at a change it has no copy for", () => {
+    expect(describeDoorEventChange(event({ change: "teleported", actor_name: "Ruth Adams" })))
+      .toBe("Unrecognised event by Ruth Adams");
+  });
+
+  /** Every arm is a phrase a volunteer reads, not an audit token. */
+  it("never renders a raw token as the sentence", () => {
+    for (const change of Object.keys(DOOR_EVENT_CHANGE_WORDS)) {
+      const words = describeDoorEventChange(event({ change }));
+      expect(words).not.toContain("_");
+      expect(words).not.toContain("device.");
     }
   });
 });

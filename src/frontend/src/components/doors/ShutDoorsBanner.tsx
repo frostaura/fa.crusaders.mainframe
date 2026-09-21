@@ -40,9 +40,40 @@ import { type DoorsChrome } from "./useDoorsChrome";
  * corridor, complete with a Reopen button, on a sheet whose whole purpose is to be true for
  * months.
  * </p>
+ *
+ * <p>
+ * <b>C11: polite, and the live region is the SENTENCE rather than the whole banner.</b> This
+ * was `role="alert"` — assertive, interrupting a screen reader mid-word — and it is
+ * re-rendered on every navigation an admin makes, so a blind admin met the consequence of
+ * their own decision as an interruption on Bookings, on Settings, on Members, all session.
+ * Scoping the region to the sentence matters as much as the role: the banner's ACTION half
+ * changes with the route (the fleet link stands down on `/admin/doors`, per-door links
+ * change), and a live region announces whenever its contents change — so a region wrapping
+ * the whole banner re-announces on navigation even when the sentence is word-for-word what
+ * it was.
+ * </p>
  */
 export function ShutDoorsBanner({ chrome }: { chrome: DoorsChrome }) {
   const { pathname } = useLocation();
+  /**
+   * <b>C11's other half: the one change that IS news.</b>
+   *
+   * <p>
+   * Somebody else shutting the club's doors while this admin reads another page is not a
+   * standing fact — it is an event, and this reader has no other way to see it. That
+   * announcement is assertive, in its own sr-only region, so the visible banner's role
+   * stays polite.
+   * </p>
+   *
+   * <p>
+   * No local "have I announced this yet" state, deliberately: the store's stamp lives for
+   * exactly one read, so the banner can be a pure function of what it is handed. A banner
+   * that remembered would have to remember per mount, and this one is re-rendered on every
+   * navigation an admin makes.
+   * </p>
+   */
+  const interrupt = chrome.shutChangedElsewhereAt !== null;
+
   const shut = chrome.doors.filter((d) => !d.enabled);
   if (shut.length === 0 || chrome.total === 0) return null;
 
@@ -55,15 +86,18 @@ export function ShutDoorsBanner({ chrome }: { chrome: DoorsChrome }) {
    */
   const onDoorsPage = pathname.startsWith("/admin/doors");
   const byFleet = shut.filter((d) => d.shutByFleet);
+  const sentence = byFleet.length > 0
+    ? doorsShutBannerLine(shut, chrome.total)
+    : doorsShutIndividuallyBanner(shut, chrome.total);
   return (
-    <div
-      role="alert"
-      className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border-l-4 border-danger-strong bg-danger-soft px-3 py-2.5 text-sm text-danger-strong print:hidden"
-    >
-      <span className="min-w-0 break-words">
-        {byFleet.length > 0
-          ? doorsShutBannerLine(shut, chrome.total)
-          : doorsShutIndividuallyBanner(shut, chrome.total)}
+    <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border-l-4 border-danger-strong bg-danger-soft px-3 py-2.5 text-sm text-danger-strong print:hidden">
+      {/* C11: assertive, and empty unless this reader is being told something they did not
+          already do. An empty live region announces nothing, so this costs silence when
+          there is nothing to interrupt for. */}
+      <span role="alert" className="sr-only">{interrupt ? sentence : ""}</span>
+      {/* C11: the polite region is the sentence alone — see the note on the component. */}
+      <span role="status" className="min-w-0 break-words">
+        {sentence}
       </span>
       {onDoorsPage ? null : byFleet.length > 0 ? (
         <Link

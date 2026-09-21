@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import Layout from "../Layout";
 import HomePage from "../../pages/Home";
 import { ProfileProvider } from "../../lib/profile";
+import { markOwnDoorsAction } from "./useDoorsChrome";
 import { SETTINGS_FIXTURE, doorFixture, doorsServer, renderPage, signIn, signOut, stubFetch } from "../../test/harness";
 
 /**
@@ -35,6 +36,70 @@ function chrome(doors: Record<string, unknown>[], route = "/admin/settings") {
   ]);
   return renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: [route] });
 }
+
+/**
+ * The chrome's own reads, without the doors — so a test can bring its own doors server and
+ * still get an admin session. Hoisted out of the store block, which had this inline.
+ */
+function adminChromeRoutes() {
+  const whoami = signIn({ isAdmin: true });
+  return [
+    { path: "/api/v1/whoami", body: whoami },
+    { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
+    {
+      path: "/api/v1/me/profile",
+      body: {
+        user_id: whoami.user_id, email: "a@b.c", full_name: "Ada", photo_url: null,
+        membership_number: "C-1",
+      },
+    },
+    { path: "/api/v1/admin/members", body: [] },
+    { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
+  ];
+}
+
+/**
+ * The standing shut banner, found by what it SAYS rather than by its role.
+ *
+ * C11 made it `role="status"`, and a layout may carry more than one polite region — a
+ * route announcement is one. Keyed on the sentence, so this helper cannot accidentally
+ * assert against somebody else's live region.
+ */
+async function shutBanner(): Promise<HTMLElement> {
+  const regions = await screen.findAllByRole("status");
+  const banner = regions.find((node) => /doors? shut|shut .*door/i.test(node.textContent ?? ""));
+  if (!banner) throw new Error("no shut banner in any polite region");
+  return banner;
+}
+
+/**
+ * Everything any assertive region SAID, in order.
+ *
+ * <p>
+ * An interruption is transient by design: the region carries the sentence for exactly as
+ * long as it takes a screen reader to be handed it, and is emptied again so that a
+ * sighted-or-browsing reader does not meet the same sentence twice in one document. That
+ * makes it invisible to an assertion written after the fact — and "it announced nothing"
+ * is precisely the claim C11 makes about an admin's own action, so a fixture that cannot
+ * see an announcement cannot falsify it. Observed as it happens instead.
+ * </p>
+ */
+function recordInterruptions(): string[] {
+  const said: string[] = [];
+  const sweep = () => {
+    for (const node of Array.from(document.querySelectorAll('[role="alert"]'))) {
+      const text = (node.textContent ?? "").trim();
+      if (text && said[said.length - 1] !== text) said.push(text);
+    }
+  };
+  const observer = new MutationObserver(sweep);
+  observer.observe(document.body, { subtree: true, childList: true, characterData: true });
+  observers.push(observer);
+  return said;
+}
+
+const observers: MutationObserver[] = [];
+afterEach(() => { for (const o of observers.splice(0)) o.disconnect(); });
 
 function chromeWithFailedDoors(route = "/admin/settings") {
   const whoami = signIn({ isAdmin: true });
@@ -206,7 +271,7 @@ describe("the club-wide shut banner", () => {
   it("is on an admin route that has nothing to do with doors", async () => {
     chrome([doorFixture({ enabled: false })], "/admin/settings");
 
-    const banner = await screen.findByRole("alert");
+    const banner = await shutBanner();
     expect(banner).toHaveTextContent("1 of 1 door shut");
   });
 
@@ -223,7 +288,7 @@ describe("the club-wide shut banner", () => {
   it("never says members cannot get in, even with every door shut", async () => {
     chrome([doorFixture({ enabled: false, last_seen_at: ago(3600) })], "/admin/settings");
 
-    const banner = await screen.findByRole("alert");
+    const banner = await shutBanner();
     expect(banner.textContent?.toLowerCase()).not.toContain("can't get in");
     expect(banner.textContent?.toLowerCase()).not.toContain("cannot get in");
   });
@@ -236,7 +301,7 @@ describe("the club-wide shut banner", () => {
       shut_by_shut_all_at: ago(120),
     })], "/admin/settings");
 
-    const banner = await screen.findByRole("alert");
+    const banner = await shutBanner();
     expect(banner).toHaveTextContent("none of them confirmed yet");
     // Named, because "1 not yet" sends nobody anywhere.
     expect(banner).toHaveTextContent("Side door");
@@ -253,7 +318,7 @@ describe("the club-wide shut banner", () => {
   it("offers no fleet reopen when the doors were shut one at a time, and links to each", async () => {
     chrome([doorFixture({ name: "Side door", enabled: false })], "/admin/settings");
 
-    const banner = await screen.findByRole("alert");
+    const banner = await shutBanner();
     expect(banner).toHaveTextContent("one at a time");
     expect(banner).toHaveTextContent("would not touch these");
     expect(screen.queryByRole("link", { name: /Reopen the/ })).toBeNull();
@@ -266,7 +331,7 @@ describe("the club-wide shut banner", () => {
     chrome([doorFixture()]);
 
     await screen.findByRole("button", { name: "Open menu" });
-    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/door shut/)).toBeNull();
   });
 
   /** Its absence is its default, so a failed read cannot produce a false all-clear. */
@@ -274,7 +339,7 @@ describe("the club-wide shut banner", () => {
     chromeWithFailedDoors();
 
     await screen.findByRole("button", { name: "Open menu" });
-    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/door shut/)).toBeNull();
   });
 
   /**
@@ -285,7 +350,7 @@ describe("the club-wide shut banner", () => {
   it("follows the ADMIN rather than the route, so it shows on Bookings", async () => {
     chrome([doorFixture({ enabled: false })], "/schedule");
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("1 of 1 door shut");
+    expect(await shutBanner()).toHaveTextContent("1 of 1 door shut");
   });
 
   it("stays away from a member entirely", async () => {
@@ -298,7 +363,7 @@ describe("the club-wide shut banner", () => {
     renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: ["/schedule"] });
 
     await screen.findByRole("button", { name: /Open menu/ });
-    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/door shut/)).toBeNull();
   });
 
   /**
@@ -311,16 +376,16 @@ describe("the club-wide shut banner", () => {
   it("offers no link of its own on the page that carries the real control", async () => {
     chrome([doorFixture({ enabled: false, shut_by_shut_all_at: ago(120) })], "/admin/doors");
 
-    const banner = await screen.findByRole("alert");
+    const banner = await shutBanner();
     expect(banner).toHaveTextContent("1 of 1 door shut");
-    expect(within(banner).queryByRole("link")).toBeNull();
+    expect(within(banner.closest("div")!).queryByRole("link")).toBeNull();
   });
 
   it("still offers it on an admin route that cannot reopen anything", async () => {
     chrome([doorFixture({ enabled: false, shut_by_shut_all_at: ago(120) })], "/admin/settings");
 
-    const banner = await screen.findByRole("alert");
-    expect(within(banner).getByRole("link", { name: "Reopen the door shut together" }))
+    const banner = await shutBanner();
+    expect(within(banner.closest("div")!).getByRole("link", { name: "Reopen the door shut together" }))
       .toHaveAttribute("href", "/admin/doors");
   });
 
@@ -328,7 +393,91 @@ describe("the club-wide shut banner", () => {
   it("is hidden from print", async () => {
     chrome([doorFixture({ enabled: false })], "/admin/settings");
 
-    expect((await screen.findByRole("alert")).className).toContain("print:hidden");
+    expect((await shutBanner()).closest("div")?.className).toContain("print:hidden");
+  });
+
+  /**
+   * <b>C11 — a standing fact is not an emergency, and it was announced as one on every route.</b>
+   *
+   * <p>
+   * The banner was `role="alert"`. Assertive live regions interrupt a screen reader mid-word,
+   * and this one is re-rendered on every navigation an admin makes — so a blind admin who
+   * shut a door themselves was interrupted with the consequence of their own decision on
+   * Bookings, on Settings, on Members, on every screen they moved to for the rest of the
+   * session. What is standing is `status`; what is <i>news</i> is the state changing under
+   * somebody who did not cause it, and only that gets to interrupt.
+   * </p>
+   */
+  it("is polite, because a standing fact is not an interruption", async () => {
+    const heard = recordInterruptions();
+    chrome([doorFixture({ enabled: false })], "/admin/settings");
+
+    expect(await shutBanner()).toHaveTextContent("1 of 1 door shut");
+    // The assertive region EXISTS — a live region has to be in the document before it can
+    // ever announce — and nothing was ever put in it. Signing in at a club whose doors
+    // are already shut is an ARRIVAL, not news somebody broke to this reader.
+    expect(screen.getByRole("alert")).toHaveTextContent("");
+    expect(heard).toEqual([]);
+  });
+
+  /**
+   * <b>C11's other half.</b> Polite everywhere would lose the one case that IS urgent: an
+   * admin reading a page while somebody else shuts the club's doors under them. That change
+   * is announced assertively, once, and the standing sentence stays polite afterwards.
+   */
+  it("interrupts when the doors are shut by somebody else while a page is open", async () => {
+    const server = doorsServer([doorFixture()]);
+    const stub = stubFetch([...adminChromeRoutes(), ...server.routes]);
+    const heard = recordInterruptions();
+    renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: ["/schedule"] });
+
+    await waitFor(() => expect(stub.calls.some((c) => c.path === "/api/v1/admin/doors")).toBe(true));
+    expect(heard).toEqual([]);
+
+    // Another admin, elsewhere in the club, shuts it. This tab did nothing.
+    server.current()[0].enabled = false;
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await waitFor(() => expect(heard.join(" ")).toMatch(/shut/i));
+    // And the standing sentence is still the polite one — the interruption is a separate,
+    // sr-only announcement, not the banner changing its own role.
+    expect(await shutBanner()).toHaveTextContent("1 of 1 door shut");
+    // Once, not once per poll: the store re-reads for as long as the tab is open, and a
+    // reader being told the same news every thirty seconds is the defect one door along.
+    const afterFirst = heard.length;
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => expect(stub.calls.filter((c) => c.path === "/api/v1/admin/doors").length)
+      .toBeGreaterThan(2));
+    expect(heard).toHaveLength(afterFirst);
+    // And the announcement does not settle into a permanent second copy of the sentence.
+    // An sr-only region that keeps its text is still in the reading order, so a screen
+    // reader browsing this page would meet "1 of 1 door shut" twice, two nodes apart.
+    expect(screen.getAllByText(/1 of 1 door shut/)).toHaveLength(1);
+  });
+
+  /**
+   * <b>C11, the case that makes the rule worth having.</b> An admin who shuts a door is
+   * looking at the result of their own press: a toast says it, the control says it, and the
+   * banner appears. Interrupting them with a fourth telling is noise, and noise is what
+   * teaches somebody to tune the third one out.
+   */
+  it("does not interrupt an admin with the consequence of their own action", async () => {
+    const server = doorsServer([doorFixture()]);
+    const stub = stubFetch([...adminChromeRoutes(), ...server.routes]);
+    const heard = recordInterruptions();
+    renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: ["/schedule"] });
+
+    await waitFor(() => expect(stub.calls.some((c) => c.path === "/api/v1/admin/doors")).toBe(true));
+
+    // What every doors action on this surface does before it re-reads.
+    markOwnDoorsAction();
+    server.current()[0].enabled = false;
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    // The banner arrives — politely. Nothing was said over the top of whatever this admin
+    // was reading, because they are the one who caused it.
+    expect(await shutBanner()).toHaveTextContent("1 of 1 door shut");
+    expect(heard).toEqual([]);
   });
 });
 
@@ -423,5 +572,90 @@ describe("the admin Home row", () => {
 
     await screen.findByText("Book a court");
     expect(screen.queryByText("Admin · Doors")).toBeNull();
+  });
+});
+
+/**
+ * <b>B2 / E-L6 — the store the chrome and the pages share.</b>
+ *
+ * <p>
+ * The banner re-read only on navigation, so it sat frozen on `/schedule` while another admin
+ * shut every door in the club — and `/admin/doors` fired three identical `GET /admin/doors`
+ * on mount, because the banner, the page and the gear badge were three readers of one fact.
+ * One store, one request, polling on every route.
+ * </p>
+ */
+describe("the shared doors store", () => {
+  const admin = () => {
+    const whoami = signIn({ isAdmin: true });
+    return [
+      { path: "/api/v1/whoami", body: whoami },
+      { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
+      {
+        path: "/api/v1/me/profile",
+        body: {
+          user_id: whoami.user_id, email: "a@b.c", full_name: "Ada", photo_url: null,
+          membership_number: "C-1",
+        },
+      },
+      { path: "/api/v1/admin/members", body: [] },
+      { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
+    ];
+  };
+
+  // Restored here rather than at the end of the test body: a failing assertion would
+  // otherwise leave fake timers installed, and the NEXT test in the file then hangs on a
+  // `findBy*` that can never advance. That is a slow, misattributed failure, and it is
+  // exactly what happened the first time this block was written.
+  afterEach(() => vi.useRealTimers());
+
+  const doorsReads = (stub: { calls: { path: string }[] }) =>
+    stub.calls.filter((c) => c.path === "/api/v1/admin/doors").length;
+
+  it("polls on a route that has nothing to do with doors", async () => {
+    // Fake timers from BEFORE the render, deliberately. `setInterval` is captured at the
+    // moment the store starts polling, so installing the fake clock afterwards leaves a real
+    // interval the fake clock can never advance — a test that passes for the wrong reason or,
+    // as here, fails for one.
+    vi.useFakeTimers();
+    const server = doorsServer([doorFixture()]);
+    const stub = stubFetch([...admin(), ...server.routes]);
+    renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: ["/schedule"] });
+
+    // The session has to resolve before the chrome is an admin's chrome at all, and that is
+    // several promise turns. Pumped rather than slept through: `waitFor` cannot help here,
+    // because nothing advances without this clock.
+    for (let i = 0; i < 20 && doorsReads(stub) === 0; i += 1) await vi.advanceTimersByTimeAsync(10);
+    const before = doorsReads(stub);
+    expect(before).toBeGreaterThan(0);
+
+    await vi.advanceTimersByTimeAsync(31_000);
+
+    expect(doorsReads(stub)).toBeGreaterThan(before);
+  });
+
+  /** And on the way back IN, rather than up to a whole interval of the state the tab was left in. */
+  it("re-reads when the tab comes back to the front", async () => {
+    const server = doorsServer([doorFixture()]);
+    const stub = stubFetch([...admin(), ...server.routes]);
+    renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: ["/schedule"] });
+
+    await waitFor(() => expect(doorsReads(stub)).toBeGreaterThan(0));
+    const before = doorsReads(stub);
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await waitFor(() => expect(doorsReads(stub)).toBeGreaterThan(before));
+  });
+
+  /** E-L6: readers mounting in one commit join the read in flight rather than starting one. */
+  it("makes one request however many readers mount at once", async () => {
+    const server = doorsServer([doorFixture({ enabled: false })]);
+    const stub = stubFetch([...admin(), ...server.routes]);
+    renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: ["/admin/settings"] });
+
+    // The banner, the gear badge and the gear's menu item are three readers of one fact.
+    await screen.findByText(/1 of 1 door shut/);
+    expect(doorsReads(stub)).toBe(1);
   });
 });

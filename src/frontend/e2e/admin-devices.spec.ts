@@ -705,9 +705,13 @@ test.describe("A board's activity", () => {
     // The refusal dictionary, on a screen at last: a token would say nothing to an admin.
     await expect(page.getByText(/Too early for that booking/)).toBeVisible();
     await expect(page.getByText("too_early")).toHaveCount(0);
-    // The offline refusal names nobody and says why it cannot.
+    // The offline refusal names nobody, says what the board actually found — E-L2: it
+    // looked the code up in the list it last downloaded and it was not there, which IS the
+    // reason, where "No reason recorded" read as a gap — and the panel reconciles the two
+    // kinds of offline row once, rather than per row (A3).
     await expect(page.getByText(/Unknown code · 9ab0cd12/)).toBeVisible();
-    await expect(page.getByText(/the door cannot say who/)).toBeVisible();
+    await expect(page.getByText(/Code not on the door's saved list/)).toBeVisible();
+    await expect(page.getByText(/An offline row names somebody/)).toBeVisible();
   });
 
   test("says nothing is recorded yet for a board nobody has used", async ({ page }) => {
