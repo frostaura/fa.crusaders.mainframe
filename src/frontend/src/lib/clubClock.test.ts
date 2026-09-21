@@ -137,9 +137,18 @@ describe.each(RUNNER_ZONES)("with the reader's own browser in %s", (runnerZone) 
  *
  * <p>
  * `utils.formatInstant` writes `toLocaleString(undefined, …)` — the READER's locale and the
- * reader's zone, "9/19/26, 9:25 PM". That is right for the wallet and the admin ledger, where
- * a movement is an instant in the reader's own clock, and wrong for every doors surface, where
- * a time is a fact about the club's day that an admin quotes in a committee meeting.
+ * reader's zone, "9/19/26, 9:25 PM". It is wrong on every doors surface, where a time is a
+ * fact about the club's day that an admin quotes in a committee meeting.
+ * </p>
+ *
+ * <p>
+ * <b>And it was wrong on the wallet too, which this paragraph used to defend.</b> "A movement
+ * is an instant in the reader's own clock" sounds right and is not: one measured member
+ * journey carried THREE conventions — the grid's `23:15`, the confirm dialog's and toast's
+ * `Mon, Sep 21, 11:15 PM`, and the wallet ledger's `9/21/26, 8:31 PM`. A member reconciling a
+ * charge against the booking that caused it has to convert to be sure they are looking at the
+ * same hour, and the audience is a South African club whose members the goal note describes as
+ * not good with technology. The money surfaces are on this list now.
  * </p>
  *
  * <p>
@@ -169,6 +178,11 @@ describe("no doors surface writes a time in the reader's own locale", () => {
     "lib/gateCopy.ts",
     "lib/memberDoorCopy.ts",
     "lib/countdown.ts",
+    // The member's money surfaces (item 8 / D4 §2.4). `LedgerTable` is shared with the admin
+    // ledger, which is the same argument: one club, one clock.
+    "components/LedgerTable.tsx",
+    "pages/Wallet.tsx",
+    "lib/walletCopy.ts",
   ];
 
   const sourcesUnder = (rel: string): string[] => {

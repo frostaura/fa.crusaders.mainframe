@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { ArrowDown, ArrowRight, ArrowUp, ArrowUpDown } from "lucide-react";
 import type { LedgerRow } from "../lib/api";
-import { cn, formatInstant, formatSignedCredits } from "../lib/utils";
+import { cn, formatSignedCredits } from "../lib/utils";
+import { clubDayAndClock, clubInstant } from "../lib/clubClock";
 import { ScrollArea } from "./ScrollArea";
 
 type Column = "time" | "from" | "to" | "amount" | "comment";
@@ -75,9 +76,31 @@ export function LedgerTable({
         <tbody className="divide-y divide-border">
           {sorted.map((r) => (
             <tr key={r.id} className="hover:bg-bg-muted/30">
+              {/*
+                <b>The club's day, in the club's format.</b> This column used to go through
+                the reader-locale helper in `lib/utils` — `toLocaleString(undefined, …)`, the
+                READER's locale and the READER's zone. (Named indirectly on purpose: the
+                one-clock net in `clubClock.test.ts` greps this file for that identifier.) Measured on one member journey: the grid said `23:15`, the confirm dialog
+                and the toast said `Mon, Sep 21, 11:15 PM`, and this column said
+                `9/21/26, 8:31 PM`. Three conventions for one evening, on the money surfaces of
+                a South African club, for an audience the goal note describes as not good with
+                technology — a member reading them has to convert to be sure two rows are the
+                same hour.
+
+                `lib/clubClock` exists precisely to fix this and its header names this exact
+                `"9/19/26, 9:25 PM"` defect: `en-GB`, 24-hour, and the club's own zone (learned
+                from any response that carries one — see `lib/clubZone`). The doors surfaces
+                were converted; the money ones were not.
+
+                The `title` carries the long form, so the full date is one hover or one
+                screen-reader description away without spending a column on it.
+              */}
               {columns.includes("time") && (
-                <td className="px-2 sm:px-4 py-2 align-top whitespace-nowrap font-mono text-xs text-text-secondary">
-                  {formatInstant(r.at)}
+                <td
+                  className="px-2 sm:px-4 py-2 align-top whitespace-nowrap font-mono text-xs text-text-secondary"
+                  title={clubInstant(r.at)}
+                >
+                  {clubDayAndClock(r.at)}
                 </td>
               )}
               {columns.includes("from") && (
