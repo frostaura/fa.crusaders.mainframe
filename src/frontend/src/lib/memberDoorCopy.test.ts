@@ -1812,6 +1812,37 @@ describe("memberDoorCopy — no state contradicts itself", () => {
     };
   }
 
+  /**
+   * Every state, with the screen it produces, built ONCE.
+   *
+   * <p>
+   * <b>The lesson this file already carries, in a second place.</b> Eight rules sweep the
+   * same 4,752 states, and rebuilding the standing line, the decision card and the six-row
+   * self-check inside each of them is eight times the work for one set of answers — enough,
+   * measured, to push a rule past vitest's five-second budget whenever the machine is busy
+   * with another file, which reads as a flake and gets somebody to add a retry. The screens
+   * are pure functions of the state; there is nothing to rebuild.
+   * </p>
+   */
+  /**
+   * Headroom for the rules that sweep every state, measured rather than guessed.
+   *
+   * <p>
+   * The whole product is built once (see below) and the rule that happens to run first pays
+   * for it: measured at 1.8 s on an idle machine, and this repo's unit suite runs four
+   * lanes' worth of files in parallel on one laptop. Vitest's default five seconds is under
+   * three times the measured cost, which is not headroom — it is a test that passes alone
+   * and fails in the suite, reads as a flake, and gets a retry added to it. Twenty is about
+   * eleven times, and a rule that genuinely hangs still fails rather than running forever.
+   * </p>
+   */
+  const SWEEP_MS = 20_000;
+
+  let screens: { state: State; screen: ReturnType<typeof screenFor> }[] | null = null;
+  function everyScreen() {
+    return (screens ??= [...everyState()].map((state) => ({ state, screen: screenFor(state) })));
+  }
+
   /** The one promise on this surface, and the only conditions under which it is true. */
   const PROMISE = /A live member code of yours opens the club door/;
   /**
@@ -1841,8 +1872,8 @@ describe("memberDoorCopy — no state contradicts itself", () => {
     still names the exact combination that broke the rule.
   */
   it("never promises and withdraws in the same breath", () => {
-    for (const state of everyState()) {
-      const { all } = screenFor(state);
+    for (const { state, screen } of everyScreen()) {
+      const { all } = screen;
       if (!PROMISE.test(all)) continue;
       const where = JSON.stringify(state);
       // The promise is made. Every one of these is a reason it cannot be.
@@ -1854,7 +1885,7 @@ describe("memberDoorCopy — no state contradicts itself", () => {
         expect(all, `promised a door and withheld it (${withhold}) — ${where}`).not.toMatch(withhold);
       }
     }
-  });
+  }, SWEEP_MS);
 
   /**
    * R3-4, as a rule rather than as a sentence: a field that never arrived is not a club that
@@ -1862,24 +1893,24 @@ describe("memberDoorCopy — no state contradicts itself", () => {
    * and the one that produced the R3-5 and R3-8 contradictions as a side effect.
    */
   it("says nothing whatever about shut doors when the wire did not say", () => {
-    for (const state of everyState()) {
+    for (const { state, screen } of everyScreen()) {
       if (state.shut !== undefined && state.shut !== "none") continue;
-      const { all } = screenFor(state);
+      const { all } = screen;
       expect(all, `invented a shut door from doors_shut=${state.shut}`).not.toMatch(/has shut/);
     }
-  });
+  }, SWEEP_MS);
 
   /** And the other direction: a club that HAS shut doors is never silent about it. */
   it("always states a shut door the wire did report", () => {
-    for (const state of everyState()) {
+    for (const { state, screen } of everyScreen()) {
       if (state.shut !== "some" && state.shut !== "all") continue;
       // The membership arm outranks everything and deliberately says nothing else — the
       // club has to move first, and a shut door is not what is standing in the way.
       if (state.membership === "not_active") continue;
-      const { standing } = screenFor(state);
+      const { standing } = screen;
       expect(standing.shutLine, `silent about doors_shut=${state.shut}`).toMatch(/has shut/);
     }
-  });
+  }, SWEEP_MS);
 
   /** WIRE-R3 §5: when the club says which, the page says which. */
   it("names the shut doors the wire named", () => {
@@ -1897,14 +1928,14 @@ describe("memberDoorCopy — no state contradicts itself", () => {
    * hours" over "your member code opens the door now" is two answers to one question.
    */
   it("never tells a member to wait out a window a code in their hand does not have", () => {
-    for (const state of everyState()) {
+    for (const { state, screen } of everyScreen()) {
       if (state.reason !== "too_early") continue;
-      const { all, decision } = screenFor(state);
+      const { all, decision } = screen;
       if (!/Too early — the door opens for you in/.test(decision.headline)) continue;
       expect(all, "told them to wait while promising the other code works")
         .not.toMatch(/member code .*opens the door now|do open — hold that one up/);
     }
-  });
+  }, SWEEP_MS);
 
   it("names the booking code, and the way out of it, where the member code works", () => {
     const { decision } = screenFor({
@@ -1947,8 +1978,8 @@ describe("memberDoorCopy — no state contradicts itself", () => {
   };
 
   it("never concludes the all-clear while a row has failed", () => {
-    for (const state of everyState()) {
-      const { diagnosis } = screenFor(state);
+    for (const { screen } of everyScreen()) {
+      const { diagnosis } = screen;
       const failed = diagnosis.rows.filter((r) => r.state === "failed");
       if (failed.length === 0) continue;
       const text = flat(diagnosis.conclusion);
@@ -1965,7 +1996,7 @@ describe("memberDoorCopy — no state contradicts itself", () => {
         `conclusion "${text}" names none of the failing rows ${failed.map((r) => r.key)}`,
       ).toBe(true);
     }
-  });
+  }, SWEEP_MS);
 
   /**
    * The other direction, and the one R3-5 was about: a conclusion may not assert a failure
@@ -1973,8 +2004,8 @@ describe("memberDoorCopy — no state contradicts itself", () => {
    * reading "active ✓ Passed" is the same defect pointing the other way.
    */
   it("never blames a row that passed", () => {
-    for (const state of everyState()) {
-      const { diagnosis } = screenFor(state);
+    for (const { screen } of everyScreen()) {
+      const { diagnosis } = screen;
       const text = flat(diagnosis.conclusion);
       const by = Object.fromEntries(diagnosis.rows.map((r) => [r.key, r.state]));
       if (by.membership === "passed") {
@@ -1988,7 +2019,7 @@ describe("memberDoorCopy — no state contradicts itself", () => {
         expect(text, "blamed a phone whose line the check passed").not.toMatch(/phone can't reach the club/i);
       }
     }
-  });
+  }, SWEEP_MS);
 
   /**
    * R3-5's own arm. A door the club has switched off is the likeliest reason a door did not
@@ -1996,28 +2027,28 @@ describe("memberDoorCopy — no state contradicts itself", () => {
    * page whose standing line was saying so ten pixels above.
    */
   it("names a shut door before it guesses at the scanner", () => {
-    for (const state of everyState()) {
+    for (const { state, screen } of everyScreen()) {
       if (state.shut !== "some" && state.shut !== "all") continue;
       // With the club unreachable the shut-door fact came from a read that has since failed,
       // and the check says so rather than asserting it — the connection arm outranks this
       // one on purpose. See `concludeFrom`.
       if (state.connection !== "ok") continue;
-      const { diagnosis } = screenFor(state);
+      const { diagnosis } = screen;
       const text = flat(diagnosis.conclusion);
       if (diagnosis.rows.some((r) => r.state === "failed")) continue;
       expect(text, "guessed at the scanner with a door shut").not.toMatch(/scanner may need a wipe/);
       expect(text).toMatch(/has shut/);
     }
-  });
+  }, SWEEP_MS);
 
   /** And never the reverse: a shut-door conclusion where nothing is shut. */
   it("never invents a shut door in the conclusion either", () => {
-    for (const state of everyState()) {
+    for (const { state, screen } of everyScreen()) {
       if (state.shut === "some" || state.shut === "all") continue;
-      expect(flat(screenFor(state).diagnosis.conclusion), `doors_shut=${state.shut}`)
+      expect(flat(screen.diagnosis.conclusion), `doors_shut=${state.shut}`)
         .not.toMatch(/has shut (its|some of its) doors/);
     }
-  });
+  }, SWEEP_MS);
 
   /**
    * <b>R3-3's member half, held as a rule rather than at one call site.</b> The finding is a
@@ -2059,14 +2090,14 @@ describe("memberDoorCopy — no state contradicts itself", () => {
 
   /** Six rows, always, whatever it was handed. A silently dropped row is an unasked question. */
   it("asks the same six questions in every state", () => {
-    for (const state of everyState()) {
-      const { diagnosis } = screenFor(state);
+    for (const { screen } of everyScreen()) {
+      const { diagnosis } = screen;
       expect(diagnosis.rows.map((r) => r.key)).toEqual([
         "membership", "policy", "booking", "window", "code", "connection",
       ]);
       expect(flat(diagnosis.conclusion).length).toBeGreaterThan(20);
     }
-  });
+  }, SWEEP_MS);
 
   /**
    * <b>R3-5: the anomaly leads when nothing else won, rather than trailing a clean bill.</b>
@@ -2127,11 +2158,11 @@ describe("memberDoorCopy — no state contradicts itself", () => {
    * dash was a state word that is `sr-only`.
    */
   it("draws a missing membership as a problem rather than as not-applicable", () => {
-    for (const state of everyState()) {
+    for (const { state, screen } of everyScreen()) {
       if (state.membership !== "none") continue;
-      const row = screenFor(state).diagnosis.rows.find((r) => r.key === "membership")!;
+      const row = screen.diagnosis.rows.find((r) => r.key === "membership")!;
       expect(row.state).toBe("attention");
       expect(row.state).not.toBe("neutral");
     }
-  });
+  }, SWEEP_MS);
 });
