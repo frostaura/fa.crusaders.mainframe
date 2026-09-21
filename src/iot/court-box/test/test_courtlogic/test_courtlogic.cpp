@@ -1269,6 +1269,35 @@ void test_box_a_screen_is_committed_in_one_piece(void) {
   TEST_ASSERT_EQUAL_STRING("READY IN 4 s       4", b.display.row(3U));
 }
 
+void test_box_a_countdown_never_eats_the_action_rows_last_character(void) {
+  Box b(kBaseMid);
+
+  // The two halves of this board agree on the action row through a CONTRACT
+  // rather than through a shared constant: the bridge holds row 3 to
+  // court::kSafeSubsetCols and this half puts the countdown to the right of it.
+  // They disagreed by one column — the clock is five characters wide and the
+  // countdown is at most three — and a five-column countdown zone silently ate
+  // the sixteenth character of every screen that carried one.
+  const char* action = "PRESS A BUTTON!!";
+  TEST_ASSERT_EQUAL_size_t(court::kSafeSubsetCols, strlen(action));
+
+  feedFrame(b.bridge, proto::Frame::row(0U, "COURT A IS ON"));
+  feedFrame(b.bridge, proto::Frame::row(3U, action));
+  b.step(kBaseMid + 1U);
+  feedFrame(b.bridge, proto::Frame::show(99U, courtlogic::kShowCountdown));
+  b.step(kBaseMid + 2U);
+
+  TEST_ASSERT_EQUAL_STRING("PRESS A BUTTON!!  99", b.display.row(3U));
+
+  // And the widest count it can ever show — the two-minute ceiling — still
+  // fits beside it.
+  feedFrame(b.bridge, proto::Frame::row(3U, action));
+  b.step(kBaseMid + 3U);
+  feedFrame(b.bridge, proto::Frame::show(120U, courtlogic::kShowCountdown));
+  b.step(kBaseMid + 4U);
+  TEST_ASSERT_EQUAL_STRING("PRESS A BUTTON!! 120", b.display.row(3U));
+}
+
 void test_box_a_scan_pre_empts_a_screen_that_is_still_counting_down(void) {
   Box b(kBaseMid);
 
@@ -1391,6 +1420,7 @@ int main(int, char**) {
   RUN_TEST(test_box_the_action_row_says_which_thing_is_missing);
   RUN_TEST(test_box_an_untrusted_clock_is_blank_not_stale);
   RUN_TEST(test_box_a_screen_is_committed_in_one_piece);
+  RUN_TEST(test_box_a_countdown_never_eats_the_action_rows_last_character);
   RUN_TEST(test_box_a_scan_pre_empts_a_screen_that_is_still_counting_down);
   RUN_TEST(test_box_an_oversize_scan_is_reported_not_only_counted);
   RUN_TEST(test_box_a_corrupt_scanner_line_is_reported_under_its_own_name);

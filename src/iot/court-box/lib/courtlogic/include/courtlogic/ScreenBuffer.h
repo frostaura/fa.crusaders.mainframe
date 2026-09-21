@@ -66,6 +66,7 @@
 
 #include "hal/Display.h"
 
+#include "court/Session.h"
 #include "courtlogic/RelayGuard.h"
 #include "protocol/Protocol.h"
 #include "timebase/TimeBase.h"
@@ -120,9 +121,22 @@ inline constexpr uint32_t kHintRateLimitMs = 2000UL;
 /// One row per second, ~21 I2C writes, entirely local: no serial traffic.
 inline constexpr uint32_t kLandingRefreshMs = 1000UL;
 
-/// The right-hand zone of the action row: a clock (`hh:mm`) or a countdown,
-/// NEVER both. Five columns, because `hh:mm` is five characters.
-inline constexpr uint8_t kStatusTailCols = 5U;
+/// The right-hand zone of the action row: a clock or a countdown, NEVER both.
+///
+/// TWO WIDTHS, and the difference is load-bearing rather than fussy. `hh:mm` is
+/// five characters and appears only on the LANDING screen, whose left text this
+/// file owns and holds to fifteen columns. A countdown is at most three digits
+/// and appears on OVERLAYS, whose action row is written by the other half of
+/// the board and is held by contract to sixteen columns — so a five-column
+/// countdown zone would silently eat the sixteenth character of every screen
+/// that carries one. They are the same zone to a reader and two different
+/// numbers to the glass.
+inline constexpr uint8_t kClockCols = 5U;
+inline constexpr uint8_t kCountdownCols = 4U;
+
+static_assert(kCountdownCols + court::kSafeSubsetCols <= hal::kDisplayCols,
+              "the countdown would overwrite the last column of an action row written to the "
+              "16-column contract");
 
 /// Seconds at which the countdown starts saying what it MEANS rather than just
 /// counting. Below this the action row reads `READY IN <n> s`, which is GOAL
@@ -243,7 +257,7 @@ private:
   void renderCourtRow(const RelayGuard& relays, uint32_t nowMs, char* out) const;
   void renderActionRow(uint32_t nowMs, char* out) const;
   void refreshLive(const RelayGuard& relays, uint32_t nowMs);
-  void writeTail(char* row, const char* tail) const;
+  void writeTail(char* row, const char* tail, uint8_t width) const;
   void writeCountdown(char* row, uint16_t seconds) const;
   uint16_t holdLeftSeconds(uint32_t nowMs) const;
   bool showActionRowOnly(uint32_t seconds, uint32_t nowMs);
