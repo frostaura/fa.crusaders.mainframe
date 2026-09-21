@@ -384,6 +384,54 @@ test.describe("B12 — the chrome at a large root font size", () => {
 });
 
 /**
+ * A-M11 / R3-29 — the header is ONE row on a phone.
+ *
+ * <p>
+ * Measured at 360×700: the row was 80 px tall with the wallet chip, the avatar and the gear on
+ * a line of their own, for a member and for an admin alike — 126 px of chrome before the page
+ * begins. On the member's code page that is what pushes the door-decision banner, the most
+ * urgent thing on the screen, below the fold; at 390 px the identical header is 56 px.
+ * </p>
+ *
+ * <p>
+ * <b>Both sessions, because they are different headers.</b> An admin has six section tabs and a
+ * doors badge; a member has three tabs and no gear items. The cluster on the right is what
+ * wraps, and it is not the same width in the two cases.
+ * </p>
+ *
+ * <p>
+ * At a 32 px root font size the row legitimately takes two lines — the words are genuinely
+ * wider than the phone by then, and B12 above measures what that must cost. This is the
+ * ordinary text size, where it cost 24 px for nothing.
+ * </p>
+ */
+test.describe("A-M11 — the header on a phone", () => {
+  for (const width of [320, 360, 375]) {
+    for (const admin of [true, false]) {
+      test(`is a single row at ${width} px for ${admin ? "an admin" : "a member"}`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 700 });
+        await signIn(page);
+        await serveApi(page, admin ? routes() : memberRoutes());
+        await page.goto("/my-code");
+        await expect(page.getByRole("button", { name: /Open menu/ })).toBeVisible();
+
+        const row = await page.evaluate(() => {
+          const el = document.querySelector("header > div") as HTMLElement;
+          const tops = new Set([...el.children]
+            .filter((k) => k.getBoundingClientRect().width > 0)
+            .map((k) => Math.round(k.getBoundingClientRect().top)));
+          return { height: Math.round(el.getBoundingClientRect().height), lines: tops.size };
+        });
+
+        expect(row.lines, `the header row wrapped onto ${row.lines} lines`).toBe(1);
+        // 56 px is the row at every ordinary width; 80 is what the wrap cost.
+        expect(row.height, `the header row is ${row.height} px tall`).toBeLessThanOrEqual(60);
+      });
+    }
+  }
+});
+
+/**
  * B13 — the offline error toast covered the tab bar, which on a phone is the only way
  * between sections. `top-[100px]` was a guess at the header's height and it is wrong at any
  * text size but one; `Layout` publishes what the header actually measures.

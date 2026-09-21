@@ -108,6 +108,28 @@ describe("Schedule", () => {
     return await screen.findByRole("dialog", { name: "Confirm booking" });
   }
 
+  /**
+   * C-M8 / R3-35 — this page had no heading of any kind.
+   *
+   * <p>
+   * Reviewer C walked it with a screen reader and found nothing to navigate by: no h1, no h2,
+   * nothing, on the screen a member opens most often and whose content is a grid of two
+   * hundred cells. It is also what the route announcer lands focus on — `#main-content h1` —
+   * so arriving here from anywhere else dropped the keyboard on the body as well. Every other
+   * route in the product has one.
+   * </p>
+   */
+  it("has a heading to navigate by, and one for the grid under it", async () => {
+    stub([]);
+    renderPage(<SchedulePage />);
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Bookings" })).toBeInTheDocument();
+    // The grid's own level-2 heading: what a reader jumps to, and a name for the region. It is
+    // sr-only because the court names are already the visible column headers.
+    const grid = await screen.findByRole("heading", { level: 2, name: "Courts and times" });
+    expect(grid.className).toContain("sr-only");
+  });
+
   // ---- F6: the confirmation is the specified modal, and it has no stopwatch ----
 
   it("shows court, time, duration, cost and the balance before and after", async () => {

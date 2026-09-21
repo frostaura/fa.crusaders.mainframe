@@ -159,10 +159,26 @@ export default function Layout() {
     // No chrome, no width cap and no inner scroll container: the page lays itself out, and the
     // DOCUMENT scrolls. The app's own shell scrolls a nested <main> instead, which on a long
     // marketing page stops a phone's URL bar collapsing and breaks scroll-to-anchor.
+    //
+    /**
+     * C-L4 / R3-35 — and it gets the skip link too.
+     *
+     * <p>
+     * The link was put in the signed-in shell (B11) because that is where the nine tab stops
+     * were, and this branch returns before it. But the public landing is the longest page in
+     * the product — a hero, four sections, a map link and a footer — and it is the first page
+     * anybody sees. A keyboard user arriving at the club's own front door had no way past its
+     * navigation to its content, and the route announcer moves focus to `#main-content h1`
+     * here as well, which needs the id to exist.
+     * </p>
+     */
     return (
-      <main className="min-h-full">
-        <Outlet />
-      </main>
+      <>
+        <SkipLink />
+        <main id="main-content" tabIndex={-1} className="min-h-full">
+          <Outlet />
+        </main>
+      </>
     );
   }
 
@@ -176,40 +192,9 @@ export default function Layout() {
 
   return (
     <div className="h-full flex flex-col">
-      {/*
-        B11 — the first thing in the DOM, and the first thing a keyboard reaches.
-        <p>
-        Nine tab stops stood between the top of the document and the page's own content: the
-        club name, five section tabs, the wallet chip, the avatar and the gear — on EVERY
-        route, so a keyboard user paid for the whole header again after every navigation.
-        </p>
-        <p>
-        `sr-only focus:not-sr-only` is the standard shape: no pixels until it is focused,
-        which is why it costs a sighted mouse user nothing. `focus:fixed` rather than
-        `focus:absolute` deliberately — the header is `sticky` and the shell has no
-        positioned ancestor here, so an absolutely-positioned link would resolve against the
-        initial containing block anyway and scroll away from the reader who just focused it.
-        </p>
-        <p>
-        The click handler is not decoration. `href="#main-content"` alone leaves the browser
-        to decide, and a fragment jump only moves FOCUS (rather than just the scroll
-        position) when the target is focusable — which is why `<main>` carries
-        `tabIndex={-1}` below. Focusing it here as well makes the behaviour the same in every
-        engine and, more to the point, testable: jsdom performs no fragment navigation at
-        all, so a skip link resting on the browser's good behaviour is a skip link nothing
-        can hold to its promise.
-        </p>
-      */}
-      <a
-        href="#main-content"
-        onClick={(event) => {
-          event.preventDefault();
-          document.getElementById("main-content")?.focus();
-        }}
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-3 focus:z-50 focus:inline-flex focus:min-h-11 focus:items-center focus:rounded-lg focus:border focus:border-accent-strong focus:bg-bg-surface focus:px-4 focus:text-sm focus:font-medium focus:text-accent-strong focus:shadow-md"
-      >
-        Skip to main content
-      </a>
+      {/* B11 / C-L4 — the first thing in the DOM, and the first thing a keyboard reaches.
+          The same link the public landing above gets; see `SkipLink` for the whole of why. */}
+      <SkipLink />
       <header ref={headerRef} data-app-header className="bg-bg-surface border-b border-border sticky top-0 z-30">
         {/*
           A10 / C14 / D6 — the row WRAPS rather than overflowing.
@@ -258,7 +243,27 @@ export default function Layout() {
             nothing once the text is bigger than one. Same rule as the tab strip and the gear
             beside it; this was the one item in the row still expressing it as padding.
           */}
-          <NavLink to="/" className="inline-flex items-center font-semibold tracking-tight whitespace-nowrap min-w-0 truncate [@media(pointer:coarse)]:min-h-[44px]">Crusaders Squash</NavLink>
+          {/*
+            A-M11 / R3-29 — `flex-1 basis-0` below `lg`, and that is what stops the second row.
+
+            Measured on /my-code at 360×700: the row was 80 px tall and the cluster sat on a
+            line of its own at y=32, for both a member and an admin — 126 px of header on a
+            phone, pushing the member's door-decision banner below the fold, which is the most
+            urgent thing on the screen. At 390 the same header is 56 px.
+
+            `flex-wrap` alone cannot fix it. Flex lays items out at their HYPOTHETICAL main
+            size, which for `flex-basis: auto` is max-content — the club name asks for 133 px
+            and the cluster for 205 px, which is 354 in a 328 px content box, so the line
+            overflows and the cluster wraps BEFORE anything is allowed to shrink. `flex-1` is
+            `flex: 1 1 0%`: a hypothetical size of zero, so the name never causes the wrap,
+            takes whatever is left over, and truncates — which is what the comment above has
+            always said should happen first, since it is the one item here carrying no action.
+
+            `lg:flex-none` restores the desktop layout exactly. Above `lg` the inline nav sits
+            between the name and the cluster, and a name that grew into all the free space
+            would shove the nav across the header.
+          */}
+          <NavLink to="/" className="inline-flex flex-1 basis-0 lg:flex-none items-center font-semibold tracking-tight whitespace-nowrap min-w-0 truncate [@media(pointer:coarse)]:min-h-[44px]">Crusaders Squash</NavLink>
           {auth.status === "authenticated" && (
             // `lg`, not `md`. The inline nav switched on at 768 and the row it sits in needs
             // 800: an admin had five tabs, and at 768 the header measured a 795px scrollWidth
@@ -464,6 +469,48 @@ export default function Layout() {
         <Outlet />
       </div></main>
     </div>
+  );
+}
+
+/**
+ * The first thing in the DOM and the first thing a keyboard reaches. (B11, and C-L4)
+ *
+ * <p>
+ * Its own component because there are two shells: the signed-in one, where nine tab stops
+ * stood between the top of the document and the page's own content, and the public landing,
+ * which returns before that shell is reached and had no skip link at all until C-L4 — the
+ * longest page in the product and the first one anybody sees.
+ * </p>
+ *
+ * <p>
+ * `sr-only focus:not-sr-only` is the standard shape: no pixels until it is focused, so it
+ * costs a sighted mouse user nothing. `focus:fixed` rather than `focus:absolute`
+ * deliberately — the signed-in header is `sticky` and neither shell has a positioned
+ * ancestor here, so an absolutely-positioned link would resolve against the initial
+ * containing block anyway and scroll away from the reader who just focused it.
+ * </p>
+ *
+ * <p>
+ * The click handler is not decoration. `href="#main-content"` alone leaves the browser to
+ * decide, and a fragment jump only moves FOCUS (rather than just the scroll position) when
+ * the target is focusable — which is why both `<main>`s carry `tabIndex={-1}`. Focusing it
+ * here as well makes the behaviour the same in every engine and, more to the point,
+ * testable: jsdom performs no fragment navigation at all, so a skip link resting on the
+ * browser's good behaviour is a skip link nothing can hold to its promise.
+ * </p>
+ */
+function SkipLink() {
+  return (
+    <a
+      href="#main-content"
+      onClick={(event) => {
+        event.preventDefault();
+        document.getElementById("main-content")?.focus();
+      }}
+      className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-3 focus:z-50 focus:inline-flex focus:min-h-11 focus:items-center focus:rounded-lg focus:border focus:border-accent-strong focus:bg-bg-surface focus:px-4 focus:text-sm focus:font-medium focus:text-accent-strong focus:shadow-md"
+    >
+      Skip to main content
+    </a>
   );
 }
 
