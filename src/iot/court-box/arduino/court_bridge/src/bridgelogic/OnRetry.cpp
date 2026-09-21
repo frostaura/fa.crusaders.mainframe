@@ -49,8 +49,34 @@ bool isExtRefusal(proto::Verb verb, const char* name) {
          strcmp(name, proto::errorName(proto::DecodeError::BadArg)) == 0;
 }
 
+ReceiveErrorAction classifyReceiveError(proto::Verb verb, const char* name, const char* detail,
+                                        proto::Verb remembered) {
+  // BADARG FIRST, and only when an `!EXT` is what is remembered. It is not a
+  // transmission failure and it is not a BADCRC, so the resend test below can
+  // never be true for it — which is how it used to fall through to nothing at
+  // all, leaving the bridge believing it held a court the Mega had released.
+  if (remembered == proto::Verb::Ext && isExtRefusal(verb, name)) {
+    return ReceiveErrorAction::ExtRefused;
+  }
+  if (isReceiveError(verb, name, detail)) {
+    return ReceiveErrorAction::Resend;
+  }
+  return ReceiveErrorAction::None;
+}
+
 void OnRetry::sent(const proto::Frame& on, uint32_t nowMs) {
   if (!affectsRelay(on.verb())) {
+    // CLEARS, it does not skip. This line used to `return` without clearing,
+    // which contradicted the header's own contract and was the live defect
+    // Carl and Dean hit: `!ERR,BADCRC` names no line, and the bridge writes
+    // several frames in quick succession — `!LCD` then `!ON` then, under a
+    // millisecond later, `!AUTH,<n>`; `!OFF,<court>` on a release press;
+    // `!PING` on the heartbeat. A CRC failure on any of those replayed the
+    // last `!ON`, so a corrupted `!OFF,B` lit court A for a fresh FULL
+    // duration while B was never released. Keeping the memory alive past a
+    // frame that is not about a relay is keeping it alive past the only
+    // evidence that the error was about THIS frame.
+    clear();
     return;
   }
   frame_ = on;

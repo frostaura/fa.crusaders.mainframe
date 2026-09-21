@@ -42,8 +42,14 @@ namespace gatelogic {
 
 class GateApi {
 public:
-  GateApi(IHttpPort& http, devlink::ApiBreaker& breaker, hal::IClock& clock)
-      : http_(http), breaker_(breaker), clock_(clock) {}
+  /// `faults` is a REFERENCE and not an optional pointer, unlike
+  /// `IDecisionLog`: every board has one, and `post()` below is the ONLY place
+  /// in this firmware where an HTTP status is seen for all three routes. A
+  /// composition root that could forget it would be a board whose `http_5xx`
+  /// count was silently always zero — which is indistinguishable from a healthy
+  /// board, and is the exact failure mode every counter here exists to end.
+  GateApi(IHttpPort& http, devlink::ApiBreaker& breaker, hal::IClock& clock, FaultLog& faults)
+      : http_(http), breaker_(breaker), clock_(clock), faults_(faults) {}
 
   /// Ask the API about one scan and interpret the answer.
   ///
@@ -75,9 +81,26 @@ private:
   /// nothing: it says nothing about whether the host is there.
   HttpOutcome post(const char* path, const char* body, char* out, size_t outCap);
 
+  /// One transport-shaped fault per completed call, from ONE place.
+  ///
+  /// Classified off `peerStatus` rather than `status`, because `peerStatus` is
+  /// the field that MEANS "what the peer said" and the classification is a
+  /// question about the peer. A call that never left this board is not
+  /// classified at all: it says nothing about the host.
+  ///
+  /// THE TWO FIELDS GIVE THE SAME ANSWER TODAY, and that is said plainly rather
+  /// than left to imply coverage this has not got. `statusForBody` keeps any
+  /// status at or above `kFirstStatusThatSpeaksForItself` through a failed body
+  /// read and zeroes everything below it, so there is no outcome on which the
+  /// two disagree and a swap of one for the other is an EQUIVALENT mutant that
+  /// no test can kill. `peerStatus` is kept so the classification stays correct
+  /// if that carve-out ever moves; the test pins the carve-out itself.
+  void recordHttpFault(const HttpOutcome& outcome, uint32_t nowMs);
+
   IHttpPort& http_;
   devlink::ApiBreaker& breaker_;
   hal::IClock& clock_;
+  FaultLog& faults_;
 };
 
 } // namespace gatelogic

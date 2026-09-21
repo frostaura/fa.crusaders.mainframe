@@ -78,15 +78,11 @@ bool parseOpensIn(const char* text, Field field, uint32_t& out) {
 bool parseRelay(const char* text, Field field, uint8_t& out) {
   // Exactly one digit, 0-3. "01" is refused: a relay number is an index, not a
   // quantity, and a second digit means somebody is sending something else.
-  if (field.end != field.start + 1U) {
-    return false;
-  }
-  const char c = text[field.start];
-  if (c < '0' || c > '3') {
-    return false;
-  }
-  out = static_cast<uint8_t>(c - '0');
-  return true;
+  //
+  // The rule itself is `detail::parseRelayDigit`, because the relay-restore
+  // grammar has to apply the identical one and a safety rule written down twice
+  // is a safety rule that drifts once.
+  return detail::parseRelayDigit(text + field.start, field.end - field.start, out);
 }
 
 bool parseToken(const char* text, Field field, char* out, size_t outCap) {
@@ -180,6 +176,18 @@ bool parseCourtNumbers(const char* body, size_t len, int16_t out[kMaxCourts], ui
 }
 
 namespace detail {
+
+bool parseRelayDigit(const char* text, size_t len, uint8_t& out) {
+  if (text == nullptr || len != 1U) {
+    return false;
+  }
+  const char c = text[0];
+  if (c < '0' || c > '3') {
+    return false;
+  }
+  out = static_cast<uint8_t>(c - '0');
+  return true;
+}
 
 bool nextStringSpan(const char* body, size_t len, size_t& at, size_t& start, size_t& n) {
   while (at < len && body[at] != '"' && body[at] != ']') {

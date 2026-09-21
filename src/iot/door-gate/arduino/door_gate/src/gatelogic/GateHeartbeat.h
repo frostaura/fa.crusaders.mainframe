@@ -30,6 +30,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "../gatelogic/FaultLog.h"
 #include "../gatelogic/GateConfig.h"
 
 namespace gatelogic {
@@ -141,6 +142,51 @@ size_t renderGateHeartbeatBody(char* out, size_t cap, const char* mac, const cha
 /// so an `unlock_seconds` that appears anywhere else in a future response
 /// cannot be picked up as this one.
 bool adoptUnlockMs(const char* body, size_t len, uint32_t& unlockMs);
+
+/// True when the body's `gate.unlock_seconds` was OUTSIDE the contract's
+/// [1, 30] and the board's own clamp therefore changed it.
+///
+/// A SEPARATE PREDICATE RATHER THAN AN OUT-PARAMETER ON `adoptUnlockMs`, so the
+/// adopt path keeps the signature the corpus suite and the app both call and
+/// this can be proved on its own. It re-reads the body, which costs one scan of
+/// at most 4 KB once per heartbeat.
+///
+/// WHY ANYBODY CARES. The clamp is not in dispute — the board must not trust
+/// the server to have clamped, and it does not. What the clamp cannot do is say
+/// that it happened: the door then runs for a number the console does not show,
+/// the server believes its own, and the one feedback surface on this hardware
+/// is a lamp with nothing to say about it. `GateApp` turns a true here into a
+/// `unlock_clamped` fault, which is the first thing on this board that can.
+///
+/// False when there is no `gate` object, no `unlock_seconds`, or one inside the
+/// range: nothing was changed, so there is nothing to disagree about.
+bool unlockSecondsWereClamped(const char* body, size_t len);
+
+/// The two fault-reporting settings the heartbeat may carry inside `gate`.
+struct GateFaultSettings {
+  bool reporting;
+  uint16_t maxPerHour;
+};
+
+/// Reads `gate.device_fault_reporting` and `gate.device_fault_max_per_hour`
+/// into `settings`, INDEPENDENTLY.
+///
+/// The caller passes the board's working values in and gets them back with
+/// whatever the body actually carried applied — so an ABSENT key, or one of the
+/// wrong JSON type, leaves that value alone exactly as `adoptUnlockMs` leaves a
+/// release time alone. An older API that sends neither must not reset settings
+/// a newer one configured, and an API that sends one must not reset the other.
+///
+/// `maxPerHour` is clamped into [kMinFaultMaxPerHour, kMaxFaultMaxPerHour]
+/// here, before it can reach a divisor — the same reasoning as clamping
+/// `unlock_seconds` in SECONDS before the multiply.
+///
+/// The read is bounded to the top-level `gate` object, for the reason
+/// `adoptUnlockMs` is: a key of the same name anywhere else in a future
+/// response, or in a nested object placed before the real one, is not this one.
+///
+/// Returns true when either key was present and usable.
+bool adoptFaultSettings(const char* body, size_t len, GateFaultSettings& settings);
 
 /// Clamps a release time from any source — the server's, or a build flag —
 /// into what the board will actually drive the lock for.

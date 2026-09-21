@@ -90,7 +90,7 @@ constexpr ErrorLines kErrors[] = {
 court::Outcome clubClosed(const char* body, size_t len) {
   char opens[12] = {};
   char line2[court::kLineLen + 1U] = {};
-  if (devapi::json::stringField(body, len, "opens_at", opens, sizeof(opens)) && opens[0] != '\0') {
+  if (devapi::json::topLevelStringField(body, len, "opens_at", opens, sizeof(opens)) && opens[0] != '\0') {
     snprintf(line2, sizeof(line2), "OPENS %s", opens);
   } else {
     snprintf(line2, sizeof(line2), "%s", "TRY LATER");
@@ -130,7 +130,7 @@ court::Outcome refusal(uint16_t status, const char* body, size_t len) {
     return byStatus(status);
   }
   char error[32] = {};
-  if (devapi::json::stringField(body, len, "error", error, sizeof(error))) {
+  if (devapi::json::topLevelStringField(body, len, "error", error, sizeof(error))) {
     if (strcmp(error, kClubClosed) == 0) {
       return clubClosed(body, len);
     }
@@ -206,7 +206,7 @@ WalkUpResult onWalkUpResponse(uint16_t status, const char* body, size_t len, uin
     // be a complaint waiting to happen. A replayed grant carries the same
     // fields and is the same grant.
     uint32_t granted = requestedMinutes;
-    static_cast<void>(devapi::json::unsignedField(body, len, "granted_minutes", granted));
+    static_cast<void>(devapi::json::topLevelUnsignedField(body, len, "granted_minutes", granted));
     const uint32_t minutes = displayMinutes(granted);
 
     result.outcome.action = court::Action::TurnOn;
