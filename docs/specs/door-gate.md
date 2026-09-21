@@ -1361,7 +1361,8 @@ firmware's authoritative signal ambiguous.
 
 | Route | Answers |
 |---|---|
-| `GET /api/v1/admin/doors` | every gate, its day, its signals, and whether a club-wide shut is in force |
+| `GET /api/v1/admin/doors` | every gate, its day, its signals, and which doors are shut together vs on their own |
+| `GET /api/v1/admin/devices/{id}/activity` | one board's SCANS (`items`) and its own story (`events`) — two arrays |
 | `GET /api/v1/admin/doors/activity` | the club's door log across all doors — door, time, outcome, reason |
 | `GET /api/v1/admin/doors/activity.csv` | the same filters as a file, formula-safe, audited |
 | `POST /api/v1/admin/doors/shut-all` · `/reopen-all` | the 403 path at fleet scale, one unit of work |
@@ -1375,9 +1376,79 @@ firmware's authoritative signal ambiguous.
 `gate.denied_<reason>` are decisions the server made (§5); `device.gate_open` and
 `device.unknown_scan` are things a board did while the link was down (§6). `DoorTrail` states
 that set once, because six readers ask it and a fifth action added later must not become five
-different subsets of the truth. A `device.registered` or a `device.updated` is the BOARD's
-story and belongs in §9's per-board feed — it is not in the club log, not in the counts and not
-in a member's history, because nobody stood at the door.
+different subsets of the truth. A `device.auto_registered` or a `device.updated` is the BOARD's
+story — it is not in the club log, not in the counts and not in a member's history, because
+nobody stood at the door.
+
+**All six readers ask `DoorTrail`, and the per-door feed was the one that did not.**
+`GET /admin/devices/{id}/activity` returned every audit row carrying the board's `device_id`,
+which is wider than a scan in two ways that both reached a screen. A console renders a row it
+has no chip for through whatever branch is last, so `device.updated` was painted as a green
+"Refused" and a door with thirteen admin edits and no scans reported "13 refused scans, newest
+1 min ago" against an empty club log. And `device.event_time_clamped` — written *beside* every
+clamped upload with identical details, same `seq`, a microsecond apart — doubled every offline
+scan on that one screen. A door's feed now answers **two arrays**: `items`, the scans
+`DoorTrail.IsScanRow` selects, and `events`, the board's own story under a closed neutral
+vocabulary (`registered` · `edited` · `removed` · `clock_corrected` · `unrecognised`). Two
+pages, not one page split afterwards, so a renamed door cannot push its scans off a `limit=50`.
+A court box is not split — none of its trail is a door scan — and carries `events: []`, because
+one response shape is worth more to a console than a key that appears and disappears.
+
+**`DoorAuditActions` is the closed list the console's chip dictionary is pinned against.** It
+is a static list in the API assembly with three disjoint parts — `Scans` (the four shapes, with
+the refusal prefix expanded against `GateAccess.Reasons`), `Events`, and `Fleet` (`doors.*`,
+which carry no `device_id` and so reach no door's feed). `DoorAuditActionsTests` scans the
+API's **own source** for every `gate.*` / `device.*` / `doors.*` literal and fails on one that
+is on neither the list nor an explicit not-a-door-surface list, so an action added in a month's
+time cannot go unlisted by somebody who has never read this file.
+
+**An offline row has two instants, and the wire carries both.** The row is written when the
+board next calls in; `details.occurred_at` is when somebody stood at the door. W1.2 says
+offline opens are scan-time stamped, and a club reading a 06:40 entry as 09:00 has the wrong
+answer to the only question it asked. So `at` is the **scan** and `delivered_at` is the row's
+own instant, non-null on offline rows only — never a copy of `at` on an online one, which would
+invent a delay that did not happen. The log, the CSV and the member's history all order, page,
+filter and count on the **delivery** axis, which is what keeps the keyset cursor total over an
+append-only table; the response says both, so no screen has to infer one from the other.
+
+**An upload is contact.** `POST /device/events` runs `DeviceSilenceLog.NoteHeartbeat` exactly
+as the heartbeat does, so `LastSeenAt` moves to the upload and the outage it ended is closed.
+"Last heard from 21:00" beside a scan "decided at 06:40" is therefore not a contradiction and a
+page may not read either as the other: the board was silent until it called in, and it brought
+an old scan with it.
+
+**A door's name is resolved by `device_id` at read time, on every surface.** The online gate
+path writes `gate_key` into its details and the offline upload path did not, so a member's own
+history showed six releases at a null door — at a door the club had named — and the page then
+told her the club had not named it. Both `/me` routes resolve it now, the club's `gate_key`
+first and the board's display `Name` second, falling back to the key stored on the row only for
+a board DELETED since the scan. The upload path stores the key too, which is what makes that
+fallback worth having.
+
+**A limit is clamped and a date is refused, and the difference is the rule.** "Give me a
+million rows" is unambiguous and bounded, so it is clamped and an error screen would be the
+worse answer. `?from=not-a-date` is not a request the server can bound: it used to fall through
+to the default window — for the CSV, to the whole retention period — and answer 200, so an
+admin exporting "last Tuesday" was handed the club's entire log and filed it as last Tuesday's.
+`from_invalid` · `to_invalid` · `cursor_invalid` · `outcome_invalid`, on the log, on the export
+and (cursor) on the member's history. A refused export writes no audit row.
+
+**A fleet reopen that changes nothing says why.** Reopen-all carries `left_shut`
+`[{id,name,gate_key}]` and `GET /admin/doors` carries `shut_together` and `shut_individually`,
+so the console offers the fleet control only while a shut-all is in force, labels it with the
+count it will actually reopen, and names every door that stays shut. The semantics are
+unchanged; what changed is that a zero-change result is no longer an unexplained empty list.
+
+**The club's two contact strings are validated, because they are printed and dialled.** They go
+on a door card that hangs on a wall and reach a member outside a building at night as `tel:`
+and `mailto:` links. Phone: digits, space and `+ - ( ) ,`, at least five digits, ≤32. Email: a
+single addr-spec with a dotted host, ≤254. `club_contact_phone_invalid` /
+`club_contact_email_invalid`, under both spellings. And the `not_approved` login refusal
+carries `{phone, email}` — that refusal only, those two fields only, tenant-scoped — because a
+pending or suspended member is told to speak to the club and every other surface carrying its
+contact is behind the door they are locked out of. An unknown address and a wrong password
+still answer a bodyless `401`; a contact block on either would make the route an account
+oracle.
 
 **Today is the CLUB's day.** The count is taken in `timezone` on the server and the boundary is
 on the wire, so the page names it rather than asserting one. A zone the platform does not know
@@ -1405,6 +1476,19 @@ a spreadsheet, and a door's name, a member's name and a gate key are all club-en
 The value is kept intact and prefixed with an apostrophe, so the log stays readable and cannot
 execute; quoting first would leave it a formula the moment a reader stripped the quotes.
 
+**The export is for a spreadsheet, not for a parser.** Columns
+`date,time,timezone,at_utc,door,door_name,outcome,reason,reason_code,offline,member,code_fingerprint`;
+UTF-8 **BOM**, because Excel reads a BOM-less UTF-8 file in the machine's legacy code page and
+a club whose door is named "Café" gets mojibake on a printed report; CRLF; `date` and `time` in
+the **club's** zone with the zone named beside them, so the file is still unambiguous when it
+is mailed on; `at_utc` to the second, because a round-trip ISO string with seven fractional
+digits is a string Excel will not parse at all. `outcome` and `reason` are the product's words
+(`DoorWords`) with the machine value kept beside them in `reason_code` — a club filtering wants
+the stable one and a club reading wants the sentence. The file ignores paging, correctly, and
+says how many rows it holds in `X-Crusaders-Rows`; that header and `X-Crusaders-Truncated` are
+named in the CORS policy's exposed headers, without which a browser hands the page neither and
+the console announces its own page size instead.
+
 **`shut-all` is one unit of work and `reopen-all` is an undo, not an unlock.** The console's
 "nothing was shut, every door is exactly as it was" is true only because of the single save. A
 door an admin took out of service individually stays shut through a fleet reopen — they did it
@@ -1428,8 +1512,8 @@ turns an ordinary re-upload into a second row for one scan.
 | `door_log_retention_days` | 90 | 7–730 | how long a club keeps its door rows — the number the sweep DELETES against |
 | `door_refusal_spike_count` | 8 | 3–100 | refusals at one door that raise the spike flag |
 | `door_refusal_spike_minutes` | 20 | 5–240 | the window those refusals are counted in |
-| `club_contact_phone` | *(empty)* | ≤32 chars | who a refused member rings; empty means the club has set none |
-| `club_contact_email` | *(empty)* | ≤254 chars | who a refused member writes to |
+| `club_contact_phone` | *(empty)* | ≤32 chars, digits + `space + - ( ) ,`, ≥5 digits | who a refused member rings; empty means the club has set none |
+| `club_contact_email` | *(empty)* | ≤254 chars, one addr-spec, dotted host | who a refused member writes to |
 
 All five bind **camelCase and snake_case** on the PUT and are **clamped again on read**, per
 §8's rule — the PUT is not the only way a value reaches that column, and this is the sharpest
@@ -1490,7 +1574,28 @@ if a club's door ever outgrows a day's rows per page, which at a racquet club it
 | The cursor walks the range once, stops, and does not promise a page that is not there | `AdminDoorLogHttpTests.The_cursor_walks_the_whole_range_once_and_stops`, `…The_last_page_carries_no_cursor` |
 | The limit is clamped to 1–200 rather than refused | `AdminDoorLogHttpTests.The_limit_is_clamped_rather_than_refused` |
 | A range wider than retention is clamped, and the retention is clamped on read | `AdminDoorLogHttpTests.A_range_wider_than_retention_is_clamped_and_the_response_says_by_how_much`, `…A_retention_outside_its_bounds_is_clamped_on_read` |
-| The club log and the per-board feed are one projection, and the feed is still six keys | `AdminDoorLogHttpTests.A_club_log_row_and_a_board_feed_row_agree_on_every_shared_key` |
+| The club log and the per-board feed are one projection, and the feed is seven keys (the six plus `delivered_at`) | `AdminDoorLogHttpTests.A_club_log_row_and_a_board_feed_row_agree_on_every_shared_key` |
+| **One offline scan is ONE row on the feed, the log, the CSV and the day's count** | `DoorScanSetHttpTests.An_offline_scan_is_one_row_on_every_surface` (uploads three with their clamp twins and counts all four surfaces) |
+| An admin edit and a registration are `events`, never `items`, and never a chip | `DoorScanSetHttpTests.An_admin_edit_is_never_a_scan_on_the_feed`, `DeviceGateHttpTests.A_doors_activity_is_readable_and_carries_both_halves_of_its_day` |
+| An action with no word for it is a neutral `unrecognised` row, not an absent one | `DoorScanSetHttpTests.An_event_with_no_word_for_it_is_neutral_rather_than_absent` |
+| The feed and the log select the same rows, over a fixture holding every door action | `DoorScanSetHttpTests.The_feed_and_the_log_select_the_same_rows` |
+| A court box's feed is not split, and carries `events: []` | `DeviceGateHttpTests.A_court_boxs_activity_is_readable_on_the_same_route` |
+| **The closed action list matches what the API's own source writes**, in both directions | `DoorAuditActionsTests.Every_action_literal_in_the_api_source_is_accounted_for`, `…The_list_and_the_scan_predicate_agree_in_both_directions`, `…Every_gate_refusal_reason_is_on_the_list`, `…The_three_lists_are_disjoint_and_All_is_their_union` |
+| An offline row is stamped with the SCAN and names its delivery; an online row has neither to name | `DoorScanTimeHttpTests.An_offline_row_is_stamped_with_the_scan_and_names_its_delivery`, `…An_online_row_has_nothing_to_deliver`, `…The_log_is_stamped_by_the_scan_and_ordered_by_the_delivery` |
+| **An upload moves `LastSeenAt`** — it is contact, like the heartbeat | `DeviceEventHttpTests.An_upload_that_ends_a_long_silence_records_the_outage_it_ended` |
+| A member's row names the door even when the row did not, and falls back to the stored key for a deleted board | `DoorScanTimeHttpTests.A_members_own_rows_name_the_door_even_when_the_row_did_not`, `…A_deleted_board_falls_back_to_the_key_the_row_stored` |
+| `from` / `to` / `cursor` that cannot be read are refused BY NAME, on the log and the export | `DoorLogRefusalHttpTests.A_parameter_the_server_cannot_read_is_refused_by_name` (seven cases × two routes), `…A_members_history_refuses_a_cursor_it_did_not_mint` |
+| A refused export is not recorded as an export | `DoorLogRefusalHttpTests.A_refused_export_is_not_recorded_as_an_export` |
+| The limit is clamped and never refused, on the log AND the member's history | `DoorLogRefusalHttpTests.A_limit_outside_the_range_is_clamped_and_never_refused` (seven values) |
+| The CSV is spreadsheet-ready: BOM, club-local date and time, the named zone, `at_utc` to the second, the product's words | `AdminDoorLogHttpTests.The_csv_carries_the_stated_header_and_is_an_attachment`, `…The_csv_states_the_clubs_own_time_and_names_the_zone`, `…The_csv_exports_the_scan_and_not_its_delivery` |
+| The CSV announces the FILE's row count, not the page's | `AdminDoorLogHttpTests.The_csv_announces_how_many_rows_the_file_holds` |
+| **Production answers an opaque 400** to a malformed body, an unbindable parameter and a bad date | `DeploymentPostureTests.A_malformed_body_is_an_opaque_400_in_Production`, `…An_unbindable_query_parameter_is_an_opaque_400_in_Production`, `…A_refused_door_log_filter_names_the_error_and_nothing_else` |
+| The CORS policy exposes the two headers the console reads | `DeploymentPostureTests.The_cors_policy_exposes_the_headers_the_console_reads` |
+| A fleet reopen NAMES the door it left shut, and a zero-change result still says why | `DoorShutDistinctionHttpTests.A_reopen_that_leaves_a_door_shut_names_the_door_it_left`, `…A_reopen_with_nothing_to_reopen_still_says_why`, `…A_shut_all_leaves_nothing_behind` |
+| The overview separates `shut_together` from `shut_individually`, and every row carries what confirmed-vs-not needs | `DoorShutDistinctionHttpTests.The_overview_separates_shut_together_from_shut_individually` |
+| A contact that is not one is refused by name, under both spellings, and writes nothing | `DoorContactHttpTests.A_contact_that_is_not_one_is_refused_by_name` (eight), `…A_contact_a_member_could_use_is_accepted` (seven) |
+| **The `not_approved` refusal carries the club's contact, and only that** | `DoorContactHttpTests.A_member_the_club_has_not_approved_is_given_the_clubs_contact` (three statuses), `…A_club_that_has_set_no_contact_says_so_rather_than_inventing_one` |
+| An unknown address and a wrong password are unchanged, and no sibling club's contact leaks | `DoorContactHttpTests.An_unknown_address_and_a_wrong_password_are_unchanged`, `…Another_clubs_contact_never_reaches_this_clubs_refusal` |
 | A registration and an admin edit are not in the club log | `AdminDoorLogHttpTests.Rows_that_are_not_scans_are_not_in_the_club_log` |
 | Another club's rows never appear, and its door id answers nothing | `AdminDoorLogHttpTests.Another_clubs_rows_never_appear_in_this_clubs_log` |
 | The CSV's header, media type and filename are as stated | `AdminDoorLogHttpTests.The_csv_carries_the_stated_header_and_is_an_attachment` |

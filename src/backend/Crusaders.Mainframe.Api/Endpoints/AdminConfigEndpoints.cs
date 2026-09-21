@@ -487,23 +487,45 @@ public static class AdminConfigEndpoints
         {
             return "door_refusal_spike_minutes_out_of_range";
         }
-        if (req.EffectiveClubContactPhone is { } phone && phone.Trim().Length > DoorSettings.MaxContactPhoneLength)
+        return ValidateClubContact(req);
+    }
+
+    /// <summary>
+    /// The club's two public contact strings, which are the only settings in this tree that are
+    /// PRINTED and DIALLED.
+    ///
+    /// <para>
+    /// B10 / C12. Both accepted anything at all — the console's inputs are not inside a
+    /// <c>&lt;form&gt;</c>, so no browser validation ran either — and the value is then printed
+    /// on a door card that hangs on a wall and handed to a member outside a building at night
+    /// as a <c>tel:</c> or <c>mailto:</c> link. "Ask at the desk" was a valid club phone number
+    /// and it produced a link that dialled nothing. Length was bounded and shape was not, which
+    /// is the half of the rule that catches a typo and not the half that catches a sentence.
+    /// </para>
+    ///
+    /// <para>
+    /// Too-long is answered before not-a-contact, so a pasted paragraph gets the refusal that
+    /// names what is wrong with it. Split from <see cref="ValidateDoorSettings"/> rather than
+    /// appended to it because the two together are past the complexity gate's branch ceiling —
+    /// and because "is this a number a person could ring" is a different question from "is this
+    /// integer inside its range". Block body for the lizard reason in <c>memory/gotchas.md</c>.
+    /// </para>
+    /// </summary>
+    private static string? ValidateClubContact(UpdateSettingsRequest req)
+    {
+        var phone = req.EffectiveClubContactPhone;
+        var email = req.EffectiveClubContactEmail;
+
+        if (phone is not null && phone.Trim().Length > DoorSettings.MaxContactPhoneLength)
         {
             return "club_contact_phone_too_long";
         }
-        if (req.EffectiveClubContactEmail is { } email && email.Trim().Length > DoorSettings.MaxContactEmailLength)
+        if (email is not null && email.Trim().Length > DoorSettings.MaxContactEmailLength)
         {
             return "club_contact_email_too_long";
         }
-
-        // B10 / C12. The two contact fields accepted ANYTHING — the console's inputs are not
-        // inside a <form>, so no browser validation ran either — and the value is then printed
-        // on a door card that hangs on a wall and handed to a member outside a building at
-        // night as a tel: or mailto: link. "Ask at the desk" was a valid phone number and it
-        // produced a link that dialled nothing. Length was bounded and shape was not, which is
-        // the half of the rule that catches a typo and not the half that catches a sentence.
-        if (!DoorSettings.IsPhone(req.EffectiveClubContactPhone)) return "club_contact_phone_invalid";
-        if (!DoorSettings.IsEmail(req.EffectiveClubContactEmail)) return "club_contact_email_invalid";
+        if (!DoorSettings.IsPhone(phone)) return "club_contact_phone_invalid";
+        if (!DoorSettings.IsEmail(email)) return "club_contact_email_invalid";
 
         return null;
     }

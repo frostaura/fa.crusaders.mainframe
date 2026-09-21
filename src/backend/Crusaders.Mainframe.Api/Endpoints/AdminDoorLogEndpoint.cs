@@ -142,14 +142,16 @@ public static class AdminDoorLogEndpoint
         // SAYS so in the `timezone` column, rather than printing local-looking times that are
         // not — the same rule DoorDay applies to the day boundary.
         var day = DoorDay.StartOfToday(settings, DateTimeOffset.UtcNow);
-        var zone = TimeZoneInfo.TryFindSystemTimeZoneById(day.Timezone, out var found) ? found : TimeZoneInfo.Utc;
+        var clock = new CsvClock(
+            TimeZoneInfo.TryFindSystemTimeZoneById(day.Timezone, out var found) ? found : TimeZoneInfo.Utc,
+            day.Timezone);
 
         var csv = new StringBuilder(Header).Append("\r\n");
         foreach (var row in exported)
         {
             var details = DoorActivityView.Details(row.DetailsJson);
             var door = DoorTrail.DeviceIdOf(details) is { } id && doors.TryGetValue(id, out var d) ? d : null;
-            csv.Append(Line(row.Action, row.CreatedAt, row.SubjectUserId, details, door, names, zone, day.Timezone));
+            csv.Append(Line(row.Action, row.CreatedAt, MemberName(row.SubjectUserId, names), details, door, clock));
         }
 
         // The export is a thing that happened to a club's own records, so the trail says who
@@ -216,22 +218,17 @@ public static class AdminDoorLogEndpoint
     /// </para>
     /// </summary>
     private static string Line(
-        string action, DateTimeOffset at, Guid? subjectUserId, JsonElement? details, DoorRef? door,
-        IReadOnlyDictionary<Guid, string> names, TimeZoneInfo zone, string timezone)
+        string action, DateTimeOffset at, string member, JsonElement? details, DoorRef? door, CsvClock clock)
     {
-        var member = subjectUserId is { } id && id != Guid.Empty
-            ? names.TryGetValue(id, out var name) ? name : ""
-            : "";
-
         var scanned = DoorActivityView.ScannedAt(details, at);
-        var local = TimeZoneInfo.ConvertTime(scanned, zone);
+        var local = TimeZoneInfo.ConvertTime(scanned, clock.Zone);
         var invariant = System.Globalization.CultureInfo.InvariantCulture;
 
         var cells = new[]
         {
             local.ToString("yyyy-MM-dd", invariant),
             local.ToString("HH:mm:ss", invariant),
-            timezone,
+            clock.Timezone,
             scanned.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", invariant),
             door?.GateKey ?? "",
             door?.Name ?? "",
@@ -259,6 +256,16 @@ public static class AdminDoorLogEndpoint
         return safe.Contains(',') || safe.Contains('"') || safe.Contains('\n') || safe.Contains('\r')
             ? "\"" + safe.Replace("\"", "\"\"") + "\""
             : safe;
+    }
+
+    /// <summary>
+    /// The name this row's subject is known by, or empty. Block body for the lizard reason in
+    /// <c>memory/gotchas.md</c>.
+    /// </summary>
+    private static string MemberName(Guid? subjectUserId, IReadOnlyDictionary<Guid, string> names)
+    {
+        if (subjectUserId is not { } id || id == Guid.Empty) return "";
+        return names.TryGetValue(id, out var name) ? name : "";
     }
 
     /// <summary>
@@ -307,3 +314,10 @@ public static class AdminDoorLogEndpoint
 /// recorded in <c>memory/gotchas.md</c>.
 /// </summary>
 public sealed record DoorRef(Guid Id, string Name, string? GateKey);
+
+/// <summary>
+/// The zone the export's two readable columns are written in, and its name for the file to
+/// carry. One value rather than two arguments, because they are one fact and a row builder with
+/// eight parameters is past what the complexity gate allows — see <c>memory/gotchas.md</c>.
+/// </summary>
+public sealed record CsvClock(TimeZoneInfo Zone, string Timezone);
