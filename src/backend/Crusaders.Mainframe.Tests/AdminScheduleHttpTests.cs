@@ -184,6 +184,59 @@ public sealed class AdminScheduleHttpTests
             $"An occurrence at {r.StartsAt:o} is in the past and should never have been written."));
     }
 
+    /// <summary>
+    /// A materialised hold tells the grid WHICH plan it belongs to, by name.
+    ///
+    /// <para>
+    /// The GRID lane renders a scheduled hold as the plan's name beside "Club hold". The
+    /// cell's own words come from <c>BlockLabel</c> (the schedule's <c>Label</c>), which is
+    /// not unique — two league nights can both be labelled "League". The NAME is unique per
+    /// club, so it is what identifies the plan, and it is null on an ordinary booking and on a
+    /// one-off admin block, which is how a cell tells a recurring hold from a hand-made one.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_scheduled_hold_names_its_plan_on_the_grid_read()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "schgrid");
+        var from = NextTuesday();
+        var client = club.AdminClient(factory);
+
+        await client.PostAsJsonAsync(Path + "/", Body(club, from, from.AddDays(7), "Tuesday league"));
+
+        var grid = await client.GetFromJsonAsync<JsonElement>($"/api/v1/schedule?date={from:yyyy-MM-dd}");
+        var hold = grid.GetProperty("slots").EnumerateArray()
+            .Single(s => s.GetProperty("status").GetString() == "adminblock");
+
+        Assert.Equal("Tuesday league", hold.GetProperty("scheduleName").GetString());
+        Assert.NotEqual(JsonValueKind.Null, hold.GetProperty("scheduleId").ValueKind);
+        // The cell's own words are still the LABEL, which is what the club wrote for the cell.
+        Assert.Equal("League — Div 1", hold.GetProperty("blockLabel").GetString());
+    }
+
+    /// <summary>An ordinary booking names no plan, which is how the grid tells the two apart.</summary>
+    [SkippableFact]
+    public async Task An_ordinary_booking_names_no_plan()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "schgridno");
+        var day = DateOnly.FromDateTime(DateTime.UtcNow.Date).AddDays(3);
+        await SeedMemberBookingAsync(
+            factory, club, new DateTimeOffset(day.ToDateTime(new TimeOnly(9, 0)), TimeSpan.Zero));
+
+        var grid = await club.AdminClient(factory)
+            .GetFromJsonAsync<JsonElement>($"/api/v1/schedule?date={day:yyyy-MM-dd}");
+        var slot = grid.GetProperty("slots").EnumerateArray().Single();
+
+        Assert.Equal(JsonValueKind.Null, slot.GetProperty("scheduleId").ValueKind);
+        Assert.Equal(JsonValueKind.Null, slot.GetProperty("scheduleName").ValueKind);
+    }
+
     // ------------------------------------------------------------------ conflicts
 
     /// <summary>
