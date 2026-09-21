@@ -13,6 +13,7 @@ import {
   stubFetch,
   unreachable,
 } from "../test/harness";
+import { CLUB_TIME_NOTE } from "../lib/memberDoorCopy";
 import { forgetLastKnown, readWalkUpChoice, rememberDoor, rememberQr } from "../lib/lastKnown";
 import { GATE_ROSTER_MAX_ENTRIES } from "../lib/gateCopy";
 
@@ -862,6 +863,39 @@ describe("MyCode at a club with a door", () => {
     await waitFor(() => expect(screen.queryByText(/Getting your code/)).toBeNull());
     expect(document.body.textContent).not.toMatch(/door/i);
     expect(screen.queryByRole("button", { name: "The door didn't open" })).toBeNull();
+  });
+
+  /**
+   * Whose clock, on the card that prints clocks. The history list said so and this did not,
+   * on the same screen and in the same zone — a member travelling, or on a phone that
+   * guessed its zone wrong, had no way to tell which day "starts 19:00" belonged to.
+   */
+  it("says whose clock the code card's times are, where it shows one", async () => {
+    renderBoth(
+      memberDoorsOnFixture({ policy: "booking_window", next_booking: BOOKING }),
+      // A court still ahead of the member, which is the case that prints a clock: a slot
+      // already under way reads "on now" and names an hour only if the fixture carries an
+      // end, and this is about the card that shows one rather than about which it is.
+      { ...CODE, starts_at: "2099-01-01T17:00:00Z" },
+    );
+
+    const card = (await screen.findByLabelText("Your code")).closest("div.rounded-lg")!;
+    // The precondition, asserted rather than assumed: a note about which clock these are
+    // means nothing unless a clock is on the card.
+    expect(card.textContent).toMatch(/\d{1,2}:\d{2}/);
+    expect(card.textContent).toContain(CLUB_TIME_NOTE);
+  });
+
+  /**
+   * And not on a card with no time on it. A note about which zone the times are in, on a
+   * card showing no time, is a sentence a member has to read and discard.
+   */
+  it("says nothing about clocks on a card that shows none", async () => {
+    renderBoth(memberDoorFixture(), { ...IDENT_CODE, doors: false });
+
+    const card = (await screen.findByLabelText("Your code")).closest("div.rounded-lg")!;
+    expect(card.textContent).not.toMatch(/\d{1,2}:\d{2}/);
+    expect(card.textContent).not.toContain(CLUB_TIME_NOTE);
   });
 
   // --- W1.7a, the standing line ---------------------------------------------------------

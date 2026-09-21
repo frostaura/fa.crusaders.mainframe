@@ -12,6 +12,7 @@ import { cn } from "../lib/utils";
 import { type LastKnown, minutesSince, readLastKnown } from "../lib/lastKnown";
 import {
   BOOKING_DOOR_WINDOW_CLOSED,
+  CLUB_TIME_NOTE,
   CONTACT_UNKNOWN,
   type CodeOnScreen,
   type ContactKnowledge,
@@ -297,6 +298,21 @@ function bookingWhen(qr: MyQrCode, meaning: CodeMeaningInput): string {
  * or adds nothing at a club that has none.
  * </p>
  */
+/**
+ * Does this card put a clock face in front of the member?
+ *
+ * <p>
+ * Asked of the rendered sentences rather than of the code's kind, because the clocks come
+ * from three places — the booking's start, its end, and the door window — under conditions
+ * that do not line up with booking-versus-ident. Reading the strings the card is about to
+ * draw is not a heuristic here: "is there a time on this card" is literally the question,
+ * and it stays right when a fourth clock is added to one of those sentences.
+ * </p>
+ */
+function showsAClock(meaning: { headline: string; detail: string }): boolean {
+  return /\d{1,2}:\d{2}/.test(`${meaning.headline} ${meaning.detail}`);
+}
+
 function describeKind(qr: MyQrCode, meaning: CodeMeaningInput): { headline: string; detail: string } {
   if (qr.kind === "booking") {
     const when = bookingWhen(qr, meaning);
@@ -961,6 +977,21 @@ function CodeCard(props: {
               </p>
               <p className="text-base font-medium">{meaning!.headline}</p>
               <p className="text-sm text-text-secondary">{meaning!.detail}</p>
+              {/*
+                Whose clock, said once, where a clock is actually shown.
+
+                This card prints "starts 17:00", "on now · ends 17:45" and the door window,
+                and said nothing about which zone any of them were in — the same gap the
+                history list had, and the one O1 closed by making every face on this surface
+                the CLUB's day. A member travelling, or on a phone that guessed its zone
+                wrong, had no way to know that. The test is whether a clock face is on the
+                card rather than which code it is: a booking code always carries one, an
+                ident code at a club with door windows sometimes does, and a note about
+                times on a card showing no time is noise.
+              */}
+              {showsAClock(meaning!) && (
+                <p className="text-xs text-text-muted">{CLUB_TIME_NOTE}</p>
+              )}
             </div>
           )}
 

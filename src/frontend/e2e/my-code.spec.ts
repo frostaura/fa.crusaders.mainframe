@@ -690,6 +690,30 @@ test("the code is fully above the fold at 320x568, decision card and all", async
   // And it did not get there by shrinking to nothing: a symbol a scanner cannot read at
   // arm's length is not above the fold in any sense that helps.
   expect(qr.width).toBeGreaterThanOrEqual(200);
+
+  /*
+    The same rule at a 32px root, stated against the part of the screen this page is given.
+
+    At that root the symbol is NOT on the glass, and the arithmetic says why: the app header
+    and tab strip take 306px of a 568px screen, leaving `<main>` 262px for a 254px symbol
+    plus a heading plus every gap. That is reviewer B12's finding — "the header and tab bar
+    take 54% of a 320×568 screen at a 32px root" — it lives in `components/Layout.tsx`, and
+    a sibling lane owns it. Asserting the viewport fold here would make this case fail for
+    their defect and pass for mine.
+
+    So what is held is this page's own contribution: measured from the top of the scrolling
+    area, the whole symbol sits inside one screen's height. The moment the chrome gives this
+    page a screen to work with, the code is on it — and if the page ever starts adding a
+    block above its own symbol again, this fails first.
+  */
+  await page.addStyleTag({ content: "html { font-size: 32px !important; }" });
+  await page.waitForTimeout(150);
+  const fits = await page.evaluate(() => {
+    const main = document.querySelector("main")!.getBoundingClientRect();
+    const symbol = document.querySelector('svg[aria-label^="QR code"]')!.getBoundingClientRect();
+    return Math.round(symbol.bottom - main.top);
+  });
+  expect(fits).toBeLessThanOrEqual(568);
 });
 
 /**
