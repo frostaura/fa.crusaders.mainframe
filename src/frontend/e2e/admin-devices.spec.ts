@@ -595,7 +595,11 @@ test.describe("A door gate", () => {
     // The door's NAME in the accessible name (reviewer B): three links reading "Manage on
     // Doors" on one screen are told apart only by which row they sit in.
     await expect(page.getByRole("link", { name: "Manage Front door on Doors" }))
-      .toHaveAttribute("href", `/admin/doors/${GATE.id}`);
+      // eco / Monitoring: Doors MOVED under /admin/monitoring. The old path is a permanent
+      // redirect — which is why every `page.goto("/admin/doors")` in this file still works,
+      // and that is worth keeping as proof — but an internal LINK points at the canonical
+      // path, because a link that costs a redirect flickers the URL bar on every use.
+      .toHaveAttribute("href", `/admin/monitoring/doors/${GATE.id}`);
     await expect(page.getByText("Doors are set up and shut under Doors.")).toBeVisible();
 
     for (const name of ["Edit name and door", "Save door", "Take out of service", "Shut this door", "Delete"]) {

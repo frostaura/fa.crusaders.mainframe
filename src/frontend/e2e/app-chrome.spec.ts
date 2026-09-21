@@ -168,7 +168,13 @@ test.describe("C16 / E-L4 / C19 — the section strip", () => {
       }
 
       // E-L4 named Doors specifically — it is the sixth tab and the one that was off the end.
-      await expect(strip.getByRole("link", { name: /^Doors/ })).toHaveAttribute("href", "/admin/doors");
+      // eco / Monitoring: the DESTINATION moved and `Layout` has not — the chrome lane owns
+      // that tab and is replacing it with a Monitoring one. Until it does, the tab points at
+      // `/admin/doors`, which is a permanent redirect to the new path and therefore still
+      // reaches the page. Either spelling passes; neither being present still fails, which
+      // is what this case is for.
+      await expect(strip.getByRole("link", { name: /^Doors/ }))
+        .toHaveAttribute("href", /^\/admin\/(monitoring\/)?doors$/);
     });
   }
 

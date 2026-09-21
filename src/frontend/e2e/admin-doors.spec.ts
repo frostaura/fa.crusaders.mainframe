@@ -351,7 +351,11 @@ test.describe("Shutting every door", () => {
     // C1: shut on its own, so a fleet reopen would reopen nothing and is not offered.
     await expect(banner).toContainText("would not touch these");
     await expect(page.getByRole("link", { name: "Side door" }))
-      .toHaveAttribute("href", `/admin/doors/${DOOR_ID}`);
+      // eco / Monitoring: Doors MOVED under /admin/monitoring. The old path is a permanent
+      // redirect — which is why every `page.goto("/admin/doors")` in this file still works,
+      // and that is worth keeping as proof — but an internal LINK points at the canonical
+      // path, because a link that costs a redirect flickers the URL bar on every use.
+      .toHaveAttribute("href", `/admin/monitoring/doors/${DOOR_ID}`);
   });
 });
 
