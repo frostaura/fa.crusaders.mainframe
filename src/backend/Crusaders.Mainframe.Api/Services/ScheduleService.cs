@@ -8,9 +8,10 @@ public sealed class ScheduleService
 {
     private readonly MainframeDbContext _db;
     private readonly TenantSettingsAccessor _settings;
+    private readonly BookingRules _rules;
 
-    public ScheduleService(MainframeDbContext db, TenantSettingsAccessor settings)
-    { _db = db; _settings = settings; }
+    public ScheduleService(MainframeDbContext db, TenantSettingsAccessor settings, BookingRules rules)
+    { _db = db; _settings = settings; _rules = rules; }
 
     public async Task<ScheduleDay> GetDayAsync(DateOnly date, Guid? viewingUserId, CancellationToken ct)
         => await GetDayAsync(date, viewingUserId, viewerIsAdmin: false, ct);
@@ -18,12 +19,20 @@ public sealed class ScheduleService
     public async Task<ScheduleDay> GetDayAsync(DateOnly date, Guid? viewingUserId, bool viewerIsAdmin, CancellationToken ct)
     {
         var settings = await _settings.GetAsync(ct);
-        var tz = ResolveTz(settings.Timezone);
         var dayStartLocal = date.ToDateTime(TimeOnly.MinValue);
-        var dayStartUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(dayStartLocal, DateTimeKind.Unspecified), tz);
-        var dayEndUtc = dayStartUtc.AddDays(1);
 
-        var courts = await _db.Courts.Where(c => c.IsActive).OrderBy(c => c.CourtNumber).ToListAsync(ct);
+        // D2-B36. This was raw ConvertTimeToUtc on an Unspecified midnight plus a flat AddDays(1)
+        // — which THROWS on a zone whose midnight does not exist, silently takes the later
+        // instant on an ambiguous one, and makes every DST day either 23 or 25 hours long while
+        // claiming 24. ClubClock is the one implementation.
+        var (dayStartUtc, dayEndUtc) = ClubClock.DayWindow(settings, date);
+
+        // D2-B34. This loaded only IsActive courts while the booking read below is not filtered
+        // by court, so a member's paid booking on a court an admin had "deleted" (a soft delete
+        // that sets exactly this flag) was silently dropped from the grid: on no screen, not
+        // cancellable from the UI, and still swept as a no-show WITH the penalty. Inactive courts
+        // are loaded and rendered inert instead, which is the honest state.
+        var courts = await _db.Courts.OrderBy(c => c.CourtNumber).ToListAsync(ct);
 
         var bookings = await _db.Bookings
             .Where(b => b.Status != BookingStatus.Cancelled
@@ -92,6 +101,8 @@ public sealed class ScheduleService
         var peak = settings.PeakHours();
         var viewerMayBookPeak = viewerIsAdmin || await ViewerBypassesPeakAsync(viewingUserId, ct);
 
+        var rules = await ViewerRulesAsync(date, viewingUserId, viewerIsAdmin, settings, ct);
+
         return new ScheduleDay(
             Date: date,
             Timezone: settings.Timezone,
@@ -105,8 +116,106 @@ public sealed class ScheduleService
             PeakEndMinute: peak is { } q ? (int)q.end.ToTimeSpan().TotalMinutes : null,
             PeakAdvanceHoursForRegular: settings.PeakAdvanceHoursForRegular,
             ViewerMayBookPeak: viewerMayBookPeak,
-            Courts: courts.Select(c => new ScheduleCourt(c.Id, c.CourtNumber, c.Name, c.SlicePriceCredits)).ToList(),
-            Slots: slots);
+            // The court's OWN price, unchanged — D2 §4.4 keeps `courts` as it is. The price the
+            // member will actually be charged is `rules.slicePriceCredits`, because their groups
+            // may have raised it above the court's and the grid paints free cells from `rules`.
+            Courts: courts.Select(c => new ScheduleCourt(
+                c.Id, c.CourtNumber, c.Name, c.SlicePriceCredits, c.IsActive)).ToList(),
+            Slots: slots,
+            Rules: rules);
+    }
+
+    /// <summary>
+    /// Everything this viewer's own rules say about this day, in ONE object, so the grid can lock
+    /// buttons and quote prices from a single read rather than by guessing or by a failed POST.
+    ///
+    /// <para>
+    /// <b>"available is a promise the grid makes", and it was broken once already</b>: 44 cells a
+    /// day were drawn green to a Regular member, each opening a modal quoting court, time, cost
+    /// and balance-after before refusing after Confirm. Item 19 would repeat that exactly, for
+    /// the cap, if the count were not on the payload — so <see cref="ScheduleRules.RemainingToday"/>
+    /// is what the UI locks on, never a failed request.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>An admin gets nulls, not numbers.</b> <c>RemainingToday</c> is null and every reason is
+    /// null: an admin's grid states that they have no limit rather than showing them a figure
+    /// that does not apply to them.
+    /// </para>
+    ///
+    /// <para>
+    /// Null for an anonymous viewer, who has no rules and no allowance to report.
+    /// </para>
+    /// </summary>
+    private async Task<ScheduleRules?> ViewerRulesAsync(
+        DateOnly date, Guid? viewingUserId, bool viewerIsAdmin, TenantSettingsView settings, CancellationToken ct)
+    {
+        if (viewingUserId is not { } userId) return null;
+
+        var groups = await _rules.GroupsForAsync(userId, date.DayOfWeek, settings, ct);
+        var (openMinute, closeMinute) = settings.HoursFor(date.DayOfWeek);
+        var clubHours = new MinuteWindow(openMinute, closeMinute);
+
+        var allowed = GroupRules.AllowedWindows(groups, clubHours);
+        var court = await _db.Courts.Where(c => c.IsActive)
+            .OrderBy(c => c.CourtNumber).Select(c => (decimal?)c.SlicePriceCredits).FirstOrDefaultAsync(ct);
+        var price = GroupRules.PriceFor(groups, court ?? settings.DefaultSlicePriceCredits);
+
+        if (viewerIsAdmin)
+        {
+            return new ScheduleRules(
+                ClubDay: date, Groups: [], AllowedWindows: [WireWindow.Of(clubHours)], ClubHours: WireWindow.Of(clubHours),
+                SlicePriceCredits: price,
+                MaxSlotsPerDay: null, MaxMinutesPerDay: null,
+                BookedSlotsToday: 0, BookedMinutesToday: 0, RemainingToday: null,
+                AdvanceBookingDays: settings.AdvanceBookingDays,
+                AdminExempt: true, EmptyWindowReason: null);
+        }
+
+        var slotCap = GroupRules.SlotCapFor(groups, BookingLimits.MaxSlotsPerDay(settings));
+        var minuteCap = GroupRules.MinuteCapFor(groups, BookingLimits.MaxMinutesPerDay(settings));
+
+        var (dayStart, dayEnd) = ClubClock.DayWindow(settings, date);
+        var held = await _db.Bookings
+            .Where(b => b.UserId == userId
+                     && b.Status != BookingStatus.Cancelled
+                     && b.StartsAt < dayEnd && b.EndsAt > dayStart)
+            .Select(b => new { b.SliceCount, b.StartsAt, b.EndsAt })
+            .ToListAsync(ct);
+
+        var bookedSlots = held.Sum(b => b.SliceCount);
+        var bookedMinutes = (int)held.Sum(b => (b.EndsAt - b.StartsAt).TotalMinutes);
+
+        // The number item 19 asks the UI to lock buttons on: the tighter of the two headrooms,
+        // floored at zero. A cap of 0 is unlimited, which is null here rather than a big number.
+        int? remaining = null;
+        if (slotCap > 0 || minuteCap > 0)
+        {
+            var slotHeadroom = slotCap > 0 ? Math.Max(slotCap - bookedSlots, 0) : int.MaxValue;
+            var minuteHeadroom = minuteCap > 0
+                ? Math.Max((minuteCap - bookedMinutes) / Math.Max(settings.SliceMinutes, 1), 0)
+                : int.MaxValue;
+            remaining = Math.Min(slotHeadroom, minuteHeadroom);
+        }
+
+        return new ScheduleRules(
+            ClubDay: date,
+            Groups: groups.Select(g => new ScheduleGroup(g.Id, g.Name, g.Description)).ToList(),
+            AllowedWindows: allowed.Select(WireWindow.Of).ToList(),
+            ClubHours: WireWindow.Of(clubHours),
+            SlicePriceCredits: price,
+            MaxSlotsPerDay: slotCap > 0 ? slotCap : null,
+            MaxMinutesPerDay: minuteCap > 0 ? minuteCap : null,
+            BookedSlotsToday: bookedSlots,
+            BookedMinutesToday: bookedMinutes,
+            RemainingToday: remaining,
+            AdvanceBookingDays: GroupRules.AdvanceDaysFor(groups, settings.AdvanceBookingDays),
+            AdminExempt: false,
+            // Present ONLY when the intersection is genuinely empty, so the console can say the
+            // true sentence in words instead of drawing a grid that reads as "the club is shut".
+            EmptyWindowReason: allowed.Count == 0
+                ? new EmptyWindowReason(groups.Select(g => g.Name).ToList(), BookingRules.DayName(date.DayOfWeek))
+                : null);
     }
 
     /// <summary>
@@ -135,11 +244,6 @@ public sealed class ScheduleService
         return i < 0 ? fullName : fullName[..i];
     }
 
-    private static TimeZoneInfo ResolveTz(string id)
-    {
-        try { return TimeZoneInfo.FindSystemTimeZoneById(id); }
-        catch { return TimeZoneInfo.Utc; }
-    }
 }
 
 public sealed record ScheduleDay(
@@ -159,9 +263,67 @@ public sealed record ScheduleDay(
     /// <summary>True for an admin or a league/senior member — the two the peak rule never refuses.</summary>
     bool ViewerMayBookPeak,
     List<ScheduleCourt> Courts,
-    List<ScheduleSlot> Slots);
+    List<ScheduleSlot> Slots,
+    /// <summary>This viewer's own rules for this day. Null for an anonymous viewer, who has none.</summary>
+    ScheduleRules? Rules = null);
 
-public sealed record ScheduleCourt(Guid Id, int CourtNumber, string Name, decimal SlicePriceCredits);
+/// <param name="IsActive">
+/// False for a court an admin has "deleted" — a soft delete. D2-B34: those courts used to be
+/// dropped from this list entirely, taking their members' paid bookings off every screen in the
+/// product while the no-show sweep went on penalising them. They are rendered inert instead.
+/// </param>
+public sealed record ScheduleCourt(
+    Guid Id, int CourtNumber, string Name, decimal SlicePriceCredits, bool IsActive = true);
+
+/// <summary>One of the viewer's groups, as the grid may show it. Name and description only — never who else is in it.</summary>
+public sealed record ScheduleGroup(Guid Id, string Name, string? Description);
+
+/// <summary>
+/// What this member may book today, what it costs them, and how much of their allowance is left —
+/// the one read the grid needs to be honest.
+/// </summary>
+/// <param name="RemainingToday">
+/// Slots this member may still take today: <c>min(slot headroom, minute headroom / slice)</c>,
+/// floored at zero. <b>Null means no limit</b>, which is an admin or a club with both caps off —
+/// not zero, which means they are out.
+/// </param>
+/// <param name="EmptyWindowReason">
+/// Non-null only when the member's groups genuinely do not overlap on this day, naming them and
+/// the day, so the console can say so in words rather than drawing an empty grid that reads to a
+/// member as the club being shut.
+/// </param>
+public sealed record ScheduleRules(
+    DateOnly ClubDay,
+    IReadOnlyList<ScheduleGroup> Groups,
+    IReadOnlyList<WireWindow> AllowedWindows,
+    WireWindow ClubHours,
+    decimal SlicePriceCredits,
+    int? MaxSlotsPerDay,
+    int? MaxMinutesPerDay,
+    int BookedSlotsToday,
+    int BookedMinutesToday,
+    int? RemainingToday,
+    int AdvanceBookingDays,
+    bool AdminExempt,
+    EmptyWindowReason? EmptyWindowReason);
+
+/// <summary>
+/// One window on the wire, as <c>HH:mm</c> rather than as minutes past midnight.
+///
+/// <para>
+/// Strings because the grid renders them and because minutes-past-midnight is the kind of number
+/// a client eventually renders as <c>1080</c> by accident — the admin change record has the same
+/// rule about its own diffs for the same reason.
+/// </para>
+/// </summary>
+public sealed record WireWindow(string Start, string End)
+{
+    public static WireWindow Of(MinuteWindow window)
+        => new(BookingService.MinutesToHhmm(window.Start), BookingService.MinutesToHhmm(window.End));
+}
+
+/// <summary>Both halves of the conditional, in words: which groups, and which day.</summary>
+public sealed record EmptyWindowReason(IReadOnlyList<string> Groups, string Day);
 
 public sealed record ScheduleSlot(
     Guid CourtId,

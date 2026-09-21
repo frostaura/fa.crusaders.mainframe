@@ -216,15 +216,20 @@ public class DeviceGateTests
     }
 
     /// <summary>
-    /// A user with no membership row at all is not barred. The test
-    /// <see cref="MembershipAccess"/> applies is "the club has recorded a decision about this
-    /// person, and it was not approval" — and it has recorded none. Note that this is the
-    /// BARRED check only: whether such a user then gets through a door is the policy's
-    /// question, and under <c>booking_window</c> the answer is no unless they are a club
-    /// admin.
+    /// A user with no membership row at all is <b>barred, under its own reason</b> — ruling 15,
+    /// and a deliberate reversal of what this test used to assert.
+    ///
+    /// <para>
+    /// The old rule was "the club has recorded a decision about this person, and it was not
+    /// approval", and about such a user it had recorded none — so a real, live ident code for
+    /// somebody the club had never admitted <b>opened the building</b> under the default
+    /// <c>active_member</c> policy. "Active member" cannot mean "anybody the club has not said no
+    /// to". <c>no_membership</c> rather than <c>member_not_active</c> because the desk's next
+    /// action is different: there is nothing to un-suspend, the person needs enrolling.
+    /// </para>
     /// </summary>
     [Fact]
-    public async Task A_user_with_no_membership_row_is_not_barred()
+    public async Task A_user_with_no_membership_row_is_refused_and_named_as_such()
     {
         var f = await CreateAsync();
         await using var _ = f.Host;
@@ -235,7 +240,9 @@ public class DeviceGateTests
         await SetMembershipAsync(f, f.Host.PlayerUser.Id, null);
 
         var decision = await DecideAsync(f, GateOn(f), Policy(f, GateAccessPolicies.ActiveMember), token, now);
-        Assert.True(decision.Opened);
+        Assert.False(decision.Opened);
+        Assert.Equal(GateAccess.NoMembership, decision.Reason);
+        Assert.Equal(0, decision.UnlockSeconds);
     }
 
     /// <summary>
@@ -492,7 +499,7 @@ public class DeviceGateTests
     /// </summary>
     [Theory]
     [InlineData(true, true, true)]      // a club admin who is also a member: in
-    [InlineData(true, false, true)]     // a club admin with no membership row: in
+    [InlineData(true, false, false)]    // a club admin with NO membership row: out (ruling 15)
     [InlineData(false, true, false)]    // an ordinary member with nothing booked: out
     [InlineData(false, false, false)]   // no membership row is not itself a way in
     public async Task A_club_admin_passes_the_booking_check_and_nobody_else_does(
@@ -509,8 +516,15 @@ public class DeviceGateTests
 
         var decision = await DecideAsync(f, GateOn(f), Policy(f, GateAccessPolicies.BookingWindow), token, now);
 
+        // The membership check runs BEFORE the policy, so a missing row is answered
+        // no_membership whoever the person is — the admin carve-out is on the BOOKING check and
+        // nothing else, and ruling 15 made "no row" a refusal rather than a shrug.
+        var expectedReason = !holdsMembership ? GateAccess.NoMembership
+            : opens ? GateAccess.Ok
+            : GateAccess.NoBooking;
+
         Assert.Equal(opens, decision.Opened);
-        Assert.Equal(opens ? GateAccess.Ok : GateAccess.NoBooking, decision.Reason);
+        Assert.Equal(expectedReason, decision.Reason);
         Assert.Equal(user.Id, decision.SubjectUserId);
     }
 
@@ -602,7 +616,9 @@ public class DeviceGateTests
 
         var decision = await DecideAsync(f, GateOn(f), Policy(f, GateAccessPolicies.BookingWindow), token, now);
         Assert.False(decision.Opened);
-        Assert.Equal(GateAccess.NoBooking, decision.Reason);
+        // no_membership rather than no_booking since ruling 15: the membership check runs first,
+        // and "the club has no record of you" is the truer of the two sentences.
+        Assert.Equal(GateAccess.NoMembership, decision.Reason);
     }
 
     /// <summary>

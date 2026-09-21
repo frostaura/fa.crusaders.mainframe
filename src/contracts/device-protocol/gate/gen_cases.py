@@ -380,6 +380,21 @@ responses = [
         "expect": {"opened": False, "reason": "member_not_active", "unlock_seconds": 0},
     },
     {
+        "id": "gate-scan-response-denied-no-membership",
+        "kind": "gate",
+        "note": (
+            "the scanner read a real, live ident code for a real user of this club who has NO "
+            "membership row at all. Previously this opened the door: MembershipAccess tested "
+            "'the club recorded a decision and it was not approval', and about such a user it "
+            "recorded none, so under active_member the door released for somebody the club has "
+            "never admitted. Named rather than folded into member_not_active because the desk's "
+            "next action differs — there is nothing to un-suspend, the person needs enrolling — "
+            "and the door says neither out loud."
+        ),
+        "body_hex": body_hex(scan(False, "no_membership", 0)),
+        "expect": {"opened": False, "reason": "no_membership", "unlock_seconds": 0},
+    },
+    {
         "id": "gate-scan-response-denied-no-booking",
         "kind": "gate",
         "note": (

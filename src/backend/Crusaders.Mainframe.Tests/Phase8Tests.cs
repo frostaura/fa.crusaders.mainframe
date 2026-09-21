@@ -287,10 +287,21 @@ public class Phase8Tests
             Assert.IsType<BookingResult.Ok>(result); // 4 * 15 = 60 mins — exactly at the cap.
         }
 
-        // 5th slice would push total to 75 minutes for the same day → blocked.
+        // 5th slice would push the day to 75 minutes AND to 5 slots, and both caps refuse it.
+        //
+        // The refusal is the SLOT one, because that is the unit GOAL item 19 asked for and the
+        // unit the grid counts buttons against — `member_max_slots_per_day` defaults to 4, which
+        // is 4 x 15 = the same 60 minutes blueprint A.4 already required, so on a default club
+        // the two bite together and naming the slot one is what makes the member's sentence
+        // match what their screen is showing them. `PerDayCapExceeded` still fires when the
+        // MINUTES cap alone binds — a member holding long bookings.
         var fifthStart = new DateTimeOffset(tomorrow.AddHours(13), TimeSpan.Zero);
         var fifth = await booking.CreateAsync(host.Courts[1].Id, host.PlayerUser.Id, host.PlayerUser.Id, fifthStart, 1, default);
-        Assert.IsType<BookingResult.PerDayCapExceeded>(fifth);
+        var refusal = Assert.IsType<BookingResult.PerDaySlotCapExceeded>(fifth);
+        Assert.Equal(4, refusal.CapSlots);
+        Assert.Equal(4, refusal.BookedSlots);
+        Assert.Equal(0, refusal.RemainingSlots);
+        Assert.Null(refusal.BoundByGroupName);
     }
 
     [Fact]
@@ -305,10 +316,15 @@ public class Phase8Tests
 
         var tomorrow = DateTime.UtcNow.Date.AddDays(2);
         // Pile in 5 bookings — admin acts on behalf, so the cap doesn't apply.
+        //
+        // ActorIsAdmin is now stated rather than inferred from `actorId != userId` (D2-B13). The
+        // old inference made an admin booking for THEMSELVES bound by the cap and never asked
+        // whether the actor held the role at all, so it was wrong in both directions.
         for (var i = 0; i < 5; i++)
         {
             var startsAt = new DateTimeOffset(tomorrow.AddHours(9 + i), TimeSpan.Zero);
-            var result = await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.AdminUser.Id, startsAt, 1, default);
+            var payer = new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, ActorIsAdmin: true);
+            var result = await booking.CreateAsync(host.Courts[0].Id, payer, startsAt, 1, default);
             Assert.IsType<BookingResult.Ok>(result);
         }
     }

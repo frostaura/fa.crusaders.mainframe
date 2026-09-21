@@ -28,11 +28,23 @@ namespace Crusaders.Mainframe.Api.Services;
 /// </para>
 ///
 /// <para>
-/// <b>A user with no membership row is not barred.</b> The test is "the club has recorded a
-/// decision about this person, and it was not approval" — and about such a user it has
-/// recorded none, so they keep the access they have today. Widening this to "must hold an
-/// Active membership" would be a different rule with a different blast radius, and it is not
-/// the one the console promises.
+/// <b>A user with NO membership row is barred too, and that is a deliberate reversal.</b> This
+/// type used to read "the club has recorded a decision about this person, and it was not
+/// approval" — and about such a user it has recorded none, so it let them through. The member
+/// lane found what that means at a door: a real, live ident code for a user with no membership
+/// row <b>opened the building</b> under the default <c>active_member</c> policy. "Active member"
+/// cannot mean "anybody the club has not said no to". The refusal carries its own reason,
+/// <c>no_membership</c>, because the desk's next action is different — there is nothing to
+/// un-suspend, the person needs enrolling.
+/// </para>
+///
+/// <para>
+/// <b>What this widening reaches.</b> Every caller of these two methods: the door, the walk-up
+/// pad, the activation paths, the cached roster, and the code-minting route — so a user with no
+/// membership row is also issued no door-capable ident code in the first place. No path in this
+/// product creates a user without a membership row (not registration, not admin promotion, not
+/// the seeder), so the blast radius in a real club is rows that should not exist. That is exactly
+/// why the old reading was safe-looking and was not safe.
 /// </para>
 ///
 /// <para>
@@ -60,7 +72,7 @@ public static class MembershipAccess
     /// </summary>
     public static async Task<bool> IsBarredFromCourtsAsync(
         MainframeDbContext db, Guid userId, CancellationToken ct)
-        => await StatusIfBarredAsync(db, userId, ct) is not null;
+        => await RefusalReasonAsync(db, userId, ct) is not null;
 
     /// <summary>
     /// The recorded status when the club has taken this member's court access away, or null
@@ -83,4 +95,41 @@ public static class MembershipAccess
             .FirstOrDefaultAsync(ct);
         return status == MembershipStatus.Active ? null : status;
     }
+
+    /// <summary>
+    /// Why the club will not let this person through, or null when it will.
+    ///
+    /// <para>
+    /// Three answers rather than two, because <see cref="StatusIfBarredAsync"/> cannot express
+    /// the third: it returns <c>null</c> both for "approved" and for "no row at all", which is
+    /// precisely the conflation that opened a door for a user the club had never admitted.
+    /// Callers that only need a yes/no use <see cref="IsBarredFromCourtsAsync"/>; callers that
+    /// have a screen to write a sentence on use this.
+    /// </para>
+    /// </summary>
+    public static async Task<string?> RefusalReasonAsync(
+        MainframeDbContext db, Guid userId, CancellationToken ct)
+    {
+        var status = await db.Memberships
+            .Where(m => m.UserId == userId)
+            .Select(m => (MembershipStatus?)m.Status)
+            .FirstOrDefaultAsync(ct);
+
+        return status switch
+        {
+            null => NoMembership,
+            MembershipStatus.Active => null,
+            MembershipStatus.Suspended => MemberSuspended,
+            _ => MemberNotActive,
+        };
+    }
+
+    /// <summary>The club has no record of this person at all. Ruling 15.</summary>
+    public const string NoMembership = "no_membership";
+
+    /// <summary>The club took this member's access away.</summary>
+    public const string MemberSuspended = "member_suspended";
+
+    /// <summary>The club has not granted access — pending approval, or rejected.</summary>
+    public const string MemberNotActive = "member_not_active";
 }

@@ -288,6 +288,7 @@ builder.Services.AddScoped<Crusaders.Mainframe.Api.Services.Realtime.RealtimeOut
 builder.Services.AddSingleton<AccessTokenRevocationList>();
 builder.Services.AddScoped<LedgerService>();
 builder.Services.AddScoped<ScheduleService>();
+builder.Services.AddScoped<BookingRules>();
 builder.Services.AddScoped<BookingService>();
 builder.Services.AddScoped<AdminBlockService>();
 builder.Services.AddScoped<CourtActivationService>();
@@ -500,6 +501,7 @@ app.MapAuthEndpoints();
 app.MapAdminMemberEndpoints();
 app.MapWalletEndpoints();
 app.MapScheduleEndpoints();
+app.MapMemberGroupEndpoints();
 app.MapBookingEndpoints();
 app.MapAdminConfigEndpoints();
 app.MapAdminDeviceEndpoints();

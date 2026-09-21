@@ -48,6 +48,19 @@ public static class GateAccess
     public const string MemberNotActive = "member_not_active";
 
     /// <summary>
+    /// The club has <b>no record of this person at all</b> — ruling 15.
+    ///
+    /// <para>
+    /// Distinct from <see cref="MemberNotActive"/> because the desk's next action is different:
+    /// there is nothing to un-suspend and no application to approve, the person needs enrolling.
+    /// Before this, such a user was not barred at all — <c>MembershipAccess</c> tested "the club
+    /// recorded a decision and it was not approval", recorded none, and under the default
+    /// <c>active_member</c> policy the door released for somebody the club had never admitted.
+    /// </para>
+    /// </summary>
+    public const string NoMembership = "no_membership";
+
+    /// <summary>
     /// Policy <see cref="GateAccessPolicies.BookingWindow"/> only: an active member with
     /// nothing booked inside <c>[StartsAt − gate_early_entry_minutes, EndsAt]</c>, and not a
     /// club admin. Unreachable under the default policy.
@@ -115,7 +128,7 @@ public static class GateAccess
     /// never comes.
     /// </summary>
     public static readonly string[] Reasons =
-        [Ok, NotRecognised, MemberNotActive, NoBooking, TooEarly, MethodNotSupported, NotAGate];
+        [Ok, NotRecognised, MemberNotActive, NoMembership, NoBooking, TooEarly, MethodNotSupported, NotAGate];
 
     /// <summary>Shortest release the lock is ever given. A zero-second release is a door that clicks and stays shut.</summary>
     public const int MinUnlockSeconds = 1;
@@ -159,13 +172,15 @@ public static class GateAccess
         var resolved = await codes.ResolveAsync(context.Token, context.Now, ct);
         if (resolved is null) return Refused(NotRecognised);
 
-        // Not-Active rather than Suspended, and a user with no membership row is not barred:
-        // both rules, and why they are stated that way round, live in MembershipAccess. This
-        // runs before the policy, so a suspended member — a club admin included — is told the
-        // same thing whichever policy the club runs.
-        if (await MembershipAccess.IsBarredFromCourtsAsync(db, resolved.UserId, ct))
+        // Not-Active rather than Suspended, and — ruling 15 — a user with NO membership row is
+        // barred too, under its own reason. Both rules live in MembershipAccess. This runs before
+        // the policy, so a member the club will not admit is told the same thing whichever policy
+        // the club runs.
+        if (await MembershipAccess.RefusalReasonAsync(db, resolved.UserId, ct) is { } refusal)
         {
-            return Refused(MemberNotActive, resolved.UserId);
+            return Refused(
+                refusal == MembershipAccess.NoMembership ? NoMembership : MemberNotActive,
+                resolved.UserId);
         }
 
         // A booking code is bounded by its OWN booking, under every policy — see

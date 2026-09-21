@@ -44,7 +44,14 @@ public static class ClubClock
     /// bookings in one zone and its door log in another.
     /// </para>
     /// </summary>
-    public static TimeZoneInfo ZoneOf(TenantSettingsView settings) => DoorClock.ZoneOf(settings).Zone;
+    public static TimeZoneInfo ZoneOf(TenantSettingsView settings) => ZoneById(settings.Timezone);
+
+    /// <summary>
+    /// The same, from a bare id — for the two call sites that carry the string rather than the
+    /// whole settings view.
+    /// </summary>
+    public static TimeZoneInfo ZoneById(string? id)
+        => TimeZoneInfo.TryFindSystemTimeZoneById(id?.Trim() ?? "", out var zone) ? zone : TimeZoneInfo.Utc;
 
     /// <summary>The club-local calendar date an instant falls on.</summary>
     public static DateOnly DateOf(TenantSettingsView settings, DateTimeOffset instant)

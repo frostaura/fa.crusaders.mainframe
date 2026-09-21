@@ -172,7 +172,10 @@ public static class DeviceRosterBuilder
                         // one window in which a club most wants it to hold is the one where
                         // nobody is watching. `!= Active` rather than `== Suspended`: see
                         // MembershipAccess for why the rule is stated that way round.
-                        && !db.Memberships.Any(m => m.UserId == b.UserId && m.Status != MembershipStatus.Active))
+                        // Ruling 15: an ACTIVE row, not merely the absence of a non-active one.
+                        // The old shape let a booking with NO membership row through, which is
+                        // the same conflation that opened a door — see MembershipAccess.
+                        && db.Memberships.Any(m => m.UserId == b.UserId && m.Status == MembershipStatus.Active))
             .OrderBy(b => b.StartsAt)
             .Take(RosterMaxEntries)
             .ToListAsync(ct);

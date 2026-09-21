@@ -452,15 +452,20 @@ public sealed record TenantSettingsView(
     /// </para>
     ///
     /// <para>
-    /// There is deliberately no "peak disabled" value. The PUT cannot express one — its
-    /// validator demands a parseable <c>HH:mm-HH:mm</c> pair — so a reader that invented one
-    /// would be honouring a state no admin could have asked for, which is exactly how the club
-    /// lost its peak protection in the first place. A club that wants no peak restriction sets
-    /// <c>peak_advance_hours_for_regular</c> high enough to cover its horizon.
+    /// <b>EMPTY is a real instruction and is honoured.</b> A club that does not run league nights
+    /// stores an empty <c>peak_hours</c>, several fixtures do, and
+    /// <c>SchedulePeakVisibilityTests</c> pins it — inventing 16:00–19:00 for those clubs would
+    /// grey out a quarter of their day on the grid and refuse bookings the club wants to sell.
+    /// The fall-back is for a value that is present and UNUSABLE, which is a typo rather than a
+    /// decision: the club plainly meant to have a peak window, and the safe reading of a typo in
+    /// an access rule is the rule, not its absence.
     /// </para>
     /// </summary>
     public (TimeOnly start, TimeOnly end)? PeakHours()
-        => TryParsePeakRange(PeakHoursRange) ?? TryParsePeakRange(DefaultPeakHoursRange);
+    {
+        if (string.IsNullOrWhiteSpace(PeakHoursRange)) return null;
+        return TryParsePeakRange(PeakHoursRange) ?? TryParsePeakRange(DefaultPeakHoursRange);
+    }
 
     /// <summary>The window every club gets until it sets its own — blueprint A.12.</summary>
     public const string DefaultPeakHoursRange = "16:00-19:00";

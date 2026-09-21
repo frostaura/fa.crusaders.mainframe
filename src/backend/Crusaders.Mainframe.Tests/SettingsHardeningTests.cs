@@ -63,7 +63,6 @@ public class SettingsHardeningTests
     [Theory]
     [InlineData("19:00-16:00")]
     [InlineData("16:00")]
-    [InlineData("")]
     [InlineData("not-a-range")]
     [InlineData("16:00-16:00")]
     public async Task An_unusable_peak_window_falls_back_to_the_default_rather_than_disabling_peak(string stored)
@@ -74,6 +73,18 @@ public class SettingsHardeningTests
         Assert.NotNull(window);
         Assert.Equal(new TimeOnly(16, 0), window!.Value.start);
         Assert.Equal(new TimeOnly(19, 0), window.Value.end);
+    }
+
+    /// <summary>
+    /// But EMPTY is not a typo, it is a decision: a club that does not run league nights stores
+    /// an empty <c>peak_hours</c>, and inventing a window for them would grey out a quarter of
+    /// their grid and refuse bookings they want to sell.
+    /// </summary>
+    [Fact]
+    public async Task An_empty_peak_window_means_the_club_has_none()
+    {
+        var view = await ReadAsync("""{"peak_hours":""}""");
+        Assert.Null(view.PeakHours());
     }
 
     /// <summary>A well-formed window is still the club's own.</summary>

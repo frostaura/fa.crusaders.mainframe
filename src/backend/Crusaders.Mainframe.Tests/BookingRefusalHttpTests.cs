@@ -211,10 +211,25 @@ public sealed class BookingRefusalHttpTests
         var (status, body) = await PostBookingAsync(member, s.CourtId, NextDayAt(10));
 
         Assert.Equal(HttpStatusCode.Conflict, status);
-        Assert.Equal("per_day_cap_exceeded", body.GetProperty("error").GetString());
-        Assert.Equal(60, body.GetProperty("cap_minutes").GetInt32());
-        Assert.Equal(60, body.GetProperty("already_booked_minutes").GetInt32());
-        Assert.Equal(15, body.GetProperty("attempted_minutes").GetInt32());
+
+        // The SLOT cap is what bound, and what the member is told about. GOAL item 19 asked for
+        // slots because that is what a member counts and what a grid locks buttons against, and
+        // on a default club four slots IS the sixty minutes blueprint A.4 already required — so
+        // the two bite together and naming the slot one is what makes the sentence match the
+        // screen. The minutes twin still fires when it alone binds.
+        Assert.Equal("per_day_slot_cap_exceeded", body.GetProperty("error").GetString());
+        Assert.Equal(4, body.GetProperty("cap_slots").GetInt32());
+        Assert.Equal(4, body.GetProperty("booked_slots").GetInt32());
+        Assert.Equal(1, body.GetProperty("attempted_slots").GetInt32());
+        Assert.Equal(0, body.GetProperty("remaining_slots").GetInt32());
+
+        // Bound by the club's own number, not a group's — and the body says which, so the
+        // sentence can name the group when one is responsible.
+        Assert.Equal("tenant", body.GetProperty("bound_by").GetString());
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("group_name").ValueKind);
+
+        // resets_at so the client never computes a club midnight in a browser.
+        Assert.NotEqual(JsonValueKind.Null, body.GetProperty("resets_at").ValueKind);
     }
 
     [SkippableFact]

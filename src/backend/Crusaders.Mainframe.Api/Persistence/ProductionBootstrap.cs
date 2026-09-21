@@ -167,6 +167,9 @@ public static class ProductionBootstrap
             db.Tenants.Add(tenant);
             db.TenantSettings.Add(new TenantSettings { TenantId = tenant.Id, SettingsJson = InitialSettingsJson });
             await db.SaveChangesAsync();
+            // GOAL item 3's two named groups, unrestricted and inheriting — see MemberGroupSeeder
+            // for why they start that way and why that is what makes this safe on a live club.
+            await MemberGroupSeeder.EnsureAsync(db, tenant.Id);
             created.Add($"tenant '{plan.Slug}'");
             return tenant;
         }

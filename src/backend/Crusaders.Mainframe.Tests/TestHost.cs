@@ -103,6 +103,7 @@ public sealed class TestHost : IAsyncDisposable
         services.AddScoped<Crusaders.Mainframe.Api.Security.DeviceAuth.DeviceKeyResolver>();
         services.AddScoped<LedgerService>();
         services.AddScoped<ScheduleService>();
+        services.AddScoped<BookingRules>();
         services.AddScoped<BookingService>();
         services.AddScoped<CourtActivationService>();
         services.AddScoped<BiometricService>();
