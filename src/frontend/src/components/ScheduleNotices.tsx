@@ -45,7 +45,21 @@ export function ScheduleNotices({ notices, live, onNextDay }: {
 }) {
   return (
     <>
+      {/* The live region itself, and the thing a SIGHTED member reads.
+          They are two nodes on purpose. The region must be `sr-only` and must stay mounted —
+          a conditionally-rendered region announces on mount, which is how a screen ends up
+          re-reading a standing banner every time a poll swaps a payload. The visible half is
+          `aria-hidden`, because one press must produce exactly one announcement.
+          Both halves matter: D4 §2.9's finding was that a member tapped a restricted cell and
+          NOTHING happened, and an explanation only a screen reader hears leaves that defect
+          in place for everyone who can see. */}
       <div role="status" aria-live="polite" className="sr-only">{live}</div>
+      {live.trim() && (
+        <div aria-hidden="true"
+          className="rounded-lg border border-info-soft bg-info-soft text-info-strong p-3 sm:p-4 text-sm">
+          {live}
+        </div>
+      )}
       {notices.map((n) => (
         <div key={n.id} role="status"
           className="rounded-lg border border-warning-strong/30 bg-warning-soft text-warning-strong p-3 sm:p-4 flex flex-wrap items-start gap-3">

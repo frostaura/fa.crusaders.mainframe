@@ -166,6 +166,20 @@ describe("item 3 — the group's window, on the member's grid", () => {
     expect(document.body.textContent).toMatch(/You're in Non-league members/);
   });
 
+  it("shows that explanation to somebody who can SEE, not only to a screen reader", async () => {
+    // D4 §2.9's finding was that a member tapped a restricted cell and nothing happened. An
+    // explanation only a screen reader hears leaves that defect in place for everyone else.
+    open(dayWith(GROUPED));
+    const restricted = await screen.findByRole("button", { name: /Court 1 at 17:00 — outside the times/ });
+    await act(async () => { restricted.click(); });
+
+    const visible = screen.getAllByText(/You can book 16:00–17:00 on this day/)
+      .filter((el) => !el.closest(".sr-only"));
+    expect(visible.length).toBeGreaterThan(0);
+    // And exactly one announcement for one press — the visible half is `aria-hidden`.
+    expect(visible[0].closest("[aria-hidden='true']")).not.toBeNull();
+  });
+
   it("names the rate as a membership rather than as a difference done to the member", async () => {
     open(dayWith(GROUPED));
     // Naming the group is what makes it a membership the member chose. A price COMPARISON is
