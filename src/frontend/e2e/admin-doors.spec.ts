@@ -369,8 +369,8 @@ test.describe("One door's page", () => {
 
     await expect(page.getByText("Needs a door name")).toBeVisible();
     await page.getByRole("button", { name: /^Edit / }).click();
-    await page.getByLabel("Name", { exact: true }).fill("Front door");
-    await page.getByLabel("Door name", { exact: true }).fill("front-door");
+    await page.getByLabel("What the club calls it", { exact: true }).fill("Front door");
+    await page.getByLabel(/Name the board uses offline/).fill("front-door");
 
     const patch = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/admin/devices/"));
     // Re-served WITH the PATCH route: `serveApi` replaces the whole table, and a re-serve
@@ -425,7 +425,7 @@ test.describe("One door's page", () => {
 
     const patch = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/admin/devices/"));
     await page.getByRole("button", { name: /^Edit / }).click();
-    await page.getByLabel("Door name", { exact: true }).fill("   ");
+    await page.getByLabel(/Name the board uses offline/).fill("   ");
     await page.getByRole("button", { name: /Save this door/ }).click();
 
     // A19: one form over all four writable fields, so one PATCH carrying all four. `""`,
@@ -448,11 +448,15 @@ test.describe("One door's page", () => {
   test("says what shutting a DOOR costs, and none of what it costs a box", async ({ page }) => {
     await openDoor(page, [door({ name: "Front door", gate_key: "front-door" })]);
 
-    const notice = page.getByText(/^The club is not alerted about its silence/);
+    // B4 / R3-24: it used to open "The club is not alerted about its silence…" — a clause
+    // with no subject, about ALERTS, under a heading about shutting a door. Both halves are
+    // still said; the order and the subject changed.
+    const notice = page.getByText(/^Shutting a door refuses every scan at it/);
     await expect(notice).toBeVisible();
     await expect(notice).toContainText("can still reach the club hears that refusal and opens for nobody");
     await expect(notice).toContainText("has also lost the network never hears it");
     await expect(notice).toContainText("up to six hours");
+    await expect(notice).toContainText("stops raising its silence as a fault");
     // A1.1: the denial survives P5's ban on the tokens.
     await expect(notice).toContainText("a door marks nobody as having arrived");
     await expect(notice).not.toContainText("check-in");
@@ -467,7 +471,14 @@ test.describe("One door's page", () => {
     await expect(page.getByRole("button", { name: /Take out of service/ })).toHaveCount(0);
   });
 
-  test("sends only enabled when a door is shut", async ({ page }) => {
+  /**
+   * <b>B13 / R3-34: and what this page last READ, so a stale tab is refused.</b>
+   *
+   * Still only those two keys — no name, no gate key, no court fields. `expected_enabled` is
+   * the negation of the request by construction: a control offering "Shut" was rendered from
+   * a door the page read as open.
+   */
+  test("sends only enabled, and what it expected, when a door is shut", async ({ page }) => {
     const only = door({ name: "Front door", gate_key: "front-door" });
     await openDoor(page, [only], [
       { method: "PATCH", path: "/api/v1/admin/devices/", body: { ...only, enabled: false } },
@@ -477,7 +488,7 @@ test.describe("One door's page", () => {
     await page.getByRole("button", { name: "Shut this door — Front door" }).click();
     await page.getByRole("button", { name: "Shut this door — Front door — tap again to confirm" }).click();
 
-    expect((await patch).postData()).toBe('{"enabled":false}');
+    expect((await patch).postData()).toBe('{"enabled":false,"expected_enabled":true}');
   });
 
   /**

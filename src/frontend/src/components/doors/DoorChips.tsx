@@ -60,11 +60,15 @@ export function DoorChips({ device, online, signals }: {
         on the FIRST chip only: it labels the group, and repeating it before each of three
         chips is the noise that teaches somebody to skip the row.
       */}
-      {chips.map((chip, i) => (
-        <Badge key={chip.label} tone={chip.tone}>
-          {i === 0 && <span className="sr-only">Status: </span>}{chip.label}
-        </Badge>
-      ))}
+      {/*
+        <b>Beside the badges, not inside the first one.</b> Inside, the prefix becomes part
+        of that badge's own text — so the badge reads "Status: Reporting" to every exact
+        text query in the suite and to speech control, which is the WCAG 2.5.3 failure
+        `ConfirmButton` documents at length, one component along. A sibling labels the group
+        and leaves each chip's own words alone.
+      */}
+      <span className="sr-only">Status: </span>
+      {chips.map((chip) => <Badge key={chip.label} tone={chip.tone}>{chip.label}</Badge>)}
     </span>
   );
 }

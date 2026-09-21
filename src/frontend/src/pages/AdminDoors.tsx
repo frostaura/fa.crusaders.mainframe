@@ -303,7 +303,13 @@ function AdminDoorsPageBody() {
         phone moves the card a thumb is already descending on. The slot is reserved, so the
         summary appearing and disappearing across polls costs no layout at all.
       */}
-      <div className="min-h-14">
+      {/*
+        A-L1 / R3-27 raised this reserve. The summary's link to the door is a 44 px target
+        now — it was 17 px — so the banner is taller than the 56 px slot it used to fit in,
+        and a slot that is too small is the A10 defect it exists to prevent: the banner
+        ARRIVES on a poll and shifts the card a thumb is already descending on.
+      */}
+      <div className="min-h-[76px]">
         {summary && (
           <p role="status" className="rounded-lg bg-warning-soft px-3 py-2.5 text-sm text-warning-strong">
             {summary}
