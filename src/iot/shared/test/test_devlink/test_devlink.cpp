@@ -39,6 +39,7 @@
 #include "devlink/Cadence.h"
 #include "devlink/EventUpload.h"
 #include "devlink/LcdSettings.h"
+#include "devlink/RelayRestore.h"
 #include "devlink/RosterSync.h"
 #include "eventq/Event.h"
 #include "roster/Roster.h"
@@ -894,6 +895,288 @@ void test_lcd_settings_a_wrong_type_or_a_cut_body_adopts_nothing() {
   }
 }
 
+// -------------------------------------------------------------------------
+// RelayRestore — what should be on after a power dip (GOAL 17)
+// -------------------------------------------------------------------------
+//
+// Today a power dip loses every lit court and there is no restore path
+// anywhere: the Mega's begin() opens every relay — correct, and what makes a
+// watchdog reset safe — the bridge sets every court dark as of now, and the
+// heartbeat response carries no relay state at all. The member's booking is
+// still live, they are still charged, and the roster will not re-grant them.
+//
+// The wire is an array of PIPE-DELIMITED STRINGS rather than objects, for the
+// same reason the roster's is: this end has a heapless JSON SCANNER, not a
+// parser, and `devapi::json` offers no object-array walker. Adding one is a new
+// failure surface for no gain.
+
+/// `cap` for these fixtures. Four is the widest relay bank in the tree today,
+/// but it is the CALLER's number rather than devlink's — this library takes a
+/// plain array and a capacity and knows nothing about a court. The assertion
+/// that four is THIS box's number lives on the device side, the way
+/// `bridgelogic/RosterTokenFits.h` does.
+constexpr uint8_t kRestoreCap = 4U;
+
+const char* kRestoreTwo = "{\"server_time\":\"2023-11-14T22:13:20+00:00\","
+                          "\"relays\":[\"0|1834|3fa85f64\",\"2|600|9c1d0e22\"],\"roster\":[]}";
+
+void test_relay_restore_reads_two_relays_and_their_true_remainder() {
+  devlink::RelayRestore out[kRestoreCap];
+  uint8_t count = 99U;
+  uint8_t rejected = 99U;
+  TEST_ASSERT_TRUE(
+      devlink::parseRelayRestore(kRestoreTwo, len(kRestoreTwo), out, kRestoreCap, count, &rejected));
+  TEST_ASSERT_EQUAL_UINT8(2U, count);
+  TEST_ASSERT_EQUAL_UINT8(0U, rejected);
+
+  TEST_ASSERT_EQUAL_UINT8(0U, out[0].relay);
+  TEST_ASSERT_EQUAL_UINT32(1834UL, out[0].remainingSeconds);
+  TEST_ASSERT_EQUAL_STRING("3fa85f64", out[0].bookingRef);
+  TEST_ASSERT_EQUAL_UINT8(2U, out[1].relay);
+  TEST_ASSERT_EQUAL_UINT32(600UL, out[1].remainingSeconds);
+  TEST_ASSERT_EQUAL_STRING("9c1d0e22", out[1].bookingRef);
+
+  // NO CLOCK IS READ, and that is the property that makes the restore safe on a
+  // box whose clock is unknown: `remaining_seconds` is relative to the instant
+  // the response was produced, exactly like the roster's opens_in/closes_in.
+  // Run at every base the suites use — the answer cannot move, because there is
+  // no `millis()` anywhere in the path.
+  for (size_t i = 0U; i < kBaseCount; ++i) {
+    devlink::RelayRestore again[kRestoreCap];
+    uint8_t n = 0U;
+    TEST_ASSERT_TRUE(devlink::parseRelayRestore(kRestoreTwo, len(kRestoreTwo), again, kRestoreCap, n));
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(2U, n, "the restore must not depend on a clock");
+    TEST_ASSERT_EQUAL_UINT32(1834UL, again[0].remainingSeconds);
+    static_cast<void>(kBases[i]);
+  }
+}
+
+/// THE THREE ABSENCES, and they mean three different things.
+///
+///   * key ABSENT — this API does not do restore. Nothing is switched, and a
+///     box must not wait for one.
+///   * EMPTY ARRAY — nothing should be on. Still switches NOTHING OFF: making
+///     an empty array an off-command would hand the API a way to darken a court
+///     mid-game, which it must not have.
+///   * NOT AN ARRAY — read as absent, so a contract drift cannot be acted on.
+void test_relay_restore_absent_and_empty_are_not_an_off_command() {
+  devlink::RelayRestore out[kRestoreCap];
+  uint8_t count = 0U;
+  uint8_t rejected = 0U;
+
+  // Seed the array so an "untouched" claim means something.
+  TEST_ASSERT_TRUE(
+      devlink::parseRelayRestore(kRestoreTwo, len(kRestoreTwo), out, kRestoreCap, count, &rejected));
+
+  const char absent[] = "{\"heartbeat_seconds\":60,\"roster\":[]}";
+  uint8_t after = 99U;
+  uint8_t afterRejected = 99U;
+  TEST_ASSERT_FALSE(devlink::parseRelayRestore(absent, len(absent), out, kRestoreCap, after, &afterRejected));
+  TEST_ASSERT_EQUAL_UINT8(99U, after);         // untouched
+  TEST_ASSERT_EQUAL_UINT8(99U, afterRejected); // untouched
+  TEST_ASSERT_EQUAL_UINT32(1834UL, out[0].remainingSeconds);
+
+  const char notArray[] = "{\"relays\":\"0|1834|3fa85f64\"}";
+  TEST_ASSERT_FALSE(devlink::parseRelayRestore(notArray, len(notArray), out, kRestoreCap, after));
+  TEST_ASSERT_EQUAL_UINT8(99U, after);
+
+  const char notArrayObject[] = "{\"relays\":{\"0\":1834}}";
+  TEST_ASSERT_FALSE(devlink::parseRelayRestore(notArrayObject, len(notArrayObject), out, kRestoreCap, after));
+
+  TEST_ASSERT_FALSE(devlink::parseRelayRestore(nullptr, 32U, out, kRestoreCap, after));
+
+  // The empty array: a restore push that restores nothing, which is DIFFERENT
+  // from no push at all — the caller learns "the server has an opinion and the
+  // opinion is none" and still switches nothing off.
+  const char empty[] = "{\"relays\":[],\"roster\":[]}";
+  uint8_t none = 99U;
+  uint8_t noneRejected = 99U;
+  TEST_ASSERT_TRUE(devlink::parseRelayRestore(empty, len(empty), out, kRestoreCap, none, &noneRejected));
+  TEST_ASSERT_EQUAL_UINT8(0U, none);
+  TEST_ASSERT_EQUAL_UINT8(0U, noneRejected);
+  // And the array the caller passed is untouched: nothing was written over it,
+  // so nothing in it can be mistaken for a court to darken.
+  TEST_ASSERT_EQUAL_UINT32(1834UL, out[0].remainingSeconds);
+}
+
+/// MUTATION-PROVED, and the mutant is the one the roster already refuses: a
+/// TWO-DIGIT relay. `parseRelay`'s rule, verbatim — "a relay number is an
+/// index, not a quantity, and a second digit means somebody is sending
+/// something else". Accept `01` as relay 1 and this goes red.
+void test_relay_restore_refuses_every_malformed_element_shape() {
+  static const char* kMalformed[] = {
+      "{\"relays\":[\"9|100|3fa85f64\"]}",      // a relay this box does not have
+      "{\"relays\":[\"4|100|3fa85f64\"]}",      // one past the last
+      "{\"relays\":[\"01|100|3fa85f64\"]}",     // TWO DIGITS — the mutant
+      "{\"relays\":[\"00|100|3fa85f64\"]}",     // and a leading zero is not relay 0
+      "{\"relays\":[\"A|100|3fa85f64\"]}",      // not a digit
+      "{\"relays\":[\"|100|3fa85f64\"]}",       // no relay at all
+      "{\"relays\":[\"0|abc|3fa85f64\"]}",      // non-numeric seconds
+      "{\"relays\":[\"0|-100|3fa85f64\"]}",     // signed seconds
+      "{\"relays\":[\"0|1e3|3fa85f64\"]}",      // exponent
+      "{\"relays\":[\"0| 100|3fa85f64\"]}",     // leading space
+      "{\"relays\":[\"0||3fa85f64\"]}",         // empty seconds
+      "{\"relays\":[\"0|100|3fa85f64|x\"]}",    // a FOURTH field
+      "{\"relays\":[\"0|100|3fa85f64|x|y\"]}",  // a FIFTH field
+      "{\"relays\":[\"0|100\"]}",               // a MISSING field
+      "{\"relays\":[\"0|100|\"]}",              // an empty booking ref
+      "{\"relays\":[\"0|100|3fa85f64a\"]}",     // a ref past the eight-character cap
+      "{\"relays\":[\"0|100|3fa85f6 \"]}",      // a ref outside the alphabet
+      "{\"relays\":[\"0|100|3fa,5f64\"]}",      // the same, with a JSON metacharacter
+      "{\"relays\":[\"\"]}",                    // an empty element
+      "{\"relays\":[\"0|4294967296|3fa85f6\"]}" // past what a uint32_t holds
+  };
+
+  for (size_t i = 0U; i < sizeof(kMalformed) / sizeof(kMalformed[0]); ++i) {
+    devlink::RelayRestore out[kRestoreCap];
+    uint8_t count = 99U;
+    uint8_t rejected = 99U;
+    TEST_ASSERT_TRUE_MESSAGE(
+        devlink::parseRelayRestore(kMalformed[i], strlen(kMalformed[i]), out, kRestoreCap, count, &rejected),
+        kMalformed[i]);
+    // The PUSH is still a push — the key was there, the server had an opinion.
+    // The ELEMENT is refused and counted, and nothing is energised from it.
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, count, kMalformed[i]);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, rejected, kMalformed[i]);
+  }
+
+  // Exactly at the bounds, all of which must be ACCEPTED, or the refusals above
+  // prove nothing but that the parser refuses everything.
+  static const char* kWellFormed[] = {
+      "{\"relays\":[\"0|0|3fa85f64\"]}",          // relay 0, nothing remaining
+      "{\"relays\":[\"3|4294967295|3fa85f64\"]}", // the last relay, the largest uint32_t
+      "{\"relays\":[\"1|500|z\"]}",               // a one-character reference
+      "{\"relays\":[\"2|500|ABCDEF01\"]}",        // exactly eight, upper case
+  };
+  for (size_t i = 0U; i < sizeof(kWellFormed) / sizeof(kWellFormed[0]); ++i) {
+    devlink::RelayRestore out[kRestoreCap];
+    uint8_t count = 99U;
+    uint8_t rejected = 99U;
+    TEST_ASSERT_TRUE_MESSAGE(devlink::parseRelayRestore(kWellFormed[i], strlen(kWellFormed[i]), out,
+                                                        kRestoreCap, count, &rejected),
+                             kWellFormed[i]);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(1U, count, kWellFormed[i]);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0U, rejected, kWellFormed[i]);
+  }
+}
+
+/// `remaining_seconds` IS THE UNCAPPED TRUE REMAINDER and the clamp is the
+/// caller's. The box clamps the `!ON` to ninety minutes itself — twice, once in
+/// the codec and once on the Mega — and arms its extension logic from the
+/// UNCAPPED value. Capping here would hide from the bridge that the booking
+/// outlives the relay deadline, which is exactly what `!EXT` exists for: the
+/// court would go dark ninety minutes in with half the booking left.
+void test_relay_restore_remaining_comes_through_uncapped() {
+  devlink::RelayRestore out[kRestoreCap];
+  uint8_t count = 0U;
+
+  // 9999 s is nearly three hours, well past the 5400 s relay hard cap.
+  const char overCap[] = "{\"relays\":[\"1|9999|3fa85f64\"]}";
+  TEST_ASSERT_TRUE(devlink::parseRelayRestore(overCap, len(overCap), out, kRestoreCap, count));
+  TEST_ASSERT_EQUAL_UINT8(1U, count);
+  TEST_ASSERT_EQUAL_UINT32(9999UL, out[0].remainingSeconds);
+  TEST_ASSERT_TRUE(out[0].remainingSeconds > 5400UL);
+
+  // And the ms value a naive caller would compute does NOT wrap at the value
+  // this parser admits — which is why the bound here is UINT32_MAX seconds and
+  // the roster's is UINT32_MAX/1000: the roster multiplies, this does not.
+  const char largest[] = "{\"relays\":[\"0|4294967295|ref\"]}";
+  TEST_ASSERT_TRUE(devlink::parseRelayRestore(largest, len(largest), out, kRestoreCap, count));
+  TEST_ASSERT_EQUAL_UINT32(4294967295UL, out[0].remainingSeconds);
+}
+
+/// ONE BAD ELEMENT MUST NOT COST THE WELL-FORMED ONES — `RosterSync.h`'s
+/// sentence about one bad booking and the evening's other fifteen, applied to a
+/// court that is dark and should not be. The contract's own vector.
+void test_relay_restore_one_bad_element_does_not_cost_the_good_ones() {
+  devlink::RelayRestore out[kRestoreCap];
+  uint8_t count = 0U;
+  uint8_t rejected = 0U;
+
+  const char mixed[] = "{\"relays\":[\"9|100|x\",\"0|abc|y\",\"1|500|z\"]}";
+  TEST_ASSERT_TRUE(devlink::parseRelayRestore(mixed, len(mixed), out, kRestoreCap, count, &rejected));
+  TEST_ASSERT_EQUAL_UINT8(1U, count);
+  TEST_ASSERT_EQUAL_UINT8(2U, rejected);
+  TEST_ASSERT_EQUAL_UINT8(1U, out[0].relay);
+  TEST_ASSERT_EQUAL_UINT32(500UL, out[0].remainingSeconds);
+  TEST_ASSERT_EQUAL_STRING("z", out[0].bookingRef);
+
+  // More elements than the caller's capacity. Counted rather than silently
+  // dropped: a server telling this box to light five relays is a configuration
+  // nobody should discover from a dark court.
+  const char five[] = "{\"relays\":[\"0|10|a\",\"1|20|b\",\"2|30|c\",\"3|40|d\",\"0|50|e\"]}";
+  uint8_t full = 0U;
+  uint8_t overflow = 0U;
+  TEST_ASSERT_TRUE(devlink::parseRelayRestore(five, len(five), out, kRestoreCap, full, &overflow));
+  TEST_ASSERT_EQUAL_UINT8(4U, full);
+  TEST_ASSERT_EQUAL_UINT8(1U, overflow);
+  TEST_ASSERT_EQUAL_UINT32(40UL, out[3].remainingSeconds);
+
+  // `rejected` is optional; a caller that does not want the diagnosis passes
+  // nothing and must still get the same accepted set.
+  uint8_t plain = 0U;
+  TEST_ASSERT_TRUE(devlink::parseRelayRestore(mixed, len(mixed), out, kRestoreCap, plain));
+  TEST_ASSERT_EQUAL_UINT8(1U, plain);
+
+  // A capacity of zero accepts nothing and counts everything — a degenerate
+  // caller, but not one that may write past the end of an array.
+  uint8_t zero = 99U;
+  uint8_t zeroRejected = 0U;
+  TEST_ASSERT_TRUE(devlink::parseRelayRestore(mixed, len(mixed), out, 0U, zero, &zeroRejected));
+  TEST_ASSERT_EQUAL_UINT8(0U, zero);
+  TEST_ASSERT_EQUAL_UINT8(3U, zeroRejected);
+  TEST_ASSERT_FALSE(devlink::parseRelayRestore(mixed, len(mixed), nullptr, kRestoreCap, zero));
+}
+
+/// A TRUNCATED BODY RESTORES NOTHING. Every element of this array CLOSES A
+/// RELAY — it physically energises a court — and half a JSON document is not a
+/// sentence the server finished saying. The restore is additive and the server
+/// re-serves it on every heartbeat while those courts should be on, so waiting
+/// one interval costs seconds; acting on a cut body costs a court lit from
+/// bytes nobody sent. Same rule, same reasoning, as `applyRoster`'s.
+void test_relay_restore_a_truncated_body_restores_nothing() {
+  static const char* kTruncated[] = {
+      "{\"relays\":[\"0|1834|3fa85f64\",\"2|600|9c1d0e",     // cut mid-element
+      "{\"relays\":[\"0|1834|3fa85f64\",\"2|600|9c1d0e22\"", // cut before the bracket
+      "{\"relays\":[\"0|1834|3fa85f64\"]",                   // cut before the brace
+      "{\"relays\":[",                                       // cut at the opening bracket
+  };
+
+  for (size_t i = 0U; i < sizeof(kTruncated) / sizeof(kTruncated[0]); ++i) {
+    devlink::RelayRestore out[kRestoreCap];
+    uint8_t count = 99U;
+    uint8_t rejected = 99U;
+    TEST_ASSERT_FALSE_MESSAGE(
+        devlink::parseRelayRestore(kTruncated[i], strlen(kTruncated[i]), out, kRestoreCap, count, &rejected),
+        kTruncated[i]);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(99U, count, kTruncated[i]);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(99U, rejected, kTruncated[i]);
+  }
+}
+
+/// A DECOY `relays` IS NOT THE RESTORE. The roster narrowed to the TOP-LEVEL
+/// array for exactly this reason (round G4, B2) and this array drives relays
+/// directly, so it is narrowed the same way: a nested `relays` placed before
+/// the real one is the list this board would otherwise have energised. The
+/// club's own slug and a button-map element are the decoys that actually
+/// arrive.
+void test_relay_restore_a_decoy_relays_array_is_not_the_restore() {
+  devlink::RelayRestore out[kRestoreCap];
+  uint8_t count = 0U;
+  uint8_t rejected = 0U;
+
+  const char nested[] =
+      "{\"tenant_slug\":\"relays\",\"device_code\":\"court-box-1\","
+      "\"config\":{\"button_map\":[\"relays\"],\"vendor\":{\"relays\":[\"3|9999|ffffffff\"]}},"
+      "\"relays\":[\"1|500|3fa85f64\"],\"roster\":[]}";
+  TEST_ASSERT_TRUE(devlink::parseRelayRestore(nested, len(nested), out, kRestoreCap, count, &rejected));
+  TEST_ASSERT_EQUAL_UINT8(1U, count);
+  TEST_ASSERT_EQUAL_UINT8(0U, rejected);
+  TEST_ASSERT_EQUAL_UINT8(1U, out[0].relay);
+  TEST_ASSERT_EQUAL_UINT32(500UL, out[0].remainingSeconds);
+  TEST_ASSERT_EQUAL_STRING("3fa85f64", out[0].bookingRef);
+}
+
 void test_heartbeat_body_names_the_box_and_survives_the_millis_wrap() {
   // The one field an auto-registering backend keys everything off. It was a
   // snprintf in the composition root, which `pio test` cannot see — so this is
@@ -963,6 +1246,14 @@ int main(int, char**) {
   RUN_TEST(test_lcd_settings_raise_scan_memory_and_never_lower_the_choice_window);
   RUN_TEST(test_lcd_settings_a_decoy_at_a_deeper_level_is_not_adopted);
   RUN_TEST(test_lcd_settings_a_wrong_type_or_a_cut_body_adopts_nothing);
+
+  RUN_TEST(test_relay_restore_reads_two_relays_and_their_true_remainder);
+  RUN_TEST(test_relay_restore_absent_and_empty_are_not_an_off_command);
+  RUN_TEST(test_relay_restore_refuses_every_malformed_element_shape);
+  RUN_TEST(test_relay_restore_remaining_comes_through_uncapped);
+  RUN_TEST(test_relay_restore_one_bad_element_does_not_cost_the_good_ones);
+  RUN_TEST(test_relay_restore_a_truncated_body_restores_nothing);
+  RUN_TEST(test_relay_restore_a_decoy_relays_array_is_not_the_restore);
 
   RUN_TEST(test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap);
   RUN_TEST(test_the_event_body_escapes_a_subject_whatever_bytes_are_in_it);

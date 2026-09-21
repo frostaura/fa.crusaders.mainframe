@@ -97,6 +97,17 @@ bool parseCourtNumbers(const char* body, size_t len, int16_t out[kMaxCourts], ui
 
 namespace detail {
 
+/// Exactly one digit, `0`-`3`. False — with `out` untouched — on anything else,
+/// including `01`: <b>a relay number is an index, not a quantity</b>, and a
+/// second digit means somebody is sending something else. Clamping `4` to `3`
+/// or reading `01` as `1` lights a different court.
+///
+/// Shared rather than restated, because it is now the rule for TWO wire
+/// grammars — the roster's `TOKEN|relay|opens_in|closes_in` and the restore's
+/// `relay|remaining_seconds|booking_ref` — and a safety rule written down twice
+/// is a safety rule that drifts once.
+bool parseRelayDigit(const char* text, size_t len, uint8_t& out);
+
 /// Finds the next `"..."` element in the array at `at`, without copying it.
 /// Yields the span of the string's contents and advances `at` past the closing
 /// quote. False at the closing bracket or the end of the buffer.
