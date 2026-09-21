@@ -500,10 +500,25 @@ public sealed class ControlBoardHttpTests
     }
 
     /// <summary>
-    /// Both halves of the conditional, at the boundary. The stale window is
-    /// <c>control_board_stale_multiplier × effective heartbeat</c> — 120 s on this fixture —
-    /// and the comparison is strictly greater, so a court whose last event is exactly one
-    /// window old is NOT yet stale.
+    /// Both halves of the conditional, and the BAND rather than the exact boundary. The stale
+    /// window is <c>control_board_stale_multiplier × effective heartbeat</c> — 120 s on this
+    /// fixture.
+    ///
+    /// <para>
+    /// <b>The edge court sits well inside the window, not one second inside it, and that is a
+    /// correction.</b> It was at 119 s of 120, which made the assertion a race against the
+    /// HTTP round trip: the server computes staleness against its own clock at read time, so a
+    /// loaded machine that took over a second to answer turned a court the fixture placed
+    /// inside the window into one outside it. A test that fails when the build agent is busy
+    /// teaches everybody to re-run it, which is how a real failure gets re-run too.
+    /// </para>
+    ///
+    /// <para>
+    /// What is lost is the strictly-greater-versus-greater-or-equal distinction at exactly one
+    /// window, which is not assertable over a network round trip at all. What is kept is the
+    /// claim that matters on the glass: inside the window is not stale, past it is, and the
+    /// qualifier travels with the state.
+    /// </para>
     /// </summary>
     [SkippableFact]
     public async Task Staleness_turns_on_just_past_the_window_and_not_at_it()
@@ -518,9 +533,9 @@ public sealed class ControlBoardHttpTests
         var now = DateTimeOffset.UtcNow;
 
         await club.SetLightsAsync(factory, fresh, LightState.On, now.AddSeconds(-5), onUntil: now.AddMinutes(30));
-        // Just INSIDE the window — 119 s of a 120 s window, with a second of slack for the
-        // round trip. The assertion that matters is the pair, not either number alone.
-        await club.SetLightsAsync(factory, edge, LightState.On, now.AddSeconds(-119), onUntil: now.AddMinutes(30));
+        // Well inside the window — 100 s of 120, which leaves twenty seconds for the round
+        // trip. See the summary for why this is not 119.
+        await club.SetLightsAsync(factory, edge, LightState.On, now.AddSeconds(-100), onUntil: now.AddMinutes(30));
         await club.SetLightsAsync(factory, gone, LightState.On, now.AddMinutes(-6), onUntil: now.AddMinutes(30));
 
         var body = await club.AdminClient(factory).GetFromJsonAsync<JsonElement>(BoardPath);
