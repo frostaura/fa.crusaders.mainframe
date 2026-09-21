@@ -30,46 +30,51 @@ bool twoDigits(const char* s, size_t at, uint32_t& out) {
 /// disagreeing answer to a question already answered.
 constexpr size_t kIsoPrefixLen = 19U;
 
-} // namespace
+/// The separators, checked BEFORE the digits.
+///
+/// A string that is the right length but the wrong shape would otherwise yield
+/// a plausible time from whatever bytes happened to sit at the offsets — and a
+/// plausible time is acted on rather than questioned. `T`, `t` and a space are
+/// all legal date-time separators in the wild.
+bool isoShapeIsRight(const char* s) {
+  const char sep = s[10];
+  return s[4] == '-' && s[7] == '-' && (sep == 'T' || sep == 't' || sep == ' ') && s[13] == ':' &&
+         s[16] == ':';
+}
 
-bool secondOfDayFrom(const char* serverTime, uint32_t& out) {
-  if (serverTime == nullptr || strnlen(serverTime, kIsoPrefixLen) < kIsoPrefixLen) {
-    return false;
-  }
-  // The separators, checked before the digits: a string that is the right
-  // length but the wrong shape would otherwise yield a plausible time from
-  // whatever bytes sat at the offsets below.
-  const char sep = serverTime[10];
-  if (serverTime[4] != '-' || serverTime[7] != '-' || (sep != 'T' && sep != 't' && sep != ' ') ||
-      serverTime[13] != ':' || serverTime[16] != ':') {
-    return false;
-  }
-  // The date is checked for shape and discarded. The box shows a time, never a
-  // date, and nothing about its behaviour changes if it thinks it is Tuesday.
-  uint32_t year = 0U;
-  uint32_t month = 0U;
-  uint32_t day = 0U;
-  if (!twoDigits(serverTime, 0U, year) || !twoDigits(serverTime, 2U, year) ||
-      !twoDigits(serverTime, 5U, month) || !twoDigits(serverTime, 8U, day)) {
-    return false;
-  }
+/// The date, checked for shape and DISCARDED. The box shows a time, never a
+/// date, and nothing about its behaviour changes if it thinks it is Tuesday —
+/// but a date that is not digits means the offsets below are not either.
+bool dateIsDigits(const char* s) {
+  uint32_t scratch = 0U;
+  return twoDigits(s, 0U, scratch) && twoDigits(s, 2U, scratch) && twoDigits(s, 5U, scratch) &&
+         twoDigits(s, 8U, scratch);
+}
 
+/// The three time fields, in range.
+///
+/// 60 is a leap second, which this does not model; 61 upwards is nonsense.
+/// Both are REFUSED rather than folded into the next minute, on the rule every
+/// reader in this tree follows: report absence, never a guess.
+bool timeOfDayFrom(const char* s, uint32_t& out) {
   uint32_t hours = 0U;
   uint32_t minutes = 0U;
   uint32_t seconds = 0U;
-  if (!twoDigits(serverTime, 11U, hours) || !twoDigits(serverTime, 14U, minutes) ||
-      !twoDigits(serverTime, 17U, seconds)) {
+  if (!twoDigits(s, 11U, hours) || !twoDigits(s, 14U, minutes) || !twoDigits(s, 17U, seconds)) {
     return false;
   }
-  // 60 is a leap second, which this does not model; 61 upwards is nonsense.
-  // Both are refused rather than folded into the next minute, on the rule every
-  // reader in this tree follows: report absence, never a guess.
   if (hours > 23U || minutes > 59U || seconds > 59U) {
     return false;
   }
-
   out = hours * 3600U + minutes * 60U + seconds;
   return true;
+}
+
+} // namespace
+
+bool secondOfDayFrom(const char* serverTime, uint32_t& out) {
+  return serverTime != nullptr && strnlen(serverTime, kIsoPrefixLen) >= kIsoPrefixLen &&
+         isoShapeIsRight(serverTime) && dateIsDigits(serverTime) && timeOfDayFrom(serverTime, out);
 }
 
 uint32_t WallClock::trustMs() const {
