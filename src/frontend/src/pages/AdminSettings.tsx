@@ -1298,7 +1298,15 @@ function CourtRow({ court, reload }: { court: AdminCourt; reload: () => Promise<
           confirmLabel="Confirm deactivate"
           onConfirm={remove}
           tone="danger"
-          className="h-11 px-4"
+          /*
+            No `className`. It was `h-11 px-4`, and neither half was doing what it looked like.
+            `h-11` is stripped by the component (`withoutFixedHeight`) because a height is not a
+            floor and a control shorter than its own words is the defect that rule closes. And
+            `px-4` is 1 rem a side — 32 px each at a 32 px root font size, 64 px of padding
+            inside a control this row gives 140 px to, leaving 76 px for the word "Deactivate".
+            The component's own `px-[12px]` is in pixels for exactly that reason; overriding it
+            with a rem put the padding back on the scale the padding was taken off.
+          */
         />
       ) : (
         <span className="text-xs text-text-muted px-3">Inactive</span>

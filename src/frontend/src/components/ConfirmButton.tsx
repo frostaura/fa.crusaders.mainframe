@@ -318,16 +318,42 @@ const CONTROL_CLASS = cn(
  * </p>
  *
  * <p>
- * <b>What `auto-fit` does that a fixed pair cannot.</b> Two columns whenever 96 px each will
- * fit, and one column — the buttons stacked — when they will not. That is the B5 ruling
+ * <b>What `auto-fit` does that a fixed pair cannot.</b> Two columns whenever the floor will
+ * fit twice, and one column — the buttons stacked — when it will not. That is the B5 ruling
  * where the ruling is about anything: side by side is what keeps the Cancel on screen beside
  * the confirm, and at a width where side by side means four letters a line it has stopped
  * doing that. Stacked, the pair is 2 × 44 px plus a gap, which is on screen at every size
  * this product is used at; the failure B5 was raised on was a 1 232 px CONSEQUENCE pushing
  * the Cancel below the fold, and the consequence is no longer inside the control at all.
  * </p>
+ *
+ * <p>
+ * <b>The floor is `6rem`, and the unit is the whole point.</b> It was `96px`, which is the
+ * same number — at a 16 px root font size. At a 32 px one it is half of what it needs to be,
+ * and the look pass found exactly that on `/admin/devices` at 320 px: the pair went side by
+ * side in about 192 px, and at 32 px text "Delete" rendered as "Dele / te" and "Cancel" as
+ * "Cance / l". Words broken across lines on the two buttons of a destructive confirm, which
+ * is the failure the floor exists to prevent, reintroduced by the floor itself.
+ * </p>
+ *
+ * <p>
+ * <b>This is the opposite of the rule B12 applies to the chrome, and deliberately so.</b>
+ * There the boxes are in pixels because what they protect is a FINGERTIP, and 44 px is 44 px
+ * whatever size the text is. Here what the floor protects is a WORD, and a word at a 32 px
+ * root is twice as wide as the same word at 16 px. A measurement belongs in the unit of the
+ * thing it is measuring; the two rules disagree because they are about different things.
+ * </p>
+ *
+ * <p>
+ * <b>`min(6rem, 100%)`, because a `minmax` minimum is a HARD minimum.</b> A bare `6rem` floor
+ * is 192 px at a 32 px root, and the Courts row hands this control 140 px there — so `auto-fit`
+ * produced one column 52 px wider than the box containing it, and the button rendered out over
+ * the card. That is the overflow this whole grid exists to prevent, reintroduced by raising the
+ * floor to fix a different case. `min(…, 100%)` is the standard guard: the floor, or the whole
+ * of what there is, whichever is smaller.
+ * </p>
  */
-const ARMED_GRID_CLASS = "grid grid-cols-[repeat(auto-fit,minmax(96px,1fr))] gap-2";
+const ARMED_GRID_CLASS = "grid grid-cols-[repeat(auto-fit,minmax(min(6rem,100%),1fr))] gap-2";
 
 export function ConfirmButton({
   idleLabel,

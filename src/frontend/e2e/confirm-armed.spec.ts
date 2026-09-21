@@ -177,6 +177,22 @@ for (const size of SIZES) {
           // And nothing spills sideways off a 320 px phone.
           expect(box.x + box.width, `confirm ${i}'s ${name} runs past the right edge`)
             .toBeLessThanOrEqual(size.width + 1);
+
+          /**
+           * Nor out of the BOX it was given. (B5)
+           *
+           * <p>
+           * Found by mutation. A `minmax(6rem, 1fr)` column floor without the `min(…, 100%)`
+           * guard is 192 px at a 32 px root, the Courts row hands this control 140 px, and a
+           * `minmax` minimum is a hard minimum — so the button rendered 52 px wider than its
+           * own wrapper, out over the card. The viewport check above cannot see it: 192 px
+           * inside a 320 px phone is comfortably on screen, it is simply in the wrong place.
+           * </p>
+           */
+          const overflow = await button.evaluate((node) =>
+            Math.round(node.getBoundingClientRect().width - node.parentElement!.getBoundingClientRect().width));
+          expect(overflow, `confirm ${i}'s ${name} is ${overflow} px wider than the box holding it`)
+            .toBeLessThanOrEqual(1);
         }
 
         /**
@@ -200,8 +216,65 @@ for (const size of SIZES) {
          * the width the control was actually given.
          * </p>
          */
+        /**
+         * NO BUTTON BREAKS A WORD THAT WOULD HAVE FITTED. (B5 / C2)
+         *
+         * <p>
+         * Found by looking, in the look pass, at `/admin/devices` at 320 px with a 32 px root
+         * font: the pair went side by side in about 192 px of room and rendered "Dele / te"
+         * beside "Cance / l" — two words that had all the room they needed, broken because the
+         * grid's column floor was written in pixels and did not move with the text.
+         * </p>
+         *
+         * <p>
+         * <b>Not "never breaks".</b> `break-words` is on the control deliberately: a word wider
+         * than any box it can be given must break the WORD rather than the layout, or it renders
+         * out over the card, which is worse. The Courts row genuinely hands this control 140 px
+         * at a 32 px root, and "Deactivate" does not fit in 140 px at 28 px text however the
+         * grid is written. So the rule is the one that separates the two cases — a break is a
+         * defect exactly when the word would have fitted.
+         * </p>
+         *
+         * <p>
+         * Measured against the button's own computed font on a canvas, so it asks the question
+         * of the label the call site actually passed rather than of a list kept here.
+         * </p>
+         */
+        for (const [name, button] of [["confirm", confirm], ["cancel", cancel]] as const) {
+          const broke = await button.evaluate((node) => {
+            const element = node as HTMLElement;
+            const text = element.innerText.trim();
+            const words = text.split(/\s+/).filter(Boolean);
+            const target = [...node.childNodes].find((n) => n.nodeType === Node.TEXT_NODE) ?? node.firstChild;
+            if (!target || words.length === 0) return null;
+            const range = document.createRange();
+            range.selectNodeContents(target);
+            const lines = range.getClientRects().length;
+            if (lines <= words.length) return null;
+
+            const style = getComputedStyle(element);
+            const room = element.getBoundingClientRect().width
+              - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight)
+              - Number.parseFloat(style.borderLeftWidth) - Number.parseFloat(style.borderRightWidth);
+            const pen = document.createElement("canvas").getContext("2d")!;
+            pen.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+            const widest = Math.max(...words.map((word) => pen.measureText(word).width));
+            // A break is only honest if the widest word could not have fitted anyway.
+            return widest <= room
+              ? { text, words: words.length, lines, room: Math.round(room), widest: Math.round(widest) }
+              : null;
+          });
+          expect(
+            broke,
+            `confirm ${i}'s ${name} breaks a word that had room for it: ${JSON.stringify(broke)}`,
+          ).toBeNull();
+        }
+
         const room = (await wrapper.boundingBox())!.width;
-        const fits = room >= 96 * 2 + 8;
+        // The floor is `6rem`, so what "enough room for both" means moves with the text size —
+        // see the note on ARMED_GRID_CLASS for why this one is in rem where the chrome is not.
+        const floor = await page.evaluate(() => Number.parseFloat(getComputedStyle(document.documentElement).fontSize) * 6);
+        const fits = room >= floor * 2 + 8;
         if (fits) {
           expect(
             Math.abs(boxes.confirm.y - boxes.cancel.y),
@@ -229,6 +302,64 @@ for (const size of SIZES) {
     });
   }
 }
+
+/**
+ * The control's PADDING does not scale with the root font size. (B5 / B12)
+ *
+ * <p>
+ * `CONTROL_CLASS` writes its padding as `px-[12px] py-[8px]` rather than `px-3 py-2`, and the
+ * component says why: at a 32 px root `px-3` is 24 px a side, which is 48 px of padding inside
+ * a 128 px column and left 80 px for a word needing 95. The text is meant to scale; the frame
+ * around it is not.
+ * </p>
+ *
+ * <p>
+ * <b>Found by mutation, and it is a call site that breaks it.</b> Putting `className="px-4"`
+ * back on the Courts row's "Deactivate" — which is what was there — restores 32 px of padding a
+ * side at a 32 px root, 64 px inside a 140 px control, and no assertion anywhere noticed:
+ * tailwind-merge rightly lets a caller's `px-4` beat the component's `px-[12px]`, so the rule
+ * has to be enforced on the rendered result rather than on the class string. The word does not
+ * fit either way at that size, so even the word-break check reads it as an honest break.
+ * </p>
+ */
+test("keeps the frame round its words in pixels, whatever the root font size", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await open(page, "/admin/settings", 0);
+  await expect(page.getByLabel(/Unlock time/)).toBeVisible();
+
+  const padding = async () => {
+    const wrappers = page.locator(CONFIRMS);
+    const out: { label: string; x: number; y: number }[] = [];
+    for (let i = 0; i < await wrappers.count(); i += 1) {
+      const wrapper = wrappers.nth(i);
+      await wrapper.locator("> button").first().evaluate((n: HTMLElement) => n.click());
+      await expect(wrapper.locator("> button")).toHaveCount(2);
+      out.push(...await wrapper.locator("> button").evaluateAll((nodes) => nodes.map((node) => {
+        const style = getComputedStyle(node);
+        return {
+          label: (node as HTMLElement).innerText.trim().slice(0, 20),
+          x: Number.parseFloat(style.paddingLeft),
+          y: Number.parseFloat(style.paddingTop),
+        };
+      })));
+      await wrapper.locator("> button").nth(1).evaluate((n: HTMLElement) => n.click());
+    }
+    return out;
+  };
+
+  const small = await padding();
+  expect(small.length, "no armed confirm was measured").toBeGreaterThan(0);
+  await page.addStyleTag({ content: "html { font-size: 32px !important; }" });
+  const large = await padding();
+
+  expect(large).toHaveLength(small.length);
+  for (const [i, row] of large.entries()) {
+    expect(row.x, `"${row.label}" has ${row.x} px of side padding at a 32 px root, ${small[i].x} px at 16 px`)
+      .toBe(small[i].x);
+    expect(row.y, `"${row.label}" has ${row.y} px of top padding at a 32 px root, ${small[i].y} px at 16 px`)
+      .toBe(small[i].y);
+  }
+});
 
 /**
  * C7 — the armed block brings itself to where it can be read.
