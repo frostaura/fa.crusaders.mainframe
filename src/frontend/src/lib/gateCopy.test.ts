@@ -248,10 +248,50 @@ describe("the armed consequence, over contact × named × enabled", () => {
       "Shut this door? Nothing can reach it, so it keeps admitting booked members from its saved"
       + " list for up to six hours.",
     );
+    // R3-1: with NO `heardShut` the server has not said, so the reopen sentence hedges. The
+    // flat "has been admitting ... all along" now belongs only to the door the server says
+    // never called in — see the three arms below.
     expect(doorReopenConsequence({ online: false, named: true })).toBe(
-      "Reopen this door? Nothing can reach it. It has been admitting booked members from its saved"
-      + " list all along.",
+      "Reopen this door? Nothing can reach it. It may have been admitting booked members from its"
+      + " saved list all along.",
     );
+  });
+
+  /**
+   * <b>R3-1 — the sentence that was the exact opposite of the truth, on the control an admin
+   * was about to press.</b>
+   *
+   * <p>
+   * A shut board is served a 403, denies every scan outright and commits an EMPTY roster. Its
+   * `last_seen_at` then froze, because `ResolveAsync` returned `Forbid()` before it noted
+   * contact — so after 180 s the screen decided the door was unreachable and told the admin
+   * it "has been admitting booked members from its saved list all along". It had been
+   * admitting nobody, for exactly the reason the admin asked for.
+   * </p>
+   *
+   * <p>
+   * Three arms, and the fixture is varied on the one field: told / not told / cannot say.
+   * </p>
+   */
+  it("never says a door that HEARD the shut has been admitting people (R3-1)", () => {
+    const told = doorReopenConsequence({ online: false, named: true, heardShut: true });
+    expect(told).toBe(
+      "Reopen this door? It was told of the shut and has been opening for nobody. It opens for"
+      + " members again from its next call in.",
+    );
+    expect(told).not.toContain("admitting booked members");
+
+    // The server says it never called since the shut: the cache claim is flat, and true.
+    expect(doorReopenConsequence({ online: false, named: true, heardShut: false })).toContain(
+      "It has been admitting booked members from its cached list all along"
+        .replace("cached", "saved"),
+    );
+
+    // And a door that heard it is told so even while it is reporting — `heardShut` outranks
+    // `online`, because "from the very next scan" is about a door that never stopped
+    // deciding, and this one has been refusing everybody.
+    expect(doorReopenConsequence({ online: true, named: true, heardShut: true }))
+      .toContain("was told of the shut");
   });
 
   it("says what is actually true of an unnamed door that cannot be reached", () => {
@@ -370,11 +410,20 @@ describe("doorConfirmedLine / doorNotConfirmedLine", () => {
    * state backwards.
    */
   it("inverts on a reopen rather than reusing the shut sentence", () => {
+    // R3-1: with no evidence either way the receipt hedges. The flat claim is reserved for a
+    // door the server says never called in since the shut.
     expect(doorNotConfirmedLine("reopen", "04:12")).toBe(
-      "NOT CONFIRMED — last heard 04:12. It has been admitting booked members from its cached list"
-      + " all along, and it will not know it is open again until it reaches the server.",
+      "NOT CONFIRMED — last heard 04:12. It may have been admitting booked members from its cached"
+      + " list all along, and it will not know it is open again until it reaches the server.",
     );
     expect(doorNotConfirmedLine("reopen", "04:12")).not.toContain("may still admit");
+    expect(doorNotConfirmedLine("reopen", "04:12", false))
+      .toContain("It has been admitting booked members from its cached list all along");
+    // The door that heard the shut: it has been opening for NOBODY, and a receipt that said
+    // otherwise is R3-1 on the screen an admin reads immediately after acting.
+    const told = doorNotConfirmedLine("reopen", "04:12", true);
+    expect(told).toContain("was told of the shut and has been opening for nobody");
+    expect(told).not.toContain("admitting booked members");
   });
 
   it("says NOT CONFIRMED in words on every arm, because colour is not a signal", () => {

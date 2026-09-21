@@ -268,6 +268,82 @@ export function doorSetupChip(device: AdminDoorDevice): DoorChip | null {
 }
 
 /**
+ * <b>R3-1 — whether this SHUT door has been told, and the three answers that exist.</b>
+ *
+ * <p>
+ * <b>The falsehood this closes, in full, because it is the worst one this surface has
+ * shipped.</b> `DeviceIdentity.ResolveAsync` returned `Forbid()` <i>before</i>
+ * `DeviceSilenceLog.NoteContact`, so the moment a door was shut its `last_seen_at` froze. One
+ * hundred and eighty seconds later the chip flipped to "Not reporting", the page said
+ * "Nothing can reach Front door, so it has not been told. It may still be admitting booked
+ * members from its saved list", and the reopen confirm said "It has been admitting booked
+ * members from its saved list all along". Every word of that was false: the board had been
+ * served a 403 within one heartbeat, had denied every scan outright and had committed an
+ * empty roster. The console reported a working shut as a failed one and invited an admin to
+ * go and stand at a door that was already refusing everybody.
+ * </p>
+ *
+ * <p>
+ * <b>Silence is not evidence about a shut door, in either direction</b>, and the rule this
+ * function exists to enforce is that no sentence about a shut door is derived from an age.
+ * `shut_heard_at` is the only evidence there is: the first 403 served after this shut began.
+ * </p>
+ *
+ * <ul>
+ *   <li><b>confirmed</b> — an instant. The board heard it and emptied its list. True for
+ *       ever after, whatever the door has done since: a door that heard the shut and then
+ *       lost the network is still opening for nobody.</li>
+ *   <li><b>not_told</b> — an explicit `null`. Shut, and it has not called since. This is the
+ *       state the cached-list caveat is actually about, and it is the only one.</li>
+ *   <li><b>unknown</b> — the field is absent. An API that has not said. <b>Unknown is not
+ *       false</b>: the screens say they cannot tell rather than picking the arm a frozen age
+ *       points at, which is precisely how the wrong one came to be printed.</li>
+ * </ul>
+ */
+export type DoorShutHeardState = "confirmed" | "not_told" | "unknown";
+
+export type DoorShutHeard = { state: DoorShutHeardState; at: string | null };
+
+export function doorShutHeard(device: {
+  enabled?: boolean; shut_heard_at?: string | null;
+}): DoorShutHeard {
+  // An OPEN door has not been told anything; every caller guards on `enabled`, and this arm
+  // exists so that one which forgets to cannot get a confident answer out of a stale field.
+  if (device.enabled !== false) return { state: "unknown", at: null };
+  const heard = device.shut_heard_at;
+  if (heard === undefined) return { state: "unknown", at: null };
+  return heard === null ? { state: "not_told", at: null } : { state: "confirmed", at: heard };
+}
+
+/**
+ * The confirmation clause a shut door's notice carries, or null where there is nothing to add.
+ *
+ * <p>
+ * The clock face is the club's, because "heard the shut at 06:09" read in the admin's own
+ * zone is the R3-3 defect one sentence along.
+ * </p>
+ */
+export function doorShutHeardLine(
+  device: AdminDoorDevice, timezone: string, named = device.gate_key !== null,
+): string | null {
+  const heard = doorShutHeard(device);
+  if (heard.state === "confirmed") {
+    return `Confirmed: this door heard the shut at ${clubDayAndClock(heard.at!, timezone)}, so it`
+      + " opens for nobody — it threw its saved list away when it was told.";
+  }
+  if (heard.state === "not_told") {
+    if (!named) {
+      return "Not confirmed: it has not called in since it was shut, so it has not been told. It has"
+        + " no door name, so it holds no saved list and opens for nobody anyway.";
+    }
+    return "Not confirmed: it has not called in since it was shut, so it has not been told, and it"
+      + " keeps admitting members with a booking from the list it last downloaded until that goes"
+      + " stale — up to six hours after its last call.";
+  }
+  return null;
+}
+
+/**
  * Who shut this door, and when — A5's replacement for "You shut this door."
  *
  * <p>
@@ -305,7 +381,15 @@ export function doorStateNotice(
   // A5: it said "You shut this door." to every admin who opened the page — false for all but
   // one of them, and unfalsifiable for the reader. The audit row has always carried the
   // actor; WIRE-R2 §2 puts the name on the door row, so the screen can say who and when.
-  if (!device.enabled) return `${doorShutAttribution(device, timezone)} ${doorShutNotice()}`;
+  //
+  // R3-1: and the shut's own CONFIRMATION comes from `shut_heard_at`, never from the age.
+  // Where the API says, that clause replaces the generic both-halves paragraph — there is no
+  // longer a pair to state, because this door's half is known. Where it does not say, the
+  // paragraph stands exactly as it was, which is the honest render of "cannot tell".
+  if (!device.enabled) {
+    const heard = doorShutHeardLine(device, timezone);
+    return `${doorShutAttribution(device, timezone)} ${heard ?? doorShutNotice()}`;
+  }
   const named = device.gate_key !== null;
   if (online) {
     if (named) {
@@ -717,12 +801,29 @@ export function doorAttentionReason(
     // contradicted it about the same door.
     // A8: `null` is "this page cannot say", and it takes the SHUT sentence without the
     // liveness clause — shut is a state the page read, not one it derived from an age.
+    //
+    // R3-1: `shut_heard_at` outranks liveness on BOTH arms where the API sends it. A door
+    // that heard the shut opens for nobody even though it has since gone quiet, and a door
+    // that is reporting has still not necessarily been told — the summary above the tiles
+    // was making the opposite claim in both directions out of an age that had frozen.
+    const heard = doorShutHeard(device);
+    if (heard.state === "confirmed") {
+      return { ...where, kind: "shut", reason: `${name} is shut and has been told. Nobody gets in through it.` };
+    }
+    if (heard.state === "not_told") {
+      return {
+        ...where,
+        kind: "shut",
+        reason: `${name} is shut but has not called in since, so it has not been told.`,
+      };
+    }
     if (online === null) return { ...where, kind: "shut", reason: `${name} is shut.` };
     if (!online) {
       return {
         ...where,
         kind: "shut",
-        reason: `${name} is shut, but nothing can reach it — it may not have been told.`,
+        reason: `${name} is shut, and the club has not heard from it since — this page cannot say`
+          + " whether it was told.",
       };
     }
     return { ...where, kind: "shut", reason: `${name} is shut. Nobody gets in through it.` };

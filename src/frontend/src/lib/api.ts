@@ -732,6 +732,28 @@ export type DeviceActivityEntry = {
   member: DeviceActivityMember | null;
   /** First eight hex of the code's SHA-256 (B4) — the only thing that correlates two scans of one unknown code. */
   fingerprint: string | null;
+  /**
+   * <b>WIRE-R3 §2 — this row's time cannot be trusted to the minute.</b>
+   *
+   * <p>
+   * True when the server clamped the board's own clock, or when `delivered_at` is EARLIER
+   * than `at` — which is impossible and is what a reviewer met as "the door told us at 19:22"
+   * about a 19:48 scan. A board has no RTC; it reports an offset from its own boot, and a
+   * board whose clock has drifted hands the server a scan instant from the future or the
+   * past. The server already wrote `device.event_time_clamped` about it and the row said
+   * nothing.
+   * </p>
+   *
+   * <p>
+   * <b>Absent is not false.</b> An API that does not send it has not said the time is sound;
+   * it has said nothing. The screens treat `undefined` as "no reason to doubt this row" —
+   * which is the same render as `false` — but never state the row as VERIFIED on the strength
+   * of an absent field, and the impossible-order guard below runs from the instants
+   * themselves, so a row an older API cannot flag is still not printed in an order that
+   * cannot have happened.
+   * </p>
+   */
+  time_uncertain?: boolean;
 };
 
 /**
@@ -763,9 +785,19 @@ export type DeviceActivityEntry = {
  * details it writes, and `other` is the honest arm for a row written before it did.
  * </p>
  */
+/**
+ * <b>Both spellings of the two that were renamed, and neither is dropped.</b>
+ *
+ * WIRE-R2 §2 wrote `details` and `removed`; WIRE-R3 §6 names the same two facts
+ * `details_changed` and `deleted`. A screen that knows only one spelling renders the other as
+ * "Unrecognised event" — which is what the honest arm is FOR, and is the wrong answer when
+ * the event is one we have copy for under its other name. Rows written under either spelling
+ * are inside retention at the same time, so both have to resolve for as long as the older
+ * ones survive.
+ */
 export const DOOR_EVENT_CHANGES = [
-  "registered", "renamed", "details", "shut", "reopened", "shut_all", "reopened_all",
-  "removed", "clock_corrected", "other",
+  "registered", "renamed", "details", "details_changed", "shut", "reopened", "shut_all",
+  "reopened_all", "removed", "deleted", "clock_corrected", "other",
 ] as const;
 
 export type DoorEventChange = (typeof DOOR_EVENT_CHANGES)[number];
@@ -802,6 +834,17 @@ export type DoorEventEntry = {
    * </p>
    */
   actor_name?: string | null;
+  /**
+   * How many identical events this row stands for (WIRE-R3 §6).
+   *
+   * <p>
+   * A-L4: nine "the board's clock was out and was corrected" rows, all inside one minute,
+   * filled a door's whole event block and said one thing nine times. The server groups them
+   * and sends the count. Absent, or 1, means the row is itself and the copy adds nothing —
+   * and a count is never invented on this side from rows that merely look alike.
+   * </p>
+   */
+  count?: number;
 };
 
 /**
@@ -1906,6 +1949,43 @@ export type AdminDoorDevice = AdminDevice & {
    * </p>
    */
   shut_by_name?: string | null;
+  /**
+   * <b>WIRE-R3 §1 — when this board was TOLD it is shut. R3-1's whole payload.</b>
+   *
+   * <p>
+   * The first time the server served this board a 403 after the current shut began; cleared
+   * on reopen. It is the only evidence there has ever been that a shut arrived: a board that
+   * gets a 403 denies the scan outright and commits an empty roster, so a door with a
+   * `shut_heard_at` is confirmed shut whatever it has done since.
+   * </p>
+   *
+   * <p>
+   * <b>Three values, and the third is the one that was being answered wrongly.</b> An instant
+   * is confirmed. `null` is "shut, and it has not called since" — NOT confirmed, and the
+   * cached-list caveat applies. <b>`undefined` is an API that cannot say</b>, and until this
+   * round the screens said it confidently in whichever direction the door's frozen
+   * `last_seen_at` pointed: `ResolveAsync` returned `Forbid()` before it noted contact, so a
+   * shut door's age froze, the chip flipped to "Not reporting" after 180 s and the page
+   * asserted "nothing can reach it, so it has not been told" about a board that had heard the
+   * refusal within one heartbeat and emptied its roster. Unknown is not false; the screens
+   * fall back to liveness only where the field is absent, and say so.
+   * </p>
+   */
+  shut_heard_at?: string | null;
+  /**
+   * How many events this board's ring buffer overwrote before it could upload them
+   * (WIRE-R3 §1) — a since-boot TOTAL the heartbeat reports, not a delta.
+   *
+   * <p>
+   * G4c: the board has reported this since the gate shipped and nothing stored or showed it,
+   * so a door that dropped records during an outage looked identical to one that dropped
+   * none. `0` is a real answer and means none were lost; `undefined` means this API does not
+   * carry it and the screens say nothing rather than printing a zero they did not read.
+   * </p>
+   */
+  events_lost?: number;
+  /** When that total was last reported. Null where the board has never said. */
+  events_lost_reported_at?: string | null;
 };
 
 /**
@@ -2194,6 +2274,15 @@ export const doorEndpoints = {
   doorFieldsSave: (
     id: string,
     req: {
+      /**
+       * <b>`""` CLEARS the name (WIRE-R3 §3), and that is why it is sent.</b>
+       *
+       * A2/B2: the editor used to substitute the old name for an empty field, so an admin who
+       * cleared it was told the save had worked and the name was exactly as it had been. A
+       * cleared name is a real decision — the door falls back to the one unnamed fallback —
+       * and either the screen performs it or it refuses; it may not do neither and report the
+       * first.
+       */
       name?: string;
       gate_key?: string;
       location_note?: string;
@@ -2218,8 +2307,29 @@ export const doorEndpoints = {
    * still typed as it was.
    * </p>
    */
-  doorSetEnabled: (id: string, enabled: boolean) =>
-    api.patch<DoorPatchResult>(`/api/v1/admin/devices/${id}`, { enabled }),
+  /**
+   * @param expectedEnabled what this tab last READ the door's state to be (WIRE-R3 §3).
+   *
+   * <p>
+   * <b>B13 / R3-34 — a background tab acts on a state that is hours old.</b> `unchanged: true`
+   * catches the case where the door is already where this click would put it; it cannot catch
+   * the opposite one, where somebody else shut the door and reopened it since this tab read,
+   * or where a tab left open all night arms a control against a screen that has moved on. The
+   * expectation goes with the write and the server answers 409 `door_changed` rather than
+   * applying it, which is the only way this screen can say "it changed since you looked"
+   * instead of quietly winning.
+   * </p>
+   *
+   * <p>
+   * Omitted — never sent as null — when the page genuinely has no prior read, because an
+   * absent expectation is the API's "apply it" and a null would be an expectation of nothing.
+   * </p>
+   */
+  doorSetEnabled: (id: string, enabled: boolean, expectedEnabled?: boolean) =>
+    api.patch<DoorPatchResult>(`/api/v1/admin/devices/${id}`, {
+      enabled,
+      ...(expectedEnabled === undefined ? {} : { expected_enabled: expectedEnabled }),
+    }),
 };
 
 /**

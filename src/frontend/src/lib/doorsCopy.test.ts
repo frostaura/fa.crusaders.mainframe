@@ -9,7 +9,7 @@ import {
   doorScanCountHeading, doorScanCountLine, doorSetupChip, doorSignalChip, doorStaleChecksNotice,
   doorStateChip, doorStateNotice, doorsAttentionSummary, describePowerLoss, spellAge,
   doorDisplayName, doorPickerLabel, doorRowIdentity, doorRowName, doorShutAttribution,
-  REMOVED_DOOR_UNNAMED,
+  REMOVED_DOOR_UNNAMED, doorShutHeard, doorShutHeardLine,
 } from "./doorsCopy";
 import { doorShutNotice } from "./gateCopy";
 import { type AdminDoorDevice, type DeviceActivityEntry, type DoorSignal } from "./api";
@@ -648,13 +648,38 @@ describe("doorAttentionReason, on a shut door nothing can reach", () => {
     const silent = doorAttentionReason(door({ enabled: false, name: "Side door" }), false, [])!;
     expect(silent.kind).toBe("shut");
     expect(silent.reason).not.toContain("Nobody gets in");
-    expect(silent.reason).toContain("nothing can reach it");
-    expect(silent.reason).toContain("may not have been told");
+    // R3-1: with no `shut_heard_at` on the row the page does not get to say the door was NOT
+    // told either — the old sentence ("nothing can reach it — it may not have been told")
+    // was a conclusion drawn from an age the shut itself had frozen. It says it cannot tell.
+    expect(silent.reason).toContain("this page cannot say whether it was told");
   });
 
   it("still says it plainly for a shut door the club CAN reach", () => {
     const reachable = doorAttentionReason(door({ enabled: false, name: "Side door" }), true, [])!;
     expect(reachable.reason).toBe("Side door is shut. Nobody gets in through it.");
+  });
+
+  /**
+   * <b>R3-1: `shut_heard_at` outranks liveness in BOTH directions.</b>
+   *
+   * The one that cost most was the first: a board served a 403 within one heartbeat, denying
+   * every scan and holding an empty roster, described on the overview as a door that "may
+   * still be admitting" people. The second matters as much and is less obvious — a door that
+   * is reporting has not necessarily been told, because the shut may be seconds old.
+   */
+  it("reads the shut's own evidence, not the door's age (R3-1)", () => {
+    const told = doorAttentionReason(
+      door({ enabled: false, name: "Side door", shut_heard_at: "2026-09-21T06:09:00Z" }), false, [],
+    )!;
+    expect(told.reason).toBe("Side door is shut and has been told. Nobody gets in through it.");
+
+    const notTold = doorAttentionReason(
+      door({ enabled: false, name: "Side door", shut_heard_at: null }), true, [],
+    )!;
+    expect(notTold.reason).toBe(
+      "Side door is shut but has not called in since, so it has not been told.",
+    );
+    expect(notTold.reason).not.toContain("Nobody gets in");
   });
 });
 
@@ -892,5 +917,97 @@ describe("spellAge", () => {
   /** "never" is already a word, and anything unrecognised is passed through rather than mangled. */
   it("leaves anything that is not an abbreviation alone", () => {
     expect(spellAge("never")).toBe("never");
+  });
+});
+
+
+/**
+ * <b>R3-1 — the worst falsehood this surface has shipped, and the field that ends it.</b>
+ *
+ * <p>
+ * `DeviceIdentity.ResolveAsync` answered `Forbid()` BEFORE noting contact, so shutting a door
+ * froze its `last_seen_at`. Three minutes later the console decided the board was unreachable
+ * and told an admin, in warning colours, that a door which had been served a 403 within one
+ * heartbeat — and had therefore denied every scan and committed an empty roster — "may still
+ * be admitting booked members from its saved list". The control reported a working shut as a
+ * failed one.
+ * </p>
+ *
+ * <p>
+ * The fixture is varied on the ONE field that decides it, across the two liveness values it
+ * used to be decided by, because the whole defect was a screen reading the wrong field.
+ * </p>
+ */
+describe("doorShutHeard — a shut door's own evidence", () => {
+  it("has three answers, and absent is not false", () => {
+    expect(doorShutHeard(door({ enabled: false, shut_heard_at: "2026-09-21T06:09:00Z" })))
+      .toEqual({ state: "confirmed", at: "2026-09-21T06:09:00Z" });
+    expect(doorShutHeard(door({ enabled: false, shut_heard_at: null })))
+      .toEqual({ state: "not_told", at: null });
+    // The older backend. It has said NOTHING, and the screens must not read that as either
+    // answer — which is what reading `last_seen_at` instead amounted to.
+    expect(doorShutHeard(door({ enabled: false })).state).toBe("unknown");
+  });
+
+  it("answers nothing about an OPEN door, whatever is on the row", () => {
+    // A stale `shut_heard_at` on a reopened row must not make the screen say a live door has
+    // "been told" something. The wire clears it on reopen; this is the guard for when it does
+    // not, which is the shape every optional field on this surface has been wrong in once.
+    expect(doorShutHeard(door({ enabled: true, shut_heard_at: "2026-09-21T06:09:00Z" })).state)
+      .toBe("unknown");
+  });
+});
+
+describe("doorShutHeardLine", () => {
+  const TZ = "Africa/Johannesburg";
+
+  it("names the instant the door heard it, in the CLUB's zone", () => {
+    const told = doorShutHeardLine(
+      door({ enabled: false, shut_heard_at: "2026-09-21T04:09:00Z" }), TZ,
+    )!;
+    // 04:09 UTC is 06:09 in Johannesburg. R3-3: an admin reading from another zone must see
+    // the club's clock, not their laptop's.
+    expect(told).toContain("06:09");
+    expect(told).toContain("opens for nobody");
+    expect(told).not.toContain("may still");
+  });
+
+  it("states the cached-list caveat only for the door the server says never called", () => {
+    const notTold = doorShutHeardLine(door({ enabled: false, shut_heard_at: null }), TZ)!;
+    expect(notTold).toContain("has not been told");
+    expect(notTold).toContain("keeps admitting members with a booking");
+
+    // An UNNAMED door holds no list at all, so the same arm must not promise it one — B3's
+    // finding, on the new sentence.
+    const unnamed = doorShutHeardLine(
+      door({ enabled: false, gate_key: null, shut_heard_at: null }), TZ,
+    )!;
+    expect(unnamed).toContain("holds no saved list");
+    expect(unnamed).not.toContain("keeps admitting");
+  });
+
+  it("adds nothing at all where the API has not said", () => {
+    expect(doorShutHeardLine(door({ enabled: false }), TZ)).toBeNull();
+  });
+});
+
+describe("doorStateNotice, on a shut door (R3-1)", () => {
+  const TZ = "Africa/Johannesburg";
+
+  it("reports a confirmed shut as confirmed even though the door has since gone quiet", () => {
+    const notice = doorStateNotice(
+      door({ enabled: false, shut_heard_at: "2026-09-21T04:09:00Z", last_seen_at: "2026-09-21T04:09:00Z" }),
+      false,
+      TZ,
+    )!;
+    expect(notice).toContain("Confirmed: this door heard the shut at");
+    // The exact sentence the reviewer read over a door that had heard it.
+    expect(notice).not.toContain("may still be admitting");
+    expect(notice).not.toContain("Nothing can reach");
+  });
+
+  it("keeps the generic both-halves paragraph where the API cannot say", () => {
+    const notice = doorStateNotice(door({ enabled: false }), false, TZ)!;
+    expect(notice).toContain(doorShutNotice());
   });
 });

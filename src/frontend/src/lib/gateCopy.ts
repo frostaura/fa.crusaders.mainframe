@@ -27,6 +27,25 @@ import { type GateAccessPolicy } from "./api";
 export const GATE_KEY_MAX_LENGTH = 64;
 
 /**
+ * Mirrors `Device.Name` — `HasMaxLength(128)` in `MainframeDbContext`.
+ *
+ * <p>
+ * <b>A2 / B2 / R3-15: it was nowhere, and that is exactly what it cost.</b> The form had no
+ * bound on the field, the API had no check, and a 129-character name reached the database as
+ * a `DbUpdateException` that came back to the browser as a 500 with the EF exception in it.
+ * The number lives here for the same reason {@link GATE_KEY_MAX_LENGTH} does: the field that
+ * stops it, the sentence that explains it and the test that pins it must all be the SAME 128,
+ * and a screen that guesses the column's bound is a screen that drifts from it silently.
+ * </p>
+ *
+ * <p>
+ * It is a device column rather than a gate one — a court box's name is bound identically —
+ * and it sits in this module because the door editor is the only form that enforces it today.
+ * </p>
+ */
+export const DEVICE_NAME_MAX_LENGTH = 128;
+
+/**
  * How many bookings a door's offline roster holds.
  *
  * <p>
@@ -192,6 +211,24 @@ export type DoorSituation = {
    * booked members" is flatly false of such a door, and that is the sentence that shipped.
    */
   named: boolean;
+  /**
+   * <b>Has this SHUT door been told? R3-1's third input, and it outranks `online`.</b>
+   *
+   * <p>
+   * `true` where the server has served this board a 403 since the shut began — which means
+   * the board denied the scan outright and committed an empty roster, so it opens for nobody
+   * whatever its network has done since. `false` where the server says it has not called.
+   * <b>`undefined` where the API cannot say</b>, which is the arm every sentence below used
+   * to take while asserting one of the other two.
+   * </p>
+   *
+   * <p>
+   * It matters most on REOPEN: "It has been admitting booked members from its saved list all
+   * along" is the exact opposite of the truth for a door that heard the shut, and that is the
+   * sentence an admin read on the control they were about to press.
+   * </p>
+   */
+  heardShut?: boolean;
 };
 
 /** Six hours, said once, in the words every arm uses. */
@@ -217,10 +254,22 @@ export function doorShutConsequence(door: DoorSituation): string {
  * listening, and only the first arm's door is.
  */
 export function doorReopenConsequence(door: DoorSituation): string {
+  // R3-1, and it is checked FIRST because it is the fact that settles the question. A door
+  // that heard the shut threw its list away, so it has been admitting NOBODY — the opposite
+  // of what the `named && !online` arm below said to every such door.
+  if (door.heardShut === true) {
+    return `${DOOR_REOPEN_LABEL}? It was told of the shut and has been opening for nobody. It opens`
+      + " for members again from its next call in.";
+  }
   if (door.online) return `${DOOR_REOPEN_LABEL}? It opens for members again from the very next scan.`;
   if (door.named) {
-    return `${DOOR_REOPEN_LABEL}? Nothing can reach it. It has been admitting booked members from its`
-      + " saved list all along.";
+    // `heardShut === false` is the server saying it never called; `undefined` is an API that
+    // cannot say. The first states the cache flatly, the second hedges it — and neither is
+    // allowed to state it as a certainty derived from an age, which is what shipped.
+    const cache = door.heardShut === false
+      ? "It has been admitting booked members from its saved list all along."
+      : "It may have been admitting booked members from its saved list all along.";
+    return `${DOOR_REOPEN_LABEL}? Nothing can reach it. ${cache}`;
   }
   return `${DOOR_REOPEN_LABEL}? Nothing can reach it, and with no saved list it opens for nobody until`
     + " it calls in.";
@@ -325,14 +374,24 @@ export function doorConfirmedLine(heardFrom: string): string {
  *
  * @param at the club-time clock face this door was last heard at, or null if it never has been.
  */
-export function doorNotConfirmedLine(action: "shut" | "reopen", at: string | null): string {
+export function doorNotConfirmedLine(
+  action: "shut" | "reopen", at: string | null, heardShut?: boolean,
+): string {
   if (at === null) {
     return "NOT CONFIRMED — never heard from. It has never called in, so nothing is known about what"
       + " it is admitting.";
   }
   if (action === "reopen") {
-    return `NOT CONFIRMED — last heard ${at}. It has been admitting booked members from its cached`
-      + " list all along, and it will not know it is open again until it reaches the server.";
+    // R3-1: a door that HEARD the shut emptied its list, so "it has been admitting booked
+    // members all along" is exactly backwards for it. Only a door the server says never
+    // called since the shut gets the flat claim; anything else is hedged.
+    const during = heardShut === true
+      ? "It was told of the shut and has been opening for nobody"
+      : heardShut === false
+        ? "It has been admitting booked members from its cached list all along"
+        : "It may have been admitting booked members from its cached list all along";
+    return `NOT CONFIRMED — last heard ${at}. ${during}, and it will not know it is open again until`
+      + " it reaches the server.";
   }
   return `NOT CONFIRMED — last heard ${at}. It may still admit booked members from its cached list`
     + " for up to six hours.";
@@ -412,13 +471,23 @@ export function doorShutStandingNotice(
  * is unnamed on install day.
  * </p>
  */
-export function doorShutOfflineNotice(name: string, named: boolean): string {
-  const head = `Nothing can reach ${name}, so it has not been told.`;
+export function doorShutOfflineNotice(name: string, named: boolean, heardShut?: boolean): string {
+  // R3-1. "Nothing can reach it, so it has not been told" was a conclusion drawn from an age
+  // that froze the instant the door was shut, and it was printed in warning colours over a
+  // board that had heard the refusal within one heartbeat. Where the server says the board
+  // heard it, there is nothing to warn about at all and this notice does not render — the
+  // caller checks; where the server says it did not, the sentence is stated flatly; where
+  // the server cannot say, so does the sentence.
+  const head = heardShut === false
+    ? `${name} has not called in since it was shut, so it has not been told.`
+    : `The club has not heard from ${name} since it was shut, so this page cannot say whether it`
+      + " was told.";
   if (!named) {
     return `${head} It has no door name, so it holds no saved list: it opens for nobody until it is`
       + " back, shut or not.";
   }
-  return `${head} It may still be admitting booked members from the list it last downloaded, for up`
+  const admitting = heardShut === false ? "is still admitting" : "may still be admitting";
+  return `${head} It ${admitting} booked members from the list it last downloaded, for up`
     + " to six hours after its last call.";
 }
 
@@ -460,7 +529,18 @@ export function doorAlreadyNotice(
  * </p>
  */
 /** One shut door, as the banner and the fleet confirm both need to name it. */
-export type ShutDoorFact = { id: string; name: string; online: boolean; shutByFleet: boolean };
+export type ShutDoorFact = {
+  id: string;
+  name: string;
+  online: boolean;
+  shutByFleet: boolean;
+  /**
+   * R3-1: whether this shut door has been TOLD, which is not the same question as whether it
+   * is reporting — and the banner counted "confirmed" from the second one. Optional so a
+   * caller with an older view still compiles; `undefined` reads as "cannot tell".
+   */
+  heardShut?: boolean;
+};
 
 /**
  * The club-wide banner, stating BOTH halves of what "shut" means right now (C2).
@@ -485,19 +565,29 @@ export type ShutDoorFact = { id: string; name: string; online: boolean; shutByFl
  */
 export function doorsShutBannerLine(shut: ShutDoorFact[], total: number): string {
   if (shut.length === 0 || total === 0) return "";
-  const silent = shut.filter((d) => !d.online);
+  // <b>R3-1: "confirmed" is `shut_heard_at`, not liveness.</b> This counted a door as
+  // confirmed when it was reporting and as not-yet when it was quiet, and the shut itself is
+  // what made a door go quiet on the old backend — so the banner on the one screen a
+  // volunteer trusts during an incident counted the doors backwards. `heardShut` where the
+  // view carries it, and the door falls through to the unsure arm where it does not.
+  const unsure = shut.filter((d) => (d.heardShut === undefined ? !d.online : !d.heardShut));
   const head = `${shut.length} of ${total} ${total === 1 ? "door" : "doors"} shut`;
-  if (silent.length === 0) {
-    return `${head} — every one of them confirmed. A shut door that the club can reach opens for`
+  if (unsure.length === 0) {
+    return `${head} — every one of them confirmed. A shut door that has been told opens for`
       + " nobody. Getting out is mechanical and unchanged.";
   }
-  const names = silent.map((d) => d.name).join(", ");
-  const confirmed = shut.length - silent.length;
+  const names = unsure.map((d) => d.name).join(", ");
+  const confirmed = shut.length - unsure.length;
   const counted = confirmed === 0
     ? `none of them confirmed yet`
-    : `${confirmed} confirmed, ${silent.length} not yet`;
-  return `${head} — ${counted}: ${names} ${silent.length === 1 ? "has" : "have"} not been heard from, so`
-    + ` ${silent.length === 1 ? "it" : "they"} may still admit booked members from the saved list for up`
+    : `${confirmed} confirmed, ${unsure.length} not yet`;
+  // "has not been told" where the server says so; "the club cannot yet tell" where it is an
+  // absent field and a frozen age. Both halves stated, neither invented.
+  const told = unsure.every((d) => d.heardShut === false)
+    ? `${unsure.length === 1 ? "has" : "have"} not been told`
+    : `${unsure.length === 1 ? "has" : "have"} not confirmed they were told`;
+  return `${head} — ${counted}: ${names} ${told}, so`
+    + ` ${unsure.length === 1 ? "it" : "they"} may still admit booked members from the saved list for up`
     + " to six hours.";
 }
 

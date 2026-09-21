@@ -8,7 +8,7 @@ import { BalanceProvider } from "../lib/balance";
 import { tokenStore } from "../lib/api";
 // The API's own bound on `gate_key`, read from the copy module rather than restated: a mock
 // that refuses at 64 while the column stores 64 has to be the SAME 64.
-import { GATE_KEY_MAX_LENGTH } from "../lib/gateCopy";
+import { DEVICE_NAME_MAX_LENGTH, GATE_KEY_MAX_LENGTH } from "../lib/gateCopy";
 // The nine scan actions, from the one place they are written down (WIRE-R1 §3).
 import { DOOR_SCAN_ACTIONS } from "../lib/deviceActivity";
 
@@ -429,7 +429,14 @@ export function applyDevicePatch(
   const next = { ...row };
   // `device.Name = cmd.Name.Trim()`. Trimmed on the API as well as by the editor, so a name
   // pasted with a trailing space is stored without one.
-  if (typeof patch.name === "string") next.name = patch.name.trim();
+  // WIRE-R3 §3: `""` or whitespace CLEARS the name and it is stored null; the door then
+  // shows the one unnamed fallback. It used to be applied as an empty string, which is what
+  // let the editor's "keep the old name" substitution look right — a mock that stores `""`
+  // and a page that never sends one agree with each other and with nothing else.
+  if (typeof patch.name === "string") {
+    const trimmed = patch.name.trim();
+    next.name = trimmed === "" ? null : trimmed;
+  }
   if (typeof patch.enabled === "boolean") next.enabled = patch.enabled;
   if (Array.isArray(patch.court_numbers)) next.court_numbers = patch.court_numbers;
   if ("button_map" in patch) next.button_map = patch.button_map;
@@ -487,6 +494,17 @@ export function refuseDevicePatch(
   // a door whose name is silently shortened is a door nobody can find in the audit trail.
   if (sentGateKey && String(patch.gate_key).trim().length > GATE_KEY_MAX_LENGTH) {
     return refuse(400, { error: "gate_key_too_long", max_length: GATE_KEY_MAX_LENGTH });
+  }
+  // WIRE-R3 §3 / R3-15: over the column's own bound is a 400 naming the field, and it used
+  // to be a 500 with the EF exception in it. A mock that accepts a 200-character name is a
+  // mock a page can prove it handles a success the API cannot send.
+  if (typeof patch.name === "string" && patch.name.trim().length > DEVICE_NAME_MAX_LENGTH) {
+    return refuse(400, { error: "name_too_long", max: DEVICE_NAME_MAX_LENGTH });
+  }
+  // WIRE-R3 §3 / R3-34: an expectation that does not match what is stored is a 409 and
+  // NOTHING is written. `undefined` means the caller did not state one, which the API applies.
+  if (patch.expected_enabled !== undefined && patch.expected_enabled !== row.enabled) {
+    return refuse(409, { error: "door_changed" });
   }
   return null;
 }
@@ -674,6 +692,12 @@ export function doorFixture(overrides: Record<string, unknown> = {}) {
     location_note: null,
     power_loss_behaviour: "not_established",
     out_of_service_since: null,
+    /**
+     * WIRE-R3 §1. <b>Absent by default, deliberately</b> — that is the older backend, and
+     * R3-1 is a finding about screens that answered confidently when the server had said
+     * nothing. A test that wants the confirmed or the not-told arm asks for it, which is
+     * what makes every assertion about either one prove something.
+     */
     ...overrides,
   };
 }
@@ -845,11 +869,13 @@ function applyFleet(state: DoorsState, enabled: boolean) {
     if (enabled) {
       if (!state.shutByFleet.has(String(d.id))) return d;
       state.shutByFleet.delete(String(d.id));
-      return { ...d, enabled: true, out_of_service_since: null };
+      return { ...d, enabled: true, out_of_service_since: null, shut_heard_at: null };
     }
     if (d.enabled === false) return d;
     state.shutByFleet.add(String(d.id));
-    return { ...d, enabled: false, out_of_service_since: at };
+    // WIRE-R3 §1: nothing has been served a 403 yet, so no door in a fresh shut-all has
+    // heard it. `null`, never absent — see {@link applyDoorPatch}.
+    return { ...d, enabled: false, out_of_service_since: at, shut_heard_at: null };
   });
   return {
     // Only the doors this request actually changed. A reopen-all that reopened nothing
@@ -1161,6 +1187,10 @@ export function applyDoorPatch(
   // `UpdateAsync` stamps the transition; the standing notice reads it.
   if (patch.enabled === false && row.enabled !== false) {
     next.out_of_service_since = new Date().toISOString();
+    // WIRE-R3 §1 / R3-1: a shut that has just landed has NOT been heard — no board has been
+    // served a 403 yet. `null` rather than absent, because the two mean different things and
+    // a mock that omitted it would let a page's "cannot tell" arm stand in for "not told".
+    next.shut_heard_at = null;
     // A5 / WIRE-R2 §2: WHO, not "you". The card said "You shut this door." to every admin in
     // the club, which is false for all but one of them and unfalsifiable for the reader.
     next.shut_by_name = row.shut_by_name ?? ACTING_ADMIN_NAME;
@@ -1168,6 +1198,8 @@ export function applyDoorPatch(
   if (patch.enabled === true) {
     next.out_of_service_since = null;
     next.shut_by_name = null;
+    // Cleared on reopen, per the wire: the field is about the CURRENT shut and nothing else.
+    next.shut_heard_at = null;
   }
   return next;
 }

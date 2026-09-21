@@ -180,17 +180,25 @@ function useDoorPage(id: string) {
  * asking, which is what an armed control looks like.
  * </p>
  */
-function DoorControls({ door, actions, online, shutAt }: {
+function DoorControls({ door, actions, online, shutAt, timezone }: {
   door: AdminDoorDevice;
   actions: DoorActions;
   online: boolean;
   shutAt: string | null;
+  /** The club's zone — R3-3: every face on this surface is written in it, never the browser's. */
+  timezone: string;
 }) {
   return (
     <section aria-labelledby="door-controls-heading" className="space-y-2">
       <h2 id="door-controls-heading" className="text-lg font-semibold">Shutting or removing this door</h2>
       <Card className="space-y-4">
-        <DoorShutControl door={door} onDone={actions.setEnabled} shutAt={shutAt} online={online} />
+        <DoorShutControl
+          door={door}
+          onDone={actions.setEnabled}
+          shutAt={shutAt}
+          online={online}
+          timezone={timezone}
+        />
         <div className="space-y-2 border-t border-border pt-4">
           {/* The consequence is rendered as page text as well as on the confirm, because
               `ConfirmButton`'s aria-label replaces its contents: without this sentence a
@@ -310,6 +318,7 @@ function AdminDoorsDetailPageBody() {
             actions={actions}
             online={online}
             shutAt={shutAtFace(door.out_of_service_since ?? null, timezone)}
+            timezone={timezone}
           />
           <DoorCardSection
             door={door}

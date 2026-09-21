@@ -112,6 +112,7 @@ describe("the one standing notice on the doors surface", () => {
         onDone={() => Promise.resolve()}
         shutAt="09:48"
         online
+        timezone="Africa/Johannesburg"
       />,
     );
 
