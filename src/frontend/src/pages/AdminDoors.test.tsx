@@ -4,6 +4,7 @@ import { Route, Routes } from "react-router-dom";
 import { AdminDoorsPage } from "./AdminDoors";
 import { AdminDoorsDetailPage } from "./AdminDoorsDetail";
 import { AdminDoorsCardPage } from "./AdminDoorsCard";
+import { refreshDoorsView } from "../components/doors/useDoorsChrome";
 import {
   SETTINGS_FIXTURE, activityFixture, deviceFixture, doorFixture, doorsServer, refuse, renderPage,
   stubFetch,
@@ -226,14 +227,23 @@ describe("the doors surface", () => {
      * which LINKS to the door that needs somebody; the order itself is stable.
      */
     it("keeps the doors in name order however their state changes", async () => {
-      openDoors([
+      const { server } = openDoors([
         doorFixture({ id: OTHER_ID, name: "Alpha door", gate_key: "alpha" }),
-        doorFixture({ name: "Zulu door", gate_key: "zulu", last_seen_at: ago(3600) }),
+        doorFixture({ name: "Zulu door", gate_key: "zulu" }),
       ]);
 
       await screen.findAllByText(/door/);
-      const names = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-      expect(names).toEqual(["Alpha door", "Zulu door"]);
+      const names = () => screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
+      expect(names()).toEqual(["Alpha door", "Zulu door"]);
+
+      // Zulu goes quiet. Under the old rule this jumped to the top of the list on the next
+      // poll — and the reviewer's thumb was already descending on the card that had been
+      // there. The card that needs somebody is LAST here, by name, and stays last.
+      server.current()[1].last_seen_at = ago(3600);
+      document.dispatchEvent(new Event("visibilitychange"));
+
+      await screen.findByText(/Zulu door has not been heard from/);
+      expect(names()).toEqual(["Alpha door", "Zulu door"]);
     });
 
     it("names one door in the attention line, counts the rest, and links to it", async () => {
@@ -262,6 +272,24 @@ describe("the doors surface", () => {
       await screen.findByText("Reporting");
       const reads = stub.calls.filter((c) => c.path === "/api/v1/admin/doors");
       expect(reads).toHaveLength(1);
+    });
+
+    /**
+     * And the mechanism under it, on its own: three readers asking in ONE tick.
+     *
+     * <p>
+     * The mounted case above passes with or without the in-flight join whenever the page
+     * happens to have one reader — which is how a suite comes to hold a finding it cannot
+     * actually see. This is the join itself: the banner, the page and the gear badge all
+     * ask on mount, and exactly one request leaves the browser.
+     * </p>
+     */
+    it("joins the read already in flight rather than starting a second", async () => {
+      const { stub } = club([doorFixture()]);
+
+      await Promise.all([refreshDoorsView(), refreshDoorsView(), refreshDoorsView()]);
+
+      expect(stub.calls.filter((c) => c.path === "/api/v1/admin/doors")).toHaveLength(1);
     });
 
     /**
@@ -992,13 +1020,46 @@ describe("the doors surface", () => {
       await vi.advanceTimersByTimeAsync(0);
       const before = stub.calls.filter((c) => c.path === "/api/v1/admin/doors").length;
 
+      // BOTH reads. The store's poll alone leaves the scans frozen — and the scans are
+      // where another admin's evening actually shows up, which is why somebody opened this
+      // page. Counting only `/admin/doors` is a test that passes with the feed's timer
+      // deleted, which is half of the finding still shipping.
+      const feedPath = `/api/v1/admin/devices/${DOOR_ID}/activity`;
+      const feedBefore = stub.calls.filter((c) => c.path.startsWith(feedPath)).length;
+      expect(feedBefore).toBeGreaterThan(0);
+
       await vi.advanceTimersByTimeAsync(16_000);
 
       expect(stub.calls.filter((c) => c.path === "/api/v1/admin/doors").length)
         .toBeGreaterThan(before);
+      expect(stub.calls.filter((c) => c.path.startsWith(feedPath)).length)
+        .toBeGreaterThan(feedBefore);
       expect(screen.getByText(/Re-reads every 15 seconds while this tab is in front/))
         .toBeInTheDocument();
       vi.useRealTimers();
+    });
+
+    /**
+     * <b>B1, the other trigger.</b> A tab left on this page for an hour and come back to is
+     * the commonest way an admin meets it: the outage email links here. Waiting up to a
+     * whole interval to find out what the club looks like NOW is the stale read the finding
+     * is about, arriving a few seconds later.
+     */
+    it("re-reads the scans as soon as the tab comes back to the front", async () => {
+      const { stub } = club([doorFixture()]);
+      renderPage(
+        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+      );
+
+      const feedPath = `/api/v1/admin/devices/${DOOR_ID}/activity`;
+      const feedReads = () => stub.calls.filter((c) => c.path.startsWith(feedPath)).length;
+      await waitFor(() => expect(feedReads()).toBeGreaterThan(0));
+      const before = feedReads();
+
+      document.dispatchEvent(new Event("visibilitychange"));
+
+      await waitFor(() => expect(feedReads()).toBeGreaterThan(before));
     });
 
     /**
@@ -1101,27 +1162,51 @@ describe("the doors surface", () => {
      * reported success — so the admin learned that their click had done something.
      */
     it("says nothing changed, and who it was, when the door was already shut", async () => {
-      // The fixture is already shut AND already attributed, which is the stale-tab state:
-      // the page believes the door is open because it read the club hours ago.
-      const server = doorsServer([doorFixture({ enabled: false, shut_by_name: "Priya Naidoo" })]);
-      stubFetch([settingsRoute(), ...server.routes]);
+      /*
+        The stale tab, written as a stale tab.
+
+        The version of this test that shipped reopened the door and shut it again and called
+        the last press "stale" — but by then the door genuinely WAS open, so the PATCH did
+        real work every time and `unchanged` was never exercised at all. It passed with the
+        whole no-op branch deleted, which is the finding still shipping under a green test.
+
+        What actually happens: this page read the club while the door was open, so it offers
+        "Shut this door". Somebody else shut it in the meantime, so the PATCH changes nothing
+        and answers with the CURRENT shut facts — who, and when.
+      */
+      const shutSince = new Date(Date.UTC(2026, 8, 19, 19, 48)).toISOString();
+      const server = doorsServer([doorFixture({ enabled: true })]);
+      const { stub } = { stub: stubFetch([
+        settingsRoute(),
+        ...server.routes,
+        // Longer than the collection prefix, so it wins the stub's longest-prefix match.
+        {
+          method: "PATCH",
+          path: `/api/v1/admin/devices/${DOOR_ID}`,
+          respond: () => ({
+            ...doorFixture({
+              enabled: false, shut_by_name: "Priya Naidoo", out_of_service_since: shutSince,
+            }),
+            unchanged: true,
+          }),
+        },
+      ]) };
+      expect(stub).toBeTruthy();
       renderPage(
         <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
         { initialEntries: [`/admin/doors/${DOOR_ID}`] },
       );
 
-      // Reopen, then shut again — the second shut is the no-op the API answers `unchanged`.
-      fireEvent.click(await screen.findByRole("button", { name: /^Reopen this door/ }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Shut this door/ }));
       fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
-      await screen.findByRole("button", { name: /^Shut this door/ });
-      fireEvent.click(screen.getByRole("button", { name: /^Shut this door/ }));
-      fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
-      await screen.findByRole("button", { name: /^Reopen this door/ });
 
-      // Now a stale press: the door is shut and the PATCH says so rather than claiming work.
-      fireEvent.click(screen.getByRole("button", { name: /^Reopen this door/ }));
-      fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
-      await screen.findByRole("button", { name: /^Shut this door/ });
+      // The button returning to its other label is the same thing it does after real work,
+      // so what the admin is TOLD is the whole fix.
+      const told = await screen.findByText(/Nothing changed/);
+      expect(told).toHaveTextContent("Side door was already shut");
+      expect(told).toHaveTextContent("Priya Naidoo");
+      // And never the success sentence — "Side door is shut." is a report of work done.
+      expect(document.body.textContent).not.toContain("Side door is shut.");
     });
 
     /** C4: "Edit this door" and its Cancel both dropped focus to `<body>`. */
