@@ -20,6 +20,8 @@
 //     and the assembler then emits the holed line as a perfectly valid token —
 //     somebody else's booking, or nobody's.
 //
+// A FOURTH, WHICH IS AN OUTPUT RATHER THAN AN INPUT: `IDecisionLog`. See below.
+//
 // No Arduino headers, no heap. Compiles for Xtensa and the host test runner.
 
 #ifndef CRUSADERS_GATELOGIC_GATEPORTS_H
@@ -28,6 +30,8 @@
 #include <stdint.h>
 
 #include "../hal/Scanner.h"
+
+#include "../gatelogic/GateFlow.h"
 
 namespace gatelogic {
 
@@ -71,6 +75,46 @@ public:
   /// hundred: the line in flight is a hole and is discarded through its next
   /// terminator.
   virtual bool takeRxError() = 0;
+};
+
+/// WHAT THE BOARD JUST DECIDED, AND WHY — for a console the real board has not
+/// got.
+///
+/// THE PROBLEM THIS EXISTS FOR. A refusal reason is the one thing this firmware
+/// computes that nothing outside it can observe. An open the API granted is in
+/// the API's own audit trail and is deliberately NOT queued; a refusal the API
+/// decided is likewise the API's row. What the BOARD did with either — whether
+/// it acted on `too_early` or on `member_not_active`, whether a 200 was
+/// second-guessed against the roster, whether an outage sent the scan to the
+/// cached list — reaches exactly two surfaces on the hardware: a relay that
+/// moves or does not, and a lamp that blinks three times for every refusal
+/// there is. Those two cannot tell six reasons apart, so on a real door nothing
+/// can, and the native simulator would be able to prove the LOCK's behaviour
+/// while saying nothing about the DECISION behind it.
+///
+/// So the decision is offered to a port. `nullptr` on every board — there is no
+/// console on an ESP32 door gate and no second feedback surface to put one on —
+/// and the simulator's implementation prints a line per decision, which is what
+/// lets the end-to-end harness assert that a given server reason produced a
+/// refusal RATHER THAN assert that a relay happened not to move.
+///
+/// IT IS AN OBSERVER AND MAY NEVER BE ANYTHING ELSE. It returns void, it is
+/// called after the door and the lamp have already been driven, and nothing in
+/// this firmware reads anything back from it. A port that could change a
+/// decision would be a door whose behaviour depends on whether a cable is
+/// plugged into it.
+class IDecisionLog {
+public:
+  virtual ~IDecisionLog() = default;
+
+  /// One decision, after it has been applied.
+  ///
+  /// `token` is the line that was scanned, or "" for a line this board refused
+  /// without looking at it. `grantedMs` is what the lock was ACTUALLY given
+  /// after both of UnlockTimer's bounds — not what the decision asked for — for
+  /// the same reason the queued event carries that number and not the request.
+  virtual void decided(const ScanDecision& decision, const char* token, uint32_t grantedMs,
+                       uint32_t nowMs) = 0;
 };
 
 } // namespace gatelogic

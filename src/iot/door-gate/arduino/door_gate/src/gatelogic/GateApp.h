@@ -132,6 +132,11 @@ public:
     GateRoster* roster = nullptr;
     GateQueue* queue = nullptr;
 
+    /// OPTIONAL, and nullptr on every board. The native simulator's console —
+    /// see IDecisionLog for why a refusal reason is otherwise unobservable
+    /// outside this class.
+    IDecisionLog* log = nullptr;
+
     /// 12 lowercase hex characters, filled by the composition root before
     /// begin(). Held by pointer: it is written once at boot and read for the
     /// life of the image.
@@ -259,6 +264,11 @@ private:
 
   void queue(const ScanDecision& decision, const char* subject, uint32_t nowMs, uint32_t grantedMs);
 
+  /// Offers a decision to the log, if there is one. Called LAST on every
+  /// decision path, after the door, the lamp and the queue — an observer that
+  /// ran earlier would be an observer a reader could mistake for a step.
+  void report(const ScanDecision& decision, const char* token, uint32_t nowMs, uint32_t grantedMs);
+
   /// Kicked immediately before and immediately after every blocking call, and
   /// the deadline re-checked with a fresh clock on the way out.
   void beforeBlocking();
@@ -278,6 +288,10 @@ private:
   ScanDebounce& debounce_;
   GateRoster& roster_;
   GateQueue& queue_;
+
+  /// A POINTER, unlike every other port here, because it is the only one that
+  /// is genuinely absent on the hardware.
+  IDecisionLog* log_;
 
   const char* mac_;
   const char* firmwareVersion_;
