@@ -131,36 +131,9 @@ public static class AdminDeviceEndpoints
         var device = await devices.FindAsync(id, ct);
         if (device is null) return Results.NotFound();
 
-        // BEFORE EVERY OTHER CHECK, AND BEFORE ANYTHING IS WRITTEN (B13 / R3-34, WIRE-R3 §3).
-        //
-        // A console tab left open overnight still offers "Shut this door" for a door another
-        // admin reopened at 06:00, and sending it shut a door somebody had deliberately opened
-        // — with a success panel and no sign anywhere that the screen had been out of date. The
-        // PATCH is a blind write: it carries the state the admin WANTS and nothing about the
-        // state they were looking at when they decided.
-        //
-        // `expected_enabled` is that missing half, and it is optional because most callers
-        // genuinely do not care — this is an If-Match, not a version column, and a request
-        // without it behaves exactly as it always has. With it, a mismatch is a 409 and NOTHING
-        // IS WRITTEN: not the name, not the card, not the switch. A partial apply would be the
-        // worst answer available, because the admin would be told their request was rejected
-        // while some of it had landed.
-        //
-        // Distinct from `unchanged: true`, which is a 200: that is a request that asked for the
-        // state the row is already in, which is success. This is a request built on a reading
-        // of the row that is no longer true.
-        if (req.ExpectedEnabled is { } expected && expected != device.Enabled)
-        {
-            return Results.Conflict(new { error = DoorChanged });
-        }
-
-        // Before anything else: a value the column cannot hold is refused by name rather than
-        // left to throw out of SaveChangesAsync as a 500 (A-M4 / B2). Checked for BOTH kinds
-        // and before the kind rules, because the width of the column is not a door question.
-        if (req.Name is { } proposed && proposed.Trim().Length > Device.NameMaxLength)
-        {
-            return Results.BadRequest(new { error = NameTooLong, max = Device.NameMaxLength });
-        }
+        // Every refusal that can be decided from the request and the row alone, before a single
+        // field is parsed or written. See StateAndWidthRefusal and KindFieldsRefusal.
+        if (StateAndWidthRefusal(device, req) is { } refused) return refused;
 
         // Before the button map is even parsed: a field that does not belong on this kind of
         // row is refused rather than parsed and then ignored.
@@ -204,6 +177,51 @@ public static class AdminDeviceEndpoints
         return Results.Ok(DeviceView.Of(
             updated, await HeartbeatSecondsAsync(settingsAccessor, ct),
             PersonNames.Of(updated.ShutByUserId, names), unchanged: changes.Count == 0));
+    }
+
+    /// <summary>
+    /// The two refusals that are about the row's STATE and the column's WIDTH rather than about
+    /// which kind of board this is — checked first, and before anything is written.
+    ///
+    /// <para>
+    /// <b><c>expected_enabled</c> is the half of a PATCH that was missing (B13 / R3-34,
+    /// WIRE-R3 §3).</b> A console tab left open overnight still offers "Shut this door" for a
+    /// door another admin reopened at 06:00, and sending it shut a door somebody had
+    /// deliberately opened — with a success panel and no sign anywhere that the screen had been
+    /// out of date. The request carries the state the admin WANTS and nothing about the state
+    /// they were looking at when they decided. This is an If-Match and not a version column, so
+    /// it is optional and a request without it behaves exactly as it always has; with it, a
+    /// mismatch is a <c>409</c> and NOTHING is written — not the name, not the card, not the
+    /// switch. A partial apply would be the worst answer available, because the admin would be
+    /// told their request was rejected while some of it had landed.
+    /// </para>
+    ///
+    /// <para>
+    /// It is distinct from <c>unchanged: true</c>, which is a <c>200</c>: that is a request that
+    /// asked for the state the row is already in, which is success. This is a request built on a
+    /// reading of the row that is no longer true.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The name's width is checked for BOTH kinds and before the kind rules</b>, because how
+    /// wide the column is is not a door question — and because the alternative is what R3-15
+    /// found: a <c>DbUpdateException</c> out of <c>SaveChangesAsync</c>, which in Development is
+    /// a developer exception page. See <see cref="Device.NameMaxLength"/>.
+    /// </para>
+    /// </summary>
+    private static IResult? StateAndWidthRefusal(Device device, UpdateDeviceRequest req)
+    {
+        if (req.ExpectedEnabled is { } expected && expected != device.Enabled)
+        {
+            return Results.Conflict(new { error = DoorChanged });
+        }
+
+        if (req.Name is { } proposed && proposed.Trim().Length > Device.NameMaxLength)
+        {
+            return Results.BadRequest(new { error = NameTooLong, max = Device.NameMaxLength });
+        }
+
+        return null;
     }
 
     /// <summary>

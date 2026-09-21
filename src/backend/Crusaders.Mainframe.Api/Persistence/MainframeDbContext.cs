@@ -175,21 +175,7 @@ public class MainframeDbContext : DbContext
             e.HasQueryFilter(l => l.TenantId == _tenant.TenantId);
         });
 
-        modelBuilder.Entity<AuditLog>(e =>
-        {
-            e.ToTable("audit_log");
-            e.HasKey(a => a.Id);
-            e.HasIndex(a => new { a.TenantId, a.CreatedAt });
-
-            // The order every door reader actually pages by — see AuditLog.ScanAt. Beside the
-            // CreatedAt index rather than replacing it: the range filter is still on CreatedAt
-            // (retention, the club's day, "last 24 h" are all about when the club HEARD), and
-            // it is the sort that moved.
-            e.HasIndex(a => new { a.TenantId, a.ScanAt });
-            e.Property(a => a.Action).HasMaxLength(128).IsRequired();
-            e.Property(a => a.DetailsJson).HasColumnType("jsonb");
-            e.HasQueryFilter(a => a.TenantId == _tenant.TenantId);
-        });
+        ConfigureAuditLog(modelBuilder);
 
         modelBuilder.Entity<WebhookEndpoint>(e =>
         {
@@ -380,6 +366,39 @@ public class MainframeDbContext : DbContext
             e.HasIndex(c => new { c.TenantId, c.BookingId })
                 .IsUnique()
                 .HasFilter("\"BookingId\" IS NOT NULL");
+        });
+    }
+
+    /// <summary>
+    /// The append-only trail: one table for the whole product, two orders over it.
+    ///
+    /// <para>
+    /// <b>Two indexes, deliberately.</b> The RANGE every door reader filters by is still
+    /// <c>CreatedAt</c> — retention, the club's day and "the last 24 hours" are all questions
+    /// about when the club HEARD — and it is the SORT that moved to
+    /// <see cref="AuditLog.ScanAt"/>, so that "newest first" is true of the instants printed on
+    /// screen rather than of a column nobody is looking at. A list ordered by one and filtered
+    /// by the other needs both, and ordering by <c>COALESCE</c> over the jsonb instead is what
+    /// the stored column exists to avoid: no index can serve it. See <see cref="AuditLog.ScanAt"/>.
+    /// </para>
+    ///
+    /// <para>
+    /// Its own method rather than another block inside <see cref="OnModelCreating"/>, because
+    /// that method is measured as one function and was one line from the length gate; see
+    /// <c>memory/gotchas.md</c> on the complexity tooling.
+    /// </para>
+    /// </summary>
+    private void ConfigureAuditLog(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AuditLog>(e =>
+        {
+            e.ToTable("audit_log");
+            e.HasKey(a => a.Id);
+            e.HasIndex(a => new { a.TenantId, a.CreatedAt });
+            e.HasIndex(a => new { a.TenantId, a.ScanAt });
+            e.Property(a => a.Action).HasMaxLength(128).IsRequired();
+            e.Property(a => a.DetailsJson).HasColumnType("jsonb");
+            e.HasQueryFilter(a => a.TenantId == _tenant.TenantId);
         });
     }
 
