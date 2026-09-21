@@ -50,6 +50,38 @@ function routes(extra: ApiRoute[] = []): ApiRoute[] {
   ];
 }
 
+/**
+ * A MEMBER's session, which is a different chrome: three section tabs where an admin has six,
+ * no doors badge, no gear menu items. B12 is a measurement, so the two cannot stand in for
+ * each other.
+ */
+function memberRoutes(): ApiRoute[] {
+  return [
+    { path: "/api/v1/whoami", body: { ...SESSION_ADMIN, is_admin: false } },
+    { path: "/api/v1/me/profile", body: { full_name: "Lerato Mokoena", email: "lerato@sample.local", photo_url: null, membership_number: "M-0001", member_class: "Regular" } },
+    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    {
+      path: "/api/v1/me/qr/generate",
+      body: {
+        code: "7K3M9XQ2RD5A", kind: "booking", expires_in_seconds: 900, court_number: 3,
+        starts_at: "2099-01-01T17:00:00Z", doors: true,
+        door_opens_at: "2099-01-01T16:30:00Z", door_closes_at: "2099-01-01T18:05:00Z",
+      },
+    },
+    {
+      path: "/api/v1/me/door",
+      body: {
+        doors: true, doors_shut: "none", timezone: "Africa/Johannesburg", policy: "booking_window",
+        membership: "active", membership_detail: "active", is_club_admin: false, next_booking: null,
+        early_entry_minutes: 30, roster_max_entries: 48,
+        contact: { phone: "021 555 0134", email: "info@crusaders.co.za" },
+        door_log_retention_days: 90, last_decision: null,
+      },
+    },
+    { path: "/api/v1/me/door/history", body: { items: [], next_cursor: null, retention_days: 90, timezone: "Africa/Johannesburg" } },
+  ];
+}
+
 async function openAdmin(page: Page, path: string, rootPx = 0) {
   await signIn(page);
   await serveApi(page, routes());
@@ -210,6 +242,73 @@ test.describe("B12 — the chrome at a large root font size", () => {
     console.log(`[B12] header ${Math.round(small)}px at a 16px root, ${Math.round(large)}px at 32px — grew ${Math.round(growth)}px`);
     expect(growth, `the chrome grew ${Math.round(growth)}px for a doubling of the text: its boxes are scaling, not just its words`)
       .toBeLessThanOrEqual(45);
+  });
+
+  /**
+   * And on the MEMBER route, which is where the finding actually bites.
+   *
+   * <p>
+   * Every case above signs in as an admin and measures `/admin/settings`, which is a page of
+   * fields: chrome taking a third of it is ugly and costs nothing you cannot scroll to.
+   * `/my-code` is the screen a member holds up to a scanner, its QR is about 254 px, and the
+   * question is whether the page has room to put one on the glass. It is also a DIFFERENT
+   * measurement — a member has three section tabs where an admin has six — so the admin number
+   * does not stand in for it.
+   * </p>
+   *
+   * <p>
+   * Measured at a 32 px root on a 320×568 phone, against the 44 px targets a coarse pointer
+   * gets: 234 px of chrome and 334 px of page before the club name stopped padding itself to a
+   * size its own text already exceeded, 214 and 354 after. The bound is the page's share, not
+   * the chrome's, because the page's share is the thing the member needs.
+   * </p>
+   */
+  test("leaves a member enough of the phone to hold a QR up to a scanner", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await signIn(page);
+    await serveApi(page, memberRoutes());
+    await page.goto("/my-code");
+    await expect(page.getByRole("heading", { name: "Your code" })).toBeVisible();
+    await page.addStyleTag({ content: "html { font-size: 32px !important; }" });
+
+    const measured = await page.evaluate(() => {
+      const header = document.querySelector("header")!.getBoundingClientRect().height;
+      const main = document.querySelector("main")!.getBoundingClientRect().height;
+      return { header, main, vh: window.innerHeight };
+    });
+    console.log(`[B12/member] chrome ${Math.round(measured.header)}px, page ${Math.round(measured.main)}px`
+      + ` of ${measured.vh} — ${Math.round((1 - measured.main / measured.vh) * 100)}% chrome`);
+
+    expect(measured.header / measured.vh, "the chrome takes more than 40 % of the phone")
+      .toBeLessThanOrEqual(0.4);
+    // And the number underneath the percentage: a 254 px code, with something left over.
+    expect(measured.main, "there is no room to put a QR on the glass").toBeGreaterThanOrEqual(254);
+  });
+
+  /**
+   * The other half of that change, so it cannot be "fixed" by shrinking a touch target.
+   *
+   * <p>
+   * The club name's 44 px came from `py-[10px]`, and the trim replaced it with a `min-h`. At a
+   * 32 px root that is the whole gain — the text already exceeds 44 px, so the minimum adds
+   * nothing — and at a 16 px root it has to be doing exactly what the padding did, or this is
+   * not a trim, it is a regression on a fingertip.
+   * </p>
+   */
+  test("keeps the club name a 44 px target on a phone at ordinary text", async ({ page }, testInfo) => {
+    // The mobile project only, and not as a convenience: the minimum is behind
+    // `@media (pointer: coarse)`, so on the desktop project it correctly does not apply and
+    // the name is 24 px. Asserting 44 there would be asserting that a mouse is a fingertip.
+    test.skip(testInfo.project.name !== "mobile", "the 44 px minimum is for a coarse pointer");
+    await page.setViewportSize({ width: 320, height: 568 });
+    await signIn(page);
+    await serveApi(page, memberRoutes());
+    await page.goto("/my-code");
+
+    const name = page.locator('header a[href="/"]').first();
+    const box = (await name.boundingBox())!;
+    console.log(`[B12/member] club name ${Math.round(box.width)}×${Math.round(box.height)}`);
+    expect(box.height, "the club name is smaller than a fingertip").toBeGreaterThanOrEqual(44);
   });
 
   /** The wallet chip showed a balance of 0 as "0…". */

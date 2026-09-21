@@ -243,7 +243,22 @@ export default function Layout() {
           182 px is 32 % of the phone, against the 54 % reviewer B measured.
         */}
         <div className="max-w-5xl mx-auto px-4 min-h-[56px] py-[4px] flex flex-wrap items-center gap-x-[16px] gap-y-[4px]">
-          <NavLink to="/" className="font-semibold tracking-tight whitespace-nowrap min-w-0 truncate [@media(pointer:coarse)]:py-[10px]">Crusaders Squash</NavLink>
+          {/*
+            B12, second pass — a touch MINIMUM, not padding that is added whatever the text
+            already measures.
+
+            `[@media(pointer:coarse)]:py-[10px]` was 20px of padding round the club name to
+            bring it to a 44px target, and at a 16px root that is exactly what it does. At a
+            32px root the name's own line box is 48px, so the padding bought nothing a
+            fingertip needed and cost a 68px line in a header that was already the finding.
+            Measured on /my-code at 320×568 with a 32px root: the club name's row went 68px →
+            48px, the header 234 → 214, and the page's share of the phone 59% → 63%.
+
+            `min-h` says what was actually meant — never smaller than a fingertip — and adds
+            nothing once the text is bigger than one. Same rule as the tab strip and the gear
+            beside it; this was the one item in the row still expressing it as padding.
+          */}
+          <NavLink to="/" className="inline-flex items-center font-semibold tracking-tight whitespace-nowrap min-w-0 truncate [@media(pointer:coarse)]:min-h-[44px]">Crusaders Squash</NavLink>
           {auth.status === "authenticated" && (
             // `lg`, not `md`. The inline nav switched on at 768 and the row it sits in needs
             // 800: an admin had five tabs, and at 768 the header measured a 795px scrollWidth
