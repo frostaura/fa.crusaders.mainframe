@@ -41,6 +41,8 @@
 #include "devapi/DeviceClient.h"
 #include "devlink/Cadence.h"
 #include "devlink/EventUpload.h"
+#include "devlink/LcdSettings.h"
+#include "devlink/RelayRestore.h"
 #include "devlink/RosterSync.h"
 #include "eventq/EventQueue.h"
 #include "fakes/FakeStore.h"
@@ -971,7 +973,10 @@ const char* corpusMac() {
 /// Decodes a vector's `body_hex` into `out` as a NUL-terminated string,
 /// returning its byte length.
 size_t bodyOf(const char* vector, char* out, size_t cap) {
-  uint8_t bytes[512] = {};
+  // Static, and 1280 rather than 512: the settings vectors carry all nine
+  // operator keys beside the button map and the roster, and a decode buffer
+  // that is quietly too small reports "body_hex" and reads as a corpus fault.
+  static uint8_t bytes[1280] = {};
   size_t n = 0U;
   TEST_ASSERT_TRUE_MESSAGE(corpus::hexField(vector, "body_hex", bytes, sizeof(bytes), &n), "body_hex");
   TEST_ASSERT_TRUE(n < cap);
@@ -1348,6 +1353,148 @@ void test_corpus_the_event_body_carries_this_boots_id() {
   TEST_ASSERT_EQUAL_MEMORY(expected, rendered, n);
 }
 
+/// B9 — the power-dip restore's five response vectors, through the parser that
+/// actually consumes them.
+///
+/// The court box is the half that ACTS on these, so this suite is where they
+/// are bound: a vector nobody executes is a contract the two sides only think
+/// they agree on.
+void test_corpus_the_relay_restore_vectors_parse_exactly_as_declared() {
+  loadHttpCorpus();
+  char body[1024] = {};
+  devlink::RelayRestore restored[bridgelogic::kStateCourts] = {};
+  uint8_t count = 0U;
+  uint8_t rejected = 0U;
+
+  // Two relays to restore, with their booking references.
+  size_t n = bodyOf(responseVector("heartbeat-response-relays-restore"), body, sizeof(body));
+  TEST_ASSERT_TRUE(devlink::parseRelayRestore(body, n, restored, bridgelogic::kStateCourts, count, &rejected));
+  TEST_ASSERT_EQUAL_UINT8(2U, count);
+  TEST_ASSERT_EQUAL_UINT8(0U, rejected);
+  TEST_ASSERT_EQUAL_UINT8(0U, restored[0].relay);
+  TEST_ASSERT_EQUAL_UINT32(1834U, restored[0].remainingSeconds);
+  TEST_ASSERT_EQUAL_STRING("3fa85f64", restored[0].bookingRef);
+  TEST_ASSERT_EQUAL_UINT8(2U, restored[1].relay);
+  TEST_ASSERT_EQUAL_UINT32(600U, restored[1].remainingSeconds);
+
+  // AN EMPTY ARRAY SWITCHES NOTHING OFF. It is information that nothing SHOULD
+  // be on, which matters only at boot when nothing IS on — making it an
+  // off-command would hand the API a way to darken a court, which it must not
+  // have. The key is PRESENT, so it is a served restore of zero relays.
+  count = 0xFFU;
+  rejected = 0xFFU;
+  n = bodyOf(responseVector("heartbeat-response-relays-empty"), body, sizeof(body));
+  TEST_ASSERT_TRUE(devlink::parseRelayRestore(body, n, restored, bridgelogic::kStateCourts, count, &rejected));
+  TEST_ASSERT_EQUAL_UINT8(0U, count);
+  TEST_ASSERT_EQUAL_UINT8(0U, rejected);
+
+  // Absent is a THIRD state: the server said nothing about relays at all.
+  n = bodyOf(responseVector("heartbeat-response-relays-absent"), body, sizeof(body));
+  TEST_ASSERT_FALSE(
+      devlink::parseRelayRestore(body, n, restored, bridgelogic::kStateCourts, count, &rejected));
+
+  // Mixed malformed: two are skipped and COUNTED, the third is applied. A
+  // diagnostic that silently drops what it could not read is a contract drift
+  // nobody hears about.
+  n = bodyOf(responseVector("heartbeat-response-relays-malformed"), body, sizeof(body));
+  TEST_ASSERT_TRUE(devlink::parseRelayRestore(body, n, restored, bridgelogic::kStateCourts, count, &rejected));
+  TEST_ASSERT_EQUAL_UINT8(1U, count);
+  TEST_ASSERT_EQUAL_UINT8(2U, rejected);
+  TEST_ASSERT_EQUAL_UINT8(1U, restored[0].relay);
+  TEST_ASSERT_EQUAL_UINT32(500U, restored[0].remainingSeconds);
+
+  // Past the relay cap, UNCAPPED on the wire: the wire carries what the server
+  // believes and the clamp is the device's, applied once at the point of use.
+  // Narrowing it here would make the two halves of a disagreement invisible.
+  n = bodyOf(responseVector("heartbeat-response-relays-over-cap"), body, sizeof(body));
+  TEST_ASSERT_TRUE(devlink::parseRelayRestore(body, n, restored, bridgelogic::kStateCourts, count, &rejected));
+  TEST_ASSERT_EQUAL_UINT8(1U, count);
+  TEST_ASSERT_EQUAL_UINT32(9999U, restored[0].remainingSeconds);
+  TEST_ASSERT_TRUE(restored[0].remainingSeconds > proto::kRelayHardCapSeconds);
+}
+
+/// B9 — the nine operator settings, in range and out of it.
+///
+/// They are read ONE LEVEL DEEP from the top-level `config` and nowhere else:
+/// devapi's flat scan takes the FIRST match in document order, so a vendor or
+/// diagnostics block nesting the same names would otherwise drive the screen.
+void test_corpus_the_lcd_settings_are_adopted_and_clamped() {
+  loadHttpCorpus();
+  char body[1024] = {};
+
+  devlink::LcdSettings settings;
+  size_t n = bodyOf(responseVector("heartbeat-response-lcd-settings"), body, sizeof(body));
+  TEST_ASSERT_TRUE(devlink::parseLcdSettings(body, n, settings));
+  TEST_ASSERT_EQUAL_UINT32(25000UL, settings.revertMs);
+  TEST_ASSERT_EQUAL_UINT32(45000UL, settings.choiceMs);
+  TEST_ASSERT_EQUAL_UINT32(6000UL, settings.cardMs);
+  TEST_ASSERT_EQUAL_UINT32(7000UL, settings.hintMs);
+  TEST_ASSERT_EQUAL_UINT32(200000UL, settings.scanMemoryMs);
+  TEST_ASSERT_EQUAL_UINT32(240UL * 60000UL, settings.clockTrustMs);
+  TEST_ASSERT_FALSE(settings.relayRestoreEnabled);
+  TEST_ASSERT_FALSE(settings.faultReporting);
+  TEST_ASSERT_EQUAL_UINT16(75U, settings.faultMaxPerHour);
+  // The cross-key invariant: the box must not forget who scanned while their
+  // selection is still live on the pad, or the next person's presses buy on
+  // their token.
+  TEST_ASSERT_TRUE(settings.scanMemoryMs >= settings.choiceMs);
+
+  // Every numeric setting past a bound, in BOTH directions across the set.
+  // Each is CLAMPED and none refuses the eight beside it: a club that typed
+  // 3600 into one field must not thereby lose its button map.
+  devlink::LcdSettings clamped;
+  n = bodyOf(responseVector("heartbeat-response-lcd-settings-out-of-range"), body, sizeof(body));
+  TEST_ASSERT_TRUE(devlink::parseLcdSettings(body, n, clamped));
+  TEST_ASSERT_EQUAL_UINT32(devlink::kLcdRevertMaxSeconds * 1000UL, clamped.revertMs);
+  TEST_ASSERT_EQUAL_UINT32(devlink::kLcdChoiceMinSeconds * 1000UL, clamped.choiceMs);
+  TEST_ASSERT_EQUAL_UINT32(devlink::kLcdCardMaxSeconds * 1000UL, clamped.cardMs);
+  TEST_ASSERT_EQUAL_UINT32(devlink::kLcdHintMinSeconds * 1000UL, clamped.hintMs);
+  TEST_ASSERT_EQUAL_UINT32(devlink::kClockTrustMaxMinutes * 60000UL, clamped.clockTrustMs);
+  TEST_ASSERT_EQUAL_UINT16(devlink::kMaxFaultMaxPerHour, clamped.faultMaxPerHour);
+  TEST_ASSERT_TRUE(clamped.faultReporting);
+  // The invariant is held by RAISING the memory, never by lowering the choice
+  // window: shortening a window somebody is mid-decision in is the one timeout
+  // on this box that can lose a half-made purchase.
+  TEST_ASSERT_TRUE(clamped.scanMemoryMs >= clamped.choiceMs);
+  TEST_ASSERT_EQUAL_UINT32(clamped.choiceMs, clamped.scanMemoryMs);
+
+  // The button map beside them is untouched by any of it.
+  const size_t at = devapi::json::findArray(body, n, "button_map");
+  TEST_ASSERT_NOT_EQUAL(devapi::json::kNotFound, at);
+}
+
+/// B9 — the two heartbeat REQUEST vectors the box's own diagnostics produce,
+/// byte for byte. Every field is omitted at its nothing value, so a box with
+/// nothing to report renders the body it has always rendered.
+void test_corpus_the_heartbeat_report_fields_are_byte_identical_to_the_contract() {
+  loadHttpCorpus();
+  char expected[512] = {};
+
+  devlink::HeartbeatReport report;
+  report.restoredRelays = 2U;
+
+  size_t n = bodyOf(requestVector("heartbeat-request-restored"), expected, sizeof(expected));
+  char rendered[devlink::kHeartbeatBodyCap] = {};
+  size_t renderedLen =
+      devlink::renderHeartbeatBody(rendered, sizeof(rendered), corpusMac(), "2.0.0", 86400000ULL, report);
+  TEST_ASSERT_EQUAL_size_t(n, renderedLen);
+  TEST_ASSERT_EQUAL_STRING(expected, rendered);
+
+  // `relay_state` is THREE states, not two: a null pointer omits the key, and a
+  // non-null pointer with a count of zero renders `[]`. A board that could not
+  // tell those apart would show a dark court as unknown and an unknown court as
+  // dark.
+  const devlink::RelayState state[2] = {{0U, 1834U}, {2U, 600U}};
+  report.relayState = state;
+  report.relayStateCount = 2U;
+  n = bodyOf(requestVector("heartbeat-request-relay-state"), expected, sizeof(expected));
+  renderedLen =
+      devlink::renderHeartbeatBody(rendered, sizeof(rendered), corpusMac(), "2.0.0", 86400000ULL, report);
+  TEST_ASSERT_EQUAL_size_t(n, renderedLen);
+  TEST_ASSERT_EQUAL_STRING(expected, rendered);
+  TEST_ASSERT_EQUAL_MEMORY(expected, rendered, n);
+}
+
 /// Every http vector this suite binds to, by id. The executed-count gate below
 /// compares this against the corpus and the manifest in both directions.
 const char* const kBoundHttpVectors[] = {
@@ -1368,6 +1515,15 @@ const char* const kBoundHttpVectors[] = {
     "activate-response-unnamed",
     "activate-response-name-too-long",
     "event-request-boot-id",
+    "heartbeat-request-restored",
+    "heartbeat-request-relay-state",
+    "heartbeat-response-relays-restore",
+    "heartbeat-response-relays-empty",
+    "heartbeat-response-relays-absent",
+    "heartbeat-response-relays-malformed",
+    "heartbeat-response-relays-over-cap",
+    "heartbeat-response-lcd-settings",
+    "heartbeat-response-lcd-settings-out-of-range",
 };
 
 bool isBound(const char* id) {
@@ -2963,6 +3119,9 @@ int main(int, char**) {
   RUN_TEST(test_corpus_walkup_body_is_byte_identical_to_the_contract);
   RUN_TEST(test_corpus_events_body_is_byte_identical_to_the_contract);
   RUN_TEST(test_corpus_roster_pushes_load_exactly_as_the_contract_declares_them);
+  RUN_TEST(test_corpus_the_relay_restore_vectors_parse_exactly_as_declared);
+  RUN_TEST(test_corpus_the_lcd_settings_are_adopted_and_clamped);
+  RUN_TEST(test_corpus_the_heartbeat_report_fields_are_byte_identical_to_the_contract);
   RUN_TEST(test_corpus_member_display_names_the_member_or_greets_them_anyway);
   RUN_TEST(test_corpus_the_event_body_carries_this_boots_id);
   RUN_TEST(test_corpus_every_http_section_is_declared_and_every_vector_is_bound);
