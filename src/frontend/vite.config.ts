@@ -28,6 +28,11 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // The club under test is in Johannesburg and several suites assert a wall-clock time a
+    // member would read ("opens for you at 18:30"). Without this the runner's own zone decides
+    // the answer: green on a Mac in SAST, red on a CI runner in UTC, and nothing in the failure
+    // says why. Pinned here rather than in each test so the next one cannot forget.
+    env: { TZ: "Africa/Johannesburg" },
     setupFiles: ["./src/test/setup.ts"],
 
     // vitest's default include is `**/*.{test,spec}.?(c|m)[jt]s?(x)` from the project

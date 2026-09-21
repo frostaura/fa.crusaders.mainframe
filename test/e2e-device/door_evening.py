@@ -1272,7 +1272,8 @@ def da_activity(d: Door) -> None:
         and all(c in "0123456789abcdef" for c in gate_open["fingerprint"]),
         f"fingerprint={(gate_open or {}).get('fingerprint')}")
 
-    serialised = json.dumps(body)
+    # `body` is the harness's Resp wrapper, not a dict — serialise what the API actually sent.
+    serialised = body.text
     chk("B5", "DetailsJson is NEVER returned, in whole or in part: it carries the club's internal "
               "device id, the gate key and a court box's relay and booking ids",
         d.gate_id not in serialised and "front-door" not in serialised
