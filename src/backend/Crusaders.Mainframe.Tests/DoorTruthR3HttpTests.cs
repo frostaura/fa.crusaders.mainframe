@@ -73,6 +73,18 @@ public sealed class DoorTruthR3HttpTests
             .Where(o => o.DeviceId == deviceId).OrderBy(o => o.DetectedAt).ToListAsync();
     }
 
+    /// <summary>
+    /// A signed-out client that still names the club — by the HOST, which is the only way this
+    /// product resolves a tenant for an anonymous caller. A query parameter does not do it, and
+    /// the failure is a <c>404 tenant_not_found</c> that reads exactly like a broken route.
+    /// </summary>
+    private static HttpClient AnonymousClient(TestWebAppFactory factory, DoorClub club)
+    {
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Host = $"{club.Slug}.crusaders.test";
+        return client;
+    }
+
     /// <summary>The MAC of a seeded door, which the fixture invents and the board must send.</summary>
     private static async Task<string> MacAsync(TestWebAppFactory factory, Guid deviceId)
         => (await DeviceAsync(factory, deviceId)).MacAddress;
@@ -860,8 +872,17 @@ public sealed class DoorTruthR3HttpTests
         // same function, not a second arrangement of the same settings.
         using (var scope = factory.Services.CreateScope())
         {
+            // The tenant has to be resolved by hand: a scope created outside a request has none,
+            // so TenantSettingsAccessor would read an empty document and answer the PRODUCT's
+            // defaults — which for this comparison is the worst possible failure mode, because
+            // one of the two policies' defaults happens to equal the right number and the check
+            // would pass while proving nothing.
+            scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Multitenancy.ITenantContext>()
+                .Set(club.TenantId, club.Slug);
             var settings = await scope.ServiceProvider
                 .GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+
+            Assert.Equal(policy, settings.GateAccessPolicy);
             Assert.Equal(BookingCodeWindow.DoorHorizonMinutes(settings), horizon);
         }
     }
@@ -880,8 +901,8 @@ public sealed class DoorTruthR3HttpTests
         await using var factory = CreateFactory();
         var club = await DoorClub.SeedAsync(factory, "r3fullname");
 
-        var response = await factory.CreateClient().PostAsync(
-            $"/api/v1/auth/register?tenant={club.Slug}",
+        var response = await AnonymousClient(factory, club).PostAsync(
+            "/api/v1/auth/register",
             new StringContent(
                 JsonSerializer.Serialize(new
                 {
@@ -899,8 +920,8 @@ public sealed class DoorTruthR3HttpTests
 
         // The boundary is accepted, or the bound is one out and every long-named member is
         // locked out of the club they belong to.
-        var exact = await factory.CreateClient().PostAsync(
-            $"/api/v1/auth/register?tenant={club.Slug}",
+        var exact = await AnonymousClient(factory, club).PostAsync(
+            "/api/v1/auth/register",
             new StringContent(
                 JsonSerializer.Serialize(new
                 {
