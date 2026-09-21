@@ -270,7 +270,22 @@ derived from three timeout constants. `DS8` measures it against a peer the real 
 cannot be made into (`gate_sim.HostileApi`, which answers *chunked with no
 Content-Length* so the measurement runs against the framing the firmware actually
 meets): a hung API, a dropped connection, and a black hole for the connect budget.
-The numbers land in the run's `notes:` block.
+The numbers land in the run's `notes:` block, and on one run they were:
+
+| | Derived | Measured |
+|---|---|---|
+| one blocking call | 12 000 ms | 4 000 ms |
+| release overrun | 12 010 ms | 3 916 ms |
+| physical release on a 30 s grant | 42 010 ms | 33 916 ms |
+| the connect budget, against TEST-NET-1 | 4 000 ms | 4 019 ms |
+| longest interval with the watchdog unkicked | — | 4 001 ms, against a 15 000 ms period |
+
+**The bound holds and is conservative**, because the three phases are not all
+reachable in one call: a connect that times out is followed by no header phase and
+no body phase, and a peer that answers the connect promptly spends nothing on it. The
+full 12 000 ms needs a connect that is *slow but successful*, which is a real network
+state and so a correct upper bound — just not what a hung or absent host produces.
+`src/iot/door-gate/README.md` carries the same table beside the sentence it measures.
 
 ## What `door_evening.py` deliberately does not prove
 

@@ -289,6 +289,33 @@ It was 8 010 ms and 38.01 s until round G3 gave the response body its own
 budget. The number went **up** because the old one was measured against a call
 whose body phase could be handed no time at all.
 
+**And it has now been MEASURED, not only derived.** `test/e2e-device`'s `DS8`
+step drives the native simulator — this firmware, over a real socket — against
+a peer that accepts the connection and then never answers, presenting a second
+scan a hundred and fifty milliseconds before a thirty-second release is due to
+end so a call is certainly in flight when the deadline passes:
+
+| | Derived | Measured |
+|---|---|---|
+| one blocking call | 12 000 ms | **4 000 ms** |
+| release overrun | 12 010 ms | **3 916 ms** |
+| physical release, 30 s grant | 42 010 ms | **33 916 ms** |
+| longest interval with the watchdog unkicked | — | **4 001 ms** (period 15 000) |
+
+**The bound holds and is conservative, and the reason is worth knowing: the
+three phases are not all reachable in one call.** A connect that times out is
+followed by no header phase and no body phase, so that call costs 4 s and
+stops; a peer that answers the connect promptly spends nothing on it. The full
+12 000 ms therefore needs a connect that is *slow but successful* — a SYN
+retransmit completing just inside four seconds — followed by a slow header
+phase and a slow body. That is a real network state, so 12 000 ms remains a
+correct upper bound; it is simply not what a hung or absent host produces, and
+the honest worst case against those is **about 34 seconds**.
+
+The connect budget itself was exercised separately, against `192.0.2.1`
+(TEST-NET-1, routed nowhere): **4 019 ms**, which is `kHttpConnectTimeoutMs`
+plus the pass tick.
+
 That sentence replaces "the lock can never stay released longer than the hard
 cap", which was false: the loop used to check the deadline once per pass
 *before* the blocking calls, so the overrun was a whole pass's worth of them.
@@ -498,6 +525,8 @@ are in [`test/`](test/) and run by `make test-iot`.
 | The watchdog is kicked around every blocking call | `test_app_the_watchdog_is_kicked_around_every_blocking_call` + the `static_assert` in `GateConfig.h` |
 | A dead API host never trips the watchdog or starves the lock | `test_app_a_dead_api_host_never_starves_the_watchdog_or_the_lock` |
 | The 12 010 ms release-overrun bound above | `test_app_a_release_outlives_its_deadline_by_at_most_one_blocking_call`, `test_config_the_worst_call_is_connect_plus_headers_plus_body` |
+| ...and the same bound MEASURED, on a real socket against a hung peer | `test/e2e-device`'s `DS8`, via `gate_sim.measure_worst_case_release` |
+| Every decision reaches the log with the reason it acted on, and a board with no log decides identically | `test_app_every_decision_reaches_the_log_with_the_reason_it_acted_on`, `test_app_a_debounced_repeat_is_not_logged_as_a_decision`, `test_app_a_board_with_no_decision_log_decides_exactly_the_same` |
 | A call is three phases and the watchdog exceeds their sum | `test_config_the_worst_call_is_connect_plus_headers_plus_body` + the `static_assert` in `GateConfig.h` |
 | An overrun costs everything buffered, and nothing after the next terminator | `test_app_an_rx_error_discards_everything_that_was_buffered_when_it_happened` |
 | Boot and a link event throw away a partial line | `test_app_boot_and_a_link_event_throw_away_a_partial_line` |
