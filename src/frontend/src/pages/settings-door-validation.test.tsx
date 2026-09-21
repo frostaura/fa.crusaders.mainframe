@@ -284,7 +284,34 @@ describe("AdminSettings — an empty number is not zero", () => {
    * if the two drift, the summary names a field nobody can see.
    * </p>
    */
-  it("names each emptied field by its own caption, whichever block it is on", async () => {
+  /**
+   * <b>Its own timeout, and the number is measured rather than picked.</b>
+   *
+   * <p>
+   * This is the slowest test in the suite by a factor of three — 1 232 ms against a next-worst
+   * of 416 ms — and it was the first thing to time out whenever another lane was building
+   * beside it. Profiled rather than guessed at: the captions cost 89 ms and the nine
+   * `getByRole` lookups 47 ms, while the nine writes cost 860 ms, which is about 95 ms of
+   * re-render each. `AdminSettings` is one component holding one state object across nine
+   * cards and some thirty fields, so every keystroke re-renders all of it; nine emptied fields
+   * is nine of those, and that is the test doing what it is for rather than doing it badly.
+   * </p>
+   *
+   * <p>
+   * <b>Three things ruled out, none of them the cause.</b> No fake or shared timers — this
+   * file installs none. No short `waitFor` — there is none in this case at all, every
+   * assertion here is synchronous. No un-awaited user event — it is `fireEvent`, which is
+   * synchronous, not `user-event`. Batching the nine writes into one `act` was tried and
+   * returned 12 %: `fireEvent` flushes inside its own `act` per event, so they do not collapse.
+   * </p>
+   *
+   * <p>
+   * So the honest fix is headroom, not a rewrite: 15 s is the same test with room for a
+   * machine running four lanes at once, and the 5 s default stays where it belongs for
+   * everything else.
+   * </p>
+   */
+  it("names each emptied field by its own caption, whichever block it is on", { timeout: 15_000 }, async () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
