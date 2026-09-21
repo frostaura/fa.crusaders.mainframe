@@ -9,7 +9,12 @@ namespace devlink {
 
 bool parseHeartbeatInterval(const char* body, size_t len, uint32_t& intervalMs) {
   uint32_t seconds = 0U;
-  if (!devapi::json::unsignedField(body, len, "heartbeat_seconds", seconds)) {
+  // Top level, not the first `heartbeat_seconds` anywhere in the document. It
+  // is read on a path that ACTS on it — the box's whole cadence, and with it
+  // how fresh its roster ever is — and a field sharing the name inside a
+  // nested object would be adopted ahead of the real one. Round G4's B2, in
+  // the one field that decides how often this board speaks at all.
+  if (!devapi::json::topLevelUnsignedField(body, len, "heartbeat_seconds", seconds)) {
     return false;
   }
   // Clamp in seconds first so the multiply cannot wrap a huge value into a

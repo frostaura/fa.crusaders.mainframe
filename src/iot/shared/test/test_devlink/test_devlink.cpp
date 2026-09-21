@@ -1412,8 +1412,68 @@ void setUp() {
 void tearDown() {
 }
 
+// --- the flat scan, where it is the wrong reader ---------------------------
+//
+// Round G4's B2 in the court box's own fields. `devapi::json::findKey` and
+// `findArray` match at ANY DEPTH and return the FIRST match in document order,
+// which is depended upon for the heartbeat's nested `config` object and is
+// exactly wrong for anything a caller ACTS ON: a decoy placed before the real
+// field wins, and the reader cannot tell the difference.
+//
+// `roster` was narrowed when B2 was found. These two were not, and both decide
+// something: `court_numbers` is which club court each relay IS — what a walk-up
+// is sold as, and what the power-dip restore gates on — and `heartbeat_seconds`
+// is how often the box speaks at all.
+
+void test_court_numbers_come_from_the_top_level_only(void) {
+  int16_t courts[devlink::kMaxCourts] = {};
+  uint8_t count = 0U;
+
+  // A decoy BEFORE the real field, which is the shape that wins under a flat
+  // scan. A box that adopted it would map relay 0 to court 7 and sell a member
+  // a court the club never booked.
+  const char* decoyFirst = "{\"vendor\":{\"court_numbers\":[7,8,9,9]},\"court_numbers\":[1,2,3,4]}";
+  TEST_ASSERT_TRUE(devlink::parseCourtNumbers(decoyFirst, strlen(decoyFirst), courts, count));
+  TEST_ASSERT_EQUAL_UINT8(4U, count);
+  TEST_ASSERT_EQUAL_INT16(1, courts[0]);
+  TEST_ASSERT_EQUAL_INT16(4, courts[3]);
+
+  // And after it, which a flat scan happens to get right — asserted so the fix
+  // is not merely reordering the document's luck.
+  const char* decoyLast = "{\"court_numbers\":[1,2,3,4],\"vendor\":{\"court_numbers\":[7,8,9,9]}}";
+  TEST_ASSERT_TRUE(devlink::parseCourtNumbers(decoyLast, strlen(decoyLast), courts, count));
+  TEST_ASSERT_EQUAL_INT16(1, courts[0]);
+
+  // A nested one ALONE is not a court map at all. Leaving the previous one
+  // alone is the documented behaviour for an absent key, and a box that has
+  // never been told its courts refuses every walk-up rather than selling court
+  // zero.
+  const char* nestedOnly = "{\"config\":{\"court_numbers\":[7,8,9,9]}}";
+  count = 0U;
+  TEST_ASSERT_FALSE(devlink::parseCourtNumbers(nestedOnly, strlen(nestedOnly), courts, count));
+  TEST_ASSERT_EQUAL_UINT8(0U, count);
+}
+
+void test_the_heartbeat_interval_comes_from_the_top_level_only(void) {
+  uint32_t intervalMs = 30000UL;
+
+  const char* decoyFirst = "{\"config\":{\"heartbeat_seconds\":300},\"heartbeat_seconds\":60}";
+  TEST_ASSERT_TRUE(devlink::parseHeartbeatInterval(decoyFirst, strlen(decoyFirst), intervalMs));
+  TEST_ASSERT_EQUAL_UINT32(60000UL, intervalMs);
+
+  // Nested alone: absent, so the working value is LEFT ALONE. An older API must
+  // not be able to change a cadence a newer one set, and neither must a field
+  // that merely shares a name with one.
+  intervalMs = 60000UL;
+  const char* nestedOnly = "{\"config\":{\"heartbeat_seconds\":300}}";
+  TEST_ASSERT_FALSE(devlink::parseHeartbeatInterval(nestedOnly, strlen(nestedOnly), intervalMs));
+  TEST_ASSERT_EQUAL_UINT32(60000UL, intervalMs);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
+  RUN_TEST(test_court_numbers_come_from_the_top_level_only);
+  RUN_TEST(test_the_heartbeat_interval_comes_from_the_top_level_only);
 
   RUN_TEST(test_roster_element_parses_the_four_fields);
   RUN_TEST(test_roster_element_refuses_a_token_longer_than_the_cap);
