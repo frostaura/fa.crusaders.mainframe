@@ -85,13 +85,43 @@ export function focusAfterAction(find: () => HTMLElement | null | undefined): vo
   const run = ++currentRun;
   let attempts = 0;
 
+  /** Try again later, while the schedule has a step left. One caller per outcome, below. */
+  const again = () => {
+    if (attempts < BACKOFF_MS.length) window.setTimeout(attempt, BACKOFF_MS[attempts]);
+  };
+
   const attempt = () => {
     if (run !== currentRun) return;
     attempts += 1;
+
     // Somebody has it, on purpose. Leave it alone — including the control's own restored
     // trigger, which is the ordinary case when the acting control survives its own action,
     // and a page that moved focus to its own receipt before this even ran.
-    if (!adrift(document.activeElement)) return;
+    //
+    /**
+     * <b>Held is a reason to wait, not a reason to stop.</b>
+     *
+     * <p>
+     * This used to `return` outright, which quietly made the whole backoff dead code for the
+     * case it was written for. `ConfirmButton` restores focus to its own trigger the instant
+     * the action settles; the page then re-reads itself, and it is the payload arriving a few
+     * hundred milliseconds later that unmounts the trigger and renders its successor. So at
+     * the first look focus is legitimately held — by a control that is about to cease to
+     * exist — and standing down there meant every call site whose successor arrives with a
+     * later payload landed on `&lt;body&gt;` exactly as it had before `focusAfter` existed.
+     * `DoorShutControl` carried a hand-rolled effect for precisely this, which is the
+     * evidence that the shared helper was not covering it.
+     * </p>
+     *
+     * <p>
+     * Nothing about the rule it enforces changes: it still only ever fills a vacuum, and it
+     * still gives up after the documented six steps, so a screen where focus never goes
+     * adrift does not leave a loop waiting to pounce on whatever the admin does next. What
+     * changes is that "is there a vacuum" is a question it re-asks, rather than one it
+     * answers once at the only instant it is guaranteed to be wrong.
+     * </p>
+     */
+    if (!adrift(document.activeElement)) { again(); return; }
 
     const target = find();
     if (target && target.isConnected) {
@@ -102,7 +132,7 @@ export function focusAfterAction(find: () => HTMLElement | null | undefined): vo
       }
       return;
     }
-    if (attempts < BACKOFF_MS.length) window.setTimeout(attempt, BACKOFF_MS[attempts]);
+    again();
   };
 
   // Never synchronously: React has not re-rendered yet, so at this instant the target does not

@@ -12,7 +12,13 @@ import {
   ACTIVITY_READ_FAILED, activityEmptyNotice, activityPanelTitle, describeActivityAction,
   describeActivityReason, describeActivityWho, unacknowledgedBoardsNotice,
 } from "../lib/deviceActivity";
-import { formatInstant } from "../lib/utils";
+// R3 adoption: the club's clock, not the reader's. The `lib/utils` formatter this replaced
+// renders through `toLocaleString(undefined, …)`, so this feed read "9/19/26, 9:25 PM" on an
+// admin laptop set to en-US while every other time on the doors surface read
+// "19 September 2026, 21:25". Two formats on one estate is what makes reconciling a night
+// after an incident guesswork. `pages/AdminDevices.tsx` is on `clubClock.test.ts`'s SURFACES
+// list from the same commit, so the old formatter cannot come back unnoticed.
+import { clubInstant } from "../lib/clubClock";
 import {
   coverageWithout, outOfServiceConfirm, outOfServiceConsequences, type CourtCoverage,
 } from "../lib/deviceCoverage";
@@ -434,7 +440,7 @@ function ActivityRow({ entry, now }: { entry: DeviceActivityEntry; now: number }
         </span>
         {/* Relative for the glance, exact on hover or long-press for the reconciliation —
             the pair the liveness line above and the ledger both already use. */}
-        <time dateTime={entry.at} title={formatInstant(entry.at)} className="ml-auto shrink-0 text-slate-400">
+        <time dateTime={entry.at} title={clubInstant(entry.at)} className="ml-auto shrink-0 text-slate-400">
           {relative(entry.at, now)}
         </time>
       </div>
@@ -577,6 +583,21 @@ type BoxEditing = {
  */
 type Liveness = { offlineAfter: number; now: number };
 
+/**
+ * The id of the control that REPLACES "Take out of service" once it has run. (R3 adoption)
+ *
+ * <p>
+ * `ConfirmButton.focusAfter` is called repeatedly for about a second after the action
+ * settles, precisely so it can name a control the re-render has not produced yet — so a
+ * stable id is all it needs, and a ref would have to be threaded through two components
+ * that do not otherwise know about each other. Derived from the device id rather than the
+ * name, because two boxes called "Court box" is a club's own business.
+ * </p>
+ */
+function backInServiceId(deviceId: string): string {
+  return `device-${deviceId}-back-in-service`;
+}
+
 function DeviceRow({
   device, boxEditing, actions, liveness, coverage,
 }: {
@@ -664,10 +685,23 @@ function DeviceRow({
             // An admin taking a spare out of service beside a box that is reporting gets the
             // plain sentence.
             confirmLabel={outOfServiceConfirm(coverage)}
+            // R3 adoption. `subject` names what is being KEPT, so the way out reads
+            // "Leave it in service — Court box 1-4" rather than carrying the destructive
+            // verb in its own accessible name; `focusAfter` lands on the control that
+            // replaces this one, which is the only thing on the row that can tell the
+            // reader the action landed. Both are additive props the R3 chrome lane added
+            // to ConfirmButton and that no call site on this page had taken up.
+            subject={device.name}
+            focusAfter={() => document.getElementById(backInServiceId(device.id))}
             onConfirm={() => actions.setEnabled(false)}
           />
         ) : (
-          <Button variant="outline" className="min-h-11 px-3 text-sm" onClick={() => void actions.setEnabled(true)}>
+          <Button
+            id={backInServiceId(device.id)}
+            variant="outline"
+            className="min-h-11 px-3 text-sm"
+            onClick={() => void actions.setEnabled(true)}
+          >
             Put back in service
           </Button>
         )}
@@ -680,6 +714,14 @@ function DeviceRow({
           idleLabel="Delete"
           cancelLabel="Keep this box"
           confirmLabel="Delete? The box re-registers on its next heartbeat."
+          // R3 adoption, and deliberately only the one prop. `subject` makes the way out
+          // read "Keep this box — Court box 1-4" in a column of identical controls. There
+          // is no `focusAfter`: the row this button lives in is gone the moment the action
+          // settles, so the only honest destination is the page's own heading, which is
+          // exactly what ConfirmButton does when the prop is absent. Naming a successor
+          // that will never exist would hold focus on `<body>` for the full second the
+          // retry loop runs.
+          subject={device.name}
           onConfirm={actions.remove}
           tone="danger"
         />

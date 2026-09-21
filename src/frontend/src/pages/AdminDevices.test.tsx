@@ -12,7 +12,7 @@ import {
   renderPage,
   stubFetch,
 } from "../test/harness";
-import { formatInstant } from "../lib/utils";
+import { clubInstant } from "../lib/clubClock";
 
 /**
  * The Devices screen, under the hobby-grade device contract.
@@ -1699,7 +1699,10 @@ describe("AdminDevices", () => {
 
       const when = await screen.findByText(/ago$/);
       expect(when).toHaveAttribute("datetime", at);
-      expect(when.getAttribute("title")).toBe(formatInstant(at));
+      // The CLUB's instant, not the reader's. The runner pins TZ to the club's own zone, so
+      // this assertion alone cannot tell the two apart — `clubClock.test.ts`'s SURFACES list
+      // is what makes the wrong formatter fail, and it names this page from the same commit.
+      expect(when.getAttribute("title")).toBe(clubInstant(at));
     });
 
     it("says nothing is recorded yet rather than showing an empty panel", async () => {

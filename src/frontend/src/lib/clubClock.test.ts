@@ -160,6 +160,11 @@ describe("no doors surface writes a time in the reader's own locale", () => {
   const SURFACES = [
     "components/doors",
     "components/member-door",
+    // R3 left this one reported rather than fixed, exactly as the note above prescribes:
+    // the device activity feed's `<time title>` went through `utils.formatInstant` and wrote
+    // "9/19/26, 9:25 PM" in the reader's own locale, on the page an admin reconciles a court
+    // box's night from. Added here in the same commit that fixed it.
+    "pages/AdminDevices.tsx",
     "pages/AdminDoors.tsx",
     "pages/AdminDoorsCard.tsx",
     "pages/AdminDoorsDetail.tsx",

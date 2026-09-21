@@ -213,6 +213,12 @@ function DoorControls({ door, displayName, actions, online, shutAt, timezone }: 
             cancelLabel="Keep this door"
             confirmLabel={gateDeleteConfirm()}
             ariaLabel={displayName}
+            // R3 adoption: "Keep this door — Side door". The way out is named after what it
+            // keeps rather than after the verb it is declining. No `focusAfter`: a successful
+            // delete navigates to the doors list, and the page it lands on moves focus itself
+            // — naming a target here would be a second claim on the keyboard during the same
+            // transition, and `focusAfterAction` deliberately declines one it would lose.
+            subject={displayName}
             onConfirm={actions.remove}
             tone="danger"
             className="min-h-11 w-full"

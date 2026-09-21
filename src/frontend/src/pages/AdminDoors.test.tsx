@@ -1209,8 +1209,21 @@ describe("the doors surface", () => {
         enabled: false, shut_by_name: "Priya Naidoo", out_of_service_since: new Date().toISOString(),
       })]);
 
-      const notice = await screen.findByText(/Side door is shut/);
-      expect(notice).toHaveAttribute("role", "status");
+      // R3 adoption: `live="standing"`, which is polite AND remembers. The visible banner
+      // carries no live role at all — that is the point of the mode, because this block is
+      // conditional on a payload the page re-reads every fifteen seconds and a remounted
+      // region with text already in it is an announcement. What speaks is a separate,
+      // invisible region, written once per distinct fact. See `alert-live.test.tsx`.
+      // `waitFor`, not a bare read: the announcement is written by an effect one commit after
+      // the banner paints, so a synchronous assertion here is green or red depending on how
+      // busy the machine is — which is a flake, and one this file has the shape to produce.
+      await waitFor(() => expect(
+        [...document.querySelectorAll("[aria-live='polite']")].map((n) => n.textContent).join(""),
+        "the standing fact was never said at all",
+      ).toMatch(/Side door is shut/));
+      const notice = screen.getAllByText(/Side door is shut/)
+        .find((n) => n.className.includes("border-danger-strong"))!;
+      expect(notice).not.toHaveAttribute("role");
       // And it still LOOKS like a refusal: the finding is about what is announced over the
       // top of a reader, not about making a shut door look ordinary.
       expect(notice.className).toContain("border-danger-strong");
