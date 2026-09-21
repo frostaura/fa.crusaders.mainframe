@@ -156,6 +156,51 @@ bool isCompleteObject(const char* body, size_t len);
 /// Container levels `isCompleteObject` can track. One bit each in a uint32_t.
 inline constexpr uint32_t kMaxNesting = 32U;
 
+// --- reading ONE object's own members ----------------------------------------
+//
+// WHY BOTH FAMILIES EXIST
+// -----------------------
+// The flat scan above is depended upon and is not going away: the court box
+// reads `button_map`, `slice_minutes` and `walk_up_max_minutes` out of the
+// heartbeat's NESTED `config` object with no path expression at all, and
+// narrowing `findKey` would break it.
+//
+// But a flat scan is the wrong reader for anything a caller ACTS ON, and round
+// G4's B2 is what that cost: `onGateResponse` read `opened` — the one field
+// that drives a lock — with it. `{"outer":{"opened":true}}` released the lock.
+// So did `[{"opened":true}]`. So did `{"opened":false,"detail":{"opened":true}}`,
+// whose top-level answer is a refusal, because `findKey` returns the FIRST
+// match in document order and a decoy placed before the real field wins.
+//
+// `adoptUnlockMs` had already scoped `unlock_seconds` by finding the `gate`
+// object first and reading inside it, and had written down why. These are that
+// reasoning made available rather than re-derived per call site — and they are
+// stricter than that idiom, which bounds a scan at the START of an object and
+// not at its end.
+//
+// THEY ARE NOT A PATH SYNTAX. Exactly one level: the members of the outermost
+// object. A caller that wants a field from a NAMED object still finds that
+// object first, with `findTopLevelObject`, and reads from there.
+
+/// Position just past the closing quote of `key` when it is a member of the
+/// OUTERMOST object — the same contract `findKey` returns, so the readers below
+/// can share everything after it. kNotFound when the key is absent from that
+/// level, when the body is not one object, or when it is malformed.
+///
+/// Every member's value is skipped WHOLE, so a key inside a nested object or
+/// array is not a match however early it appears.
+size_t findTopLevelKey(const char* body, size_t len, const char* key);
+
+/// `stringField` / `unsignedField` / `boolField`, restricted to the outermost
+/// object's own members. Same refusal rules in every other respect.
+bool topLevelStringField(const char* body, size_t len, const char* key, char* out, size_t outCap);
+bool topLevelUnsignedField(const char* body, size_t len, const char* key, uint32_t& out);
+bool topLevelBoolField(const char* body, size_t len, const char* key, bool& out);
+
+/// `findObject` / `findArray`, restricted the same way.
+size_t findTopLevelObject(const char* body, size_t len, const char* key, size_t& outLen);
+size_t findTopLevelArray(const char* body, size_t len, const char* key);
+
 // --- writing ----------------------------------------------------------------
 //
 // WHY A READER HAS AN ESCAPER IN IT

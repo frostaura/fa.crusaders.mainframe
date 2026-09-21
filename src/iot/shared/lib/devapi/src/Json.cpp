@@ -112,8 +112,12 @@ size_t findKey(const char* body, size_t len, const char* key) {
   return kNotFound;
 }
 
-bool stringField(const char* body, size_t len, const char* key, char* out, size_t outCap) {
-  size_t at = findKey(body, len, key);
+namespace {
+
+/// The string value at a position `findKey` or `findTopLevelKey` returned.
+/// Shared by both families so the two can never disagree about what a value is
+/// — only about where a key may be found.
+bool stringAt(const char* body, size_t len, size_t at, char* out, size_t outCap) {
   if (at == kNotFound) {
     return false;
   }
@@ -122,6 +126,12 @@ bool stringField(const char* body, size_t len, const char* key, char* out, size_
     return false;
   }
   return out[0] != '\0';
+}
+
+} // namespace
+
+bool stringField(const char* body, size_t len, const char* key, char* out, size_t outCap) {
+  return stringAt(body, len, findKey(body, len, key), out, outCap);
 }
 
 namespace {
@@ -150,8 +160,9 @@ bool readUnsigned(const char* body, size_t len, size_t& at, uint32_t& out) {
 
 } // namespace
 
-bool unsignedField(const char* body, size_t len, const char* key, uint32_t& out) {
-  size_t at = findKey(body, len, key);
+namespace {
+
+bool unsignedAt(const char* body, size_t len, size_t at, uint32_t& out) {
   if (at == kNotFound) {
     return false;
   }
@@ -159,8 +170,7 @@ bool unsignedField(const char* body, size_t len, const char* key, uint32_t& out)
   return readUnsigned(body, len, at, out);
 }
 
-bool boolField(const char* body, size_t len, const char* key, bool& out) {
-  size_t at = findKey(body, len, key);
+bool boolAt(const char* body, size_t len, size_t at, bool& out) {
   if (at == kNotFound) {
     return false;
   }
@@ -176,8 +186,19 @@ bool boolField(const char* body, size_t len, const char* key, bool& out) {
   return false;
 }
 
-size_t findObject(const char* body, size_t len, const char* key, size_t& outLen) {
-  size_t at = findKey(body, len, key);
+} // namespace
+
+bool unsignedField(const char* body, size_t len, const char* key, uint32_t& out) {
+  return unsignedAt(body, len, findKey(body, len, key), out);
+}
+
+bool boolField(const char* body, size_t len, const char* key, bool& out) {
+  return boolAt(body, len, findKey(body, len, key), out);
+}
+
+namespace {
+
+size_t objectAt(const char* body, size_t len, size_t at, size_t& outLen) {
   if (at == kNotFound) {
     return kNotFound;
   }
@@ -211,8 +232,7 @@ size_t findObject(const char* body, size_t len, const char* key, size_t& outLen)
   return kNotFound;
 }
 
-size_t findArray(const char* body, size_t len, const char* key) {
-  size_t at = findKey(body, len, key);
+size_t arrayAt(const char* body, size_t len, size_t at) {
   if (at == kNotFound) {
     return kNotFound;
   }
@@ -223,6 +243,16 @@ size_t findArray(const char* body, size_t len, const char* key) {
     return kNotFound;
   }
   return at + 1U;
+}
+
+} // namespace
+
+size_t findObject(const char* body, size_t len, const char* key, size_t& outLen) {
+  return objectAt(body, len, findKey(body, len, key), outLen);
+}
+
+size_t findArray(const char* body, size_t len, const char* key) {
+  return arrayAt(body, len, findKey(body, len, key));
 }
 
 bool nextStringElement(const char* body, size_t len, size_t& at, char* out, size_t outCap) {
@@ -420,6 +450,103 @@ bool escapeInto(const char* in, size_t inLen, char* out, size_t outCap) {
   }
   out[at] = '\0';
   return true;
+}
+
+namespace {
+
+/// Past the value that starts at `at`, whatever kind it is. kNotFound when the
+/// document ends inside it or a container never balances.
+///
+/// `pastBalancedObject` below handles `{` and `[` alike — it remembers each
+/// opener's KIND — so it is the one walker for both. A scalar is anything up to
+/// the next `,` or `}` at this level, which cannot be inside a string because a
+/// string is skipped whole above it.
+size_t pastBalancedObject(const char* body, size_t len, size_t at);
+
+size_t pastValue(const char* body, size_t len, size_t at) {
+  if (at >= len) {
+    return kNotFound;
+  }
+  if (body[at] == '"') {
+    const size_t close = endOfString(body, len, at);
+    return close == kNotFound ? kNotFound : close + 1U;
+  }
+  if (body[at] == '{' || body[at] == '[') {
+    return pastBalancedObject(body, len, at);
+  }
+  while (at < len && body[at] != ',' && body[at] != '}') {
+    ++at;
+  }
+  return at;
+}
+
+} // namespace
+
+size_t findTopLevelKey(const char* body, size_t len, const char* key) {
+  if (body == nullptr || key == nullptr) {
+    return kNotFound;
+  }
+  const size_t keyLen = strlen(key);
+  if (keyLen == 0U) {
+    return kNotFound;
+  }
+
+  size_t at = skipSpace(body, len, 0U);
+  // A TOP-LEVEL ARRAY IS NOT AN OBJECT, and that is one of the two bodies B2
+  // reported: `[{"opened":true}]` released a lock through the flat scan.
+  if (at >= len || body[at] != '{') {
+    return kNotFound;
+  }
+  ++at;
+
+  while (true) {
+    at = skipSpace(body, len, at);
+    if (at >= len || body[at] != '"') {
+      return kNotFound; // the closing brace, a trailing comma, or malformed
+    }
+    const size_t close = endOfString(body, len, at);
+    if (close == kNotFound) {
+      return kNotFound;
+    }
+    const size_t colon = skipSpace(body, len, close + 1U);
+    if (colon >= len || body[colon] != ':') {
+      return kNotFound; // a member with no value: not a document this reads
+    }
+    if (close - (at + 1U) == keyLen && memcmp(body + at + 1U, key, keyLen) == 0) {
+      return close + 1U; // the same contract findKey returns
+    }
+    // NOT THIS ONE: past its value WHOLE, so a key nested inside it is never a
+    // match however early in the document it appears.
+    at = pastValue(body, len, skipToValue(body, len, colon));
+    if (at == kNotFound) {
+      return kNotFound;
+    }
+    at = skipSpace(body, len, at);
+    if (at >= len || body[at] != ',') {
+      return kNotFound; // the object ended, and the key was not in it
+    }
+    ++at;
+  }
+}
+
+bool topLevelStringField(const char* body, size_t len, const char* key, char* out, size_t outCap) {
+  return stringAt(body, len, findTopLevelKey(body, len, key), out, outCap);
+}
+
+bool topLevelUnsignedField(const char* body, size_t len, const char* key, uint32_t& out) {
+  return unsignedAt(body, len, findTopLevelKey(body, len, key), out);
+}
+
+bool topLevelBoolField(const char* body, size_t len, const char* key, bool& out) {
+  return boolAt(body, len, findTopLevelKey(body, len, key), out);
+}
+
+size_t findTopLevelObject(const char* body, size_t len, const char* key, size_t& outLen) {
+  return objectAt(body, len, findTopLevelKey(body, len, key), outLen);
+}
+
+size_t findTopLevelArray(const char* body, size_t len, const char* key) {
+  return arrayAt(body, len, findTopLevelKey(body, len, key));
 }
 
 bool isCompleteObject(const char* body, size_t len) {

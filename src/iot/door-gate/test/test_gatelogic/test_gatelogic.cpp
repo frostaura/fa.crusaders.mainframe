@@ -3319,6 +3319,87 @@ void test_app_a_404_on_events_keeps_the_backlog_and_retries_it() {
   TEST_ASSERT_TRUE_MESSAGE(rig.queue.empty(), "the kept events have to actually get through in the end");
 }
 
+/// G4 / B2. `opened` WAS READ BY A FLAT ANY-DEPTH SCAN, so a body that never
+/// said the door should open at the top level opened it anyway.
+///
+/// `devapi::json::findKey` finds a key at ANY depth, deliberately — the court
+/// box reads `button_map` out of the heartbeat's nested `config` with no path
+/// expression at all — and `onGateResponse` used it for the one field that
+/// drives a lock. `{"outer":{"opened":true}}` and `[{"opened":true}]` both
+/// released it, and so did `{"opened":false,"detail":{"opened":true}}`, whose
+/// TOP-LEVEL answer is a refusal.
+///
+/// `adoptUnlockMs` had already scoped `unlock_seconds` to the `gate` object and
+/// written down why; this is the same rule applied to the field that matters
+/// most and to the two beside it.
+void test_gate_response_reads_only_the_top_level_object() {
+  struct Row {
+    const char* label;
+    const char* body;
+    bool opens;
+  };
+  const Row rows[] = {
+      {"the contract's own open", "{\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":3}", true},
+      {"the contract's own refusal", "{\"opened\":false,\"reason\":\"not_recognised\",\"unlock_seconds\":0}",
+       false},
+      {"nested in an object", "{\"outer\":{\"opened\":true,\"unlock_seconds\":3}}", false},
+      {"a top-level array", "[{\"opened\":true,\"unlock_seconds\":3}]", false},
+      {"a top-level refusal with a nested open",
+       "{\"opened\":false,\"detail\":{\"opened\":true}}", false},
+      {"a reason first, then a nested open",
+       "{\"reason\":\"no\",\"meta\":{\"opened\":true,\"unlock_seconds\":30}}", false},
+      {"a nested open BEFORE the real refusal",
+       "{\"meta\":{\"opened\":true},\"opened\":false,\"reason\":\"not_recognised\"}", false},
+      {"an open behind a decoy string value",
+       "{\"reason\":\"opened\",\"opened\":true,\"unlock_seconds\":3}", true},
+  };
+
+  for (const Row& row : rows) {
+    const gatelogic::ScanDecision decision =
+        gatelogic::onGateResponse(200U, row.body, strlen(row.body), kDefaultMs, kCapMs);
+    char message[256] = {};
+    snprintf(message, sizeof(message), "%s: %s -> released=%d", row.label, row.body,
+             decision.released ? 1 : 0);
+    TEST_ASSERT_EQUAL_MESSAGE(row.opens, decision.released, message);
+    // AND A BODY THAT SAID NOTHING AT THE TOP LEVEL IS AN OUTAGE, not a
+    // refusal: nobody said no, so the roster gets its turn. That is the
+    // existing rule for a 200 whose body is shaped differently from the
+    // contract, and it has to keep holding for these.
+    if (!row.opens && strstr(row.body, "\"opened\":false") == nullptr) {
+      TEST_ASSERT_TRUE_MESSAGE(decision.fallbackToRoster, message);
+    }
+  }
+}
+
+/// G4 / B2. `unlock_seconds` and `reason` are scoped the same way, so a nested
+/// number cannot drive the lock and a nested string cannot explain a decision
+/// it had nothing to do with.
+void test_gate_response_takes_its_duration_and_reason_from_the_top_level_too() {
+  // A nested thirty beside a top-level three: the lock gets three.
+  const char* body = "{\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":3,"
+                     "\"debug\":{\"unlock_seconds\":30,\"reason\":\"tampered\"}}";
+  gatelogic::ScanDecision decision =
+      gatelogic::onGateResponse(200U, body, strlen(body), kDefaultMs, kCapMs);
+  TEST_ASSERT_TRUE(decision.released);
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(3000U, decision.unlockMs, body);
+  TEST_ASSERT_EQUAL_STRING_MESSAGE("ok", decision.reason, body);
+
+  // A nested one FIRST, which is the ordering a flat scan actually loses to.
+  const char* decoyFirst = "{\"debug\":{\"unlock_seconds\":30,\"reason\":\"tampered\"},"
+                           "\"opened\":true,\"reason\":\"ok\",\"unlock_seconds\":3}";
+  decision = gatelogic::onGateResponse(200U, decoyFirst, strlen(decoyFirst), kDefaultMs, kCapMs);
+  TEST_ASSERT_TRUE(decision.released);
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(3000U, decision.unlockMs, decoyFirst);
+  TEST_ASSERT_EQUAL_STRING_MESSAGE("ok", decision.reason, decoyFirst);
+
+  // And a 200 that opens with NO top-level duration still falls back to the
+  // adopted one rather than to a nested number.
+  const char* noDuration = "{\"opened\":true,\"reason\":\"ok\",\"x\":{\"unlock_seconds\":30}}";
+  decision = gatelogic::onGateResponse(200U, noDuration, strlen(noDuration), kDefaultMs, kCapMs);
+  TEST_ASSERT_TRUE(decision.released);
+  TEST_ASSERT_EQUAL_UINT32_MESSAGE(kDefaultMs, decision.unlockMs, noDuration);
+}
+
 // ---------------------------------------------------------------------------
 // G4 / L1 — a line the board could not read is answered, and bounded
 // ---------------------------------------------------------------------------
@@ -4709,6 +4790,8 @@ int main(int, char**) {
   RUN_TEST(test_app_a_heartbeat_whose_body_never_arrived_counts_as_a_no_push);
   RUN_TEST(test_app_a_draining_backlog_still_lets_the_member_at_the_door_through);
   RUN_TEST(test_app_a_404_on_events_keeps_the_backlog_and_retries_it);
+  RUN_TEST(test_gate_response_reads_only_the_top_level_object);
+  RUN_TEST(test_gate_response_takes_its_duration_and_reason_from_the_top_level_too);
   RUN_TEST(test_app_a_corrupt_line_gives_the_member_an_answer);
   RUN_TEST(test_app_line_noise_cannot_strobe_the_lamp_or_fill_the_ring);
   RUN_TEST(test_app_two_alternating_tokens_cannot_hold_the_door_open_for_ever);

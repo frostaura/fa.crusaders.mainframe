@@ -539,7 +539,10 @@ void GateApp::applyEventReaction(uint16_t status, const char* response) {
   switch (devapi::react(status)) {
   case devapi::Reaction::Accepted: {
     uint32_t through = 0U;
-    if (devapi::json::unsignedField(response, strlen(response), "accepted_through", through)) {
+    // TOP-LEVEL (round G4, B2). This number RELEASES RECORDS — everything at or
+    // below it leaves the ring for ever — so it is read from the object the
+    // server sent rather than from anywhere one happens to appear.
+    if (devapi::json::topLevelUnsignedField(response, strlen(response), "accepted_through", through)) {
       static_cast<void>(queue_.releaseThrough(through));
     }
     return;

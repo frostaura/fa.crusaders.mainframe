@@ -133,7 +133,13 @@ SyncResult applyRoster(const char* body, size_t len, RosterT& target, uint32_t n
     return result;
   }
 
-  size_t at = devapi::json::findArray(body, len, "roster");
+  // THE TOP-LEVEL `roster`, not the first one anywhere in the document (round
+  // G4, B2). This array REPLACES the cache that decides who gets in offline,
+  // and `findArray` takes the first match in document order — so a nested one
+  // placed before the real one is the roster this board would have committed.
+  // Both device contracts put `roster` at the top level, which is what makes
+  // this safe to narrow for the court box as well as for the gate.
+  size_t at = devapi::json::findTopLevelArray(body, len, "roster");
   if (at == devapi::json::kNotFound) {
     return result;
   }
