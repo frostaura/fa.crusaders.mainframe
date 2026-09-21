@@ -1,6 +1,7 @@
 import {
   createContext, useCallback, useContext, useEffect, useState, cloneElement, isValidElement, useId,
 } from "react";
+import { Link } from "react-router-dom";
 import { endpoints, GATE_ACCESS_POLICIES, type AdminSettings, type AdminCourt, type GateAccessPolicy } from "../lib/api";
 import {
   DAY_KEYS, DAY_NAMES, DEVICE_ALERT_COOLDOWN_MAX_MINUTES, DEVICE_ALERT_COOLDOWN_MIN_MINUTES,
@@ -602,6 +603,17 @@ export default function AdminSettingsPage() {
           */}
           <p className="text-sm text-text-secondary">
             {capsSentence(settings)}
+          </p>
+          {/*
+            The other half of item 3, and it is a destination rather than a field: a group may
+            LOWER either cap for its own members and may never raise one, so the number above
+            is a ceiling and the groups page is where the exceptions to it live. Without this
+            link the two halves of one rule sit on two pages that do not mention each other.
+          */}
+          <p className="text-sm">
+            <Link to="/admin/groups" className="inline-flex min-h-11 items-center text-accent-strong">
+              Member groups can lower these for their own members
+            </Link>
           </p>
           <Field settingKey="action_glyphs" label={SETTING_LABELS.action_glyphs} hint={ACTION_GLYPHS_HINT}>
             <select
