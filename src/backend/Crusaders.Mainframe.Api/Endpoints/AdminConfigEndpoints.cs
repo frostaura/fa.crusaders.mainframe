@@ -108,6 +108,20 @@ public static class AdminConfigEndpoints
                 door_refusal_spike_minutes = DoorSettings.RefusalSpikeMinutes(defaults),
                 club_contact_phone = DoorSettings.ContactPhone(defaults) ?? "",
                 club_contact_email = DoorSettings.ContactEmail(defaults) ?? "",
+
+                // The four BE-ADMIN keys, rendered from the CLAMPED readers rather than
+                // echoed out of the stored document — otherwise the settings page round-trips
+                // a number the engine does not honour, which is the defect
+                // AdminSettingsHttpTests.Opening_the_settings_page_and_saving_it_changes_nothing
+                // is named for.
+                admin_bulk_max_items = BulkSettings.MaxItems(defaults),
+                schedule_materialisation_days = ScheduleSettings.MaterialisationDays(defaults),
+                schedule_max_rows_per_change = ScheduleSettings.MaxRowsPerChange(defaults),
+                schedule_worker_interval_seconds = (int)ScheduleSettings.WorkerInterval(defaults).TotalSeconds,
+
+                // The two night-trace keys, from TraceSettings for the same reason.
+                member_trace_enabled = TraceSettings.Enabled(defaults),
+                member_trace_max_events = TraceSettings.MaxEvents(defaults),
             });
         });
 
@@ -630,6 +644,29 @@ public static class AdminConfigEndpoints
             return "schedule_worker_interval_out_of_range";
         }
 
+        if (req.EffectiveMemberTraceMaxEvents is { } events
+            && (events < TraceSettings.MinMaxEvents || events > TraceSettings.MaxMaxEvents))
+        {
+            return "member_trace_max_events_out_of_range";
+        }
+
+        return ValidateScheduleHorizon(req);
+    }
+
+    /// <summary>
+    /// The materialisation horizon, and the one CROSS-FIELD rule in this lane.
+    ///
+    /// <para>
+    /// Split out of <see cref="ValidateAdminSettings"/> for the complexity gate, and it earns
+    /// its own method anyway: the other three bounds are independent numbers, while this one is
+    /// a RELATIONSHIP between two keys that are edited from different screens. The failure of
+    /// the pair — a member booking fourteen days out into a league night the materialiser has
+    /// not written yet — appears weeks later, on the night, as a member holding a paid court the
+    /// club promised to a division.
+    /// </para>
+    /// </summary>
+    private static string? ValidateScheduleHorizon(UpdateSettingsRequest req)
+    {
         if (req.EffectiveScheduleMaterialisationDays is not { } horizon) return null;
 
         if (horizon < ScheduleSettings.MinMaterialisationDays || horizon > ScheduleSettings.MaxMaterialisationDays)
@@ -648,6 +685,14 @@ public static class AdminConfigEndpoints
         if (req.EffectiveScheduleMaxRowsPerChange is { } rows) doc["schedule_max_rows_per_change"] = ToElement(rows);
         if (req.EffectiveScheduleWorkerIntervalSeconds is { } tick)
             doc["schedule_worker_interval_seconds"] = ToElement(tick);
+
+        // Written as a real JSON boolean, never a string: TenantSettingsAccessor.TryBool
+        // accepts true/false only, and a coerced "false" would leave a club that believed it
+        // had switched the trace OFF with it on — the one direction that key must never fail in.
+        if (req.EffectiveMemberTraceEnabled is { } traceOn)
+            doc["member_trace_enabled"] = ToElement(traceOn);
+        if (req.EffectiveMemberTraceMaxEvents is { } events)
+            doc["member_trace_max_events"] = ToElement(events);
     }
 
     private static void WriteOptionalDoorSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
@@ -858,8 +903,24 @@ public sealed record UpdateSettingsRequest(
     [property: JsonPropertyName("admin_bulk_max_items")] int? AdminBulkMaxItemsSnake = null,
     [property: JsonPropertyName("schedule_materialisation_days")] int? ScheduleMaterialisationDaysSnake = null,
     [property: JsonPropertyName("schedule_max_rows_per_change")] int? ScheduleMaxRowsPerChangeSnake = null,
-    [property: JsonPropertyName("schedule_worker_interval_seconds")] int? ScheduleWorkerIntervalSecondsSnake = null)
+    [property: JsonPropertyName("schedule_worker_interval_seconds")] int? ScheduleWorkerIntervalSecondsSnake = null,
+
+    // ---- The two night-trace keys ----
+    //
+    // The first is a KILL SWITCH on the most surveillance-capable surface in the product, so
+    // it is editable from the settings screen like every other club decision rather than
+    // being a deployment flag nobody at the club can reach.
+    bool? MemberTraceEnabled = null,
+    int? MemberTraceMaxEvents = null,
+    [property: JsonPropertyName("member_trace_enabled")] bool? MemberTraceEnabledSnake = null,
+    [property: JsonPropertyName("member_trace_max_events")] int? MemberTraceMaxEventsSnake = null)
 {
+    /// <summary>Whether the club wants the night trace on, under either spelling.</summary>
+    public bool? EffectiveMemberTraceEnabled => MemberTraceEnabled ?? MemberTraceEnabledSnake;
+
+    /// <summary>The trace's page ceiling as asked for, under either spelling.</summary>
+    public int? EffectiveMemberTraceMaxEvents => MemberTraceMaxEvents ?? MemberTraceMaxEventsSnake;
+
     /// <summary>The bulk ceiling the club asked for, under either spelling.</summary>
     public int? EffectiveAdminBulkMaxItems => AdminBulkMaxItems ?? AdminBulkMaxItemsSnake;
 

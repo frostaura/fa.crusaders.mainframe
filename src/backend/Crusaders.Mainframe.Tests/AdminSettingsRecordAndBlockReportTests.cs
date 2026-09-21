@@ -171,6 +171,8 @@ public sealed class AdminSettingsRecordAndBlockReportTests
     [InlineData("scheduleMaterialisationDays", 3, "schedule_materialisation_days_out_of_range")]
     [InlineData("scheduleMaxRowsPerChange", 5, "schedule_max_rows_out_of_range")]
     [InlineData("scheduleWorkerIntervalSeconds", 5, "schedule_worker_interval_out_of_range")]
+    [InlineData("memberTraceMaxEvents", 10, "member_trace_max_events_out_of_range")]
+    [InlineData("memberTraceMaxEvents", 5000, "member_trace_max_events_out_of_range")]
     public async Task Each_new_number_is_bounded_on_the_put(string key, int value, string expected)
     {
         Skip.IfNot(_pg.Available, Skipped);
@@ -225,6 +227,45 @@ public sealed class AdminSettingsRecordAndBlockReportTests
         Assert.Equal(
             TimeSpan.FromSeconds(ScheduleSettings.MinWorkerIntervalSeconds),
             ScheduleSettings.WorkerInterval(view));
+    }
+
+    /// <summary>
+    /// The night-trace kill switch is a club decision, editable from the settings screen and
+    /// round-tripped by it.
+    ///
+    /// <para>
+    /// <b>Written as a real JSON boolean, and read as one.</b> The accessor's <c>TryBool</c>
+    /// accepts <c>true</c>/<c>false</c> only; a coerced <c>"false"</c> would leave a club that
+    /// believed it had switched the trace OFF with it on, which is the one direction this
+    /// particular key must never fail in.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task The_night_trace_can_be_switched_off_and_the_switch_round_trips()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, "settrace");
+        var client = club.AdminClient(factory);
+
+        // On by default, so a club that has never opened this page can still answer
+        // "who was here last night" after a break-in.
+        var before = await client.GetFromJsonAsync<JsonElement>(SettingsPath);
+        Assert.True(before.GetProperty("member_trace_enabled").GetBoolean());
+
+        var save = BaseSave();
+        save["memberTraceEnabled"] = false;
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(SettingsPath, save)).StatusCode);
+
+        var after = await client.GetFromJsonAsync<JsonElement>(SettingsPath);
+        Assert.False(after.GetProperty("member_trace_enabled").GetBoolean());
+
+        using var scope = factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Multitenancy.ITenantContext>()
+            .Set(club.TenantId, club.Slug);
+        var view = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+        Assert.False(TraceSettings.Enabled(view));
     }
 
     // ------------------------------------------------------------------ D2-B35
