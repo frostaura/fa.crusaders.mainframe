@@ -65,11 +65,22 @@ public static class MeDoorEndpoints
     /// <c>GET /api/v1/me/door</c> — everything the member's code page needs about doors.
     ///
     /// <para>
-    /// <c>doors: false</c> is load-bearing: a club with no door controller must get a page that
-    /// says NOTHING about doors rather than one describing a building with no controller in it.
-    /// It counts ENABLED gates only, for the reason <c>QrEndpoints</c> already records — a board
-    /// the club has switched off is answered 403 on every route it calls, so promising a member
-    /// it will let them in would be false.
+    /// <b><c>doors</c> means "this club has door scanners", and it used to mean "one of them is
+    /// switched on" (E-H1 / B4).</b> A club that shut every door for the night answered
+    /// <c>doors: false</c>, which is the same answer a squash club with no scanners at all gets
+    /// — so the member's page dropped the whole door section, dropped the history link and went
+    /// silent about doors on the one night a member most needed to be told why the building
+    /// would not let them in. The two facts are now separate: <c>doors</c> is whether the club
+    /// has any gate row at all, and <c>doors_shut</c> is how many of them are shut.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>And the page may say the club has shut its doors without promising that nobody gets
+    /// in.</b> Both halves are true at once: a board the club has switched off is answered 403
+    /// on every route it calls, AND a board that has lost the network never hears the switch and
+    /// goes on admitting whatever its cached roster carries for up to six hours. "The club has
+    /// shut its doors for now" is the honest sentence; "nobody can get in" is not one this
+    /// server can support.
     /// </para>
     /// </summary>
     private static async Task<IResult> DoorAsync(
@@ -81,13 +92,24 @@ public static class MeDoorEndpoints
         var settings = await settingsAccessor.GetAsync(ct);
         var now = DateTimeOffset.UtcNow;
 
-        var doors = await db.Devices.AnyAsync(d => d.Kind == DeviceKind.Gate && d.Enabled, ct);
+        var gates = await db.Devices.Where(d => d.Kind == DeviceKind.Gate)
+            .Select(d => d.Enabled).ToListAsync(ct);
         var status = await db.Memberships.Where(m => m.UserId == userId)
             .Select(m => (MembershipStatus?)m.Status).FirstOrDefaultAsync(ct);
 
         return Results.Ok(new
         {
-            doors,
+            doors = gates.Count > 0,
+
+            // "none" for a club with no doors at all, which is the same sentence as a club
+            // whose doors are all open: there is nothing shut to tell anybody about, and the
+            // `doors` flag above is what says whether the section exists.
+            doors_shut = ShutState(gates),
+
+            // The club's zone, so a member's history and code card can say "club time" once
+            // rather than rendering in whatever zone the phone is in. O1: there were two clock
+            // formatters in this product, and the member's one always used the viewer's zone.
+            timezone = DoorClock.ZoneOf(settings).Name,
             policy = settings.GateAccessPolicy,
             membership = Membership(status),
 
@@ -111,7 +133,18 @@ public static class MeDoorEndpoints
 
             // Clamped server-side; the page never clamps. Additive to WIRE-W1 so the standing
             // line can name the window instead of saying "a while before".
-            early_entry_minutes = BookingCodeWindow.EntryWindowMinutes(settings),
+            //
+            // NULL UNLESS THE POLICY IS booking_window (E-H3). Under active_member a booking
+            // code's door window is not the early-entry number at all — it is
+            // StartsAt − DoorHorizonMinutes, which is the wider of that number and the horizon
+            // the member's own phone shows the code over (BookingCodeWindow) — so a page
+            // carrying `early_entry_minutes: 30` beside a door that opened at 08:05 for a 10:15
+            // booking was holding two numbers that do not belong to the same rule and printing
+            // the wrong one. The instants the member actually needs are on `next_booking`,
+            // computed through the function the door itself decides with.
+            early_entry_minutes = settings.GateAccessPolicy == GateAccessPolicies.BookingWindow
+                ? BookingCodeWindow.EntryWindowMinutes(settings)
+                : (int?)null,
             roster_max_entries = DeviceGateRosterBuilder.GateRosterMaxEntries,
 
             contact = new
@@ -184,6 +217,12 @@ public static class MeDoorEndpoints
             next_cursor = page.Count > limit && items.Count > 0
                 ? new DoorLogCursor(items[^1].CreatedAt, items[^1].Id).Encode()
                 : null,
+
+            // The club's zone, so the list says "club time" once rather than rendering every
+            // row in whatever zone the phone happens to be in (O1). The member's formatter used
+            // the VIEWER's zone always, which for a member abroad — or one whose phone clock is
+            // wrong — put their own history at the wrong hours with nothing saying so.
+            timezone = DoorClock.ZoneOf(settings).Name,
             retention_days = retentionDays,
         });
     }
@@ -269,7 +308,7 @@ public static class MeDoorEndpoints
     /// device id inside a jsonb document proves nothing about whose board it is.
     /// </para>
     /// </summary>
-    private static async Task<Dictionary<Guid, string>> DoorNamesAsync(
+    private static async Task<Dictionary<Guid, string?>> DoorNamesAsync(
         MainframeDbContext db, IEnumerable<string?> detailsJson, CancellationToken ct)
     {
         var ids = detailsJson
@@ -277,17 +316,32 @@ public static class MeDoorEndpoints
             .Where(d => d is not null).Select(d => d!.Value).Distinct().ToList();
         if (ids.Count == 0) return [];
 
-        // The club's own label for the DOOR first, the board's display name second.
+        // The board's DISPLAY NAME first, then the club's key — the reverse of what round one
+        // chose, on A12's ruling.
         //
-        // `gate_key` is what a club writes on a door and what A2.2 keys "Needs a door name"
-        // on; `Name` is the board's label and starts life as the auto-registration's
-        // placeholder, which is a worse thing to show somebody standing outside than the slug
-        // the club chose. A door with neither is the club's own gap and the page has its own
-        // sentence for it.
+        // The argument for the key was that `Name` starts life as the auto-registration's
+        // placeholder. That is true of the placeholder and of nothing else: "Front door" is a
+        // name a club typed for people to read, and `front-door` is a slug that reached a
+        // member's history verbatim while the admin log said "Front door" for the same scan —
+        // two surfaces of one product calling one door two things. So the rule is the name
+        // UNLESS it is still the placeholder, in which case the key, in which case nothing and
+        // the page has its own sentence for a door the club has not named.
         return await db.Devices.AsNoTracking()
             .Where(d => ids.Contains(d.Id))
-            .Select(d => new { d.Id, Label = d.GateKey ?? d.Name })
-            .ToDictionaryAsync(d => d.Id, d => d.Label, ct);
+            .Select(d => new { d.Id, d.Name, d.GateKey })
+            .ToDictionaryAsync(d => d.Id, d => MemberLabel(d.Name, d.GateKey), ct);
+    }
+
+    /// <summary>
+    /// What a MEMBER calls a door: its display name unless that is still
+    /// <see cref="DeviceRegistryService.GatePlaceholderName"/>, then the club's key, then
+    /// nothing. Block body for the lizard reason in <c>memory/gotchas.md</c>.
+    /// </summary>
+    public static string? MemberLabel(string? name, string? gateKey)
+    {
+        var trimmed = name?.Trim();
+        if (!string.IsNullOrEmpty(trimmed) && trimmed != DeviceRegistryService.GatePlaceholderName) return trimmed;
+        return string.IsNullOrWhiteSpace(gateKey) ? null : gateKey;
     }
 
     /// <summary>
@@ -301,10 +355,16 @@ public static class MeDoorEndpoints
     /// in <c>memory/gotchas.md</c>.
     /// </para>
     /// </summary>
-    private static string? DoorNameOf(JsonElement? details, IReadOnlyDictionary<Guid, string> doors)
+    private static string? DoorNameOf(JsonElement? details, IReadOnlyDictionary<Guid, string?> doors)
     {
         if (DoorTrail.DeviceIdOf(details) is { } id && doors.TryGetValue(id, out var name)) return name;
-        return details is { } root ? DoorActivityView.Text(root, "gate_key") : null;
+        if (details is not { } root) return null;
+
+        // The same rule against what the ROW stored, which is all there is once the board is
+        // gone: the display name it had at the scan unless that was still the placeholder,
+        // then the key. Never the device code — `gate-44c103` is a thing an admin reads off a
+        // board in a cupboard, not a door a member stood at.
+        return MemberLabel(DoorActivityView.Text(root, "door_name"), DoorActivityView.Text(root, "gate_key"));
     }
 
     /// <summary>
@@ -318,7 +378,7 @@ public static class MeDoorEndpoints
     /// </para>
     /// </summary>
     private static object Entry(
-        string action, DateTimeOffset at, string? detailsJson, IReadOnlyDictionary<Guid, string> doors)
+        string action, DateTimeOffset at, string? detailsJson, IReadOnlyDictionary<Guid, string?> doors)
     {
         var details = DoorActivityView.Details(detailsJson);
         return new
@@ -356,6 +416,32 @@ public static class MeDoorEndpoints
     {
         if (status is null) return "none";
         return status == MembershipStatus.Active ? "active" : "not_active";
+    }
+
+    /// <summary>No door is shut.</summary>
+    public const string ShutNone = "none";
+
+    /// <summary>Some doors are shut and at least one is not.</summary>
+    public const string ShutSome = "some";
+
+    /// <summary>Every door the club has is shut.</summary>
+    public const string ShutAll = "all";
+
+    /// <summary>
+    /// How much of the club's door fleet is shut, in three words (E-H1 / B4).
+    ///
+    /// <para>
+    /// A club with no doors at all is <see cref="ShutNone"/>, not <see cref="ShutAll"/>: "all of
+    /// nothing" is true and is not a sentence anybody should be shown, and <c>doors: false</c>
+    /// is already the flag that says there is no section to render. Block body for the lizard
+    /// reason in <c>memory/gotchas.md</c>.
+    /// </para>
+    /// </summary>
+    private static string ShutState(IReadOnlyCollection<bool> enabled)
+    {
+        var shut = enabled.Count(e => !e);
+        if (shut == 0) return ShutNone;
+        return shut == enabled.Count ? ShutAll : ShutSome;
     }
 
     /// <summary>
@@ -449,11 +535,21 @@ public static class MeDoorEndpoints
     /// person walking back in for a forgotten racquet.
     /// </para>
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>There is no horizon on it any more (Lerato's LOW).</b> It answered null for every
+    /// booking further off than the door's own window, so a member with a court tomorrow was
+    /// told nothing at all about when the door would open for it — on a page whose whole job is
+    /// to explain that window. The page already explains windows and already has the instants;
+    /// withholding the booking was the server deciding the member did not need to know. The
+    /// bound that remains is the one that is about the booking rather than about the door: a
+    /// booking whose code has expired is not the next one.
+    /// </para>
+    /// </remarks>
     private static async Task<object?> NextBookingAsync(
         MainframeDbContext db, TenantSettingsView settings, Guid userId, DateTimeOffset now, CancellationToken ct)
     {
         var horizon = BookingCodeWindow.DoorHorizonMinutes(settings);
-        var latestStart = BookingCodeWindow.LatestStart(now, horizon);
         var tail = settings.GraceWindowMinutes;
 
         var booking = await db.Bookings.AsNoTracking()
@@ -461,7 +557,6 @@ public static class MeDoorEndpoints
                         && (b.Status == BookingStatus.Booked
                             || b.Status == BookingStatus.NoShow
                             || b.Status == BookingStatus.Completed)
-                        && b.StartsAt <= latestStart
                         && b.StartsAt.AddMinutes((b.SliceMinutes * b.SliceCount) + tail) >= now)
             .OrderBy(b => b.StartsAt)
             .Select(b => new { b.StartsAt, b.EndsAt, b.SliceMinutes, b.SliceCount, b.CourtId })

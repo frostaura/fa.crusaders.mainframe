@@ -222,10 +222,14 @@ public sealed class DeviceRegistryService
     /// that everything here is about one instant and nothing here is about a field.
     /// </para>
     /// </summary>
-    private async Task SwitchAsync(Device device, bool enabled, CancellationToken ct)
+    private async Task SwitchAsync(Device device, bool enabled, Guid actorUserId, CancellationToken ct)
     {
         var switchedAt = DateTimeOffset.UtcNow;
         device.OutOfServiceSince = enabled ? null : switchedAt;
+
+        // Who did it, beside when. See Device.ShutByUserId: the console said "You shut this
+        // door." to every admin in the club because this was the one fact it did not have.
+        device.ShutByUserId = enabled ? null : actorUserId;
 
         // A door going back INTO service was not shut by a fleet shut-all any more, whichever
         // route reopened it. Cleared here rather than only in the fleet reopen, because an admin
@@ -246,9 +250,33 @@ public sealed class DeviceRegistryService
         foreach (var outage in open) outage.EndedAt = switchedAt;
     }
 
-    public async Task<Device> UpdateAsync(Device device, UpdateDeviceCommand cmd, Guid actorUserId, CancellationToken ct)
+    /// <returns>
+    /// The row, and the list of what this PATCH actually changed — empty when it changed
+    /// nothing, which the endpoint answers <c>unchanged: true</c> to. See
+    /// <see cref="DoorAuditActions.ChangeOf"/> for what the words become on a door's own feed.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// <b>The list is computed by comparing before with after, not from which fields arrived.</b>
+    /// A console sends the whole card back on every save, so "the request mentioned
+    /// <c>location_note</c>" is true of nine saves out of ten and says nothing; the feed filled
+    /// up with identical "details or state were changed" rows and the one row that mattered —
+    /// who shut the door — was lost among them (A5). And a stale tab shutting an
+    /// already-shut door needs to be told it changed nothing rather than shown a success (B10),
+    /// which only a real comparison can say.
+    /// </para>
+    /// <para>
+    /// <b>A PATCH that changed nothing writes no audit row either.</b> A trail is a record of
+    /// changes; a row saying a change happened when none did is noise that also makes the
+    /// door's own story unreadable. The exception that is not one: acknowledging an
+    /// auto-registered row IS a change — somebody looked at it — and is recorded as such.
+    /// </para>
+    /// </remarks>
+    public async Task<(Device Device, IReadOnlyList<string> Changes)> UpdateAsync(
+        Device device, UpdateDeviceCommand cmd, Guid actorUserId, CancellationToken ct)
     {
-        if (cmd.Name is not null) device.Name = cmd.Name.Trim();
+        var changes = new List<string>();
+        ApplyName(device, cmd, changes);
 
         // The switch-off instant and the outage it closes: see SwitchAsync.
         //
@@ -264,37 +292,101 @@ public sealed class DeviceRegistryService
         // Cleared on the way back in: a board in service is not out of service since anything.
         if (cmd.Enabled is { } enabled && enabled != device.Enabled)
         {
-            await SwitchAsync(device, enabled, ct);
+            changes.Add(enabled ? DoorAuditActions.ReopenedToken : DoorAuditActions.ShutToken);
+            await SwitchAsync(device, enabled, actorUserId, ct);
         }
 
         if (cmd.Enabled is not null) device.Enabled = cmd.Enabled.Value;
-        if (cmd.CourtNumbers is not null) device.CourtNumbers = cmd.CourtNumbers.ToList();
-        if (cmd.ButtonMap is { } buttons) device.ButtonMapJson = buttons.Value?.ToJson();
 
-        // Two-valued rather than three, unlike the button map: absent leaves the name alone
-        // and an EMPTY STRING clears it. A door's name has no "run the club's default" state
-        // to distinguish a JSON null from, so the extra value would only be a second way of
-        // saying the same thing — and an empty name is what an admin types when they want it
-        // gone, which is the gesture worth honouring. Trimmed and bounded by the caller,
-        // where there is a person to refuse.
-        if (cmd.GateKey is not null) device.GateKey = cmd.GateKey.Length == 0 ? null : cmd.GateKey;
-
-        // The door card. Same two-valued rule as the name above, and the same reason for it.
-        if (cmd.LocationNote is not null)
-        {
-            device.LocationNote = cmd.LocationNote.Length == 0 ? null : cmd.LocationNote;
-        }
-        if (cmd.PowerLossBehaviour is { } powerLoss) device.PowerLossBehaviour = powerLoss;
+        ApplyCourts(device, cmd, changes);
+        ApplyCard(device, cmd, changes);
 
         // An admin has now looked at this row, so it stops reading as "appeared by itself,
         // nobody has checked the courts it guessed". Deleting the row and letting the box
-        // register again is what sets it back.
+        // register again is what sets it back. It counts as a change: somebody looked, which is
+        // the whole meaning of the flag and is what takes the row out of the unacknowledged cap.
+        if (device.AutoRegistered) changes.Add("acknowledged");
         device.AutoRegistered = false;
 
-        Audit(actorUserId, "device.updated", new { device_id = device.Id });
+        // Nothing changed, so nothing is recorded and nothing is saved. A trail is a record of
+        // changes; nine rows saying "details or state were changed" when nothing was is how a
+        // door's own story became unreadable (A5). The caller answers `unchanged: true`.
+        if (changes.Count == 0) return (device, changes);
+
+        Audit(actorUserId, "device.updated", new { device_id = device.Id, changes });
         await _db.SaveChangesAsync(ct);
 
-        return device;
+        return (device, changes);
+    }
+
+    // The three blocks below are the field-by-field half of UpdateAsync, split out of it for
+    // one reason and one only: with all of them inline the method reached 22 branches against
+    // the complexity gate's 15, and a gate that is failed is a gate that stops being run. The
+    // split is along the lines an admin already thinks in — what the door is CALLED, what it is
+    // ASSIGNED to, what is on its CARD — and the call order is the original statement order, so
+    // the `changes` list still comes out in the sequence the tests were written against.
+    //
+    // Each of them compares before with after rather than reading which fields arrived: the
+    // reason is in UpdateAsync's own remarks and it is the whole of A5 and B10.
+
+    /// <summary>What the door is called. See the note above <see cref="ApplyCourts"/>.</summary>
+    private static void ApplyName(Device device, UpdateDeviceCommand cmd, List<string> changes)
+    {
+        if (cmd.Name is not null && device.Name != cmd.Name.Trim()) changes.Add(DoorAuditActions.NameToken);
+        if (cmd.Name is not null) device.Name = cmd.Name.Trim();
+    }
+
+    /// <summary>What a court box is assigned to, and which button is which court.</summary>
+    private static void ApplyCourts(Device device, UpdateDeviceCommand cmd, List<string> changes)
+    {
+        if (cmd.CourtNumbers is not null && !device.CourtNumbers.SequenceEqual(cmd.CourtNumbers))
+        {
+            changes.Add("court_numbers");
+        }
+        if (cmd.CourtNumbers is not null) device.CourtNumbers = cmd.CourtNumbers.ToList();
+
+        if (cmd.ButtonMap is { } buttons)
+        {
+            var json = buttons.Value?.ToJson();
+            if (device.ButtonMapJson != json) changes.Add("button_map");
+            device.ButtonMapJson = json;
+        }
+    }
+
+    /// <summary>
+    /// The club's key for the door, and the door card — where it is, what its lock does with no
+    /// power.
+    ///
+    /// <para>
+    /// <b>Two-valued rather than three, unlike the button map</b>: absent leaves the field alone
+    /// and an EMPTY STRING clears it. A door's key has no "run the club's default" state to
+    /// distinguish a JSON null from, so the extra value would only be a second way of saying the
+    /// same thing — and an empty value is what an admin types when they want it gone, which is
+    /// the gesture worth honouring. Trimmed and bounded by the caller, where there is a person
+    /// to refuse.
+    /// </para>
+    /// </summary>
+    private static void ApplyCard(Device device, UpdateDeviceCommand cmd, List<string> changes)
+    {
+        if (cmd.GateKey is not null)
+        {
+            var key = cmd.GateKey.Length == 0 ? null : cmd.GateKey;
+            if (device.GateKey != key) changes.Add(DoorAuditActions.GateKeyToken);
+            device.GateKey = key;
+        }
+
+        if (cmd.LocationNote is not null)
+        {
+            var note = cmd.LocationNote.Length == 0 ? null : cmd.LocationNote;
+            if (device.LocationNote != note) changes.Add("location_note");
+            device.LocationNote = note;
+        }
+
+        if (cmd.PowerLossBehaviour is { } powerLoss)
+        {
+            if (device.PowerLossBehaviour != powerLoss) changes.Add("power_loss_behaviour");
+            device.PowerLossBehaviour = powerLoss;
+        }
     }
 
     public Task<bool> DeviceCodeTakenAsync(string deviceCode, CancellationToken ct) =>
@@ -481,6 +573,20 @@ public sealed class DeviceRegistryService
     /// configuration somebody chose. The row is flagged <see cref="Device.AutoRegistered"/>
     /// exactly as a box's is, which is how the Devices page asks for that name.
     /// </summary>
+    /// <summary>
+    /// The display name auto-registration gives a gate, until somebody names it.
+    ///
+    /// <para>
+    /// <b>It is a placeholder and no surface may present it as a name</b> (A11, A12). A door
+    /// heading reading "Door gate" over "no door name yet" and "Needs a door name" is three
+    /// sentences disagreeing about whether the club has named the door; a member's history
+    /// saying "Door gate" is worse, because there is nothing else on that row to correct it.
+    /// Named once here so every reader tests against the same string —
+    /// <see cref="MeDoorEndpoints.MemberLabel"/> is the one that matters.
+    /// </para>
+    /// </summary>
+    public const string GatePlaceholderName = "Door gate";
+
     private async Task<Device> NewGateAsync(string macAddress, CancellationToken ct)
     {
         return new Device
@@ -488,7 +594,7 @@ public sealed class DeviceRegistryService
             TenantId = _tenant.TenantId,
             MacAddress = macAddress,
             DeviceCode = await AvailableDeviceCodeAsync(macAddress, DeviceKind.Gate, ct),
-            Name = "Door gate",
+            Name = GatePlaceholderName,
             Kind = DeviceKind.Gate,
             Hardware = DeviceHardware.Esp32,
             CourtNumbers = [],

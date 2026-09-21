@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using Crusaders.Mainframe.Api.Endpoints;
 using Crusaders.Mainframe.Api.Services;
 
 namespace Crusaders.Mainframe.Tests;
@@ -130,11 +131,49 @@ public sealed class DoorScanTimeHttpTests
 
         var member = club.ClientFor(factory, club.MemberUserId, null);
 
+        // The board's DISPLAY name, resolved now — A12's reversal. The key is the fallback, not
+        // the first choice: "Side door" is what the club typed for people to read and
+        // "side-door" is the slug it wrote on the board.
         var history = await member.GetFromJsonAsync<JsonElement>("/api/v1/me/door/history");
-        Assert.Equal("side-door", Items(history).Single().GetProperty("door_name").GetString());
+        Assert.Equal("Side door", Items(history).Single().GetProperty("door_name").GetString());
 
         var door = await member.GetFromJsonAsync<JsonElement>("/api/v1/me/door");
-        Assert.Equal("side-door", door.GetProperty("last_decision").GetProperty("door_name").GetString());
+        Assert.Equal("Side door", door.GetProperty("last_decision").GetProperty("door_name").GetString());
+    }
+
+    /// <summary>
+    /// A12, the other two branches: a door still carrying the auto-registration placeholder
+    /// falls back to the club's key, and one with neither is null.
+    ///
+    /// <para>
+    /// "Door gate" is not a name the club chose — it is what the board called itself before
+    /// anybody looked at it — and showing it to a member standing outside is the same defect
+    /// A11 names on the admin page: a placeholder presented as an answer.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task A_door_still_carrying_the_placeholder_name_falls_back_to_the_clubs_key()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, "scantime5");
+        var keyed = await club.AddDoorAsync(factory, "gate-st0005", "back-door");
+        var bare = await club.AddDoorAsync(factory, "gate-st0006", gateKey: null);
+        var now = DateTimeOffset.UtcNow;
+
+        await club.WriteRowAsync(
+            factory, keyed, DeviceGateEndpoint.OpenedAction, now.AddMinutes(-1),
+            subjectUserId: club.MemberUserId, reason: GateAccess.Ok);
+        await club.WriteRowAsync(
+            factory, bare, DeviceGateEndpoint.OpenedAction, now.AddMinutes(-2),
+            subjectUserId: club.MemberUserId, reason: GateAccess.Ok);
+
+        var items = Items(await club.ClientFor(factory, club.MemberUserId, null)
+            .GetFromJsonAsync<JsonElement>("/api/v1/me/door/history"));
+
+        Assert.Equal("back-door", items[0].GetProperty("door_name").GetString());
+        Assert.Equal(JsonValueKind.Null, items[1].GetProperty("door_name").ValueKind);
     }
 
     /// <summary>

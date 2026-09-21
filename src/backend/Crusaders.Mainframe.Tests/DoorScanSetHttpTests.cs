@@ -112,9 +112,22 @@ public sealed class DoorScanSetHttpTests
         Assert.Equal(13, events.Count);
         Assert.Equal(DoorAuditActions.EditedKind, events[0].GetProperty("kind").GetString());
         Assert.Equal(DoorAuditActions.RegisteredKind, events[^1].GetProperty("kind").GetString());
+        // Five keys now: `change` says which edit it was, because thirteen rows of "details or
+        // state were changed" were the whole of a door's story and none of them said which one
+        // was the shut (A5). `actor_name` names the admin — the club's own admin audit, which
+        // is what {actor, subject} has always promised. Still no outcome, no reason, no member
+        // and no fingerprint: P4 is untouched.
         Assert.All(events, e => Assert.Equal(
-            ["at", "action", "kind"],
+            ["at", "action", "kind", "change", "actor_name"],
             e.EnumerateObject().Select(p => p.Name).ToArray()));
+
+        // Rows written before the `changes` list existed have no list, so they are `other` —
+        // honest, where "details" would be a guess about what a past edit did.
+        Assert.Equal(DoorAuditActions.OtherChange, events[0].GetProperty("change").GetString());
+        Assert.Equal(DoorAuditActions.RegisteredChange, events[^1].GetProperty("change").GetString());
+
+        // Guid.Empty is the BOARD, not a person, and must not resolve to anybody's name.
+        Assert.All(events, e => Assert.Equal(JsonValueKind.Null, e.GetProperty("actor_name").ValueKind));
     }
 
     /// <summary>
@@ -165,13 +178,13 @@ public sealed class DoorScanSetHttpTests
         var feed = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/admin/devices/{doorId}/activity?limit=200");
         var log = await admin.GetFromJsonAsync<JsonElement>("/api/v1/admin/doors/activity?limit=200");
 
-        var feedActions = Items(feed).Select(i => i.GetProperty("action").GetString()).Order().ToList();
-        var logActions = Items(log).Select(i => i.GetProperty("action").GetString()).Order().ToList();
+        var feedActions = Items(feed).Select(i => i.GetProperty("action").GetString()!).Order().ToList();
+        var logActions = Items(log).Select(i => i.GetProperty("action").GetString()!).Order().ToList();
 
         Assert.Equal(DoorAuditActions.Scans.Order().ToList(), feedActions);
         Assert.Equal(feedActions, logActions);
         Assert.Equal(
             DoorAuditActions.Events.Order().ToList(),
-            feed.GetProperty("events").EnumerateArray().Select(e => e.GetProperty("action").GetString()).Order().ToList());
+            feed.GetProperty("events").EnumerateArray().Select(e => e.GetProperty("action").GetString()!).Order().ToList());
     }
 }

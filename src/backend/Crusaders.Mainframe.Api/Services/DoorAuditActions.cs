@@ -130,6 +130,112 @@ public static class DoorAuditActions
     /// </summary>
     public const string UnrecognisedKind = "unrecognised";
 
+    // ----------------------------------------------------------------- what changed
+
+    /// <summary>The board told the server it exists.</summary>
+    public const string RegisteredChange = "registered";
+
+    /// <summary>An admin gave the door a different name or key.</summary>
+    public const string RenamedChange = "renamed";
+
+    /// <summary>An admin changed something else on the card — where it is, what its lock does with no power.</summary>
+    public const string DetailsChange = "details";
+
+    /// <summary>An admin took this door out of service on its own page.</summary>
+    public const string ShutChange = "shut";
+
+    /// <summary>An admin put it back into service on its own page.</summary>
+    public const string ReopenedChange = "reopened";
+
+    /// <summary>An admin shut every open door at once.</summary>
+    public const string ShutAllChange = "shut_all";
+
+    /// <summary>An admin reopened the doors a shut-all had shut.</summary>
+    public const string ReopenedAllChange = "reopened_all";
+
+    /// <summary>An admin removed the board.</summary>
+    public const string RemovedChange = "removed";
+
+    /// <summary>The server overruled the board's own clock on an uploaded event.</summary>
+    public const string ClockCorrectedChange = "clock_corrected";
+
+    /// <summary>
+    /// A row this server cannot say anything sharper about — including every <c>device.updated</c>
+    /// written before the <c>changes</c> list existed. Rendered neutrally, never guessed at.
+    /// </summary>
+    public const string OtherChange = "other";
+
+    /// <summary>
+    /// Every value <c>change</c> can take. A closed set, like <see cref="EventKinds"/> and for
+    /// the same reason: a console holds sentences for these and must never fall through to one
+    /// that asserts something else happened.
+    /// </summary>
+    public static readonly string[] Changes =
+    [
+        RegisteredChange, RenamedChange, DetailsChange, ShutChange, ReopenedChange,
+        ShutAllChange, ReopenedAllChange, RemovedChange, ClockCorrectedChange, OtherChange,
+    ];
+
+    /// <summary>The token <c>device.updated</c> writes when the door went out of service.</summary>
+    public const string ShutToken = "shut";
+
+    /// <summary>The token it writes when the door came back into service.</summary>
+    public const string ReopenedToken = "reopened";
+
+    /// <summary>The token it writes when the board's display name changed.</summary>
+    public const string NameToken = "name";
+
+    /// <summary>The token it writes when the club's key for the door changed.</summary>
+    public const string GateKeyToken = "gate_key";
+
+    /// <summary>
+    /// What one row of a door's own feed actually CHANGED, as a word.
+    ///
+    /// <para>
+    /// <b>Nine identical rows saying "details or state were changed" are useless (A5).</b> The
+    /// feed said <c>kind: "edited"</c> for a rename, a location note, a shut and a reopen alike,
+    /// so a door's story read as a column of the same sentence and the one row an admin was
+    /// looking for — who shut it, and when — was indistinguishable from eight that did not
+    /// matter. The words are derived from the <c>changes</c> list
+    /// <see cref="DeviceRegistryService.UpdateAsync"/> now writes; a row from before that
+    /// existed has no list and is <see cref="OtherChange"/>, which is honest, rather than
+    /// "details", which would be a guess.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>State beats naming beats everything else</b> when one PATCH did several things. A
+    /// single edit that renamed a door AND shut it is a shut first: "Shut by Priya Naidoo at
+    /// 09:48" is the sentence somebody is looking for, and the rename is on the same row for
+    /// anybody who reads further. Block body for the lizard reason in <c>memory/gotchas.md</c>.
+    /// </para>
+    /// </summary>
+    public static string ChangeOf(string action, IReadOnlyCollection<string> changes)
+    {
+        return action switch
+        {
+            AutoRegistered => RegisteredChange,
+            Deleted => RemovedChange,
+            EventTimeClamped => ClockCorrectedChange,
+            ShutAll => ShutAllChange,
+            ReopenedAll => ReopenedAllChange,
+            Updated => UpdatedChangeOf(changes),
+            _ => OtherChange,
+        };
+    }
+
+    /// <summary>
+    /// The word for one <c>device.updated</c>, from the tokens it recorded. Block body for the
+    /// lizard reason in <c>memory/gotchas.md</c>.
+    /// </summary>
+    private static string UpdatedChangeOf(IReadOnlyCollection<string> changes)
+    {
+        if (changes.Count == 0) return OtherChange;
+        if (changes.Contains(ShutToken)) return ShutChange;
+        if (changes.Contains(ReopenedToken)) return ReopenedChange;
+        if (changes.Contains(NameToken) || changes.Contains(GateKeyToken)) return RenamedChange;
+        return DetailsChange;
+    }
+
     /// <summary>
     /// The word for one non-scan action. Block body for the lizard reason in
     /// <c>memory/gotchas.md</c>.

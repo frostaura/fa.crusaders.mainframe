@@ -253,6 +253,112 @@ public sealed class DeploymentPostureTests
         Assert.Contains("AdminDoorLogEndpoint.TruncatedHeader", program, StringComparison.Ordinal);
     }
 
+    // ---- E-C2: the dev sign-in shortcut, and the account it signs in as ------------------
+    //
+    // The reviewer found a "Dev shortcuts" block on the login page filled in with a working
+    // admin's email and password. It is rendered only under `import.meta.env.DEV ||
+    // VITE_SHOW_DEV_LOGIN === "true"`, and the account exists only because the Development
+    // seeder ran — so on the review stack, which is a Vite dev server, both halves are true and
+    // neither is a defect. What was NOT pinned anywhere is that both halves stay false off a
+    // developer's machine, and "it is only Development" is exactly the sentence nobody may say
+    // without having looked. These two look.
+
+    /// <summary>
+    /// <b>No shipped file turns the dev sign-in block on.</b> It is a Vite build-time flag, so
+    /// what decides it is the ARGS a compose file or a Dockerfile passes to the frontend build —
+    /// and the only safe value is one that is not the string <c>true</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("docker-compose.yml")]
+    [InlineData("docker-compose.prod.yml")]
+    [InlineData("docker-compose.onprem.yml")]
+    [InlineData("docker-compose.test.yml")]
+    public void No_shipped_compose_file_turns_on_the_dev_sign_in_block(string file)
+    {
+        foreach (var line in Read(file).Split('\n'))
+        {
+            if (!line.Contains(DevLoginFlag, StringComparison.Ordinal)) continue;
+
+            // `VITE_SHOW_DEV_LOGIN: ${VITE_SHOW_DEV_LOGIN:-false}` is the shape the local
+            // compose file uses. What matters is the DEFAULT: a value interpolated from the
+            // environment is a developer opting in on their own machine, which is the feature.
+            var effective = Interpolated().Match(line) is { Success: true } m ? m.Groups[1].Value : Value(line);
+            Assert.False(
+                string.Equals(effective.Trim(), "true", StringComparison.OrdinalIgnoreCase),
+                $"{file} builds the frontend with {DevLoginFlag}=true, which ships a sign-in " +
+                "shortcut carrying a seeded admin's password to whoever opens the login page.");
+        }
+    }
+
+    /// <summary>
+    /// And the Dockerfile that actually builds the image defaults it off, so a build that says
+    /// nothing about the flag — which is every build CI runs — produces a bundle without the
+    /// block in it.
+    /// </summary>
+    [Fact]
+    public void The_frontend_image_defaults_the_dev_sign_in_block_off()
+    {
+        var dockerfile = Read("src", "frontend", "Dockerfile");
+
+        Assert.Matches(new Regex($@"(?m)^ARG\s+{DevLoginFlag}=false\s*$"), dockerfile);
+
+        // The CI workflow is the other half: it must not pass the arg at all. A default of
+        // false that every real build overrides would be a default in name only.
+        var ci = Read(".github", "workflows", "ci.yml");
+        var frontendBuilds = ci.Split("- name: Build and push frontend").Skip(1).ToList();
+        Assert.NotEmpty(frontendBuilds);
+        Assert.All(frontendBuilds, section => Assert.DoesNotContain(DevLoginFlag, section, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// <b>The seeded admin cannot exist outside Development.</b> The block above is only half of
+    /// E-C2: a shortcut that fills in a password is harmless if the account it names is not
+    /// there. <see cref="Seeder"/> is invoked from exactly one place and that place is inside an
+    /// <c>IsDevelopment()</c> guard — asserted against the shipped <c>Program.cs</c> rather than
+    /// by booting, because what must be true is that there is no SECOND call site.
+    /// </summary>
+    [Fact]
+    public void The_development_seeder_is_called_from_one_place_and_only_under_Development()
+    {
+        var program = Read("src", "backend", "Crusaders.Mainframe.Api", "Program.cs");
+
+        var calls = Regex.Matches(program, @"Seeder\.SeedAsync\s*\(");
+        Assert.Single(calls);
+
+        // The guard is the statement immediately above the call. Read as text, which is what
+        // makes a second call site or a widened condition visible.
+        var guarded = Regex.IsMatch(
+            program,
+            @"if\s*\(\s*app\.Environment\.IsDevelopment\(\)\s*\)[^}]*?Seeder\.SeedAsync",
+            RegexOptions.Singleline);
+        Assert.True(guarded, "Seeder.SeedAsync is not inside an app.Environment.IsDevelopment() guard.");
+
+        // And nothing else in the API calls it either.
+        var api = Path.Combine(RepoRoot(), "src", "backend", "Crusaders.Mainframe.Api");
+        var callers = Directory.EnumerateFiles(api, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+                     && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
+            .Where(f => !f.EndsWith("Seeder.cs", StringComparison.Ordinal))
+            .Where(f => File.ReadAllText(f).Contains("Seeder.SeedAsync", StringComparison.Ordinal))
+            .Select(f => Path.GetFileName(f))
+            .ToList();
+
+        Assert.Equal(["Program.cs"], callers);
+    }
+
+    /// <summary>The Vite flag that renders the login page's dev shortcuts.</summary>
+    private const string DevLoginFlag = "VITE_SHOW_DEV_LOGIN";
+
+    /// <summary><c>${NAME:-default}</c> — the default is what a deployment that sets nothing gets.</summary>
+    private static Regex Interpolated() => new(@"\$\{[A-Z_]+:-([^}]*)\}");
+
+    /// <summary>The right-hand side of a <c>KEY: value</c> or <c>KEY=value</c> line.</summary>
+    private static string Value(string line)
+    {
+        var cut = line.IndexOfAny([':', '=']);
+        return cut < 0 ? "" : line[(cut + 1)..];
+    }
+
     [Fact]
     public void The_backend_really_has_no_graphql_endpoint()
     {

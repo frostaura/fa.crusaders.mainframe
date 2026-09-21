@@ -111,30 +111,60 @@ public static class AdminDeviceActivityEndpoint
         // One read for the whole page rather than one per row, and the name comes from the
         // membership because that is the only name this product shows another person. Only the
         // scans can name anybody: a door event is about the BOARD.
-        var subjects = scans.Where(r => r.SubjectUserId is not null).Select(r => r.SubjectUserId!.Value).Distinct().ToList();
-        var names = await db.Memberships.AsNoTracking()
-            .Where(m => subjects.Contains(m.UserId))
-            .Select(m => new { m.UserId, m.FullName })
-            .ToDictionaryAsync(m => m.UserId, m => m.FullName, ct);
+        var names = await PersonNames.ForAsync(db, scans.Select(r => r.SubjectUserId), ct);
 
         var items = scans
             .Select(r => Item(r.Action, r.CreatedAt, r.SubjectUserId, r.DetailsJson, names))
             .ToList();
 
-        // The other half, in its own array and its own vocabulary. No outcome, no reason and no
-        // member on any of them: a door event is about the BOARD, and P4 is that an alert — and
-        // by the same argument a row on this screen — is about a door or a credential, never a
-        // person. See DoorAuditActions for the closed set of words and why the list exists.
+        // Who made each of the board's own changes, in one read for the page.
+        //
+        // THE SUBJECT AND THE ACTOR ARE DIFFERENT PEOPLE AND DIFFERENT RULES. A scan's subject
+        // is the member at the door and reaches only that member's own history and the club log;
+        // an event's actor is the ADMIN who changed the row, and naming them here is the club's
+        // own admin audit — the trail the product has always promised as {actor, subject} —
+        // not member tracking. P4 is untouched: an event still carries no member, no
+        // fingerprint and no code.
+        var actors = await PersonNames.ForAsync(db, other.Select(r => (Guid?)r.ActorUserId), ct);
+
+        // The other half, in its own array and its own vocabulary. See DoorAuditActions for the
+        // closed sets of words and why the lists exist.
         var events = other
             .Select(r => new
             {
                 at = r.CreatedAt,
                 action = r.Action,
+
+                // `kind` stays for compatibility and is the coarse word; `change` is what
+                // actually happened. Nine rows of "details or state were changed" were the
+                // whole of a door's story and none of them said which one was the shut (A5).
                 kind = DoorAuditActions.EventKindOf(r.Action),
+                change = DoorAuditActions.ChangeOf(r.Action, Changes(r.DetailsJson)),
+
+                // Null for the board's own rows, whose actor is Guid.Empty: nobody registered
+                // it and nobody corrected its clock. See PersonNames.
+                actor_name = PersonNames.Of(r.ActorUserId, actors),
             })
             .ToList();
 
         return Results.Ok(new { items, events });
+    }
+
+    /// <summary>
+    /// The <c>changes</c> list a <c>device.updated</c> row recorded, or empty — which is what
+    /// every row written before that list existed looks like, and is why
+    /// <see cref="DoorAuditActions.OtherChange"/> exists rather than a guess.
+    /// </summary>
+    private static IReadOnlyCollection<string> Changes(string? detailsJson)
+    {
+        if (DoorActivityView.Details(detailsJson) is not { } root) return [];
+        if (root.ValueKind != JsonValueKind.Object) return [];
+        if (!root.TryGetProperty("changes", out var list) || list.ValueKind != JsonValueKind.Array) return [];
+
+        return list.EnumerateArray()
+            .Where(e => e.ValueKind == JsonValueKind.String)
+            .Select(e => e.GetString()!)
+            .ToList();
     }
 
     /// <summary>
@@ -147,7 +177,7 @@ public static class AdminDeviceActivityEndpoint
             .OrderByDescending(a => a.CreatedAt)
             .ThenByDescending(a => a.Id)
             .Take(take)
-            .Select(a => new ActivityRow(a.Action, a.CreatedAt, a.SubjectUserId, a.DetailsJson))
+            .Select(a => new ActivityRow(a.Action, a.CreatedAt, a.SubjectUserId, a.DetailsJson, a.ActorUserId))
             .ToListAsync(ct);
     }
 
@@ -174,4 +204,5 @@ public static class AdminDeviceActivityEndpoint
 /// One board-trail row as it comes off the database, before either projection reads it.
 /// Top-level and bodyless for the lizard reason recorded in <c>memory/gotchas.md</c>.
 /// </summary>
-public sealed record ActivityRow(string Action, DateTimeOffset CreatedAt, Guid? SubjectUserId, string? DetailsJson);
+public sealed record ActivityRow(
+    string Action, DateTimeOffset CreatedAt, Guid? SubjectUserId, string? DetailsJson, Guid ActorUserId);

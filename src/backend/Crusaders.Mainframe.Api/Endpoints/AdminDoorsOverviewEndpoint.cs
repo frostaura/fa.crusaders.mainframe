@@ -44,6 +44,11 @@ public static class AdminDoorsOverviewEndpoint
 
         var scans = await ScansAsync(db, settings, day.DayStartedAt, now, ct);
 
+        // Who shut each door that is shut, in one read for the whole page. "You shut this
+        // door." was shown to every admin in the club (A5), and who shut it is the fact the
+        // NEXT admin needs before reopening it. See Device.ShutByUserId and PersonNames.
+        var shutBy = await PersonNames.ForAsync(db, doors.Select(d => d.ShutByUserId), ct);
+
         return Results.Ok(new
         {
             day_started_at = day.DayStartedAt,
@@ -75,7 +80,7 @@ public static class AdminDoorsOverviewEndpoint
 
             doors = doors.Select(d => new
             {
-                device = DeviceView.Of(d, settings.HeartbeatSeconds),
+                device = DeviceView.Of(d, settings.HeartbeatSeconds, PersonNames.Of(d.ShutByUserId, shutBy)),
                 today = Today(d.Id, scans, day),
                 signals = DoorSignals
                     .For(scans.TryGetValue(d.Id, out var own) ? own : [], settings, now)

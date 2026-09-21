@@ -62,7 +62,7 @@ public sealed class MeDoorHttpTests
     /// member it will let them in would be false. The same rule the QR screen already applies.
     /// </summary>
     [SkippableFact]
-    public async Task A_club_whose_only_door_is_out_of_service_has_no_doors()
+    public async Task A_club_whose_only_door_is_out_of_service_still_HAS_a_door_and_says_it_is_shut()
     {
         Skip.IfNot(_pg.Available, Skipped);
 
@@ -71,7 +71,51 @@ public sealed class MeDoorHttpTests
         await club.AddDoorAsync(factory, "gate-me0001", "front-door", enabled: false);
 
         var body = await club.MemberClient(factory).GetFromJsonAsync<JsonElement>(DoorPath);
+
+        // E-H1 / B4 reverse round one's reading. `doors: false` used to mean BOTH "this club
+        // has no scanners" and "every scanner is switched off", so a club that shut its doors
+        // for the night handed its members the page a club with no doors at all gets: no door
+        // section, no history link, and nothing said about why the building would not let them
+        // in. The two facts are separate now.
+        Assert.True(body.GetProperty("doors").GetBoolean());
+        Assert.Equal(MeDoorEndpoints.ShutAll, body.GetProperty("doors_shut").GetString());
+    }
+
+    /// <summary>A club with no gate row at all — the case <c>doors: false</c> is now only for.</summary>
+    [SkippableFact]
+    public async Task A_club_with_no_gate_row_at_all_has_no_doors_and_nothing_shut()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, "medoornone");
+
+        var body = await club.MemberClient(factory).GetFromJsonAsync<JsonElement>(DoorPath);
+
         Assert.False(body.GetProperty("doors").GetBoolean());
+
+        // "all of nothing" is true and is not a sentence anybody should be shown.
+        Assert.Equal(MeDoorEndpoints.ShutNone, body.GetProperty("doors_shut").GetString());
+    }
+
+    /// <summary>
+    /// One of two shut is <c>some</c>, so the page can say "the club has shut N of its doors"
+    /// rather than either of the two absolutes (B4).
+    /// </summary>
+    [SkippableFact]
+    public async Task One_door_shut_out_of_two_is_some_and_not_all()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, "medoorsome");
+        await club.AddDoorAsync(factory, "gate-me0021", "front-door");
+        await club.AddDoorAsync(factory, "gate-me0022", "side-door", enabled: false);
+
+        var body = await club.MemberClient(factory).GetFromJsonAsync<JsonElement>(DoorPath);
+
+        Assert.True(body.GetProperty("doors").GetBoolean());
+        Assert.Equal(MeDoorEndpoints.ShutSome, body.GetProperty("doors_shut").GetString());
     }
 
     [SkippableFact]
@@ -184,6 +228,110 @@ public sealed class MeDoorHttpTests
         Assert.Equal(startsAt, booking.GetProperty("starts_at").GetDateTimeOffset(), TimeSpan.FromSeconds(1));
         Assert.True(booking.GetProperty("door_opens_at").GetDateTimeOffset() < startsAt);
         Assert.True(booking.GetProperty("door_closes_at").GetDateTimeOffset() > startsAt);
+    }
+
+    /// <summary>
+    /// <b>A booking beyond the door's own horizon is still the member's next booking</b>
+    /// (Lerato's LOW).
+    ///
+    /// <para>
+    /// It answered null for anything further off than the window the door honours, so a member
+    /// with a court tomorrow was told nothing at all about when the door would open for it — on
+    /// the page whose whole job is to explain that window, and while the same page's self-check
+    /// was telling her there was "no window to wait for". The bound that remains is about the
+    /// BOOKING, not about the door: a booking whose code has already expired is not the next one.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task The_next_booking_has_no_horizon_and_a_court_tomorrow_still_counts()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, "medoorfar");
+        await club.AddDoorAsync(factory, "gate-me0023", "front-door");
+
+        // Well past DoorHorizonMinutes, whose ceiling is four hours.
+        var startsAt = DateTimeOffset.UtcNow.AddHours(26);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            db.Bookings.Add(new Booking
+            {
+                TenantId = club.TenantId, CourtId = club.CourtId, UserId = club.MemberUserId,
+                BookedByUserId = club.MemberUserId, PaidByUserId = club.MemberUserId,
+                StartsAt = startsAt, EndsAt = startsAt.AddMinutes(30),
+                SliceMinutes = 15, SliceCount = 2, Status = BookingStatus.Booked,
+                AmountChargedCredits = 16m, ChargedAt = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var booking = (await club.MemberClient(factory).GetFromJsonAsync<JsonElement>(DoorPath))
+            .GetProperty("next_booking");
+
+        Assert.Equal(JsonValueKind.Object, booking.ValueKind);
+        Assert.Equal(startsAt, booking.GetProperty("starts_at").GetDateTimeOffset(), TimeSpan.FromSeconds(1));
+
+        // And the instants that answer "when will it let me in", which is the question.
+        Assert.True(booking.GetProperty("door_opens_at").GetDateTimeOffset() < startsAt);
+        Assert.True(booking.GetProperty("door_opens_at").GetDateTimeOffset() > DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>
+    /// The one bound that is still there: a booking whose window has closed is past, not next.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_booking_whose_window_has_already_closed_is_not_the_next_one()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, "medoorpast");
+        await club.AddDoorAsync(factory, "gate-me0024", "front-door");
+
+        var startsAt = DateTimeOffset.UtcNow.AddHours(-4);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            db.Bookings.Add(new Booking
+            {
+                TenantId = club.TenantId, CourtId = club.CourtId, UserId = club.MemberUserId,
+                BookedByUserId = club.MemberUserId, PaidByUserId = club.MemberUserId,
+                StartsAt = startsAt, EndsAt = startsAt.AddMinutes(30),
+                SliceMinutes = 15, SliceCount = 2, Status = BookingStatus.Booked,
+                AmountChargedCredits = 16m, ChargedAt = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var body = await club.MemberClient(factory).GetFromJsonAsync<JsonElement>(DoorPath);
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("next_booking").ValueKind);
+    }
+
+    /// <summary>
+    /// O1: the club's zone on <c>/me/door</c> too, so one formatter can render every clock in
+    /// this product in the zone the clock belongs to. The member's formatter used the VIEWER's
+    /// zone always, which is the wrong one for a member abroad or with a wrong phone clock.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_member_is_told_which_clock_the_clubs_times_are_in()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(
+            factory, "medoortz",
+            """{"timezone":"Africa/Johannesburg","grace_window_minutes":5}""");
+        await club.AddDoorAsync(factory, "gate-me0025", "front-door");
+
+        var client = club.MemberClient(factory);
+        Assert.Equal(
+            "Africa/Johannesburg",
+            (await client.GetFromJsonAsync<JsonElement>(DoorPath)).GetProperty("timezone").GetString());
+        Assert.Equal(
+            "Africa/Johannesburg",
+            (await client.GetFromJsonAsync<JsonElement>(HistoryPath)).GetProperty("timezone").GetString());
     }
 
     [SkippableFact]
@@ -399,9 +547,11 @@ public sealed class MeDoorHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
+        // E-H3: the number is on the wire ONLY under booking_window, which is the one policy
+        // it is the door's window under. Both clubs here run it explicitly.
         var normal = await DoorClub.SeedAsync(
             factory, "medoorent",
-            """{"timezone":"UTC","grace_window_minutes":5,"gate_early_entry_minutes":45}""");
+            """{"timezone":"UTC","grace_window_minutes":5,"gate_early_entry_minutes":45,"gate_access_policy":"booking_window"}""");
         await normal.AddDoorAsync(factory, "gate-me0018", "front-door");
 
         var body = await normal.MemberClient(factory).GetFromJsonAsync<JsonElement>(DoorPath);
@@ -409,11 +559,41 @@ public sealed class MeDoorHttpTests
 
         var handEdited = await DoorClub.SeedAsync(
             factory, "medoorentx",
-            """{"timezone":"UTC","grace_window_minutes":5,"gate_early_entry_minutes":99999}""");
+            """{"timezone":"UTC","grace_window_minutes":5,"gate_early_entry_minutes":99999,"gate_access_policy":"booking_window"}""");
         await handEdited.AddDoorAsync(factory, "gate-me0019", "front-door");
 
         var clamped = await handEdited.MemberClient(factory).GetFromJsonAsync<JsonElement>(DoorPath);
         Assert.Equal(GateAccess.MaxEarlyEntryMinutes, clamped.GetProperty("early_entry_minutes").GetInt32());
+    }
+
+    /// <summary>
+    /// E-H3: under <c>active_member</c> the number is <b>null</b>, because it is not the window
+    /// the door runs.
+    ///
+    /// <para>
+    /// Lerato held a booking code for tomorrow's court and was refused <c>too_early</c>
+    /// seventeen times while her page carried <c>early_entry_minutes: 30</c> and the door had
+    /// in fact been working to <c>StartsAt − 130 minutes</c> — the roster reach plus the
+    /// activation cue, which is what <c>DoorHorizonMinutes</c> answers under this policy. Two
+    /// numbers belonging to two different rules, and the page was printing the one that was not
+    /// in force.
+    /// </para>
+    /// </summary>
+    [SkippableFact]
+    public async Task The_early_entry_minutes_are_null_under_the_policy_they_are_not_the_window_for()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(
+            factory, "medoorentn",
+            """{"timezone":"UTC","grace_window_minutes":5,"gate_early_entry_minutes":30,"gate_access_policy":"active_member"}""");
+        await club.AddDoorAsync(factory, "gate-me0020", "front-door");
+
+        var body = await club.MemberClient(factory).GetFromJsonAsync<JsonElement>(DoorPath);
+
+        Assert.Equal("active_member", body.GetProperty("policy").GetString());
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("early_entry_minutes").ValueKind);
     }
 
     /// <summary>
@@ -614,9 +794,16 @@ public sealed class MeDoorHttpTests
 
         Assert.Equal(3, items.Count);
         Assert.True(items[0].GetProperty("at").GetDateTimeOffset() > items[2].GetProperty("at").GetDateTimeOffset());
-        Assert.Equal("front-door", items[0].GetProperty("door_name").GetString());
+        // The board's DISPLAY name, not the key — A12's reversal of round one's choice. A
+        // member reading "front-door" while the admin log says "Front door" for the same scan
+        // is one product calling one door two things.
+        Assert.Equal("Front door", items[0].GetProperty("door_name").GetString());
         Assert.True(items[0].GetProperty("released").GetBoolean());
         Assert.Equal(DoorSettings.DefaultLogRetentionDays, body.GetProperty("retention_days").GetInt32());
+
+        // O1: the list says which clock it is in, once, rather than rendering in whatever zone
+        // the viewer's phone is set to.
+        Assert.Equal("UTC", body.GetProperty("timezone").GetString());
     }
 
     /// <summary>

@@ -139,10 +139,15 @@ public class DeviceMacIdentityTests
         var devices = scope.ServiceProvider.GetRequiredService<DeviceRegistryService>();
 
         var device = await devices.AutoRegisterAsync(Mac, DeviceKind.CourtBox, default);
-        var updated = await devices.UpdateAsync(
+        var (updated, changes) = await devices.UpdateAsync(
             device, new UpdateDeviceCommand("Main box", null, null), host.AdminUser.Id, default);
 
         Assert.False(updated.AutoRegistered);
+
+        // Acknowledging the row IS a change — somebody looked at it, which is the whole meaning
+        // of the flag and what takes the row out of the unacknowledged cap. So this PATCH is
+        // never the `unchanged` answer, even on its second identical send.
+        Assert.Contains("acknowledged", changes);
     }
 
     /// <summary>

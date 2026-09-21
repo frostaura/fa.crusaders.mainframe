@@ -100,6 +100,14 @@ public static class DeviceGateEndpoint
                 device_id = device.Id,
                 device_code = device.DeviceCode,
                 gate_key = device.GateKey,
+
+                // The board's DISPLAY name as it stood at the scan, beside the key. Every
+                // reader resolves both by `device_id` at reply time and this is purely the
+                // fallback for a board DELETED since — which is the one case resolution cannot
+                // answer and the case that turned /admin/doors/log into a white page (A1). The
+                // row is never the authority: a rename must not strand a history on an old
+                // label. See DoorRowDoor.
+                door_name = device.Name,
                 reason = decision.Reason,
                 method,
             }),

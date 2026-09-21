@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-gotchas
-description: "The test suite lies in specific ways: no fixture here reads a real socket, it cannot pass in the last half-hour of a UTC day, some tests cannot fail on this Mac, a test can be green because of one fixture field."
+description: "The test suite lies in specific ways: no fixture reads a real socket, it cannot pass in the last half-hour of a UTC day, the door evening was red for an hour a day, some tests cannot fail on this Mac, a test can be green for its fixture."
 type: gotcha
-last_verified: 2026-09-19
+last_verified: 2026-09-21
 ---
 
 # Gotchas — the test suite and its fixtures
@@ -17,6 +17,13 @@ Why a green suite is not evidence at all is a decision, not a gotcha:
   second worktree before believing your diff caused it.** Sweeping for these means running under
   several synthetic clocks — and moving the club timezone in the test host alone manufactures false
   failures unless every fixture pinning `"timezone":"UTC"` moves with it.
+- **A fixture reset that names a status is racing every worker that changes one.**
+  `door_evening.py` cleared the seeded bookings `where "Status" = Booked`; the seeder plants one
+  at **18:00 local** and `NoShowWorker` sweeps every 30 s, so an evening starting after 18:01
+  had it written off to `NoShow`, `EndsAt` truncated, in the same seconds.
+  `ck_bookings_no_overlapping_slot` excludes `Cancelled` and **nothing else**, so the corpse
+  stayed in the constraint and D8's back-shift over the slot that had just ended was refused:
+  one step red and four behind it. It clears every status.
 - **A test booking `UtcNow.AddHours(3)` fails every afternoon.** The fixture's peak window is
   16:00–19:00 UTC and a Regular member may not take a peak slot that far ahead, so a cancellation
   test throws `PeakHoursLeagueOnly` and reads as a broken refund path. `BookableSlot()` steps clear

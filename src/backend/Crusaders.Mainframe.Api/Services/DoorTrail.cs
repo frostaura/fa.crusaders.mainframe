@@ -59,6 +59,31 @@ public static class DoorTrail
     public static readonly string[] Outcomes = [Released, Refused, Offline];
 
     /// <summary>
+    /// An uploaded event whose <c>kind</c> the board mangled past recognition. Written as the
+    /// row's <c>outcome</c>, so it reaches the log's reason filter like any other. The writer's
+    /// own constant rather than a copy — the two going out of step is how a filter starts
+    /// refusing a word the server is still writing.
+    /// </summary>
+    public const string MalformedOutcome = DeviceEventEndpoints.Malformed;
+
+    /// <summary>
+    /// Every value <c>?reason=</c> accepts — <b>both vocabularies</b>, because a gate decision
+    /// writes <c>reason</c> and an uploaded event writes <c>outcome</c>, and the filter reaches
+    /// both (see <c>DoorLogQuery.ReasonMatch</c>).
+    ///
+    /// <para>
+    /// <b>Closed rather than free text, because it was free text and said nothing.</b>
+    /// <c>?reason=bogus</c> answered <c>200</c> with an empty list, which an admin reads as
+    /// "nothing happened at this door" and not as "that is not a word this server knows"
+    /// (E-M3). The two extra members are the outcomes only the OFFLINE path writes:
+    /// <see cref="MalformedOutcome"/> for a kind it could not read and
+    /// <c>not_a_court_box</c> for a door reporting a court event.
+    /// </para>
+    /// </summary>
+    public static readonly string[] Reasons =
+        [.. GateAccess.Reasons, MalformedOutcome, GateAccess.NotACourtBox];
+
+    /// <summary>
     /// The same four actions as a predicate the database can run.
     ///
     /// <para>

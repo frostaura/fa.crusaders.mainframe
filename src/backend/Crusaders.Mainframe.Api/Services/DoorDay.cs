@@ -31,16 +31,22 @@ public static class DoorDay
     /// knows — in which case the boundary is UTC's and no count derived from it may be
     /// published as the club's.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The boundary is built by <see cref="DoorClock.StartOfLocalDay"/> and no longer here.</b>
+    /// This method used to convert <paramref name="now"/> into the club's zone and then construct
+    /// midnight with <c>local.Offset</c> — the offset in force at <i>now</i> rather than at
+    /// midnight. On the two days a year a DST zone changes those are different numbers, so the
+    /// club's day was said to have begun an hour early or an hour late and every count taken
+    /// against it belonged to a different day. Every fixture club in this repository runs UTC and
+    /// the first real one runs Africa/Johannesburg, neither of which has DST, so nothing could
+    /// go red. See <see cref="DoorClock"/> for the invalid- and ambiguous-midnight cases too.
+    /// </para>
+    /// </remarks>
     public static (DateTimeOffset DayStartedAt, string Timezone, bool Countable) StartOfToday(
         TenantSettingsView settings, DateTimeOffset now)
     {
-        var stored = settings.Timezone?.Trim() ?? "";
-        var countable = TimeZoneInfo.TryFindSystemTimeZoneById(stored, out var zone);
-        zone ??= TimeZoneInfo.Utc;
-
-        var local = TimeZoneInfo.ConvertTime(now, zone);
-        var start = new DateTimeOffset(local.Year, local.Month, local.Day, 0, 0, 0, local.Offset);
-
-        return (start, countable ? stored : TimeZoneInfo.Utc.Id, countable);
+        var (zone, name, known) = DoorClock.ZoneOf(settings);
+        return (DoorClock.StartOfLocalDay(zone, DoorClock.LocalDateOf(zone, now)), name, known);
     }
 }

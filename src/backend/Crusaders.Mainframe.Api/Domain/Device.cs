@@ -281,6 +281,34 @@ public sealed class Device : ITenantScoped
     public DateTimeOffset? ShutByShutAllAt { get; set; }
 
     /// <summary>
+    /// The admin who took this board out of service, or null while it is in service.
+    ///
+    /// <para>
+    /// <b>"You shut this door." was shown to every admin in the club (A5).</b> The console had
+    /// <see cref="OutOfServiceSince"/> and nothing else, so it addressed whoever was reading as
+    /// the person who had done it — to a committee of six, five of whom had not. Who shut a door
+    /// is exactly the fact a second admin needs before reopening it, and it is also what makes
+    /// a stale tab's no-op PATCH answerable: "it was already shut — by Priya Naidoo at 21:48"
+    /// (B10).
+    /// </para>
+    ///
+    /// <para>
+    /// <b>A column rather than a derivation from the audit trail, and the fleet shut is why.</b>
+    /// An individual shut writes a <c>device.updated</c> row carrying this board's id, so it
+    /// could be found; a <c>doors.shut_all</c> writes ONE row for the whole club and carries no
+    /// <c>device_id</c> at all, so a door shut by the fleet could not be attributed by any
+    /// query. The same argument <see cref="ShutByShutAllAt"/> already makes: the state of this
+    /// row now is a property of this row.
+    /// </para>
+    ///
+    /// <para>
+    /// Cleared on the way back into service, by either route — a board in service was not shut
+    /// by anybody. It is deliberately not a history; the trail is the history.
+    /// </para>
+    /// </summary>
+    public Guid? ShutByUserId { get; set; }
+
+    /// <summary>
     /// This box's own button map, as the eight-entry wire array (<c>ButtonMap.ToWire()</c>)
     /// serialised to JSON — or null to use the club's map from <c>tenant_settings</c>.
     ///

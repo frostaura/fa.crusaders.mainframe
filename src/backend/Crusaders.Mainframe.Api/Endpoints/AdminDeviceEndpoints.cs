@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
@@ -54,10 +55,16 @@ public static class AdminDeviceEndpoints
         => (await settingsAccessor.GetAsync(ct)).HeartbeatSeconds;
 
     private static async Task<IResult> ListAsync(
-        DeviceRegistryService devices, TenantSettingsAccessor settingsAccessor, CancellationToken ct)
+        DeviceRegistryService devices, TenantSettingsAccessor settingsAccessor, MainframeDbContext db,
+        CancellationToken ct)
     {
         var heartbeat = await HeartbeatSecondsAsync(settingsAccessor, ct);
-        return Results.Ok((await devices.ListAsync(ct)).Select(d => DeviceView.Of(d, heartbeat)).ToList());
+        var rows = await devices.ListAsync(ct);
+
+        // One read for the whole list. See PersonNames.
+        var names = await PersonNames.ForAsync(db, rows.Select(d => d.ShutByUserId), ct);
+
+        return Results.Ok(rows.Select(d => DeviceView.Of(d, heartbeat, PersonNames.Of(d.ShutByUserId, names))).ToList());
     }
 
     /// <summary>
@@ -104,10 +111,23 @@ public static class AdminDeviceEndpoints
     /// <c>Taking_a_board_out_of_service_records_the_instant_and_returning_it_clears_it</c>.
     /// </para>
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A PATCH that changes nothing says so (B10).</b> A console tab left open while another
+    /// admin shut the door offered "Shut this door", sent it, and was answered <c>200</c> with a
+    /// row that looked exactly like a success — so two admins each believed they had shut it and
+    /// neither was told the other had. The answer now carries <c>unchanged: true</c> alongside
+    /// <c>shut_by_name</c> and <c>out_of_service_since</c>, which is everything the sentence "it
+    /// was already shut — by Priya Naidoo at 21:48" needs. It is still a <c>200</c>: nothing was
+    /// wrong with the request and the row is in the state the caller asked for, which is what a
+    /// <c>409</c> would deny.
+    /// </para>
+    /// </remarks>
     private static async Task<IResult> UpdateAsync(
-        Guid id, UpdateDeviceRequest req, DeviceRegistryService devices, TenantSettingsAccessor settingsAccessor,
+        Guid id, UpdateDeviceRequest req, [AsParameters] DeviceUpdateServices services,
         HttpContext ctx, CancellationToken ct)
     {
+        var (devices, settingsAccessor, db) = services;
         var device = await devices.FindAsync(id, ct);
         if (device is null) return Results.NotFound();
 
@@ -139,7 +159,7 @@ public static class AdminDeviceEndpoints
             powerLoss = parsedPowerLoss;
         }
 
-        var updated = await devices.UpdateAsync(
+        var (updated, changes) = await devices.UpdateAsync(
             device,
             new UpdateDeviceCommand(req.Name, req.Enabled, req.CourtNumbers, buttons, req.EffectiveGateKey?.Trim())
             {
@@ -148,7 +168,11 @@ public static class AdminDeviceEndpoints
             },
             ctx.User.Id() ?? Guid.Empty, ct);
 
-        return Results.Ok(DeviceView.Of(updated, await HeartbeatSecondsAsync(settingsAccessor, ct)));
+        var names = await PersonNames.ForAsync(db, [updated.ShutByUserId], ct);
+
+        return Results.Ok(DeviceView.Of(
+            updated, await HeartbeatSecondsAsync(settingsAccessor, ct),
+            PersonNames.Of(updated.ShutByUserId, names), unchanged: changes.Count == 0));
     }
 
     /// <summary>Error code for <c>gate_key</c> sent to a court box.</summary>
@@ -429,3 +453,19 @@ public sealed record UpdateDeviceRequest(
         => EffectiveLocationNote is not null
            || EffectivePowerLossBehaviour.ValueKind != JsonValueKind.Undefined;
 }
+
+/// <summary>
+/// The services the device PATCH needs, bundled — see <c>WalkUpServices</c> for the pattern and
+/// the reason.
+///
+/// <para>
+/// The handler acquired its seventh parameter when the answer started naming the admin who shut
+/// the door (A5/B10): <see cref="PersonNames"/> reads the display name, and reading it needs the
+/// context. Seven is past the complexity gate's limit of six and past the point where the shape
+/// of the handler is visible at a glance; <c>[AsParameters]</c> leaves the binding identical.
+/// </para>
+/// </summary>
+public sealed record DeviceUpdateServices(
+    DeviceRegistryService Devices,
+    TenantSettingsAccessor SettingsAccessor,
+    MainframeDbContext Db);
