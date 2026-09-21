@@ -232,8 +232,7 @@ inline constexpr uint16_t kFirstStatusThatSpeaksForItself = 400U;
 ///
 /// One return statement: the generated sketch compiles at gnu++11.
 constexpr uint16_t statusForBody(uint16_t status, BodyResult result) {
-  return result == BodyResult::Ok ? status
-                                  : (status >= kFirstStatusThatSpeaksForItself ? status : 0U);
+  return result == BodyResult::Ok ? status : (status >= kFirstStatusThatSpeaksForItself ? status : 0U);
 }
 
 } // namespace gatelogic

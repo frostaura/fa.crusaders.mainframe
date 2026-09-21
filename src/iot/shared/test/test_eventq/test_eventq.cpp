@@ -148,8 +148,7 @@ void test_queue_a_full_ring_evicts_refusals_before_it_evicts_admissions() {
     TEST_ASSERT_TRUE(queue.release());
   }
   TEST_ASSERT_EQUAL_UINT16(8U, seen);
-  TEST_ASSERT_EQUAL_UINT16_MESSAGE(4U, opens,
-                                   "every admission has to survive a night of refusals");
+  TEST_ASSERT_EQUAL_UINT16_MESSAGE(4U, opens, "every admission has to survive a night of refusals");
 
   // AND THE COUNTER IS HONEST: every discarded event is counted, whichever kind
   // it was. A club that sees this move knows it lost history.

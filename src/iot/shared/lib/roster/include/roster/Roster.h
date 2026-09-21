@@ -83,8 +83,7 @@ inline constexpr size_t kMaxTokenLen = 20U;
 ///
 /// One return statement: the generated sketches compile at gnu++11.
 constexpr bool isTokenChar(char c) {
-  return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '-' ||
-         c == '_';
+  return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '-' || c == '_';
 }
 
 /// One booking, as far as the box needs to know about it.

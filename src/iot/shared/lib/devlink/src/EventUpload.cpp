@@ -82,14 +82,14 @@ size_t renderEventBody(char* out, size_t cap, const char* mac, uint32_t bootId, 
     return 0U;
   }
 
-  const int written = snprintf(
-      out, cap,
-      "{\"mac\":\"%s\"%s,\"uptime_ms\":%s,\"events\":[{\"seq\":%lu,\"uptime_ms\":%s,"
-      "\"kind\":\"%s\",\"court\":%d,\"method\":%s,\"subject\":\"%s\",\"duration_ms\":%lu}]}",
-      mac, bootJson, batchUptime, static_cast<unsigned long>(event.seq), eventUptime,
-      eventq::kindName(event.kind),
-      event.court == eventq::Event::kNoCourt ? -1 : static_cast<int>(event.court), methodJson, subject,
-      static_cast<unsigned long>(event.durationMs));
+  const int written =
+      snprintf(out, cap,
+               "{\"mac\":\"%s\"%s,\"uptime_ms\":%s,\"events\":[{\"seq\":%lu,\"uptime_ms\":%s,"
+               "\"kind\":\"%s\",\"court\":%d,\"method\":%s,\"subject\":\"%s\",\"duration_ms\":%lu}]}",
+               mac, bootJson, batchUptime, static_cast<unsigned long>(event.seq), eventUptime,
+               eventq::kindName(event.kind),
+               event.court == eventq::Event::kNoCourt ? -1 : static_cast<int>(event.court), methodJson,
+               subject, static_cast<unsigned long>(event.durationMs));
   if (written < 0 || static_cast<size_t>(written) >= cap) {
     // snprintf truncated. A half-rendered body is a request the server refuses
     // as malformed, and the drain path treats a 4xx as "the box caused this"

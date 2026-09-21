@@ -539,8 +539,8 @@ void test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap() {
   // Refused rather than truncated: a half-rendered body comes back 4xx and the
   // drain path drops the event as one the box caused.
   char tiny[24] = {};
-  TEST_ASSERT_EQUAL_size_t(0U,
-                           devlink::renderEventBody(tiny, sizeof(tiny), "5ccf7f0a1b2c", 0U, 2000ULL, release));
+  TEST_ASSERT_EQUAL_size_t(
+      0U, devlink::renderEventBody(tiny, sizeof(tiny), "5ccf7f0a1b2c", 0U, 2000ULL, release));
   TEST_ASSERT_EQUAL_STRING("", tiny);
 
   // And never without a MAC: an events batch that names no device is one the
@@ -553,10 +553,10 @@ void test_the_event_body_carries_a_64_bit_uptime_across_the_millis_wrap() {
   // rather than escaped: escaping would hide that, and there is nothing useful
   // a server can do with a device name nobody minted.
   static const char* kNotAMac[] = {
-      "5ccf7f0a1b2",              // eleven
-      "5ccf7f0a1b2cd",            // thirteen
-      "5CCF7F0A1B2C",             // uppercase, which encodeLower never emits
-      "5ccf7f0a1b2g",             // not hex
+      "5ccf7f0a1b2",                 // eleven
+      "5ccf7f0a1b2cd",               // thirteen
+      "5CCF7F0A1B2C",                // uppercase, which encodeLower never emits
+      "5ccf7f0a1b2g",                // not hex
       "\",\"uptime_ms\":1,\"x\":\"", // the B1 shape, from the other field
   };
   for (size_t i = 0U; i < sizeof(kNotAMac) / sizeof(kNotAMac[0]); ++i) {

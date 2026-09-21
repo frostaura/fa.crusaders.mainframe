@@ -512,8 +512,8 @@ void test_top_level_readers_see_only_the_outermost_objects_members() {
   const char* bodies[] = {nestedAfter, nestedFirst, inAnArray, topLevelArray};
   for (size_t i = 0U; i < sizeof(bodies) / sizeof(bodies[0]); ++i) {
     flag = false;
-    TEST_ASSERT_FALSE_MESSAGE(
-        devapi::json::topLevelBoolField(bodies[i], strlen(bodies[i]), "opened", flag), bodies[i]);
+    TEST_ASSERT_FALSE_MESSAGE(devapi::json::topLevelBoolField(bodies[i], strlen(bodies[i]), "opened", flag),
+                              bodies[i]);
     // And the FLAT family still finds it, which is what the court box depends
     // on and is why both exist.
     if (bodies[i] != topLevelArray) {
