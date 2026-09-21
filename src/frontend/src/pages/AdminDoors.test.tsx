@@ -1978,3 +1978,36 @@ describe("what the door pages say out loud", () => {
     expect(screen.getByText("Not told yet")).toBeInTheDocument();
   });
 });
+
+/**
+ * <b>E2 / R3-3 at this surface's own call sites.</b>
+ *
+ * <p>
+ * `clubClock` renders in whatever zone it is handed and falls back to the BROWSER's — which
+ * is right for a volunteer standing in the club and wrong for everybody else. A reviewer on
+ * `Pacific/Auckland` read a log header "06:09 club time" against their own clock, and the
+ * fleet receipt and the printed door card took the same fallback with no label at all.
+ * </p>
+ */
+describe("the club's own clock, on every doors face", () => {
+  beforeEach(() => { vi.useRealTimers(); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("dates a fleet result in the club's zone, not the reader's", async () => {
+    // A club five hours from the runner's own zone, so the two answers differ visibly.
+    const server = doorsServer([doorFixture({ last_seen_at: "2026-09-19T04:09:00Z" })], {
+      timezone: "Pacific/Auckland",
+    });
+    stubFetch([{ path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE }, ...server.routes]);
+    renderPage(<AdminDoorsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Shut all doors|Shut the/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /tap again to confirm/ }));
+
+    // 04:09 UTC is 16:09 in Auckland and 06:09 in Johannesburg — the fixture's zone is the
+    // one that must win, whatever zone the test runner is pinned to.
+    await waitFor(() => {
+      expect(screen.getByText(/last heard 16:09/)).toBeInTheDocument();
+    });
+  });
+});

@@ -13,6 +13,15 @@ import { type FleetDoorResult } from "../../lib/api";
 /** A result is a receipt for an instant, so it carries the instant it was taken at. */
 export type FleetResultState = {
   action: "shut" | "reopen";
+  /**
+   * The CLUB's zone (E2 / R3-3), from the read that produced this result.
+   *
+   * `clubClock` falls back to the BROWSER's zone when given none — right for a volunteer
+   * standing in the club, and wrong for anyone else, which is how a reviewer in Auckland
+   * read a receipt dated on the wrong day beside a Door-events block that was correct.
+   * Optional so a caller without a view still compiles; every caller in this tree passes it.
+   */
+  timezone?: string;
   doors: FleetDoorResult[];
   /** The doors this request deliberately did not touch, NAMED (C1). Never a silent omission. */
   leftShut: { id: string; name: string; gate_key: string | null }[];
@@ -47,7 +56,7 @@ function heading(state: FleetResultState): string {
 
 function ResultRow({ door, state }: { door: FleetDoorResult; state: FleetResultState }) {
   const ok = confirmed(door, state.at);
-  const clock = door.last_seen_at ? clubClock(door.last_seen_at) : null;
+  const clock = door.last_seen_at ? clubClock(door.last_seen_at, state.timezone) : null;
   return (
     <li className="border-t border-border py-3 first:border-t-0 sm:grid sm:grid-cols-[220px_minmax(0,1fr)_240px] sm:gap-4">
       <p className="min-w-0 break-words font-medium">
@@ -93,7 +102,7 @@ export function FleetResultPanel({ state }: { state: FleetResultState }) {
   useEffect(() => { headingRef.current?.focus(); }, [state]);
 
   const anyUnknown = state.doors.some((d) => (d.power_loss_behaviour ?? "not_established") === "not_established");
-  const taken = clubClock(state.at);
+  const taken = clubClock(state.at, state.timezone);
 
   const staying = doorsStayShutNotice(state.leftShut.map((d) => d.name));
   return (

@@ -39,12 +39,17 @@ function AdminDoorsCardPageBody() {
   const [loading, setLoading] = useState(true);
   /** The instant this sheet was built, stamped once. See `printedOn` below. */
   const [builtAt, setBuiltAt] = useState(0);
+  const [timezone, setTimezone] = useState<string | undefined>(undefined);
 
   const load = useCallback(async () => {
     setBuiltAt(Date.now());
     try {
       const view = await doorEndpoints.doors();
       const row = view.doors.find((d) => d.device.id === id);
+      // E2 / R3-3: the club's zone. This sheet is printed and goes on a wall for months, so
+      // a date written in whichever zone the printing admin's laptop was in is the one
+      // mistake on it nobody can catch afterwards.
+      setTimezone(view.timezone);
       setDoor(row?.device ?? null);
       setFailed(false);
     } catch {
@@ -98,7 +103,7 @@ function AdminDoorsCardPageBody() {
   // "9/19/26" is the last place a month-first date belongs. Read at LOAD rather than during
   // render — it is the instant the card was built, and a clock read in a render body is both
   // impure and a value that can change between two paints of one sheet.
-  const printedOn = clubDate(builtAt);
+  const printedOn = clubDate(builtAt, timezone);
 
   return (
     <div className="space-y-4">

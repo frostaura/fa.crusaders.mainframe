@@ -146,6 +146,7 @@ function DoorsList({ store, rows, now, livenessOf, settings }: {
         failed={false}
         reload={refreshDoorsView}
         onRetry={() => void refreshDoorsView()}
+        timezone={view?.timezone}
       />
       {/* `items-stretch` and an internal footer: B18. Tiles misaligned whenever one door
           carried more chips than its neighbour, so three cards in a row ended with their
