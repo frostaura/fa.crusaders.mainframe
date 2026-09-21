@@ -137,7 +137,29 @@ public sealed class AdminBlockService
         // blocked four courts on a Saturday and lifted them an hour later leaves a trail.
         block.Status = BookingStatus.Cancelled;
         block.CancelledAt = DateTimeOffset.UtcNow;
-        await _db.SaveChangesAsync(ct);
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Two admins pressed "lift" on the same block.
+            //
+            // `Booking.Version` is a concurrency token that MainframeDbContext bumps on every
+            // modified booking, so the loser's UPDATE matches no rows and throws — and this
+            // method had no catch, while BookingService.CancelAsync has had one since the
+            // identical race was found there. The lift button is on every admin's grid, so the
+            // loser got an unhandled 500 from a route with no exception handler in front of it.
+            //
+            // False, which is the same answer a lift of a block that is already gone gets: the
+            // route turns it into `block_not_found` and the bulk path turns it into a per-item
+            // result row. Both are true — by the time this returns the block IS lifted, just
+            // not by this request.
+            _logger.LogInformation("Lift of block {BlockId} lost a concurrent write", blockId);
+            return false;
+        }
+
         return true;
     }
 

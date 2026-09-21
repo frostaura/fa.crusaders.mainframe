@@ -299,6 +299,14 @@ builder.Services.AddScoped<ActivationPlumbing>();
 builder.Services.AddScoped<CourtActivationService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<MemberApprovalService>();
+// The club's undeletable admin change record. Every admin mutation in every lane writes
+// through this one service; see AdminChangeRecorder for why staging and recording differ.
+builder.Services.AddScoped<AdminChangeRecorder>();
+// Items 5 + 13 — the per-item, never-transactional bulk cancel and bulk book.
+builder.Services.AddScoped<AdminBulkBookingService>();
+// Item 14 — repeating schedules, materialised as real AdminBlock rows so the GiST
+// exclusion constraint is what actually reserves the court.
+builder.Services.AddScoped<BookingScheduleService>();
 
 // Phase 4 — webhook engine + lights cue worker + no-show worker
 builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
@@ -328,6 +336,9 @@ builder.Services.AddHostedService<PeripheralHealthWorker>();
 
 // Phase 8.8 — retention worker (nightly anonymisation of records older than retention_years)
 builder.Services.AddHostedService<Crusaders.Mainframe.Api.Workers.RetentionWorker>();
+// Tops each club's schedule horizon up. The create and edit paths materialise
+// synchronously as well, so an admin sees their own click land.
+builder.Services.AddHostedService<Crusaders.Mainframe.Api.Workers.ScheduleMaterialisationWorker>();
 
 // Phase 5 — biometric abstraction
 builder.Services.AddSingleton<IBiometricDevice, NullBiometricDevice>();
@@ -511,6 +522,10 @@ app.MapAdminConfigEndpoints();
 app.MapAdminDeviceEndpoints();
 app.MapAdminDoorEndpoints();
 app.MapAdminLedgerEndpoints();
+app.MapAdminChangeEndpoints();
+app.MapAdminMemberTraceEndpoints();
+app.MapAdminBulkBookingEndpoints();
+app.MapAdminScheduleEndpoints();
 app.MapMeProfileEndpoints();
 app.MapMeDoorEndpoints();
 app.MapWebhookEndpoints();

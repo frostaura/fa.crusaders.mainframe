@@ -136,12 +136,28 @@ public static class AdminConfigEndpoints
                 realtime_fallback_window_seconds = RealtimeSettings.FallbackWindowSeconds(defaults),
                 realtime_poll_seconds_wallet = RealtimeSettings.PollSecondsWallet(defaults),
                 realtime_poll_seconds_control_board = RealtimeSettings.PollSecondsControlBoard(defaults),
+
+                // The four BE-ADMIN keys, rendered from the CLAMPED readers rather than
+                // echoed out of the stored document — otherwise the settings page round-trips
+                // a number the engine does not honour, which is the defect
+                // AdminSettingsHttpTests.Opening_the_settings_page_and_saving_it_changes_nothing
+                // is named for.
+                admin_bulk_max_items = BulkSettings.MaxItems(defaults),
+                schedule_materialisation_days = ScheduleSettings.MaterialisationDays(defaults),
+                schedule_max_rows_per_change = ScheduleSettings.MaxRowsPerChange(defaults),
+                schedule_worker_interval_seconds = (int)ScheduleSettings.WorkerInterval(defaults).TotalSeconds,
+
+                // The two night-trace keys, from TraceSettings for the same reason.
+                member_trace_enabled = TraceSettings.Enabled(defaults),
+                member_trace_max_events = TraceSettings.MaxEvents(defaults),
             });
         });
 
         settings.MapPut("/", async (
-            UpdateSettingsRequest req, MainframeDbContext db, ITenantContext tenant, CancellationToken ct) =>
+            UpdateSettingsRequest req, HttpContext ctx, MainframeDbContext db,
+            AdminChangeRecorder recorder, CancellationToken ct) =>
         {
+            var tenant = ctx.RequestServices.GetRequiredService<ITenantContext>();
             if (req.AdvanceBookingDays < 0 || req.AdvanceBookingDays > 365)
                 return Results.BadRequest(new { error = "advance_booking_days_out_of_range" });
             if (req.SliceMinutes is < 5 or > 240)
@@ -217,6 +233,8 @@ public static class AdminConfigEndpoints
 
             var liveError = ValidateLiveSettings(req);
             if (liveError is not null) return Results.BadRequest(new { error = liveError });
+            var adminError = ValidateAdminSettings(req);
+            if (adminError is not null) return Results.BadRequest(new { error = adminError });
 
             var row = await db.TenantSettings.FirstOrDefaultAsync(s => s.TenantId == tenant.TenantId, ct);
             if (row is null)
@@ -225,6 +243,9 @@ public static class AdminConfigEndpoints
                 db.TenantSettings.Add(row);
             }
             var doc = ParseObject(row.SettingsJson);
+
+            // Snapshotted BEFORE anything is written into `doc`, which is mutated in place.
+            var before = new Dictionary<string, JsonElement>(doc, StringComparer.Ordinal);
 
             // The cue window must fit inside the forward window, and either may arrive
             // alone — so each is compared against the value that will actually be in
@@ -292,6 +313,17 @@ public static class AdminConfigEndpoints
             WriteOptionalDoorSettings(doc, req);
             WriteOptionalBoxSettings(doc, req);
             WriteOptionalLiveSettings(doc, req);
+            WriteOptionalAdminSettings(doc, req);
+
+            // D2-B19 — the diff of CHANGED KEYS ONLY, before the document is replaced.
+            //
+            // This endpoint wrote no record of any kind. Its sharpest form:
+            // door_log_retention_days is the cutoff RetentionWorker DELETES audit rows
+            // against, so lowering it to 7 destroys the club's door record and left no trace
+            // of who lowered it. Changed keys only, because a whole-document before/after on
+            // every save makes the record unreadable and stores the same thirty keys a
+            // hundred times.
+            var changed = ChangedKeys(before, doc);
             row.SettingsJson = JsonSerializer.Serialize(doc);
             // The column was written once, at construction, and never again — a dead audit
             // field on the one table that governs money and lights. Nothing reads it today,
@@ -299,8 +331,22 @@ public static class AdminConfigEndpoints
             // this club last change its penalty policy" would have got the seed date and
             // believed it.
             row.UpdatedAt = DateTimeOffset.UtcNow;
+
+            if (changed.Before.Count > 0 || changed.After.Count > 0)
+            {
+                // Staged, so the record and the change it describes flush together: a record
+                // of a save that rolled back is worse than no record.
+                await recorder.StageAsync(new AdminChange(
+                    Action: AdminChangeActions.SettingsUpdated,
+                    ActorUserId: ctx.User.Id() ?? Guid.Empty,
+                    SubjectKind: AdminChangeSubjects.Setting,
+                    SubjectLabel: "Club settings",
+                    Before: changed.Before,
+                    After: changed.After), ct);
+            }
+
             await db.SaveChangesAsync(ct);
-            return Results.Ok(new { saved = true });
+            return Results.Ok(new { saved = true, changed_keys = changed.After.Keys.ToList() });
         });
 
         var courts = app.MapGroup("/api/v1/admin/courts").RequireAuthorization(p => p.RequireRole("admin"));
@@ -698,6 +744,123 @@ public static class AdminConfigEndpoints
     }
 
     /// <summary>Same omitted-means-unchanged rule as the economics keys, for the five door settings.</summary>
+    /// <summary>
+    /// The four BE-ADMIN numbers, bounded, plus the one CROSS-FIELD rule in this lane.
+    ///
+    /// <para>
+    /// <b>The cross-field rule is the point of this method.</b> Either value can be edited
+    /// independently, from different screens, and the failure of the pair — a member booking
+    /// fourteen days out into a league night the materialiser has not written yet — appears
+    /// weeks later, on the night, as a member holding a paid court the club promised to a
+    /// division. It is refused here, where there is a person to tell.
+    /// </para>
+    /// </summary>
+    /// <summary>
+    /// The keys whose values differ between the stored document and the one about to replace
+    /// it, as two parallel maps.
+    ///
+    /// <para>
+    /// Compared on RAW JSON TEXT rather than on parsed values. Two <c>JsonElement</c>s are
+    /// reference-compared by <c>Equals</c>, so a structural comparison would report every key
+    /// as changed on every save — which is the unreadable whole-document record this method
+    /// exists to avoid, arriving through the back door.
+    /// </para>
+    ///
+    /// <para>
+    /// A key that was REMOVED appears in <c>Before</c> and not in <c>After</c>, which is what
+    /// lets the diff renderer draw "was 90, now not set" rather than dropping it silently.
+    /// </para>
+    /// </summary>
+    private static (Dictionary<string, object?> Before, Dictionary<string, object?> After) ChangedKeys(
+        IReadOnlyDictionary<string, JsonElement> before, IReadOnlyDictionary<string, JsonElement> after)
+    {
+        var wasChanged = new Dictionary<string, object?>(StringComparer.Ordinal);
+        var isChanged = new Dictionary<string, object?>(StringComparer.Ordinal);
+
+        foreach (var key in before.Keys.Concat(after.Keys).Distinct(StringComparer.Ordinal))
+        {
+            var had = before.TryGetValue(key, out var was) ? was.GetRawText() : null;
+            var has = after.TryGetValue(key, out var now) ? now.GetRawText() : null;
+            if (had == has) continue;
+
+            if (had is not null) wasChanged[key] = JsonSerializer.Deserialize<object?>(had);
+            if (has is not null) isChanged[key] = JsonSerializer.Deserialize<object?>(has);
+        }
+
+        return (wasChanged, isChanged);
+    }
+
+    private static string? ValidateAdminSettings(UpdateSettingsRequest req)
+    {
+        if (req.EffectiveAdminBulkMaxItems is { } items
+            && (items < BulkSettings.MinMaxItems || items > BulkSettings.MaxMaxItems))
+        {
+            return "admin_bulk_max_items_out_of_range";
+        }
+
+        if (req.EffectiveScheduleMaxRowsPerChange is { } rows
+            && (rows < ScheduleSettings.MinMaxRowsPerChange || rows > ScheduleSettings.MaxMaxRowsPerChange))
+        {
+            return "schedule_max_rows_out_of_range";
+        }
+
+        if (req.EffectiveScheduleWorkerIntervalSeconds is { } tick
+            && (tick < ScheduleSettings.MinWorkerIntervalSeconds || tick > ScheduleSettings.MaxWorkerIntervalSeconds))
+        {
+            return "schedule_worker_interval_out_of_range";
+        }
+
+        if (req.EffectiveMemberTraceMaxEvents is { } events
+            && (events < TraceSettings.MinMaxEvents || events > TraceSettings.MaxMaxEvents))
+        {
+            return "member_trace_max_events_out_of_range";
+        }
+
+        return ValidateScheduleHorizon(req);
+    }
+
+    /// <summary>
+    /// The materialisation horizon, and the one CROSS-FIELD rule in this lane.
+    ///
+    /// <para>
+    /// Split out of <see cref="ValidateAdminSettings"/> for the complexity gate, and it earns
+    /// its own method anyway: the other three bounds are independent numbers, while this one is
+    /// a RELATIONSHIP between two keys that are edited from different screens. The failure of
+    /// the pair — a member booking fourteen days out into a league night the materialiser has
+    /// not written yet — appears weeks later, on the night, as a member holding a paid court the
+    /// club promised to a division.
+    /// </para>
+    /// </summary>
+    private static string? ValidateScheduleHorizon(UpdateSettingsRequest req)
+    {
+        if (req.EffectiveScheduleMaterialisationDays is not { } horizon) return null;
+
+        if (horizon < ScheduleSettings.MinMaterialisationDays || horizon > ScheduleSettings.MaxMaterialisationDays)
+        {
+            return "schedule_materialisation_days_out_of_range";
+        }
+
+        return horizon < req.AdvanceBookingDays ? ScheduleSettings.AdvanceDaysExceedHorizon : null;
+    }
+
+    private static void WriteOptionalAdminSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
+    {
+        if (req.EffectiveAdminBulkMaxItems is { } items) doc["admin_bulk_max_items"] = ToElement(items);
+        if (req.EffectiveScheduleMaterialisationDays is { } horizon)
+            doc["schedule_materialisation_days"] = ToElement(horizon);
+        if (req.EffectiveScheduleMaxRowsPerChange is { } rows) doc["schedule_max_rows_per_change"] = ToElement(rows);
+        if (req.EffectiveScheduleWorkerIntervalSeconds is { } tick)
+            doc["schedule_worker_interval_seconds"] = ToElement(tick);
+
+        // Written as a real JSON boolean, never a string: TenantSettingsAccessor.TryBool
+        // accepts true/false only, and a coerced "false" would leave a club that believed it
+        // had switched the trace OFF with it on — the one direction that key must never fail in.
+        if (req.EffectiveMemberTraceEnabled is { } traceOn)
+            doc["member_trace_enabled"] = ToElement(traceOn);
+        if (req.EffectiveMemberTraceMaxEvents is { } events)
+            doc["member_trace_max_events"] = ToElement(events);
+    }
+
     private static void WriteOptionalDoorSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
     {
         if (req.EffectiveDoorLogRetentionDays is { } retention) doc["door_log_retention_days"] = ToElement(retention);
@@ -939,8 +1102,53 @@ public sealed record UpdateSettingsRequest(
     [property: JsonPropertyName("realtime_fallback_after_failures")] int? RealtimeFallbackAfterFailures = null,
     [property: JsonPropertyName("realtime_fallback_window_seconds")] int? RealtimeFallbackWindowSeconds = null,
     [property: JsonPropertyName("realtime_poll_seconds_wallet")] int? RealtimePollSecondsWallet = null,
-    [property: JsonPropertyName("realtime_poll_seconds_control_board")] int? RealtimePollSecondsControlBoard = null)
+    [property: JsonPropertyName("realtime_poll_seconds_control_board")] int? RealtimePollSecondsControlBoard = null,
+
+    // ---- The four BE-ADMIN keys, under both spellings ----
+    //
+    // Same asymmetry and same remedy as the nine above. The one a silent no-op would hurt
+    // most here is schedule_materialisation_days: a horizon narrowed below
+    // advance_booking_days lets a member book into a league night that has not been written
+    // yet, and nobody finds out until the night itself.
+    int? AdminBulkMaxItems = null,
+    int? ScheduleMaterialisationDays = null,
+    int? ScheduleMaxRowsPerChange = null,
+    int? ScheduleWorkerIntervalSeconds = null,
+    [property: JsonPropertyName("admin_bulk_max_items")] int? AdminBulkMaxItemsSnake = null,
+    [property: JsonPropertyName("schedule_materialisation_days")] int? ScheduleMaterialisationDaysSnake = null,
+    [property: JsonPropertyName("schedule_max_rows_per_change")] int? ScheduleMaxRowsPerChangeSnake = null,
+    [property: JsonPropertyName("schedule_worker_interval_seconds")] int? ScheduleWorkerIntervalSecondsSnake = null,
+
+    // ---- The two night-trace keys ----
+    //
+    // The first is a KILL SWITCH on the most surveillance-capable surface in the product, so
+    // it is editable from the settings screen like every other club decision rather than
+    // being a deployment flag nobody at the club can reach.
+    bool? MemberTraceEnabled = null,
+    int? MemberTraceMaxEvents = null,
+    [property: JsonPropertyName("member_trace_enabled")] bool? MemberTraceEnabledSnake = null,
+    [property: JsonPropertyName("member_trace_max_events")] int? MemberTraceMaxEventsSnake = null)
 {
+    /// <summary>Whether the club wants the night trace on, under either spelling.</summary>
+    public bool? EffectiveMemberTraceEnabled => MemberTraceEnabled ?? MemberTraceEnabledSnake;
+
+    /// <summary>The trace's page ceiling as asked for, under either spelling.</summary>
+    public int? EffectiveMemberTraceMaxEvents => MemberTraceMaxEvents ?? MemberTraceMaxEventsSnake;
+
+    /// <summary>The bulk ceiling the club asked for, under either spelling.</summary>
+    public int? EffectiveAdminBulkMaxItems => AdminBulkMaxItems ?? AdminBulkMaxItemsSnake;
+
+    /// <summary>The materialisation horizon the club asked for, under either spelling.</summary>
+    public int? EffectiveScheduleMaterialisationDays
+        => ScheduleMaterialisationDays ?? ScheduleMaterialisationDaysSnake;
+
+    /// <summary>The per-change row cap the club asked for, under either spelling.</summary>
+    public int? EffectiveScheduleMaxRowsPerChange => ScheduleMaxRowsPerChange ?? ScheduleMaxRowsPerChangeSnake;
+
+    /// <summary>The worker tick the club asked for, under either spelling.</summary>
+    public int? EffectiveScheduleWorkerIntervalSeconds
+        => ScheduleWorkerIntervalSeconds ?? ScheduleWorkerIntervalSecondsSnake;
+
     /// <summary>The release the club asked for, under either spelling, or null when neither arrived.</summary>
     public int? EffectiveGateUnlockSeconds => GateUnlockSeconds ?? GateUnlockSecondsSnake;
 

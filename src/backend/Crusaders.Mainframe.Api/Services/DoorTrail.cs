@@ -2,6 +2,7 @@ using System.Linq.Expressions;
 using System.Text.Json;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Endpoints;
+using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Services;
 
@@ -217,6 +218,84 @@ public static class DoorTrail
     {
         if (!IsScan(action)) return createdAt;
         return Endpoints.DoorActivityView.ScannedAt(Endpoints.DoorActivityView.Details(detailsJson), createdAt);
+    }
+
+    /// <summary>
+    /// The boards this club has that are NOT doors — the ids a door surface must not read a
+    /// scan from.
+    ///
+    /// <para>
+    /// <b>D2-B27.</b> <c>unknown_scan</c> is declared on the upload path with no dispatch case
+    /// and no kind guard, unlike <c>gate_open</c>, which is gated — and a court box genuinely
+    /// emits one. The row's action is <see cref="OfflineUnknownScanAction"/>, which
+    /// <see cref="IsRefusalRow"/> classifies as a door refusal, so a member mis-scanning at a
+    /// COURT BOX appeared in the club's door log as somebody turned away at a DOOR and was
+    /// counted in the club's per-day door totals. Every door surface reads
+    /// <see cref="IsScanRow"/>, and none of them had a <c>Kind == Gate</c> predicate.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Stated as "not a door" rather than "is a gate", and the difference is a removed
+    /// board.</b> Filtering to boards that ARE gates would delete from the log every row
+    /// belonging to a door the club has since removed — the rows the <c>removed_door</c> filter
+    /// exists to serve, whose whole point is that they survive their board. A row whose
+    /// <c>device_id</c> resolves to nothing is kept, because "this club no longer has that
+    /// board" is not evidence that the scan happened somewhere else; a row that resolves to a
+    /// board this club still has and that is not a door is dropped, because that IS evidence.
+    /// </para>
+    /// </summary>
+    public static List<Guid> NotADoorIds(Persistence.MainframeDbContext db)
+        => db.Devices.AsNoTracking()
+            .Where(d => d.Kind != DeviceKind.Gate)
+            .Select(d => d.Id)
+            .ToList();
+
+    /// <summary>
+    /// The same list, read without blocking — for the callers that have a
+    /// <see cref="CancellationToken"/> and are already awaiting.
+    /// </summary>
+    public static Task<List<Guid>> NotADoorIdsAsync(
+        Persistence.MainframeDbContext db, CancellationToken ct)
+        => db.Devices.AsNoTracking()
+            .Where(d => d.Kind != DeviceKind.Gate)
+            .Select(d => d.Id)
+            .ToListAsync(ct);
+
+    /// <summary>
+    /// Those rows removed from a query — one jsonb containment per board, negated.
+    ///
+    /// <para>
+    /// A containment (<c>@&gt;</c>) rather than a text match, for
+    /// <see cref="Endpoints.DoorLogQuery.Filtered"/>'s own reason: a guid that happened to
+    /// appear in some other field of the document cannot match. A club has a handful of boards,
+    /// so this is a handful of index-supported predicates and not a join that <c>audit_log</c>
+    /// has no foreign key for.
+    /// </para>
+    /// </summary>
+    public static IQueryable<AuditLog> WithoutNonDoorBoards(
+        IQueryable<AuditLog> rows, IReadOnlyCollection<Guid> notADoor)
+    {
+        foreach (var id in notADoor)
+        {
+            var containment = JsonSerializer.Serialize(new { device_id = id });
+            rows = rows.Where(a => a.DetailsJson == null
+                                   || !EF.Functions.JsonContains(a.DetailsJson, containment));
+        }
+        return rows;
+    }
+
+    /// <summary>
+    /// Whether one already-materialised row happened at something that is not a door — the
+    /// in-memory half of <see cref="WithoutNonDoorBoards"/>, for a reader that has the rows in
+    /// hand and the board ids beside them.
+    /// </summary>
+    public static bool AtANonDoorBoard(JsonElement? details, IReadOnlyCollection<Guid> notADoor)
+    {
+        // Block body for the lizard reason in `memory/gotchas.md`: lizard's C# parser cannot
+        // follow an expression-bodied member whose value carries braces — a `{ }` property
+        // pattern counts — loses scope, and emits a `*global*` pseudo-function spanning the
+        // whole FILE, which then trips the function-length gate on any file over 200 lines.
+        return DeviceIdOf(details) is { } id && notADoor.Contains(id);
     }
 
     /// <summary>

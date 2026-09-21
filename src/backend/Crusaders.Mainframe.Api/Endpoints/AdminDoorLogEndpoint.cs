@@ -435,6 +435,14 @@ public static class AdminDoorLogEndpoint
     /// One cell: defused against a spreadsheet's formula parser, then quoted against the CSV
     /// grammar. Both, in that order — a value quoted first would still begin with <c>=</c>
     /// once the quotes were stripped by the reader.
+    ///
+    /// <para>
+    /// The rule itself moved to <see cref="CsvCell"/> when the third export was written. It
+    /// stays reachable under this name because this file's own tests and its column builders
+    /// read as one piece; what must not happen is a second export re-deriving the rule and
+    /// getting the ORDER wrong, which is invisible until somebody's spreadsheet runs a formula
+    /// out of a member's name field.
+    /// </para>
     /// </summary>
     /// <remarks>
     /// Public because the monitoring export needs exactly this rule and a second copy of it is
@@ -442,13 +450,7 @@ public static class AdminDoorLogEndpoint
     /// here — a board's name, a fault's detail — and the two exports must defuse them
     /// identically or one of them is a file that executes.
     /// </remarks>
-    public static string Cell(string value)
-    {
-        var safe = value.Length > 0 && value[0] is '=' or '+' or '-' or '@' ? "'" + value : value;
-        return safe.Contains(',') || safe.Contains('"') || safe.Contains('\n') || safe.Contains('\r')
-            ? "\"" + safe.Replace("\"", "\"\"") + "\""
-            : safe;
-    }
+    public static string Cell(string value) => CsvCell.Of(value);
 
     /// <summary>
     /// The name this row's subject is known by, or empty. Block body for the lizard reason in

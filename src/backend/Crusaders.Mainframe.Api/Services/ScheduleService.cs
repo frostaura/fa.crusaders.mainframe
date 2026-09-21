@@ -40,6 +40,17 @@ public sealed class ScheduleService
         // on a twenty-court club is twenty. The output order is unchanged.
         var bookingsByCourt = bookings.ToLookup(b => b.CourtId);
 
+        // One read for the whole grid, not one per cell. A league night is four courts by
+        // twelve slices, so resolving the plan's name inside the loop would be forty-eight
+        // queries for one string — the N+1 the lookup above already exists to prevent.
+        var scheduleIds = bookings.Where(b => b.ScheduleId is not null)
+            .Select(b => b.ScheduleId!.Value).Distinct().ToList();
+        var scheduleNames = scheduleIds.Count == 0
+            ? []
+            : await _db.BookingSchedules.AsNoTracking()
+                .Where(s => scheduleIds.Contains(s.Id))
+                .ToDictionaryAsync(s => s.Id, s => s.Name, ct);
+
         var slots = new List<ScheduleSlot>(bookings.Count);
         foreach (var court in courts)
         {
@@ -71,7 +82,9 @@ public sealed class ScheduleService
                     // for check-in used to return three comments and no rendered field,
                     // because the projection did not carry it at all.
                     CheckedIn: maySeeDetail ? b.CheckedInAt is not null : null,
-                    AmountChargedCredits: maySeeDetail ? b.AmountChargedCredits : null));
+                    AmountChargedCredits: maySeeDetail ? b.AmountChargedCredits : null,
+                    ScheduleId: b.ScheduleId,
+                    ScheduleName: b.ScheduleId is { } sid ? scheduleNames.GetValueOrDefault(sid) : null));
             }
         }
 
@@ -176,4 +189,24 @@ public sealed record ScheduleSlot(
     Guid? BookingId,
     string? BlockLabel,
     bool? CheckedIn,
-    decimal? AmountChargedCredits);
+    decimal? AmountChargedCredits,
+
+    /// <summary>
+    /// The repeating schedule that produced this row, when one did — item 14.
+    ///
+    /// <para>
+    /// <b>The NAME, not the label, and both are deliberate.</b> An occurrence's
+    /// <c>BlockLabel</c> is the schedule's <c>Label</c> — the words the club wants ON the cell
+    /// ("League — Div 1"). This is the schedule's <c>Name</c>, which is unique per club and is
+    /// what identifies the plan a hold belongs to ("Tuesday league"). The grid renders the
+    /// plan's name beside "Club hold"; the label alone could not say which of two league nights
+    /// this is, because a label is not unique.
+    /// </para>
+    ///
+    /// <para>
+    /// Null on every ordinary booking and on a one-off admin block, which is what lets a cell
+    /// tell a recurring hold from a hold somebody made by hand.
+    /// </para>
+    /// </summary>
+    Guid? ScheduleId = null,
+    string? ScheduleName = null);

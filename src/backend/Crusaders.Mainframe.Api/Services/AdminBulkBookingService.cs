@@ -1,0 +1,362 @@
+using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Multitenancy;
+using Crusaders.Mainframe.Api.Persistence;
+using Microsoft.EntityFrameworkCore;
+
+namespace Crusaders.Mainframe.Api.Services;
+
+/// <summary>
+/// Items 5 and 13 — an admin ticking a list of grid cells and cancelling or booking all of them.
+///
+/// <para>
+/// <b>Each item is its own unit of work. The batch always answers 200 with a per-item result
+/// array. There is no transactional batch.</b> Three reasons, in order of weight. Each booking
+/// is its own money movement behind its own <c>PayerLock</c>, so wrapping forty bookings for
+/// forty members in one transaction serialises them behind one another and makes one member's
+/// lock contention roll back thirty-nine unrelated refunds. A collision is normal traffic — in a
+/// twenty-slot league book-out, one slot already taken is the expected case, and an
+/// all-or-nothing batch would fail the whole thing and give the admin no way to see which one.
+/// And it matches what the admin is doing: they ticked a list of checkboxes, and the honest
+/// answer to a list of checkboxes is a list of outcomes, not one word.
+/// </para>
+///
+/// <para>
+/// <b>Partial failure is data, not a status code.</b> <c>207 Multi-Status</c> is rejected: it is
+/// a WebDAV code, the frontend's error handling keys on 2xx/4xx, and a partially-successful
+/// batch is not an error — it is a result the admin has to read either way. Which is also why
+/// the console must never render a bulk action as a spinner ending in a toast: a toast cannot
+/// say "11 cancelled, 1 was already gone" and stay readable, and this audience will not go
+/// looking.
+/// </para>
+///
+/// <para>
+/// <b>No new settlement code.</b> Every cancellation goes through
+/// <see cref="BookingService.CancelAsync"/> and every booking through
+/// <see cref="BookingService.CreateAsync"/>, exactly as the single-item routes do. The penalty
+/// arithmetic, the waiver derivation, the email, the audit row and the domain event all stay
+/// where they are. This service is a loop with a result collector.
+/// </para>
+/// </summary>
+public sealed class AdminBulkBookingService
+{
+    private readonly MainframeDbContext _db;
+    private readonly ITenantContext _tenant;
+    private readonly BookingService _bookings;
+    private readonly AdminBlockService _blocks;
+    private readonly LedgerService _ledger;
+
+    public AdminBulkBookingService(
+        MainframeDbContext db, ITenantContext tenant, BookingService bookings,
+        AdminBlockService blocks, LedgerService ledger)
+    { _db = db; _tenant = tenant; _bookings = bookings; _blocks = blocks; _ledger = ledger; }
+
+    /// <summary>
+    /// The reference one item's refund and penalty are posted under.
+    ///
+    /// <para>
+    /// <b>The tenant prefix is not optional.</b> The unique index on
+    /// <c>ledger_entries.ExternalReference</c> carries no <c>TenantId</c>, which is why the
+    /// credit-adjust endpoint prefixes its own keys by hand. Two clubs whose consoles mint the
+    /// same key would otherwise collide, and the loser's cancellation would fail to post a
+    /// refund for money that had been taken.
+    /// </para>
+    /// </summary>
+    public string CancelReference(string key, Guid bookingId)
+        => $"bulkcancel:{_tenant.TenantId:N}:{key}:{bookingId:N}";
+
+    /// <summary>
+    /// The reference one booked item is posted under.
+    ///
+    /// <para>
+    /// <b>Keyed on the item's INDEX rather than a hash of its contents.</b> An admin may
+    /// legitimately name the same court and time twice in one batch only by mistake, and the
+    /// second one should lose the slot race and say so — not be silently deduplicated into
+    /// looking like it worked.
+    /// </para>
+    /// </summary>
+    public string BookReference(string key, int index)
+        => $"bulkbook:{_tenant.TenantId:N}:{key}:{index}";
+
+    // ------------------------------------------------------------------ cancel
+
+    /// <summary>
+    /// Cancels or lifts each row in turn, never stopping, and reports every outcome.
+    /// </summary>
+    public async Task<BulkCancelOutcome> CancelAsync(
+        IReadOnlyList<BulkCancelItem> items, string idempotencyKey, string reason,
+        bool waivePenaltyDefault, Guid actorId, CancellationToken ct)
+    {
+        var context = await ContextForAsync(items.Select(i => i.BookingId).ToList(), ct);
+        var results = new List<BulkCancelResult>(items.Count);
+        var refunded = 0m;
+        var penalty = 0m;
+
+        foreach (var item in items)
+        {
+            var result = await CancelOneAsync(
+                item, new BulkCancelBatch(idempotencyKey, reason, waivePenaltyDefault, actorId), context, ct);
+            refunded += result.RefundCredits;
+            penalty += result.PenaltyCredits;
+            results.Add(result);
+        }
+
+        return new BulkCancelOutcome(results, refunded, penalty);
+    }
+
+    /// <summary>
+    /// One row. Block body for the lizard reason in <c>memory/gotchas.md</c> — the four outcomes
+    /// are four sentences and collapsing them would lose the distinction the vocabulary exists
+    /// for.
+    /// </summary>
+    private async Task<BulkCancelResult> CancelOneAsync(
+        BulkCancelItem item, BulkCancelBatch batch, BulkContext context, CancellationToken ct)
+    {
+        var (idempotencyKey, reason, waivePenaltyDefault, actorId) =
+            (batch.IdempotencyKey, batch.Reason, batch.WaivePenaltyDefault, batch.ActorId);
+
+        // Re-resolved through the tenant-filtered DbSet and never trusted from the client.
+        //
+        // This matters more here than anywhere: GET /api/v1/schedule hands every member every
+        // other member's booking id, and this is the first endpoint to accept a LIST of them.
+        // A foreign id answers `booking_not_found` — the same non-committal refusal
+        // CancelAsync gives, so a stranger learns nothing, not even that the id is real.
+        var booking = await _db.Bookings.FirstOrDefaultAsync(b => b.Id == item.BookingId, ct);
+        if (booking is null)
+        {
+            return BulkCancelResult.Failure(item.BookingId, "booking_not_found");
+        }
+
+        var label = context.Describe(booking);
+
+        if (booking.Status == BookingStatus.AdminBlock)
+        {
+            var lifted = await _blocks.RemoveAsync(booking.Id, actorId, ct);
+            return lifted
+                ? label with { Status = BulkCancelStatuses.BlockLifted }
+                : label with { Status = BulkCancelStatuses.AlreadyCancelled };
+        }
+
+        if (booking.Status != BookingStatus.Booked)
+        {
+            return label with { Status = BulkCancelStatuses.AlreadyCancelled };
+        }
+
+        var waive = item.WaivePenalty ?? waivePenaltyDefault;
+        var outcome = await _bookings.CancelAsync(
+            booking.Id, actorId, actorIsAdmin: true, waivePenalty: waive, ct,
+            waiveReason: reason,
+            externalReferencePrefix: CancelReference(idempotencyKey, booking.Id));
+
+        return outcome switch
+        {
+            CancellationResult.Ok ok => label with
+            {
+                Status = BulkCancelStatuses.Cancelled,
+                RefundCredits = ok.RefundedCredits,
+                PenaltyCredits = ok.PenaltyCredits,
+            },
+
+            // The row was Booked when we read it and is not now — somebody else decided it
+            // between the two statements. That is a success from the admin's point of view:
+            // the court they wanted freed is free.
+            CancellationResult.NotFound => label with { Status = BulkCancelStatuses.AlreadyCancelled },
+
+            _ => label with { Status = BulkCancelStatuses.Failed, Error = "already_started" },
+        };
+    }
+
+    // ------------------------------------------------------------------ book
+
+    /// <summary>
+    /// Books each item in turn. Every error is per-item and the loop continues —
+    /// <b>except</b> <c>insufficient_balance</c>, which halts.
+    ///
+    /// <para>
+    /// A payer who has run out of credit mid-batch is different from a slot that was taken:
+    /// continuing would produce a jagged half-booked league night and a member who cannot cover
+    /// it. The response then carries <c>halted_at</c> and <c>halted_reason</c> alongside the
+    /// results so far, and the admin retries with <c>allow_negative_balance</c> <b>under the
+    /// same idempotency key</b> — the items that landed answer <c>duplicate</c> and only the
+    /// rest are attempted. That retry-safety is the entire reason the key is mandatory.
+    /// </para>
+    /// </summary>
+    public async Task<BulkBookOutcome> BookAsync(
+        IReadOnlyList<BulkBookItem> items, BulkBookRequestContext request, Guid actorId, CancellationToken ct)
+    {
+        var courts = await _db.Courts.AsNoTracking()
+            .ToDictionaryAsync(c => c.Id, c => c.Name, ct);
+
+        var results = new List<BulkBookResult>(items.Count);
+        var charged = 0m;
+        int? haltedAt = null;
+        string? haltedReason = null;
+
+        for (var index = 0; index < items.Count; index++)
+        {
+            var item = items[index];
+            var courtName = courts.TryGetValue(item.CourtId, out var name) ? name : null;
+
+            var result = await BookOneAsync(item, index, courtName, request, actorId, ct);
+            results.Add(result);
+            charged += result.AmountCredits;
+
+            if (result.Error == "insufficient_balance")
+            {
+                haltedAt = index;
+                haltedReason = "insufficient_balance";
+                break;
+            }
+        }
+
+        return new BulkBookOutcome(results, charged, haltedAt, haltedReason);
+    }
+
+    private async Task<BulkBookResult> BookOneAsync(
+        BulkBookItem item, int index, string? courtName, BulkBookRequestContext request,
+        Guid actorId, CancellationToken ct)
+    {
+        // A free-text guest has no wallet, no email and no cancellation rights — which is
+        // exactly what an admin block already is. Putting the guest's name in BlockLabel is not
+        // schema abuse: BlockLabel IS the label a block carries, and the grid already renders
+        // one. The row charges nobody, and the response says so.
+        if (request.PayerUserId is null)
+        {
+            return await BlockForGuestAsync(item, index, courtName, request, actorId, ct);
+        }
+
+        var reference = BookReference(request.IdempotencyKey, index);
+        if (await ReplayedBookingAsync(reference, ct) is { } already)
+        {
+            return BulkBookResult.Replay(index, already, courtName);
+        }
+
+        var payer = new BookingPayer(request.PayerUserId.Value, actorId, request.AllowNegativeBalance);
+        var outcome = await _bookings.CreateAsync(
+            item.CourtId, payer, item.StartsAt, item.SliceCount, ct, externalReference: reference);
+
+        if (outcome is BookingResult.Ok ok)
+        {
+            // A guest name BESIDE a real member is a different thing from a guest booking: that
+            // row is a member's paid booking and must not become a block. It goes on
+            // Booking.AdminNote, which admins see and members do not.
+            if (request.AdminNote is not null)
+            {
+                ok.Booking.AdminNote = request.AdminNote;
+                await _db.SaveChangesAsync(ct);
+            }
+
+            return BulkBookResult.Booked(index, ok.Booking, courtName, ok.Booking.AmountChargedCredits);
+        }
+
+        return BulkBookResult.Failure(index, RefusalCodeOf(outcome), courtName, item.StartsAt);
+    }
+
+    private async Task<BulkBookResult> BlockForGuestAsync(
+        BulkBookItem item, int index, string? courtName, BulkBookRequestContext request,
+        Guid actorId, CancellationToken ct)
+    {
+        var settings = await _db.TenantSettings.AsNoTracking()
+            .FirstOrDefaultAsync(s => s.TenantId == _tenant.TenantId, ct);
+        _ = settings;
+
+        // A block posts no ledger row, so there is no ExternalReference to make the retry
+        // idempotent and the index cannot help. The honest substitute is to look for the row
+        // this item would have produced: same court, same start, same label, not cancelled.
+        // Without it, a retried batch answers `slot_taken` about a block it created itself —
+        // technically safe and completely misleading.
+        var existing = await _db.Bookings.AsNoTracking().FirstOrDefaultAsync(
+            b => b.CourtId == item.CourtId
+                 && b.StartsAt == item.StartsAt
+                 && b.Status == BookingStatus.AdminBlock
+                 && b.BlockLabel == request.GuestName, ct);
+        if (existing is not null)
+        {
+            return BulkBookResult.Replay(index, existing, courtName);
+        }
+
+        var outcome = await _blocks.CreateAsync(
+            item.CourtId, item.StartsAt, item.SliceCount, request.GuestName, actorId, ct);
+
+        return outcome is BookingResult.Ok ok
+            ? BulkBookResult.Blocked(index, ok.Booking, courtName)
+            : BulkBookResult.Failure(index, RefusalCodeOf(outcome), courtName, item.StartsAt);
+    }
+
+    /// <summary>
+    /// The booking a previous attempt under this reference produced, or null.
+    ///
+    /// <para>
+    /// Read-then-write, exactly as the credit-adjust endpoint does: the index is the backstop
+    /// for two attempts in flight at once, and this is what turns the ordinary case — a retry
+    /// after the first batch halted — into an honest <c>duplicate</c> rather than a
+    /// <c>slot_taken</c> about a court the admin already has.
+    /// </para>
+    /// </summary>
+    private async Task<Booking?> ReplayedBookingAsync(string reference, CancellationToken ct)
+    {
+        var bookingId = await _db.LedgerEntries.AsNoTracking()
+            .Where(l => l.ExternalReference == reference)
+            .Select(l => l.RelatedBookingId)
+            .FirstOrDefaultAsync(ct);
+
+        return bookingId is null
+            ? null
+            : await _db.Bookings.AsNoTracking().FirstOrDefaultAsync(b => b.Id == bookingId, ct);
+    }
+
+    /// <summary>
+    /// The single-booking refusal vocabulary, verbatim. A batch does not invent codes — the
+    /// console already maps these to sentences, and a second spelling of "slot taken" would be
+    /// a sentence it has never heard of.
+    /// </summary>
+    private static string RefusalCodeOf(BookingResult result)
+    {
+        // Block body rather than an expression body, for the lizard reason in
+        // memory/gotchas.md. lizard's C# parser cannot follow `=> x switch { … }`: it loses
+        // scope and emits a *global* pseudo-function spanning the whole FILE, which then trips
+        // the 200-line function gate on any file long enough to matter.
+        return result switch
+        {
+            BookingResult.NotFound => "court_not_found",
+            BookingResult.PastTime => "past_time",
+            BookingResult.TooFarAhead => "too_far_ahead",
+            BookingResult.SlotTaken => "slot_taken",
+            BookingResult.InsufficientBalance => "insufficient_balance",
+            BookingResult.PeakHoursLeagueOnly => "peak_hours_league_only",
+            BookingResult.PerDayCapExceeded => "per_day_cap_exceeded",
+            BookingResult.OutOfHours => "out_of_hours",
+            BookingResult.NoTimeAvailable => "no_time_available",
+            BookingResult.InvalidDuration => "invalid_duration",
+            BookingResult.DuplicateRequest => "duplicate_request",
+            _ => "booking_failed",
+        };
+    }
+
+    /// <summary>Every name and court title one batch's result rows need, in two reads rather than 2n.</summary>
+    private async Task<BulkContext> ContextForAsync(IReadOnlyList<Guid> bookingIds, CancellationToken ct)
+    {
+        var bookings = await _db.Bookings.AsNoTracking()
+            .Where(b => bookingIds.Contains(b.Id))
+            .Select(b => new { b.Id, b.UserId, b.CourtId })
+            .ToListAsync(ct);
+
+        var names = await PersonNames.ForAsync(_db, bookings.Select(b => b.UserId), ct);
+        var courts = await _db.Courts.AsNoTracking().ToDictionaryAsync(c => c.Id, c => c.Name, ct);
+
+        return new BulkContext(names, courts);
+    }
+
+    private sealed record BulkContext(
+        IReadOnlyDictionary<Guid, string> Names, IReadOnlyDictionary<Guid, string> Courts)
+    {
+        public BulkCancelResult Describe(Booking booking) => new(
+            BookingId: booking.Id,
+            Status: BulkCancelStatuses.Failed,
+            RefundCredits: 0m,
+            PenaltyCredits: 0m,
+            MemberName: PersonNames.Of(booking.UserId, Names),
+            CourtName: Courts.TryGetValue(booking.CourtId, out var name) ? name : null,
+            StartsAt: booking.StartsAt,
+            Error: null);
+    }
+}

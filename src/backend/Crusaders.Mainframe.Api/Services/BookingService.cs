@@ -55,7 +55,25 @@ public sealed class BookingService
     /// parameter object rather than a seventh argument because the complexity gate caps
     /// signatures at six — and because the three travel together everywhere they are read.
     /// </summary>
-    public async Task<BookingResult> CreateAsync(Guid courtId, BookingPayer payer, DateTimeOffset startsAt, int sliceCount, CancellationToken ct)
+    /// <param name="externalReference">
+    /// The booking's identity across retries, landing on the ledger row where the filtered
+    /// unique index makes a second attempt fail to post rather than debit twice.
+    ///
+    /// <para>
+    /// <b>Optional, and used only by the admin BULK route.</b> A single booking needs none —
+    /// the member is looking at the answer — but a batch of forty is retried as a unit after a
+    /// payer runs out of credit mid-way, and without a per-item reference that retry books the
+    /// items that already landed a second time. Same mechanism the walk-up already relies on
+    /// (<see cref="CreateWalkUpAsync"/>), reached from the other end.
+    /// </para>
+    ///
+    /// <para>
+    /// Trailing and defaulted so every existing caller binds exactly as it did.
+    /// </para>
+    /// </param>
+    public async Task<BookingResult> CreateAsync(
+        Guid courtId, BookingPayer payer, DateTimeOffset startsAt, int sliceCount, CancellationToken ct,
+        string? externalReference = null)
     {
         var (userId, actorId) = (payer.UserId, payer.ActorId);
         // Bounds before arithmetic, because the arithmetic is signed.
@@ -168,6 +186,7 @@ public sealed class BookingService
             TotalCost: totalCost,
             DurationLabel: $"{settings.SliceMinutes * sliceCount} min",
             IsWalkUp: false,
+            ExternalReference: externalReference,
             AllowNegativeBalance: overdraftAuthorised), ct);
     }
 
@@ -868,8 +887,23 @@ public sealed class BookingService
     /// the existing positional callers — which pass the cancellation token last — keep
     /// binding their arguments to the parameters they meant.
     /// </param>
+    /// <param name="externalReferencePrefix">
+    /// When set, the refund and the penalty are posted under
+    /// <c>{prefix}:refund</c> and <c>{prefix}:penalty</c>, so the filtered unique index on
+    /// <c>ledger_entries.ExternalReference</c> refuses a second posting of either.
+    ///
+    /// <para>
+    /// <b>This is the change that gives cancellation any ledger-level idempotency at all.</b>
+    /// Today both postings carry no reference and the whole guarantee rests on
+    /// <see cref="Booking.Version"/> — which is sufficient for one cancellation and
+    /// insufficient for a retried batch, because the two attempts are not racing the same
+    /// tracked row. Used only by the admin bulk route; every existing caller passes nothing and
+    /// behaves exactly as before.
+    /// </para>
+    /// </param>
     public async Task<CancellationResult> CancelAsync(
-        Guid bookingId, Guid actorId, bool actorIsAdmin, bool waivePenalty, CancellationToken ct, string? waiveReason = null)
+        Guid bookingId, Guid actorId, bool actorIsAdmin, bool waivePenalty, CancellationToken ct,
+        string? waiveReason = null, string? externalReferencePrefix = null)
     {
         var booking = await _db.Bookings.FirstOrDefaultAsync(b => b.Id == bookingId, ct);
         if (booking is null || booking.Status != BookingStatus.Booked) return new CancellationResult.NotFound();
@@ -998,7 +1032,8 @@ public sealed class BookingService
                 AmountCredits: refundAmount,
                 ActorUserId: actorId,
                 RelatedBookingId: booking.Id,
-                Reason: "Cancellation refund"));
+                Reason: "Cancellation refund",
+                ExternalReference: externalReferencePrefix is null ? null : $"{externalReferencePrefix}:refund"));
         }
         if (penaltyAmount > 0)
         {
@@ -1008,7 +1043,8 @@ public sealed class BookingService
                 AmountCredits: -penaltyAmount,
                 ActorUserId: actorId,
                 RelatedBookingId: booking.Id,
-                Reason: $"Late-cancellation penalty {Email.EmailTemplates.Num(settings.PenaltyPct)}%"));
+                Reason: $"Late-cancellation penalty {Email.EmailTemplates.Num(settings.PenaltyPct)}%",
+                ExternalReference: externalReferencePrefix is null ? null : $"{externalReferencePrefix}:penalty"));
         }
 
         try
@@ -1023,6 +1059,24 @@ public sealed class BookingService
             // they save through this context. NotFound is the same answer a second
             // cancellation gets when it loses cleanly, which is what this is.
             _logger.LogInformation("Cancellation of {BookingId} lost a concurrent write", booking.Id);
+            return new CancellationResult.NotFound();
+        }
+        catch (DbUpdateException ex) when (IsDuplicateReference(ex))
+        {
+            // The same cancellation twice, in flight together — a bulk batch retried before
+            // its first attempt answered. The filtered unique index refused the second refund,
+            // and the status change went down with it in the same SaveChanges because the
+            // ledger saves through this context. NotFound is the same answer a second
+            // cancellation gets when it loses cleanly, which is what this is: the batch's own
+            // per-item resolution has already seen the row as Cancelled and reports it as a
+            // success, so the admin is told the truth either way.
+            //
+            // Reachable only on the bulk path, because that is the only caller that passes a
+            // reference — but the catch is here rather than there, beside the concurrency catch
+            // it is the second half of.
+            _logger.LogInformation(
+                "Cancellation of {BookingId} was already posted under reference {Reference}",
+                booking.Id, externalReferencePrefix);
             return new CancellationResult.NotFound();
         }
 

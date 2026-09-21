@@ -32,6 +32,28 @@ public class MainframeDbContext : DbContext
     public DbSet<Booking> Bookings => Set<Booking>();
     public DbSet<LedgerEntry> LedgerEntries => Set<LedgerEntry>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+
+    /// <summary>
+    /// The club's undeletable record of what its administrators did.
+    ///
+    /// <para>
+    /// <b>There is no <c>Remove</c> anywhere in this tree for this set, and there must never
+    /// be.</b> <c>AdminChangeLogPostureTests</c> greps for one; the table's own triggers raise
+    /// <c>42501</c> on <c>DELETE</c>, <c>UPDATE</c> and <c>TRUNCATE</c>; and
+    /// <c>RetentionWorker</c> never names it. See <see cref="AdminChangeLog"/> for why it is not
+    /// <see cref="AuditLogs"/>.
+    /// </para>
+    /// </summary>
+    public DbSet<AdminChangeLog> AdminChangeLogs => Set<AdminChangeLog>();
+
+    /// <summary>Repeating court bookings — league nights, coaching blocks. GOAL item 14.</summary>
+    public DbSet<BookingSchedule> BookingSchedules => Set<BookingSchedule>();
+
+    /// <summary>Which courts each schedule occupies. A child table, not a <c>uuid[]</c>.</summary>
+    public DbSet<BookingScheduleCourt> BookingScheduleCourts => Set<BookingScheduleCourt>();
+
+    /// <summary>The single dates that do not follow a schedule's rule — skipped or re-timed.</summary>
+    public DbSet<BookingScheduleException> BookingScheduleExceptions => Set<BookingScheduleException>();
     public DbSet<WebhookEndpoint> WebhookEndpoints => Set<WebhookEndpoint>();
     public DbSet<WebhookDelivery> WebhookDeliveries => Set<WebhookDelivery>();
     public DbSet<EnrolledTemplate> EnrolledTemplates => Set<EnrolledTemplate>();
@@ -143,47 +165,11 @@ public class MainframeDbContext : DbContext
             e.HasQueryFilter(c => c.TenantId == _tenant.TenantId);
         });
 
-        modelBuilder.Entity<Booking>(e =>
-        {
-            e.ToTable("bookings");
-            e.HasKey(b => b.Id);
-            e.HasIndex(b => new { b.TenantId, b.CourtId, b.StartsAt });
-            e.HasIndex(b => new { b.TenantId, b.UserId, b.StartsAt });
-            e.Property(b => b.AmountChargedCredits).HasColumnType("numeric(10,2)");
-            e.Property(b => b.Status).HasConversion<int>();
-            e.Property(b => b.BlockLabel).HasMaxLength(128);
-            e.Property(b => b.CancellationReason).HasMaxLength(512);
-            e.Property(b => b.Version).IsConcurrencyToken();
-            e.HasQueryFilter(b => b.TenantId == _tenant.TenantId);
-        });
-
-        modelBuilder.Entity<LedgerEntry>(e =>
-        {
-            e.ToTable("ledger_entries");
-            e.HasKey(l => l.Id);
-            e.HasIndex(l => new { l.TenantId, l.UserId, l.CreatedAt });
-            e.HasIndex(l => l.ExternalReference).IsUnique().HasFilter("\"ExternalReference\" IS NOT NULL");
-            e.Property(l => l.AmountCredits).HasColumnType("numeric(10,2)");
-            e.Property(l => l.ZarPaid).HasColumnType("numeric(10,2)");
-            e.Property(l => l.ConversionRate).HasColumnType("numeric(8,4)");
-            e.Property(l => l.Type).HasConversion<int>();
-
-            // A CHECK constraint on the enum's range. The column is a plain integer, so
-            // without this a bad write — a bug, a bad migration, a hand-run UPDATE —
-            // persists a value no code can interpret, and it lands in net_credits while
-            // matching no bucket. The database is the last place that can refuse it.
-            //
-            // Widen this when the enum grows: LedgerEntryTypeCoverageTests pins the count,
-            // so the two cannot drift apart silently.
-            e.ToTable(t => t.HasCheckConstraint(
-                "ck_ledger_entries_type_range",
-                $"\"Type\" BETWEEN 0 AND {(int)Enum.GetValues<LedgerEntryType>().Max()}"));
-            e.Property(l => l.Reason).HasMaxLength(512);
-            e.Property(l => l.ExternalReference).HasMaxLength(255);
-            e.HasQueryFilter(l => l.TenantId == _tenant.TenantId);
-        });
+        ConfigureBookingsAndLedger(modelBuilder);
 
         ConfigureAuditLog(modelBuilder);
+        ConfigureAdminChangeLog(modelBuilder);
+        ConfigureBookingSchedules(modelBuilder);
 
         modelBuilder.Entity<WebhookEndpoint>(e =>
         {
@@ -402,6 +388,72 @@ public class MainframeDbContext : DbContext
     /// <c>memory/gotchas.md</c> on the complexity tooling.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// The two tables the money model hangs off, configured together.
+    ///
+    /// <para>
+    /// Extracted from <c>OnModelCreating</c> when the schedule and trace indexes pushed it
+    /// past the complexity gate's 200-line ceiling. They belong together for a reason
+    /// beyond arithmetic: a booking row and its ledger row flush in one unit of work, and
+    /// the concurrency token on one is what makes the other safe.
+    /// </para>
+    /// </summary>
+    private void ConfigureBookingsAndLedger(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Booking>(e =>
+        {
+            e.ToTable("bookings");
+            e.HasKey(b => b.Id);
+            e.HasIndex(b => new { b.TenantId, b.CourtId, b.StartsAt });
+            e.HasIndex(b => new { b.TenantId, b.UserId, b.StartsAt });
+            e.Property(b => b.AmountChargedCredits).HasColumnType("numeric(10,2)");
+            e.Property(b => b.Status).HasConversion<int>();
+            // How "edit this and future" finds an occurrence's rows, and how the grid learns
+            // which league night a block belongs to. StartsAt last so the index also serves
+            // "everything this schedule has ahead of now".
+            e.HasIndex(b => new { b.TenantId, b.ScheduleId, b.StartsAt });
+            e.Property(b => b.AdminNote).HasMaxLength(128);
+            e.Property(b => b.BlockLabel).HasMaxLength(128);
+            e.Property(b => b.CancellationReason).HasMaxLength(512);
+            e.Property(b => b.Version).IsConcurrencyToken();
+            e.HasQueryFilter(b => b.TenantId == _tenant.TenantId);
+        });
+
+        modelBuilder.Entity<LedgerEntry>(e =>
+        {
+            e.ToTable("ledger_entries");
+            e.HasKey(l => l.Id);
+            e.HasIndex(l => new { l.TenantId, l.UserId, l.CreatedAt });
+
+            // The night trace asks "what did this person do" in BOTH directions — as the
+            // subject of a movement and as the actor of one — because an admin adjusting
+            // somebody's credits belongs on that member's night AND on the admin's own. The
+            // subject half is served by the index above; without this one the actor half is a
+            // sequential scan of the club's entire ledger.
+            e.HasIndex(l => new { l.TenantId, l.ActorUserId, l.CreatedAt });
+
+            e.HasIndex(l => l.ExternalReference).IsUnique().HasFilter("\"ExternalReference\" IS NOT NULL");
+            e.Property(l => l.AmountCredits).HasColumnType("numeric(10,2)");
+            e.Property(l => l.ZarPaid).HasColumnType("numeric(10,2)");
+            e.Property(l => l.ConversionRate).HasColumnType("numeric(8,4)");
+            e.Property(l => l.Type).HasConversion<int>();
+
+            // A CHECK constraint on the enum's range. The column is a plain integer, so
+            // without this a bad write — a bug, a bad migration, a hand-run UPDATE —
+            // persists a value no code can interpret, and it lands in net_credits while
+            // matching no bucket. The database is the last place that can refuse it.
+            //
+            // Widen this when the enum grows: LedgerEntryTypeCoverageTests pins the count,
+            // so the two cannot drift apart silently.
+            e.ToTable(t => t.HasCheckConstraint(
+                "ck_ledger_entries_type_range",
+                $"\"Type\" BETWEEN 0 AND {(int)Enum.GetValues<LedgerEntryType>().Max()}"));
+            e.Property(l => l.Reason).HasMaxLength(512);
+            e.Property(l => l.ExternalReference).HasMaxLength(255);
+            e.HasQueryFilter(l => l.TenantId == _tenant.TenantId);
+        });
+    }
+
     private void ConfigureAuditLog(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<AuditLog>(e =>
@@ -410,9 +462,119 @@ public class MainframeDbContext : DbContext
             e.HasKey(a => a.Id);
             e.HasIndex(a => new { a.TenantId, a.CreatedAt });
             e.HasIndex(a => new { a.TenantId, a.ScanAt });
+
+            // The night trace's two halves, and the change view's actor filter.
+            //
+            // audit_log had exactly one index — (TenantId, CreatedAt) — and grows for ever for
+            // every non-door action, because retention_years only NULLS the subject rather than
+            // deleting the row. Asking it "everything about this person on this night" without
+            // these is a full scan of the club's whole history, twice, per request.
+            e.HasIndex(a => new { a.TenantId, a.SubjectUserId, a.CreatedAt });
+            e.HasIndex(a => new { a.TenantId, a.ActorUserId, a.CreatedAt });
+
             e.Property(a => a.Action).HasMaxLength(128).IsRequired();
             e.Property(a => a.DetailsJson).HasColumnType("jsonb");
             e.HasQueryFilter(a => a.TenantId == _tenant.TenantId);
+        });
+    }
+
+    /// <summary>
+    /// The undeletable admin change record.
+    ///
+    /// <para>
+    /// <b>Four indexes, because this table is read four ways and never scanned.</b> The change
+    /// view pages by time; the area filter is the console's default narrowing; "what did this
+    /// admin do" is how a club monitors itself, which is the sentence GOAL item 14 asks for;
+    /// and "what happened to this schedule" is the per-schedule view. Without the last two a
+    /// club's own record becomes a sequential scan of a table that, by design, is never pruned.
+    /// </para>
+    ///
+    /// <para>
+    /// The immutability triggers are NOT here — they are raw SQL in
+    /// <c>ProtectAdminChangeLog</c>, because EF has no model concept for one. This method
+    /// configures the shape; that migration configures the promise.
+    /// </para>
+    /// </summary>
+    private void ConfigureAdminChangeLog(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AdminChangeLog>(e =>
+        {
+            e.ToTable("admin_change_log");
+            e.HasKey(a => a.Id);
+            e.HasIndex(a => new { a.TenantId, a.OccurredAt });
+            e.HasIndex(a => new { a.TenantId, a.Area, a.OccurredAt });
+            e.HasIndex(a => new { a.TenantId, a.ActorUserId, a.OccurredAt });
+            e.HasIndex(a => new { a.TenantId, a.SubjectKind, a.SubjectId, a.OccurredAt });
+            e.Property(a => a.ActorName).HasMaxLength(255).IsRequired();
+            e.Property(a => a.ActorEmail).HasMaxLength(320);
+            e.Property(a => a.Area).HasMaxLength(32).IsRequired();
+            e.Property(a => a.Action).HasMaxLength(64).IsRequired();
+            e.Property(a => a.SubjectKind).HasMaxLength(32);
+            e.Property(a => a.SubjectLabel).HasMaxLength(255);
+            e.Property(a => a.Reason).HasMaxLength(512);
+            e.Property(a => a.BeforeJson).HasColumnType("jsonb");
+            e.Property(a => a.AfterJson).HasColumnType("jsonb");
+            e.Property(a => a.RequestId).HasMaxLength(64);
+            e.Property(a => a.IpAddress).HasMaxLength(64);
+            e.HasQueryFilter(a => a.TenantId == _tenant.TenantId);
+        });
+    }
+
+    /// <summary>
+    /// Repeating bookings — the rule, the courts it occupies, and the dates that break it.
+    ///
+    /// <para>
+    /// <b>The CHECK constraints are on the database and not only in the validator.</b> An
+    /// occurrence expander reading <c>EndMinute &lt;= StartMinute</c> produces a negative-length
+    /// block, and a <c>DaysOfWeek</c> of zero produces a schedule that materialises nothing and
+    /// reports success — both of which are the shape of <c>peak_hours</c>' "validated one way and
+    /// read another" defect, which left peak protection silently off for every Regular member
+    /// with no error anywhere. The PUT is not the only way a value reaches a column.
+    /// </para>
+    /// </summary>
+    private void ConfigureBookingSchedules(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<BookingSchedule>(e =>
+        {
+            e.ToTable("booking_schedules", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_booking_schedules_time_range",
+                    $"\"EndMinute\" > \"StartMinute\" AND \"EndMinute\" <= {BookingSchedule.MinutesPerDay} AND \"StartMinute\" >= 0");
+                t.HasCheckConstraint(
+                    "ck_booking_schedules_days",
+                    $"\"DaysOfWeek\" BETWEEN {BookingSchedule.SundayBit} AND {BookingSchedule.AllDays}");
+                t.HasCheckConstraint(
+                    "ck_booking_schedules_interval",
+                    $"\"IntervalWeeks\" BETWEEN 1 AND {BookingSchedule.MaxIntervalWeeks}");
+            });
+            e.HasKey(s => s.Id);
+            e.HasIndex(s => new { s.TenantId, s.Status });
+            e.Property(s => s.Name).HasMaxLength(128).IsRequired();
+            e.Property(s => s.Label).HasMaxLength(128).IsRequired();
+            e.Property(s => s.Status).HasConversion<int>();
+            e.HasQueryFilter(s => s.TenantId == _tenant.TenantId);
+        });
+
+        modelBuilder.Entity<BookingScheduleCourt>(e =>
+        {
+            e.ToTable("booking_schedule_courts");
+            e.HasKey(c => c.Id);
+            e.HasIndex(c => new { c.TenantId, c.ScheduleId, c.CourtId }).IsUnique();
+            e.HasQueryFilter(c => c.TenantId == _tenant.TenantId);
+        });
+
+        modelBuilder.Entity<BookingScheduleException>(e =>
+        {
+            e.ToTable("booking_schedule_exceptions");
+            e.HasKey(x => x.Id);
+            // One exception per date: a date that is both skipped and re-timed is two
+            // contradictory instructions, and the database is the only place that can refuse the
+            // second one when two admins send them at once.
+            e.HasIndex(x => new { x.TenantId, x.ScheduleId, x.OccurrenceDate }).IsUnique();
+            e.Property(x => x.Kind).HasConversion<int>();
+            e.Property(x => x.Reason).HasMaxLength(512);
+            e.HasQueryFilter(x => x.TenantId == _tenant.TenantId);
         });
     }
 

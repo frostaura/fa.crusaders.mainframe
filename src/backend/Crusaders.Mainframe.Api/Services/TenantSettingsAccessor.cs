@@ -136,6 +136,31 @@ public sealed class TenantSettingsAccessor
             RealtimeFallbackWindowSeconds = TryInt(root, "realtime_fallback_window_seconds", RealtimeSettings.DefaultFallbackWindowSeconds),
             RealtimePollSecondsWallet = TryInt(root, "realtime_poll_seconds_wallet", RealtimeSettings.DefaultPollSecondsWallet),
             RealtimePollSecondsControlBoard = TryInt(root, "realtime_poll_seconds_control_board", RealtimeSettings.DefaultPollSecondsControlBoard),
+
+            // Bounded at BulkSettings, for the same reason the five above are bounded at
+            // DoorSettings: this method's contract is "what the column says", and "what an
+            // admin bulk action may act on" is a different question with a different answer
+            // for a hand-edited document.
+            AdminBulkMaxItems = TryInt(root, "admin_bulk_max_items", BulkSettings.DefaultMaxItems),
+
+            // The two night-trace numbers. Raw here and bounded by TraceSettings at the one
+            // reader, exactly like the five door settings above — and for a sharper reason: the
+            // first of them is the kill switch on the most surveillance-capable surface in the
+            // product, so "what the column says" and "what the endpoint may act on" must be two
+            // separate questions with one answer each. See TraceSettings.
+            MemberTraceEnabled = TryBool(root, "member_trace_enabled", TraceSettings.DefaultEnabled),
+            MemberTraceMaxEvents = TryInt(root, "member_trace_max_events", TraceSettings.DefaultMaxEvents),
+
+            // The three schedule numbers. Raw here, bounded at ScheduleSettings — and the
+            // horizon is the sharpest case of that rule in this lane, because a horizon
+            // shorter than advance_booking_days lets a member book into a league night that
+            // has not been written yet, weeks before anyone finds out.
+            ScheduleMaterialisationDays = TryInt(
+                root, "schedule_materialisation_days", ScheduleSettings.DefaultMaterialisationDays),
+            ScheduleMaxRowsPerChange = TryInt(
+                root, "schedule_max_rows_per_change", ScheduleSettings.DefaultMaxRowsPerChange),
+            ScheduleWorkerIntervalSeconds = TryInt(
+                root, "schedule_worker_interval_seconds", ScheduleSettings.DefaultWorkerIntervalSeconds),
         };
     }
 
@@ -355,6 +380,47 @@ public sealed record TenantSettingsView(
 
     /// <summary>The window those refusals are counted in, minutes. Read via <see cref="DoorSettings.RefusalSpikeMinutes"/>.</summary>
     public int DoorRefusalSpikeMinutes { get; init; } = DoorSettings.DefaultRefusalSpikeMinutes;
+
+    /// <summary>
+    /// Most items one admin bulk action may carry. Read via <see cref="BulkSettings.MaxItems"/>.
+    ///
+    /// <para>
+    /// Raw as stored, like everything else on this record, and bounded at the reader — a
+    /// hand-edited document is not a PUT, and this number decides how many payer locks and
+    /// GiST index writes one request may take.
+    /// </para>
+    /// </summary>
+    public int AdminBulkMaxItems { get; init; } = BulkSettings.DefaultMaxItems;
+
+    // ---- The two night-trace settings ----
+    //
+    // Raw as stored, like everything else on this record, and read through TraceSettings, which
+    // is where the bounds and the kill switch's meaning live. The defaults are TraceSettings'
+    // own constants rather than literals here, so the accessor's fallback and this initialiser
+    // cannot drift.
+
+    /// <summary>
+    /// Whether this club's admins may read one member's night. Read via
+    /// <see cref="TraceSettings.Enabled"/>; false makes the route answer <c>404</c>.
+    /// </summary>
+    public bool MemberTraceEnabled { get; init; } = TraceSettings.DefaultEnabled;
+
+    /// <summary>Most events one trace returns. Read via <see cref="TraceSettings.MaxEvents"/>.</summary>
+    public int MemberTraceMaxEvents { get; init; } = TraceSettings.DefaultMaxEvents;
+
+    // ---- The three schedule settings ----
+    //
+    // Raw as stored and read through ScheduleSettings, where the bounds live along with the
+    // cross-field rule that the horizon must reach at least as far as advance_booking_days.
+
+    /// <summary>How far ahead occurrences are written, days. Read via <see cref="ScheduleSettings.MaterialisationDays"/>.</summary>
+    public int ScheduleMaterialisationDays { get; init; } = ScheduleSettings.DefaultMaterialisationDays;
+
+    /// <summary>Most rows one schedule change may touch. Read via <see cref="ScheduleSettings.MaxRowsPerChange"/>.</summary>
+    public int ScheduleMaxRowsPerChange { get; init; } = ScheduleSettings.DefaultMaxRowsPerChange;
+
+    /// <summary>The materialisation worker's tick, seconds. Read via <see cref="ScheduleSettings.WorkerInterval"/>.</summary>
+    public int ScheduleWorkerIntervalSeconds { get; init; } = ScheduleSettings.DefaultWorkerIntervalSeconds;
 
     /// <summary>
     /// The number a member refused at a door should ring. Empty by default — a club that has

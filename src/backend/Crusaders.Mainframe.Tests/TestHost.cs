@@ -118,6 +118,14 @@ public sealed class TestHost : IAsyncDisposable
         services.AddScoped<BiometricService>();
         services.AddScoped<AuthService>();
         services.AddScoped<MemberApprovalService>();
+        services.AddScoped<AdminBlockService>();
+        // Mirrors Program.cs: the recorder reads the request's trace id and remote address off
+        // the accessor, and a host that lacked one would make every admin change row in the
+        // suite carry nulls the application never writes.
+        services.AddHttpContextAccessor();
+        services.AddScoped<AdminChangeRecorder>();
+        services.AddScoped<AdminBulkBookingService>();
+        services.AddScoped<BookingScheduleService>();
 
         var sp = services.BuildServiceProvider();
 

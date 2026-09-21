@@ -82,7 +82,22 @@ public static class ReportingEndpoints
         admin.MapGet("/utilisation", async (DateTimeOffset? from, DateTimeOffset? to, MainframeDbContext db, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
         {
             var (_, _, f, t) = ResolveWindow(from, to, await ClubZoneAsync(settingsAccessor, ct));
-            var bookings = await db.Bookings.Where(b => b.StartsAt >= f && b.StartsAt < t && b.Status != BookingStatus.Cancelled).ToListAsync(ct);
+            // D2-B35 — a block is not a booking, and with item 14's schedules that stopped
+            // being a nuisance and became a permanently wrong figure.
+            //
+            // All three club reports counted `Status != Cancelled`, which includes AdminBlock:
+            // a row with UserId null, costing 0, with no ledger entry behind it. Blocking four
+            // courts for four hours reported 960 minutes of "use" nobody bought. A league
+            // season adds hundreds of those rows every term.
+            //
+            // Held time is still something a club wants to see — a court held for league IS
+            // unavailable — so it becomes its OWN number rather than being folded into paid
+            // use or dropped.
+            var all = await db.Bookings.Where(b => b.StartsAt >= f && b.StartsAt < t && b.Status != BookingStatus.Cancelled).ToListAsync(ct);
+            var bookings = all.Where(b => b.Status != BookingStatus.AdminBlock).ToList();
+            var blockedByCourt = all.Where(b => b.Status == BookingStatus.AdminBlock)
+                .GroupBy(b => b.CourtId)
+                .ToDictionary(g => g.Key, g => g.Sum(b => b.SliceMinutes * b.SliceCount));
             var courts = await db.Courts.IgnoreQueryFilters().AsNoTracking()
                 .ToDictionaryAsync(c => c.Id, c => new { c.CourtNumber, c.Name }, ct);
 
@@ -117,6 +132,7 @@ public static class ReportingEndpoints
                         bookings = g.Count(),
                         revenue_credits = g.Sum(b => -settled.GetValueOrDefault(b.Id, 0m)),
                         quoted_credits = g.Sum(b => b.AmountChargedCredits),
+                        blocked_minutes = blockedByCourt.GetValueOrDefault(g.Key, 0),
                     };
                 })
                 .OrderBy(r => r.court_number)
@@ -137,6 +153,10 @@ public static class ReportingEndpoints
             var bookings = await db.Bookings
                 .Where(b => b.StartsAt >= f && b.StartsAt < t
                          && b.Status != BookingStatus.Cancelled
+                         // D2-B35 — an admin block cannot be a no-show, so counting it in the
+                         // denominator dilutes the percentage. With league nights in the
+                         // denominator the figure halves, permanently.
+                         && b.Status != BookingStatus.AdminBlock
                          && b.StartsAt <= now)
                 .ToListAsync(ct);
             var total = bookings.Count;
@@ -238,7 +258,10 @@ public static class ReportingEndpoints
                     // its own total. `LedgerEntryTypeCoverageTests` asserts the bucket TABLE
                     // is total; it cannot see whether an endpoint uses all of it.
                     net_movement_credits = le.Sum(x => x.AmountCredits),
-                    bookings = bk.Count(b => b.Status != BookingStatus.Cancelled),
+                    // D2-B35. The member-facing /reports/me/daily further down is NOT
+                    // changed by this: it is pre-filtered by UserId, and a block has none.
+                    bookings = bk.Count(b => b.Status is not BookingStatus.Cancelled and not BookingStatus.AdminBlock),
+                    blocked = bk.Count(b => b.Status == BookingStatus.AdminBlock),
                     no_shows = bk.Count(b => b.Status == BookingStatus.NoShow),
                 };
             }).ToList();
