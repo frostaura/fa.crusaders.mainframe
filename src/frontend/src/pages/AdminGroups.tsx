@@ -17,7 +17,7 @@ import {
 } from "../lib/adminApi";
 import {
   GROUPS_EMPTY_TITLE, GROUPS_READ_FAILED, MOST_RESTRICTIVE_STANDING, deleteRefusalSentence,
-  explainGroupRefusal,
+  explainGroupRefusal, groupChangeConsequence,
 } from "../lib/groupsCopy";
 import type { PaintedWeek } from "../lib/groupsCopy";
 
@@ -336,6 +336,7 @@ export function AdminGroupsPage() {
       {panel?.kind === "member-preview" && (
         <MemberPreviewPanel
           clubMembers={clubMembers ?? []}
+          groups={groups ?? []}
           sliceMinutes={sliceMinutes}
           onClose={() => setPanel(null)}
         />
@@ -431,8 +432,9 @@ function GroupMembersPanel({ group, clubMembers, timezone, onClose, onChanged }:
 }
 
 /** The named-member preview: pick somebody, ask the club what they may actually book. */
-function MemberPreviewPanel({ clubMembers, sliceMinutes, onClose }: {
+function MemberPreviewPanel({ clubMembers, groups, sliceMinutes, onClose }: {
   clubMembers: ClubMember[];
+  groups: MemberGroup[];
   sliceMinutes: number;
   onClose: () => void;
 }) {
@@ -440,6 +442,8 @@ function MemberPreviewPanel({ clubMembers, sliceMinutes, onClose }: {
   const [rules, setRules] = useState<MemberBookingRules | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [proposed, setProposed] = useState<string[] | null>(null);
+  const [proposedRules, setProposedRules] = useState<MemberBookingRules | null>(null);
 
   const ask = useCallback(async (userId: string) => {
     setLoading(true);
@@ -453,6 +457,18 @@ function MemberPreviewPanel({ clubMembers, sliceMinutes, onClose }: {
     }
   }, []);
 
+  /** What WOULD apply. Nothing is written, and the fieldset says so. */
+  const propose = async (userId: string, groupIds: string[]) => {
+    setProposed(groupIds);
+    try {
+      setProposedRules(await adminEndpoints.memberGroupPreview({ userId, proposedGroupIds: groupIds }));
+    } catch {
+      // A preview that could not be taken says nothing rather than showing the current rules
+      // under a heading that claims they are the proposed ones.
+      setProposedRules(null);
+    }
+  };
+
   const day = todayInClub();
 
   return (
@@ -465,6 +481,17 @@ function MemberPreviewPanel({ clubMembers, sliceMinutes, onClose }: {
         error={error}
         sliceMinutes={sliceMinutes}
         onRetry={() => { if (member) void ask(member.user_id); }}
+        groups={groups}
+        proposed={proposed}
+        proposedRules={proposedRules}
+        onPropose={(ids) => { if (member) void propose(member.user_id, ids); }}
+        consequence={member && proposedRules
+          ? groupChangeConsequence({
+            name: member.full_name,
+            sliceBefore: rules?.slice_price_credits,
+            sliceAfter: proposedRules.slice_price_credits,
+          })
+          : []}
       >
         <MemberPicker
           members={clubMembers.map((m) => ({
@@ -474,6 +501,8 @@ function MemberPreviewPanel({ clubMembers, sliceMinutes, onClose }: {
           onChange={(next) => {
             setMember(next);
             setRules(null);
+            setProposed(null);
+            setProposedRules(null);
             if (next) void ask(next.user_id);
           }}
           label="Which member?"

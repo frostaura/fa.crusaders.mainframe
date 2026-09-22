@@ -335,6 +335,46 @@ describe("the previews, which are the answer to “most restrictive” being an 
   });
 
   /**
+   * <b>The second wire call, and the reason it exists.</b> `POST /member-groups/preview` asks
+   * what WOULD apply without saving anything, so a membership change states its consequence
+   * before it is made rather than after. The saving half lives on the member row, which is
+   * another lane's file — this is the same question asked from the group side.
+   */
+  it("asks what WOULD apply before anything is saved, and says what it costs the member", async () => {
+    const stub = open([OFF_PEAK, groupFixture({ id: "g-regular", name: "Regular" })], [
+      {
+        path: "/api/v1/admin/members/44444444-4444-4444-4444-444444444444/booking-rules",
+        body: bookingRulesFixture({ slice_price_credits: 8 }),
+      },
+      {
+        method: "POST",
+        path: "/api/v1/admin/member-groups/preview",
+        body: bookingRulesFixture({
+          groups: [{ id: "g-regular", name: "Regular" }, { id: "g-offpeak", name: "Off-peak" }],
+          slice_price_credits: 12,
+        }),
+      },
+    ]);
+    fireEvent.click(await screen.findByRole("button", { name: /Preview for one member/ }));
+    fireEvent.change(await screen.findByRole("combobox"), { target: { value: "Ada" } });
+    fireEvent.mouseDown(await screen.findByRole("button", { name: /Ada Lovelace/ }));
+    await screen.findByText(/Ada Lovelace is in Regular\./);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Off-peak/ }));
+    const sent = await waitFor(() => {
+      const call = stub.calls.find((c) => c.method === "POST" && c.path.endsWith("/preview"));
+      expect(call).toBeTruthy();
+      return call!.body as Record<string, unknown>;
+    });
+    expect(sent.proposedGroupIds).toEqual(["g-regular", "g-offpeak"]);
+    expect(await screen.findByText(/A slot will cost Ada Lovelace 12 credits instead of 8\./))
+      .toBeInTheDocument();
+    // Nothing has been written, and the screen has to say so or an admin walks away believing
+    // they have made the change.
+    expect(screen.getByText(/Nothing here is saved/)).toBeInTheDocument();
+  });
+
+  /**
    * <b>The reachable state D2 §4.3 names.</b> Two groups whose windows do not overlap leave the
    * member nothing, and an empty grid would read as "the club is shut".
    */

@@ -151,6 +151,7 @@ function wireWindows(windows: Array<{ start: string; end: string }> | undefined)
  */
 export function MemberPreview({
   rules, memberName, day, loading, error, sliceMinutes, onRetry, children,
+  groups = [], proposed = null, onPropose, proposedRules = null, consequence = [],
 }: {
   rules: MemberBookingRules | null;
   memberName: string | null;
@@ -161,6 +162,14 @@ export function MemberPreview({
   onRetry: () => void;
   /** The picker, rendered by the page — this component knows nothing about members. */
   children: React.ReactNode;
+  /** Every group the club has, for asking "what if they were in these instead?". */
+  groups?: MemberGroup[];
+  /** Which groups the question is currently about, or null while nobody has asked one. */
+  proposed?: string[] | null;
+  onPropose?: (groupIds: string[]) => void;
+  proposedRules?: MemberBookingRules | null;
+  /** What the change would do to this member's money, in words. */
+  consequence?: string[];
 }) {
   const empty = rules?.empty_window_reason;
   const allowed = wireWindows(rules?.allowed_windows);
@@ -214,6 +223,59 @@ export function MemberPreview({
           )}
         </StateBlock>
       )}
+
+      {memberName && rules && onPropose && (
+        /*
+         * The second wire call — `POST /member-groups/preview` — which answers what WOULD
+         * apply without writing anything. It exists so a membership change can state its
+         * consequence BEFORE it is made; the saving half of that lives on the member row,
+         * which is another surface. Asking here is the same question from the group's side.
+         */
+        <fieldset className="space-y-2 border-t border-border pt-3">
+          <legend className="text-sm font-medium text-text-primary">
+            {`What if ${memberName} were in different groups?`}
+          </legend>
+          <p className="text-sm text-text-muted">
+            Nothing here is saved. It asks the club what the rules would come out as, so a change
+            can be decided on before it is made.
+          </p>
+          <ul className="space-y-1">
+            {groups.map((group) => {
+              const on = (proposed ?? (rules.groups ?? []).map((g) => g.id)).includes(group.id);
+              return (
+                <li key={group.id}>
+                  <label className="flex min-h-11 items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="h-5 w-5"
+                      checked={on}
+                      onChange={() => {
+                        const now = proposed ?? (rules.groups ?? []).map((g) => g.id);
+                        onPropose(on ? now.filter((id) => id !== group.id) : [...now, group.id]);
+                      }}
+                    />
+                    <span>{group.name}</span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+          {consequence.map((line) => (
+            <p key={line} className="text-sm font-medium text-text-primary">{line}</p>
+          ))}
+          {proposedRules?.empty_window_reason && (
+            <Alert tone="warning">
+              {emptyIntersectionSentence(
+                proposedRules.empty_window_reason.groups
+                  ?? (proposedRules.groups ?? []).map((g) => g.name),
+                (proposedRules.empty_window_reason.day as Weekday) ?? day,
+                memberName,
+              )}
+            </Alert>
+          )}
+        </fieldset>
+      )}
+
       <Legend />
     </Card>
   );
