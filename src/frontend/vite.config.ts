@@ -1,6 +1,7 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
+import fs from "node:fs";
 
 export default defineConfig({
   plugins: [react()],
@@ -9,6 +10,23 @@ export default defineConfig({
   },
   server: {
     port: Number(process.env.VITE_DEV_PORT ?? 4173),
+    // THE DEV SERVER MUST BE ABLE TO REACH A SYMLINKED node_modules, OR IT SERVES NO FONTS.
+    //
+    // This product self-hosts Figtree rather than pulling it from a CDN, so the faces come out
+    // of node_modules. A git worktree of this repo symlinks node_modules to the primary
+    // checkout — which is OUTSIDE the worktree root — and Vite's filesystem allow-list refuses
+    // anything outside that root, so every .woff2 is answered 403 with a line in the log that
+    // reads like noise: "is outside of Vite serving allow list".
+    //
+    // Nothing looks broken. The page renders in the fallback face and carries on, and that is
+    // the whole problem: a fallback has different metrics from Figtree, so every layout test
+    // measuring whether text fits its box is measuring the wrong typeface. A narrow-screen
+    // overflow test therefore passed locally and failed on CI, where npm ci puts a real
+    // node_modules in place and the real font loads. A test that cannot see the defect is
+    // worse than no test, because it is trusted.
+    //
+    // `realpath` because the allow-list is compared after symlink resolution.
+    fs: { allow: [path.resolve(__dirname), fs.realpathSync(path.resolve(__dirname, "node_modules"))] },
     proxy: {
       "/api": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
       "/healthz": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },

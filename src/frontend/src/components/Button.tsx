@@ -313,5 +313,19 @@ export function Badge({ tone = "muted", children }: { tone?: "muted" | "success"
   // whatever copy a call site gives it, and "New — check court numbers" wants 134 px inside
   // the 124 px a 32 px root font leaves on this estate's narrowest screen. A badge that
   // cannot shrink below its longest word takes the row it sits in with it.
-  return <span className={cn("inline-flex items-center min-w-0 max-w-full break-words px-2.5 py-0.5 rounded-full text-xs font-medium", tones[tone])}>{children}</span>;
+  //
+  // THE INNER SPAN IS LOAD-BEARING, and it is why the classes above were not enough on their
+  // own. Text placed directly inside a flex container becomes an ANONYMOUS flex item, and an
+  // anonymous item cannot be given `min-width: 0` by any selector — there is no element to
+  // target. Its `min-width: auto` floors it at min-content, which for a single unbroken word
+  // is the whole word, so `break-words` on the pill never gets the chance to break anything
+  // and a one-word badge overflows by however much the word exceeds the space.
+  //
+  // "Reporting" did exactly that, by two pixels, at 320 px with a 32 px root font. Wrapping
+  // the children in a real element gives the flex item an identity that `min-w-0` can reach.
+  return (
+    <span className={cn("inline-flex items-center min-w-0 max-w-full px-2.5 py-0.5 rounded-full text-xs font-medium", tones[tone])}>
+      <span className="min-w-0 break-words">{children}</span>
+    </span>
+  );
 }
