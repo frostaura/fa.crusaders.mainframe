@@ -176,6 +176,45 @@ public sealed class DoorEventChangeHttpTests
 
         Assert.Equal(stamped, again.GetProperty("out_of_service_since").GetDateTimeOffset());
         Assert.Equal("Door Admin", again.GetProperty("shut_by_name").GetString());
+
+        // AND THE INSTANT WE HANDED BACK IS ONE THE DATABASE CAN KEEP.
+        //
+        // The two assertions above compare a response against a later response, so they only
+        // catch a stamp that moves if BOTH sides have already been through the column. The first
+        // shut answers from the entity in memory, and `DateTimeOffset.UtcNow` counts ten ticks
+        // to every microsecond `timestamptz` can store — so a raw stamp is a number this system
+        // reports and then cannot hold, and the move happens between the answer and the first
+        // read rather than between two reads.
+        //
+        // This is what actually failed on CI while passing here: the tick granularity of the
+        // clock differs per platform, so on this machine the value usually survives by luck.
+        // Asserting the alignment makes the rule platform-independent.
+        Assert.Equal(0, stamped.UtcTicks % 10);
+    }
+
+    /// <summary>
+    /// The truncation itself, stated where no clock can hide it.
+    /// </summary>
+    /// <remarks>
+    /// The round-trip assertion above can only fail when the clock happens to produce a
+    /// sub-microsecond tick, which is a property of the host rather than of this code — it is
+    /// why the defect reached CI at all. This one feeds in a value that is guaranteed to have
+    /// one, so the rule is enforced identically on every machine, and it pins the direction:
+    /// DOWN, never nearest, because a door must never be recorded as shut in the future.
+    /// </remarks>
+    [Fact]
+    public void A_stamp_is_cut_to_a_precision_the_column_can_keep()
+    {
+        var awkward = new DateTimeOffset(2026, 9, 23, 10, 30, 0, TimeSpan.Zero).AddTicks(1_234_567);
+        Assert.NotEqual(0, awkward.UtcTicks % 10);   // the premise: this value cannot round-trip
+
+        var stored = awkward.Storable();
+
+        Assert.Equal(0, stored.UtcTicks % 10);
+        Assert.True(stored <= awkward, "a stamp must never be moved forward in time");
+        Assert.Equal(7, awkward.UtcTicks - stored.UtcTicks);
+        // Already-aligned values are left exactly alone.
+        Assert.Equal(stored, stored.Storable());
     }
 
     /// <summary>

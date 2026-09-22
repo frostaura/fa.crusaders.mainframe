@@ -224,7 +224,27 @@ public sealed class DeviceRegistryService
     /// </summary>
     private async Task SwitchAsync(Device device, bool enabled, Guid actorUserId, CancellationToken ct)
     {
-        var switchedAt = DateTimeOffset.UtcNow;
+        // STAMPED AT THE PRECISION THE COLUMN CAN HOLD, NOT THE PRECISION THE CLOCK OFFERS.
+        //
+        // `DateTimeOffset.UtcNow` counts in 100-nanosecond ticks. Postgres `timestamptz` stores
+        // microseconds. So a raw `UtcNow` whose tick count is not a multiple of ten is a value
+        // this system CANNOT store: the response to the shut carries it, the database quietly
+        // drops the last digit, and every read afterwards returns something else.
+        //
+        // That is the exact failure `A_repeated_shut_does_not_move_the_instant_or_the_name`
+        // exists to prevent, arriving by a route that test could not see. The console would show
+        // a "shut at" that moves the first time the page is refreshed — a door reporting that it
+        // was shut at an instant it was not — which is the whole reason the instant is pinned.
+        //
+        // It hid because the two clocks disagree per platform: this machine's `UtcNow` lands on
+        // microsecond boundaries often enough that the value survives the round trip, so the
+        // suite is green here and the Linux CI runner, whose clock is finer, fails on it. A test
+        // that passes on the developer's machine and fails on the runner is the worst kind, and
+        // the cause was never in the test.
+        //
+        // Truncating rather than rounding, because a shut must never be recorded as having
+        // happened in the future, however slightly.
+        var switchedAt = StorableTime.UtcNow;
         device.OutOfServiceSince = enabled ? null : switchedAt;
 
         // Who did it, beside when. See Device.ShutByUserId: the console said "You shut this
@@ -791,6 +811,7 @@ public sealed class DeviceRegistryService
             DetailsJson = JsonSerializer.Serialize(details),
         });
     }
+
 }
 
 /// <summary>

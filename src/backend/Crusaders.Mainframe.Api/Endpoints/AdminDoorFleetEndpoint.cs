@@ -84,7 +84,10 @@ public static class AdminDoorFleetEndpoint
         HttpContext ctx, bool shut, CancellationToken ct)
     {
         var settings = await settingsAccessor.GetAsync(ct);
-        var now = DateTimeOffset.UtcNow;
+        // Storable, not raw: these instants are written to timestamptz AND answered to the
+        // caller in the same request, so a sub-microsecond reading would report a time the
+        // column cannot keep. See StorableTime.
+        var now = StorableTime.UtcNow;
 
         var doors = await db.Devices
             .Where(d => d.Kind == DeviceKind.Gate)
