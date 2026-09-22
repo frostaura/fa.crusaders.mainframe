@@ -1,7 +1,8 @@
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import TopUpPage from "./TopUp";
 import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
+import { resetClubCurrencySymbol, setClubCurrencySymbol } from "../lib/currency";
 
 /**
  * The checkout, which no member could complete.
@@ -81,7 +82,7 @@ describe("Top-up — what the checkout actually sends", () => {
     const stub = stubFetch(routes());
     renderPage(<TopUpPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "R200" }));
+    fireEvent.click(await screen.findByRole("button", { name: "R200.00" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
     await vi.waitFor(() => expect(stub.calls.some((c) => c.method === "POST")).toBe(true));
@@ -99,7 +100,7 @@ describe("Top-up — what the checkout actually sends", () => {
     stubFetch(routes());
     renderPage(<TopUpPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "R200" }));
+    fireEvent.click(await screen.findByRole("button", { name: "R200.00" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
     await vi.waitFor(() => expect(submitted.length).toBe(1));
@@ -139,16 +140,18 @@ describe("Top-up — what the checkout actually sends", () => {
     renderPage(<TopUpPage />);
 
     expect(await screen.findByText(/Min R50\.00 · Max R5000\.00 · Multiples of R50\.00 only/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "R2500" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "R2500.00" })).toBeInTheDocument();
     expect(screen.queryByText(/R1000\.00 only/)).not.toBeInTheDocument();
 
     // The rate the member is quoted is the club's, and the preview is that rate applied.
-    expect(screen.getByText(/At 2.4 credits \/ R1 \(league \/ senior rate\)/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "R500" }));
-    expect(screen.getByText("1200.00 credits")).toBeInTheDocument();
+    // Both legs in words, because they are now written in the same symbol: "1200.00 credits"
+    // said which quantity it was by carrying a different unit, and "R1200.00" cannot.
+    expect(screen.getByText(/Every R1\.00 you pay adds R2\.40 to your wallet \(league \/ senior rate\)/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "R500.00" }));
+    expect(screen.getByText("R1200.00")).toBeInTheDocument();
 
     // R2,500 is fine here and would have been refused by the old hardcoded R1,000 cap.
-    fireEvent.click(screen.getByRole("button", { name: "R2500" }));
+    fireEvent.click(screen.getByRole("button", { name: "R2500.00" }));
     expect(screen.getByRole("button", { name: "Continue to PayFast" })).not.toBeDisabled();
   });
 
@@ -192,8 +195,43 @@ describe("Top-up — what the checkout actually sends", () => {
     // `parseFloat` took "200abc" as 200 and "1e3" as 1000 and enabled the button on both,
     // so the member submitted an amount that is not the one they typed.
     fireEvent.change(input, { target: { value: "200abc" } });
-    expect(screen.getByText("That isn't a number — enter an amount in rand.")).toBeInTheDocument();
+    expect(screen.getByText("That isn't a number — enter digits only, like 200.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Continue to PayFast" })).toBeDisabled();
+  });
+
+  /**
+   * The currency NAME is gone from this screen, and that is a decision rather than an
+   * oversight.
+   *
+   * <p>
+   * "Enter an amount in rand" was true for one club. The symbol is `tenant_settings`, a club
+   * on CHF gets `CHF100.00` in the same field, and there is no way to derive "Swiss francs"
+   * from a sentence that hardcodes "rand" — so the sentence says what is wrong with what was
+   * typed and lets the symbol beside the field name the money. `spokenCurrencyName` is where
+   * a noun is still produced, for the things a screen reader SAYS.
+   * </p>
+   */
+  it("does not name one country's currency in a field every club shares", async () => {
+    stubFetch(routes());
+    renderPage(<TopUpPage />);
+
+    const input = await screen.findByPlaceholderText(/Custom amount/);
+    // Nothing typed is not an error — the three states stay three, and the message for an
+    // empty field is a fallback the disabled button keeps out of reach.
+    fireEvent.change(input, { target: { value: "" } });
+    expect(screen.queryByText(/Enter an amount/)).toBeNull();
+    fireEvent.change(input, { target: { value: "zzz" } });
+    expect(screen.getByText("That isn't a number — enter digits only, like 200.")).toBeInTheDocument();
+
+    // The SPOKEN line is allowed to say "rand" — `spokenMoney` derives it from the club's own
+    // symbol and answers nothing at all for a symbol it cannot name. What is checked here is
+    // the visible prose, which is where a hardcoded country was wrong.
+    const seen = [...document.body.querySelectorAll("p, span, label, button")]
+      .filter((el) => !el.className.includes("sr-only"))
+      .map((el) => el.textContent ?? "")
+      .join(" ");
+    expect(seen).not.toMatch(/\brand\b/i);
+    expect(seen).not.toMatch(/\bZAR\b/);
   });
 
   /**
@@ -210,9 +248,12 @@ describe("Top-up — what the checkout actually sends", () => {
 
     for (const typed of ["1e3", "1E3", "0x64", "0b1100100", "1_000", "1,000", "Infinity", "+200", "2e2"]) {
       fireEvent.change(input, { target: { value: typed } });
-      expect(screen.getByText("That isn't a number — enter an amount in rand.")).toBeInTheDocument();
+      expect(screen.getByText("That isn't a number — enter digits only, like 200.")).toBeInTheDocument();
       expect(submit).toBeDisabled();
-      expect(screen.queryByText(/You receive/)).not.toHaveTextContent(/1600|320/);
+      // The wallet leg is blank, not quoted. This used to read the "You receive" row by its
+      // label; the row is now named for the side it is on, and the figure is what matters.
+      expect(screen.queryByText("R1600.00")).toBeNull();
+      expect(screen.queryByText("R320.00")).toBeNull();
     }
 
     // Nothing a member actually types is caught by the same net.
@@ -231,7 +272,7 @@ describe("Top-up — what the checkout actually sends", () => {
     ]));
     renderPage(<TopUpPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "R100" }));
+    fireEvent.click(await screen.findByRole("button", { name: "R100.00" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
     expect(await screen.findByText("Payments aren't set up for this club yet — please ask an admin.")).toBeInTheDocument();
@@ -304,9 +345,9 @@ describe("Top-up — the quoted rate against the registered one", () => {
     ]);
     renderPage(<TopUpPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "R200" }));
+    fireEvent.click(await screen.findByRole("button", { name: "R200.00" }));
     // The offer the member is looking at when they press the button.
-    expect(screen.getByText("480.00 credits")).toBeInTheDocument();
+    expect(screen.getByText("R480.00")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
@@ -315,20 +356,20 @@ describe("Top-up — the quoted rate against the registered one", () => {
     await screen.findByRole("alert");
     expect(submitted).toHaveLength(0);
 
-    // …and the member is told, in the club's own figures, what changed.
+    // …and the member is told, in the club's own figures, what changed. Both figures wear the
+    // same symbol now, so the alert has to say which is which in words.
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent(/The club changed its rate while this page was open/);
-    expect(alert).toHaveTextContent("320.00 credits");
-    expect(alert).toHaveTextContent("1.6 credits / R1");
+    expect(alert).toHaveTextContent("R200.00 now adds R320.00 to your wallet instead");
     // The preview moves with it, so nothing on screen still says 480.
-    expect(screen.queryByText("480.00 credits")).not.toBeInTheDocument();
-    expect(screen.getByText("320.00 credits")).toBeInTheDocument();
+    expect(screen.queryByText("R480.00")).not.toBeInTheDocument();
+    expect(screen.getByText("R320.00")).toBeInTheDocument();
     // …and the class label moves with it too, rather than being dropped. A headed run against
     // the client-side version of this fix showed "At 2.4 credits / R1 (regular rate)" — the new
     // number beside the old reason for it, a second small untruth arriving with the fix for the
     // first. That lane dropped the label. It does not have to be dropped: the refusal carries
     // `member_class`, so the line can name the RIGHT class, which is what is asserted here.
-    expect(screen.getByText(/At 1\.6 credits \/ R1 \(regular rate\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Every R1\.00 you pay adds R1\.60 to your wallet \(regular rate\)/)).toBeInTheDocument();
     expect(screen.queryByText(/league \/ senior rate/)).not.toBeInTheDocument();
   });
 
@@ -342,7 +383,7 @@ describe("Top-up — the quoted rate against the registered one", () => {
     ]);
     renderPage(<TopUpPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "R200" }));
+    fireEvent.click(await screen.findByRole("button", { name: "R200.00" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
     await screen.findByRole("alert");
 
@@ -371,7 +412,7 @@ describe("Top-up — the quoted rate against the registered one", () => {
     ]);
     renderPage(<TopUpPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "R200" }));
+    fireEvent.click(await screen.findByRole("button", { name: "R200.00" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
     await vi.waitFor(() => expect(submitted).toHaveLength(1));
@@ -389,11 +430,161 @@ describe("Top-up — the quoted rate against the registered one", () => {
     renderPage(<TopUpPage />);
 
     // The retired sentence, word for word off the three finders' screenshots.
-    expect(await screen.findByText(/At 2.4 credits \/ R1/)).toBeInTheDocument();
+    expect(await screen.findByText(/Every R1\.00 you pay adds R2\.40 to your wallet/)).toBeInTheDocument();
     expect(screen.queryByText(/locked in when you continue/)).not.toBeInTheDocument();
     expect(screen.queryByText(/can't change while you're paying\./)).not.toBeInTheDocument();
-    // What is true, and what the code above now keeps.
+    // What is true, and what the code above now keeps. The apostrophes are gone from the
+    // rendered sentence as well as from the source — lizard's .tsx lexer opens a string on a
+    // bare one in JSX text — so these read "cannot" and "we will".
     expect(screen.getByText(/fixed the moment the club registers this payment/)).toBeInTheDocument();
-    expect(screen.getByText(/we'll show you the new figure before sending you there/)).toBeInTheDocument();
+    expect(screen.getByText(/we will show you the new figure before sending you there/)).toBeInTheDocument();
+  });
+});
+
+/**
+ * The conversion boundary itself — the one screen where a member meets both quantities at
+ * once, now that they are written in the same symbol.
+ *
+ * <p>
+ * <code>lib/currency.ts</code> states the rule this block exists to enforce: the exchange
+ * rate is invisible everywhere except here, so this screen must say <b>both legs in words</b>
+ * — what leaves the card, and what arrives in the wallet. "You pay R100.00 / You receive
+ * R160.00" with no sentence between them is not a rounding quibble, it is a screen that looks
+ * like it has a bug in it.
+ * </p>
+ */
+describe("Top-up — both legs of the conversion, in words", () => {
+  const OPTIONS = {
+    block_zar: 100, min_zar: 100, max_zar: 1000, presets_zar: [100, 200, 500, 1000],
+    conversion_rate: 1.6, member_class: "Regular" as const,
+  };
+
+  const routes = (options: Record<string, unknown> = OPTIONS) => [
+    { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+    { path: "/api/v1/credit/topup/options", body: options },
+  ];
+
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); signOut(); resetClubCurrencySymbol(); });
+
+  it("names the side each figure is on, and where the difference comes from", async () => {
+    stubFetch(routes());
+    renderPage(<TopUpPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "R200.00" }));
+
+    // Neither row is a bare "You pay" / "You receive" any more: with one symbol on both
+    // legs, the label is the only thing left that says which quantity a figure is. Scoped to
+    // the preview, because "R200.00" is also the preset button that was just pressed — which
+    // is the whole hazard in one symbol for both quantities.
+    const preview = within(screen.getByTestId("conversion-preview"));
+    expect(preview.getByText("You pay PayFast")).toBeInTheDocument();
+    expect(preview.getByText("Added to your wallet")).toBeInTheDocument();
+    expect(preview.getByText("R200.00")).toBeInTheDocument();
+    expect(preview.getByText("R320.00")).toBeInTheDocument();
+
+    // …and the sentence that stops the bigger number reading as a typo.
+    expect(preview.getByText("The club adds R120.00 on top of what you pay.")).toBeInTheDocument();
+    expect(preview.getByText(/Every R1\.00 you pay adds R1\.60 to your wallet/)).toBeInTheDocument();
+
+    // The residual risk `currency.ts` names: a member reading a wallet as withdrawable cash.
+    expect(preview.getByText(/It is not cash and cannot be paid back out/)).toBeInTheDocument();
+  });
+
+  it("says the two figures out loud, rather than spelling the symbol as a letter", async () => {
+    stubFetch(routes());
+    renderPage(<TopUpPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "R200.00" }));
+
+    // An aria-label REPLACES an element's contents, and a reader handed "R320.00" announces
+    // the R. The spoken line carries the noun the symbol cannot.
+    expect(screen.getByText("Paying 200.00 rand adds 320.00 rand to your wallet.")).toBeInTheDocument();
+    // The amount field, too: "Amount (R)" is announced as a letter in brackets.
+    expect(screen.getByRole("textbox", { name: "Amount in rand" })).toBeInTheDocument();
+  });
+
+  it("carries a multi-character symbol through every figure, and names it out loud", async () => {
+    setClubCurrencySymbol("CHF");
+    stubFetch(routes());
+    renderPage(<TopUpPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "CHF200.00" }));
+
+    expect(screen.getByText("CHF320.00")).toBeInTheDocument();
+    expect(screen.getByText("The club adds CHF120.00 on top of what you pay.")).toBeInTheDocument();
+    expect(screen.getByText(/Every CHF1\.00 you pay adds CHF1\.60 to your wallet/)).toBeInTheDocument();
+    expect(screen.getByText("Paying 200.00 Swiss francs adds 320.00 Swiss francs to your wallet.")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Amount in Swiss francs" })).toBeInTheDocument();
+  });
+
+  /**
+   * A symbol this product cannot name is not a symbol this product guesses at. The figure is
+   * still spoken — as a bare number, inside a sentence that says what the number is — and the
+   * field falls back to "Amount", which is true in any currency.
+   */
+  it("degrades to a bare number for a symbol it has no noun for", async () => {
+    setClubCurrencySymbol("₸");
+    stubFetch(routes());
+    renderPage(<TopUpPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "₸200.00" }));
+
+    expect(screen.getByText("Paying 200.00 adds 320.00 to your wallet.")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Amount" })).toBeInTheDocument();
+  });
+
+  it("treats an absent symbol exactly as the default, never as the last club's", async () => {
+    setClubCurrencySymbol("CHF");
+    setClubCurrencySymbol(undefined);
+    stubFetch(routes());
+    renderPage(<TopUpPage />);
+
+    expect(await screen.findByRole("button", { name: "R200.00" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^CHF/ })).toBeNull();
+  });
+
+  /**
+   * The fixture varied where it matters: the club that gives nothing away, and the club that
+   * takes a cut. Neither may be told it is getting a bonus, and the rate sentence has to stay
+   * true in both — it is the only place on the screen the rate still appears.
+   */
+  it("claims no bonus when the club adds nothing, and none when it adds less than nothing", async () => {
+    stubFetch(routes({ ...OPTIONS, conversion_rate: 1 }));
+    const flat = renderPage(<TopUpPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "R200.00" }));
+    expect(screen.queryByText(/on top of what you pay/)).toBeNull();
+    expect(screen.getByText(/Every R1\.00 you pay adds R1\.00 to your wallet/)).toBeInTheDocument();
+    flat.unmount();
+
+    vi.unstubAllGlobals();
+    stubFetch(routes({ ...OPTIONS, conversion_rate: 0.5 }));
+    renderPage(<TopUpPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "R200.00" }));
+    expect(screen.queryByText(/on top of what you pay/)).toBeNull();
+    // R100.00 is also a preset button here, so the wallet leg is read inside the preview.
+    expect(within(screen.getByTestId("conversion-preview")).getByText("R100.00")).toBeInTheDocument();
+    expect(screen.getByText(/Every R1\.00 you pay adds R0\.50 to your wallet/)).toBeInTheDocument();
+  });
+
+  it("holds its shape on a very large amount", async () => {
+    stubFetch(routes({ ...OPTIONS, max_zar: 1_000_000, presets_zar: [1_000_000] }));
+    renderPage(<TopUpPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "R1000000.00" }));
+    expect(screen.getByText("R1600000.00")).toBeInTheDocument();
+    expect(screen.getByText("The club adds R600000.00 on top of what you pay.")).toBeInTheDocument();
+  });
+
+  /** Nothing chosen yet: three states, and "—" is the one that means "nothing typed". */
+  it("shows neither leg, and no bonus sentence, before an amount is valid", async () => {
+    stubFetch(routes());
+    renderPage(<TopUpPage />);
+
+    const input = await screen.findByPlaceholderText(/Custom amount/);
+    fireEvent.change(input, { target: { value: "150" } });
+
+    expect(screen.getAllByText("—")).toHaveLength(2);
+    expect(screen.queryByText(/on top of what you pay/)).toBeNull();
+    expect(screen.queryByText(/adds .* to your wallet\.$/)).toBeNull();
   });
 });
