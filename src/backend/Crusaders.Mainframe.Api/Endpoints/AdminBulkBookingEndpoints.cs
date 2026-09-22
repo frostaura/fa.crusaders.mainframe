@@ -139,8 +139,14 @@ public static class AdminBulkBookingEndpoints
 
         var actorId = ctx.User.Id() ?? Guid.Empty;
 
-        var (context, refusal) = await ResolveOnBehalfAsync(req, actorId, db, ct);
+        var (resolved, refusal) = await ResolveOnBehalfAsync(req, actorId, db, ct);
         if (refusal is not null) return refusal;
+
+        // The role claim, not an inference. This group is RequireRole("admin"), so the answer is
+        // always true today — but D2-B13 is exactly the bug of deciding "is this an admin?" from
+        // something other than the claim, and a batch that lost the exemption would be refused
+        // item by item with member-class reason codes rather than failing loudly.
+        var context = resolved with { ActorIsAdmin = ctx.User.IsInRole("admin") };
 
         // The payer as they were before the batch, read once. An admin needs the pair to
         // explain a top-up to the member standing in front of them, and re-reading it per item

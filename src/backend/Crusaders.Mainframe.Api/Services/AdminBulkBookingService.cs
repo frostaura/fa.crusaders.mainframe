@@ -230,7 +230,12 @@ public sealed class AdminBulkBookingService
             return BulkBookResult.Replay(index, already, courtName);
         }
 
-        var payer = new BookingPayer(request.PayerUserId.Value, actorId, request.AllowNegativeBalance);
+        // ActorIsAdmin is carried on the context from the route group's role claim, never
+        // re-derived from actorId != userId — that inference is D2-B13, and every row this
+        // method books satisfies it, so losing it silently would refuse a whole league night
+        // with member-class reason codes.
+        var payer = new BookingPayer(
+            request.PayerUserId.Value, actorId, request.AllowNegativeBalance, request.ActorIsAdmin);
         var outcome = await _bookings.CreateAsync(
             item.CourtId, payer, item.StartsAt, item.SliceCount, ct, externalReference: reference);
 

@@ -41,6 +41,9 @@ public static class ActionGlyphs
     public static bool IsKnown(string? value) => value is Thumbs or Marks;
 
     /// <summary>The glyph set a club will actually get.</summary>
+    // The pattern rather than a call to IsKnown: it is the same test, and it is the one the
+    // compiler can see through — `settings.ActionGlyphs.Trim()` behind an IsKnown() call is a
+    // CS8602 the build then carries for ever.
     public static string For(TenantSettingsView settings)
-        => IsKnown(settings.ActionGlyphs?.Trim()) ? settings.ActionGlyphs.Trim() : Thumbs;
+        => settings.ActionGlyphs?.Trim() is Thumbs or Marks ? settings.ActionGlyphs.Trim() : Thumbs;
 }

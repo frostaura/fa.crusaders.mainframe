@@ -6,8 +6,22 @@ namespace Crusaders.Mainframe.Api.Services;
 /// <param name="PayerUserId">Null means a free-text guest, which becomes an admin block charging nobody.</param>
 /// <param name="GuestName">The label a guest block carries, or the note beside a member's booking.</param>
 /// <param name="AdminNote">Set only when a guest name accompanies a real member.</param>
+/// <param name="ActorIsAdmin">
+/// Whether the actor holds the admin role, taken from the route group's claim exactly as
+/// <c>BookingEndpoints</c>' on-behalf route takes it.
+///
+/// <para>
+/// <b>It is carried rather than inferred, and carrying it is load-bearing.</b>
+/// <c>BookingService</c> used to derive "this is an admin" from <c>actorId != userId</c>, which
+/// was true of every row this service books; D2-B13 removed that inference, so without this the
+/// whole bulk path silently lost its exemption from peak hours, the group windows and the
+/// per-day caps — and a league night booked out across four courts would have been refused item
+/// by item with member-class reason codes.
+/// </para>
+/// </param>
 public readonly record struct BulkBookRequestContext(
-    Guid? PayerUserId, string? GuestName, string? AdminNote, bool AllowNegativeBalance, string IdempotencyKey);
+    Guid? PayerUserId, string? GuestName, string? AdminNote, bool AllowNegativeBalance,
+    string IdempotencyKey, bool ActorIsAdmin = false);
 
 /// <summary>One row of a bulk cancel's answer.</summary>
 public sealed record BulkCancelResult(
