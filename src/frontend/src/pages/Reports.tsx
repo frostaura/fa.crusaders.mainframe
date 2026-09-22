@@ -6,7 +6,7 @@ import { Button, fieldClassName } from "../components/Button";
 import { useToast } from "../components/Toast";
 import { Carousel, type CarouselSlide } from "../components/Carousel";
 import { DataTable, type DataColumn } from "../components/DataTable";
-import { formatCredits, formatMinutes, formatSignedCredits, formatZar } from "../lib/utils";
+import { formatCredits, formatMinutes, formatSignedCredits, formatMoney } from "../lib/utils";
 import {
   RevenueAreaChart, DailyFlowBarChart, BookingsLineChart, CourtsRevenueBarChart,
   NoShowDonut, MyBalanceLineChart, MyFlowBarChart, MyBookingsBarChart,
@@ -77,7 +77,7 @@ export default function ReportsPage() {
 
   const tiles = isAdmin
     ? [
-        { label: "Net revenue", value: revenue ? formatZar(revenue.net_zar) : "—", tone: "accent" as const },
+        { label: "Net revenue", value: revenue ? formatMoney(revenue.net_zar) : "—", tone: "accent" as const },
         { label: "Top-ups", value: revenue ? formatCredits(revenue.gross_topups_credits) : "—", tone: "success" as const },
         { label: "Bookings", value: dailyAdmin ? String(dailyAdmin.reduce((s, d) => s + d.bookings, 0)) : "—", tone: "neutral" as const },
         { label: "No-show rate", value: noShow ? `${noShow.no_show_pct.toFixed(1)}%` : "—", tone: noShow && noShow.no_show_pct > 5 ? "warning" as const : "neutral" as const },

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ApiError, endpoints, type PayFastFormField, type TopUpOptions } from "../lib/api";
 import { Card } from "../components/Card";
 import { Button, Input, Label } from "../components/Button";
-import { formatCredits, formatRatePerRand, formatZar } from "../lib/utils";
+import { formatCredits, describeTopUpRate, formatMoney } from "../lib/utils";
 import { useBalance, walletTone } from "../lib/balance";
 import { BALANCE_SENTENCE } from "../lib/walletCopy";
 
@@ -42,12 +42,12 @@ function amountProblem(text: string, o: TopUpOptions | null): string | null {
   if (!Number.isFinite(value)) return "That isn't a number — enter an amount in rand.";
   if (!o) return null;
   if (value <= 0) return "Enter an amount greater than zero.";
-  if (value > o.max_zar) return `The most you can top up at once is ${formatZar(o.max_zar)}.`;
-  if (value < o.min_zar) return `The smallest top-up is ${formatZar(o.min_zar)}.`;
+  if (value > o.max_zar) return `The most you can top up at once is ${formatMoney(o.max_zar)}.`;
+  if (value < o.min_zar) return `The smallest top-up is ${formatMoney(o.min_zar)}.`;
   // Money in cents, so compare on cents rather than on floats: 150 % 50 is exact, but
   // 0.1 + 0.2 arithmetic on rand is not.
   if (Math.round(value * 100) % Math.round(o.block_zar * 100) !== 0)
-    return `Top-ups go in multiples of ${formatZar(o.block_zar)}.`;
+    return `Top-ups go in multiples of ${formatMoney(o.block_zar)}.`;
   return null;
 }
 
@@ -222,11 +222,11 @@ export default function TopUpPage() {
               value={amount}
               onChange={(e) => { setAmount(e.target.value); setError(null); setRestated(null); }}
               inputMode="decimal"
-              placeholder={options ? `Custom amount (multiple of ${formatZar(options.block_zar)})` : "Custom amount"}
+              placeholder={options ? `Custom amount (multiple of ${formatMoney(options.block_zar)})` : "Custom amount"}
             />
             <p className="text-xs text-text-muted mt-1">
               {options
-                ? `Min ${formatZar(options.min_zar)} · Max ${formatZar(options.max_zar)} · Multiples of ${formatZar(options.block_zar)} only`
+                ? `Min ${formatMoney(options.min_zar)} · Max ${formatMoney(options.max_zar)} · Multiples of ${formatMoney(options.block_zar)} only`
                 : "Loading the club's limits…"}
             </p>
           </div>
@@ -235,7 +235,7 @@ export default function TopUpPage() {
           <div className="bg-bg-muted rounded-lg p-3 text-sm">
             <div className="flex items-baseline justify-between">
               <span className="text-text-secondary">You pay</span>
-              <span className="font-semibold">{canSubmit ? formatZar(value) : "—"}</span>
+              <span className="font-semibold">{canSubmit ? formatMoney(value) : "—"}</span>
             </div>
             <div className="flex items-baseline justify-between mt-1">
               <span className="text-text-secondary">You receive</span>
@@ -269,7 +269,7 @@ export default function TopUpPage() {
                   here reported submit at 72 NLOC / 27 CCN / 133 length and turned the gate red
                   on a line nobody had touched.
                 */}
-                At {formatRatePerRand(options.conversion_rate)} ({options.member_class === "LeagueOrSenior" ? "league / senior rate" : "regular rate"}).
+                {describeTopUpRate(options.conversion_rate)} ({options.member_class === "LeagueOrSenior" ? "league / senior rate" : "regular rate"}).
                 Your rate is fixed the moment the club registers this payment, and it can't change while you're at PayFast.
                 If the club's rate has moved since this page loaded, we'll show you the new figure before sending you there.
               </p>
@@ -287,9 +287,9 @@ export default function TopUpPage() {
           {restated && (
             <p role="alert" className="text-sm text-warning-strong">
               The club changed its rate while this page was open, so nothing has been sent to
-              PayFast yet. {formatZar(value)} now buys{" "}
+              PayFast yet. {formatMoney(value)} now buys{" "}
               {formatCredits(Number.isFinite(restated.credits) ? restated.credits : value * restated.rate, { long: true })} at{" "}
-              {formatRatePerRand(restated.rate)}. Press Continue again to pay at that rate.
+              {describeTopUpRate(restated.rate)}. Press Continue again to pay at that rate.
             </p>
           )}
 

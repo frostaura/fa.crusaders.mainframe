@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { resetClubCurrencySymbol, setClubCurrencySymbol } from "./currency";
-import { formatCredits, formatMinutes, formatRate, formatRatePerRand, formatSignedCredits, formatZar } from "./utils";
+import { describeTopUpRate, formatCredits, formatMinutes, formatRate, formatSignedCredits, formatMoney } from "./utils";
 
 afterEach(resetClubCurrencySymbol);
 
@@ -39,7 +39,7 @@ describe("money formatting", () => {
     // Top-ups are genuinely in rand: that is what PayFast charges. The two functions
     // exist so the distinction is made once, deliberately, rather than by whoever is
     // editing a component.
-    expect(formatZar(100)).toBe("R100.00");
+    expect(formatMoney(100)).toBe("R100.00");
   });
 
   /**
@@ -54,9 +54,9 @@ describe("money formatting", () => {
    */
   it("puts the club's own symbol in front of a rand amount", () => {
     setClubCurrencySymbol("CHF");
-    expect(formatZar(100)).toBe("CHF100.00");
-    expect(formatZar(0)).toBe("CHF0.00");
-    expect(formatZar(1234567.891)).toBe("CHF1234567.89");
+    expect(formatMoney(100)).toBe("CHF100.00");
+    expect(formatMoney(0)).toBe("CHF0.00");
+    expect(formatMoney(1234567.891)).toBe("CHF1234567.89");
   });
 
   it("never lets the club's symbol touch a credit figure", () => {
@@ -75,19 +75,19 @@ describe("money formatting", () => {
     // is how a negative amount of money is written; "R-50.00" reads as a symbol
     // followed by a malformed number. `net_zar` on the club revenue card goes negative
     // in any period whose refunds beat its top-ups, so this renders in production.
-    expect(formatZar(-50)).toBe("-R50.00");
+    expect(formatMoney(-50)).toBe("-R50.00");
     setClubCurrencySymbol("R$");
-    expect(formatZar(-50)).toBe("-R$50.00");
+    expect(formatMoney(-50)).toBe("-R$50.00");
     // Negative zero is zero, and carries no direction — as it does for credits.
-    expect(formatZar(-0)).toBe("R$0.00");
+    expect(formatMoney(-0)).toBe("R$0.00");
   });
 
   it("falls back to the default symbol when the club has not said", () => {
     // An older API serves no key at all, which is the commonest case on the day this
     // ships. It must be indistinguishable from a club that chose "R".
     setClubCurrencySymbol(undefined);
-    expect(formatZar(100)).toBe("R100.00");
-    expect(formatRatePerRand(1.6)).toBe("1.6 credits / R1");
+    expect(formatMoney(100)).toBe("R100.00");
+    expect(describeTopUpRate(1.6)).toBe("Every R1.00 you pay adds 1.60 cr to your wallet");
   });
 });
 
@@ -128,32 +128,47 @@ describe("signed credits, rates and durations", () => {
     expect(formatRate(2)).toBe("2");
   });
 
-  it("agrees the noun with the rate, so a 1:1 club is not quoted 1 credits", () => {
-    // Seen live on the re-quote screen: a club whose rate is exactly 1 read
-    // "At 1 credits / R1". The trimming that makes 1.6000 into 1.6 is what leaves 1
-    // standing beside a plural noun, so the noun belongs with the number.
-    expect(formatRatePerRand(1)).toBe("1 credit / R1");
-    expect(formatRatePerRand(1.0)).toBe("1 credit / R1");
-    // 1.0000 IS one, and 0.9999 is not — the boundary is the trimmed number, not the input.
-    expect(formatRatePerRand(1.00001)).toBe("1 credit / R1");
-    expect(formatRatePerRand(0.9999)).toBe("0.9999 credits / R1");
-
-    // Everything else is plural, including the fractions and the zero. English pluralises
-    // every quantity but one, so this is not a special case list, it is the rule.
-    expect(formatRatePerRand(1.6)).toBe("1.6 credits / R1");
-    expect(formatRatePerRand(1.6667)).toBe("1.6667 credits / R1");
-    expect(formatRatePerRand(2)).toBe("2 credits / R1");
-    expect(formatRatePerRand(0.5)).toBe("0.5 credits / R1");
-    expect(formatRatePerRand(0)).toBe("0 credits / R1");
+  /**
+   * The conversion boundary — the one sentence in the product that spans both units.
+   *
+   * It used to read "1.6 credits / R1", which is accurate and which asks the reader to do
+   * the multiplication the sentence exists to save them. It now names what leaves the card
+   * and what arrives in the wallet, each in its own unit — and the two being visibly
+   * different units is the point, because a member paying R100 for 160 cr must not be able
+   * to read that as R160.
+   */
+  it("says what leaves the card and what arrives in the wallet", () => {
+    expect(describeTopUpRate(1.6)).toBe("Every R1.00 you pay adds 1.60 cr to your wallet");
+    expect(describeTopUpRate(2.4)).toBe("Every R1.00 you pay adds 2.40 cr to your wallet");
   });
 
-  it("quotes the rate against the club's own currency, not a hardcoded rand", () => {
-    // "1.6 credits / R1" hardcoded the rand sign beside a number that is the club's
-    // own `credits_per_zar_*`. A club on another currency was being told its rate per
-    // a currency it does not take.
+  it("keeps the money leg and the wallet leg in different units", () => {
+    // The whole guard, as one assertion: exactly one R, and it is on the money leg.
+    const sentence = describeTopUpRate(1.6);
+    expect(sentence.match(/R/g)).toHaveLength(1);
+    expect(sentence).toContain("R1.00");
+    expect(sentence).toContain("1.60 cr");
+    expect(sentence).not.toContain("R1.60");
+  });
+
+  it("follows the club's own symbol on the money leg only", () => {
     setClubCurrencySymbol("CHF");
-    expect(formatRatePerRand(1.6)).toBe("1.6 credits / CHF1");
-    expect(formatRatePerRand(1)).toBe("1 credit / CHF1");
+    expect(describeTopUpRate(1.6)).toBe("Every CHF1.00 you pay adds 1.60 cr to your wallet");
+  });
+
+  it("says it plainly for a club that gives no bonus at all", () => {
+    // A club on 1:1 reads "adds 1.00 cr". A sentence that vanished at parity would leave
+    // that screen saying nothing about the rate at all.
+    expect(describeTopUpRate(1)).toBe("Every R1.00 you pay adds 1.00 cr to your wallet");
+  });
+
+  it("retires the singular trap the old wording carried", () => {
+    // "1 credit / R1" needed the noun to agree with the number, and a club on exactly 1
+    // was told "At 1 credits / R1" — seen live on the re-quote screen. "cr" does not
+    // inflect, so the agreement problem cannot come back.
+    for (const rate of [0, 0.5, 1, 1.0001, 1.6, 2]) {
+      expect(describeTopUpRate(rate), String(rate)).not.toMatch(/\bcredits?\b/);
+    }
   });
 
   it("says a duration the way a person says it", () => {

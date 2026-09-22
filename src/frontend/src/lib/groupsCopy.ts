@@ -5,7 +5,7 @@ import {
   UNLIMITED, WEEK_IN_READING_ORDER, capOverrideIsInert, countSlots, formatClock, intersect,
   type Interval,
 } from "./groupRules";
-import { formatZar } from "./utils";
+import { formatMoney } from "./utils";
 
 /**
  * Every sentence the groups surface says — GOAL items 3 + 19.
@@ -338,7 +338,7 @@ export function ratePerBlockSentence(input: {
   const credits = Number((input.creditsPerZar * input.blockZar).toFixed(2));
   // Through the one formatter, so this sentence and the top-up screen — which quotes the
   // same `topup_block_zar` — cannot name the club's money two different ways.
-  const head = `${formatZar(input.blockZar)} buys ${creditsFace(credits)} credits`;
+  const head = `${formatMoney(input.blockZar)} buys ${creditsFace(credits)} credits`;
   if (input.slicePrice <= 0) {
     return `${head}. Courts cost nothing at the moment, so that buys any number of slots.`;
   }
@@ -380,7 +380,7 @@ export function groupChangeConsequence(input: {
   if (typeof input.creditsPerBlockBefore === "number" && typeof input.creditsPerBlockAfter === "number"
     && input.creditsPerBlockBefore !== input.creditsPerBlockAfter) {
     out.push(`${name}'s next top-up will buy ${creditsFace(input.creditsPerBlockAfter)} credits per `
-      + `${formatZar(input.blockZar ?? 100)} instead of ${creditsFace(input.creditsPerBlockBefore)}. `
+      + `${formatMoney(input.blockZar ?? 100)} instead of ${creditsFace(input.creditsPerBlockBefore)}. `
       + "Credit he already has does not change.");
   }
   if (typeof input.sliceBefore === "number" && typeof input.sliceAfter === "number"

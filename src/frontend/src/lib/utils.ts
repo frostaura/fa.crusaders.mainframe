@@ -17,7 +17,7 @@ export function cn(...inputs: ClassValue[]) {
  * on the wallet header, the booking grid, the reports and the admin member list at once.
  *
  * That bug was live in six places. This function exists so there is one answer to
- * "how is money shown", and `formatZar` exists so the places that genuinely handle
+ * "how is money shown", and `formatMoney` exists so the places that genuinely handle
  * rand can say so.
  */
 export function formatCredits(value: number, options?: { long?: boolean }) {
@@ -38,7 +38,7 @@ export function formatCredits(value: number, options?: { long?: boolean }) {
  * malformed number. It is not hypothetical: `net_zar` on the club revenue card goes
  * negative in any period whose refunds beat its top-ups.
  */
-export function formatZar(value: number) {
+export function formatMoney(value: number) {
   // `Math.abs` before `toFixed` so a negated zero cannot arrive here as "-0.00". Zero has
   // no direction, exactly as it has none in `formatSignedCredits`.
   const magnitude = Math.abs(value).toFixed(2);
@@ -78,22 +78,39 @@ export function formatRate(value: number) {
 }
 
 /**
- * A conversion rate as a member reads it: "1.6 credits / R1", and "1 credit / R1".
+ * The top-up rate, said as a member reads it — <b>both legs, each in its own unit</b>.
  *
- * Trimming the trailing zeros is right for 1.6667 and wrong for exactly 1, which came out
- * as the bare "1" and left the top-up screens reading "At 1 credits / R1" for any club on
- * a 1:1 rate — seen live on the re-quote screen. The noun has to agree with the number, so
- * the noun lives here with the number rather than as loose text at each call site, which is
- * how the two got out of step. Only 1 is singular: 0, 0.5 and 1.6 all take "credits", which
- * is English rather than an arbitrary rule, and 1.0000 is the same rate as 1.
+ * <p>
+ * This is the one sentence in the product that spans the conversion, so it is the one place
+ * the rate is visible at all. It used to read "1.6 credits / R1", which is accurate and
+ * which a volunteer at the desk could not act on: it asks the reader to do the multiplication
+ * that the sentence exists to save them.
+ * </p>
  *
- * The "R1" was hardcoded beside a number that is the club's own `credits_per_zar_*`, so a
- * club on another currency was quoted its rate per a currency it does not take. It comes
- * from the same one place the amounts do.
+ * <p>
+ * So it names what leaves the card and what arrives in the wallet: <i>"Every R1.00 you pay
+ * adds 1.60 cr to your wallet."</i> The money leg wears the club's configurable symbol, the
+ * wallet leg keeps the credit unit, and the two being visibly different units is the whole
+ * point — a member paying R100 for 160 cr must not be able to read that as R160.
+ * </p>
+ *
+ * <p>
+ * It also retires a trap the old wording carried. "1 credit / R1" needed the noun to agree
+ * with the number, because trimming 1.0000 to "1" left a singular quantity beside a plural
+ * noun, and a club on a 1:1 rate was being told "At 1 credits / R1" — seen live on the
+ * re-quote screen. "cr" does not inflect, so the agreement problem cannot come back.
+ * </p>
+ *
+ * <p>
+ * Still no rounding: {@link formatCredits} keeps two decimals and the rate itself may carry
+ * four, so a club on 1.6667 reads "adds 1.67 cr" while the ledger settles on 1.6667. That is
+ * a quote-versus-settlement gap the old wording had too, and it is why the sentence says what
+ * ONE unit of money buys rather than what the member's whole top-up buys — a per-R1 figure
+ * rounds to something a member can check, and a per-R1000 figure would not.
+ * </p>
  */
-export function formatRatePerRand(value: number) {
-  const rate = formatRate(value);
-  return `${rate} ${rate === "1" ? "credit" : "credits"} / ${clubCurrencySymbol()}1`;
+export function describeTopUpRate(rate: number) {
+  return `Every ${formatMoney(1)} you pay adds ${formatCredits(rate)} to your wallet`;
 }
 
 /**
