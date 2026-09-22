@@ -91,6 +91,25 @@ export function focusAfterAction(find: () => HTMLElement | null | undefined): vo
   };
 
   const attempt = () => {
+    // THE SAME GUARD AS THE ONE ON THE WAY IN, AND IT BELONGS AT BOTH ENDS.
+    //
+    // `focusAfterAction` refuses to start without a document, which was right and was not
+    // enough: what it schedules is a backoff chain of up to six timers, and nothing can
+    // cancel them. The document can therefore go away BETWEEN the schedule and the attempt,
+    // and the check that ran on the way in has long since passed.
+    //
+    // Found on CI, not here. Under vitest the jsdom environment is torn down at the end of a
+    // file while a chain is still in flight; the timer then fires in bare Node and dies on
+    // `document.activeElement` with "document is not defined". It is an UNHANDLED error, so
+    // it fails the run while every one of the 2755 tests reports passing — and it is a race,
+    // so it surfaced on the Linux runner and never once here.
+    //
+    // The same shape is a real, if small, misbehaviour in the product: the chain outlives the
+    // page that started it, so focus can be taken on a screen the member has already left.
+    // Bailing when the document is gone is the floor. Making the chain cancellable so a
+    // caller can stop it on unmount is the proper cure, and it changes a signature every call
+    // site uses, so it is recorded rather than smuggled in beside a CI fix.
+    if (typeof document === "undefined") return;
     if (run !== currentRun) return;
     attempts += 1;
 

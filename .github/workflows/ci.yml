@@ -47,25 +47,19 @@ jobs:
           dotnet build Crusaders.Mainframe.Api/Crusaders.Mainframe.Api.csproj --nologo -v q
           dotnet build Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q
 
-      - name: Test with coverage
-        run: dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q --settings coverlet.runsettings --results-directory ./TestResults
-
-      - name: Enforce coverage threshold
-        run: |
-          THRESHOLD=70
-          REPORT=$(find ./TestResults -name "coverage.cobertura.xml" | head -1)
-          if [ -z "$REPORT" ]; then
-            echo "No coverage report produced — the collector did not run."
-            echo "This used to exit 0, which meant the gate passed whenever it broke."
-            exit 1
-          fi
-          line_rate=$(grep -oP 'line-rate="\K[^"]+' "$REPORT" | head -1)
-          coverage=$(awk "BEGIN {printf \"%.1f\", $line_rate * 100}")
-          echo "Line coverage: ${coverage}% (threshold: ${THRESHOLD}%)"
-          if [ "$(awk "BEGIN {print ($coverage < $THRESHOLD)}")" -eq 1 ]; then
-            echo "Coverage ${coverage}% is below the ${THRESHOLD}% threshold"
-            exit 1
-          fi
+      # NO COVERAGE THRESHOLD HERE, DELIBERATELY — it is enforced in
+      # `backend-integration`, and the reason is that this job has no Postgres.
+      #
+      # Every Postgres-backed test skips itself when the connection string is absent, which
+      # is 1017 of 2209 — so this job exercises 54% of the suite and then a 70% line-coverage
+      # rule was applied to the result. That rule was not measuring the product's coverage; it
+      # was measuring how much of the product happens to be reachable without a database, and
+      # it fell below the line the moment a release added code that is exercised through one.
+      #
+      # A threshold a tier cannot structurally satisfy teaches people to edit the threshold.
+      # The number is now taken where the whole suite actually runs.
+      - name: Test
+        run: dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q
 
   # ============================================================================
   # Frontend — lint, build, test (Node 22 / React 19 / Vite 7)
@@ -198,7 +192,29 @@ jobs:
         # class-name list rots the day a new Postgres-backed class is added —
         # which is exactly how the postgres-http tier silently ran in CI never.
         # The in-memory tests re-run here; the `backend` job stays the fast gate.
-        run: dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q
+        run: dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q --settings coverlet.runsettings --results-directory ./TestResults
+
+      # THE COVERAGE GATE LIVES HERE, not on the fast `backend` job, because this is the only
+      # tier that runs the whole suite. Measured on a run where every Postgres-backed test
+      # skipped, the same rule reported 63.2% and failed a release whose real coverage nobody
+      # had measured — the gate was reading how much of the product is reachable without a
+      # database, which is not a property anybody intends to hold a line on.
+      - name: Enforce coverage threshold
+        run: |
+          THRESHOLD=70
+          REPORT=$(find ./TestResults -name "coverage.cobertura.xml" | head -1)
+          if [ -z "$REPORT" ]; then
+            echo "No coverage report produced — the collector did not run."
+            echo "This used to exit 0, which meant the gate passed whenever it broke."
+            exit 1
+          fi
+          line_rate=$(grep -oP 'line-rate="\K[^"]+' "$REPORT" | head -1)
+          coverage=$(awk "BEGIN {printf \"%.1f\", $line_rate * 100}")
+          echo "Line coverage: ${coverage}% (threshold: ${THRESHOLD}%)"
+          if [ "$(awk "BEGIN {print ($coverage < $THRESHOLD)}")" -eq 1 ]; then
+            echo "Coverage ${coverage}% is below the ${THRESHOLD}% threshold"
+            exit 1
+          fi
 
   # ============================================================================
   # IoT firmware — host-compiled unit tests, no hardware required.
