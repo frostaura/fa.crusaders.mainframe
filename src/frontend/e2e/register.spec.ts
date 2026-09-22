@@ -228,6 +228,46 @@ test.describe("Waiting, and then getting in", () => {
     await expect(page.getByRole("button", { name: /Resend the confirmation email/i })).toHaveCount(0);
   });
 
+  /**
+   * <b>Enter signs you in, because that is what everybody does.</b>
+   *
+   * <p>
+   * Every other test on this screen CLICKS the button, so all of them would still pass on a
+   * form that could only ever be submitted by clicking. Implicit submission is a property of
+   * the form's markup rather than of its handler — a stray <code>type="button"</code> on the
+   * submit control, an input moved out from under the <code>&lt;form&gt;</code>, or a hidden
+   * <code>required</code> field failing constraint validation all break it while leaving the
+   * button working — and this spec's own preamble is about a form that was inert in a real
+   * browser for exactly that last reason.
+   * </p>
+   *
+   * <p>
+   * It has to be Playwright rather than jsdom or a screenshot harness: implicit submission is
+   * driven by the browser's real key-event sequence, and a tool that dispatches keydown
+   * without the rest of it reports a working form as broken. That mattered — a walkthrough of
+   * the running app read this as a defect until the missing keypress explained it.
+   * </p>
+   */
+  test("Enter in the password field signs in, not just the button", async ({ page }) => {
+    await serveApi(page, [
+      { path: "/api/v1/session", body: { ...SESSION_ANON, user_id: "u-1", is_authenticated: true } },
+      { method: "POST", path: "/api/v1/auth/login", body: { access_token: "t", user_id: "u-1", is_admin: false } },
+      { path: "/api/v1/whoami", body: { user_id: "u-1", is_admin: false, must_change_password: false } },
+      { path: "/api/v1/me/profile", body: { full_name: "Thandi Probe", photo_url: null, email: "thandi.probe@review.test" } },
+      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0 } },
+      { path: "/api/v1/schedule", body: { days: [] } },
+    ]);
+    await page.goto("/login");
+    await page.getByLabel("Email").fill("thandi.probe@review.test");
+    // Typed into rather than filled, and Enter pressed from there, so the whole thing is the
+    // key sequence a person produces — not a value assignment followed by a synthetic event.
+    await page.getByLabel("Password").click();
+    await page.keyboard.type("Review!2345");
+    await page.keyboard.press("Enter");
+
+    await expect(page).toHaveURL(/\/schedule/);
+  });
+
   test("once approved, the same credentials land on the schedule", async ({ page }) => {
     await serveApi(page, [
       { path: "/api/v1/session", body: { ...SESSION_ANON, user_id: "u-1", is_authenticated: true } },
