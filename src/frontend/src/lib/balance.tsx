@@ -66,7 +66,7 @@ export function walletHref(balance: number | null): string {
 export type WalletTone = "zero" | "low" | "fine";
 
 /**
- * How near zero counts as zero. Half a cent of a credit — the smallest movement that can
+ * How near zero counts as zero. Half a cent — the smallest movement that can
  * change what `toFixed(2)` paints.
  */
 const ROUNDS_TO_ZERO = 0.005;
@@ -178,7 +178,7 @@ export function BalanceProvider({ children, transport, policy }: {
    * <p>
    * Carried as a DEPENDENCY for the same reason as in `profile.tsx`: `auth.status` stays
    * `"authenticated"` right through the forced change, so a hook keyed on it alone never
-   * re-ran once the member had chosen their own password, and the header pill sat on "— cr"
+   * re-ran once the member had chosen their own password, and the header pill sat on a dash
    * until a manual reload.
    * </p>
    */

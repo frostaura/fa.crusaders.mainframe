@@ -139,7 +139,7 @@ export const MONITORING_RULES: readonly NumericSettingRule[] = [
 ] as const;
 
 /**
- * Real-time — how the control board and the credits badge stay current.
+ * Real-time — how the control board and the wallet chip stay current.
  *
  * <p>
  * `sse_keepalive_seconds` has the tightest reason of the four and the message says it: nginx

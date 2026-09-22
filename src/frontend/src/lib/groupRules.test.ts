@@ -241,7 +241,7 @@ describe("price — most restrictive is the HIGHEST, and that is the decision mo
 
   it("says so when one of the groups has a price it could not work out", () => {
     // The highest KNOWN figure, with the flag that stops the screen printing it as final. The
-    // copy turns the pair into "at least 4 credits", which is the only true sentence available
+    // copy turns the pair into "at least R4.00", which is the only true sentence available
     // when one of the three rules has not arrived yet.
     const known = groupFixture({ id: "a", pricing: { mode: "multiplier", multiplier_bps: 5_000 } });
     const unknown = groupFixture({ id: "b", pricing: { mode: "flat_per_slice", flat_slice_price_credits: null } });
@@ -257,7 +257,7 @@ describe("price — most restrictive is the HIGHEST, and that is the decision mo
 
   it("clamps a multiplier outside the API's own bound rather than quoting it", () => {
     expect(priceForGroup(groupFixture({ pricing: { mode: "multiplier", multiplier_bps: -5_000 } }), 8)).toBe(0);
-    // 1_000_000 bps is the API's ceiling: 100×, so 800 credits and not 800 000.
+    // 1_000_000 bps is the API's ceiling: 100×, so R800.00 and not R800 000.00.
     expect(priceForGroup(groupFixture({ pricing: { mode: "multiplier", multiplier_bps: 9_999_999 } }), 8)).toBe(800);
   });
 });

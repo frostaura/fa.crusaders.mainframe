@@ -750,7 +750,7 @@ export const adminEndpoints = {
 
   // --- Admin credit (item 8's admin half) ------------------------------------------------
   /**
-   * One hand movement of credit, with the KIND of movement it is.
+   * One hand movement of a member's money, with the KIND of movement it is.
    *
    * <p>
    * `amountCredits` is signed on the wire, exactly as it always was — the screen is what

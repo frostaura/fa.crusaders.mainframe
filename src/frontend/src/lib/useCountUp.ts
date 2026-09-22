@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 /**
- * The number the credits chip actually paints while it catches up with the server's.
+ * The number the wallet chip actually paints while it catches up with the server's.
  *
  * <p>
  * A balance that jumps from 0.00 to 200.00 between two frames is a number nobody watched
@@ -12,11 +12,11 @@ import { useEffect, useRef, useState } from "react";
  */
 
 /**
- * How long a movement of `delta` credits should take to count.
+ * How long a movement of `delta` should take to count.
  *
  * <p>
- * `clamp(350, 18 × |Δ|, 900)`. Five credits is 350 ms; fifty — one court — is 900; four
- * hundred is also 900. <b>The ceiling is the point:</b> a duration that scales without one
+ * `clamp(350, 18 × |Δ|, 900)`. A movement of R5.00 is 350 ms; R50.00 — one court — is 900;
+ * R400.00 is also 900. <b>The ceiling is the point:</b> a duration that scales without one
  * makes a big top-up, which is the happiest thing that happens on this screen, feel slow.
  * </p>
  */

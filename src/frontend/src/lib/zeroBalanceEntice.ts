@@ -19,7 +19,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * </pre>
  *
  * <p>
- * <b>The grace period is not padding.</b> A member who has just spent their last credits
+ * <b>The grace period is not padding.</b> A member who has just spent the last of their balance
  * watches the count-down finish and reads the booking toast. Starting a pulse on top of that
  * turns a successful booking into an alarm. Four seconds is the toast's own life minus its
  * exit.
