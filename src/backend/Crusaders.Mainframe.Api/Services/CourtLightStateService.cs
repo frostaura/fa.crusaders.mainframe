@@ -270,11 +270,57 @@ public sealed class CourtLightStateService
         var row = await _db.CourtLightStates.FirstOrDefaultAsync(s => s.CourtId == courtId, ct);
         if (row is not null) return row;
 
+        // THE PLACEHOLDER IS MATERIALISED BY THE DATABASE, NOT BY THE CHANGE TRACKER.
+        //
+        // AddCourtLightState backfills a row per court that existed when it ran, so every court
+        // created AFTERWARDS reaches here with no row — which is every court in a club that has
+        // added one, and every court in every test fixture. Adding it to the change tracker
+        // makes the race obvious once it is written down: two activations of one court arrive
+        // together, both read no row, both queue an INSERT, and the loser's SaveChanges dies on
+        // `PK_court_light_state` with a 23505 that nothing on the path expects.
+        //
+        // That matters here more than a lost projection row would, because the 23505 is thrown
+        // from inside the ACTIVATION save — so it takes the attendance stamp, the audit row and
+        // the whole request down with it, and a retry storm from a flapping box (eight uploads
+        // of one batch, which is a real test) turns into 500s on a path whose entire contract is
+        // that it is idempotent. The booking's concurrency token is what is supposed to decide
+        // that race, and it never got the chance.
+        //
+        // ON CONFLICT DO NOTHING is the whole fix: the row exists after this line whoever won,
+        // the re-read attaches the winner's, and the caller's mutation is an UPDATE. A
+        // concurrent inserter in an uncommitted transaction blocks this statement rather than
+        // failing it, which is the correct wait — the answer is not knowable until it commits.
+        // Every NOT NULL column without a database default is named, because
+        // AddRelayRestoreHandshake ADDS ConfirmedState with a default and then drops it
+        // deliberately — see that migration for why. A future migration that adds another such
+        // column and forgets this statement gets a 23502 from the first test that activates a
+        // court, which is loud and immediate rather than silent; that is the cost of the
+        // explicit list and it is the right way round.
+        if (_db.Database.IsNpgsql())
+        {
+            await _db.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                 INSERT INTO court_light_state
+                     ("TenantId", "CourtId", "State", "Cause", "ConfirmedState",
+                      "LastEventAt", "LastEventSeq", "LastEventBootId", "UpdatedAt")
+                 VALUES ({_tenant.TenantId}, {courtId}, {(int)LightState.Unknown}, {(int)LightCause.Unknown},
+                         {(int)LightState.Unknown}, now(), 0, 0, now())
+                 ON CONFLICT ("TenantId", "CourtId") DO NOTHING
+                 """,
+                ct);
+
+            return await _db.CourtLightStates.FirstAsync(s => s.CourtId == courtId, ct);
+        }
+
+        // The in-memory provider has neither the constraint nor a second writer, and it cannot
+        // run the statement above at all. Same shape as PayerLock and DeviceRegistryService,
+        // which take the same fork for the same reason.
         row = new CourtLightState
         {
             TenantId = _tenant.TenantId,
             CourtId = courtId,
             State = LightState.Unknown,
+            Cause = LightCause.Unknown,
             LastEventAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow,
         };

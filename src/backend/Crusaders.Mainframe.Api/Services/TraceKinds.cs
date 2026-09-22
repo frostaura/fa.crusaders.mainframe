@@ -185,6 +185,21 @@ public static class TraceKinds
     /// <summary>Money in.</summary>
     public const string WalletToppedUp = "wallet.topped_up";
 
+    /// <summary>
+    /// Money in, taken by hand at the desk — cash, an EFT that cleared, a card taken offline.
+    ///
+    /// <para>
+    /// <b>Its own word rather than <see cref="WalletToppedUp"/>'s, and not
+    /// <see cref="WalletAdjustedByAdmin"/>'s either.</b> The member did not do it, so "Topped up
+    /// 200 credits" is a sentence about somebody who was not there; and it is not an adjustment,
+    /// because <see cref="LedgerEntryType.AdminTopUp"/> is money the club TOOK and counts as
+    /// revenue, while an adjustment is a book correction. Borrowing either word is the
+    /// guessed-sentence failure the vocabulary exists to prevent — a member disputing a figure
+    /// is entitled to the sentence that says who handed over what.
+    /// </para>
+    /// </summary>
+    public const string WalletToppedUpAtTheDesk = "wallet.topped_up_at_the_desk";
+
     /// <summary>Money out for court time.</summary>
     public const string WalletSpent = "wallet.spent";
 
@@ -221,8 +236,8 @@ public static class TraceKinds
         WalkUpBought, WalkUpRefunded,
         CourtCheckedIn, CourtRefused,
         LightsOn, LightsOff,
-        WalletToppedUp, WalletSpent, WalletRefunded, WalletPenalised, WalletAdjustedByAdmin,
-        WalletReversed,
+        WalletToppedUp, WalletToppedUpAtTheDesk, WalletSpent, WalletRefunded, WalletPenalised,
+        WalletAdjustedByAdmin, WalletReversed,
         Unrecognised,
     ];
 
@@ -371,6 +386,7 @@ public static class TraceKinds
         return type switch
         {
             LedgerEntryType.TopUp => WalletToppedUp,
+            LedgerEntryType.AdminTopUp => WalletToppedUpAtTheDesk,
             LedgerEntryType.BookingCharge or LedgerEntryType.LightsPurchase => WalletSpent,
             LedgerEntryType.CancellationRefund => WalletRefunded,
             LedgerEntryType.NoShowPenalty or LedgerEntryType.LateCancellationPenalty => WalletPenalised,
@@ -435,6 +451,7 @@ public static class TraceKinds
             LightsOff => $"{court} lights went off",
 
             WalletToppedUp => $"Topped up {Credits(facts)} credits",
+            WalletToppedUpAtTheDesk => ToppedUpAtTheDesk(facts),
             WalletSpent => Spent(facts),
             WalletRefunded => Refunded(facts),
             WalletPenalised => Penalised(facts),
@@ -485,6 +502,15 @@ public static class TraceKinds
 
     private static string AdjustedByAdmin(TraceFacts facts)
         => $"{Who(facts)} changed their credits by {Credits(facts)}";
+
+    /// <summary>
+    /// A top-up the club took by hand. It names the actor for the reason
+    /// <see cref="AdjustedByAdmin"/> does: the member was not the one who did it, and a night
+    /// that says "Topped up 200 credits" about a payment somebody else keyed in is a sentence
+    /// the member cannot check.
+    /// </summary>
+    private static string ToppedUpAtTheDesk(TraceFacts facts)
+        => $"{Who(facts)} added {Credits(facts)} credits at the desk";
 
     /// <summary>
     /// What they paid for, named when the row knows it. D2 §6.2's own example sentence is
