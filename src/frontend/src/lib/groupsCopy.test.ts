@@ -240,7 +240,7 @@ describe("what a slot costs, in the club's own units", () => {
   /**
    * D3 §6.2: R100 is the club's actual top-up block, and "1.6" means nothing to a volunteer.
    *
-   * The figure now comes through `formatZar`, so it carries the club's own symbol and the
+   * The figure now comes through `formatMoney`, so it carries the club's own symbol and the
    * two decimals the top-up screen already shows for this very setting. The sentence and the
    * screen it is about used to name `topup_block_zar` two different ways.
    */
