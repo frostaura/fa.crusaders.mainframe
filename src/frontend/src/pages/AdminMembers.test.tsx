@@ -4,6 +4,24 @@ import AdminMembersPage from "./AdminMembers";
 import { ledgerRowFixture, memberFixture, renderPage, stubFetch, type StubRoute } from "../test/harness";
 
 /**
+ * <b>This file's cases need longer than the 5-second default, and the reason is the fix.</b>
+ *
+ * <p>
+ * Credit used to move through one signed field and an Apply button — two `fireEvent`s. D3-B08
+ * replaced it with three steps, because a volunteer typing <code>-100</code> where they meant
+ * <code>100</code> moved a member two hundred credits the wrong way and nothing on the screen
+ * would have stopped them. Each step is a render of a members table that already holds every
+ * row in the club, and in jsdom that is seconds rather than milliseconds.
+ * </p>
+ *
+ * <p>
+ * Raised here rather than in `vite.config.ts`, deliberately: a global raise hides a slow test
+ * everywhere, and the cost is this file's alone.
+ * </p>
+ */
+vi.setConfig({ testTimeout: 20_000 });
+
+/**
  * The members screen — the credit-adjustment form specifically.
  *
  * <p>
@@ -91,10 +109,48 @@ describe("AdminMembers — adjust credit", () => {
     { method: "POST", path: `/api/v1/admin/credit/${USER}/adjust`, body: { entry_id: "9", amount_credits: 24, balance_after_credits: 144 } },
   ];
 
-  async function openAdjustAndFill(amount: string, reason: string) {
-    fireEvent.click(await screen.findByRole("button", { name: "Adjust credit" }));
-    fireEvent.change(await screen.findByLabelText(/Amount \(credits/), { target: { value: amount } });
-    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: reason } });
+  /**
+   * Drive the three-step sheet as far as the check step. (D3-B08)
+   *
+   * <p>
+   * The form this replaces was ONE signed field and an Apply button, so every case below used
+   * to be two `fireEvent`s. It is three steps now because money is three questions — how
+   * much, why, and is this right — and the third exists because the resulting balance used to
+   * appear only in a four-second toast AFTER the movement, over a row that had already
+   * changed. The extra keystrokes here are the fix, not an accident of it.
+   * </p>
+   *
+   * <p>
+   * <b>There is no sign anywhere in this flow.</b> A negative movement is a differently
+   * titled, differently toned path reached by name — `takeBack` below — because a sign is a
+   * character somebody types and not a decision they make.
+   * </p>
+   */
+  async function openAdjustAndFill(
+    amount: string, reason: string, opts: { takeBack?: boolean; booking?: string } = {},
+  ) {
+    fireEvent.click(await screen.findByRole("button", { name: /Top up/ }));
+    if (opts.takeBack) fireEvent.click(await screen.findByRole("button", { name: "Take credit back instead" }));
+    fireEvent.change(await screen.findByLabelText("Another amount"), { target: { value: amount } });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(await screen.findByLabelText(opts.takeBack ? "Correcting a mistake" : "Goodwill — something went wrong"));
+    fireEvent.change(screen.getByLabelText("And why this one?"), { target: { value: reason } });
+    if (opts.booking !== undefined) {
+      fireEvent.change(await screen.findByLabelText("For booking (optional)"), { target: { value: opts.booking } });
+    }
+    return opts;
+  }
+
+  /** Step 2 → step 3. Separated because several cases assert on step 2 before moving on. */
+  async function toCheck() {
+    fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+  }
+
+  /** The confirm: arm it, then fire it. There is no bare "Apply" any more. */
+  async function apply() {
+    const idle = await screen.findByRole("button", { name: /^(Add|Take back) / });
+    fireEvent.click(idle);
+    fireEvent.click(await screen.findByRole("button", { name: /choose again to confirm/ }));
   }
 
   it("offers the member's recent bookings from the ledger and sends the picked one as relatedBookingId", async () => {
@@ -113,18 +169,26 @@ describe("AdminMembers — adjust credit", () => {
     expect(ledgerCall?.path).toContain(`userId=${USER}`);
 
     fireEvent.change(screen.getByLabelText("For booking (optional)"), { target: { value: BOOKING } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await toCheck();
+    // The three figures, before the press. This is the whole of what D3-B08 was missing.
+    expect(screen.getByText("Balance after")).toBeInTheDocument();
+    await apply();
 
     await waitFor(() => {
       const post = stub.calls.find((c) => c.method === "POST");
       expect(post?.path).toBe(`/api/v1/admin/credit/${USER}/adjust`);
       // objectContaining, plus the key checked by name: every adjustment now also carries
-      // an idempotencyKey naming the movement, so a retry cannot become a second one.
-      expect(post?.body).toEqual(expect.objectContaining({ amountCredits: 24, reason: "Box was offline; no-show was wrong", relatedBookingId: BOOKING }));
+      // an idempotencyKey naming the movement, so a retry cannot become a second one — and
+      // a reasonCode, without which a cash top-up is invisible to the revenue report.
+      expect(post?.body).toEqual(expect.objectContaining({
+        amountCredits: 24, reason: "Box was offline; no-show was wrong",
+        relatedBookingId: BOOKING, reasonCode: "goodwill",
+      }));
       expect(typeof (post?.body as Record<string, unknown>).idempotencyKey).toBe("string");
     });
-    // The row's balance follows the API's answer, and the toast names the booking.
-    expect(await screen.findByText(/Credited Ada Lovelace 24\.00 cr for booking aaaaaaaa/)).toBeInTheDocument();
+    // The receipt STAYS on screen — money deserves more than four seconds — and the row's
+    // balance follows the API's answer.
+    expect(await screen.findByText(/Done\. Ada Lovelace now has 144\.00 cr\./)).toBeInTheDocument();
     expect(screen.getByText("144.00 cr")).toBeInTheDocument();
   });
 
@@ -132,8 +196,12 @@ describe("AdminMembers — adjust credit", () => {
     const stub = stubFetch(routes());
     renderPage(<AdminMembersPage />);
 
-    await openAdjustAndFill("-10", "Bar tab");
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    // Taking credit back is its own path, reached by name. The amount field is positive on
+    // BOTH paths — the direction carries the sign, which is the whole of D3-B08 — so what
+    // goes on the wire is still the negative number the server expects.
+    await openAdjustAndFill("10", "Bar tab", { takeBack: true });
+    await toCheck();
+    await apply();
 
     await waitFor(() => {
       const post = stub.calls.find((c) => c.method === "POST");
@@ -175,9 +243,9 @@ describe("AdminMembers — adjust credit", () => {
   ];
 
   async function applyForBooking() {
-    await openAdjustAndFill("24", "Compensation");
-    fireEvent.change(await screen.findByLabelText("For booking (optional)"), { target: { value: BOOKING } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await openAdjustAndFill("24", "Compensation", { booking: BOOKING });
+    await toCheck();
+    await apply();
   }
 
   it("shows booking_not_found at the field, keeping the form and the typed values", async () => {
@@ -192,12 +260,14 @@ describe("AdminMembers — adjust credit", () => {
     expect(alert).toHaveTextContent(/pick one from the list/);
     expect(screen.queryByText("Credit adjustment failed.")).not.toBeInTheDocument();
 
-    // Form still open, amount and reason intact — nothing to re-type, and no second POST.
-    expect(screen.getByLabelText(/Amount \(credits/)).toHaveValue("24");
+    // The sheet stays where it was, on the check step, with the figures intact — nothing to
+    // re-type, and no second POST.
+    expect(screen.getByText("Balance after")).toBeInTheDocument();
     expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(1);
 
     // Choosing a different booking clears the verdict; it was about the old one.
-    fireEvent.change(screen.getByLabelText("For booking (optional)"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.change(await screen.findByLabelText("For booking (optional)"), { target: { value: "" } });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -241,13 +311,20 @@ describe("AdminMembers — adjust credit", () => {
     // The API binds it as a Guid? and answers a bare 400 otherwise; the check is here,
     // where the admin can fix it.
     fireEvent.change(screen.getByLabelText("Booking ID"), { target: { value: "last tuesday" } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await toCheck();
+    await apply();
     expect(await screen.findByText(/That booking ID is not one/)).toBeInTheDocument();
     expect(stub.calls.some((c) => c.method === "POST")).toBe(false);
 
     const other = "12345678-1234-4123-8123-123456789abc";
-    fireEvent.change(screen.getByLabelText("Booking ID"), { target: { value: other } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    // Back to step 2. `RelatedBookingField` is unmounted while the check step is showing, so
+    // it comes back on its own terms and the free-text escape hatch has to be chosen again —
+    // which is what a volunteer correcting a mis-typed id actually does.
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.change(await screen.findByLabelText("For booking (optional)"), { target: { value: "other" } });
+    fireEvent.change(await screen.findByLabelText("Booking ID"), { target: { value: other } });
+    await toCheck();
+    await apply();
     await waitFor(() => {
       expect(stub.calls.find((c) => c.method === "POST")?.body).toEqual(expect.objectContaining({ amountCredits: 24, reason: "Compensation", relatedBookingId: other }));
     });
@@ -292,9 +369,24 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
   ];
 
   async function fill(amount: string, reason: string) {
-    fireEvent.click(await screen.findByRole("button", { name: "Adjust credit" }));
-    fireEvent.change(await screen.findByLabelText(/Amount \(credits/), { target: { value: amount } });
-    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: reason } });
+    fireEvent.click(await screen.findByRole("button", { name: /Top up/ }));
+    fireEvent.change(await screen.findByLabelText("Another amount"), { target: { value: amount } });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(await screen.findByLabelText("Goodwill — something went wrong"));
+    fireEvent.change(screen.getByLabelText("And why this one?"), { target: { value: reason } });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  }
+
+  /**
+   * Arm the confirm and return the FIRED control, so a case can press it twice.
+   *
+   * The double-click this whole block exists for is now a double-click on the armed button:
+   * `ConfirmButton` arms on the first press and fires on the second, and the guard being
+   * tested is what happens when the second press lands twice.
+   */
+  async function armed() {
+    fireEvent.click(await screen.findByRole("button", { name: /^(Add|Take back) / }));
+    return screen.findByRole("button", { name: /choose again to confirm/ });
   }
 
   it("posts once for a double-click, and names the movement so a retry cannot duplicate it", async () => {
@@ -302,11 +394,11 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
     renderPage(<AdminMembersPage />);
 
     await fill("7", "fast dblclick probe");
-    const apply = screen.getByRole("button", { name: "Apply" });
-    fireEvent.click(apply);
-    fireEvent.click(apply);
+    const fire = await armed();
+    fireEvent.click(fire);
+    fireEvent.click(fire);
 
-    await waitFor(() => expect(screen.getByText(/Credited Ada Lovelace 7\.00 cr/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Done\. Ada Lovelace now has 127\.00 cr\./)).toBeInTheDocument());
 
     const posts = stub.calls.filter((c) => c.method === "POST" && c.path === ADJUST);
     expect(posts).toHaveLength(1);
@@ -325,10 +417,12 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
     renderPage(<AdminMembersPage />);
 
     await fill("7", "coaching credit");
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
-    expect(await screen.findByText("Credit adjustment failed.")).toBeInTheDocument();
+    fireEvent.click(await armed());
+    // A 500 is NOT a refusal: the request may have been applied and the answer lost coming
+    // back, so the toast says the club could not be reached and does NOT say nothing changed.
+    expect(await screen.findByText("Couldn't reach the club.")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    fireEvent.click(await armed());
     await waitFor(() => expect(stub.calls.filter((c) => c.method === "POST").length).toBe(2));
 
     const [first, second] = stub.calls.filter((c) => c.method === "POST");
@@ -342,14 +436,17 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
     renderPage(<AdminMembersPage />);
 
     await fill("7", "coaching credit");
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
-    await waitFor(() => expect(screen.getByText(/Credited Ada Lovelace 7\.00 cr/)).toBeInTheDocument());
+    fireEvent.click(await armed());
+    await waitFor(() => expect(screen.getByText(/Done\. Ada Lovelace now has 127\.00 cr\./)).toBeInTheDocument());
+    // The receipt stays until it is closed — that is the point of it — so the second pass
+    // starts by closing it, exactly as a volunteer would.
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
     // Reopened form, same member, same amount, same reason — and a different movement. A
     // guard keyed on the member or the amount would refuse this, which is the same bug
     // pointing the other way: money that should have moved and did not.
     await fill("7", "coaching credit");
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    fireEvent.click(await armed());
     await waitFor(() => expect(stub.calls.filter((c) => c.method === "POST").length).toBe(2));
 
     const [first, second] = stub.calls.filter((c) => c.method === "POST");
@@ -655,7 +752,7 @@ describe("AdminMembers — the table fits the screen it is on", () => {
     renderPage(<AdminMembersPage />);
 
     await screen.findByText("Ada Lovelace");
-    const actions = screen.getByRole("button", { name: "Adjust credit" }).parentElement!;
+    const actions = screen.getByRole("button", { name: "Top up" }).parentElement!;
     // `flex-row`, and NOT `flex-wrap` either — the two are what the round-3 and round-4
     // lanes asserted against each other, and Chromium settled it: allowing the buttons to
     // wrap lets the table squeeze this column from 197px to 96px, and the row grows from
@@ -670,7 +767,7 @@ describe("AdminMembers — the table fits the screen it is on", () => {
     renderPage(<AdminMembersPage />);
 
     await screen.findByText("Ada Lovelace");
-    const cell = screen.getByRole("button", { name: "Adjust credit" }).closest("td")!;
+    const cell = screen.getByRole("button", { name: "Top up" }).closest("td")!;
     // Measured in Chromium: without this, all 27 action controls of a seven-member club sat
     // outside the scroller's box at both 768px and 1440px until the admin found the sideways
     // scroll. With it, 27 of 27 are visible before anything is scrolled. Opaque background

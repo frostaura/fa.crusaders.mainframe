@@ -50,6 +50,15 @@ function describeRegenerated(iso: string): string {
 }
 
 /** The key itself: masked, revealable, copyable. */
+/**
+ * Where the keyboard lands once the key has been regenerated. (R3 adoption)
+ *
+ * A constant rather than a literal in two places: `focusAfter` names a node that the update
+ * removing the control has not rendered yet, so the two spellings would have to agree across
+ * a re-render nobody can see failing — the search would simply find nothing and fall silent.
+ */
+const DEVICE_KEY_LINE_ID = "device-api-key-line";
+
 function KeyLine({ apiKey }: { apiKey: string }) {
   const [revealed, setRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -79,7 +88,10 @@ function KeyLine({ apiKey }: { apiKey: string }) {
     // for the same volunteer in the same club — and a fixed height clips its own words once
     // they wrap, which at this text size they do.
     <div className="flex min-w-0 flex-wrap items-start gap-2">
-      <code className="block min-w-0 flex-1 break-all rounded-lg bg-slate-100 p-2 font-mono text-xs" aria-label="Device API key">
+      {/* The id is what `focusAfter` on the regenerate confirm lands on (R3 adoption): the
+          key itself is the only thing on this panel that changed, and it carries its own
+          accessible name, so focusing it reads the new key out. */}
+      <code id={DEVICE_KEY_LINE_ID} className="block min-w-0 flex-1 break-all rounded-lg bg-slate-100 p-2 font-mono text-xs" aria-label="Device API key">
         {revealed ? apiKey : maskKey(apiKey)}
       </code>
       <Button variant="outline" className="min-h-11 px-2 text-xs" onClick={() => setRevealed((r) => !r)} aria-label={revealed ? "Hide device API key" : "Reveal device API key"}>
@@ -178,7 +190,15 @@ export function DeviceApiKeyPanel() {
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <ConfirmButton
               idleLabel="Regenerate key"
+              cancelLabel="Keep the current key"
               confirmLabel="Reflash every board after this — regenerate?"
+              // R3 adoption. There is one club key, so the subject is the club's estate rather
+              // than a row — but the way out was named "Cancel", which on the most expensive
+              // control in the product says nothing about what it preserves. `focusAfter`
+              // lands on the key line, which is what changed and is the only thing on the
+              // panel that can tell a keyboard user the action landed.
+              subject="the key every board is using"
+              focusAfter={() => document.getElementById(DEVICE_KEY_LINE_ID)}
               onConfirm={regenerate}
               tone="danger"
             />

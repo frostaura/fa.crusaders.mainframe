@@ -206,7 +206,7 @@ function DoorEvents({ read, timezone }: { read: FeedRead; timezone: string }) {
  * One door's recent scans, open on arrival, with the day's own two numbers above them.
  *
  * <p>
- * <b>Not collapsed, unlike the panel on `/admin/devices`.</b> That one is shut by default
+ * <b>Not collapsed, unlike the panel on `/admin/monitoring/devices`.</b> That one is shut by default
  * because a club with eight boards would make eight extra calls on a list page for panels
  * nobody opened. This page is one door and the feed is why it was opened.
  * </p>
@@ -255,7 +255,7 @@ export function DoorFeed({ door, today, read, clock }: {
               nothing else. Standing text on this page carries no live role at all. */}
           <p aria-live="polite" className="sr-only">{announcement}</p>
           <Link
-            to={`/admin/doors/log?door=${encodeURIComponent(door.id)}`}
+            to={`/admin/monitoring/doors/log?door=${encodeURIComponent(door.id)}`}
             className="inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-control px-5 text-sm font-medium"
           >
             All scans at this door

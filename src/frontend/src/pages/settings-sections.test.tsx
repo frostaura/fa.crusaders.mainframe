@@ -24,7 +24,7 @@ describe("the settings screen as a document", () => {
    * long the lock is released" link paid for the booking, credits and court-box blocks first,
    * every time.
    */
-  it("is nine named regions with a jump nav at the top", async () => {
+  it("is a named region per card, with a jump nav that names every one of them", async () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
@@ -39,13 +39,20 @@ describe("the settings screen as a document", () => {
       .map((id) => document.getElementById(id)!.textContent);
     for (const heading of [
       "Booking", "Opening hours", "No-show & cancellation policy", "Credits & top-ups",
-      "Court access", "Court boxes & identification", "Door gates", "Records", "Courts",
+      "Court access", "Court boxes & identification", "Door gates", "Records",
+      // eco — ruling 13's three new blocks. Counted rather than listed separately, because
+      // the property being held is that the nav and the document cannot drift apart: a block
+      // added without a nav entry is the seventy-six-tab-stops finding, re-shipped.
+      "Box screens & scanning", "Limits & confirmations", "Monitoring & live updates",
+      "Courts",
     ]) {
       expect(names, `no region named ${heading}`).toContain(heading);
     }
 
     const nav = screen.getByRole("navigation", { name: "Jump to section" });
-    expect(within(nav).getAllByRole("link")).toHaveLength(9);
+    // Derived from the regions rather than pinned to a number, so adding a block and its nav
+    // entry together passes and adding one without the other does not.
+    expect(within(nav).getAllByRole("link")).toHaveLength(names.length);
   });
 
   /**

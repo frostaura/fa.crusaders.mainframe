@@ -339,7 +339,12 @@ export const SETTINGS_FIXTURE = {
   // The three door-gate numbers, at the API's own defaults. `active_member` is the default
   // policy, so a fixture that wanted the strict one has to say so — which is what makes the
   // tests of `booking_window` prove something.
-  gate_unlock_seconds: 3,
+  // Ruling 5 / GOAL item 2: the API's default moved from 3 seconds to 15. Three was not long
+  // enough to get a door open while holding a bag, which is the whole of the finding. The
+  // fixture follows the API's default because that is what it claims to be — a club running
+  // the shipping defaults — and a fixture that lags the default is a suite that agrees with
+  // a screen nobody has.
+  gate_unlock_seconds: 15,
   gate_access_policy: "active_member",
   gate_early_entry_minutes: 30,
 };

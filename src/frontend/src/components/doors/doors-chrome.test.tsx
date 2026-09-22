@@ -154,9 +154,10 @@ describe("the doors cue in the chrome", () => {
   it("is reachable without opening the gear", async () => {
     chrome([doorFixture()]);
 
-    // The tab is "Monitoring" now — the section the doors overview lives in. The point the
-    // test was written to pin is unchanged: an admin's landing screen names the surface, and
-    // it is not a 6 px dot on a cog.
+    // The tab is "Monitoring" now — the section the doors overview lives in, and the chrome
+    // lane has shipped it, so the admin lane's "either spelling" hedge is settled rather than
+    // carried. The point the test was written to pin is unchanged: an admin's landing screen
+    // names the surface, and it is not a 6 px dot on a cog.
     const inNav = (await screen.findAllByRole("link", { name: /Monitoring/ }))
       .some((link) => link.getAttribute("href") === "/admin/monitoring");
     expect(inNav).toBe(true);
@@ -343,7 +344,7 @@ describe("the club-wide shut banner", () => {
     expect(screen.queryByRole("link", { name: /Reopen the/ })).toBeNull();
     // The way back is the door's own page, which is never a dead link.
     expect(screen.getByRole("link", { name: "Side door" }))
-      .toHaveAttribute("href", "/admin/doors/99999999-9999-9999-9999-999999999999");
+      .toHaveAttribute("href", "/admin/monitoring/doors/99999999-9999-9999-9999-999999999999");
   });
 
   it("is absent while every door is open", async () => {
@@ -387,13 +388,13 @@ describe("the club-wide shut banner", () => {
 
   /**
    * <b>C17-21, found by looking at a rendered overview.</b> The banner's action linked to
-   * `/admin/doors`, which is a dead control once you are already there — and the doors page
+   * `/admin/monitoring/doors`, which is a dead control once you are already there — and the doors page
    * carries the real fleet control a few hundred pixels below it, so one screen offered the
    * same action twice, one of them inert. The sentence stays everywhere; the link stands
    * down where the page beneath it can do the job.
    */
   it("offers no link of its own on the page that carries the real control", async () => {
-    chrome([doorFixture({ enabled: false, shut_by_shut_all_at: ago(120) })], "/admin/doors");
+    chrome([doorFixture({ enabled: false, shut_by_shut_all_at: ago(120) })], "/admin/monitoring/doors");
 
     const banner = await shutBanner();
     expect(banner).toHaveTextContent("1 of 1 door shut");
@@ -405,7 +406,7 @@ describe("the club-wide shut banner", () => {
 
     const banner = await shutBanner();
     expect(within(banner.closest("div")!).getByRole("link", { name: "Reopen the door shut together" }))
-      .toHaveAttribute("href", "/admin/doors");
+      .toHaveAttribute("href", "/admin/monitoring/doors");
   });
 
   /** B14 — it printed across the top of the door card that goes on a wall, Reopen and all. */
@@ -530,7 +531,7 @@ describe("the admin Home row", () => {
 
     expect(await screen.findByText("Admin · Doors")).toBeInTheDocument();
     expect(screen.getByText("Side door has not been heard from.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Admin · Doors/ })).toHaveAttribute("href", "/admin/doors");
+    expect(screen.getByRole("link", { name: /Admin · Doors/ })).toHaveAttribute("href", "/admin/monitoring/doors");
   });
 
   it("says a shut door is shut rather than that it has gone quiet", async () => {
@@ -620,7 +621,7 @@ describe("the admin Home row", () => {
  *
  * <p>
  * The banner re-read only on navigation, so it sat frozen on `/schedule` while another admin
- * shut every door in the club — and `/admin/doors` fired three identical `GET /admin/doors`
+ * shut every door in the club — and `/admin/monitoring/doors` fired three identical `GET /admin/monitoring/doors`
  * on mount, because the banner, the page and the gear badge were three readers of one fact.
  * One store, one request, polling on every route.
  * </p>

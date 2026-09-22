@@ -169,6 +169,25 @@ describe("no doors surface writes a time in the reader's own locale", () => {
   const SURFACES = [
     "components/doors",
     "components/member-door",
+    // R3 left this one reported rather than fixed, exactly as the note above prescribes:
+    // the device activity feed's `<time title>` went through `utils.formatInstant` and wrote
+    // "9/19/26, 9:25 PM" in the reader's own locale, on the page an admin reconciles a court
+    // box's night from. Added here in the same commit that fixed it.
+    "pages/AdminDevices.tsx",
+    // eco: the six new admin surfaces write times too, and they joined this list in the same
+    // wave that created them rather than a round later — which is how `AdminDevices` came to
+    // be on it at all. `pages/monitoring` is covered here AND by its own posture test; two
+    // checks on one rule is cheap, and this one is the list a reader looks at.
+    "pages/monitoring",
+    "components/monitoring",
+    "components/groups",
+    "components/members",
+    "pages/AdminGroups.tsx",
+    "pages/AdminSchedules.tsx",
+    "pages/AdminScheduleDetail.tsx",
+    "lib/monitoringCopy.ts",
+    "lib/nightCopy.ts",
+    "lib/deviceFaultCopy.ts",
     "pages/AdminDoors.tsx",
     "pages/AdminDoorsCard.tsx",
     "pages/AdminDoorsDetail.tsx",
@@ -183,6 +202,13 @@ describe("no doors surface writes a time in the reader's own locale", () => {
     "components/LedgerTable.tsx",
     "pages/Wallet.tsx",
     "lib/walletCopy.ts",
+    // The repeating-bookings surface. Its INSTANTS (next_occurrence, a change record's
+    // occurred_at, a conflict's starts_at) go through this module; its bare club-local dates
+    // do not and must not — see the header of `lib/scheduleCopy.ts` for why turning a
+    // YYYY-MM-DD into an instant to format it is the DST bug in the last place anyone looks.
+    // The two pages themselves are already named above, with the rest of the eco wave.
+    "components/schedules",
+    "lib/scheduleCopy.ts",
   ];
 
   const sourcesUnder = (rel: string): string[] => {

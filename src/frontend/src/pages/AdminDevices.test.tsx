@@ -12,7 +12,7 @@ import {
   renderPage,
   stubFetch,
 } from "../test/harness";
-import { formatInstant } from "../lib/utils";
+import { clubInstant } from "../lib/clubClock";
 
 /**
  * The Devices screen, under the hobby-grade device contract.
@@ -1448,7 +1448,7 @@ describe("AdminDevices", () => {
       // board answered N seconds ago and nothing more.
       expect(screen.getByText("Reporting")).toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Manage Front door on Doors" }))
-        .toHaveAttribute("href", "/admin/doors/99999999-9999-9999-9999-999999999999");
+        .toHaveAttribute("href", "/admin/monitoring/doors/99999999-9999-9999-9999-999999999999");
     });
 
     /**
@@ -1568,7 +1568,7 @@ describe("AdminDevices", () => {
   // Round G3, F2. The board has written an audit row for every decision since it shipped
   // and no screen read one.
   //
-  // A2.5 moved the DOOR's half of this to /admin/doors/:id, where the feed is open on
+  // A2.5 moved the DOOR's half of this to /admin/monitoring/doors/:id, where the feed is open on
   // arrival, chip-first, and renders an offline row three distinct ways. What is tested
   // here is the panel this page still has — a court box's — and every claim below is one
   // the panel makes whatever kind of board it is reading.
@@ -1699,7 +1699,10 @@ describe("AdminDevices", () => {
 
       const when = await screen.findByText(/ago$/);
       expect(when).toHaveAttribute("datetime", at);
-      expect(when.getAttribute("title")).toBe(formatInstant(at));
+      // The CLUB's instant, not the reader's. The runner pins TZ to the club's own zone, so
+      // this assertion alone cannot tell the two apart — `clubClock.test.ts`'s SURFACES list
+      // is what makes the wrong formatter fail, and it names this page from the same commit.
+      expect(when.getAttribute("title")).toBe(clubInstant(at));
     });
 
     it("says nothing is recorded yet rather than showing an empty panel", async () => {

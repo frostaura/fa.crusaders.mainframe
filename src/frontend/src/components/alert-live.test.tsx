@@ -202,8 +202,54 @@ describe("the one standing notice on the doors surface", () => {
       />,
     );
 
-    expect(screen.getByRole("status")).toHaveTextContent(/Front door/);
     expect(screen.queryByRole("alert"), "a shut door shouts over the page it is describing")
       .not.toBeInTheDocument();
+  });
+
+  /**
+   * <b>R3 adoption — polite was right about the ROLE and wrong about the repetition.</b>
+   *
+   * <p>
+   * The door's own page re-reads itself, and this branch is conditional on
+   * <code>!door.enabled</code>: every poll that re-evaluates the condition mounts a fresh
+   * <code>role="status"</code> with the sentence already in it, which a screen reader
+   * announces as a change. Over the ten minutes an admin spends working out why a door is
+   * shut, that is the same forty-word notice read back a dozen times — the exact C-M2
+   * finding <code>live="standing"</code> was built for, on the one surface that had not
+   * adopted it. <code>standing</code> keeps the polite urgency and adds the memory.
+   * </p>
+   *
+   * <p>
+   * The <code>announceKey</code> is the door's id, not the sentence: a door shut, reopened
+   * and shut again produces the same words twice, and the second shut is news. Keyed on the
+   * DOOR, the change of words within that channel is what speaks — so reopening and
+   * re-shutting the front door is announced, and polling it is not.
+   * </p>
+   */
+  it("says a shut door once, not on every poll that re-mounts the notice", () => {
+    const control = (
+      <DoorShutControl
+        door={SHUT_DOOR as Parameters<typeof DoorShutControl>[0]["door"]}
+        onDone={() => Promise.resolve()}
+        shutAt="09:48"
+        online
+        timezone="Africa/Johannesburg"
+      />
+    );
+
+    /** What a screen reader is handed, as in the block above: the live region, not the banner. */
+    const spoken = () => [...document.querySelectorAll("[aria-live='polite']")]
+      .map((n) => n.textContent ?? "").join("");
+
+    const first = render(control);
+    expect(spoken(), "the standing sentence arrives on the first read").toMatch(/Front door/);
+    first.unmount();
+
+    // The second read of the same fact — a poll re-evaluating `!door.enabled`, or a return to
+    // the page. The notice is visible again, and it is not said again.
+    render(control);
+    expect(spoken(), "the same shut door, announced twice").toBe("");
+    expect(screen.getAllByText(/Front door/).length, "the visible notice is still there to be read")
+      .toBeGreaterThan(0);
   });
 });

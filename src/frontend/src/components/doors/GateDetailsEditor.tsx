@@ -10,7 +10,7 @@ import { type AdminDoorDevice, type PowerLossBehaviour } from "../../lib/api";
  * Everything an admin can write about one door, in ONE form with ONE Save.
  *
  * <p>
- * <b>Moved here from `pages/AdminDevices.tsx` (A2.5), not copied.</b> `/admin/doors` is now
+ * <b>Moved here from `pages/AdminDevices.tsx` (A2.5), not copied.</b> `/admin/monitoring/doors` is now
  * the only place a gate is edited, named, shut, reopened or deleted, and Devices renders
  * gates as read-only rows. The reason is the one `lib/gateCopy.ts`'s own header records: the
  * out-of-service consequence had three call sites and shipped three rounds running with the
@@ -23,7 +23,7 @@ import { type AdminDoorDevice, type PowerLossBehaviour } from "../../lib/api";
  * name and door name" under the controls and "Edit" on the door card — opening two forms
  * with two Saves over the same four fields of the same row. A reviewer under time pressure
  * edited one, saved, and could not find where the other field lived. All four go over a
- * single `PATCH /admin/devices/{id}`, so two saves were never anything but two chances to
+ * single `PATCH /admin/monitoring/devices/{id}`, so two saves were never anything but two chances to
  * finish half the job.
  * </p>
  *

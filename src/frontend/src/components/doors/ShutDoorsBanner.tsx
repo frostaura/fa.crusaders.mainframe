@@ -48,7 +48,7 @@ import { type DoorsChrome } from "./useDoorsChrome";
  * re-rendered on every navigation an admin makes, so a blind admin met the consequence of
  * their own decision as an interruption on Bookings, on Settings, on Members, all session.
  * Scoping the region to the sentence matters as much as the role: the banner's ACTION half
- * changes with the route (the fleet link stands down on `/admin/doors`, per-door links
+ * changes with the route (the fleet link stands down on `/admin/monitoring/doors`, per-door links
  * change), and a live region announces whenever its contents change — so a region wrapping
  * the whole banner re-announces on navigation even when the sentence is word-for-word what
  * it was.
@@ -79,7 +79,7 @@ export function ShutDoorsBanner({ chrome }: { chrome: DoorsChrome }) {
   if (shut.length === 0 || chrome.total === 0) return null;
 
   /**
-   * C17-21: the banner's action was a link to `/admin/doors`, which is a DEAD CONTROL once
+   * C17-21: the banner's action was a link to `/admin/monitoring/doors`, which is a DEAD CONTROL once
    * you are already there — and the doors page carries the real fleet control a few hundred
    * pixels below it, so the screen offered the same action twice, once inertly. The sentence
    * is still worth carrying everywhere (it is the standing reminder the club has no
@@ -128,19 +128,19 @@ export function ShutDoorsBanner({ chrome }: { chrome: DoorsChrome }) {
       </span>
       {onDoorsPage ? null : byFleet.length > 0 ? (
         <Link
-          to="/admin/doors"
+          to="/admin/monitoring/doors"
           className="ml-auto inline-flex min-h-11 items-center rounded-lg border border-danger-strong px-4 font-medium"
         >
           {doorFleetReopenLabel(byFleet.length)}
         </Link>
       ) : (
-        // C17-21: the fleet link was a dead control once you were already on /admin/doors.
+        // C17-21: the fleet link was a dead control once you were already on /admin/monitoring/doors.
         // A per-door link is never dead — it goes somewhere the reader is not.
         <span className="ml-auto flex flex-wrap gap-2">
           {shut.map((door) => (
             <Link
               key={door.id}
-              to={`/admin/doors/${door.id}`}
+              to={`/admin/monitoring/doors/${door.id}`}
               className="inline-flex min-h-11 items-center rounded-lg border border-danger-strong px-4 font-medium"
             >
               {door.name}

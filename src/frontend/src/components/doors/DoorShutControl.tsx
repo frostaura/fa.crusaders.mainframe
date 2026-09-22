@@ -1,4 +1,3 @@
-import { useEffect, useRef } from "react";
 import { Alert } from "../Alert";
 import { ConfirmButton } from "../ConfirmButton";
 import {
@@ -60,18 +59,40 @@ export function DoorShutControl({ door, onDone, shutAt, online, timezone }: {
    * is about to destroy and may never take focus from somewhere else, which is the same rule
    * `ConfirmButton` states about itself.
    * </p>
+   *
+   * <p>
+   * <b>R3 adoption: this is now `ConfirmButton`'s own `focusAfter`, not an effect here.</b>
+   * The two did the same job under the same guard — `lib/focusAfterAction` acts only when
+   * focus is on the body or on a node that has left the document — and the effect had one
+   * defect the shared helper does not: it ran ONCE, in the tick the payload flipped, and
+   * `door.enabled` flips when the page's re-read lands rather than when the action settles.
+   * The helper keeps looking, backing off over about a second, precisely because the control
+   * it is looking for is usually rendered by a later update than the one that removed the
+   * old one. Two mechanisms for one behaviour is also how they drift.
+   * </p>
    */
-  const groupRef = useRef<HTMLDivElement>(null);
-  const wasEnabled = useRef(door.enabled);
-  useEffect(() => {
-    const flipped = wasEnabled.current !== door.enabled;
-    wasEnabled.current = door.enabled;
-    if (!flipped) return;
-    const active = document.activeElement;
-    if (active === null || active === document.body) {
-      groupRef.current?.querySelector("button")?.focus();
-    }
-  }, [door.enabled]);
+  /**
+   * The control that will stand where this one stood — named by the state it belongs to.
+   *
+   * <p>
+   * <b>Not "the first button in the wrapper".</b> That was the first shape of this and it is
+   * a trap worth naming: `focusAfterAction` looks the instant the action settles, and at that
+   * instant the page has not re-read itself yet, so the wrapper still holds the control that
+   * is about to be replaced. The helper found it, focused it, and stood down — and the payload
+   * then removed it, leaving focus on `&lt;body&gt;` with nothing left looking. A successor has
+   * to be identified by what it WILL be, or the search resolves to the thing it is waiting for
+   * to disappear.
+   * </p>
+   *
+   * <p>
+   * `wanted` is read at render time from the state this control is moving away FROM, so the
+   * closure the confirm captures is asking for the other branch by name.
+   * </p>
+   */
+  const wanted = door.enabled ? "shut" : "open";
+  const successor = () => document.querySelector<HTMLElement>(
+    `[data-door-control="${door.id}"][data-door-state="${wanted}"] button`,
+  );
   // B3: ONE situation object, and every armed consequence below is generated from it. The
   // confirms used to describe the pair in the abstract, so a door in contact was told about
   // doors that are not — and an unnamed door, which holds no list at all, was told it goes
@@ -84,18 +105,28 @@ export function DoorShutControl({ door, onDone, shutAt, online, timezone }: {
   const situation: DoorSituation = { online, named: door.gate_key !== null, heardShut };
   if (!door.enabled) {
     return (
-      // R3-10: the wrapper carries the ref the page focuses after a confirm. Both branches
-      // return one, and they are DIFFERENT elements to React — which is why focus landed on
-      // `<body>`: the control an admin pressed is unmounted by the very state change it
-      // caused, and `ConfirmButton`'s own restore has no trigger left to put it back on.
-      <div ref={groupRef} className="space-y-3">
+      // R3-10 / R3 adoption: the wrapper is NAMED, so the other branch can be found from
+      // outside this component once React has rendered it. Both branches return a wrapper and
+      // they are DIFFERENT elements to React — which is why focus landed on `<body>`: the
+      // control an admin pressed is unmounted by the very state change it caused, and
+      // `ConfirmButton`'s own restore has no trigger left to put it back on.
+      <div data-door-control={door.id} data-door-state="shut" className="space-y-3">
         {/*
           C11: a shut door is a STANDING fact, and this sat in an assertive region on a page
           that re-reads itself every fifteen seconds. What is standing is polite; only a change
           somebody else caused earns an interruption. `live` is Alert's own prop — the role no
           longer depends on the order of a spread.
         */}
-        <Alert tone="danger" live="polite">
+        {/*
+          R3 adoption: `standing`, not `polite`. See the paragraph on C11 above — polite was
+          right about the URGENCY and said nothing about the repetition. This branch is
+          conditional on the door being shut, on a page that re-reads itself, so a poll that
+          re-evaluates the condition mounts a fresh live region with the sentence already in
+          it and a screen reader announces it again. Keyed on the DOOR rather than on the
+          words, because a door shut, reopened and shut again produces the same sentence
+          twice and the second shut is news.
+        */}
+        <Alert tone="danger" live="standing" announceKey={`door-shut:${door.id}`}>
           {doorShutStandingNotice(door.name, shutAt, door.shut_by_name ?? null)}
         </Alert>
         {/* R3-1: the confirmation clause, from `shut_heard_at` and never from an age. A door
@@ -120,6 +151,12 @@ export function DoorShutControl({ door, onDone, shutAt, online, timezone }: {
           cancelLabel="Leave it shut"
           confirmLabel={doorReopenConfirm(situation)}
           ariaLabel={door.name}
+          // R3 adoption. `subject` names what the way OUT keeps — "Leave it shut — Front
+          // door" — so the cancel does not carry the door's name only by way of the verb it
+          // is refusing. `focusAfter` replaces the effect above: the Shut control that takes
+          // this one's place is where the person was standing.
+          subject={door.name}
+          focusAfter={successor}
           onConfirm={() => onDone(true)}
           className="min-h-11 w-full"
         />
@@ -127,7 +164,7 @@ export function DoorShutControl({ door, onDone, shutAt, online, timezone }: {
     );
   }
   return (
-    <div ref={groupRef} className="space-y-3">
+    <div data-door-control={door.id} data-door-state="open" className="space-y-3">
       {/* A14: the power-loss sentence used to be printed here AND on the door card directly
           above, twice on one screen. The card is where it belongs — it has the room to say
           it is a property of the lock and not of this app.
@@ -139,6 +176,10 @@ export function DoorShutControl({ door, onDone, shutAt, online, timezone }: {
         cancelLabel="Keep it open"
         confirmLabel={doorShutConfirm(situation)}
         ariaLabel={door.name}
+        // "Keep it open — Front door": the way out, named after what it keeps. Without the
+        // subject it is one of a column of identical "Keep it open" controls.
+        subject={door.name}
+        focusAfter={successor}
         onConfirm={() => onDone(false)}
         tone="danger"
         className="min-h-11 w-full"

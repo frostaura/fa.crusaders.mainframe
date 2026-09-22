@@ -1,5 +1,4 @@
 import { NavLink } from "react-router-dom";
-import { Card } from "../Card";
 import { ScrollArea } from "../ScrollArea";
 import { cn } from "../../lib/utils";
 
@@ -17,9 +16,10 @@ import { cn } from "../../lib/utils";
  *
  * <p>
  * <b>This file is the shell, deliberately.</b> The pages under it — the control board, faults,
- * a person's night, the change record — belong to the admin lane. What ships here is the route
- * scaffolding, this strip, and the permanent redirects, so that the URLs in outage emails, in
- * bookmarks and on the printed door card keep working on the day the pages land.
+ * a person's night, the change record — came from the admin lane and have now landed. What
+ * lives here is the one list every one of them is reconciled against, and this strip. The
+ * permanent redirects that keep the URLs in outage emails, in bookmarks and on the printed
+ * door card working are in `App.tsx`, beside the routes they point at.
  * </p>
  */
 
@@ -78,43 +78,13 @@ export function MonitoringNav({ className }: { className?: string }) {
   );
 }
 
-/**
- * The wrapper an admin-lane Monitoring page renders itself inside.
- *
- * `title` is the page's own `<h1>` — the route announcer moves focus to `#main-content h1`, so
- * every page under this section needs exactly one and it belongs here rather than in six
- * copies.
+/*
+ * There was a `MonitoringSection` wrapper and a `MonitoringPlaceholder` here, and both are
+ * gone now that the admin lane's six pages have landed. The placeholder existed so that the
+ * four unbuilt paths could be real routes rather than absent ones — a nav entry that 404s
+ * teaches an admin that the console is broken — and it was always the one export that would
+ * be deleted rather than merged. The wrapper went with it: each page carries its own header
+ * because each header is different (the control board holds the wall-view switch and a
+ * freshness line, faults holds its own), and a wrapper with one shape and no callers is a
+ * worse thing to leave behind than six honest headers.
  */
-export function MonitoringSection({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
-      <MonitoringNav />
-      {children}
-    </div>
-  );
-}
-
-/**
- * What a Monitoring destination renders until the admin lane builds it.
- *
- * <p>
- * <b>A placeholder that says it is one.</b> The alternative was to leave the four unbuilt
- * paths off the route table, which makes the sub-nav above either wrong or shorter than the
- * IA — and a nav entry that 404s teaches an admin that the console is broken. This says the
- * true thing instead, and it is the one file the admin lane deletes rather than merges.
- * </p>
- */
-export function MonitoringPlaceholder({ title, what }: { title: string; what: string }) {
-  return (
-    <MonitoringSection title={title}>
-      <Card>
-        {/* `role="status"`, not `alert`: nothing has gone wrong, and this is a standing fact
-            about the screen rather than an interruption. */}
-        <p role="status" className="text-text-secondary">
-          {what} isn't built yet. The rest of Monitoring is — the tabs above work.
-        </p>
-      </Card>
-    </MonitoringSection>
-  );
-}

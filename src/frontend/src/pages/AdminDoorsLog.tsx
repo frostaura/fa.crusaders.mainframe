@@ -547,7 +547,7 @@ function AdminDoorsLogPageBody() {
     <div className="space-y-6">
       <header className="space-y-2 sm:flex sm:items-start sm:justify-between sm:gap-4 sm:space-y-0">
         <div>
-          <Link to="/admin/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">← Doors</Link>
+          <Link to="/admin/monitoring/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">← Doors</Link>
           {/* E6 / R3-19: the heading is what a screenshot of this page is read as, and it
               said "All scans, all doors" over one door's refusals on one Tuesday. */}
           <h1 className="text-2xl font-bold tracking-tight">
@@ -822,7 +822,7 @@ function AdminDoorsLogPageBody() {
                 <p key={sentence} className="text-sm text-text-secondary">{sentence}</p>
               ))}
               {doorName && !chosenRemoved && (
-                <Link to="/admin/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">
+                <Link to="/admin/monitoring/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">
                   Check it on Doors
                 </Link>
               )}

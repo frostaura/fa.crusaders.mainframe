@@ -178,7 +178,9 @@ test.describe("C16 / E-L4 / C19 — the section strip", () => {
       }
 
       // E-L4 named Doors specifically — the sixth tab, the one that was off the end. It is
-      // Monitoring now (D3 §3.1); still sixth, still the one this test exists for.
+      // Monitoring now (D3 §3.1); still sixth, still the one this test exists for. The admin
+      // lane's "either spelling" hedge was written against a chrome that had not landed yet;
+      // it has, so this pins the one destination rather than tolerating two.
       await expect(strip.getByRole("link", { name: /^Monitoring/ })).toHaveAttribute("href", "/admin/monitoring");
     });
   }

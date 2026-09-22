@@ -382,7 +382,10 @@ describe("AdminSettings — door gates", () => {
     renderPage(<AdminSettingsPage />);
 
     const unlock = await screen.findByLabelText(/Unlock time/);
-    expect(unlock).toHaveValue(3);
+    // Ruling 5 / GOAL item 2: the shipping default moved from 3 seconds to 15, because three
+    // is not long enough to get a door open while holding a bag. The BOUNDS are unchanged —
+    // the firmware still caps the lock at 30 seconds whatever is set here.
+    expect(unlock).toHaveValue(15);
     expect(unlock).toHaveAttribute("min", "1");
     expect(unlock).toHaveAttribute("max", "30");
 

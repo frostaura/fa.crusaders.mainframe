@@ -79,7 +79,7 @@ function AdminDoorsCardPageBody() {
   if (failed) {
     return (
       <div className="space-y-3">
-        <Link to="/admin/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">← Doors</Link>
+        <Link to="/admin/monitoring/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">← Doors</Link>
         <Alert tone="danger">{DOORS_READ_FAILED}</Alert>
         <Button variant="outline" onClick={() => void load()}>Try again</Button>
       </div>
@@ -88,7 +88,7 @@ function AdminDoorsCardPageBody() {
   if (!door) {
     return (
       <div className="space-y-3">
-        <Link to="/admin/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">← Doors</Link>
+        <Link to="/admin/monitoring/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">← Doors</Link>
         <p className="text-sm text-text-secondary">
           That door is not on the club's list. It may have been deleted — a board re-registers itself
           on its next heartbeat, with no name.
@@ -108,7 +108,7 @@ function AdminDoorsCardPageBody() {
   return (
     <div className="space-y-4">
       <div data-print-hide className="space-y-3">
-        <Link to={`/admin/doors/${door.id}`} className="inline-flex min-h-11 items-center text-sm text-accent-strong">
+        <Link to={`/admin/monitoring/doors/${door.id}`} className="inline-flex min-h-11 items-center text-sm text-accent-strong">
           {`← ${doorDisplayName(door)}`}
         </Link>
         <p className="text-sm text-text-secondary">

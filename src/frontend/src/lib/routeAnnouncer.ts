@@ -62,7 +62,9 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   ["/admin/biometric", "Members"],
   /**
    * The old admin paths. Still named, because they are still ROUTES — permanent redirects
-   * rather than deletions (D3 §3.1), and the title is set before the redirect resolves.
+   * rather than deletions (D3 §3.1), and the title is set before the redirect resolves: a
+   * redirect renders for a tick, and the suite reads every `path=` in the router without
+   * caring what it renders.
    */
   ["/admin/devices", "Devices"],
   ["/admin/doors", "Doors"],
@@ -82,6 +84,12 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   ["/admin/monitoring/changes", "Change record"],
   ["/admin/settings", "Admin settings"],
   ["/admin/ledger", "Transactions"],
+  // eco / items 14, 3 and 19. Named for what an admin came to look at, never for the
+  // mechanism — these strings are a browser tab, a bookmark, a history entry and the first
+  // thing a screen reader says on arrival, and this audience does not read "recurrence".
+  ["/admin/schedules", "Repeating bookings"],
+  ["/admin/schedules/:id", "Repeating booking"],
+  ["/admin/groups", "Member groups"],
   /**
    * Development only — the route is registered behind `import.meta.env.DEV` and is not in the
    * production bundle. It is named here because the suite guard reconciles this table against

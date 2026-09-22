@@ -32,11 +32,21 @@ import { AdminDoorsPage } from "./pages/AdminDoors";
 import { AdminDoorsDetailPage } from "./pages/AdminDoorsDetail";
 import { AdminDoorsLogPage } from "./pages/AdminDoorsLog";
 import { AdminDoorsCardPage } from "./pages/AdminDoorsCard";
+// eco: Monitoring — the section that absorbs Doors and Devices and adds the four surfaces
+// GOAL items 6, 7, 10 and 14 asked for. The section shell and the nav entry belong to the
+// chrome lane; these are the pages.
+import { ControlBoardPage } from "./pages/monitoring/ControlBoard";
+import { MonitoringFaultsPage } from "./pages/monitoring/MonitoringFaults";
+import { MemberNightPage } from "./pages/monitoring/MemberNight";
+import { AdminChangeRecordPage } from "./pages/monitoring/AdminChangeRecord";
+// eco: item 14's calendar half, and items 3 + 19's admin half.
+import { AdminSchedulesPage } from "./pages/AdminSchedules";
+import { AdminScheduleDetailPage } from "./pages/AdminScheduleDetail";
+import { AdminGroupsPage } from "./pages/AdminGroups";
 import NotFoundPage from "./pages/NotFound";
 import { Card } from "./components/Card";
 import { Button } from "./components/Button";
 import { RouteAnnouncer } from "./components/RouteAnnouncer";
-import { MonitoringPlaceholder } from "./components/monitoring/MonitoringSection";
 
 /**
  * The primitives preview — development only, and dropped from the production bundle.
@@ -108,27 +118,31 @@ export default function App() {
             <Route path="/admin/webhooks" element={<RequireAuth admin><AdminWebhooksPage /></RequireAuth>} />
             <Route path="/admin/biometric" element={<Navigate to="/admin/members" replace />} />
             {/*
-              MONITORING (D3 §3.1, ruling 10) — one home for "how is the hardware doing".
+              MONITORING (D3 §3.1, ruling 10) — one section for "how is the club's estate
+              doing", and the six pages under it.
 
               Doors was a top-level tab and Devices was buried in the gear menu, while the two
-              pages already linked to each other across that boundary. The section is the new
-              home; the pages themselves have NOT moved on disk, so these routes point at the
-              same components they always did and the admin lane moves the files when it builds
-              the rest of the section.
+              pages already linked to each other across that boundary. Both MOVE here; neither
+              gets a copy, and the doors pages have not moved on disk, so those routes point at
+              the same components they always did. The old paths below are permanent redirects
+              for the same reason `/court-code` is one: they are in outage emails, in
+              bookmarks, in the pairing instructions on the Devices page and on the printed
+              card that is screwed to a door frame. A moved URL that 404s is a dead link
+              somebody finds while standing at a locked door.
 
               `/log` is declared BEFORE `/:id` or it resolves as a door id and the club log
               becomes a 404 nobody can explain. `/card` is a child of a door because it is that
               door's card, and its back link says so.
             */}
-            <Route path="/admin/monitoring" element={<RequireAuth admin><MonitoringPlaceholder title="Control board" what="The live court board" /></RequireAuth>} />
+            <Route path="/admin/monitoring" element={<RequireAuth admin><ControlBoardPage /></RequireAuth>} />
             <Route path="/admin/monitoring/doors" element={<RequireAuth admin><AdminDoorsPage /></RequireAuth>} />
             <Route path="/admin/monitoring/doors/log" element={<RequireAuth admin><AdminDoorsLogPage /></RequireAuth>} />
             <Route path="/admin/monitoring/doors/:id" element={<RequireAuth admin><AdminDoorsDetailPage /></RequireAuth>} />
             <Route path="/admin/monitoring/doors/:id/card" element={<RequireAuth admin><AdminDoorsCardPage /></RequireAuth>} />
             <Route path="/admin/monitoring/devices" element={<RequireAuth admin><AdminDevicesPage /></RequireAuth>} />
-            <Route path="/admin/monitoring/faults" element={<RequireAuth admin><MonitoringPlaceholder title="Faults" what="The board fault log" /></RequireAuth>} />
-            <Route path="/admin/monitoring/night" element={<RequireAuth admin><MonitoringPlaceholder title="A person's night" what="The per-person trace" /></RequireAuth>} />
-            <Route path="/admin/monitoring/changes" element={<RequireAuth admin><MonitoringPlaceholder title="Change record" what="The admin change record" /></RequireAuth>} />
+            <Route path="/admin/monitoring/faults" element={<RequireAuth admin><MonitoringFaultsPage /></RequireAuth>} />
+            <Route path="/admin/monitoring/night" element={<RequireAuth admin><MemberNightPage /></RequireAuth>} />
+            <Route path="/admin/monitoring/changes" element={<RequireAuth admin><AdminChangeRecordPage /></RequireAuth>} />
 
             {/*
               PERMANENT redirects, not deletions — the same decision, and the same reason, as
@@ -147,6 +161,13 @@ export default function App() {
             <Route path="/admin/doors/log" element={<RedirectKeepingQuery to="/admin/monitoring/doors/log" />} />
             <Route path="/admin/doors/:id" element={<RedirectDoor />} />
             <Route path="/admin/doors/:id/card" element={<RedirectDoor card />} />
+
+            {/* eco / item 14 — the calendar half. Under /admin rather than beside the grid,
+                because a plan is a thing with a life of its own; the grid links to it. */}
+            <Route path="/admin/schedules" element={<RequireAuth admin><AdminSchedulesPage /></RequireAuth>} />
+            <Route path="/admin/schedules/:id" element={<RequireAuth admin><AdminScheduleDetailPage /></RequireAuth>} />
+            {/* eco / items 3 + 19 — groups, rates, windows and the per-day ceiling. */}
+            <Route path="/admin/groups" element={<RequireAuth admin><AdminGroupsPage /></RequireAuth>} />
             <Route path="/admin/settings" element={<RequireAuth admin><AdminSettingsPage /></RequireAuth>} />
             <Route path="/admin/ledger" element={<RequireAuth admin><AdminLedgerPage /></RequireAuth>} />
             {DevPrimitivesPage && (
@@ -202,22 +223,6 @@ function RedirectDoor({ card = false }: { card?: boolean }) {
 }
 
 /**
- * The guard on every member and admin route.
- *
- * <p>
- * It carries the location it turned away in router state, so `/login` can finish the journey the
- * member actually started. Without that, a "top up" link from an email or a bookmarked
- * `/wallet` was silently discarded and every sign-in landed on `/schedule` — the member had to
- * navigate to the thing they had already asked for.
- * </p>
- *
- * <p>
- * It also holds a session whose password an admin has just reset on `/change-password`. That is
- * courtesy, not security: `PasswordChangeGate` on the API refuses the same session everywhere
- * else regardless, because a redirect is only ever a suggestion to whatever holds the token.
- * </p>
- */
-/**
  * The routes that are worth anything with no signal at all. (D3)
  *
  * <p>
@@ -239,10 +244,27 @@ function RedirectDoor({ card = false }: { card?: boolean }) {
 const OFFLINE_CAPABLE = new Set(["/my-code"]);
 
 /**
+ * The guard on every member and admin route.
+ *
+ * <p>
+ * It carries the location it turned away in router state, so `/login` can finish the journey the
+ * member actually started. Without that, a "top up" link from an email or a bookmarked
+ * `/wallet` was silently discarded and every sign-in landed on `/schedule` — the member had to
+ * navigate to the thing they had already asked for.
+ * </p>
+ *
+ * <p>
+ * It also holds a session whose password an admin has just reset on `/change-password`. That is
+ * courtesy, not security: `PasswordChangeGate` on the API refuses the same session everywhere
+ * else regardless, because a redirect is only ever a suggestion to whatever holds the token.
+ * </p>
+ *
+ * <p>
  * Exported for `offline-routing.test.tsx`, which is the only test that can hold the
  * offline-capable rule: the decision is three conditions deep and the two that matter most —
  * "only these routes" and "only a confirmed identity" — are invisible to the production-build
  * e2e, which necessarily arrives with both already satisfied.
+ * </p>
  */
 export function RequireAuth({ children, admin = false }: { children: React.ReactNode; admin?: boolean }) {
   const auth = useAuth();

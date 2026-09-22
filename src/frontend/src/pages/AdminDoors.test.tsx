@@ -66,8 +66,8 @@ describe("the doors surface", () => {
   ) => {
     const made = club(doors, options, settings);
     renderPage(
-      <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-      { initialEntries: [`/admin/doors/${id}`] },
+      <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+      { initialEntries: [`/admin/monitoring/doors/${id}`] },
     );
     return made;
   };
@@ -207,7 +207,7 @@ describe("the doors surface", () => {
 
       expect(await screen.findByText("No doors have called in yet.")).toBeInTheDocument();
       expect(screen.getByText(/registers itself the first time it is powered on/)).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "Go to Devices" })).toHaveAttribute("href", "/admin/devices");
+      expect(screen.getByRole("link", { name: "Go to Devices" })).toHaveAttribute("href", "/admin/monitoring/devices");
     });
 
     /** <b>A2.3.</b> No sort control at any width — a sorted door list is a footfall ranking. */
@@ -257,11 +257,11 @@ describe("the doors surface", () => {
       expect(status).toHaveTextContent("1 other door needs attention.");
       // A10: a count sends nobody anywhere. The line carries the reader to the card.
       expect(screen.getByRole("link", { name: "Go to Side door" }))
-        .toHaveAttribute("href", `/admin/doors/${DOOR_ID}`);
+        .toHaveAttribute("href", `/admin/monitoring/doors/${DOOR_ID}`);
     });
 
     /**
-     * <b>E-L6.</b> `/admin/doors` fired three identical `GET /admin/doors` on mount — the
+     * <b>E-L6.</b> `/admin/monitoring/doors` fired three identical `GET /admin/monitoring/doors` on mount — the
      * banner store re-read on navigation, the page polled on its own, and the gear badge read
      * a third time. Three readers of one fact is also C3, which is why the answer to both is
      * one store that owns the request.
@@ -373,7 +373,10 @@ describe("the doors surface", () => {
       });
 
       expect(await screen.findByText(/A code was accepted three times in under a minute/))
-        .toHaveTextContent("The lock is released for 3 seconds.");
+        // Ruling 5 / GOAL item 2: the shipping default moved from 3 seconds to 15. The
+        // sentence is generated from the club's own number, so what this pins is that it
+        // quotes the number rather than a constant — and the number is now the new default.
+        .toHaveTextContent("The lock is released for 15 seconds.");
       expect(screen.getByRole("link", { name: /Change how long the lock is released — Side door/ }))
         .toHaveAttribute("href", "/admin/settings#setting-gate-unlock-seconds");
     });
@@ -474,8 +477,8 @@ describe("the doors surface", () => {
         ...server.routes,
       ]);
       renderPage(
-        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+        <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
       );
 
       await screen.findByText("Side door");
@@ -711,8 +714,8 @@ describe("the doors surface", () => {
         ...server.routes,
       ]);
       renderPage(
-        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+        <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
       );
 
       expect(await screen.findByText(/Could not read that board's activity/)).toBeInTheDocument();
@@ -729,7 +732,7 @@ describe("the doors surface", () => {
       openDoor([doorFixture()], { activity: [activityFixture()] });
 
       expect(await screen.findByRole("link", { name: "All scans at this door" }))
-        .toHaveAttribute("href", `/admin/doors/log?door=${DOOR_ID}`);
+        .toHaveAttribute("href", `/admin/monitoring/doors/log?door=${DOOR_ID}`);
     });
   });
 
@@ -767,8 +770,8 @@ describe("the doors surface", () => {
     it("saves the note and the behaviour on the devices PATCH", async () => {
       const { server, stub } = club([doorFixture()]);
       renderPage(
-        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+        <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
       );
 
       fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
@@ -823,8 +826,8 @@ describe("the doors surface", () => {
       })]);
       stubFetch([settingsRoute(settings), ...server.routes]);
       renderPage(
-        <Routes><Route path="/admin/doors/:id/card" element={<AdminDoorsCardPage />} /></Routes>,
-        { initialEntries: [`/admin/doors/${DOOR_ID}/card`] },
+        <Routes><Route path="/admin/monitoring/doors/:id/card" element={<AdminDoorsCardPage />} /></Routes>,
+        { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}/card`] },
       );
     };
 
@@ -876,8 +879,8 @@ describe("the doors surface", () => {
     it("confirms with the door's own consequence, and sends only enabled", async () => {
       const { stub } = club([doorFixture()]);
       renderPage(
-        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+        <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
       );
 
       fireEvent.click(await screen.findByRole("button", { name: "Shut this door — Side door" }));
@@ -923,8 +926,8 @@ describe("the doors surface", () => {
     it("reopens a shut door and says a reachable one opens on the very next scan", async () => {
       const { stub } = club([doorFixture({ enabled: false })]);
       renderPage(
-        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+        <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
       );
 
       fireEvent.click(await screen.findByRole("button", { name: "Reopen this door — Side door" }));
@@ -980,8 +983,8 @@ describe("the doors surface", () => {
     it("says a deleted door comes back unnamed", async () => {
       const { stub } = club([doorFixture({ name: "Front door" })]);
       renderPage(
-        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+        <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
       );
 
       fireEvent.click(await screen.findByRole("button", { name: "Delete this door — Front door" }));
@@ -1019,15 +1022,15 @@ describe("the doors surface", () => {
       vi.useFakeTimers();
       const { stub } = club([doorFixture()]);
       renderPage(
-        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+        <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
       );
       await vi.advanceTimersByTimeAsync(0);
       const before = stub.calls.filter((c) => c.path === "/api/v1/admin/doors").length;
 
       // BOTH reads. The store's poll alone leaves the scans frozen — and the scans are
       // where another admin's evening actually shows up, which is why somebody opened this
-      // page. Counting only `/admin/doors` is a test that passes with the feed's timer
+      // page. Counting only `/admin/monitoring/doors` is a test that passes with the feed's timer
       // deleted, which is half of the finding still shipping.
       const feedPath = `/api/v1/admin/devices/${DOOR_ID}/activity`;
       const feedBefore = stub.calls.filter((c) => c.path.startsWith(feedPath)).length;
@@ -1053,8 +1056,8 @@ describe("the doors surface", () => {
     it("re-reads the scans as soon as the tab comes back to the front", async () => {
       const { stub } = club([doorFixture()]);
       renderPage(
-        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+        <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
       );
 
       const feedPath = `/api/v1/admin/devices/${DOOR_ID}/activity`;
@@ -1182,8 +1185,8 @@ describe("the doors surface", () => {
         },
       ]);
       renderPage(
-        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+        <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
       );
 
       fireEvent.click(await screen.findByRole("button", { name: /^Shut this door/ }));
@@ -1209,8 +1212,21 @@ describe("the doors surface", () => {
         enabled: false, shut_by_name: "Priya Naidoo", out_of_service_since: new Date().toISOString(),
       })]);
 
-      const notice = await screen.findByText(/Side door is shut/);
-      expect(notice).toHaveAttribute("role", "status");
+      // R3 adoption: `live="standing"`, which is polite AND remembers. The visible banner
+      // carries no live role at all — that is the point of the mode, because this block is
+      // conditional on a payload the page re-reads every fifteen seconds and a remounted
+      // region with text already in it is an announcement. What speaks is a separate,
+      // invisible region, written once per distinct fact. See `alert-live.test.tsx`.
+      // `waitFor`, not a bare read: the announcement is written by an effect one commit after
+      // the banner paints, so a synchronous assertion here is green or red depending on how
+      // busy the machine is — which is a flake, and one this file has the shape to produce.
+      await waitFor(() => expect(
+        [...document.querySelectorAll("[aria-live='polite']")].map((n) => n.textContent).join(""),
+        "the standing fact was never said at all",
+      ).toMatch(/Side door is shut/));
+      const notice = screen.getAllByText(/Side door is shut/)
+        .find((n) => n.className.includes("border-danger-strong"))!;
+      expect(notice).not.toHaveAttribute("role");
       // And it still LOOKS like a refusal: the finding is about what is announced over the
       // top of a reader, not about making a shut door look ordinary.
       expect(notice.className).toContain("border-danger-strong");
@@ -1252,8 +1268,8 @@ describe("the doors surface", () => {
       ]) };
       expect(stub).toBeTruthy();
       renderPage(
-        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+        <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
       );
 
       fireEvent.click(await screen.findByRole("button", { name: /^Shut this door/ }));
@@ -1479,8 +1495,8 @@ describe("the doors surface", () => {
     it("saves a door's name and its door name together, as name and gate_key", async () => {
       const { stub } = club([doorFixture({ name: "Door gate", gate_key: null, auto_registered: true })]);
       renderPage(
-        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+        <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
       );
 
       fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
@@ -1509,8 +1525,8 @@ describe("the doors surface", () => {
     it("trims the door name before sending it", async () => {
       const { stub } = club([doorFixture()]);
       renderPage(
-        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+        <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
       );
 
       fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
@@ -1531,8 +1547,8 @@ describe("the doors surface", () => {
     it("clears a door name by sending an empty string, and the door really loses it", async () => {
       const { server, stub } = club([doorFixture({ name: "Front door", gate_key: "front-door" })]);
       renderPage(
-        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+        <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
       );
 
       fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
@@ -1569,8 +1585,8 @@ describe("the doors surface", () => {
     it("refuses a door name past 64 characters at the server, not only at the keyboard", async () => {
       const { server } = club([doorFixture({ gate_key: "front-door" })]);
       renderPage(
-        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+        <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
       );
 
       fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
@@ -1594,8 +1610,8 @@ describe("the doors surface", () => {
       const server = doorsServer([deviceFixture({ id: DOOR_ID })]);
       stubFetch([settingsRoute(), ...server.routes]);
       renderPage(
-        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+        <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
       );
 
       fireEvent.click(await screen.findByRole("button", { name: /^Edit / }));
@@ -1621,8 +1637,8 @@ describe("the doors surface", () => {
     it("drops the needs-a-name chip once the door is named", async () => {
       const { server } = club([doorFixture({ gate_key: null, auto_registered: true })]);
       renderPage(
-        <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-        { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+        <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+        { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
       );
 
       expect(await screen.findByText("Needs a door name")).toBeInTheDocument();
@@ -1705,8 +1721,8 @@ describe("the door pages, round 3", () => {
     const server = doorsServer(doors, options);
     const stub = stubFetch([settingsRoute(), ...server.routes]);
     renderPage(
-      <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-      { initialEntries: [`/admin/doors/${id}`] },
+      <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+      { initialEntries: [`/admin/monitoring/doors/${id}`] },
     );
     return { server, stub };
   };
@@ -1822,8 +1838,8 @@ describe("the door pages, round 3", () => {
     const server = doorsServer([doorFixture()]);
     stubFetch([settingsRoute(), ...server.routes]);
     renderPage(
-      <Routes><Route path="/admin/doors/:id/card" element={<AdminDoorsCardPage />} /></Routes>,
-      { initialEntries: ["/admin/doors/11111111-1111-1111-1111-111111111111/card"] },
+      <Routes><Route path="/admin/monitoring/doors/:id/card" element={<AdminDoorsCardPage />} /></Routes>,
+      { initialEntries: ["/admin/monitoring/doors/11111111-1111-1111-1111-111111111111/card"] },
     );
 
     expect(await screen.findByText(/That door is not on the club's list/)).toBeInTheDocument();
@@ -1854,8 +1870,8 @@ describe("a door page acting on a state that has moved", () => {
       ...server.routes,
     ]);
     renderPage(
-      <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-      { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+      <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+      { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
     );
 
     fireEvent.click(await screen.findByRole("button", { name: /^Shut this door/ }));
@@ -1909,8 +1925,8 @@ describe("what the door pages say out loud", () => {
     });
     stubFetch([settingsRoute({ door_refusal_spike_minutes: 20 }), ...server.routes]);
     renderPage(
-      <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-      { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+      <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+      { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
     );
 
     const advisory = await screen.findByText(/turned away 30 scans/);
@@ -1927,8 +1943,8 @@ describe("what the door pages say out loud", () => {
     });
     stubFetch([settingsRoute(), ...server.routes]);
     renderPage(
-      <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-      { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+      <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+      { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
     );
 
     const quiet = await screen.findByText(/No scans at this door since/);
@@ -1949,8 +1965,8 @@ describe("what the door pages say out loud", () => {
     const server = doorsServer([doorFixture()], { activity: scans });
     stubFetch([settingsRoute(), ...server.routes]);
     renderPage(
-      <Routes><Route path="/admin/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
-      { initialEntries: [`/admin/doors/${DOOR_ID}`] },
+      <Routes><Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} /></Routes>,
+      { initialEntries: [`/admin/monitoring/doors/${DOOR_ID}`] },
     );
 
     fireEvent.click(await screen.findByRole("button", { name: /Show the other 4 scans/ }));

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { MONITORING_TABS, MonitoringNav, MonitoringPlaceholder } from "./MonitoringSection";
+import { MONITORING_TABS, MonitoringNav } from "./MonitoringSection";
 import { monitoringAttentionLabel } from "../Layout";
 import { routePageName, NOT_FOUND_PAGE_NAME } from "../../lib/routeAnnouncer";
 
@@ -122,17 +122,22 @@ describe("the attention sentence says both halves", () => {
   });
 });
 
-describe("an unbuilt destination says so", () => {
-  it("is honest rather than empty, and is not an alert", () => {
-    render(
-      <MemoryRouter initialEntries={["/admin/monitoring/faults"]}>
-        <MonitoringPlaceholder title="Faults" what="The board fault log" />
-      </MemoryRouter>,
-    );
-    // A nav entry that 404s teaches an admin that the console is broken.
-    expect(screen.getByRole("heading", { name: "Faults", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent(/isn't built yet/);
-    // Nothing has gone wrong; an alert interrupts and this is a standing fact.
-    expect(screen.queryByRole("alert")).toBeNull();
+describe("every destination is a real page now", () => {
+  /**
+   * This replaces "an unbuilt destination says so", which rendered `MonitoringPlaceholder`
+   * and asserted it admitted to being one. All six pages have landed, the placeholder is
+   * deleted, and the thing worth pinning is the opposite: no tab may quietly go back to
+   * being a stub, and none may be wired to a component that does not exist.
+   */
+  it("wires each tab to a page, never to a placeholder", () => {
+    expect(app, "a placeholder is back under Monitoring").not.toContain("MonitoringPlaceholder");
+    for (const tab of MONITORING_TABS) {
+      const route = new RegExp(`path="${tab.to}"\\s+element=\\{<RequireAuth admin><([A-Za-z]+)\\s*/>`);
+      const found = app.match(route);
+      expect(found, `${tab.to} does not render a page component`).not.toBeNull();
+      // A route is only as real as the import behind it.
+      expect(app, `${tab.to} renders <${found?.[1]}>, which nothing imports`)
+        .toMatch(new RegExp(`import \\{[^}]*\\b${found?.[1]}\\b`));
+    }
   });
 });

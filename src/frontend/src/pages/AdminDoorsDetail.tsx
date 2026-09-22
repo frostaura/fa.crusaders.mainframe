@@ -53,7 +53,7 @@ function shutAtFace(iso: string | null, timezone: string): string | null {
 }
 
 function BackToDoors() {
-  return <Link to="/admin/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">← Doors</Link>;
+  return <Link to="/admin/monitoring/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">← Doors</Link>;
 }
 
 /** Everything one door's page reads, and whether each read landed. */
@@ -213,6 +213,12 @@ function DoorControls({ door, displayName, actions, online, shutAt, timezone }: 
             cancelLabel="Keep this door"
             confirmLabel={gateDeleteConfirm()}
             ariaLabel={displayName}
+            // R3 adoption: "Keep this door — Side door". The way out is named after what it
+            // keeps rather than after the verb it is declining. No `focusAfter`: a successful
+            // delete navigates to the doors list, and the page it lands on moves focus itself
+            // — naming a target here would be a second claim on the keyboard during the same
+            // transition, and `focusAfterAction` deliberately declines one it would lose.
+            subject={displayName}
             onConfirm={actions.remove}
             tone="danger"
             className="min-h-11 w-full"
@@ -241,7 +247,7 @@ function AdminDoorsDetailPageBody() {
     // A-M7 / R3-14: the confirmation travels WITH the navigation. Pushed as a toast and then
     // navigated away from in the same tick, it was in practice never seen — and the page it
     // lands on is a list that polls, so one fewer row reads as a board dropping off.
-    afterDelete: (said: string) => nav("/admin/doors", { state: { doorsNotice: said } }),
+    afterDelete: (said: string) => nav("/admin/monitoring/doors", { state: { doorsNotice: said } }),
   });
 
   if (read.loading) return <p className="text-sm text-text-secondary">Loading this door…</p>;

@@ -37,7 +37,7 @@ describe("the club door log", () => {
     rows: Record<string, unknown>[],
     /** `doors` overrides the club's door list; everything else goes to `doorsServer`. */
     options: Parameters<typeof doorsServer>[1] & { doors?: Record<string, unknown>[] } = {},
-    entries = ["/admin/doors/log"],
+    entries = ["/admin/monitoring/doors/log"],
   ) => {
     const { doors, ...serverOptions } = options;
     const server = doorsServer(doors ?? [doorFixture()], { activity: rows, ...serverOptions });
@@ -147,7 +147,7 @@ describe("the club door log", () => {
   });
 
   it("sends the club-local period the club picked, and never two ranges at once", async () => {
-    const { stub } = open([doorLogFixture()], {}, ["/admin/doors/log?range=yesterday"]);
+    const { stub } = open([doorLogFixture()], {}, ["/admin/monitoring/doors/log?range=yesterday"]);
 
     // Yesterday genuinely holds none of today's rows, so the page settles on its empty state
     // — which is itself the point: the window is a calendar day, not a rolling 24 hours.
@@ -160,7 +160,7 @@ describe("the club door log", () => {
   });
 
   it("asks for one club-local day, by day, once a day is chosen", async () => {
-    const { stub } = open([doorLogFixture()], {}, ["/admin/doors/log?range=day&day=2026-09-20"]);
+    const { stub } = open([doorLogFixture()], {}, ["/admin/monitoring/doors/log?range=day&day=2026-09-20"]);
 
     await screen.findByLabelText("Which day");
     const read = new URL(`http://x${stub.calls.filter((c) => c.path.includes("/doors/activity")).at(-1)!.path}`);
@@ -179,7 +179,7 @@ describe("the club door log", () => {
    * nothing.
    */
   it("does not send a malformed day, and does not quietly list something else", async () => {
-    const { stub } = open([doorLogFixture()], {}, ["/admin/doors/log?range=day&day=20-09-2026"]);
+    const { stub } = open([doorLogFixture()], {}, ["/admin/monitoring/doors/log?range=day&day=20-09-2026"]);
 
     await screen.findByLabelText("Which day");
     expect(stub.calls.find((c) => c.path.includes("/doors/activity"))).toBeUndefined();
@@ -195,7 +195,7 @@ describe("the club door log", () => {
    * in between. The field holds its own draft and only a complete club day is committed.
    */
   it("does not commit a half-typed day to the URL", async () => {
-    const { stub } = open([doorLogFixture()], {}, ["/admin/doors/log?range=day"]);
+    const { stub } = open([doorLogFixture()], {}, ["/admin/monitoring/doors/log?range=day"]);
 
     const field = await screen.findByLabelText("Which day");
     fireEvent.change(field, { target: { value: "200920-02-06" } });
@@ -213,7 +213,7 @@ describe("the club door log", () => {
    * one the rows were read with.
    */
   it("states the exact resolved range in words, from the server's own answer", async () => {
-    open([doorLogFixture()], {}, ["/admin/doors/log?range=yesterday"]);
+    open([doorLogFixture()], {}, ["/admin/monitoring/doors/log?range=yesterday"]);
 
     expect(await screen.findByText(/^Scans from .* to .*, club time\.$/)).toBeInTheDocument();
   });
@@ -241,7 +241,7 @@ describe("the club door log", () => {
     open([doorLogFixture()], {
       range: { from: "2026-09-19T22:30:00Z", to: "2026-09-20T05:00:00Z" },
       timezone: "America/New_York",
-    }, ["/admin/doors/log?range=yesterday"]);
+    }, ["/admin/monitoring/doors/log?range=yesterday"]);
 
     const line = await screen.findByText(/^Scans from .* to .*, club time\.$/);
     expect(line).toHaveTextContent("18:30");
@@ -253,7 +253,7 @@ describe("the club door log", () => {
 
   /** Query-string filters are what let a door page pre-filter and a link be shareable. */
   it("reads its filters out of the query string", async () => {
-    const { stub } = open([doorLogFixture()], {}, [`/admin/doors/log?door=${DOOR_ID}`]);
+    const { stub } = open([doorLogFixture()], {}, [`/admin/monitoring/doors/log?door=${DOOR_ID}`]);
 
     await screen.findByText(/newest first/);
     expect(screen.getByLabelText("Door")).toHaveValue(DOOR_ID);
@@ -295,7 +295,7 @@ describe("the club door log", () => {
       { path: "/api/v1/admin/doors/activity", status: 503, body: {} },
       ...server.routes,
     ]);
-    renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/doors/log"] });
+    renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/monitoring/doors/log"] });
 
     /*
      * C5: the failure goes through the ONE polite region this page has, rather than through a
@@ -331,7 +331,7 @@ describe("the club door log", () => {
   });
 
   it("tells a narrowed filter how to widen", async () => {
-    open([], {}, ["/admin/doors/log?outcome=refused"]);
+    open([], {}, ["/admin/monitoring/doors/log?outcome=refused"]);
 
     expect(await screen.findByText("No scans match those filters.")).toBeInTheDocument();
     expect(screen.getByText(/Try a longer time range/)).toBeInTheDocument();
@@ -349,16 +349,16 @@ describe("the club door log", () => {
    * derived from that door's own liveness now.
    */
   it("does not blame a reporting door's board for an empty range", async () => {
-    open([], {}, [`/admin/doors/log?door=${DOOR_ID}`]);
+    open([], {}, [`/admin/monitoring/doors/log?door=${DOOR_ID}`]);
 
     expect(await screen.findByText(/No scans at Side door between/))
       .toHaveTextContent("It is reporting, so the club is hearing from it");
     expect(screen.queryByText(/may not be reaching the club/)).toBeNull();
-    expect(screen.getByRole("link", { name: "Check it on Doors" })).toHaveAttribute("href", "/admin/doors");
+    expect(screen.getByRole("link", { name: "Check it on Doors" })).toHaveAttribute("href", "/admin/monitoring/doors");
   });
 
   it("does say so when the door really is not reporting", async () => {
-    open([], { doors: [doorFixture({ last_seen_at: ago(3600) })] }, [`/admin/doors/log?door=${DOOR_ID}`]);
+    open([], { doors: [doorFixture({ last_seen_at: ago(3600) })] }, [`/admin/monitoring/doors/log?door=${DOOR_ID}`]);
 
     expect(await screen.findByText(/No scans at Side door between/))
       .toHaveTextContent("Nothing can reach it, so if members have been using it the club would not know");
@@ -396,7 +396,7 @@ describe("the club door log", () => {
       },
       ...server.routes,
     ]);
-    renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/doors/log"] });
+    renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/monitoring/doors/log"] });
 
     await screen.findByText(/Showing 2 scans so far/);
     fireEvent.click(screen.getByRole("button", { name: "Load older scans" }));
@@ -424,7 +424,7 @@ describe("the club door log", () => {
    * hand a committee a different set of rows from the one the admin was looking at.
    */
   it("asks for the CSV with byte-identical filters to the list", async () => {
-    const { stub } = open([doorLogFixture()], {}, [`/admin/doors/log?door=${DOOR_ID}&range=7d`]);
+    const { stub } = open([doorLogFixture()], {}, [`/admin/monitoring/doors/log?door=${DOOR_ID}&range=7d`]);
 
     await screen.findByText(/newest first/);
     const listQuery = new URL(`http://x${stub.calls.find((c) => c.path.includes("/doors/activity"))!.path}`).search;
@@ -503,7 +503,7 @@ describe("the club door log", () => {
       },
       ...server.routes,
     ]);
-    renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/doors/log"] });
+    renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/monitoring/doors/log"] });
 
     fireEvent.click(await screen.findByRole("button", { name: "Download CSV" }));
     expect(await screen.findByText("165 scans downloaded.")).toBeInTheDocument();
@@ -594,7 +594,7 @@ describe("the club door log", () => {
       { path: "/api/v1/admin/doors/activity", body: { items: [doorLogFixture()], next_cursor: null, retention_days: 90 } },
       { path: "/api/v1/admin/doors", status: 503, body: {} },
     ]);
-    renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/doors/log"] });
+    renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/monitoring/doors/log"] });
 
     const picker = await screen.findByLabelText("Door");
     expect(picker).toHaveTextContent("Side door");
@@ -607,7 +607,7 @@ describe("the club door log", () => {
   /**
    * <b>The critical of this round, found independently by three reviewers.</b>
    *
-   * A reviewer deleted a door and `/admin/doors/log` became a blank white page for the whole
+   * A reviewer deleted a door and `/admin/monitoring/doors/log` became a blank white page for the whole
    * club: rows arrived with `door: null`, the page read `.name` off it, and the whole
    * document unmounted. It was reachable four ways — a `?door=<deleted id>` link, the Outcome
    * filter, the range, and "Load older scans" with no warning at all.
@@ -709,7 +709,7 @@ describe("the club door log", () => {
   it("clears a door already in the URL when a removed door is chosen", async () => {
     const { stub } = open([doorLogFixture()], {
       removedDoors: [{ key: "side-door", name: "Side door", gate_key: "side-door" }],
-    }, [`/admin/doors/log?door=${DOOR_ID}`]);
+    }, [`/admin/monitoring/doors/log?door=${DOOR_ID}`]);
 
     await screen.findByRole("group", { name: "Removed doors" });
     fireEvent.change(screen.getByLabelText("Door"), { target: { value: "removed:side-door" } });
@@ -724,7 +724,7 @@ describe("the club door log", () => {
   it("clears a removed door when a live one is chosen instead", async () => {
     const { stub } = open([doorLogFixture()], {
       removedDoors: [{ key: "side-door", name: "Side door", gate_key: "side-door" }],
-    }, ["/admin/doors/log?removed_door=side-door"]);
+    }, ["/admin/monitoring/doors/log?removed_door=side-door"]);
 
     await screen.findByRole("group", { name: "Removed doors" });
     fireEvent.change(screen.getByLabelText("Door"), { target: { value: DOOR_ID } });
@@ -771,7 +771,7 @@ describe("the club door log", () => {
   it("does not link a removed door to a door page that is gone", async () => {
     open([], {
       removedDoors: [{ key: "side-door", name: "Side door", gate_key: "side-door" }],
-    }, ["/admin/doors/log?removed_door=side-door"]);
+    }, ["/admin/monitoring/doors/log?removed_door=side-door"]);
 
     await screen.findByText(/No scans at Side door/);
     expect(screen.queryByRole("link", { name: "Check it on Doors" })).toBeNull();
@@ -804,7 +804,7 @@ describe("the club door log", () => {
       },
       { path: "/api/v1/admin/doors", status: 503, body: {} },
     ]);
-    renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/doors/log"] });
+    renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/monitoring/doors/log"] });
 
     // R3-20: no total from the API AND no further cursor — so the page does know, and says
     // "all". "So far" is reserved for a list that genuinely has more behind it.
@@ -845,7 +845,7 @@ describe("the club door log", () => {
 
   it("adds the day when the row is not today's", async () => {
     open([doorLogFixture({ at: new Date(Date.now() - 3 * 86_400_000).toISOString() })], {},
-      ["/admin/doors/log?range=7d"]);
+      ["/admin/monitoring/doors/log?range=7d"]);
 
     const row = (await screen.findAllByRole("listitem"))[0];
     // "Fri 18 Sept, 11:18" — B20: a weekday always carries its date, because the log ranges
@@ -947,7 +947,7 @@ describe("the club door log, filtered to a door that is gone", () => {
       } as (typeof routes)[number]);
     }
     const stub = stubFetch(routes);
-    renderPage(<AdminDoorsLogPage />, { initialEntries: [`/admin/doors/log?door=${GONE}`] });
+    renderPage(<AdminDoorsLogPage />, { initialEntries: [`/admin/monitoring/doors/log?door=${GONE}`] });
     return { stub };
   };
 
@@ -1016,14 +1016,14 @@ describe("the club door log's heading", () => {
   };
 
   it("still reads All scans, all doors when nothing is narrowed", async () => {
-    openAt("/admin/doors/log");
+    openAt("/admin/monitoring/doors/log");
 
     expect(await screen.findByRole("heading", { level: 1 }))
       .toHaveTextContent("All scans, all doors");
   });
 
   it("names the door, the outcome and the range it is actually showing", async () => {
-    openAt(`/admin/doors/log?door=${DOOR_ID}&outcome=refused&range=yesterday`);
+    openAt(`/admin/monitoring/doors/log?door=${DOOR_ID}&outcome=refused&range=yesterday`);
 
     const heading = await screen.findByRole("heading", { level: 1 });
     expect(heading).toHaveTextContent("Refused scans, at Side door — yesterday");
@@ -1058,7 +1058,7 @@ describe("the club door log's export, when it fails", () => {
       { path: "/api/v1/admin/doors/activity.csv", status: 500, body: { error: "boom" } },
       ...server.routes,
     ]);
-    renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/doors/log"] });
+    renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/monitoring/doors/log"] });
 
     fireEvent.click(await screen.findByRole("button", { name: /Download CSV/ }));
 

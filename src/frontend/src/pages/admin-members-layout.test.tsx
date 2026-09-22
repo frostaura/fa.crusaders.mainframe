@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import AdminMembersPage from "./AdminMembers";
-import { memberFixture, renderPage, stubFetch } from "../test/harness";
+import { memberFixture, renderPage, stubFetch, type StubRoute } from "../test/harness";
 
 /**
  * The members table's shape, which was measured wrong at both ends of the range.
@@ -71,7 +71,10 @@ describe("the admin members table", () => {
 
   it("lays the row actions along the row, not down it", async () => {
     renderMembers();
-    const adjust = await screen.findByRole("button", { name: "Adjust credit" });
+    // D3-B06: this control was a 32×32 icon-only button, four to a row, twelve rows —
+    // WCAG 2.5.5 asks 44, and the rest of this chrome already uses a coarse-pointer minimum.
+    // It is now a labelled 44px button, in the same place in the same row.
+    const adjust = await screen.findByRole("button", { name: "Top up" });
     const actions = adjust.parentElement!;
     // Four 32px buttons stacked vertically is a 164px row. This is the assertion that stops it
     // coming back as a "tidier" column — or as a wrapping one, which measures at 136.5px and
@@ -83,7 +86,10 @@ describe("the admin members table", () => {
 
   it("pins the actions column so the buttons do not start off-screen", async () => {
     renderMembers();
-    const adjust = await screen.findByRole("button", { name: "Adjust credit" });
+    // D3-B06: this control was a 32×32 icon-only button, four to a row, twelve rows —
+    // WCAG 2.5.5 asks 44, and the rest of this chrome already uses a coarse-pointer minimum.
+    // It is now a labelled 44px button, in the same place in the same row.
+    const adjust = await screen.findByRole("button", { name: "Top up" });
     const cell = adjust.closest("td")!;
     const header = screen.getByRole("columnheader", { name: "Actions" });
     // 0 of 27 controls on screen before this, 27 of 27 after — see the file comment. The
@@ -125,7 +131,7 @@ describe("the admin members table", () => {
    */
   it("draws a column only at the widths where it fits, and keeps every field in card mode", async () => {
     renderMembers();
-    await screen.findByRole("button", { name: "Adjust credit" });
+    await screen.findByRole("button", { name: "Top up" });
 
     const expected: Record<string, string> = {
       // Email is the widest optional column and lands last, at the width where the whole
@@ -158,7 +164,7 @@ describe("the admin members table", () => {
 
   it("pins the balance header with its cells, at the same offset", async () => {
     renderMembers();
-    await screen.findByRole("button", { name: "Adjust credit" });
+    await screen.findByRole("button", { name: "Top up" });
     const balance = screen.getByRole("columnheader", { name: "Balance" });
     const actions = screen.getByRole("columnheader", { name: "Actions" });
     // Balance is pinned beside Actions rather than left to scroll under it — measured in
@@ -181,5 +187,80 @@ describe("the admin members table", () => {
     // ...and agree with the body cells, which are what the balance is actually drawn in.
     const cell = document.querySelector<HTMLElement>('tbody td[data-label="Balance"]')!;
     expect(/sm:right-\[(\d+)px\]/.exec(cell.className)?.[1]).toBe(headerOffset);
+  });
+});
+
+/**
+ * The three findings D3 raised about this table's own controls, each verified against the
+ * code before it was fixed — designers can be wrong, and one of the four was.
+ *
+ * <p>
+ * <b>D3-B12 does not reproduce and is deliberately not "fixed".</b> The finding was that
+ * `Name`, `Email`, `Member #`, `Status` and `Joined` render sentence-case while `CLASS`,
+ * `BALANCE` and `ACTIONS` render upper-case, because the first five come from `SortHeader`
+ * and the last three from `Cell`'s `data-label`. On this tree the whole `<thead>` carries
+ * `uppercase`, so every desktop header renders the same way and the phone card labels are a
+ * separate, deliberately different treatment. The design read an older tip. Recorded here
+ * rather than silently dropped, so nobody re-opens it.
+ * </p>
+ */
+describe("the members table's own controls, at the size a club actually uses", () => {
+  const routes = (): StubRoute[] => [
+    { path: "/api/v1/admin/members/", body: [
+      memberFixture({ status: "PendingApproval" }),
+      memberFixture({ membership_id: "m2", user_id: "u2", full_name: "Grace Hopper", status: "Suspended" }),
+      memberFixture({ membership_id: "m3", user_id: "u3", full_name: "Alan Turing", member_class: "LeagueOrSenior" }),
+    ] },
+    { path: "/api/v1/admin/biometric/enrollments", body: [] },
+    { path: "/api/v1/admin/ledger/", body: [] },
+  ];
+
+  /** D3-B07: measured at 72×36 and 61×36. Approving somebody is what lets them through a door. */
+  it("gives Approve and Reject a 44px target", async () => {
+    stubFetch(routes());
+    renderPage(<AdminMembersPage />);
+
+    for (const name of ["Approve", "Reject"]) {
+      const control = await screen.findByRole("button", { name });
+      expect(control.className, `${name} is still 36px`).toContain("min-h-11");
+      expect(control.className).not.toContain("h-9");
+    }
+  });
+
+  /**
+   * D3-B13: a native select does not shrink its own text, so a fixed-width column clipped
+   * "League or senior" to "League or senio" — one of only two values the column can hold.
+   */
+  it("gives the class select a 44px target and a way to read its full value", async () => {
+    stubFetch(routes());
+    renderPage(<AdminMembersPage />);
+
+    const select = await screen.findByLabelText("Member class for Alan Turing");
+    expect(select.className).toContain("min-h-11");
+    expect(select).toHaveAttribute("title", "League or senior");
+  });
+
+  /**
+   * D3-B18: two controls vanished from a suspended row with nothing saying why, which reads
+   * as a rendering fault rather than as a rule.
+   */
+  it("says why a suspended member's row is shorter than everybody else's", async () => {
+    stubFetch(routes());
+    renderPage(<AdminMembersPage />);
+
+    await screen.findByText("Grace Hopper");
+    // In the row, not in a tooltip: a title is invisible on a phone, to a screen reader and
+    // to touch, which is the whole of this audience.
+    const said = await screen.findByText(/no top-ups or fingerprints until they are reactivated/);
+    expect(said.closest("tr")).toContainElement(screen.getByTitle("Reactivate member"));
+  });
+
+  it("offers no top-up on a suspended row at all, rather than one that refuses", async () => {
+    stubFetch(routes());
+    renderPage(<AdminMembersPage />);
+
+    await screen.findByText("Grace Hopper");
+    const row = screen.getByText(/no top-ups or fingerprints/).closest("tr")!;
+    expect(within(row).queryByRole("button", { name: "Top up" })).not.toBeInTheDocument();
   });
 });
