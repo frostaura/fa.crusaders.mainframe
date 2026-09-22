@@ -22,6 +22,20 @@ export const LOW_BALANCE_CREDITS = 50;
  * </p>
  *
  * <p>
+ * <b>The zero arm states the balance it is describing, and a debt is not zero.</b> The arm was
+ * written as the literal sentence "Wallet balance 0 credits", which is true of exactly one of
+ * the balances that reach it. `walletTone` classifies a NEGATIVE balance as `"zero"` and is
+ * right to — see the reasoning on `walletTone` itself — but "emptier than empty" is a statement
+ * about what the member can DO, not about what they have. A member at −25.00 credits was told,
+ * in the only place this chip says a number out loud, that their balance was 0. It is not:
+ * they owe the club money, the visible chip beside the label has been rendering "-25.00 cr" all
+ * along, and a member who tops up the price of one slot on the strength of that sentence still
+ * cannot book. The direction is carried by a WORD rather than by a minus sign, for the same
+ * reason this label spells out "credits" instead of reusing the "cr" abbreviation: a screen
+ * reader given "−25.00" announces anything from "twenty five" to "dash twenty five".
+ * </p>
+ *
+ * <p>
  * <b>The signature is additive.</b> `walletLabel(balance, loading)` is what a dozen callers and
  * `wallet-chip-a11y.test.tsx` already pass; the third argument carries the honesty suffix and
  * defaults to saying nothing.
@@ -37,9 +51,27 @@ export function walletLabel(balance: number | null, loading: boolean, state?: Li
   // one sees can never disagree — which they did at 0.004, where this said "running low" over
   // a chip the wallet page was calling empty.
   const tone = walletTone(balance);
-  if (tone === "zero") return `Wallet balance 0 credits. You can't book until you top up. Tap to top up.${stale}`;
+  if (tone === "zero") return `Wallet balance ${emptyAmount(balance)}. You can't book until you top up. Tap to top up.${stale}`;
   if (tone === "low") return `Wallet balance ${amount}, running low. Tap to top up.${stale}`;
   return `Wallet balance ${amount}. Tap to top up.${stale}`;
+}
+
+/**
+ * The figure, and its direction, for a balance the tone rule has called `"zero"`.
+ *
+ * <p>
+ * Rounded to two places FIRST, because the whole of this product's zero rule is about the
+ * number the member can see: 0.004 is "0.00 credits" and not a hair of credit, and −0.001 is
+ * "0.00 credits" and not a debt of nothing. Rounding first is also what keeps the negated zero
+ * out of the sentence — `(-0.001).toFixed(2)` is the string "-0.00", and a spoken "minus zero
+ * point zero zero credits" is the same class of defect `formatMoney` and `formatSignedCredits`
+ * each carry their own guard against.
+ * </p>
+ */
+function emptyAmount(balance: number): string {
+  const shown = Number(balance.toFixed(2));
+  const magnitude = `${Math.abs(shown).toFixed(2)} credits`;
+  return shown < 0 ? `${magnitude} overdrawn` : magnitude;
 }
 
 /**

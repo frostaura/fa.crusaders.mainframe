@@ -52,7 +52,7 @@ const CHART_HEIGHT = 240;
 const TOP_MARGIN = 16;
 
 /**
- * The y-axis gutter, in pixels, for a credit-denominated axis.
+ * The narrowest y-axis gutter a credit-denominated axis is ever given.
  *
  * <p>
  * 48 was under the width of "50.00 cr" at 11px, and recharts wraps a tick that does not fit
@@ -60,8 +60,48 @@ const TOP_MARGIN = 16;
  * lines, doubling the label column's height and pushing the top one into the clip described
  * above. Counts ({@link COUNT_AXIS_WIDTH}) are short enough not to need it.
  * </p>
+ *
+ * <p>
+ * <b>It is now a FLOOR rather than the answer.</b> 64 was measured against "50.00 cr" and then
+ * shipped as a constant for every credit axis in the product, which is the whole defect: these
+ * series are net, net goes four figures negative on any day whose penalty rows reverse an
+ * earlier sweep, and no constant chosen against one label survives the next wider one. The
+ * width each chart actually uses comes from {@link creditAxisWidth}, computed from its own
+ * data. This value stays as the lower bound so that a chart whose numbers are small keeps the
+ * gutter that was measured right for it, instead of reclaiming a few pixels of plot on the
+ * strength of the same arithmetic that is being introduced to widen the others.
+ * </p>
  */
-const CREDIT_AXIS_WIDTH = 64;
+const CREDIT_AXIS_MIN_WIDTH = 64;
+
+/**
+ * The parts of a credit tick label, in pixels, <b>measured in Chromium</b> at the 11px Figtree
+ * 400 the axis is drawn in — not estimated from character counts, which is how 64 was arrived
+ * at. `getComputedTextLength` on the rendered ticks: "0.00 cr" 35.83, "50.00 cr" 42.16,
+ * "-1000.00 cr" 59.06, "-8000.00 cr" 61.28.
+ *
+ * <p>
+ * Figtree's figures are proportional, not tabular — "0" is 7.06px and "1" is 4.55px — so a
+ * label's width depends on which digits are in it. The widest digit is used for all of them,
+ * which makes {@link creditLabelWidth} an upper bound for any number of that many digits: 61.67
+ * against a real "-8000.00 cr" of 61.28. An upper bound is the right side to be wrong on, and
+ * it also means an intermediate tick can never need more room than the extreme one that sized
+ * the axis.
+ * </p>
+ */
+const AXIS_WIDEST_DIGIT_PX = 7.07;
+const AXIS_MINUS_PX = 4.6;
+/** ".00 cr" — the tail every credit label carries, measured whole so its kerning is included. */
+const AXIS_DECIMALS_AND_UNIT_PX = 28.79;
+
+/**
+ * What recharts keeps between the plot and the tick text: `tickSize` 6 plus `tickMargin` 2.
+ *
+ * A left axis anchors its tick text at `x + width - tickSize - tickMargin` with `text-anchor:
+ * end`, so a label wider than `width - 8` starts to the left of the chart's own box — which is
+ * where the carousel's Previous arrow sits, and is the collision {@link LEFT_MARGIN} records.
+ */
+const AXIS_TICK_GAP_PX = 8;
 
 /** The same gutter for an axis of plain integers — "12" needs nothing like the room "50.00 cr" does. */
 const COUNT_AXIS_WIDTH = 36;
@@ -217,6 +257,136 @@ const legendProps = {
 // which are credit-denominated — a rand sign here overstates every bar by the
 // conversion rate.
 const fmtCredits = (v: number | string) => formatCredits(Number(v));
+
+/**
+ * U+00A0, written as an escape on purpose: a literal non-breaking space in source is
+ * invisible, survives no copy-paste reliably, and an editor that helpfully normalises
+ * whitespace would silently put every credit tick back onto two lines.
+ */
+const NON_BREAKING_SPACE = "\u00a0";
+
+/**
+ * The same figure for an axis tick, with the space before the unit made non-breaking.
+ *
+ * <p>
+ * <b>This is not typography. It is what stops every credit tick above 99 rendering on two
+ * lines.</b> recharts decides whether a tick fits by splitting it on spaces and measuring the
+ * words with `getStringSize`, which puts them in a hidden `span` appended to `document.body` —
+ * a span that inherits the BODY's 16px, while the tick itself is drawn at the axis's 11px. It
+ * was therefore judging every label about 45% wider than it draws, and breaking it accordingly:
+ * measured in Chromium at the shipped 64px gutter, "100.00 cr" came out as "100.00" above "cr",
+ * and so did 150, 200 and every four-figure negative. The unit column doubled in height and the
+ * topmost tick went into the SVG's clip — the exact fault {@link TOP_MARGIN} was added to fix,
+ * arriving by a different route.
+ * </p>
+ *
+ * <p>
+ * A label with no breaking space in it is one word, and recharts never breaks a word: the
+ * mis-measurement stops being able to express itself, whatever font size it thinks it is
+ * working in. What remains is the honest question of whether the label FITS, which
+ * {@link creditAxisWidth} answers from the data. The character is U+00A0, so the rendered text
+ * is identical to a reader and to a screenshot; only the line-breaking opportunity is gone.
+ * </p>
+ *
+ * <p>
+ * Deliberately not applied to {@link fmtCredits}, which the tooltips use: a tooltip is laid out
+ * in HTML, has no gutter to overflow, and its text is matched by tests and read by people who
+ * may copy it.
+ * </p>
+ */
+const fmtAxisCredits = (v: number | string) => formatCredits(Number(v)).replace(" ", NON_BREAKING_SPACE);
+
+/**
+ * The width of the widest label an axis reaching `value` can draw, in pixels.
+ *
+ * Upper bound, by construction: every digit is costed as the widest one in the face. See the
+ * metric constants above for where the numbers come from and why they are measured rather than
+ * counted.
+ */
+function creditLabelWidth(value: number): number {
+  const digits = String(Math.floor(Math.abs(value))).length;
+  const sign = 0 > value ? AXIS_MINUS_PX : 0;
+  return sign + digits * AXIS_WIDEST_DIGIT_PX + AXIS_DECIMALS_AND_UNIT_PX;
+}
+
+/**
+ * A value rounded AWAY from zero to the next multiple of its own leading power of ten.
+ *
+ * <p>
+ * The axis does not label the data; it labels the ticks, and recharts picks round ones that
+ * reach past the extreme value. A series topping out at 950 is drawn with a tick at 1000 —
+ * one digit wider than anything in the data — so sizing the gutter from the data alone
+ * under-fits it by exactly one character on precisely the series that were about to overflow
+ * anyway. This is a deliberate over-estimate of where the tick lands rather than a
+ * reimplementation of recharts' tick algorithm: it is never narrower than the real top tick,
+ * and it only ever changes the answer at a digit boundary, which is the only place the answer
+ * changes at all.
+ * </p>
+ */
+function niceAway(value: number): number {
+  if (value === 0) return 0;
+  const magnitude = Math.abs(value);
+  const step = 10 ** Math.max(0, Math.floor(Math.log10(magnitude)));
+  return Math.sign(value) * Math.ceil(magnitude / step) * step;
+}
+
+/**
+ * The gutter a credit y-axis needs for the widest label its own data can produce.
+ *
+ * <p>
+ * Exported so `chart-geometry.test.tsx` can rebuild the expectation from the series each chart
+ * declares rather than restating them — the one drift this design can suffer is a `Bar` added
+ * to a chart and not to the list of keys its width is computed from.
+ * </p>
+ *
+ * <p>
+ * Zero is always in the range, because every one of these axes draws a zero line.
+ * </p>
+ */
+export function creditAxisWidth(values: readonly number[]): number {
+  const finite = values.filter(Number.isFinite);
+  const widest = Math.max(
+    creditLabelWidth(niceAway(Math.min(0, ...finite))),
+    creditLabelWidth(niceAway(Math.max(0, ...finite))),
+  );
+  return Math.max(CREDIT_AXIS_MIN_WIDTH, Math.ceil(widest) + AXIS_TICK_GAP_PX);
+}
+
+/**
+ * The values a stacked signed chart's y-axis has to reach.
+ *
+ * <p>
+ * Not the largest single bar: `stackOffset="sign"` accumulates a stack's positives upward and
+ * its negatives downward, so a day's reach is the sum of each sign within each stack. A chart
+ * with no stacks passes one key per group and gets the values themselves back.
+ * </p>
+ *
+ * <p>
+ * The comparisons are written `0 > v` rather than `v < 0` for the reason recorded on
+ * {@link ChartFrame}: lizard reads a bare `<` in a .tsx file as a JSX open tag and swallows the
+ * rest of the file into whichever function it was last inside.
+ * </p>
+ */
+function stackedExtremes(rows: readonly Record<string, unknown>[], stacks: readonly (readonly string[])[]): number[] {
+  const out: number[] = [];
+  for (const row of rows) {
+    for (const keys of stacks) {
+      const values = keys.map((k) => Number(row[k])).filter(Number.isFinite);
+      out.push(values.filter((v) => v > 0).reduce((a, b) => a + b, 0));
+      out.push(values.filter((v) => 0 > v).reduce((a, b) => a + b, 0));
+    }
+  }
+  return out;
+}
+
+/**
+ * Which series share a stack, per chart — mirroring the `stackId`s on the bars below.
+ *
+ * The geometry test reads the real ones off the rendered elements and checks the width against
+ * them, so these cannot fall out of step with the chart without a test failing.
+ */
+const CLUB_FLOW_STACKS = [["top_ups_credits"], ["booking_charges_credits", "penalties_credits"]];
+const MEMBER_FLOW_STACKS = [["top_ups_credits", "refunds_credits"], ["spent_credits"]];
 const fmtDate = (d: string) => {
   const dt = new Date(d + "T00:00:00Z");
   return dt.toLocaleDateString(undefined, { month: "short", day: "2-digit" });
@@ -269,7 +439,7 @@ export function RevenueAreaChart({ data }: { data: DailyAdminPoint[] }) {
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} />
+          <YAxis tickFormatter={fmtAxisCredits} fontSize={11} stroke={TEXT_MUTED} width={creditAxisWidth(stackedExtremes(data, [["top_ups_credits"]]))} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
           <Area type="monotone" dataKey="top_ups_credits" name="Top-ups" stroke={ACCENT} fill="url(#revFill)" strokeWidth={2} />
         </AreaChart>
@@ -288,7 +458,7 @@ export function DailyFlowBarChart({ data }: { data: DailyAdminPoint[] }) {
         <BarChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }} stackOffset="sign">
           <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} domain={SIGNED_DOMAIN} />
+          <YAxis tickFormatter={fmtAxisCredits} fontSize={11} stroke={TEXT_MUTED} width={creditAxisWidth(stackedExtremes(data, CLUB_FLOW_STACKS))} domain={SIGNED_DOMAIN} />
           <ReferenceLine y={0} stroke={ZERO_LINE_STROKE} strokeWidth={1} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
           <Legend {...legendProps} />
@@ -322,7 +492,7 @@ export function CourtsRevenueBarChart({ data }: { data: { court_name: string; re
         <BarChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }}>
           <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
           <XAxis dataKey="court_name" fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} />
+          <YAxis tickFormatter={fmtAxisCredits} fontSize={11} stroke={TEXT_MUTED} width={creditAxisWidth(stackedExtremes(data, [["revenue_credits"]]))} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} />
           <Bar dataKey="revenue_credits" name="Revenue" fill={ACCENT} radius={[6, 6, 0, 0]} />
         </BarChart>
@@ -361,7 +531,7 @@ export function MyBalanceLineChart({ data }: { data: DailyMePoint[] }) {
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} />
+          <YAxis tickFormatter={fmtAxisCredits} fontSize={11} stroke={TEXT_MUTED} width={creditAxisWidth(stackedExtremes(data, [["balance_credits"]]))} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
           <Area type="monotone" dataKey="balance_credits" name="Balance" stroke={ACCENT} fill="url(#balFill)" strokeWidth={2} />
         </AreaChart>
@@ -381,7 +551,7 @@ export function MyFlowBarChart({ data }: { data: DailyMePoint[] }) {
         <BarChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }} stackOffset="sign">
           <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} domain={SIGNED_DOMAIN} />
+          <YAxis tickFormatter={fmtAxisCredits} fontSize={11} stroke={TEXT_MUTED} width={creditAxisWidth(stackedExtremes(data, MEMBER_FLOW_STACKS))} domain={SIGNED_DOMAIN} />
           <ReferenceLine y={0} stroke={ZERO_LINE_STROKE} strokeWidth={1} />
           <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
           <Legend {...legendProps} />

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { endpoints, LEDGER_ENTRY_TYPES, type LedgerRow } from "../lib/api";
-import { formatCredits, formatSignedCredits } from "../lib/utils";
+import { formatSignedCredits } from "../lib/utils";
 import { Card } from "../components/Card";
 import { Button, Input, Label, fieldClassName } from "../components/Button";
 import { LedgerTable } from "../components/LedgerTable";
@@ -178,15 +178,55 @@ export default function AdminLedgerPage() {
 
       <Card className="!p-0 flex flex-col flex-1 min-h-0">
         <div className="px-4 sm:px-6 pt-4 pb-2 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm shrink-0">
+          {/*
+            Every signed figure through `formatSignedCredits`, never a sign composed around
+            `formatCredits`.
+
+            These two read `+${formatCredits(...)}` and `−${formatCredits(...)}`, so the sign
+            was decided by which tile it was rather than by the figure in it, and a filter
+            that matched nothing rendered "+0.00 cr" beside "−0.00 cr" on the one screen whose
+            whole job is reconciling money. A signed zero reads as a movement that did not
+            happen. `formatSignedCredits` already answers this — its own comment records the
+            reports card that made the identical mistake and was brought through it — and its
+            zero arm is why the fix is here at the formatter boundary rather than in a guard on
+            the empty case: a genuine zero-valued adjustment row is wrong in exactly the same
+            way, with a table full of rows underneath it.
+
+            Debits are summed as a MAGNITUDE (`amountCredits` of the rows whose signed amount
+            is negative), so the negation is what tells the formatter which direction this tile
+            is counting. The sign on screen is then the sign of a number, which is the property
+            that cannot drift.
+          */}
           <Stat label="Movements" value={String(totals.count)} />
-          <Stat label="Credits" value={`+${formatCredits(totals.credits)}`} tone="success" />
-          <Stat label="Debits" value={`−${formatCredits(totals.debits)}`} tone="warning" />
-          <Stat label="Net" value={formatSignedCredits(totals.net)} tone={totals.net >= 0 ? "success" : "warning"} />
+          <Stat label="Credits" value={formatSignedCredits(totals.credits)} tone={toneOf(totals.credits)} />
+          <Stat label="Debits" value={formatSignedCredits(-totals.debits)} tone={toneOf(-totals.debits)} />
+          <Stat label="Net" value={formatSignedCredits(totals.net)} tone={toneOf(totals.net)} />
         </div>
         <LedgerTable rows={filtered} emptyText={loading ? "Loading…" : "No movements match these filters."} fill label="Club ledger" />
       </Card>
     </div>
   );
+}
+
+/**
+ * The colour of a total, taken from its sign — for the same reason the sign is.
+ *
+ * <p>
+ * The tiles were coloured by which tile they were: Credits always `success`, Debits always
+ * `warning`, and Net asked <code>>= 0</code>, so a club that had neither taken nor given
+ * anything in the period was painted green as though it had come out ahead. That is the "+"
+ * defect one layer down — a colour is a claim about direction, and zero has no direction —
+ * and leaving it would have meant an uncoloured sign sitting inside a coloured figure.
+ * </p>
+ *
+ * <p>
+ * <code>-0 === 0</code> in JavaScript, so a negated zero arriving from the Debits tile lands
+ * on the same arm as a plain one rather than on the negative branch.
+ * </p>
+ */
+function toneOf(value: number): "success" | "warning" | undefined {
+  if (value === 0) return undefined;
+  return value > 0 ? "success" : "warning";
 }
 
 function Stat({ label, value, tone }: { label: string; value: string; tone?: "success" | "warning" }) {

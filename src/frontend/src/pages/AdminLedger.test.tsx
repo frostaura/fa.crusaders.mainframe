@@ -164,6 +164,124 @@ describe("Admin ledger — the filters are the URL", () => {
   });
 });
 
+/**
+ * Zero is neither a credit nor a debit.
+ *
+ * <p>
+ * The four totals above the club's book were composed as a literal sign wrapped around
+ * {@link formatCredits} — <code>`+${formatCredits(totals.credits)}`</code> and its minus-sign
+ * twin — so the sign was decided by which tile it was rather than by the figure in it. A
+ * filter that matched nothing therefore rendered <b>+0.00 cr</b> and <b>−0.00 cr</b>, side by
+ * side, on the one screen in the product whose entire job is reconciling money. A signed zero
+ * reads as a movement that did not happen, and an admin chasing a discrepancy reads two of
+ * them.
+ * </p>
+ *
+ * <p>
+ * This is the same defect `formatSignedCredits` was written for, and its own comment records
+ * the reports card that hardcoded a minus around `formatCredits` rather than coming through
+ * it. That card was fixed; this one was not, because nothing connected them — which is the
+ * argument for the totals going through the formatter rather than around it. Fixing it at the
+ * formatter boundary is also what makes a genuine zero-valued row right, rather than only the
+ * empty filter that made it visible.
+ * </p>
+ */
+describe("Admin ledger — the totals are signed by their value, not by their label", () => {
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  const routes = (rows: unknown[]) => [
+    { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
+    { path: "/api/v1/admin/ledger", body: rows },
+  ];
+
+  /** The four figures above the table, in document order: movements, credits, debits, net. */
+  const totals = () => [...document.querySelectorAll("p.font-mono")].map((p) => p.textContent ?? "");
+
+  /** The same four, as `{ text, className }` — because the colour is the sign said again. */
+  const tiles = () => [...document.querySelectorAll("p.font-mono")]
+    .map((p) => ({ text: p.textContent ?? "", cls: p.className }));
+
+  it("puts no sign on a total of nothing", async () => {
+    stubFetch(routes([]));
+    renderPage(<AdminLedgerPage />);
+
+    await screen.findByText("No movements match these filters.");
+    expect(totals()).toContain("0.00 cr");
+    // The two that were there. U+2212 as well as the hyphen, because the minus this screen
+    // draws is the typographic one.
+    expect(totals()).not.toContain("+0.00 cr");
+    expect(totals()).not.toContain("−0.00 cr");
+    expect(totals()).not.toContain("-0.00 cr");
+  });
+
+  it("signs a genuine zero-valued row the same way, not just the empty filter", async () => {
+    // A zero-valued adjustment is a real row the API can return — a desk correction that
+    // nets out. It lands in neither the credit nor the debit bucket, so both totals are zero
+    // while the table below is emphatically not empty. Special-casing "no rows" would leave
+    // this one wrong.
+    stubFetch(routes([ledgerRowFixture({ id: "z1", comment: "Nets out", type: "AdminAdjustment", signedAmountCredits: 0, amountCredits: 0 })]));
+    renderPage(<AdminLedgerPage />);
+
+    await screen.findByText("Nets out");
+    expect(totals()).not.toContain("+0.00 cr");
+    expect(totals()).not.toContain("−0.00 cr");
+  });
+
+  it("does not paint a total of nothing in a direction either", async () => {
+    // The "+" one layer down. Credits was unconditionally green, Debits unconditionally
+    // amber and Net asked `>= 0`, so a period in which the club had neither taken nor given
+    // anything was painted as though it had come out ahead. Leaving that would have put an
+    // unsigned figure inside a coloured one, which is the disagreement the sign fix removes.
+    stubFetch(routes([]));
+    renderPage(<AdminLedgerPage />);
+
+    await screen.findByText("No movements match these filters.");
+    for (const tile of tiles().filter((t) => t.text === "0.00 cr")) {
+      expect(tile.cls).not.toMatch(/text-success-strong|text-warning-strong/);
+    }
+  });
+
+  it("still signs the figures that have a direction", async () => {
+    // The guard against fixing the above by dropping the signs altogether. The sign is the
+    // information on this table; it just has to come from the number.
+    stubFetch(routes([
+      ledgerRowFixture({ id: "r1", comment: "Booking charge", signedAmountCredits: -24, amountCredits: 24 }),
+      ledgerRowFixture({ id: "r2", comment: "Desk credit", type: "AdminAdjustment", signedAmountCredits: 40, amountCredits: 40 }),
+    ]));
+    renderPage(<AdminLedgerPage />);
+
+    await screen.findByText("Desk credit");
+    expect(totals()).toContain("+40.00 cr");
+    expect(totals()).toContain("−24.00 cr");
+    // Net: 40 in, 24 out.
+    expect(totals()).toContain("+16.00 cr");
+
+    // And the colour still agrees with the sign, in both directions.
+    expect(tiles().find((t) => t.text === "+40.00 cr")!.cls).toMatch(/text-success-strong/);
+    expect(tiles().find((t) => t.text === "−24.00 cr")!.cls).toMatch(/text-warning-strong/);
+  });
+
+  /**
+   * The varied setup value: the SIZE of the movements, which ought not to change any of this.
+   * A single fixture at 40 against 24 would pass against arithmetic that happened to be right
+   * only for two rows of those magnitudes, and a club whose debits outweigh its credits is the
+   * period this screen is opened for.
+   */
+  it("signs a net that has gone the other way", async () => {
+    stubFetch(routes([
+      ledgerRowFixture({ id: "r1", comment: "Big charge", signedAmountCredits: -1250.5, amountCredits: 1250.5 }),
+      ledgerRowFixture({ id: "r2", comment: "Small credit", type: "AdminAdjustment", signedAmountCredits: 0.5, amountCredits: 0.5 }),
+    ]));
+    renderPage(<AdminLedgerPage />);
+
+    await screen.findByText("Big charge");
+    expect(totals()).toContain("+0.50 cr");
+    expect(totals()).toContain("−1250.50 cr");
+    expect(totals()).toContain("−1250.00 cr");
+    expect(tiles().find((t) => t.text === "−1250.00 cr")!.cls).toMatch(/text-warning-strong/);
+  });
+});
+
 function SearchProbe() {
   return <span data-testid="router-search">{useLocation().search}</span>;
 }

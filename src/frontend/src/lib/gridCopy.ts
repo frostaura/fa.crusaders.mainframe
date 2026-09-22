@@ -220,11 +220,32 @@ export function groupRateSentence(groups: readonly { name: string }[], priceCred
  * may top the member up while they look, and a grid that hides slots on a wallet read would
  * be making a promise in the other direction. The member is told, and the cells still work.
  * </p>
+ *
+ * <p>
+ * <b>It takes the balance, because a wallet below zero is not an empty one.</b> This used to
+ * take the slice price alone, so the banner was structurally incapable of saying the one thing
+ * a member in debt needs to hear — while `walletNotice`, its only caller, had the figure in
+ * its hand and dropped it on the way in. "You have no credits" told a member 25.00 credits
+ * overdrawn to top up the price of a slot, which would not have bought them one: they must
+ * clear the hole first. The two sentences differ only in their first clause, because the rest
+ * of the banner — what a slot costs, and the fact that the cells still work — is identical
+ * either way.
+ * </p>
+ *
+ * <p>
+ * The rounding case is the product's usual one, decided on the number the member can SEE.
+ * −0.001 renders as "0.00", so it is an empty wallet and not a debt; taking `toFixed(2)` first
+ * is also what stops "-0.00 cr" reaching the screen.
+ * </p>
  */
-export function emptyWalletSentence(cheapestSliceCredits: number | null): string {
+export function emptyWalletSentence(balanceCredits: number | null, cheapestSliceCredits: number | null): string {
   const cost = cheapestSliceCredits !== null
     ? ` A slot here costs ${formatCredits(cheapestSliceCredits)}.`
     : "";
+  // `null` is UNKNOWN and never reaches here — `walletTone` answers "fine" for it — but it is
+  // read as "not a debt" rather than trusted not to arrive.
+  const shown = balanceCredits === null ? 0 : Number(balanceCredits.toFixed(2));
+  if (shown < 0) return `You owe ${formatCredits(Math.abs(shown))}, so you can't book yet.${cost}`;
   return `You have no credits, so you can't book yet.${cost}`;
 }
 

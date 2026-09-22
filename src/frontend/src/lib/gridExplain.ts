@@ -183,7 +183,9 @@ export function walletNotice(balanceCredits: number | null, day: ScheduleDay | n
   if (walletTone(balanceCredits) !== "zero") return null;
   return {
     id: "wallet", tone: "warning",
-    title: emptyWalletSentence(cheapestSlice(day)),
+    // The balance, not just the price. A member below zero is told what they owe rather than
+    // that they "have no credits" — the banner could not say it while this dropped the figure.
+    title: emptyWalletSentence(balanceCredits, cheapestSlice(day)),
     action: { label: "Top up", to: "/wallet/topup" },
   };
 }
