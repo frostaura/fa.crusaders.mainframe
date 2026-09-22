@@ -199,7 +199,10 @@ function StateSpeech({ text, state }: { text: string; state: CourtExpectation })
     if (last.current === null) { last.current = state; return; }
     if (last.current === state) return;
     last.current = state;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- writes the region once per state change
+    // No disable needed here, and it is worth saying why rather than leaving a directive that
+    // does nothing: the two guards above return before this line on every render EXCEPT the
+    // one where the state word actually changed, so the linter can see this is not a write on
+    // every commit. A dead directive is worse than none — it reads as a rule being suppressed.
     setSpoken(text);
   }, [state, text]);
 
