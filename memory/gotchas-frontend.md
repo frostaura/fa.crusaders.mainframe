@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-gotchas-frontend
-description: "React and browser-harness traps: renderPage(<StrictMode>…) is INERT so lanes wrote tests they believed were guarded, user-event's keyboard path hangs under jsdom 28, and only the repo's own Chromium can register a service worker."
+description: "React and browser-harness traps: renderPage(<StrictMode>…) is INERT, user-event's keyboard path hangs under jsdom 28, only the repo's own Chromium registers a service worker, and a worktree serves no webfonts so layout tests measure the wrong typeface."
 type: gotcha
-last_verified: 2026-09-11
+last_verified: 2026-09-23
 ---
 
 # Gotchas — frontend, vitest and the browser harness
@@ -19,10 +19,9 @@ last_verified: 2026-09-11
   and, later, an outage screen's retry button dead for the life of the tab. A test that renders the
   component without StrictMode cannot reproduce either.
 - **`@testing-library/user-event`'s keyboard and typing paths never settle under jsdom 28 +
-  vitest 4 here.** A `user.type()` or `user.keyboard()` hangs to the test timeout and the failure
-  reads as a component ignoring input. `user.click` is fine. Use `fireEvent.change` /
-  `fireEvent.keyDown` instead — the events dispatched are the ones a browser sends. Mixing
-  user-event with fake timers deadlocks outright.
+  vitest 4 here.** `user.type()` / `user.keyboard()` hang to the test timeout and read as a
+  component ignoring input. `user.click` is fine. Use `fireEvent.change` / `fireEvent.keyDown`
+  — the events dispatched are the ones a browser sends. user-event plus fake timers deadlocks.
 - **A fetch stub that matches routes by first-declared prefix is a trap.** An admin collection path
   is a prefix of its own sub-resource, so a test stubbing both got whichever was declared first and
   failed with an empty screen and no hint why. Both the vitest harness and the Playwright fixture
@@ -31,8 +30,8 @@ last_verified: 2026-09-11
   recorded "cannot be registered in this repo's automation" in four places as the reason for
   dropping offline support; a refuter registered one on the first attempt through Playwright's
   `executablePath` and reproduced a **cross-member cache leak** — one member's wallet served to
-  another — with it. `PLAYWRIGHT_CHROMIUM_PATH` is read by `playwright.config.ts`; without it
-  `npx playwright test` cannot launch on this Mac at all, because the cached revision and the one
+  another. `PLAYWRIGHT_CHROMIUM_PATH` is read by `playwright.config.ts`; without it
+  `npx playwright test` cannot launch on this Mac, because the cached revision and the one
   Playwright wants differ.
 - **Playwright refuses a browser revision it did not pin**, so a CI runner that already ships
   Chromium is unusable unless `executablePath` points at it — otherwise every run re-downloads
@@ -42,6 +41,19 @@ last_verified: 2026-09-11
   built-in, which is undefined without the flag. An in-memory `Storage` polyfill in the frontend
   test setup file covers it; **keep it if that file is ever rewritten**, or the app test fails on
   `localStorage.clear()`.
+- **In a git worktree the dev server serves NO webfonts, so layout tests measure the wrong
+  typeface.** Figtree is self-hosted from `node_modules`; a worktree symlinks that outside the
+  worktree root, so Vite's allow-list 403s every `.woff2` with one log line that reads like
+  noise: *"is outside of Vite serving allow list"*. Nothing looks broken — the page renders in
+  the fallback face — but a fallback has different metrics, so a test asserting text fits its
+  box is measuring a font the product does not ship. A 2 px badge overflow passed here every
+  run and failed on CI. `server.fs.allow` in `vite.config.ts` names the resolved path;
+  **do not "simplify" it away.**
+- **Text directly inside a flex container cannot be made to shrink.** It becomes an ANONYMOUS
+  flex item no selector can reach, so `min-width: auto` floors it at min-content — the whole of
+  an unbroken word — and `break-words` on the container never breaks anything. `min-w-0` on the
+  parent does not help: wrap the children in a real element and put `min-w-0 break-words`
+  there. `Badge` in `components/Button.tsx` carries the working shape.
 - **Accessibility defects hide in hand-rolled primitives.** Tests written against existing
   components found a confirm button whose accessible name was every copy of its label concatenated,
   and a settings `Field` rendering a label with no `htmlFor`, leaving every input on that page

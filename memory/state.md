@@ -1,41 +1,36 @@
 ---
 name: crusaders-mainframe-state
-description: "PR #2 is merged and main publishes three images; PR #3 (door gates) is an OPEN DRAFT; claude/eco-mail carries the email redesign locally with NO upstream and nothing pushed. Nothing deployed, nothing on hardware."
+description: "All three PRs are MERGED and main carries everything; origin has one branch and no open PRs. The last CI run on main is the one claim here that decays on its own — re-run it. Nothing deployed, nothing on hardware."
 type: state
-last_verified: 2026-09-19
+last_verified: 2026-09-23
 ---
 
 # Current state
 
-Re-measured **2026-09-19** by command — `git status --porcelain`, `git branch -a`,
-`git rev-list --left-right --count`, `gh pr list --state all`, `gh pr checks 3`,
-`gh run view`. **Three claims below decay on their own and must be re-run, never inherited:**
-the result of the latest run on `main`, the result of the latest run on `claude/gate-controller`,
-and the Actions secrets inventory, which has not been re-checked since 2026-09-11.
+Re-measured **2026-09-23** by command — `git status --porcelain`, `git branch -r`,
+`git rev-list --left-right --count`, `gh pr list --state all`, `gh run view`, `git worktree
+list`. **Two claims below decay on their own and must be re-run, never inherited:** the result
+of the latest run on `main`, and the Actions secrets inventory, unchecked since 2026-09-11.
 
-**The branches.** **PR #2 merged into `main` on 2026-09-19** (`36b96ad`), carrying the whole
-`claude/e2e-fix-programme` history; its remote branch was deleted on merge. **PR #3 —
-the door gates — is OPEN as a DRAFT from `claude/gate-controller`**, which is ahead of
-`origin/main`, not behind it, and level with its own remote: nothing on it is unpushed.
-PR #1 merged 2026-08-24. Delivery is one branch, one PR by founder decision.
+**The branches, and there is now only one.** **PR #3 merged into `main` on 2026-09-23**, and its
+remote branch was deleted. **All three PRs are MERGED and none is open.** `origin` carries
+`main` and nothing else; the 76 local lane branches and 27 lane worktrees were removed after
+`git branch --no-merged origin/main` returned **zero**. Delivery was one branch, one PR by
+founder decision; that line is now simply `main`.
 
-**`claude/eco-mail` is a LOCAL branch with no upstream** (measured 2026-09-22:
-`git rev-parse --abbrev-ref '@{u}'` answers "no upstream configured"). It holds the transactional
-email redesign, on top of the gate-controller line and far ahead of `origin/main` — and
-**nothing on it is pushed**. Re-run the count rather than inheriting one. Whoever picks it up sets an upstream before claiming any of it is
-safe; until then the only copy is this working tree. What it changed is in
-[`decisions-email.md`](decisions-email.md).
+**Work goes directly onto `main` by founder decision (2026-09-23)** — no branch, no PR — so
+every push runs the release half of CI as well as the gates. `git rev-list --left-right --count
+origin/main...HEAD` answering `0 0` is the check before claiming anything is safe.
 
-**What CI does on that branch.** Every gate runs; **no image is built.** The six image jobs and
-the three manifest steps are gated on a *push to `main`*, so on a pull request they report as
-skipped — a green run on this branch says nothing whatever about the release half. At the branch
-head (`854ba10`, run `35448643445`, 2026-09-19) backend, backend-integration, frontend, both
-e2e jobs, `iot-build` and Security Scan passed, and **two jobs were red**: *IoT Firmware (native
-tests + lint)*, where the ASAN/UBSAN build refused `gatelogic`'s `static_assert` over a
-`constexpr` string length the plain build accepts — **`2a57f9c` landed on the branch after that
-run and is that fix**, so the job has not been re-measured since — and **GitGuardian**, a probable
-false positive on a shared corpus fixture ([`watch-doors.md`](watch-doors.md)). Take the current
-answer from `gh pr checks 3`, never from this paragraph.
+**What CI does on `main`.** Every gate runs **and the release half runs too**: the six image
+jobs and three manifest steps are gated on a push to `main`, so unlike a pull request they are
+live. They publish `:latest` multi-arch images to Docker Hub **and stop** — the Portainer
+redeploy job was removed 2026-09-19, so nothing is redeployed automatically.
+**A failing job SKIPS every job behind it**, which for several runs hid the state of
+`backend-integration`, `e2e-device` and Security Scan entirely — count the skips before reading
+a run as mostly-passing, and see [`gotchas-ci-jobs.md`](gotchas-ci-jobs.md) for why a timeout
+reports as *cancelled*. Take the current answer from `gh run list --branch main`, never from
+this paragraph.
 
 **What the product does now.** The court-light headline flow — book online, scan at the box,
 lights on — exists end to end and is pinned by `make test-e2e-device`. **The door gate now exists
@@ -47,11 +42,10 @@ signing, HMAC device auth, discovery, claim codes and the device clock are gone 
 ([`decisions-device.md`](decisions-device.md)).
 
 **Nothing is deployed, nothing has ever run on hardware, and no money has moved through PayFast
-in production.** The publish half is proven: run `35434498116` on 2026-09-19 pushed all three
-multi-arch manifests, and the next push, `35435320324`, was the first fully green run in this
-repository's history. The Portainer deploy job was removed the same day, so **redeploying the club
-stack is a manual step** and has lost the stack checks that job carried ([`watch.md`](watch.md)).
-Crusaders Squash Club is a named, committed pilot that **pays nothing**.
+in production.** The publish half is proven: run `35434498116` (2026-09-19) pushed all three
+multi-arch manifests. Redeploying the club stack is a **manual step** and has lost the checks
+the removed Portainer job carried ([`watch.md`](watch.md)). Crusaders Squash Club is a named,
+committed pilot that **pays nothing**.
 
 **The two founder-facing pages** — `docs/system-blueprint.html` and `docs/court-lights-flows.html`
 — were regenerated **2026-09-19** on `claude/gate-g2-docs` for the door gate, after the G1 and G2
@@ -60,7 +54,7 @@ the stable URL is `https://claude.ai/code/artifact/45da513d-3977-4c49-9bed-9ac44
 copy behind it is the 2026-09-06 revision that knows nothing about doors. Whoever republishes
 keeps that URL so the link the founder holds stays good.
 
-**What stands between here and a lit court at Crusaders** is founder and committee work, not code:
+**What stands between here and a lit court** is founder and committee work, not code:
 the relay safety question ([`safety-relays.md`](safety-relays.md)), Carl's two facts about the
 door lock, committee sign-off on charge-at-booking, PayFast production credentials, one manual
 redeploy, and supervised bench sessions with the real box and the first real door.

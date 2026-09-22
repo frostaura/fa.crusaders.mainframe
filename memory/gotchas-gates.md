@@ -13,24 +13,26 @@ failures are in [`gotchas-env.md`](gotchas-env.md).
 
 - **`make complexity` prints its warning to stdout and exits 1** — piping it through `tail` loses
   the exit code and reports a red gate as green. That is how a failing gate reached CI. Read `$?`.
-- **lizard's `.tsx` lexer desyncs three ways** — a bare `<` in an object literal, an odd number of
-  bare apostrophes in JSX text, or an inline object type inside a generic argument — each reporting a
-  function nobody wrote; the tell is that the *enclosing* component stops being reported at all. The
-  cure is the text, not the code: name the type, reword the sentence, hoist the literal.
+- **lizard's `.tsx` lexer desyncs four ways** — a bare `<` in an object literal, an odd number of
+  bare apostrophes in JSX text, an inline object type inside a generic argument, or **a component
+  whose own name appears later in the file as a JSX closing tag** — each reporting a function
+  nobody wrote; the tell is that the *enclosing* component stops being reported at all. The
+  cure is the text, not the code: name the type, reword the sentence, hoist the literal. For the
+  fourth, the declaration is run on to its own `</Name>`: `ChartFrame` is 38 lines and was
+  reported at 271, tripping `-L 200`. **Move the component to its own file** — the span then has
+  no unrelated code to swallow, and a file with 28 functions wanted splitting anyway.
 - **lizard's C# parser mis-scopes any expression-bodied member whose body contains braces**
   (`=> new { … }`, `=> x switch { … }`, a property pattern), dumping the rest of the file into a
   `*global*` pseudo-function the length of the file — the gate trips naming no real function at line
   0. The fix is a block body, not a whitelist entry; a method directly *after* an expression-bodied
   private constructor misfiles identically. Placement, not content.
 - **The same `*global*` warning also has a form no single member causes.** `EmailChrome.cs` — 490
-  lines, most of them raw string literals full of markup — lost its class partway down and reported
-  `*global*` at 491 lines with only five of its ~20 members found, one of them renamed `style::Wrap`
-  after the `<style>` element in a const. **Removing any one member does not fix it** (a bisect that
-  deletes each in turn leaves the warning standing), and neither did emptying the CSS or replacing
-  the one `#hex` in it: it is the *density* of raw strings the reader cannot track, not a single
-  construct. The fix is **smaller files** — the class was split into three `partial` files of ~150
-  lines each and the warning went. Reach for a block body first; if the warning survives every
-  block body in the file, stop bisecting and split it.
+  lines, mostly raw string literals full of markup — lost its class partway down and reported
+  `*global*` at 491 lines with five of ~20 members found. **Removing any one member does not fix
+  it** (a bisect deleting each in turn leaves it standing): it is the *density* of raw strings,
+  not one construct. The fix is **smaller files** — split into three `partial` files of ~150
+  lines and it went. Try a block body first; if the warning survives every block body in the
+  file, stop bisecting and split it.
 - **The rollover grep gate keys on identifier NAMES and has a hole:** it catches `now >=
   expiresAtMs` but not `now >= until_[i].at`, and `at` is the deadline type's public field, so the
   naive comparison is reachable through any deadline named otherwise. The tests are the real gate.
