@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { LedgerTable } from "./LedgerTable";
+import { resetClubCurrencySymbol, setClubCurrencySymbol } from "../lib/currency";
 import type { LedgerRow } from "../lib/api";
+
+afterEach(resetClubCurrencySymbol);
 
 /**
  * The ledger table at phone width.
@@ -109,14 +112,59 @@ describe("LedgerTable — what survives a 375px screen", () => {
     // A debit's counterparty is who was paid; a credit's is who paid. Picking by sign is
     // what makes one line enough — the member is always the other end. And the amount
     // keeps its sign, with a real U+2212 minus in a tabular column so debits line up.
-    expect(text).toContain("\u221224.00 crClub treasury");
-    expect(text).toContain("+2000.00 crClub treasury");
+    //
+    // The SIGN SITS OUTSIDE THE SYMBOL. "R-24.00" is a symbol in front of a malformed
+    // number; "\u2212R24.00" is how a negative amount of money is written, and this is the one
+    // column whose entire meaning is carried by the sign.
+    expect(text).toContain("\u2212R24.00Club treasury");
+    expect(text).toContain("+R2000.00Club treasury");
     for (const cell of amounts) expect(cell.className).toContain("tabular-nums");
 
     // The counterparty line is itself mobile-only: above `sm` the From/To columns are
     // back and repeating the name under the amount would be noise.
     for (const cell of amounts) {
       expect(cell.querySelector("span")!.className).toContain("sm:hidden");
+    }
+  });
+
+  /**
+   * The symbol is the CLUB's, and this column is where a wrong one is least visible.
+   *
+   * <p>
+   * A hardcoded "R" would pass every assertion above and be wrong for every club that is not
+   * on rand — and the ledger is the screen a member is sent to when they dispute a figure, so
+   * a unit that is not theirs is the worst place for it. The multi-character case is the one
+   * that catches an implementation that took `symbol[0]`, and the absent case is the one that
+   * catches a club whose API predates the key.
+   * </p>
+   */
+  it.each([
+    ["CHF", "−CHF24.00", "+CHF2000.00"],
+    ["R$", "−R$24.00", "+R$2000.00"],
+    ["€", "−€24.00", "+€2000.00"],
+  ])("writes the club's own symbol in front of every figure (%s)", (symbol, debit, credit) => {
+    setClubCurrencySymbol(symbol);
+    render(<LedgerTable rows={rows} label="Ledger" />);
+    const text = cellsOf("Amount").map((c) => c.textContent);
+    expect(text).toContain(`${debit}Club treasury`);
+    expect(text).toContain(`${credit}Club treasury`);
+  });
+
+  it("falls back to the default symbol when the club has never chosen one", () => {
+    // Not "no unit at all", and not the previous club's — `setClubCurrencySymbol` always
+    // assigns, so an unusable value is the DEFAULT rather than whatever was there before.
+    setClubCurrencySymbol("CHF");
+    setClubCurrencySymbol(undefined);
+    render(<LedgerTable rows={rows} label="Ledger" />);
+    const text = cellsOf("Amount").map((c) => c.textContent);
+    expect(text).toContain("−R24.00Club treasury");
+  });
+
+  it("never writes the abbreviation this product used to carry", () => {
+    render(<LedgerTable rows={rows} label="Ledger" />);
+    for (const cell of cellsOf("Amount")) {
+      expect(cell.textContent).not.toMatch(/\bcr\b/);
+      expect(cell.textContent).not.toMatch(/credits?/i);
     }
   });
 });
