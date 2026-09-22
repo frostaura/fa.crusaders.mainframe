@@ -94,7 +94,10 @@ public class MoneySurfaceTests
     {
         var mail = EmailTemplates.TopUpConfirmation(
             "member@test.local", amountZar: 100m, creditsAdded: 160m,
-            conversionRate: 1.6m, balanceAfterCredits: 210m, reference: "1089250");
+            conversionRate: 1.6m, balanceAfterCredits: 210m, reference: "1089250",
+            // A club on the default symbol. What happens when it is NOT the default is
+            // CurrencySymbolTests' — this case is here to hold the shape of the mail itself.
+            currencySymbol: CurrencySymbol.Default);
 
         Assert.Contains("R100.00", mail.HtmlBody);
         Assert.Contains("1.6 credits per R1", mail.HtmlBody);

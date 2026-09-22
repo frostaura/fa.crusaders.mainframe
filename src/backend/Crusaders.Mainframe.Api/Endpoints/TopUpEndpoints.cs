@@ -268,7 +268,7 @@ public static partial class TopUpEndpoints
                 pending.FailureReason = FailureCodes.AmountMismatch;
                 await db.SaveChangesAsync(ct);
 
-                if (wasPending) await NotifyNotCompletedAsync(db, emailService, logger, pending, ct);
+                if (wasPending) await NotifyNotCompletedAsync(db, emailService, logger, settingsAccessor, pending, ct);
                 return Results.BadRequest(new { error = "amount_mismatch" });
             }
 
@@ -322,7 +322,7 @@ public static partial class TopUpEndpoints
             pending.CompletedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(ct);
 
-            if (wasPending) await NotifyNotCompletedAsync(db, emailService, logger, pending, ct);
+            if (wasPending) await NotifyNotCompletedAsync(db, emailService, logger, settingsAccessor, pending, ct);
             return Results.Ok(new { ok = false, reason = pending.FailureReason });
         }).AllowAnonymous();
 
@@ -350,17 +350,22 @@ public static partial class TopUpEndpoints
     /// </para>
     /// </summary>
     private static async Task NotifyNotCompletedAsync(
-        MainframeDbContext db, IEmailService email, ILogger logger, PendingTopup pending, CancellationToken ct)
+        MainframeDbContext db, IEmailService email, ILogger logger, TenantSettingsAccessor settings,
+        PendingTopup pending, CancellationToken ct)
     {
         var recipient = await db.Users.AsNoTracking()
             .Where(u => u.Id == pending.UserId).Select(u => u.Email).FirstOrDefaultAsync(ct);
         if (string.IsNullOrEmpty(recipient)) return;
 
+        // The club's own money symbol, resolved from the tenant the callback already set.
+        // Never a constant: this mail names an amount the member's card was asked for.
+        var symbol = CurrencySymbol.For(await settings.GetAsync(ct));
+
         EmailDispatch.InBackground(
             email, logger,
             EmailTemplates.TopUpNotCompleted(
                 recipient, pending.AmountZar, pending.FailureReason,
-                pending.ExternalReference ?? pending.IdempotencyKey),
+                pending.ExternalReference ?? pending.IdempotencyKey, symbol),
             $"top-up failure notice for {pending.Id}");
     }
 
@@ -444,7 +449,10 @@ public static partial class TopUpEndpoints
                 ActorUserId: pending.UserId,
                 // Invariant separators, so the comment reads in the same convention as the
                 // amount column beside it rather than the server's ambient culture.
-                Reason: $"PayFast top-up ({EmailTemplates.Zar(pending.AmountZar)} → {EmailTemplates.Cr(credits)} @ {EmailTemplates.Num(rate)})",
+                // The club's own money symbol, frozen into the row. A ledger reason is written
+                // once and read for ever: a club that changes its symbol later has not changed
+                // what this member paid, and re-rendering the history would be the lie.
+                Reason: $"PayFast top-up ({EmailTemplates.Zar(pending.AmountZar, CurrencySymbol.For(settings))} → {EmailTemplates.Cr(credits)} @ {EmailTemplates.Num(rate)})",
                 ExternalReference: reference), ct);
 
             await c.Db.SaveChangesAsync(ct);
@@ -475,7 +483,7 @@ public static partial class TopUpEndpoints
                 c.Email, c.Logger,
                 EmailTemplates.TopUpConfirmation(
                     recipient, pending.AmountZar, credits, rate, balanceAfter,
-                    interp.PaymentId ?? pending.IdempotencyKey),
+                    interp.PaymentId ?? pending.IdempotencyKey, CurrencySymbol.For(settings)),
                 $"top-up confirmation for {pending.Id}");
         }
 

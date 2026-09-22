@@ -22,6 +22,7 @@ public static class MeProfileEndpoints
             var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId, ct);
             if (user is null) return Results.NotFound();
             var membership = await db.Memberships.AsNoTracking().FirstOrDefaultAsync(m => m.UserId == userId, ct);
+            var clubSettings = await settings.GetAsync(ct);
             return Results.Ok(new
             {
                 user_id = user.Id,
@@ -39,7 +40,14 @@ public static class MeProfileEndpoints
                 // MEMBER needs and the settings surface is admin-only. It is their own club's by
                 // construction — the accessor resolves the tenant from the caller's own token, so
                 // there is no id a member could supply to read another club's.
-                action_glyphs = ActionGlyphs.For(await settings.GetAsync(ct)),
+                action_glyphs = ActionGlyphs.For(clubSettings),
+
+                // The club's money symbol, on this payload for exactly the same two reasons —
+                // a member needs it (the top-up screens are theirs) and the settings surface is
+                // admin-only — and safe for the same third: it is resolved from the caller's own
+                // token, so no member can ask for another club's. The alternative, a second
+                // endpoint for one string, would be a round trip on the first paint.
+                currency_symbol = CurrencySymbol.For(clubSettings),
             });
         });
 
