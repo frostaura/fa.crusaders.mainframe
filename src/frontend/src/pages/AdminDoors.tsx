@@ -284,11 +284,22 @@ function AdminDoorsPageBody() {
             {refreshing ? "Checking…" : "Refresh"}
           </Button>
         </div>
-        {/* eco: Doors lives inside Monitoring now. The strip is on the page rather than only
-            in the chrome because an admin arriving from a bookmark or an outage email lands
-            HERE, and without it the section they are in is invisible from inside it. */}
-        <MonitoringNav className="pt-1" />
       </header>
+      {/*
+        eco: Doors lives inside Monitoring now. The strip is on the page rather than only in
+        the chrome because an admin arriving from a bookmark or an outage email lands HERE,
+        and without it the section they are in is invisible from inside it.
+
+        OUTSIDE the header, and that is the whole of a measured defect. The header is
+        `sm:flex`, so from 640 px up the strip became a third COLUMN beside the title and the
+        buttons — not what it is, and worse than cosmetic: a flex item's automatic minimum
+        size is its content, so the strip could not shrink, its `overflow-auto` never clipped
+        anything, and `main` measured 1 444 px inside an 820 px viewport. Below `sm` the
+        header is a block and the same markup was fine, which is why only the wide case went
+        red. Out here it is a full-width row of its own at every width, which is what the
+        other five Monitoring pages do.
+      */}
+      <MonitoringNav />
 
       {/* A8 / C4: one polite region carrying what Refresh found and whether this page can
           currently say anything about liveness at all. */}

@@ -1062,7 +1062,22 @@ export function AdminDevicesPage() {
     // own padding on a 320 px phone, on top of the shell's. What the padding protects is a
     // GAP, and a gap does not need to grow with the text; what the space it eats protects is
     // a WORD, which does.
-    <div className="mx-auto min-w-0 max-w-4xl space-y-6 p-[16px]">
+    //
+    /*
+     * `w-full`, and it is load-bearing rather than tidy. `Layout` renders every page inside
+     * `flex flex-col`, so this div is a flex item — and an item with AUTO cross-axis margins
+     * (`mx-auto`) does not stretch, so without a width it is sized to fit its content, capped
+     * only by `max-w-4xl`. That cap is a rem: 896 px at a 16 px root and 1 792 px at the 32 px
+     * root an older volunteer uses, so on a 320 px phone it caps nothing at all.
+     *
+     * The bug was invisible for as long as nothing on this page was wider than the screen.
+     * The Monitoring strip is: its row is `w-max` by design, and it is meant to be clipped and
+     * scrolled by the `overflow-auto` around it. Instead the whole page grew to the strip's
+     * width — measured 354 px at a 16 px root and 913 px at 32 px, on a 320 px viewport — and
+     * the strip never scrolled, because it was never narrower than its content. `Layout`'s own
+     * wrapper has carried `w-full` beside its `max-w-*` since it was written, for this reason.
+     */
+    <div className="mx-auto w-full min-w-0 max-w-4xl space-y-6 p-[16px]">
       <h1 className="text-2xl font-bold">Devices</h1>
       {/* eco: Devices was in a gear menu and is a destination now — the section this page was
           moved into is invisible from inside it without this strip, which is the IA problem

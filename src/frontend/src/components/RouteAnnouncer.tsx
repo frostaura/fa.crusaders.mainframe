@@ -156,7 +156,7 @@ function takeFocus(hash: string): () => void {
 
   const attempt = () => {
     attempts += 1;
-    const landed = isTyping(document.activeElement)
+    const landed = inUse(document.activeElement)
       ? false
       : (hash ? focusFragmentTarget(hash) : focusPageHeading());
     if (landed) return;
@@ -175,10 +175,37 @@ function focusPageHeading(): boolean {
   return true;
 }
 
-/** Whether focus is somewhere a person could be part-way through a sentence. */
-function isTyping(active: Element | null): boolean {
+/**
+ * Whether focus is somewhere a person is part-way through something.
+ *
+ * <p>
+ * <b>Typing was only half of it, and the other half destroys work rather than interrupting
+ * it.</b> A two-step confirm disarms when focus leaves the group — that is what makes Escape,
+ * a click elsewhere and a Tab away all mean "no" without needing a clock. So a retry that
+ * pulls focus to the heading while a confirm is ARMED does not merely interrupt: it silently
+ * cancels the thing the admin had just decided to do, and the only trace is a polite
+ * "Cancelled — nothing was changed." that arrives while they are looking at the button.
+ * </p>
+ *
+ * <p>
+ * It is reachable in the product rather than only under test, and it took the Monitoring move
+ * to expose it. The old admin paths are permanent redirects now, so an admin following
+ * `/admin/doors` out of an outage email lands, is redirected, and the redirect is a second
+ * pathname change whose focus attempt retries for a further second — straight over the fleet
+ * control they have already armed. Measured on the doors overview: armed, then disarmed
+ * 40 ms later by `handleBlur`, with `relatedTarget` the page's own `<h1>`.
+ * </p>
+ *
+ * <p>
+ * `[data-confirm]` is `ConfirmButton`'s own armed marking, so this asks the control whether
+ * it is armed rather than keeping a second register of which controls are two-step. An idle
+ * confirm carries no such attribute and is not protected — there is nothing to lose.
+ * </p>
+ */
+function inUse(active: Element | null): boolean {
   if (!active || !(active instanceof HTMLElement)) return false;
   if (active.isContentEditable) return true;
   const tag = active.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  return active.closest("[data-confirm]") !== null;
 }
