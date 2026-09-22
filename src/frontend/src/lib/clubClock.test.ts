@@ -165,6 +165,20 @@ describe("no doors surface writes a time in the reader's own locale", () => {
     // "9/19/26, 9:25 PM" in the reader's own locale, on the page an admin reconciles a court
     // box's night from. Added here in the same commit that fixed it.
     "pages/AdminDevices.tsx",
+    // eco: the six new admin surfaces write times too, and they joined this list in the same
+    // wave that created them rather than a round later — which is how `AdminDevices` came to
+    // be on it at all. `pages/monitoring` is covered here AND by its own posture test; two
+    // checks on one rule is cheap, and this one is the list a reader looks at.
+    "pages/monitoring",
+    "components/monitoring",
+    "components/groups",
+    "components/members",
+    "pages/AdminGroups.tsx",
+    "pages/AdminSchedules.tsx",
+    "pages/AdminScheduleDetail.tsx",
+    "lib/monitoringCopy.ts",
+    "lib/nightCopy.ts",
+    "lib/deviceFaultCopy.ts",
     "pages/AdminDoors.tsx",
     "pages/AdminDoorsCard.tsx",
     "pages/AdminDoorsDetail.tsx",

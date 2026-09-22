@@ -35,6 +35,18 @@ import { api } from "./api";
  * ignores the rest, so a mis-cased key is a field that never arrives and a save that reports
  * success.
  * </p>
+ *
+ * <p>
+ * <b>D2 contradicts itself about this and the merged backend settles it.</b> §13 states the
+ * camelCase-in / snake_case-out convention; §4.5 then illustrates the group bodies in
+ * snake_case (<code>user_ids</code>, <code>multiplier_bps</code>, <code>max_slots_per_day</code>),
+ * which reads as a second convention and is not one. `MemberGroupEndpoints.cs` binds
+ * `MemberGroupRequest(Name, Description, Status, Pricing, Caps, Windows)`,
+ * `GroupMembersRequest(UserIds)` and `PreviewRequest(UserId, Day, ProposedGroupIds)` as
+ * ordinary records with no naming policy and no `[JsonPropertyName]`, so ASP.NET binds them
+ * from camelCase. §13 is right, §4.5's illustration is loose, and this file follows §13 —
+ * checked against the endpoint rather than argued from the document.
+ * </p>
  */
 
 /** Query string from the fields that are actually set. `?` only when there is something to say. */
