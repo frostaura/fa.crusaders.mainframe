@@ -107,7 +107,17 @@ jobs:
   e2e:
     name: End-to-end (Playwright)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 30, not 15. The 15 was set when this job took 4 minutes and the suite was a few hundred
+    # specs; it is 644 now, run across a desktop and a mobile project, on top of a browser
+    # install and a production build. Measured on the runs of 2026-09-23 it needs the better
+    # part of quarter of an hour with everything passing, which left no headroom at all.
+    #
+    # A budget with no headroom fails in the most expensive way there is: exceeding
+    # timeout-minutes reports as CANCELLED, so the job names no test and reads like a hang
+    # rather than like arithmetic. It already cost one debugging cycle on this suite, where the
+    # real cause was a 2 px badge overflow whose retries — each recording video — ate the
+    # margin. See memory/gotchas-ci-jobs.md.
+    timeout-minutes: 30
     needs: [frontend]
     defaults:
       run:
