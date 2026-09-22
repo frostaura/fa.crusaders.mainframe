@@ -20,36 +20,42 @@ namespace Crusaders.Mainframe.Tests;
 /// </summary>
 public class MoneySurfaceTests
 {
-    // ---- Emails are in credits, and quote the tenant's own policy ----------
+    // ---- Emails write one symbol, and quote the tenant's own policy --------
 
     /// <summary>
-    /// "Charged R50,00" for a court that cost R31.25 at the club's 1.6 rate. Every figure in
-    /// both money emails is credits, and <c>CLAUDE.md</c> calls a field that mixes the two
-    /// units a money-correctness bug.
+    /// <b>Every figure in every money email carries the club's symbol, and no unit word.</b>
+    ///
+    /// <para>
+    /// This test used to assert the exact opposite — "50.00 credits" present and "R50" absent —
+    /// because the product then rendered two quantities in two units. The owner has ruled twice
+    /// since: one configurable symbol, preceding every amount, and neither "cr" nor "credits"
+    /// surviving as a unit on a number. The reasoning, and the risk accepted with it, is at the
+    /// head of <c>frontend/src/lib/currency.ts</c> and in <c>Services/CurrencySymbol.cs</c>.
+    /// </para>
     /// </summary>
     [Fact]
-    public void The_booking_confirmation_states_credits_and_never_rand()
+    public void The_booking_confirmation_states_the_clubs_symbol_and_never_a_unit_word()
     {
         var mail = EmailTemplates.BookingConfirmation("member@test.local", new BookingConfirmationDetails(
             CourtName: "Court 3", StartsAtLocal: "Wed 16 Sep 10:00", Duration: "15 min",
             AmountCredits: 50m, BalanceAfterCredits: 60m,
-            PenaltyWindowMinutes: 15, PenaltyPct: 30m));
+            PenaltyWindowMinutes: 15, PenaltyPct: 30m, CurrencySymbol: "R"));
 
-        Assert.Contains("50.00 credits", mail.HtmlBody);
-        Assert.Contains("60.00 credits", mail.HtmlBody);
-        Assert.DoesNotContain("R50", mail.HtmlBody);
-        Assert.DoesNotContain("R60", mail.HtmlBody);
+        Assert.Contains("R50.00", mail.HtmlBody);
+        Assert.Contains("R60.00", mail.HtmlBody);
+        Assert.DoesNotContain("credits", mail.HtmlBody);
+        Assert.DoesNotContain("50.00 cr", mail.HtmlBody);
     }
 
     [Fact]
-    public void The_cancellation_email_states_credits_and_never_rand()
+    public void The_cancellation_email_states_the_clubs_symbol_and_never_a_unit_word()
     {
-        var mail = EmailTemplates.BookingCancellation("member@test.local", "Court 4", 50m, 15m);
+        var mail = EmailTemplates.BookingCancellation("member@test.local", "Court 4", 50m, 15m, "R");
 
-        Assert.Contains("50.00 credits", mail.HtmlBody);
-        Assert.Contains("15.00 credits", mail.HtmlBody);
-        Assert.DoesNotContain("R50", mail.HtmlBody);
-        Assert.DoesNotContain("R15", mail.HtmlBody);
+        Assert.Contains("R50.00", mail.HtmlBody);
+        Assert.Contains("R15.00", mail.HtmlBody);
+        Assert.DoesNotContain("credits", mail.HtmlBody);
+        Assert.DoesNotContain("50.00 cr", mail.HtmlBody);
     }
 
     /// <summary>
@@ -61,7 +67,7 @@ public class MoneySurfaceTests
     {
         var mail = EmailTemplates.BookingConfirmation("member@test.local", new BookingConfirmationDetails(
             "Court 3", "Wed 16 Sep 10:00", "15 min", 50m, 60m,
-            PenaltyWindowMinutes: 30, PenaltyPct: 50m));
+            PenaltyWindowMinutes: 30, PenaltyPct: 50m, CurrencySymbol: "R"));
 
         Assert.Contains("within 30 minutes", mail.HtmlBody);
         Assert.Contains("50% penalty", mail.HtmlBody);
@@ -77,8 +83,8 @@ public class MoneySurfaceTests
         try
         {
             Thread.CurrentThread.CurrentCulture = new CultureInfo("af-ZA");
-            var mail = EmailTemplates.BookingCancellation("member@test.local", "Court 4", 50m, 15m);
-            Assert.Contains("50.00 credits", mail.HtmlBody);
+            var mail = EmailTemplates.BookingCancellation("member@test.local", "Court 4", 50m, 15m, "R");
+            Assert.Contains("R50.00", mail.HtmlBody);
             Assert.DoesNotContain("50,00", mail.HtmlBody);
         }
         finally { Thread.CurrentThread.CurrentCulture = previous; }
@@ -89,8 +95,20 @@ public class MoneySurfaceTests
     /// which existed — so the one event where a member hands over real money, and the one
     /// where somebody else moves their balance, both sent nothing at all.
     /// </summary>
+    /// <summary>
+    /// <b>The conversion boundary, and the one rule the single-symbol decision imposes.</b>
+    ///
+    /// <para>
+    /// Both legs now wear the same sign and are different sizes: R100.00 left the card and
+    /// R160.00 arrived, at the shipped 1.6. That is only honest if the mail says which is
+    /// which, in words, because the rate is invisible everywhere else in the product now. This
+    /// test asserts the sentence, not merely the figures — "Paid R100.00 / Credited R160.00"
+    /// with nothing between them is the defect it exists to prevent, and it passes a test that
+    /// only looks for two numbers.
+    /// </para>
+    /// </summary>
     [Fact]
-    public void A_topup_confirmation_shows_the_rand_paid_the_rate_and_the_credits_received()
+    public void A_topup_confirmation_names_both_legs_of_the_conversion_in_words()
     {
         var mail = EmailTemplates.TopUpConfirmation("member@test.local", new TopUpConfirmationDetails(
             AmountZar: 100m, CreditsAdded: 160m, ConversionRate: 1.6m,
@@ -99,29 +117,76 @@ public class MoneySurfaceTests
             // CurrencySymbolTests' — this case is here to hold the shape of the mail itself.
             CurrencySymbol: CurrencySymbol.Default));
 
+        // The three figures, each in the club's own sign and none of them wearing a unit word.
         Assert.Contains("R100.00", mail.HtmlBody);
-        Assert.Contains("1.6 credits per R1", mail.HtmlBody);
-        Assert.Contains("160.00 credits", mail.HtmlBody);
-        Assert.Contains("210.00 credits", mail.HtmlBody);
+        Assert.Contains("R160.00", mail.HtmlBody);
+        Assert.Contains("R210.00", mail.HtmlBody);
         Assert.Contains("1089250", mail.HtmlBody);
+        Assert.DoesNotContain("credits", mail.HtmlBody);
+
+        // …and the sentence that says which leg is which. Asserted as the whole sentence: a
+        // keyword would survive a template that printed the rate and dropped the naming.
+        Assert.Contains(
+            "Every R1.00 you pay adds R1.60 to your wallet, which is why R160.00 arrived for " +
+            "the R100.00 that left your card.",
+            mail.HtmlBody);
+
+        // The residual risk the owner accepted when the two quantities collapsed onto one
+        // symbol: a member reading their balance as cash they could ask back.
+        Assert.Contains("it is not cash and cannot be paid back out", mail.HtmlBody);
+
+        // The rows are LABELLED as the two legs, not as two bare amounts.
+        Assert.Contains(">You paid</td>", mail.HtmlBody);
+        Assert.Contains(">Added to your wallet</td>", mail.HtmlBody);
+
+        // And the subject carries both, so a member scanning an inbox is not told only the
+        // larger number.
+        Assert.Equal("Top-up confirmed — R100.00 paid, R160.00 added", mail.Subject);
+    }
+
+    /// <summary>
+    /// The conversion sentence is computed from the RATE, not written out. A club on the league
+    /// rate gives 140%, and a club on 1:1 gives nothing — and the sentence has to be true of
+    /// all three without a special case.
+    /// </summary>
+    [Theory]
+    [InlineData(1.6, 160, "Every R1.00 you pay adds R1.60 to your wallet")]
+    [InlineData(2.4, 240, "Every R1.00 you pay adds R2.40 to your wallet")]
+    [InlineData(1.0, 100, "Every R1.00 you pay adds R1.00 to your wallet")]
+    public void The_conversion_sentence_is_derived_from_the_clubs_own_rate(
+        double rate, double credited, string expected)
+    {
+        var mail = EmailTemplates.TopUpConfirmation("member@test.local", new TopUpConfirmationDetails(
+            AmountZar: 100m, CreditsAdded: (decimal)credited, ConversionRate: (decimal)rate,
+            BalanceAfterCredits: (decimal)credited, Reference: "r", CurrencySymbol: "R"));
+
+        Assert.Contains(expected, mail.HtmlBody);
     }
 
     [Theory]
-    [InlineData(25, "Credit added")]
-    [InlineData(-10, "Credit deducted")]
-    public void A_credit_adjustment_email_says_which_way_the_money_went(double amount, string expectedSubject)
+    [InlineData(25, "Added to your balance — R25.00", "+R25.00")]
+    [InlineData(-10, "Deducted from your balance — R10.00", "−R10.00")]
+    public void A_credit_adjustment_email_says_which_way_the_money_went(
+        double amount, string expectedSubject, string expectedAmountCell)
     {
-        var mail = EmailTemplates.CreditAdjustment("member@test.local", (decimal)amount, 145m, "desk credit");
+        var mail = EmailTemplates.CreditAdjustment(
+            "member@test.local", (decimal)amount, 145m, "desk credit", "R");
 
-        Assert.StartsWith(expectedSubject, mail.Subject);
-        Assert.Contains("145.00 credits", mail.HtmlBody);
+        Assert.Equal(expectedSubject, mail.Subject);
+        Assert.Contains("R145.00", mail.HtmlBody);
         Assert.Contains("desk credit", mail.HtmlBody);
+        Assert.DoesNotContain("credits", mail.HtmlBody);
+
+        // The direction is the +/− in front, and the figure itself is absolute: two negatives
+        // on one amount would read as a correction of a correction.
+        Assert.Contains($"<strong>{expectedAmountCell}</strong>", mail.HtmlBody);
+        Assert.DoesNotContain("-R10.00", mail.HtmlBody);
     }
 
     // ---- F19: an adjustment is club money, not the admin's own -------------
 
     /// <summary>
-    /// A negative adjustment rendered "Naledi Khoza → Crusaders Admin −10.00 cr" on the
+    /// A negative adjustment rendered "Naledi Khoza → Crusaders Admin −R10.00" on the
     /// member's own statement, which reads as money handed to a person. Booking charges on
     /// the same statement correctly say "Club treasury".
     /// </summary>
@@ -339,7 +404,7 @@ public class MoneySurfaceTests
     {
         var walkUp = EmailTemplates.BookingConfirmation("member@test.local", new BookingConfirmationDetails(
             "Court 2", "Sun 06 Sep 22:51", "15 min", 50m, 100m,
-            PenaltyWindowMinutes: 15, PenaltyPct: 30m, IsWalkUp: true));
+            PenaltyWindowMinutes: 15, PenaltyPct: 30m, CurrencySymbol: "R", IsWalkUp: true));
 
         Assert.DoesNotContain("30% penalty", walkUp.HtmlBody);
         Assert.DoesNotContain("cancelling within", walkUp.HtmlBody);
@@ -353,7 +418,7 @@ public class MoneySurfaceTests
         // to false, so nothing that is not a walk-up loses it.
         var reservation = EmailTemplates.BookingConfirmation("member@test.local", new BookingConfirmationDetails(
             "Court 2", "Sun 06 Sep 22:51", "15 min", 50m, 100m,
-            PenaltyWindowMinutes: 15, PenaltyPct: 30m));
+            PenaltyWindowMinutes: 15, PenaltyPct: 30m, CurrencySymbol: "R"));
         Assert.Contains("30% penalty", reservation.HtmlBody);
         Assert.Contains(">Starts<", reservation.HtmlBody);
     }
@@ -417,18 +482,18 @@ public class MoneySurfaceTests
     public void A_club_cancellation_names_the_club_the_reason_and_the_waiver()
     {
         var byClub = EmailTemplates.BookingCancellation(
-            "member@test.local", "Court 4", 50m, null,
+            "member@test.local", "Court 4", 50m, null, "R",
             new ClubCancellation("Court double-booked by the desk", PenaltyWaived: true));
 
         Assert.Contains("The club cancelled your booking", byClub.HtmlBody);
         Assert.Contains("Court double-booked by the desk", byClub.HtmlBody);
         Assert.Contains("waived", byClub.HtmlBody);
-        Assert.Contains("50.00 credits", byClub.HtmlBody);
+        Assert.Contains("R50.00", byClub.HtmlBody);
         Assert.Contains("club", byClub.Subject);
 
         // A member cancelling their own court is a different event and keeps its own mail —
         // no actor, because there is nobody to name.
-        var self = EmailTemplates.BookingCancellation("member@test.local", "Court 4", 50m, 15m);
+        var self = EmailTemplates.BookingCancellation("member@test.local", "Court 4", 50m, 15m, "R");
         Assert.DoesNotContain("The club cancelled", self.HtmlBody);
         Assert.DoesNotContain("waived", self.HtmlBody);
         Assert.Equal("Booking cancelled — Court 4", self.Subject);

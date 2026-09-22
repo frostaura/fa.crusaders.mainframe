@@ -17,24 +17,32 @@ using Microsoft.IdentityModel.Tokens;
 namespace Crusaders.Mainframe.Tests;
 
 /// <summary>
-/// The club's currency symbol — what it governs, and the one thing it deliberately does not.
+/// The club's currency symbol — <b>the sign every amount in this product is written in</b>.
 ///
 /// <para>
-/// <b>The decision this file pins.</b> The owner asked for the <c>cr</c> suffix to be replaced
-/// by a configurable symbol that precedes the amount, defaulting to <c>R</c>. This product
-/// renders two quantities and only one of them is money: rand is what a member hands PayFast,
-/// credits are the unit of account at <c>credits_per_zar_regular</c> — which ships at 1.6 — per
-/// rand. So <c>currency_symbol</c> is the symbol for RAND, and the credit unit keeps a unit of
-/// its own.
+/// <b>The decision this file pins, and it changed.</b> The owner asked twice. First: "instead
+/// of a <c>cr</c> suffix, have a configurable currency symbol instead which would precede
+/// amounts. Like <c>R </c> for ZAR (default)." The first pass scoped that to real money only
+/// and left a second formatter printing "50.00 credits" beside it, so the owner said it again:
+/// "remember the wording changes from credits and cr to the currency symbol."
 /// </para>
 ///
 /// <para>
-/// That is not a preference. <see cref="EmailTemplates"/>'s own <c>Cr</c> header records the
-/// incident: every money email printed a rand sign over a credit figure — "Charged R50,00" for
-/// a court that cost the member R31.25 — on the one artifact a member reconciles a bank
-/// statement against. <c>CLAUDE.md</c> calls a field that mixes the two units a
-/// money-correctness bug. Letting a configurable symbol back onto a credit figure would
-/// reintroduce it with a settings key attached.
+/// So there is now ONE formatter and ONE unit. Neither "cr" nor the word "credits" survives as
+/// a unit on a number anywhere a member or an admin reads one.
+/// </para>
+///
+/// <para>
+/// <b>What that collapses, and the one rule it imposes.</b> The product renders two quantities
+/// that are not the same size — what a member pays the gateway, and what their wallet holds,
+/// which convert at <c>credits_per_zar_regular</c> (1.6) or <c>credits_per_zar_league</c>
+/// (2.4). Writing both with one symbol means a wallet bought for R100 reads R160.00. The owner
+/// has accepted that, on the argument that a member can never exchange a wallet back for cash;
+/// the full reasoning is at the head of <c>frontend/src/lib/currency.ts</c> and in
+/// <see cref="Api.Services.CurrencySymbol"/>. The rule it imposes is that the rate is now
+/// invisible everywhere except at the conversion itself, so any surface spanning both legs —
+/// the top-up confirmation above all — must state both in words. That is
+/// <c>MoneySurfaceTests.A_topup_confirmation_names_both_legs_of_the_conversion_in_words</c>.
 /// </para>
 /// </summary>
 [Collection(HttpTestCollection.Name)]
@@ -111,7 +119,7 @@ public sealed class CurrencySymbolTests
     [Fact]
     public void The_default_is_the_rand_sign() => Assert.Equal("R", CurrencySymbol.Default);
 
-    // ---- The emails: the symbol reaches rand and stops there ---------------
+    // ---- The emails: EVERY amount is the club's own symbol -----------------
 
     [Fact]
     public void A_topup_confirmation_is_denominated_in_the_clubs_own_currency()
@@ -120,19 +128,20 @@ public sealed class CurrencySymbolTests
             AmountZar: 100m, CreditsAdded: 160m, ConversionRate: 1.6m,
             BalanceAfterCredits: 210m, Reference: "1089250", CurrencySymbol: "CHF"));
 
+        // BOTH legs, and the balance, in the club's own sign. The previous decision held the
+        // wallet figures back from the symbol; this is the reversal, and it is deliberate.
         Assert.Contains("CHF100.00", mail.HtmlBody);
-        // The rate is quoted per ONE of the club's own currency, not per a hardcoded rand.
-        Assert.Contains("1.6 credits per CHF1", mail.HtmlBody);
+        Assert.Contains("CHF160.00", mail.HtmlBody);
+        Assert.Contains("CHF210.00", mail.HtmlBody);
         Assert.DoesNotContain("R100.00", mail.HtmlBody);
-        Assert.DoesNotContain("per R1", mail.HtmlBody);
+        Assert.DoesNotContain("credits", mail.HtmlBody);
 
-        // And the credit figures are untouched by it. This is the whole decision: the two
-        // quantities in this one email are 100 of the club's money and 160 credits, and at
-        // the shipped 1.6 rate they are not the same size.
-        Assert.Contains("160.00 credits", mail.HtmlBody);
-        Assert.Contains("210.00 credits", mail.HtmlBody);
-        Assert.DoesNotContain("CHF160", mail.HtmlBody);
-        Assert.DoesNotContain("CHF210", mail.HtmlBody);
+        // And because they now wear the same sign while being different sizes, the mail states
+        // which leg is which — in the club's own currency, not in a hardcoded rand.
+        Assert.Contains(
+            "Every CHF1.00 you pay adds CHF1.60 to your wallet, which is why CHF160.00 arrived " +
+            "for the CHF100.00 that left your card.",
+            mail.HtmlBody);
     }
 
     [Fact]
@@ -144,33 +153,70 @@ public sealed class CurrencySymbolTests
 
         Assert.Contains("R$250.00", mail.Subject);
         Assert.Contains("R$250.00", mail.HtmlBody);
-        // Nothing was credited, and zero credits is still credits.
-        Assert.Contains("0.00 credits", mail.HtmlBody);
+        // Nothing arrived, and nothing is still an amount: R$0.00, not a blank and not a word.
+        Assert.Contains("R$0.00", mail.HtmlBody);
+        Assert.DoesNotContain("credits", mail.HtmlBody);
     }
 
     /// <summary>
-    /// The symbol does not reach a credit email, whatever it is set to. Every one of these
-    /// templates renders a credit figure and nothing else, so the club's money symbol
-    /// appearing in one of them would be the exact defect <c>Cr</c>'s header describes.
+    /// <b>Every money email carries the club's symbol on every figure, and none of them carries
+    /// a unit word.</b>
+    ///
+    /// <para>
+    /// This test is the inversion of the one it replaces, which asserted that the symbol must
+    /// NOT reach a wallet figure. That was the earlier, narrower reading of the ask; the owner
+    /// has since ruled the other way, twice. Keeping the old assertion would have frozen the
+    /// decision that was overruled.
+    /// </para>
+    ///
+    /// <para>
+    /// A non-default symbol on purpose: a club on rand cannot tell a template that reads the
+    /// setting from one that hardcodes <see cref="CurrencySymbol.Default"/>.
+    /// </para>
     /// </summary>
     [Fact]
-    public void No_credit_email_carries_a_money_symbol()
+    public void Every_money_email_carries_the_clubs_symbol_and_no_unit_word()
     {
         var confirmation = EmailTemplates.BookingConfirmation("member@test.local", new BookingConfirmationDetails(
             CourtName: "Court 3", StartsAtLocal: "Wed 16 Sep 10:00", Duration: "15 min",
             AmountCredits: 50m, BalanceAfterCredits: 60m,
-            PenaltyWindowMinutes: 15, PenaltyPct: 30m));
-        var cancellation = EmailTemplates.BookingCancellation("member@test.local", "Court 4", 50m, 15m);
-        var adjustment = EmailTemplates.CreditAdjustment("member@test.local", 25m, 145m, "desk credit");
+            PenaltyWindowMinutes: 15, PenaltyPct: 30m, CurrencySymbol: "CHF"));
+        var cancellation = EmailTemplates.BookingCancellation("member@test.local", "Court 4", 50m, 15m, "CHF");
+        var adjustment = EmailTemplates.CreditAdjustment("member@test.local", 25m, 145m, "desk credit", "CHF");
+        var noShow = EmailTemplates.BookingNoShow("member@test.local", "Court 4", 50m, 15m, "CHF");
+        var walkUpVoid = EmailTemplates.WalkUpNotStarted("member@test.local", "Court 4", 50m, "CHF");
 
-        foreach (var mail in new[] { confirmation, cancellation, adjustment })
+        foreach (var mail in new[] { confirmation, cancellation, adjustment, noShow, walkUpVoid })
         {
-            Assert.Contains("credits", mail.HtmlBody);
-            Assert.DoesNotContain("R50", mail.HtmlBody);
-            Assert.DoesNotContain("R60", mail.HtmlBody);
-            Assert.DoesNotContain("R145", mail.HtmlBody);
-            Assert.DoesNotContain("R25", mail.HtmlBody);
+            Assert.DoesNotContain("credits", mail.HtmlBody);
+            Assert.DoesNotContain(" cr<", mail.HtmlBody);
+            Assert.DoesNotContain("50.00 cr", mail.HtmlBody);
+            Assert.Contains("CHF", mail.HtmlBody);
+            // The rand sign must not have leaked in from a hardcoded default.
+            Assert.DoesNotContain("R50.00", mail.HtmlBody);
+            Assert.DoesNotContain("R145.00", mail.HtmlBody);
         }
+    }
+
+    /// <summary>
+    /// A club that has said nothing gets exactly what a club that said "R" gets. The absent
+    /// setting is the commonest case on the day this ships, and "unknown" must never mean
+    /// "some other symbol" — it means the club has not chosen.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("RANDS")]
+    public void A_club_that_has_not_chosen_reads_exactly_like_a_club_on_the_default(string? unset)
+    {
+        var chosen = EmailTemplates.BookingCancellation(
+            "member@test.local", "Court 4", 50m, 15m, CurrencySymbol.Default);
+        var unchosen = EmailTemplates.BookingCancellation(
+            "member@test.local", "Court 4", 50m, 15m, CurrencySymbol.Sanitise(unset));
+
+        Assert.Equal(chosen.HtmlBody, unchosen.HtmlBody);
+        Assert.Contains("R50.00", unchosen.HtmlBody);
     }
 
     /// <summary>
@@ -184,8 +230,32 @@ public sealed class CurrencySymbolTests
     [InlineData(-50, "R", "-R50.00")]
     [InlineData(-50, "R$", "-R$50.00")]
     [InlineData(1234567.891, "CHF", "CHF1234567.89")]
+    [InlineData(-0.005, "R", "-R0.01")]
+    [InlineData(99999999.99, "kr", "kr99999999.99")]
     public void A_money_figure_puts_the_sign_outside_the_symbol(double value, string symbol, string expected)
-        => Assert.Equal(expected, EmailTemplates.Zar((decimal)value, symbol));
+        => Assert.Equal(expected, EmailTemplates.Money((decimal)value, symbol));
+
+    /// <summary>
+    /// <b>There is exactly one amount formatter, and it never writes a unit word.</b>
+    ///
+    /// <para>
+    /// <c>Cr</c> — which rendered "50.00 credits" — was the second one, and collapsing the two
+    /// into this is the whole of the owner's second instruction. Asserted on the formatter
+    /// itself rather than only through the templates, because that is the single expression a
+    /// future change would have to get past.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void The_one_formatter_never_writes_a_unit_word()
+    {
+        foreach (var symbol in new[] { "R", "CHF", "R$", "kr" })
+        {
+            var rendered = EmailTemplates.Money(50m, symbol);
+            Assert.Equal($"{symbol}50.00", rendered);
+            Assert.DoesNotContain("credits", rendered, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("cr", rendered, StringComparison.Ordinal);
+        }
+    }
 
     /// <summary>Invariant culture, whatever the host's own is — as every money figure here is.</summary>
     [Fact]
@@ -195,8 +265,8 @@ public sealed class CurrencySymbolTests
         try
         {
             Thread.CurrentThread.CurrentCulture = new CultureInfo("af-ZA");
-            Assert.Equal("R100.00", EmailTemplates.Zar(100m, "R"));
-            Assert.DoesNotContain(",", EmailTemplates.Zar(100m, "R"));
+            Assert.Equal("R100.00", EmailTemplates.Money(100m, "R"));
+            Assert.DoesNotContain(",", EmailTemplates.Money(100m, "R"));
         }
         finally { Thread.CurrentThread.CurrentCulture = previous; }
     }
@@ -322,6 +392,45 @@ public sealed class CurrencySymbolTests
         Assert.Equal(HttpStatusCode.OK, (await zurichClient.PutAsJsonAsync(SettingsPath, Save(("currencySymbol", "€")))).StatusCode);
         Assert.Equal("€", CurrencySymbol.For(await EngineSettingsAsync(factory, zurich)));
         Assert.Equal("R", CurrencySymbol.For(await EngineSettingsAsync(factory, durban)));
+    }
+
+    /// <summary>
+    /// <b>Two clubs, two symbols, and one process.</b> The HTTP test above proves the SETTINGS
+    /// do not leak; this proves the RENDERING does not — a formatter that cached the last
+    /// symbol it saw, or a template that fell back to "whatever we had", would pass that one
+    /// and fail this. It is the failure mode a module-level symbol store actually has, and the
+    /// frontend's own <c>setClubCurrencySymbol</c> carries the same warning.
+    /// </summary>
+    [Fact]
+    public void One_clubs_symbol_never_reaches_another_clubs_mail()
+    {
+        var durban = EmailTemplates.BookingCancellation("a@durban.test", "Court 1", 50m, 15m, "R");
+        var zurich = EmailTemplates.BookingCancellation("a@zurich.test", "Court 1", 50m, 15m, "CHF");
+        var durbanAgain = EmailTemplates.BookingCancellation("a@durban.test", "Court 1", 50m, 15m, "R");
+
+        Assert.Contains("R50.00", durban.HtmlBody);
+        Assert.DoesNotContain("CHF", durban.HtmlBody);
+
+        Assert.Contains("CHF50.00", zurich.HtmlBody);
+        Assert.DoesNotContain("R50.00", zurich.HtmlBody);
+
+        // And the second club's mail did not change the first's — rendered after it, byte for
+        // byte the same.
+        Assert.Equal(durban.HtmlBody, durbanAgain.HtmlBody);
+    }
+
+    /// <summary>
+    /// The same, for the trace sentences an admin reads, which are composed on the server from
+    /// a symbol carried on the resolved query rather than read a second time per row.
+    /// </summary>
+    [Fact]
+    public void One_clubs_symbol_never_reaches_another_clubs_night_trace()
+    {
+        var facts = new TraceFacts { AmountCredits = 36m, CourtName = "Court 2" };
+
+        Assert.Equal("Paid R36.00 for Court 2", TraceKinds.Headline(TraceKinds.WalletSpent, facts, "R"));
+        Assert.Equal("Paid CHF36.00 for Court 2", TraceKinds.Headline(TraceKinds.WalletSpent, facts, "CHF"));
+        Assert.Equal("Paid R36.00 for Court 2", TraceKinds.Headline(TraceKinds.WalletSpent, facts, "R"));
     }
 
     // ---- fixtures ---------------------------------------------------------

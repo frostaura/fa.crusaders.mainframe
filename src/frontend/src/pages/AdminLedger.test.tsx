@@ -3,6 +3,7 @@ import { fireEvent, screen } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 import AdminLedgerPage from "./AdminLedger";
 import { ledgerRowFixture, renderPage, signIn, signOut, stubFetch } from "../test/harness";
+import { resetClubCurrencySymbol, setClubCurrencySymbol } from "../lib/currency";
 
 /**
  * Clearing a date on the admin ledger.
@@ -171,3 +172,58 @@ function SearchProbe() {
 function search() {
   return screen.getByTestId("router-search").textContent ?? "";
 }
+
+/**
+ * The totals row, which is the one place on this screen that composes its own money.
+ *
+ * <p>
+ * Two of the four Stats built their sign by hand — <code>`+${formatMoney(x)}`</code> — on
+ * the screen whose whole job is to reconcile. A period with nothing in it therefore read
+ * "+R0.00" and "−R0.00": a signed zero is a movement that did not happen, and
+ * <code>formatSignedMoney</code> exists precisely so that zero carries no direction.
+ * </p>
+ */
+describe("Transactions — the totals row, signed by the formatter", () => {
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); resetClubCurrencySymbol(); });
+
+  const mount = (rows: unknown[]) => {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
+      { path: "/api/v1/admin/ledger", body: { entries: rows, total: rows.length, offset: 0, limit: 200 } },
+    ]);
+    renderPage(<AdminLedgerPage />);
+  };
+
+  it("signs both directions through one formatter, and gives zero no direction at all", async () => {
+    mount([
+      ledgerRowFixture({ id: "a", signedAmountCredits: 40, amountCredits: 40, type: "AdminAdjustment" }),
+      ledgerRowFixture({ id: "b", signedAmountCredits: -24, amountCredits: 24 }),
+    ]);
+
+    expect(await screen.findByText("+R40.00")).toBeInTheDocument();
+    expect(screen.getByText("−R24.00")).toBeInTheDocument();
+    // Net of +40 and −24. U+2212 throughout, so a debit lines up under a credit.
+    expect(screen.getByText("+R16.00")).toBeInTheDocument();
+  });
+
+  it("does not put a sign on a period in which nothing moved", async () => {
+    mount([]);
+
+    // Hardcoded "+"/"−" produced "+R0.00" and "−R0.00" here, on the screen that reconciles.
+    expect(await screen.findByText(/No movements match these filters/)).toBeInTheDocument();
+    expect(screen.queryByText("+R0.00")).toBeNull();
+    expect(screen.queryByText("−R0.00")).toBeNull();
+    expect(screen.getAllByText("R0.00")).toHaveLength(3);
+  });
+
+  it("names the two directions without the retired unit, and carries the club symbol", async () => {
+    setClubCurrencySymbol("CHF");
+    mount([ledgerRowFixture({ id: "a", signedAmountCredits: 40, amountCredits: 40, type: "AdminAdjustment" })]);
+
+    expect(await screen.findByText("+CHF40.00")).toBeInTheDocument();
+    expect(screen.getByText("Money in")).toBeInTheDocument();
+    expect(screen.getByText("Money out")).toBeInTheDocument();
+    expect(screen.queryByText("Credits")).toBeNull();
+    expect(screen.queryByText("Debits")).toBeNull();
+  });
+});

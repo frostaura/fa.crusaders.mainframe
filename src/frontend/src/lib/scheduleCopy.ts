@@ -1,7 +1,7 @@
 import { WEEKDAYS, type ScheduleConflict, type Weekday } from "./adminApi";
 import { clubDayAndClock } from "./clubClock";
 import { epochDay, weekdayOf } from "./scheduleRules";
-import { formatCredits } from "./utils";
+import { formatMoney } from "./utils";
 
 /**
  * Every sentence the repeating-bookings surface says, as pure functions returning strings.
@@ -256,14 +256,14 @@ export function conflictRefundPhrase(
   const amount = conflict.would_refund_credits;
   if (amount === undefined || amount === null) return `What would go back${to} isn't known yet.`;
   if (amount === 0) return `Nothing would go back${to}.`;
-  return `${formatCredits(amount)} would go back${to}.`;
+  return `${formatMoney(amount)} would go back${to}.`;
 }
 
 /** The primary button's label, restating the option chosen — including the unknown total. */
 export function clearAllLabel(count: number, totalCredits: number | null): string {
   const bookings = `${count} booking${count === 1 ? "" : "s"}`;
   if (totalCredits === null) return `Cancel ${bookings} and refund them in full`;
-  return `Cancel ${bookings} and refund ${formatCredits(totalCredits)} in full`;
+  return `Cancel ${bookings} and refund ${formatMoney(totalCredits)} in full`;
 }
 
 export const CREATE_LABEL = "Create the hold";
@@ -393,7 +393,7 @@ export function endConsequence({ remaining, days, slots, refundCredits }: EndWor
     ? `${stops}, and the slots it was holding can be booked again.`
     : `${stops} and releases ${slots} held slot${slots === 1 ? "" : "s"}, which members can then book.`;
   const money = refundCredits > 0
-    ? `${formatCredits(refundCredits)} goes back to the members who paid.`
+    ? `${formatMoney(refundCredits)} goes back to the members who paid.`
     : "Nobody is refunded — nobody was charged for a hold.";
   const past = days.length === 1
     ? `${weekdayPlural(days[0])} that have already happened stay exactly as they are.`

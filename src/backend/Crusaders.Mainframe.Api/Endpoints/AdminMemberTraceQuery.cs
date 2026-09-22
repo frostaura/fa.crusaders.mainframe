@@ -57,6 +57,25 @@ public sealed record AdminMemberTraceQuery(
     public required string Timezone { get; init; }
 
     /// <summary>
+    /// The club's currency symbol, resolved once when the request was parsed — exactly as
+    /// <see cref="Zone"/> is, and for the same reason.
+    ///
+    /// <para>
+    /// Every money sentence on this surface is composed on the SERVER (see
+    /// <see cref="Services.TraceKinds"/>), so the symbol has to reach the composer, and the
+    /// composer is three layers below the request. Carrying it on the resolved query rather
+    /// than reading settings again down there is what makes one night's sentences all speak in
+    /// one club's sign: a second read is a second chance to read a different tenant's.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>required</c>, not defaulted, for the reason <see cref="Email.EmailTemplates.Money"/>
+    /// gives at length.
+    /// </para>
+    /// </summary>
+    public required string CurrencySymbol { get; init; }
+
+    /// <summary>
     /// The one club day this range covers, or null when it covers something else.
     ///
     /// <para>
@@ -171,6 +190,7 @@ public sealed record AdminMemberTraceQuery(
         {
             Zone = zone,
             Timezone = timezone,
+            CurrencySymbol = Services.CurrencySymbol.For(settings),
             ClubDay = WholeClubDay(zone, from, to),
         }, null);
     }

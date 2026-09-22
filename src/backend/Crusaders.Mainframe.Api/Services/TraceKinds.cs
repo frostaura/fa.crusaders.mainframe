@@ -45,7 +45,7 @@ public readonly record struct TraceFacts
     /// <summary>The court's name, for a booking, court or lights sentence.</summary>
     public string? CourtName { get; init; }
 
-    /// <summary>The movement, in credits, unsigned — the sentence carries the direction.</summary>
+    /// <summary>The movement, unsigned — the sentence carries the direction.</summary>
     public decimal? AmountCredits { get; init; }
 
     /// <summary>Who did it, when naming them makes the sentence say something.</summary>
@@ -191,7 +191,7 @@ public static class TraceKinds
     /// <para>
     /// <b>Its own word rather than <see cref="WalletToppedUp"/>'s, and not
     /// <see cref="WalletAdjustedByAdmin"/>'s either.</b> The member did not do it, so "Topped up
-    /// 200 credits" is a sentence about somebody who was not there; and it is not an adjustment,
+    /// R200.00" is a sentence about somebody who was not there; and it is not an adjustment,
     /// because <see cref="LedgerEntryType.AdminTopUp"/> is money the club TOOK and counts as
     /// revenue, while an adjustment is a book correction. Borrowing either word is the
     /// guessed-sentence failure the vocabulary exists to prevent — a member disputing a figure
@@ -209,7 +209,7 @@ public static class TraceKinds
     /// <summary>Money kept by the club for a missed or late-cancelled booking.</summary>
     public const string WalletPenalised = "wallet.penalised";
 
-    /// <summary>An admin moved credits by hand.</summary>
+    /// <summary>An admin moved a balance by hand.</summary>
     public const string WalletAdjustedByAdmin = "wallet.adjusted_by_admin";
 
     /// <summary>A payment was clawed back after the fact. <b>Added beyond D2 §6.2.</b></summary>
@@ -419,8 +419,17 @@ public static class TraceKinds
     /// detail degrades the sentence rather than breaking it — "Came in through a door" is true
     /// where "Came in through " is not.
     /// </para>
+    ///
+    /// <para>
+    /// <paramref name="symbol"/> is the club's own, from <see cref="CurrencySymbol.For"/>, and
+    /// it is <b>required rather than defaulted</b> for the reason
+    /// <see cref="Email.EmailTemplates.Money"/> gives: a default would let a new money sentence
+    /// be written that silently prints a rand sign to a club that does not take rand. Every
+    /// amount below is written through <see cref="Money"/> and none of them carries a unit word,
+    /// which is the owner's ruling.
+    /// </para>
     /// </summary>
-    public static string Headline(string kind, TraceFacts facts)
+    public static string Headline(string kind, TraceFacts facts, string symbol)
     {
         var door = string.IsNullOrWhiteSpace(facts.DoorName) ? "a door" : facts.DoorName.Trim();
         var court = string.IsNullOrWhiteSpace(facts.CourtName) ? "a court" : facts.CourtName.Trim();
@@ -450,25 +459,40 @@ public static class TraceKinds
             LightsOn => $"{court} lights came on",
             LightsOff => $"{court} lights went off",
 
-            WalletToppedUp => $"Topped up {Credits(facts)} credits",
-            WalletToppedUpAtTheDesk => ToppedUpAtTheDesk(facts),
-            WalletSpent => Spent(facts),
-            WalletRefunded => Refunded(facts),
-            WalletPenalised => Penalised(facts),
-            WalletAdjustedByAdmin => AdjustedByAdmin(facts),
-            WalletReversed => $"A payment of {Credits(facts)} credits was reversed",
+            WalletToppedUp => $"Topped up {Money(facts, symbol)}",
+            WalletToppedUpAtTheDesk => ToppedUpAtTheDesk(facts, symbol),
+            WalletSpent => Spent(facts, symbol),
+            WalletRefunded => Refunded(facts, symbol),
+            WalletPenalised => Penalised(facts, symbol),
+            WalletAdjustedByAdmin => AdjustedByAdmin(facts, symbol),
+            WalletReversed => $"A payment of {Money(facts, symbol)} was reversed",
 
             _ => $"Something this club's records have no word for ({facts.RawAction ?? kind})",
         };
     }
 
-    /// <summary>The movement as a club reads it, or a dash when the row carries none.</summary>
-    private static string Credits(TraceFacts facts)
+    /// <summary>
+    /// The movement as a club reads it, or a dash when the row carries none.
+    ///
+    /// <para>
+    /// <b>The dash carries no symbol, and that is not a detail.</b> A row with no amount on it
+    /// is not a movement of zero — it is a row that never touched the balance — and "R—" is a
+    /// sum, badly printed. The absent case therefore short-circuits before the symbol is
+    /// reached.
+    /// </para>
+    ///
+    /// <para>
+    /// <see cref="Math.Abs(decimal)"/> stays: the verb around the figure carries the direction
+    /// ("Got … back", "Was charged a penalty of …"), so a minus sign here would state it twice
+    /// and contradict itself on the refund sentences.
+    /// </para>
+    /// </summary>
+    private static string Money(TraceFacts facts, string symbol)
     {
         // Block body for the lizard reason in `memory/gotchas.md`: a `{ }` property pattern in
         // an expression-bodied member costs this file its scope in lizard's C# parser.
         return facts.AmountCredits is { } amount
-            ? Math.Abs(amount).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)
+            ? Email.EmailTemplates.Money(Math.Abs(amount), symbol)
             : "—";
     }
 
@@ -490,37 +514,44 @@ public static class TraceKinds
             ? $"The club's automatic check cancelled {court}"
             : $"{Who(facts)} cancelled {court} for them";
 
-    private static string Refunded(TraceFacts facts)
+    private static string Refunded(TraceFacts facts, string symbol)
         => BySystem(facts)
-            ? $"The club's automatic check returned {Credits(facts)} credits"
-            : $"Got {Credits(facts)} credits back";
+            ? $"The club's automatic check returned {Money(facts, symbol)}"
+            : $"Got {Money(facts, symbol)} back";
 
-    private static string Penalised(TraceFacts facts)
+    private static string Penalised(TraceFacts facts, string symbol)
         => BySystem(facts)
-            ? $"The club's automatic check charged a penalty of {Credits(facts)} credits"
-            : $"Was charged a penalty of {Credits(facts)} credits";
+            ? $"The club's automatic check charged a penalty of {Money(facts, symbol)}"
+            : $"Was charged a penalty of {Money(facts, symbol)}";
 
-    private static string AdjustedByAdmin(TraceFacts facts)
-        => $"{Who(facts)} changed their credits by {Credits(facts)}";
+    /// <summary>
+    /// A by-hand move on somebody's balance. "Changed their balance by R25.00" rather than
+    /// "changed their credits by 25.00": the figure is unsigned here, as it is everywhere on
+    /// this surface, and "by" is the word that admits the direction is in the amount column
+    /// beside it rather than in the sentence.
+    /// </summary>
+    private static string AdjustedByAdmin(TraceFacts facts, string symbol)
+        => $"{Who(facts)} changed their balance by {Money(facts, symbol)}";
 
     /// <summary>
     /// A top-up the club took by hand. It names the actor for the reason
     /// <see cref="AdjustedByAdmin"/> does: the member was not the one who did it, and a night
-    /// that says "Topped up 200 credits" about a payment somebody else keyed in is a sentence
+    /// that says "Topped up R200.00" about a payment somebody else keyed in is a sentence
     /// the member cannot check.
     /// </summary>
-    private static string ToppedUpAtTheDesk(TraceFacts facts)
-        => $"{Who(facts)} added {Credits(facts)} credits at the desk";
+    private static string ToppedUpAtTheDesk(TraceFacts facts, string symbol)
+        => $"{Who(facts)} added {Money(facts, symbol)} at the desk";
 
     /// <summary>
     /// What they paid for, named when the row knows it. D2 §6.2's own example sentence is
-    /// "Paid 36.00 credits for Court 2", and the court is what makes it answer a question — but
-    /// a ledger row carries no court of its own, so the sentence degrades rather than inventing
-    /// one. Block body for the lizard reason in <c>memory/gotchas.md</c>.
+    /// "Paid 36.00 credits for Court 2" — now "Paid R36.00 for Court 2" — and the court is what
+    /// makes it answer a question, but a ledger row carries no court of its own, so the
+    /// sentence degrades rather than inventing one. Block body for the lizard reason in
+    /// <c>memory/gotchas.md</c>.
     /// </summary>
-    private static string Spent(TraceFacts facts)
+    private static string Spent(TraceFacts facts, string symbol)
     {
-        var paid = $"Paid {Credits(facts)} credits";
+        var paid = $"Paid {Money(facts, symbol)}";
         return string.IsNullOrWhiteSpace(facts.CourtName) ? paid : $"{paid} for {facts.CourtName.Trim()}";
     }
 }

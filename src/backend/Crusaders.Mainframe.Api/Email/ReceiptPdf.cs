@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 
 namespace Crusaders.Mainframe.Api.Email;
@@ -31,6 +30,42 @@ namespace Crusaders.Mainframe.Api.Email;
 /// confirmation.
 /// </para>
 /// </remarks>
+/// <summary>
+/// Everything one booking receipt states, as named members.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Its own record rather than ten positional parameters, on the argument
+/// <see cref="BookingConfirmationDetails"/> already makes: nine of the ten are a string or a
+/// decimal, so a transposed pair — the member and the court, the charge and the balance —
+/// would have compiled and printed a wrong receipt. Named members make that a compile error.
+/// </para>
+/// <para>
+/// <b>Both</b> times are the club's own wall clock, and that is why <see cref="IssuedAtLocal"/>
+/// arrives already formatted rather than as a <c>DateTimeOffset</c> this file would stamp
+/// itself. It used to render <c>UtcNow</c> with a literal "UTC" two lines above a "Starts" that
+/// had been converted to <c>tenant_settings.timezone</c>, so every receipt carried two times
+/// two hours apart for the same booking — on the one artefact a member keeps against a
+/// disputed charge.
+/// </para>
+/// </remarks>
+/// <param name="CurrencySymbol">
+/// The club's own symbol, from <see cref="Services.CurrencySymbol.For"/>. <b>Required, and
+/// carried on the record rather than assumed here</b>: this is the document a member reconciles
+/// a bank statement against, so a hardcoded sign on it is the worst possible place for one.
+/// </param>
+public sealed record BookingReceipt(
+    string ClubName,
+    string MemberName,
+    string BookingReference,
+    string CourtName,
+    string StartsAtLocal,
+    string Duration,
+    decimal AmountCredits,
+    decimal BalanceAfterCredits,
+    string IssuedAtLocal,
+    string CurrencySymbol);
+
 public static class ReceiptPdf
 {
     /// <summary>One line of the receipt: a label and its value, or a bare heading.</summary>
@@ -40,62 +75,38 @@ public static class ReceiptPdf
     private const int PageWidth = 595;
     private const int PageHeight = 842;
 
-    private const string Currency = "cr";
-
     /// <summary>
     /// Renders the receipt for one booking.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// Every figure passed in is <b>credits</b>. Credits are the unit of account in this system —
-    /// rand exists only on the top-up row for reconciliation — and a receipt that printed a rand
-    /// sign over a credit figure would overstate the charge by the conversion rate, which is the
-    /// exact defect this repo already carried once.
-    /// </para>
-    /// <para>
-    /// <b>Both</b> times are the club's own wall clock, and that is why this takes
-    /// <paramref name="issuedAtLocal"/> already formatted rather than a <c>DateTimeOffset</c> it
-    /// would stamp itself. It used to render <c>UtcNow</c> with a literal "UTC" two lines above a
-    /// "Starts" that had been converted to <c>tenant_settings.timezone</c>, so every receipt
-    /// carried two times two hours apart for the same booking — on the one artefact a member
-    /// keeps against a disputed charge.
-    /// </para>
+    /// Every figure is written in the club's own symbol, which is the owner's ruling: one
+    /// symbol in front of every amount the product prints, and no unit word after any of them.
+    /// The rendering is <see cref="EmailTemplates.Money"/>'s, so the receipt and the mail it
+    /// travels attached to cannot format the same number two ways.
     /// </remarks>
-    public static byte[] ForBooking(
-        string clubName,
-        string memberName,
-        string bookingReference,
-        string courtName,
-        string startsAtLocal,
-        string duration,
-        decimal amountCredits,
-        decimal balanceAfterCredits,
-        string issuedAtLocal)
+    public static byte[] ForBooking(BookingReceipt r)
     {
         var lines = new List<Line>
         {
-            new(clubName),
+            new(r.ClubName),
             new("Booking receipt"),
             new(""),
-            new("Receipt no.", bookingReference),
-            new("Issued", issuedAtLocal),
-            new("Member", memberName),
+            new("Receipt no.", r.BookingReference),
+            new("Issued", r.IssuedAtLocal),
+            new("Member", r.MemberName),
             new(""),
-            new("Court", courtName),
-            new("Starts", startsAtLocal),
-            new("Duration", duration),
+            new("Court", r.CourtName),
+            new("Starts", r.StartsAtLocal),
+            new("Duration", r.Duration),
             new(""),
-            new("Charged", Credits(amountCredits)),
-            new("Balance after", Credits(balanceAfterCredits)),
+            new("Charged", EmailTemplates.Money(r.AmountCredits, r.CurrencySymbol)),
+            new("Balance after", EmailTemplates.Money(r.BalanceAfterCredits, r.CurrencySymbol)),
             new(""),
-            new("Times are this club's local time. Credits are its unit of account."),
+            new("Times and amounts are this club's own."),
             new("This receipt records one ledger movement; your wallet holds the full history."),
         };
         return Render(lines);
     }
-
-    private static string Credits(decimal amount)
-        => $"{amount.ToString("0.00", CultureInfo.InvariantCulture)} {Currency}";
 
     /// <summary>Draws the lines onto a single page and assembles the file.</summary>
     private static byte[] Render(IReadOnlyList<Line> lines)
@@ -127,14 +138,39 @@ public static class ReceiptPdf
         => $"BT /{font} {size} Tf {x} {y} Td ({EscapeText(value)}) Tj ET\n";
 
     /// <summary>
+    /// The one code point WinAnsi and Latin-1 disagree about that this document needs.
+    ///
+    /// <para>
+    /// WinAnsi puts the euro sign at <c>0x80</c>, which Latin-1 leaves as a control byte, so the
+    /// <see cref="Encoding.Latin1"/> writer in <see cref="Assemble"/> emits <c>0x80</c> for
+    /// <c>U+0080</c> and the reader decodes it back as <c>€</c>. Mapping it here rather than in
+    /// the writer keeps the offset arithmetic honest — one char in, one byte out, as every other
+    /// character on the page already is.
+    /// </para>
+    /// </summary>
+    private const char WinAnsiEuro = '';
+
+    /// <summary>
     /// Escapes a string for a PDF literal.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Backslash, and both parentheses, end a literal early — a court called "Court (old)" would
     /// otherwise produce a file no reader can parse, and a member's own name is attacker-adjacent
-    /// input on a document the club emails out. Anything outside printable ASCII is dropped
-    /// rather than guessed at: the standard-font encoding is WinAnsi, and a mis-encoded byte
-    /// renders as a wrong character rather than as nothing, which is worse on a receipt.
+    /// input on a document the club emails out.
+    /// </para>
+    /// <para>
+    /// <b>The accepted range is WinAnsi's, not ASCII's, and that is load-bearing since the
+    /// club's currency symbol started printing here.</b> It used to drop everything above
+    /// <c>~</c>, which was harmless while the unit was the literal "cr" and is not now: a club
+    /// on <c>£</c> or <c>€</c> would have been handed a receipt reading "100.00" with the sign
+    /// silently gone, on the one document it is reconciled from. <c>0xA0</c>–<c>0xFF</c> is the
+    /// range WinAnsi and Latin-1 agree on byte for byte, so it passes through the writer
+    /// unchanged; the euro is the single exception and is mapped to the slot WinAnsi gives it.
+    /// Anything else outside the range is still dropped rather than guessed at, because a
+    /// mis-encoded byte renders as a wrong character rather than as nothing, which is worse on
+    /// a receipt.
+    /// </para>
     /// </remarks>
     private static string EscapeText(string value)
     {
@@ -143,6 +179,8 @@ public static class ReceiptPdf
         {
             if (ch is '(' or ')' or '\\') sb.Append('\\').Append(ch);
             else if (ch >= ' ' && ch <= '~') sb.Append(ch);
+            else if (ch == '€') sb.Append(WinAnsiEuro);
+            else if (ch >= ' ' && ch <= 'ÿ') sb.Append(ch);
         }
         return sb.ToString();
     }

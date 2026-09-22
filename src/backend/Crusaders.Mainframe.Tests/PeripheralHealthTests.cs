@@ -2420,7 +2420,7 @@ public class PeripheralHealthTests
     public void Every_sentence_of_the_out_of_service_waiver_mail()
     {
         var mail = EmailTemplates.BookingRefundedForOutOfServiceBox(
-            "player@test.local", "Court 4", 8m, "Crusaders Squash Club");
+            "player@test.local", "Court 4", 8m, "Crusaders Squash Club", "R");
 
         Assert.Equal("Refunded — the box on Court 4 is out of service", mail.Subject);
         Assert.Contains("Your booking has been refunded in full", mail.HtmlBody);
@@ -2440,7 +2440,7 @@ public class PeripheralHealthTests
         // is argued from what the box can no longer do (settlement-model.md S5a).
         Assert.DoesNotContain("could have reached the club", mail.HtmlBody);
         Assert.DoesNotContain("No court box was answering", mail.HtmlBody);
-        Assert.Contains(">Refunded</td><td><strong>8.00 credits</strong>", mail.HtmlBody);
+        Assert.Contains(">Refunded</td><td><strong>R8.00</strong>", mail.HtmlBody);
         Assert.Contains(">Penalty</td><td><strong>None</strong>", mail.HtmlBody);
         Assert.Contains(
             "You have not been marked down for missing it, and nothing has been deducted. Because " +
@@ -2464,7 +2464,7 @@ public class PeripheralHealthTests
     public void Every_sentence_of_the_outage_waiver_mail()
     {
         var mail = EmailTemplates.BookingRefundedForOutage(
-            "player@test.local", "Court 4", 8m, "Crusaders Squash Club");
+            "player@test.local", "Court 4", 8m, "Crusaders Squash Club", "R");
 
         Assert.Equal("Refunded — Court 4 was offline", mail.Subject);
         Assert.Contains("Your booking has been refunded in full", mail.HtmlBody);
@@ -2472,7 +2472,7 @@ public class PeripheralHealthTests
             "The court controller at Crusaders Squash Club was offline during your booking on " +
             "<strong>Court 4</strong>, so the lights could not be released against your name.",
             mail.HtmlBody);
-        Assert.Contains(">Refunded</td><td><strong>8.00 credits</strong>", mail.HtmlBody);
+        Assert.Contains(">Refunded</td><td><strong>R8.00</strong>", mail.HtmlBody);
         Assert.Contains(">Penalty</td><td><strong>None</strong>", mail.HtmlBody);
         Assert.Contains(
             "You have not been marked down for missing it, and nothing has been deducted. If you " +
@@ -2488,20 +2488,42 @@ public class PeripheralHealthTests
     }
 
     /// <summary>
-    /// The amounts in both waiver mails are the booking's, not a constant. The verifier's
-    /// aggregate mutation replaced the money lines with text; asserting one fixed figure would
-    /// have let a template that hard-codes "8.00 credits" pass.
+    /// The amounts in both waiver mails are the booking's, not a constant, and so is the SYMBOL.
+    /// The verifier's aggregate mutation replaced the money lines with text; asserting one fixed
+    /// figure would have let a template that hard-codes "R8.00" pass, and asserting one fixed
+    /// symbol would let one that hard-codes the rand sign pass for a club that does not take rand.
     /// </summary>
     [Theory]
-    [InlineData(12.5, "12.50 credits")]
-    [InlineData(0, "0.00 credits")]
-    public void Both_waiver_mails_quote_the_bookings_own_refund(decimal refunded, string rendered)
+    [InlineData(12.5, "R", "R12.50")]
+    [InlineData(0, "R", "R0.00")]
+    [InlineData(12.5, "CHF", "CHF12.50")]
+    [InlineData(12.5, "R$", "R$12.50")]
+    public void Both_waiver_mails_quote_the_bookings_own_refund(decimal refunded, string symbol, string rendered)
     {
         Assert.Contains(
             $">Refunded</td><td><strong>{rendered}</strong>",
-            EmailTemplates.BookingRefundedForOutOfServiceBox("a@b.c", "Court 4", refunded, "Club").HtmlBody);
+            EmailTemplates.BookingRefundedForOutOfServiceBox("a@b.c", "Court 4", refunded, "Club", symbol).HtmlBody);
         Assert.Contains(
             $">Refunded</td><td><strong>{rendered}</strong>",
-            EmailTemplates.BookingRefundedForOutage("a@b.c", "Court 4", refunded, "Club").HtmlBody);
+            EmailTemplates.BookingRefundedForOutage("a@b.c", "Court 4", refunded, "Club", symbol).HtmlBody);
+    }
+
+    /// <summary>
+    /// Neither waiver mail says "credits" anywhere, at any symbol. Both are member-facing
+    /// notices about money the club gave back, and the word was the unit on the figure.
+    /// </summary>
+    [Fact]
+    public void Neither_waiver_mail_names_a_unit_beside_a_number()
+    {
+        foreach (var mail in new[]
+                 {
+                     EmailTemplates.BookingRefundedForOutOfServiceBox("a@b.c", "Court 4", 8m, "Club", "CHF"),
+                     EmailTemplates.BookingRefundedForOutage("a@b.c", "Court 4", 8m, "Club", "CHF"),
+                 })
+        {
+            Assert.DoesNotContain("credits", mail.HtmlBody);
+            Assert.DoesNotContain("8.00 cr", mail.HtmlBody);
+            Assert.Contains("CHF8.00", mail.HtmlBody);
+        }
     }
 }

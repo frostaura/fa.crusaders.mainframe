@@ -438,6 +438,11 @@ public static partial class TopUpEndpoints
                 "a top-up reached CompleteAsync with no pf_payment_id; the D2-B01 guard has been removed");
         var reference = TopUpReference(tenantRow.Id, paymentId);
 
+        // Resolved once and used by both the ledger comment and the confirmation mail, so the
+        // row a member disputes and the mail they dispute it with cannot be denominated
+        // differently.
+        var symbol = CurrencySymbol.For(settings);
+
         try
         {
             await c.Ledger.PostAsync(new LedgerPosting(
@@ -449,10 +454,17 @@ public static partial class TopUpEndpoints
                 ActorUserId: pending.UserId,
                 // Invariant separators, so the comment reads in the same convention as the
                 // amount column beside it rather than the server's ambient culture.
-                // The club's own money symbol, frozen into the row. A ledger reason is written
-                // once and read for ever: a club that changes its symbol later has not changed
-                // what this member paid, and re-rendering the history would be the lie.
-                Reason: $"PayFast top-up ({EmailTemplates.Zar(pending.AmountZar, CurrencySymbol.For(settings))} → {EmailTemplates.Cr(credits)} @ {EmailTemplates.Num(rate)})",
+                //
+                // The club's own symbol, FROZEN INTO THE ROW. A ledger reason is written once
+                // and read for ever: a club that changes its symbol later has not changed what
+                // this member paid, and re-rendering the history would be the lie.
+                //
+                // This is also the ledger's own conversion boundary — the one row where the two
+                // legs sit together — so both are named in words rather than left as two bare
+                // figures that differ by an invisible rate. Same rule, and for the same reason,
+                // as EmailTemplates.TopUpConfirmation's sentence.
+                Reason: $"PayFast top-up ({EmailTemplates.Money(pending.AmountZar, symbol)} paid → "
+                      + $"{EmailTemplates.Money(credits, symbol)} added to wallet @ {EmailTemplates.Num(rate)})",
                 ExternalReference: reference), ct);
 
             await c.Db.SaveChangesAsync(ct);
@@ -487,7 +499,7 @@ public static partial class TopUpEndpoints
                     ConversionRate: rate,
                     BalanceAfterCredits: balanceAfter,
                     Reference: interp.PaymentId ?? pending.IdempotencyKey,
-                    CurrencySymbol: CurrencySymbol.For(settings))),
+                    CurrencySymbol: symbol)),
                 $"top-up confirmation for {pending.Id}");
         }
 

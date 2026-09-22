@@ -87,7 +87,7 @@ test("every wallet ledger column a member needs is on screen at 375px", async ({
   expect(overflowing.offScreen, "amount cells rendered outside the 375px viewport").toEqual([]);
 
   // And the amounts are readable as text, not merely present in the DOM.
-  // U+2212 MINUS, not a hyphen — `formatSignedCredits` uses it so a debit lines up under a
+  // U+2212 MINUS, not a hyphen — `formatSignedMoney` uses it so a debit lines up under a
   // credit in the tabular-nums column.
   await expect(page.getByText("+1600.00 cr", { exact: false })).toBeVisible();
   await expect(page.getByText("\u22121250.75 cr", { exact: false })).toBeVisible();

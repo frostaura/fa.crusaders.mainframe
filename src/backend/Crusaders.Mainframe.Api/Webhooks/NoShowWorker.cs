@@ -112,22 +112,37 @@ public sealed class NoShowWorker : BackgroundService
     // member whose body contains braces — a `switch { … }` among them — and dumps the rest of the
     // file into a *global* pseudo-function the length of the file, failing `-L 200` with a warning
     // that names no real function. See memory/gotchas.md.
-    private static EmailMessage Notice(
-        string to, string courtName, string clubName, decimal refundedCredits, decimal penalty,
-        CourtDarkness darkness)
+    private static EmailMessage Notice(SweptBooking n)
     {
-        if (darkness == CourtDarkness.Unreachable)
+        if (n.Darkness == CourtDarkness.Unreachable)
         {
-            return EmailTemplates.BookingRefundedForOutage(to, courtName, refundedCredits, clubName);
+            return EmailTemplates.BookingRefundedForOutage(
+                n.To, n.CourtName, n.RefundedCredits, n.ClubName, n.CurrencySymbol);
         }
 
-        if (darkness == CourtDarkness.OutOfService)
+        if (n.Darkness == CourtDarkness.OutOfService)
         {
-            return EmailTemplates.BookingRefundedForOutOfServiceBox(to, courtName, refundedCredits, clubName);
+            return EmailTemplates.BookingRefundedForOutOfServiceBox(
+                n.To, n.CourtName, n.RefundedCredits, n.ClubName, n.CurrencySymbol);
         }
 
-        return EmailTemplates.BookingNoShow(to, courtName, refundedCredits, penalty);
+        return EmailTemplates.BookingNoShow(
+            n.To, n.CourtName, n.RefundedCredits, n.Penalty, n.CurrencySymbol);
     }
+
+    /// <summary>
+    /// Everything the sweep's notice states, as named members.
+    ///
+    /// <para>
+    /// Its own record rather than a seventh positional parameter, on the argument
+    /// <c>EmailTemplates</c>'s own detail records make: the club's currency symbol took
+    /// <see cref="Notice"/> past the complexity gate's six, and four of the seven were a string
+    /// or a decimal that would transpose silently — the court's name and the club's among them.
+    /// </para>
+    /// </summary>
+    private sealed record SweptBooking(
+        string To, string CourtName, string ClubName, decimal RefundedCredits, decimal Penalty,
+        CourtDarkness Darkness, string CurrencySymbol);
 
     /// <summary>
     /// Reverses one no-show: refund, penalty, status, notification, event.
@@ -220,7 +235,11 @@ public sealed class NoShowWorker : BackgroundService
             postings.Add(new LedgerPosting(
                 UserId: payerUserId, Type: LedgerEntryType.NoShowPenalty, AmountCredits: -penalty,
                 ActorUserId: Guid.Empty, RelatedBookingId: b.Id,
-                Reason: $"No-show penalty ({Email.EmailTemplates.Num(tSettings.PenaltyPct)}% of {Email.EmailTemplates.Cr(b.AmountChargedCredits)})"));
+                // The club's own symbol, frozen into the row: a ledger reason is written once
+                // and read for ever, so a club that changes its symbol later has not changed
+                // what this penalty was taken out of.
+                Reason: $"No-show penalty ({Email.EmailTemplates.Num(tSettings.PenaltyPct)}% of "
+                      + $"{Email.EmailTemplates.Money(b.AmountChargedCredits, Services.CurrencySymbol.For(tSettings))})"));
         }
 
         // Status FIRST, then one save carrying it and both movements together.
@@ -314,7 +333,9 @@ public sealed class NoShowWorker : BackgroundService
             try
             {
                 await email.SendAsync(
-                    Notice(user.Email, courtName, tenant.DisplayName, refundedCredits, penalty, darkness), ct);
+                    Notice(new SweptBooking(
+                        user.Email, courtName, tenant.DisplayName, refundedCredits, penalty,
+                        darkness, CurrencySymbol.For(tSettings))), ct);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "No-show email failed for {BookingId}", b.Id); }
         }

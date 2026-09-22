@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArrowDown, ArrowRight, ArrowUp, ArrowUpDown } from "lucide-react";
 import type { LedgerRow } from "../lib/api";
-import { cn, formatSignedCredits } from "../lib/utils";
+import { cn, formatSignedMoney } from "../lib/utils";
 import { clubDayAndClock, clubInstant } from "../lib/clubClock";
 import { ScrollArea } from "./ScrollArea";
 
@@ -118,7 +118,7 @@ export function LedgerTable({
                   "px-2 sm:px-4 py-2 align-top text-right font-mono tabular-nums whitespace-nowrap",
                   r.signedAmountCredits >= 0 ? "text-success-strong" : "text-warning-strong",
                 )}>
-                  {formatSignedCredits(r.signedAmountCredits)}
+                  {formatSignedMoney(r.signedAmountCredits)}
                   {/* On a phone the From/To columns are hidden, so the counterparty rides
                       under the amount rather than being lost. */}
                   <span className="block sm:hidden text-[10px] font-normal text-text-muted">

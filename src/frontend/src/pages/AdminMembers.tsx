@@ -15,7 +15,7 @@ import { ConfirmButton } from "../components/ConfirmButton";
 import { Modal } from "../components/Modal";
 import { ScrollArea } from "../components/ScrollArea";
 import { useToast } from "../components/Toast";
-import { cn, formatCredits } from "../lib/utils";
+import { cn, formatMoney } from "../lib/utils";
 
 const FINGER_OPTIONS = [
   "left-index", "left-middle", "left-pinky", "left-ring", "left-thumb",
@@ -999,10 +999,10 @@ function MemberRow({ member: m, fingerprints, busy, onClass, actions }: {
           cell now, so this paragraph cannot go back to being a number nobody checked.
         */}
         <span
-          title={formatCredits(m.balance_credits)}
+          title={formatMoney(m.balance_credits)}
           className={cn("block truncate font-medium", m.balance_credits < 0 ? "text-danger-strong" : "text-text-primary")}
         >
-          {formatCredits(m.balance_credits)}
+          {formatMoney(m.balance_credits)}
         </span>
       </Cell>
       {/*

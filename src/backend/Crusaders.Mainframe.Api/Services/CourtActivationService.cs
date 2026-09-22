@@ -264,7 +264,7 @@ public class CourtActivationService
                 // Refused, loudly and with nothing written. The old code logged this and
                 // carried on into the lights.
                 _logger.LogWarning(
-                    "court {Court}: {Method} identified {User} for booking {Booking} but payer {Payer} has {Current} of {Required} credits — refused, no lights",
+                    "court {Court}: {Method} identified {User} for booking {Booking} but payer {Payer} has a balance of {Current} against a price of {Required} — refused, no lights",
                     court.CourtNumber, method, identifiedUserId, booking.Id, ib.PayerUserId, ib.Current, ib.Required);
                 return new ActivationResult.InsufficientBalance(ib.PayerUserId, ib.Current, ib.Required);
 

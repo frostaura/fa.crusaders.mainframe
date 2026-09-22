@@ -112,7 +112,7 @@ public static class AdminMemberTraceAssembly
             strands.Audit.Count + strands.Ledger.Count + strands.Receipts.Count);
         merged.AddRange(AuditEvents(strands, query));
         merged.AddRange(LedgerEvents(strands, query));
-        merged.AddRange(ReceiptEvents(strands));
+        merged.AddRange(ReceiptEvents(strands, query));
 
         // OLDEST FIRST — a night reads forwards: she arrived, the lights came on, she paid, she
         // left. The tie-break on the row's own id is what makes the order TOTAL, which the
@@ -309,7 +309,7 @@ public static class AdminMemberTraceAssembly
                     ActorName = actorName,
                     ActorKind = actorKind,
                     RawAction = row.Action,
-                }),
+                }, q.CurrencySymbol),
                 ActorUserId: row.ActorUserId,
                 ActorKind: actorKind,
                 ActorName: actorName,
@@ -356,7 +356,7 @@ public static class AdminMemberTraceAssembly
                     CourtName = court?.Name,
                     ActorName = actorName,
                     ActorKind = actorKind,
-                }),
+                }, q.CurrencySymbol),
                 ActorUserId: row.ActorUserId,
                 ActorKind: actorKind,
                 ActorName: actorName,
@@ -382,7 +382,7 @@ public static class AdminMemberTraceAssembly
     /// is built against.
     /// </para>
     /// </summary>
-    private static IEnumerable<TraceEventRow> ReceiptEvents(Strands s)
+    private static IEnumerable<TraceEventRow> ReceiptEvents(Strands s, AdminMemberTraceQuery q)
     {
         foreach (var row in s.Receipts)
         {
@@ -400,7 +400,7 @@ public static class AdminMemberTraceAssembly
                 SourceId: row.Id,
                 Source: ReceiptSource,
                 Kind: kind,
-                Headline: TraceKinds.Headline(kind, new TraceFacts { CourtName = court?.Name }),
+                Headline: TraceKinds.Headline(kind, new TraceFacts { CourtName = court?.Name }, q.CurrencySymbol),
                 ActorUserId: Guid.Empty,
                 ActorKind: TraceActors.Device,
                 ActorName: null,
