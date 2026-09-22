@@ -1,24 +1,24 @@
-import { formatCredits } from "./utils";
+import { formatMoney } from "./utils";
 import type { AdjustReasonCode } from "./adminApi";
 
 /**
- * The admin's hand movement of a member's credit, in words.
+ * The admin's hand movement of a member's money, in words.
  *
  * <p>
  * <b>The defect this module exists to close (D3-B08).</b> The form was ONE signed field —
  * "Amount (credits — positive adds, negative deducts)" — with a free-text box, whose only
  * guard was "non-zero", and with no statement anywhere of what the member's balance would be
  * afterwards. A volunteer typing <code>-100</code> where they meant <code>100</code> moves a
- * member two hundred credits the wrong way, and the new balance appears only in the toast
+ * member R200.00 the wrong way, and the new balance appears only in the toast
  * afterwards, four seconds long, over a row that has already changed.
  * </p>
  *
  * <p>
- * <b>The fix is not validation; it is two paths.</b> Adding credit and taking it back are
+ * <b>The fix is not validation; it is two paths.</b> Adding money and taking it back are
  * different decisions with different consequences and different audiences, so they are
  * different flows with different titles and different button tones. A sign is not a decision
  * a person makes — it is a character they type — and a comment telling them which way it goes
- * is how a member loses two hundred credits.
+ * is how a member loses R200.00.
  * </p>
  *
  * <p>
@@ -29,11 +29,20 @@ import type { AdjustReasonCode } from "./adminApi";
  * </p>
  */
 
-/** Which direction this flow is going. Never inferred from the sign of a field. */
+/**
+ * Which direction this flow is going. Never inferred from the sign of a field.
+ *
+ * <p>
+ * <b>The type name outlives the vocabulary on purpose.</b> `CreditDirection` is an identifier,
+ * not a sentence a volunteer reads, and renaming it would churn every caller for nothing. What
+ * changed is the WORDS: the product no longer has a thing called a credit, so "Take credit
+ * back" beside a figure written "R100.00" showed a desk two vocabularies for one balance.
+ * </p>
+ */
 export type CreditDirection = "add" | "take_back";
 
 export function sheetTitle(direction: CreditDirection, name: string): string {
-  return direction === "add" ? `Top up ${name}` : `Take credit back from ${name}`;
+  return direction === "add" ? `Top up ${name}` : `Take money back from ${name}`;
 }
 
 /**
@@ -91,7 +100,7 @@ export function revenueNote(code: AdjustReasonCode): string {
 // ---------------------------------------------------------------------------------------
 
 /**
- * "Thandi has 370.00 cr. After +100.00 cr: 470.00 cr."
+ * "Thandi has R370.00. After +R100.00: R470.00."
  *
  * <p>
  * Three arms, and the third is the one that matters: a balance the console could not read is
@@ -104,31 +113,31 @@ export function balanceSentence(
   name: string, balance: number | null, amount: number | null, direction: CreditDirection,
 ): string {
   if (balance === null) {
-    return `Couldn't read ${name}'s balance. You can still ${direction === "add" ? "add credit" : "take credit back"}, `
+    return `Couldn't read ${name}'s balance. You can still ${direction === "add" ? "add money" : "take money back"}, `
       + "but the figure below is not available — the club's system works out the result.";
   }
-  if (amount === null || amount === 0) return `${name} has ${formatCredits(balance)}.`;
+  if (amount === null || amount === 0) return `${name} has ${formatMoney(balance)}.`;
   const signed = direction === "add" ? amount : -amount;
   const after = balance + signed;
-  const movement = `${signed > 0 ? "+" : "−"}${formatCredits(Math.abs(amount))}`;
-  return `${name} has ${formatCredits(balance)}. After ${movement}: ${formatCredits(after)}.`;
+  const movement = `${signed > 0 ? "+" : "−"}${formatMoney(Math.abs(amount))}`;
+  return `${name} has ${formatMoney(balance)}. After ${movement}: ${formatMoney(after)}.`;
 }
 
-/** The one thing a "take credit back" must say that a top-up need not: it can go negative. */
+/** The one thing a "take money back" must say that a top-up need not: it can go negative. */
 export function overdraftWarning(balance: number | null, amount: number | null): string | null {
   if (balance === null || amount === null || amount <= 0) return null;
   const after = balance - amount;
   if (after >= 0) return null;
-  return `That takes them to ${formatCredits(after)} — they would owe the club ${formatCredits(Math.abs(after))} `
+  return `That takes them to ${formatMoney(after)} — they would owe the club ${formatMoney(Math.abs(after))} `
     + "and cannot book until it is made up.";
 }
 
 /** The refusal when somebody types a minus into the amount on the ADD path. */
 export const MINUS_REFUSED
-  = "Use “Take credit back” at the bottom to remove credit. This field only adds.";
+  = "Use “Take money back” at the bottom to take money off. This field only adds.";
 
-export const TAKE_BACK_LINK = "Take credit back instead";
-export const ADD_LINK = "Add credit instead";
+export const TAKE_BACK_LINK = "Take money back instead";
+export const ADD_LINK = "Add money instead";
 
 export const TAKE_BACK_CONSEQUENCE
   = "This reduces what they can spend, and they are emailed about it.";
@@ -139,15 +148,15 @@ export function confirmConsequence(
 ): string {
   const after = balance === null ? null : balance + (direction === "add" ? amount : -amount);
   const head = direction === "add"
-    ? `Add ${formatCredits(amount)} to ${name}?`
-    : `Take ${formatCredits(amount)} back from ${name}?`;
-  const result = after === null ? "" : ` They end on ${formatCredits(after)}.`;
+    ? `Add ${formatMoney(amount)} to ${name}?`
+    : `Take ${formatMoney(amount)} back from ${name}?`;
+  const result = after === null ? "" : ` They end on ${formatMoney(after)}.`;
   return `${head}${result} This goes on the ledger and cannot be deleted.`;
 }
 
 /** The receipt, which stays on screen rather than being a four-second toast. */
 export function doneSentence(name: string, balanceAfter: number): string {
-  return `Done. ${name} now has ${formatCredits(balanceAfter)}.`;
+  return `Done. ${name} now has ${formatMoney(balanceAfter)}.`;
 }
 
 export const LIVE_PUSH_NOTE
@@ -172,7 +181,7 @@ export function validateAmount(text: string): string | null {
   if (trimmed.startsWith("-") || trimmed.startsWith("−")) return MINUS_REFUSED;
   const amount = Number(trimmed);
   if (!Number.isFinite(amount) || amount <= 0) return "Enter an amount greater than zero.";
-  if (Math.round(amount * 100) !== amount * 100) return "Credits go to two decimal places.";
+  if (Math.round(amount * 100) !== amount * 100) return "Amounts go to two decimal places.";
   return null;
 }
 

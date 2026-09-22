@@ -1,4 +1,4 @@
-import { formatCredits } from "./utils";
+import { formatMoney } from "./utils";
 import { describeBookingError } from "./bookingErrors";
 import { ApiError } from "./api";
 import type { BulkRow, CancelTotals } from "./bulkResults";
@@ -58,13 +58,13 @@ export function bulkProgress(mode: "book" | "cancel", total: number): string {
  * <p>
  * The last clause is the *"nothing back once the lights have been on"* invariant, said out loud
  * at the moment it costs a member their court fee — rather than discovered in a ledger later.
- * Each clause appears only when it actually happened; a line reading "0.00 cr is kept as a
+ * Each clause appears only when it actually happened; a line reading "R0.00 is kept as a
  * penalty" on a free cancellation is noise that teaches an admin to stop reading.
  * </p>
  */
 export function cancelTotalsSentence(totals: CancelTotals): string {
-  const parts = [`${formatCredits(totals.refundCredits - totals.penaltyCredits)} goes back.`];
-  if (totals.penaltyCredits > 0) parts.push(`${formatCredits(totals.penaltyCredits)} is kept as a late-cancellation penalty.`);
+  const parts = [`${formatMoney(totals.refundCredits - totals.penaltyCredits)} goes back.`];
+  if (totals.penaltyCredits > 0) parts.push(`${formatMoney(totals.penaltyCredits)} is kept as a late-cancellation penalty.`);
   if (totals.nothingBack > 0) {
     parts.push(`${totals.nothingBack} ${totals.nothingBack === 1 ? "booking gets" : "bookings get"} nothing back — the lights had already been on.`);
   }
@@ -74,7 +74,7 @@ export function cancelTotalsSentence(totals: CancelTotals): string {
 /** The armed consequence on the destructive confirm. It states what cannot be taken back. */
 export function cancelConsequence(refundCredits: number, members: number): string {
   const who = members === 1 ? "1 member is emailed" : `${members} members are emailed`;
-  return `${formatCredits(refundCredits)} goes back. ${who}. This cannot be undone.`;
+  return `${formatMoney(refundCredits)} goes back. ${who}. This cannot be undone.`;
 }
 
 /**
@@ -90,10 +90,10 @@ export function cancelConsequence(refundCredits: number, members: number): strin
 export const NO_UNDO_LINE = "Cancelling is final. There is no undo — re-booking would be a new booking at today's price, into a slot somebody else may have taken.";
 
 export function bookMoneyLine(total: number, payerName: string | null, before: number | null, after: number | null): string {
-  const cost = `${formatCredits(total)}`;
+  const cost = `${formatMoney(total)}`;
   if (!payerName || before === null) return `${cost} in total.`;
-  const afterText = after === null ? "" : ` After this: ${formatCredits(after)}.`;
-  return `${cost} in total. ${payerName} has ${formatCredits(before)}.${afterText}`;
+  const afterText = after === null ? "" : ` After this: ${formatMoney(after)}.`;
+  return `${cost} in total. ${payerName} has ${formatMoney(before)}.${afterText}`;
 }
 
 /** The written-in-name path charges nobody, and the sheet says so in those words. */
@@ -122,8 +122,8 @@ export function rowOutcome(row: BulkRow, mode: "book" | "cancel", payerName: str
     if (row.status === "already_cancelled") return "Was already cancelled";
     if (row.status === "block_lifted") return "Club hold lifted";
     if (row.nothingBack) return "Cancelled — nothing back, the lights had been on";
-    const penalty = row.penaltyCredits > 0 ? `, ${formatCredits(row.penaltyCredits)} penalty kept` : "";
-    return `Cancelled — ${formatCredits(row.refundCredits - row.penaltyCredits)} back${penalty}`;
+    const penalty = row.penaltyCredits > 0 ? `, ${formatMoney(row.penaltyCredits)} penalty kept` : "";
+    return `Cancelled — ${formatMoney(row.refundCredits - row.penaltyCredits)} back${penalty}`;
   }
   if (row.status === "duplicate") return "Already booked under this batch";
   if (row.status === "blocked") return "Held for your written-in name";
@@ -134,7 +134,7 @@ export function rowOutcome(row: BulkRow, mode: "book" | "cancel", payerName: str
 export function haltSentence(reason: string | null, payerName: string | null): string | null {
   if (reason !== "insufficient_balance") return reason ? "The batch stopped part-way." : null;
   const who = payerName ?? "That member";
-  return `${who} ran out of credit part-way through, so the rest were not attempted. `
+  return `${who}'s wallet ran out part-way through, so the rest were not attempted. `
     + "You can book the rest anyway and leave them owing.";
 }
 
