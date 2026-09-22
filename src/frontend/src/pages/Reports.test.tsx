@@ -79,10 +79,10 @@ describe("Reports — net daily buckets", () => {
     expect(table.getByRole("columnheader", { name: /Penalties \(net\)/ })).toBeInTheDocument();
 
     // Both signs present, and the negative kept as a negative rather than shown as 8.00.
-    expect(table.getByText("8.00 cr")).toBeInTheDocument();
-    expect(table.getByText("-8.00 cr")).toBeInTheDocument();
-    expect(table.getByText("2.40 cr")).toBeInTheDocument();
-    expect(table.getByText("-2.40 cr")).toBeInTheDocument();
+    expect(table.getByText("R8.00")).toBeInTheDocument();
+    expect(table.getByText("-R8.00")).toBeInTheDocument();
+    expect(table.getByText("R2.40")).toBeInTheDocument();
+    expect(table.getByText("-R2.40")).toBeInTheDocument();
 
     // No NaN anywhere — the number went through a formatter, not a subtraction.
     expect(table.queryByText(/NaN/)).not.toBeInTheDocument();
@@ -90,6 +90,55 @@ describe("Reports — net daily buckets", () => {
     // And the sentence that says what a negative day is.
     expect(table.getByText(/Refunds, penalties, adjustments and reversals are net/)).toBeInTheDocument();
     expect(table.getByText(/opposite-sign row on the day it lands/)).toBeInTheDocument();
+  });
+
+  /**
+   * <b>The second place the two quantities meet</b>, and the reason this card needed more
+   * than a formatter change.
+   *
+   * <p>
+   * <code>net_zar</code> is money the gateway actually settled. <code>gross_topups_credits</code>
+   * is what those same payments became in member wallets, which at 1.6 is 60% bigger. They
+   * used to be told apart by their units; they are now both written <code>R…</code>, so an
+   * admin reading "R100.00" beside "R160.00" has nothing but the labels to go on.
+   * </p>
+   */
+  it("says which of two figures in the same symbol is card money and which is wallet money", async () => {
+    stubFetch(routes(true));
+    renderPage(<ReportsPage />);
+
+    // The old labels were "Net revenue" and "Top-ups" — two nouns that do not say which side
+    // of the conversion they are on.
+    // Each label appears twice — on the tile, and as the <strong> in the note that explains
+    // it — so the tile is the one whose own element is the label paragraph.
+    const tile = (label: string) => {
+      const p = screen.getAllByText(label).find((el) => el.tagName === "P");
+      if (!p?.parentElement) throw new Error(`No tile for ${label}`);
+      return within(p.parentElement);
+    };
+
+    await screen.findByText("R100.00");
+    // The gateway leg, settled net of fees, and the wallet leg it became at 1.6. Read inside
+    // their own tiles: R160.00 is also a day in the table below, which is the whole hazard.
+    expect(tile("Received by the club").getByText("R100.00")).toBeInTheDocument();
+    expect(tile("Added to wallets").getByText("R160.00")).toBeInTheDocument();
+    expect(screen.getAllByText("Received by the club")).toHaveLength(2);
+    expect(screen.getAllByText("Added to wallets")).toHaveLength(2);
+
+    // …and the sentence that says why the second is bigger, rather than leaving an admin to
+    // conclude the report is broken.
+    expect(screen.getByText(/what the payment gateway settled/)).toBeInTheDocument();
+    expect(screen.getByText(/at each member-class rate/)).toBeInTheDocument();
+  });
+
+  /** A member sees neither figure, so the note that explains them must not be there either. */
+  it("keeps the gateway-versus-wallet note off a member's own report", async () => {
+    stubFetch(routes(false));
+    renderPage(<ReportsPage />);
+
+    await screen.findByText("My wallet — totals");
+    expect(screen.queryByText("Received by the club")).toBeNull();
+    expect(screen.queryByText(/what the payment gateway settled/)).toBeNull();
   });
 
   /**
@@ -114,7 +163,7 @@ describe("Reports — net daily buckets", () => {
     const stats = within(card.querySelector("dl")!);
 
     expect(stats.getByText("Adjustments")).toBeInTheDocument();
-    expect(stats.getByText("+25.50 cr")).toBeInTheDocument();
+    expect(stats.getByText("+R25.50")).toBeInTheDocument();
     expect(within(card).getByText(/what the desk added or took back by hand/)).toBeInTheDocument();
 
     // The desk's own wallet is gone from the club's report.
@@ -143,13 +192,13 @@ describe("Reports — net daily buckets", () => {
 
     // The bucket that was on no screen, with its sign.
     expect(stats.getByText("Reversals")).toBeInTheDocument();
-    expect(stats.getByText("−160.00 cr")).toBeInTheDocument();
+    expect(stats.getByText("−R160.00")).toBeInTheDocument();
 
     // The net, which is the whole point: 160 − 24 + 0 − 0 + 25.5 − 160.
-    expect(within(card).getByText("+1.50 cr")).toBeInTheDocument();
+    expect(within(card).getByText("+R1.50")).toBeInTheDocument();
     // And NOT the number the five-bucket sum produced. This is the assertion that fails if
     // the reversal is dropped anywhere between the endpoint and this paragraph.
-    expect(within(card).queryByText("+161.50 cr")).not.toBeInTheDocument();
+    expect(within(card).queryByText("+R161.50")).not.toBeInTheDocument();
 
     // The copy names the sixth term, so the arithmetic on the page can be checked by hand.
     expect(within(card).getByText(/\+ reversals, which is every ledger movement in the club summed/)).toBeInTheDocument();
@@ -189,7 +238,7 @@ describe("Reports — net daily buckets", () => {
 
     const table = await tableUnder("Daily breakdown");
     expect(table.getByRole("columnheader", { name: /Reversals/ })).toBeInTheDocument();
-    expect(table.getByText("-160.00 cr")).toBeInTheDocument();
+    expect(table.getByText("-R160.00")).toBeInTheDocument();
   });
 
   it("puts the desk's adjustments in the daily table and says which clock each column is on", async () => {
@@ -198,9 +247,9 @@ describe("Reports — net daily buckets", () => {
 
     const table = await tableUnder("Daily breakdown");
     expect(table.getByRole("columnheader", { name: /Adjustments/ })).toBeInTheDocument();
-    expect(table.getByText("25.50 cr")).toBeInTheDocument();
+    expect(table.getByText("R25.50")).toBeInTheDocument();
 
-    // "Charges 2300.00 cr · Bookings 6" was one row about two different sets of bookings —
+    // "Charges R2300.00 · Bookings 6" was one row about two different sets of bookings —
     // money on the day it moved, courts on the day they are played — with nothing on the
     // page saying so. The column is renamed and the consequence is spelled out.
     expect(table.getByRole("columnheader", { name: /Courts played/ })).toBeInTheDocument();
@@ -217,7 +266,7 @@ describe("Reports — net daily buckets", () => {
     expect(table.getByRole("columnheader", { name: /Refunds \(net\)/ })).toBeInTheDocument();
     // A member reading their own statement is the person most likely to read a negative
     // refund as a mistake, and the one with the least context to resolve it.
-    expect(table.getByText("-8.00 cr")).toBeInTheDocument();
+    expect(table.getByText("-R8.00")).toBeInTheDocument();
     expect(table.getByText(/Refunds are net/)).toBeInTheDocument();
 
     // The window totals are the same arithmetic over a longer bucket, so they are
@@ -234,7 +283,7 @@ describe("Reports — net daily buckets", () => {
  * 100.00 refunded, one 15.00 penalty and 2,500.00 of `AdminAdjustment` — the 500 seed
  * opening balance and a 2,000 desk credit. The page showed top-ups, spend, refunds and a
  * penalty COUNT and nothing else, so it read as <b>0 in, 950 out, 100 back = −850</b>
- * beside a header saying <b>1,635.00 cr</b>, with nothing on screen accounting for the
+ * beside a header saying <b>R1,635.00</b>, with nothing on screen accounting for the
  * gap. The 2,500 was not small print; it was most of her balance.
  * </p>
  *
@@ -288,17 +337,17 @@ describe("Reports — the member's summary reconciles to their balance", () => {
     // and says nothing about it; without the penalty total the 15.00 appears NOWHERE in
     // the product, only its count does — `reporting.md` asks for count AND total.
     expect(w.getByText("Adjustments")).toBeInTheDocument();
-    expect(w.getByText("+2500.00 cr")).toBeInTheDocument();
+    expect(w.getByText("+R2500.00")).toBeInTheDocument();
     expect(w.getByText("Penalties")).toBeInTheDocument();
-    expect(w.getByText("−15.00 cr")).toBeInTheDocument();
+    expect(w.getByText("−R15.00")).toBeInTheDocument();
 
     // Signs on the buckets, so the reader can add them up without guessing direction.
-    expect(w.getByText("−950.00 cr")).toBeInTheDocument();
-    expect(w.getByText("+100.00 cr")).toBeInTheDocument();
+    expect(w.getByText("−R950.00")).toBeInTheDocument();
+    expect(w.getByText("+R100.00")).toBeInTheDocument();
 
     // And the arithmetic, stated. 1,635.00 is her balance; the page now says so out loud
     // rather than leaving a −850 summary next to a 1,635 header.
-    expect(w.getByText("+1635.00 cr")).toBeInTheDocument();
+    expect(w.getByText("+R1635.00")).toBeInTheDocument();
     expect(w.getByText(/is exactly what your balance moved by/)).toBeInTheDocument();
   });
 
@@ -390,8 +439,8 @@ describe("Reports — utilisation says what it counts", () => {
     // column was the wrong one of them.
     expect(card.getByRole("columnheader", { name: /Quoted/ })).toBeInTheDocument();
     expect(card.getByRole("columnheader", { name: /Kept/ })).toBeInTheDocument();
-    expect(card.getByText("50.00 cr")).toBeInTheDocument();
-    expect(card.getByText("15.00 cr")).toBeInTheDocument();
+    expect(card.getByText("R50.00")).toBeInTheDocument();
+    expect(card.getByText("R15.00")).toBeInTheDocument();
 
     // Minutes, said as a person says them. "Slices" is gone: 1 there meant either 15
     // minutes or 60 depending on the row, and the column summed the two.
@@ -410,9 +459,9 @@ describe("Reports — utilisation says what it counts", () => {
  *
  * <p>
  * "My wallet — totals" hardcoded its own <code>+</code> and <code>−</code> around
- * <code>formatCredits</code> for Top-ups, Spent and Penalties, while going through
- * <code>formatSignedCredits</code> two lines away for Refunds and Adjustments. A member
- * with no spend and no penalties was therefore shown <b>−0.00 cr</b> twice, on the one
+ * <code>formatMoney</code> for Top-ups, Spent and Penalties, while going through
+ * <code>formatSignedMoney</code> two lines away for Refunds and Adjustments. A member
+ * with no spend and no penalties was therefore shown <b>−R0.00</b> twice, on the one
  * card whose whole job is to reconcile. Zero has no direction, and every figure on the
  * card now comes through the same formatter.
  * </p>
@@ -441,14 +490,14 @@ describe("Reports — the totals card on a period with no movement", () => {
     const card = within(title.parentElement!.querySelector("dl")!);
 
     // U+2212 MINUS is what the card actually printed, so look for that as well as a hyphen.
-    expect(card.queryByText("−0.00 cr")).not.toBeInTheDocument();
-    expect(card.queryByText("-0.00 cr")).not.toBeInTheDocument();
-    expect(card.queryByText("+0.00 cr")).not.toBeInTheDocument();
+    expect(card.queryByText("−R0.00")).not.toBeInTheDocument();
+    expect(card.queryByText("-R0.00")).not.toBeInTheDocument();
+    expect(card.queryByText("+R0.00")).not.toBeInTheDocument();
 
     // Every bucket on the card, all of them zero, all of them unsigned.
     for (const label of ["Top-ups", "Spent", "Refunds (net)", "Penalties", "Adjustments"]) {
       const term = card.getByText(label);
-      expect(term.parentElement).toHaveTextContent(`${label}0.00 cr`);
+      expect(term.parentElement).toHaveTextContent(`${label}R0.00`);
     }
   });
 
@@ -464,8 +513,8 @@ describe("Reports — the totals card on a period with no movement", () => {
     // The <dl> itself, not the card: the tiles above it carry the same labels.
     const card = within(title.parentElement!.querySelector("dl")!);
 
-    expect(card.getByText("Top-ups").parentElement).toHaveTextContent("Top-ups+160.00 cr");
+    expect(card.getByText("Top-ups").parentElement).toHaveTextContent("Top-ups+R160.00");
     // Spend leaves the wallet, so it is negated — not merely labelled with a minus.
-    expect(card.getByText("Spent").parentElement).toHaveTextContent("Spent−24.00 cr");
+    expect(card.getByText("Spent").parentElement).toHaveTextContent("Spent−R24.00");
   });
 });

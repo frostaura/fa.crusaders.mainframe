@@ -6,7 +6,7 @@ import { Button, fieldClassName } from "../components/Button";
 import { useToast } from "../components/Toast";
 import { Carousel, type CarouselSlide } from "../components/Carousel";
 import { DataTable, type DataColumn } from "../components/DataTable";
-import { formatCredits, formatMinutes, formatSignedCredits, formatZar } from "../lib/utils";
+import { formatMoney, formatMinutes, formatSignedMoney } from "../lib/utils";
 import {
   RevenueAreaChart, DailyFlowBarChart, BookingsLineChart, CourtsRevenueBarChart,
   NoShowDonut, MyBalanceLineChart, MyFlowBarChart, MyBookingsBarChart,
@@ -77,15 +77,18 @@ export default function ReportsPage() {
 
   const tiles = isAdmin
     ? [
-        { label: "Net revenue", value: revenue ? formatZar(revenue.net_zar) : "—", tone: "accent" as const },
-        { label: "Top-ups", value: revenue ? formatCredits(revenue.gross_topups_credits) : "—", tone: "success" as const },
+        // Two quantities that are NOT the same size, now written in the same symbol. The
+        // labels are the only thing left that tells them apart, so they name the SIDE each
+        // figure is on rather than being two nouns for money — see the note under the tiles.
+        { label: "Received by the club", value: revenue ? formatMoney(revenue.net_zar) : "—", tone: "accent" as const },
+        { label: "Added to wallets", value: revenue ? formatMoney(revenue.gross_topups_credits) : "—", tone: "success" as const },
         { label: "Bookings", value: dailyAdmin ? String(dailyAdmin.reduce((s, d) => s + d.bookings, 0)) : "—", tone: "neutral" as const },
         { label: "No-show rate", value: noShow ? `${noShow.no_show_pct.toFixed(1)}%` : "—", tone: noShow && noShow.no_show_pct > 5 ? "warning" as const : "neutral" as const },
       ]
     : [
-        { label: "Top-ups", value: wallet ? formatCredits(wallet.top_ups_credits) : "—", tone: "success" as const },
-        { label: "Spent", value: wallet ? formatCredits(wallet.spent_credits) : "—", tone: "accent" as const },
-        { label: "Refunds (net)", value: wallet ? formatCredits(wallet.refunds_credits) : "—", tone: "neutral" as const },
+        { label: "Top-ups", value: wallet ? formatMoney(wallet.top_ups_credits) : "—", tone: "success" as const },
+        { label: "Spent", value: wallet ? formatMoney(wallet.spent_credits) : "—", tone: "accent" as const },
+        { label: "Refunds (net)", value: wallet ? formatMoney(wallet.refunds_credits) : "—", tone: "neutral" as const },
         // Attendance, which nothing in the product showed anywhere — `reporting.md` has
         // promised "Time on court" since it was written.
         { label: "Time on court", value: wallet ? formatMinutes(wallet.minutes_on_court) : "—", tone: "neutral" as const },
@@ -155,6 +158,21 @@ export default function ReportsPage() {
       </div>
 
       {/*
+        The gateway leg and the wallet leg, side by side in one symbol. Before the ruling
+        they carried different units and needed no sentence; now an admin looking at R100.00
+        beside R160.00 has only these two labels, so the difference is attributed rather than
+        left to be read as a fault in the report. Admin-only, because a member never sees
+        the gateway figure at all.
+      */}
+      {isAdmin && (
+        <p className="text-xs text-text-muted -mt-3">
+          <strong>Received by the club</strong> is what the payment gateway settled, after fees.{" "}
+          <strong>Added to wallets</strong> is what those same payments became in member wallets
+          at each member-class rate — the same money after the conversion, which is why it is the larger figure.
+        </p>
+      )}
+
+      {/*
         The club's own money, including the figure that was on no screen at all.
 
         An admin opening /reports got a "My wallet — totals" panel showing the ADMIN'S wallet
@@ -162,7 +180,7 @@ export default function ReportsPage() {
         zero by design ("it never plays") — sitting in the middle of the club-wide report and
         ending with "…it is exactly what your balance moved by". Inert furniture. Meanwhile
         the club's report carried Top-ups, Charges, Refunds and Penalties and no ADJUSTMENTS
-        anywhere: a tenant with 2,525.50 credits handed out by the desk could see that figure
+        anywhere: a tenant with R2,525.50 handed out by the desk could see that figure
         on a member's own report and on Transactions, and nowhere on the report whose subject
         is where the club's money went.
       */}
@@ -170,18 +188,18 @@ export default function ReportsPage() {
         <Card>
           <h2 className="font-semibold mb-3">Club money — totals</h2>
           <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-            <Stat label="Top-ups" value={formatSignedCredits(clubTotals.topUps)} />
-            <Stat label="Charges" value={formatSignedCredits(-clubTotals.charges)} />
-            <Stat label="Refunds (net)" value={formatSignedCredits(clubTotals.refunds)} />
-            <Stat label="Penalties (net)" value={formatSignedCredits(-clubTotals.penalties)} />
-            <Stat label="Adjustments" value={formatSignedCredits(clubTotals.adjustments)} />
-            <Stat label="Reversals" value={formatSignedCredits(clubTotals.reversals)} />
+            <Stat label="Top-ups" value={formatSignedMoney(clubTotals.topUps)} />
+            <Stat label="Charges" value={formatSignedMoney(-clubTotals.charges)} />
+            <Stat label="Refunds (net)" value={formatSignedMoney(clubTotals.refunds)} />
+            <Stat label="Penalties (net)" value={formatSignedMoney(-clubTotals.penalties)} />
+            <Stat label="Adjustments" value={formatSignedMoney(clubTotals.adjustments)} />
+            <Stat label="Reversals" value={formatSignedMoney(clubTotals.reversals)} />
             <Stat label="Courts played" value={String(clubTotals.bookings)} />
             <Stat label="No-shows" value={String(clubTotals.noShows)} />
             <Stat label="Days" value={String(clubTotals.days)} />
           </dl>
           <p className="mt-3 text-xs text-text-muted">
-            Credit held by members moved by <strong className="font-mono">{formatSignedCredits(clubTotals.net)}</strong> over
+            Money held in member wallets moved by <strong className="font-mono">{formatSignedMoney(clubTotals.net)}</strong> over
             this period — top-ups − charges + refunds − penalties + adjustments + reversals, which is every ledger movement
             in the club summed. <strong>Adjustments</strong> is what the desk added or took back by hand;{" "}
             <strong>Reversals</strong> is a payment clawed back after the fact.
@@ -197,30 +215,31 @@ export default function ReportsPage() {
           {/*
             Every bucket a movement can land in, because this has to reconcile. It showed
             top-ups, spend, refunds and a penalty COUNT and nothing else, so a member with
-            2,500 credits of admin adjustments read "0 in, 950 out, 100 back" — reading as
+            R2,500.00 of admin adjustments read "0 in, 950 out, 100 back" — reading as
             −850 — beside a header that said 1,635, with nothing on the page accounting for
             the difference. The net line at the bottom is the arithmetic, spelled out.
           */}
           <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
             {/*
-              Every one of these goes through `formatSignedCredits`, including the two
-              whose direction is fixed. Hardcoding "+" and "−" around `formatCredits`
+              Every one of these goes through `formatSignedMoney`, including the two
+              whose direction is fixed. Hardcoding "+" and "−" around `formatMoney`
               looked equivalent and was not: a period with no spend and no penalties read
-              "−0.00 cr", and on the one screen whose job is to reconcile, a signed zero
+              "−0.00 cr" before the symbol landed, and on the one screen whose job is to
+              reconcile, a signed zero
               reads as a movement that did not happen. Spend and penalties leave the
               wallet, so they are negated rather than labelled negative.
             */}
-            <Stat label="Top-ups" value={formatSignedCredits(wallet.top_ups_credits)} />
-            <Stat label="Spent" value={formatSignedCredits(-wallet.spent_credits)} />
-            <Stat label="Refunds (net)" value={formatSignedCredits(wallet.refunds_credits)} />
-            <Stat label="Penalties" value={formatSignedCredits(-wallet.penalties_credits)} />
-            <Stat label="Adjustments" value={formatSignedCredits(wallet.adjustments_credits)} />
+            <Stat label="Top-ups" value={formatSignedMoney(wallet.top_ups_credits)} />
+            <Stat label="Spent" value={formatSignedMoney(-wallet.spent_credits)} />
+            <Stat label="Refunds (net)" value={formatSignedMoney(wallet.refunds_credits)} />
+            <Stat label="Penalties" value={formatSignedMoney(-wallet.penalties_credits)} />
+            <Stat label="Adjustments" value={formatSignedMoney(wallet.adjustments_credits)} />
             <Stat label="Penalty count" value={String(wallet.penalty_count)} />
             <Stat label="Bookings played" value={`${wallet.attended_bookings} · ${formatMinutes(wallet.minutes_on_court)}`} />
             <Stat label="Movements" value={String(wallet.count)} />
           </dl>
           <p className="mt-3 text-xs text-text-muted">
-            Net movement over this period: <strong className="font-mono">{formatSignedCredits(wallet.net_movement_credits)}</strong>.
+            Net movement over this period: <strong className="font-mono">{formatSignedMoney(wallet.net_movement_credits)}</strong>.
             That is top-ups − spend + refunds − penalties + adjustments, and it is exactly what your balance moved by.
           </p>
         </Card>
@@ -252,8 +271,8 @@ export default function ReportsPage() {
               // Minutes, not slices. A 60-minute walk-up is SliceCount 1 and was counted
               // the same as a 15-minute booking, so the column mixed units.
               { key: "booked_minutes", header: "Booked", align: "right", cell: (r) => formatMinutes(r.booked_minutes), sortValue: (r) => r.booked_minutes },
-              { key: "quoted_credits", header: "Quoted", align: "right", cell: (r) => formatCredits(r.quoted_credits), sortValue: (r) => r.quoted_credits },
-              { key: "revenue_credits", header: "Kept", align: "right", cell: (r) => formatCredits(r.revenue_credits), sortValue: (r) => r.revenue_credits },
+              { key: "quoted_credits", header: "Quoted", align: "right", cell: (r) => formatMoney(r.quoted_credits), sortValue: (r) => r.quoted_credits },
+              { key: "revenue_credits", header: "Kept", align: "right", cell: (r) => formatMoney(r.revenue_credits), sortValue: (r) => r.revenue_credits },
             ] satisfies DataColumn<UtilisationRow>[]}
           />
           <p className="mt-2 text-xs text-text-muted">
@@ -277,19 +296,19 @@ export default function ReportsPage() {
             maxHeight="60vh"
             columns={[
               { key: "date", header: "Date", cell: (r) => prettyDate(r.date), sortValue: (r) => r.date, width: 130 },
-              { key: "top_ups_credits", header: "Top-ups", align: "right", cell: (r) => cr(r.top_ups_credits), sortValue: (r) => r.top_ups_credits },
-              { key: "booking_charges_credits", header: "Charges", align: "right", cell: (r) => cr(r.booking_charges_credits), sortValue: (r) => r.booking_charges_credits },
-              { key: "refunds_credits", header: "Refunds (net)", align: "right", cell: (r) => <NetCredits value={r.refunds_credits} />, sortValue: (r) => r.refunds_credits },
-              { key: "penalties_credits", header: "Penalties (net)", align: "right", cell: (r) => <NetCredits value={r.penalties_credits} />, sortValue: (r) => r.penalties_credits },
-              { key: "adjustments_credits", header: "Adjustments", align: "right", cell: (r) => <NetCredits value={r.adjustments_credits} />, sortValue: (r) => r.adjustments_credits },
+              { key: "top_ups_credits", header: "Top-ups", align: "right", cell: (r) => money(r.top_ups_credits), sortValue: (r) => r.top_ups_credits },
+              { key: "booking_charges_credits", header: "Charges", align: "right", cell: (r) => money(r.booking_charges_credits), sortValue: (r) => r.booking_charges_credits },
+              { key: "refunds_credits", header: "Refunds (net)", align: "right", cell: (r) => <NetMoney value={r.refunds_credits} />, sortValue: (r) => r.refunds_credits },
+              { key: "penalties_credits", header: "Penalties (net)", align: "right", cell: (r) => <NetMoney value={r.penalties_credits} />, sortValue: (r) => r.penalties_credits },
+              { key: "adjustments_credits", header: "Adjustments", align: "right", cell: (r) => <NetMoney value={r.adjustments_credits} />, sortValue: (r) => r.adjustments_credits },
               // Reversals were on no screen at all while the totals card above claimed to sum
               // every movement in the club, so a day carrying a clawed-back payment could not
               // be reconciled against that card by anyone reading this table.
-              { key: "reversals_credits", header: "Reversals", align: "right", cell: (r) => <NetCredits value={r.reversals_credits} />, sortValue: (r) => r.reversals_credits },
+              { key: "reversals_credits", header: "Reversals", align: "right", cell: (r) => <NetMoney value={r.reversals_credits} />, sortValue: (r) => r.reversals_credits },
               // "Courts played", not "Bookings". These two columns count the day the court
               // is USED; every money column to their left counts the day the money MOVED.
               // Under a 14-day advance window those are routinely different days, which is
-              // how one row came to read "Charges 2300.00 cr · Bookings 6" — 46 slices' worth
+              // how one row came to read "Charges R2300.00 · Bookings 6" — 46 slices worth
               // of money beside six courts. The header says which clock it is on and the
               // footnote below spells the consequence out.
               { key: "bookings", header: "Courts played", align: "right", cell: (r) => r.bookings, sortValue: (r) => r.bookings },
@@ -320,11 +339,11 @@ export default function ReportsPage() {
             maxHeight="60vh"
             columns={[
               { key: "date", header: "Date", cell: (r) => prettyDate(r.date), sortValue: (r) => r.date, width: 130 },
-              { key: "top_ups_credits", header: "Top-ups", align: "right", cell: (r) => cr(r.top_ups_credits), sortValue: (r) => r.top_ups_credits },
-              { key: "spent_credits", header: "Spent", align: "right", cell: (r) => cr(r.spent_credits), sortValue: (r) => r.spent_credits },
-              { key: "refunds_credits", header: "Refunds (net)", align: "right", cell: (r) => <NetCredits value={r.refunds_credits} />, sortValue: (r) => r.refunds_credits },
+              { key: "top_ups_credits", header: "Top-ups", align: "right", cell: (r) => money(r.top_ups_credits), sortValue: (r) => r.top_ups_credits },
+              { key: "spent_credits", header: "Spent", align: "right", cell: (r) => money(r.spent_credits), sortValue: (r) => r.spent_credits },
+              { key: "refunds_credits", header: "Refunds (net)", align: "right", cell: (r) => <NetMoney value={r.refunds_credits} />, sortValue: (r) => r.refunds_credits },
               { key: "bookings", header: "Bookings", align: "right", cell: (r) => r.bookings, sortValue: (r) => r.bookings },
-              { key: "balance_credits", header: "Balance", align: "right", cell: (r) => cr(r.balance_credits), sortValue: (r) => r.balance_credits },
+              { key: "balance_credits", header: "Balance", align: "right", cell: (r) => money(r.balance_credits), sortValue: (r) => r.balance_credits },
             ] satisfies DataColumn<DailyMePoint>[]}
           />
           <NetNote what="Refunds" />
@@ -370,11 +389,16 @@ function sumDays(days: DailyAdminPoint[]) {
 }
 
 /**
- * Every column this formats is credit-denominated, and it used to print a rand sign over
- * all eight of them. Credits are the unit of account; rand is only ever what was paid at
- * the till. Kept as a local alias so the call sites stay short.
+ * A local alias, so the call sites in the two daily tables stay short.
+ *
+ * <p>
+ * It used to be called `cr` and carried a comment about credits being the unit of account
+ * and rand being only what was paid at the till. Both units are gone: every figure in the
+ * product is written in the club symbol, and the one place the two quantities still differ
+ * in SIZE is the revenue card above, where the labels say so.
+ * </p>
  */
-const cr = (v: number) => formatCredits(v);
+const money = (v: number) => formatMoney(v);
 const prettyDate = (s: string) => new Date(s + "T00:00:00Z").toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
 
 /**
@@ -397,8 +421,8 @@ const prettyDate = (s: string) => new Date(s + "T00:00:00Z").toLocaleDateString(
  * the only trace on this screen that a reversal happened at all.
  * </p>
  */
-function NetCredits({ value }: { value: number }) {
-  return <span className={value < 0 ? "text-warning-strong" : undefined}>{formatCredits(value)}</span>;
+function NetMoney({ value }: { value: number }) {
+  return <span className={value < 0 ? "text-warning-strong" : undefined}>{formatMoney(value)}</span>;
 }
 
 /** Says once, under the table, what the "(net)" in those column headers means. */
