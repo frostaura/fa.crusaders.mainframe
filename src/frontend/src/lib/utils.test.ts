@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { resetClubCurrencySymbol, setClubCurrencySymbol } from "./currency";
 import { formatCredits, formatMinutes, formatRate, formatRatePerRand, formatSignedCredits, formatZar } from "./utils";
+
+afterEach(resetClubCurrencySymbol);
 
 /**
  * The money-rendering bug, pinned.
@@ -37,6 +40,54 @@ describe("money formatting", () => {
     // exist so the distinction is made once, deliberately, rather than by whoever is
     // editing a component.
     expect(formatZar(100)).toBe("R100.00");
+  });
+
+  /**
+   * The club's symbol reaches real money and stops there.
+   *
+   * <p>
+   * `currency_symbol` is the unit a member hands the gateway. Putting it on a credit
+   * figure is the defect this file's first paragraph describes and `money.spec.ts`
+   * guards — at the default 1.6 rate a 240-credit wallet shown as "R240.00" overstates
+   * the member's rand position by 60%.
+   * </p>
+   */
+  it("puts the club's own symbol in front of a rand amount", () => {
+    setClubCurrencySymbol("CHF");
+    expect(formatZar(100)).toBe("CHF100.00");
+    expect(formatZar(0)).toBe("CHF0.00");
+    expect(formatZar(1234567.891)).toBe("CHF1234567.89");
+  });
+
+  it("never lets the club's symbol touch a credit figure", () => {
+    setClubCurrencySymbol("CHF");
+    expect(formatCredits(240)).toBe("240.00 cr");
+    expect(formatCredits(240, { long: true })).toBe("240.00 credits");
+    expect(formatSignedCredits(-15)).toBe("−15.00 cr");
+    for (const rendered of [formatCredits(240), formatSignedCredits(240)]) {
+      expect(rendered).not.toContain("CHF");
+      expect(rendered).not.toContain("R");
+    }
+  });
+
+  it("puts the sign OUTSIDE the symbol, because R-50.00 is not a thing anyone writes", () => {
+    // A preceding symbol forces the choice that a trailing unit never did. "-R50.00"
+    // is how a negative amount of money is written; "R-50.00" reads as a symbol
+    // followed by a malformed number. `net_zar` on the club revenue card goes negative
+    // in any period whose refunds beat its top-ups, so this renders in production.
+    expect(formatZar(-50)).toBe("-R50.00");
+    setClubCurrencySymbol("R$");
+    expect(formatZar(-50)).toBe("-R$50.00");
+    // Negative zero is zero, and carries no direction — as it does for credits.
+    expect(formatZar(-0)).toBe("R$0.00");
+  });
+
+  it("falls back to the default symbol when the club has not said", () => {
+    // An older API serves no key at all, which is the commonest case on the day this
+    // ships. It must be indistinguishable from a club that chose "R".
+    setClubCurrencySymbol(undefined);
+    expect(formatZar(100)).toBe("R100.00");
+    expect(formatRatePerRand(1.6)).toBe("1.6 credits / R1");
   });
 });
 
@@ -94,6 +145,15 @@ describe("signed credits, rates and durations", () => {
     expect(formatRatePerRand(2)).toBe("2 credits / R1");
     expect(formatRatePerRand(0.5)).toBe("0.5 credits / R1");
     expect(formatRatePerRand(0)).toBe("0 credits / R1");
+  });
+
+  it("quotes the rate against the club's own currency, not a hardcoded rand", () => {
+    // "1.6 credits / R1" hardcoded the rand sign beside a number that is the club's
+    // own `credits_per_zar_*`. A club on another currency was being told its rate per
+    // a currency it does not take.
+    setClubCurrencySymbol("CHF");
+    expect(formatRatePerRand(1.6)).toBe("1.6 credits / CHF1");
+    expect(formatRatePerRand(1)).toBe("1 credit / CHF1");
   });
 
   it("says a duration the way a person says it", () => {

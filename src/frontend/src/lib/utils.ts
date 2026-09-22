@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { clubCurrencySymbol } from "./currency";
 
 /** shadcn-style className composer. */
 export function cn(...inputs: ClassValue[]) {
@@ -25,13 +26,24 @@ export function formatCredits(value: number, options?: { long?: boolean }) {
 }
 
 /**
- * Rand, formatted for display.
+ * Real money, formatted for display, in the club's own currency symbol.
  *
- * Only for amounts that really are rand: the top-up screens, where a member is paying
- * PayFast, and the admin reconciliation views. Everything else is credits.
+ * Only for amounts that really are money: the top-up screens, where a member is paying
+ * PayFast, and the admin reconciliation views. Everything else is credits — the symbol
+ * is deliberately scoped to this function, and the reasoning is in `currency.ts`.
+ *
+ * The symbol PRECEDES the amount, which forces a choice a trailing unit never did: the
+ * sign goes outside the symbol. "-R50.00" is how a negative amount of money is written;
+ * "R-50.00" — what `R${value.toFixed(2)}` produced — reads as a symbol followed by a
+ * malformed number. It is not hypothetical: `net_zar` on the club revenue card goes
+ * negative in any period whose refunds beat its top-ups.
  */
 export function formatZar(value: number) {
-  return `R${value.toFixed(2)}`;
+  // `Math.abs` before `toFixed` so a negated zero cannot arrive here as "-0.00". Zero has
+  // no direction, exactly as it has none in `formatSignedCredits`.
+  const magnitude = Math.abs(value).toFixed(2);
+  const sign = value < 0 ? "-" : "";
+  return `${sign}${clubCurrencySymbol()}${magnitude}`;
 }
 
 /**
@@ -74,10 +86,14 @@ export function formatRate(value: number) {
  * the noun lives here with the number rather than as loose text at each call site, which is
  * how the two got out of step. Only 1 is singular: 0, 0.5 and 1.6 all take "credits", which
  * is English rather than an arbitrary rule, and 1.0000 is the same rate as 1.
+ *
+ * The "R1" was hardcoded beside a number that is the club's own `credits_per_zar_*`, so a
+ * club on another currency was quoted its rate per a currency it does not take. It comes
+ * from the same one place the amounts do.
  */
 export function formatRatePerRand(value: number) {
   const rate = formatRate(value);
-  return `${rate} ${rate === "1" ? "credit" : "credits"} / R1`;
+  return `${rate} ${rate === "1" ? "credit" : "credits"} / ${clubCurrencySymbol()}1`;
 }
 
 /**
