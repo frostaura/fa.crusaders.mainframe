@@ -113,9 +113,9 @@ describe("the sentences", () => {
 
   it("says the penalty and the nothing-back cases out loud, and only when they happened", () => {
     expect(cancelTotalsSentence({ succeeded: 2, failed: 0, refundCredits: 270, penaltyCredits: 0, nothingBack: 0 }))
-      .toBe("270.00 cr goes back.");
+      .toBe("R270.00 goes back.");
     const full = cancelTotalsSentence({ succeeded: 4, failed: 0, refundCredits: 270, penaltyCredits: 30, nothingBack: 1 });
-    expect(full).toContain("30.00 cr is kept as a late-cancellation penalty.");
+    expect(full).toContain("R30.00 is kept as a late-cancellation penalty.");
     // "nothing back once the lights have been on" — said at the moment it costs somebody money.
     expect(full).toContain("1 booking gets nothing back");
   });

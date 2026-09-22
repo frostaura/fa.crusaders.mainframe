@@ -1,5 +1,5 @@
 import { ApiError } from "./api";
-import { formatCredits } from "./utils";
+import { formatMoney } from "./utils";
 import { describeFailure } from "./errors";
 
 /**
@@ -46,7 +46,7 @@ const BOOKING_ERROR_TEXT: Record<string, string> = {
   // `provesStaleGrid` below), so the sentence states what has happened rather than asking
   // for something the member cannot do.
   slot_taken: "Someone just took that slot. The schedule behind this is up to date now — pick another time.",
-  insufficient_balance: "Not enough credits — top up your wallet and try again.",
+  insufficient_balance: "Not enough in your wallet — top up and try again.",
   court_not_found: "That court isn't on the schedule any more. The schedule behind this is up to date now.",
   duplicate_request: "That booking already went through — it's on the schedule behind this.",
   already_started: "That booking has already started, so it can't be cancelled.",
@@ -75,7 +75,7 @@ const BOOKING_ERROR_TEXT: Record<string, string> = {
  * fix.
  * </p>
  */
-const SERVER_DOWN_TEXT = "The club's system isn't answering right now. Nothing was booked and no credit was taken — try again in a minute.";
+const SERVER_DOWN_TEXT = "The club's system isn't answering right now. Nothing was booked and nothing was taken from your wallet — try again in a minute.";
 
 /** The sign-out sentence. The 401 handler in `lib/api.ts` does the actual redirect. */
 export const SESSION_LOST_TEXT = "Your session has expired — sign in again to book.";
@@ -97,7 +97,7 @@ export const SESSION_LOST_TEXT = "Your session has expired — sign in again to 
  * </p>
  */
 export const MEMBER_SHORT_TEXT =
-  "That member doesn't have enough credit for this court. Try again to see what they're short by.";
+  "That member doesn't have enough in their wallet for this court. Try again to see what they're short by.";
 
 /**
  * The same refusal when the short wallet is the signed-in admin's own.
@@ -113,7 +113,7 @@ export const MEMBER_SHORT_TEXT =
  * </p>
  */
 export const ADMIN_SELF_SHORT_TEXT =
-  "You don't have enough credit for this court. The admin override only works on another member's " +
+  "You don't have enough in your wallet for this court. The admin override only works on another member's " +
   "wallet, not your own — top up and book it again.";
 
 function describePeakHours(err: ApiError): string {
@@ -298,7 +298,7 @@ export function describeCourtCodeFetchFailure(e: unknown, screen: "code" | "barr
  *
  * <p>
  * It replaces "Booking cancelled — refund pending.", which was shown identically when
- * 50.00 credits came back, when 35.00 came back with 15.00 kept as a penalty, and when
+ * R50.00 came back, when R35.00 came back with R15.00 kept as a penalty, and when
  * a checked-in member lost the whole price and nothing came back at all. Nothing in that
  * sentence was true in the third case, and the member had no other way to find out.
  * </p>
@@ -306,21 +306,28 @@ export function describeCourtCodeFetchFailure(e: unknown, screen: "code" | "barr
  * <p>
  * `member` is the first name of the person whose booking it was, and it is present exactly
  * when an ADMIN cancelled on somebody else's behalf. §7 is explicit that "refunds always
- * go to the booking's player", and the sentence said "back to your credit" to a desk
- * account whose own balance never moved — first person about another person's money, with
- * the member never named. An admin acting for someone should be told whose credit moved.
+ * go to the booking's player", and this sentence addressed the refund to whoever was
+ * reading it — a desk account whose own balance never moved — in the first person about
+ * another person's money, with the member never named. An admin acting for someone should
+ * be told whose wallet moved.
+ * </p>
+ *
+ * <p>
+ * <b>The wallet, not "your credit".</b> The destination used to be named by the unit the
+ * money was counted in; the unit is gone, and the wallet is the thing the member can look at
+ * afterwards to check this sentence was true.
  * </p>
  */
 export function cancellationOutcome(refunded: number, penalty: number, member?: string | null): string {
-  const whose = member ? `${member}'s credit` : "your credit";
+  const whose = member ? `${member}'s wallet` : "your wallet";
   if (refunded <= 0 && penalty <= 0) {
     return member
       ? `Booking cancelled. Nothing was refunded — ${member} had already checked in and the lights had been on.`
       : "Booking cancelled. Nothing was refunded — the lights had already been on.";
   }
   if (penalty > 0) {
-    return `Booking cancelled. ${formatCredits(refunded - penalty)} back to ${whose}, `
-      + `${formatCredits(penalty)} kept as the late-cancellation penalty.`;
+    return `Booking cancelled. ${formatMoney(refunded - penalty)} back to ${whose}, `
+      + `${formatMoney(penalty)} kept as the late-cancellation penalty.`;
   }
-  return `Booking cancelled. ${formatCredits(refunded)} back to ${whose}.`;
+  return `Booking cancelled. ${formatMoney(refunded)} back to ${whose}.`;
 }
