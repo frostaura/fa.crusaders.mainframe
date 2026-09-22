@@ -655,9 +655,10 @@ export type AdminSettings = {
   /** `thumbs` (default) or `marks` — ruling 4. Destructive confirms are exempt and keep the
    *  action's own icon and the danger treatment whichever is chosen. */
   action_glyphs?: "thumbs" | "marks";
-  /** The symbol this club's REAL MONEY figures wear, default `R`. 1–4 letters or currency
-   *  signs. It is NOT the credit unit — credits convert at `credits_per_zar_*` and keep a
-   *  unit of their own; see `lib/currency.ts`. */
+  /** The symbol EVERY amount this club shows wears, default `R`. 1–4 letters or currency
+   *  signs. It dresses a wallet balance and a court price as well as a card payment, which is
+   *  the owner's ruling — so `credits_per_zar_*` is invisible except at the conversion
+   *  itself, and any sentence spanning both legs states both in words; see `lib/currency.ts`. */
   currency_symbol?: string;
   /** GOAL item 6's kill switch, default true. False makes the trace route answer 404 —
    *  never 403, which would confirm the surface exists and that this member has one. */
@@ -1105,7 +1106,7 @@ export type MyProfile = {
   action_glyphs?: string;
 
   /**
-   * The symbol this club's REAL MONEY figures wear — `R`, `R$`, `CHF`.
+   * The symbol EVERY amount this club shows wears — `R`, `R$`, `CHF`.
    *
    * <p>
    * A tenant setting, riding on the payload that already reaches every signed-in screen for
@@ -1115,9 +1116,11 @@ export type MyProfile = {
    * </p>
    *
    * <p>
-   * <b>It is not the credit unit.</b> A member pays R100 and receives
-   * <code>credits_per_zar_regular</code> × 100 credits, which ships at 1.6 — so a credit
-   * figure wearing this symbol overstates what they have by 60%. See `lib/currency.ts`.
+   * <b>It dresses the wallet too, on the owner's instruction.</b> A member pays R100 and their
+   * wallet gains <code>credits_per_zar_regular</code> × 100, which ships at 1.6 — two
+   * quantities that are not the same size, now written the same way. What that collapses, why
+   * it is defensible, and the rule it imposes on every sentence spanning both legs are all in
+   * `lib/currency.ts`. Read it before adding a caller.
    * </p>
    */
   currency_symbol?: string;

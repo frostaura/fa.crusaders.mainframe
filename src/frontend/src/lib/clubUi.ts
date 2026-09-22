@@ -56,7 +56,7 @@ export function readActionGlyphSet(raw: unknown): ActionGlyphSet {
 export type ClubUi = {
   actionGlyphs: ActionGlyphSet;
   /**
-   * The symbol the club's REAL MONEY figures wear — `R`, `R$`, `CHF`.
+   * The symbol EVERY amount the club shows wears — `R`, `R$`, `CHF`.
    *
    * <p>
    * Here for a component that needs to say it in prose ("Top-up block (R)"). The FORMATTERS
@@ -67,8 +67,12 @@ export type ClubUi = {
    * </p>
    *
    * <p>
-   * <b>It is not the credit unit.</b> Credits convert at `credits_per_zar_*` and keep a unit
-   * of their own — see `currency.ts`.
+   * <b>It reaches the wallet too, and that is the owner's ruling rather than an oversight.</b>
+   * This field used to be scoped to real money — what a member hands the gateway — and this
+   * comment said so. It now dresses a wallet balance and a court price as well, which makes
+   * the `credits_per_zar_*` conversion invisible everywhere except at the conversion itself.
+   * `currency.ts` carries the whole decision, the risk the owner accepted, and the one rule it
+   * imposes on any sentence that spans both legs.
    * </p>
    */
   currencySymbol: string;

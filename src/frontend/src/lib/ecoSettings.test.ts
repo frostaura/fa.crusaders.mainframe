@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  ACTION_GLYPH_CHOICES, ECO_NUMERIC_RULES, ECO_SETTING_LABELS, ecoSettingComplaints,
+  ACTION_GLYPH_CHOICES, CURRENCY_SYMBOL_HINT, ECO_NUMERIC_RULES, ECO_SETTING_LABELS,
+  ecoSettingComplaints,
 } from "./ecoSettings";
 
 /**
@@ -162,5 +163,41 @@ describe("what the page refuses, and what it deliberately does not", () => {
     expect(ecoSettingComplaints({})).toEqual([]);
     expect(ecoSettingComplaints({ currency_symbol: undefined })).toEqual([]);
     expect(ecoSettingComplaints({ currency_symbol: null })).toEqual([]);
+  });
+
+  /**
+   * The hint is the only sentence on the settings page that tells an admin what this symbol
+   * actually reaches — and it used to tell them the opposite.
+   *
+   * <p>
+   * It said the symbol governs rand and "does not change credit figures, which stay in
+   * credits". That was true of the first pass and is false now: the owner's second ruling put
+   * the symbol on EVERY amount, wallet and court price included. An admin acting on the old
+   * hint would file the wallet's new symbol as a bug, which is the one reader this row exists
+   * for.
+   * </p>
+   *
+   * <p>
+   * What has to survive is the warning underneath it, which the old sentence got right for the
+   * wrong reason: a wallet and a card payment are different sizes at `credits_per_zar_*`, and
+   * they now look alike. The admin is the person who sets that rate, so they are the person who
+   * has to be told the two are no longer told apart by their units.
+   * </p>
+   */
+  it("tells the admin what the symbol reaches, and warns that two different sizes now look alike", () => {
+    // The claim that has to be gone: it reaches every figure, not only the ones PayFast sees.
+    expect(CURRENCY_SYMBOL_HINT).not.toMatch(/does not change/i);
+    expect(CURRENCY_SYMBOL_HINT).not.toMatch(/stay in credits/i);
+    expect(CURRENCY_SYMBOL_HINT).not.toMatch(/credits?\b/i);
+
+    // The claim that has to be there: it reaches everything…
+    expect(CURRENCY_SYMBOL_HINT).toMatch(/every (amount|figure)/i);
+    // …including the wallet, which is the half that changed…
+    expect(CURRENCY_SYMBOL_HINT).toMatch(/wallet/i);
+    // …and the warning that the two legs are different sizes at the club's own rate.
+    expect(CURRENCY_SYMBOL_HINT).toMatch(/different sizes?/i);
+
+    // Still the rule the field is bounded by, which is the API's and never invented here.
+    expect(CURRENCY_SYMBOL_HINT).toContain("1–4");
   });
 });
