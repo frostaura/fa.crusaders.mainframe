@@ -1014,6 +1014,56 @@ def d11_relief_and_membership(d: Door, booking: dict) -> None:
     print("  [db] M's membership restored to Active", flush=True)
     d.scan("D11", "and the moment the desk lifts it, the same QR opens the door", ident, True, "ok")
 
+    # -- D11b : NO MEMBERSHIP ROW AT ALL ------------------------------------
+    #
+    # The hole the member lane found, and the one refusal reason this harness has never
+    # reached: a user with NO membership row was not barred, because the check read as
+    # "the club has recorded a decision about this person and it was not approval" — and
+    # about such a user it has recorded none. A real, live ident code for such a user
+    # OPENED THE BUILDING under the default `active_member` policy. "Active member"
+    # cannot mean "anybody the club has not said no to".
+    #
+    # Provoked the way it actually happens rather than by inventing a user: the code is
+    # minted while the membership is good and the ROW THEN GOES AWAY — a data repair, a
+    # bad migration, a manual delete. No path in this product creates a user without a
+    # membership row, which is exactly why the old reading looked safe and was not.
+    #
+    # The row is stashed as JSON and put back verbatim, columns and all, so the steps
+    # after this one run against the fixture they were written for and this cannot
+    # become a test that passes by breaking its neighbours.
+    stashed = d.sql.scalar(
+        f"""select row_to_json(m)::text from memberships m where m."UserId"='{d.w.m_user_id}'""")
+    if not stashed:
+        raise StepFailed("M has no membership row to remove — the fixture this step needs is gone")
+    d.sql.run(f"""delete from memberships where "UserId"='{d.w.m_user_id}'""")
+    print("  [db] M's membership ROW DELETED (not suspended — absent)", flush=True)
+    try:
+        d.scan("D11", "a live ident QR for a user with NO membership row -> `no_membership`, which "
+                      "is its own reason because the desk's next action is different: there is "
+                      "nothing to un-suspend, the person needs enrolling",
+               ident, False, "no_membership")
+        d.scan("D11", "  ...and their booking's own code is refused for the same reason, because "
+                      "the membership check runs before anything about a booking",
+               booking["code"], False, "no_membership")
+        hb = d.gate.heartbeat()
+        chk("D11", "  ...and they are off the OFFLINE roster too, so the refusal holds through an "
+                   "outage rather than only while the gate can reach the API",
+            booking["code"] not in roster_tokens(hb), f"roster n={len(roster_tokens(hb))}")
+        # THE OTHER HALF OF THE WIDENING. Refusing the scan is not enough if the product
+        # will still hand this user a fresh door-capable code the moment they ask.
+        minted = d.w.http.call("POST", "/api/v1/me/qr/generate?kind=ident", token=d.w.m_token)
+        no_door = minted.status != 200 or not (minted.json or {}).get("doors", False)
+        chk("D11", "  ...and no door-capable code is MINTED for them either — a door that refuses "
+                   "a code the same product is still issuing is a race, not a rule",
+            no_door, f"status={minted.status} body={str(minted.json)[:140]}")
+    finally:
+        d.sql.run("insert into memberships select * from json_populate_record"
+                  f"(null::memberships, $stash${stashed}$stash$)")
+        print("  [db] M's membership row restored verbatim", flush=True)
+    d.scan("D11", "and with the row back, the same QR opens the door again — so the refusal above "
+                  "was about the missing row and not about anything this step broke",
+           ident, True, "ok")
+
 
 def d12_offline_uploads(d: Door, booking: dict) -> None:
     sc.step("D12  The door uploads what it decided while the link was down")
@@ -1259,6 +1309,46 @@ def d16_cross_kind(d: Door, booking: dict) -> None:
         and hit[0][1] == "-", f"row={hit[0][:2] if hit else None}")
 
 
+_CONSOLE_KINDS: Optional[frozenset[str]] = None
+
+
+def console_event_kinds() -> frozenset[str]:
+    """Every `kind` the admin console has a word for, read from its own source.
+
+    Parsed rather than restated so the two cannot drift: this harness once carried a
+    hand-copied set that went stale the day WIRE-R3 §6 made `kind` the fine vocabulary,
+    and it then failed a correct product on every run. Both maps count — a row may be
+    rendered through either — and `describeDoorEventKind` falls back to a neutral
+    sentence, which is exactly the outcome the assertion exists to prevent, so the
+    fallback is NOT treated as coverage.
+
+    A parse that finds nothing raises rather than returning an empty set: an allow-list
+    that accidentally allows everything is worse than one that is stale, because it
+    never fails and nobody looks at it again."""
+    global _CONSOLE_KINDS
+    if _CONSOLE_KINDS is not None:
+        return _CONSOLE_KINDS
+    src = (ROOT / "src" / "frontend" / "src" / "lib" / "deviceActivity.ts").read_text(encoding="utf-8")
+    kinds: set[str] = set()
+    for map_name in ("DOOR_EVENT_KIND_WORDS", "DOOR_EVENT_CHANGE_WORDS"):
+        m = re.search(map_name + r"\s*:\s*Record<string,\s*string>\s*=\s*\{(.*?)^\};",
+                      src, re.S | re.M)
+        if not m:
+            raise StepFailed(f"could not find {map_name} in deviceActivity.ts — this harness "
+                             f"reads the console's own vocabulary and cannot assert without it")
+        body = m.group(1)
+        # Keys only, and only at the map's own indentation: a key inside a doc comment or a
+        # nested object would widen the allow-list silently.
+        for line in body.splitlines():
+            km = re.match(r"\s{2}([A-Za-z_][A-Za-z0-9_]*)\s*:", line)
+            if km:
+                kinds.add(km.group(1))
+    if not kinds:
+        raise StepFailed("parsed the console's event-kind maps and found no kinds at all")
+    _CONSOLE_KINDS = frozenset(kinds)
+    return _CONSOLE_KINDS
+
+
 def da_activity(d: Door) -> None:
     sc.step("DA  B5 — the trail finally has a reader")
     body = d.activity_body()
@@ -1279,8 +1369,21 @@ def da_activity(d: Door) -> None:
             or str(e.get("action")).startswith("device.updated") for e in events)
         and not any(str(a).startswith("device.auto_registered") or str(a).startswith("device.updated")
                     for a in actions)
-        and all(e.get("kind") in {"registered", "edited", "removed", "clock_corrected", "unrecognised"}
-                for e in events),
+        # THE ALLOW-LIST IS READ FROM THE CONSOLE, NOT RESTATED HERE.
+        #
+        # This clause used to carry a hand-copied set — {registered, edited, removed,
+        # clock_corrected, unrecognised} — and WIRE-R3 §6 then made `kind` the FINE
+        # vocabulary, so the server began answering `renamed`, `shut` and `reopened`.
+        # The console had words for all three on the day it changed; this list did not,
+        # and it failed a correct product for two rounds.
+        #
+        # What the assertion is actually about is the SEAM: a kind the console has no
+        # chip for renders as a neutral "Unrecognised event" at best, and the sentence
+        # above warns it can render as a green refusal at worst. So it is asked of the
+        # console's own map, parsed out of the frontend source. A kind genuinely new to
+        # both still fails here, which is the whole point; a kind both already agree on
+        # cannot fail here again.
+        and all(e.get("kind") in console_event_kinds() for e in events),
         f"events={sorted({(str(e.get('action')), str(e.get('kind'))) for e in events})}")
     chk("B5", "one scan is ONE row on every surface: the clock-correction row the upload writes "
               "beside a clamped event carries identical details and is not a second scan",

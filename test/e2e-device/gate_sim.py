@@ -365,6 +365,33 @@ class GateSim:
         legitimately run to CAP_MS (GATE_UNLOCK_HARD_CAP_MS) before the cap closes it."""
         return (CAP_MS / 1000.0) + unlock_seconds + 5.0
 
+    def relay_is_released(self) -> bool:
+        """Whether the lock is released RIGHT NOW, read off the transcript."""
+        with self._lock:
+            for line in reversed(self.lines):
+                if line.channel == "relay" and line.state in ("ON", "OFF"):
+                    return line.state == "ON"
+        return False
+
+    def wait_until_locked(self, timeout: float) -> None:
+        """Block until the lock is de-energised, then wait out the relatch dwell.
+
+        A STEP THAT NEEDS A CLOSED DOOR MUST WAIT FOR ONE. Sleeping the scan
+        debounce and assuming the rest is what the dwell probe used to do, and it
+        was only ever true because a release was three seconds long: by the time
+        the debounce had passed, the door had closed on its own. At fifteen the
+        previous step's window is still open, so the probe's scan EXTENDED that
+        window instead of opening a new one — a correct `released=1` with no relay
+        edge at all — and `relay_window` then waited for an ON that was never
+        coming and reported the release as broken.
+
+        Waiting on the observed state rather than on a number cannot go stale the
+        next time the default moves."""
+        if self.relay_is_released():
+            self.expect(lambda l: l.channel == "relay" and l.state == "OFF", timeout,
+                        "the release window closing", self.mark())
+        self.let_the_lock_relatch()
+
     def let_the_lock_relatch(self) -> None:
         """Wait out the firmware's relock dwell before presenting another code.
 
@@ -1111,6 +1138,8 @@ def dsim_firmware(door: Any) -> None:
         # `gate_open` that DS5's "exactly once" counts would then read as a drain
         # that duplicated. The board is back online by now, so these go through
         # the API and queue nothing.
+        # THE DOOR HAS TO BE SHUT BEFORE THIS CAN OPEN IT. See wait_until_locked.
+        sim.wait_until_locked(GateSim.release_wait(door.unlock_seconds()))
         time.sleep((SCAN_DEBOUNCE_MS / 1000.0) + 0.3)
         dwell_open = sim.mark()
         reopened = sim.scan(live_code)
