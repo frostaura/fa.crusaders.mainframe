@@ -1092,9 +1092,13 @@ public class WalkUpBookingTests
         var sent = await SettledMailAsync(f);
         Assert.DoesNotContain(sent, m => m.Subject.StartsWith("Court time started", StringComparison.Ordinal));
         var told = Assert.Single(sent, m => m.Subject.StartsWith("Court time not started", StringComparison.Ordinal));
-        Assert.Contains("Nothing was bought", told.HtmlBody);
-        Assert.Contains("Put back on your credit", told.HtmlBody);
-        Assert.DoesNotContain("penalty", told.HtmlBody);
+        // Both bodies: the reassurance is worth nothing in the half the member is not shown.
+        foreach (var half in new[] { told.HtmlBody, MailText.Unwrap(told.PlainBody) })
+        {
+            Assert.Contains("Nothing was bought", half);
+            Assert.Contains("has gone straight back onto your balance", half);
+            Assert.DoesNotContain("penalty", half);
+        }
 
         // And the court is free again — the member can press the button a second time and be
         // sold what they were refused. Before the undo, their own abandoned booking answered

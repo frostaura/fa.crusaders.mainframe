@@ -178,10 +178,12 @@ public static partial class TopUpEndpoints
             IEmailService emailService,
             IEventBus bus,
             Crusaders.Mainframe.Api.Multitenancy.ITenantContext tenant,
+            ClubIdentityResolver club,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
             var logger = loggerFactory.CreateLogger("TopUpCallback");
+            var mailer = new TopUpMailer(emailService, logger, club, settingsAccessor);
             var slug = http.Query["tenant"].ToString();
             if (string.IsNullOrEmpty(slug)) return Results.BadRequest(new { error = "tenant_missing" });
 
@@ -268,7 +270,7 @@ public static partial class TopUpEndpoints
                 pending.FailureReason = FailureCodes.AmountMismatch;
                 await db.SaveChangesAsync(ct);
 
-                if (wasPending) await NotifyNotCompletedAsync(db, emailService, logger, settingsAccessor, pending, ct);
+                if (wasPending) await NotifyNotCompletedAsync(db, mailer, pending, ct);
                 return Results.BadRequest(new { error = "amount_mismatch" });
             }
 
@@ -300,7 +302,7 @@ public static partial class TopUpEndpoints
                 }
 
                 return await CompleteAsync(
-                    new TopUpCompletion(db, ledger, settingsAccessor, emailService, bus, logger),
+                    new TopUpCompletion(db, ledger, settingsAccessor, emailService, bus, logger) { Club = club },
                     pending, tenantRow, interp, ct);
             }
 
@@ -322,7 +324,7 @@ public static partial class TopUpEndpoints
             pending.CompletedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(ct);
 
-            if (wasPending) await NotifyNotCompletedAsync(db, emailService, logger, settingsAccessor, pending, ct);
+            if (wasPending) await NotifyNotCompletedAsync(db, mailer, pending, ct);
             return Results.Ok(new { ok = false, reason = pending.FailureReason });
         }).AllowAnonymous();
 
@@ -350,8 +352,7 @@ public static partial class TopUpEndpoints
     /// </para>
     /// </summary>
     private static async Task NotifyNotCompletedAsync(
-        MainframeDbContext db, IEmailService email, ILogger logger, TenantSettingsAccessor settings,
-        PendingTopup pending, CancellationToken ct)
+        MainframeDbContext db, TopUpMailer mailer, PendingTopup pending, CancellationToken ct)
     {
         var recipient = await db.Users.AsNoTracking()
             .Where(u => u.Id == pending.UserId).Select(u => u.Email).FirstOrDefaultAsync(ct);
@@ -359,15 +360,28 @@ public static partial class TopUpEndpoints
 
         // The club's own money symbol, resolved from the tenant the callback already set.
         // Never a constant: this mail names an amount the member's card was asked for.
-        var symbol = CurrencySymbol.For(await settings.GetAsync(ct));
+        var symbol = CurrencySymbol.For(await mailer.Settings.GetAsync(ct));
 
         EmailDispatch.InBackground(
-            email, logger,
+            mailer.Email, mailer.Logger,
             EmailTemplates.TopUpNotCompleted(
-                recipient, pending.AmountZar, pending.FailureReason,
+                await mailer.Club.GetAsync(ct), recipient, pending.AmountZar, pending.FailureReason,
                 pending.ExternalReference ?? pending.IdempotencyKey, symbol),
             $"top-up failure notice for {pending.Id}");
     }
+
+    /// <summary>
+    /// What it takes to send one top-up mail. Bundled because the club and its settings are the
+    /// fifth and sixth collaborators and the gate caps a signature at six.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Settings"/> is here rather than passed alongside for the same reason the rest
+    /// of it is: this mail states a rand figure, that figure wears the club's own symbol, and
+    /// the club's symbol comes out of the same accessor the club's identity does. Widening the
+    /// call signature instead would have put the method back over the gate.
+    /// </remarks>
+    private sealed record TopUpMailer(
+        IEmailService Email, ILogger Logger, ClubIdentityResolver Club, TenantSettingsAccessor Settings);
 
     /// <summary>The services <see cref="CompleteAsync"/> needs, bundled so the method stays inside the argument gate.</summary>
     internal sealed record TopUpCompletion(
@@ -376,7 +390,14 @@ public static partial class TopUpEndpoints
         TenantSettingsAccessor Settings,
         IEmailService Email,
         IEventBus Bus,
-        ILogger Logger);
+        ILogger Logger)
+    {
+        /// <summary>
+        /// Who the confirmation is from. Init-only rather than a seventh positional parameter:
+        /// six is the gate, and the reason it exists still holds.
+        /// </summary>
+        public required ClubIdentityResolver Club { get; init; }
+    }
 
     /// <summary>
     /// Converts a completed payment to credits and posts it.
@@ -481,13 +502,16 @@ public static partial class TopUpEndpoints
         {
             EmailDispatch.InBackground(
                 c.Email, c.Logger,
-                EmailTemplates.TopUpConfirmation(recipient, new TopUpConfirmationDetails(
-                    AmountZar: pending.AmountZar,
-                    CreditsAdded: credits,
-                    ConversionRate: rate,
-                    BalanceAfterCredits: balanceAfter,
-                    Reference: interp.PaymentId ?? pending.IdempotencyKey,
-                    CurrencySymbol: CurrencySymbol.For(settings))),
+                EmailTemplates.TopUpConfirmation(
+                    await c.Club.GetAsync(ct), recipient, new TopUpReceipt(
+                        AmountZar: pending.AmountZar,
+                        CreditsAdded: credits,
+                        ConversionRate: rate,
+                        BalanceAfterCredits: balanceAfter,
+                        Reference: interp.PaymentId ?? pending.IdempotencyKey,
+                        // The club's own symbol, for the one figure on this receipt that is
+                        // money. The three credit figures beside it take none.
+                        CurrencySymbol: CurrencySymbol.For(settings))),
                 $"top-up confirmation for {pending.Id}");
         }
 

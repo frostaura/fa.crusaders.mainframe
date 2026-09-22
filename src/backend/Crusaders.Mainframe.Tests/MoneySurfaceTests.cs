@@ -20,6 +20,13 @@ namespace Crusaders.Mainframe.Tests;
 /// </summary>
 public class MoneySurfaceTests
 {
+    /// <summary>
+    /// The club these direct-to-template tests render for. Not Crusaders: a template that
+    /// hardcoded the first club's name would be indistinguishable from one that resolved it.
+    /// </summary>
+    private static readonly ClubIdentity Club =
+        new("Riverside Racquet Club", "+27 31 555 0188", "desk@riverside.review.test");
+
     // ---- Emails are in credits, and quote the tenant's own policy ----------
 
     /// <summary>
@@ -30,7 +37,7 @@ public class MoneySurfaceTests
     [Fact]
     public void The_booking_confirmation_states_credits_and_never_rand()
     {
-        var mail = EmailTemplates.BookingConfirmation("member@test.local", new BookingConfirmationDetails(
+        var mail = EmailTemplates.BookingConfirmation(Club, "member@test.local", new BookingConfirmationDetails(
             CourtName: "Court 3", StartsAtLocal: "Wed 16 Sep 10:00", Duration: "15 min",
             AmountCredits: 50m, BalanceAfterCredits: 60m,
             PenaltyWindowMinutes: 15, PenaltyPct: 30m));
@@ -44,7 +51,7 @@ public class MoneySurfaceTests
     [Fact]
     public void The_cancellation_email_states_credits_and_never_rand()
     {
-        var mail = EmailTemplates.BookingCancellation("member@test.local", "Court 4", 50m, 15m);
+        var mail = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 50m, 15m);
 
         Assert.Contains("50.00 credits", mail.HtmlBody);
         Assert.Contains("15.00 credits", mail.HtmlBody);
@@ -59,14 +66,91 @@ public class MoneySurfaceTests
     [Fact]
     public void The_booking_confirmation_quotes_the_tenants_penalty_policy_not_a_literal()
     {
-        var mail = EmailTemplates.BookingConfirmation("member@test.local", new BookingConfirmationDetails(
+        var mail = EmailTemplates.BookingConfirmation(Club, "member@test.local", new BookingConfirmationDetails(
             "Court 3", "Wed 16 Sep 10:00", "15 min", 50m, 60m,
             PenaltyWindowMinutes: 30, PenaltyPct: 50m));
 
-        Assert.Contains("within 30 minutes", mail.HtmlBody);
-        Assert.Contains("50% penalty", mail.HtmlBody);
-        Assert.DoesNotContain("15 minutes", mail.HtmlBody);
-        Assert.DoesNotContain("30% penalty", mail.HtmlBody);
+        // Both bodies, because the plain-text half is the one nobody looks at and therefore
+        // the one that would go on quoting the old policy unnoticed.
+        foreach (var body in new[] { mail.HtmlBody, MailText.Unwrap(mail.PlainBody) })
+        {
+            Assert.Contains("30 minutes before the start", body);
+            Assert.Contains("50% of the price", body);
+            Assert.DoesNotContain("15 minutes", body);
+            Assert.DoesNotContain("30% of the price", body);
+        }
+    }
+
+    /// <summary>
+    /// <b>A ledger reason is a money surface, and it was the last one still formatting a
+    /// figure in the host's own culture.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ReduceLitChargeAsync</c> built its reason with a bare <c>{back:0.00}</c>. That takes
+    /// <see cref="CultureInfo.CurrentCulture"/>, and the club is in Durban North — so on the
+    /// club's own <c>en-ZA</c> locale, which is the DEFAULT case and not an exotic one, the
+    /// figure rendered "8,00". Every other credit figure in this system goes through the
+    /// invariant formatter, so one booking could show "8,00 credits" on the line the lights
+    /// were refunded on and "8.00 credits" on the charge directly above it, in the same wallet
+    /// history, for the same court.
+    /// </para>
+    /// <para>
+    /// Driven through <c>SettleReleaseAsync</c> rather than asserted against the formatter,
+    /// because the formatter was never the thing that was wrong: the call site was. A test of
+    /// <c>MoneyFormat.Credits</c> would have passed on the broken code.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_ledger_reason_states_its_figure_in_the_invariant_culture()
+    {
+        var previous = Thread.CurrentThread.CurrentCulture;
+        try
+        {
+            // The club's own locale. A comma decimal separator, and the one this ships on.
+            Thread.CurrentThread.CurrentCulture = new CultureInfo("en-ZA");
+
+            await using var host = await TestHost.CreateAsync();
+            using var scope = host.NewScope();
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+            var bookings = scope.ServiceProvider.GetRequiredService<BookingService>();
+
+            await ledger.PostAsync(new LedgerPosting(
+                host.PlayerUser.Id, LedgerEntryType.TopUp, 500m, host.PlayerUser.Id), default);
+            var created = Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
+                host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id,
+                TestHost.BookableSlot(2), sliceCount: 1, default));
+            await bookings.CancelAsync(created.Booking.Id, host.PlayerUser.Id, actorIsAdmin: false,
+                waivePenalty: false, default);
+
+            // The court was lit anyway, on the cancelled booking's code, and charged for the
+            // whole grant. This is the row the release is about to reduce.
+            var booking = await db.Bookings.FirstAsync(b => b.Id == created.Booking.Id);
+            await ledger.PostAsync(new LedgerPosting(
+                host.PlayerUser.Id, LedgerEntryType.LightsPurchase, -booking.AmountChargedCredits,
+                host.PlayerUser.Id, RelatedBookingId: booking.Id,
+                Reason: "Lights on a cancelled booking"), default);
+
+            // …and the relay says it was closed for one slice-minute, not the whole window.
+            var settled = await bookings.SettleReleaseAsync(
+                booking, litMinutes: 1, DateTimeOffset.UtcNow, host.PlayerUser.Id, default);
+            Assert.Equal("charge_reduced", settled.Code);
+
+            var reason = (await db.LedgerEntries
+                .Where(l => l.RelatedBookingId == booking.Id
+                            && l.Type == LedgerEntryType.LightsPurchase
+                            && l.AmountCredits > 0)
+                .OrderByDescending(l => l.CreatedAt)
+                .FirstAsync()).Reason;
+
+            Assert.NotNull(reason);
+            Assert.Contains(settled.AmountCredits.ToString("0.00", CultureInfo.InvariantCulture), reason!);
+            // The defect, named: the club's own locale renders this figure with a comma.
+            Assert.DoesNotContain(settled.AmountCredits.ToString("0.00", new CultureInfo("en-ZA")), reason!);
+            Assert.Contains("credits", reason!);
+        }
+        finally { Thread.CurrentThread.CurrentCulture = previous; }
     }
 
     /// <summary>Money figures use one separator whatever the host's culture is.</summary>
@@ -77,7 +161,7 @@ public class MoneySurfaceTests
         try
         {
             Thread.CurrentThread.CurrentCulture = new CultureInfo("af-ZA");
-            var mail = EmailTemplates.BookingCancellation("member@test.local", "Court 4", 50m, 15m);
+            var mail = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 50m, 15m);
             Assert.Contains("50.00 credits", mail.HtmlBody);
             Assert.DoesNotContain("50,00", mail.HtmlBody);
         }
@@ -92,9 +176,9 @@ public class MoneySurfaceTests
     [Fact]
     public void A_topup_confirmation_shows_the_rand_paid_the_rate_and_the_credits_received()
     {
-        var mail = EmailTemplates.TopUpConfirmation("member@test.local", new TopUpConfirmationDetails(
-            AmountZar: 100m, CreditsAdded: 160m, ConversionRate: 1.6m,
-            BalanceAfterCredits: 210m, Reference: "1089250",
+        var mail = EmailTemplates.TopUpConfirmation(Club, "member@test.local", new TopUpReceipt(
+            AmountZar: 100m, CreditsAdded: 160m,
+            ConversionRate: 1.6m, BalanceAfterCredits: 210m, Reference: "1089250",
             // A club on the default symbol. What happens when it is NOT the default is
             // CurrencySymbolTests' — this case is here to hold the shape of the mail itself.
             CurrencySymbol: CurrencySymbol.Default));
@@ -111,7 +195,7 @@ public class MoneySurfaceTests
     [InlineData(-10, "Credit deducted")]
     public void A_credit_adjustment_email_says_which_way_the_money_went(double amount, string expectedSubject)
     {
-        var mail = EmailTemplates.CreditAdjustment("member@test.local", (decimal)amount, 145m, "desk credit");
+        var mail = EmailTemplates.CreditAdjustment(Club, "member@test.local", (decimal)amount, 145m, "desk credit");
 
         Assert.StartsWith(expectedSubject, mail.Subject);
         Assert.Contains("145.00 credits", mail.HtmlBody);
@@ -337,25 +421,33 @@ public class MoneySurfaceTests
     [Fact]
     public void A_walk_up_confirmation_does_not_offer_a_refund_the_server_will_not_pay()
     {
-        var walkUp = EmailTemplates.BookingConfirmation("member@test.local", new BookingConfirmationDetails(
+        var walkUp = EmailTemplates.BookingConfirmation(Club, "member@test.local", new BookingConfirmationDetails(
             "Court 2", "Sun 06 Sep 22:51", "15 min", 50m, 100m,
             PenaltyWindowMinutes: 15, PenaltyPct: 30m, IsWalkUp: true));
 
-        Assert.DoesNotContain("30% penalty", walkUp.HtmlBody);
-        Assert.DoesNotContain("cancelling within", walkUp.HtmlBody);
-        Assert.DoesNotContain("You're booked", walkUp.HtmlBody);
-        Assert.Contains("not refunded once the lights have been on", walkUp.HtmlBody);
-        Assert.Contains("You're on court", walkUp.HtmlBody);
+        // The text part as well as the HTML: a promise the server will not keep is no less
+        // false for being in the half a plain-text client renders.
+        foreach (var body in new[] { walkUp.HtmlBody, MailText.Unwrap(walkUp.PlainBody) })
+        {
+            Assert.DoesNotContain("30% of the price", body);
+            Assert.DoesNotContain("Cancel more than", body);
+            Assert.DoesNotContain("You&#39;re booked", body);
+            Assert.DoesNotContain("You're booked", body);
+            Assert.Contains("not refunded once the lights have been on", body);
+        }
+        Assert.Contains("You&#39;re on court", walkUp.HtmlBody);
+        Assert.Contains("You're on court", walkUp.PlainBody!);
         // "Starts" is wrong on a session that already has; the same figure, correctly labelled.
-        Assert.Contains(">Started<", walkUp.HtmlBody);
+        Assert.Contains(">Started</th>", walkUp.HtmlBody);
+        Assert.Contains("Started: Sun 06 Sep 22:51", walkUp.PlainBody!);
 
         // And an ordinary reservation keeps the heads-up it is entitled to — the flag defaults
         // to false, so nothing that is not a walk-up loses it.
-        var reservation = EmailTemplates.BookingConfirmation("member@test.local", new BookingConfirmationDetails(
+        var reservation = EmailTemplates.BookingConfirmation(Club, "member@test.local", new BookingConfirmationDetails(
             "Court 2", "Sun 06 Sep 22:51", "15 min", 50m, 100m,
             PenaltyWindowMinutes: 15, PenaltyPct: 30m));
-        Assert.Contains("30% penalty", reservation.HtmlBody);
-        Assert.Contains(">Starts<", reservation.HtmlBody);
+        Assert.Contains("30% of the price", reservation.HtmlBody);
+        Assert.Contains(">Starts</th>", reservation.HtmlBody);
     }
 
     /// <summary>
@@ -401,7 +493,7 @@ public class MoneySurfaceTests
 
         var mail = await PollMail(host, m => m.Subject.StartsWith("Court time started", StringComparison.Ordinal));
         Assert.NotNull(mail);
-        Assert.DoesNotContain("30% penalty", mail!.HtmlBody);
+        Assert.DoesNotContain("30% of the price", mail!.HtmlBody);
         Assert.Contains("not refunded once the lights have been on", mail.HtmlBody);
     }
 
@@ -417,7 +509,7 @@ public class MoneySurfaceTests
     public void A_club_cancellation_names_the_club_the_reason_and_the_waiver()
     {
         var byClub = EmailTemplates.BookingCancellation(
-            "member@test.local", "Court 4", 50m, null,
+            Club, "member@test.local", "Court 4", 50m, null,
             new ClubCancellation("Court double-booked by the desk", PenaltyWaived: true));
 
         Assert.Contains("The club cancelled your booking", byClub.HtmlBody);
@@ -428,7 +520,7 @@ public class MoneySurfaceTests
 
         // A member cancelling their own court is a different event and keeps its own mail —
         // no actor, because there is nobody to name.
-        var self = EmailTemplates.BookingCancellation("member@test.local", "Court 4", 50m, 15m);
+        var self = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 50m, 15m);
         Assert.DoesNotContain("The club cancelled", self.HtmlBody);
         Assert.DoesNotContain("waived", self.HtmlBody);
         Assert.Equal("Booking cancelled — Court 4", self.Subject);

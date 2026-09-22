@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-state
-description: "PR #2 is merged and main publishes three images; PR #3, the door gates, is an OPEN DRAFT from claude/gate-controller whose branch run is red on the firmware host job and on GitGuardian. Nothing deployed, nothing on hardware."
+description: "PR #2 is merged and main publishes three images; PR #3 (door gates) is an OPEN DRAFT; claude/eco-mail carries the email redesign locally with NO upstream and nothing pushed. Nothing deployed, nothing on hardware."
 type: state
 last_verified: 2026-09-19
 ---
@@ -18,6 +18,13 @@ and the Actions secrets inventory, which has not been re-checked since 2026-09-1
 the door gates — is OPEN as a DRAFT from `claude/gate-controller`**, which is ahead of
 `origin/main`, not behind it, and level with its own remote: nothing on it is unpushed.
 PR #1 merged 2026-08-24. Delivery is one branch, one PR by founder decision.
+
+**`claude/eco-mail` is a LOCAL branch with no upstream** (measured 2026-09-22:
+`git rev-parse --abbrev-ref '@{u}'` answers "no upstream configured"). It holds the transactional
+email redesign, on top of the gate-controller line and far ahead of `origin/main` — and
+**nothing on it is pushed**. Re-run the count rather than inheriting one. Whoever picks it up sets an upstream before claiming any of it is
+safe; until then the only copy is this working tree. What it changed is in
+[`decisions-email.md`](decisions-email.md).
 
 **What CI does on that branch.** Every gate runs; **no image is built.** The six image jobs and
 the three manifest steps are gated on a *push to `main`*, so on a pull request they report as

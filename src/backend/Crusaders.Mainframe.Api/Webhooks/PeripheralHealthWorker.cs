@@ -73,6 +73,19 @@ public sealed class PeripheralHealthWorker : BackgroundService
         /// <summary>Console link for the alert, resolved once per tick rather than per device.</summary>
         public string ConsoleUrl { get; init; } = "/admin/devices";
 
+        /// <summary>
+        /// Whose club this pass is about, as a message needs it.
+        ///
+        /// <para>
+        /// Built from <see cref="Tenant"/> and that tenant's settings rather than from the
+        /// scoped resolver, for the reason the sweep's shape forces: <c>TickAsync</c> walks
+        /// every tenant inside ONE scope, resetting <c>ITenantContext</c> as it goes, so a
+        /// scoped resolver would memoise the first club and sign every other club's alerts
+        /// with its name and phone number.
+        /// </para>
+        /// </summary>
+        public Email.ClubIdentity Club { get; init; } = new("the club", "", "");
+
         /// <summary>The club's <c>device_alert_cooldown_minutes</c>. See <see cref="AnnouncedAsync"/>.</summary>
         public TimeSpan Cooldown { get; init; } = TimeSpan.FromMinutes(TenantSettingsView.DefaultDeviceAlertCooldownMinutes);
     }
@@ -106,6 +119,7 @@ public sealed class PeripheralHealthWorker : BackgroundService
             {
                 Lights = lights,
                 ConsoleUrl = $"{baseUrl}/admin/devices",
+                Club = Email.ClubIdentityResolver.For(tenant, s),
                 Cooldown = TimeSpan.FromMinutes(Math.Clamp(
                     s.DeviceAlertCooldownMinutes,
                     TenantSettingsView.MinDeviceAlertCooldownMinutes,
@@ -296,7 +310,7 @@ public sealed class PeripheralHealthWorker : BackgroundService
 
             if (announce)
             {
-                await AlertAdminsAsync(health, m => EmailTemplates.AdminGateUnhealthy(m, GateAlertFor(health, device, minutes)), ct);
+                await AlertAdminsAsync(health, m => EmailTemplates.AdminGateUnhealthy(health.Club, m, GateAlertFor(health, device, minutes)), ct);
             }
         }
         else
@@ -308,9 +322,8 @@ public sealed class PeripheralHealthWorker : BackgroundService
             if (announce)
             {
                 var alert = new PeripheralAlert(
-                    device.Name, device.DeviceCode, device.CourtNumbers, minutes,
-                    health.Tenant.DisplayName, health.ConsoleUrl);
-                await AlertAdminsAsync(health, m => EmailTemplates.AdminPeripheralUnhealthy(m, alert), ct);
+                    device.Name, device.DeviceCode, device.CourtNumbers, minutes, health.ConsoleUrl);
+                await AlertAdminsAsync(health, m => EmailTemplates.AdminPeripheralUnhealthy(health.Club, m, alert), ct);
             }
         }
 
@@ -340,7 +353,7 @@ public sealed class PeripheralHealthWorker : BackgroundService
                 "Door gate {DeviceCode} is back after {Minutes} minutes, mailed {Mailed}", device.DeviceCode, minutes, announce);
             if (announce)
             {
-                await AlertAdminsAsync(health, m => EmailTemplates.AdminGateRecovered(m, GateAlertFor(health, device, minutes)), ct);
+                await AlertAdminsAsync(health, m => EmailTemplates.AdminGateRecovered(health.Club, m, GateAlertFor(health, device, minutes)), ct);
             }
         }
         else
@@ -351,9 +364,8 @@ public sealed class PeripheralHealthWorker : BackgroundService
             if (announce)
             {
                 var alert = new PeripheralAlert(
-                    device.Name, device.DeviceCode, device.CourtNumbers, minutes,
-                    health.Tenant.DisplayName, health.ConsoleUrl);
-                await AlertAdminsAsync(health, m => EmailTemplates.AdminPeripheralRecovered(m, alert), ct);
+                    device.Name, device.DeviceCode, device.CourtNumbers, minutes, health.ConsoleUrl);
+                await AlertAdminsAsync(health, m => EmailTemplates.AdminPeripheralRecovered(health.Club, m, alert), ct);
             }
         }
 
@@ -387,8 +399,7 @@ public sealed class PeripheralHealthWorker : BackgroundService
     private static GateAlert GateAlertFor(Health health, Device device, int minutes)
     {
         return new GateAlert(
-            device.Name, device.DeviceCode, device.GateKey, minutes,
-            health.Tenant.DisplayName, health.ConsoleUrl);
+            device.Name, device.DeviceCode, device.GateKey, minutes, health.ConsoleUrl);
     }
 
     /// <summary>

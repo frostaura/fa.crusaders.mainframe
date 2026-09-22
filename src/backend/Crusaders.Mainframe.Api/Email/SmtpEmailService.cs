@@ -50,20 +50,33 @@ public sealed class SmtpEmailService : IEmailService
             Timeout = (int)TimeSpan.FromSeconds(15).TotalMilliseconds,
         };
 
+        // THE BODY IS THE PLAIN TEXT, and the HTML is the alternate view — not the other way
+        // round, and not both.
+        //
+        // This set Body to the HTML with IsBodyHtml true AND added two alternate views, and
+        // SmtpClient emits Body as its own part alongside them: the message that came out held
+        // three parts — the raw HTML labelled `text/plain`, the real plain text, and the HTML —
+        // so a text-only client was handed markup by the one part written to stop that, and a
+        // spam filter saw a message whose plain alternative was a wall of tags.
+        //
+        // One body plus one alternate view is the shape .NET actually renders as a two-part
+        // multipart/alternative, least-capable first, which is the order RFC 2046 wants.
+        var hasPlain = !string.IsNullOrWhiteSpace(message.PlainBody);
         using var mail = new MailMessage
         {
-            From = new MailAddress(from, fromName),
+            // The club's own name where the message carries one, so two clubs on one
+            // deployment do not both arrive from the same sender. SMTP_FROM_NAME stays the
+            // fallback for anything with no tenant behind it.
+            From = new MailAddress(from, NonEmpty(message.FromName) ?? fromName),
             Subject = message.Subject,
-            Body = message.HtmlBody,
-            IsBodyHtml = true,
+            Body = hasPlain ? message.PlainBody! : message.HtmlBody,
+            IsBodyHtml = !hasPlain,
             // A real header, not a loud subject. See EmailMessage.HighPriority.
             Priority = message.HighPriority ? MailPriority.High : MailPriority.Normal,
         };
         mail.To.Add(message.To);
-        if (!string.IsNullOrWhiteSpace(message.PlainBody))
+        if (hasPlain)
         {
-            mail.AlternateViews.Add(System.Net.Mail.AlternateView.CreateAlternateViewFromString(
-                message.PlainBody, null, "text/plain"));
             mail.AlternateViews.Add(System.Net.Mail.AlternateView.CreateAlternateViewFromString(
                 message.HtmlBody, null, "text/html"));
         }

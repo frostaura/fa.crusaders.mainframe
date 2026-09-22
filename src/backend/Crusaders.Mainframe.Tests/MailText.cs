@@ -1,0 +1,39 @@
+namespace Crusaders.Mainframe.Tests;
+
+/// <summary>
+/// Reading the plain-text half of a message as sentences rather than as lines.
+///
+/// <para>
+/// <b>It exists because asserting prose against a wrapped body is green by luck.</b>
+/// <c>EmailChrome</c> wraps the text part at 72 columns — deliberately, because a phone
+/// re-wrapping a 200-character line is unreadable and the text part is disproportionately what
+/// a member on a bad connection is served. A sentence therefore carries newlines at positions
+/// nobody chose, and <c>Assert.Contains("not refunded once the lights have been on", body)</c>
+/// passes or fails on where the preceding words happened to land.
+/// </para>
+///
+/// <para>
+/// <b>The dangerous half is the negative.</b> A <c>DoesNotContain</c> against a wrapped body
+/// passes whenever the forbidden phrase happens to straddle a break — so a test written to
+/// prove a walk-up is never offered a refund the server will not pay would have gone on
+/// passing while the mail offered exactly that, for no better reason than the length of the
+/// court's name. Every prose assertion against a text part goes through this.
+/// </para>
+/// </summary>
+internal static class MailText
+{
+    /// <summary>
+    /// The text part with its soft wrapping undone: single newlines become spaces, and the
+    /// blank line between blocks stays, so block boundaries are still a thing a test can see.
+    /// </summary>
+    internal static string Unwrap(string? text)
+    {
+        var body = text ?? "";
+        // Paragraph breaks first, behind a sentinel no template can contain, so collapsing the
+        // soft breaks cannot also collapse the structural ones.
+        return body
+            .Replace("\n\n", "\u0000")
+            .Replace('\n', ' ')
+            .Replace("\u0000", "\n\n");
+    }
+}

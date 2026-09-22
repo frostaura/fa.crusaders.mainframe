@@ -226,7 +226,7 @@ public static class WalletEndpoints
         [AsParameters] AdjustServices services,
         CancellationToken ct)
     {
-        var (ledger, db, tenant, email, loggerFactory) = services;
+        var (ledger, db, tenant, email, loggerFactory, _) = services;
         var logger = loggerFactory.CreateLogger("CreditAdjustment");
 
         var (refusal, kind) = RefuseRequest(req, logger);
@@ -320,7 +320,7 @@ public static class WalletEndpoints
         Crusaders.Mainframe.Api.Email.EmailDispatch.InBackground(
             email, logger,
             Crusaders.Mainframe.Api.Email.EmailTemplates.CreditAdjustment(
-                user.Email, entry.AmountCredits, balanceAfter, req.Reason),
+                await services.Club.GetAsync(ct), user.Email, entry.AmountCredits, balanceAfter, req.Reason),
             $"credit adjustment {entry.Id}");
 
         return AdjustmentResult(entry, kind!.Value, balanceBefore, balanceAfter, user);
@@ -558,7 +558,8 @@ public sealed record AdjustServices(
     MainframeDbContext Db,
     Crusaders.Mainframe.Api.Multitenancy.ITenantContext Tenant,
     Crusaders.Mainframe.Api.Email.IEmailService Email,
-    ILoggerFactory LoggerFactory);
+    ILoggerFactory LoggerFactory,
+    Crusaders.Mainframe.Api.Email.ClubIdentityResolver Club);
 
 /// <summary>
 /// <paramref name="RelatedBookingId"/> is optional: set it when the adjustment compensates

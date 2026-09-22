@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-gotchas
-description: "The test suite lies in specific ways: no fixture read a real socket, a test can be green for its fixture, in-memory EF proves the opposite, a mutation that does not apply looks like a pass. Clock traps live in gotchas-clock."
+description: "The test suite lies in specific ways: no fixture read a real socket, an EmailMessage is not a message, prose against a wrapped text part is green by luck, in-memory EF proves the opposite. Clock traps live in gotchas-clock."
 type: gotcha
-last_verified: 2026-09-21
+last_verified: 2026-09-22
 ---
 
 # Gotchas — the test suite and its fixtures
@@ -21,6 +21,20 @@ Why a green suite is not evidence at all is a decision, not a gotcha:
   (1.0, and 1.1 de-chunked by hand, direct and through nginx) at `DW`, and at `DSIM` it runs the
   REAL door firmware over a real socket — so a FRAMING regression goes red at the first and a
   DECISION one at the second. `scenario.py` still uses `urllib`, which proves neither.
+- **An `EmailMessage` is not a message, and every email test in the suite stopped at the record.**
+  `SmtpEmailService` set `MailMessage.Body` to the HTML *and* added a plain-text alternate view, and
+  `SmtpClient` emits `Body` as a part of its own beside the views — so what left the process had
+  **three** parts, the first being the raw HTML labelled `text/plain`. The part written to stop a
+  text client seeing markup was handing it markup, and nothing in the suite could see it because
+  nothing read past `message.HtmlBody`. `EmailTransportTests` accepts one message on a loopback
+  `TcpListener` and reads the bytes; that is the only tier at which a MIME defect is visible.
+- **Asserting prose against the plain-text part is green by luck.** `EmailChrome` wraps it at 72
+  columns, so a sentence carries newlines nobody chose and `Assert.Contains("…")` passes on where
+  the preceding words happened to land. **The negative is the dangerous half**: a `DoesNotContain`
+  passes whenever the forbidden phrase straddles a break, so a test proving a walk-up is never
+  offered a refund the server will not pay would go on passing while the mail offered exactly that,
+  for no better reason than the length of the court's name. Every prose assertion against a text
+  part goes through `MailText.Unwrap`.
 - **A test can be green because of its FIXTURE, not its code.** Flipping one boolean on a stale
   device fixture exposed a live money rule — a stale-but-enabled box beside a healthy one waiving
   no-show penalties indefinitely — that no test discriminated. Mutate the rule *and* vary the

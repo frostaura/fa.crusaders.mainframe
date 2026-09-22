@@ -48,6 +48,14 @@ public sealed class CurrencySymbolTests
     private const string SettingsPath = "/api/v1/admin/settings/";
     private const string ProfilePath = "/api/v1/me/profile";
 
+    /// <summary>
+    /// The club these direct-to-template cases render for. Deliberately not Crusaders, for the
+    /// reason <see cref="EmailCatalogue"/> gives: the first tenant's name is what a hardcoded
+    /// literal would be, so a mail rendered as Crusaders cannot tell a template that resolved
+    /// the club from one that guessed it.
+    /// </summary>
+    private static readonly ClubIdentity Club = EmailCatalogue.Riverside;
+
     // ---- The value itself: what a club may type ---------------------------
 
     /// <summary>
@@ -116,7 +124,7 @@ public sealed class CurrencySymbolTests
     [Fact]
     public void A_topup_confirmation_is_denominated_in_the_clubs_own_currency()
     {
-        var mail = EmailTemplates.TopUpConfirmation("member@test.local", new TopUpConfirmationDetails(
+        var mail = EmailTemplates.TopUpConfirmation(Club, "member@test.local", new TopUpReceipt(
             AmountZar: 100m, CreditsAdded: 160m, ConversionRate: 1.6m,
             BalanceAfterCredits: 210m, Reference: "1089250", CurrencySymbol: "CHF"));
 
@@ -139,13 +147,17 @@ public sealed class CurrencySymbolTests
     public void A_topup_that_did_not_complete_is_denominated_in_the_clubs_own_currency()
     {
         var mail = EmailTemplates.TopUpNotCompleted(
-            "member@test.local", amountZar: 250m, failureReason: null,
+            Club, "member@test.local", amountZar: 250m, failureReason: null,
             reference: "1089251", currencySymbol: "R$");
 
         Assert.Contains("R$250.00", mail.Subject);
         Assert.Contains("R$250.00", mail.HtmlBody);
+        // Both bodies: the text part is the half nobody looks at, and therefore the half that
+        // would go on printing a hardcoded rand sign unnoticed.
+        Assert.Contains("R$250.00", MailText.Unwrap(mail.PlainBody));
         // Nothing was credited, and zero credits is still credits.
         Assert.Contains("0.00 credits", mail.HtmlBody);
+        Assert.DoesNotContain("R$0.00", mail.HtmlBody);
     }
 
     /// <summary>
@@ -156,12 +168,12 @@ public sealed class CurrencySymbolTests
     [Fact]
     public void No_credit_email_carries_a_money_symbol()
     {
-        var confirmation = EmailTemplates.BookingConfirmation("member@test.local", new BookingConfirmationDetails(
+        var confirmation = EmailTemplates.BookingConfirmation(Club, "member@test.local", new BookingConfirmationDetails(
             CourtName: "Court 3", StartsAtLocal: "Wed 16 Sep 10:00", Duration: "15 min",
             AmountCredits: 50m, BalanceAfterCredits: 60m,
             PenaltyWindowMinutes: 15, PenaltyPct: 30m));
-        var cancellation = EmailTemplates.BookingCancellation("member@test.local", "Court 4", 50m, 15m);
-        var adjustment = EmailTemplates.CreditAdjustment("member@test.local", 25m, 145m, "desk credit");
+        var cancellation = EmailTemplates.BookingCancellation(Club, "member@test.local", "Court 4", 50m, 15m);
+        var adjustment = EmailTemplates.CreditAdjustment(Club, "member@test.local", 25m, 145m, "desk credit");
 
         foreach (var mail in new[] { confirmation, cancellation, adjustment })
         {
