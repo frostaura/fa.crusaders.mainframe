@@ -2707,6 +2707,32 @@ public abstract record BookingResult
     public sealed record NoBookableWindow(IReadOnlyList<string> GroupNames, string Day) : BookingResult;
 
     /// <summary>
+    /// The booking would run past the end of the club's day, and this product does not book
+    /// across midnight.
+    ///
+    /// <para>
+    /// <b>It is its own refusal because every other one lies about it.</b> A day is 1440 minutes
+    /// here — <see cref="MinuteWindow"/> is one stretch of a club day, a group window is checked
+    /// with <c>EndMinute &lt;= 1440</c>, and nothing in the product spans two club days. So a
+    /// booking starting at 23:41 for three slices ends at minute 1466 and fits inside NO window,
+    /// including the whole-day one. What a desk saw was
+    /// <c>group_window</c> naming <c>00:00–24:00</c> as the times it may book — a window that
+    /// plainly contains 23:41 — which reads as the product being broken rather than as the
+    /// booking being too late.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Reachable only on the on-behalf path, and that is the point.</b> An ordinary member
+    /// meets the opening-hours rule first, because any club close is at or before minute 1440.
+    /// An admin booking FOR somebody is deliberately exempt from the hours — the desk deciding to
+    /// open is the club deciding to open — and that exemption then walked straight into the day
+    /// boundary with no words for it. The exemption is real; the day is still a day.
+    /// </para>
+    /// </summary>
+    public sealed record CrossesMidnight(string StartsAt, string EndsAt, int MinutesPastMidnight)
+        : BookingResult;
+
+    /// <summary>
     /// A walk-up truncated to nothing — the next booking starts now, or the request was for
     /// no time at all. Distinct from <see cref="SlotTaken"/>, which means someone is already
     /// playing: the court box has to say "court free at 18:00", not "court busy".

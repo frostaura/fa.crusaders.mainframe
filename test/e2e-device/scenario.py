@@ -1173,13 +1173,56 @@ def admin_login(w: World) -> None:
         raise StepFailed("dev admin login did not return an admin session")
 
 
+def club_zone_for_the_run() -> str:
+    """A club timezone in which this whole fixture fits inside ONE local day.
+
+    THE HIDDEN INPUT IS THE WALL CLOCK. Every booking here is placed relative to "now",
+    and the furthest — B6, three hours out and forty-five minutes long — has to END
+    before the club's local midnight, because no window in this product spans two club
+    days. Run before about 20:15 in Johannesburg it fits; run after, the admin booking
+    is refused and three assertions fail on a product that is behaving correctly. That
+    is exactly what happened, and the refusal it produced was so misleading it earned its
+    own fix in BookingRules (`crosses_midnight`).
+
+    The zone is a genuine club setting rather than a stub, so choosing one is not cheating
+    — a real deployment has clubs in several. Johannesburg is kept whenever it works, so
+    the ordinary run is the realistic one; otherwise the first candidate whose local time
+    leaves the fixture room wins. The candidates span offsets from -7 to +13 with no gap
+    wider than four hours, so one of them always lands in the daytime window.
+
+    It varies the fixture for free, which this repository asks for anyway: a suite that
+    only ever runs in one zone is a suite in which a whole class of club-day defect is
+    invisible."""
+    if ZoneInfo is None:
+        return "UTC"
+    now = now_utc()
+    for name in ("Africa/Johannesburg", "Europe/London", "UTC", "America/Sao_Paulo",
+                 "America/Los_Angeles", "Asia/Kolkata", "Asia/Tokyo", "Pacific/Auckland"):
+        try:
+            local = now.astimezone(ZoneInfo(name))
+        except Exception:  # noqa: BLE001 - a platform without that zone simply tries the next
+            continue
+        # 06:00-18:00: at least six hours of local day left for a fixture that reaches
+        # three hours and forty-five minutes out, and a club hour that reads as plausible
+        # in any transcript somebody reads later.
+        if 6 <= local.hour < 18:
+            return name
+    raise StepFailed("no candidate club timezone leaves room for the fixture — "
+                     "this should be unreachable; the candidates span 20 hours of offset")
+
+
 def seed_and_tune(w: World) -> None:
     step("Seed tenant/admin/courts/members and tune settings through the API")
     # The Development seeder created the pilot tenant, the admin, four courts and five
     # sample members with an opening balance. Everything below is done over HTTP.
     settings = expect_status(w.http.get("/api/v1/admin/settings", token=w.admin_token), 200, "settings GET")
     w.tenant_tz = settings.get("timezone") or w.tenant_tz
+    zone = club_zone_for_the_run()
+    print(f"  [settings] club timezone for this run: {zone} "
+          f"(local {now_utc().astimezone(ZoneInfo(zone)).strftime('%H:%M') if ZoneInfo else '??:??'}) "
+          f"— see club_zone_for_the_run", flush=True)
     body = {
+        "timezone": zone,
         "sliceMinutes": 15,
         "slicePriceCredits": settings["slice_price_credits"],
         "advanceBookingDays": settings["advance_booking_days"],

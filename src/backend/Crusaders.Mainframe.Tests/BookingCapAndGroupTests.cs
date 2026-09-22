@@ -564,6 +564,67 @@ public class BookingCapAndGroupTests
     /// the club's access rule about that member is not what a desk overrides by booking for them.
     /// The CAP is, and that is the distinction D2 §4.6 draws.
     /// </summary>
+    /// <summary>
+    /// A booking that runs past the end of the club's day is refused IN WORDS ABOUT THE DAY.
+    ///
+    /// <para>
+    /// Found by the device end-to-end run, which books three hours ahead and therefore only
+    /// crossed midnight when it happened to start after 20:15. What the desk got was
+    /// <c>group_window</c> for a member in NO groups, naming <c>00:00–24:00</c> as the times
+    /// they may book — a window that plainly contains the start. Every window in this product
+    /// ends at minute 1440 or earlier, so a booking ending at 1466 fits none of them and the
+    /// window rule refused it perfectly correctly while describing it wrongly.
+    /// </para>
+    ///
+    /// <para>
+    /// Only the on-behalf path reaches it: an ordinary member meets the opening-hours rule first,
+    /// because a club close cannot be later than the end of the day. The desk is exempt from the
+    /// hours on purpose — booking outside advertised hours is the club deciding to open — and
+    /// that exemption walked into the day boundary with nothing to say about it.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task An_admin_booking_on_behalf_that_runs_past_midnight_says_so()
+    {
+        await using var host = await TestHost.CreateAsync();
+        await GiveSettingsAsync(host, Settings("\"member_max_slots_per_day\":0,\"member_per_day_max_minutes\":0"));
+        using var scope = host.NewScope();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
+
+        // 23:45 plus two fifteen-minute slices ends at 00:15 the next day.
+        var payer = new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, ActorIsAdmin: true);
+        var refusal = Assert.IsType<BookingResult.CrossesMidnight>(await booking.CreateAsync(
+            host.Courts[0].Id, payer, NextWeekAt(23, 45), 2, default));
+
+        // The sentence names the time it would have run to, which is the fact the desk needs in
+        // order to shorten the booking. A refusal that only said "no" would be the old one again.
+        Assert.Equal("23:45", refusal.StartsAt);
+        Assert.Equal("00:15", refusal.EndsAt);
+        Assert.Equal(15, refusal.MinutesPastMidnight);
+    }
+
+    /// <summary>
+    /// And the boundary itself is bookable: a booking ending EXACTLY at the end of the day has
+    /// not crossed anything. Without this, the fix above is one <c>&gt;=</c> away from making the
+    /// last slot of every day unbookable, which is a worse bug than the one it replaced.
+    /// </summary>
+    [Fact]
+    public async Task A_booking_that_ends_exactly_at_the_end_of_the_day_is_allowed()
+    {
+        await using var host = await TestHost.CreateAsync();
+        await GiveSettingsAsync(host, Settings("\"member_max_slots_per_day\":0,\"member_per_day_max_minutes\":0"));
+        using var scope = host.NewScope();
+        var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
+        var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
+        await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
+
+        var payer = new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, ActorIsAdmin: true);
+        Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
+            host.Courts[0].Id, payer, NextWeekAt(23, 45), 1, default));
+    }
+
     [Fact]
     public async Task An_admin_booking_on_behalf_is_still_held_to_the_members_group_window()
     {

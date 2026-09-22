@@ -30,6 +30,14 @@ import { describeFailure } from "./errors";
  */
 const BOOKING_ERROR_TEXT: Record<string, string> = {
   past_time: "That slot has already started — pick a later one.",
+  /**
+   * Only an admin booking ON BEHALF of somebody reaches this: a member meets the club's
+   * closing time first. The desk is exempt from the opening hours on purpose, so the only
+   * thing left stopping them is the end of the day itself, and it has to say so — the
+   * refusal it used to get named the whole day as the times the member may book, under a
+   * refusal at 23:41.
+   */
+  crosses_midnight: "That booking would run past midnight, and a booking has to finish on the day it starts. Shorten it, or start it earlier.",
   too_far_ahead: "That day isn't open for booking yet. Try a date closer to today.",
   // These four used to end "Refresh the schedule", inside a modal that covered the only
   // Refresh control on the page — a real click on it is intercepted by the dialog's own

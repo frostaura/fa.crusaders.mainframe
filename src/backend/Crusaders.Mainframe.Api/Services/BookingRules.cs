@@ -192,6 +192,13 @@ public sealed class BookingRules
     /// who is in no group at all.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// How long a club day is. Named because it is a RULE here rather than an arithmetic fact:
+    /// every group window is stored with <c>EndMinute &lt;= 1440</c> and no booking in this
+    /// product spans two club days.
+    /// </summary>
+    private const int MinutesInDay = 1440;
+
     private static BookingResult? AccessRefusal(
         RuleSubject subject, RuleSlot slot, TenantSettingsView settings, DateOnly day, bool onBehalf)
     {
@@ -206,9 +213,29 @@ public sealed class BookingRules
                 BookingService.MinutesToHhmm(openMinute), BookingService.MinutesToHhmm(closeMinute));
         }
 
+        // THE DAY ENDS, AND SOMETHING HAS TO SAY SO IN WORDS.
+        //
+        // Checked BEFORE the window rule rather than left to it. A booking past minute 1440 fits
+        // inside no window — every window in this product ends at 1440 or earlier — so the window
+        // rule refuses it correctly and then reports the whole day as the times it may book. The
+        // desk reads "you may book 00:00-24:00" underneath a refusal at 23:41 and concludes the
+        // product is broken.
+        //
+        // An ordinary member never gets here: any club close is at or before 1440, so the hours
+        // rule above has already refused them with a sentence about hours. This is the on-behalf
+        // admin path, which is exempt from the hours on purpose and met the day boundary with
+        // nothing to say about it.
+        if (endMinute > MinutesInDay)
+        {
+            return new BookingResult.CrossesMidnight(
+                BookingService.MinutesToHhmm(startMinute),
+                BookingService.MinutesToHhmm(endMinute - MinutesInDay),
+                endMinute - MinutesInDay);
+        }
+
         var baseWindow = hoursApply
             ? new MinuteWindow(openMinute, closeMinute)
-            : new MinuteWindow(0, 1440);
+            : new MinuteWindow(0, MinutesInDay);
 
         return WindowRefusal(subject, day, baseWindow, startMinute, endMinute);
     }

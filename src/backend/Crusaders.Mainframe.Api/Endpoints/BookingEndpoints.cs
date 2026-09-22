@@ -226,6 +226,16 @@ public static class BookingEndpoints
                 day = w.Day,
                 allowed_windows = w.AllowedWindows.Select(x => new { start = x.Start, end = x.End }).ToList(),
             }),
+        // The booking runs past the end of the club's day. Its own code, because every other
+        // refusal available here describes it wrongly — see BookingResult.CrossesMidnight.
+        BookingResult.CrossesMidnight m => Results.Conflict(
+            new
+            {
+                error = "crosses_midnight",
+                starts_at = m.StartsAt,
+                ends_at = m.EndsAt,
+                minutes_past_midnight = m.MinutesPastMidnight,
+            }),
         // The member is in two or more groups whose windows do not overlap at all on this day,
         // so there is nothing they can book. Its own code, because the honest sentence is
         // completely different and because an empty grid reads as "the club is shut".
