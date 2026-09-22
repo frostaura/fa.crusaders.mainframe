@@ -149,10 +149,18 @@ jobs:
   backend-integration:
     name: Backend Integration (Postgres)
     runs-on: ubuntu-latest
-    # 25, not 10: the suite re-runs every in-memory test beside the Postgres ones and took
+    # 40, not 25: the suite re-runs every in-memory test beside the Postgres ones and took
     # 7 of its 10 minutes before the doors console added 146 tests; at 10 it was cancelled
     # mid-run, which reads as a failure and names no test.
-    timeout-minutes: 25
+    #
+    # 25 stopped being enough when the coverage gate moved here, because collecting coverage
+    # instruments every line: the same 2210 tests take 12m34s without it and 17m with, a 35%
+    # overhead measured on a developer machine and worse on a shared runner. At 25 this job
+    # was killed a few minutes from the end, and a job killed by its own timeout reports as
+    # CANCELLED rather than failed — so it names no test, points at nothing, and reads like a
+    # hang. That is the most expensive kind of red there is, and it is worth paying for
+    # headroom to never see it again.
+    timeout-minutes: 40
     needs: [backend]
     services:
       postgres:
