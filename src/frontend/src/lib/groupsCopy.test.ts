@@ -237,27 +237,33 @@ describe("what a slot costs, in the club's own units", () => {
       .toBe("The club's system hasn't said what one slot costs under this choice yet.");
   });
 
-  /** D3 §6.2: R100 is the club's actual top-up block, and "1.6" means nothing to a volunteer. */
-  it("puts the rate in R100 blocks, with what that actually buys", () => {
+  /**
+   * D3 §6.2: R100 is the club's actual top-up block, and "1.6" means nothing to a volunteer.
+   *
+   * The figure now comes through `formatMoney`, so it carries the club's own symbol and the
+   * two decimals the top-up screen already shows for this very setting. The sentence and the
+   * screen it is about used to name `topup_block_zar` two different ways.
+   */
+  it("puts the rate in top-up blocks, with what that actually buys", () => {
     expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrice: 50 }))
-      .toBe("R100 buys 160 credits — about 3 slots at today's prices.");
+      .toBe("R100.00 buys 160 credits — about 3 slots at today's prices.");
   });
 
   it("says one slot in the singular and none in words", () => {
     expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrice: 160 }))
       .toContain("about 1 slot");
     expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrice: 400 }))
-      .toBe("R100 buys 160 credits — not enough for a single slot at today's prices.");
+      .toBe("R100.00 buys 160 credits — not enough for a single slot at today's prices.");
   });
 
   it("does not divide by a free court", () => {
     expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrice: 0 }))
-      .toBe("R100 buys 160 credits. Courts cost nothing at the moment, so that buys any number of slots.");
+      .toBe("R100.00 buys 160 credits. Courts cost nothing at the moment, so that buys any number of slots.");
   });
 
   it("says nothing it does not know", () => {
     expect(ratePerBlockSentence({ creditsPerZar: null, blockZar: 100, slicePrice: 50 }))
-      .toBe("The club's system hasn't said what R100 buys.");
+      .toBe("The club's system hasn't said what a top-up buys.");
   });
 });
 
@@ -265,7 +271,7 @@ describe("the consequence of moving somebody between groups, stated BEFORE savin
   it("says what their next top-up buys and what their existing credit does", () => {
     expect(groupChangeConsequence({
       name: "Daniel", creditsPerBlockBefore: 160, creditsPerBlockAfter: 240, blockZar: 100,
-    })).toContain("Daniel's next top-up will buy 240 credits per R100 instead of 160. "
+    })).toContain("Daniel's next top-up will buy 240 credits per R100.00 instead of 160. "
       + "Credit he already has does not change.");
   });
 

@@ -110,7 +110,7 @@ describe("Top-up — the quoted rate is the registered rate", () => {
     // The preview is re-quoted rather than left lying: the stale 240.00 is gone.
     expect(screen.getByText("160.00 credits")).toBeInTheDocument();
     expect(screen.queryByText("240.00 credits")).not.toBeInTheDocument();
-    expect(screen.getByText(/At 1.6 credits \/ R1 \(regular rate\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Every R1\.00 you pay adds 1\.60 cr to your wallet \(regular rate\)/)).toBeInTheDocument();
 
     // And nothing was handed to PayFast — the defect's whole shape was a card form
     // appearing as the next thing the member saw.

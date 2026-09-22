@@ -143,7 +143,7 @@ describe("Top-up — what the checkout actually sends", () => {
     expect(screen.queryByText(/R1000\.00 only/)).not.toBeInTheDocument();
 
     // The rate the member is quoted is the club's, and the preview is that rate applied.
-    expect(screen.getByText(/At 2.4 credits \/ R1 \(league \/ senior rate\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Every R1\.00 you pay adds 2\.40 cr to your wallet \(league \/ senior rate\)/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "R500" }));
     expect(screen.getByText("1200.00 credits")).toBeInTheDocument();
 
@@ -319,16 +319,16 @@ describe("Top-up — the quoted rate against the registered one", () => {
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent(/The club changed its rate while this page was open/);
     expect(alert).toHaveTextContent("320.00 credits");
-    expect(alert).toHaveTextContent("1.6 credits / R1");
+    expect(alert).toHaveTextContent("Every R1.00 you pay adds 1.60 cr to your wallet");
     // The preview moves with it, so nothing on screen still says 480.
     expect(screen.queryByText("480.00 credits")).not.toBeInTheDocument();
     expect(screen.getByText("320.00 credits")).toBeInTheDocument();
     // …and the class label moves with it too, rather than being dropped. A headed run against
-    // the client-side version of this fix showed "At 2.4 credits / R1 (regular rate)" — the new
+    // the client-side version of this fix showed the new rate beside the old class label — the new
     // number beside the old reason for it, a second small untruth arriving with the fix for the
     // first. That lane dropped the label. It does not have to be dropped: the refusal carries
     // `member_class`, so the line can name the RIGHT class, which is what is asserted here.
-    expect(screen.getByText(/At 1\.6 credits \/ R1 \(regular rate\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Every R1\.00 you pay adds 1\.60 cr to your wallet \(regular rate\)/)).toBeInTheDocument();
     expect(screen.queryByText(/league \/ senior rate/)).not.toBeInTheDocument();
   });
 
@@ -389,7 +389,7 @@ describe("Top-up — the quoted rate against the registered one", () => {
     renderPage(<TopUpPage />);
 
     // The retired sentence, word for word off the three finders' screenshots.
-    expect(await screen.findByText(/At 2.4 credits \/ R1/)).toBeInTheDocument();
+    expect(await screen.findByText(/Every R1\.00 you pay adds 2\.40 cr to your wallet/)).toBeInTheDocument();
     expect(screen.queryByText(/locked in when you continue/)).not.toBeInTheDocument();
     expect(screen.queryByText(/can't change while you're paying\./)).not.toBeInTheDocument();
     // What is true, and what the code above now keeps.

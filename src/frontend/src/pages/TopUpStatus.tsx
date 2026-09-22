@@ -4,7 +4,7 @@ import { ApiError, endpoints, type TopUpStatus } from "../lib/api";
 import { Card } from "../components/Card";
 import { Badge, Button } from "../components/Button";
 import { useBalance } from "../lib/balance";
-import { formatZar } from "../lib/utils";
+import { formatMoney } from "../lib/utils";
 
 /**
  * What each failure code means, to a member.
@@ -196,7 +196,7 @@ export default function TopUpStatusPage() {
     <div className="max-w-md mx-auto">
       <Card>
         <h1 className="text-xl font-semibold mb-2">Top-up</h1>
-        <p className="text-sm text-text-secondary mb-3">{formatZar(s.amount_zar)}</p>
+        <p className="text-sm text-text-secondary mb-3">{formatMoney(s.amount_zar)}</p>
         <Badge tone={tone}>{s.status}</Badge>
 
         {/* The status above was read before the club stopped answering, so it is kept and

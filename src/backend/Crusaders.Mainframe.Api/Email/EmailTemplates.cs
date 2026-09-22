@@ -29,6 +29,32 @@ namespace Crusaders.Mainframe.Api.Email;
 /// heads-up it is entitled to.
 /// </para>
 /// </param>
+/// <summary>
+/// What a member needs to reconcile a top-up: what left their card, what arrived in their
+/// wallet, and the rate between the two.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Its own record rather than a seventh positional parameter, on exactly the argument
+/// <see cref="ClubCancellation"/> already makes here: the club's currency symbol took
+/// <see cref="EmailTemplates.TopUpConfirmation"/> past the complexity gate's six, and five of
+/// the seven were a decimal or a string that would transpose silently.
+/// </para>
+/// <para>
+/// <b><see cref="CurrencySymbol"/> denominates <see cref="AmountZar"/> and nothing else on
+/// this record.</b> <see cref="CreditsAdded"/> and <see cref="BalanceAfterCredits"/> are
+/// credits, they convert at <see cref="ConversionRate"/>, and at the shipped 1.6 they are not
+/// the same size as the money — see <see cref="Services.CurrencySymbol"/>.
+/// </para>
+/// </remarks>
+public sealed record TopUpConfirmationDetails(
+    decimal AmountZar,
+    decimal CreditsAdded,
+    decimal ConversionRate,
+    decimal BalanceAfterCredits,
+    string Reference,
+    string CurrencySymbol);
+
 public sealed record BookingConfirmationDetails(
     string CourtName,
     string StartsAtLocal,
@@ -118,8 +144,31 @@ public static class EmailTemplates
     /// </summary>
     internal static string Cr(decimal value) => value.ToString("0.00", CultureInfo.InvariantCulture) + " credits";
 
-    /// <summary>Rand. Only for amounts that really are rand — what the member paid the gateway.</summary>
-    internal static string Zar(decimal value) => "R" + value.ToString("0.00", CultureInfo.InvariantCulture);
+    /// <summary>
+    /// Real money, in the club's own symbol. Only for amounts that really are money — what the
+    /// member paid the gateway.
+    ///
+    /// <para>
+    /// <b>The symbol is a parameter rather than a constant, and it is required rather than
+    /// defaulted.</b> A default would let a new money surface be written that silently prints
+    /// a rand sign to a club that does not take rand, and nothing would fail; required, the
+    /// compiler asks the author where the club's symbol comes from. There are three call sites
+    /// and the answer is <see cref="Services.CurrencySymbol.For"/> at all three.
+    /// </para>
+    ///
+    /// <para>
+    /// The symbol PRECEDES the amount, which forces a choice a trailing unit never did: the
+    /// sign goes OUTSIDE it. "-R50.00" is how a negative amount of money is written;
+    /// "R-50.00" reads as a symbol followed by a malformed number.
+    /// </para>
+    ///
+    /// <para>
+    /// Invariant culture, for the reason <see cref="Cr"/> gives — and here it is load-bearing
+    /// twice over, because PayFast rejects the club's own <c>en-ZA</c> comma decimal.
+    /// </para>
+    /// </summary>
+    internal static string Zar(decimal value, string symbol) =>
+        (value < 0 ? "-" : "") + symbol + Math.Abs(value).ToString("0.00", CultureInfo.InvariantCulture);
 
     /// <summary>A number with no trailing-zero noise, for percentages and rates. Invariant, as above.</summary>
     internal static string Num(decimal value) => value.ToString("0.####", CultureInfo.InvariantCulture);
@@ -512,26 +561,31 @@ public static class EmailTemplates
     /// Top-up confirmation — <c>feature-spec.md</c> §11 has required this since the spec was
     /// written and nothing sent it, so the one event where a member hands over real money
     /// produced no email at all. This is the single template that legitimately shows both
-    /// units: rand is what left their card, credits are what arrived in the wallet, and the
+    /// units: money is what left their card, credits are what arrived in the wallet, and the
     /// rate between them is the number a dispute turns on.
+    ///
+    /// <para>
+    /// <b>It is also the one template where the two units sit in adjacent rows</b>, which is
+    /// why the club's symbol may not touch the credit rows: at the shipped 1.6 rate "Paid
+    /// R100.00 / Credited R160.00" would tell a member the club had given them R60.
+    /// </para>
     /// </summary>
-    public static EmailMessage TopUpConfirmation(
-        string to, decimal amountZar, decimal creditsAdded, decimal conversionRate, decimal balanceAfterCredits, string reference) => new(
+    public static EmailMessage TopUpConfirmation(string to, TopUpConfirmationDetails d) => new(
         To: to,
-        Subject: $"Top-up confirmed — {Cr(creditsAdded)}",
+        Subject: $"Top-up confirmed — {Cr(d.CreditsAdded)}",
         HtmlBody:
             $"""
             <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
               <h2 style="margin:0 0 12px">Your wallet has been topped up</h2>
               <table style="border-collapse:collapse;font-size:14px">
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Paid</td><td><strong>{Zar(amountZar)}</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Rate</td><td><strong>{Num(conversionRate)} credits per R1</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Credited</td><td><strong>{Cr(creditsAdded)}</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Balance after</td><td><strong>{Cr(balanceAfterCredits)}</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Reference</td><td>{System.Net.WebUtility.HtmlEncode(reference)}</td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Paid</td><td><strong>{Zar(d.AmountZar, d.CurrencySymbol)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Rate</td><td><strong>{Num(d.ConversionRate)} credits per {d.CurrencySymbol}1</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Credited</td><td><strong>{Cr(d.CreditsAdded)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Balance after</td><td><strong>{Cr(d.BalanceAfterCredits)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Reference</td><td>{System.Net.WebUtility.HtmlEncode(d.Reference)}</td></tr>
               </table>
               <p style="margin-top:16px;font-size:13px;color:#475569">
-                Credits are what you book court time with. Rand is only the payment rail.
+                Credits are what you book court time with. {d.CurrencySymbol} is only the payment rail.
               </p>
               {FooterHtml}
             </div>
@@ -587,17 +641,17 @@ public static class EmailTemplates
     /// </para>
     /// </summary>
     public static EmailMessage TopUpNotCompleted(
-        string to, decimal amountZar, string? failureReason, string reference) => new(
+        string to, decimal amountZar, string? failureReason, string reference, string currencySymbol) => new(
         To: to,
         Subject: failureReason == "cancelled"
-            ? $"Top-up cancelled — {Zar(amountZar)}"
-            : $"Top-up didn't go through — {Zar(amountZar)}",
+            ? $"Top-up cancelled — {Zar(amountZar, currencySymbol)}"
+            : $"Top-up didn't go through — {Zar(amountZar, currencySymbol)}",
         HtmlBody:
             $"""
             <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
               <h2 style="margin:0 0 12px">{(failureReason == "cancelled" ? "Your top-up was cancelled" : "Your top-up didn't go through")}</h2>
               <table style="border-collapse:collapse;font-size:14px">
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Amount</td><td><strong>{Zar(amountZar)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Amount</td><td><strong>{Zar(amountZar, currencySymbol)}</strong></td></tr>
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">Credited</td><td><strong>{Cr(0m)}</strong></td></tr>
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">Reference</td><td>{System.Net.WebUtility.HtmlEncode(reference)}</td></tr>
               </table>

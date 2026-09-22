@@ -21,10 +21,13 @@ import {
 // made configurable, in one module so a field's `min` cannot drift from the bound the save
 // is validated against.
 import {
-  ACTION_GLYPHS_HINT, ACTION_GLYPH_CHOICES, ACTION_GLYPH_LABEL, CAP_RULES, DEVICE_TIMING_RULES,
-  ECO_SETTING_LABELS, MEMBER_TRACE_HINT, MEMBER_TRACE_LABEL, MONITORING_RULES, REALTIME_RULES,
+  ACTION_GLYPHS_HINT, ACTION_GLYPH_CHOICES, ACTION_GLYPH_LABEL, CAP_RULES,
+  CURRENCY_SYMBOL_HINT, CURRENCY_SYMBOL_LABEL, DEVICE_TIMING_RULES,
+  ECO_SETTING_LABELS, MAX_CURRENCY_SYMBOL_LENGTH, MEMBER_TRACE_HINT, MEMBER_TRACE_LABEL,
+  MONITORING_RULES, REALTIME_RULES,
   SCHEDULE_RULES, ecoSettingComplaints, type NumericSettingRule,
 } from "../lib/ecoSettings";
+import { readCurrencySymbol } from "../lib/currency";
 import {
   GATE_POLICY_LABELS, describeCourtSettingDoorReach, describeDoorBookingHorizon, describeEarlyEntry,
   describeGatePolicy, gateOfflineFallbackNotice,
@@ -93,10 +96,14 @@ const SETTING_LABELS: Record<string, string> = {
   penalty_pct: "Penalty (% of slice price)",
   grace_window_minutes: "Grace window (minutes)",
   penalty_window_minutes: "Late-cancel window (minutes)",
-  credits_per_zar_regular: "Credits per R1 — members",
-  credits_per_zar_league: "Credits per R1 — league / over-65",
-  topup_block_zar: "Top-up block (R)",
-  topup_max_zar_per_member: "Top-up cap per member (R)",
+  // The four money-denominated rows. `{currency}` is substituted by `settingLabel` with the
+  // club's own symbol: a club on CHF being told its rate in "credits per R1" is the same
+  // class of defect as a figure wearing the wrong sign, one layer up in the copy.
+  credits_per_zar_regular: "Credits per {currency}1 — members",
+  credits_per_zar_league: "Credits per {currency}1 — league / over-65",
+  topup_block_zar: "Top-up block ({currency})",
+  topup_max_zar_per_member: "Top-up cap per member ({currency})",
+  currency_symbol: CURRENCY_SYMBOL_LABEL,
   member_per_day_max_minutes: "Court time per member per day (minutes)",
   peak_hours: "Peak hours",
   peak_advance_hours_for_regular: "Peak opens to everyone (hours before start)",
@@ -123,9 +130,23 @@ const SETTING_LABELS: Record<string, string> = {
   ...ECO_SETTING_LABELS,
 };
 
+/**
+ * A field's caption, in the club's own currency.
+ *
+ * <p>
+ * One reader, so a jump link, an emptied-field message and the field's own label cannot name
+ * the same setting three different ways — which is how "Top-up block (R)" and a club on CHF
+ * would have ended up on one screen together.
+ * </p>
+ */
+function settingLabel(key: string, currencySymbol: string): string {
+  return (SETTING_LABELS[key] ?? key).replaceAll("{currency}", currencySymbol);
+}
+
 /** The five above that a person types words into rather than a number. */
 const TEXT_SETTINGS = new Set([
   "timezone", "peak_hours", "gate_access_policy", "club_contact_phone", "club_contact_email",
+  "currency_symbol",
 ]);
 
 const NUMERIC_SETTING_KEYS = Object.keys(SETTING_LABELS).filter((key) => !TEXT_SETTINGS.has(key));
@@ -134,13 +155,13 @@ const NUMERIC_SETTING_KEYS = Object.keys(SETTING_LABELS).filter((key) => !TEXT_S
 type Blocker = SettingComplaint & { label: string };
 
 /** Which numeric fields have been emptied — the one complaint no bound-check can phrase. */
-function emptyNumberComplaints(settings: AdminSettings): SettingComplaint[] {
+function emptyNumberComplaints(settings: AdminSettings, currencySymbol: string): SettingComplaint[] {
   const document_ = settings as unknown as Record<string, unknown>;
   return NUMERIC_SETTING_KEYS
     .filter((key) => typeof document_[key] === "number" && !Number.isFinite(document_[key]))
     .map((key) => ({
       key,
-      message: `${SETTING_LABELS[key]} needs a number — an empty box is not the same as 0.`,
+      message: `${settingLabel(key, currencySymbol)} needs a number — an empty box is not the same as 0.`,
     }));
 }
 
@@ -158,8 +179,9 @@ function emptyNumberComplaints(settings: AdminSettings): SettingComplaint[] {
 function blockersOf(
   settings: AdminSettings,
   hours: { day: DayKey; message: string } | null,
+  currencySymbol: string,
 ): Blocker[] {
-  const empties = emptyNumberComplaints(settings);
+  const empties = emptyNumberComplaints(settings, currencySymbol);
   const emptied = new Set(empties.map((complaint) => complaint.key));
   const cooldown = deviceNumbersComplaint(settings);
   const rules: SettingComplaint[] = [
@@ -183,7 +205,7 @@ function blockersOf(
     ...dayRow,
     ...[...empties, ...rules].map((complaint) => ({
       ...complaint,
-      label: SETTING_LABELS[complaint.key] ?? complaint.key,
+      label: settingLabel(complaint.key, currencySymbol),
     })),
   ];
 }
@@ -481,6 +503,71 @@ function EcoSections({ settings, onChange, blockers, saving, onSave, onFocusSett
   );
 }
 
+/**
+ * What a member's money is worth, and what it is called.
+ *
+ * <p>
+ * Its own component rather than five more rows inside `AdminSettingsPage`, which the
+ * complexity gate holds at 200 lines and which this block took past it. The seam is a real
+ * one: these five fields are the only ones on the page denominated in the club's currency,
+ * and they are the only ones that have to re-caption when the symbol changes.
+ * </p>
+ */
+function CreditsAndTopUpsSection({ settings, setSettings, currencySymbol }: {
+  settings: AdminSettings;
+  setSettings: (next: AdminSettings) => void;
+  currencySymbol: string;
+}) {
+  return (
+          <SettingsSection id={SECTION_IDS.credits} title="Credits & top-ups">
+            {/* These four decide what a member's money is worth. Until now the only way to
+                change one was to hand-edit a JSON column on a live system — no validation,
+                no audit trail, and a typo away from making every top-up worthless. */}
+            <p className="text-sm text-text-secondary">
+              Credits are the unit of account. A member pays in {currencySymbol} and receives credits at the rate
+              for their class — so the two are different sizes, and the currency symbol below never appears on a
+              credit figure.
+            </p>
+            <Field settingKey="currency_symbol" label={CURRENCY_SYMBOL_LABEL} hint={CURRENCY_SYMBOL_HINT}>
+              <Input
+                type="text"
+                inputMode="text"
+                maxLength={MAX_CURRENCY_SYMBOL_LENGTH}
+                value={settings.currency_symbol ?? ""}
+                placeholder="R"
+                onChange={(e) => setSettings({ ...settings, currency_symbol: e.target.value })}
+              />
+            </Field>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* step 0.01, not 0.1.
+                  A number input's valid values step from `min`, not from zero, so min=0.01 with
+                  step=0.1 made the valid set 0.01, 0.11, … 1.51, 1.61 — and the club's own shipped
+                  rates, 1.6 and 2.4, were both stepMismatch. Every round rate an admin would type
+                  (1.5, 2.0, 2.5) was invalid, the arrows turned 1.6 into 1.61, and because Save is
+                  not a native submit nothing ever said so: the field looked fine while the arrows
+                  quietly moved the money conversion rate by a hundredth. Cents are the smallest unit
+                  anyone would express a rand rate in, so 0.01 is both the granularity and the base. */}
+              <Field settingKey="credits_per_zar_regular" label={settingLabel("credits_per_zar_regular", currencySymbol)} hint={`${currencySymbol}100 at 1.6 gives 160 credits.`}>
+                <Input type="number" min={0.01} max={1000} step={0.01} value={shown(settings.credits_per_zar_regular)}
+                  onChange={(e) => setSettings({ ...settings, credits_per_zar_regular: toNumber(e.target.value) })} />
+              </Field>
+              <Field settingKey="credits_per_zar_league" label={settingLabel("credits_per_zar_league", currencySymbol)} hint={`${currencySymbol}100 at 2.4 gives 240 credits.`}>
+                <Input type="number" min={0.01} max={1000} step={0.01} value={shown(settings.credits_per_zar_league)}
+                  onChange={(e) => setSettings({ ...settings, credits_per_zar_league: toNumber(e.target.value) })} />
+              </Field>
+              <Field settingKey="topup_block_zar" label={settingLabel("topup_block_zar", currencySymbol)} hint="Members top up in multiples of this.">
+                <Input type="number" min={1} max={100000} value={shown(settings.topup_block_zar)}
+                  onChange={(e) => setSettings({ ...settings, topup_block_zar: toNumber(e.target.value) })} />
+              </Field>
+              <Field settingKey="topup_max_zar_per_member" label={settingLabel("topup_max_zar_per_member", currencySymbol)} hint="Must be at least one block, or no top-up is ever legal.">
+                <Input type="number" min={1} max={100000} value={shown(settings.topup_max_zar_per_member)}
+                  onChange={(e) => setSettings({ ...settings, topup_max_zar_per_member: toNumber(e.target.value) })} />
+              </Field>
+            </div>
+          </SettingsSection>
+  );
+}
+
 export default function AdminSettingsPage() {
   const toast = useToast();
   const [settings, setSettings] = useState<AdminSettings | null>(null);
@@ -533,7 +620,14 @@ export default function AdminSettingsPage() {
   // toast that has faded says nothing about which of seven rows to fix, and the row itself
   // is already saying it in red.
   const hoursComplaint = operatingHoursComplaint(settings.operating_hours ?? {});
-  const blockers = blockersOf(settings, hoursComplaint);
+
+  // The symbol the LABELS on this page wear, read from the working copy rather than from
+  // `useClubUi()`. The admin editing this field is the one person who should see the rest of
+  // the page follow it as they type — the club-wide value does not move until the save lands
+  // and the profile is re-read. `readCurrencySymbol` means a half-typed or unusable value
+  // paints the default rather than a caption made of rubbish.
+  const currencySymbol = readCurrencySymbol(settings.currency_symbol);
+  const blockers = blockersOf(settings, hoursComplaint, currencySymbol);
   const fieldState: FieldState = {
     errors: Object.fromEntries(blockers.map((blocker) => [blocker.key, blocker.message])),
     highlighted,
@@ -610,40 +704,11 @@ export default function AdminSettingsPage() {
           </div>
         </SettingsSection>
 
-        <SettingsSection id={SECTION_IDS.credits} title="Credits & top-ups">
-          {/* These four decide what a member's money is worth. Until now the only way to
-              change one was to hand-edit a JSON column on a live system — no validation,
-              no audit trail, and a typo away from making every top-up worthless. */}
-          <p className="text-sm text-text-secondary">
-            Credits are the unit of account. A member pays in rand and receives credits at the rate for their class.
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* step 0.01, not 0.1.
-                A number input's valid values step from `min`, not from zero, so min=0.01 with
-                step=0.1 made the valid set 0.01, 0.11, … 1.51, 1.61 — and the club's own shipped
-                rates, 1.6 and 2.4, were both stepMismatch. Every round rate an admin would type
-                (1.5, 2.0, 2.5) was invalid, the arrows turned 1.6 into 1.61, and because Save is
-                not a native submit nothing ever said so: the field looked fine while the arrows
-                quietly moved the money conversion rate by a hundredth. Cents are the smallest unit
-                anyone would express a rand rate in, so 0.01 is both the granularity and the base. */}
-            <Field settingKey="credits_per_zar_regular" label={SETTING_LABELS.credits_per_zar_regular} hint="R100 at 1.6 gives 160 credits.">
-              <Input type="number" min={0.01} max={1000} step={0.01} value={shown(settings.credits_per_zar_regular)}
-                onChange={(e) => setSettings({ ...settings, credits_per_zar_regular: toNumber(e.target.value) })} />
-            </Field>
-            <Field settingKey="credits_per_zar_league" label={SETTING_LABELS.credits_per_zar_league} hint="R100 at 2.4 gives 240 credits.">
-              <Input type="number" min={0.01} max={1000} step={0.01} value={shown(settings.credits_per_zar_league)}
-                onChange={(e) => setSettings({ ...settings, credits_per_zar_league: toNumber(e.target.value) })} />
-            </Field>
-            <Field settingKey="topup_block_zar" label={SETTING_LABELS.topup_block_zar} hint="Members top up in multiples of this.">
-              <Input type="number" min={1} max={100000} value={shown(settings.topup_block_zar)}
-                onChange={(e) => setSettings({ ...settings, topup_block_zar: toNumber(e.target.value) })} />
-            </Field>
-            <Field settingKey="topup_max_zar_per_member" label={SETTING_LABELS.topup_max_zar_per_member} hint="Must be at least one block, or no top-up is ever legal.">
-              <Input type="number" min={1} max={100000} value={shown(settings.topup_max_zar_per_member)}
-                onChange={(e) => setSettings({ ...settings, topup_max_zar_per_member: toNumber(e.target.value) })} />
-            </Field>
-          </div>
-        </SettingsSection>
+        <CreditsAndTopUpsSection
+          settings={settings}
+          setSettings={setSettings}
+          currencySymbol={currencySymbol}
+        />
 
         <SettingsSection id={SECTION_IDS.courtAccess} title="Court access">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

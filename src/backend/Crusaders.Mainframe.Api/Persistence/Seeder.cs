@@ -67,6 +67,7 @@ public static class Seeder
                     "sat": "07:00-20:00", "sun": "07:00-20:00"
                   },
                   "timezone": "Africa/Johannesburg",
+                  "currency_symbol": "R",
                   "brand_accent_hex": "#00498D",
                   "payfast": {
                     "merchant_id": "REPLACE_WITH_PAYFAST_MERCHANT_ID",

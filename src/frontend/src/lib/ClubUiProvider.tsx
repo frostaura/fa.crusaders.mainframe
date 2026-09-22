@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { ClubUiContext, readActionGlyphSet, type ClubUi } from "./clubUi";
+import { readCurrencySymbol, setClubCurrencySymbol } from "./currency";
 import { useProfile } from "./profile";
 
 /**
@@ -23,9 +24,23 @@ import { useProfile } from "./profile";
 export function ClubUiProvider({ children }: { children: React.ReactNode }) {
   const { profile } = useProfile();
   const actionGlyphs = readActionGlyphSet(profile?.action_glyphs);
-  // Memoised on the VALUE rather than on the profile object: `ProfileProvider` replaces the
+  const currencySymbol = readCurrencySymbol(profile?.currency_symbol);
+
+  // The money formatters are pure functions reached from `lib/*Copy.ts`, which are not
+  // components and cannot read this context — so the symbol is ALSO pushed into the module
+  // store they do read. Set during render rather than in an effect, because a sentence
+  // composed on the first paint must already carry the right symbol: an effect runs after
+  // it, and the club would see one frame of rand.
+  //
+  // Idempotent and unconditional, which is what makes a second club in the same tab safe:
+  // `setClubCurrencySymbol` resets to the default when a profile carries no symbol, so a
+  // sign-out cannot leave the previous club's standing over the next one's money.
+  setClubCurrencySymbol(currencySymbol);
+
+  // Memoised on the VALUES rather than on the profile object: `ProfileProvider` replaces the
   // object on every refresh, and a new context value re-renders every consumer of it — which
   // here is every button in the product.
-  const value = useMemo<ClubUi>(() => ({ actionGlyphs }), [actionGlyphs]);
+  const value = useMemo<ClubUi>(
+    () => ({ actionGlyphs, currencySymbol }), [actionGlyphs, currencySymbol]);
   return <ClubUiContext.Provider value={value}>{children}</ClubUiContext.Provider>;
 }

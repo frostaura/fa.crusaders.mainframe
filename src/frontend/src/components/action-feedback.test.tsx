@@ -4,7 +4,7 @@ import { Button } from "./Button";
 import { ConfirmButton, confirmSubject } from "./ConfirmButton";
 import { ActionGlyph, glyphFor, CheckGlyph, CrossGlyph, ThumbsUpGlyph, ThumbsDownGlyph, AlertGlyph } from "./ActionGlyph";
 import { glyphKindFor, outcomeClassName, pressClassName, useActionFeedback } from "./useActionFeedback";
-import { ClubUiContext, DEFAULT_ACTION_GLYPHS, readActionGlyphSet } from "../lib/clubUi";
+import { CLUB_UI_FALLBACK, ClubUiContext, DEFAULT_ACTION_GLYPHS, readActionGlyphSet } from "../lib/clubUi";
 
 /**
  * Item 12 — the system-wide action feedback theme.
@@ -108,7 +108,7 @@ describe("the club's glyph set", () => {
 
   it("reaches a button through the provider, not through a prop at the call site", () => {
     const { container } = render(
-      <ClubUiContext.Provider value={{ actionGlyphs: "marks" }}>
+      <ClubUiContext.Provider value={{ ...CLUB_UI_FALLBACK, actionGlyphs: "marks" }}>
         <ActionGlyph kind="affirm" />
       </ClubUiContext.Provider>,
     );

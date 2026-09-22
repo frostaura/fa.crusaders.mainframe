@@ -174,6 +174,11 @@ public sealed class TenantSettingsAccessor
             // GOAL item 12's glyph set. Read RAW, like every other key; ActionGlyphs is what
             // decides what an unrecognised stored value means.
             ActionGlyphs = TryString(root, ActionGlyphs.Key, ActionGlyphs.Thumbs),
+
+            // The club's money symbol. Read RAW for the same reason; CurrencySymbol is what
+            // decides what an unprintable stored value means. It governs RAND only — the
+            // reasoning, and the incident behind it, are in that file.
+            CurrencySymbol = TryString(root, CurrencySymbol.Key, CurrencySymbol.Default),
         };
     }
 
@@ -578,6 +583,19 @@ public sealed record TenantSettingsView(
     /// decided rather than obeyed.
     /// </summary>
     public string ActionGlyphs { get; init; } = Services.ActionGlyphs.Thumbs;
+
+    /// <summary>
+    /// The symbol the club's REAL MONEY figures wear — <c>R</c>, <c>R$</c>, <c>CHF</c>. Read via
+    /// <see cref="Services.CurrencySymbol.For"/>, which is where an unprintable stored value is
+    /// decided rather than obeyed.
+    ///
+    /// <para>
+    /// <b>It is not the credit unit and must never become it.</b> Credits are the unit of
+    /// account and convert at <see cref="CreditsPerZarRegular"/>; a credit figure wearing this
+    /// symbol is the defect <see cref="Services.CurrencySymbol"/> documents.
+    /// </para>
+    /// </summary>
+    public string CurrencySymbol { get; init; } = Services.CurrencySymbol.Default;
 
     /// <summary>
     /// The club's open and close for one local weekday, as minutes past local midnight.

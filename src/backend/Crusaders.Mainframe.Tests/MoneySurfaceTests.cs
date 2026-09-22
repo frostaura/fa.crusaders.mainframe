@@ -92,9 +92,12 @@ public class MoneySurfaceTests
     [Fact]
     public void A_topup_confirmation_shows_the_rand_paid_the_rate_and_the_credits_received()
     {
-        var mail = EmailTemplates.TopUpConfirmation(
-            "member@test.local", amountZar: 100m, creditsAdded: 160m,
-            conversionRate: 1.6m, balanceAfterCredits: 210m, reference: "1089250");
+        var mail = EmailTemplates.TopUpConfirmation("member@test.local", new TopUpConfirmationDetails(
+            AmountZar: 100m, CreditsAdded: 160m, ConversionRate: 1.6m,
+            BalanceAfterCredits: 210m, Reference: "1089250",
+            // A club on the default symbol. What happens when it is NOT the default is
+            // CurrencySymbolTests' — this case is here to hold the shape of the mail itself.
+            CurrencySymbol: CurrencySymbol.Default));
 
         Assert.Contains("R100.00", mail.HtmlBody);
         Assert.Contains("1.6 credits per R1", mail.HtmlBody);

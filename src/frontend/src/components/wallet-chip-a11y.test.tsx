@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { walletLabel } from "../lib/balance";
+import { resetClubCurrencySymbol, setClubCurrencySymbol } from "../lib/currency";
+
+afterEach(resetClubCurrencySymbol);
 
 /**
  * The wallet chip's accessible name.
@@ -95,6 +98,29 @@ describe("the wallet chip says the balance out loud", () => {
     // The suffix reaches every arm, not just the healthy one.
     expect(walletLabel(0, false, "degraded")).toMatch(/checked every 30 seconds/i);
     expect(walletLabel(12.5, false, "degraded")).toMatch(/checked every 30 seconds/i);
+  });
+
+  /**
+   * A currency symbol is not a word, and this chip's whole job is to be spoken.
+   *
+   * <p>
+   * The spoken form has to survive the club's money symbol in BOTH directions. A screen
+   * reader given "R472.00" announces the R as a letter — "R four hundred and seventy-two" —
+   * which is why this label says "credits" where the visible chip says "cr". And the figure
+   * is a CREDIT balance, so a money symbol on it would not merely sound wrong, it would be
+   * the wrong quantity: at the shipped 1.6 rate a member with 472 credits does not have 472
+   * rand.
+   * </p>
+   */
+  it("speaks a word, whatever symbol the club has chosen", () => {
+    for (const symbol of ["R", "CHF", "R$", "€"]) {
+      setClubCurrencySymbol(symbol);
+      const spoken = walletLabel(472, false);
+      expect(spoken, symbol).toContain("472.00 credits");
+      expect(spoken, symbol).not.toContain(symbol);
+      // And still not the abbreviation, which is read as two letters.
+      expect(spoken, symbol).not.toMatch(/\bcr\b/);
+    }
   });
 
   it("keeps the two-argument form every existing caller uses", () => {

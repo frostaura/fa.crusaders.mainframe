@@ -126,9 +126,9 @@ describe("the standing statement and the three honest reads", () => {
     expect(screen.getByText(/One slot costs what the court costs — 8 credits/)).toBeInTheDocument();
   });
 
-  it("says what R100 buys, because “1.6” means nothing to a volunteer", async () => {
+  it("says what a top-up block buys, because “1.6” means nothing to a volunteer", async () => {
     open([groupFixture()]);
-    expect(await screen.findByText(/R100 buys 160 credits/)).toBeInTheDocument();
+    expect(await screen.findByText(/R100\.00 buys 160 credits/)).toBeInTheDocument();
   });
 });
 

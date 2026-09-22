@@ -166,6 +166,11 @@ public static class AdminConfigEndpoints
                 // gate_access_policy: a settings page that showed a glyph set the product does
                 // not draw would report a choice that is not in force.
                 action_glyphs = ActionGlyphs.For(defaults),
+
+                // The club's money symbol. Rendered from the RESOLVED value, like
+                // action_glyphs and gate_access_policy: a settings page that showed a symbol
+                // the product will not print would report a choice that is not in force.
+                currency_symbol = CurrencySymbol.For(defaults),
             });
         });
 
@@ -268,6 +273,17 @@ public static class AdminConfigEndpoints
             if (req.EffectiveActionGlyphs is { } glyphs && !ActionGlyphs.IsKnown(glyphs.Trim()))
             {
                 return Results.BadRequest(new { error = "action_glyphs_invalid", valid = ActionGlyphs.All });
+            }
+
+            // Refused rather than coerced, on the same argument. A club that types an essay
+            // into the symbol box is told so, rather than saving and silently getting an R.
+            if (req.EffectiveCurrencySymbol is { } symbol && !CurrencySymbol.IsAcceptable(symbol))
+            {
+                return Results.BadRequest(new
+                {
+                    error = "currency_symbol_invalid",
+                    max_length = CurrencySymbol.MaxLength,
+                });
             }
 
             var row = await db.TenantSettings.FirstOrDefaultAsync(s => s.TenantId == tenant.TenantId, ct);
@@ -996,6 +1012,7 @@ public static class AdminConfigEndpoints
         if (req.EffectiveRealtimeFallbackWindowSeconds is { } window) doc["realtime_fallback_window_seconds"] = ToElement(window);
         if (req.EffectiveRealtimePollSecondsWallet is { } poll) doc["realtime_poll_seconds_wallet"] = ToElement(poll);
         if (req.EffectiveActionGlyphs is { } glyphs) doc[ActionGlyphs.Key] = ToElement(glyphs.Trim());
+        if (req.EffectiveCurrencySymbol is { } symbol) doc[CurrencySymbol.Key] = ToElement(symbol.Trim());
     }
 
     /// <summary>Same omitted-means-unchanged rule as the economics keys, for the gate block.</summary>
@@ -1281,10 +1298,15 @@ public sealed record UpdateSettingsRequest(
     [property: JsonPropertyName("realtime_fallback_window_seconds")] int? RealtimeFallbackWindowSecondsSnake = null,
     [property: JsonPropertyName("realtime_poll_seconds_wallet")] int? RealtimePollSecondsWalletSnake = null,
     string? ActionGlyphs = null,
-    [property: JsonPropertyName("action_glyphs")] string? ActionGlyphsSnake = null)
+    [property: JsonPropertyName("action_glyphs")] string? ActionGlyphsSnake = null,
+    string? CurrencySymbol = null,
+    [property: JsonPropertyName("currency_symbol")] string? CurrencySymbolSnake = null)
 {
     /// <summary>The glyph set the club asked for, under either spelling.</summary>
     public string? EffectiveActionGlyphs => ActionGlyphs ?? ActionGlyphsSnake;
+
+    /// <summary>The money symbol the club asked for, under either spelling.</summary>
+    public string? EffectiveCurrencySymbol => CurrencySymbol ?? CurrencySymbolSnake;
 
     /// <summary>The slot cap the club asked for, under either spelling.</summary>
     public int? EffectiveMemberMaxSlotsPerDay => MemberMaxSlotsPerDay ?? MemberMaxSlotsPerDaySnake;
