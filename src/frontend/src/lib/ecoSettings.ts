@@ -248,11 +248,19 @@ export const MEMBER_TRACE_HINT
  * </p>
  */
 export function ecoSettingComplaints(settings: Record<string, unknown>): SettingComplaint[] {
+  return [
+    ...numericComplaints(settings),
+    ...bookingHorizonComplaint(settings),
+    ...glyphChoiceComplaint(settings),
+  ];
+}
+
+/** Every declared numeric range, checked one rule at a time. */
+function numericComplaints(settings: Record<string, unknown>): SettingComplaint[] {
   const out: SettingComplaint[] = [];
   for (const rule of ECO_NUMERIC_RULES) {
     const value = settings[rule.key];
-    if (value === undefined || value === null) continue;
-    if (typeof value !== "number") continue;
+    if (typeof value !== "number") continue; // absent, null or not a number: nothing to judge
     if (!Number.isFinite(value)) continue; // the page's emptied-field check owns this one
     if (!Number.isInteger(value) || value < rule.min || value > rule.max) {
       out.push({
@@ -261,31 +269,35 @@ export function ecoSettingComplaints(settings: Record<string, unknown>): Setting
       });
     }
   }
+  return out;
+}
 
-  /*
-   * The one cross-field rule, and it is the one whose failure appears weeks later: a member
-   * can book `advance_booking_days` ahead, and a repeating booking is only WRITTEN
-   * `schedule_materialisation_days` ahead. Set the first higher than the second and somebody
-   * books into a league night that has not been written yet — and nothing goes wrong until
-   * the week it does.
-   */
+/*
+ * The one cross-field rule, and it is the one whose failure appears weeks later: a member
+ * can book `advance_booking_days` ahead, and a repeating booking is only WRITTEN
+ * `schedule_materialisation_days` ahead. Set the first higher than the second and somebody
+ * books into a league night that has not been written yet — and nothing goes wrong until
+ * the week it does.
+ */
+function bookingHorizonComplaint(settings: Record<string, unknown>): SettingComplaint[] {
   const horizon = settings.schedule_materialisation_days;
   const advance = settings.advance_booking_days;
-  if (typeof horizon === "number" && typeof advance === "number"
-    && Number.isFinite(horizon) && Number.isFinite(advance) && advance > horizon) {
-    out.push({
-      key: "schedule_materialisation_days",
-      message: `Members can book ${advance} days ahead but repeating bookings are only written `
-        + `${horizon} days ahead, so somebody could book into a league night that has not been `
-        + "written yet. Write them at least as far ahead as members can book.",
-    });
-  }
+  const comparable = typeof horizon === "number" && typeof advance === "number"
+    && Number.isFinite(horizon) && Number.isFinite(advance);
+  if (!comparable || advance <= horizon) return [];
+  return [{
+    key: "schedule_materialisation_days",
+    message: `Members can book ${advance} days ahead but repeating bookings are only written `
+      + `${horizon} days ahead, so somebody could book into a league night that has not been `
+      + "written yet. Write them at least as far ahead as members can book.",
+  }];
+}
 
+/** The one enum: a glyph set this build does not know how to draw. */
+function glyphChoiceComplaint(settings: Record<string, unknown>): SettingComplaint[] {
   const glyphs = settings.action_glyphs;
-  if (typeof glyphs === "string" && !(ACTION_GLYPH_CHOICES as readonly string[]).includes(glyphs)) {
-    out.push({ key: "action_glyphs", message: "Choose either thumbs or a tick and cross." });
-  }
-  return out;
+  if (typeof glyphs !== "string" || (ACTION_GLYPH_CHOICES as readonly string[]).includes(glyphs)) return [];
+  return [{ key: "action_glyphs", message: "Choose either thumbs or a tick and cross." }];
 }
 
 /** The labels, for the page's own emptied-field message and its jump-to-field links. */

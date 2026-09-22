@@ -53,24 +53,158 @@ function recentNights(today: Date): Array<{ iso: string; label: string }> {
   });
 }
 
-export function MemberNightPage() {
+/**
+ * The night itself: one list, three kinds of row.
+ *
+ * <p>
+ * Its own component because the three arms are the whole of what this surface draws, and
+ * because the page around it is a chooser — a member, a night, and the states a read can be
+ * in. Keeping the two together made one function that both fetched and rendered a timeline.
+ * </p>
+ */
+function NightTimeline({ rows, subjectName, timezone }: {
+  rows: ReturnType<typeof buildTimeline>;
+  subjectName: string;
+  timezone: string | undefined;
+}) {
+  return (
+    <ol className="relative space-y-3 border-l-2 border-border pl-4">
+      {rows.map((row, index) => (
+        <li key={`${row.kind}-${index}`}>
+          {row.kind === "gap" ? (
+            /* Drawn, not closed up. A night with an hour missing from the middle and
+               no sign of it reads as a continuous evening, which is a claim. */
+            <p className="border-l-2 border-dashed border-border py-2 pl-3 text-sm text-text-muted">
+              {gapLine(durationInWords(row.minutes))}
+            </p>
+          ) : row.kind === "burst" ? (
+            <details className="rounded-lg bg-bg-muted p-3">
+              {/* A real `<details>`: the disclosure semantics are free, the summary is
+                  the accessible name, and it works with no JavaScript at all. */}
+              <summary className="min-h-11 cursor-pointer text-sm font-medium">
+                {`${clubClock(row.at, timezone)} · ${row.events.length} in ${
+                  durationInWords(Math.max(1, Math.round(
+                    (Date.parse(row.events.at(-1)!.at) - Date.parse(row.at)) / 60_000,
+                  )))
+                }`}
+              </summary>
+              <p className="mt-1 text-sm text-text-secondary">{burstOutcomes(row.events).join(", ")}</p>
+            </details>
+          ) : (
+            <TraceCard event={row.event} subjectName={subjectName} timezone={timezone} />
+          )}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/**
+ * Who, and which night — the two questions this surface cannot do anything without.
+ *
+ * <p>
+ * Its own component because the page's remaining branching was almost entirely here: three
+ * separate `!member` guards disabling a control and saying why, plus the picker's own
+ * loading and failed states. None of it is about a timeline.
+ * </p>
+ */
+function NightChooser({
+  pickable, member, onMember, membersLoading, membersFailed, day, onDay, rangeHint,
+}: {
+  pickable: PickableMember[];
+  member: PickableMember | null;
+  onMember: (next: PickableMember | null) => void;
+  membersLoading: boolean;
+  membersFailed: boolean;
+  day: string;
+  onDay: (next: string) => void;
+  rangeHint: string;
+}) {
+  return (
+    <Card className="space-y-4">
+      <MemberPicker
+        label="Which member?"
+        hint="There is nothing to trace for a visitor booked in under a written-in name, so only members appear here."
+        members={pickable}
+        value={member}
+        onChange={onMember}
+        loading={membersLoading}
+        failed={membersFailed}
+      />
+
+      <div>
+        <Label htmlFor="night-day">Which night?</Label>
+        {/* Disabled until the first half is answered, and the disabled half SAYS WHY —
+            a greyed-out control with no explanation is a dead end somebody stares at. */}
+        {!member && <p className="text-sm text-text-muted">{NIGHT_NO_MEMBER_YET}</p>}
+        <Input
+          id="night-day"
+          type="date"
+          className="mt-1 min-h-11"
+          value={day}
+          disabled={!member}
+          onChange={(e) => onDay(e.target.value)}
+        />
+        <div className="mt-2 flex flex-wrap gap-2">
+          {recentNights(new Date()).map((night) => (
+            <Button
+              key={night.iso}
+              variant="outline"
+              className="min-h-11"
+              disabled={!member}
+              onClick={() => onDay(night.iso)}
+            >
+              {night.label}
+            </Button>
+          ))}
+        </div>
+        <p className="mt-2 text-sm text-text-muted">{rangeHint}</p>
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * The club's members, as the picker needs them, with its failure kept separate.
+ *
+ * A failed read must never reach the picker as an empty list — "the club has no members" is a
+ * different sentence from "we could not ask", and rendering the first from the second is the
+ * three-state trap this release is written against.
+ */
+function useClubMembers() {
   const [members, setMembers] = useState<AdminMember[] | null>(null);
   const [membersFailed, setMembersFailed] = useState(false);
-  const [member, setMember] = useState<PickableMember | null>(null);
-  const [day, setDay] = useState<string>(() => new Date().toISOString().slice(0, 10));
-  const [view, setView] = useState<TraceView | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<unknown>(null);
 
   useEffect(() => {
     let cancelled = false;
     endpoints.adminMembers()
       .then((rows) => { if (!cancelled) setMembers(rows); })
-      // Its own state, never "the club has no members": an empty picker after a failed read
-      // is the trap this whole release is written against.
       .catch(() => { if (!cancelled) { setMembers([]); setMembersFailed(true); } });
     return () => { cancelled = true; };
   }, []);
+
+  const pickable: PickableMember[] = (members ?? []).map((m) => ({
+    user_id: m.user_id,
+    full_name: m.full_name,
+    membership_number: m.membership_number ?? null,
+  }));
+  return { pickable, membersLoading: members === null, membersFailed };
+}
+
+/**
+ * One member's night, re-read whenever either half of the question changes.
+ *
+ * <p>
+ * The previous night is CLEARED on a failure and on an unset member, deliberately and unlike
+ * the control board: a timeline for the wrong person or the wrong night is not stale truth,
+ * it is a different fact. On this surface of all surfaces, a timeline that outlives its
+ * subject for even one paint is the wrong person's night.
+ * </p>
+ */
+function useMemberNight(member: PickableMember | null, day: string) {
+  const [view, setView] = useState<TraceView | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<unknown>(null);
 
   const read = useCallback(async (userId: string, when: string) => {
     setLoading(true);
@@ -78,8 +212,6 @@ export function MemberNightPage() {
       setView(await adminEndpoints.memberTrace(userId, { day: when }));
       setError(null);
     } catch (err) {
-      // The previous night is cleared, deliberately and unlike the control board: a timeline
-      // for the wrong person or the wrong night is not "stale truth", it is a different fact.
       setView(null);
       setError(err);
     } finally {
@@ -87,27 +219,56 @@ export function MemberNightPage() {
     }
   }, []);
 
-  // Clearing the view when the member is unset IS the synchronisation: what is on screen
-  // belongs to a person who is no longer chosen, and on this surface of all surfaces a
-  // timeline that outlives its subject for even one paint is the wrong person's night.
-  // The read itself is async and every setState inside it runs in a promise callback.
+  // Clearing the view when the member is unset IS the synchronisation — see above. The read
+  // itself is async and every setState inside it runs in a promise callback.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
     if (!member) { setView(null); setError(null); return; }
     void read(member.user_id, day);
   }, [member, day, read]);
 
-  const pickable: PickableMember[] = (members ?? []).map((m) => ({
-    user_id: m.user_id,
-    full_name: m.full_name,
-    membership_number: m.membership_number ?? null,
-  }));
+  return { view, loading, error, read };
+}
 
-  const timezone = view?.timezone;
-  const events = view?.events ?? [];
-  const rows = buildTimeline(events);
-  const subjectName = view?.member?.name ?? member?.full_name ?? "this member";
-  const caveat = retentionCaveat(view?.retention, timezone);
+/**
+ * Everything the page draws that is derived rather than fetched.
+ *
+ * <p>
+ * Out of the component body because it is a run of optional chains over a read that may not
+ * have happened yet — and a page component whose branching is all `?.` and `??` is one that
+ * reads as complicated while doing nothing. Each fallback is a decision, though, and they are
+ * the reason this is a function and not a spread: `subjectName` falls back from the name the
+ * server returned, to the name the picker holds, to a phrase that names nobody, so a card
+ * never says "undefined scanned".
+ * </p>
+ */
+function nightView(view: TraceView | null, member: PickableMember | null) {
+  // One guard instead of an optional chain per field: every line below reads a night that is
+  // known to exist, and the absent case is answered once, here, where it is obvious.
+  const read = view ?? EMPTY_NIGHT;
+  const timezone = read.timezone;
+  const events = read.events ?? [];
+  return {
+    timezone,
+    events,
+    rows: buildTimeline(events),
+    subjectName: read.member?.name ?? member?.full_name ?? "this member",
+    caveat: retentionCaveat(read.retention, timezone),
+    retentionKey: read.club_day ?? "",
+    rangeHint: nightWindowHint(read.range, timezone),
+  };
+}
+
+/** What a night looks like before one has been read. Fields the wire may omit stay absent. */
+const EMPTY_NIGHT = {} as Partial<TraceView>;
+
+export function MemberNightPage() {
+  const { pickable, membersLoading, membersFailed } = useClubMembers();
+  const [member, setMember] = useState<PickableMember | null>(null);
+  const [day, setDay] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const { view, loading, error, read } = useMemberNight(member, day);
+
+  const { timezone, events, rows, subjectName, caveat, retentionKey, rangeHint } = nightView(view, member);
 
   return (
     <div className="space-y-6">
@@ -123,107 +284,85 @@ export function MemberNightPage() {
         {NIGHT_PRIVACY_NOTICE}
       </Alert>
 
-      <Card className="space-y-4">
-        <MemberPicker
-          label="Which member?"
-          hint="There is nothing to trace for a visitor booked in under a written-in name, so only members appear here."
-          members={pickable}
-          value={member}
-          onChange={setMember}
-          loading={members === null}
-          failed={membersFailed}
-        />
+      <NightChooser
+        pickable={pickable}
+        member={member}
+        onMember={setMember}
+        membersLoading={membersLoading}
+        membersFailed={membersFailed}
+        day={day}
+        onDay={setDay}
+        rangeHint={rangeHint}
+      />
 
-        <div>
-          <Label htmlFor="night-day">Which night?</Label>
-          {/* Disabled until the first half is answered, and the disabled half SAYS WHY —
-              a greyed-out control with no explanation is a dead end somebody stares at. */}
-          {!member && <p className="text-sm text-text-muted">{NIGHT_NO_MEMBER_YET}</p>}
-          <Input
-            id="night-day"
-            type="date"
-            className="mt-1 min-h-11"
-            value={day}
-            disabled={!member}
-            onChange={(e) => setDay(e.target.value)}
-          />
-          <div className="mt-2 flex flex-wrap gap-2">
-            {recentNights(new Date()).map((night) => (
-              <Button
-                key={night.iso}
-                variant="outline"
-                className="min-h-11"
-                disabled={!member}
-                onClick={() => setDay(night.iso)}
-              >
-                {night.label}
-              </Button>
-            ))}
-          </div>
-          <p className="mt-2 text-sm text-text-muted">{nightWindowHint(view?.range, timezone)}</p>
-        </div>
-      </Card>
-
-      {caveat && <Alert tone="info" live="standing" announceKey={`night-retention:${view?.club_day ?? ""}`}>{caveat}</Alert>}
+      {caveat && <Alert tone="info" live="standing" announceKey={`night-retention:${retentionKey}`}>{caveat}</Alert>}
       {hasApproximateTimes(events) && <p className="text-sm text-text-muted">{APPROXIMATE_EXPLANATION}</p>}
 
       {member && (
-        <StateBlock
+        <NightResult
+          member={member}
+          day={day}
           loading={loading}
           error={error}
-          action="that night"
-          // The one sentence most designs leave out. The server writes its audit row on a
-          // 200, so a failed read that still claimed "opening this is recorded" would make
-          // the notice above a lie about the only thing this surface promises.
-          failedCaveat="Nothing was recorded about this look-up."
-          onRetry={() => { if (member) void read(member.user_id, day); }}
-          empty={!loading && !error && events.length === 0}
-          emptyTitle={nightEmptyNotice(subjectName, clubDate(day, timezone))}
-          emptyHint={NIGHT_EMPTY_HINT}
-        >
-          <div className="space-y-3">
-            <ol className="relative space-y-3 border-l-2 border-border pl-4">
-              {rows.map((row, index) => (
-                <li key={`${row.kind}-${index}`}>
-                  {row.kind === "gap" ? (
-                    /* Drawn, not closed up. A night with an hour missing from the middle and
-                       no sign of it reads as a continuous evening, which is a claim. */
-                    <p className="border-l-2 border-dashed border-border py-2 pl-3 text-sm text-text-muted">
-                      {gapLine(durationInWords(row.minutes))}
-                    </p>
-                  ) : row.kind === "burst" ? (
-                    <details className="rounded-lg bg-bg-muted p-3">
-                      {/* A real `<details>`: the disclosure semantics are free, the summary is
-                          the accessible name, and it works with no JavaScript at all. */}
-                      <summary className="min-h-11 cursor-pointer text-sm font-medium">
-                        {`${clubClock(row.at, timezone)} · ${row.events.length} in ${
-                          durationInWords(Math.max(1, Math.round(
-                            (Date.parse(row.events.at(-1)!.at) - Date.parse(row.at)) / 60_000,
-                          )))
-                        }`}
-                      </summary>
-                      <p className="mt-1 text-sm text-text-secondary">{burstOutcomes(row.events).join(", ")}</p>
-                    </details>
-                  ) : (
-                    <TraceCard event={row.event} subjectName={subjectName} timezone={timezone} />
-                  )}
-                </li>
-              ))}
-            </ol>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <a
-                className="inline-flex min-h-11 items-center rounded-lg border border-control bg-bg-surface px-4 text-sm font-medium"
-                href={adminEndpoints.memberTraceCsvUrl(member.user_id, { day })}
-              >
-                Download CSV
-              </a>
-              <p className="min-w-0 flex-1 text-xs text-text-muted">{NIGHT_EXPORT_NOTE}</p>
-            </div>
-          </div>
-        </StateBlock>
+          events={events}
+          rows={rows}
+          subjectName={subjectName}
+          timezone={timezone}
+          onRetry={() => read(member.user_id, day)}
+        />
       )}
     </div>
+  );
+}
+
+/**
+ * What the read produced — its three states, the timeline, and the export beside it.
+ *
+ * Its own component because the page above is now a question (who, and which night) and this
+ * is the answer. It also takes the whole of the page's remaining branching with it: the empty
+ * condition is three terms, and the export needs the member it was read for.
+ */
+function NightResult({
+  member, day, loading, error, events, rows, subjectName, timezone, onRetry,
+}: {
+  member: PickableMember;
+  day: string;
+  loading: boolean;
+  error: unknown;
+  events: Parameters<typeof burstOutcomes>[0];
+  rows: ReturnType<typeof buildTimeline>;
+  subjectName: string;
+  timezone: string | undefined;
+  onRetry: () => void | Promise<unknown>;
+}) {
+  return (
+    <StateBlock
+      loading={loading}
+      error={error}
+      action="that night"
+      // The one sentence most designs leave out. The server writes its audit row on a
+      // 200, so a failed read that still claimed "opening this is recorded" would make
+      // the notice above a lie about the only thing this surface promises.
+      failedCaveat="Nothing was recorded about this look-up."
+      onRetry={() => void onRetry()}
+      empty={!loading && !error && events.length === 0}
+      emptyTitle={nightEmptyNotice(subjectName, clubDate(day, timezone))}
+      emptyHint={NIGHT_EMPTY_HINT}
+    >
+      <div className="space-y-3">
+        <NightTimeline rows={rows} subjectName={subjectName} timezone={timezone} />
+
+        <div className="flex flex-wrap items-center gap-3">
+          <a
+            className="inline-flex min-h-11 items-center rounded-lg border border-control bg-bg-surface px-4 text-sm font-medium"
+            href={adminEndpoints.memberTraceCsvUrl(member.user_id, { day })}
+          >
+            Download CSV
+          </a>
+          <p className="min-w-0 flex-1 text-xs text-text-muted">{NIGHT_EXPORT_NOTE}</p>
+        </div>
+      </div>
+    </StateBlock>
   );
 }
 

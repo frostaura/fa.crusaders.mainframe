@@ -192,6 +192,31 @@ function doorOptions(view: DoorsView | null, rows: DoorLogEntry[] | null): Picke
   return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * <b>C-H3 / R3-12 — focus stays where the person put it, across a re-render.</b>
+ *
+ * <p>
+ * The control that caused a filter change is still on screen and still the thing they are
+ * using; a re-render that leaves focus adrift is how a keyboard user ends up at the top of
+ * the document after choosing a door. It restores focus only where focus has genuinely been
+ * DROPPED to `<body>`, and never takes it from somewhere else — the same rule `ConfirmButton`
+ * holds itself to.
+ * </p>
+ *
+ * <p>
+ * Module scope rather than the component body, because it closes over nothing: it reads the
+ * live `document` and no state, no props and no hook. Being outside also makes it the obvious
+ * thing to call from a second handler, which is what it is for.
+ * </p>
+ */
+function keepFocus() {
+  const active = document.activeElement as HTMLElement | null;
+  if (!active || active === document.body) return;
+  queueMicrotask(() => {
+    if (document.activeElement === document.body) active.focus();
+  });
+}
+
 function AdminDoorsLogPageBody() {
   const toast = useToast();
   const now = useTicker(true);
@@ -345,32 +370,13 @@ function AdminDoorsLogPageBody() {
     if (appendedFrom > 0 && !cursor) exhaustedRef.current?.focus();
   }, [rows, appendedFrom, cursor]);
 
-  /**
-   * <b>A-M5 / C-H3 / R3-12 — a filter change is a navigation, and it keeps its place.</b>
-   *
-   * <p>
-   * <b>It PUSHES.</b> It used to replace, so Back from a narrowed log left the page entirely
-   * rather than undoing the narrowing — and Back is what everybody reaches for after
-   * filtering to something that turned out to be wrong. Three taps leaving three history
-   * entries is the cost, and it is the cheaper one: an extra Back press is an annoyance, and
-   * a Back that throws away the log you were reading is a lost place.
-   * </p>
-   *
-   * <p>
-   * <b>And focus stays where the person put it.</b> The control that caused the change is
-   * still on screen and still the thing they are using; a re-render that leaves focus adrift
-   * is how a keyboard user ends up at the top of the document after choosing a door. It is
-   * restored only where focus has genuinely been dropped, never taken from somewhere else.
-   * </p>
+  /*
+   * A-M5 — a filter change is a navigation, and it PUSHES. It used to replace, so Back from a
+   * narrowed log left the page entirely rather than undoing the narrowing, and Back is what
+   * everybody reaches for after filtering to something that turned out to be wrong. Three taps
+   * leaving three history entries is the cost, and it is the cheaper one: an extra Back press
+   * is an annoyance, a Back that throws away the log you were reading is a lost place.
    */
-  const keepFocus = () => {
-    const active = document.activeElement as HTMLElement | null;
-    if (!active || active === document.body) return;
-    queueMicrotask(() => {
-      if (document.activeElement === document.body) active.focus();
-    });
-  };
-
   const setFilter = (key: string, value: string) => {
     const next = new URLSearchParams(params);
     if (value === "") next.delete(key); else next.set(key, value);

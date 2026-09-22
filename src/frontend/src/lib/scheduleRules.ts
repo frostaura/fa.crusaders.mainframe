@@ -324,20 +324,37 @@ export function enumerateOccurrences(rule: WeeklyRule, window: EnumerationWindow
   // flickers its consequence line at every character.
   const last = ruleEnd ?? horizonEnd;
 
+  const walked = walkMatchingDays(rule, chosen, first, last, maxOccurrences);
+  // Open-ended and we walked to the horizon: what we listed is a window, and the copy has to
+  // say so. Cut short by the cap counts too, which is why this is an OR and not an assignment.
+  const truncated = walked.truncated || (openEnded && ruleEnd === null);
+  return { dates: walked.dates, openEnded, truncated };
+}
+
+/**
+ * Every day in `[first, last]` the rule actually falls on, stopping at the cap.
+ *
+ * Separated from the window arithmetic above because the two reason about different things:
+ * that decides WHERE to stop, this decides WHICH days inside it count. `truncated` here means
+ * only "the cap stopped us" — the open-ended horizon is the caller's to fold in.
+ */
+function walkMatchingDays(
+  rule: WeeklyRule,
+  chosen: Set<string>,
+  first: number,
+  last: number,
+  maxOccurrences: number,
+): { dates: string[]; truncated: boolean } {
   const dates: string[] = [];
-  let truncated = false;
   for (let day = first; day <= last; day += 1) {
-    if (dates.length >= maxOccurrences) { truncated = true; break; }
+    if (dates.length >= maxOccurrences) return { dates, truncated: true };
     const date = fromEpochDay(day);
     const weekday = WEEKDAYS[new Date(day * MS_PER_DAY).getUTCDay()];
     if (!chosen.has(weekday)) continue;
     if (!inIntervalPhase(date, rule.startDate, rule.intervalWeeks)) continue;
     dates.push(date);
   }
-  // Open-ended and we walked to the horizon: what we listed is a window, and the copy has to
-  // say so. Cut short by the cap counts too, which is why this is an OR and not an assignment.
-  if (openEnded && ruleEnd === null) truncated = true;
-  return { dates, openEnded, truncated };
+  return { dates, truncated: false };
 }
 
 // ---------------------------------------------------------------------------------------

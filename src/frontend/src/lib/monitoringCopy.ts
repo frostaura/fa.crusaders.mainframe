@@ -141,46 +141,58 @@ export function lightsLine(
    * Every board in the field reports no relay state until the new firmware ships, so that
    * reading would have printed "confirmed by the box" across a whole club on day one.
    */
-  if (lights.confirmed_at) {
-    const said = clubClock(lights.confirmed_at, timezone);
-    const box = lights.confirmed_state ?? "unknown";
-    // The disagreement is shown, never resolved. A box reporting a relay open while the
-    // server believes it granted nothing is the contradiction an admin is there to see.
-    if (box !== believed && believed !== "unknown") {
-      return `The box says the lights are ${box === "on" ? "on" : box === "off" ? "off" : "in a state it cannot name"}`
-        + ` (${said}), and the club's records say ${believed === "on" ? "on" : "off"}. They do not agree.`;
-    }
-    if (box === "on") return `Lights on — confirmed by the box at ${said}.`;
-    if (box === "off") return `Lights off — confirmed by the box at ${said}.`;
-    return `The box reported at ${said} and could not say what the lights are doing.`;
-  }
+  if (lights.confirmed_at) return boxConfirmedLine(lights, believed, clubClock(lights.confirmed_at, timezone));
 
   // Nothing has confirmed anything. What is left is the server's own record, and how old it
   // is — said as a record rather than as a fact, in all three arms.
-  const never = " No box has confirmed it.";
-
-  if (lights.stale === true) {
-    const since = at ? ` The box last reported at ${at}.` : " The box has not reported since.";
-    if (believed === "on") return `The club's records say the lights are on, but nothing has confirmed it.${since}`;
-    if (believed === "off") return `The club's records say the lights are off, but nothing has confirmed it.${since}`;
-    return `Nobody knows what the lights are doing on this court.${since}`;
-  }
-
-  if (lights.stale === false) {
-    if (believed === "on") return at
-      ? `The club's records say the lights went on at ${at}.${never}`
-      : `The club's records say the lights are on.${never}`;
-    if (believed === "off") return at
-      ? `The club's records say the lights went off at ${at}.${never}`
-      : `The club's records say the lights are off.${never}`;
-    return "Nobody knows what the lights are doing on this court.";
-  }
-
+  if (lights.stale === true) return staleRecordLine(believed, at);
+  if (lights.stale === false) return freshRecordLine(believed, at);
   /*
    * `stale` is absent — an API that has not shipped the field. This arm has to say LESS, not
    * guess: no freshness claim in either direction, because "recent" and "stale" are both
    * claims about a field that is not there.
    */
+  return unknownFreshnessLine(believed, at);
+}
+
+/** What has not been confirmed, said the same way wherever the freshness arms need it. */
+const NEVER_CONFIRMED = " No box has confirmed it.";
+
+/** The box itself reported — the only arm allowed to use the word "confirmed". */
+function boxConfirmedLine(lights: ControlBoardLights, believed: string, said: string): string {
+  const box = lights.confirmed_state ?? "unknown";
+  // The disagreement is shown, never resolved. A box reporting a relay open while the
+  // server believes it granted nothing is the contradiction an admin is there to see.
+  if (box !== believed && believed !== "unknown") {
+    return `The box says the lights are ${box === "on" ? "on" : box === "off" ? "off" : "in a state it cannot name"}`
+      + ` (${said}), and the club's records say ${believed === "on" ? "on" : "off"}. They do not agree.`;
+  }
+  if (box === "on") return `Lights on — confirmed by the box at ${said}.`;
+  if (box === "off") return `Lights off — confirmed by the box at ${said}.`;
+  return `The box reported at ${said} and could not say what the lights are doing.`;
+}
+
+/** The server's record is old, and the line says how old rather than what is true. */
+function staleRecordLine(believed: string, at: string | null): string {
+  const since = at ? ` The box last reported at ${at}.` : " The box has not reported since.";
+  if (believed === "on") return `The club's records say the lights are on, but nothing has confirmed it.${since}`;
+  if (believed === "off") return `The club's records say the lights are off, but nothing has confirmed it.${since}`;
+  return `Nobody knows what the lights are doing on this court.${since}`;
+}
+
+/** The server's record is recent — still a record, and still unconfirmed. */
+function freshRecordLine(believed: string, at: string | null): string {
+  if (believed === "on") return at
+    ? `The club's records say the lights went on at ${at}.${NEVER_CONFIRMED}`
+    : `The club's records say the lights are on.${NEVER_CONFIRMED}`;
+  if (believed === "off") return at
+    ? `The club's records say the lights went off at ${at}.${NEVER_CONFIRMED}`
+    : `The club's records say the lights are off.${NEVER_CONFIRMED}`;
+  return "Nobody knows what the lights are doing on this court.";
+}
+
+/** No freshness field at all: the same record, with every claim about its age dropped. */
+function unknownFreshnessLine(believed: string, at: string | null): string {
   if (believed === "on") return at
     ? `The club's records say the lights went on at ${at}.`
     : "The club's records say the lights are on.";
