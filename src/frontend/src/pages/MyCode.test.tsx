@@ -1173,15 +1173,42 @@ describe("MyCode at a club with a door", () => {
     }));
 
     /*
-      `findAll`, because the decision card and the standing line can both offer it — the
-      refusal says "you had no booking" and the standing rule says "this club wants one",
-      and they are the same act. Which of the two renders first is a timing accident, and a
-      `findBy` here resolved on whichever won the race. Every one of them must go to the
-      schedule; that is the rule this case is about.
+      ONE of them, and this assertion used to say `toBeGreaterThan(0)`.
+
+      The decision card and the standing line were both offering it, because the refusal says
+      "you had no booking" and the standing rule says "this club wants one" — the same act,
+      told twice, as two identical filled brand-coloured buttons a few hundred pixels apart on
+      a phone. A member outside a locked door reads that as two different things they have not
+      understood. The card is the EVENT and outranks the rule while it is on screen; dismiss
+      it and the standing line's offer comes back, which the case below this one asserts.
     */
     const books = await screen.findAllByRole("link", { name: "Book a court" });
-    expect(books.length).toBeGreaterThan(0);
-    for (const book of books) expect(book).toHaveAttribute("href", "/schedule");
+    expect(books).toHaveLength(1);
+    expect(books[0]).toHaveAttribute("href", "/schedule");
+  });
+
+  /**
+   * And the CTA is never LOST, which is the failure mode of every fix for a duplicate.
+   *
+   * <p>
+   * The card is dismissible and pinned; the standing line is permanent. Suppressing the
+   * permanent one is only safe because the suppression follows the card — a member who
+   * dismisses the refusal still has the one thing they need to press.
+   * </p>
+   */
+  it("hands the offer back to the standing line when the card is dismissed", async () => {
+    renderBoth(memberDoorsOnFixture({
+      policy: "booking_window",
+      last_decision: memberDoorDecisionFixture({ reason: "no_booking" }),
+    }));
+
+    expect(await screen.findAllByRole("link", { name: "Book a court" })).toHaveLength(1);
+    fireEvent.click(await screen.findByRole("button", { name: /dismiss/i }));
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("link", { name: "Book a court" })).toHaveLength(1);
+    });
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   /**

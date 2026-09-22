@@ -75,6 +75,25 @@ export function StandingLine(props: {
   hasLiveCode: boolean;
   /** Switches the page to the member's own code. E-H2 (3). */
   onUseMemberCode: () => void;
+  /**
+   * Something ABOVE this section is already offering the same next act.
+   *
+   * <p>
+   * The decision card renders "Book a court" when the last refusal was `no_booking`; this
+   * line renders it when the club's policy wants a booking and the member has none. Those are
+   * the same fact seen from two sides, and on one screen they were two identical filled
+   * buttons a few hundred pixels apart — which a member outside a locked door reads as two
+   * different things they have not understood.
+   * </p>
+   *
+   * <p>
+   * The EVENT outranks the standing rule while it is on screen, and the card is dismissible:
+   * dismissing it hands the offer straight back here, so the one control a stuck member needs
+   * is never absent. This line does not decide that — it cannot see the card — which is why
+   * the page passes it in.
+   * </p>
+   */
+  actionOfferedAbove?: boolean;
 }) {
   const { door, cached, cachedMinutesAgo, loading, failure, code, staleSince, onUseMemberCode } = props;
   const codeState = { hasLiveCode: props.hasLiveCode };
@@ -106,7 +125,7 @@ export function StandingLine(props: {
             {USE_MEMBER_CODE_INSTEAD}
           </Button>
         )}
-        {line.action?.kind === "book_a_court" && (
+        {line.action?.kind === "book_a_court" && !props.actionOfferedAbove && (
           <Link to="/schedule" className={MEMBER_DOOR_ACTION_LINK}>
             {line.action.label}
           </Link>

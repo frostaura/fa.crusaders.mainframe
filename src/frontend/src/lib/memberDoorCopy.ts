@@ -713,6 +713,45 @@ const ARMS: Record<string, (ctx: DecisionContext) => Arm> = {
   not_a_gate: armBoardFault,
 };
 
+/**
+ * Which actions a decision's arm would offer — the kinds only, with none of the words.
+ *
+ * <p>
+ * <b>It exists so that two blocks on one screen cannot offer the same act twice.</b> The
+ * decision card and the standing line both used to render "Book a court", as two identical
+ * filled buttons a few hundred pixels apart: the card because the refusal reason was
+ * `no_booking`, the line because the club's policy is `booking_window` and the member has
+ * nothing booked. They are the same act, and for a member outside a locked door two identical
+ * buttons read as two different things they have not understood.
+ * </p>
+ *
+ * <p>
+ * The page is the only layer that can see both, so the page has to be able to ask. Reading the
+ * SAME `ARMS` table that `describeDecision` reads is what keeps the answer from drifting from
+ * the card it is about — a predicate spelled `reason === "no_booking"` at the call site would
+ * be right until an arm changed its mind, and silently wrong afterwards.
+ * </p>
+ */
+export function decisionActionKinds(
+  decision: { reason: string | null; released: boolean; offline: boolean },
+): ActionKind[] {
+  const build = decision.released
+    ? (decision.offline ? armOkOffline : armOk)
+    : (ARMS[reasonKey(decision.reason)] ?? armUnknown);
+  // The context shapes the SENTENCES, never the `wants` list — which is why a neutral one is
+  // safe here and why this returns kinds rather than labelled actions.
+  return build(NEUTRAL_DECISION_CONTEXT).wants;
+}
+
+/** Enough of a context to build an arm for its `wants`. None of these reach the list. */
+const NEUTRAL_DECISION_CONTEXT: DecisionContext = {
+  countdown: null,
+  opensAtClock: null,
+  bookingStartsClock: null,
+  earlyEntryMinutes: null,
+  contact: CONTACT_UNKNOWN,
+};
+
 const ACTION_LABELS: Record<"book_a_court" | "refresh_the_code", string> = {
   book_a_court: "Book a court",
   refresh_the_code: "Refresh the code",

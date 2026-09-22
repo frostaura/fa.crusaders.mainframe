@@ -26,6 +26,7 @@ import {
   type ReadFailure,
   USE_MEMBER_CODE_INSTEAD,
   codeExpiredDeadEnd,
+  decisionActionKinds,
   describeStanding,
   liveContact,
   offlineIdentDeadEnd,
@@ -664,8 +665,19 @@ export default function MyCodePage() {
   // After every hook, so none is skipped. BarredCard says why it replaces the whole page.
   if (barred !== null) return <BarredCard reason={barred} error={error} loading={loading} onCheckAgain={refetch} />;
 
+  /*
+    The decision card and the standing line are the same act seen from two sides — the card
+    because the refusal reason wants a booking, the line because the club's policy does — and
+    both were rendering "Book a court" as identical filled buttons on one screen. Asked
+    through `decisionActionKinds`, which reads the same arm table the card renders from, so
+    the answer cannot drift from the button it is about.
+  */
+  const bookingOfferedByCard = decisionToShow !== null
+    && decisionActionKinds(decisionToShow).includes("book_a_court");
+
   const doorBlocks = (
     <DoorBlocks
+      actionOfferedAbove={bookingOfferedByCard}
       doorsClub={doorsClub}
       doorsKnowledge={doorsKnowledge}
       door={door}
@@ -799,6 +811,8 @@ export default function MyCodePage() {
  * </p>
  */
 function DoorBlocks(props: {
+  /** The decision card above is already offering "Book a court". See `StandingLine`. */
+  actionOfferedAbove?: boolean;
   doorsClub: boolean;
   /** Yes, no, or — D1 — this page never found out. */
   doorsKnowledge: "yes" | "no" | "unknown";
@@ -844,6 +858,7 @@ function DoorBlocks(props: {
         codeSecondsLeft={props.codeSecondsLeft}
         onRefreshCode={props.onRefreshCode}
         onUseMemberCode={onUseMemberCode}
+        actionOfferedAbove={props.actionOfferedAbove}
       />
     </>
   );
