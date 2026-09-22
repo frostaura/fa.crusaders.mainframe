@@ -124,6 +124,13 @@ secrets.json
 # src/iot/requirements.txt); one .pio per PlatformIO project, so the glob has to
 # reach a level deeper than the venv does — src/iot/court-box/.pio, and whatever
 # the next firmware project is called.
+# Both spellings, deliberately. The trailing slash matches a real directory; the
+# bare name matches the case where .venv is a SYMLINK to a venv kept outside the
+# tree — which is what a git worktree of this repo ends up with, and which the
+# slashed form silently misses, because a symlink is not a directory to git. The
+# consequence of missing it is a committed symlink pointing at one machine's
+# absolute path, and `git add -A` in a worktree will take it without complaint.
+src/iot/.venv
 src/iot/.venv/
 src/iot/**/.pio/
 src/iot/**/coverage.xml
