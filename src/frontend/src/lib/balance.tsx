@@ -1,17 +1,25 @@
 import { createContext, useContext } from "react";
 import { useAuth } from "./auth";
 import { useLiveBalance, type BalanceDelta, type BalanceTransport, type LiveBalancePolicy, type LiveState } from "./liveBalance";
+import { spokenMoney } from "./utils";
 
-/** How low a balance has to be before the chip warns, in credits. Mirrors the amber threshold. */
+/**
+ * How low a balance has to be before the chip warns, in the club's own money. Mirrors the
+ * amber threshold.
+ */
 export const LOW_BALANCE_CREDITS = 50;
 
 /**
  * What a screen reader says for the wallet chip.
  *
  * <p>
- * Spelled out rather than reusing `formatCredits`, whose "cr" is an abbreviation a screen
- * reader reads as letters. And the low-balance state is spoken, because it is otherwise
- * carried entirely by the chip's colour.
+ * <b>Through `spokenMoney`, never `formatMoney`.</b> An `aria-label` REPLACES an element's
+ * contents as its accessible name, so this string is the whole of what a screen-reader user
+ * gets — and the visible unit is now a symbol, which is not speakable. "R472.00" is announced
+ * with the R as a letter, exactly the defect "cr" had when it was read as two of them. The
+ * chip SHOWS "R472.00" and this sentence SAYS "472.00 rand"; `spokenMoney` owns the noun and
+ * drops it rather than guessing for a currency it cannot name. And the low-balance state is
+ * spoken, because it is otherwise carried entirely by the chip's colour.
  * </p>
  *
  * <p>
@@ -29,7 +37,7 @@ export const LOW_BALANCE_CREDITS = 50;
  */
 export function walletLabel(balance: number | null, loading: boolean, state?: LiveState): string {
   if (balance === null) return loading ? "Wallet balance, loading" : "Wallet balance unavailable";
-  const amount = `${balance.toFixed(2)} credits`;
+  const amount = spokenMoney(balance);
   // Never claim a figure is live when the stream has gone and a 30-second poll is standing in
   // for it. A confident stale number is the defect the degraded state exists to close.
   const stale = state === "degraded" ? " This figure is checked every 30 seconds." : "";
@@ -37,7 +45,9 @@ export function walletLabel(balance: number | null, loading: boolean, state?: Li
   // one sees can never disagree — which they did at 0.004, where this said "running low" over
   // a chip the wallet page was calling empty.
   const tone = walletTone(balance);
-  if (tone === "zero") return `Wallet balance 0 credits. You can't book until you top up. Tap to top up.${stale}`;
+  // The figure rather than a literal zero: a negative balance is also "zero" by tone — a late
+  // reversal may take one below nothing — and a member who owes the club should hear how much.
+  if (tone === "zero") return `Wallet balance ${amount}. You can't book until you top up. Tap to top up.${stale}`;
   if (tone === "low") return `Wallet balance ${amount}, running low. Tap to top up.${stale}`;
   return `Wallet balance ${amount}. Tap to top up.${stale}`;
 }
@@ -66,10 +76,11 @@ const ROUNDS_TO_ZERO = 0.005;
  *
  * <p>
  * Three lanes each wrote this rule and they disagreed. The chip asked `balance <= 0`; the
- * wallet page asked `< 0.005`; the grid's empty-wallet banner asked `balance > 0`. At 0.004
- * credits a member therefore saw a green chip reading "0.00 cr", a red wallet card telling
- * them they could not book, and a grid with no banner on it — three screens, each written by
- * somebody who HAD thought about the rounding case, each having thought about it alone.
+ * wallet page asked `< 0.005`; the grid's empty-wallet banner asked `balance > 0`. At a
+ * balance of 0.004 a member therefore saw a green chip reading "R0.00", a red wallet card
+ * telling them they could not book, and a grid with no banner on it — three screens, each
+ * written by somebody who HAD thought about the rounding case, each having thought about it
+ * alone.
  * </p>
  *
  * <p>
@@ -77,14 +88,14 @@ const ROUNDS_TO_ZERO = 0.005;
  * real state: the settlement model posts a late reversal as two NEW rows rather than an edit,
  * and says in so many words that the balance may go negative. That is emptier than empty, not
  * a different kind of thing. `<= 0` misses the other end — 0.004 is not `<= 0`, renders as
- * "0.00 credits" and buys nothing, since a slot costs fifty. What the member can SEE is two
- * decimal places, so the rule has to be about the same number they are looking at.
+ * "R0.00" and buys nothing, since a slot costs fifty. What the member can SEE is two decimal
+ * places, so the rule has to be about the same number they are looking at.
  * </p>
  *
  * <p>
  * <b>`null` is UNKNOWN, and answers `fine`.</b> A wallet read that has not landed is not an
- * empty wallet; a product that shouted "no credits" at a slow network would be wrong more
- * often than right, and would send a member who has money to a top-up form.
+ * empty wallet; a product that shouted "your wallet is empty" at a slow network would be wrong
+ * more often than right, and would send a member who has money to a top-up form.
  * </p>
  */
 export function walletTone(balance: number | null): WalletTone {
