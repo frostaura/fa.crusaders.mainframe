@@ -163,6 +163,20 @@ export const DOOR_EVENT_WORDS: Record<string, string> = {
   "doors.shut_all": "Every door was shut together",
   "doors.reopened_all": "The doors shut together were reopened",
   "doors.log_exported": "Someone downloaded the door log",
+  /**
+   * The power-dip restore (ruling 8 / item 17), in the three rows it actually writes.
+   *
+   * <p>
+   * These arrived with the backend's live lane and reached this screen with no copy at all,
+   * so each rendered as "Unrecognised event" on the page an admin reconciles a court box's
+   * night from — which is the exact failure this dictionary exists to prevent, one lane
+   * later. The words say what happened to the COURT rather than what happened on the wire:
+   * an admin reading this feed is working out why a court went dark.
+   * </p>
+   */
+  "device.relay_restore_served": "Board restarted; the club told it which courts were lit",
+  "device.relay_restore_confirmed": "The board put the lit courts back on after restarting",
+  "device.relay_restore_failed": "The board did not put the lit courts back on after restarting",
   /** A court box's own rows. A gate never writes these; the dictionary is shared. */
   "device.activation": "Court activated",
   "device.release": "Court released",

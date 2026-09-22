@@ -235,6 +235,7 @@ See `webhooks.md` for delivery mechanics. Player- or admin-configurable per tena
 - `booking.displacement_reversed`
 - `booking.cancelled_lights_charged`
 - `credit.topped_up`
+- `credit.topped_up_by_admin` — the club took money outside the payment gateway (cash at the desk, an EFT) and an admin recorded it against a member's wallet. Distinct from `credit.adjusted`, which is a goodwill gesture or a correction and is not money the club received; an integration reconciling takings needs the two apart. `LedgerEntryType.AdminTopUp`, `LedgerService`.
 - `credit.refunded`
 - `credit.penalty_applied`
 - `credit.adjusted`
