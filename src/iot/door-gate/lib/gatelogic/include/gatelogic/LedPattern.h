@@ -60,6 +60,22 @@ enum class LedCue : uint8_t {
   Boot = 0U,
   /// Three fast blinks: refused.
   Denied = 1U,
+  /// ONE slow pulse: not refused — ASKED TO WAIT.
+  ///
+  /// The two are different answers and used to share a lamp. A member arriving
+  /// in the relock dwell — the fraction of a second the lock is guaranteed dark
+  /// after a close, so the strike actually relatches — got the same three-blink
+  /// stutter as a member whose booking is not on today. One of those people
+  /// should scan again in a moment; the other should go and talk to somebody at
+  /// the desk. Telling a club full of people who are not confident with
+  /// technology to do the second when they needed the first is how a working
+  /// door gets reported as broken.
+  ///
+  /// The shape is chosen to read as the OPPOSITE of a refusal rather than as a
+  /// variation on one: slower, and once. A refusal stutters; this breathes. A
+  /// fourth or fifth blink would have been a longer refusal, which is exactly
+  /// the reading to avoid.
+  Wait = 2U,
 };
 
 /// Milliseconds. Half-periods, so a "blink" is on for one and off for one.
@@ -67,6 +83,15 @@ inline constexpr uint32_t kDeniedHalfMs = 120U;
 inline constexpr uint32_t kBootHalfMs = 90U;
 inline constexpr uint8_t kDeniedBlinks = 3U;
 inline constexpr uint8_t kBootBlinks = 2U;
+
+/// The wait pulse: one blink, lit for 450 ms and dark for 450 ms. Nearly four
+/// times the refusal's half-period, so the difference is legible to somebody
+/// who is not comparing them side by side — and 900 ms total, which is shorter
+/// than the 400 ms floor plus the time it takes to lift a phone and present it
+/// again, so the lamp is never still pulsing when the member's second scan
+/// lands.
+inline constexpr uint32_t kWaitHalfMs = 450U;
+inline constexpr uint8_t kWaitBlinks = 1U;
 /// 1 Hz: on for half a second, off for half a second.
 inline constexpr uint32_t kLinkDownHalfMs = 500U;
 

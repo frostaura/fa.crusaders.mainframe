@@ -336,13 +336,34 @@ class GateSim:
                            f"a decision for {code!r}", mark)
 
     def relay_window(self, mark: int, timeout: float) -> tuple[Optional[int], Optional[int]]:
-        """The board's own ON and OFF instants after `mark`, in its own millis()."""
+        """The board's own ON and OFF instants after `mark`, in its own millis().
+
+        `timeout` MUST be longer than the release it is measuring, and callers get
+        it from `release_wait()` rather than choosing a number. Both call sites
+        here once passed a flat 12.0, which was comfortable for the three-second
+        default and became a guaranteed failure the day the club's default became
+        fifteen: the board released correctly for 15 002 ms, this returned
+        `off=None` because it had stopped listening at 12 000, and the harness
+        reported a firmware defect that did not exist. A wait shorter than the
+        thing it waits for is not a timeout, it is an assertion that the feature
+        is broken."""
         on = self.maybe(lambda l: l.channel == "relay" and l.state == "ON", timeout, mark)
         if on is None:
             return None, None
         off = self.maybe(lambda l: l.channel == "relay" and l.state == "OFF", timeout,
                          mark)
         return (on.at_ms, off.at_ms if off else None)
+
+    @staticmethod
+    def release_wait(unlock_seconds: int) -> float:
+        """How long to wait for a release of `unlock_seconds` to end, with headroom.
+
+        Derived from the club's OWN configured value, never a constant: this is the
+        number that went stale, and a constant would go stale again the next time
+        somebody changes the default. The headroom is one hard cap's worth of
+        slack rather than a token margin, because the window a re-arm extends can
+        legitimately run to CAP_MS (GATE_UNLOCK_HARD_CAP_MS) before the cap closes it."""
+        return (CAP_MS / 1000.0) + unlock_seconds + 5.0
 
     def let_the_lock_relatch(self) -> None:
         """Wait out the firmware's relock dwell before presenting another code.
@@ -905,7 +926,7 @@ def dsim_firmware(door: Any) -> None:
         chk("DSIM", "an allowed scan: the firmware asks the API, reads `opened`, and RELEASES",
             decision.flag("released") and decision.get("reason") == "ok"
             and decision.get("token") == live_code, decision.raw)
-        on_ms, off_ms = sim.relay_window(opened, timeout=12.0)
+        on_ms, off_ms = sim.relay_window(opened, timeout=GateSim.release_wait(door.unlock_seconds()))
         want = door.unlock_seconds() * 1000
         held = (off_ms - on_ms) if (on_ms is not None and off_ms is not None) else None
         chk("DSIM", f"the relay ENERGISES and RELEASES after the club's configured "
@@ -1013,7 +1034,7 @@ def dsim_firmware(door: Any) -> None:
         chk("DSIM", "WITH THE RADIO GONE the firmware decides from its CACHED roster and opens for a "
                     "rostered booking — in microseconds, with no call to make",
             allowed.flag("released") and allowed.flag("queued"), allowed.raw)
-        on_ms, off_ms = sim.relay_window(offline_from, timeout=12.0)
+        on_ms, off_ms = sim.relay_window(offline_from, timeout=GateSim.release_wait(door.unlock_seconds()))
         held = (off_ms - on_ms) if (on_ms is not None and off_ms is not None) else None
         chk("DSIM", "  ...for the SAME adopted release time, because a door is released for long "
                     "enough to walk through and the booking's minutes are the court's business",
@@ -1096,7 +1117,7 @@ def dsim_firmware(door: Any) -> None:
         chk("DSIM", "the cached roster opens the door again, which is what creates the close the "
                     "dwell follows",
             reopened.flag("released"), reopened.raw)
-        _, closed_ms = sim.relay_window(dwell_open, timeout=12.0)
+        _, closed_ms = sim.relay_window(dwell_open, timeout=GateSim.release_wait(door.unlock_seconds()))
         if closed_ms is None:
             raise StepFailed("the release window never closed, so the dwell cannot be probed")
 
@@ -1129,7 +1150,7 @@ def dsim_firmware(door: Any) -> None:
             back.flag("released"), back.raw)
         chk("DSIM", "  ...with the relay actually moving for it", sim.relay_moved(back_from),
             f"relay lines: {[l.raw for l in sim.since(back_from, 'relay')]}")
-        sim.relay_window(back_from, timeout=12.0)
+        sim.relay_window(back_from, timeout=GateSim.release_wait(door.unlock_seconds()))
         sim.let_the_lock_relatch()
 
 

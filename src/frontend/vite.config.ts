@@ -25,6 +25,22 @@ export default defineConfig({
       "/uploads": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
     },
   },
+
+  // `vite preview` serves the PRODUCTION bundle, and it does not inherit `server.proxy` —
+  // without this block a preview answers /api with the SPA's index.html and every screen
+  // reads as a broken product. It matters beyond convenience: the dev server is the one
+  // artefact that carries the sign-in shortcut (`production-posture.test.ts` proves the
+  // built bundle does not), so a reviewer asked to walk the product as a member can only
+  // be walking the real sign-in if they are walking a preview. Same three routes as above,
+  // same env override, so the two servers cannot drift.
+  preview: {
+    port: Number(process.env.VITE_PREVIEW_PORT ?? 4174),
+    proxy: {
+      "/api": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
+      "/healthz": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
+      "/uploads": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
+    },
+  },
   test: {
     environment: "jsdom",
     globals: true,

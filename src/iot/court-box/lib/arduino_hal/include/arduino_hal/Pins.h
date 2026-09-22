@@ -36,9 +36,12 @@ inline constexpr uint8_t kButtonPins[hal::kButtonCount] = {22U, 24U, 26U, 28U, 3
 /// at the cupboard can tell "the box is dead" from "the box thinks it is idle".
 inline constexpr uint8_t kStatusLedPin = 13U;
 
-/// PCF8574 backpack address. The panel fitted is a 2004A; the firmware drives
-/// it as 16x2 by decision, so a swapped display degrades to a smaller screen
-/// instead of to garbage. Geometry comes from hal::kDisplayCols/Rows.
+/// PCF8574 backpack address. The panel fitted is a 2004A and the firmware now
+/// drives all 20x4 of it; LCD_PHYSICAL_COLS/ROWS record what is soldered in and
+/// LCD_COLS/ROWS what is painted, so a smaller panel swapped in degrades to a
+/// smaller screen instead of to garbage. Geometry reaches code as
+/// hal::kDisplayCols/Rows — the address and the bus are untouched either way,
+/// because using more of a panel is not rewiring it.
 inline constexpr uint8_t kLcdI2cAddress = 0x27U;
 
 /// Both UARTs on the Mega run at 9600: the scanner module and the DIP-routed

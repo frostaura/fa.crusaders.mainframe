@@ -12,6 +12,10 @@ void LedPattern::cue(LedCue which, uint32_t nowMs) {
     cueHalfMs_ = kDeniedHalfMs;
     cueHalves_ = static_cast<uint8_t>(kDeniedBlinks * 2U);
     break;
+  case LedCue::Wait:
+    cueHalfMs_ = kWaitHalfMs;
+    cueHalves_ = static_cast<uint8_t>(kWaitBlinks * 2U);
+    break;
   }
   cueStartedAtMs_ = nowMs;
   cueActive_ = true;

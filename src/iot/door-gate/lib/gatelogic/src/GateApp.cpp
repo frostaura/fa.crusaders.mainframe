@@ -387,7 +387,9 @@ void GateApp::decideScan(const char* token) {
     // than asked about, on exactly the debounce's precedent above: a scan this
     // board cannot honour is not a question for the API, and a 200 answering
     // `opened` would put a door opening in the server's trail that did not
-    // happen. The member gets the denial blink and scans again.
+    // happen. The member gets the WAIT pulse — one slow breath rather than the
+    // refusal's stutter, because this is the lock relatching and not a decision
+    // about them — and scans again.
     decision = refuseRelocking(how == Attempt::RosterOnly);
   } else if (how == Attempt::Online && scanCallFloorAt_.remaining(asked) > 0U) {
     // THE FLOOR UNDER `/gate` CALLS (round G4, A2). The debounce bounds repeats
@@ -454,7 +456,9 @@ void GateApp::report(const ScanDecision& decision, const char* token, uint32_t n
 
 uint32_t GateApp::apply(ScanDecision& decision, uint32_t nowMs) {
   if (!decision.released) {
-    led_.cue(LedCue::Denied, nowMs);
+    // "In a moment" and "no" are different answers and the lamp is the only
+    // channel that can carry either. See ScanDecision::askedToWait.
+    led_.cue(decision.askedToWait ? LedCue::Wait : LedCue::Denied, nowMs);
     return 0U;
   }
   switch (unlock_.request(nowMs, decision.unlockMs)) {
@@ -472,10 +476,11 @@ uint32_t GateApp::apply(ScanDecision& decision, uint32_t nowMs) {
     // lines later, so a window can close inside the very call that granted
     // this — which is how a relay was measured writing OFF and ON at the same
     // millisecond, for ever. The decision is rewritten rather than dropped:
-    // the lamp denies, the log says `relocking`, and an offline record says a
-    // scan was refused rather than that a door opened.
+    // the lamp asks them to WAIT rather than denying them, the log says
+    // `relocking`, and an offline record says a scan was refused rather than
+    // that a door opened.
     markRelocking(decision);
-    led_.cue(LedCue::Denied, nowMs);
+    led_.cue(LedCue::Wait, nowMs);
     return 0U;
   }
   led_.setReleased(true);

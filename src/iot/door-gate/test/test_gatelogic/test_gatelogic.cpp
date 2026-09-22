@@ -1386,6 +1386,48 @@ void test_led_blinks_three_times_for_a_refusal_and_twice_at_boot() {
   }
 }
 
+/// THE WAIT PULSE IS NOT A REFUSAL, AND A MEMBER MUST BE ABLE TO SEE THAT.
+///
+/// Before this, a member who arrived during the relock dwell got the identical
+/// three-blink stutter as a member whose membership the club had suspended.
+/// One of them should present the phone again; the other should go to the desk.
+/// A door gate has one lamp, so the difference has to live in the shape.
+void test_led_asks_to_wait_with_one_slow_pulse_not_the_refusal_stutter() {
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    const uint32_t base = kBases[b];
+
+    gatelogic::LedPattern wait;
+    wait.setLinkUp(true);
+    wait.cue(gatelogic::LedCue::Wait, base);
+    // Lit first, like every cue — a pulse whose first half were dark is a pulse
+    // somebody who glanced away never saw.
+    for (uint8_t half = 0U; half < gatelogic::kWaitBlinks * 2U; ++half) {
+      const uint32_t at = base + (half * gatelogic::kWaitHalfMs) + 10U;
+      TEST_ASSERT_EQUAL_MESSAGE((half % 2U) == 0U, wait.on(at), "one pulse, lit first");
+    }
+    TEST_ASSERT_FALSE_MESSAGE(wait.on(base + (gatelogic::kWaitBlinks * 2U * gatelogic::kWaitHalfMs)),
+                              "and then it is over");
+
+    // THE POINT OF THE TEST, and the assertion a future edit has to break
+    // before it can make the two look alike again: at the instant the refusal
+    // has gone dark for the first time, the wait pulse is STILL LIT. Somebody
+    // watching the lamp can tell them apart without a stopwatch.
+    gatelogic::LedPattern denied;
+    denied.setLinkUp(true);
+    denied.cue(gatelogic::LedCue::Denied, base);
+    const uint32_t firstDark = base + gatelogic::kDeniedHalfMs + 5U;
+    TEST_ASSERT_FALSE_MESSAGE(denied.on(firstDark), "the refusal has blinked off by now");
+    TEST_ASSERT_TRUE_MESSAGE(wait.on(firstDark), "and the wait pulse has not");
+
+    // They also do not merely differ in phase: the shapes are different
+    // lengths, so no sampling instant makes them the same pattern.
+    TEST_ASSERT_TRUE_MESSAGE(
+        (gatelogic::kWaitBlinks * 2U * gatelogic::kWaitHalfMs)
+            != (gatelogic::kDeniedBlinks * 2U * gatelogic::kDeniedHalfMs),
+        "a wait that lasted exactly as long as a refusal would be a refusal");
+  }
+}
+
 void test_led_blinks_slowly_while_the_radio_is_down_and_is_dark_when_it_is_up() {
   gatelogic::LedPattern led;
   led.setLinkUp(false);
@@ -4101,6 +4143,16 @@ void test_app_a_scan_inside_the_relock_dwell_costs_no_call_and_records_no_openin
                                    "the member is told why, in a word that is about the door");
   TEST_ASSERT_FALSE_MESSAGE(rig.log.last().released, "and the log must not claim a release");
 
+  // AND THE LAMP SAYS "IN A MOMENT", NOT "NO". The log reason is for the club;
+  // this is the only thing the member standing at the door can see. Sampled at
+  // the instant a REFUSAL would have gone dark for the first time: the wait
+  // pulse is still lit there, and that is the whole difference.
+  {
+    const uint32_t firstDark = rig.clock.value() + gatelogic::kDeniedHalfMs + 5U;
+    TEST_ASSERT_TRUE_MESSAGE(rig.led.on(firstDark),
+                             "the dwell must pulse, not stutter — this member should scan again");
+  }
+
   // The queued record: an `unknown_scan`, never a `gate_open` for a door that
   // did not move. Read off the ring's growth plus the decision's own flag.
   TEST_ASSERT_TRUE_MESSAGE(rig.log.last().queued, "an offline refusal is still evidence");
@@ -6109,6 +6161,7 @@ int main(int, char**) {
   RUN_TEST(test_led_level_for_both_polarities);
   RUN_TEST(test_led_is_solid_while_the_lock_is_released_whatever_else_is_happening);
   RUN_TEST(test_led_blinks_three_times_for_a_refusal_and_twice_at_boot);
+  RUN_TEST(test_led_asks_to_wait_with_one_slow_pulse_not_the_refusal_stutter);
   RUN_TEST(test_led_blinks_slowly_while_the_radio_is_down_and_is_dark_when_it_is_up);
   RUN_TEST(test_led_a_cue_outranks_the_link_blink_and_then_gives_it_back);
 

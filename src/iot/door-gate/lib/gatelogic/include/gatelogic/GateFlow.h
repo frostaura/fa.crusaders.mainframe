@@ -178,6 +178,22 @@ struct ScanDecision {
   /// after an admin presses the button.
   bool outOfService = false;
 
+  /// THIS REFUSAL IS "IN A MOMENT", NOT "NO".
+  ///
+  /// Set only by the two relock-dwell paths. Every other refusal is a decision
+  /// about the MEMBER — a code that is not for today, a membership the club
+  /// suspended, a board taken out of service — and the thing to do about it is
+  /// to go and find somebody. This one is a decision about the LOCK: it is a
+  /// few hundred milliseconds of guaranteed dark time so the strike relatches,
+  /// and the thing to do about it is scan again. The lamp is the only channel
+  /// a door gate has, so the two must not look the same on it.
+  ///
+  /// A flag rather than a comparison against `reason`, for the same reason
+  /// `outOfService` is one: a caller that had to match a string would be a
+  /// caller that silently stops matching the day the word changes, and what it
+  /// would fall back to is the refusal blink — the exact bug this closes.
+  bool askedToWait = false;
+
   /// Only meaningful when queueEvent. GateOpen for an open this board decided,
   /// UnknownScan for a refusal it decided.
   eventq::Kind eventKind = eventq::Kind::UnknownScan;
