@@ -170,20 +170,22 @@ function ruleNotice(rules: ViewerRules, clubDay: string): Notice | null {
 }
 
 /**
- * D4 §2.6. A member with 0.00 credits was shown thirty-one green cells and found out in the
- * dialog, after picking a court and a time. `null` is UNKNOWN — a wallet read that has not
- * landed — and says nothing, because a grid that shouted "no credits" at a slow network would
+ * D4 §2.6. A member with R0.00 was shown thirty-one green cells and found out in the dialog,
+ * after picking a court and a time. `null` is UNKNOWN — a wallet read that has not landed —
+ * and says nothing, because a grid that shouted "your wallet is empty" at a slow network would
  * be wrong more often than right.
  */
 export function walletNotice(balanceCredits: number | null, day: ScheduleDay | null): Notice | null {
   // Through `walletTone`, and exported so the one rule can be asserted on all three surfaces
   // at once. This used to ask `balanceCredits > 0`, which let 0.004 through — a balance that
-  // renders as "0.00" and buys nothing, on a grid still offering thirty-one green cells while
+  // renders as "R0.00" and buys nothing, on a grid still offering thirty-one green cells while
   // the chip beside it was already red.
   if (walletTone(balanceCredits) !== "zero") return null;
   return {
     id: "wallet", tone: "warning",
-    title: emptyWalletSentence(cheapestSlice(day)),
+    // The figure, not a literal zero: `walletTone` reads a NEGATIVE balance as "zero" too, and
+    // a member who owes the club needs to top up by more than a member who merely has nothing.
+    title: emptyWalletSentence(cheapestSlice(day), balanceCredits ?? 0),
     action: { label: "Top up", to: "/wallet/topup" },
   };
 }

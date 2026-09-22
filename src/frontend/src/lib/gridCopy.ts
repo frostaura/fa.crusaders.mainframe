@@ -1,4 +1,4 @@
-import { formatCredits } from "./utils";
+import { formatMoney } from "./utils";
 
 /**
  * Every sentence the booking grid says, in one module.
@@ -205,13 +205,13 @@ export function groupRateLine(groups: readonly { name: string }[]): string | nul
 export function groupRateSentence(groups: readonly { name: string }[], priceCredits: number, sliceMinutes: number): string {
   const first = groups[0]?.name;
   const who = first ? `You're a ${withoutTrailingPlural(first).toLowerCase()}.` : "This is your rate.";
-  return `${who} You pay ${formatCredits(priceCredits)} for ${sliceMinutes} minutes on this court.`;
+  return `${who} You pay ${formatMoney(priceCredits)} for ${sliceMinutes} minutes on this court.`;
 }
 
 /* ─────────────────────────── The wallet, before the member picks ─────────────────────────── */
 
 /**
- * D4 §2.6. A member with no credit was shown thirty-one green cells and found out in the
+ * D4 §2.6. A member with an empty wallet was shown thirty-one green cells and found out in the
  * dialog, after choosing a court and a time. The dialog handles it well; it just handles it
  * too late.
  *
@@ -220,12 +220,30 @@ export function groupRateSentence(groups: readonly { name: string }[], priceCred
  * may top the member up while they look, and a grid that hides slots on a wallet read would
  * be making a promise in the other direction. The member is told, and the cells still work.
  * </p>
+ *
+ * <p>
+ * <b>Written around the AMOUNT, not around a unit.</b> It used to read "You have no credits,
+ * so you can't book yet", where "credits" is a noun the sentence leans on rather than a unit
+ * bolted to a number — so substituting the symbol for it gives nonsense and deleting it gives
+ * "You have no, so you can't book yet". Naming the balance is the better sentence anyway: it
+ * sits next to the cost of a slot, so the two figures read as the one comparison the member is
+ * actually making, and "R0.00" is what their own chip is showing them at the same moment.
+ * </p>
+ *
+ * <p>
+ * <b>The balance argument is additive and defaults to zero.</b> `walletTone` reads a NEGATIVE
+ * balance as the same "zero" state — the settlement model posts a late reversal as two new
+ * rows and says in so many words that a balance may go below nothing — so the banner fires for
+ * a member who owes the club. Saying "R0.00" to somebody at −25.00 understates the top-up they
+ * need by the whole of what they owe, and it is the one sentence on that screen that could
+ * have told them.
+ * </p>
  */
-export function emptyWalletSentence(cheapestSliceCredits: number | null): string {
+export function emptyWalletSentence(cheapestSliceCredits: number | null, balance = 0): string {
   const cost = cheapestSliceCredits !== null
-    ? ` A slot here costs ${formatCredits(cheapestSliceCredits)}.`
+    ? ` A slot here costs ${formatMoney(cheapestSliceCredits)}.`
     : "";
-  return `You have no credits, so you can't book yet.${cost}`;
+  return `Your balance is ${formatMoney(balance)}, so you can't book yet.${cost}`;
 }
 
 /* ─────────────────────────── The past wall ─────────────────────────── */
