@@ -110,6 +110,7 @@ export function SegmentedTabs<T extends string>({
   label,
   panelId,
   className,
+  showDisabledReasons = false,
 }: {
   segments: Segment<T>[];
   value: T;
@@ -119,6 +120,24 @@ export function SegmentedTabs<T extends string>({
   /** The id of the tabpanel each segment controls. It must resolve to a real element. */
   panelId: (value: T) => string;
   className?: string;
+  /**
+   * Draw each dim segment's `disabledReason` under the control, rather than only speaking it.
+   *
+   * <p>
+   * <b>Off by default, and on is usually the better answer.</b> A dimmed control whose reason
+   * only a screen reader hears leaves every sighted member tapping a thing that does nothing —
+   * which is the dead-surface defect this round exists to remove, and sighted members are
+   * almost all of them. It is nonetheless a prop rather than the default because a consumer
+   * with no room under the capsule cannot be broken by a prop it never passes, and the two
+   * lanes that built this control shipped both behaviours before they met.
+   * </p>
+   *
+   * <p>
+   * Either way there is exactly ONE copy of the sentence and the dim tab's
+   * `aria-describedby` points at it. Two copies is how the seen and the spoken drift apart.
+   * </p>
+   */
+  showDisabledReasons?: boolean;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const tabRefs = useRef(new Map<T, HTMLButtonElement>());
@@ -186,11 +205,24 @@ export function SegmentedTabs<T extends string>({
     // `aria-disabled` does not stop a click the way `disabled` does — that is the whole point
     // of choosing it — so the refusal is here rather than in the markup.
     if (segment.disabled) return;
-    if (segment.value === value) return;
+    /*
+      A tap on the ALREADY-selected segment is reported, not swallowed.
+
+      It reads like a redundant event and is not: a consumer may DERIVE `value` from something
+      other than the last tap. `/my-code` derives it from the code the server sent, so a member
+      with no booking sees "Member code" selected while having chosen nothing — and tapping it
+      is how she pins that choice. Swallowing the tap made the pin unreachable, which is the
+      very bug the derived selection was introduced to fix, coming back in through the control.
+
+      Idempotence belongs to the consumer: it is the only layer that knows whether acting twice
+      costs anything.
+    */
     onChange(segment.value);
   };
 
-  return (
+  const explained = segments.filter((s) => s.disabled && s.disabledReason);
+
+  const track = (
     <div
       ref={trackRef}
       role="tablist"
@@ -301,15 +333,35 @@ export function SegmentedTabs<T extends string>({
         shipped once with its name made of every copy of its label. Out here it is only ever a
         description, read when focus arrives.
 
-        Inside the tablist rather than beside it because a `role="tablist"` whose children are
-        not all tabs is still a valid tablist (the spec allows other content), and lifting the
-        component's return into a fragment would make `className` apply to something that is
-        not the control.
+        Inside the tablist while they are invisible, because a `role="tablist"` whose children
+        are not all tabs is still a valid tablist and a zero-size span disturbs no layout.
+        `aria-hidden` so the invisible copy is a description and never page content as well.
       */}
-      {segments.filter((s) => s.disabled && s.disabledReason).map((s) => (
+      {!showDisabledReasons && explained.map((s) => (
         <span key={`${s.value}-why`} id={`${panelId(s.value)}-why`} className="sr-only" aria-hidden="true">
           {s.disabledReason}
         </span>
+      ))}
+    </div>
+  );
+
+  if (!showDisabledReasons || explained.length === 0) return track;
+
+  /*
+    Drawn: the same single sentence, out of the flex row and under the control.
+
+    It leaves the tablist because a paragraph among flex children is laid out AS a segment —
+    it would take a share of the row and stretch the capsule round it. And the `aria-hidden`
+    comes off with the `sr-only`: visible text that a screen reader is forbidden to reach as
+    page content is a second class of invisible, and the description reference still finds it.
+  */
+  return (
+    <div className="space-y-1.5">
+      {track}
+      {explained.map((s) => (
+        <p key={`${s.value}-why`} id={`${panelId(s.value)}-why`} className="text-xs text-text-muted">
+          {s.disabledReason}
+        </p>
       ))}
     </div>
   );

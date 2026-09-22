@@ -463,3 +463,162 @@ describe("booking many — item 13", () => {
     expect(first.allowNegativeBalance).toBe(false);
   });
 });
+
+
+/**
+ * Item 5's desktop half — D3 §4.1 doors 3 and 4: drag a marquee, and extend with Shift.
+ *
+ * <p>
+ * <b>Both grow a RECTANGLE, and D3 said "reading order" for Shift+click.</b> The deviation is
+ * argued in `withinRectangle`: shift-clicking Court 2 at 16:00 and Court 2 at 17:00 means that
+ * court for that hour, which is what a league night is. In reading order the same pair also
+ * takes every other court of the first row, every court of every row between, and the courts
+ * before the target in the last — twenty-odd slots where four were asked for, on a control
+ * whose next button is a bulk charge.
+ * </p>
+ *
+ * <p>
+ * <b>The rectangle is filled from the CELLS, not from the rules.</b> `keysWithin` reads each
+ * cell's own `data-select-key`, so a Closed or Past cell inside the sweep is passed over
+ * because that cell already decided it cannot be chosen. Re-deriving that here would be a
+ * second copy of `cellVerdict`, the quota and the group windows.
+ * </p>
+ */
+describe("extending a selection across a range", () => {
+  beforeEach(() => { forgetClubZone(); signIn({ isAdmin: true }); });
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); forgetClubZone(); });
+
+  const cellAt = (name: string) => screen.getByRole("gridcell", { name });
+  const chosen = () => screen.getAllByRole("gridcell").filter((c) => c.getAttribute("aria-selected") === "true");
+
+  it("takes the rectangle between the anchor and a Shift+click, not the reading-order run", async () => {
+    openAsAdmin();
+    await select([/^Book Court 1 at 16:00/]);
+
+    // Court 1 16:00 is the anchor. Shift+click Court 1 at 16:30 — one column, three rows.
+    await act(async () => {
+      fireEvent.click(cellAt("Court 1 at 16:30"), { shiftKey: true, bubbles: true });
+    });
+
+    const names = chosen().map((c) => c.getAttribute("aria-label"));
+    expect(names).toEqual(["Court 1 at 16:00", "Court 1 at 16:15", "Court 1 at 16:30"]);
+    // The proof that it is a rectangle and not a run: the reading-order answer would have
+    // swept Court 2 at 16:00 and 16:15 in as well.
+    expect(names).not.toContain("Court 2 at 16:00");
+  });
+
+  it("widens across courts when the Shift+click is in another column", async () => {
+    openAsAdmin();
+    await select([/^Book Court 1 at 16:00/]);
+
+    await act(async () => {
+      fireEvent.click(cellAt("Court 2 at 16:15"), { shiftKey: true, bubbles: true });
+    });
+
+    expect(chosen().map((c) => c.getAttribute("aria-label")).sort()).toEqual([
+      "Court 1 at 16:00", "Court 1 at 16:15", "Court 2 at 16:00", "Court 2 at 16:15",
+    ]);
+  });
+
+  /**
+   * A second extension from the same anchor REPLACES the first rather than adding to it, so a
+   * drag that went too far is fixed by dragging back — not by un-ticking eleven cells.
+   */
+  it("shrinks when the range is pulled back, rather than only ever growing", async () => {
+    openAsAdmin();
+    await select([/^Book Court 1 at 16:00/]);
+
+    await act(async () => { fireEvent.click(cellAt("Court 1 at 16:45"), { shiftKey: true, bubbles: true }); });
+    expect(chosen()).toHaveLength(4);
+
+    await act(async () => { fireEvent.click(cellAt("Court 1 at 16:15"), { shiftKey: true, bubbles: true }); });
+    expect(chosen().map((c) => c.getAttribute("aria-label")))
+      .toEqual(["Court 1 at 16:00", "Court 1 at 16:15"]);
+  });
+
+  it("extends on Shift+Arrow, so the keyboard draws the same shape as the mouse", async () => {
+    openAsAdmin();
+    await select([/^Book Court 1 at 16:00/]);
+
+    const grid = screen.getByRole("grid");
+    await act(async () => { fireEvent.keyDown(grid, { key: "ArrowDown", shiftKey: true }); });
+    await act(async () => { fireEvent.keyDown(grid, { key: "ArrowRight", shiftKey: true }); });
+
+    expect(chosen().map((c) => c.getAttribute("aria-label")).sort()).toEqual([
+      "Court 1 at 16:00", "Court 1 at 16:15", "Court 2 at 16:00", "Court 2 at 16:15",
+    ]);
+  });
+
+  /** Without Shift the caret moves and the selection is left exactly as it was. */
+  it("moves the caret without touching the selection when Shift is not held", async () => {
+    openAsAdmin();
+    await select([/^Book Court 1 at 16:00/]);
+
+    const grid = screen.getByRole("grid");
+    await act(async () => { fireEvent.keyDown(grid, { key: "ArrowDown" }); });
+    expect(chosen().map((c) => c.getAttribute("aria-label"))).toEqual(["Court 1 at 16:00"]);
+  });
+
+  /**
+   * The marquee, on a mouse. `pointerType: "mouse"` is load-bearing: a coarse pointer gets the
+   * long press instead, because a marquee on a phone is a scroll.
+   */
+  it("paints a rectangle under a mouse drag, and enters selection mode by itself", async () => {
+    openAsAdmin();
+    await screen.findByRole("grid");
+    // No `Select` pressed. The drag is a door IN — D3 §4.1, door 3. The day strip's toggle is
+    // what says whether the mode is on; `aria-multiselectable` is on the grid for any admin.
+    expect(screen.getByRole("button", { name: "Select" })).toBeInTheDocument();
+
+    const grid = screen.getByRole("grid");
+    await act(async () => {
+      fireEvent.pointerDown(cellAt("Court 1 at 16:00"), { pointerType: "mouse", button: 0, bubbles: true });
+      fireEvent.pointerOver(cellAt("Court 1 at 16:15"), { pointerType: "mouse", bubbles: true });
+      fireEvent.pointerOver(cellAt("Court 2 at 16:30"), { pointerType: "mouse", bubbles: true });
+      fireEvent.pointerUp(window);
+    });
+
+    expect(grid).toHaveAttribute("aria-multiselectable", "true");
+    expect(screen.getByRole("button", { name: "Done" })).toBeInTheDocument();
+    expect(chosen().map((c) => c.getAttribute("aria-label")).sort()).toEqual([
+      "Court 1 at 16:00", "Court 1 at 16:15", "Court 1 at 16:30",
+      "Court 2 at 16:00", "Court 2 at 16:15", "Court 2 at 16:30",
+    ]);
+  });
+
+  /**
+   * A press and a release on ONE cell is a click, and must still open the booking dialog. A
+   * marquee that fired on every click would have replaced the product's primary action.
+   */
+  it("leaves an ordinary click alone", async () => {
+    openAsAdmin();
+    await screen.findByRole("grid");
+
+    const cell = await screen.findByRole("button", { name: /^Book Court 1 at 16:00/ });
+    await act(async () => {
+      fireEvent.pointerDown(cell, { pointerType: "mouse", button: 0, bubbles: true });
+      fireEvent.pointerUp(window);
+      fireEvent.click(cell);
+    });
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  /**
+   * A marquee is not a mobile gesture. On a coarse pointer the same sequence must do nothing,
+   * because the same sequence is how somebody scrolls a grid with their thumb.
+   */
+  it("ignores a touch drag, which is a scroll", async () => {
+    openAsAdmin();
+    await screen.findByRole("grid");
+
+    await act(async () => {
+      fireEvent.pointerDown(cellAt("Court 1 at 16:00"), { pointerType: "touch", button: 0, bubbles: true });
+      fireEvent.pointerOver(cellAt("Court 1 at 16:30"), { pointerType: "touch", bubbles: true });
+      fireEvent.pointerUp(window);
+    });
+
+    expect(screen.getByRole("button", { name: "Select" })).toBeInTheDocument();
+    expect(chosen()).toHaveLength(0);
+  });
+});

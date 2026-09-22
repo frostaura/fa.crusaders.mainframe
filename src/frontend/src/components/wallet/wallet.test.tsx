@@ -2,9 +2,8 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import WalletPage from "../../pages/Wallet";
 import { renderPage, stubFetch } from "../../test/harness";
-import { LOW_BALANCE_CREDITS } from "../../lib/balance";
 import {
-  BALANCE_SENTENCE, balanceLevel, creditArrivedSentence, creditLeftSentence,
+  BALANCE_SENTENCE, creditArrivedSentence, creditLeftSentence,
 } from "../../lib/walletCopy";
 
 /**
@@ -41,36 +40,19 @@ function serveWallet(balance: number, entries: Record<string, unknown>[] = []) {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("zero is a different thing from low", () => {
-  it.each([
-    [0, "empty"],
-    [-25, "empty"],
-    [0.004, "empty"],
-    [0.01, "low"],
-    [49.99, "low"],
-    [LOW_BALANCE_CREDITS, "fine"],
-    [100000, "fine"],
-  ])("reads %s as %s", (balance, level) => {
-    expect(balanceLevel(balance, LOW_BALANCE_CREDITS)).toBe(level);
-  });
-
-  /**
-   * `0.004` rounds to `0.00` for display and is not `<= 0`. The mutant this kills is a
-   * `=== 0` test, which would show a member "0.00 credits" beside the comfortable sentence.
-   */
-  it("treats a balance that rounds to zero as empty, not as a rounding curiosity", () => {
-    expect(balanceLevel(0.004, LOW_BALANCE_CREDITS)).toBe("empty");
-    expect((0.004).toFixed(2)).toBe("0.00");
-  });
-
-  it("reads an absent balance as nothing to warn about", () => {
-    expect(balanceLevel(null, LOW_BALANCE_CREDITS)).toBe("fine");
-  });
+  /*
+    The rule itself moved. It is now `walletTone` in `lib/balance` — one function for the chip,
+    the wallet page and the grid's empty-wallet banner, which each used to decide separately
+    and disagreed at 0.004 credits. `lib/wallet-tone.test.ts` holds the table of balances and
+    the 0.004 case against that one function; what stays here is what this PAGE does with the
+    answer.
+  */
 
   it("says what an empty wallet STOPS, not that it is getting on", async () => {
     serveWallet(0);
     renderPage(<WalletPage />);
 
-    expect(await screen.findByText(BALANCE_SENTENCE.empty)).toBeInTheDocument();
+    expect(await screen.findByText(BALANCE_SENTENCE.zero)).toBeInTheDocument();
     expect(screen.queryByText(/running low/i)).toBeNull();
     // And the one control that helps is the primary one, named for the errand.
     expect(screen.getByRole("link", { name: /Top up to start booking/ })).toHaveAttribute("href", "/wallet/topup");
@@ -81,7 +63,7 @@ describe("zero is a different thing from low", () => {
     renderPage(<WalletPage />);
 
     expect(await screen.findByText(BALANCE_SENTENCE.low)).toBeInTheDocument();
-    expect(screen.queryByText(BALANCE_SENTENCE.empty)).toBeNull();
+    expect(screen.queryByText(BALANCE_SENTENCE.zero)).toBeNull();
   });
 
   it("says nothing alarming at a comfortable balance", async () => {
@@ -136,7 +118,7 @@ describe("what a member sees when the club tops them up while they watch", () =>
     const club = { balance_credits: 0, entries: [] as unknown[], total_entries: 0, offset: 0, limit: 100 };
     stubFetch([{ path: "/api/v1/wallet", respond: () => ({ ...club }) }]);
     renderPage(<WalletPage />);
-    await screen.findByText(BALANCE_SENTENCE.empty);
+    await screen.findByText(BALANCE_SENTENCE.zero);
 
     club.balance_credits = 200;
     club.entries = [ROW()];
@@ -193,7 +175,7 @@ describe("the ledger's clock", () => {
   it("does not claim a clock convention when there are no rows to read", async () => {
     serveWallet(0);
     renderPage(<WalletPage />);
-    await screen.findByText(BALANCE_SENTENCE.empty);
+    await screen.findByText(BALANCE_SENTENCE.zero);
 
     expect(screen.queryByText("Times are the club's own.")).toBeNull();
   });
@@ -207,7 +189,7 @@ describe("a wallet that will not load", () => {
     expect(await screen.findByText(/Couldn't load wallet/)).toBeInTheDocument();
     // Three states, not two: a failed read is not an empty wallet, and must not be dressed as
     // one — "you can't book until you top up" over a read that never landed is a lie.
-    expect(screen.queryByText(BALANCE_SENTENCE.empty)).toBeNull();
+    expect(screen.queryByText(BALANCE_SENTENCE.zero)).toBeNull();
     await waitFor(() => expect(screen.queryByText("0.00")).toBeNull());
     cleanup();
   });

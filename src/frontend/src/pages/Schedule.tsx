@@ -245,7 +245,19 @@ export default function SchedulePage() {
       <ScheduleBulk
         selection={selection} day={day} slotsByCourt={slotsByCourt} bulk={bulk} setBulk={setBulk}
         members={members} actorUserId={actorUserId}
-        onSettled={(done) => { selection?.drop(done); void reconcile(); void refreshBalance(); refreshMembers(); }}
+        /*
+          `expectSelf`: the sheet has just drawn a per-item report with the totals on it, so
+          the chip announcing the same movement again is one action told twice. Not `apply`:
+          a bulk book's `balance_after_credits` is the PAYER's, and on behalf of a member that
+          is somebody else's wallet — handing it to the viewer's chip would paint a stranger's
+          balance in the header.
+        */
+        onSettled={(done) => {
+          selection?.drop(done);
+          void reconcile();
+          void refreshBalance({ expectSelf: true });
+          refreshMembers();
+        }}
       />
 
       <ScheduleDialogs

@@ -26,6 +26,7 @@ import {
   type ReadFailure,
   USE_MEMBER_CODE_INSTEAD,
   codeExpiredDeadEnd,
+  decisionActionKinds,
   describeStanding,
   liveContact,
   offlineIdentDeadEnd,
@@ -44,7 +45,7 @@ import { useBoundaryRefresh } from "../components/member-door/useBoundaryRefresh
 import { useCountdownSeconds } from "../components/member-door/useCountdownSeconds";
 import { useMemberCode } from "../components/member-door/useMemberCode";
 import { useMemberDoor, useShownDecision } from "../components/member-door/useMemberDoor";
-import { SegmentedTabs } from "../components/member-door/CodeTabs";
+import { SegmentedTabs } from "../components/SegmentedTabs";
 // item 16 — the pushed card about the booking in hand, and the way to the whole guide.
 import { WhatsNextCard } from "../components/onboarding/WhatsNextCard";
 import { GUIDE_FROM_CODE, GUIDE_PATH } from "../lib/onboardingCopy";
@@ -513,6 +514,12 @@ function CodeChoice(props: {
         value={selected}
         panelId={(v) => PANEL_ID[v]}
         onChange={(next) => onChoose(next === "member")}
+        /*
+          Drawn, not `sr-only`. This is the one place the two lanes that built the capsule
+          disagreed, and the drawn sentence is why a member who taps the dim tab learns
+          anything at all — see `showDisabledReasons` on the primitive.
+        */
+        showDisabledReasons
         segments={[
           {
             value: "booking",
@@ -534,7 +541,7 @@ function CodeChoice(props: {
         No `tabIndex={0}`: the APG asks for it only on a panel with nothing focusable in it,
         and this one holds the full-screen control and the refresh.
       */}
-      <div id={PANEL_ID[selected]} role="tabpanel" aria-labelledby={`tab-${selected}`} className="space-y-2">
+      <div id={PANEL_ID[selected]} role="tabpanel" aria-labelledby={`segment-${PANEL_ID[selected]}`} className="space-y-2">
         {children}
         {selected === "member" && memberChoice && (
           <p className="text-xs text-text-muted">{CODE_CHOICE_STICKY}</p>
@@ -600,13 +607,30 @@ function DoorWindowClosed(props: { onUseMemberCode: () => void }) {
 
 // --- the page -------------------------------------------------------------------
 
-export default function MyCodePage() {
+/**
+ * Everything `MyCodePage` KNOWS, gathered out of the function that draws it.
+ *
+ * <p>
+ * <b>Extracted for the complexity gate, and the gate was right.</b> The page was eighteen
+ * branches of derivation followed by three possible returns, and the derivation is the part
+ * that is hard: a `null` that means "not read yet" three times over, a code's own countdown
+ * crossed with a door's window, and a decision that is only a decision at a club with a door.
+ * A reader checking whether the page draws the right thing had to hold all of it at once.
+ * </p>
+ *
+ * <p>
+ * <b>A hook rather than a pure function, because the facts are hooks.</b> Six of them, and the
+ * rules of hooks mean they cannot move anywhere but into another hook. What this buys is that
+ * the component below is now only a render: every question it asks is answered here, once,
+ * with the reasoning beside the answer.
+ * </p>
+ */
+function useMyCodePage() {
   // The code's own lifecycle — fetching, pacing, the pre-fetch, the not-rotated chase and
   // the barred dead end — is `useMemberCode`. None of it is about doors, and inline it
   // made this function a thirty-branch render that nobody could check by reading.
-  const {
-    qr, secondsLeft, loading, error, barred, walkUp, refetch, refetchAsync, chooseWalkUp,
-  } = useMemberCode();
+  const code_ = useMemberCode();
+  const { qr, secondsLeft, loading, error, walkUp, refetch, refetchAsync, chooseWalkUp } = code_;
 
   // doors: member — one read carries the whole door picture, and every block it feeds is
   // silent unless this club has a door. See `doorFacts` below.
@@ -617,9 +641,8 @@ export default function MyCodePage() {
 
   const { shown: shownDecision, dismiss } = useShownDecision(door, refetch);
   const facts = doorFacts(door, qr, cached, doorRead.failed && !!error);
-  const { doorsClub, doorsKnowledge, contact, meaning, code } = facts;
   /** A decision is only ever about a door, so a club with none has none to show. */
-  const decisionToShow = doorsClub ? shownDecision : null;
+  const decisionToShow = facts.doorsClub ? shownDecision : null;
   /**
    * D6 — when the door facts on screen were read, or null while they are the live answer.
    *
@@ -641,6 +664,8 @@ export default function MyCodePage() {
     }, [refetchAsync, doorRead]),
   );
 
+  /** Zero when there is no code at all, which the checklist reads as "had run out". */
+  const codeSecondsLeft = qr ? secondsLeft : 0;
   /**
    * Has this booking code stopped opening a door? Null when there is no window to judge.
    *
@@ -650,16 +675,60 @@ export default function MyCodePage() {
    * sleeps through.
    * </p>
    */
-  /** Zero when there is no code at all, which the checklist reads as "had run out". */
-  const codeSecondsLeft = qr ? secondsLeft : 0;
   const doorWindowLeft = useCountdownSeconds(bookingDoorWindowEnd(qr));
   const bookingDoorWindowClosed = doorWindowLeft !== null && doorWindowLeft <= 0;
+
+  /*
+    The decision card and the standing line are the same act seen from two sides — the card
+    because the refusal reason wants a booking, the line because the club's policy does — and
+    both were rendering "Book a court" as identical filled buttons on one screen. Asked
+    through `decisionActionKinds`, which reads the same arm table the card renders from, so
+    the answer cannot drift from the button it is about.
+  */
+  const bookingOfferedByCard = decisionToShow !== null
+    && decisionActionKinds(decisionToShow).includes("book_a_court");
+
+  return {
+    ...code_,
+    ...facts,
+    doorRead,
+    door,
+    cached,
+    dismiss,
+    decisionToShow,
+    staleSince,
+    switchToMemberCode,
+    codeSecondsLeft,
+    bookingOfferedByCard,
+    /** Only when there is something better to switch TO — see `DoorBlocks`. */
+    windowClosedOffer: bookingDoorWindowClosed && !walkUp,
+    /** The last usable code this browser saw, offered only once the live one has run out. */
+    fallbackCode: codeSecondsLeft === 0 ? usableCachedBookingCode(cached, qr?.code ?? null) : null,
+    loading,
+    error,
+    walkUp,
+    refetch,
+    refetchAsync,
+    chooseWalkUp,
+  };
+}
+
+// --- the page -------------------------------------------------------------------
+
+export default function MyCodePage() {
+  const {
+    qr, secondsLeft, loading, error, barred, walkUp, refetch, refetchAsync, chooseWalkUp,
+    doorsClub, doorsKnowledge, contact, meaning, code, doorRead, door, cached, dismiss,
+    decisionToShow, staleSince, switchToMemberCode, codeSecondsLeft, bookingOfferedByCard,
+    windowClosedOffer, fallbackCode,
+  } = useMyCodePage();
 
   // After every hook, so none is skipped. BarredCard says why it replaces the whole page.
   if (barred !== null) return <BarredCard reason={barred} error={error} loading={loading} onCheckAgain={refetch} />;
 
   const doorBlocks = (
     <DoorBlocks
+      actionOfferedAbove={bookingOfferedByCard}
       doorsClub={doorsClub}
       doorsKnowledge={doorsKnowledge}
       door={door}
@@ -669,7 +738,7 @@ export default function MyCodePage() {
       code={code}
       staleSince={staleSince}
       codeSecondsLeft={codeSecondsLeft}
-      windowClosedOffer={bookingDoorWindowClosed && !walkUp}
+      windowClosedOffer={windowClosedOffer}
       onUseMemberCode={switchToMemberCode}
       onRefreshCode={refetchAsync}
     />
@@ -723,7 +792,7 @@ export default function MyCodePage() {
           contact={contact}
           loading={loading}
           secondsLeft={secondsLeft}
-          fallback={codeSecondsLeft === 0 ? usableCachedBookingCode(cached, qr?.code ?? null) : null}
+          fallback={fallbackCode}
           onRefresh={refetch}
         />
       </CodeChoice>
@@ -793,6 +862,8 @@ export default function MyCodePage() {
  * </p>
  */
 function DoorBlocks(props: {
+  /** The decision card above is already offering "Book a court". See `StandingLine`. */
+  actionOfferedAbove?: boolean;
   doorsClub: boolean;
   /** Yes, no, or — D1 — this page never found out. */
   doorsKnowledge: "yes" | "no" | "unknown";
@@ -838,6 +909,7 @@ function DoorBlocks(props: {
         codeSecondsLeft={props.codeSecondsLeft}
         onRefreshCode={props.onRefreshCode}
         onUseMemberCode={onUseMemberCode}
+        actionOfferedAbove={props.actionOfferedAbove}
       />
     </>
   );

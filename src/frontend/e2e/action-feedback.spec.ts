@@ -1,0 +1,336 @@
+import { SESSION_ADMIN, SESSION_ANON, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import type { Page } from "@playwright/test";
+
+/**
+ * Item 12 where a member meets it, in an engine that has a layout.
+ *
+ * <p>
+ * The unit suite proves each control DECLARES its intent (`components/member-confirm-intent.
+ * test.tsx`). Only a browser can answer the question the founder actually asked, which is
+ * whether a thumb is drawn on the glass and whether pressing it does anything you can see.
+ * jsdom reports no geometry, runs no CSS animation, resolves no custom property and honours
+ * no media query, so every assertion below is one no vitest test can make:
+ * </p>
+ *
+ * <ul>
+ *   <li>the glyph is a real stroked <code>&lt;svg&gt;</code> with non-zero size, not a
+ *       character that fell back to a missing font;</li>
+ *   <li>the thumb is the THUMB — ruling 4 overrules D4's ✓/✕ recommendation, and a club that
+ *       has set nothing gets thumbs;</li>
+ *   <li>pressing moves the button, and pressing a destructive one does not;</li>
+ *   <li>under <code>prefers-reduced-motion</code> the motion goes and the glyph, the colour
+ *       and the word stay — which is the half of a reduced-motion implementation that is
+ *       usually thrown out with the animation.</li>
+ * </ul>
+ *
+ * <p>
+ * 375x812 throughout: the phone the design was measured on, and the one a member is holding in
+ * the corridor outside court 3.
+ * </p>
+ */
+
+const PHONE = { width: 375, height: 812 };
+
+const COURT_A = "aaaaaaaa-0000-4000-8000-00000000000a";
+
+function tomorrow(): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/** One court, one free slice, nothing else in the way of the dialog under test. */
+function day() {
+  const d = tomorrow();
+  return {
+    date: d, timezone: "UTC", sliceMinutes: 15,
+    dayStartMinute: 7 * 60, dayEndMinute: 8 * 60,
+    advanceBookingDays: 14, penaltyPct: 30, penaltyWindowMinutes: 15,
+    courts: [{ id: COURT_A, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 }],
+    slots: [],
+    rules: {
+      // A window that covers the whole day. An EMPTY `allowedWindows` is not "no restriction" —
+      // it is a group that may book at no time at all, and every cell draws "Not your hours".
+      groups: [], allowedWindows: [{ start: "07:00", end: "08:00" }],
+      clubHours: { start: "07:00", end: "08:00" },
+      slicePriceCredits: 50, remainingToday: null, adminExempt: false,
+    },
+  };
+}
+
+/**
+ * A MEMBER, not an admin — and it is load-bearing rather than tidy.
+ *
+ * <p>
+ * `SESSION_ADMIN` opens the booking dialog on "on behalf of a member" with nobody chosen, so
+ * its confirm is `disabled`; `index.css`'s `button:disabled { transform: none }` is (0,1,1)
+ * and beats the `scale-[0.97]` utility's (0,1,0), so the press compression genuinely does not
+ * render — correctly, on a button that cannot be pressed. Walking item 12 through that session
+ * measures a disabled control and reports it as a missing theme. These screens are the
+ * member's; the walk is the member's.
+ * </p>
+ */
+const SESSION_MEMBER = {
+  ...SESSION_ADMIN,
+  is_admin: false,
+};
+
+const PROFILE = {
+  full_name: "Test Member", email: "m@test.local", photo_url: null,
+  membership_number: "P-1", member_class: "Regular",
+};
+
+async function onPhone(page: Page) {
+  await page.setViewportSize(PHONE);
+}
+
+/**
+ * What a press looks like, sampled while it is happening.
+ *
+ * <p>
+ * <b>Both obvious ways of asking this return "nothing happened", for different reasons.</b>
+ * Reading `getComputedStyle` at the instant the class lands gives the value the transition is
+ * moving AWAY from — `none` — because the transition has not produced a frame yet. Waiting for
+ * it to finish and then reading gives `none` as well, because the press RELEASES ITSELF after
+ * `duration.press` whether or not a pointerup ever arrives (`useActionFeedback` records why:
+ * arming a `ConfirmButton` unmounts the trigger under the finger). The window in which a press
+ * is visible is 90 ms wide and both reads sit outside it.
+ * </p>
+ *
+ * <p>
+ * So the press is dispatched and sampled inside ONE page-side task: no protocol round trip can
+ * land in the middle of the window, and what comes back is every frame of it rather than one
+ * guessed instant.
+ * </p>
+ */
+async function samplePress(page: Page, name: string | RegExp) {
+  return page.getByRole("button", { name }).evaluate(async (el: Element) => {
+    const frames: { fb: string | null; transform: string; animation: string }[] = [];
+    el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1 }));
+    // Every ~8 ms across the 90 ms compression, plus a little past it.
+    for (let i = 0; i < 14; i++) {
+      await new Promise(requestAnimationFrame);
+      const style = getComputedStyle(el);
+      frames.push({
+        fb: el.getAttribute("data-fb"),
+        transform: style.transform,
+        animation: style.animationName,
+      });
+    }
+    el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1 }));
+    return frames;
+  });
+}
+
+/** A transform that actually shrinks the button, as opposed to `none` or the identity. */
+function compressed(transform: string): boolean {
+  const m = /matrix\(([^)]+)\)/.exec(transform);
+  if (!m) return false;
+  const [a, , , d] = m[1].split(",").map((n) => Number.parseFloat(n));
+  return a < 0.999 && d < 0.999;
+}
+
+/**
+ * What the glyph actually is on the glass.
+ *
+ * <p>
+ * Read off the DOM rather than screenshotted, because the question is not "does something
+ * appear" but "is it the drawn mark, at a size, in the current text colour". A glyph rendered
+ * as a text character in a font the phone does not have is a 0x0 box that a screenshot
+ * comparison would happily accept as "different but fine".
+ * </p>
+ */
+async function glyphOf(page: Page, name: string | RegExp) {
+  const svg = page.getByRole("button", { name }).locator("svg[aria-hidden='true']").first();
+  await expect(svg).toHaveCount(1);
+  return page.getByRole("button", { name }).evaluate((button) => {
+    const el = button.querySelector("svg[aria-hidden='true']");
+    if (!el) return null;
+    const box = el.getBoundingClientRect();
+    return {
+      width: box.width,
+      height: box.height,
+      kind: el.getAttribute("data-glyph"),
+      stroke: getComputedStyle(el).stroke,
+      // The mark is STROKED, never a background-image and never a mask, which is what makes it
+      // one of the three things that survive forced colours.
+      background: getComputedStyle(el).backgroundImage,
+    };
+  });
+}
+
+async function openBookingDialog(page: Page) {
+  await signIn(page);
+  await serveApi(page, [
+    { path: "/api/v1/whoami", body: SESSION_MEMBER },
+    { path: "/api/v1/schedule", body: day() },
+    { path: "/api/v1/admin/members/", body: [] },
+    { path: "/api/v1/me/profile", body: PROFILE },
+    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+  ]);
+  await page.goto("/schedule");
+  await page.waitForSelector('[role="grid"]');
+  await page.getByRole("gridcell").locator("button", { hasText: "Available" }).first().click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+}
+
+test.describe("the booking dialog", () => {
+  test("draws a thumb on the yes and on the no, by default", async ({ page }) => {
+    await onPhone(page);
+    await openBookingDialog(page);
+
+    const yes = await glyphOf(page, /Book for/);
+    const no = await glyphOf(page, "Keep looking");
+
+    // Ruling 4: the club has set nothing, so it gets THUMBS. D4 recommended ✓/✕ and was
+    // overruled — the club is in Durban, where the gesture is unambiguous, and the founder
+    // asked for it by name. `action_glyphs: "marks"` is the way to the other pair.
+    expect(yes?.kind).toBe("thumbs-up");
+    expect(no?.kind).toBe("thumbs-down");
+
+    // Drawn at a size, in the text colour, with no background-image anywhere near it.
+    for (const g of [yes, no]) {
+      expect(g!.width).toBeGreaterThan(8);
+      expect(g!.height).toBeGreaterThan(8);
+      expect(g!.background).toBe("none");
+    }
+
+    // And the word is still the name. NN/g: a glyph without a label is ambiguous, and this
+    // audience is the one that pays for ambiguity.
+    await expect(page.getByRole("button", { name: /Book for 50\.00/ })).toBeVisible();
+  });
+
+  test("moves under a press, and says it is working", async ({ page }) => {
+    await onPhone(page);
+    await openBookingDialog(page);
+
+    const confirm = page.getByRole("button", { name: /Book for/ });
+    expect(await confirm.evaluate((el) => getComputedStyle(el).transform)).toBe("none");
+
+    const frames = await samplePress(page, /Book for/);
+
+    // The phase is reached, and it ends by itself — 90 ms of compression, not a button left
+    // squashed until a pointerup that may never arrive.
+    expect(frames.some((f) => f.fb === "press")).toBe(true);
+    expect(frames[frames.length - 1].fb).toBe("rest");
+
+    // The compression is what makes a tap feel LANDED on a phone, and it is the assertion a
+    // class-name check cannot make: `scale-[0.97]` means nothing until something computes it.
+    expect(frames.some((f) => compressed(f.transform))).toBe(true);
+  });
+});
+
+test.describe("a destructive confirm", () => {
+  /**
+   * The carve-out, measured. Ruling 4 in one sentence: a thumbs-up on "Cancel the booking" is
+   * the software claiming it approves of a member losing a 15.00 penalty.
+   */
+  test("wears no thumb and does not snap", async ({ page }) => {
+    await onPhone(page);
+    await signIn(page);
+    const d = tomorrow();
+    await serveApi(page, [
+      { path: "/api/v1/whoami", body: SESSION_MEMBER },
+      { path: "/api/v1/me/profile", body: PROFILE },
+      { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+      { path: "/api/v1/admin/members/", body: [] },
+      {
+        path: "/api/v1/schedule",
+        body: {
+          ...day(),
+          slots: [{
+            courtId: COURT_A, courtNumber: 1,
+            startsAtUtc: `${d}T07:00:00.000Z`, endsAtUtc: `${d}T07:15:00.000Z`,
+            status: "booked", ownerUserId: SESSION_MEMBER.user_id, ownerFirstName: "Test",
+            ownerPhotoUrl: null, isMine: true, bookingId: "bk-1", blockLabel: null,
+            checkedIn: false, amountChargedCredits: 50,
+          }],
+        },
+      },
+      {
+        path: "/api/v1/bookings/bk-1/cancellation-quote",
+        body: { refundCredits: 35, penaltyCredits: 15, checkedIn: false },
+      },
+    ]);
+    await page.goto("/schedule");
+    await page.waitForSelector('[role="grid"]');
+    await page.getByRole("gridcell").locator("button", { hasText: "Mine" }).first().click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+
+    const confirm = page.getByRole("button", { name: "Cancel the booking" });
+    await expect(confirm).toHaveAttribute("data-intent", "destructive");
+    // No glyph at all — not a different one. `glyphKindFor` returns null for destructive at
+    // every phase but failure, which is the whole of the carve-out.
+    await expect(confirm.locator("svg[aria-hidden='true']")).toHaveCount(0);
+
+    // The way out is still a thumb: refusing a deletion is not itself destructive.
+    const keep = await glyphOf(page, "Keep the booking");
+    expect(keep?.kind).toBe("thumbs-down");
+
+    const frames = await samplePress(page, "Cancel the booking");
+    expect(frames.some((f) => f.fb === "press")).toBe(true);
+    // It settles rather than snapping: not one frame of the whole press window shrinks it. A
+    // button that shuts a door should not feel eager.
+    expect(frames.some((f) => compressed(f.transform))).toBe(false);
+  });
+});
+
+test.describe("reduced motion keeps everything that is not motion", () => {
+  /**
+   * The half that usually gets thrown out with the animation. `prefers-reduced-motion` is a
+   * request for less MOVEMENT, not for less information — a member who has asked for it still
+   * needs to know which button is the yes.
+   */
+  test("drops the transform and keeps the glyph, the colour and the word", async ({ page }) => {
+    await onPhone(page);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await openBookingDialog(page);
+
+    const yes = await glyphOf(page, /Book for/);
+    expect(yes?.kind).toBe("thumbs-up");
+    expect(yes?.width).toBeGreaterThan(8);
+
+    const frames = await samplePress(page, /Book for/);
+
+    // The phase still HAPPENS — it is what the outcome hangs off — and it is simply not drawn
+    // as movement. `index.css` stands `[data-fb]` down to `transform: none !important`.
+    expect(frames.some((f) => f.fb === "press")).toBe(true);
+    for (const f of frames) {
+      expect(f.transform).toBe("none");
+      expect(f.animation).toBe("none");
+    }
+    await expect(page.getByRole("button", { name: /Book for 50\.00/ })).toBeVisible();
+  });
+});
+
+test.describe("the money pages a member reaches alone", () => {
+  const anonRoutes: ApiRoute[] = [
+    { path: "/api/v1/whoami", body: SESSION_ANON },
+    { path: "/api/v1/auth/registration-policy", body: { self_registration: true, requires_approval: true } },
+  ];
+
+  test("registration's one commitment wears the affirm", async ({ page }) => {
+    await onPhone(page);
+    await serveApi(page, anonRoutes);
+    await page.goto("/register");
+    const submit = page.getByRole("button", { name: /Submit application/ });
+    await expect(submit).toBeVisible();
+    const glyph = await glyphOf(page, /Submit application/);
+    expect(glyph?.kind).toBe("thumbs-up");
+  });
+
+  test("top-up marks continue and cancel as the pair they are", async ({ page }) => {
+    await onPhone(page);
+    await signIn(page);
+    await serveApi(page, [
+      { path: "/api/v1/whoami", body: SESSION_MEMBER },
+      { path: "/api/v1/me/profile", body: PROFILE },
+      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+      { path: "/api/v1/payments/topup-options", body: { min_zar: 50, max_zar: 5000, step_zar: 50, presets: [100, 500], credits_per_rand: 2 } },
+    ]);
+    await page.goto("/wallet/topup");
+
+    expect((await glyphOf(page, "Continue to PayFast"))?.kind).toBe("thumbs-up");
+    expect((await glyphOf(page, "Cancel"))?.kind).toBe("thumbs-down");
+  });
+});

@@ -76,12 +76,14 @@ const FAST: LiveBalancePolicy = {
 };
 
 function Probe() {
-  const { balance, state, delta } = useBalance();
+  const { balance, state, delta, refresh } = useBalance();
   return (
     <>
       <span data-testid="balance">{balance === null ? "none" : balance.toFixed(2)}</span>
       <span data-testid="state">{state}</span>
       <span data-testid="delta">{delta ? `${delta.source}:${delta.amount.toFixed(2)}` : "none"}</span>
+      <button onClick={() => void refresh()}>refresh</button>
+      <button onClick={() => void refresh({ expectSelf: true })}>refresh as mine</button>
     </>
   );
 }
@@ -259,8 +261,14 @@ describe("the chip's three states, as pure functions", () => {
   it("tells empty from low from fine", () => {
     expect(walletTone(0)).toBe("zero");
     expect(walletTone(-5)).toBe("zero");
-    // 0.004 prints as "0.00" and is NOT <= 0. It is genuinely low, not empty.
-    expect(walletTone(0.004)).toBe("low");
+    /*
+      0.004 prints as "0.00" and buys nothing, so it is ZERO — this line said "genuinely low"
+      and the wallet page's own rule said empty, which is how a member came to see a green
+      chip, a red card and no grid banner for one balance. The whole rule is `walletTone` now;
+      the table of cases lives with it in `lib/wallet-tone.test.ts`, and what is left here is
+      the chip's use of the answer.
+    */
+    expect(walletTone(0.004)).toBe("zero");
     expect(walletTone(49.99)).toBe("low");
     expect(walletTone(50)).toBe("fine");
     expect(walletTone(null)).toBe("fine");
@@ -311,5 +319,77 @@ describe("the zero-balance entice is finite by construction", () => {
     // A member who has just spent their last credits is reading a success toast. Starting a
     // pulse on top of it turns a successful booking into an alarm.
     expect(ZERO_ENTICE.graceMs).toBeGreaterThanOrEqual(4_000);
+  });
+});
+
+
+/**
+ * Who caused the movement, on the path that does not carry a figure.
+ *
+ * <p>
+ * <b>`source` is the only thing standing between a cancel and two toasts for one event.</b>
+ * `apply()` marks the next movement as this tab's own, which is why booking raises exactly one
+ * — the page says "Booked", and the chip stays quiet. Cancelling had no `apply` to call: the
+ * cancel endpoint answers with `refunded_credits` and `penalty_credits` and no balance, so the
+ * page re-read the wallet instead — and a plain re-read is indistinguishable from an admin
+ * crediting the member, so the chip announced "The club added 50 credits" over the page's own
+ * "50.00 back". One action, two sentences, and a member wondering which one happened.
+ * </p>
+ *
+ * <p>
+ * <b>The fix is a flag on the read, not an arithmetic.</b> `apply` takes the server's own
+ * figure by contract — it is not an optimistic guess — and `balance + refunded - penalty` in
+ * the client would be exactly that, on the one screen where being wrong about money is worst.
+ * So the re-read stays a re-read and simply says who asked for it.
+ * </p>
+ */
+describe("a re-read can say whose doing it was", () => {
+  /** Re-points the wallet route at a new figure, as a refund landing on the server would. */
+  const walletNowHolds = (credits: number) => stubFetch([
+    { path: "/api/v1/whoami", body: WHOAMI },
+    { path: "/api/v1/wallet", body: { balance_credits: credits, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+  ]);
+
+  it("marks a movement the page caused as this tab's own", async () => {
+    const t = fakeTransport();
+    await mount(t.transport, { balance_credits: 100 });
+    await t.accept();
+
+    // The refund has landed on the server; the page asks for the figure rather than guessing.
+    walletNowHolds(150);
+    await act(async () => { screen.getByRole("button", { name: "refresh as mine" }).click(); });
+
+    expect(screen.getByTestId("balance")).toHaveTextContent("150.00");
+    expect(screen.getByTestId("delta")).toHaveTextContent("self:50.00");
+  });
+
+  /**
+   * And the default is unchanged, which is the half that must not regress: the refresh on
+   * focus and on visibility is how a member learns an admin topped them up while the phone was
+   * in a pocket. Marking every read as self would make that movement silent.
+   */
+  it("still calls an unattributed movement the club's", async () => {
+    const t = fakeTransport();
+    await mount(t.transport, { balance_credits: 100 });
+    await t.accept();
+
+    walletNowHolds(300);
+    await act(async () => { screen.getByRole("button", { name: "refresh" }).click(); });
+
+    expect(screen.getByTestId("delta")).toHaveTextContent("club:200.00");
+  });
+
+  it("does not leave the flag armed for the next movement", async () => {
+    const t = fakeTransport();
+    await mount(t.transport, { balance_credits: 100 });
+    await t.accept();
+
+    walletNowHolds(150);
+    await act(async () => { screen.getByRole("button", { name: "refresh as mine" }).click(); });
+    expect(screen.getByTestId("delta")).toHaveTextContent("self:50.00");
+
+    // The club credits them a moment later. A flag that stayed armed would swallow it.
+    await t.push({ balance_credits: 250 });
+    expect(screen.getByTestId("delta")).toHaveTextContent("club:100.00");
   });
 });

@@ -121,7 +121,9 @@ export function WhatsNextCard({ booking, timezone, doors, unlockSeconds }: Whats
         ))}
       </ol>
       <div className="flex flex-wrap gap-3">
-        <Button variant="outline" onClick={dismiss} className="w-full sm:w-auto">{WHATS_NEXT_DISMISS}</Button>
+        {/* `affirm`: "Got it" acknowledges the steps, it does not refuse them. A thumbs-down
+            under a list of instructions reads as "no, I don't want to know". */}
+        <Button intent="affirm" variant="outline" onClick={dismiss} className="w-full sm:w-auto">{WHATS_NEXT_DISMISS}</Button>
         <Link
           to={GUIDE_PATH}
           className="inline-flex min-h-11 items-center text-sm text-accent-strong underline underline-offset-2 hover:no-underline"

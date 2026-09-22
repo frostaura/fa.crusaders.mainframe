@@ -1173,15 +1173,18 @@ describe("MyCode at a club with a door", () => {
     }));
 
     /*
-      `findAll`, because the decision card and the standing line can both offer it — the
-      refusal says "you had no booking" and the standing rule says "this club wants one",
-      and they are the same act. Which of the two renders first is a timing accident, and a
-      `findBy` here resolved on whichever won the race. Every one of them must go to the
-      schedule; that is the rule this case is about.
+      ONE of them, and this assertion used to say `toBeGreaterThan(0)`.
+
+      The decision card and the standing line were both offering it, because the refusal says
+      "you had no booking" and the standing rule says "this club wants one" — the same act,
+      told twice, as two identical filled brand-coloured buttons a few hundred pixels apart on
+      a phone. A member outside a locked door reads that as two different things they have not
+      understood. The card is the EVENT and outranks the rule while it is on screen; dismiss
+      it and the standing line's offer comes back, which the case below this one asserts.
     */
     const books = await screen.findAllByRole("link", { name: "Book a court" });
-    expect(books.length).toBeGreaterThan(0);
-    for (const book of books) expect(book).toHaveAttribute("href", "/schedule");
+    expect(books).toHaveLength(1);
+    expect(books[0]).toHaveAttribute("href", "/schedule");
   });
 
   /**
@@ -2611,7 +2614,10 @@ describe("MyCode at a club with a door", () => {
   it("keeps the segment names to two words and puts the explanation in the panel", async () => {
     renderBoth(memberDoorsOnFixture(), IDENT_CODE);
     const tab = await screen.findByRole("tab", { name: "Member code" });
-    expect(tab.textContent).toBe("Member code");
+    // The accessible NAME, not `textContent`: the shared primitive carries a hidden,
+    // out-of-flow copy of the label that it measures the stacked/side-by-side decision from,
+    // and `textContent` counts it while nothing a person uses does.
+    expect(tab).toHaveAccessibleName("Member code");
 
     const panel = document.getElementById(tab.getAttribute("aria-controls")!);
     expect(panel?.textContent).toMatch(/start on a free court now/);

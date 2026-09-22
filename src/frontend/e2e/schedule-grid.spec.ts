@@ -169,3 +169,59 @@ test("answers a cell that cannot be booked, rather than doing nothing", async ({
   await restricted.click();
   await expect(page.locator('[aria-live="polite"]').filter({ hasText: /You can book 07:00–08:00/ })).toHaveCount(1);
 });
+
+/**
+ * The marquee — D3 §4.1, door 3 — driven with a real mouse in a real engine.
+ *
+ * <p>
+ * The unit test dispatches `pointerover` on the cells it means, which proves the wiring and
+ * nothing about the gesture. What a browser adds is the sequence: `pointerover` arriving from
+ * movement rather than from a call, a real `click` fired on release over a cell that is now
+ * ticked, and the text selection the drag would otherwise paint across every court name it
+ * crosses. The last of those is what made a first attempt at this look broken rather than
+ * wrong, and no assertion in jsdom can see any of the three.
+ * </p>
+ */
+test("a mouse drag paints a rectangle, enters selection mode, and selects no text", async ({ page }) => {
+  await openGrid(page);
+
+  const cell = (name: string) => page.getByRole("gridcell", { name });
+  const from = (await cell("Court 1 at 07:00").boundingBox())!;
+  const to = (await cell("Court 2 at 07:30").boundingBox())!;
+
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  // Through the cell between, as a hand would: a marquee that only reads its endpoints would
+  // pass this and miss every cell a real sweep crosses.
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height * 1.5, { steps: 4 });
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 8 });
+  await page.mouse.up();
+
+  // Six cells: two courts by three slices. And the mode is on, without anybody pressing Select.
+  await expect(page.locator('[role="gridcell"][aria-selected="true"]')).toHaveCount(6);
+  await expect(page.getByRole("button", { name: "Done", exact: true })).toBeVisible();
+
+  // No booking dialog: the click the browser fires on release is swallowed, or a drag would
+  // end by opening the very thing selection mode exists to avoid opening one cell at a time.
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  // And the drag painted no text selection across the court names it crossed.
+  expect(await page.evaluate(() => (window.getSelection()?.toString() ?? "").trim())).toBe("");
+});
+
+test("shift+click extends the rectangle, and shift+arrow draws the same shape", async ({ page }) => {
+  await openGrid(page);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.getByRole("gridcell", { name: "Court 1 at 07:00" }).click();
+
+  await page.getByRole("gridcell", { name: "Court 1 at 07:30" }).click({ modifiers: ["Shift"] });
+  await expect(page.locator('[role="gridcell"][aria-selected="true"]')).toHaveCount(3);
+
+  // Reading order would have taken Court 2 at 07:00 and 07:15 as well. It is a rectangle.
+  await expect(page.getByRole("gridcell", { name: "Court 2 at 07:00" }))
+    .not.toHaveAttribute("aria-selected", "true");
+
+  // The keyboard grows the same shape from the same anchor — one selection model, two hands.
+  await page.keyboard.press("Shift+ArrowRight");
+  await expect(page.locator('[role="gridcell"][aria-selected="true"]')).toHaveCount(6);
+});

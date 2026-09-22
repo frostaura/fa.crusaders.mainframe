@@ -208,6 +208,16 @@ function pickedMember(members: Props["members"], memberId: string, charged: bool
  * labelled "Book for 50.00 cr" and be surprised by what it does. It is a danger button and
  * it states, in its own label, the balance it will leave behind.
  * </p>
+ *
+ * <p>
+ * <b>Item 12 reaches the glyph and the press, and deliberately not an outcome phase.</b> The
+ * outcome phase needs `onAction`, which reads a resolve as success — and this dialog's
+ * `submit` resolves for a REFUSAL too, because a refusal is a value here rather than a thrown
+ * thing and belongs in the panel above rather than on the button. Wiring `onAction` would
+ * flash a green tick over "that slot has just gone". A success unmounts the dialog; a refusal
+ * is announced by `Refusal`'s `role="alert"`. Nothing here needs a second voice, so no call
+ * site sets `announcedElsewhere` — it only means anything alongside `onAction`.
+ * </p>
  */
 function ConfirmActions(props: {
   busy: boolean; free: boolean; cost: number; blocked: boolean;
@@ -217,13 +227,22 @@ function ConfirmActions(props: {
   const { busy, free, cost, blocked, shortfall, onCancel, onSubmit } = props;
   return (
     <div className="flex gap-2 justify-end">
-      <Button variant="ghost" onClick={onCancel} disabled={busy}>Keep looking</Button>
+      <Button intent="decline" variant="ghost" onClick={onCancel} disabled={busy}>Keep looking</Button>
       {shortfall ? (
-        <Button variant="danger" onClick={() => onSubmit(true)} disabled={busy}>
+        /*
+          `destructive`, not `affirm` — and the distinction is ruling 4's, not a shade of it.
+
+          The action is affirmative (it books a court) and its CONSEQUENCE is not: it pushes a
+          member into a negative balance on a desk clerk's judgement, and the label says so in
+          figures. A thumbs-up beside "leaves -12.00 cr" is the software approving of that.
+          `destructive` draws no thumb at all, settles instead of snapping, and keeps the
+          danger variant the button already wore.
+        */
+        <Button intent="destructive" variant="danger" onClick={() => onSubmit(true)} disabled={busy}>
           {busy ? "Booking…" : `Book anyway — leaves ${formatCredits(shortfall.current - shortfall.required)}`}
         </Button>
       ) : (
-        <Button onClick={() => onSubmit(false)} disabled={busy || blocked}>
+        <Button intent="affirm" onClick={() => onSubmit(false)} disabled={busy || blocked}>
           {busy ? "Booking…" : free ? "Block the court" : `Book for ${formatCredits(cost)}`}
         </Button>
       )}

@@ -152,6 +152,25 @@ describe("Top-up — what the checkout actually sends", () => {
     expect(screen.getByRole("button", { name: "Continue to PayFast" })).not.toBeDisabled();
   });
 
+  /**
+   * Item 12 on the page that sends a member to a payment gateway.
+   *
+   * <p>
+   * `affirm` on Continue and `decline` on Cancel, and NO outcome phase on either: Continue
+   * ends in a redirect, so "it worked" is PayFast's own page arriving, and a tick drawn over
+   * a button the member is being taken away from would be a claim about a payment that has
+   * not happened. The glyph and the press are the whole of the adoption here.
+   * </p>
+   */
+  it("marks Continue the affirm and Cancel the decline", async () => {
+    stubFetch(routes());
+    renderPage(<TopUpPage />);
+    const go = await screen.findByRole("button", { name: "Continue to PayFast" });
+    expect(go).toHaveAttribute("data-intent", "affirm");
+    expect(go.querySelector("svg[aria-hidden]")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveAttribute("data-intent", "decline");
+  });
+
   it("says why an amount is not accepted, rather than greying the button in silence", async () => {
     stubFetch(routes());
     renderPage(<TopUpPage />);

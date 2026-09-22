@@ -33,8 +33,12 @@ export function walletLabel(balance: number | null, loading: boolean, state?: Li
   // Never claim a figure is live when the stream has gone and a 30-second poll is standing in
   // for it. A confident stale number is the defect the degraded state exists to close.
   const stale = state === "degraded" ? " This figure is checked every 30 seconds." : "";
-  if (balance <= 0) return `Wallet balance 0 credits. You can't book until you top up. Tap to top up.${stale}`;
-  if (balance < LOW_BALANCE_CREDITS) return `Wallet balance ${amount}, running low. Tap to top up.${stale}`;
+  // Through `walletTone`, so the sentence a screen-reader user hears and the colour a sighted
+  // one sees can never disagree — which they did at 0.004, where this said "running low" over
+  // a chip the wallet page was calling empty.
+  const tone = walletTone(balance);
+  if (tone === "zero") return `Wallet balance 0 credits. You can't book until you top up. Tap to top up.${stale}`;
+  if (tone === "low") return `Wallet balance ${amount}, running low. Tap to top up.${stale}`;
   return `Wallet balance ${amount}. Tap to top up.${stale}`;
 }
 
@@ -45,14 +49,48 @@ export function walletLabel(balance: number | null, loading: boolean, state?: Li
  * the chip that says "you cannot book" led to a screen that does nothing about it.
  */
 export function walletHref(balance: number | null): string {
-  return balance !== null && balance <= 0 ? "/wallet/topup" : "/wallet";
+  return walletTone(balance) === "zero" ? "/wallet/topup" : "/wallet";
 }
 
-/** Which of the three looks the chip wears. Three states, three looks — not two. */
-export function walletTone(balance: number | null): "zero" | "low" | "fine" {
-  if (balance !== null && balance <= 0) return "zero";
-  if (balance !== null && balance < LOW_BALANCE_CREDITS) return "low";
-  return "fine";
+/** The three states a balance can be in. `null` — not read yet — is not one of them. */
+export type WalletTone = "zero" | "low" | "fine";
+
+/**
+ * How near zero counts as zero. Half a cent of a credit — the smallest movement that can
+ * change what `toFixed(2)` paints.
+ */
+const ROUNDS_TO_ZERO = 0.005;
+
+/**
+ * Which of the three states a balance is in. <b>The only place the question is asked.</b>
+ *
+ * <p>
+ * Three lanes each wrote this rule and they disagreed. The chip asked `balance <= 0`; the
+ * wallet page asked `< 0.005`; the grid's empty-wallet banner asked `balance > 0`. At 0.004
+ * credits a member therefore saw a green chip reading "0.00 cr", a red wallet card telling
+ * them they could not book, and a grid with no banner on it — three screens, each written by
+ * somebody who HAD thought about the rounding case, each having thought about it alone.
+ * </p>
+ *
+ * <p>
+ * <b>Not `=== 0`, and not `<= 0` either.</b> `=== 0` misses a negative balance, which is a
+ * real state: the settlement model posts a late reversal as two NEW rows rather than an edit,
+ * and says in so many words that the balance may go negative. That is emptier than empty, not
+ * a different kind of thing. `<= 0` misses the other end — 0.004 is not `<= 0`, renders as
+ * "0.00 credits" and buys nothing, since a slot costs fifty. What the member can SEE is two
+ * decimal places, so the rule has to be about the same number they are looking at.
+ * </p>
+ *
+ * <p>
+ * <b>`null` is UNKNOWN, and answers `fine`.</b> A wallet read that has not landed is not an
+ * empty wallet; a product that shouted "no credits" at a slow network would be wrong more
+ * often than right, and would send a member who has money to a top-up form.
+ * </p>
+ */
+export function walletTone(balance: number | null): WalletTone {
+  if (balance === null) return "fine";
+  if (balance < ROUNDS_TO_ZERO) return "zero";
+  return balance < LOW_BALANCE_CREDITS ? "low" : "fine";
 }
 
 type BalanceState = {
@@ -64,7 +102,12 @@ type BalanceState = {
   /** The most recent movement, for the chip's count-up and flyout. */
   delta: BalanceDelta | null;
   clearDelta: () => void;
-  refresh: () => Promise<void>;
+  /**
+   * Re-read the wallet. `{ expectSelf: true }` on the paths where the PAGE has already told
+   * the member what happened, so the chip does not announce the same movement a second time —
+   * see `useLiveBalance.refresh`. Bare, for the reads nobody asked for (focus, visibility).
+   */
+  refresh: (options?: { expectSelf?: boolean }) => Promise<void>;
   /**
    * Take a balance the server has just stated, without asking it again.
    *

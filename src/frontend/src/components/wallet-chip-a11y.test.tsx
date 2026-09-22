@@ -70,10 +70,18 @@ describe("the wallet chip says the balance out loud", () => {
     expect(walletLabel(0, false)).toMatch(/can't book until you top up/i);
     // Both halves: the arm below it still fires, or the fix has simply moved the boundary.
     expect(walletLabel(0.01, false)).toMatch(/running low/i);
-    // A rounding trap: 0.004 prints as "0.00" and is NOT <= 0, so it is genuinely low rather
-    // than empty. The member has a fraction of a credit and still cannot book; saying "low"
-    // is the honest half of that and the dialog carries the rest.
-    expect(walletLabel(0.004, false)).toMatch(/running low/i);
+    /*
+      The rounding trap, settled the other way than this file first had it.
+
+      Two lanes wrote a paragraph about 0.004 and reached opposite conclusions. This one said
+      "genuinely low, since it is not <= 0"; the wallet page's said "empty, since it prints as
+      0.00 and buys nothing". The wallet page is right, and the reason is that the sentence has
+      to be about the number the member can SEE: a chip reading "0.00 cr" while the voice says
+      "running low" is the two-arm defect this very test was written to kill, wearing the other
+      arm. `walletTone` now decides for the chip, the page and the grid together — so this is
+      one assertion about one rule rather than three files agreeing by hand.
+    */
+    expect(walletLabel(0.004, false)).toMatch(/can't book until you top up/i);
     expect(walletLabel(-25, false)).toMatch(/can't book until you top up/i);
   });
 

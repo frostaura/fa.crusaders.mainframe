@@ -74,6 +74,8 @@ export function DoorSection(props: {
   onRefreshCode: () => Promise<void>;
   /** Switches the page to the member's own code. E-H2 (3). */
   onUseMemberCode: () => void;
+  /** The decision card above is already offering "Book a court". See `StandingLine`. */
+  actionOfferedAbove?: boolean;
 }) {
   const { door, cached, doorRead, contact, codeSecondsLeft, code, staleSince } = props;
   const { onRefreshCode, onUseMemberCode } = props;
@@ -141,6 +143,7 @@ export function DoorSection(props: {
         staleSince={staleSince}
         hasLiveCode={hasLiveCode}
         onUseMemberCode={onUseMemberCode}
+        actionOfferedAbove={props.actionOfferedAbove}
       />
 
       {open ? (

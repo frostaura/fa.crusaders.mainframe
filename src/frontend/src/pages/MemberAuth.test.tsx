@@ -316,6 +316,27 @@ describe("Register — one message per mistake", () => {
   const submit = () => fireEvent.click(screen.getByRole("button", { name: /Submit application/i }));
 
   /**
+   * Item 12 on the one control that commits anything on this page.
+   *
+   * <p>
+   * The theme defaults to `neutral` so that a hundred call sites could not be restyled
+   * unreviewed — which means every screen it should reach has to say so, and a screen that
+   * forgets looks exactly like a screen that decided against it. This is the assertion that
+   * tells those two apart on registration.
+   * </p>
+   */
+  it("wears the affirm glyph on the application it sends", async () => {
+    stubFetch([]);
+    renderAt(<RegisterPage />);
+    const button = await screen.findByRole("button", { name: /Submit application/i });
+    expect(button).toHaveAttribute("data-intent", "affirm");
+    // The glyph, not merely the declaration: `ActionGlyph` draws an aria-hidden <svg>, and
+    // the word beside it is still the accessible name.
+    expect(button.querySelector("svg[aria-hidden]")).not.toBeNull();
+    expect(button).toHaveAccessibleName(/Submit application/i);
+  });
+
+  /**
    * D4 bug 1, at the unit level. The browser half of it — `required` on a 1x1 clipped input
    * making Chrome refuse to submit with no bubble and no console line — is guarded in
    * `e2e/register.spec.ts`; this is the half that says the form does its own checking and

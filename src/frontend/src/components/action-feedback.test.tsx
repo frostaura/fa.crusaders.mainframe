@@ -71,6 +71,28 @@ describe("the club's glyph set", () => {
   });
 
   /**
+   * Each mark names itself on the element, so a browser can tell them apart.
+   *
+   * <p>
+   * The founder's question about item 12 is "is a thumb actually on the button", and it is a
+   * question only a real engine can answer — jsdom draws nothing. Without a name on the
+   * element the browser-side check is a pixel comparison, which passes for a ✓ that shipped
+   * where a thumb was ordered and fails for a 1 px nudge to a curve. `data-glyph` is one
+   * attribute and it makes `e2e/action-feedback.spec.ts` ask the real question.
+   * </p>
+   */
+  it.each([
+    [ThumbsUpGlyph, "thumbs-up"],
+    [ThumbsDownGlyph, "thumbs-down"],
+    [CheckGlyph, "check"],
+    [CrossGlyph, "cross"],
+    [AlertGlyph, "alert"],
+  ])("names itself on the element (%#)", (Glyph, name) => {
+    const { container } = render(<Glyph />);
+    expect(container.querySelector("svg")).toHaveAttribute("data-glyph", name);
+  });
+
+  /**
    * Unknown is never "the other one". This is the field's commonest value on the day the
    * theme ships, because the backend key does not exist yet.
    */

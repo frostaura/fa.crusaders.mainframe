@@ -33,7 +33,11 @@ const NO_BOOKING: Segment<Code>[] = [
   { value: "member", label: "Member code" },
 ];
 
-function Harness({ segments = BOTH, onChange }: { segments?: Segment<Code>[]; onChange?: (v: Code) => void }) {
+function Harness({ segments = BOTH, onChange, showDisabledReasons }: {
+  segments?: Segment<Code>[];
+  onChange?: (v: Code) => void;
+  showDisabledReasons?: boolean;
+}) {
   const [value, setValue] = useState<Code>("booking");
   return (
     <>
@@ -43,6 +47,7 @@ function Harness({ segments = BOTH, onChange }: { segments?: Segment<Code>[]; on
         onChange={(next) => { setValue(next); onChange?.(next); }}
         label="Which code to show"
         panelId={(v) => `panel-${v}`}
+        showDisabledReasons={showDisabledReasons}
       />
       <SegmentedTabPanel id={`panel-${value}`}>The {value} code</SegmentedTabPanel>
     </>
@@ -187,6 +192,101 @@ describe("a segment that cannot be chosen is present, dimmed, and says why", () 
     act(() => { member.focus(); });
     fireEvent.keyDown(member, { key: "ArrowLeft" });
     expect(booking).toHaveFocus();
+  });
+});
+
+/**
+ * `showDisabledReasons` — the member lane's departure, carried into the primitive.
+ *
+ * <p>
+ * Two lanes built this control and disagreed about one thing: whether the reason a segment is
+ * dim is DRAWN or only spoken. The member lane drew it, and drawing it is right — a dimmed
+ * control with no visible reason is a member tapping a thing that does nothing, which is the
+ * dead-surface defect the whole round set out to remove. Sighted members are the ones who
+ * cannot see a `sr-only` sentence, and they are almost all of them.
+ * </p>
+ *
+ * <p>
+ * It is a prop rather than the new default because the primitive has consumers that have no
+ * room under the capsule, and an additive prop cannot break one of them. The DEFAULT stays
+ * `sr-only`; `/my-code` asks for the drawn one.
+ * </p>
+ */
+describe("the reason for a dim segment can be drawn, not only spoken", () => {
+  it("is sr-only by default, so no existing consumer grows a paragraph", () => {
+    render(<Harness segments={NO_BOOKING} />);
+    const why = document.getElementById("panel-booking-why");
+    expect(why).not.toBeNull();
+    expect(why).toHaveClass("sr-only");
+  });
+
+  it("draws the sentence when asked, where a member can read it", () => {
+    render(<Harness segments={NO_BOOKING} showDisabledReasons />);
+    const why = document.getElementById("panel-booking-why");
+    expect(why).not.toBeNull();
+    expect(why).not.toHaveClass("sr-only");
+    // Visible to everyone means visible to the screen reader as page content too, so the
+    // `aria-hidden` that keeps the invisible copy from being read twice must come OFF.
+    expect(why).not.toHaveAttribute("aria-hidden");
+    expect(screen.getByText(/no booking starting in the next 2 hours/)).toBeVisible();
+  });
+
+  it("still describes the tab from the drawn sentence, rather than a second copy of it", () => {
+    render(<Harness segments={NO_BOOKING} showDisabledReasons />);
+    const booking = screen.getAllByRole("tab")[0];
+    expect(booking).toHaveAccessibleName("Booking code");
+    expect(booking).toHaveAccessibleDescription(/no booking starting in the next 2 hours/);
+    // One sentence, not one per reader. Two copies is how the visible one and the spoken one
+    // drift apart, which is the bug this page already shipped once.
+    expect(screen.getAllByText(/no booking starting in the next 2 hours/)).toHaveLength(1);
+  });
+
+  it("keeps the drawn sentence out of the tablist, which may only hold tabs' worth of layout", () => {
+    render(<Harness segments={NO_BOOKING} showDisabledReasons />);
+    const why = document.getElementById("panel-booking-why") as HTMLElement;
+    // A flex row of segments with a paragraph in it lays the paragraph out as a segment.
+    expect(screen.getByRole("tablist").contains(why)).toBe(false);
+  });
+
+  it("says nothing at all when no segment is dim", () => {
+    render(<Harness segments={BOTH} showDisabledReasons />);
+    expect(document.getElementById("panel-booking-why")).toBeNull();
+  });
+});
+
+/**
+ * Tapping the segment that is ALREADY selected still reports the tap.
+ *
+ * <p>
+ * This looks like a redundant event and is not, because on `/my-code` the selection is
+ * DERIVED from the code the server sent rather than from anything the member did. A member
+ * with no booking gets the member code because the server picked it; the "Member code"
+ * segment is therefore already selected while the member has chosen nothing. Tapping it is
+ * how she pins the choice for the rest of the session, and a primitive that swallowed the tap
+ * as a no-op made that unreachable — which is precisely the bug the derived selection was
+ * introduced to fix, arriving back through the control.
+ * </p>
+ *
+ * <p>
+ * Idempotence belongs to the consumer, which is the only layer that knows whether acting
+ * twice costs anything. `/my-code`'s fetch is paced by its own 10 s gap.
+ * </p>
+ */
+describe("a tap on the selected segment", () => {
+  it("is still reported, because selection can be derived rather than chosen", () => {
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    const booking = screen.getAllByRole("tab")[0];
+    expect(booking).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(booking);
+    expect(onChange).toHaveBeenCalledWith("booking");
+  });
+
+  it("is still refused when that segment is dim", () => {
+    const onChange = vi.fn();
+    render(<Harness segments={NO_BOOKING} onChange={onChange} />);
+    fireEvent.click(screen.getAllByRole("tab")[0]);
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
 
