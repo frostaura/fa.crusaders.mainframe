@@ -100,6 +100,19 @@ public class MoneySurfaceTests
     /// because the formatter was never the thing that was wrong: the call site was. A test of
     /// <c>MoneyFormat.Credits</c> would have passed on the broken code.
     /// </para>
+    /// <para>
+    /// <b>The ambient culture is BUILT here, not named.</b> This first asked for
+    /// <c>en-ZA</c>, because that is the club's own locale and it is the case the defect was
+    /// found in. That made the test depend on a platform's opinion of a locale rather than on
+    /// the only property it actually needs — a comma where the invariant culture puts a point.
+    /// CLDR moved <c>en-ZA</c>'s decimal separator from a comma to a point, so a host with
+    /// newer ICU renders the two identically, and the pair of assertions below became a
+    /// contradiction that no code could satisfy: the same string both required and forbidden.
+    /// It passed on macOS and failed on the Linux CI runner, which is the worst possible
+    /// shape for a test, because the platform that disagrees is the one nobody is watching.
+    /// A culture assembled from the invariant one with a single field changed says what is
+    /// meant, cannot drift with the CLDR, and is identical on every host.
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task A_ledger_reason_states_its_figure_in_the_invariant_culture()
@@ -107,8 +120,11 @@ public class MoneySurfaceTests
         var previous = Thread.CurrentThread.CurrentCulture;
         try
         {
-            // The club's own locale. A comma decimal separator, and the one this ships on.
-            Thread.CurrentThread.CurrentCulture = new CultureInfo("en-ZA");
+            // A comma decimal separator — the property the club's own locale had when this was
+            // found, stated directly instead of hoping a named locale still carries it.
+            var commaDecimal = (CultureInfo)CultureInfo.InvariantCulture.Clone();
+            commaDecimal.NumberFormat.NumberDecimalSeparator = ",";
+            Thread.CurrentThread.CurrentCulture = commaDecimal;
 
             await using var host = await TestHost.CreateAsync();
             using var scope = host.NewScope();
@@ -145,9 +161,16 @@ public class MoneySurfaceTests
                 .FirstAsync()).Reason;
 
             Assert.NotNull(reason);
-            Assert.Contains(settled.AmountCredits.ToString("0.00", CultureInfo.InvariantCulture), reason!);
-            // The defect, named: the club's own locale renders this figure with a comma.
-            Assert.DoesNotContain(settled.AmountCredits.ToString("0.00", new CultureInfo("en-ZA")), reason!);
+            var invariant = settled.AmountCredits.ToString("0.00", CultureInfo.InvariantCulture);
+            var ambient = settled.AmountCredits.ToString("0.00", commaDecimal);
+            // Guard the premise before asserting on it. If the two spellings ever coincide,
+            // the pair below stops being a test and becomes a contradiction — which is exactly
+            // how this failed on CI while passing here.
+            Assert.NotEqual(invariant, ambient);
+
+            Assert.Contains(invariant, reason!);
+            // The defect, named: under the ambient culture this figure renders with a comma.
+            Assert.DoesNotContain(ambient, reason!);
             Assert.Contains("credits", reason!);
         }
         finally { Thread.CurrentThread.CurrentCulture = previous; }
