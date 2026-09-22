@@ -61,6 +61,27 @@
 # bundling label and hint into a `copy` object, or taking `props` and destructuring on the next
 # line, both move the same eight names one line down and buy nothing. If a reviewer disagrees,
 # the change to make is a smaller component, not a smaller signature.
+#
+# THE ECO BLOCK BELOW is the same two artifacts again, arriving in one wave, and each entry was
+# checked against the source rather than taken on trust.
+#
+# The PARAM half is PhotoPicker's, verbatim: a React component takes ONE argument and lizard
+# counts each destructured prop as a parameter. Every one of them is trivial by every other
+# measure — `GroupCard` and `GroupEditor` are CCN 1, `MemberPreview` CCN 1, `SentenceDisclosure`
+# CCN 1, `MemberPicker` CCN 1, `DoorCardSection` CCN 1 in six lines. `StateBlock` is the busiest
+# at CCN 14, still under the gate's 15; only its 14 props trip it.
+#
+# The FUNCTION-BOUNDARY half is new here and worth naming, because the numbers look alarming and
+# are fiction. lizard's TSX parser does not always end a function where the source does, so it
+# attributes the JSX around a small helper to the helper. `wireWindows` is reported at 104 NLOC,
+# CCN 42 and 144 lines; read it — it is a ten-line `for` loop over `{start, end}` pairs with one
+# `continue`, and the 42 branches are the component rendered ABOVE it. `resendVerification` is
+# reported at 1072 NLOC and 1180 lines in a 1559-line file; it is an eight-line arrow that calls
+# one endpoint and pushes one toast. Neither can be "simplified" — there is nothing there — and
+# splitting the real function would move the mis-attribution to whatever lands next to it.
+#
+# Both halves are frozen, not forgiven: if one of these genuinely grows a branch, the ratchet
+# still reports it, because the whitelist suppresses the warning and not the measurement.
 AdminConfigEndpoints::MapAdminConfigEndpoints
 AdminMemberEndpoints::MapAdminMemberEndpoints
 AdminMembersPage
@@ -86,3 +107,21 @@ TopUpEndpoints::MapTopUpEndpoints  # the SAME function under lizard's other scop
 WebAuthnEndpoints::MapWebAuthnEndpoints
 adjust
 load
+
+# --- eco wave: PARAM artifacts (React props), see the note above ---
+DoorCardSection
+EcoSection
+GroupCard
+GroupEditor
+GroupMembers
+MemberPicker
+MemberPreview
+OccurrenceChange
+SentenceDisclosure
+SentenceInput
+StateBlock
+TopUpSheet
+
+# --- eco wave: function-boundary artifacts, see the note above ---
+resendVerification
+wireWindows
