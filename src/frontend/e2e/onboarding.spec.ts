@@ -100,7 +100,17 @@ test.describe("the always-reachable guide", () => {
       ...home(door()),
       { method: "POST", path: "/api/v1/me/qr/generate", body: { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true } },
       { path: "/api/v1/me/door/history", body: { items: [], has_more: false } },
-      { path: "/api/v1/me/webauthn/credentials", body: { credentials: [] } },
+      /*
+       * An ARRAY, because that is what the endpoint returns: `webauthnList` is typed
+       * `WebAuthnCredentialRow[]`, and `PasskeysCard` hands the result straight to `rows.map`.
+       *
+       * Stubbed as `{ credentials: [] }` this spec crashed the whole Profile tree with
+       * "rows.map is not a function" — and passed anyway for as long as the link below
+       * happened to render before the passkeys read resolved. That is a race, not a test: it
+       * went red the first time an unrelated change shifted render timing by a few
+       * milliseconds, having been wrong the entire time.
+       */
+      { path: "/api/v1/me/webauthn/credentials", body: [] },
     ]);
 
     await page.goto("/");

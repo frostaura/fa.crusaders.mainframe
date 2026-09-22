@@ -529,6 +529,18 @@ test.describe("B13 — where a toast lands", () => {
 test("reaches the door settings within twelve tab stops of the skip link", async ({ page }) => {
   await openAdmin(page, "/admin/settings");
 
+  /*
+   * Wait for the thing being counted TO EXIST before counting.
+   *
+   * `openAdmin` returns as soon as the chrome is up, and the jump nav renders only once the
+   * settings read resolves. Start tabbing before that and the walk goes through a page that
+   * has no "Door gates" link on it yet, runs out its twelve presses and reports twelve —
+   * which reads as "the nav got longer" and is really "the nav was not there". The failure is
+   * indistinguishable from the real one this test exists to catch, which is what makes it
+   * worth closing rather than retrying.
+   */
+  await expect(page.getByRole("link", { name: "Door gates" })).toBeVisible();
+
   await page.keyboard.press("Tab");
   await expect(page.getByRole("link", { name: "Skip to main content" })).toBeFocused();
   await page.keyboard.press("Enter");
