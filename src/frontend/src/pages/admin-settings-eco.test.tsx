@@ -44,7 +44,65 @@ const ALL = {
   control_board_resync_seconds: 300,
   action_glyphs: "thumbs",
   member_trace_enabled: true,
+  currency_symbol: "R",
 };
+
+describe("the club's money symbol", () => {
+  /**
+   * The row itself, and the narrowing stated where the person who would file it as a bug
+   * will read it: this symbol goes in front of MONEY, and credits keep their own unit.
+   */
+  it("gives the currency symbol a row in the block it denominates", async () => {
+    stubFetch(routes(ALL));
+    renderPage(<AdminSettingsPage />);
+
+    const field = await screen.findByLabelText(/Currency symbol/);
+    expect(field).toHaveValue("R");
+    // Bounded in the markup as well as in the validator, so the box cannot hold an essay.
+    expect(field).toHaveAttribute("maxLength", "4");
+  });
+
+  /**
+   * The rest of the money block follows the symbol AS IT IS TYPED.
+   *
+   * <p>
+   * The captions are the point. "Credits per R1 — members" beside a club on CHF is the same
+   * class of defect as a figure wearing the wrong sign, one layer up in the copy — and the
+   * admin editing this very field is the one person who can see both at once.
+   * </p>
+   */
+  it("re-denominates the money captions as the symbol is typed", async () => {
+    stubFetch(routes(ALL));
+    renderPage(<AdminSettingsPage />);
+
+    await screen.findByLabelText(/Credits per R1 — members/);
+    fireEvent.change(screen.getByLabelText(/Currency symbol/), { target: { value: "CHF" } });
+
+    expect(await screen.findByLabelText(/Credits per CHF1 — members/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Top-up block \(CHF\)/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Top-up cap per member \(CHF\)/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Credits per R1 — members/)).not.toBeInTheDocument();
+  });
+
+  /**
+   * A half-typed symbol must not paint a caption made of rubbish, and must not be saveable.
+   */
+  it("refuses a symbol the server would refuse, and paints the default meanwhile", async () => {
+    const stub = stubFetch(routes(ALL));
+    renderPage(<AdminSettingsPage />);
+
+    await screen.findByLabelText(/Currency symbol/);
+    fireEvent.change(screen.getByLabelText(/Currency symbol/), { target: { value: "50" } });
+
+    // The caption falls back rather than reading "Credits per 501 — members".
+    expect(await screen.findByLabelText(/Credits per R1 — members/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    await waitFor(() => {
+      expect(stub.calls.find((c) => c.method === "PUT")).toBeUndefined();
+    });
+  });
+});
 
 describe("the settings rows this release owes", () => {
   it("gives the box's screen timeout and the rapid-scan window a row each", async () => {
@@ -158,6 +216,7 @@ describe("the settings rows this release owes", () => {
       const put = stub.calls.find((c) => c.method === "PUT");
       expect(put?.body).toEqual(expect.objectContaining({
         lcdRevertSeconds: 20, memberMaxSlotsPerDay: 4, sseKeepaliveSeconds: 25, actionGlyphs: "thumbs",
+        currencySymbol: "R",
       }));
     });
   });

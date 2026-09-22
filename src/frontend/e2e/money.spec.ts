@@ -118,3 +118,96 @@ test("the admin ledger totals credits and debits apart", async ({ page }) => {
   await expect(page.getByRole("cell", { name: "+160.00 cr" })).toBeVisible();
   await expect(page.getByRole("cell", { name: "−50.00 cr" })).toBeVisible();
 });
+
+/**
+ * The club's own currency symbol, end to end — and the boundary it does not cross.
+ *
+ * <p>
+ * The owner asked for the <code>cr</code> suffix to be replaced by a configurable symbol
+ * preceding the amount. It governs RAND, because a member pays R100 and receives
+ * <code>credits_per_zar_regular</code> × 100 credits — shipped at 1.6 — so the two are
+ * different sizes. This is the same assertion the first test in this file makes, with the
+ * symbol made configurable: whatever the club sets, it reaches money and stops there.
+ * </p>
+ *
+ * <p>
+ * Driven through the real channel rather than a formatter: the symbol rides on
+ * <code>/me/profile</code>, so this proves the whole path — payload, provider, module store,
+ * formatter, screen.
+ * </p>
+ */
+test("the club's currency symbol reaches money and never a credit figure", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [
+    { path: "/api/v1/whoami", body: SESSION_ADMIN },
+    {
+      path: "/api/v1/me/profile",
+      body: {
+        full_name: "Club Admin", email: "a@test.local", photo_url: null,
+        membership_number: "A-1", member_class: "Regular",
+        currency_symbol: "CHF",
+      },
+    },
+    { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
+    { path: "/api/v1/reports/me/wallet", body: { from: "", to: "", top_ups_credits: 0, spent_credits: 0, refunds_credits: 0, penalty_count: 0, count: 0 } },
+    { path: "/api/v1/reports/me/daily", body: [] },
+    {
+      path: "/api/v1/admin/reports/revenue",
+      body: {
+        from: "2026-01-01T00:00:00Z", to: "2026-02-01T00:00:00Z",
+        gross_topups_zar: 1000, reversals_zar: 0, net_zar: 1000,
+        gross_topups_credits: 1600, reversals_credits: 0, net_credits: 1600,
+      },
+    },
+    { path: "/api/v1/admin/reports/utilisation", body: { from: "", to: "", by_court: [] } },
+    { path: "/api/v1/admin/reports/no-shows", body: { from: "", to: "", total: 0, no_show: 0, no_show_pct: 0 } },
+    { path: "/api/v1/admin/reports/daily", body: [] },
+  ]);
+
+  await page.goto("/reports");
+
+  // The money figure wears the club's symbol, in front of the amount.
+  await expect(page.getByText("CHF1000.00")).toBeVisible();
+  // The rand sign is gone from this club entirely — it is not this club's currency.
+  await expect(page.getByText("R1000.00")).toHaveCount(0);
+
+  // And the credit figure beside it is untouched. 1600 credits is CHF1000 of top-up at the
+  // club's own 1.6 rate, so "CHF1600.00" here would overstate the club's income by 60%.
+  await expect(page.getByText("1600.00 cr")).toBeVisible();
+  await expect(page.getByText("CHF1600")).toHaveCount(0);
+});
+
+/**
+ * The wallet chip's spoken name survives the symbol.
+ *
+ * <p>
+ * An <code>aria-label</code> is what a screen reader announces INSTEAD of the element's
+ * contents, so the chip's label has always spelt "credits" where the chip shows "cr" — "cr"
+ * is read as two letters. A currency symbol is worse: "CHF240.00" is announced as letters
+ * followed by a number, and it would be the wrong quantity as well as the wrong sound.
+ * </p>
+ */
+test("the wallet chip still speaks a word when the club has a symbol", async ({ page }) => {
+  await signIn(page);
+  await serveApi(page, [
+    { path: "/api/v1/whoami", body: SESSION_ADMIN },
+    { path: "/api/v1/wallet", body: { balance_credits: 240, entries: [] } },
+    {
+      path: "/api/v1/me/profile",
+      body: {
+        full_name: "Test Member", email: "m@test.local", photo_url: null,
+        membership_number: "P-1", member_class: "Regular",
+        currency_symbol: "CHF",
+      },
+    },
+  ]);
+
+  await page.goto("/wallet");
+
+  const chip = page.locator("header [aria-label*='Wallet balance']");
+  await expect(chip).toHaveAttribute("aria-label", /240\.00 credits/);
+  await expect(chip).not.toHaveAttribute("aria-label", /CHF/);
+  // The visible chip keeps the credit unit too — the symbol is money's, and this is not.
+  await expect(page.locator("header")).toContainText("240.00 cr");
+  await expect(page.locator("header")).not.toContainText("CHF240");
+});

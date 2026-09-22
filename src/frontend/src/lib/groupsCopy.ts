@@ -5,6 +5,7 @@ import {
   UNLIMITED, WEEK_IN_READING_ORDER, capOverrideIsInert, countSlots, formatClock, intersect,
   type Interval,
 } from "./groupRules";
+import { formatZar } from "./utils";
 
 /**
  * Every sentence the groups surface says — GOAL items 3 + 19.
@@ -329,10 +330,15 @@ export function ratePerBlockSentence(input: {
   slicePrice: number;
 }): string {
   if (typeof input.creditsPerZar !== "number" || typeof input.blockZar !== "number") {
-    return "The club's system hasn't said what R100 buys.";
+    // No amount invented here. The branch is reached when the BLOCK is unknown as well as
+    // the rate, so naming a figure would be naming one this club may not use — and now that
+    // the symbol is the club's too, the old literal named a currency it may not take either.
+    return "The club's system hasn't said what a top-up buys.";
   }
   const credits = Number((input.creditsPerZar * input.blockZar).toFixed(2));
-  const head = `R${input.blockZar} buys ${creditsFace(credits)} credits`;
+  // Through the one formatter, so this sentence and the top-up screen — which quotes the
+  // same `topup_block_zar` — cannot name the club's money two different ways.
+  const head = `${formatZar(input.blockZar)} buys ${creditsFace(credits)} credits`;
   if (input.slicePrice <= 0) {
     return `${head}. Courts cost nothing at the moment, so that buys any number of slots.`;
   }
@@ -374,7 +380,7 @@ export function groupChangeConsequence(input: {
   if (typeof input.creditsPerBlockBefore === "number" && typeof input.creditsPerBlockAfter === "number"
     && input.creditsPerBlockBefore !== input.creditsPerBlockAfter) {
     out.push(`${name}'s next top-up will buy ${creditsFace(input.creditsPerBlockAfter)} credits per `
-      + `R${input.blockZar ?? 100} instead of ${creditsFace(input.creditsPerBlockBefore)}. `
+      + `${formatZar(input.blockZar ?? 100)} instead of ${creditsFace(input.creditsPerBlockBefore)}. `
       + "Credit he already has does not change.");
   }
   if (typeof input.sliceBefore === "number" && typeof input.sliceAfter === "number"

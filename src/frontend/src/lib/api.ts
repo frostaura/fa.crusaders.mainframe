@@ -655,6 +655,10 @@ export type AdminSettings = {
   /** `thumbs` (default) or `marks` — ruling 4. Destructive confirms are exempt and keep the
    *  action's own icon and the danger treatment whichever is chosen. */
   action_glyphs?: "thumbs" | "marks";
+  /** The symbol this club's REAL MONEY figures wear, default `R`. 1–4 letters or currency
+   *  signs. It is NOT the credit unit — credits convert at `credits_per_zar_*` and keep a
+   *  unit of their own; see `lib/currency.ts`. */
+  currency_symbol?: string;
   /** GOAL item 6's kill switch, default true. False makes the trace route answer 404 —
    *  never 403, which would confirm the surface exists and that this member has one. */
   member_trace_enabled?: boolean;
@@ -1099,6 +1103,24 @@ export type MyProfile = {
    * </p>
    */
   action_glyphs?: string;
+
+  /**
+   * The symbol this club's REAL MONEY figures wear — `R`, `R$`, `CHF`.
+   *
+   * <p>
+   * A tenant setting, riding on the payload that already reaches every signed-in screen for
+   * the same reason <code>action_glyphs</code> does. <b>Optional, and its absence is the
+   * commonest case</b>: an API that predates the key sends nothing, and
+   * <code>readCurrencySymbol</code> answers the default.
+   * </p>
+   *
+   * <p>
+   * <b>It is not the credit unit.</b> A member pays R100 and receives
+   * <code>credits_per_zar_regular</code> × 100 credits, which ships at 1.6 — so a credit
+   * figure wearing this symbol overstates what they have by 60%. See `lib/currency.ts`.
+   * </p>
+   */
+  currency_symbol?: string;
 };
 
 export type MemberClass = "Regular" | "LeagueOrSenior";
@@ -2017,6 +2039,10 @@ export const endpoints = {
     ...(req.realtime_poll_seconds_control_board !== undefined ? { realtimePollSecondsControlBoard: req.realtime_poll_seconds_control_board } : {}),
     ...(req.control_board_resync_seconds !== undefined ? { controlBoardResyncSeconds: req.control_board_resync_seconds } : {}),
     ...(req.action_glyphs !== undefined ? { actionGlyphs: req.action_glyphs } : {}),
+    // The club's money symbol, on the same omitted-means-unchanged terms. Sent RAW, not
+    // sanitised: the page refuses to save an unacceptable one, and quietly turning a typo
+    // into an R here would be the client deciding a money question on the admin's behalf.
+    ...(req.currency_symbol !== undefined ? { currencySymbol: req.currency_symbol } : {}),
     ...(req.member_trace_enabled !== undefined ? { memberTraceEnabled: req.member_trace_enabled } : {}),
   }),
 

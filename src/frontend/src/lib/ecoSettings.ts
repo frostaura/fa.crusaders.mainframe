@@ -1,3 +1,4 @@
+import { isAcceptableCurrencySymbol } from "./currency";
 import type { SettingComplaint } from "./tenantSettings";
 
 /**
@@ -214,6 +215,28 @@ export const ACTION_GLYPHS_HINT
   + "their own colour whichever is chosen — a thumbs-up on “Delete” would be wrong.";
 
 /**
+ * The symbol the club's REAL MONEY figures wear.
+ *
+ * <p>
+ * <b>The hint is where the narrowing is stated to the person who can act on it.</b> The owner
+ * asked for the `cr` suffix to be replaced by this symbol. It governs rand — what a member
+ * hands PayFast — and not credits, because a member pays R100 and receives
+ * `credits_per_zar_regular` × 100 credits, which ships at 1.6: a wallet of 240 credits shown
+ * as "R240.00" would tell the member they hold 60% more money than they do. An admin reading
+ * this row is the person who would otherwise file that as a bug, so the row says it.
+ * </p>
+ */
+export const CURRENCY_SYMBOL_LABEL = "Currency symbol";
+
+export const CURRENCY_SYMBOL_HINT
+  = "Goes in FRONT of every rand figure — top-ups, the cap, the club's revenue. 1–4 letters "
+  + "or currency signs: R, R$, CHF. It does not change credit figures, which stay in credits: "
+  + "a member pays in rand and receives credits at the rate above, so the two are different "
+  + "sizes and showing one as the other would overstate what a member has.";
+
+export const MAX_CURRENCY_SYMBOL_LENGTH = 4;
+
+/**
  * Whether the per-person night trace exists at all — a kill switch, and it answers 404.
  *
  * Not 403: a 403 confirms the surface exists and that this member has one, which is a leak
@@ -252,6 +275,7 @@ export function ecoSettingComplaints(settings: Record<string, unknown>): Setting
     ...numericComplaints(settings),
     ...bookingHorizonComplaint(settings),
     ...glyphChoiceComplaint(settings),
+    ...currencySymbolComplaint(settings),
   ];
 }
 
@@ -300,9 +324,36 @@ function glyphChoiceComplaint(settings: Record<string, unknown>): SettingComplai
   return [{ key: "action_glyphs", message: "Choose either thumbs or a tick and cross." }];
 }
 
+/**
+ * The money symbol, bounded exactly as the server bounds it.
+ *
+ * <p>
+ * The bound is the API's, mirrored — `CurrencySymbol.IsAcceptable`. The reason this file
+ * already gives at length applies here with money attached: a screen that bounds it more
+ * loosely produces a save that fails with a message nobody on the screen can act on, and one
+ * that bounds it more tightly silently forbids a club a symbol the product supports.
+ * </p>
+ *
+ * <p>
+ * An ABSENT key is not a complaint, as everywhere else in this file. An EMPTIED box is, and
+ * it is caught here rather than by the page's empty-NUMBER check, because this field is text.
+ * </p>
+ */
+function currencySymbolComplaint(settings: Record<string, unknown>): SettingComplaint[] {
+  const symbol = settings.currency_symbol;
+  if (symbol === undefined || symbol === null) return [];
+  if (isAcceptableCurrencySymbol(symbol)) return [];
+  return [{
+    key: "currency_symbol",
+    message: `${CURRENCY_SYMBOL_LABEL} has to be 1 to ${MAX_CURRENCY_SYMBOL_LENGTH} letters or `
+      + "currency signs — R, R$, CHF. No digits, and no spaces inside it.",
+  }];
+}
+
 /** The labels, for the page's own emptied-field message and its jump-to-field links. */
 export const ECO_SETTING_LABELS: Record<string, string> = Object.fromEntries([
   ...ECO_NUMERIC_RULES.map((rule) => [rule.key, rule.label] as const),
   ["action_glyphs", "Yes and no icons"] as const,
+  ["currency_symbol", CURRENCY_SYMBOL_LABEL] as const,
   ["member_trace_enabled", MEMBER_TRACE_LABEL] as const,
 ]);

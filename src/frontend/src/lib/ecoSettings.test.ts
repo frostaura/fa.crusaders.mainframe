@@ -130,4 +130,37 @@ describe("what the page refuses, and what it deliberately does not", () => {
     }
     expect(ecoSettingComplaints({ action_glyphs: "emoji" })).toHaveLength(1);
   });
+
+  /**
+   * The money symbol, bounded exactly as the server bounds it.
+   *
+   * <p>
+   * The bound is `CurrencySymbol.IsAcceptable`'s, mirrored. The whole reason this module
+   * exists is that a screen bounding a field differently from the server either refuses a
+   * value the product supports or produces a save that fails with a message nobody on the
+   * screen can act on.
+   * </p>
+   */
+  it("takes any symbol a real currency uses", () => {
+    for (const symbol of ["R", "$", "€", "kr", "R$", "CHF", "US$"]) {
+      expect(ecoSettingComplaints({ currency_symbol: symbol }), symbol).toEqual([]);
+    }
+    // Whitespace is packaging, and the server trims it too.
+    expect(ecoSettingComplaints({ currency_symbol: "  R  " })).toEqual([]);
+  });
+
+  it("refuses a symbol the product cannot print in front of a number", () => {
+    for (const bad of ["", "   ", "RANDS", "R 50", "50", "R50", "<b>"]) {
+      expect(ecoSettingComplaints({ currency_symbol: bad }), bad).toHaveLength(1);
+    }
+    expect(ecoSettingComplaints({ currency_symbol: "" })[0].key).toBe("currency_symbol");
+  });
+
+  it("says nothing about a key the API never served", () => {
+    // An absent key is never a complaint — this module's own rule, and the commonest case
+    // against an API that predates the key.
+    expect(ecoSettingComplaints({})).toEqual([]);
+    expect(ecoSettingComplaints({ currency_symbol: undefined })).toEqual([]);
+    expect(ecoSettingComplaints({ currency_symbol: null })).toEqual([]);
+  });
 });
