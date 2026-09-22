@@ -790,14 +790,18 @@ function GateRows({ gates, tenantHeartbeat, now }: {
               </time>
               <Link
                 to={`/admin/monitoring/doors/${gate.id}`}
-                className="ml-auto inline-flex min-h-11 items-center rounded-lg border border-control px-4 text-sm font-medium"
+                className="ml-auto inline-flex min-w-0 max-w-full items-center break-words rounded-lg border border-control px-4 text-sm font-medium min-h-11"
                 /* The door's NAME in the accessible name. Reviewer B met three links reading
                    "Manage on Doors" on one screen — identical to anybody tabbing or using
                    speech control, and distinguished only by which row they happen to sit in,
                    which is visual position and therefore nothing at all. */
                 aria-label={`Manage ${name} on Doors`}
               >
-                Manage on Doors
+                {/* The label is its own box so it can shrink. `min-w-0` on the link makes the
+                    LINK shrinkable within the row; the text inside an inline-flex is an
+                    anonymous flex item that keeps its own automatic minimum, so without this
+                    span the words still refused to wrap and the row stayed 10 px over. */}
+                <span className="min-w-0 break-words">Manage on Doors</span>
               </Link>
             </li>
           );
@@ -1089,7 +1093,9 @@ export function AdminDevicesPage() {
       <Card className="p-5">
         <div className="mb-1 flex flex-wrap items-center gap-2">
           <Cpu className="h-5 w-5 text-slate-400" />
-          <h2 className="text-lg font-semibold">Connected boards</h2>
+          {/* `min-w-0 break-words`: a flex item's automatic minimum size is its longest word,
+              and at a 32 px root "Connected" alone wants more than the row has. */}
+          <h2 className="min-w-0 break-words text-lg font-semibold">Connected boards</h2>
           {/* The outage email says "open the Devices page" and watch the box come back, so
               the page has to be able to say when it last looked and to look again on
               demand — the Bookings screen has had a Refresh button all along, and it is

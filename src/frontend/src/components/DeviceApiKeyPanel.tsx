@@ -119,7 +119,11 @@ function PairingNote() {
   return (
     <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
       <h3 className="mb-2 font-semibold text-slate-800">How to pair a board</h3>
-      <ol className="list-decimal space-y-1 pl-5">
+      {/* `break-words`: the steps name files and make targets — `secrets.h`, `door_gate`,
+          `box-xxxxxx` — and an identifier has no space to wrap at. At a 32 px root font the
+          list's own `pl-5` leaves about 86 px here, and a 130 px unbreakable token pushed the
+          card, the page and the viewport sideways rather than going to a second line. */}
+      <ol className="list-decimal space-y-1 break-words pl-5">
         <li>Copy this key, and the club WiFi name and password, into that firmware’s <code className="font-mono text-xs">secrets.h</code> — a court box and a door gate each have their own.</li>
         <li>Flash it. A court box: <code className="font-mono text-xs">make flash-bridge</code>, or its sketch in the Arduino IDE. A door gate: the <code className="font-mono text-xs">door_gate</code> sketch in the Arduino IDE, board “ESP32 Dev Module”.</li>
         <li>Power it on. It appears under Connected boards by itself on its first heartbeat, named <code className="font-mono text-xs">box-xxxxxx</code> or <code className="font-mono text-xs">gate-xxxxxx</code> — then give a box its name and courts, or a door its name.</li>

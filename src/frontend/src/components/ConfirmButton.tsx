@@ -795,6 +795,22 @@ export function ConfirmButton({
     <div
       ref={groupRef}
       onBlur={handleBlur}
+      /*
+       * What a sweep finds this control BY, and it earns its place rather than being a test
+       * hook for its own sake.
+       *
+       * The e2e sweeps used to select every confirm by its shape — a div holding a direct
+       * `span[aria-live="polite"]` — precisely so that a control arriving on one of these
+       * screens next month is measured without anybody remembering to add it. That shape
+       * stopped being exclusive: `Alert` renders its standing live region as a FRAGMENT
+       * sibling, so every container holding an `Alert` now answers the same selector, and the
+       * sweeps started measuring a notice instead of a confirm — on the doors overview the
+       * first "confirm" they found had no way out, because it was a banner.
+       *
+       * A marking on the group keeps the property that mattered (every ConfirmButton is found,
+       * automatically) and drops the one that broke (anything else shaped like one is too).
+       */
+      data-confirm-group=""
       className={cn("min-w-0", showingArmed && ARMED_GRID_CLASS)}
     >
       {showingArmed ? (

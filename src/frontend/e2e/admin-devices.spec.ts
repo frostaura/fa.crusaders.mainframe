@@ -847,6 +847,14 @@ test.describe("Devices at 320 px with a 32 px root font", () => {
         if (e.classList.contains("flex-1") && e.classList.contains("min-h-0")) return false;
         // `sr-only` is a 1 px clipped box by construction — that is what the utility IS.
         if (e.classList.contains("sr-only")) return false;
+        /*
+         * A scroll container is not a box that refuses to hold its content — holding more
+         * than it shows, and saying so, is the entire job. `ScrollArea` is the one on this
+         * page: the Monitoring strip's row is `w-max` by design, the region scrolls it, and
+         * a fade plus a sentence announce that there is more. Measuring it here would make
+         * this sweep demand that a deliberately scrollable strip not scroll.
+         */
+        if (getComputedStyle(e).overflowX !== "visible") return false;
         return e.scrollWidth - e.clientWidth > 1 && e.getBoundingClientRect().width > 0;
       })
       .map((el) => ({

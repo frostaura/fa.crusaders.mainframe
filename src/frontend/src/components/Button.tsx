@@ -184,7 +184,22 @@ export function Button({
           TEXT still scales — that is what a root font size is for — and the box around it
           stops growing at the size a fingertip needs.
         */
-        "inline-flex items-center justify-center gap-2 min-h-[44px] px-[20px] py-[8px] rounded-lg text-sm font-medium",
+        /*
+         * `min-w-0 break-words` — the horizontal half of the same rule the height above is
+         * the vertical half of.
+         *
+         * A button's default automatic minimum size is its longest WORD, and it has no way
+         * to give that back: at a 32 px root font on a 320 px phone, "Edit buttons" wants
+         * 145 px inside a 124 px column and "Box activity" 140 px, so the button pushed its
+         * own row sideways and every ancestor with it. Measured on the Devices page, where
+         * the shell's and the card's rem padding already leave about 124 px to work in.
+         *
+         * `min-w-0` lets it shrink and `break-words` makes the label wrap rather than spill
+         * once it has. Neither does anything at an ordinary text size — a button wide enough
+         * for its words is untouched — and the 44 px floor above is unaffected, so a label
+         * that takes two lines gets a taller control rather than a clipped one.
+         */
+        "inline-flex items-center justify-center gap-2 min-w-0 max-w-full break-words min-h-[44px] px-[20px] py-[8px] rounded-lg text-sm font-medium",
         BUTTON_VARIANT_CLASS[variant],
         // The disabled LOOK is suppressed while loading, but `disabled` itself is kept — it is
         // what stops a double submit, which on register means uploading the photo twice. A
@@ -294,5 +309,9 @@ export function Badge({ tone = "muted", children }: { tone?: "muted" | "success"
     warning: "bg-warning-soft text-warning-strong",
     danger: "bg-danger-soft text-danger-strong",
   };
-  return <span className={cn("inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium", tones[tone])}>{children}</span>;
+  // `min-w-0 break-words` for the same reason the button above carries them: a pill holds
+  // whatever copy a call site gives it, and "New — check court numbers" wants 134 px inside
+  // the 124 px a 32 px root font leaves on this estate's narrowest screen. A badge that
+  // cannot shrink below its longest word takes the row it sits in with it.
+  return <span className={cn("inline-flex items-center min-w-0 max-w-full break-words px-2.5 py-0.5 rounded-full text-xs font-medium", tones[tone])}>{children}</span>;
 }

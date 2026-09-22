@@ -14,14 +14,20 @@ import { BUTTON_VARIANT_CLASS } from "../src/components/Button";
  * </p>
  *
  * <p>
- * <b>Found by shape, not by wording.</b> Every `ConfirmButton` is a wrapper holding its
- * control and the polite live region that replaced `aria-pressed`, so the selector below is
- * every two-step confirm on the page and nothing else — a control that arrives on one of
- * these screens next month is measured without anybody remembering to add it.
+ * <b>Found by shape, not by wording.</b> Every `ConfirmButton` marks its own group, so the
+ * selector below is every two-step confirm on the page and nothing else — a control that
+ * arrives on one of these screens next month is measured without anybody remembering to add
+ * it.
+ * </p>
+ *
+ * <p>
+ * It selected the shape directly until the shape stopped being exclusive: `Alert` renders its
+ * standing live region as a fragment sibling, so a div holding a notice answered the same
+ * selector as a div holding a confirm, and the sweep began measuring banners.
  * </p>
  */
 
-const CONFIRMS = 'div:has(> span[aria-live="polite"])';
+const CONFIRMS = "[data-confirm-group]";
 
 const SETTINGS = {
   slice_minutes: 15, slice_price_credits: 8, advance_booking_days: 14,

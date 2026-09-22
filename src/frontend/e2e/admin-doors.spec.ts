@@ -227,14 +227,27 @@ test.describe("The doors overview", () => {
   test("keeps every control at 44 px and the page inside the phone", async ({ page }) => {
     await openDoors(page, [door({ gate_key: "a".repeat(64), name: "The changing room corridor door" })]);
 
-    // Scoped to the page's own content. The app chrome's brand link and tab strip are
-    // `Layout`'s and predate this surface; A2.7's 44 px rule is about the doors pages.
+    /*
+     * Scoped to the page's own content. The app chrome's brand link and tab strip are
+     * `Layout`'s and predate this surface; A2.7's 44 px rule is about the doors pages.
+     *
+     * The Monitoring strip is chrome too, and it renders INSIDE `main` — deliberately, so
+     * that an admin arriving from a bookmark or an outage email can see which section they
+     * are in. Its own floor is `min-h-[36px]` with `[@media(pointer:coarse)]:min-h-[44px]`,
+     * which is the chrome lane's considered answer and a better one than a flat 44: a touch
+     * target is a fingertip, so the floor belongs in pixels and must not double with the text
+     * at a 32 px root font, while a mouse does not need 44. `monitoring-posture.test.ts`
+     * holds that pairing explicitly. So it is excluded here rather than flattened — this
+     * sweep is about the doors surface's own controls.
+     */
     const main = page.getByRole("main");
-    for (const control of await main.getByRole("button").all()) {
+    const ownControls = (role: "button" | "link") =>
+      main.getByRole(role).locator(':not(nav[aria-label="Monitoring"] *)');
+    for (const control of await ownControls("button").all()) {
       const box = await control.boundingBox();
       if (box) expect(box.height).toBeGreaterThanOrEqual(43.5);
     }
-    for (const link of await main.getByRole("link").all()) {
+    for (const link of await ownControls("link").all()) {
       const box = await link.boundingBox();
       if (box) expect(box.height).toBeGreaterThanOrEqual(43.5);
     }
@@ -584,7 +597,16 @@ test.describe("The club door log", () => {
       ...extra,
     ]);
     await page.goto(url);
-    await expect(page.getByRole("heading", { name: "All scans, all doors" })).toBeVisible();
+    /*
+     * The heading names the FILTER, so it is matched as a prefix rather than pinned to the
+     * unfiltered wording. This helper is also given `?door=<id>` URLs, and those used to
+     * arrive unfiltered for the wrong reason: the redirect from the old `/admin/doors/log`
+     * threw the query string away, so the page really did open on every scan in the club and
+     * really did say "all doors". `RedirectKeepingQuery` carries the query across now — the
+     * filter survives, which is the whole point of it — and the heading correctly reads
+     * "All scans, at Side door". A prefix still fails loudly if the page does not render.
+     */
+    await expect(page.getByRole("heading", { name: /^All scans/, level: 1 })).toBeVisible();
   }
 
   /**
@@ -767,9 +789,8 @@ test.describe("An armed doors confirm fits the words it is showing", () => {
    * reason it needed four lines in the first place.
    */
   /**
-   * <b>Found by shape, not by wording.</b> Every `ConfirmButton` is a wrapper holding its
-   * control and the polite live region that replaced `aria-pressed`, so this selector is every
-   * two-step confirm on the page and nothing else.
+   * <b>Found by shape, not by wording.</b> Every `ConfirmButton` marks its own group, so this
+   * selector is every two-step confirm on the page and nothing else.
    *
    * <p>
    * An earlier draft of this sweep named each control by its label, and the labels changed
@@ -778,8 +799,17 @@ test.describe("An armed doors confirm fits the words it is showing", () => {
    * written against is not a guarantee; a control that arrives on this screen next month gets
    * measured by this test without anybody remembering to add it.
    * </p>
+   *
+   * <p>
+   * It used to select the shape directly — a div with a direct `span[aria-live="polite"]` —
+   * and that shape stopped belonging to `ConfirmButton` alone. `Alert` renders its standing
+   * live region as a fragment sibling, so every container holding one answered too: on a shut
+   * door's page the sweep counted three confirms and the first had no way out, because it was
+   * the "this door is shut" banner. The marking is on the group itself, so the property that
+   * mattered survives — a new confirm is swept without anybody adding it here.
+   * </p>
    */
-  const CONFIRMS = 'div:has(> span[aria-live="polite"])';
+  const CONFIRMS = "[data-confirm-group]";
 
   /**
    * Arm every confirm on the page in turn, measure it, and put it back.
