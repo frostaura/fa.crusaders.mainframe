@@ -18,14 +18,17 @@ public sealed class AuthService
     private readonly ILogger<AuthService> _logger;
     private readonly MemberApprovalService _memberships;
     private readonly AccessTokenRevocationList _revocations;
+    private readonly InherentAdminService _inherentAdmins;
 
     public AuthService(MainframeDbContext db, ITenantContext tenant, IPasswordHasher hasher,
         IJwtIssuer jwt, IEmailService email, IConfiguration config, ILogger<AuthService> logger,
-        MemberApprovalService memberships, AccessTokenRevocationList revocations)
+        MemberApprovalService memberships, AccessTokenRevocationList revocations,
+        InherentAdminService inherentAdmins)
     {
         _db = db; _tenant = tenant; _hasher = hasher; _jwt = jwt;
         _email = email; _config = config; _logger = logger;
         _memberships = memberships; _revocations = revocations;
+        _inherentAdmins = inherentAdmins;
     }
 
     /// <summary>
@@ -131,6 +134,13 @@ public sealed class AuthService
             return new RegistrationResult.MembershipNumberInUse();
         }
 
+        // IsAdmin stays false here even for an address in Admins:Emails, and that is a decision
+        // rather than an omission. An applicant at this moment has an unconfirmed address and a
+        // membership the club has not approved; IsAdmin is precisely what exempts an account
+        // from both of those checks in LoginAsync, so setting it here would let a configured
+        // address sign straight past them. An inherent administrator who registers after the
+        // stack was deployed is promoted at their first sign-in that passes every check — see
+        // InherentAdminService, which explains why that is the earliest safe moment.
         var user = new User
         {
             TenantId = _tenant.TenantId,
@@ -337,6 +347,20 @@ public sealed class AuthService
             return new LoginResult.NotApproved(membership.Status);
 
         user.LastLoginAt = DateTimeOffset.UtcNow;
+
+        // THE LAST THING, AND THE POSITION IS THE WHOLE SAFETY ARGUMENT.
+        //
+        // Admins:Emails decides one bit — IsAdmin — and it must not be able to decide any
+        // other. This method already treats IsAdmin as an EXEMPTION from the membership gate
+        // eleven lines above ("!user.IsAdmin"), so a promotion applied any earlier would let a
+        // configured address in past a rejection, a suspension or an unapproved application
+        // that the club itself had decided. Applied here, every refusal has already been
+        // evaluated against the account as the database found it: the list can only add the
+        // admin flag to a sign-in that was going to succeed anyway.
+        //
+        // The same reasoning is why RegisterAsync does not call this and ConsumeMagicLinkAsync
+        // does not either — see InherentAdminService.
+        await _inherentAdmins.ApplyAsync(user, ct);
         await _db.SaveChangesAsync(ct);
 
         var roles = new List<string>();

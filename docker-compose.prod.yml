@@ -85,6 +85,27 @@ services:
       # price, and a court created at 0 is free to book — so this is a money setting, not a
       # cosmetic one. Change court prices afterwards from Admin → Settings.
       Bootstrap__SlicePriceCredits: "8"
+      # ---- Inherent administrators ----
+      # Whoever is listed here holds club-admin rights in every club on this deployment where
+      # that address ALREADY has an account. It is applied at sign-in, so an address added
+      # later — or a person who registers later — is covered without a restart.
+      #
+      # It grants the admin flag and nothing else. It is not a password, it does not skip email
+      # verification, it does not admit a member the club has suspended or not yet approved, and
+      # it never invents a member in a club that person has not joined.
+      #
+      # DEPLOYMENT-OWNED, NOT CLUB-OWNED — that is why it is here rather than in the club's own
+      # settings. The club appoints its own admins from Admin → Members, and those are untouched.
+      #
+      # Not a secret; nothing here is a credential. It IS security-relevant: editing this line
+      # changes who can administer every club on this stack, so it is reviewed, not skimmed.
+      #
+      # Indexed, one address per line: Admins__Emails__0, Admins__Emails__1, … An empty list is
+      # a valid, ordinary configuration — delete the line and the clubs run on their own admins.
+      # REMOVING an address does not strip an admin who already has the rights (that would let a
+      # typo lock a club out of its own console); it logs a warning, and the rights are removed
+      # in Admin → Members.
+      Admins__Emails__0: dean.martin@frostaura.net
       # Signs every member and admin session. At least 32 bytes; changing it logs everyone out.
       #
       # Generate it, do not invent it:  openssl rand -base64 48

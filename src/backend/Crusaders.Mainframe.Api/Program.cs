@@ -303,6 +303,12 @@ builder.Services.AddScoped<AdminBlockService>();
 // The activation service's non-decision dependencies, bundled — see ActivationPlumbing.
 builder.Services.AddScoped<ActivationPlumbing>();
 builder.Services.AddScoped<CourtActivationService>();
+// Admins:Emails — the deployment's inherent administrators. Read ONCE, at startup, and shared:
+// it is deployment configuration, it cannot change while the process runs, and parsing it per
+// request would put the ignored-entry warning in the log on every sign-in. The service that
+// applies it is scoped, because it writes an audit row through the request's DbContext.
+builder.Services.AddSingleton(InherentAdmins.From(builder.Configuration));
+builder.Services.AddScoped<InherentAdminService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<MemberApprovalService>();
 // The club's undeletable admin change record. Every admin mutation in every lane writes
@@ -412,6 +418,14 @@ if (builder.Configuration.GetValue<bool>("Database:AutoMigrateOnStartup"))
     var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Bootstrap");
     await ProductionBootstrap.RunAsync(app.Services, builder.Configuration, logger);
 }
+
+// ---- Inherent administrators ----
+//
+// Says what this deployment is configured to hold, and — the part worth a line in a container
+// log — what it threw away doing it. A typo in Admins__Emails__1 is otherwise silent: the
+// address never matches anybody, and nothing ever says so.
+app.Services.GetRequiredService<InherentAdmins>()
+    .Report(app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Admins"));
 
 // Bring back the sign-outs that are still inside their token's lifetime.
 //

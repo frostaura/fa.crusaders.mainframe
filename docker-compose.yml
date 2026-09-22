@@ -82,6 +82,16 @@ services:
       Bootstrap__AdminPassword: ${BOOTSTRAP_ADMIN_PASSWORD:-}
       Bootstrap__Courts: ${BOOTSTRAP_COURTS:-4}
       Bootstrap__SlicePriceCredits: ${BOOTSTRAP_SLICE_PRICE_CREDITS:-8}
+      # Inherent administrators of the deployment — club-admin rights in every club where that
+      # address already has an account. Deployment-owned, not club-owned; not a secret, but
+      # security-relevant. The full note is in docker-compose.prod.yml and appsettings.json.
+      #
+      # It carries the appsettings.json default explicitly, for the reason the TrustedProxies
+      # note below spells out: an empty environment variable does not mean "absent" to .NET
+      # configuration, it SHADOWS the file value with "" — and an "" entry is exactly what this
+      # list discards, so `${ADMINS_EMAILS_0:-}` would silently delete the shipped default here
+      # and nowhere else.
+      Admins__Emails__0: ${ADMINS_EMAILS_0:-dean.martin@frostaura.net}
       Smtp__Host: ${SMTP_HOST:-mailhog}
       Smtp__Port: ${SMTP_PORT:-1025}
       Smtp__User: ${SMTP_USER:-}
