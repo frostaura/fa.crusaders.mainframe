@@ -31,7 +31,7 @@ import { endpoints } from "../lib/api";
  * <p>
  * <b>And the destructive carve-out is asserted alongside it</b>, because it is the half that
  * goes wrong quietly. Ruling 4: a thumbs-up on "Cancel the booking" is the software claiming
- * it approves of a member losing an R15.00 penalty. Those controls declare `destructive`, which
+ * it approves of a member losing a 15.00 penalty. Those controls declare `destructive`, which
  * draws no thumb, does not celebrate, and settles rather than snapping.
  * </p>
  */
@@ -78,7 +78,7 @@ describe("the booking dialog says which button is the yes", () => {
 
   /**
    * The override is an AFFIRMATIVE action with a destructive consequence, and the consequence
-   * is what the glyph must not cheer. "Book anyway — leaves -R12.00" beside a thumbs-up is
+   * is what the glyph must not cheer. "Book anyway — leaves -12.00 cr" beside a thumbs-up is
    * the software approving of pushing a member into the red on a desk clerk's judgement.
    */
   it("keeps the overdraft override out of the thumbs, on the danger treatment", async () => {

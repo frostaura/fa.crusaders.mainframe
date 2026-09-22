@@ -1,8 +1,8 @@
 import { ApiError, type LedgerEntryType, type LedgerRow } from "./api";
-import { formatMoney } from "./utils";
+import { formatCredits } from "./utils";
 
 /**
- * The pure logic behind the admin console's form for moving a member's money by hand.
+ * The pure logic behind the admin console's "adjust credit" form.
  *
  * <p>
  * It lives in a `.ts` module rather than beside the screen it serves, and that is a
@@ -15,7 +15,7 @@ import { formatMoney } from "./utils";
  */
 
 /**
- * A name for one intended money movement.
+ * A name for one intended credit movement.
  *
  * <p>
  * `crypto.randomUUID` needs a secure context and is absent under plain HTTP on a LAN
@@ -36,7 +36,7 @@ export function newIdempotencyKey(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
-// --- "for booking" on a hand adjustment ----------------------------------------
+// --- "for booking" on a credit adjustment --------------------------------------
 
 export const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function isGuid(value: string) { return GUID.test(value); }
@@ -141,7 +141,7 @@ export function recentBookingsFrom(rows: LedgerRow[]): RecentBooking[] {
     if (!id || seen.has(id)) continue;
     seen.add(id);
     const when = new Date(row.at).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
-    out.push({ id, label: `${when} · ${LEDGER_TYPE_LABEL[row.type] ?? row.type} ${formatMoney(row.amountCredits)} · ${id.slice(0, 8)}` });
+    out.push({ id, label: `${when} · ${LEDGER_TYPE_LABEL[row.type] ?? row.type} ${formatCredits(row.amountCredits)} · ${id.slice(0, 8)}` });
   }
   return out;
 }

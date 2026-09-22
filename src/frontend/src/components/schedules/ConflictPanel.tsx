@@ -8,7 +8,6 @@ import {
   NOTHING_CHANGED_YET, clearAllLabel, conflictRefundPhrase, conflictsHeadline,
 } from "../../lib/scheduleCopy";
 import { describeFailure } from "../../lib/errors";
-import { formatMoney } from "../../lib/utils";
 import { endpoints } from "../../lib/api";
 import type { ScheduleConflict } from "../../lib/adminApi";
 
@@ -46,7 +45,7 @@ import type { ScheduleConflict } from "../../lib/adminApi";
 function knownRefundTotal(conflicts: readonly ScheduleConflict[]): number | null {
   let total = 0;
   for (const c of conflicts) {
-    // Unknown is never zero. A button promising "refund R314.00" over a list where one
+    // Unknown is never zero. A button promising "refund 314.00 cr" over a list where one
     // quote never arrived is promising a figure nobody computed.
     if (c.would_refund_credits === undefined || c.would_refund_credits === null) return null;
     total += c.would_refund_credits;
@@ -98,11 +97,7 @@ export function ConflictPanel({
           id: conflict.booking_id as string,
           label,
           ok: true,
-          // Through the shared formatter, not a `toFixed` with a unit typed beside it. This
-          // line is the RECEIPT for a refund an admin has just issued, and it sat next to a
-          // button whose own label already went through `formatMoney` — so the promise and
-          // the receipt were written in two different units by two different rules.
-          detail: `${formatMoney(result.refunded_credits)} went back in full.`,
+          detail: `${result.refunded_credits.toFixed(2)} cr went back in full.`,
         });
       } catch (err) {
         rows.push({
@@ -200,7 +195,7 @@ export function ConflictPanel({
               confirmLabel={
                 total === null
                   ? `${cancellable.length} member booking${cancellable.length === 1 ? "" : "s"} will be cancelled and refunded in full, and each member emailed. This cannot be undone from here — a cancelled slot goes back on the grid for anyone to book.`
-                  : `${cancellable.length} member booking${cancellable.length === 1 ? "" : "s"} will be cancelled, ${formatMoney(total)} goes back in full, and each member is emailed. This cannot be undone from here — a cancelled slot goes back on the grid for anyone to book.`
+                  : `${cancellable.length} member booking${cancellable.length === 1 ? "" : "s"} will be cancelled, ${total.toFixed(2)} cr goes back in full, and each member is emailed. This cannot be undone from here — a cancelled slot goes back on the grid for anyone to book.`
               }
               focusAfter={() => resultsRef.current?.querySelector("h3")}
               onConfirm={() => cancelThese(cancellable)}

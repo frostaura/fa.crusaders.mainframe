@@ -4,8 +4,7 @@ import {
 } from "recharts";
 import { createElement, useEffect, useRef, useState } from "react";
 import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
-import { formatMoney } from "../lib/utils";
-import { clubCurrencySymbol } from "../lib/currency";
+import { formatCredits } from "../lib/utils";
 import { chartColors } from "../lib/tokens";
 
 /**
@@ -47,80 +46,24 @@ const CHART_HEIGHT = 240;
  * At 8px the top label was sliced in half by the SVG's own edge — "50.00 cr" rendered as a row
  * of half-height digits above an intact "45.00 cr", which reads as a rendering fault rather than
  * as a number. A tick is centred on its gridline, so the margin has to clear half a line of text
- * at the 11px the axis is set in. Unchanged by the move to a leading symbol: what this clears is
- * half a LINE, and a line is the same height whatever is written on it.
+ * at the 11px the axis is set in.
  * </p>
  */
 const TOP_MARGIN = 16;
 
-/** The font size every y-axis on this page is set in. The widths below are derived at it. */
-const AXIS_FONT_PX = 11;
-
 /**
- * Widths at {@link AXIS_FONT_PX}, as fractions of the em — the arithmetic behind the gutter.
+ * The y-axis gutter, in pixels, for a credit-denominated axis.
  *
  * <p>
- * <b>Written down rather than folded into a constant, because the constant it replaces was
- * wrong the moment the unit became configurable.</b> 64 was measured against "50.00 cr" and is
- * carried nowhere near a symbol a club can change. `SYMBOL` is deliberately the width of an
- * UPPERCASE LETTER, which is the widest thing `isAcceptableCurrencySymbol` admits: "CHF" and
- * "US$" are letters, where "€", "£" and "₹" are all narrower, so budgeting a letter per
- * character is an over-estimate for every currency sign and an exact one for the worst case.
+ * 48 was under the width of "50.00 cr" at 11px, and recharts wraps a tick that does not fit
+ * rather than overflowing it — so every single tick on the wallet-balance chart rendered on two
+ * lines, doubling the label column's height and pushing the top one into the clip described
+ * above. Counts ({@link COUNT_AXIS_WIDTH}) are short enough not to need it.
  * </p>
  */
-const DIGIT_PX = 0.55 * AXIS_FONT_PX;
-const POINT_PX = 0.26 * AXIS_FONT_PX;
-const SIGN_PX = 0.33 * AXIS_FONT_PX;
-const SYMBOL_CHAR_PX = 0.75 * AXIS_FONT_PX;
+const CREDIT_AXIS_WIDTH = 64;
 
-/** recharts' own `tickSize` (6) plus `tickMargin` (3), which live inside the axis width. */
-const TICK_GAP_PX = 9;
-
-/**
- * The widest NUMBER these axes draw: four integer digits, a point and two decimals.
- *
- * <p>
- * Not a guess at the data — it is the bound the old constant was implicitly derived at. 64px
- * less the 9px tick gap leaves 55px, and "1000.00 cr" needs about 52 of them, so four integer
- * digits is exactly where the photographed fix stopped. A club whose daily revenue reaches five
- * figures will wrap a tick, as it would have done before this change; that is a known edge and
- * not a regression introduced here.
- * </p>
- */
-const WIDEST_NUMBER_PX = 6 * DIGIT_PX + POINT_PX;
-
-/**
- * The y-axis gutter, in pixels, for a money-denominated axis — <b>derived from the club's own
- * symbol, because it is no longer a property of this file.</b>
- *
- * <p>
- * The failure this protects against is unchanged and is worth restating, because it is not the
- * obvious one: recharts <b>wraps</b> a tick that does not fit rather than overflowing it. So a
- * gutter that is too narrow does not produce a clipped label — it produces every tick on two
- * lines, which doubles the label column's height and pushes the topmost one into the clip
- * {@link TOP_MARGIN} exists to prevent. That is what 48px did to the wallet-balance chart.
- * </p>
- *
- * <p>
- * The move to a leading symbol made the default club's label NARROWER — "R50.00" against
- * "50.00 cr" — and a club on "CHF" WIDER. A single constant cannot be right for both, and the
- * one that is right for the default is the one that silently wraps for everybody else. Rounded
- * up to a multiple of 4 so the gutter lands on the layout's own step rather than on a fraction
- * of a pixel.
- * </p>
- *
- * <p>
- * At one character this comes out at exactly 64 — the number a real browser confirmed — which
- * is a check on the arithmetic rather than a coincidence worth relying on; `chart-geometry.test.tsx`
- * pins it as a floor either way.
- * </p>
- */
-export function moneyAxisWidth(symbol: string = clubCurrencySymbol()): number {
-  const needed = TICK_GAP_PX + SIGN_PX + WIDEST_NUMBER_PX + SYMBOL_CHAR_PX * symbol.length;
-  return Math.ceil(needed / 4) * 4;
-}
-
-/** The same gutter for an axis of plain integers — "12" needs nothing like the room "R50.00" does. */
+/** The same gutter for an axis of plain integers — "12" needs nothing like the room "50.00 cr" does. */
 const COUNT_AXIS_WIDTH = 36;
 
 /**
@@ -270,13 +213,10 @@ const legendProps = {
   formatter: (value: string) => createElement("span", { style: { color: LEGEND_TEXT } }, value),
 } as const;
 
-// One unit, and it is the club's. This comment used to read "credits, not rand" and warned
-// that a rand sign here would overstate every bar by the conversion rate — which was true
-// while the two were written differently. The owner has collapsed them: a court price, a
-// wallet and a card payment are all written with the club's symbol now, and `lib/currency.ts`
-// carries the ruling and the residual risk it accepts. The only rule left for this file is
-// that the unit comes from `formatMoney` rather than being composed beside a `toFixed`.
-const fmtMoney = (v: number | string) => formatMoney(Number(v));
+// Credits, not rand. These charts plot ledger movements and court spend, both of
+// which are credit-denominated — a rand sign here overstates every bar by the
+// conversion rate.
+const fmtCredits = (v: number | string) => formatCredits(Number(v));
 const fmtDate = (d: string) => {
   const dt = new Date(d + "T00:00:00Z");
   return dt.toLocaleDateString(undefined, { month: "short", day: "2-digit" });
@@ -329,8 +269,8 @@ export function RevenueAreaChart({ data }: { data: DailyAdminPoint[] }) {
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtMoney} fontSize={11} stroke={TEXT_MUTED} width={moneyAxisWidth()} />
-          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtMoney(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
+          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} />
+          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
           <Area type="monotone" dataKey="top_ups_credits" name="Top-ups" stroke={ACCENT} fill="url(#revFill)" strokeWidth={2} />
         </AreaChart>
     </ChartFrame>
@@ -348,9 +288,9 @@ export function DailyFlowBarChart({ data }: { data: DailyAdminPoint[] }) {
         <BarChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }} stackOffset="sign">
           <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtMoney} fontSize={11} stroke={TEXT_MUTED} width={moneyAxisWidth()} domain={SIGNED_DOMAIN} />
+          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} domain={SIGNED_DOMAIN} />
           <ReferenceLine y={0} stroke={ZERO_LINE_STROKE} strokeWidth={1} />
-          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtMoney(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
+          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
           <Legend {...legendProps} />
           <Bar dataKey="top_ups_credits" name="Top-ups" stackId="a" fill={SUCCESS} radius={[3, 3, 0, 0]} />
           <Bar dataKey="booking_charges_credits" name="Bookings" stackId="b" fill={ACCENT} radius={[3, 3, 0, 0]} />
@@ -382,8 +322,8 @@ export function CourtsRevenueBarChart({ data }: { data: { court_name: string; re
         <BarChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }}>
           <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
           <XAxis dataKey="court_name" fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtMoney} fontSize={11} stroke={TEXT_MUTED} width={moneyAxisWidth()} />
-          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtMoney(v)) as never} />
+          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} />
+          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} />
           <Bar dataKey="revenue_credits" name="Revenue" fill={ACCENT} radius={[6, 6, 0, 0]} />
         </BarChart>
     </ChartFrame>
@@ -421,8 +361,8 @@ export function MyBalanceLineChart({ data }: { data: DailyMePoint[] }) {
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtMoney} fontSize={11} stroke={TEXT_MUTED} width={moneyAxisWidth()} />
-          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtMoney(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
+          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} />
+          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
           <Area type="monotone" dataKey="balance_credits" name="Balance" stroke={ACCENT} fill="url(#balFill)" strokeWidth={2} />
         </AreaChart>
     </ChartFrame>
@@ -441,9 +381,9 @@ export function MyFlowBarChart({ data }: { data: DailyMePoint[] }) {
         <BarChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }} stackOffset="sign">
           <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
           <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtMoney} fontSize={11} stroke={TEXT_MUTED} width={moneyAxisWidth()} domain={SIGNED_DOMAIN} />
+          <YAxis tickFormatter={fmtCredits} fontSize={11} stroke={TEXT_MUTED} width={CREDIT_AXIS_WIDTH} domain={SIGNED_DOMAIN} />
           <ReferenceLine y={0} stroke={ZERO_LINE_STROKE} strokeWidth={1} />
-          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtMoney(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
+          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
           <Legend {...legendProps} />
           <Bar dataKey="top_ups_credits" name="Top-ups" stackId="a" fill={SUCCESS} radius={[3, 3, 0, 0]} />
           <Bar dataKey="refunds_credits" name="Refunds (net)" stackId="a" fill={SUCCESS_SOFT} radius={[3, 3, 0, 0]} />

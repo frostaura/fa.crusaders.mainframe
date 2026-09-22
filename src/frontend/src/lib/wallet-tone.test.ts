@@ -9,8 +9,8 @@ import { walletNotice } from "./gridExplain";
  * <p>
  * <b>Three lanes wrote this rule and they did not agree.</b> The header chip asked
  * `balance <= 0`; the wallet page asked `balance < 0.005` through `balanceLevel`; the grid's
- * empty-wallet banner asked `balance > 0`. At a balance of 0.004 — which renders as "R0.00"
- * and buys nothing, because a slot costs fifty — a member saw a green chip saying R0.00, a red wallet
+ * empty-wallet banner asked `balance > 0`. At 0.004 credits — which renders as "0.00" and buys
+ * nothing, because a slot costs fifty — a member saw a green chip saying 0.00, a red wallet
  * card saying they could not book, and a grid with no banner on it at all. Every one of those
  * three screens was written by somebody who had thought about the rounding case; they simply
  * each thought about it separately.
@@ -37,8 +37,8 @@ describe("one rule, asked in three places", () => {
   });
 
   it("reads an absent balance as nothing to warn about", () => {
-    // `null` is UNKNOWN — a wallet read that has not landed — and a grid that shouted "your
-    // wallet is empty" at a slow network would be wrong more often than right.
+    // `null` is UNKNOWN — a wallet read that has not landed — and a grid that shouted "no
+    // credits" at a slow network would be wrong more often than right.
     expect(walletTone(null)).toBe("fine");
   });
 
@@ -63,7 +63,7 @@ describe("one rule, asked in three places", () => {
     expect(walletNotice(0.004, null)?.id).toBe("wallet");
   });
 
-  it("puts nobody on the top-up screen who has money to spend", () => {
+  it("puts nobody on the top-up screen who has credit to spend", () => {
     expect(walletHref(0.01)).toBe("/wallet");
     expect(walletHref(500)).toBe("/wallet");
     // Unknown is not zero. The chip that does not know yet must not send a member to a form.

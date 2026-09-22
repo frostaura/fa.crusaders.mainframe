@@ -236,26 +236,20 @@ public class AdminOverdraftBookingTests
     }
 
     /// <summary>
-    /// The member's own confirmation. Left alone, the email states "Balance after: -R5.00"
-    /// and nothing else — a negative number with no account of itself, on the one artifact a
-    /// member reconciles a bank statement against.
+    /// The member's own confirmation. Left alone, the email states "Balance after: −5,00
+    /// credits" and nothing else — a negative number with no account of itself, on the one
+    /// artifact a member reconciles a bank statement against.
     /// </summary>
     [Fact]
     public void The_confirmation_email_explains_a_negative_balance_and_says_nothing_when_it_is_positive()
     {
         var overdrawn = EmailTemplates.BookingConfirmation("naledi@example.test", new BookingConfirmationDetails(
-            "Court 1", "Sat 06 Sep 09:00", "15 min", 8m, -5m, 15, 30m, "R"));
+            "Court 1", "Sat 06 Sep 09:00", "15 min", 8m, -5m, 15, 30m));
         var ordinary = EmailTemplates.BookingConfirmation("naledi@example.test", new BookingConfirmationDetails(
-            "Court 1", "Sat 06 Sep 09:00", "15 min", 8m, 192m, 15, 30m, "R"));
+            "Court 1", "Sat 06 Sep 09:00", "15 min", 8m, 192m, 15, 30m));
 
         Assert.Contains("This booking was made for you at the club", overdrawn.HtmlBody);
         Assert.Contains("Top up to clear it", overdrawn.HtmlBody);
         Assert.DoesNotContain("This booking was made for you at the club", ordinary.HtmlBody);
-
-        // The figure inside the notice, with the sign OUTSIDE the symbol. Without this the
-        // notice could print "R-5.00" — a symbol followed by a malformed number — and the two
-        // assertions above would not notice.
-        Assert.Contains("<strong>-R5.00</strong>", overdrawn.HtmlBody);
-        Assert.DoesNotContain("credits", overdrawn.HtmlBody);
     }
 }

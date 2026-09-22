@@ -151,7 +151,7 @@ function useCrossTabSessionEnd(statusRef: { current: AuthState["status"] }, endS
  * the change-password route with `403 password_change_required`. This context only ever
  * learned the flag from `whoami` at boot, so an in-app route change afterwards rendered the
  * new screen against a stale context: a finder clicked Reports and got
- * `TOP-UPS — · SPENT — · REFUNDS (NET) — · TIME ON COURT —`, a stale "−R40.00" still in the
+ * `TOP-UPS — · SPENT — · REFUNDS (NET) — · TIME ON COURT —`, a stale "−40.00 cr" still in the
  * header, a Download wallet CSV button still offered, and no message of any kind — two 403s
  * swallowed into an empty state. Only a full page load re-read `whoami` and did the right
  * thing, which is what made it look like a page bug rather than a context one.

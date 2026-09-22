@@ -27,7 +27,7 @@ type Args = {
    * there is no server figure to `apply` — and `balance + refunded - penalty` in the client
    * would be the optimistic guess `apply` exists to not be, on the one screen where being
    * wrong about money is worst. So the read stays a read and says who asked for it: without
-   * the flag the chip raised "The club added R50.00 to your wallet" on top of the toast below, and a
+   * the flag the chip raised "The club added 50 credits" on top of the toast below, and a
    * member saw one cancellation reported twice, in two different voices.
    * </p>
    */
@@ -58,7 +58,7 @@ export function useSlotEnders({ cancelling, setCancelling, setDay, reconcile, re
       setDay((d) => withoutBooking(d, cancelling.bookingId));
       setCancelling(null);
       // The figures the server actually moved, not "refund pending", and named for whose
-      // wallet moved: §7 refunds the booking's player, never the acting admin.
+      // credit moved: §7 refunds the booking's player, never the acting admin.
       toast.push({
         tone: "success",
         text: cancellationOutcome(

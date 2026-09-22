@@ -74,8 +74,8 @@ describe("Top-up — the quoted rate is the registered rate", () => {
     ]);
     renderPage(<TopUpPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "R100.00" }));
-    expect(screen.getByText("R240.00")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "R100" }));
+    expect(screen.getByText("240.00 credits")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
     await vi.waitFor(() => expect(submitted.length).toBe(1));
@@ -94,8 +94,8 @@ describe("Top-up — the quoted rate is the registered rate", () => {
     ]);
     renderPage(<TopUpPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "R100.00" }));
-    expect(screen.getByText("R240.00")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "R100" }));
+    expect(screen.getByText("240.00 credits")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
     // The member is told, in their own words and with the number that matters. It is an
@@ -103,14 +103,14 @@ describe("Top-up — the quoted rate is the registered rate", () => {
     // price moved — so it is announced, and it says what the next press will do.
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/The club changed its rate while this page was open/);
-    expect(alert).toHaveTextContent("R100.00 now adds R160.00 to your wallet instead");
+    expect(alert).toHaveTextContent("R100.00 now buys 160.00 credits");
     expect(alert).toHaveTextContent(/nothing has been sent to PayFast yet/);
     expect(alert).toHaveTextContent(/Press Continue again to pay at that rate/);
 
     // The preview is re-quoted rather than left lying: the stale 240.00 is gone.
-    expect(screen.getByText("R160.00")).toBeInTheDocument();
-    expect(screen.queryByText("R240.00")).not.toBeInTheDocument();
-    expect(screen.getByText(/Every R1\.00 you pay adds R1\.60 to your wallet \(regular rate\)/)).toBeInTheDocument();
+    expect(screen.getByText("160.00 credits")).toBeInTheDocument();
+    expect(screen.queryByText("240.00 credits")).not.toBeInTheDocument();
+    expect(screen.getByText(/At 1.6 credits \/ R1 \(regular rate\)/)).toBeInTheDocument();
 
     // And nothing was handed to PayFast — the defect's whole shape was a card form
     // appearing as the next thing the member saw.
@@ -143,12 +143,12 @@ describe("Top-up — the quoted rate is the registered rate", () => {
     // which is why this line changed. `reactStrictMode` is applied outside the wrapper.
     renderPage(<TopUpPage />, { reactStrictMode: true });
 
-    fireEvent.click(await screen.findByRole("button", { name: "R100.00" }));
+    fireEvent.click(await screen.findByRole("button", { name: "R100" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("R100.00 now adds R160.00 to your wallet instead");
-    expect(screen.getByText("R160.00")).toBeInTheDocument();
-    expect(screen.queryByText("R240.00")).not.toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("R100.00 now buys 160.00 credits");
+    expect(screen.getByText("160.00 credits")).toBeInTheDocument();
+    expect(screen.queryByText("240.00 credits")).not.toBeInTheDocument();
     expect(submitted.length).toBe(0);
   });
 
@@ -160,11 +160,11 @@ describe("Top-up — the quoted rate is the registered rate", () => {
     ]);
     renderPage(<TopUpPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "R100.00" }));
+    fireEvent.click(await screen.findByRole("button", { name: "R100" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
     expect(await screen.findByText("Payments aren't set up for this club yet — please ask an admin."))
       .toBeInTheDocument();
-    expect(screen.getByText("R240.00")).toBeInTheDocument();
+    expect(screen.getByText("240.00 credits")).toBeInTheDocument();
   });
 });

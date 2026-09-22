@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { ApiError, endpoints, type ScheduleDay, type ScheduleSlot } from "./api";
 import { ADMIN_SELF_SHORT_TEXT, describeBookingError, MEMBER_SHORT_TEXT, provesStaleGrid } from "./bookingErrors";
-import { formatMoney } from "./utils";
+import { formatCredits } from "./utils";
 import type { AdminOption, BookingIntent, BookingOutcome } from "../components/BookingConfirmModal";
 import type { MemberOption } from "../pages/Schedule";
 
@@ -158,10 +158,10 @@ function bookedMessage(
     // Naming the resulting balance is the point of the override being deliberate: the admin who
     // has just put somebody in the red is told by how much, at the moment they did it.
     const owing = memberBalanceAfter !== null && memberBalanceAfter < 0
-      ? ` ${memberName}'s balance is now ${formatMoney(memberBalanceAfter)} — they've been emailed about it.`
+      ? ` ${memberName}'s balance is now ${formatCredits(memberBalanceAfter)} — they've been emailed about it.`
       : "";
     // Named, not "that member". The desk has just picked a name from a dropdown and spent that
-    // person's money; repeating the name back is the one check that catches a mis-click.
+    // person's credit; repeating the name back is the one check that catches a mis-click.
     return `Booked ${intent.courtName} at ${intent.whenLabel} for ${memberName}.${owing}`;
   }
   return `Booked ${intent.courtName} at ${intent.whenLabel}.`;

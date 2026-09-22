@@ -25,20 +25,8 @@ public sealed record RegisterCheckoutRequest(
     public string? NameFirst { get; init; }
     public string? NameLast { get; init; }
 
-    /// <summary>
-    /// Shown on the gateway's own payment page and on the member's card statement.
-    ///
-    /// <para>
-    /// <b>It said "Crusaders credits top-up", and the word had to go for the same reason it
-    /// went everywhere else</b> — but this string is read in a place none of the others are:
-    /// a bank statement, weeks later, next to purchases from shops. So it names the CLUB and
-    /// what was bought rather than the club's internal unit of account: a member scanning a
-    /// statement for an unrecognised line needs to know who took the money, and "credits" told
-    /// them nothing they could act on. Deliberately NOT the currency symbol either — the
-    /// statement already prints the amount in the bank's own.
-    /// </para>
-    /// </summary>
-    public string ItemName { get; init; } = "Crusaders Mainframe wallet top-up";
+    /// <summary>Shown on the gateway's own payment page and on the member's card statement.</summary>
+    public string ItemName { get; init; } = "Crusaders credits top-up";
 }
 
 public sealed record RegisterCheckoutResult(

@@ -139,7 +139,7 @@ export const MONITORING_RULES: readonly NumericSettingRule[] = [
 ] as const;
 
 /**
- * Real-time — how the control board and the wallet chip stay current.
+ * Real-time — how the control board and the credits badge stay current.
  *
  * <p>
  * `sse_keepalive_seconds` has the tightest reason of the four and the message says it: nginx
@@ -215,35 +215,24 @@ export const ACTION_GLYPHS_HINT
   + "their own colour whichever is chosen — a thumbs-up on “Delete” would be wrong.";
 
 /**
- * The symbol every amount in the product wears.
+ * The symbol the club's REAL MONEY figures wear.
  *
  * <p>
- * <b>This hint said the opposite until the owner's second ruling, and an admin acting on the
- * old one would file a correct screen as a bug.</b> The first pass scoped the symbol to real
- * money only — what a member hands PayFast — and the hint said so: "It does not change credit
- * figures, which stay in credits." The owner then ruled that the wording changes from credits
- * and `cr` to the symbol, so it now goes in front of EVERY figure: a top-up, the cap, the
- * club's revenue, a wallet balance and the price of a court alike.
- * </p>
- *
- * <p>
- * <b>What the old hint got right has to survive, and is now the warning rather than the
- * narrowing.</b> A member pays R100 and their wallet gains `credits_per_zar_regular` × 100 —
- * shipped at 1.6 — so the two quantities are different sizes and they no longer look it. The
- * person reading this row is the person who SETS that rate, which makes them the one reader
- * who must be told that the product has stopped telling the two apart by their units, and that
- * the screens spanning both legs say so in words instead. `currency.ts` carries the whole
- * decision and the risk the owner accepted with it.
+ * <b>The hint is where the narrowing is stated to the person who can act on it.</b> The owner
+ * asked for the `cr` suffix to be replaced by this symbol. It governs rand — what a member
+ * hands PayFast — and not credits, because a member pays R100 and receives
+ * `credits_per_zar_regular` × 100 credits, which ships at 1.6: a wallet of 240 credits shown
+ * as "R240.00" would tell the member they hold 60% more money than they do. An admin reading
+ * this row is the person who would otherwise file that as a bug, so the row says it.
  * </p>
  */
 export const CURRENCY_SYMBOL_LABEL = "Currency symbol";
 
 export const CURRENCY_SYMBOL_HINT
-  = "Goes in FRONT of every amount the club shows — a member's wallet, the price of a court, "
-  + "top-ups, the cap, the club's revenue. 1–4 letters or currency signs: R, R$, CHF. Note "
-  + "that a wallet and a card payment are different sizes at the rate above — R100.00 paid "
-  + "adds R160.00 to a wallet at 1.6 — so the screens that span both say which is which in "
-  + "words. Changing this re-writes how every figure is shown and moves no money.";
+  = "Goes in FRONT of every rand figure — top-ups, the cap, the club's revenue. 1–4 letters "
+  + "or currency signs: R, R$, CHF. It does not change credit figures, which stay in credits: "
+  + "a member pays in rand and receives credits at the rate above, so the two are different "
+  + "sizes and showing one as the other would overstate what a member has.";
 
 export const MAX_CURRENCY_SYMBOL_LENGTH = 4;
 

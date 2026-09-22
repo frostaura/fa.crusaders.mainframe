@@ -143,7 +143,7 @@ export const motion = {
     settle: "240ms",
     /** One failure shake. Three cycles, never repeated. */
     shake: "320ms",
-    /** The ceiling on the wallet count-up; the floor and the scaling are in `useCountUp`. */
+    /** The ceiling on a credits count-up; the floor and the scaling are in `useCountUp`. */
     count: "600ms",
     /** One breath of the zero-balance chip. Three of these is one burst. */
     breathe: "1400ms",

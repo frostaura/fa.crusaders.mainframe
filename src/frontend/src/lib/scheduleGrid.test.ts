@@ -77,7 +77,7 @@ describe("slotAt — a booking occupies every cell it covers", () => {
 
   it("shows a walk-up that started mid-slice, which used to be invisible entirely", () => {
     // The box stamps StartsAt = now. 12:51:05 -> 13:21:05 is a real row from the finding:
-    // relay B closed, R100.00 charged, and BOTH 13:00 and 13:15 read "Available"
+    // relay B closed, 100.00 credits charged, and BOTH 13:00 and 13:15 read "Available"
     // for the member and for the admin, while the court was lit and in use.
     const walkUp = slot(sast(12, 51, 5), sast(13, 21, 5), { isMine: false, checkedIn: null, amountChargedCredits: null });
     const byCourt = groupSlotsByCourt(day({}, [walkUp]));
@@ -137,7 +137,7 @@ describe("buildTimeSlices — the grid is drawn to the club's hours for that day
     const rows = buildTimeSlices(day());
     expect(rows[0].label).toBe("07:00");
     expect(rows[rows.length - 1].label).toBe("19:45");
-    // 21:45 on a Saturday — the slot finder B was sold and charged R50.00 for —
+    // 21:45 on a Saturday — the slot finder B was sold and charged 50.00 credits for —
     // is not on the grid at all now that the day carries its own hours.
     expect(rows.some((r) => r.label === "21:45")).toBe(false);
   });
@@ -175,11 +175,11 @@ describe("cancellationOutcome — the message names what actually moved", () => 
     // The API posts refund and penalty as two ledger rows, gross and deduction. What the
     // member wants to read is what landed in their wallet, and what was kept.
     expect(cancellationOutcome(50, 15)).toBe(
-      "Booking cancelled. R35.00 back to your wallet, R15.00 kept as the late-cancellation penalty.");
+      "Booking cancelled. 35.00 cr back to your credit, 15.00 cr kept as the late-cancellation penalty.");
   });
 
   it("states a free cancellation as a plain figure", () => {
-    expect(cancellationOutcome(50, 0)).toBe("Booking cancelled. R50.00 back to your wallet.");
+    expect(cancellationOutcome(50, 0)).toBe("Booking cancelled. 50.00 cr back to your credit.");
   });
 
   it("says nothing came back when the lights had been on", () => {
@@ -197,7 +197,7 @@ describe("cancellationOutcome — the message names what actually moved", () => 
  * Blueprint A.12 reserves the peak window for league and senior members until
  * `peak_advance_hours_for_regular` before a slot starts, and the rule lived only in
  * `BookingService`. A Regular member's grid therefore drew 44 cells a day as green, clickable
- * "Available" — same colour, same cursor, same "Book Court 2 at 17:00 for R50.00" label as a
+ * "Available" — same colour, same cursor, same "Book Court 2 at 17:00 for 50.00 cr" label as a
  * slot they could actually have — and the refusal arrived only after they had read a price and
  * pressed Confirm.
  * </p>

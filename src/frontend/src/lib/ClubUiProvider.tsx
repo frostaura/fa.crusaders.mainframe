@@ -30,13 +30,7 @@ export function ClubUiProvider({ children }: { children: React.ReactNode }) {
   // components and cannot read this context — so the symbol is ALSO pushed into the module
   // store they do read. Set during render rather than in an effect, because a sentence
   // composed on the first paint must already carry the right symbol: an effect runs after
-  // it, and the club would see one frame of the default.
-  //
-  // The reach of that one assignment is the whole product, not only the screens that touch the
-  // gateway: under the owner's ruling this symbol dresses a wallet balance and a court price
-  // as well as a card payment. That is why it is a module store and not a prop — a sentence
-  // builder in `lib/*Copy.ts` has no component to take one from, and six screens each passing
-  // their own is exactly how the unit drifted before. See `currency.ts`.
+  // it, and the club would see one frame of rand.
   //
   // Idempotent and unconditional, which is what makes a second club in the same tab safe:
   // `setClubCurrencySymbol` resets to the default when a profile carries no symbol, so a

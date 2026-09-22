@@ -4,7 +4,7 @@ import { ConfirmButton } from "./ConfirmButton";
 import { BulkResultList, BulkResultActions } from "./BulkResultList";
 import { endpoints, type CancellationQuote, type ScheduleDay, type ScheduleSlot } from "../lib/api";
 import { clubClock } from "../lib/clubClock";
-import { formatMoney } from "../lib/utils";
+import { formatCredits } from "../lib/utils";
 import { describeFailure } from "../lib/errors";
 import { readCancelResults, summariseCancel, type BulkRow } from "../lib/bulkResults";
 import { cancelConsequence, cancelTotalsSentence, NO_UNDO_LINE, bulkProgress } from "../lib/bulkCopy";
@@ -145,8 +145,8 @@ function quoteLine(quote: CancellationQuote | undefined, slot: ScheduleSlot): st
   if (quote.checkedIn) return "nothing back — already checked in";
   const net = quote.refundCredits - quote.penaltyCredits;
   return quote.penaltyCredits > 0
-    ? `${formatMoney(net)} back, ${formatMoney(quote.penaltyCredits)} penalty`
-    : `${formatMoney(net)} back`;
+    ? `${formatCredits(net)} back, ${formatCredits(quote.penaltyCredits)} penalty`
+    : `${formatCredits(net)} back`;
 }
 
 function quoteTotals(targets: Target[], quotes: Map<string, CancellationQuote> | null) {

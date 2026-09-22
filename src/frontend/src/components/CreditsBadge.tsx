@@ -5,10 +5,10 @@ import { useBalance, walletHref, walletLabel, walletTone } from "../lib/balance"
 import { useCountUp, usePrefersReducedMotion } from "../lib/useCountUp";
 import { useZeroBalanceEntice } from "../lib/zeroBalanceEntice";
 import { useToast } from "./Toast";
-import { cn, formatMoney, formatSignedMoney, spokenMoney } from "../lib/utils";
+import { cn, formatCredits } from "../lib/utils";
 
 /**
- * Item 8 — the wallet badge.
+ * Item 8 — the credits badge.
  *
  * <p>
  * Lifted out of `Layout` because it stopped being a `NavLink` with a class on it: it counts,
@@ -28,12 +28,11 @@ import { cn, formatMoney, formatSignedMoney, spokenMoney } from "../lib/utils";
  * t=0      the stream delivers balance_credits: 200.00   (previous 0.00)
  * t=0      the zero-state entice stops, permanently
  * t=0      the chip cross-fades danger-soft -> success-soft over --fb-in (180 ms)
- * t=0      the flyout "+R200.00" rises and fades over 900 ms         [aria-hidden]
- * t=0..900 the figure counts R0.00 -> R200.00, easeOutCubic          [aria-hidden]
+ * t=0      the flyout "+200.00" rises and fades over 900 ms          [aria-hidden]
+ * t=0..900 the figure counts 0.00 -> 200.00, easeOutCubic            [aria-hidden]
  * t=0      TOAST, tone success, 6 000 ms:
- *          read  "The club added R200.00 to your wallet."            [role=status]
- *          heard "The club added 200.00 rand to your wallet."        [aria-label]
- * t~900    the chip settles at R200.00, green
+ *          "The club added 200.00 credits to your wallet."           [role=status]
+ * t~900    the chip settles at 200.00 cr, green
  * </pre>
  *
  * <p>
@@ -48,69 +47,15 @@ import { cn, formatMoney, formatSignedMoney, spokenMoney } from "../lib/utils";
 /** 6 000 ms, not the 4 000 default. Money deserves reading time, and it is dismissible. */
 const MONEY_TOAST_MS = 6_000;
 
-/**
- * Both halves of the conditional, in one place, so neither can be written twice — and the
- * figure comes from a FORMATTER rather than from a `toFixed` with a unit typed beside it.
- *
- * <p>
- * It read <code>`${amount.toFixed(2)} credits`</code>, which is the shape `lib/currency.ts`
- * was written to end: the unit lived here, in this sentence, where nothing connected it to
- * the chip above it or to the ledger the member taps through to.
- * </p>
- *
- * <p>
- * <b>`say` is the parameter because this sentence is composed twice.</b> Once with
- * {@link formatMoney} for the toast body — "The club added R200.00 to your wallet." — and
- * once with {@link spokenMoney} for the toast's accessible name — "The club added 200.00
- * rand to your wallet." A symbol is not speakable, and this toast is the ONLY thing in the
- * product that tells a blind member the club moved their money, so it is the one string
- * where that costs something real. `Toast`'s `spokenText` prop carries the second form.
- * </p>
- *
- * <p>
- * <b>The magnitude, never the signed value.</b> The direction is in the verb — "added",
- * "took … off" — so a minus sign would say it twice, and "took −R50.00 off your wallet" is a
- * double negative about somebody's money.
- * </p>
- */
-export function clubMovementSentence(amount: number, say: (value: number) => string = formatMoney): string {
-  const moved = say(Math.abs(amount));
+/** Both halves of the conditional, in one place, so neither can be written twice. */
+export function clubMovementSentence(amount: number): string {
+  const credits = Math.abs(amount).toFixed(2);
   // No "just now": under the degraded poll this may be up to thirty seconds old, and a
   // sentence that claims a time it cannot know is the class of defect the whole state machine
   // above exists to avoid.
   return amount > 0
-    ? `The club added ${moved} to your wallet.`
-    : `The club took ${moved} off your wallet.`;
-}
-
-/**
- * What the chip PAINTS — three states, three figures.
- *
- * <p>
- * It was <code>balance === null ? "— cr" : formatMoney(displayed)</code>, and the dash was
- * doing two jobs. A balance that has not landed yet and one that could not be read are
- * different facts: the first resolves on its own, the second does not and the member should
- * go looking. `walletLabel` has told them apart in the accessible name for a round already
- * ("Wallet balance, loading" against "Wallet balance unavailable"), so the chip was the half
- * of the pair still conflating them — and it is the half a sighted member actually uses.
- * </p>
- *
- * <p>
- * An ellipsis for "still coming", an em dash for "could not be read". Neither carries a
- * figure, because a figure the chip does not have is the one thing it must not draw; the
- * `title` above says which is which in words.
- * </p>
- *
- * <p>
- * <b>`displayed`, not `balance`.</b> `useCountUp` eases the figure over 900 ms, so for most
- * of that window the two disagree and painting the settled one would make the count-up
- * invisible. The null check is on `balance` because that is what says whether there is a
- * figure at all.
- * </p>
- */
-export function chipFigure(balance: number | null, loading: boolean, displayed: number): string {
-  if (balance === null) return loading ? "…" : "—";
-  return formatMoney(displayed);
+    ? `The club added ${credits} credits to your wallet.`
+    : `The club took ${credits} credits off your wallet.`;
 }
 
 const TONE_CLASS = {
@@ -157,14 +102,7 @@ export function CreditsBadge() {
     if (announced.current === delta.at) return;
     announced.current = delta.at;
     if (delta.source === "club") {
-      toast.push({
-        tone: delta.amount > 0 ? "success" : "info",
-        text: clubMovementSentence(delta.amount),
-        // Read one way, said another — see `clubMovementSentence`. This is the announcement,
-        // and "R200.00" is announced with the R as a letter.
-        spokenText: clubMovementSentence(delta.amount, spokenMoney),
-        durationMs: MONEY_TOAST_MS,
-      });
+      toast.push({ tone: delta.amount > 0 ? "success" : "info", text: clubMovementSentence(delta.amount), durationMs: MONEY_TOAST_MS });
     }
     // The flyout lives 900 ms; clearing after it keeps a re-render from replaying it.
     const t = window.setTimeout(clearDelta, 1_000);
@@ -208,10 +146,9 @@ export function CreditsBadge() {
           : loading ? "Refreshing balance…" : "Wallet balance — tap to top up"}
       >
         <WalletIcon size={14} strokeWidth={2.25} className="shrink-0" />
-        {/* aria-hidden: the label above already says the number, and it says it in WORDS —
-            the visible text carries the club's symbol, which a screen reader announces as a
-            letter. No `truncate` — B12. */}
-        <span aria-hidden="true">{chipFigure(balance, loading, displayed)}</span>
+        {/* aria-hidden: the label above already says the number, and the visible text
+            abbreviates it to "cr", which is not a word. No `truncate` — B12. */}
+        <span aria-hidden="true">{balance === null ? "— cr" : formatCredits(displayed)}</span>
         {entice.showWord && (
           /**
            * The reduced-motion variant is a DIFFERENT affordance, not a quieter one.
@@ -238,7 +175,7 @@ export function CreditsBadge() {
         /**
          * Up is `success-strong`. Down is `text-secondary` — deliberately not red.
          *
-         * Spending your own money on a court you chose is not an error, and a red number in
+         * Spending your own credit on a court you chose is not an error, and a red number in
          * the header over a successful booking is the app telling a member off for using it.
          * Red is reserved for money leaving unexpectedly, which in this product is only the
          * cancellation penalty — and that has its own dialog with the figure in it.
@@ -252,12 +189,7 @@ export function CreditsBadge() {
             delta!.amount > 0 ? "text-success-strong" : "text-text-secondary",
           )}
         >
-          {/* Through the shared formatter. This composed its own `+`/`−` over a bare
-              `toFixed(2)` and so carried NO unit at all — which was survivable while the unit
-              was an abbreviation everything else on the chip also wore, and is not now that
-              the figure beside it reads "R200.00". `formatSignedMoney` puts the sign outside
-              the symbol and uses the same U+2212 the ledger column does. */}
-          {formatSignedMoney(delta!.amount)}
+          {delta!.amount > 0 ? "+" : "−"}{Math.abs(delta!.amount).toFixed(2)}
         </span>
       )}
     </div>

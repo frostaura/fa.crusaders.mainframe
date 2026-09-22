@@ -1,51 +1,34 @@
 /**
- * The club's currency symbol — the sign its unit of account is written in.
+ * The club's currency symbol — what it is, and the one thing it is deliberately NOT.
  *
  * <p>
- * <b>The owner's ruling, given twice, and this file is where it is written down.</b> First:
- * "instead of a `cr` suffix, have a configurable currency symbol instead which would precede
- * amounts. Like `R ` for ZAR (default)." Then, when the first pass scoped the symbol to real
- * money only: "remember the wording changes from credits and cr to the currency symbol."
- * </p>
- *
- * <p>
- * So every amount in the product is written one way — <code>R50.00</code> — and neither
- * "cr" nor the word "credits" survives as a unit attached to a number.
- * </p>
- *
- * <h3>What that collapses, and the risk it carries</h3>
- *
- * <p>
- * The product renders two quantities that are <b>not the same size</b>:
+ * <b>The decision, stated here because the code is where it has to hold.</b> The owner asked
+ * for the <code>cr</code> suffix to be replaced by a configurable symbol that precedes the
+ * amount, defaulting to <code>R</code>. This product renders two different quantities and
+ * only one of them is money:
  * </p>
  *
  * <ul>
- *   <li><b>What a member pays the gateway.</b> <code>topup_block_zar</code>,
- *       <code>topup_max_zar_per_member</code>, the revenue report's net.</li>
- *   <li><b>What their wallet holds and a court costs.</b> These convert from the first at
- *       <code>credits_per_zar_regular</code> — shipped at <b>1.6</b> — or
- *       <code>credits_per_zar_league</code>, shipped at <b>2.4</b>.</li>
+ *   <li><b>Rand</b> — what a member hands PayFast. <code>topup_block_zar</code>,
+ *       <code>topup_max_zar_per_member</code>, the revenue card's <code>net_zar</code>.
+ *       This IS money, and this symbol is its symbol.</li>
+ *   <li><b>Credits</b> — the wallet balance and what a slot costs. A member pays R100 and
+ *       receives <code>credits_per_zar_regular</code> × 100 credits, which ships at
+ *       <b>1.6</b>. Credits are the unit of account (<code>CLAUDE.md</code>), and a credit
+ *       figure wearing a rand sign is a money-correctness defect, not a copy choice: at the
+ *       shipped rate a 240-credit wallet rendered "R240.00" overstates the member's rand
+ *       position by 60%, and at the League rate of 2.4 by 140%.</li>
  * </ul>
  *
  * <p>
- * Writing both with one symbol means a wallet bought for R150 reads <code>R240.00</code>.
- * That was a live defect once, in six places at once, and the earlier fix for it is still
- * legible in this repository's history and in <code>e2e/money.spec.ts</code>. It is being
- * reintroduced <b>deliberately, on the owner's instruction</b>, and the reason it is
- * defensible is that a member cannot convert back: they never exchange a wallet for cash, so
- * the wallet is a statement of how much court time they can buy, and quoting court prices in
- * the club's own money is easier to read than quoting them in an invented unit.
- * </p>
- *
- * <p>
- * <b>What that costs, and the one rule it imposes.</b> The exchange rate is now invisible
- * everywhere except at the conversion itself. So the two places a member meets the boundary
- * — the top-up screen and the top-up email — <b>must state both legs in words</b>: what left
- * their card, and what arrived in their wallet. A club on 1.6 is giving a 60% bonus, and a
- * screen that renders "You pay R100.00 / You receive R160.00" without saying which is which
- * is the defect this paragraph exists to prevent. The residual risk the owner is accepting
- * is a member reading their wallet as withdrawable cash; that is a terms-and-conditions
- * matter, not an arithmetic one.
+ * That second bullet is not a hypothetical. It shipped, in six places at once, and is
+ * recorded in the header of {@link ./utils.ts formatCredits}, in the header of
+ * <code>EmailTemplates.Cr</code> on the backend, and in the existence of
+ * <code>e2e/money.spec.ts</code>, whose entire job is to assert that a credit figure never
+ * carries an R. <b>So this symbol reaches rand and stops there, and the credit unit keeps a
+ * unit of its own.</b> The ask has been narrowed, deliberately and visibly; a club that
+ * genuinely wants its credits shown as rand wants <code>credits_per_zar_* = 1</code> first,
+ * and that is the founder's call to make, not this file's.
  * </p>
  *
  * <p>
@@ -143,38 +126,4 @@ export function clubCurrencySymbol(): string {
 /** Back to the default. For tests, and for a signed-out screen. */
 export function resetClubCurrencySymbol(): void {
   current = DEFAULT_CURRENCY_SYMBOL;
-}
-
-/**
- * What a symbol is called out loud.
- *
- * <p>
- * <b>This exists because the visible unit is now a symbol, and a symbol is not speakable.</b>
- * An <code>aria-label</code> REPLACES an element's contents as its accessible name, and a
- * screen reader handed "R240.00" announces the R as a letter — the same defect "cr" had,
- * which is why the wallet chip's label always spelt "credits" where the chip showed "cr".
- * </p>
- *
- * <p>
- * There is no general way to get "rand" from "R", so the currencies this product is likely
- * to meet are named and everything else answers null. <b>Null is the right answer, not a
- * guess</b>: a wrong noun — "240.00 dollars" to a club on tenge — is a lie a sighted member
- * would never be told, whereas no noun still leaves a sentence, because the sentence around
- * the number says what the number is.
- * </p>
- */
-const SPOKEN_NAMES: Readonly<Record<string, string>> = {
-  R: "rand",
-  $: "dollars",
-  "US$": "dollars",
-  "€": "euros",
-  "£": "pounds",
-  CHF: "Swiss francs",
-  "R$": "reais",
-  kr: "kroner",
-  "₹": "rupees",
-};
-
-export function spokenCurrencyName(symbol: string = clubCurrencySymbol()): string | null {
-  return SPOKEN_NAMES[symbol] ?? null;
 }

@@ -397,7 +397,6 @@ public sealed class BookingService
             court.Name, startsAtLocal, $"{minutes} min",
             booking.AmountChargedCredits, await _ledger.GetBalanceAsync(userId, ct),
             settings.PenaltyWindowMinutes, settings.PenaltyPct,
-            CurrencySymbol.For(settings),
             IsWalkUp: true);
 
         await MailConfirmationAsync(booking, user.Email, userId, details, ct);
@@ -510,9 +509,7 @@ public sealed class BookingService
 
         var user = await _db.Users.FirstAsync(u => u.Id == booking.UserId, ct);
         SendEmailInBackground(
-            EmailTemplates.WalkUpNotStarted(
-                user.Email, court.Name, booking.AmountChargedCredits,
-                CurrencySymbol.For(await _settings.GetAsync(ct))),
+            EmailTemplates.WalkUpNotStarted(user.Email, court.Name, booking.AmountChargedCredits),
             $"walk-up void for {booking.Id}");
 
         return true;
@@ -782,10 +779,9 @@ public sealed class BookingService
             .ToString("ddd dd MMM HH:mm");
         // Build the message in the request scope; dispatch in the background so SMTP latency
         // (Mailhog/EHLO can take seconds) does not block the booking response.
-        // The club's own symbol travels with the figures, because the template may not assume
-        // one: see EmailTemplates.Money. The penalty policy travels with them for the same
-        // reason it always did — it was hardcoded "15 minutes / 30%" and went on saying so
-        // after an admin moved the club.
+        // Credits, not rand — the template printed a rand sign over both of these. The penalty
+        // policy travels with them for the same reason: it was hardcoded "15 minutes / 30%" and
+        // went on saying so after an admin moved the club.
         // IsWalkUp travels with them because it decides what the mail may promise. A walk-up
         // starts the instant it is bought and the same request lights the court, so the shared
         // template's "cancelling early costs 30%" told a member already under the lights they
@@ -795,7 +791,6 @@ public sealed class BookingService
             court.Name, startsAtLocal, spec.DurationLabel,
             spec.TotalCost, balance,
             settings.PenaltyWindowMinutes, settings.PenaltyPct,
-            CurrencySymbol.For(settings),
             IsWalkUp: spec.IsWalkUp);
 
         async Task SendConfirmationAsync(CancellationToken cancel) =>
@@ -1181,8 +1176,7 @@ public sealed class BookingService
             ? new Email.ClubCancellation(waiveReasonRecorded, waived)
             : null;
         var cancellationMsg = EmailTemplates.BookingCancellation(
-            user.Email, court.Name, refundAmount, penaltyAmount > 0 ? penaltyAmount : null,
-            CurrencySymbol.For(settings), byClub);
+            user.Email, court.Name, refundAmount, penaltyAmount > 0 ? penaltyAmount : null, byClub);
         SendEmailInBackground(cancellationMsg, $"cancellation for {booking.Id}");
 
         await _bus.EmitAsync(new DomainEvent(
@@ -1860,11 +1854,7 @@ public sealed class BookingService
         {
             try
             {
-                await _email.SendAsync(
-                    CancelledLightsEmail(
-                        user.Email, court.Name, minutes, amount,
-                        CurrencySymbol.For(await _settings.GetAsync(ct))),
-                    ct);
+                await _email.SendAsync(CancelledLightsEmail(user.Email, court.Name, minutes, amount), ct);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "Cancelled-lights email failed for {BookingId}", booking.Id); }
         }
@@ -1888,8 +1878,7 @@ public sealed class BookingService
         return new CancelledLightsResult.Charged(amount, minutes);
     }
 
-    private static Email.EmailMessage CancelledLightsEmail(
-        string to, string courtName, int minutes, decimal amount, string currencySymbol)
+    private static Email.EmailMessage CancelledLightsEmail(string to, string courtName, int minutes, decimal amount)
     {
         return new Email.EmailMessage(
             To: to,
@@ -1899,7 +1888,7 @@ public sealed class BookingService
                 <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
                   <h2 style="margin:0 0 12px">Your cancelled booking was used</h2>
                   <p>The lights on {courtName} were switched on with the code of a booking you had cancelled and been refunded for.</p>
-                  <p><strong>{minutes} minutes</strong> of court time has been charged at the usual rate: <strong>{Email.EmailTemplates.Money(amount, currencySymbol)}</strong>. Nothing is refunded once the lights have been on.</p>
+                  <p><strong>{minutes} minutes</strong> of court time has been charged at the usual rate: <strong>{amount:0.00} credits</strong>. Nothing is refunded once the lights have been on.</p>
                 </div>
                 """);
     }
@@ -1993,12 +1982,7 @@ public sealed class BookingService
                 AmountCredits: back,
                 ActorUserId: Guid.Empty,
                 RelatedBookingId: booking.Id,
-                // Through the one formatter, in the club's own symbol, and INVARIANT: this was
-                // a raw `{back:0.00}` interpolation, which reads the server process's ambient
-                // culture, so one host's ledger said "7,50 credits returned" and another's
-                // "7.50" for the same movement.
-                Reason: $"Lights ran {litMinutes} min, not the granted window — "
-                      + $"{Email.EmailTemplates.Money(back, CurrencySymbol.For(await _settings.GetAsync(ct)))} returned",
+                Reason: $"Lights ran {litMinutes} min, not the granted window — {back:0.00} credits returned",
                 ExternalReference: CancelledLightsReleaseReference(booking.Id)), ct);
         }
         catch (DbUpdateException ex) when (IsDuplicateReference(ex))
@@ -2196,11 +2180,7 @@ public sealed class BookingService
         {
             try
             {
-                await _email.SendAsync(
-                    NoShowReversedEmail(
-                        user.Email, courtName, refunded, penalised,
-                        CurrencySymbol.For(await _settings.GetAsync(ct))),
-                    ct);
+                await _email.SendAsync(NoShowReversedEmail(user.Email, courtName, refunded, penalised), ct);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "No-show reversal email failed for {BookingId}", booking.Id); }
         }
@@ -2224,8 +2204,7 @@ public sealed class BookingService
 
     // Block body, not an expression body — lizard mis-scopes an expression-bodied member
     // containing braces; see memory/gotchas.md.
-    private static Email.EmailMessage NoShowReversedEmail(
-        string to, string courtName, decimal refunded, decimal penalised, string currencySymbol)
+    private static Email.EmailMessage NoShowReversedEmail(string to, string courtName, decimal refunded, decimal penalised)
     {
         return new Email.EmailMessage(
             To: to,
@@ -2235,7 +2214,7 @@ public sealed class BookingService
                 <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
                   <h2 style="margin:0 0 12px">You were there after all</h2>
                   <p>Your booking on {courtName} was marked as a no-show, but the court's check-in reached us afterwards.</p>
-                  <p>The no-show refund of <strong>{Email.EmailTemplates.Money(refunded, currencySymbol)}</strong> has been reversed and the penalty of <strong>{Email.EmailTemplates.Money(penalised, currencySymbol)}</strong> returned. The booking now stands as attended.</p>
+                  <p>The no-show refund of <strong>{refunded:0.00} credits</strong> has been reversed and the penalty of <strong>{penalised:0.00} credits</strong> returned. The booking now stands as attended.</p>
                 </div>
                 """);
     }
@@ -2506,20 +2485,16 @@ public sealed class BookingService
             var tenant = await _db.Tenants.IgnoreQueryFilters()
                 .FirstOrDefaultAsync(t => t.Id == _tenant.TenantId, ct);
 
-            var pdf = Email.ReceiptPdf.ForBooking(new Email.BookingReceipt(
-                ClubName: tenant?.DisplayName ?? "Crusaders Mainframe",
-                MemberName: membership?.FullName ?? "Member",
-                BookingReference: booking.Id.ToString(),
-                CourtName: details.CourtName,
-                StartsAtLocal: details.StartsAtLocal,
-                Duration: details.Duration,
-                AmountCredits: details.AmountCredits,
-                BalanceAfterCredits: details.BalanceAfterCredits,
-                IssuedAtLocal: IssuedAtLocal(await _settings.GetAsync(ct)),
-                // The receipt is denominated by the SAME value the mail it is attached to used,
-                // rather than by a second read of settings: the attachment and the body of one
-                // message cannot be allowed to disagree about what the figures are.
-                CurrencySymbol: details.CurrencySymbol));
+            var pdf = Email.ReceiptPdf.ForBooking(
+                clubName: tenant?.DisplayName ?? "Crusaders Mainframe",
+                memberName: membership?.FullName ?? "Member",
+                bookingReference: booking.Id.ToString(),
+                courtName: details.CourtName,
+                startsAtLocal: details.StartsAtLocal,
+                duration: details.Duration,
+                amountCredits: details.AmountCredits,
+                balanceAfterCredits: details.BalanceAfterCredits,
+                issuedAtLocal: IssuedAtLocal(await _settings.GetAsync(ct)));
 
             return new Email.EmailAttachment($"receipt-{booking.Id:N}.pdf", "application/pdf", pdf);
         }

@@ -3,7 +3,7 @@ import { Alert } from "../Alert";
 import { Button, Input, Label } from "../Button";
 import { ConfirmButton } from "../ConfirmButton";
 import { Modal } from "../Modal";
-import { formatMoney } from "../../lib/utils";
+import { formatCredits } from "../../lib/utils";
 import { type AdjustReasonCode } from "../../lib/adminApi";
 import {
   ADD_LINK, LIVE_PUSH_NOTE, MINUS_REFUSED, TAKE_BACK_CONSEQUENCE, TAKE_BACK_LINK,
@@ -13,8 +13,7 @@ import {
 } from "../../lib/topUpCopy";
 
 /**
- * Put money into a member's wallet, or take it back — two flows, never one signed field.
- * (D3-B08)
+ * Add credit to a member, or take it back — two flows, never one signed field. (D3-B08)
  *
  * <p>
  * <b>The shape is three steps because money is three questions.</b> How much · why · is this
@@ -27,7 +26,7 @@ import {
  * <b>Nothing here touches the idempotency machinery.</b> The key, the in-flight ref and the
  * double-click guard live on the page and stay exactly as they are — that code has a paid-for
  * bug history (a double-click posted +7 twice and moved a member 444 → 458; four clicks on a
- * slow connection granted R44.00 where R11.00 was typed) and this component calls into it
+ * slow connection granted 44 credits where 11 were typed) and this component calls into it
  * rather than around it.
  * </p>
  *
@@ -118,7 +117,7 @@ export function TopUpSheet({
                 className="min-h-14 px-4 tabular-nums"
                 onClick={() => { setAmountText(String(value)); setComplaint(null); }}
               >
-                {`${direction === "add" ? "+" : "−"}${formatMoney(value)}`}
+                {`${direction === "add" ? "+" : "−"}${formatCredits(value)}`}
               </Button>
             ))}
           </div>
@@ -148,7 +147,7 @@ export function TopUpSheet({
           <div className="flex flex-wrap items-center justify-between gap-2">
             {/* The other path is a LINK, low in the flow, differently titled and differently
                 toned. It is not a sign, a toggle or a minus key: it is a decision with a
-                name, which is what stops a typo being a two-hundred-rand mistake. */}
+                name, which is what stops a typo being a two-hundred-credit mistake. */}
             <Button
               variant="ghost"
               className="min-h-11"
@@ -233,15 +232,15 @@ export function TopUpSheet({
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
             <dt className="text-text-muted">Balance now</dt>
             <dd className="tabular-nums text-text-primary">
-              {balance === null ? "Couldn't read it" : formatMoney(balance)}
+              {balance === null ? "Couldn't read it" : formatCredits(balance)}
             </dd>
             <dt className="text-text-muted">This</dt>
             <dd className="font-semibold tabular-nums text-text-primary">
-              {`${direction === "add" ? "+" : "−"}${formatMoney(valid)}`}
+              {`${direction === "add" ? "+" : "−"}${formatCredits(valid)}`}
             </dd>
             <dt className="font-semibold text-text-muted">Balance after</dt>
             <dd className="font-semibold tabular-nums text-text-primary">
-              {balance === null ? "the club's system works it out" : formatMoney(balance + (direction === "add" ? valid : -valid))}
+              {balance === null ? "the club's system works it out" : formatCredits(balance + (direction === "add" ? valid : -valid))}
             </dd>
           </dl>
           <p className="text-sm text-text-secondary">{`Reason: ${reasonLabel(reasonCode)} — “${reasonText.trim()}”`}</p>
@@ -252,12 +251,12 @@ export function TopUpSheet({
           <div className="flex justify-end gap-2">
             <Button variant="ghost" className="min-h-11" onClick={() => setStep(2)}>Back</Button>
             <ConfirmButton
-              idleLabel={direction === "add" ? `Add ${formatMoney(valid)}` : `Take back ${formatMoney(valid)}`}
-              cancelLabel="Don't move any money"
+              idleLabel={direction === "add" ? `Add ${formatCredits(valid)}` : `Take back ${formatCredits(valid)}`}
+              cancelLabel="Don't move any credit"
               confirmLabel={confirmConsequence(name, balance, valid, direction)}
               // Both, and they answer different questions: `ariaLabel` is what the ACTION is
-              // about ("Add R24.00 — Thandi Mokoena — choose again to confirm") and
-              // `subject` is what the way OUT keeps ("Don't move any money — Thandi
+              // about ("Add 24.00 cr — Thandi Mokoena — choose again to confirm") and
+              // `subject` is what the way OUT keeps ("Don't move any credit — Thandi
               // Mokoena"). Without the first, the armed control's name is the whole
               // consequence sentence and label-in-name holds only by accident.
               ariaLabel={name}

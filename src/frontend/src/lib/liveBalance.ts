@@ -205,7 +205,7 @@ export type LiveBalance = {
    * the path where the page has ALREADY told the member what happened. Cancelling a booking
    * is that path: its endpoint answers with `refunded_credits` and `penalty_credits` and no
    * balance, so there is no figure to `apply`, and the un-flagged re-read raised "The club
-   * added R50.00 to your wallet" over the page's own "R50.00 back".
+   * added 50 credits" over the page's own "50.00 back".
    * </p>
    */
   refresh: (options?: { expectSelf?: boolean }) => Promise<void>;

@@ -10,16 +10,12 @@ namespace Crusaders.Mainframe.Api.Email;
 /// Everything a booking confirmation states, as named members.
 /// </summary>
 /// <remarks>
-/// Every figure here is written in the club's own <see cref="CurrencySymbol"/>, which is the
-/// owner's ruling: one symbol in front of every amount the product prints, and no unit word
-/// after any of them. <c>PenaltyWindowMinutes</c> and <c>PenaltyPct</c> travel with them
-/// because the template used to hardcode "15 minutes / 30%" and went on saying so after an
-/// admin moved the club to 30 minutes at 50%.
+/// Every figure here is <b>credits</b>. Credits are this system's unit of account and rand
+/// exists only on the top-up row for reconciliation; a field that mixes the two is a
+/// money-correctness bug by the repo's own invariants. <c>PenaltyWindowMinutes</c> and
+/// <c>PenaltyPct</c> travel with them because the template used to hardcode "15 minutes / 30%"
+/// and went on saying so after an admin moved the club to 30 minutes at 50%.
 /// </remarks>
-/// <param name="CurrencySymbol">
-/// The club's own symbol, from <see cref="Services.CurrencySymbol.For"/>. Required rather than
-/// defaulted, for the reason <see cref="EmailTemplates.Money"/> gives.
-/// </param>
 /// <param name="IsWalkUp">
 /// Court time bought at the box rather than a reservation made ahead of it.
 ///
@@ -35,7 +31,7 @@ namespace Crusaders.Mainframe.Api.Email;
 /// </param>
 /// <summary>
 /// What a member needs to reconcile a top-up: what left their card, what arrived in their
-/// wallet, and the relationship between the two.
+/// wallet, and the rate between the two.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -45,17 +41,10 @@ namespace Crusaders.Mainframe.Api.Email;
 /// the seven were a decimal or a string that would transpose silently.
 /// </para>
 /// <para>
-/// <b><see cref="CurrencySymbol"/> denominates every figure on this record</b> — that is the
-/// owner's ruling. <see cref="AmountZar"/> is what left the card; <see cref="CreditsAdded"/>
-/// and <see cref="BalanceAfterCredits"/> are what the wallet holds, and they convert at
-/// <see cref="ConversionRate"/>, which at the shipped 1.6 makes them a different SIZE from the
-/// money while wearing the same sign.
-/// </para>
-/// <para>
-/// <b>That is why this is the one record whose template may not simply print its figures.</b>
-/// The rate is invisible everywhere else in the product now, so the mail built from this record
-/// has to say, in words, which leg is which — see <see cref="EmailTemplates.TopUpConfirmation"/>
-/// and <see cref="Services.CurrencySymbol"/>.
+/// <b><see cref="CurrencySymbol"/> denominates <see cref="AmountZar"/> and nothing else on
+/// this record.</b> <see cref="CreditsAdded"/> and <see cref="BalanceAfterCredits"/> are
+/// credits, they convert at <see cref="ConversionRate"/>, and at the shipped 1.6 they are not
+/// the same size as the money — see <see cref="Services.CurrencySymbol"/>.
 /// </para>
 /// </remarks>
 public sealed record TopUpConfirmationDetails(
@@ -74,7 +63,6 @@ public sealed record BookingConfirmationDetails(
     decimal BalanceAfterCredits,
     int PenaltyWindowMinutes,
     decimal PenaltyPct,
-    string CurrencySymbol,
     bool IsWalkUp = false);
 
 /// <summary>
@@ -138,28 +126,34 @@ public sealed record GateAlert(
 public static class EmailTemplates
 {
     /// <summary>
-    /// <b>The one amount formatter.</b> Every figure this product prints — what a member paid
-    /// the gateway, what their wallet holds, what a court cost — is written the same way, in
-    /// the club's own symbol, with no unit word after it.
+    /// Credits, for an email.
     ///
     /// <para>
-    /// <b>This replaced two formatters, and the collapse was the owner's ruling given twice.</b>
-    /// First: "instead of a <c>cr</c> suffix, have a configurable currency symbol instead which
-    /// would precede amounts. Like <c>R </c> for ZAR (default)." Then, when the first pass
-    /// scoped the symbol to real money only and left a <c>Cr</c> beside it printing
-    /// "50.00 credits": "remember the wording changes from credits and cr to the currency
-    /// symbol." So <c>Cr</c> is gone and this is what took its place. The full reasoning, and
-    /// the risk the owner is accepting, is in <see cref="Services.CurrencySymbol"/>.
+    /// Every money email printed a rand sign over a credit figure — "Charged R50,00" for a
+    /// court that cost the member R31.25 at the club's own 1.6 rate — which is the unit lie
+    /// <c>CLAUDE.md</c> forbids, on the one artifact a member reconciles a bank statement
+    /// against. Credits are the unit of account; rand appears in exactly one template, the
+    /// top-up confirmation, because that is the only place a member actually paid rand.
     /// </para>
+    ///
+    /// <para>
+    /// Invariant culture, so the separator is a dot on every host. It was the server
+    /// process's ambient culture, which is how "−15.00 cr" and "penalty 30,0%" ended up in
+    /// the same row of one member's ledger.
+    /// </para>
+    /// </summary>
+    internal static string Cr(decimal value) => value.ToString("0.00", CultureInfo.InvariantCulture) + " credits";
+
+    /// <summary>
+    /// Real money, in the club's own symbol. Only for amounts that really are money — what the
+    /// member paid the gateway.
     ///
     /// <para>
     /// <b>The symbol is a parameter rather than a constant, and it is required rather than
     /// defaulted.</b> A default would let a new money surface be written that silently prints
     /// a rand sign to a club that does not take rand, and nothing would fail; required, the
-    /// compiler asks the author where the club's symbol comes from. The answer is
-    /// <see cref="Services.CurrencySymbol.For"/> at every call site, and the requirement earned
-    /// its keep in the change that introduced it: it caught a template composing an amount with
-    /// no club in scope at all.
+    /// compiler asks the author where the club's symbol comes from. There are three call sites
+    /// and the answer is <see cref="Services.CurrencySymbol.For"/> at all three.
     /// </para>
     ///
     /// <para>
@@ -169,16 +163,12 @@ public static class EmailTemplates
     /// </para>
     ///
     /// <para>
-    /// Invariant culture, so the separator is a dot on every host. It was the server process's
-    /// ambient culture, which is how "−15.00 cr" and "penalty 30,0%" ended up in the same row
-    /// of one member's ledger — and it is load-bearing twice over, because PayFast rejects the
-    /// club's own <c>en-ZA</c> comma decimal.
+    /// Invariant culture, for the reason <see cref="Cr"/> gives — and here it is load-bearing
+    /// twice over, because PayFast rejects the club's own <c>en-ZA</c> comma decimal.
     /// </para>
     /// </summary>
-    // STEP A (temporary): the OLD rendering, so the plumbing below compiles and the new tests
-    // go red on the assertion rather than on the build. Flipped to the real body in step C.
-    internal static string Money(decimal value, string symbol) =>
-        value.ToString("0.00", CultureInfo.InvariantCulture) + " credits";
+    internal static string Zar(decimal value, string symbol) =>
+        (value < 0 ? "-" : "") + symbol + Math.Abs(value).ToString("0.00", CultureInfo.InvariantCulture);
 
     /// <summary>A number with no trailing-zero noise, for percentages and rates. Invariant, as above.</summary>
     internal static string Num(decimal value) => value.ToString("0.####", CultureInfo.InvariantCulture);
@@ -259,7 +249,7 @@ public static class EmailTemplates
               <h2 style="margin:0 0 12px">Hi {fullName},</h2>
               <p>Your membership at {clubName} has been suspended, so you can't sign in, book a court or open a court with your fingerprint, PIN or code for now.</p>
               <p style="background:#FEF3C7;border:1px solid #FDE68A;border-radius:8px;padding:12px 14px"><strong>Reason:</strong> {reason}</p>
-              <p style="color:#475569">Your balance and your existing bookings are untouched. Speak to the club office to have the suspension lifted.</p>
+              <p style="color:#475569">Your credit balance and your existing bookings are untouched. Speak to the club office to have the suspension lifted.</p>
               {FooterHtml}
             </div>
             """);
@@ -271,7 +261,7 @@ public static class EmailTemplates
             $"""
             <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
               <h2 style="margin:0 0 12px">Hi {fullName},</h2>
-              <p>Your membership at {clubName} has been reactivated. You can sign in, book courts and open a court at the box again — your balance is exactly as you left it.</p>
+              <p>Your membership at {clubName} has been reactivated. You can sign in, book courts and open a court at the box again — your credit balance is exactly as you left it.</p>
               {FooterHtml}
             </div>
             """);
@@ -360,27 +350,27 @@ public static class EmailTemplates
     /// <c>feature-spec.md</c> §8's override and their balance is now below zero.
     ///
     /// <para>
-    /// Without it the confirmation states "Balance after: -R40.00" and nothing
+    /// Without it the confirmation states "Balance after: −40,00 credits" and nothing
     /// else — a negative number with no account of itself, on the artifact a member
     /// reconciles against. The club took the booking deliberately and the member is owed
     /// the reason, not just the figure. Empty on every ordinary booking, so nothing that
     /// is not an overdraft acquires an explanation for one.
     /// </para>
     /// </summary>
-    private static string OverdrawnNoticeHtml(decimal balanceAfterCredits, string symbol) =>
+    private static string OverdrawnNoticeHtml(decimal balanceAfterCredits) =>
         balanceAfterCredits >= 0 ? "" : $"""
             <p style="margin-top:16px;font-size:13px;color:#B91C1C">
               This booking was made for you at the club and takes your balance to
-              <strong>{Money(balanceAfterCredits, symbol)}</strong>. Top up to clear it — the amount owing comes
+              <strong>{Cr(balanceAfterCredits)}</strong>. Top up to clear it — the amount owing comes
               off your next top-up.
             </p>
             """;
 
     /// <summary>
-    /// Both figures on <paramref name="d"/> are written in the club's own symbol, and the
-    /// penalty policy is the tenant's, not a literal: the previous template hardcoded "within
-    /// 15 minutes … 30%" and went on saying it after an admin had moved the club to 30 minutes
-    /// at 50%.
+    /// <c>AmountCredits</c> and <c>BalanceAfterCredits</c> on <paramref name="d"/> are
+    /// <b>credits</b>, and the penalty policy is the tenant's, not a literal: the previous
+    /// template hardcoded "within 15 minutes … 30%" and went on saying it after an admin had
+    /// moved the club to 30 minutes at 50%.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -411,10 +401,10 @@ public static class EmailTemplates
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">Court</td><td><strong>{d.CourtName}</strong></td></tr>
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">{(d.IsWalkUp ? "Started" : "Starts")}</td><td><strong>{d.StartsAtLocal}</strong></td></tr>
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">Duration</td><td><strong>{d.Duration}</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Charged</td><td><strong>{Money(d.AmountCredits, d.CurrencySymbol)}</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Balance after</td><td><strong>{Money(d.BalanceAfterCredits, d.CurrencySymbol)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Charged</td><td><strong>{Cr(d.AmountCredits)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Balance after</td><td><strong>{Cr(d.BalanceAfterCredits)}</strong></td></tr>
               </table>
-              {OverdrawnNoticeHtml(d.BalanceAfterCredits, d.CurrencySymbol)}
+              {OverdrawnNoticeHtml(d.BalanceAfterCredits)}
               {CancellationTermsHtml(d)}
               <p style="margin-top:16px;font-size:13px;color:#475569">Your receipt is attached.</p>
               {FooterHtml}
@@ -469,12 +459,11 @@ public static class EmailTemplates
     /// explanation between them, for a member who is standing at a box reading COURT NOT FREE.
     /// The figure is the <b>gross</b> refund, which is also the whole price — there is no
     /// penalty leg on a court that was never lit. A court priced at zero has no figure to
-    /// print and gets the shorter sentence: I10 writes no zero ledger row, so quoting
-    /// "R0.00" here would name a movement that is not on the statement.
+    /// print and gets the shorter sentence: I10 writes no zero ledger row, so quoting "0.00
+    /// credits" here would name a movement that is not on the statement.
     /// </para>
     /// </remarks>
-    public static EmailMessage WalkUpNotStarted(
-        string to, string courtName, decimal refundedCredits, string currencySymbol) => new(
+    public static EmailMessage WalkUpNotStarted(string to, string courtName, decimal refundedCredits) => new(
         To: to,
         Subject: $"Court time not started — {courtName}",
         HtmlBody:
@@ -483,16 +472,15 @@ public static class EmailTemplates
               <h2 style="margin:0 0 12px">Nothing was bought</h2>
               <p>The box could not start {System.Net.WebUtility.HtmlEncode(courtName)} for you, so the court time you pressed for was not sold.</p>
               {(refundedCredits > 0
-                  ? $"<p>Put back in your wallet: <strong>{Money(refundedCredits, currencySymbol)}</strong>. Your balance is where it was before you pressed.</p>"
-                  : "<p>Nothing was taken out of your wallet.</p>")}
+                  ? $"<p>Put back on your credit: <strong>{Cr(refundedCredits)}</strong>. Your balance is where it was before you pressed.</p>"
+                  : "<p>Nothing was taken off your credit.</p>")}
               <p>Try again at the box, or ask at the desk.</p>
               {FooterHtml}
             </div>
             """);
 
     /// <summary>
-    /// A cancelled booking, in the member's mail. Both figures are written in the club's own
-    /// symbol; see <see cref="Money"/>.
+    /// A cancelled booking, in the member's mail. Both figures are <b>credits</b>; see <see cref="Cr"/>.
     /// </summary>
     /// <remarks>
     /// <paramref name="refundedCredits"/> is the <b>gross</b> refund — the <c>CancellationRefund</c>
@@ -503,7 +491,7 @@ public static class EmailTemplates
     /// </remarks>
     public static EmailMessage BookingCancellation(
         string to, string courtName, decimal refundedCredits, decimal? penaltyCredits,
-        string currencySymbol, ClubCancellation? byClub = null) => new(
+        ClubCancellation? byClub = null) => new(
         To: to,
         Subject: byClub is null ? $"Booking cancelled — {courtName}" : $"The club cancelled your booking — {courtName}",
         HtmlBody:
@@ -514,8 +502,8 @@ public static class EmailTemplates
                   ? $"Your booking on {System.Net.WebUtility.HtmlEncode(courtName)} has been cancelled."
                   : $"The club cancelled your booking on {System.Net.WebUtility.HtmlEncode(courtName)} on your behalf. You did not do this.")}</p>
               {ClubReasonHtml(byClub)}
-              <p>Refunded to your wallet: <strong>{Money(refundedCredits, currencySymbol)}</strong>.</p>
-              {(penaltyCredits is > 0 ? $"<p>Late-cancellation penalty applied: <strong>{Money(penaltyCredits.Value, currencySymbol)}</strong>.</p>" : "")}
+              <p>Refunded to your credit: <strong>{Cr(refundedCredits)}</strong>.</p>
+              {(penaltyCredits is > 0 ? $"<p>Late-cancellation penalty applied: <strong>{Cr(penaltyCredits.Value)}</strong>.</p>" : "")}
               {(byClub is { PenaltyWaived: true } ? "<p>The late-cancellation penalty was waived, so nothing was deducted for it.</p>" : "")}
               {FooterHtml}
             </div>
@@ -552,9 +540,7 @@ public static class EmailTemplates
     /// <c>/wallet</c>, computed the only way this system computes one — by summing the rows.
     /// </para>
     /// </remarks>
-    public static EmailMessage BookingNoShow(
-        string to, string courtName, decimal refundedCredits, decimal penaltyCredits,
-        string currencySymbol) => new(
+    public static EmailMessage BookingNoShow(string to, string courtName, decimal refundedCredits, decimal penaltyCredits) => new(
         To: to,
         Subject: $"Missed booking — {courtName}",
         HtmlBody:
@@ -563,8 +549,8 @@ public static class EmailTemplates
               <h2 style="margin:0 0 12px">You missed this booking</h2>
               <p>Nobody was identified at the court for your booking on {System.Net.WebUtility.HtmlEncode(courtName)} before the grace window closed, so it was released and marked as a no-show.</p>
               <table style="border-collapse:collapse;margin:16px 0;font-size:14px">
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Booking refunded</td><td><strong>{Money(refundedCredits, currencySymbol)}</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">No-show penalty</td><td><strong>{(penaltyCredits > 0 ? Money(-penaltyCredits, currencySymbol) : "None")}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Booking refunded</td><td><strong>{Cr(refundedCredits)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">No-show penalty</td><td><strong>{(penaltyCredits > 0 ? Cr(-penaltyCredits) : "None")}</strong></td></tr>
               </table>
               <p style="font-size:13px;color:#475569">Both movements appear separately in your wallet — the refund and the penalty are two rows, not one. If you were at the court and could not get the lights on, tell the club and they can reverse this.</p>
               {FooterHtml}
@@ -574,73 +560,36 @@ public static class EmailTemplates
     /// <summary>
     /// Top-up confirmation — <c>feature-spec.md</c> §11 has required this since the spec was
     /// written and nothing sent it, so the one event where a member hands over real money
-    /// produced no email at all.
+    /// produced no email at all. This is the single template that legitimately shows both
+    /// units: money is what left their card, credits are what arrived in the wallet, and the
+    /// rate between them is the number a dispute turns on.
     ///
     /// <para>
-    /// <b>This is the conversion boundary, and it is the one surface in the product that MUST
-    /// state both legs in words.</b> Since the owner's ruling there is a single symbol on every
-    /// amount, so the two figures here — what left the card, and what arrived in the wallet —
-    /// wear the same sign while being different sizes: at the shipped 1.6 rate a member who
-    /// paid R100.00 is credited R160.00. The rate is now invisible everywhere in the product
-    /// EXCEPT here, which is precisely why "Paid R100.00 / Credited R160.00" as two bare rows
-    /// is a defect and not a layout. The sentence below names which leg is which, and it is
-    /// the same sentence the top-up screen renders, deliberately: a member who reads the mail
-    /// and a member who reads the screen must not be told two different things about one
-    /// payment.
-    /// </para>
-    ///
-    /// <para>
-    /// It also says the wallet is not cash. That is the residual risk the owner accepted when
-    /// the two quantities collapsed onto one symbol — a member reading their balance as
-    /// something they could ask for back — and the mail is the artifact they keep.
+    /// <b>It is also the one template where the two units sit in adjacent rows</b>, which is
+    /// why the club's symbol may not touch the credit rows: at the shipped 1.6 rate "Paid
+    /// R100.00 / Credited R160.00" would tell a member the club had given them R60.
     /// </para>
     /// </summary>
     public static EmailMessage TopUpConfirmation(string to, TopUpConfirmationDetails d) => new(
         To: to,
-        Subject: $"Top-up confirmed — {Money(d.AmountZar, d.CurrencySymbol)} paid, "
-               + $"{Money(d.CreditsAdded, d.CurrencySymbol)} added",
+        Subject: $"Top-up confirmed — {Cr(d.CreditsAdded)}",
         HtmlBody:
             $"""
             <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
               <h2 style="margin:0 0 12px">Your wallet has been topped up</h2>
               <table style="border-collapse:collapse;font-size:14px">
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">You paid</td><td><strong>{Money(d.AmountZar, d.CurrencySymbol)}</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Added to your wallet</td><td><strong>{Money(d.CreditsAdded, d.CurrencySymbol)}</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Balance after</td><td><strong>{Money(d.BalanceAfterCredits, d.CurrencySymbol)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Paid</td><td><strong>{Zar(d.AmountZar, d.CurrencySymbol)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Rate</td><td><strong>{Num(d.ConversionRate)} credits per {d.CurrencySymbol}1</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Credited</td><td><strong>{Cr(d.CreditsAdded)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Balance after</td><td><strong>{Cr(d.BalanceAfterCredits)}</strong></td></tr>
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">Reference</td><td>{System.Net.WebUtility.HtmlEncode(d.Reference)}</td></tr>
               </table>
               <p style="margin-top:16px;font-size:13px;color:#475569">
-                {ConversionSentence(d)}
+                Credits are what you book court time with. {d.CurrencySymbol} is only the payment rail.
               </p>
               {FooterHtml}
             </div>
             """);
-
-    /// <summary>
-    /// The two legs of a top-up, in words — <b>the one rule the single-symbol decision imposes</b>.
-    ///
-    /// <para>
-    /// Written as "every one unit you pay adds N to your wallet" rather than as a rate, because
-    /// a rate is a number a member has to apply and this is a sentence they can check against
-    /// the two figures directly above it. The leading unit is rendered through
-    /// <see cref="Money"/> rather than written as "{symbol}1", so it reads "Every R1.00" beside
-    /// "R100.00" instead of "Every R1" beside it.
-    /// </para>
-    ///
-    /// <para>
-    /// The second sentence is the one the owner's acceptance of this collapse rests on: a
-    /// wallet cannot be exchanged back for money, which is what makes quoting court prices in
-    /// the club's own sign defensible rather than a 60% overstatement of what the member holds.
-    /// </para>
-    /// </summary>
-    private static string ConversionSentence(TopUpConfirmationDetails d)
-    {
-        return $"Every {Money(1m, d.CurrencySymbol)} you pay adds "
-             + $"{Money(d.ConversionRate, d.CurrencySymbol)} to your wallet, which is why "
-             + $"{Money(d.CreditsAdded, d.CurrencySymbol)} arrived for the "
-             + $"{Money(d.AmountZar, d.CurrencySymbol)} that left your card. "
-             + "Your wallet is what you book court time with — it is not cash and cannot be paid back out.";
-    }
 
     /// <summary>
     /// What a member is told when a top-up ended in anything but credits.
@@ -658,10 +607,10 @@ public static class EmailTemplates
         switch (failureReason)
         {
             case "cancelled":
-                return "You cancelled this payment at PayFast, so nothing was charged and nothing was added to your wallet. "
+                return "You cancelled this payment at PayFast, so nothing was charged and no credits were added. "
                      + "You can start a new top-up whenever you like.";
             case "amount_mismatch":
-                return "PayFast reported a different amount from the one this top-up was for, so nothing was added to your wallet. "
+                return "PayFast reported a different amount from the one this top-up was for, so nothing was credited. "
                      + "If money did leave your account, send the club the reference below and they will sort it out.";
             case "declined":
                 return "Your bank declined the payment, so nothing was charged. Try again, or use a different card.";
@@ -671,7 +620,7 @@ public static class EmailTemplates
     }
 
     /// <summary>
-    /// A top-up that ended with nothing added — declined, cancelled at the gateway, or settled
+    /// A top-up that ended without credits — declined, cancelled at the gateway, or settled
     /// for an amount other than the one it was registered for.
     ///
     /// <para>
@@ -686,7 +635,7 @@ public static class EmailTemplates
     ///
     /// <para>
     /// It states the amount and says nothing was charged where that is true, because the fear
-    /// a member has here is that the money left and their wallet never moved. The one case
+    /// a member has here is that the money left and the credits did not arrive. The one case
     /// where money may genuinely have moved — <c>amount_mismatch</c> — says so and tells them
     /// what to send the club.
     /// </para>
@@ -695,15 +644,15 @@ public static class EmailTemplates
         string to, decimal amountZar, string? failureReason, string reference, string currencySymbol) => new(
         To: to,
         Subject: failureReason == "cancelled"
-            ? $"Top-up cancelled — {Money(amountZar, currencySymbol)}"
-            : $"Top-up didn't go through — {Money(amountZar, currencySymbol)}",
+            ? $"Top-up cancelled — {Zar(amountZar, currencySymbol)}"
+            : $"Top-up didn't go through — {Zar(amountZar, currencySymbol)}",
         HtmlBody:
             $"""
             <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
               <h2 style="margin:0 0 12px">{(failureReason == "cancelled" ? "Your top-up was cancelled" : "Your top-up didn't go through")}</h2>
               <table style="border-collapse:collapse;font-size:14px">
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Amount</td><td><strong>{Money(amountZar, currencySymbol)}</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Added to your wallet</td><td><strong>{Money(0m, currencySymbol)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Amount</td><td><strong>{Zar(amountZar, currencySymbol)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Credited</td><td><strong>{Cr(0m)}</strong></td></tr>
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">Reference</td><td>{System.Net.WebUtility.HtmlEncode(reference)}</td></tr>
               </table>
               <p style="margin-top:16px">{System.Net.WebUtility.HtmlEncode(TopUpFailureSentence(failureReason))}</p>
@@ -715,30 +664,23 @@ public static class EmailTemplates
             """);
 
     /// <summary>
-    /// A manual adjustment by the desk — the other half of <c>feature-spec.md</c>
+    /// A manual credit adjustment by the desk — the other half of <c>feature-spec.md</c>
     /// §11's "Refund / credit adjustment", which also sent nothing. A member whose balance
     /// moves by someone else's hand is told what moved and why.
     /// </summary>
-    /// <remarks>
-    /// The <c>+</c> / <c>−</c> in front of the amount is the DIRECTION and is deliberately not
-    /// <see cref="Money"/>'s own sign: the figure is passed in already made absolute, so the
-    /// row reads "+R25.00" and "−R25.00" against a subject line that says the same thing in
-    /// words. Two negatives on one figure would read as a correction of a correction.
-    /// </remarks>
     public static EmailMessage CreditAdjustment(
-        string to, decimal amountCredits, decimal balanceAfterCredits, string reason,
-        string currencySymbol) => new(
+        string to, decimal amountCredits, decimal balanceAfterCredits, string reason) => new(
         To: to,
         Subject: amountCredits >= 0
-            ? $"Added to your balance — {Money(amountCredits, currencySymbol)}"
-            : $"Deducted from your balance — {Money(Math.Abs(amountCredits), currencySymbol)}",
+            ? $"Credit added — {Cr(amountCredits)}"
+            : $"Credit deducted — {Cr(Math.Abs(amountCredits))}",
         HtmlBody:
             $"""
             <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
-              <h2 style="margin:0 0 12px">{(amountCredits >= 0 ? "Added to your wallet" : "Deducted from your wallet")}</h2>
+              <h2 style="margin:0 0 12px">{(amountCredits >= 0 ? "Credits added to your wallet" : "Credits deducted from your wallet")}</h2>
               <table style="border-collapse:collapse;font-size:14px">
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Amount</td><td><strong>{(amountCredits >= 0 ? "+" : "−")}{Money(Math.Abs(amountCredits), currencySymbol)}</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Balance after</td><td><strong>{Money(balanceAfterCredits, currencySymbol)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Amount</td><td><strong>{(amountCredits >= 0 ? "+" : "−")}{Cr(Math.Abs(amountCredits))}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Balance after</td><td><strong>{Cr(balanceAfterCredits)}</strong></td></tr>
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">Reason</td><td>{System.Net.WebUtility.HtmlEncode(reason)}</td></tr>
               </table>
               <p style="margin-top:16px;font-size:13px;color:#475569">
@@ -901,8 +843,7 @@ public static class EmailTemplates
     /// </para>
     /// </summary>
     public static EmailMessage BookingRefundedForOutage(
-        string to, string courtName, decimal refundedCredits, string clubName,
-        string currencySymbol) => new(
+        string to, string courtName, decimal refundedCredits, string clubName) => new(
         To: to,
         Subject: $"Refunded — {courtName} was offline",
         HtmlBody:
@@ -911,7 +852,7 @@ public static class EmailTemplates
               <h2 style="margin:0 0 12px">Your booking has been refunded in full</h2>
               <p>The court controller at {System.Net.WebUtility.HtmlEncode(clubName)} was offline during your booking on <strong>{System.Net.WebUtility.HtmlEncode(courtName)}</strong>, so the lights could not be released against your name.</p>
               <table style="border-collapse:collapse;margin:16px 0;font-size:14px">
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Refunded</td><td><strong>{Money(refundedCredits, currencySymbol)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Refunded</td><td><strong>{Cr(refundedCredits)}</strong></td></tr>
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">Penalty</td><td><strong>None</strong></td></tr>
               </table>
               <p style="font-size:13px;color:#475569">You have not been marked down for missing it, and nothing has been deducted. If you did get onto the court, the box uploads its record when it reconnects and the booking settles as attended — the refund is reversed and you are charged the original price, with no penalty either way.</p>
@@ -964,8 +905,7 @@ public static class EmailTemplates
     /// </para>
     /// </summary>
     public static EmailMessage BookingRefundedForOutOfServiceBox(
-        string to, string courtName, decimal refundedCredits, string clubName,
-        string currencySymbol) => new(
+        string to, string courtName, decimal refundedCredits, string clubName) => new(
         To: to,
         Subject: $"Refunded — the box on {courtName} is out of service",
         HtmlBody:
@@ -974,7 +914,7 @@ public static class EmailTemplates
               <h2 style="margin:0 0 12px">Your booking has been refunded in full</h2>
               <p>Nobody checked in on <strong>{System.Net.WebUtility.HtmlEncode(courtName)}</strong> at {System.Net.WebUtility.HtmlEncode(clubName)} during your booking, and the box on that court is out of service — it could not open the court, and it will never send the club a record of anyone who played.</p>
               <table style="border-collapse:collapse;margin:16px 0;font-size:14px">
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Refunded</td><td><strong>{Money(refundedCredits, currencySymbol)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Refunded</td><td><strong>{Cr(refundedCredits)}</strong></td></tr>
                 <tr><td style="padding:6px 16px 6px 0;color:#475569">Penalty</td><td><strong>None</strong></td></tr>
               </table>
               <p style="font-size:13px;color:#475569">You have not been marked down for missing it, and nothing has been deducted. Because that box is out of service it will not send the club anything further, so this refund is final — if you did get onto the court, please tell the desk rather than waiting for it to correct itself.</p>

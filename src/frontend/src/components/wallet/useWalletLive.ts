@@ -26,7 +26,7 @@ import { useBalance } from "../../lib/balance";
 export type LiveState = "loading" | "live" | "degraded" | "unavailable";
 
 /**
- * Two movements a hundredth apart are the same movement, and neither is one.
+ * Two movements a hundredth of a credit apart are the same movement, and neither is one.
  *
  * `toFixed(2)` is what the whole product renders money at, so a change that cannot show up
  * in two decimal places has not happened as far as a member is concerned.
@@ -99,7 +99,7 @@ export type BalanceDelta = {
  *
  * <p>
  * A count that scales without a ceiling makes a big top-up feel slow, so the duration is
- * clamped: R5.00 takes 350 ms and R400.00 takes 900. Eased on the VALUE, because
+ * clamped: five credits takes 350 ms and four hundred takes 900. Eased on the VALUE, because
  * linear counting reads mechanical. A second movement mid-tween restarts from what is on
  * screen, never from the old target, so two quick movements can never make the number jump
  * backwards.

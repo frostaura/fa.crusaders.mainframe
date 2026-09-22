@@ -143,7 +143,7 @@ export function setUnauthorizedHandler(fn: (() => void) | null) { unauthorizedHa
  * at boot, so an SPA route change after the flip rendered the new page against a stale
  * context and the 403s landed in each screen's own <code>catch</code>. A finder watched
  * Reports fill with em-dashes — <code>TOP-UPS — · SPENT — · TIME ON COURT —</code> — beside a
- * stale "-R40.00" in the header and a Download wallet CSV button, with no banner, no toast
+ * stale "-40.00 cr" in the header and a Download wallet CSV button, with no banner, no toast
  * and nothing in <code>[role=status],[role=alert]</code> at any sample. Only a full page load
  * re-read <code>whoami</code> and did the right thing.
  * </p>
@@ -484,7 +484,7 @@ export type BulkBookResponse = {
   total_charged_credits?: number;
   payer?: { user_id?: string; name?: string; balance_before_credits?: number; balance_after_credits?: number };
   results?: BulkResultRow[];
-  /** D2 §5.3 — the batch stopped here because the payer's wallet ran out. */
+  /** D2 §5.3 — the batch stopped here because the payer ran out of credit. */
   halted_at?: number; halted_reason?: string;
 } & Record<string, unknown>;
 
@@ -655,10 +655,9 @@ export type AdminSettings = {
   /** `thumbs` (default) or `marks` — ruling 4. Destructive confirms are exempt and keep the
    *  action's own icon and the danger treatment whichever is chosen. */
   action_glyphs?: "thumbs" | "marks";
-  /** The symbol EVERY amount this club shows wears, default `R`. 1–4 letters or currency
-   *  signs. It dresses a wallet balance and a court price as well as a card payment, which is
-   *  the owner's ruling — so `credits_per_zar_*` is invisible except at the conversion
-   *  itself, and any sentence spanning both legs states both in words; see `lib/currency.ts`. */
+  /** The symbol this club's REAL MONEY figures wear, default `R`. 1–4 letters or currency
+   *  signs. It is NOT the credit unit — credits convert at `credits_per_zar_*` and keep a
+   *  unit of their own; see `lib/currency.ts`. */
   currency_symbol?: string;
   /** GOAL item 6's kill switch, default true. False makes the trace route answer 404 —
    *  never 403, which would confirm the surface exists and that this member has one. */
@@ -1106,7 +1105,7 @@ export type MyProfile = {
   action_glyphs?: string;
 
   /**
-   * The symbol EVERY amount this club shows wears — `R`, `R$`, `CHF`.
+   * The symbol this club's REAL MONEY figures wear — `R`, `R$`, `CHF`.
    *
    * <p>
    * A tenant setting, riding on the payload that already reaches every signed-in screen for
@@ -1116,11 +1115,9 @@ export type MyProfile = {
    * </p>
    *
    * <p>
-   * <b>It dresses the wallet too, on the owner's instruction.</b> A member pays R100 and their
-   * wallet gains <code>credits_per_zar_regular</code> × 100, which ships at 1.6 — two
-   * quantities that are not the same size, now written the same way. What that collapses, why
-   * it is defensible, and the rule it imposes on every sentence spanning both legs are all in
-   * `lib/currency.ts`. Read it before adding a caller.
+   * <b>It is not the credit unit.</b> A member pays R100 and receives
+   * <code>credits_per_zar_regular</code> × 100 credits, which ships at 1.6 — so a credit
+   * figure wearing this symbol overstates what they have by 60%. See `lib/currency.ts`.
    * </p>
    */
   currency_symbol?: string;
@@ -1223,8 +1220,8 @@ export type WebAuthnCredentialRow = {
  * rather than hardcoded on the screen.
  *
  * The screen carried `MIN_ZAR = 100`, `MAX_ZAR = 1000`, `BLOCK_ZAR = 100` and two literal
- * conversion rates, so an admin who changed any of them left it quoting a member 60% more
- * than they would actually get, offering amounts the club had stopped accepting and refusing
+ * conversion rates, so an admin who changed any of them left it quoting 60% more credits
+ * than the member would get, offering amounts the club had stopped accepting and refusing
  * amounts it did accept — disagreeing with the server in both directions at once.
  */
 export type TopUpOptions = {
@@ -1241,7 +1238,7 @@ export type TopUpOptions = {
  *
  * `revenue_credits` is what the club KEPT, summed off the ledger rows naming each booking
  * — the settlement model's `Owed`. It used to be the price quoted at booking, so a
- * no-showed R50.00 court counted as R50.00 of revenue when the club's take was the R15.00
+ * no-showed 50-credit court counted as 50 of revenue when the club's take was the 15
  * penalty. `quoted_credits` keeps the old figure under a name that says what it is.
  *
  * `booked_minutes` exists because `slices` mixes units: a 60-minute walk-up is one slice,
@@ -1287,8 +1284,8 @@ export type TopUpStatus = {
  * A member's own period summary.
  *
  * Every bucket a movement can land in, because the page has to reconcile: it reported
- * top-ups, spend, refunds and a penalty COUNT and nothing else, so a member with R2,500.00
- * of admin adjustments read "0 in, 950 out, 100 back" beside a header saying
+ * top-ups, spend, refunds and a penalty COUNT and nothing else, so a member with 2,500
+ * credits of admin adjustments read "0 in, 950 out, 100 back" beside a header saying
  * 1,635 and no way to see where the gap came from. `net_movement_credits` is the sum,
  * and over a range covering the whole ledger it is the balance.
  */
@@ -1833,7 +1830,7 @@ export const endpoints = {
   /**
    * Suspend / reactivate (spec §8) — the status a club reaches for when dues lapse.
    *
-   * A suspension is not a rejection and not a deletion: the member's balance and
+   * A suspension is not a rejection and not a deletion: the member's credit balance and
    * their existing bookings are untouched, and reactivating restores access exactly as it
    * was. A reason is required because the member is emailed it.
    */
@@ -1843,7 +1840,7 @@ export const endpoints = {
     api.post<{ reactivated: boolean; member_notified: boolean }>(`/api/v1/admin/members/${memberId}/reactivate`),
 
   /**
-   * A manual money movement. `relatedBookingId` is optional and OMITTED when not given:
+   * A manual credit movement. `relatedBookingId` is optional and OMITTED when not given:
    * an adjustment that names a booking is what lets a late box upload recognise that the
    * desk already compensated the member for a wrongly-swept no-show, and audit instead of
    * refunding twice (`BookingService.ReverseNoShowAsync`). One without it is plain money.
@@ -1856,7 +1853,7 @@ export const endpoints = {
       // Names THIS movement, so every retry of one intended adjustment is the same
       // movement and a genuinely second one of the same amount is not. A double-click on
       // Apply used to post twice and move the balance twice; a slow connection and four
-      // clicks granted R44.00 where R11.00 was typed.
+      // clicks granted 44 credits where 11 were typed.
       ...(idempotencyKey ? { idempotencyKey } : {}),
     }),
   adminResetMemberPassword: (memberId: string) =>
@@ -1914,7 +1911,7 @@ export const endpoints = {
    * they pressed Continue, and it is not optional: the server compares it with the live one
    * and answers 409 `topup_rate_changed` rather than registering a top-up at a rate the
    * member was never shown. Sending nothing would silently opt this screen back into the
-   * defect — a member offered a wallet gain of R240.00 for R100.00 paid, and given R160.00.
+   * defect — a member offered 240 credits for R100 and given 160.
    */
   topupStart: (amountZar: number, quotedConversionRate: number) =>
     api.post<TopUpStart>("/api/v1/credit/topup", { amountZar, quotedConversionRate }),

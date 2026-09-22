@@ -214,9 +214,9 @@ describe("the clash check", () => {
 
   it("never reads an unknown refund as nothing", () => {
     expect(conflictRefundPhrase({ would_refund_credits: 36, member_name: "Priya Naidoo" }))
-      .toBe("R36.00 would go back to Priya Naidoo.");
+      .toBe("36.00 cr would go back to Priya Naidoo.");
     expect(conflictRefundPhrase({ would_refund_credits: 36 }))
-      .toBe("R36.00 would go back.");
+      .toBe("36.00 cr would go back.");
     expect(conflictRefundPhrase({ would_refund_credits: 0, member_name: "Priya Naidoo" }))
       .toBe("Nothing would go back to Priya Naidoo.");
     // The arm that matters: the backend has not shipped the quote yet. "Nothing would go
@@ -228,8 +228,8 @@ describe("the clash check", () => {
   });
 
   it("restates the chosen option in the button that does it", () => {
-    expect(clearAllLabel(4, 350)).toBe("Cancel 4 bookings and refund R350.00 in full");
-    expect(clearAllLabel(1, 36)).toBe("Cancel 1 booking and refund R36.00 in full");
+    expect(clearAllLabel(4, 350)).toBe("Cancel 4 bookings and refund 350.00 cr in full");
+    expect(clearAllLabel(1, 36)).toBe("Cancel 1 booking and refund 36.00 cr in full");
     // Unknown total, again: the button promises the refund without inventing its size.
     expect(clearAllLabel(4, null)).toBe("Cancel 4 bookings and refund them in full");
     expect(CREATE_LABEL).toBe("Create the hold");

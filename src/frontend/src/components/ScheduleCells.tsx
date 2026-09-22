@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { ChevronRight, Info, Lock } from "lucide-react";
 import { Card } from "./Card";
 import type { ScheduleCourt, ScheduleDay, ScheduleSlot } from "../lib/api";
-import { cn, formatMoney, spokenMoney } from "../lib/utils";
+import { cn, formatCredits } from "../lib/utils";
 import { isSlotHead, peakRestricted, slotAt, type TimeSlice } from "../lib/scheduleGrid";
 import { cellVerdict, type GridReason, type ViewerRules } from "../lib/gridRules";
 import {
@@ -347,10 +347,8 @@ function HeaderRow({ courts, sliceMinutes, yourRate }: {
           className="sticky top-0 z-20 bg-bg-surface px-2 py-2 text-xs text-text-secondary text-center border-b border-border">
           <div className="font-medium text-text-primary">{c.name}{c.isActive === false && <span className="font-normal"> · not in use</span>}</div>
           {/* D3-B16: the grid priced a "slice" and never said how long one is. And the price
-              is THIS VIEWER's (D2 §4.2) — a member is never shown another group's rate.
-              `formatMoney` because this is READ: it is the column header a sighted member
-              scans. The same figure is SAID, in words, in each cell's own name below. */}
-          <div>{formatMoney(c.slicePriceCredits)} / {sliceMinutes} min{yourRate && <span className="block text-[10px]">your rate</span>}</div>
+              is THIS VIEWER's (D2 §4.2) — a member is never shown another group's rate. */}
+          <div>{formatCredits(c.slicePriceCredits)} / {sliceMinutes} min{yourRate && <span className="block text-[10px]">your rate</span>}</div>
         </div>
       ))}
     </div>
@@ -576,32 +574,17 @@ function EmptyCell(props: SlotCellProps) {
     return <Cell label={`${where} — this court is not in use`} roving={props.roving} at={props.at}>{inert("bg-bg-muted/40 border border-dashed border-border", "Not in use")}</Cell>;
   }
 
-  /*
-    `spokenMoney`, and this is the ONE money control in the product where that is the right
-    answer rather than the wrong one.
-
-    An `aria-label` REPLACES an element's contents as the accessible name, so whatever goes in
-    here is the whole of what a screen reader says — and "R50.00" is announced with the R as a
-    letter, which is the same defect "cr" had when it was read as two of them. Everywhere else
-    that argument loses to WCAG 2.5.3 Label in Name: a button printed "Book for R50.00" is
-    named by the words a speech user can read, or they cannot reach it by saying them.
-
-    This button's visible text is the word "Available". The price is in the COLUMN HEADER,
-    conveyed by position — which is exactly what a screen reader cannot perceive, and why the
-    price is in this name at all. There is no visible wording for a spoken figure to
-    contradict, so 2.5.3 has nothing to bind and the name is free to be the sayable one.
-
-    `spokenMoney` drops the noun rather than guessing for a currency it cannot name, which
-    leaves "Book Court 1 at 06:00 for 50.00" — still a sentence that says what the number is.
-  */
-  const spokenPrice = spokenMoney(court.slicePriceCredits);
+  // The parameter used to be called priceZar and rendered with a rand sign. The name was the
+  // tell: it is a credit price, and at 1.6–2.4 credits per rand the grid was quoting a court
+  // at well under half what it costs.
+  const price = formatCredits(court.slicePriceCredits);
   return (
     <Cell label={where} selectKey={selectKey} candidateKey={candidateKey} selection={ctx.selection} roving={props.roving} at={props.at}>
       <button
         type="button"
         onClick={() => (selectKey ? ctx.selection?.toggle(selectKey, props.at) : ctx.onBook(court, startsAtUtc))}
         onPointerDown={armKey ? ctx.selection?.armLongPress(armKey, props.at) : undefined}
-        aria-label={`Book ${where} for ${spokenPrice}`}
+        aria-label={`Book ${where} for ${price}`}
         className="w-full m-0.5 h-12 rounded-md bg-success-soft text-success-strong hover:bg-success-soft/70 text-xs font-medium"
       >
         {CELL_WORD.available}

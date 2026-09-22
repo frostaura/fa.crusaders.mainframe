@@ -39,9 +39,9 @@ describe("a neutral button is exactly the button it was", () => {
 
 describe("an intent puts a glyph beside the word, never instead of it", () => {
   it("keeps the visible label, which is the accessible name", () => {
-    render(<Button intent="affirm">Book for R50.00</Button>);
+    render(<Button intent="affirm">Book for 50.00 cr</Button>);
     // WCAG 2.5.3: the name is the words, and the glyph adds nothing to it.
-    expect(screen.getByRole("button", { name: "Book for R50.00" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Book for 50.00 cr" })).toBeInTheDocument();
   });
 
   it("hides the glyph from assistive technology", () => {

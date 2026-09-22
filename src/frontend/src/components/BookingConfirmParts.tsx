@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { Button } from "./Button";
-import { formatMoney } from "../lib/utils";
+import { formatCredits } from "../lib/utils";
 import type { BookingIntent } from "./BookingConfirmModal";
 
 /**
@@ -36,7 +36,7 @@ export function CostSummary(props: {
       <Row term="Court" value={intent.courtName} />
       <Row term="Time" value={intent.whenLabel} />
       <Row term="Duration" value={`${intent.sliceMinutes} min`} />
-      <Row term="Cost" value={free ? "No charge — court held, not sold" : formatMoney(cost)} />
+      <Row term="Cost" value={free ? "No charge — court held, not sold" : formatCredits(cost)} />
       {!free && <BalanceRows wallet={wallet} cost={cost} theirs={chargedToSomeoneElse} canAfford={canAfford} />}
     </dl>
   );
@@ -48,7 +48,7 @@ export function CostSummary(props: {
  * <p>
  * "Their balance: charged to the member" was the whole of what an admin saw — a phrase
  * where a number belongs, and no "balance after" row at all. The desk could see the price
- * and the court but not whose wallet it was spending or what it left them, which is the
+ * and the court but not whose credit it was spending or what it left them, which is the
  * one check that catches a wrong name picked from a dropdown. It is stated as the club
  * last read it, and the server still decides: a member who turns out to be short is
  * refused, and §8's override panel restates both figures from the refusal itself.
@@ -59,7 +59,7 @@ export function BalanceRows(
   { wallet: number | null; cost: number; theirs: boolean; canAfford?: boolean },
 ) {
   if (wallet !== null) {
-    // N-F7's second half. "Balance after -R30.00" is a figure for a booking the dialog has
+    // N-F7's second half. "Balance after -30.00 cr" is a figure for a booking the dialog has
     // already decided will not happen — the Book button beside it is disabled — and nothing
     // told the member it was hypothetical. What is true, and what they can act on, is how far
     // short they are. The spec's "balance after" is kept for the case where the booking can
@@ -67,15 +67,15 @@ export function BalanceRows(
     if (!canAfford) {
       return (
         <>
-          <Row term={theirs ? "Their balance" : "Balance now"} value={formatMoney(wallet)} />
-          <Row term="Short by" value={formatMoney(cost - wallet)} emphasise />
+          <Row term={theirs ? "Their balance" : "Balance now"} value={formatCredits(wallet)} />
+          <Row term="Short by" value={formatCredits(cost - wallet)} emphasise />
         </>
       );
     }
     return (
       <>
-        <Row term={theirs ? "Their balance" : "Balance now"} value={formatMoney(wallet)} />
-        <Row term={theirs ? "Their balance after" : "Balance after"} value={formatMoney(wallet - cost)} emphasise />
+        <Row term={theirs ? "Their balance" : "Balance now"} value={formatCredits(wallet)} />
+        <Row term={theirs ? "Their balance after" : "Balance after"} value={formatCredits(wallet - cost)} emphasise />
       </>
     );
   }
@@ -104,7 +104,7 @@ export function Refusal({ message }: { message: string }) {
 }
 
 /**
- * §8: "Book on behalf of any member (charges that member's wallet; if insufficient, admin
+ * §8: "Book on behalf of any member (charges that member's credit; if insufficient, admin
  * can override and create a negative balance, logged)."
  *
  * <p>
@@ -127,16 +127,13 @@ export function Refusal({ message }: { message: string }) {
 export function OverdraftNotice({ name, current, required }: { name: string; current: number; required: number }) {
   return (
     <div className="mb-3 rounded-lg border border-danger-soft bg-danger-soft/40 p-3 text-sm">
-      {/* "doesn't have enough credit" read as a unit the product no longer writes; "enough in
-          their wallet" is the same fact in the word the chip, the route and the top-up copy
-          all already use. */}
       <p className="font-semibold text-danger-strong">
-        {name} doesn't have enough in their wallet for this court.
+        {name} doesn't have enough credit for this court.
       </p>
       <dl className="mt-2 space-y-1">
-        <Row term="Their balance" value={formatMoney(current)} />
-        <Row term="This booking" value={formatMoney(required)} />
-        <Row term="Their balance after" value={formatMoney(current - required)} emphasise />
+        <Row term="Their balance" value={formatCredits(current)} />
+        <Row term="This booking" value={formatCredits(required)} />
+        <Row term="Their balance after" value={formatCredits(current - required)} emphasise />
       </dl>
       <p className="mt-2 text-text-secondary">
         You can book it anyway. It charges {name} the full price, leaves them owing the

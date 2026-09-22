@@ -44,9 +44,7 @@ public static class ReportingEndpoints
             // a day the file does not contain.
             var name = $"crusaders-mainframe_wallet_{firstDay:yyyy-MM-dd}-{lastDay:yyyy-MM-dd}.csv";
             ctx.Response.Headers.ContentDisposition = $"attachment; filename=\"{name}\"";
-            return Results.Text(
-                LedgerCsv(entries, CurrencySymbol.For(await settingsAccessor.GetAsync(ct))),
-                "text/csv", Encoding.UTF8);
+            return Results.Text(LedgerCsv(entries), "text/csv", Encoding.UTF8);
         });
 
         var admin = app.MapGroup("/api/v1/admin/reports").RequireAuthorization(p => p.RequireRole("admin"));
@@ -487,27 +485,15 @@ public static class ReportingEndpoints
         };
     }
 
-    /// <summary>
-    /// A member's own statement, as a file.
-    ///
-    /// <para>
-    /// <b><c>amount</c> plus a <c>currency</c> column, not <c>amount_credits</c></b> — the same
-    /// change, for the same reason, as the member trace's export: the product no longer writes
-    /// "credits" as a unit anywhere a person reads one, so a column caption that still did was
-    /// naming a unit that does not exist. The cell stays a bare number a spreadsheet can sum,
-    /// and the symbol rides in a column of its own.
-    /// </para>
-    /// </summary>
-    private static string LedgerCsv(IEnumerable<LedgerEntry> entries, string currencySymbol)
+    private static string LedgerCsv(IEnumerable<LedgerEntry> entries)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("created_at,type,amount,currency,reason,external_reference,related_booking_id");
+        sb.AppendLine("created_at,type,amount_credits,reason,external_reference,related_booking_id");
         foreach (var e in entries)
         {
             sb.Append(e.CreatedAt.ToString("o", CultureInfo.InvariantCulture)).Append(',');
             sb.Append(e.Type).Append(',');
             sb.Append(e.AmountCredits.ToString(CultureInfo.InvariantCulture)).Append(',');
-            sb.Append(Csv(currencySymbol)).Append(',');
             sb.Append(Csv(e.Reason)).Append(',');
             sb.Append(Csv(e.ExternalReference)).Append(',');
             sb.AppendLine(e.RelatedBookingId?.ToString() ?? "");

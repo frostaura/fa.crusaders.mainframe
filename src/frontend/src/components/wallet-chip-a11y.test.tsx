@@ -25,26 +25,13 @@ describe("the wallet chip says the balance out loud", () => {
     expect(walletLabel(472, false)).toContain("472.00");
   });
 
-  /**
-   * A SPOKEN noun, and now it is the currency's rather than an invented unit's.
-   *
-   * <p>
-   * The chip shows "R472.00" and this sentence says "472.00 rand". Both halves matter: a
-   * label that said "R472.00" would hand a screen reader a letter where a word belongs, which
-   * is the identical defect "cr" had, and one that still said "credits" would be naming a unit
-   * the product no longer writes anywhere a member can see.
-   * </p>
-   */
-  it("says the currency as a word, because a symbol is read as a letter", () => {
-    expect(walletLabel(472, false)).toContain("472.00 rand");
+  it("says 'credits', because 'cr' is read as two letters", () => {
+    expect(walletLabel(472, false)).toContain("472.00 credits");
     expect(walletLabel(472, false)).not.toMatch(/\bcr\b/);
-    expect(walletLabel(472, false)).not.toMatch(/credits?/i);
-    // And never the symbol itself, which is the thing that cannot be spoken.
-    expect(walletLabel(472, false)).not.toContain("R472");
   });
 
   it("announces the low-balance state that is otherwise only a colour", () => {
-    expect(walletLabel(12.5, false)).toContain("12.50 rand");
+    expect(walletLabel(12.5, false)).toContain("12.50 credits");
     expect(walletLabel(12.5, false)).toMatch(/running low/i);
   });
 
@@ -54,8 +41,7 @@ describe("the wallet chip says the balance out loud", () => {
   });
 
   it("distinguishes 'still loading' from 'could not be read'", () => {
-    // The visible chip used to show "— cr" for BOTH, which was the same ambiguity one layer
-    // down; `chipFigure` in `CreditsBadge.tsx` now separates them there too.
+    // The visible chip shows "— cr" for both, which is the same ambiguity one layer down.
     expect(walletLabel(null, true)).toMatch(/loading/i);
     expect(walletLabel(null, false)).toMatch(/unavailable/i);
     expect(walletLabel(null, false)).not.toMatch(/loading/i);
@@ -68,7 +54,7 @@ describe("the wallet chip says the balance out loud", () => {
   it("reads a zero balance as a number rather than falling through to unavailable", () => {
     // `balance || "unavailable"` would be the natural bug here, and zero is the balance a
     // member most needs to hear.
-    expect(walletLabel(0, false)).toContain("0.00 rand");
+    expect(walletLabel(0, false)).toContain("0 credits");
     expect(walletLabel(0, false)).not.toMatch(/unavailable/i);
   });
 
@@ -93,7 +79,7 @@ describe("the wallet chip says the balance out loud", () => {
       Two lanes wrote a paragraph about 0.004 and reached opposite conclusions. This one said
       "genuinely low, since it is not <= 0"; the wallet page's said "empty, since it prints as
       0.00 and buys nothing". The wallet page is right, and the reason is that the sentence has
-      to be about the number the member can SEE: a chip reading "R0.00" while the voice says
+      to be about the number the member can SEE: a chip reading "0.00 cr" while the voice says
       "running low" is the two-arm defect this very test was written to kill, wearing the other
       arm. `walletTone` now decides for the chip, the page and the grid together — so this is
       one assertion about one rule rather than three files agreeing by hand.
@@ -120,49 +106,26 @@ describe("the wallet chip says the balance out loud", () => {
    * <p>
    * The spoken form has to survive the club's money symbol in BOTH directions. A screen
    * reader given "R472.00" announces the R as a letter — "R four hundred and seventy-two" —
-   * which is why this label says a WORD where the visible chip shows the symbol. The word is
-   * the currency's own, and it follows the club: a club on CHF hears "Swiss francs", not
-   * "rand", and not the three letters.
+   * which is why this label says "credits" where the visible chip says "cr". And the figure
+   * is a CREDIT balance, so a money symbol on it would not merely sound wrong, it would be
+   * the wrong quantity: at the shipped 1.6 rate a member with 472 credits does not have 472
+   * rand.
    * </p>
    */
   it("speaks a word, whatever symbol the club has chosen", () => {
-    const spokenFor: [string, string][] = [
-      ["R", "472.00 rand"],
-      ["CHF", "472.00 Swiss francs"],
-      ["R$", "472.00 reais"],
-      ["€", "472.00 euros"],
-    ];
-    for (const [symbol, expected] of spokenFor) {
+    for (const symbol of ["R", "CHF", "R$", "€"]) {
       setClubCurrencySymbol(symbol);
       const spoken = walletLabel(472, false);
-      expect(spoken, symbol).toContain(expected);
+      expect(spoken, symbol).toContain("472.00 credits");
       expect(spoken, symbol).not.toContain(symbol);
       // And still not the abbreviation, which is read as two letters.
       expect(spoken, symbol).not.toMatch(/\bcr\b/);
     }
   });
 
-  /**
-   * A symbol with no name answers with no noun, and that is the right answer.
-   *
-   * <p>
-   * `spokenCurrencyName` refuses to guess: "472.00 dollars" to a club on tenge is a lie a
-   * sighted member would never be told. What is left is a bare figure inside a sentence that
-   * already says what the figure is — "Wallet balance 472.00. Tap to top up." — which is
-   * understandable, where a wrong currency is not.
-   * </p>
-   */
-  it("drops the noun rather than guessing one for a symbol it cannot name", () => {
-    setClubCurrencySymbol("₸"); // tenge — deliberately not in the spoken table
-    const spoken = walletLabel(472, false);
-    expect(spoken).toContain("472.00");
-    expect(spoken).not.toContain("₸");
-    expect(spoken).not.toMatch(/rand|dollar|euro/i);
-  });
-
   it("keeps the two-argument form every existing caller uses", () => {
     // Additive: a dozen call sites and this file's own tests pass two arguments, and the
     // honesty suffix defaults to saying nothing.
-    expect(walletLabel(472, false)).toBe("Wallet balance 472.00 rand. Tap to top up.");
+    expect(walletLabel(472, false)).toBe("Wallet balance 472.00 credits. Tap to top up.");
   });
 });

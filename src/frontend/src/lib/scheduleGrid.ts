@@ -92,7 +92,7 @@ export function buildTimeSlices(day: ScheduleDay): TimeSlice[] {
  * `peak_advance_hours_for_regular` before the slot starts, and until round 3 the rule lived
  * only in `BookingService`. A Regular member's grid therefore drew 44 cells a day — counted,
  * on 2026-09-10 — as green, clickable "Available", with the same cursor and the same
- * "Book Court 2 at 17:00 for R50.00" label as a slot they could actually have; the modal
+ * "Book Court 2 at 17:00 for 50.00 cr" label as a slot they could actually have; the modal
  * then quoted court, time, cost, balance now and balance after, and the refusal arrived only
  * after Confirm. §5 defines `available` as "green, clickable", so a slot that is neither
  * should not be wearing it.

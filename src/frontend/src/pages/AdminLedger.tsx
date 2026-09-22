@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { endpoints, LEDGER_ENTRY_TYPES, type LedgerRow } from "../lib/api";
-import { formatMoney, formatSignedMoney } from "../lib/utils";
+import { formatCredits, formatSignedCredits } from "../lib/utils";
 import { Card } from "../components/Card";
 import { Button, Input, Label, fieldClassName } from "../components/Button";
 import { LedgerTable } from "../components/LedgerTable";
@@ -179,9 +179,9 @@ export default function AdminLedgerPage() {
       <Card className="!p-0 flex flex-col flex-1 min-h-0">
         <div className="px-4 sm:px-6 pt-4 pb-2 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm shrink-0">
           <Stat label="Movements" value={String(totals.count)} />
-          <Stat label="Credits" value={`+${formatMoney(totals.credits)}`} tone="success" />
-          <Stat label="Debits" value={`−${formatMoney(totals.debits)}`} tone="warning" />
-          <Stat label="Net" value={formatSignedMoney(totals.net)} tone={totals.net >= 0 ? "success" : "warning"} />
+          <Stat label="Credits" value={`+${formatCredits(totals.credits)}`} tone="success" />
+          <Stat label="Debits" value={`−${formatCredits(totals.debits)}`} tone="warning" />
+          <Stat label="Net" value={formatSignedCredits(totals.net)} tone={totals.net >= 0 ? "success" : "warning"} />
         </div>
         <LedgerTable rows={filtered} emptyText={loading ? "Loading…" : "No movements match these filters."} fill label="Club ledger" />
       </Card>

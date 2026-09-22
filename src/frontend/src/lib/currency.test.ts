@@ -6,18 +6,16 @@ import {
   readCurrencySymbol,
   resetClubCurrencySymbol,
   setClubCurrencySymbol,
-  spokenCurrencyName,
 } from "./currency";
 
 afterEach(resetClubCurrencySymbol);
 
 /**
- * The club's currency symbol — the unit of account's own sign.
+ * The symbol is the club's, it is REAL MONEY's, and an absent one is the default.
  *
  * <p>
- * The owner's ruling, given twice: the wallet, court prices and top-ups are all denominated
- * in the club's currency, written as a symbol IN FRONT of the amount. "cr" and the word
- * "credits" are gone as units. What that does and does not claim is set out at the head of
+ * `currency_symbol` names the unit a member actually pays the gateway in. It is not the
+ * credit unit and must never become it — see the decision recorded at the head of
  * `currency.ts`.
  * </p>
  */
@@ -28,7 +26,8 @@ describe("the club's currency symbol", () => {
   });
 
   it("accepts the multi-character symbols real currencies use", () => {
-    // A one-character rule would have been enough for ZAR and wrong for most of the world.
+    // A one-character rule would have been enough for ZAR and wrong for most of the
+    // world. R$ is two, CHF is three, and a club that types one must not be refused.
     for (const symbol of ["R", "$", "€", "kr", "R$", "CHF", "US$", "₹", "zł", "Kč"]) {
       expect(isAcceptableCurrencySymbol(symbol), symbol).toBe(true);
       expect(readCurrencySymbol(symbol), symbol).toBe(symbol);
@@ -41,6 +40,8 @@ describe("the club's currency symbol", () => {
     // that pastes one gets a double gap.
     expect(readCurrencySymbol("  R  ")).toBe("R");
     expect(readCurrencySymbol("R$ ")).toBe("R$");
+    // A pasted value carries whatever came with it. Trailing whitespace of any kind is
+    // the value's packaging, not the value.
     expect(readCurrencySymbol("R\n")).toBe("R");
     expect(readCurrencySymbol("\tR$\n")).toBe("R$");
     // Only the ENDS are packaging. Whitespace INSIDE is not a symbol and is refused —
@@ -51,7 +52,7 @@ describe("the club's currency symbol", () => {
 
   it("is a symbol, not an essay, and not a sentence a club could inject", () => {
     // Bounded at 4 characters: past that it is not a symbol, and it is also the string
-    // that goes into an HTML email body and onto a 20-column device screen's neighbours.
+    // that goes into an HTML email body and a 20-column device screen's neighbours.
     for (const bad of [
       "", "   ", "RANDS", "R 50", "50", "R50", "<b>", "&nbsp;", "\"R\"", "R\nX",
       null, undefined, 42, {}, [],
@@ -90,41 +91,6 @@ describe("the club's currency symbol", () => {
       setClubCurrencySymbol("CHF");
       setClubCurrencySymbol("RANDS");
       expect(clubCurrencySymbol()).toBe(DEFAULT_CURRENCY_SYMBOL);
-    });
-  });
-
-  /**
-   * The spoken name, which is the half nobody looks at.
-   *
-   * <p>
-   * A screen reader handed "R240.00" announces the R as a letter. The visible text is a
-   * symbol; the ACCESSIBLE name has to be a sentence a person understands, so it needs a
-   * word. There is no way to derive "rand" from "R" in general, so the few symbols the
-   * product is likely to meet are named, and everything else degrades to no noun at all —
-   * which still reads as a sentence, because the sentence around it says what the number is.
-   * </p>
-   */
-  describe("the spoken name", () => {
-    it("names the currencies a club is likely to be in", () => {
-      expect(spokenCurrencyName("R")).toBe("rand");
-      expect(spokenCurrencyName("$")).toBe("dollars");
-      expect(spokenCurrencyName("€")).toBe("euros");
-      expect(spokenCurrencyName("£")).toBe("pounds");
-      expect(spokenCurrencyName("CHF")).toBe("Swiss francs");
-    });
-
-    it("answers nothing rather than guessing, for one it does not know", () => {
-      // A wrong noun is worse than none: "240.00 dollars" for a club on ₹ is a lie a
-      // sighted member would never be told. No noun still leaves a usable sentence.
-      expect(spokenCurrencyName("₸")).toBeNull();
-      expect(spokenCurrencyName("Kč")).toBeNull();
-    });
-
-    it("reads the club's own symbol when it is not given one", () => {
-      setClubCurrencySymbol("€");
-      expect(spokenCurrencyName()).toBe("euros");
-      setClubCurrencySymbol("R");
-      expect(spokenCurrencyName()).toBe("rand");
     });
   });
 });

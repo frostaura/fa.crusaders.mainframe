@@ -96,12 +96,7 @@ constexpr ScreenSpec kScreenSpecs[kScreenCount] = {
      kRevertSeconds,
      kShowFlagCountdown},
     {ScreenId::InsufficientBalance,
-     // "BALANCE", never "CREDITS": the product writes every amount with the
-     // club's own currency symbol and no unit word, so the glass may not be the
-     // one surface still naming an invented unit. The contract test's key noun
-     // for this screen moved with it. Fifteen columns — the same width the old
-     // wording had, so nothing about the clip changes.
-     {{"BALANCE TOO LOW", RowArg::None, ""},
+     {{"TOO FEW CREDITS", RowArg::None, ""},
       {"Top up to play", RowArg::None, ""},
       {"Top up in the app", RowArg::None, ""},
       {"SCAN WHEN READY", RowArg::None, ""}},

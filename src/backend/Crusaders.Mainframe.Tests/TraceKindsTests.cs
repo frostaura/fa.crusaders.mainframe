@@ -187,14 +187,13 @@ public sealed class TraceKindsTests
 
         Assert.Equal(TraceKinds.Unrecognised, TraceKinds.OfAudit(invented, actorIsSubject: true));
 
-        var headline = TraceKinds.Headline(
-            TraceKinds.Unrecognised, new TraceFacts { RawAction = invented }, Symbol);
+        var headline = TraceKinds.Headline(TraceKinds.Unrecognised, new TraceFacts { RawAction = invented });
         Assert.Contains(invented, headline);
 
         // It must not have borrowed any other word's sentence.
         foreach (var kind in TraceKinds.All.Where(k => k != TraceKinds.Unrecognised))
         {
-            Assert.NotEqual(TraceKinds.Headline(kind, new TraceFacts(), Symbol), headline);
+            Assert.NotEqual(TraceKinds.Headline(kind, new TraceFacts()), headline);
         }
     }
 
@@ -221,7 +220,7 @@ public sealed class TraceKindsTests
             Assert.NotEmpty(TraceKinds.StrandOf(kind));
             Assert.Contains(TraceKinds.StrandOf(kind), TraceKinds.Strands);
 
-            var sentence = TraceKinds.Headline(kind, new TraceFacts(), Symbol);
+            var sentence = TraceKinds.Headline(kind, new TraceFacts());
             Assert.False(string.IsNullOrWhiteSpace(sentence), $"'{kind}' has no sentence.");
             Assert.False(
                 sentences.TryGetValue(sentence, out var already),
@@ -240,10 +239,10 @@ public sealed class TraceKindsTests
     {
         var system = TraceKinds.Headline(
             TraceKinds.WalletPenalised,
-            new TraceFacts { ActorKind = TraceActors.System, AmountCredits = 9m }, Symbol);
+            new TraceFacts { ActorKind = TraceActors.System, AmountCredits = 9m });
         var person = TraceKinds.Headline(
             TraceKinds.WalletPenalised,
-            new TraceFacts { ActorKind = TraceActors.Admin, AmountCredits = 9m }, Symbol);
+            new TraceFacts { ActorKind = TraceActors.Admin, AmountCredits = 9m });
 
         Assert.NotEqual(person, system);
         Assert.Contains("automatic", system, StringComparison.OrdinalIgnoreCase);
@@ -278,111 +277,4 @@ public sealed class TraceKindsTests
     [Fact]
     public void The_vocabulary_is_a_set()
         => Assert.Equal(TraceKinds.All.Length, TraceKinds.All.Distinct().Count());
-
-    // ---- The money sentences, since the unit became the club's own symbol ----
-
-    /// <summary>The club under test, for the sentences that do not vary it.</summary>
-    private const string Symbol = "R";
-
-    /// <summary>
-    /// <b>Every money sentence writes the symbol in front of the figure and no unit after it.</b>
-    ///
-    /// <para>
-    /// These sentences read "Topped up 200.00 credits", "Paid 36.00 credits for Court 2",
-    /// "changed their credits by 25.00". The owner ruled twice that the unit word goes and a
-    /// configurable symbol precedes the amount, so each is asserted in its new form AND against
-    /// the word it must no longer contain — a Contains alone would pass a sentence that printed
-    /// both.
-    /// </para>
-    /// </summary>
-    [Theory]
-    [InlineData(TraceKinds.WalletToppedUp, "Topped up R200.00")]
-    [InlineData(TraceKinds.WalletReversed, "A payment of R200.00 was reversed")]
-    [InlineData(TraceKinds.WalletSpent, "Paid R200.00")]
-    [InlineData(TraceKinds.WalletRefunded, "Got R200.00 back")]
-    [InlineData(TraceKinds.WalletPenalised, "Was charged a penalty of R200.00")]
-    public void A_money_sentence_writes_the_symbol_in_front_and_no_unit_after(string kind, string expected)
-    {
-        var sentence = TraceKinds.Headline(kind, new TraceFacts { AmountCredits = 200m }, Symbol);
-
-        Assert.Equal(expected, sentence);
-        Assert.DoesNotContain("credits", sentence, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(" cr", sentence, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// The two sentences that name an actor, which is the half of the vocabulary the theory
-    /// above cannot reach: without an <see cref="TraceFacts.ActorName"/> they fall to "Somebody
-    /// at the club", and the figure still has to carry the symbol.
-    /// </summary>
-    [Fact]
-    public void The_sentences_that_name_an_actor_carry_the_symbol_too()
-    {
-        var facts = new TraceFacts { AmountCredits = 25m, ActorName = "Naledi Khoza" };
-
-        Assert.Equal(
-            "Naledi Khoza added R25.00 at the desk",
-            TraceKinds.Headline(TraceKinds.WalletToppedUpAtTheDesk, facts, Symbol));
-        Assert.Equal(
-            "Naledi Khoza changed their balance by R25.00",
-            TraceKinds.Headline(TraceKinds.WalletAdjustedByAdmin, facts, Symbol));
-    }
-
-    /// <summary>
-    /// <b>A row with no amount is not a movement of zero.</b> It is a row that never touched the
-    /// balance, and "R—" would be a sum, badly printed. The dash is the whole answer.
-    /// </summary>
-    [Fact]
-    public void A_row_carrying_no_amount_gets_a_dash_and_not_a_symbol()
-    {
-        var sentence = TraceKinds.Headline(TraceKinds.WalletToppedUp, new TraceFacts(), Symbol);
-
-        Assert.Equal("Topped up \u2014", sentence);
-        Assert.DoesNotContain("R\u2014", sentence, StringComparison.Ordinal);
-        Assert.DoesNotContain("R0.00", sentence, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// The symbol is the CLUB's, not a constant — and the fixtures that would pass a naive
-    /// implementation are here on purpose: a multi-character symbol, and a second club whose
-    /// sentence must share not one character of the first's figure.
-    /// </summary>
-    [Theory]
-    [InlineData("R", "Paid R36.00 for Court 2")]
-    [InlineData("CHF", "Paid CHF36.00 for Court 2")]
-    [InlineData("R$", "Paid R$36.00 for Court 2")]
-    [InlineData("kr", "Paid kr36.00 for Court 2")]
-    public void Two_clubs_get_their_own_symbols_in_their_own_sentences(string symbol, string expected)
-    {
-        var sentence = TraceKinds.Headline(
-            TraceKinds.WalletSpent,
-            new TraceFacts { AmountCredits = 36m, CourtName = "Court 2" },
-            symbol);
-
-        Assert.Equal(expected, sentence);
-    }
-
-    /// <summary>
-    /// <b><see cref="Math.Abs(decimal)"/> stays.</b> The verb carries the direction — "Got …
-    /// back", "Was charged a penalty of …" — so a minus sign on the figure would state it twice
-    /// and contradict itself on the refund. A penalty row is stored NEGATIVE, so this is the
-    /// shape production actually passes.
-    /// </summary>
-    [Fact]
-    public void The_verb_carries_the_direction_and_the_figure_stays_unsigned()
-    {
-        Assert.Equal(
-            "Was charged a penalty of R15.00",
-            TraceKinds.Headline(TraceKinds.WalletPenalised, new TraceFacts { AmountCredits = -15m }, Symbol));
-        Assert.Equal(
-            "Got R50.00 back",
-            TraceKinds.Headline(TraceKinds.WalletRefunded, new TraceFacts { AmountCredits = 50m }, Symbol));
-    }
-
-    /// <summary>Zero is a real movement a club can post, and it renders as one.</summary>
-    [Fact]
-    public void Zero_renders_as_an_amount_rather_than_as_nothing()
-        => Assert.Equal(
-            "Topped up R0.00",
-            TraceKinds.Headline(TraceKinds.WalletToppedUp, new TraceFacts { AmountCredits = 0m }, Symbol));
 }

@@ -44,33 +44,10 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// </summary>
 public static class AdminMemberTraceEndpoints
 {
-    /// <summary>
-    /// Columns of the export, in the order the rows are written.
-    ///
-    /// <para>
-    /// <b>The two money columns are named <c>amount</c> and <c>balance_after</c>, and a
-    /// <c>currency</c> column carries the club's own symbol.</b> They used to be
-    /// <c>amount_credits</c> / <c>balance_after_credits</c>, and once the product stopped
-    /// writing "credits" as a unit anywhere a member or an admin can read one, a header saying
-    /// it was the last place in the export still naming a unit that no longer exists.
-    /// </para>
-    ///
-    /// <para>
-    /// The cells stay BARE NUMBERS — a spreadsheet sums a number and cannot sum "R36.00" — so
-    /// the unit has to live somewhere, and a column is the only place a per-tenant symbol can
-    /// live without making every cell text. It repeats down the file, which is what a currency
-    /// column in an export always does and what makes a filtered selection still say what it is
-    /// denominated in.
-    /// </para>
-    ///
-    /// <para>
-    /// <b>The JSON response's keys are deliberately NOT renamed with these</b> — see
-    /// <see cref="Event"/>. That is a wire contract with a console this change does not own.
-    /// </para>
-    /// </summary>
+    /// <summary>Columns of the export, in the order the rows are written.</summary>
     private const string Header =
         "date,time,timezone,at_utc,strand,kind,headline,actor,actor_kind,is_self,subject,court," +
-        "amount,balance_after,currency,source";
+        "amount_credits,balance_after_credits,source";
 
     /// <summary>How many rows the file actually holds, so a page announces the file and not its page size.</summary>
     public const string RowsHeader = "X-Crusaders-Rows";
@@ -332,15 +309,6 @@ public static class AdminMemberTraceEndpoints
     /// <c>ActorUserId != SubjectUserId</c>, which is D2-B41. Block body for the lizard reason in
     /// <c>memory/gotchas.md</c>.
     /// </para>
-    ///
-    /// <para>
-    /// <b><c>amount_credits</c> and <c>balance_after_credits</c> keep their names here while the
-    /// CSV's columns were renamed, and the difference is deliberate.</b> These are wire keys a
-    /// console already reads; the CSV's are column captions a person reads. Renaming the first
-    /// pair is a breaking change to a client this change does not own, and the figures are bare
-    /// numbers either way — the composed <c>headline</c> beside them is where this surface says
-    /// what they are denominated in.
-    /// </para>
     /// </summary>
     private static object Event(AdminMemberTraceQuery query, TraceEventRow e)
     {
@@ -391,7 +359,6 @@ public static class AdminMemberTraceEndpoints
             e.Court?.Name,
             Number(e.AmountCredits),
             Number(e.BalanceAfterCredits),
-            Currency(e, query),
             e.Source);
     }
 
@@ -401,21 +368,6 @@ public static class AdminMemberTraceEndpoints
         return value is { } amount
             ? amount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)
             : "";
-    }
-
-    /// <summary>
-    /// The club's symbol, on the rows that carry a figure, and blank on the rows that do not.
-    ///
-    /// <para>
-    /// A door opening and a relay closing are not movements of zero — they are rows that never
-    /// touched the balance — and stamping a currency on them would invite a reader to total a
-    /// column of blanks. Same rule as the night trace's own dash; see
-    /// <see cref="Services.TraceKinds"/>.
-    /// </para>
-    /// </summary>
-    private static string Currency(TraceEventRow e, AdminMemberTraceQuery query)
-    {
-        return e.AmountCredits is null && e.BalanceAfterCredits is null ? "" : query.CurrencySymbol;
     }
 
     /// <summary>

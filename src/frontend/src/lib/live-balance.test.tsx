@@ -291,7 +291,7 @@ describe("the count-up's duration", () => {
   });
 
   it("has a CEILING, or a big top-up feels slow", () => {
-    // A movement of R50.00 — one court — is already at the ceiling, and R400.00 is no slower.
+    // 50 credits — one court — is already at the ceiling, and 400 is no slower.
     expect(countDurationMs(50)).toBe(900);
     expect(countDurationMs(400)).toBe(900);
   });
@@ -316,7 +316,7 @@ describe("the zero-balance entice is finite by construction", () => {
   });
 
   it("waits out the booking toast before it starts", () => {
-    // A member who has just spent the last of their balance is reading a success toast. Starting a
+    // A member who has just spent their last credits is reading a success toast. Starting a
     // pulse on top of it turns a successful booking into an alarm.
     expect(ZERO_ENTICE.graceMs).toBeGreaterThanOrEqual(4_000);
   });
@@ -332,7 +332,7 @@ describe("the zero-balance entice is finite by construction", () => {
  * — the page says "Booked", and the chip stays quiet. Cancelling had no `apply` to call: the
  * cancel endpoint answers with `refunded_credits` and `penalty_credits` and no balance, so the
  * page re-read the wallet instead — and a plain re-read is indistinguishable from an admin
- * crediting the member, so the chip announced "The club added R50.00 to your wallet" over the page's own
+ * crediting the member, so the chip announced "The club added 50 credits" over the page's own
  * "50.00 back". One action, two sentences, and a member wondering which one happened.
  * </p>
  *

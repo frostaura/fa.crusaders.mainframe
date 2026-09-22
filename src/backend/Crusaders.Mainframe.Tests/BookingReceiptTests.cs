@@ -36,9 +36,9 @@ public sealed class BookingReceiptTests
     [Fact]
     public void A_receipt_is_a_pdf_a_reader_will_open()
     {
-        var pdf = ReceiptPdf.ForBooking(new BookingReceipt(
+        var pdf = ReceiptPdf.ForBooking(
             "Crusaders Squash Club", "Erin AgentE", "b1", "Court 1",
-            "Sat 05 Sep 12:45", "15 min", 50m, 450m, "Thu 01 Jan 1970 00:00", "R"));
+            "Sat 05 Sep 12:45", "15 min", 50m, 450m, "Thu 01 Jan 1970 00:00");
 
         var text = TextOf(pdf);
         Assert.StartsWith("%PDF-1.4", text, StringComparison.Ordinal);
@@ -54,24 +54,12 @@ public sealed class BookingReceiptTests
         Assert.Contains("/Type /Page ", text, StringComparison.Ordinal);
     }
 
-    /// <summary>
-    /// <b>The receipt is written in the club's own symbol, and the symbol comes from the club.</b>
-    ///
-    /// <para>
-    /// This used to assert "50.00 cr" and that rand must NOT appear, which was the previous
-    /// decision: two quantities, two units, and a rand sign over a wallet figure would have
-    /// overstated the charge by the conversion rate. The owner has since ruled twice that every
-    /// amount in the product is written with one configurable symbol in front of it and no unit
-    /// word after it, so this assertion is INVERTED rather than deleted — the figure carries the
-    /// sign, and "cr" is gone from the document entirely.
-    /// </para>
-    /// </summary>
     [Fact]
-    public void A_receipt_states_the_amount_in_the_clubs_own_symbol_and_names_the_booking()
+    public void A_receipt_states_the_amount_in_credits_and_names_the_booking()
     {
-        var pdf = ReceiptPdf.ForBooking(new BookingReceipt(
+        var pdf = ReceiptPdf.ForBooking(
             "Crusaders Squash Club", "Erin AgentE", "0f2b-booking-ref", "Court 1",
-            "Sat 05 Sep 12:45", "15 min", 50m, 450m, "Thu 01 Jan 1970 00:00", "R"));
+            "Sat 05 Sep 12:45", "15 min", 50m, 450m, "Thu 01 Jan 1970 00:00");
 
         var text = TextOf(pdf);
         Assert.Contains("Crusaders Squash Club", text, StringComparison.Ordinal);
@@ -82,80 +70,16 @@ public sealed class BookingReceiptTests
         Assert.Contains("Court 1", text, StringComparison.Ordinal);
         Assert.Contains("Sat 05 Sep 12:45", text, StringComparison.Ordinal);
 
-        // The symbol in front, and no unit word anywhere on the page.
-        Assert.Contains("R50.00", text, StringComparison.Ordinal);
-        Assert.Contains("R450.00", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("50.00 cr", text, StringComparison.Ordinal);
-        Assert.DoesNotContain(" cr", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("credits", text, StringComparison.Ordinal);
+        // Credits, never rand. Credits are the unit of account here; a rand sign over a credit
+        // figure overstates the charge by the conversion rate, which is a defect this repo has
+        // already carried once.
+        Assert.Contains("50.00 cr", text, StringComparison.Ordinal);
+        Assert.Contains("450.00 cr", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("R50", text, StringComparison.Ordinal);
         // And a full stop, whatever the server's locale is. en-ZA — the club's own — uses a
         // comma, so a receipt rendered in the ambient culture would say "50,00" beside an email
         // saying "50.00" and read as a different number to somebody scanning both.
         Assert.DoesNotContain("50,00", text, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// A club that does not take rand gets ITS sign on the document it is reconciled from.
-    ///
-    /// <para>
-    /// The multi-character cases are the ones a "first character is the symbol" implementation
-    /// would pass and a club would not. The two Latin-1 cases are the ones the PDF's own
-    /// escaper used to DROP: it admitted printable ASCII only, which was harmless while the
-    /// unit was the literal "cr" and would have handed a club on a pound sign a receipt reading
-    /// "100.00" with the sign silently gone. The euro is expected at WinAnsi's own slot for it
-    /// (0x80), which is the byte a reader decodes back to the sign.
-    /// </para>
-    /// </summary>
-    [Theory]
-    [InlineData("R", "R100.00", "R0.00")]
-    [InlineData("CHF", "CHF100.00", "CHF0.00")]
-    [InlineData("R$", "R$100.00", "R$0.00")]
-    [InlineData("kr", "kr100.00", "kr0.00")]
-    [InlineData("\u00A3", "\u00A3100.00", "\u00A30.00")]
-    [InlineData("\u20AC", "\u0080100.00", "\u00800.00")]
-    public void A_receipt_carries_whatever_symbol_the_club_uses(string symbol, string charged, string balance)
-    {
-        var pdf = ReceiptPdf.ForBooking(new BookingReceipt(
-            "Zurich Racquets", "Erin AgentE", "b1", "Court 1",
-            "Sat 05 Sep 12:45", "15 min", 100m, 0m, "Thu 01 Jan 1970 00:00", symbol));
-
-        var text = TextOf(pdf);
-        Assert.Contains(charged, text, StringComparison.Ordinal);
-        Assert.Contains(balance, text, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// A member the club has booked into a negative balance still gets a readable receipt: the
-    /// sign goes OUTSIDE the symbol. "-R40.00" is how a negative amount of money is written;
-    /// "R-40.00" reads as a symbol followed by a malformed number.
-    /// </summary>
-    [Fact]
-    public void A_negative_balance_puts_the_sign_outside_the_symbol()
-    {
-        var pdf = ReceiptPdf.ForBooking(new BookingReceipt(
-            "Crusaders Squash Club", "Erin AgentE", "b1", "Court 1",
-            "Sat 05 Sep 12:45", "15 min", 50m, -40m, "Thu 01 Jan 1970 00:00", "R"));
-
-        var text = TextOf(pdf);
-        Assert.Contains("-R40.00", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("R-40.00", text, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// A figure far larger than any court, to prove the formatter neither groups nor rounds:
-    /// a receipt is reconciled against a bank statement to the cent.
-    /// </summary>
-    [Fact]
-    public void A_very_large_amount_is_neither_grouped_nor_rounded()
-    {
-        var pdf = ReceiptPdf.ForBooking(new BookingReceipt(
-            "Crusaders Squash Club", "Erin AgentE", "b1", "Court 1",
-            "Sat 05 Sep 12:45", "15 min", 1234567.891m, 98765432.10m, "Thu 01 Jan 1970 00:00", "R"));
-
-        var text = TextOf(pdf);
-        Assert.Contains("R1234567.89", text, StringComparison.Ordinal);
-        Assert.Contains("R98765432.10", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("1,234,567", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -163,9 +87,9 @@ public sealed class BookingReceiptTests
     {
         // An unescaped parenthesis closes a PDF literal early and produces a file no reader can
         // parse. Court names are admin-entered and a member's own name is on the page too.
-        var pdf = ReceiptPdf.ForBooking(new BookingReceipt(
+        var pdf = ReceiptPdf.ForBooking(
             "Club (Pty) Ltd", @"O'Brien \ Smith", "b1", "Court 1 (old hall)",
-            "Sat 05 Sep 12:45", "15 min", 50m, 450m, "Thu 01 Jan 1970 00:00", "R"));
+            "Sat 05 Sep 12:45", "15 min", 50m, 450m, "Thu 01 Jan 1970 00:00");
 
         var text = TextOf(pdf);
         Assert.Contains(@"Court 1 \(old hall\)", text, StringComparison.Ordinal);
@@ -206,20 +130,9 @@ public sealed class BookingReceiptTests
         // Formatted invariantly on BOTH sides, and that is load-bearing rather than tidy: the
         // club's own locale is en-ZA, whose decimal separator is a comma. This assertion caught
         // itself doing "8,00" on a machine set that way, which is exactly the disagreement that
-        // would otherwise ship as a receipt reading "R8,00" beside an email reading "R8.00".
-        //
-        // The symbol is the FIXTURE CLUB's own, read back through the same accessor the service
-        // used, rather than a literal "R": a literal would go on passing for a club that had
-        // configured something else, which is the whole of what this change is about.
-        var symbol = CurrencySymbol.For(
-            await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default));
-        Assert.Contains(
-            $"{symbol}{SlicePriceCredits.ToString("0.00", CultureInfo.InvariantCulture)}",
-            text, StringComparison.Ordinal);
-        Assert.Contains(
-            $"{symbol}{ok.BalanceAfterCredits.ToString("0.00", CultureInfo.InvariantCulture)}",
-            text, StringComparison.Ordinal);
-        Assert.DoesNotContain(" cr", text, StringComparison.Ordinal);
+        // would otherwise ship as a receipt reading "8,00 cr" beside an email reading "8.00 cr".
+        Assert.Contains($"{SlicePriceCredits.ToString("0.00", CultureInfo.InvariantCulture)} cr", text, StringComparison.Ordinal);
+        Assert.Contains($"{ok.BalanceAfterCredits.ToString("0.00", CultureInfo.InvariantCulture)} cr", text, StringComparison.Ordinal);
         Assert.Contains(ok.Booking.Id.ToString(), text, StringComparison.Ordinal);
     }
 

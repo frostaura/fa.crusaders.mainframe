@@ -113,7 +113,7 @@ struct WalkUpResult {
 ///                was asked for if the field is missing), display-clamped to
 ///                the relay cap. `"replayed": true` is the same grant, seen
 ///                again, and is handled identically.
-///   402        → BALANCE TOO LOW
+///   402        → TOO FEW CREDITS
 ///   409        → COURT NOT FREE, or NO TIME BEFORE / NEXT BOOKING when the
 ///                body says `no_time_available` — the court is empty and the
 ///                next player is imminent, which is a different sentence — or

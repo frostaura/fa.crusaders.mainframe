@@ -43,7 +43,7 @@ describe("zero is a different thing from low", () => {
   /*
     The rule itself moved. It is now `walletTone` in `lib/balance` — one function for the chip,
     the wallet page and the grid's empty-wallet banner, which each used to decide separately
-    and disagreed at 0.004. `lib/wallet-tone.test.ts` holds the table of balances and
+    and disagreed at 0.004 credits. `lib/wallet-tone.test.ts` holds the table of balances and
     the 0.004 case against that one function; what stays here is what this PAGE does with the
     answer.
   */
@@ -77,32 +77,32 @@ describe("zero is a different thing from low", () => {
 
 describe("what a member sees when the club tops them up while they watch", () => {
   /**
-   * The sentence is read off the ledger row, never assumed. "The club added R200.00" is
+   * The sentence is read off the ledger row, never assumed. "The club added 200 credits" is
    * false if a partner cancelled a court in another tab, and the row is the only thing that
    * can tell them apart.
    */
   it.each([
-    ["AdminAdjustment", "Sipho at the desk added R200.00 to your wallet."],
-    ["TopUp", "Your top-up landed: R200.00 is in your wallet."],
-    ["CancellationRefund", "A cancelled booking put R200.00 back in your wallet."],
-    ["PaymentReversal", "A payment was reversed: R200.00 is back in your wallet."],
+    ["AdminAdjustment", "Sipho at the desk added 200.00 credits to your wallet."],
+    ["TopUp", "Your top-up landed: 200.00 credits are in your wallet."],
+    ["CancellationRefund", "A cancelled booking put 200.00 credits back in your wallet."],
+    ["PaymentReversal", "A payment was reversed: 200.00 credits are back in your wallet."],
   ] as const)("names a %s for what it was", (type, sentence) => {
     expect(creditArrivedSentence(200, type, "Sipho at the desk")).toBe(sentence);
   });
 
   /** No row to match, or an actor who is the member themselves: the neutral, true sentence. */
   it("falls back to a sentence that is true whoever caused it", () => {
-    expect(creditArrivedSentence(200, null, null)).toBe("Your wallet went up by R200.00.");
-    expect(creditArrivedSentence(200, "AdminAdjustment", null)).toBe("The club added R200.00 to your wallet.");
+    expect(creditArrivedSentence(200, null, null)).toBe("Your wallet went up by 200.00 credits.");
+    expect(creditArrivedSentence(200, "AdminAdjustment", null)).toBe("The club added 200.00 credits to your wallet.");
   });
 
   /**
-   * Money leaving is not an error. Spending your own money on a court you chose is the
+   * Money leaving is not an error. Spending your own credit on a court you chose is the
    * product working, and a red alarm over it is the app telling a member off for using it.
    */
   it("words money going out plainly, and never as a failure", () => {
-    expect(creditLeftSentence(50, "BookingCharge")).toBe("R50.00 went on a court booking.");
-    expect(creditLeftSentence(50, null)).toBe("R50.00 left your wallet.");
+    expect(creditLeftSentence(50, "BookingCharge")).toBe("50.00 credits went on a court booking.");
+    expect(creditLeftSentence(50, null)).toBe("50.00 credits left your wallet.");
     for (const type of ["BookingCharge", "LightsPurchase", "NoShowPenalty", null] as const) {
       expect(creditLeftSentence(50, type)).not.toMatch(/fail|error|wrong/i);
     }
@@ -131,10 +131,10 @@ describe("what a member sees when the club tops them up while they watch", () =>
     */
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Refresh" })); });
 
-    await screen.findByText(/added R200\.00 to your wallet/);
+    await screen.findByText(/added 200\.00 credits to your wallet/);
     // ONE announcement. The toast carries role="status" per instance and the viewport
     // deliberately carries none.
-    expect(within(document.body).queryAllByText(/added R200\.00/)).toHaveLength(1);
+    expect(within(document.body).queryAllByText(/added 200\.00 credits/)).toHaveLength(1);
     expect(document.querySelectorAll("[role=alert]")).toHaveLength(0);
   });
 
@@ -144,12 +144,7 @@ describe("what a member sees when the club tops them up while they watch", () =>
     renderPage(<WalletPage />);
     await screen.findByText(BALANCE_SENTENCE.fine);
 
-    // The figure is written TWICE now — "R500.00" for the eye, `aria-hidden`, and "500.00 rand"
-    // in an `sr-only` span for the ear, because a currency symbol is announced as a letter. So
-    // the query has to name which one it means; the live-region rule is about the element that
-    // holds them both.
-    const figure = screen.getByText("R500.00").closest("p")!;
-    expect(within(figure).getByText("500.00 rand").className).toContain("sr-only");
+    const figure = screen.getByText(/500\.00/).closest("p")!;
     expect(figure.getAttribute("aria-live")).toBeNull();
     expect(figure.getAttribute("role")).toBeNull();
     // And it is tabular, so a count-up cannot reflow the card on every frame.

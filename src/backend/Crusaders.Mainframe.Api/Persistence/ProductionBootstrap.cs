@@ -1,8 +1,6 @@
-using System.Text.Json;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Security;
-using Crusaders.Mainframe.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Persistence;
@@ -119,7 +117,7 @@ public static class ProductionBootstrap
         var tenant = await EnsureTenantAsync(db, plan, created);
         tenantContext.Set(tenant.Id, tenant.Slug);
         await EnsureAdminAsync(db, hasher, tenant, plan, logger, created);
-        await EnsureCourtsAsync(db, tenant, plan, await SymbolOfAsync(db, tenant), created);
+        await EnsureCourtsAsync(db, tenant, plan, created);
 
         Report(plan, created, logger);
     }
@@ -260,46 +258,8 @@ public static class ProductionBootstrap
         created.Add($"admin '{plan.AdminEmail}' (must change password at first sign-in)");
     }
 
-    /// <summary>
-    /// The symbol this club's amounts will actually be written in, read from the settings row
-    /// this bootstrap has just created or repaired.
-    ///
-    /// <para>
-    /// <b>Read rather than assumed.</b> <see cref="CurrencySymbol.Default"/> would be right for
-    /// today's <see cref="InitialSettingsJson"/>, which names no symbol — and would silently
-    /// stop being right the day that document does, on a line an operator reads to check the
-    /// club was set up correctly. The sanitising is <see cref="CurrencySymbol"/>'s own, so this
-    /// line and every screen agree about what an unprintable stored value means.
-    /// </para>
-    /// </summary>
-    private static async Task<string> SymbolOfAsync(MainframeDbContext db, Tenant tenant)
-    {
-        var json = await db.TenantSettings.IgnoreQueryFilters()
-            .Where(s => s.TenantId == tenant.Id)
-            .Select(s => s.SettingsJson)
-            .FirstOrDefaultAsync();
-        if (string.IsNullOrWhiteSpace(json)) return CurrencySymbol.Default;
-
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            return doc.RootElement.TryGetProperty(CurrencySymbol.Key, out var value)
-                   && value.ValueKind == JsonValueKind.String
-                ? CurrencySymbol.Sanitise(value.GetString())
-                : CurrencySymbol.Default;
-        }
-        catch (JsonException)
-        {
-            // A hand-edited settings document. Every other reader of this column falls back
-            // rather than failing closed; a bootstrap that refused to finish over a GLYPH would
-            // be the worst possible place to start.
-            return CurrencySymbol.Default;
-        }
-    }
-
     /// <summary>The club's courts, if it has none. Never adds to a club that already has some.</summary>
-    private static async Task EnsureCourtsAsync(
-        MainframeDbContext db, Tenant tenant, BootstrapPlan plan, string currencySymbol, List<string> created)
+    private static async Task EnsureCourtsAsync(MainframeDbContext db, Tenant tenant, BootstrapPlan plan, List<string> created)
     {
         if (await db.Courts.IgnoreQueryFilters().AnyAsync(c => c.TenantId == tenant.Id)) return;
 
@@ -315,13 +275,7 @@ public static class ProductionBootstrap
             });
         }
         await db.SaveChangesAsync();
-        // The club's own symbol on an operator-facing line, for the same reason every other
-        // amount in this product now carries one: "8 credits/slice" names a unit the product
-        // stopped writing. Read from the plan rather than from settings — this runs before
-        // there is a tenant to read settings for.
-        created.Add(
-            $"{plan.CourtCount} squash court(s) at "
-            + $"{Email.EmailTemplates.Money(plan.SlicePriceCredits, currencySymbol)}/slice");
+        created.Add($"{plan.CourtCount} squash court(s) at {plan.SlicePriceCredits} credits/slice");
     }
 
     /// <summary>What happened, at a level an operator reading container logs will actually see.</summary>

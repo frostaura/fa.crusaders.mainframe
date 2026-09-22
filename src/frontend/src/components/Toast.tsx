@@ -7,8 +7,6 @@ type ToastItem = {
   id: number;
   tone: ToastTone;
   text: string;
-  /** What a screen reader says instead of {@link text}. See the prop on `push`. */
-  spokenText?: string;
   /** ms before the toast auto-dismisses. Default 4000. Set 0 to keep until manually closed. */
   durationMs: number;
   /** Whether this failure left the world exactly as it was. See {@link NOTHING_CHANGED}. */
@@ -19,32 +17,6 @@ type ToastContextValue = {
   push: (input: {
     tone?: ToastTone;
     text: string;
-    /**
-     * The same sentence, as it should be SAID — for the one thing a symbol cannot do.
-     *
-     * <p>
-     * The visible unit is a currency symbol, and a symbol is not speakable: a screen reader
-     * handed "R160.00" announces the R as a letter, which is the identical defect "cr" had
-     * when it was read as two of them. `spokenMoney` in `lib/utils.ts` is the form that says
-     * the currency as a word, and this is where a call site hands it over.
-     * </p>
-     *
-     * <p>
-     * <b>This split is allowed here and forbidden on a button.</b> WCAG 2.5.3 Label in Name
-     * requires a control's accessible name to contain its visible label, because a speech
-     * user says the words they can see — so a button reading "Book for R50.00" is named by
-     * those words and nothing else. A toast is not a control: it carries no action beyond
-     * dismissal, so there is no name a spoken figure can break. It already had two channels
-     * before this prop existed — the `aria-label` below has always been the announced string
-     * and the body has always been the read one — this simply stops them being forced equal.
-     * </p>
-     *
-     * <p>
-     * Optional, and the default is the visible text, so every existing call site is unchanged
-     * and no toast can accidentally announce nothing.
-     * </p>
-     */
-    spokenText?: string;
     durationMs?: number;
     /**
      * Say, in the same breath, that nothing happened. (R3-28 / B10)
@@ -97,7 +69,6 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       id,
       tone: input.tone ?? "info",
       text: input.text,
-      spokenText: input.spokenText,
       durationMs: input.durationMs ?? 4000,
       unchanged: input.unchanged ?? false,
     };
@@ -215,9 +186,7 @@ function ToastView({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: num
       role="status"
       data-interactive
       tabIndex={0}
-      /* The announced string, which is NOT always the read one — see `spokenText` on `push`.
-         `?? text` rather than a merge: two sentences would be said twice. */
-      aria-label={`${toast.spokenText ?? toast.text} — dismiss`}
+      aria-label={`${toast.text} — dismiss`}
       onClick={dismiss}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); dismiss(); } }}
       className={cn(

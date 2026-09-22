@@ -7,7 +7,6 @@ import { Button } from "../components/Button";
 import { LedgerTable } from "../components/LedgerTable";
 import { useToast } from "../components/Toast";
 import { walletTone } from "../lib/balance";
-import { formatMoney, spokenMoney } from "../lib/utils";
 import { useBalanceMovement, useCountUp, useWalletLive } from "../components/wallet/useWalletLive";
 import {
   BALANCE_SENTENCE, BALANCE_TONE, LEDGER_CLOCK_NOTE, TOP_UP_LABEL,
@@ -110,7 +109,7 @@ function useWalletLedger() {
  *
  * <p>
  * <b>What it says is read off the ledger, never assumed.</b> The delta says how much moved;
- * the newest row that matches it says what it WAS. "The club added R200.00" would be
+ * the newest row that matches it says what it WAS. "The club added 200 credits" would be
  * false if a partner had cancelled a court in another tab, and this page cannot tell those
  * apart except by looking at the row.
  * </p>
@@ -165,17 +164,7 @@ function BalanceCard({ balance, painted }: { balance: number | null; painted: nu
             announcements. The toast is the announcement.
           */}
           <p className={`text-3xl font-semibold tabular-nums ${level === "zero" ? tone.ink : ""}`}>
-            {/*
-              Through the one formatter, symbol and all. This was `toFixed(2)` with the unit
-              in a sibling span — the biggest figure in the product, composing its own unit.
-
-              The visible figure is hidden from the accessibility tree and a spoken one sits
-              beside it: a reader handed "R517.01" announces the R as a letter, which is the
-              same defect "cr" had in a different hat. Both come from the same painted value,
-              so the count-up cannot desynchronise them.
-            */}
-            <span aria-hidden="true">{formatMoney(painted ?? 0)}</span>
-            <span className="sr-only">{spokenMoney(painted ?? 0)}</span>
+            {(painted ?? 0).toFixed(2)} <span className="text-base font-normal text-text-secondary">credits</span>
           </p>
           <p className={`text-xs mt-1 ${level === "fine" ? "text-text-muted" : tone.ink}`}>
             {BALANCE_SENTENCE[level]}
@@ -236,7 +225,7 @@ export default function WalletPage() {
         <LedgerHeader shown={shown} total={total} busy={busy} onRefresh={() => load(Math.max(shown, PAGE_SIZE))} />
         {error && <p className="px-4 sm:px-6 pb-2 text-xs text-danger-strong">{error}</p>}
         {rows.length === 0 ? (
-          <p className="px-4 sm:px-6 pb-4 text-sm text-text-secondary">No movements yet. Top up, or wait for the club to add to your wallet.</p>
+          <p className="px-4 sm:px-6 pb-4 text-sm text-text-secondary">No movements yet. Top up or wait for an admin credit.</p>
         ) : (
           <>
             <LedgerTable rows={rows} fill label="Wallet ledger" />
