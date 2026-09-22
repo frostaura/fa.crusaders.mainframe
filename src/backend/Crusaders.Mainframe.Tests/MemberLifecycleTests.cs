@@ -279,10 +279,12 @@ public class MemberLifecycleTests
     private static MemberApprovalService WithDeadMailServer(IServiceScope scope, IEmailService mail) => new(
         scope.ServiceProvider.GetRequiredService<MainframeDbContext>(),
         scope.ServiceProvider.GetRequiredService<ITenantContext>(),
-        mail,
         scope.ServiceProvider.GetRequiredService<IConfiguration>(),
         scope.ServiceProvider.GetRequiredService<IEventBus>(),
-        scope.ServiceProvider.GetRequiredService<ILogger<MemberApprovalService>>());
+        new MemberApprovalService.MemberNotifier(
+            mail,
+            scope.ServiceProvider.GetRequiredService<ILogger<MemberApprovalService>>(),
+            scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Email.ClubIdentityResolver>()));
 
     /// <summary>
     /// <b>Mail is a consequence of the transition, not part of it.</b>

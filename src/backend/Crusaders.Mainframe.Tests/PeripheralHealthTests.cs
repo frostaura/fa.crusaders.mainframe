@@ -2415,20 +2415,32 @@ public class PeripheralHealthTests
     /// exactly how the gap stayed open. The court name and the club name are asserted where they
     /// appear, so dropping either from the sentence goes red too.
     /// </para>
+    ///
+    /// <para>
+    /// <b>Asserted on the text part, not on the markup.</b> These sentences used to be pinned as
+    /// HTML fragments — <c>&gt;Refunded&lt;/td&gt;&lt;td&gt;&lt;strong&gt;8.00 credits&lt;/strong&gt;</c> — which
+    /// coupled a claim about what a member is PROMISED to a claim about which tag it sits in, so
+    /// restyling the mail broke it for a reason that has nothing to do with money. Both bodies
+    /// are rendered from one list of blocks and a separate test proves every figure in one
+    /// appears in the other, so reading the text part is the same evidence about the same
+    /// sentences, with none of the coupling — and it additionally pins the half a plain-text
+    /// client is served, which nothing used to.
+    /// </para>
     /// </summary>
     [Fact]
     public void Every_sentence_of_the_out_of_service_waiver_mail()
     {
         var mail = EmailTemplates.BookingRefundedForOutOfServiceBox(
-            "player@test.local", "Court 4", 8m, "Crusaders Squash Club");
+            WaiverClub, "player@test.local", "Court 4", 8m);
+        var body = mail.PlainBody!;
 
         Assert.Equal("Refunded — the box on Court 4 is out of service", mail.Subject);
-        Assert.Contains("Your booking has been refunded in full", mail.HtmlBody);
+        Assert.Contains("Your booking has been refunded in full", body);
         Assert.Contains(
-            "Nobody checked in on <strong>Court 4</strong> at Crusaders Squash Club during your " +
-            "booking, and the box on that court is out of service — it could not open the court, " +
-            "and it will never send the club a record of anyone who played.",
-            mail.HtmlBody);
+            "Nobody checked in on Court 4 at Riverside Racquet Club during your booking, and the " +
+            "box on that court is out of service — it could not open the court, and it will never " +
+            "send the club a record of anyone who played.",
+            Unwrap(body));
 
         // The claim this sentence is NOT allowed to make any more, asserted absent as well as
         // replaced. Its two predecessors both said something false about the COURT rather than
@@ -2438,21 +2450,22 @@ public class PeripheralHealthTests
         // terminal's PIN, QR and biometric routes never resolve a device row and are not refused,
         // so a member at a court whose every box is out of service CAN still identify; the waiver
         // is argued from what the box can no longer do (settlement-model.md S5a).
-        Assert.DoesNotContain("could have reached the club", mail.HtmlBody);
-        Assert.DoesNotContain("No court box was answering", mail.HtmlBody);
-        Assert.Contains(">Refunded</td><td><strong>8.00 credits</strong>", mail.HtmlBody);
-        Assert.Contains(">Penalty</td><td><strong>None</strong>", mail.HtmlBody);
+        Assert.DoesNotContain("could have reached the club", body);
+        Assert.DoesNotContain("No court box was answering", body);
+        Assert.Contains("Refunded: 8.00 credits", body);
+        Assert.Contains("Penalty: None", body);
+        Assert.Contains("You have not been marked down for missing it, and nothing has been deducted.", Unwrap(body));
         Assert.Contains(
-            "You have not been marked down for missing it, and nothing has been deducted. Because " +
-            "that box is out of service it will not send the club anything further, so this refund " +
-            "is final — if you did get onto the court, please tell the desk rather than waiting " +
-            "for it to correct itself.",
-            mail.HtmlBody);
+            "Because that box is out of service it will not send the club anything further, so " +
+            "this refund is final. If you did get onto the court, tell the desk rather than " +
+            "waiting for it to correct itself.",
+            Unwrap(body));
 
         // The one sentence this template exists to NOT make. S6 cannot reach a board the API
         // refuses, so a member who did play must be sent to the desk, not told to wait.
-        Assert.DoesNotContain("when it reconnects", mail.HtmlBody);
-        Assert.DoesNotContain("settles as attended", mail.HtmlBody);
+        Assert.DoesNotContain("when it reconnects", body);
+        Assert.DoesNotContain("settles as played", body);
+        Assert.DoesNotContain("settles as attended", body);
     }
 
     /// <summary>
@@ -2463,28 +2476,28 @@ public class PeripheralHealthTests
     [Fact]
     public void Every_sentence_of_the_outage_waiver_mail()
     {
-        var mail = EmailTemplates.BookingRefundedForOutage(
-            "player@test.local", "Court 4", 8m, "Crusaders Squash Club");
+        var mail = EmailTemplates.BookingRefundedForOutage(WaiverClub, "player@test.local", "Court 4", 8m);
+        var body = mail.PlainBody!;
 
         Assert.Equal("Refunded — Court 4 was offline", mail.Subject);
-        Assert.Contains("Your booking has been refunded in full", mail.HtmlBody);
+        Assert.Contains("Your booking has been refunded in full", body);
         Assert.Contains(
-            "The court controller at Crusaders Squash Club was offline during your booking on " +
-            "<strong>Court 4</strong>, so the lights could not be released against your name.",
-            mail.HtmlBody);
-        Assert.Contains(">Refunded</td><td><strong>8.00 credits</strong>", mail.HtmlBody);
-        Assert.Contains(">Penalty</td><td><strong>None</strong>", mail.HtmlBody);
+            "The court controller at Riverside Racquet Club was offline during your booking on " +
+            "Court 4, so the lights could not be released against your name.",
+            Unwrap(body));
+        Assert.Contains("Refunded: 8.00 credits", body);
+        Assert.Contains("Penalty: None", body);
+        Assert.Contains("You have not been marked down for missing it, and nothing has been deducted.", Unwrap(body));
         Assert.Contains(
-            "You have not been marked down for missing it, and nothing has been deducted. If you " +
-            "did get onto the court, the box uploads its record when it reconnects and the booking " +
-            "settles as attended — the refund is reversed and you are charged the original price, " +
-            "with no penalty either way.",
-            mail.HtmlBody);
+            "If you did get onto the court, the box uploads its record when it reconnects and the " +
+            "booking settles as played — the refund is reversed and you are charged the original " +
+            "price, with no penalty either way.",
+            Unwrap(body));
 
         // The sentence this one must not make: its board is still in service, so telling the
         // member the refund is final would be false in the direction that costs them a court.
-        Assert.DoesNotContain("out of service", mail.HtmlBody);
-        Assert.DoesNotContain("this refund is final", mail.HtmlBody);
+        Assert.DoesNotContain("out of service", body);
+        Assert.DoesNotContain("this refund is final", body);
     }
 
     /// <summary>
@@ -2498,10 +2511,20 @@ public class PeripheralHealthTests
     public void Both_waiver_mails_quote_the_bookings_own_refund(decimal refunded, string rendered)
     {
         Assert.Contains(
-            $">Refunded</td><td><strong>{rendered}</strong>",
-            EmailTemplates.BookingRefundedForOutOfServiceBox("a@b.c", "Court 4", refunded, "Club").HtmlBody);
+            $"Refunded: {rendered}",
+            EmailTemplates.BookingRefundedForOutOfServiceBox(WaiverClub, "a@b.c", "Court 4", refunded).PlainBody!);
         Assert.Contains(
-            $">Refunded</td><td><strong>{rendered}</strong>",
-            EmailTemplates.BookingRefundedForOutage("a@b.c", "Court 4", refunded, "Club").HtmlBody);
+            $"Refunded: {rendered}",
+            EmailTemplates.BookingRefundedForOutage(WaiverClub, "a@b.c", "Court 4", refunded).PlainBody!);
     }
+
+    /// <summary>The club the two waiver mails are rendered for. Deliberately not Crusaders.</summary>
+    private static readonly Crusaders.Mainframe.Api.Email.ClubIdentity WaiverClub =
+        new("Riverside Racquet Club", "+27 31 555 0188", "desk@riverside.review.test");
+
+    /// <summary>
+    /// The text part wrapped at 72 columns, un-wrapped, so a sentence can be asserted as the
+    /// sentence it is rather than as whatever line breaks it happened to land on.
+    /// </summary>
+    private static string Unwrap(string text) => text.Replace('\n', ' ');
 }

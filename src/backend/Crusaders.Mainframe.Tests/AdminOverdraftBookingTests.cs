@@ -243,13 +243,20 @@ public class AdminOverdraftBookingTests
     [Fact]
     public void The_confirmation_email_explains_a_negative_balance_and_says_nothing_when_it_is_positive()
     {
-        var overdrawn = EmailTemplates.BookingConfirmation("naledi@example.test", new BookingConfirmationDetails(
+        var club = new Crusaders.Mainframe.Api.Email.ClubIdentity(
+            "Riverside Racquet Club", "+27 31 555 0188", "desk@riverside.review.test");
+        var overdrawn = EmailTemplates.BookingConfirmation(club, "naledi@example.test", new BookingConfirmationDetails(
             "Court 1", "Sat 06 Sep 09:00", "15 min", 8m, -5m, 15, 30m));
-        var ordinary = EmailTemplates.BookingConfirmation("naledi@example.test", new BookingConfirmationDetails(
+        var ordinary = EmailTemplates.BookingConfirmation(club, "naledi@example.test", new BookingConfirmationDetails(
             "Court 1", "Sat 06 Sep 09:00", "15 min", 8m, 192m, 15, 30m));
 
-        Assert.Contains("This booking was made for you at the club", overdrawn.HtmlBody);
-        Assert.Contains("Top up to clear it", overdrawn.HtmlBody);
-        Assert.DoesNotContain("This booking was made for you at the club", ordinary.HtmlBody);
+        // Both bodies: the explanation is worth nothing in the half the member is not shown.
+        foreach (var body in new[] { overdrawn.HtmlBody, overdrawn.PlainBody! })
+        {
+            Assert.Contains("The club made this booking for you", body);
+            Assert.Contains("Top up to clear it", body);
+        }
+        Assert.DoesNotContain("The club made this booking for you", ordinary.HtmlBody);
+        Assert.DoesNotContain("The club made this booking for you", ordinary.PlainBody!);
     }
 }

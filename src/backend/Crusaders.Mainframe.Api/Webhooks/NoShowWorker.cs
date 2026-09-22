@@ -73,7 +73,10 @@ public sealed class NoShowWorker : BackgroundService
         /// club's mail with the first club's name and phone number.
         /// </para>
         /// </summary>
-        public Email.ClubIdentity Club => Email.ClubIdentityResolver.For(Tenant, Settings);
+        // Fully qualified: `Email` on this record is the IEmailService, so the short form
+        // resolves to the property rather than to the namespace.
+        public Crusaders.Mainframe.Api.Email.ClubIdentity Club =>
+            Crusaders.Mainframe.Api.Email.ClubIdentityResolver.For(Tenant, Settings);
     }
 
     /// <summary>

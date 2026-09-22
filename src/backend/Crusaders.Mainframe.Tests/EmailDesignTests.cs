@@ -326,10 +326,39 @@ public class EmailDesignTests
         {
             Assert.DoesNotContain("tel:", message.HtmlBody, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("mailto:", message.HtmlBody, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("&nbsp;·&nbsp;", message.HtmlBody, StringComparison.Ordinal);
             foreach (var artefact in new[] { "Phone: \n", "Email: \n", "null", "()" })
             {
                 Assert.False(message.PlainBody!.Contains(artefact, StringComparison.Ordinal),
                     $"{name} renders '{artefact.Trim()}' for a club with no contact details.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// <b>Omitted means omitted, not emitted empty.</b>
+    /// </summary>
+    /// <remarks>
+    /// The test above was satisfied by a footer that printed the contact row anyway and simply
+    /// had nothing to put in it: no <c>tel:</c>, no <c>mailto:</c>, and a blank cell holding an
+    /// empty string. A mutation that dropped the <c>HasContact</c> guard survived it — the club
+    /// was not given an invented number, but it was given a hole where one goes, which on a
+    /// table-laid-out message is a visible gap in the footer of every mail the club sends.
+    /// Nothing in this design has a legitimate empty cell: the two that look empty — the tin
+    /// rule and the callout's coloured bar — both carry a non-breaking space precisely so they
+    /// have height in clients that collapse an empty cell.
+    /// </remarks>
+    [Fact]
+    public void No_message_renders_an_empty_table_cell_where_something_was_omitted()
+    {
+        foreach (var club in new[] { EmailCatalogue.Riverside, EmailCatalogue.Silent })
+        {
+            foreach (var (name, message) in EmailCatalogue.All(club))
+            {
+                var empty = Regex.Match(message.HtmlBody, @"<t[dh][^>]*>\s*</t[dh]>");
+                Assert.False(empty.Success,
+                    $"{name}, for {club.Name}, renders an empty cell — something was omitted by "
+                    + $"leaving it blank rather than by leaving it out: {empty.Value}");
             }
         }
     }
@@ -407,9 +436,9 @@ public class EmailDesignTests
         var club = EmailCatalogue.Riverside;
         var messages = new[]
         {
-            EmailTemplates.MembershipRejected("m@riverside.review.test", payload, club.Name),
-            EmailTemplates.CreditAdjustment("m@riverside.review.test", 10m, 20m, payload),
-            EmailTemplates.BookingCancellation("m@riverside.review.test", payload, 5m, null, new ClubCancellation(payload, false)),
+            EmailTemplates.MembershipRejected(club, "m@riverside.review.test", payload),
+            EmailTemplates.CreditAdjustment(club, "m@riverside.review.test", 10m, 20m, payload),
+            EmailTemplates.BookingCancellation(club, "m@riverside.review.test", payload, 5m, null, new ClubCancellation(payload, false)),
         };
 
         foreach (var message in messages)

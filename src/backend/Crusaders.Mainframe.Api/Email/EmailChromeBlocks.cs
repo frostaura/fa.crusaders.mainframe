@@ -67,10 +67,18 @@ public static partial class EmailChrome
         for (var i = 0; i < rows.Count; i++)
         {
             var bg = i % 2 == 0 ? SurfaceBg : MutedBg;
+
+            // A value short enough to sit on one line is a figure, and figures line up on the
+            // right where a reader compares them. A value long enough to wrap is prose — a
+            // reason an admin typed, a reference — and right-aligned prose on a 375px phone
+            // breaks into a ragged staircase that is harder to read than the sentence it came
+            // from. The label never wraps, because "Balance after" split across two lines beside
+            // a one-line figure is the row looking broken rather than full.
+            var align = rows[i].Value.Length <= 24 ? "right" : "left";
             sb.Append($"""
                 <tr>
-                  <th scope="row" align="left" bgcolor="{bg}" style="background-color:{bg};padding:11px 16px;font-family:{FontStack};font-size:14px;line-height:20px;font-weight:400;color:{TextSecondary};text-align:left;">{E(rows[i].Label)}</th>
-                  <td align="right" bgcolor="{bg}" style="background-color:{bg};padding:11px 16px;font-family:{FontStack};font-size:15px;line-height:20px;font-weight:600;color:{TextPrimary};text-align:right;">{E(rows[i].Value)}</td>
+                  <th scope="row" align="left" bgcolor="{bg}" style="background-color:{bg};padding:11px 16px;font-family:{FontStack};font-size:14px;line-height:20px;font-weight:400;color:{TextSecondary};text-align:left;white-space:nowrap;">{E(rows[i].Label)}</th>
+                  <td align="{align}" bgcolor="{bg}" style="background-color:{bg};padding:11px 16px;font-family:{FontStack};font-size:15px;line-height:21px;font-weight:600;color:{TextPrimary};text-align:{align};">{E(rows[i].Value)}</td>
                 </tr>
                 """);
         }

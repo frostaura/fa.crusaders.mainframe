@@ -117,6 +117,10 @@ public sealed class TestHost : IAsyncDisposable
         // sign-out the moment the request that made it ended.
         services.AddSingleton<AccessTokenRevocationList>();
         services.AddScoped<TenantSettingsAccessor>();
+        // Which club a message is from. Program.cs registers it beside the settings
+        // accessor for the same reason: every mail path needs it.
+        services.AddScoped<Crusaders.Mainframe.Api.Email.ClubIdentityResolver>();
+        services.AddScoped<MemberApprovalService.MemberNotifier>();
         services.AddScoped<AccessCodeService>();
         services.AddScoped<IdentificationResolver>();
         services.AddScoped<DeviceRegistryService>();

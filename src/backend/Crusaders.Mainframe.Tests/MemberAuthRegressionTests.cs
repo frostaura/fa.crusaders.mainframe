@@ -146,6 +146,56 @@ public class MemberAuthRegressionTests
     }
 
     /// <summary>
+    /// <b>The applicant gets ONE email, because the screen in front of them promises one.</b>
+    ///
+    /// <para>
+    /// <c>registrationCopy.ts</c>'s three steps say, in step 1, that a link has been emailed,
+    /// and in step 3 that a <i>second</i> email arrives once the club has approved them.
+    /// Registration sent two in the same second — "Your membership is pending review" beside
+    /// "Verify your email" — so the approval mail was the third, and the screen's own count was
+    /// wrong from the moment the applicant looked at their inbox. For the readers this club
+    /// actually has, a count that does not match is not a detail; it reads as evidence that
+    /// something went wrong, and the club hears about it at the desk.
+    /// </para>
+    ///
+    /// <para>
+    /// It also split the one instruction that mattered. The pending notice carried no link at
+    /// all, so an applicant who opened that one first was told to wait by the message whose
+    /// whole job was to tell them to press something.
+    /// </para>
+    ///
+    /// <para>
+    /// The count is asserted, not the presence of the verification mail: presence is what let
+    /// the second one live. The admin notice is excluded because it goes to the club, not to
+    /// the applicant — it is not a message they ever see.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task An_applicant_gets_exactly_one_email_which_is_the_one_the_screen_promises()
+    {
+        await using var host = await TestHost.CreateAsync();
+
+        using (var scope = host.NewScope())
+        {
+            await Auth(scope).RegisterAsync("solo@test.local", "Pass1234!", "Solo Applicant", "SOLO-1", null, default);
+        }
+
+        // Registration dispatches in the background, so wait for the one that must arrive
+        // before counting — otherwise "exactly one" passes while the second is still in flight.
+        Assert.NotNull(await host.EmailService.WaitFor(m => m.To == "solo@test.local"));
+        var toApplicant = host.EmailService.Sent.Where(m => m.To == "solo@test.local").ToList();
+
+        var only = Assert.Single(toApplicant);
+        Assert.Contains("Verify", only.Subject, StringComparison.OrdinalIgnoreCase);
+
+        // And it says all three things the screen says, in the order the screen says them, so
+        // the one mail does the work the two were doing badly.
+        Assert.Contains("Confirm my email address", only.PlainBody!, StringComparison.Ordinal);
+        Assert.Contains("checks your membership number", only.PlainBody!, StringComparison.Ordinal);
+        Assert.Contains("one more email", only.PlainBody!, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Consuming the welcome link confirms the address, because the link was emailed to it.
     ///
     /// <para>

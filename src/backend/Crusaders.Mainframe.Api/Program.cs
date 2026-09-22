@@ -273,7 +273,7 @@ builder.Services.AddSingleton<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<TenantSettingsAccessor>();
 // Which club a message is from. One source for a fact that had four.
 builder.Services.AddScoped<Crusaders.Mainframe.Api.Email.ClubIdentityResolver>();
-builder.Services.AddScoped<Services.MemberApprovalService.MemberNotifier>();
+builder.Services.AddScoped<Crusaders.Mainframe.Api.Services.MemberApprovalService.MemberNotifier>();
 builder.Services.AddScoped<AccessCodeService>();
 builder.Services.AddScoped<IdentificationResolver>();
 builder.Services.AddScoped<DeviceRegistryService>();
