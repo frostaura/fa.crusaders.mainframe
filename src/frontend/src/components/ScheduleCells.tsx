@@ -9,7 +9,10 @@ import {
   CELL_WORD, closedCellLabel, holdCellLabel, holdLiftLabel, pastCellLabel,
   quotaCellLabel, restrictionLabel, unavailableWhy,
 } from "../lib/gridCopy";
-import { type SelectionApi, pressableAs, selectableAs } from "../lib/gridSelection";
+import {
+  type GridCoord, type SelectionApi, type SelectionKey,
+  candidateAs, pressableAs, selectableAs, withinRectangle,
+} from "../lib/gridSelection";
 
 /** What every cell on the board needs to know, carried once rather than threaded per cell. */
 export type BoardContext = {
@@ -123,13 +126,152 @@ export function ScheduleBoard(props: GridProps & { onExpandEarlier: () => void; 
   const rowCount = timeSlices.length;
   const colCount = day.courts.length;
 
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Which of the cells inside this rectangle may actually be chosen, read off the cells.
+   *
+   * <p>
+   * `data-select-key` is the cell's own answer to "could I be chosen", published by `Cell`.
+   * Re-deriving it here from the day's rules would be a second copy of `cellVerdict`, the
+   * quota, the group windows and the past threshold — four rules that already disagree with
+   * each other often enough to have their own tests, and a marquee that selected a Closed cell
+   * would then charge somebody for it.
+   * </p>
+   */
+  const keysWithin = (a: GridCoord, b: GridCoord): SelectionKey[] => {
+    const cells = gridRef.current?.querySelectorAll<HTMLElement>("[data-select-key]") ?? [];
+    const out: SelectionKey[] = [];
+    for (const el of cells) {
+      const row = Number(el.dataset.row);
+      const col = Number(el.dataset.col);
+      if (!Number.isFinite(row) || !Number.isFinite(col)) continue;
+      if (withinRectangle(a, b, { row, col })) out.push(el.dataset.selectKey!);
+    }
+    return out;
+  };
+
+  const extendTo = (to: GridCoord) => {
+    const from = ctx.selection?.anchor ?? to;
+    ctx.selection?.extendRange(keysWithin(from, to));
+  };
+
+  /**
+   * The marquee (D3 §4.1, door 3) — a fine pointer only, and one of the three ways IN.
+   *
+   * <p>
+   * `dragging` holds the corner the press started at; `moved` records whether the pointer ever
+   * reached a different cell. Both are refs rather than state because a marquee redraws on
+   * every `pointerover` and re-rendering two hundred and forty cells to store a number nobody
+   * paints is how a grid becomes slow to drag.
+   * </p>
+   *
+   * <p>
+   * <b>`moved` is what keeps an ordinary click an ordinary click.</b> Press and release on one
+   * cell has to open the booking dialog, exactly as it does today; only a press that actually
+   * crossed a cell boundary is a marquee. And after one, the click that the browser fires on
+   * release is swallowed — without that, releasing over the cell you started on would enter
+   * selection mode and then immediately un-tick that very cell.
+   * </p>
+   */
+  const dragging = useRef<GridCoord | null>(null);
+  const moved = useRef(false);
+  const swallowClick = useRef(false);
+
+  const coordOf = (target: EventTarget | null): GridCoord | null => {
+    const el = (target as HTMLElement | null)?.closest?.("[data-row][data-col]") as HTMLElement | null;
+    if (!el) return null;
+    const row = Number(el.dataset.row);
+    const col = Number(el.dataset.col);
+    return Number.isFinite(row) && Number.isFinite(col) ? { row, col } : null;
+  };
+
+  const onGridPointerDown = (e: React.PointerEvent) => {
+    // Coarse pointers get the long press instead: a marquee on a phone is a scroll.
+    if (!ctx.selection || e.pointerType !== "mouse" || e.button !== 0) return;
+    const at = coordOf(e.target);
+    if (!at) return;
+    dragging.current = at;
+    moved.current = false;
+  };
+
+  const onGridPointerOver = (e: React.PointerEvent) => {
+    const from = dragging.current;
+    if (!from) return;
+    const at = coordOf(e.target);
+    if (!at || (at.row === from.row && at.col === from.col)) return;
+    if (!moved.current) {
+      moved.current = true;
+      // The corner is fixed at the first crossing rather than at the press, so a selection
+      // already on screen is kept and this rectangle replaces only itself — see `beginRange`.
+      ctx.selection?.beginRange(from);
+    }
+    ctx.selection?.extendRange(keysWithin(from, at));
+  };
+
+  const endDrag = () => {
+    if (dragging.current && moved.current) swallowClick.current = true;
+    dragging.current = null;
+    moved.current = false;
+  };
+
+  // On the WINDOW: a drag that ends outside the grid — over the action bar, off the edge of
+  // the page — still ends, rather than leaving the marquee live until the next click.
+  useEffect(() => {
+    const up = () => endDrag();
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, []);
+
+  /**
+   * Shift+click extends, and it is caught here rather than in six cell variants.
+   *
+   * `onClickCapture`, so it runs before the cell's own handler and can stop it: without that,
+   * a Shift+click would both extend the range and toggle the cell it landed on.
+   */
+  const onGridClickCapture = (e: React.MouseEvent) => {
+    if (swallowClick.current) {
+      swallowClick.current = false;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    if (!e.shiftKey || !ctx.selection?.active) return;
+    const at = coordOf(e.target);
+    if (!at) return;
+    e.preventDefault();
+    e.stopPropagation();
+    extendTo(at);
+    setRoving(at);
+  };
+
   const onGridKey = (e: React.KeyboardEvent) => {
     const move = (dr: number, dc: number) => {
       e.preventDefault();
-      setRoving((p) => ({
-        row: Math.min(rowCount - 1, Math.max(collapsedRows, p.row + dr)),
-        col: Math.min(colCount - 1, Math.max(0, p.col + dc)),
-      }));
+      setRoving((p) => {
+        const next = {
+          row: Math.min(rowCount - 1, Math.max(collapsedRows, p.row + dr)),
+          col: Math.min(colCount - 1, Math.max(0, p.col + dc)),
+        };
+        /*
+          Shift+Arrow grows the same rectangle the marquee draws, from the same anchor. Two
+          selection shapes in one grid — a run for the keyboard and a rectangle for the mouse —
+          would be a control that behaves differently depending on which hand you used.
+
+          With no anchor yet, the cell being left becomes one, so the first Shift+Arrow of a
+          session extends from where the caret was rather than from nowhere.
+        */
+        if (e.shiftKey && ctx.selection) {
+          if (!ctx.selection.anchor) ctx.selection.beginRange(p);
+          const from = ctx.selection.anchor ?? p;
+          ctx.selection.extendRange(keysWithin(from, next));
+        }
+        return next;
+      });
     };
     switch (e.key) {
       case "ArrowDown": return move(1, 0);
@@ -160,9 +302,15 @@ export function ScheduleBoard(props: GridProps & { onExpandEarlier: () => void; 
     <Card className="p-0 overflow-hidden mb-6">
       <div ref={scroller}
         className="overflow-auto max-h-[max(280px,calc(100dvh-var(--app-chrome-height,154px)-var(--selection-bar-height,0px)-96px))]">
-        <div role="grid" aria-labelledby={HEADING_ID} aria-multiselectable={ctx.selection ? true : undefined}
+        <div ref={gridRef} role="grid" aria-labelledby={HEADING_ID} aria-multiselectable={ctx.selection ? true : undefined}
           onKeyDown={selecting ? onGridKey : undefined}
-          className="grid min-w-[600px]" style={{ gridTemplateColumns: columns }}>
+          onPointerDown={ctx.selection ? onGridPointerDown : undefined}
+          onPointerOver={ctx.selection ? onGridPointerOver : undefined}
+          onClickCapture={ctx.selection ? onGridClickCapture : undefined}
+          /* While a marquee is live the browser would otherwise paint a text selection across
+             every court name it crosses, which looks like the page has broken. */
+          className={cn("grid min-w-[600px]", ctx.selection && "[&_*]:select-none")}
+          style={{ gridTemplateColumns: columns }}>
           <HeaderRow courts={day.courts} sliceMinutes={day.sliceMinutes}
             yourRate={ctx.rules.known && ctx.rules.groups.length > 0} />
           {earlierLabel && <EarlierRow label={earlierLabel} span={day.courts.length + 1} onExpand={onExpandEarlier} />}
@@ -259,6 +407,7 @@ export const ScheduleGrid = memo(function ScheduleGrid(props: GridProps & {
             {day.courts.map((c, colIndex) => (
               <SlotCell
                 key={c.id + t.utc}
+                at={{ row: rowIndex, col: colIndex }}
                 roving={roving ? roving.row === rowIndex && roving.col === colIndex : null}
                 ctx={ctx}
                 court={c}
@@ -322,6 +471,8 @@ type SlotCellProps = {
   facts: { minuteOfDay: number; sliceMinutes: number; isPast: boolean; outOfHours: boolean; peakRestricted: boolean };
   /** True on the one cell that is the grid's tab stop; null outside selection mode. */
   roving?: boolean | null;
+  /** Where this cell is in the grid — the marquee and the Shift extension measure with it. */
+  at?: GridCoord;
 };
 
 export function SlotCell(props: SlotCellProps) {
@@ -355,8 +506,21 @@ export function SlotCell(props: SlotCellProps) {
  * sentence twice. So the cell says where it is and the control says what it does.
  * </p>
  */
-function Cell({ label, selectKey, selection, roving, children }: {
+function Cell({ label, selectKey, candidateKey, at, selection, roving, children }: {
   label: string; selectKey?: string | null; selection?: SelectionApi | null;
+  /**
+   * The key this cell WOULD be chosen by, whether or not the mode is on — see `candidateAs`.
+   *
+   * <p>
+   * Published as `data-select-key` so the marquee and the Shift extension read the cell's own
+   * answer about whether it may be chosen, rather than keeping a second copy of the day's
+   * rules that would drift from it. It is also why a drag can be a way INTO selection mode:
+   * at pointer-down nothing is selectable yet, and `selectKey` is null on every cell.
+   * </p>
+   */
+  candidateKey?: string | null;
+  /** Where this cell is — row is the time slice, column is the court. */
+  at?: GridCoord;
   /** Roving tabindex: `true` on the ONE cell that is the grid's tab stop. Null outside selection mode. */
   roving?: boolean | null;
   children: React.ReactNode;
@@ -377,6 +541,7 @@ function Cell({ label, selectKey, selection, roving, children }: {
   }, [roving, children]);
   return (
     <div ref={ref} role="gridcell" aria-label={label} tabIndex={roving == null ? undefined : (roving ? 0 : -1)}
+      data-row={at?.row} data-col={at?.col} data-select-key={candidateKey ?? undefined}
       aria-selected={selection && selectKey ? Boolean(selected) : undefined}
       className={cn("relative outline-none", selected && "ring-2 ring-inset ring-accent-strong rounded-md",
         roving && "ring-2 ring-offset-1 ring-accent-strong rounded-md")}>
@@ -397,15 +562,16 @@ function EmptyCell(props: SlotCellProps) {
   const target = { kind: "free", courtId: court.id, startsAtUtc } as const;
   const selectKey = selectableAs(ctx.selection, target, verdict.bookable);
   const armKey = pressableAs(ctx.selection, target, verdict.bookable);
+  const candidateKey = candidateAs(ctx.selection, target, verdict.bookable);
 
   if (verdict.reason === "past_time") {
-    return <Cell label={pastCellLabel(where)} roving={props.roving}>{inert("bg-bg-muted/60 border border-border uppercase tracking-wide font-medium", CELL_WORD.past)}</Cell>;
+    return <Cell label={pastCellLabel(where)} roving={props.roving} at={props.at}>{inert("bg-bg-muted/60 border border-border uppercase tracking-wide font-medium", CELL_WORD.past)}</Cell>;
   }
   if (verdict.reason !== null) {
-    return <Cell label={where} roving={props.roving}><UnavailableCell reason={verdict.reason} where={where} ctx={ctx} /></Cell>;
+    return <Cell label={where} roving={props.roving} at={props.at}><UnavailableCell reason={verdict.reason} where={where} ctx={ctx} /></Cell>;
   }
   if (court.isActive === false) {
-    return <Cell label={`${where} — this court is not in use`} roving={props.roving}>{inert("bg-bg-muted/40 border border-dashed border-border", "Not in use")}</Cell>;
+    return <Cell label={`${where} — this court is not in use`} roving={props.roving} at={props.at}>{inert("bg-bg-muted/40 border border-dashed border-border", "Not in use")}</Cell>;
   }
 
   // The parameter used to be called priceZar and rendered with a rand sign. The name was the
@@ -413,11 +579,11 @@ function EmptyCell(props: SlotCellProps) {
   // at well under half what it costs.
   const price = formatCredits(court.slicePriceCredits);
   return (
-    <Cell label={where} selectKey={selectKey} selection={ctx.selection} roving={props.roving}>
+    <Cell label={where} selectKey={selectKey} candidateKey={candidateKey} selection={ctx.selection} roving={props.roving} at={props.at}>
       <button
         type="button"
-        onClick={() => (selectKey ? ctx.selection?.toggle(selectKey) : ctx.onBook(court, startsAtUtc))}
-        onPointerDown={armKey ? ctx.selection?.armLongPress(armKey) : undefined}
+        onClick={() => (selectKey ? ctx.selection?.toggle(selectKey, props.at) : ctx.onBook(court, startsAtUtc))}
+        onPointerDown={armKey ? ctx.selection?.armLongPress(armKey, props.at) : undefined}
         aria-label={`Book ${where} for ${price}`}
         className="w-full m-0.5 h-12 rounded-md bg-success-soft text-success-strong hover:bg-success-soft/70 text-xs font-medium"
       >
@@ -487,7 +653,10 @@ function inert(tone: string, text: string) {
  */
 function HoldCell(props: SlotCellProps & { slot: ScheduleSlot }) {
   const { ctx, slot, where, facts } = props;
-  const selectKey = selectableAs(ctx.selection, { kind: "booked", bookingId: slot.bookingId ?? "" }, !facts.isPast && Boolean(slot.bookingId));
+  const holdTarget = { kind: "booked", bookingId: slot.bookingId ?? "" } as const;
+  const holdPickable = !facts.isPast && Boolean(slot.bookingId);
+  const selectKey = selectableAs(ctx.selection, holdTarget, holdPickable);
+  const candidateKey = candidateAs(ctx.selection, holdTarget, holdPickable);
   const body = (
     <span className="flex flex-col items-center leading-tight min-w-0">
       <span className="truncate max-w-full">{slot.blockLabel ?? "Club hold"}</span>
@@ -497,9 +666,9 @@ function HoldCell(props: SlotCellProps & { slot: ScheduleSlot }) {
   const shell = "m-0.5 h-12 rounded-md border border-transparent bg-bg-muted bg-[repeating-linear-gradient(45deg,_rgba(0,0,0,0.04)_0,_rgba(0,0,0,0.04)_4px,_transparent_4px,_transparent_8px)] flex items-center justify-center gap-1 text-xs text-text-secondary px-1";
   if (selectKey) {
     return (
-      <Cell label={where} selectKey={selectKey} selection={ctx.selection} roving={props.roving}>
+      <Cell label={where} selectKey={selectKey} candidateKey={candidateKey} selection={ctx.selection} roving={props.roving} at={props.at}>
         <button type="button" className={cn(shell, "w-full")} aria-label={holdCellLabel(where, slot.blockLabel)}
-          onClick={() => ctx.selection?.toggle(selectKey)}>{body}</button>
+          onClick={() => ctx.selection?.toggle(selectKey, props.at)}>{body}</button>
       </Cell>
     );
   }
@@ -508,7 +677,7 @@ function HoldCell(props: SlotCellProps & { slot: ScheduleSlot }) {
   // cell answering to two labels.
   const liftable = ctx.isAdmin && slot.bookingId && !facts.isPast;
   return (
-    <Cell label={holdCellLabel(where, slot.blockLabel)} roving={props.roving}>
+    <Cell label={holdCellLabel(where, slot.blockLabel)} candidateKey={candidateKey} roving={props.roving} at={props.at}>
       <div className={shell}>
         {body}
         {liftable && (
@@ -527,10 +696,12 @@ function HoldCell(props: SlotCellProps & { slot: ScheduleSlot }) {
 }
 
 /** A later cell of a booking that started earlier. Reserved, and visibly the same booking. */
-function ContinuationCell({ slot, where, roving }: { slot: ScheduleSlot; where: string; roving?: boolean | null }) {
+function ContinuationCell({ slot, where, roving, at }: {
+  slot: ScheduleSlot; where: string; roving?: boolean | null; at?: GridCoord;
+}) {
   const tone = slot.isMine ? "bg-info-soft/60 text-info-strong" : "bg-bg-muted text-text-secondary";
   return (
-    <Cell label={slot.isMine ? `${where} — continues, your booking` : `${where} — continues, reserved`} roving={roving}>
+    <Cell label={slot.isMine ? `${where} — continues, your booking` : `${where} — continues, reserved`} roving={roving} at={at}>
       {/* `border border-transparent`, the house rule from `index.css`'s forced-colors block and
           from `BUTTON_VARIANT_CLASS.ghost`: under `forced-colors: active` every author
           background is thrown away, so a cell whose only boundary is its fill becomes bare text
@@ -552,9 +723,10 @@ function MyCell(props: SlotCellProps & { slot: ScheduleSlot }) {
   const pickable = !facts.isPast && Boolean(slot.bookingId);
   const selectKey = selectableAs(ctx.selection, target, pickable);
   const armKey = pressableAs(ctx.selection, target, pickable);
+  const candidateKey = candidateAs(ctx.selection, target, pickable);
   if (facts.isPast || !slot.bookingId) {
     return (
-      <Cell label={slot.checkedIn ? `${where} — your past booking, attended` : `${where} — your past booking`} roving={props.roving}>
+      <Cell label={slot.checkedIn ? `${where} — your past booking, attended` : `${where} — your past booking`} roving={props.roving} at={props.at}>
         <div className="m-0.5 h-12 rounded-md bg-info-soft/60 text-info-strong border border-info-soft flex items-center justify-center text-xs font-medium text-center px-1">
           {slot.checkedIn ? "Mine · played" : "Mine · past"}
         </div>
@@ -563,11 +735,11 @@ function MyCell(props: SlotCellProps & { slot: ScheduleSlot }) {
   }
   const mineLabel = slot.checkedIn ? `Cancel your booking on ${where} — checked in` : `Cancel your booking on ${where}`;
   return (
-    <Cell label={where} selectKey={selectKey} selection={ctx.selection} roving={props.roving}>
+    <Cell label={where} selectKey={selectKey} candidateKey={candidateKey} selection={ctx.selection} roving={props.roving} at={props.at}>
       <button
         type="button"
-        onClick={() => (selectKey ? ctx.selection?.toggle(selectKey) : ctx.onCancel(slot, court.name))}
-        onPointerDown={armKey ? ctx.selection?.armLongPress(armKey) : undefined}
+        onClick={() => (selectKey ? ctx.selection?.toggle(selectKey, props.at) : ctx.onCancel(slot, court.name))}
+        onPointerDown={armKey ? ctx.selection?.armLongPress(armKey, props.at) : undefined}
         aria-label={mineLabel}
         className={cn(
           "w-full m-0.5 h-12 rounded-md text-xs font-medium px-1 text-center",
@@ -603,6 +775,7 @@ function OtherCell(props: SlotCellProps & { slot: ScheduleSlot }) {
   const pickable = ctx.isAdmin && !facts.isPast && Boolean(slot.bookingId);
   const selectKey = selectableAs(ctx.selection, target, pickable);
   const armKey = pressableAs(ctx.selection, target, pickable);
+  const candidateKey = candidateAs(ctx.selection, target, pickable);
 
   // §8: an admin can cancel any booking on behalf of any member, penalty waiveable. The
   // endpoint has always existed; another member's slot was inert text with no way to reach it,
@@ -610,11 +783,11 @@ function OtherCell(props: SlotCellProps & { slot: ScheduleSlot }) {
   const otherLabel = `${slot.ownerFirstName ?? "Reserved"} — cancel on their behalf, ${where}`;
   if (ctx.isAdmin && slot.bookingId && !facts.isPast) {
     return (
-      <Cell label={where} selectKey={selectKey} selection={ctx.selection} roving={props.roving}>
+      <Cell label={where} selectKey={selectKey} candidateKey={candidateKey} selection={ctx.selection} roving={props.roving} at={props.at}>
         <button
           type="button"
-          onClick={() => (selectKey ? ctx.selection?.toggle(selectKey) : ctx.onCancel(slot, court.name))}
-          onPointerDown={armKey ? ctx.selection?.armLongPress(armKey) : undefined}
+          onClick={() => (selectKey ? ctx.selection?.toggle(selectKey, props.at) : ctx.onCancel(slot, court.name))}
+          onPointerDown={armKey ? ctx.selection?.armLongPress(armKey, props.at) : undefined}
           aria-label={otherLabel}
           className={cn(shell, "hover:bg-bg-muted/70")}
         >
@@ -624,7 +797,7 @@ function OtherCell(props: SlotCellProps & { slot: ScheduleSlot }) {
     );
   }
   return (
-    <Cell label={`${where} — booked by ${slot.ownerFirstName ?? "another member"}`} roving={props.roving}>
+    <Cell label={`${where} — booked by ${slot.ownerFirstName ?? "another member"}`} roving={props.roving} at={props.at}>
       <div className={cn(shell, "overflow-visible")} aria-hidden="true">{body}</div>
     </Cell>
   );
