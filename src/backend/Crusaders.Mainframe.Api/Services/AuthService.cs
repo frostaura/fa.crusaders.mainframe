@@ -19,16 +19,17 @@ public sealed class AuthService
     private readonly MemberApprovalService _memberships;
     private readonly AccessTokenRevocationList _revocations;
     private readonly InherentAdminService _inherentAdmins;
+    private readonly ClubIdentityResolver _club;
 
     public AuthService(MainframeDbContext db, ITenantContext tenant, IPasswordHasher hasher,
         IJwtIssuer jwt, IEmailService email, IConfiguration config, ILogger<AuthService> logger,
         MemberApprovalService memberships, AccessTokenRevocationList revocations,
-        InherentAdminService inherentAdmins)
+        InherentAdminService inherentAdmins, ClubIdentityResolver club)
     {
         _db = db; _tenant = tenant; _hasher = hasher; _jwt = jwt;
         _email = email; _config = config; _logger = logger;
         _memberships = memberships; _revocations = revocations;
-        _inherentAdmins = inherentAdmins;
+        _inherentAdmins = inherentAdmins; _club = club;
     }
 
     /// <summary>
@@ -194,9 +195,21 @@ public sealed class AuthService
                 : new RegistrationResult.MembershipNumberInUse();
         }
 
+        // ONE mail to the applicant, not two.
+        //
+        // This sent a "pending review" notice beside the verification link, in the same second,
+        // while the screen in front of them said they had been sent A link and that the next
+        // message would come when the club approved them. The approval mail was therefore the
+        // third, and for a reader who is not confident with software a count that does not
+        // match is not a detail — it reads as something having gone wrong. The pending notice
+        // also carried no link at all, so an applicant who opened it first was told to wait by
+        // the one of the two whose job was to tell them to press something.
+        //
+        // VerifyEmail now says both things in the order they happen, which is the order the
+        // registration screen already promises. MembershipPending is gone rather than unused.
         var verifyUrl = $"{PublicBaseUrl()}/verify-email/{token}";
-        await SendOrLogAsync(EmailTemplates.VerifyEmail(email, verifyUrl), $"verification for {email}", ct);
-        await SendOrLogAsync(EmailTemplates.MembershipPending(email), $"pending-approval notice for {email}", ct);
+        var club = await _club.GetAsync(ct);
+        await SendOrLogAsync(EmailTemplates.VerifyEmail(club, email, verifyUrl), $"verification for {email}", ct);
         // ONE call, and it is this one. Two fixers closed spec §2.3 independently — a private
         // helper here and MemberApprovalService.AnnounceRegistrationAsync — and the merge left
         // both live, so every application put two near-identical emails in front of the club's
@@ -263,7 +276,8 @@ public sealed class AuthService
         });
         await _db.SaveChangesAsync(ct);
 
-        await SendOrLogAsync(EmailTemplates.VerifyEmail(user.Email, $"{PublicBaseUrl()}/verify-email/{token}"),
+        await SendOrLogAsync(
+            EmailTemplates.VerifyEmail(await _club.GetAsync(ct), user.Email, $"{PublicBaseUrl()}/verify-email/{token}"),
             $"re-sent verification for {user.Email}", ct);
     }
 
@@ -294,7 +308,7 @@ public sealed class AuthService
         });
         await _db.SaveChangesAsync(ct);
 
-        await SendOrLogAsync(EmailTemplates.PasswordChanged(user.Email), $"password-changed notice for {user.Email}", ct);
+        await SendOrLogAsync(EmailTemplates.PasswordChanged(await _club.GetAsync(ct), user.Email), $"password-changed notice for {user.Email}", ct);
         return PasswordChangeResult.Ok;
     }
 
@@ -389,7 +403,7 @@ public sealed class AuthService
         await _db.SaveChangesAsync(ct);
 
         var resetUrl = $"{PublicBaseUrl()}/reset-password/{token}";
-        await SendOrLogAsync(EmailTemplates.PasswordReset(email, resetUrl), $"password reset for {email}", ct);
+        await SendOrLogAsync(EmailTemplates.PasswordReset(await _club.GetAsync(ct), email, resetUrl), $"password reset for {email}", ct);
         return true;
     }
 
@@ -415,7 +429,7 @@ public sealed class AuthService
         // travels — changed the password and told nobody. The reset mail itself is not that
         // signal: it is sent before anything happens, and it is the mail an attacker with
         // mailbox access has already read.
-        await SendOrLogAsync(EmailTemplates.PasswordChanged(user.Email), $"password-changed notice for {user.Email}", ct);
+        await SendOrLogAsync(EmailTemplates.PasswordChanged(await _club.GetAsync(ct), user.Email), $"password-changed notice for {user.Email}", ct);
         return true;
     }
 

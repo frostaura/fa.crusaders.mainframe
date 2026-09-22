@@ -53,10 +53,32 @@ public sealed class BookingService
     public BookingService(
         MainframeDbContext db, ITenantContext tenant, LedgerService ledger, TenantSettingsAccessor settings,
         IEmailService email, IEventBus bus, AccessCodeService codes, Realtime.RealtimeOutbox outbox,
-        BookingRules rules, ILogger<BookingService> logger)
+        BookingRules rules, ILogger<BookingService> logger, Email.ClubIdentityResolver club)
     {
         _db = db; _tenant = tenant; _ledger = ledger; _settings = settings; _email = email; _bus = bus;
-        _codes = codes; _outbox = outbox; _rules = rules; _logger = logger;
+        _codes = codes; _outbox = outbox; _rules = rules; _logger = logger; _club = club;
+    }
+
+    /// <summary>
+    /// Which club these mails are from. Was <c>tenant?.DisplayName ?? "Crusaders Mainframe"</c>
+    /// on the receipt and nothing at all on the six emails this service sends.
+    /// </summary>
+    private readonly Email.ClubIdentityResolver _club;
+
+    /// <summary>
+    /// A slot's start, in the club's own clock and in the club's own words.
+    /// </summary>
+    /// <remarks>
+    /// Invariant culture, like every other formatted value that reaches a member: the server
+    /// process's ambient culture is what once put "penalty 30,0%" in an English sentence. The
+    /// zone is the tenant's, because a booking at six in the evening is at six in the evening
+    /// wherever the server happens to be.
+    /// </remarks>
+    private async Task<string> StartsAtLocalAsync(DateTimeOffset startsAt, CancellationToken ct)
+    {
+        var settings = await _settings.GetAsync(ct);
+        return TimeZoneInfo.ConvertTimeFromUtc(startsAt.UtcDateTime, ResolveTz(settings.Timezone))
+            .ToString("ddd dd MMM, HH:mm", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     /// <summary>
@@ -355,7 +377,7 @@ public sealed class BookingService
         Booking booking, string toEmail, Guid userId, Email.BookingConfirmationDetails details, CancellationToken ct)
     {
         var message = EmailTemplates.BookingConfirmation(
-            toEmail, details, await BuildReceiptAsync(booking, details, userId, ct));
+            await _club.GetAsync(ct), toEmail, details, await BuildReceiptAsync(booking, details, userId, ct));
         SendEmailInBackground(message, $"booking confirmation for {booking.Id}");
     }
 
@@ -509,7 +531,7 @@ public sealed class BookingService
 
         var user = await _db.Users.FirstAsync(u => u.Id == booking.UserId, ct);
         SendEmailInBackground(
-            EmailTemplates.WalkUpNotStarted(user.Email, court.Name, booking.AmountChargedCredits),
+            EmailTemplates.WalkUpNotStarted(await _club.GetAsync(ct), user.Email, court.Name, booking.AmountChargedCredits),
             $"walk-up void for {booking.Id}");
 
         return true;
@@ -1176,7 +1198,7 @@ public sealed class BookingService
             ? new Email.ClubCancellation(waiveReasonRecorded, waived)
             : null;
         var cancellationMsg = EmailTemplates.BookingCancellation(
-            user.Email, court.Name, refundAmount, penaltyAmount > 0 ? penaltyAmount : null, byClub);
+            await _club.GetAsync(ct), user.Email, court.Name, refundAmount, penaltyAmount > 0 ? penaltyAmount : null, byClub);
         SendEmailInBackground(cancellationMsg, $"cancellation for {booking.Id}");
 
         await _bus.EmitAsync(new DomainEvent(
@@ -1682,7 +1704,8 @@ public sealed class BookingService
         {
             try
             {
-                await _email.SendAsync(DisplacedEmail(user.Email, courtName, other.StartsAt), ct);
+                await _email.SendAsync(EmailTemplates.BookingDisplaced(
+                    await _club.GetAsync(ct), user.Email, courtName, await StartsAtLocalAsync(other.StartsAt, ct)), ct);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "Displacement email failed for {BookingId}", other.Id); }
         }
@@ -1705,22 +1728,6 @@ public sealed class BookingService
             }), ct);
     }
 
-    // Block body, not an expression body — lizard mis-scopes an expression-bodied member
-    // containing braces; see memory/gotchas.md.
-    private static Email.EmailMessage DisplacedEmail(string to, string courtName, DateTimeOffset startsAt)
-    {
-        return new Email.EmailMessage(
-            To: to,
-            Subject: $"Booking refunded — {courtName} was already in use",
-            HtmlBody:
-                $"""
-                <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
-                  <h2 style="margin:0 0 12px">Your booking has been refunded</h2>
-                  <p>Your booking on {courtName} at {startsAt:HH:mm} on {startsAt:ddd dd MMM} was sold while the court was still being used by an earlier booking whose check-in reached us late.</p>
-                  <p>It has been cancelled and refunded in full, with no penalty. We are sorry for the wasted trip.</p>
-                </div>
-                """);
-    }
 
     /// <summary>The ledger reference for the one pro-rata charge a cancelled-then-lit booking may carry.</summary>
     public static string CancelledLightsReference(Guid bookingId) => $"cancelled-lit:{bookingId:N}";
@@ -1854,7 +1861,8 @@ public sealed class BookingService
         {
             try
             {
-                await _email.SendAsync(CancelledLightsEmail(user.Email, court.Name, minutes, amount), ct);
+                await _email.SendAsync(EmailTemplates.CancelledBookingLightsCharged(
+                    await _club.GetAsync(ct), user.Email, court.Name, minutes, amount), ct);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "Cancelled-lights email failed for {BookingId}", booking.Id); }
         }
@@ -1878,20 +1886,6 @@ public sealed class BookingService
         return new CancelledLightsResult.Charged(amount, minutes);
     }
 
-    private static Email.EmailMessage CancelledLightsEmail(string to, string courtName, int minutes, decimal amount)
-    {
-        return new Email.EmailMessage(
-            To: to,
-            Subject: $"Lights charged — {courtName}",
-            HtmlBody:
-                $"""
-                <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
-                  <h2 style="margin:0 0 12px">Your cancelled booking was used</h2>
-                  <p>The lights on {courtName} were switched on with the code of a booking you had cancelled and been refunded for.</p>
-                  <p><strong>{minutes} minutes</strong> of court time has been charged at the usual rate: <strong>{amount:0.00} credits</strong>. Nothing is refunded once the lights have been on.</p>
-                </div>
-                """);
-    }
 
     /// <summary>
     /// The box's own <c>release</c> event, applied: the one measurement of how long a relay
@@ -2122,7 +2116,8 @@ public sealed class BookingService
         {
             try
             {
-                await _email.SendAsync(ReinstatedEmail(user.Email, courtName, other.StartsAt), ct);
+                await _email.SendAsync(EmailTemplates.BookingReinstated(
+                    await _club.GetAsync(ct), user.Email, courtName, await StartsAtLocalAsync(other.StartsAt, ct)), ct);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "Reinstatement email failed for {BookingId}", other.Id); }
         }
@@ -2143,22 +2138,6 @@ public sealed class BookingService
             }), ct);
     }
 
-    // Block body, not an expression body — lizard mis-scopes an expression-bodied member
-    // containing braces; see memory/gotchas.md.
-    private static Email.EmailMessage ReinstatedEmail(string to, string courtName, DateTimeOffset startsAt)
-    {
-        return new Email.EmailMessage(
-            To: to,
-            Subject: $"Booking reinstated — {courtName}",
-            HtmlBody:
-                $"""
-                <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
-                  <h2 style="margin:0 0 12px">Your booking is back on</h2>
-                  <p>We refunded your booking on {courtName} at {startsAt:HH:mm} on {startsAt:ddd dd MMM} because an earlier booking looked as though it was still using the court.</p>
-                  <p>The court's own lights say otherwise — it went dark before your slot — so the booking has been reinstated and re-charged at the original price. Your access code is in the app.</p>
-                </div>
-                """);
-    }
 
     /// <summary>
     /// Tells the member and the event stream. Mirrors the sweep's own notification: the
@@ -2180,7 +2159,8 @@ public sealed class BookingService
         {
             try
             {
-                await _email.SendAsync(NoShowReversedEmail(user.Email, courtName, refunded, penalised), ct);
+                await _email.SendAsync(EmailTemplates.NoShowReversed(
+                    await _club.GetAsync(ct), user.Email, courtName, refunded, penalised), ct);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "No-show reversal email failed for {BookingId}", booking.Id); }
         }
@@ -2202,22 +2182,6 @@ public sealed class BookingService
             }), ct);
     }
 
-    // Block body, not an expression body — lizard mis-scopes an expression-bodied member
-    // containing braces; see memory/gotchas.md.
-    private static Email.EmailMessage NoShowReversedEmail(string to, string courtName, decimal refunded, decimal penalised)
-    {
-        return new Email.EmailMessage(
-            To: to,
-            Subject: $"No-show reversed — {courtName}",
-            HtmlBody:
-                $"""
-                <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
-                  <h2 style="margin:0 0 12px">You were there after all</h2>
-                  <p>Your booking on {courtName} was marked as a no-show, but the court's check-in reached us afterwards.</p>
-                  <p>The no-show refund of <strong>{refunded:0.00} credits</strong> has been reversed and the penalty of <strong>{penalised:0.00} credits</strong> returned. The booking now stands as attended.</p>
-                </div>
-                """);
-    }
 
     /// <summary>
     /// Settles who pays, at the moment somebody identifies at the court.
@@ -2482,11 +2446,12 @@ public sealed class BookingService
         try
         {
             var membership = await _db.Memberships.FirstOrDefaultAsync(m => m.UserId == userId, ct);
-            var tenant = await _db.Tenants.IgnoreQueryFilters()
-                .FirstOrDefaultAsync(t => t.Id == _tenant.TenantId, ct);
 
             var pdf = Email.ReceiptPdf.ForBooking(
-                clubName: tenant?.DisplayName ?? "Crusaders Mainframe",
+                // The club's own name. This read the tenant row directly and fell back to the
+                // literal "Crusaders Mainframe" — the software's name — on a receipt a member
+                // keeps against a disputed charge, and on every other club's receipts.
+                clubName: (await _club.GetAsync(ct)).Name,
                 memberName: membership?.FullName ?? "Member",
                 bookingReference: booking.Id.ToString(),
                 courtName: details.CourtName,

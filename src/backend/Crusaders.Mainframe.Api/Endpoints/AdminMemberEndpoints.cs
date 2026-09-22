@@ -113,7 +113,8 @@ public static class AdminMemberEndpoints
         // so they can communicate it directly when the email channel is broken.
         g.MapPost("/{memberId:guid}/reset-password", async (
             Guid memberId, HttpContext ctx, MainframeDbContext db,
-            IPasswordHasher hasher, IEmailService email, ILoggerFactory loggerFactory, CancellationToken ct) =>
+            IPasswordHasher hasher, IEmailService email, ClubIdentityResolver club,
+            ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
             var logger = loggerFactory.CreateLogger("AdminResetPassword");
             var actor = ctx.User.Id() ?? Guid.Empty;
@@ -142,7 +143,7 @@ public static class AdminMemberEndpoints
             // screen an admin reaches for when "email delivery is uncertain" asserted that
             // delivery had happened. Same shape as approve/reject, one layer down.
             var notified = true;
-            try { await email.SendAsync(EmailTemplates.AdminPasswordReset(user.Email, membership.FullName, tempPassword), ct); }
+            try { await email.SendAsync(EmailTemplates.AdminPasswordReset(await club.GetAsync(ct), user.Email, membership.FullName, tempPassword), ct); }
             catch (Exception ex) { notified = false; logger.LogWarning(ex, "Admin reset email failed for {UserId}", user.Id); }
 
             return Results.Ok(new

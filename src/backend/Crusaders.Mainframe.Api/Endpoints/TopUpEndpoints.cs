@@ -178,10 +178,12 @@ public static partial class TopUpEndpoints
             IEmailService emailService,
             IEventBus bus,
             Crusaders.Mainframe.Api.Multitenancy.ITenantContext tenant,
+            ClubIdentityResolver club,
             ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
             var logger = loggerFactory.CreateLogger("TopUpCallback");
+            var mailer = new TopUpMailer(emailService, logger, club);
             var slug = http.Query["tenant"].ToString();
             if (string.IsNullOrEmpty(slug)) return Results.BadRequest(new { error = "tenant_missing" });
 
@@ -268,7 +270,7 @@ public static partial class TopUpEndpoints
                 pending.FailureReason = FailureCodes.AmountMismatch;
                 await db.SaveChangesAsync(ct);
 
-                if (wasPending) await NotifyNotCompletedAsync(db, emailService, logger, pending, ct);
+                if (wasPending) await NotifyNotCompletedAsync(db, mailer, pending, ct);
                 return Results.BadRequest(new { error = "amount_mismatch" });
             }
 
@@ -300,7 +302,7 @@ public static partial class TopUpEndpoints
                 }
 
                 return await CompleteAsync(
-                    new TopUpCompletion(db, ledger, settingsAccessor, emailService, bus, logger),
+                    new TopUpCompletion(db, ledger, settingsAccessor, emailService, bus, logger) { Club = club },
                     pending, tenantRow, interp, ct);
             }
 
@@ -322,7 +324,7 @@ public static partial class TopUpEndpoints
             pending.CompletedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(ct);
 
-            if (wasPending) await NotifyNotCompletedAsync(db, emailService, logger, pending, ct);
+            if (wasPending) await NotifyNotCompletedAsync(db, mailer, pending, ct);
             return Results.Ok(new { ok = false, reason = pending.FailureReason });
         }).AllowAnonymous();
 
@@ -350,19 +352,25 @@ public static partial class TopUpEndpoints
     /// </para>
     /// </summary>
     private static async Task NotifyNotCompletedAsync(
-        MainframeDbContext db, IEmailService email, ILogger logger, PendingTopup pending, CancellationToken ct)
+        MainframeDbContext db, TopUpMailer mailer, PendingTopup pending, CancellationToken ct)
     {
         var recipient = await db.Users.AsNoTracking()
             .Where(u => u.Id == pending.UserId).Select(u => u.Email).FirstOrDefaultAsync(ct);
         if (string.IsNullOrEmpty(recipient)) return;
 
         EmailDispatch.InBackground(
-            email, logger,
+            mailer.Email, mailer.Logger,
             EmailTemplates.TopUpNotCompleted(
-                recipient, pending.AmountZar, pending.FailureReason,
+                await mailer.Club.GetAsync(ct), recipient, pending.AmountZar, pending.FailureReason,
                 pending.ExternalReference ?? pending.IdempotencyKey),
             $"top-up failure notice for {pending.Id}");
     }
+
+    /// <summary>
+    /// What it takes to send one top-up mail. Bundled because the club is a fifth collaborator
+    /// and the gate caps a signature at six.
+    /// </summary>
+    private sealed record TopUpMailer(IEmailService Email, ILogger Logger, ClubIdentityResolver Club);
 
     /// <summary>The services <see cref="CompleteAsync"/> needs, bundled so the method stays inside the argument gate.</summary>
     internal sealed record TopUpCompletion(
@@ -371,7 +379,14 @@ public static partial class TopUpEndpoints
         TenantSettingsAccessor Settings,
         IEmailService Email,
         IEventBus Bus,
-        ILogger Logger);
+        ILogger Logger)
+    {
+        /// <summary>
+        /// Who the confirmation is from. Init-only rather than a seventh positional parameter:
+        /// six is the gate, and the reason it exists still holds.
+        /// </summary>
+        public required ClubIdentityResolver Club { get; init; }
+    }
 
     /// <summary>
     /// Converts a completed payment to credits and posts it.
@@ -474,8 +489,9 @@ public static partial class TopUpEndpoints
             EmailDispatch.InBackground(
                 c.Email, c.Logger,
                 EmailTemplates.TopUpConfirmation(
-                    recipient, pending.AmountZar, credits, rate, balanceAfter,
-                    interp.PaymentId ?? pending.IdempotencyKey),
+                    await c.Club.GetAsync(ct), recipient, new TopUpReceipt(
+                        pending.AmountZar, credits, rate, balanceAfter,
+                        interp.PaymentId ?? pending.IdempotencyKey)),
                 $"top-up confirmation for {pending.Id}");
         }
 

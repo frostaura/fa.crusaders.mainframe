@@ -62,6 +62,18 @@ public sealed class NoShowWorker : BackgroundService
         /// </para>
         /// </summary>
         public DeviceOutageIndex Outages { get; init; } = DeviceOutageIndex.Empty;
+
+        /// <summary>
+        /// Whose club this pass is about, as a message needs it.
+        ///
+        /// <para>
+        /// Built from <see cref="Tenant"/> and that tenant's settings at construction, never
+        /// from the scoped resolver: the tick walks every tenant inside ONE scope, resetting
+        /// <c>ITenantContext</c> as it goes, so a memoised resolver would sign every other
+        /// club's mail with the first club's name and phone number.
+        /// </para>
+        /// </summary>
+        public Email.ClubIdentity Club => Email.ClubIdentityResolver.For(Tenant, Settings);
     }
 
     /// <summary>
@@ -113,20 +125,20 @@ public sealed class NoShowWorker : BackgroundService
     // file into a *global* pseudo-function the length of the file, failing `-L 200` with a warning
     // that names no real function. See memory/gotchas.md.
     private static EmailMessage Notice(
-        string to, string courtName, string clubName, decimal refundedCredits, decimal penalty,
+        ClubIdentity club, string to, string courtName, decimal refundedCredits, decimal penalty,
         CourtDarkness darkness)
     {
         if (darkness == CourtDarkness.Unreachable)
         {
-            return EmailTemplates.BookingRefundedForOutage(to, courtName, refundedCredits, clubName);
+            return EmailTemplates.BookingRefundedForOutage(club, to, courtName, refundedCredits);
         }
 
         if (darkness == CourtDarkness.OutOfService)
         {
-            return EmailTemplates.BookingRefundedForOutOfServiceBox(to, courtName, refundedCredits, clubName);
+            return EmailTemplates.BookingRefundedForOutOfServiceBox(club, to, courtName, refundedCredits);
         }
 
-        return EmailTemplates.BookingNoShow(to, courtName, refundedCredits, penalty);
+        return EmailTemplates.BookingNoShow(club, to, courtName, refundedCredits, penalty);
     }
 
     /// <summary>
@@ -293,6 +305,7 @@ public sealed class NoShowWorker : BackgroundService
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == b.UserId, ct);
         var court = await db.Courts.FirstOrDefaultAsync(c => c.Id == b.CourtId, ct);
 
+
         // The refund LEG, exactly as it was posted above — gross, and zero when nothing was
         // ever taken, because quoting a member a refund they did not receive is how a
         // support ticket starts.
@@ -314,7 +327,7 @@ public sealed class NoShowWorker : BackgroundService
             try
             {
                 await email.SendAsync(
-                    Notice(user.Email, courtName, tenant.DisplayName, refundedCredits, penalty, darkness), ct);
+                    Notice(sweep.Club, user.Email, courtName, refundedCredits, penalty, darkness), ct);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "No-show email failed for {BookingId}", b.Id); }
         }

@@ -42,10 +42,24 @@ public sealed class MemberApprovalService
     private readonly IEventBus _bus;
     private readonly ILogger<MemberApprovalService> _logger;
 
+    private readonly ClubIdentityResolver _club;
+
+    /// <summary>
+    /// Everything it takes to tell somebody. Bundled rather than passed one by one because the
+    /// club became a seventh collaborator and the complexity gate caps a signature at six —
+    /// which is the right pressure: what these three do together is one job, and the four
+    /// arguments left are the four this class reasons about.
+    /// </summary>
+    public sealed record MemberNotifier(
+        IEmailService Email, ILogger<MemberApprovalService> Logger, ClubIdentityResolver Club);
+
     public MemberApprovalService(
-        MainframeDbContext db, ITenantContext tenant, IEmailService email, IConfiguration config,
-        IEventBus bus, ILogger<MemberApprovalService> logger)
-    { _db = db; _tenant = tenant; _email = email; _config = config; _bus = bus; _logger = logger; }
+        MainframeDbContext db, ITenantContext tenant, IConfiguration config,
+        IEventBus bus, MemberNotifier notifier)
+    {
+        _db = db; _tenant = tenant; _config = config; _bus = bus;
+        _email = notifier.Email; _logger = notifier.Logger; _club = notifier.Club;
+    }
 
     public async Task<TransitionReport> ApproveAsync(Guid memberId, Guid actorId, CancellationToken ct)
     {
@@ -77,10 +91,10 @@ public sealed class MemberApprovalService
 
         await _db.SaveChangesAsync(ct);
 
-        var clubName = await ClubNameAsync(ct);
+        var club = await _club.GetAsync(ct);
         var url = $"{_config["App:PublicBaseUrl"] ?? "http://localhost:8088"}/welcome/{magicLinkPlain}";
         var notified = await SendOrLogAsync(
-            EmailTemplates.MembershipApproved(user.Email, url, clubName), $"approval notice for {user.Email}", ct);
+            EmailTemplates.MembershipApproved(club, user.Email, url), $"approval notice for {user.Email}", ct);
         await EmitAsync("member.approved", membership, actorId, null, ct);
         return new TransitionReport(MembershipTransition.Ok, notified);
     }
@@ -108,9 +122,8 @@ public sealed class MemberApprovalService
 
         await _db.SaveChangesAsync(ct);
 
-        var clubName = await ClubNameAsync(ct);
         var notified = await SendOrLogAsync(
-            EmailTemplates.MembershipRejected(user.Email, reason, clubName), $"rejection notice for {user.Email}", ct);
+            EmailTemplates.MembershipRejected(await _club.GetAsync(ct), user.Email, reason), $"rejection notice for {user.Email}", ct);
         await EmitAsync("member.rejected", membership, actorId, reason, ct);
         return new TransitionReport(MembershipTransition.Ok, notified);
     }
@@ -154,8 +167,9 @@ public sealed class MemberApprovalService
         });
         await _db.SaveChangesAsync(ct);
 
-        var clubName = await ClubNameAsync(ct);
-        var notified = await SendOrLogAsync(EmailTemplates.MembershipSuspended(user.Email, membership.FullName, reason, clubName), $"suspension notice for {user.Email}", ct);
+        var notified = await SendOrLogAsync(
+            EmailTemplates.MembershipSuspended(await _club.GetAsync(ct), user.Email, membership.FullName, reason),
+            $"suspension notice for {user.Email}", ct);
         await EmitAsync("member.suspended", membership, actorId, reason, ct);
         return new TransitionReport(MembershipTransition.Ok, notified);
     }
@@ -186,8 +200,9 @@ public sealed class MemberApprovalService
         });
         await _db.SaveChangesAsync(ct);
 
-        var clubName = await ClubNameAsync(ct);
-        var notified = await SendOrLogAsync(EmailTemplates.MembershipReactivated(user.Email, membership.FullName, clubName), $"reactivation notice for {user.Email}", ct);
+        var notified = await SendOrLogAsync(
+            EmailTemplates.MembershipReactivated(await _club.GetAsync(ct), user.Email, membership.FullName),
+            $"reactivation notice for {user.Email}", ct);
         await EmitAsync("member.reactivated", membership, actorId, null, ct);
         return new TransitionReport(MembershipTransition.Ok, notified);
     }
@@ -211,7 +226,7 @@ public sealed class MemberApprovalService
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
         if (user is null) return;
 
-        var clubName = await ClubNameAsync(ct);
+        var club = await _club.GetAsync(ct);
         var consoleUrl = $"{_config["App:PublicBaseUrl"] ?? "http://localhost:8088"}/admin/members";
 
         // Admin users of this tenant only. Query filters already scope to the tenant; the
@@ -240,15 +255,12 @@ public sealed class MemberApprovalService
         {
             EmailDispatch.InBackground(
                 _email, _logger,
-                EmailTemplates.AdminNewRegistration(to, membership.FullName, user.Email, membership.MembershipNumber, clubName, consoleUrl),
+                EmailTemplates.AdminNewRegistration(club, to, membership.FullName, user.Email, membership.MembershipNumber, consoleUrl),
                 $"new-registration notice to {to}");
         }
 
         await EmitAsync("member.registered", membership, actorId: userId, reason: null, ct);
     }
-
-    private Task<string> ClubNameAsync(CancellationToken ct) =>
-        _db.Tenants.IgnoreQueryFilters().Where(t => t.Id == _tenant.TenantId).Select(t => t.DisplayName).FirstAsync(ct);
 
     /// <summary>
     /// Sends, and answers whether it went. The bool is not decoration: the caller is a
