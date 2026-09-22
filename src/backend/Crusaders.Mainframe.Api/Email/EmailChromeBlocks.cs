@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Net;
 using System.Text;
 
 namespace Crusaders.Mainframe.Api.Email;
@@ -18,7 +17,6 @@ namespace Crusaders.Mainframe.Api.Email;
 /// </remarks>
 public static partial class EmailChrome
 {
-
     // Block body, not an expression one: lizard's C# parser reads the `{` of a switch
     // EXPRESSION as the END of the member and dumps the remainder of the file into a *global*
     // pseudo-function the length of the file, failing `-L 200` with a warning naming no real
@@ -148,7 +146,6 @@ public static partial class EmailChrome
             </td></tr>
             """;
     }
-
 
     // ---- text/plain ----
 

@@ -72,7 +72,7 @@ public class MoneySurfaceTests
 
         // Both bodies, because the plain-text half is the one nobody looks at and therefore
         // the one that would go on quoting the old policy unnoticed.
-        foreach (var body in new[] { mail.HtmlBody, mail.PlainBody! })
+        foreach (var body in new[] { mail.HtmlBody, MailText.Unwrap(mail.PlainBody) })
         {
             Assert.Contains("30 minutes before the start", body);
             Assert.Contains("50% of the price", body);
@@ -352,7 +352,7 @@ public class MoneySurfaceTests
 
         // The text part as well as the HTML: a promise the server will not keep is no less
         // false for being in the half a plain-text client renders.
-        foreach (var body in new[] { walkUp.HtmlBody, walkUp.PlainBody! })
+        foreach (var body in new[] { walkUp.HtmlBody, MailText.Unwrap(walkUp.PlainBody) })
         {
             Assert.DoesNotContain("30% of the price", body);
             Assert.DoesNotContain("Cancel more than", body);

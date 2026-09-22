@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Net;
 using System.Text;
 
 namespace Crusaders.Mainframe.Api.Email;
@@ -28,8 +26,10 @@ namespace Crusaders.Mainframe.Api.Email;
 ///
 /// <para>
 /// <b>Dark mode is defended against rather than supported.</b> The product has one light
-/// palette and asserts in two posture tests that it has no dark one, so there is nothing to
-/// mirror here. What a client does instead is invert, so every cell that carries text paints
+/// palette — <c>monitoring-posture.test.ts</c> asserts no <c>dark:</c> utility appears, and
+/// <c>pwa-posture.test.ts</c> asserts the <c>color-scheme: light</c> meta that stops a dark
+/// browser painting its own chrome underneath — so there is nothing to mirror here. What a
+/// client does instead is invert, so every cell that carries text paints
 /// its own background — as a <c>bgcolor</c> attribute <i>and</i> an inline
 /// <c>background-color</c>, because the clients that honour one ignore the other — and the
 /// <c>color-scheme</c> pair in the head asks the ones that ask to leave it alone. Dark text on
@@ -119,7 +119,10 @@ public static partial class EmailChrome
     /// <summary>
     /// A club's message, as a message — both bodies, from one set of blocks.
     /// </summary>
-    /// <param name="club">Whose stationery this is. Its name reaches the masthead, the footer and nowhere else it could be missed.</param>
+    /// <param name="club">
+    /// Whose stationery this is. Its name reaches the masthead and the footer, and nowhere it
+    /// could be missed.
+    /// </param>
     /// <param name="to">The recipient.</param>
     /// <param name="content">What the message says.</param>
     /// <param name="attachment">A receipt, where the template carries one.</param>

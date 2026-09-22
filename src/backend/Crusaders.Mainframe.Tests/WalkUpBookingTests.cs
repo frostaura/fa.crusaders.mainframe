@@ -1093,7 +1093,7 @@ public class WalkUpBookingTests
         Assert.DoesNotContain(sent, m => m.Subject.StartsWith("Court time started", StringComparison.Ordinal));
         var told = Assert.Single(sent, m => m.Subject.StartsWith("Court time not started", StringComparison.Ordinal));
         // Both bodies: the reassurance is worth nothing in the half the member is not shown.
-        foreach (var half in new[] { told.HtmlBody, told.PlainBody! })
+        foreach (var half in new[] { told.HtmlBody, MailText.Unwrap(told.PlainBody) })
         {
             Assert.Contains("Nothing was bought", half);
             Assert.Contains("has gone straight back onto your balance", half);

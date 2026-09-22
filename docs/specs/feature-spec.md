@@ -267,11 +267,11 @@ that, and names the setting so they can ask their operator for it. Reasoning:
 See `reporting.md`. Both players and admins get filterable, exportable transaction & activity reports. Charts where useful, never as decoration.
 
 ## 11. Notifications (email)
-Every player-affecting event sends an email — this is the contractual comms channel. Webhooks mirror these for programmatic consumers but never replace them. Templates live in `src/backend/EmailTemplates/` (when scaffolded). Each email must be testable against a snapshot.
+Every player-affecting event sends an email — this is the contractual comms channel. Webhooks mirror these for programmatic consumers but never replace them. Templates live in `src/backend/Crusaders.Mainframe.Api/Email/` — `EmailTemplates.cs` says what each message is about, as blocks, and `EmailChrome` renders those blocks as the club's HTML **and** as its plain-text alternative, so the two halves cannot drift. Every template is rendered for a fictional second club by `EmailCatalogue` and held to the house rules as a set by `EmailDesignTests`; what actually leaves the process is read off a loopback socket by `EmailTransportTests`, because an `EmailMessage` is not a message.
 
 Required emails:
-- Email verification (registration) — also re-sendable on request from the sign-in screen
-- Membership pending review (to the applicant)
+- **Email verification (registration)** — also re-sendable on request from the sign-in screen, and **the only mail an applicant gets at registration**. It carries the link, then the wait, then what ends the wait, in that order.
+- ~~Membership pending review (to the applicant)~~ — **merged into the verification mail and no longer sent.** Two mails went out in the same second while `registrationCopy.ts`'s three steps told the applicant, in step 1, that they had been sent *a* link and, in step 3, that the *second* mail would come once the club approved them. The approval mail was therefore the third, and the screen's own count was wrong from the moment they opened their inbox — which, for a membership that skews older and is explicitly not technology-confident, reads as evidence that something went wrong rather than as a detail. It also split the one instruction that mattered: the pending notice carried no link at all, so an applicant who opened it first was told to wait by the one of the two whose whole job was to tell them to press something. **The screen was right about what should happen and the mail was wrong**, so the mail changed. Pinned by `An_applicant_gets_exactly_one_email_which_is_the_one_the_screen_promises`.
 - **New membership application (to every tenant admin)** — the "admin notified" half of §2.3. It went unsent for a long time: both registration mails went to the applicant, so the only cue an admin ever had was a pending counter on a screen they had to think to open.
 - Membership approved + magic-link sign-in
 - Membership rejected with reason

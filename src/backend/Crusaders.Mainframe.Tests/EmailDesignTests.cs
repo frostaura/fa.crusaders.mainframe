@@ -411,6 +411,9 @@ public class EmailDesignTests
         foreach (var (name, message) in Catalogue())
         {
             Assert.False(string.IsNullOrWhiteSpace(message.Subject), $"{name} has no subject.");
+            // 72 characters for the template's OWN words. The one variable a subject carries
+            // is the club's name, and the two templates that use it lead with it, so a club
+            // with a long name loses the tail rather than the point.
             Assert.True(message.Subject.Length <= 72,
                 $"{name}'s subject is {message.Subject.Length} characters and will be cut: {message.Subject}");
             Assert.Equal(message.Subject.Trim(), message.Subject);

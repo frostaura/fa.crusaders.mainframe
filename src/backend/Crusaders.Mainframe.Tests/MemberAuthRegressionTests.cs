@@ -190,9 +190,10 @@ public class MemberAuthRegressionTests
 
         // And it says all three things the screen says, in the order the screen says them, so
         // the one mail does the work the two were doing badly.
-        Assert.Contains("Confirm my email address", only.PlainBody!, StringComparison.Ordinal);
-        Assert.Contains("checks your membership number", only.PlainBody!, StringComparison.Ordinal);
-        Assert.Contains("one more email", only.PlainBody!, StringComparison.Ordinal);
+        var text = MailText.Unwrap(only.PlainBody);
+        Assert.Contains("Confirm my email address", text, StringComparison.Ordinal);
+        Assert.Contains("checks your membership number", text, StringComparison.Ordinal);
+        Assert.Contains("one more email", text, StringComparison.Ordinal);
     }
 
     /// <summary>

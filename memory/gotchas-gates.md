@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-gotchas-gates
-description: "Several quality gates report a red run as green or trip on a function nobody wrote: complexity exits 1 on stdout, lizard's C# and .tsx lexers mis-scope, the rollover grep keys on names, and ls-files misses untracked work."
+description: "Gates that report a red run as green or trip on a function nobody wrote: complexity exits 1 on stdout, lizard's C# and .tsx lexers mis-scope (one form of it no single member causes — split the file), ls-files misses untracked work."
 type: gotcha
-last_verified: 2026-09-19
+last_verified: 2026-09-22
 ---
 
 # Gotchas — the quality gates and their lint tooling
@@ -22,6 +22,15 @@ failures are in [`gotchas-env.md`](gotchas-env.md).
   `*global*` pseudo-function the length of the file — the gate trips naming no real function at line
   0. The fix is a block body, not a whitelist entry; a method directly *after* an expression-bodied
   private constructor misfiles identically. Placement, not content.
+- **The same `*global*` warning also has a form no single member causes.** `EmailChrome.cs` — 490
+  lines, most of them raw string literals full of markup — lost its class partway down and reported
+  `*global*` at 491 lines with only five of its ~20 members found, one of them renamed `style::Wrap`
+  after the `<style>` element in a const. **Removing any one member does not fix it** (a bisect that
+  deletes each in turn leaves the warning standing), and neither did emptying the CSS or replacing
+  the one `#hex` in it: it is the *density* of raw strings the reader cannot track, not a single
+  construct. The fix is **smaller files** — the class was split into three `partial` files of ~150
+  lines each and the warning went. Reach for a block body first; if the warning survives every
+  block body in the file, stop bisecting and split it.
 - **The rollover grep gate keys on identifier NAMES and has a hole:** it catches `now >=
   expiresAtMs` but not `now >= until_[i].at`, and `at` is the deadline type's public field, so the
   naive comparison is reachable through any deadline named otherwise. The tests are the real gate.

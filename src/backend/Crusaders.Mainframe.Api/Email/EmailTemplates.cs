@@ -123,21 +123,21 @@ public static class EmailTemplates
     // stop telling a member their money moved, and a link pretending otherwise would be a lie.
 
     private const string WhyAccount =
-        "You are getting this because somebody asked for it on your account at the club. "
-        + "If that was not you, tell the club straight away.";
+        "You're getting this because somebody asked for it on your account at the club. "
+        + "If that wasn't you, tell the club straight away.";
 
     private const string WhyMembership =
-        "You are getting this because you have a membership application or a membership at the club.";
+        "You're getting this because you have a membership application or a membership at the club.";
 
     private const string WhyMoney =
-        "You are getting this because it is the record of money moving in your club wallet. "
-        + "The club emails you every time that happens, so you always have the paper trail.";
+        "You're getting this because it is the record of money moving in your club wallet. "
+        + "The club emails you every time that happens, so the trail is yours to keep.";
 
     private const string WhyBooking =
-        "You are getting this because it is the record of a court booking in your name at the club.";
+        "You're getting this because it is the record of a court booking in your name at the club.";
 
     private const string WhyAdmin =
-        "You are getting this because you are listed as an administrator at the club. "
+        "You're getting this because you're listed as an administrator at the club. "
         + "Only administrators get these.";
 
     // ---- getting in ----
@@ -181,16 +181,19 @@ public static class EmailTemplates
                 new CallToAction("Confirm my email address", verifyUrl),
                 new Callout(CalloutTone.Warning, "The link works once, and it stops working after 24 hours."),
                 new Paragraph("After that, somebody at the club checks your membership number against their records. That is a person opening a list, so it usually takes a day or two."),
-                new Paragraph("You will get one more email when they have done it, and you can book a court from then on. Nothing else is needed from you in the meantime."),
+                new Paragraph("You'll get one more email once they have, and you can book a court from then on. Nothing else is needed from you in the meantime."),
             ],
-            WhyThis: "You are getting this because somebody used this address to apply for membership at the club. "
-                   + "If that was not you, ignore this email and the application expires on its own."));
+            WhyThis: "You're getting this because somebody used this address to apply for membership at the club. "
+                   + "If that wasn't you, ignore this email and the application expires on its own."));
 
     /// <summary>The applicant is in, and the mail is the way in.</summary>
     public static EmailMessage MembershipApproved(ClubIdentity club, string to, string magicLinkUrl) =>
         EmailChrome.Compose(club, to, new EmailContent(
-            Subject: $"Welcome to {club.Name} — you can book a court",
-            Preheader: "Your membership is approved. The sign-in link below lasts 15 minutes.",
+            // The club's name is the only variable in this subject, and it leads with the two
+            // words that carry it. Everything else a subject could say here is in the
+            // preheader, which is where a long club name pushes text off a phone's list.
+            Subject: $"Welcome to {club.Name}",
+            Preheader: "You're approved and can book a court. The sign-in link below lasts 15 minutes.",
             Heading: "You're in",
             Blocks:
             [
@@ -204,12 +207,12 @@ public static class EmailTemplates
     /// <summary>The application was refused. The reason is the admin's own words.</summary>
     public static EmailMessage MembershipRejected(ClubIdentity club, string to, string reason) =>
         EmailChrome.Compose(club, to, new EmailContent(
-            Subject: "Your membership application was not approved",
+            Subject: "Your membership application wasn't approved",
             Preheader: "The club has given a reason, and there is somebody to talk to about it.",
-            Heading: "The club could not approve your application",
+            Heading: "The club couldn't approve your application",
             Blocks:
             [
-                new Paragraph($"Somebody at {club.Name} has looked at your application and has not approved it."),
+                new Paragraph($"Somebody at {club.Name} has looked at your application and hasn't approved it."),
                 new Callout(CalloutTone.Danger, reason),
                 new Paragraph("If that looks like a mistake — a mistyped membership number is the usual one — speak to the club committee and they can sort it out. Your details have not been deleted."),
             ],
@@ -221,11 +224,11 @@ public static class EmailTemplates
     public static EmailMessage MembershipSuspended(ClubIdentity club, string to, string fullName, string reason) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: "Your membership is suspended",
-            Preheader: "You cannot book or get on court for now. Your credits are untouched.",
-            Heading: $"Hello {fullName}",
+            Preheader: "You can't book or get on court for now. Your credits are untouched.",
+            Heading: "Your membership is suspended",
             Blocks:
             [
-                new Paragraph($"Your membership at {club.Name} has been suspended. You cannot sign in, book a court, or open a court with your fingerprint, PIN or code while it is."),
+                new Paragraph($"Hello {fullName}. Your membership at {club.Name} has been suspended, so you can't sign in, book a court, or open a court with your fingerprint, PIN or code while it is."),
                 new Callout(CalloutTone.Danger, reason),
                 new Paragraph("Your credit balance and any bookings you already have are untouched. Speak to the club office to have the suspension lifted."),
             ],
@@ -236,10 +239,10 @@ public static class EmailTemplates
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: "Your membership is active again",
             Preheader: "You can book and get on court again. Your credits are where you left them.",
-            Heading: $"Hello {fullName}",
+            Heading: "Your membership is active again",
             Blocks:
             [
-                new Paragraph($"Your membership at {club.Name} is active again. You can sign in, book courts, and open a court at the box."),
+                new Paragraph($"Hello {fullName}. Your membership at {club.Name} is active again, so you can sign in, book courts, and open a court at the box."),
                 new Callout(CalloutTone.Success, "Your credit balance is exactly as you left it. Nothing was taken while you were suspended."),
             ],
             WhyThis: WhyMembership));
@@ -275,14 +278,14 @@ public static class EmailTemplates
     public static EmailMessage PasswordReset(ClubIdentity club, string to, string resetUrl) =>
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: "Reset your password",
-            Preheader: "The link below lasts an hour. If you did not ask for it, nothing has changed.",
+            Preheader: "The link below lasts an hour. If you didn't ask for it, nothing has changed.",
             Heading: "Set a new password",
             Blocks:
             [
                 new Paragraph($"Somebody asked to reset the password on your {club.Name} account. Open the link below and choose a new one."),
                 new CallToAction("Choose a new password", resetUrl),
                 new Callout(CalloutTone.Warning, "The link lasts one hour and works once."),
-                new Paragraph("If you did not ask for this, you do not need to do anything. Your password has not changed and nobody can use this link without opening this email."),
+                new Paragraph("If you didn't ask for this, there's nothing to do. Your password hasn't changed, and nobody can use this link without opening this email."),
             ],
             WhyThis: WhyAccount));
 
@@ -294,14 +297,14 @@ public static class EmailTemplates
         EmailChrome.Compose(club, to, new EmailContent(
             Subject: "An administrator has reset your password",
             Preheader: "Sign in with the temporary password in this email, then choose your own.",
-            Heading: $"Hello {fullName}",
+            Heading: "An administrator has reset your password",
             Blocks:
             [
-                new Paragraph($"An administrator at {club.Name} has reset your password. Sign in with the temporary one below."),
+                new Paragraph($"Hello {fullName}. An administrator at {club.Name} has reset your password, so sign in with the temporary one below."),
                 new Facts([new FactRow("Temporary password", tempPassword)]),
-                new Paragraph("You will be asked to choose your own straight away, and this one stops working the moment you do."),
+                new Paragraph("You'll be asked to choose your own straight away, and this one stops working the moment you do."),
                 new Callout(CalloutTone.Warning, "Until you have chosen your own, anybody holding this email can sign in as you. Do it now rather than later, and do not forward this message."),
-                new Paragraph("If you did not ask for this, contact the club committee."),
+                new Paragraph("If you didn't ask for this, contact the club committee."),
             ],
             WhyThis: WhyAccount));
 
@@ -316,8 +319,8 @@ public static class EmailTemplates
             Heading: "Your password was changed",
             Blocks:
             [
-                new Paragraph($"The password on your {club.Name} account was changed a moment ago. If that was you, there is nothing to do and you can ignore this."),
-                new Callout(CalloutTone.Danger, "If it was not you, somebody else has access to your account. Contact the club committee straight away."),
+                new Paragraph($"The password on your {club.Name} account was changed a moment ago. If that was you, there's nothing to do and you can ignore this."),
+                new Callout(CalloutTone.Danger, "If it wasn't you, somebody else has access to your account. Contact the club committee straight away."),
             ],
             WhyThis: WhyAccount));
 
@@ -434,7 +437,7 @@ public static class EmailTemplates
     {
         var blocks = new List<EmailBlock>
         {
-            new Paragraph($"The box could not start {courtName} for you, so the court time you pressed for was not sold."),
+            new Paragraph($"The box couldn't start {courtName} for you, so the court time you pressed for wasn't sold."),
         };
         blocks.Add(refundedCredits > 0
             ? new Callout(CalloutTone.Success, $"{Cr(refundedCredits)} has gone straight back onto your balance. You are exactly where you were before you pressed.")
@@ -472,7 +475,7 @@ public static class EmailTemplates
                 ? $"Your booking on {courtName} has been cancelled and the slot is free again."
                 : $"The club cancelled your booking on {courtName} on your behalf. You did not do this."),
         };
-        if (byClub?.Reason?.Trim() is { Length: > 0 } reason) blocks.Add(new Callout(CalloutTone.Info, $"The club's reason: {reason}"));
+        if (byClub?.Reason?.Trim() is { Length: > 0 } reason) blocks.Add(new Callout(CalloutTone.Info, $"Reason given by the club: {reason}"));
         blocks.Add(new Facts(rows));
         if (byClub is { PenaltyWaived: true }) blocks.Add(new Callout(CalloutTone.Success, "The late-cancellation penalty was waived, so nothing was deducted for it."));
         blocks.Add(new Footnote("Each of these is its own line in your wallet. The refund and any penalty are separate movements, not one figure."));
@@ -521,7 +524,7 @@ public static class EmailTemplates
                     new FactRow("No-show penalty", penaltyCredits > 0 ? Cr(penaltyCredits) : "None"),
                 ]),
                 new Footnote("Both of those are separate lines in your wallet — the refund and the penalty are two movements, not one."),
-                new Callout(CalloutTone.Info, "If you were at the court and could not get the lights on, tell the club. They can reverse this."),
+                new Callout(CalloutTone.Info, "If you were at the court and couldn't get the lights on, tell the club. They can reverse this."),
             ],
             WhyThis: WhyBooking));
 
@@ -561,7 +564,7 @@ public static class EmailTemplates
                     new FactRow("Charged", Cr(amountCredits)),
                 ]),
                 new Callout(CalloutTone.Warning, "Court time is not refunded once the lights have been on, so this charge stands."),
-                new Paragraph("If that was not you, your access code has been used by somebody else — tell the club and they can look at who opened the court."),
+                new Paragraph("If that wasn't you, your access code has been used by somebody else — tell the club and they can look at who opened the court."),
             ],
             WhyThis: WhyMoney));
 
@@ -720,7 +723,7 @@ public static class EmailTemplates
                     new FactRow("Balance after", Cr(balanceAfterCredits)),
                     new FactRow("Reason given", reason),
                 ]),
-                new Paragraph("If that does not look right, reply to this email or speak to the desk. The movement stays on your wallet either way — a correction is a second line, never a deleted one."),
+                new Paragraph("If that doesn't look right, reply to this email or speak to the desk. The movement stays on your wallet either way — a correction is a second line, never a deleted one."),
             ],
             WhyThis: WhyMoney));
     }

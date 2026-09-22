@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Net;
 using System.Text;
 
@@ -18,7 +17,6 @@ namespace Crusaders.Mainframe.Api.Email;
 /// </remarks>
 public static partial class EmailChrome
 {
-
     private static string HtmlHead(string subject) =>
         $"""
         <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -104,7 +102,6 @@ public static partial class EmailChrome
           <h1 class="fx-h1" style="margin:0;font-family:{FontStack};font-size:27px;line-height:34px;font-weight:700;letter-spacing:-0.5px;color:{TextPrimary};">{E(heading)}</h1>
         </td></tr>
         """;
-
 
     /// <summary>
     /// Who sent this, how to reach them, and why this person has it.

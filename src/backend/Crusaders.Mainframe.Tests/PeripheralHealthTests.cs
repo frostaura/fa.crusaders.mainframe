@@ -2432,7 +2432,9 @@ public class PeripheralHealthTests
     {
         var mail = EmailTemplates.BookingRefundedForOutOfServiceBox(
             WaiverClub, "player@test.local", "Court 4", 8m);
-        var body = mail.PlainBody!;
+        // Unwrapped: a DoesNotContain against a 72-column body passes whenever the phrase
+        // it forbids happens to straddle a break. See MailText.
+        var body = MailText.Unwrap(mail.PlainBody);
 
         Assert.Equal("Refunded — the box on Court 4 is out of service", mail.Subject);
         Assert.Contains("Your booking has been refunded in full", body);
@@ -2440,7 +2442,7 @@ public class PeripheralHealthTests
             "Nobody checked in on Court 4 at Riverside Racquet Club during your booking, and the " +
             "box on that court is out of service — it could not open the court, and it will never " +
             "send the club a record of anyone who played.",
-            Unwrap(body));
+            body);
 
         // The claim this sentence is NOT allowed to make any more, asserted absent as well as
         // replaced. Its two predecessors both said something false about the COURT rather than
@@ -2454,12 +2456,12 @@ public class PeripheralHealthTests
         Assert.DoesNotContain("No court box was answering", body);
         Assert.Contains("Refunded: 8.00 credits", body);
         Assert.Contains("Penalty: None", body);
-        Assert.Contains("You have not been marked down for missing it, and nothing has been deducted.", Unwrap(body));
+        Assert.Contains("You have not been marked down for missing it, and nothing has been deducted.", body);
         Assert.Contains(
             "Because that box is out of service it will not send the club anything further, so " +
             "this refund is final. If you did get onto the court, tell the desk rather than " +
             "waiting for it to correct itself.",
-            Unwrap(body));
+            body);
 
         // The one sentence this template exists to NOT make. S6 cannot reach a board the API
         // refuses, so a member who did play must be sent to the desk, not told to wait.
@@ -2477,22 +2479,24 @@ public class PeripheralHealthTests
     public void Every_sentence_of_the_outage_waiver_mail()
     {
         var mail = EmailTemplates.BookingRefundedForOutage(WaiverClub, "player@test.local", "Court 4", 8m);
-        var body = mail.PlainBody!;
+        // Unwrapped: a DoesNotContain against a 72-column body passes whenever the phrase
+        // it forbids happens to straddle a break. See MailText.
+        var body = MailText.Unwrap(mail.PlainBody);
 
         Assert.Equal("Refunded — Court 4 was offline", mail.Subject);
         Assert.Contains("Your booking has been refunded in full", body);
         Assert.Contains(
             "The court controller at Riverside Racquet Club was offline during your booking on " +
             "Court 4, so the lights could not be released against your name.",
-            Unwrap(body));
+            body);
         Assert.Contains("Refunded: 8.00 credits", body);
         Assert.Contains("Penalty: None", body);
-        Assert.Contains("You have not been marked down for missing it, and nothing has been deducted.", Unwrap(body));
+        Assert.Contains("You have not been marked down for missing it, and nothing has been deducted.", body);
         Assert.Contains(
             "If you did get onto the court, the box uploads its record when it reconnects and the " +
             "booking settles as played — the refund is reversed and you are charged the original " +
             "price, with no penalty either way.",
-            Unwrap(body));
+            body);
 
         // The sentence this one must not make: its board is still in service, so telling the
         // member the refund is final would be false in the direction that costs them a court.
@@ -2522,9 +2526,4 @@ public class PeripheralHealthTests
     private static readonly Crusaders.Mainframe.Api.Email.ClubIdentity WaiverClub =
         new("Riverside Racquet Club", "+27 31 555 0188", "desk@riverside.review.test");
 
-    /// <summary>
-    /// The text part wrapped at 72 columns, un-wrapped, so a sentence can be asserted as the
-    /// sentence it is rather than as whatever line breaks it happened to land on.
-    /// </summary>
-    private static string Unwrap(string text) => text.Replace('\n', ' ');
 }

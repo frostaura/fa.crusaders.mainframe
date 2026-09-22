@@ -251,12 +251,12 @@ public class AdminOverdraftBookingTests
             "Court 1", "Sat 06 Sep 09:00", "15 min", 8m, 192m, 15, 30m));
 
         // Both bodies: the explanation is worth nothing in the half the member is not shown.
-        foreach (var body in new[] { overdrawn.HtmlBody, overdrawn.PlainBody! })
+        foreach (var body in new[] { overdrawn.HtmlBody, MailText.Unwrap(overdrawn.PlainBody) })
         {
             Assert.Contains("The club made this booking for you", body);
             Assert.Contains("Top up to clear it", body);
         }
         Assert.DoesNotContain("The club made this booking for you", ordinary.HtmlBody);
-        Assert.DoesNotContain("The club made this booking for you", ordinary.PlainBody!);
+        Assert.DoesNotContain("The club made this booking for you", MailText.Unwrap(ordinary.PlainBody));
     }
 }
