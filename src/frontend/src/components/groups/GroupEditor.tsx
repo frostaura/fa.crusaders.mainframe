@@ -176,7 +176,11 @@ export function GroupEditor({
         )}
         {draft.mode === "flat_per_slice" && (
           <div className="space-y-1">
-            <Label htmlFor="group-flat">Credits per slot</Label>
+            {/* Not "Credits per slot": that is a unit the product no longer writes anywhere a
+                member or an admin can read. The sentence under this field restates the typed
+                figure through `formatMoney`, with the club's own symbol on it, so the label's
+                job is to name the thing rather than to carry a unit of its own. */}
+            <Label htmlFor="group-flat">Price per slot</Label>
             <Input
               id="group-flat" className="min-h-11" inputMode="decimal" value={draft.flatPrice}
               onChange={(e) => set("flatPrice", e.target.value)}

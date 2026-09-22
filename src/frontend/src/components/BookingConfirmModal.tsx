@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Modal } from "./Modal";
 import { Button, Label, fieldClassName } from "./Button";
 import { CostSummary, OverdraftNotice, Refusal, ShortfallPrompt } from "./BookingConfirmParts";
-import { formatCredits } from "../lib/utils";
+import { formatMoney } from "../lib/utils";
 
 export type BookingIntent = {
   courtId: string;
@@ -58,7 +58,7 @@ type Props = {
   intent: BookingIntent;
   balanceCredits: number | null;
   /**
-   * Members to offer when an admin books on behalf, each with the credit the club last
+   * Members to offer when an admin books on behalf, each with the balance the club last
    * read for them. Empty for a member.
    */
   members: { userId: string; name: string; balanceCredits: number | null }[];
@@ -73,7 +73,7 @@ type Props = {
  *
  * <p>
  * None of that existed. The confirmation was the grid cell itself turning orange and
- * relabelling to "Reserve for 50.00 cr?" — no court, no time, no duration, no balance —
+ * relabelling to "Reserve for R50.00?" — no court, no time, no duration, no balance —
  * and it disarmed after three seconds, so a member who stopped to read the price tapped
  * a control that had already gone back to idle and nothing happened at all. There was
  * no way for a slow reader to book.
@@ -119,7 +119,7 @@ export function BookingConfirmModal({ intent, balanceCredits, members, isAdmin, 
   // disabled. The other two (cancel on a member's behalf, block a court) worked, which
   // is why it looked whole.
   //
-  // A block is free and a member booking spends the member's credit — and §8 lets an
+  // A block is free and a member booking spends the member's own wallet — and §8 lets an
   // admin push that member into a negative balance deliberately. Neither is the
   // viewer's money, so neither is the viewer's balance to fail.
   const spendingOwnCredit = !free && !chargedToSomeoneElse;
@@ -186,7 +186,7 @@ export function BookingConfirmModal({ intent, balanceCredits, members, isAdmin, 
  * <p>
  * §8: "The confirmation modal shows the member's name, their balance, the price and the
  * balance it will leave." Only the refusal panel used to carry the two figures, so a desk
- * spending the credit of a member who COULD afford it never saw whose money it was
+ * spending the wallet of a member who COULD afford it never saw whose money it was
  * spending, how much they had, or what it left them. The balance is null unless the member
  * is the one being charged, so no other mode can render somebody else's wallet.
  * </p>
@@ -205,7 +205,7 @@ function pickedMember(members: Props["members"], memberId: string, charged: bool
  * <p>
  * The override REPLACES the ordinary confirm rather than sitting beside it, so there is no
  * frame in which a desk that has just been told a member is short can press a button
- * labelled "Book for 50.00 cr" and be surprised by what it does. It is a danger button and
+ * labelled "Book for R50.00" and be surprised by what it does. It is a danger button and
  * it states, in its own label, the balance it will leave behind.
  * </p>
  *
@@ -234,16 +234,16 @@ function ConfirmActions(props: {
 
           The action is affirmative (it books a court) and its CONSEQUENCE is not: it pushes a
           member into a negative balance on a desk clerk's judgement, and the label says so in
-          figures. A thumbs-up beside "leaves -12.00 cr" is the software approving of that.
+          figures. A thumbs-up beside "leaves -R12.00" is the software approving of that.
           `destructive` draws no thumb at all, settles instead of snapping, and keeps the
           danger variant the button already wore.
         */
         <Button intent="destructive" variant="danger" onClick={() => onSubmit(true)} disabled={busy}>
-          {busy ? "Booking…" : `Book anyway — leaves ${formatCredits(shortfall.current - shortfall.required)}`}
+          {busy ? "Booking…" : `Book anyway — leaves ${formatMoney(shortfall.current - shortfall.required)}`}
         </Button>
       ) : (
         <Button intent="affirm" onClick={() => onSubmit(false)} disabled={busy || blocked}>
-          {busy ? "Booking…" : free ? "Block the court" : `Book for ${formatCredits(cost)}`}
+          {busy ? "Booking…" : free ? "Block the court" : `Book for ${formatMoney(cost)}`}
         </Button>
       )}
     </div>
@@ -259,8 +259,8 @@ type Mode = "self" | "member" | "block";
  * N-F11: an admin opens on "on behalf of a member", not on their own wallet. §8 is explicit
  * that "a desk account's balance is zero permanently, because it never plays", so defaulting
  * to "My own booking" made the FIRST state of this dialog, on every slot, every time, a
- * refusal of the person who had just opened it — `Balance now 0.00 cr · Balance after
- * -50.00 cr`, "That's more than you have", and a disabled Book button — and the admin had to
+ * refusal of the person who had just opened it — `Balance now R0.00 · Balance after
+ * -R50.00`, "That's more than you have", and a disabled Book button — and the admin had to
  * notice the select and change it before the dialog did anything useful. "My own booking" is
  * still there for an admin who does play: it is the default that was wrong, not the option.
  * </p>

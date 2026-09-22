@@ -238,7 +238,7 @@ export function CreditsBadge() {
         /**
          * Up is `success-strong`. Down is `text-secondary` — deliberately not red.
          *
-         * Spending your own credit on a court you chose is not an error, and a red number in
+         * Spending your own money on a court you chose is not an error, and a red number in
          * the header over a successful booking is the app telling a member off for using it.
          * Red is reserved for money leaving unexpectedly, which in this product is only the
          * cancellation penalty — and that has its own dialog with the figure in it.

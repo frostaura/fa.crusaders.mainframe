@@ -4,7 +4,7 @@ import { BulkResultList, BulkResultActions } from "./BulkResultList";
 import { newKey } from "./BulkCancelSheet";
 import { endpoints, type ScheduleDay } from "../lib/api";
 import { clubClock } from "../lib/clubClock";
-import { formatCredits } from "../lib/utils";
+import { formatMoney } from "../lib/utils";
 import { describeFailure } from "../lib/errors";
 import { readBookResults, summariseBook, type BulkRow } from "../lib/bulkResults";
 import { bookMoneyLine, guestMoneyLine, haltSentence, RETRY_OVERDRAWN_LABEL } from "../lib/bulkCopy";
@@ -31,7 +31,7 @@ type Who =
  *
  * <p>
  * <b>`insufficient_balance` halts the batch, and the retry is offered with the figures.</b>
- * Every other refusal is per-item and the loop continues; a payer who runs out of credit
+ * Every other refusal is per-item and the loop continues; a payer who runs out of money
  * mid-batch is different, because continuing produces a jagged half-booked league night. The
  * retry goes out under the SAME idempotency key, so the items that landed answer `duplicate`
  * rather than being booked and charged twice.
@@ -122,7 +122,7 @@ export function BulkBookSheet({ day, slots, members, actorUserId, onClose, onSet
           <li key={keyOf(s)} className="flex items-baseline gap-2 p-2">
             <span className="font-medium">{clubClock(s.startsAtUtc, day.timezone)}</span>
             <span>{s.courtName}</span>
-            <span className="ml-auto text-text-secondary">{formatCredits(s.priceCredits)}</span>
+            <span className="ml-auto text-text-secondary">{formatMoney(s.priceCredits)}</span>
           </li>
         ))}
       </ul>
@@ -174,7 +174,7 @@ function WhoPicker({ who, members, actorUserId, onChange }: {
           {members.map((m) => (
             <option key={m.userId} value={m.userId}>
               {m.name}{m.userId === actorUserId ? " (you)" : ""}
-              {m.balanceCredits !== null ? ` — ${formatCredits(m.balanceCredits)}` : ""}
+              {m.balanceCredits !== null ? ` — ${formatMoney(m.balanceCredits)}` : ""}
             </option>
           ))}
         </select>

@@ -31,7 +31,7 @@ function Harness({ withField = false, initialFocus }: { withField?: boolean; ini
         >
           <button>Keep looking</button>
           {withField && <input id="reason" aria-label="Reason" />}
-          <button>Book for 50.00 cr</button>
+          <button>Book for R50.00</button>
         </Modal>
       )}
     </>
@@ -83,7 +83,7 @@ describe("Tab does not walk out of it", () => {
     render(<Harness />);
     open();
     const first = screen.getByRole("button", { name: "Keep looking" });
-    const last = screen.getByRole("button", { name: "Book for 50.00 cr" });
+    const last = screen.getByRole("button", { name: "Book for R50.00" });
 
     act(() => { last.focus(); });
     // Measured before: the third Tab reached "Skip to main content" — outside the dialog the
@@ -96,7 +96,7 @@ describe("Tab does not walk out of it", () => {
     render(<Harness />);
     open();
     const first = screen.getByRole("button", { name: "Keep looking" });
-    const last = screen.getByRole("button", { name: "Book for 50.00 cr" });
+    const last = screen.getByRole("button", { name: "Book for R50.00" });
 
     act(() => { first.focus(); });
     // Measured before: six Shift+Tabs reached an "Available" grid cell behind the scrim.
@@ -116,7 +116,7 @@ describe("Tab does not walk out of it", () => {
   it("leaves every key that is not Tab alone", () => {
     render(<Harness />);
     open();
-    const last = screen.getByRole("button", { name: "Book for 50.00 cr" });
+    const last = screen.getByRole("button", { name: "Book for R50.00" });
     act(() => { last.focus(); });
     fireEvent.keyDown(document, { key: "ArrowDown" });
     // A trap that swallowed arrow keys would break every tablist, menu and select inside a
@@ -174,7 +174,7 @@ describe("an overlay click never discards what somebody typed", () => {
   it("counts a picked option as something typed", () => {
     const onClose = vi.fn();
     render(
-      <Modal title="Adjust credit" onClose={onClose}>
+      <Modal title="Adjust the wallet" onClose={onClose}>
         <select aria-label="Reason">
           <option value="">Choose…</option>
           <option value="goodwill">Goodwill</option>

@@ -15,7 +15,7 @@ import { cn } from "../lib/utils";
  * <pre>
  * focus AFTER open : { tag: "BUTTON", label: "Book Court 4 at 23:15…", inDialog: false }
  *   tab1 -> "Keep looking"         inDialog: true
- *   tab2 -> "Book for 50.00 cr"    inDialog: true
+ *   tab2 -> "Book for R50.00"      inDialog: true
  *   tab3 -> "Skip to main content" inDialog: FALSE   &lt;- walked out of the modal
  *   6 x Shift+Tab -> "Available"   inDialog: FALSE   &lt;- into the grid behind the scrim
  * after Escape     : focus = "Book Court 1 at 23:15…" &lt;- NOT the Court 4 cell that opened it
@@ -31,7 +31,7 @@ import { cn } from "../lib/utils";
  * <p>
  * <b>And the fourth, which is not about focus.</b> It closed on <em>any</em> overlay click, so
  * a mis-tap beside the dialog silently discarded a typed rejection reason, suspension reason or
- * credit adjustment. Below, an overlay click on a dialog somebody has typed into is ignored and
+ * wallet adjustment. Below, an overlay click on a dialog somebody has typed into is ignored and
  * said out loud; Escape still closes, because Escape is a deliberate gesture and a mis-tap is
  * not. That asymmetry is the whole design.
  * </p>

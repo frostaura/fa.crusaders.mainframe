@@ -143,7 +143,7 @@ describe("ConfirmButton", () => {
    * <b>There is no timer, and this is the third position this file has held on that.</b>
    *
    * <p>
-   * 3000 ms first: on the booking grid a member who paused to read "Reserve for 50.00 cr?"
+   * 3000 ms first: on the booking grid a member who paused to read "Reserve for R50.00?"
    * tapped a control that had already gone back to idle, so the second tap re-armed instead
    * of confirming and a slow reader could tap for ever without booking anything. Removed,
    * which left an armed destructive control on an admin screen loaded indefinitely. Then

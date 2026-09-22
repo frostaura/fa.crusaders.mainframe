@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Modal } from "./Modal";
 import { Button, fieldClassName } from "./Button";
 import { endpoints, type CancellationQuote } from "../lib/api";
-import { formatCredits } from "../lib/utils";
+import { formatMoney } from "../lib/utils";
 import { describeBookingError } from "../lib/bookingErrors";
 
 type Props = {
@@ -29,8 +29,8 @@ type Props = {
  * There was no modal. The whole confirmation was a grid cell whose label changed from
  * "Mine" to "Confirm cancel", stating no amount, no penalty and no attendance, and the
  * message afterwards read "Booking cancelled — refund pending." whatever had actually
- * happened. It said that when 50.00 credits came back. It said it when 35.00 came back
- * and 15.00 was kept as a penalty the member was never warned about. And it said it —
+ * happened. It said that when R50.00 came back. It said it when R35.00 came back
+ * and R15.00 was kept as a penalty the member was never warned about. And it said it —
  * word for word — to a member who had already scanned in at the box and therefore lost
  * the entire price, with nothing on screen mentioning that the court was lit.
  * </p>
@@ -116,7 +116,7 @@ export function CancelBookingModal(props: Props) {
  *
  * <p>
  * An admin is not the member. The dialog used to tell a desk account that "the full
- * 50.00 cr goes back to YOUR credit" and that "YOU'VE already checked in", about somebody
+ * R50.00 goes back to YOUR wallet" and that "YOU'VE already checked in", about somebody
  * else's court and somebody else's scan, with the member never named anywhere in it — so
  * nothing on screen could catch a wrong slot clicked on a crowded grid.
  * </p>
@@ -154,7 +154,7 @@ function WaiveControl(props: {
           checked={waive}
           onChange={(e) => setWaive(e.target.checked)}
         />
-        <span>Waive the {formatCredits(penaltyCredits)} penalty (logged against your account)</span>
+        <span>Waive the {formatMoney(penaltyCredits)} penalty (logged against your account)</span>
       </label>
       {waive && (
         <div className="space-y-1">
@@ -182,10 +182,20 @@ function WaiveControl(props: {
  * the product used to hide completely.
  *
  * <p>
+ * <b>"credit" became "wallet", and that is a rewrite rather than a substitution.</b> The word
+ * was doing two jobs — the unit on a number ("50.00 cr") and the noun for the place the money
+ * lives ("your credit"). The owner's ruling is about the first, and swapping the noun for the
+ * symbol would have produced "goes back to your R". "Wallet" is what the rest of the product
+ * already calls it: the chip is a wallet, the route is <code>/wallet</code>, and the top-up
+ * copy says "adds to your wallet". A member who has never heard the word "credit" in a club
+ * loses nothing.
+ * </p>
+ *
+ * <p>
  * `subject` is the booking's own player, non-null exactly when an admin is cancelling on
  * somebody else's behalf, and it changes the voice of all three: §7 says "refunds always
  * go to the booking's player", and every sentence here was written in the first person.
- * A desk was told the money came back to "your credit" — an account whose balance is zero
+ * A desk was told the money came back to "your wallet" — an account whose balance is zero
  * permanently and never moved — and, worse, that "<b>you've</b> already checked in and the
  * lights have been on" about a scan somebody else made at a court the admin was not at.
  * The member was never named, so nothing in the dialog could catch a wrong slot clicked on
@@ -194,7 +204,7 @@ function WaiveControl(props: {
  */
 function Consequence(props: { quote: CancellationQuote; waived: boolean; subject: string | null }) {
   const { quote, waived, subject } = props;
-  const whose = subject ? `${subject}'s credit` : "your credit";
+  const whose = subject ? `${subject}'s wallet` : "your wallet";
 
   if (quote.checkedIn) {
     return (
@@ -204,7 +214,7 @@ function Consequence(props: { quote: CancellationQuote; waived: boolean; subject
             ? `${subject} has already checked in and the lights have been on, so nothing is refunded.`
             : "You've already checked in and the lights have been on, so nothing is refunded."}
         </strong>{" "}
-        The {formatCredits(quote.amountChargedCredits)} paid for this court stays spent.
+        The {formatMoney(quote.amountChargedCredits)} paid for this court stays spent.
       </p>
     );
   }
@@ -216,8 +226,8 @@ function Consequence(props: { quote: CancellationQuote; waived: boolean; subject
     return (
       <p className="text-sm rounded-lg bg-warning-soft text-warning-strong p-3">
         <strong>Cancelling within the penalty window.</strong>{" "}
-        A {quote.penaltyPct}% penalty of {formatCredits(penalty)} is deducted and{" "}
-        <strong>{formatCredits(refund)}</strong> goes back to {whose}.
+        A {quote.penaltyPct}% penalty of {formatMoney(penalty)} is deducted and{" "}
+        <strong>{formatMoney(refund)}</strong> goes back to {whose}.
       </p>
     );
   }
@@ -225,7 +235,7 @@ function Consequence(props: { quote: CancellationQuote; waived: boolean; subject
   return (
     <p className="text-sm rounded-lg bg-success-soft text-success-strong p-3">
       <strong>Cancelling now is free.</strong>{" "}
-      The full {formatCredits(refund)} goes back to {whose}.
+      The full {formatMoney(refund)} goes back to {whose}.
       {waived && quote.penaltyCredits > 0 && " (Penalty waived by you.)"}
     </p>
   );
