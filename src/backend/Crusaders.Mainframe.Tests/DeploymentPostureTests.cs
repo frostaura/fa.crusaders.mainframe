@@ -33,7 +33,13 @@ public sealed class DeploymentPostureTests
     /// tests do. The compose files are deliberately not copied to the output directory: a copy
     /// is a second thing to keep in step, and these tests exist to read the shipped ones.
     /// </summary>
-    private static string RepoRoot()
+    /// <remarks>
+    /// Internal rather than private so the one other class that reads shipped configuration —
+    /// <see cref="InherentAdminTests"/>, on the two <c>appsettings</c> files — walks up the same
+    /// way. A second copy of this loop is a second thing to keep in step, which is the very
+    /// argument the summary above makes against copying the files themselves.
+    /// </remarks>
+    internal static string RepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)

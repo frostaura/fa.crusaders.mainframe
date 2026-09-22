@@ -53,25 +53,37 @@ public sealed class TestHost : IAsyncDisposable
     /// anything: with a database per host, tenant B is empty because it is a different
     /// store, and the assertion holds even with every query filter deleted.
     /// </summary>
-    public static async Task<TestHost> CreateAsync(string? tenantSlug = null, string? sharedDatabaseName = null)
+    /// <param name="inherentAdminEmails">
+    /// <c>Admins:Emails</c> for this host. Null — the default every other test gets — leaves the
+    /// section absent, which is what an ordinary deployment has and is why adding the feature
+    /// changed no existing fixture.
+    /// </param>
+    public static async Task<TestHost> CreateAsync(
+        string? tenantSlug = null, string? sharedDatabaseName = null, IReadOnlyList<string>? inherentAdminEmails = null)
     {
         var dbName = sharedDatabaseName ?? $"crusaders-test-{Guid.NewGuid():N}";
         var slug = tenantSlug ?? "crusaders";
         var mediaRoot = Path.Combine(Path.GetTempPath(), $"crusaders-media-{Guid.NewGuid():N}");
 
+        var settings = new Dictionary<string, string?>
+        {
+            ["Jwt:Secret"] = "TEST_SECRET_THAT_IS_DEFINITELY_LONG_ENOUGH_FOR_HS256",
+            ["Jwt:Issuer"] = "test",
+            ["Jwt:Audience"] = "test",
+            ["App:PublicBaseUrl"] = "http://localhost:8088",
+            ["Smtp:Host"] = "stub",
+            ["Smtp:From"] = "noreply@test.local",
+            ["Media:StoragePath"] = mediaRoot,
+        };
+        for (var i = 0; i < (inherentAdminEmails?.Count ?? 0); i++)
+        {
+            settings[$"{InherentAdmins.SectionKey}:{i}"] = inherentAdminEmails![i];
+        }
+
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Jwt:Secret"] = "TEST_SECRET_THAT_IS_DEFINITELY_LONG_ENOUGH_FOR_HS256",
-                ["Jwt:Issuer"] = "test",
-                ["Jwt:Audience"] = "test",
-                ["App:PublicBaseUrl"] = "http://localhost:8088",
-                ["Smtp:Host"] = "stub",
-                ["Smtp:From"] = "noreply@test.local",
-                ["Media:StoragePath"] = mediaRoot,
-            }).Build());
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
+        services.AddSingleton<IConfiguration>(configuration);
         services.AddDbContext<MainframeDbContext>(o => o.UseInMemoryDatabase(dbName));
 
         var tenantContext = new TenantContext();
@@ -117,6 +129,10 @@ public sealed class TestHost : IAsyncDisposable
         services.AddScoped<BookingService>();
         services.AddScoped<CourtActivationService>();
         services.AddScoped<BiometricService>();
+        // Mirrors Program.cs. The options object is read once and shared; the service that
+        // applies it is per-request, because it writes through the request's DbContext.
+        services.AddSingleton(InherentAdmins.From(configuration));
+        services.AddScoped<InherentAdminService>();
         services.AddScoped<AuthService>();
         services.AddScoped<MemberApprovalService>();
         services.AddScoped<AdminBlockService>();
