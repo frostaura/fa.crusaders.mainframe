@@ -91,6 +91,21 @@ export function AuthShell({ subline, children, className }: AuthShellProps) {
             <p className="mt-1 text-sm text-brand-soft">{subline}</p>
           </div>
         </div>
+        {/*
+          THE TIN RULE, and it is the same one the club's email stationery carries under its
+          masthead. The blue band alone is a blue band; the red line under it is the thing that
+          makes a Crusaders screen recognisably a Crusaders screen, and the point of putting it
+          in both places is that an email and a screen should not look like two different clubs.
+
+          `bg-brand-tin` rather than an arbitrary value: brand.tin is a literal hex in the
+          palette, so Tailwind emits a real rule for it — a `var()`-backed token here would
+          silently emit nothing the moment anybody added an opacity modifier, which is a trap
+          this repository has already been caught by once.
+
+          aria-hidden and no height in the accessible tree: it carries no information a screen
+          reader has any use for. The card's own overflow-hidden clips it to the rounded corners.
+        */}
+        <div aria-hidden="true" className="h-1 bg-brand-tin" />
         <div className="px-5 py-6 sm:px-6 sm:py-7">{children}</div>
       </div>
     </div>
