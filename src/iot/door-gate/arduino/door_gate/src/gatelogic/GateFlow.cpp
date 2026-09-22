@@ -191,6 +191,7 @@ ScanDecision refuseUnreadable(bool offline) {
 
 ScanDecision refuseRelocking(bool offline) {
   ScanDecision decision;
+  decision.askedToWait = true;
   setReason(decision, kReasonRelocking);
   decision.queueEvent = offline;
   decision.eventKind = eventq::Kind::UnknownScan;
@@ -208,6 +209,7 @@ ScanDecision refuseTooFast(bool offline) {
 void markRelocking(ScanDecision& decision) {
   decision.released = false;
   decision.unlockMs = 0U;
+  decision.askedToWait = true;
   // The RECORD changes too, not just the lamp. An event still saying `gate_open`
   // would be this board reporting an opening it refused, which is the one thing
   // an audit trail must never contain.
