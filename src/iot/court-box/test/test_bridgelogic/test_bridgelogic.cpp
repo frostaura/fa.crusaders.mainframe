@@ -363,7 +363,7 @@ void test_scan_flow_a_refusal_is_a_decision_the_roster_does_not_second_guess() {
 
   const Case cases[] = {
       {"{\"activated\":false,\"reason\":\"no_booking\"}", "NO BOOKING", "SEE THE DESK"},
-      {"{\"activated\":false,\"reason\":\"insufficient_balance\"}", "TOO FEW CREDITS", "TOP UP & RETRY"},
+      {"{\"activated\":false,\"reason\":\"insufficient_balance\"}", "BALANCE TOO LOW", "TOP UP & RETRY"},
       {"{\"activated\":false,\"reason\":\"wrong_court\",\"court_number\":42}", "WRONG COURT", "SEE THE DESK"},
       {"{\"activated\":false,\"reason\":\"not_recognised\"}", "NOT RECOGNISED", "SEE THE DESK"},
       {"{\"activated\":false,\"reason\":\"not_chargeable\"}", "SEE THE DESK", ""},
@@ -574,7 +574,7 @@ void test_walkup_every_refusal_reads_differently_and_says_whether_it_was_decided
   };
 
   const Case cases[] = {
-      {402U, "{\"error\":\"insufficient_balance\"}", "TOO FEW CREDITS", true, true},
+      {402U, "{\"error\":\"insufficient_balance\"}", "BALANCE TOO LOW", true, true},
       {409U, "{\"error\":\"court_in_use\"}", "COURT NOT FREE", true, true},
       {409U, "{\"error\":\"no_time_available\"}", "NO TIME BEFORE", true, true},
       {409U, "{\"error\":\"purchase_ended\"}", "PURCHASE ENDED", true, true},
@@ -716,7 +716,7 @@ void test_walkup_recognised_comes_from_the_body_never_from_the_status() {
     TEST_ASSERT_EQUAL_MESSAGE(c.recognised, r.outcome.recognised, c.body);
   }
   // A bare status keeps its screen and loses only the window.
-  TEST_ASSERT_EQUAL_STRING("TOO FEW CREDITS",
+  TEST_ASSERT_EQUAL_STRING("BALANCE TOO LOW",
                            bridgelogic::onWalkUpResponse(402U, "", 0U, 1U, 30U).outcome.line1);
   TEST_ASSERT_EQUAL_STRING("COURT NOT FREE",
                            bridgelogic::onWalkUpResponse(409U, "", 0U, 1U, 30U).outcome.line1);
@@ -2772,7 +2772,7 @@ const ScreenContract kContract[] = {
     {bridgelogic::ScreenId::Grant, "COURT", false, false},
     {bridgelogic::ScreenId::AlreadyOn, "COURT", false, false},
     {bridgelogic::ScreenId::NoBooking, "BOOKING", true, false},
-    {bridgelogic::ScreenId::InsufficientBalance, "CREDITS", false, false},
+    {bridgelogic::ScreenId::InsufficientBalance, "BALANCE", false, false},
     {bridgelogic::ScreenId::WrongCourt, "COURT", false, false},
     {bridgelogic::ScreenId::TooEarly, "EARLY", false, false},
     {bridgelogic::ScreenId::NotRecognised, "CODE", false, false},
@@ -2823,6 +2823,18 @@ bool endsMidWord(const char* row, size_t cutAt) {
   // Cut inside the text: the character at the cut, and the one before it, must
   // not both be part of one word.
   return row[cutAt] != ' ' && row[cutAt - 1U] != ' ';
+}
+
+/// Rule 1, for a two-line `!LCD` refusal: both lines survive a 1602's clip as a
+/// complete message. Row 2 may be empty — several refusals are one line — and
+/// an empty row is not a broken sentence.
+void assertRefusalFitsTheSafeSubset(const court::Outcome& outcome, const char* label) {
+  TEST_ASSERT_TRUE_MESSAGE(outcome.line1[0] != '\0', label);
+  const char* const rows[] = {outcome.line1, outcome.line2};
+  for (size_t i = 0U; i < 2U; ++i) {
+    TEST_ASSERT_TRUE_MESSAGE(strlen(rows[i]) <= court::kSafeSubsetCols, label);
+    TEST_ASSERT_FALSE_MESSAGE(endsMidWord(rows[i], court::kSafeSubsetCols), label);
+  }
 }
 
 void test_every_screen_holds_the_layout_contract() {
@@ -2884,6 +2896,78 @@ void test_every_screen_holds_the_layout_contract() {
     if (contract.actionRowFromMap) {
       TEST_ASSERT_TRUE_MESSAGE(screen.rows[3][0] != '\0', label);
     }
+  }
+}
+
+// The SAME contract, over the OTHER path to the glass.
+//
+// ScreenScript's table is not the only thing that paints words: every refusal
+// ScanFlow and WalkUp compose goes to the Mega as a two-line `!LCD` frame
+// (court_bridge/main.cpp), and until this test those lines had no width gate of
+// any kind — `court::detail::setLine` clips them at court::kLineLen, which is
+// TWENTY on the panel that is fitted. So a reworded refusal could be a whole
+// sentence on the 2004A and half of one on a 1602, which is precisely the
+// failure the safe-subset contract exists to make impossible, and nothing
+// anywhere would have said so. Found while moving this path off the word
+// "CREDITS"; the wording that prompted it fits, and the gap it sat in did not.
+//
+// Driven through the public entry points rather than over the tables, because
+// the tables are file-local and because it is the COMPOSED line a member reads.
+void test_every_refusal_line_holds_the_safe_subset_contract() {
+  const bridgelogic::ScanFlow flow;
+  const int16_t courts[devlink::kMaxCourts] = {1, 2, 3, 4};
+
+  // Every `reason` ScanFlow.cpp names, plus one it does not.
+  const char* const kScanBodies[] = {
+      "{\"activated\":false,\"reason\":\"no_booking\"}",
+      "{\"activated\":false,\"reason\":\"insufficient_balance\"}",
+      "{\"activated\":false,\"reason\":\"wrong_court\"}",
+      "{\"activated\":false,\"reason\":\"not_recognised\"}",
+      "{\"activated\":false,\"reason\":\"not_chargeable\"}",
+      "{\"activated\":false,\"reason\":\"ended\"}",
+      "{\"activated\":false,\"reason\":\"too_early\",\"starts_in_seconds\":5400}",
+      "{\"activated\":false,\"reason\":\"too_early\"}",
+      "{\"activated\":false,\"reason\":\"something_newer\"}",
+      "{\"activated\":false}",
+  };
+
+  // Every `error` WalkUp.cpp names, plus the bare statuses it falls back on.
+  struct WalkUpCase {
+    uint16_t status;
+    const char* body;
+  };
+  const WalkUpCase kWalkUps[] = {
+      {402U, "{\"error\":\"insufficient_balance\"}"},
+      {409U, "{\"error\":\"court_in_use\"}"},
+      {409U, "{\"error\":\"no_time_available\"}"},
+      {409U, "{\"error\":\"purchase_ended\"}"},
+      {400U, "{\"error\":\"not_recognised\"}"},
+      {400U, "{\"error\":\"court_not_on_device\"}"},
+      {400U, "{\"error\":\"minutes_out_of_range\",\"max_minutes\":20}"},
+      {400U, "{\"error\":\"activation_refused\"}"},
+      // The one refusal whose second line is composed rather than fixed. The
+      // club's opening time is `HH:mm`, so "OPENS 06:00" is its widest form.
+      {400U, "{\"error\":\"club_closed\",\"opens_at\":\"06:00\"}"},
+      {400U, "{\"error\":\"club_closed\"}"},
+      {402U, ""},
+      {409U, ""},
+      {0U, ""},
+      {503U, ""},
+  };
+
+  const size_t scanCount = sizeof(kScanBodies) / sizeof(kScanBodies[0]);
+  for (size_t i = 0U; i < scanCount; ++i) {
+    const court::Outcome outcome =
+        flow.onActivateResponse(200U, kScanBodies[i], len(kScanBodies[i]), courts, 4U).outcome;
+    assertRefusalFitsTheSafeSubset(outcome, kScanBodies[i]);
+  }
+
+  const size_t walkUpCount = sizeof(kWalkUps) / sizeof(kWalkUps[0]);
+  for (size_t i = 0U; i < walkUpCount; ++i) {
+    const court::Outcome outcome =
+        bridgelogic::onWalkUpResponse(kWalkUps[i].status, kWalkUps[i].body, len(kWalkUps[i].body), 1U, 30U)
+            .outcome;
+    assertRefusalFitsTheSafeSubset(outcome, kWalkUps[i].body);
   }
 }
 
@@ -3156,6 +3240,7 @@ int main(int, char**) {
   RUN_TEST(test_the_clock_advances_between_heartbeats_and_wraps_at_midnight);
   RUN_TEST(test_a_clock_nobody_has_confirmed_for_too_long_blanks_rather_than_lies);
   RUN_TEST(test_every_screen_holds_the_layout_contract);
+  RUN_TEST(test_every_refusal_line_holds_the_safe_subset_contract);
   RUN_TEST(test_a_sixteen_character_name_still_fits_the_panel);
   RUN_TEST(test_the_screens_say_what_the_table_says_they_say);
   RUN_TEST(test_a_row_that_would_name_a_time_blanks_when_the_clock_is_not_trusted);

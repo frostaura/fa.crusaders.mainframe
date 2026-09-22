@@ -5,7 +5,7 @@ import {
   UNLIMITED, WEEK_IN_READING_ORDER, capOverrideIsInert, countSlots, formatClock, intersect,
   type Interval,
 } from "./groupRules";
-import { formatZar } from "./utils";
+import { formatMoney } from "./utils";
 
 /**
  * Every sentence the groups surface says — GOAL items 3 + 19.
@@ -279,14 +279,19 @@ export function capResolutionSentence(
 // Price
 // ---------------------------------------------------------------------------------------
 
-/** A multiplier written the way it was typed — 7500 bps is "0.75×", not "7500". */
+/**
+ * A multiplier written the way it was typed — 7500 bps is "0.75×", not "7500".
+ *
+ * <p>
+ * <b>Bare, and it stays bare.</b> A multiplier is a ratio, not an amount, so putting the club's
+ * symbol on it would be the mirror image of the defect this whole change is about: a figure
+ * wearing a unit that is not its own. This is now the only trailing-zero trimmer in the file —
+ * `creditsFace` used to trim amounts the same way, and amounts go through `formatMoney`, which
+ * keeps the two decimals the ledger keeps.
+ * </p>
+ */
 function multiplierFace(bps: number): string {
   return String(Number((bps / 10_000).toFixed(4)));
-}
-
-/** Credits with no trailing noise: 8, 8.5, 8.25 — never "8.00" and never "8.2500000001". */
-export function creditsFace(credits: number): string {
-  return String(Number(credits.toFixed(2)));
 }
 
 /**
@@ -304,24 +309,35 @@ export function slicePriceLine(input: {
 }): string {
   if (input.unknown) return "The club's system hasn't said what one slot costs under this choice yet.";
   if (input.mode === "inherit_court") {
-    return `One slot costs what the court costs — ${creditsFace(input.courtPrice)} credits.`;
+    return `One slot costs what the court costs — ${formatMoney(input.courtPrice)}.`;
   }
   if (input.mode === "multiplier") {
     const face = typeof input.multiplierBps === "number" ? multiplierFace(input.multiplierBps) : "?";
-    return `One slot costs ${creditsFace(input.credits)} credits — ${face}× the court's `
-      + `${creditsFace(input.courtPrice)}.`;
+    return `One slot costs ${formatMoney(input.credits)} — ${face}× the court's `
+      + `${formatMoney(input.courtPrice)}.`;
   }
-  return `One slot costs ${creditsFace(input.credits)} credits, whatever the court charges.`;
+  return `One slot costs ${formatMoney(input.credits)}, whatever the court charges.`;
 }
 
 /**
- * The club's top-up rate in the block it actually sells — D3 §6.2.
+ * The club's top-up rate in the block it actually sells — D3 §6.2. <b>A conversion boundary.</b>
  *
  * <p>
  * R100 rather than per rand, because `topup_block_zar` is what a member hands over and "1.6"
- * means nothing to a volunteer. The consequence clause is the point: a number of credits is
- * only meaningful against what a court costs, and that is the arithmetic nobody should be doing
+ * means nothing to a volunteer. The consequence clause is the point: an amount is only
+ * meaningful against what a court costs, and that is the arithmetic nobody should be doing
  * standing at a desk.
+ * </p>
+ *
+ * <p>
+ * <b>This sentence spans both legs, so it must name both.</b> It read "R100.00 buys 160
+ * credits", which worked only while a card payment and a wallet wore different units. They now
+ * wear the same symbol, and "R100.00 buys R160.00" reads as a typo rather than as the 60%
+ * bonus it is — the exact failure `currency.ts` names. So it says what is PAID and what is
+ * ADDED, in that order, and the wallet is named as the destination. A club on 1:1 reads
+ * "R100.00 paid adds R100.00", which is honest rather than silly: it is the club that has
+ * chosen no bonus, and a clause that quietly vanished at parity would leave this screen saying
+ * nothing about the rate at all.
  * </p>
  */
 export function ratePerBlockSentence(input: {
@@ -335,14 +351,14 @@ export function ratePerBlockSentence(input: {
     // the symbol is the club's too, the old literal named a currency it may not take either.
     return "The club's system hasn't said what a top-up buys.";
   }
-  const credits = Number((input.creditsPerZar * input.blockZar).toFixed(2));
-  // Through the one formatter, so this sentence and the top-up screen — which quotes the
-  // same `topup_block_zar` — cannot name the club's money two different ways.
-  const head = `${formatZar(input.blockZar)} buys ${creditsFace(credits)} credits`;
+  const added = Number((input.creditsPerZar * input.blockZar).toFixed(2));
+  // Both legs through the one formatter, so this sentence and the top-up screen — which quotes
+  // the same `topup_block_zar` — cannot name the club's money two different ways.
+  const head = `${formatMoney(input.blockZar)} paid adds ${formatMoney(added)} to the member's wallet`;
   if (input.slicePrice <= 0) {
     return `${head}. Courts cost nothing at the moment, so that buys any number of slots.`;
   }
-  const slots = Math.floor(credits / input.slicePrice);
+  const slots = Math.floor(added / input.slicePrice);
   if (slots === 0) return `${head} — not enough for a single slot at today's prices.`;
   return `${head} — about ${slotsWord(slots)} at today's prices.`;
 }
@@ -362,9 +378,17 @@ export function ratePerBlockSentence(input: {
  *
  * <p>
  * The top-up clause is grounded: the rate is locked onto the top-up row at purchase
- * (`LockTopUpConversionRate`), so credit already bought genuinely does not move. Saying so is
- * not reassurance, it is the difference between an admin making the change and an admin
- * refusing to.
+ * (`LockTopUpConversionRate`), so what the member already holds genuinely does not move.
+ * Saying so is not reassurance, it is the difference between an admin making the change and an
+ * admin refusing to.
+ * </p>
+ *
+ * <p>
+ * <b>The top-up clause is the file's second conversion boundary.</b> It read "will buy 240
+ * credits per R100.00 instead of 160" — three figures in two units, which now collapse into
+ * one. So it names the two legs in order and says which is which: the top-up a member PAYS,
+ * and what it ADDS to their wallet. Written the lazy way — "will buy R240.00 per R100.00" —
+ * it reads as an arithmetic error rather than as the rate change it is.
  * </p>
  */
 export function groupChangeConsequence(input: {
@@ -379,14 +403,14 @@ export function groupChangeConsequence(input: {
   const { name } = input;
   if (typeof input.creditsPerBlockBefore === "number" && typeof input.creditsPerBlockAfter === "number"
     && input.creditsPerBlockBefore !== input.creditsPerBlockAfter) {
-    out.push(`${name}'s next top-up will buy ${creditsFace(input.creditsPerBlockAfter)} credits per `
-      + `${formatZar(input.blockZar ?? 100)} instead of ${creditsFace(input.creditsPerBlockBefore)}. `
-      + "Credit he already has does not change.");
+    out.push(`${name}'s next ${formatMoney(input.blockZar ?? 100)} top-up will add `
+      + `${formatMoney(input.creditsPerBlockAfter)} to his wallet instead of `
+      + `${formatMoney(input.creditsPerBlockBefore)}. What he already holds does not change.`);
   }
   if (typeof input.sliceBefore === "number" && typeof input.sliceAfter === "number"
     && input.sliceBefore !== input.sliceAfter) {
-    out.push(`A slot will cost ${name} ${creditsFace(input.sliceAfter)} credits instead of `
-      + `${creditsFace(input.sliceBefore)}.`);
+    out.push(`A slot will cost ${name} ${formatMoney(input.sliceAfter)} instead of `
+      + `${formatMoney(input.sliceBefore)}.`);
   }
   if (out.length > 0) return out;
   const knewSomething = typeof input.sliceBefore === "number" || typeof input.creditsPerBlockBefore === "number";

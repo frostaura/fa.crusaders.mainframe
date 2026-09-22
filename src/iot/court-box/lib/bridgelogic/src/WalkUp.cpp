@@ -35,7 +35,16 @@ struct ErrorLines {
 
 constexpr ErrorLines kErrors[] = {
     // Priced: the API knows who this is and what they have.
-    {"insufficient_balance", "TOO FEW CREDITS", "TOP UP & RETRY", true},
+    //
+    // "BALANCE", never "CREDITS": the product writes every amount with the club's
+    // own currency symbol and no unit word, so the glass may not be the one
+    // surface still naming an invented unit. It is also what the legacy panel
+    // already said (protocol/Codec.cpp's LOW BALANCE) and the word the API's own
+    // `insufficient_balance` uses. Fifteen columns, inside the sixteen the
+    // safe-subset contract allows. Kept identical to ScanFlow.cpp's row for the
+    // same reason the two paths share every other screen: one situation, one
+    // sentence, whichever path decided it.
+    {"insufficient_balance", "BALANCE TOO LOW", "TOP UP & RETRY", true},
     // A verdict about the court, for a member the API identified.
     {"court_in_use", "COURT NOT FREE", "SCAN TO START", true},
     // Distinct from court_in_use: the court is empty and the next player is
@@ -108,7 +117,7 @@ constexpr char kClubClosed[] = "club_closed";
 /// so nothing here recognises anybody.
 court::Outcome byStatus(uint16_t status) {
   if (status == 402U) {
-    return lines("TOO FEW CREDITS", "TOP UP & RETRY");
+    return lines("BALANCE TOO LOW", "TOP UP & RETRY");
   }
   if (status == 409U) {
     return lines("COURT NOT FREE", "SCAN TO START");

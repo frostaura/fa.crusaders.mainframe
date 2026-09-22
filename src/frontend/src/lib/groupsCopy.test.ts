@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   GROUP_REFUSAL_CODES, MOST_RESTRICTIVE_STANDING, addMembersLabel, addResultLine,
   capResolutionSentence, deleteRefusalSentence, emptyIntersectionSentence, explainGroupRefusal,
@@ -7,6 +7,9 @@ import {
 } from "./groupsCopy";
 import { UNLIMITED, capOverrideIsInert } from "./groupRules";
 import { ApiError } from "./api";
+import { resetClubCurrencySymbol, setClubCurrencySymbol } from "./currency";
+
+afterEach(resetClubCurrencySymbol);
 
 /**
  * Every sentence this surface says, in one module — the discipline `doorsCopy` established.
@@ -216,20 +219,20 @@ describe("the per-day ceiling, said where it is set — item 19", () => {
   });
 });
 
-describe("what a slot costs, in the club's own units", () => {
+describe("what a slot costs, in the club's own money", () => {
   it("says the court's own price for a group that inherits", () => {
     expect(slicePriceLine({ mode: "inherit_court", credits: 8, courtPrice: 8 }))
-      .toBe("One slot costs what the court costs — 8 credits.");
+      .toBe("One slot costs what the court costs — R8.00.");
   });
 
   it("says the multiplier AND the figure it produces", () => {
     expect(slicePriceLine({ mode: "multiplier", credits: 6, courtPrice: 8, multiplierBps: 7_500 }))
-      .toBe("One slot costs 6 credits — 0.75× the court's 8.");
+      .toBe("One slot costs R6.00 — 0.75× the court's R8.00.");
   });
 
   it("says a flat price is flat, because that is the part an admin misreads", () => {
     expect(slicePriceLine({ mode: "flat_per_slice", credits: 12, courtPrice: 8 }))
-      .toBe("One slot costs 12 credits, whatever the court charges.");
+      .toBe("One slot costs R12.00, whatever the court charges.");
   });
 
   it("will not print a price the club's system has not sent", () => {
@@ -237,47 +240,115 @@ describe("what a slot costs, in the club's own units", () => {
       .toBe("The club's system hasn't said what one slot costs under this choice yet.");
   });
 
+  it("leaves the multiplier a bare number, because a multiplier is not money", () => {
+    // 0.75× is a ratio. Putting a currency symbol on it would be the mirror of the defect
+    // this whole change is about: a figure wearing a unit that is not its own.
+    const line = slicePriceLine({ mode: "multiplier", credits: 6, courtPrice: 8, multiplierBps: 7_500 });
+    expect(line).toContain("0.75×");
+    expect(line).not.toContain("R0.75");
+  });
+
+  it("names every price in the club's own symbol, never a hardcoded rand", () => {
+    setClubCurrencySymbol("CHF");
+    expect(slicePriceLine({ mode: "multiplier", credits: 6, courtPrice: 8, multiplierBps: 7_500 }))
+      .toBe("One slot costs CHF6.00 — 0.75× the court's CHF8.00.");
+  });
+
+  it("carries no 'credits' and no 'cr' in any arm", () => {
+    const modes = ["inherit_court", "multiplier", "flat_per_slice"] as const;
+    for (const mode of modes) {
+      const line = slicePriceLine({ mode, credits: 6, courtPrice: 8, multiplierBps: 7_500 });
+      expect(line).not.toMatch(/credits?/i);
+      expect(line).not.toMatch(/\bcr\b/);
+    }
+  });
+
   /**
-   * D3 §6.2: R100 is the club's actual top-up block, and "1.6" means nothing to a volunteer.
+   * <b>A conversion boundary — one of the two in this file.</b>
    *
-   * The figure now comes through `formatZar`, so it carries the club's own symbol and the
-   * two decimals the top-up screen already shows for this very setting. The sentence and the
-   * screen it is about used to name `topup_block_zar` two different ways.
+   * <p>
+   * D3 §6.2: R100 is the club's actual top-up block, and "1.6" means nothing to a volunteer.
+   * The sentence used to read "R100.00 buys 160 credits", which worked only while the two
+   * quantities wore different units. With one symbol on both, "R100.00 buys R160.00" would
+   * read as a typo rather than as a 60% bonus — so the sentence must name what LEAVES the card
+   * and what ARRIVES in the wallet, which is the rule `currency.ts` imposes on every sentence
+   * spanning the two legs.
+   * </p>
    */
-  it("puts the rate in top-up blocks, with what that actually buys", () => {
+  it("names what a member pays and what lands in their wallet, not one figure buying another", () => {
     expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrice: 50 }))
-      .toBe("R100.00 buys 160 credits — about 3 slots at today's prices.");
+      .toBe("R100.00 paid adds R160.00 to the member's wallet — about 3 slots at today's prices.");
+  });
+
+  it("says it plainly for a club that gives no bonus at all", () => {
+    // A club on 1:1 reads "R100.00 paid adds R100.00", which is honest rather than silly: it
+    // is the club that has chosen no bonus, and a sentence that vanished at parity would leave
+    // the screen saying nothing about the rate at all.
+    expect(ratePerBlockSentence({ creditsPerZar: 1, blockZar: 100, slicePrice: 50 }))
+      .toBe("R100.00 paid adds R100.00 to the member's wallet — about 2 slots at today's prices.");
   });
 
   it("says one slot in the singular and none in words", () => {
     expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrice: 160 }))
       .toContain("about 1 slot");
     expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrice: 400 }))
-      .toBe("R100.00 buys 160 credits — not enough for a single slot at today's prices.");
+      .toBe("R100.00 paid adds R160.00 to the member's wallet — not enough for a single slot at today's prices.");
   });
 
   it("does not divide by a free court", () => {
     expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrice: 0 }))
-      .toBe("R100.00 buys 160 credits. Courts cost nothing at the moment, so that buys any number of slots.");
+      .toBe("R100.00 paid adds R160.00 to the member's wallet. Courts cost nothing at the moment, so that buys any number of slots.");
   });
 
   it("says nothing it does not know", () => {
     expect(ratePerBlockSentence({ creditsPerZar: null, blockZar: 100, slicePrice: 50 }))
       .toBe("The club's system hasn't said what a top-up buys.");
+    expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: null, slicePrice: 50 }))
+      .toBe("The club's system hasn't said what a top-up buys.");
+  });
+
+  it("writes both legs in the club's own symbol, so neither can be read as the other's currency", () => {
+    setClubCurrencySymbol("CHF");
+    expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrice: 50 }))
+      .toBe("CHF100.00 paid adds CHF160.00 to the member's wallet — about 3 slots at today's prices.");
+  });
+
+  it("keeps every decimal a four-decimal rate can produce", () => {
+    // `credits_per_zar_*` takes four decimals. A club on 1.6667 quoted at 1.67 is a quote the
+    // ledger will not honour; here that surfaces as the amount the wallet actually gains.
+    expect(ratePerBlockSentence({ creditsPerZar: 1.6667, blockZar: 100, slicePrice: 50 }))
+      .toContain("adds R166.67 to the member's wallet");
   });
 });
 
 describe("the consequence of moving somebody between groups, stated BEFORE saving", () => {
-  it("says what their next top-up buys and what their existing credit does", () => {
+  /**
+   * <b>The second conversion boundary.</b> "will buy 240 credits per R100.00 instead of 160"
+   * named two quantities in two units; with one unit it has to say which leg is which.
+   */
+  it("says what their next top-up costs and what it adds, and what they already hold", () => {
     expect(groupChangeConsequence({
       name: "Daniel", creditsPerBlockBefore: 160, creditsPerBlockAfter: 240, blockZar: 100,
-    })).toContain("Daniel's next top-up will buy 240 credits per R100.00 instead of 160. "
-      + "Credit he already has does not change.");
+    })).toContain("Daniel's next R100.00 top-up will add R240.00 to his wallet instead of R160.00. "
+      + "What he already holds does not change.");
+  });
+
+  it("carries no 'credits' into either leg of that sentence", () => {
+    const said = groupChangeConsequence({
+      name: "Daniel", creditsPerBlockBefore: 160, creditsPerBlockAfter: 240, blockZar: 100,
+    });
+    expect(said.join(" ")).not.toMatch(/credits?/i);
+  });
+
+  it("falls back to the club's standard block when none was sent", () => {
+    expect(groupChangeConsequence({
+      name: "Daniel", creditsPerBlockBefore: 160, creditsPerBlockAfter: 240,
+    })[0]).toContain("Daniel's next R100.00 top-up");
   });
 
   it("says what a slot will cost them, which is the half a group actually changes", () => {
     const said = groupChangeConsequence({ name: "Daniel", sliceBefore: 8, sliceAfter: 12 });
-    expect(said).toContain("A slot will cost Daniel 12 credits instead of 8.");
+    expect(said).toContain("A slot will cost Daniel R12.00 instead of R8.00.");
   });
 
   it("says plainly when nothing about their money changes", () => {

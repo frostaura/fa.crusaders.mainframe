@@ -18,7 +18,13 @@ struct ReasonLines {
 
 constexpr ReasonLines kReasons[] = {
     {"no_booking", "NO BOOKING", "SEE THE DESK"},
-    {"insufficient_balance", "TOO FEW CREDITS", "TOP UP & RETRY"},
+    // "BALANCE", never "CREDITS": the product writes every amount with the
+    // club's own currency symbol and no unit word, so the glass may not be the
+    // one surface still naming an invented unit. It is also the vocabulary the
+    // legacy panel already used (protocol/Codec.cpp's LOW BALANCE) and the word
+    // the API's own `insufficient_balance` reason uses. Fifteen columns, inside
+    // the sixteen the safe-subset contract allows.
+    {"insufficient_balance", "BALANCE TOO LOW", "TOP UP & RETRY"},
     {"wrong_court", "WRONG COURT", "SEE THE DESK"},
     {"not_recognised", "NOT RECOGNISED", "SEE THE DESK"},
     {"not_chargeable", "SEE THE DESK", ""},
