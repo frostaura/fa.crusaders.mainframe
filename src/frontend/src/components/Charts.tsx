@@ -6,7 +6,7 @@ import { createElement } from "react";
 import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
 import { formatCredits } from "../lib/utils";
 import { chartColors } from "../lib/tokens";
-import { ChartFrame, CHART_HEIGHT } from "./ChartFrame";
+import { ChartFrame } from "./ChartFrame";
 
 /**
  * The chart palette, from the token module rather than from a copy.

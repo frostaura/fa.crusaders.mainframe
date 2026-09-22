@@ -2,10 +2,16 @@ import { ResponsiveContainer } from "recharts";
 import { useEffect, useRef, useState } from "react";
 
 /**
- * How tall every chart in this product is drawn. Shared with <c>Charts.tsx</c>, which is the
- * only other file that needs it, so it is stated once here and imported there.
+ * How tall every chart in this product is drawn.
+ *
+ * <p>
+ * Module-private: <c>ChartFrame</c> is the only thing that has ever needed it, because the
+ * frame is what gives a chart its height in the first place. It was briefly exported when this
+ * component moved out of <c>Charts.tsx</c>, which left an export nobody imported and put a
+ * non-component export beside a component — the shape <c>react-refresh</c> warns about.
+ * </p>
  */
-export const CHART_HEIGHT = 240;
+const CHART_HEIGHT = 240;
 
 type FrameSize = { width: number };
 
