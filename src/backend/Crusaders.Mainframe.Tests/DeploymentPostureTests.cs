@@ -174,7 +174,22 @@ public sealed class DeploymentPostureTests
         }
     }
 
-    /// <summary>A body that is not JSON is a 400 that says nothing about this server.</summary>
+    /// <summary>
+    /// A body that is not JSON is a 400 that says nothing about this server.
+    ///
+    /// <para>
+    /// <b>The tenant is carried on the HOST HEADER, and the four cases were green about nothing
+    /// until it was.</b> This asked for <c>?tenant={slug}</c>, which
+    /// <c>TenantResolutionMiddleware</c> has never read — it resolves from the JWT's
+    /// <c>tenant_slug</c>, then the host subdomain, then <c>Tenancy:DefaultTenantSlug</c> — so
+    /// an anonymous request fell through to the configured default, which no
+    /// <c>Production</c>-environment factory seeds (the dev <c>Seeder</c> does not run there).
+    /// The middleware answered <c>404 tenant_not_found</c> before the JSON binder was ever
+    /// reached, and <see cref="AssertOpaque"/> then checked a refusal this test is not about:
+    /// the leak assertions passed, the status assertion is what caught it. A malformed body has
+    /// to get as far as the model binder to say anything about the binder.
+    /// </para>
+    /// </summary>
     [SkippableTheory]
     [InlineData("{")]
     [InlineData("{\"email\": }")]
@@ -187,8 +202,11 @@ public sealed class DeploymentPostureTests
         await using var factory = new TestWebAppFactory { ConnectionString = _pg.ConnectionString, EnvironmentName = "Production" };
         var club = await DoorClub.SeedAsync(factory, "posture");
 
-        var response = await factory.CreateClient().PostAsync(
-            $"/api/v1/auth/login?tenant={club.Slug}", new StringContent(body, Encoding.UTF8, "application/json"));
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Host = $"{club.Slug}.crusaders.test";
+
+        var response = await client.PostAsync(
+            "/api/v1/auth/login", new StringContent(body, Encoding.UTF8, "application/json"));
 
         AssertOpaque(response.StatusCode, await response.Content.ReadAsStringAsync());
     }

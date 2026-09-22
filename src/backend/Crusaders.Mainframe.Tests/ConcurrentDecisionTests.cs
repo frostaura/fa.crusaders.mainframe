@@ -626,6 +626,20 @@ public sealed class ConcurrentDecisionTests
         // Starts 30 minutes ago, ends 30 minutes from now — swept mid-slot.
         var bookingId = await SeedDueNoShowAsync(factory, club);
 
+        // The rebooking below starts five minutes from now and runs fifteen, and this fixture's
+        // club shuts at local midnight (day_end_minute 1440). The operating-hours rule is
+        // evaluated on the slot's END, so at 23:50 UTC a fifteen-minute slot ends at minute 1445
+        // and is refused OutOfHours — the test then reads as the exclusion constraint rejecting a
+        // row it never saw, for the last quarter-hour of every UTC day. The subject here is the
+        // constraint, not closing time, so the club moves rather than the slot: twenty minutes is
+        // everything this test consumes of the club's day from now. See TestHost.DayZoneFor and
+        // memory/gotchas-clock.md.
+        using (var zoneScope = factory.Services.CreateScope())
+        {
+            await TestHost.ClearOfClosingAsync(
+                zoneScope.ServiceProvider.GetRequiredService<MainframeDbContext>(), club.TenantId, 20);
+        }
+
         await Worker(factory).TickAsync(default);
 
         using (var check = RequestScope(factory, club))
