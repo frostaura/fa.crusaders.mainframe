@@ -116,10 +116,9 @@ public sealed class CurrencySymbolTests
     [Fact]
     public void A_topup_confirmation_is_denominated_in_the_clubs_own_currency()
     {
-        var mail = EmailTemplates.TopUpConfirmation(
-            "member@test.local", amountZar: 100m, creditsAdded: 160m,
-            conversionRate: 1.6m, balanceAfterCredits: 210m, reference: "1089250",
-            currencySymbol: "CHF");
+        var mail = EmailTemplates.TopUpConfirmation("member@test.local", new TopUpConfirmationDetails(
+            AmountZar: 100m, CreditsAdded: 160m, ConversionRate: 1.6m,
+            BalanceAfterCredits: 210m, Reference: "1089250", CurrencySymbol: "CHF"));
 
         Assert.Contains("CHF100.00", mail.HtmlBody);
         // The rate is quoted per ONE of the club's own currency, not per a hardcoded rand.

@@ -29,6 +29,32 @@ namespace Crusaders.Mainframe.Api.Email;
 /// heads-up it is entitled to.
 /// </para>
 /// </param>
+/// <summary>
+/// What a member needs to reconcile a top-up: what left their card, what arrived in their
+/// wallet, and the rate between the two.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Its own record rather than a seventh positional parameter, on exactly the argument
+/// <see cref="ClubCancellation"/> already makes here: the club's currency symbol took
+/// <see cref="EmailTemplates.TopUpConfirmation"/> past the complexity gate's six, and five of
+/// the seven were a decimal or a string that would transpose silently.
+/// </para>
+/// <para>
+/// <b><see cref="CurrencySymbol"/> denominates <see cref="AmountZar"/> and nothing else on
+/// this record.</b> <see cref="CreditsAdded"/> and <see cref="BalanceAfterCredits"/> are
+/// credits, they convert at <see cref="ConversionRate"/>, and at the shipped 1.6 they are not
+/// the same size as the money — see <see cref="Services.CurrencySymbol"/>.
+/// </para>
+/// </remarks>
+public sealed record TopUpConfirmationDetails(
+    decimal AmountZar,
+    decimal CreditsAdded,
+    decimal ConversionRate,
+    decimal BalanceAfterCredits,
+    string Reference,
+    string CurrencySymbol);
+
 public sealed record BookingConfirmationDetails(
     string CourtName,
     string StartsAtLocal,
@@ -544,24 +570,22 @@ public static class EmailTemplates
     /// R100.00 / Credited R160.00" would tell a member the club had given them R60.
     /// </para>
     /// </summary>
-    public static EmailMessage TopUpConfirmation(
-        string to, decimal amountZar, decimal creditsAdded, decimal conversionRate,
-        decimal balanceAfterCredits, string reference, string currencySymbol) => new(
+    public static EmailMessage TopUpConfirmation(string to, TopUpConfirmationDetails d) => new(
         To: to,
-        Subject: $"Top-up confirmed — {Cr(creditsAdded)}",
+        Subject: $"Top-up confirmed — {Cr(d.CreditsAdded)}",
         HtmlBody:
             $"""
             <div style="font-family:Figtree,sans-serif;color:#0F172A;max-width:560px">
               <h2 style="margin:0 0 12px">Your wallet has been topped up</h2>
               <table style="border-collapse:collapse;font-size:14px">
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Paid</td><td><strong>{Zar(amountZar, currencySymbol)}</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Rate</td><td><strong>{Num(conversionRate)} credits per {currencySymbol}1</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Credited</td><td><strong>{Cr(creditsAdded)}</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Balance after</td><td><strong>{Cr(balanceAfterCredits)}</strong></td></tr>
-                <tr><td style="padding:6px 16px 6px 0;color:#475569">Reference</td><td>{System.Net.WebUtility.HtmlEncode(reference)}</td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Paid</td><td><strong>{Zar(d.AmountZar, d.CurrencySymbol)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Rate</td><td><strong>{Num(d.ConversionRate)} credits per {d.CurrencySymbol}1</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Credited</td><td><strong>{Cr(d.CreditsAdded)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Balance after</td><td><strong>{Cr(d.BalanceAfterCredits)}</strong></td></tr>
+                <tr><td style="padding:6px 16px 6px 0;color:#475569">Reference</td><td>{System.Net.WebUtility.HtmlEncode(d.Reference)}</td></tr>
               </table>
               <p style="margin-top:16px;font-size:13px;color:#475569">
-                Credits are what you book court time with. {currencySymbol} is only the payment rail.
+                Credits are what you book court time with. {d.CurrencySymbol} is only the payment rail.
               </p>
               {FooterHtml}
             </div>

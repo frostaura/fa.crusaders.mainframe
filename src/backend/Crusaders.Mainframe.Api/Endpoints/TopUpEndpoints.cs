@@ -481,9 +481,13 @@ public static partial class TopUpEndpoints
         {
             EmailDispatch.InBackground(
                 c.Email, c.Logger,
-                EmailTemplates.TopUpConfirmation(
-                    recipient, pending.AmountZar, credits, rate, balanceAfter,
-                    interp.PaymentId ?? pending.IdempotencyKey, CurrencySymbol.For(settings)),
+                EmailTemplates.TopUpConfirmation(recipient, new TopUpConfirmationDetails(
+                    AmountZar: pending.AmountZar,
+                    CreditsAdded: credits,
+                    ConversionRate: rate,
+                    BalanceAfterCredits: balanceAfter,
+                    Reference: interp.PaymentId ?? pending.IdempotencyKey,
+                    CurrencySymbol: CurrencySymbol.For(settings))),
                 $"top-up confirmation for {pending.Id}");
         }
 
