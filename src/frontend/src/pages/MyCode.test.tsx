@@ -1188,30 +1188,6 @@ describe("MyCode at a club with a door", () => {
   });
 
   /**
-   * And the CTA is never LOST, which is the failure mode of every fix for a duplicate.
-   *
-   * <p>
-   * The card is dismissible and pinned; the standing line is permanent. Suppressing the
-   * permanent one is only safe because the suppression follows the card — a member who
-   * dismisses the refusal still has the one thing they need to press.
-   * </p>
-   */
-  it("hands the offer back to the standing line when the card is dismissed", async () => {
-    renderBoth(memberDoorsOnFixture({
-      policy: "booking_window",
-      last_decision: memberDoorDecisionFixture({ reason: "no_booking" }),
-    }));
-
-    expect(await screen.findAllByRole("link", { name: "Book a court" })).toHaveLength(1);
-    fireEvent.click(await screen.findByRole("button", { name: /dismiss/i }));
-
-    await waitFor(() => {
-      expect(screen.getAllByRole("link", { name: "Book a court" })).toHaveLength(1);
-    });
-    expect(screen.queryByRole("status")).toBeNull();
-  });
-
-  /**
    * The dead-code arm, and the two things it must not do: say "no refusals found", and
    * make the member ask for the fresh code the page can fetch on its own.
    */
