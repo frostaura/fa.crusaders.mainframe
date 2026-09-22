@@ -3,6 +3,7 @@ import { fireEvent, screen } from "@testing-library/react";
 import WalletPage from "./Wallet";
 import { BalanceProvider } from "../lib/balance";
 import { ledgerRowFixture, renderPage, signIn, signOut, stubFetch } from "../test/harness";
+import { resetClubCurrencySymbol, setClubCurrencySymbol } from "../lib/currency";
 
 /**
  * The wallet, on the screen a member opens when they are arguing about their balance.
@@ -28,7 +29,7 @@ describe("Wallet — one balance, and a way to refresh it", () => {
   beforeEach(() => {
     vi.stubGlobal("EventSource", class { close() {} } as unknown as typeof EventSource);
   });
-  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); resetClubCurrencySymbol(); });
 
   const ROW = ledgerRowFixture();
 
@@ -48,14 +49,14 @@ describe("Wallet — one balance, and a way to refresh it", () => {
     ]);
     renderPage(<BalanceProvider><WalletPage /></BalanceProvider>);
 
-    expect(await screen.findByText("510.01")).toBeInTheDocument();
+    expect(await screen.findByText("R510.01")).toBeInTheDocument();
 
     // The control that did not exist. Pressing it is the member's own answer to "the
     // number at the top and the number in the middle do not match".
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
 
-    expect(await screen.findByText("517.01")).toBeInTheDocument();
-    expect(screen.queryByText("510.01")).not.toBeInTheDocument();
+    expect(await screen.findByText("R517.01")).toBeInTheDocument();
+    expect(screen.queryByText("R510.01")).not.toBeInTheDocument();
     // And the movement that explains the difference is now on the page, not missing.
     expect(screen.getByText("Desk credit")).toBeInTheDocument();
     expect(stub.calls.filter((c) => c.path.startsWith("/api/v1/wallet?")).length).toBeGreaterThan(1);
@@ -68,7 +69,7 @@ describe("Wallet — one balance, and a way to refresh it", () => {
     ]);
     renderPage(<BalanceProvider><WalletPage /></BalanceProvider>);
 
-    await screen.findByText("510.01");
+    await screen.findByText("R510.01");
 
     // Bounded. The endpoint returned every row a member had ever had, and the page
     // rendered all of them.
@@ -91,5 +92,87 @@ describe("Wallet — one balance, and a way to refresh it", () => {
     expect(await screen.findByText("Couldn't load wallet.")).toBeInTheDocument();
     // "No movements yet" over a failed fetch tells a member their history is gone.
     expect(screen.queryByText(/No movements yet/)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The figure itself, which is the whole reason a member opens this page.
+ *
+ * <p>
+ * It was composed here rather than by the shared formatter: <code>toFixed(2)</code> with the
+ * unit in a sibling <code>&lt;span&gt;credits&lt;/span&gt;</code>. That is the pattern the
+ * owner ruled out — the unit is now a symbol, it precedes the amount, and it is the club's.
+ * </p>
+ *
+ * <p>
+ * And a symbol is not speakable. The visible figure is hidden from the accessibility tree and
+ * a spoken one sits beside it, because a reader handed "R517.01" announces the R as a letter —
+ * which is the same defect "cr" had, in a different hat.
+ * </p>
+ */
+describe("Wallet — the balance figure wears the club symbol, and says itself out loud", () => {
+  const page = (balance: number) => ({
+    balance_credits: balance, entries: [], total_entries: 0, offset: 0, limit: 100,
+  });
+
+  beforeEach(() => {
+    vi.stubGlobal("EventSource", class { close() {} } as unknown as typeof EventSource);
+  });
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); resetClubCurrencySymbol(); });
+
+  const mount = (balance: number) => {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/wallet", body: page(balance) },
+    ]);
+    renderPage(<BalanceProvider><WalletPage /></BalanceProvider>);
+  };
+
+  it("writes the balance through the one formatter, with no unit hanging off it", async () => {
+    mount(517.01);
+
+    expect(await screen.findByText("R517.01")).toBeInTheDocument();
+    expect(screen.queryByText("credits")).toBeNull();
+    expect(screen.queryByText("517.01")).toBeNull();
+  });
+
+  it("says the balance out loud, rather than spelling the symbol as a letter", async () => {
+    mount(517.01);
+
+    expect(await screen.findByText("517.01 rand")).toBeInTheDocument();
+    // The visible one is out of the accessibility tree, so the figure is announced once.
+    expect(screen.getByText("R517.01")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("puts the sign outside the symbol on a wallet that has gone negative", async () => {
+    mount(-12.5);
+
+    // A late reversal can take a wallet below zero — see the settlement model. "R-12.50"
+    // reads as a symbol followed by a malformed number.
+    expect(await screen.findByText("-R12.50")).toBeInTheDocument();
+    expect(screen.getByText("\u221212.50 rand")).toBeInTheDocument();
+  });
+
+  it("carries a multi-character symbol, and a symbol it cannot name", async () => {
+    setClubCurrencySymbol("CHF");
+    mount(517.01);
+
+    expect(await screen.findByText("CHF517.01")).toBeInTheDocument();
+    expect(screen.getByText("517.01 Swiss francs")).toBeInTheDocument();
+  });
+
+  it("speaks a bare number for a symbol with no noun, rather than guessing at one", async () => {
+    setClubCurrencySymbol("\u20b8");
+    mount(517.01);
+
+    expect(await screen.findByText("\u20b8517.01")).toBeInTheDocument();
+    expect(screen.getByText("517.01")).toBeInTheDocument();
+  });
+
+  it("shows an empty ledger as empty without inviting a word the product no longer uses", async () => {
+    mount(0);
+
+    expect(await screen.findByText(/No movements yet/)).toBeInTheDocument();
+    expect(screen.queryByText(/admin credit/)).toBeNull();
   });
 });
