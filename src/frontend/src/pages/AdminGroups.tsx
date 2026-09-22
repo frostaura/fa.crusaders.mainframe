@@ -81,96 +81,53 @@ const BLANK: MemberGroup = {
   member_count: 0,
 };
 
-export function AdminGroupsPage() {
-  const toast = useToast();
-  const [settings, setSettings] = useState<Record<string, unknown> | null>(null);
-  const [groups, setGroups] = useState<MemberGroup[] | null>(null);
-  const [clubMembers, setClubMembers] = useState<ClubMember[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<unknown>(null);
-  const [panel, setPanel] = useState<Panel>(null);
-  const [weekPreviewId, setWeekPreviewId] = useState<string | null>(null);
-  const [draftGroup, setDraftGroup] = useState<MemberGroup | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<unknown>(null);
-  const [refusal, setRefusal] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    const [groupsRead, settingsRead, membersRead] = await Promise.allSettled([
-      adminEndpoints.memberGroups(),
-      endpoints.adminSettingsGet(),
-      endpoints.adminMembers(),
-    ]);
-    if (groupsRead.status === "fulfilled") { setGroups(groupsRead.value.groups); setError(null); }
-    else setError(groupsRead.reason);
-    if (settingsRead.status === "fulfilled") {
-      setSettings(settingsRead.value as unknown as Record<string, unknown>);
-    }
-    if (membersRead.status === "fulfilled") {
-      setClubMembers(membersRead.value.map((m) => ({
-        user_id: m.user_id, full_name: m.full_name, membership_number: m.membership_number,
-      })));
-    }
-    setLoading(false);
-  }, []);
-
-  // Reading on mount is what this effect is FOR, and `load` is async — every setState inside it
-  // runs in a promise callback rather than synchronously in the effect body. The rule cannot
-  // see through the `void`, so the directive is here, last line of its comment run and directly
-  // above the statement it is about.
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
-  useEffect(() => { void load(); }, [load]);
-
-  const club = useMemo<PaintedWeek>(() => clubWeek(settings ?? {}), [settings]);
+/**
+ * The club-wide numbers this page reasons against, read out of the settings blob once.
+ *
+ * <p>
+ * <b>`null` where the key is ABSENT, and that is the whole of "unknown is never false" here.</b>
+ * A club-wide cap the API has not shipped yet is not a club with no cap: the first reads
+ * "nobody is limited", which an admin would act on, and only the second is true. Three backend
+ * lanes were writing these keys while this screen was built, so every one of them could be
+ * missing on any given day.
+ * </p>
+ */
+function clubContextFrom(settings: Record<string, unknown> | null) {
   const numberFrom = (key: string, fallback: number) =>
     typeof settings?.[key] === "number" ? (settings[key] as number) : fallback;
-  const sliceMinutes = numberFrom("slice_minutes", 15);
-  const courtPrice = numberFrom("slice_price_credits", 0);
-  /*
-   * `null` where the key is ABSENT, and that is the whole of "unknown is never false" on this
-   * page. A club-wide cap the API has not shipped yet is not a club with no cap: the first
-   * reads "nobody is limited", which an admin would act on, and only the second is true.
-   * Three backend lanes are writing these keys while this screen is being built.
-   */
   const capFromSettings = (key: string) =>
     typeof settings?.[key] === "number" ? (settings[key] as number) : null;
-  const clubCaps = {
-    slotCap: capFromSettings("member_max_slots_per_day"),
-    minuteCap: capFromSettings("member_per_day_max_minutes"),
-    advanceDays: capFromSettings("advance_booking_days"),
+  return {
+    sliceMinutes: numberFrom("slice_minutes", 15),
+    courtPrice: numberFrom("slice_price_credits", 0),
+    clubCaps: {
+      slotCap: capFromSettings("member_max_slots_per_day"),
+      minuteCap: capFromSettings("member_per_day_max_minutes"),
+      advanceDays: capFromSettings("advance_booking_days"),
+    },
+    timezone: typeof settings?.timezone === "string" ? settings.timezone : undefined,
   };
-  const timezone = typeof settings?.timezone === "string" ? settings.timezone : undefined;
+}
 
-  /*
-   * The club's hours as they were when the open preview was computed. A preview is arithmetic
-   * over settings read at one instant, and settings are edited on another screen — so when a
-   * reload brings back different hours while a preview is open, the preview says so rather than
-   * quietly showing a week that is no longer the club's.
-   */
-  const [previewBasis, setPreviewBasis] = useState<string | null>(null);
-  const clubKey = JSON.stringify(club);
-  const previewStale = previewBasis !== null && previewBasis !== clubKey;
-
-  const openPanel = (next: Panel) => {
-    setRefusal(null);
-    setSaveError(null);
-    setPanel(next);
-    if (next?.kind === "member-preview") setPreviewBasis(clubKey);
-  };
-
-  const openWeekPreview = (id: string) => {
-    setRefusal(null);
-    setWeekPreviewId(id);
-    // The hours the preview below is arithmetic over. When a reload brings back different ones
-    // the preview says so rather than quietly showing a week that is no longer the club's.
-    setPreviewBasis(clubKey);
-  };
-
-  const chosen = panel && "id" in panel ? (groups ?? []).find((g) => g.id === panel.id) ?? null : null;
-  const weekPreviewGroup = weekPreviewId === null
-    ? null
-    : (groups ?? []).find((g) => g.id === weekPreviewId) ?? null;
-
+/**
+ * The three writes this page makes, and what each of them says when the club refuses.
+ *
+ * <p>
+ * Out of the component because they are the page's only real logic and none of it is about
+ * rendering. The two 409s on the delete path are the whole point of it: they are rendered as
+ * sentences with the way out in them — never as a code, and never as a toast that is gone
+ * before it has been read.
+ * </p>
+ */
+function useGroupWrites({ load, toast, setPanel, setDraftGroup, setSaving, setSaveError, setRefusal }: {
+  load: () => Promise<void>;
+  toast: ReturnType<typeof useToast>;
+  setPanel: (next: Panel) => void;
+  setDraftGroup: (next: MemberGroup | null) => void;
+  setSaving: (next: boolean) => void;
+  setSaveError: (next: unknown) => void;
+  setRefusal: (next: string | null) => void;
+}) {
   const save = async (id: string, body: MemberGroupBody) => {
     setSaving(true);
     setSaveError(null);
@@ -223,9 +180,267 @@ export function AdminGroupsPage() {
     }
   };
 
+  return { save, archive, remove };
+}
+
+/**
+ * The four things this page can have open over it, and which of them is open.
+ *
+ * <p>
+ * One component rather than four conditionals in the page's render: the page was 263 lines
+ * against a 200-line gate, and this is where most of its branching was — every panel is
+ * `open && <Panel/>`, and three of them also have to answer "open on WHICH group".
+ * </p>
+ *
+ * <p>
+ * Every callback here belongs to the page. This component decides nothing; it only knows
+ * which panel a given `Panel` value means.
+ * </p>
+ */
+function GroupPanels({
+  panel, editing, chosen, weekPreviewGroup, club, clubCaps, clubMembers, groups, settings,
+  sliceMinutes, courtPrice, timezone, saving, saveError, previewStale,
+  onSave, onClosePanel, onCloseWeekPreview, onMembersChanged,
+}: {
+  panel: Panel;
+  editing: MemberGroup | null;
+  chosen: MemberGroup | null;
+  weekPreviewGroup: MemberGroup | null;
+  club: PaintedWeek;
+  clubCaps: ReturnType<typeof clubContextFrom>["clubCaps"];
+  clubMembers: ClubMember[];
+  groups: MemberGroup[];
+  settings: Record<string, unknown> | null;
+  sliceMinutes: number;
+  courtPrice: number;
+  timezone: string | undefined;
+  saving: boolean;
+  saveError: unknown;
+  previewStale: boolean;
+  onSave: (body: MemberGroupBody) => void;
+  onClosePanel: () => void;
+  onCloseWeekPreview: () => void;
+  onMembersChanged: () => void;
+}) {
+  return (
+    <>
+    {editing && (
+      <GroupEditor
+        key={panel?.kind === "edit" ? panel.id : "new"}
+        group={editing}
+        club={club}
+        sliceMinutes={sliceMinutes}
+        courtPrice={courtPrice}
+        clubCaps={clubCaps}
+        creditsPerZar={settings?.credits_per_zar_regular as number | undefined}
+        blockZar={settings?.topup_block_zar as number | undefined}
+        saving={saving}
+        error={saveError}
+        onSave={onSave}
+        onCancel={onClosePanel}
+      />
+    )}
+
+    {panel?.kind === "members" && chosen && (
+      <GroupMembersPanel
+        group={chosen}
+        clubMembers={clubMembers}
+        timezone={timezone}
+        onClose={onClosePanel}
+        onChanged={onMembersChanged}
+      />
+    )}
+
+    {weekPreviewGroup && (
+      <GroupWeekPreview
+        group={weekPreviewGroup}
+        club={club}
+        sliceMinutes={sliceMinutes}
+        clubCaps={clubCaps}
+        stale={previewStale}
+        onClose={onCloseWeekPreview}
+      />
+    )}
+
+    {panel?.kind === "member-preview" && (
+      <MemberPreviewPanel
+        clubMembers={clubMembers}
+        groups={groups}
+        sliceMinutes={sliceMinutes}
+        onClose={onClosePanel}
+      />
+    )}
+    </>
+  );
+}
+
+/**
+ * The club's groups, in the three states a read can be in.
+ *
+ * <p>
+ * The error split is the point of it, and it is not cosmetic: rows the club has already given
+ * us are still the last true thing it said, so a failed RE-read keeps them and the band above
+ * this list says they are not being updated. Only a failed FIRST read — nothing to fall back
+ * on — reaches `StateBlock`'s error arm.
+ * </p>
+ */
+function GroupList({
+  groups, loading, error, club, sliceMinutes, courtPrice, settings,
+  onRetry, onEdit, onMembers, onPreview, onArchive, onDelete,
+}: {
+  groups: MemberGroup[] | null;
+  loading: boolean;
+  error: unknown;
+  club: PaintedWeek;
+  sliceMinutes: number;
+  courtPrice: number;
+  settings: Record<string, unknown> | null;
+  onRetry: () => void;
+  onEdit: (id: string) => void;
+  onMembers: (id: string) => void;
+  onPreview: (id: string) => void;
+  onArchive: (group: MemberGroup) => string | void | Promise<string | void>;
+  onDelete: (group: MemberGroup) => string | void | Promise<string | void>;
+}) {
+  return (
+    <StateBlock
+      loading={loading}
+      // Only where there is nothing to fall back on. Rows the club already gave us are still
+      // the last true thing it said; the band above is what stops them being a claim.
+      error={groups === null ? error : null}
+      action="read the club's groups"
+      codes={{}}
+      failedCaveat={GROUPS_READ_FAILED.replace("Couldn't read the club's groups. ", "")}
+      onRetry={onRetry}
+      empty={!loading && !error && (groups ?? []).length === 0}
+      emptyTitle={GROUPS_EMPTY_TITLE}
+    >
+      <div className="space-y-4">
+        {(groups ?? []).map((group) => (
+          <GroupCard
+            key={group.id}
+            group={group}
+            club={club}
+            sliceMinutes={sliceMinutes}
+            courtPrice={courtPrice}
+            creditsPerZar={settings?.credits_per_zar_regular as number | undefined}
+            blockZar={settings?.topup_block_zar as number | undefined}
+            onEdit={() => onEdit(group.id)}
+            onMembers={() => onMembers(group.id)}
+            onPreview={() => onPreview(group.id)}
+            onArchive={() => onArchive(group)}
+            onDelete={() => onDelete(group)}
+          />
+        ))}
+      </div>
+    </StateBlock>
+  );
+}
+
+/**
+ * Which group each open thing is about — three lookups that all answer "none" the same way.
+ *
+ * <p>
+ * `null` throughout, and never a fallback to the first group: a panel open on a group that has
+ * just been deleted by somebody else must close, not silently re-point at a different club
+ * group and accept an edit for it.
+ * </p>
+ *
+ * <p>
+ * The editor's own case is the odd one, and deliberately: an id of `""` means "being created",
+ * so it renders the draft rather than a lookup that can only fail.
+ * </p>
+ */
+function groupSelection(
+  panel: Panel,
+  groups: MemberGroup[] | null,
+  weekPreviewId: string | null,
+  draftGroup: MemberGroup | null,
+) {
+  const rows = groups ?? [];
+  const chosen = panel && "id" in panel ? rows.find((g) => g.id === panel.id) ?? null : null;
+  const weekPreviewGroup = weekPreviewId === null
+    ? null
+    : rows.find((g) => g.id === weekPreviewId) ?? null;
   const editing = panel?.kind === "edit"
     ? (panel.id === "" ? draftGroup ?? BLANK : chosen)
     : null;
+  return { chosen, weekPreviewGroup, editing };
+}
+
+export function AdminGroupsPage() {
+  const toast = useToast();
+  const [settings, setSettings] = useState<Record<string, unknown> | null>(null);
+  const [groups, setGroups] = useState<MemberGroup[] | null>(null);
+  const [clubMembers, setClubMembers] = useState<ClubMember[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
+  const [panel, setPanel] = useState<Panel>(null);
+  const [weekPreviewId, setWeekPreviewId] = useState<string | null>(null);
+  const [draftGroup, setDraftGroup] = useState<MemberGroup | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<unknown>(null);
+  const [refusal, setRefusal] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const [groupsRead, settingsRead, membersRead] = await Promise.allSettled([
+      adminEndpoints.memberGroups(),
+      endpoints.adminSettingsGet(),
+      endpoints.adminMembers(),
+    ]);
+    if (groupsRead.status === "fulfilled") { setGroups(groupsRead.value.groups); setError(null); }
+    else setError(groupsRead.reason);
+    if (settingsRead.status === "fulfilled") {
+      setSettings(settingsRead.value as unknown as Record<string, unknown>);
+    }
+    if (membersRead.status === "fulfilled") {
+      setClubMembers(membersRead.value.map((m) => ({
+        user_id: m.user_id, full_name: m.full_name, membership_number: m.membership_number,
+      })));
+    }
+    setLoading(false);
+  }, []);
+
+  // Reading on mount is what this effect is FOR, and `load` is async — every setState inside it
+  // runs in a promise callback rather than synchronously in the effect body. The rule cannot
+  // see through the `void`, so the directive is here, last line of its comment run and directly
+  // above the statement it is about.
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
+  useEffect(() => { void load(); }, [load]);
+
+  const club = useMemo<PaintedWeek>(() => clubWeek(settings ?? {}), [settings]);
+  const { sliceMinutes, courtPrice, clubCaps, timezone } = clubContextFrom(settings);
+
+  /*
+   * The club's hours as they were when the open preview was computed. A preview is arithmetic
+   * over settings read at one instant, and settings are edited on another screen — so when a
+   * reload brings back different hours while a preview is open, the preview says so rather than
+   * quietly showing a week that is no longer the club's.
+   */
+  const [previewBasis, setPreviewBasis] = useState<string | null>(null);
+  const clubKey = JSON.stringify(club);
+  const previewStale = previewBasis !== null && previewBasis !== clubKey;
+
+  const openPanel = (next: Panel) => {
+    setRefusal(null);
+    setSaveError(null);
+    setPanel(next);
+    if (next?.kind === "member-preview") setPreviewBasis(clubKey);
+  };
+
+  const openWeekPreview = (id: string) => {
+    setRefusal(null);
+    setWeekPreviewId(id);
+    // The hours the preview below is arithmetic over. When a reload brings back different ones
+    // the preview says so rather than quietly showing a week that is no longer the club's.
+    setPreviewBasis(clubKey);
+  };
+
+  const { chosen, weekPreviewGroup, editing } = groupSelection(panel, groups, weekPreviewId, draftGroup);
+
+  const { save, archive, remove } = useGroupWrites({
+    load, toast, setPanel, setDraftGroup, setSaving, setSaveError, setRefusal,
+  });
 
   return (
     <div className="space-y-6">
@@ -263,84 +478,43 @@ export function AdminGroupsPage() {
         </Button>
       </div>
 
-      <StateBlock
+      <GroupList
+        groups={groups}
         loading={loading}
-        // Only where there is nothing to fall back on. Rows the club already gave us are still
-        // the last true thing it said; the band above is what stops them being a claim.
-        error={groups === null ? error : null}
-        action="read the club's groups"
-        codes={{}}
-        failedCaveat={GROUPS_READ_FAILED.replace("Couldn't read the club's groups. ", "")}
+        error={error}
+        club={club}
+        sliceMinutes={sliceMinutes}
+        courtPrice={courtPrice}
+        settings={settings}
         onRetry={() => void load()}
-        empty={!loading && !error && (groups ?? []).length === 0}
-        emptyTitle={GROUPS_EMPTY_TITLE}
-      >
-        <div className="space-y-4">
-          {(groups ?? []).map((group) => (
-            <GroupCard
-              key={group.id}
-              group={group}
-              club={club}
-              sliceMinutes={sliceMinutes}
-              courtPrice={courtPrice}
-              creditsPerZar={settings?.credits_per_zar_regular as number | undefined}
-              blockZar={settings?.topup_block_zar as number | undefined}
-              onEdit={() => openPanel({ kind: "edit", id: group.id })}
-              onMembers={() => openPanel({ kind: "members", id: group.id })}
-              onPreview={() => openWeekPreview(group.id)}
-              onArchive={() => archive(group)}
-              onDelete={() => remove(group)}
-            />
-          ))}
-        </div>
-      </StateBlock>
+        onEdit={(id) => openPanel({ kind: "edit", id })}
+        onMembers={(id) => openPanel({ kind: "members", id })}
+        onPreview={openWeekPreview}
+        onArchive={archive}
+        onDelete={remove}
+      />
 
-      {editing && (
-        <GroupEditor
-          key={panel?.kind === "edit" ? panel.id : "new"}
-          group={editing}
-          club={club}
-          sliceMinutes={sliceMinutes}
-          courtPrice={courtPrice}
-          clubCaps={clubCaps}
-          creditsPerZar={settings?.credits_per_zar_regular as number | undefined}
-          blockZar={settings?.topup_block_zar as number | undefined}
-          saving={saving}
-          error={saveError}
-          onSave={(body) => void save(panel?.kind === "edit" ? panel.id : "", body)}
-          onCancel={() => { setPanel(null); setDraftGroup(null); }}
-        />
-      )}
-
-      {panel?.kind === "members" && chosen && (
-        <GroupMembersPanel
-          group={chosen}
-          clubMembers={clubMembers ?? []}
-          timezone={timezone}
-          onClose={() => setPanel(null)}
-          onChanged={() => void load()}
-        />
-      )}
-
-      {weekPreviewGroup && (
-        <GroupWeekPreview
-          group={weekPreviewGroup}
-          club={club}
-          sliceMinutes={sliceMinutes}
-          clubCaps={clubCaps}
-          stale={previewStale}
-          onClose={() => { setWeekPreviewId(null); setPreviewBasis(null); }}
-        />
-      )}
-
-      {panel?.kind === "member-preview" && (
-        <MemberPreviewPanel
-          clubMembers={clubMembers ?? []}
-          groups={groups ?? []}
-          sliceMinutes={sliceMinutes}
-          onClose={() => setPanel(null)}
-        />
-      )}
+      <GroupPanels
+        panel={panel}
+        editing={editing}
+        chosen={chosen}
+        weekPreviewGroup={weekPreviewGroup}
+        club={club}
+        clubCaps={clubCaps}
+        clubMembers={clubMembers ?? []}
+        groups={groups ?? []}
+        settings={settings}
+        sliceMinutes={sliceMinutes}
+        courtPrice={courtPrice}
+        timezone={timezone}
+        saving={saving}
+        saveError={saveError}
+        previewStale={previewStale}
+        onSave={(body) => void save(panel?.kind === "edit" ? panel.id : "", body)}
+        onClosePanel={() => { setPanel(null); setDraftGroup(null); }}
+        onCloseWeekPreview={() => { setWeekPreviewId(null); setPreviewBasis(null); }}
+        onMembersChanged={() => void load()}
+      />
     </div>
   );
 }

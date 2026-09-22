@@ -125,3 +125,18 @@ TopUpSheet
 # --- eco wave: function-boundary artifacts, see the note above ---
 resendVerification
 wireWindows
+
+# --- the same PARAM artifact again, created BY the extraction that cleared the real debt ---
+#
+# Breaking a 263-line page into named pieces hands each piece the props the page used to hold
+# in scope, so the components below exist BECAUSE the complexity came down, not despite it.
+# Every one is CCN 1: they choose nothing, they only render what the page decided. Taking a
+# single `props` object instead would satisfy lizard and hide the component's API from its own
+# signature, which is the trade the PhotoPicker note above already refuses.
+EndScheduleCard
+GroupList
+GroupPanels
+NightChooser
+NightResult
+OccurrenceRow
+useGroupWrites

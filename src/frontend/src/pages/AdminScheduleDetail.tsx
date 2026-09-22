@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { useRead } from "../lib/useRead";
 import { Alert } from "../components/Alert";
 import { Badge, Button, Input, Label } from "../components/Button";
 import { Card } from "../components/Card";
@@ -36,42 +37,248 @@ import { slotsPerOccurrence } from "../lib/scheduleRules";
  * </p>
  */
 
-type Read<T> = { data: T | null; error: unknown; loading: boolean };
-
-/**
- * One read, keyed by the attempt it belongs to.
- *
- * The effect only STARTS a request; everything it learns is set from the promise's own
- * callback. Resetting three states at the top of an effect body is a cascading render the
- * React compiler cannot memoize around, and `react-hooks/set-state-in-effect` is an error in
- * this repo rather than a warning. Keyed, "loading" is the honest sentence "what I am holding
- * is not what I asked for".
- */
-function useRead<T>(key: string, load: () => Promise<T>): [Read<T>, () => void] {
-  const [nonce, setNonce] = useState(0);
-  const [state, setState] = useState<{ key: string; data: T | null; error: unknown }>(
-    { key: "", data: null, error: null },
-  );
-  const asked = `${key}:${nonce}`;
-
-  useEffect(() => {
-    let live = true;
-    load()
-      .then((data) => { if (live) setState({ key: asked, data, error: null }); })
-      .catch((error) => { if (live) setState({ key: asked, data: null, error }); });
-    return () => { live = false; };
-  }, [asked, load]);
-
-  const fresh = state.key === asked;
-  return [
-    { data: fresh ? state.data : null, error: fresh ? state.error : null, loading: !fresh },
-    () => setNonce((n) => n + 1),
-  ];
-}
-
 /** How many courts an occurrence actually holds, or the rule's count where it says nothing. */
 function courtsHeldBy(occurrence: ScheduleOccurrence, fallback: number): number {
   return occurrence.courts?.length ?? fallback;
+}
+
+/**
+ * One date this repeating booking holds, and what may be done to it.
+ *
+ * <p>
+ * Its own component because the page around it was a 271-line render against a 200-line gate,
+ * and this row is where most of the branching lived: a status word, a court count that
+ * pluralises, two controls that exist only while the date is still scheduled, and an inline
+ * editor that opens under it. None of that is the page's business.
+ * </p>
+ *
+ * <p>
+ * The skip control is a `ConfirmButton` and the restore is a chip ABOVE the list, never a
+ * second control here: two controls for one action are two names for it (D3 §5.5).
+ * </p>
+ */
+function OccurrenceRow({
+  occurrence, courtCount, row, busy, changing,
+  onToggleChange, onCancelChange, onSubmitChange, onSkip, focusAfter, notice,
+}: {
+  occurrence: ScheduleOccurrence;
+  courtCount: number;
+  row: ScheduleRow;
+  busy: boolean;
+  changing: boolean;
+  onToggleChange: () => void;
+  onCancelChange: () => void;
+  onSubmitChange: Parameters<typeof OccurrenceChange>[0]["onSubmit"];
+  onSkip: () => string | void | Promise<string | void>;
+  focusAfter: () => HTMLElement | null;
+  notice: React.ReactNode;
+}) {
+  return (
+          <li className="space-y-2 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium text-text-primary">{clubDateShort(occurrence.date)}</p>
+                <p className="text-sm text-text-secondary">
+                  {`${occurrenceStatusWord(occurrence.status)} · ${courtsHeldBy(occurrence, courtCount)} court${courtsHeldBy(occurrence, courtCount) === 1 ? "" : "s"}`}
+                </p>
+              </div>
+              {occurrence.status === "scheduled" && (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    className="min-h-11"
+                    onClick={onToggleChange}
+                  >
+                    {`Change the hours of ${clubDateShort(occurrence.date)}`}
+                  </Button>
+                  <ConfirmButton
+                    idleLabel={`Skip ${clubDateShort(occurrence.date)}`}
+                    tone="danger"
+                    disabled={busy}
+                    subject={clubDateShort(occurrence.date)}
+                    cancelLabel="Keep it"
+                    confirmLabel={skipConsequence(courtsHeldBy(occurrence, courtCount), occurrence.date)}
+                    focusAfter={focusAfter}
+                    onConfirm={onSkip}
+                  />
+                </div>
+              )}
+            </div>
+            {changing && (
+              <OccurrenceChange
+                date={occurrence.date}
+                start={row.start ?? ""}
+                end={row.end ?? ""}
+                busy={busy}
+                error={notice}
+                onCancel={onCancelChange}
+                onSubmit={onSubmitChange}
+              />
+            )}
+          </li>
+  );
+}
+
+/**
+ * Ending a repeating booking — which is the only way one ever stops.
+ *
+ * <p>
+ * There is no delete, and the card says so: a repeating booking that has run is part of the
+ * club's history, so ending it releases the dates still ahead and leaves the ones that already
+ * happened exactly as they are. The reason is kept in the change record, which is why it is a
+ * field here rather than a confirm-dialog afterthought.
+ * </p>
+ *
+ * <p>
+ * The consequence sentence is computed by the page and passed in: it needs the occurrence read
+ * to say how many dates are still ahead, and "we could not read them" must not render as zero.
+ * </p>
+ */
+function EndScheduleCard({ row, busy, endReason, onEndReason, consequence, focusAfter, onEnd }: {
+  row: ScheduleRow;
+  busy: boolean;
+  endReason: string;
+  onEndReason: (next: string) => void;
+  consequence: string;
+  focusAfter: () => HTMLElement | null;
+  onEnd: () => string | void | Promise<string | void>;
+}) {
+  return (
+          <Card className="space-y-3 p-4">
+            <h2 className="text-lg font-semibold text-text-primary">End this repeating booking</h2>
+            <p className="text-sm text-text-secondary">
+              {"There is no delete. A repeating booking that has run is part of the club's "}
+              {"history: ending it releases the dates still ahead and leaves the ones that "}
+              {"already happened exactly as they are."}
+            </p>
+            <div className="space-y-1">
+              <Label htmlFor="end-reason">Reason for ending (kept in the change record)</Label>
+              <Input
+                id="end-reason"
+                value={endReason}
+                maxLength={512}
+                onChange={(e) => onEndReason(e.target.value)}
+              />
+            </div>
+            <ConfirmButton
+              idleLabel={`End ${row.name}`}
+              tone="danger"
+              disabled={busy}
+              subject={row.name}
+              cancelLabel="Keep it running"
+              confirmLabel={consequence}
+              focusAfter={focusAfter}
+              onConfirm={onEnd}
+            />
+          </Card>
+  );
+}
+
+/**
+ * What this repeating booking IS, said once at the top.
+ *
+ * <p>
+ * The `<h1>` carries the ref because it is where focus goes after every write — a confirm that
+ * completes and leaves focus on a control that has just been replaced is how a keyboard user
+ * loses their place — so the page owns the ref and this component only mounts it.
+ * </p>
+ *
+ * <p>
+ * `partial` is computed by the page rather than here: it needs the occurrence read, and
+ * "we could not read the dates" must not be rendered as "it holds none".
+ * </p>
+ */
+function ScheduleHeadline({ row, days, headingRef, partial }: {
+  row: ScheduleRow;
+  days: NonNullable<ScheduleRow["days"]>;
+  headingRef: React.RefObject<HTMLHeadingElement | null>;
+  partial: string | null;
+}) {
+  return (
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-bold tracking-tight text-text-primary focus:outline-none">
+                {row.name}
+              </h1>
+              {row.status === "ended" && <Badge tone="muted">Ended</Badge>}
+            </div>
+            <p className="text-text-secondary">
+              {ruleSentence({
+                courtNames: (row.courts ?? []).map((c) => c.name),
+                days,
+                start: row.start ?? "",
+                end: row.end ?? "",
+                label: row.label,
+                startDate: row.start_date ?? "",
+                endDate: row.end_date,
+                intervalWeeks: row.interval_weeks,
+              })}
+            </p>
+            <p className="text-sm text-text-muted">{nextOccurrenceLine(row.next_occurrence, row.status)}</p>
+            {partial && <Alert tone="info" live="polite" announceKey="schedule-partial">{partial}</Alert>}
+          </div>
+  );
+}
+
+/**
+ * D3 §5.5's chips: the ONE place a skipped date is restored from.
+ *
+ * The occurrence row below shows the word "Skipped" and offers no control, because two
+ * controls for one action are two names for it. Renders nothing when there is nothing skipped,
+ * so the page does not need a guard around it.
+ */
+function SkippedDateChips({ skipped, busy, onRestore }: {
+  skipped: ScheduleOccurrence[];
+  busy: boolean;
+  onRestore: (date: string) => void;
+}) {
+  if (skipped.length === 0) return null;
+  return (
+          <div className="space-y-2">
+            <h2 className="text-sm font-semibold text-text-primary">Skipped dates</h2>
+            <ul className="flex flex-wrap gap-2">
+              {skipped.map((o) => (
+                <li key={o.date}>
+                  <Button
+                    variant="outline"
+                    className="min-h-11"
+                    disabled={busy}
+                    onClick={() => onRestore(o.date)}
+                  >
+                    {skipChipLabel(o.date)}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </div>
+  );
+}
+
+/**
+ * What this repeating booking holds, counted once.
+ *
+ * <p>
+ * <b>`remainingSlots` is null and never zero while the dates are unread.</b> The end-confirm
+ * says how many held slots ending it releases, and "releases 0 held slots" is a claim about
+ * the club rather than a fact about the request — the admin would press it believing nothing
+ * is being given back. The two come from the same read, so they are absent together.
+ * </p>
+ */
+function scheduleFacts(row: ScheduleRow | null, occurrences: ScheduleOccurrence[] | null) {
+  const days = row?.days ?? [];
+  const courtCount = row?.courts?.length ?? 0;
+  const perOccurrence = row?.start && row?.end
+    ? slotsPerOccurrence({ start: row.start, end: row.end }, 15)
+    : 0;
+  const held = occurrences ?? [];
+  const remaining = held.filter((o) => o.status === "scheduled");
+  return {
+    days,
+    courtCount,
+    skipped: held.filter((o) => o.status === "skipped"),
+    remaining,
+    remainingSlots: occurrences === null ? null : remaining.length * courtCount * perOccurrence,
+  };
 }
 
 export function AdminScheduleDetailPage() {
@@ -97,16 +304,7 @@ export function AdminScheduleDetailPage() {
   const occurrences = occurrencesRead.data?.occurrences ?? null;
   const codes = useMemo(() => scheduleCodes({}), []);
 
-  const days = row?.days ?? [];
-  const courtCount = row?.courts?.length ?? 0;
-  const perOccurrence = row?.start && row?.end
-    ? slotsPerOccurrence({ start: row.start, end: row.end }, 15)
-    : 0;
-
-  const skipped = (occurrences ?? []).filter((o) => o.status === "skipped");
-  const remaining = (occurrences ?? []).filter((o) => o.status === "scheduled");
-  // Null, not zero, when we have not read the dates: "releases 0 held slots" is a claim.
-  const remainingSlots = occurrences === null ? null : remaining.length * courtCount * perOccurrence;
+  const { days, courtCount, skipped, remaining, remainingSlots } = scheduleFacts(row, occurrences);
 
   /** Every write on this page refreshes the same three reads and clears the same notice. */
   const afterWrite = useCallback(() => {
@@ -168,35 +366,16 @@ export function AdminScheduleDetailPage() {
       >
         {row && (
           <div className="space-y-6">
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-bold tracking-tight text-text-primary focus:outline-none">
-                  {row.name}
-                </h1>
-                {row.status === "ended" && <Badge tone="muted">Ended</Badge>}
-              </div>
-              <p className="text-text-secondary">
-                {ruleSentence({
-                  courtNames: (row.courts ?? []).map((c) => c.name),
-                  days,
-                  start: row.start ?? "",
-                  end: row.end ?? "",
-                  label: row.label,
-                  startDate: row.start_date ?? "",
-                  endDate: row.end_date,
-                  intervalWeeks: row.interval_weeks,
-                })}
-              </p>
-              <p className="text-sm text-text-muted">{nextOccurrenceLine(row.next_occurrence, row.status)}</p>
-              {occurrences !== null && (() => {
-                const partial = partialMaterialisation(
-                  occurrences.filter((o) => (o.courts?.length ?? 0) > 0).length,
-                  occurrences.filter((o) => o.status !== "skipped").length,
-                  days,
-                );
-                return partial ? <Alert tone="info" live="polite" announceKey="schedule-partial">{partial}</Alert> : null;
-              })()}
-            </div>
+            <ScheduleHeadline
+              row={row}
+              days={days}
+              headingRef={headingRef}
+              partial={occurrences === null ? null : partialMaterialisation(
+                occurrences.filter((o) => (o.courts?.length ?? 0) > 0).length,
+                occurrences.filter((o) => o.status !== "skipped").length,
+                days,
+              )}
+            />
 
             {clampedTo && (
               <Alert tone="info" live="polite" announceKey={`schedule-clamped-${clampedTo}`}>
@@ -208,25 +387,11 @@ export function AdminScheduleDetailPage() {
             {/* D3 §5.5's chips: the ONE place a skipped date is restored from. The occurrence
                 row below shows the word "Skipped" and no control, because two controls for
                 one action is two names for it. */}
-            {skipped.length > 0 && (
-              <div className="space-y-2">
-                <h2 className="text-sm font-semibold text-text-primary">Skipped dates</h2>
-                <ul className="flex flex-wrap gap-2">
-                  {skipped.map((o) => (
-                    <li key={o.date}>
-                      <Button
-                        variant="outline"
-                        className="min-h-11"
-                        disabled={busy}
-                        onClick={() => { void runWrite(() => adminEndpoints.scheduleOccurrenceUpdate(id, o.date, { skip: false })); }}
-                      >
-                        {skipChipLabel(o.date)}
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            <SkippedDateChips
+              skipped={skipped}
+              busy={busy}
+              onRestore={(date) => { void runWrite(() => adminEndpoints.scheduleOccurrenceUpdate(id, date, { skip: false })); }}
+            />
 
             <Card className="space-y-4 p-4">
               <h2 className="text-lg font-semibold text-text-primary">The dates it holds</h2>
@@ -243,92 +408,44 @@ export function AdminScheduleDetailPage() {
               >
                 <ul className="divide-y divide-border">
                   {(occurrences ?? []).map((o) => (
-                    <li key={o.date} className="space-y-2 py-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <p className="text-sm font-medium text-text-primary">{clubDateShort(o.date)}</p>
-                          <p className="text-sm text-text-secondary">
-                            {`${occurrenceStatusWord(o.status)} · ${courtsHeldBy(o, courtCount)} court${courtsHeldBy(o, courtCount) === 1 ? "" : "s"}`}
-                          </p>
-                        </div>
-                        {o.status === "scheduled" && (
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              variant="outline"
-                              className="min-h-11"
-                              onClick={() => setChanging(changing === o.date ? null : o.date)}
-                            >
-                              {`Change the hours of ${clubDateShort(o.date)}`}
-                            </Button>
-                            <ConfirmButton
-                              idleLabel={`Skip ${clubDateShort(o.date)}`}
-                              tone="danger"
-                              disabled={busy}
-                              subject={clubDateShort(o.date)}
-                              cancelLabel="Keep it"
-                              confirmLabel={skipConsequence(courtsHeldBy(o, courtCount), o.date)}
-                              focusAfter={() => headingRef.current}
-                              onConfirm={() => runWrite(
-                                () => adminEndpoints.scheduleOccurrenceUpdate(id, o.date, { skip: true }),
-                              )}
-                            />
-                          </div>
-                        )}
-                      </div>
-                      {changing === o.date && (
-                        <OccurrenceChange
-                          date={o.date}
-                          start={row.start ?? ""}
-                          end={row.end ?? ""}
-                          busy={busy}
-                          error={notice}
-                          onCancel={() => setChanging(null)}
-                          onSubmit={(choice) => submitChange(o.date, choice)}
-                        />
+                    <OccurrenceRow
+                      key={o.date}
+                      occurrence={o}
+                      courtCount={courtCount}
+                      row={row}
+                      busy={busy}
+                      changing={changing === o.date}
+                      onToggleChange={() => setChanging(changing === o.date ? null : o.date)}
+                      onCancelChange={() => setChanging(null)}
+                      onSubmitChange={(choice) => submitChange(o.date, choice)}
+                      onSkip={() => runWrite(
+                        () => adminEndpoints.scheduleOccurrenceUpdate(id, o.date, { skip: true }),
                       )}
-                    </li>
+                      focusAfter={() => headingRef.current}
+                      notice={notice}
+                    />
                   ))}
                 </ul>
               </StateBlock>
             </Card>
 
             {row.status !== "ended" && (
-              <Card className="space-y-3 p-4">
-                <h2 className="text-lg font-semibold text-text-primary">End this repeating booking</h2>
-                <p className="text-sm text-text-secondary">
-                  {"There is no delete. A repeating booking that has run is part of the club's "}
-                  {"history: ending it releases the dates still ahead and leaves the ones that "}
-                  {"already happened exactly as they are."}
-                </p>
-                <div className="space-y-1">
-                  <Label htmlFor="end-reason">Reason for ending (kept in the change record)</Label>
-                  <Input
-                    id="end-reason"
-                    value={endReason}
-                    maxLength={512}
-                    onChange={(e) => setEndReason(e.target.value)}
-                  />
-                </div>
-                <ConfirmButton
-                  idleLabel={`End ${row.name}`}
-                  tone="danger"
-                  disabled={busy}
-                  subject={row.name}
-                  cancelLabel="Keep it running"
-                  confirmLabel={endConsequence({
-                    // Both figures are null together: they come from the same read, and a
-                    // count of dates we could not read is not zero.
-                    remaining: occurrences === null ? null : remaining.length,
-                    days,
-                    slots: remainingSlots,
-                    refundCredits: 0,
-                  })}
-                  focusAfter={() => headingRef.current}
-                  onConfirm={() => runWrite(
-                    () => adminEndpoints.scheduleEnd(id, { reason: endReason.trim() }),
-                  )}
-                />
-              </Card>
+              <EndScheduleCard
+                row={row}
+                busy={busy}
+                endReason={endReason}
+                onEndReason={setEndReason}
+                consequence={endConsequence({
+                  // Both figures are null together: they come from the same read, and a count
+                  // of dates we could not read is not zero.
+                  remaining: occurrences === null ? null : remaining.length,
+                  days,
+                  slots: remainingSlots,
+                  refundCredits: 0,
+                })}
+                focusAfter={() => headingRef.current}
+                onEnd={() => runWrite(() => adminEndpoints.scheduleEnd(id, { reason: endReason.trim() }))}
+              />
             )}
 
             <Card className="p-4">

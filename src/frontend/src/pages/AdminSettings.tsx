@@ -378,6 +378,109 @@ function useSettingFocus(ready: boolean) {
   return { highlighted, focusSetting };
 }
 
+/**
+ * The three blocks ruling 13 added, and the save bar that ends the document.
+ *
+ * <p>
+ * Lifted out of the page because the page had become a 285-line render — over the gate's 200
+ * — and these three are the coherent piece to take: they share a shape (`EcoSection` plus a
+ * rules list), they arrived together, and none of the page's own state handling is in them.
+ * Every prop here is something the page owns; this component decides nothing.
+ * </p>
+ */
+function EcoSections({ settings, onChange, blockers, saving, onSave, onFocusSetting }: {
+  settings: AdminSettings;
+  onChange: (next: AdminSettings) => void;
+  blockers: Parameters<typeof SaveBar>[0]["blockers"];
+  saving: boolean;
+  onSave: () => void | Promise<unknown>;
+  onFocusSetting: Parameters<typeof SaveBar>[0]["onFocusSetting"];
+}) {
+  return (
+    <>
+      <EcoSection
+        id={SECTION_IDS.screens}
+        title="Box screens & scanning"
+        lede="What the court box's screen does, and how long it waits. A box picks these up the next time it calls in, so a change reaches the courts within a minute rather than the moment you save it."
+        rules={DEVICE_TIMING_RULES}
+        settings={settings}
+        onChange={onChange}
+      />
+
+      <EcoSection
+        id={SECTION_IDS.limits}
+        title="Limits & confirmations"
+        lede="How much one member may hold in a day, how much an admin may do in one press, and what yes and no look like."
+        rules={[...CAP_RULES, ...SCHEDULE_RULES]}
+        settings={settings}
+        onChange={onChange}
+      >
+        {/*
+          The two caps compose, and neither field alone would say so. A club that sets 4
+          slots and leaves the minutes at 60 has set an hour — the most restrictive of the
+          two is what a member meets, a group may lower either and may never raise one, and
+          admins are exempt from both (ruling 3).
+        */}
+        <p className="text-sm text-text-secondary">
+          {capsSentence(settings)}
+        </p>
+        {/*
+          The other half of item 3, and it is a destination rather than a field: a group may
+          LOWER either cap for its own members and may never raise one, so the number above
+          is a ceiling and the groups page is where the exceptions to it live. Without this
+          link the two halves of one rule sit on two pages that do not mention each other.
+        */}
+        <p className="text-sm">
+          <Link to="/admin/groups" className="inline-flex min-h-11 items-center text-accent-strong">
+            Member groups can lower these for their own members
+          </Link>
+        </p>
+        <Field settingKey="action_glyphs" label={SETTING_LABELS.action_glyphs} hint={ACTION_GLYPHS_HINT}>
+          <select
+            value={settings.action_glyphs ?? "thumbs"}
+            onChange={(e) => onChange({ ...settings, action_glyphs: e.target.value as "thumbs" | "marks" })}
+            className={fieldClassName}
+          >
+            {ACTION_GLYPH_CHOICES.map((choice) => (
+              <option key={choice} value={choice}>{ACTION_GLYPH_LABEL[choice]}</option>
+            ))}
+          </select>
+        </Field>
+      </EcoSection>
+
+      <EcoSection
+        id={SECTION_IDS.monitoring}
+        title="Monitoring & live updates"
+        lede="How long the club keeps what its boards report, and how screens that show it stay current."
+        rules={[...MONITORING_RULES, ...REALTIME_RULES]}
+        settings={settings}
+        onChange={onChange}
+      >
+        {/*
+          A switch rather than a number, and it is the most consequential control on this
+          page: off, the per-person night page is not there at all. Rendered only where the
+          API actually serves the key, because a switch bound to `undefined` is a switch
+          that reads "off" about a feature that is on.
+        */}
+        {settings.member_trace_enabled !== undefined && (
+          <Field settingKey="member_trace_enabled" label={MEMBER_TRACE_LABEL} hint={MEMBER_TRACE_HINT}>
+            <label className="inline-flex min-h-11 items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="h-5 w-5"
+                checked={settings.member_trace_enabled}
+                onChange={(e) => onChange({ ...settings, member_trace_enabled: e.target.checked })}
+              />
+              {settings.member_trace_enabled ? "On — every look is recorded" : "Off — the page is not there"}
+            </label>
+          </Field>
+        )}
+        <SaveBar blockers={blockers} saving={saving} onSave={onSave} onFocusSetting={onFocusSetting} />
+      </EcoSection>
+    </>
+  );
+}
+
 export default function AdminSettingsPage() {
   const toast = useToast();
   const [settings, setSettings] = useState<AdminSettings | null>(null);
@@ -578,85 +681,14 @@ export default function AdminSettingsPage() {
 
         {/* eco — ruling 13's three new blocks, between Records and Courts. Save moves to the
             bottom of the last of them, so it is still the last thing on the document. */}
-        <EcoSection
-          id={SECTION_IDS.screens}
-          title="Box screens & scanning"
-          lede="What the court box's screen does, and how long it waits. A box picks these up the next time it calls in, so a change reaches the courts within a minute rather than the moment you save it."
-          rules={DEVICE_TIMING_RULES}
+        <EcoSections
           settings={settings}
           onChange={setSettings}
+          blockers={blockers}
+          saving={saving}
+          onSave={save}
+          onFocusSetting={focusSetting}
         />
-
-        <EcoSection
-          id={SECTION_IDS.limits}
-          title="Limits & confirmations"
-          lede="How much one member may hold in a day, how much an admin may do in one press, and what yes and no look like."
-          rules={[...CAP_RULES, ...SCHEDULE_RULES]}
-          settings={settings}
-          onChange={setSettings}
-        >
-          {/*
-            The two caps compose, and neither field alone would say so. A club that sets 4
-            slots and leaves the minutes at 60 has set an hour — the most restrictive of the
-            two is what a member meets, a group may lower either and may never raise one, and
-            admins are exempt from both (ruling 3).
-          */}
-          <p className="text-sm text-text-secondary">
-            {capsSentence(settings)}
-          </p>
-          {/*
-            The other half of item 3, and it is a destination rather than a field: a group may
-            LOWER either cap for its own members and may never raise one, so the number above
-            is a ceiling and the groups page is where the exceptions to it live. Without this
-            link the two halves of one rule sit on two pages that do not mention each other.
-          */}
-          <p className="text-sm">
-            <Link to="/admin/groups" className="inline-flex min-h-11 items-center text-accent-strong">
-              Member groups can lower these for their own members
-            </Link>
-          </p>
-          <Field settingKey="action_glyphs" label={SETTING_LABELS.action_glyphs} hint={ACTION_GLYPHS_HINT}>
-            <select
-              value={settings.action_glyphs ?? "thumbs"}
-              onChange={(e) => setSettings({ ...settings, action_glyphs: e.target.value as "thumbs" | "marks" })}
-              className={fieldClassName}
-            >
-              {ACTION_GLYPH_CHOICES.map((choice) => (
-                <option key={choice} value={choice}>{ACTION_GLYPH_LABEL[choice]}</option>
-              ))}
-            </select>
-          </Field>
-        </EcoSection>
-
-        <EcoSection
-          id={SECTION_IDS.monitoring}
-          title="Monitoring & live updates"
-          lede="How long the club keeps what its boards report, and how screens that show it stay current."
-          rules={[...MONITORING_RULES, ...REALTIME_RULES]}
-          settings={settings}
-          onChange={setSettings}
-        >
-          {/*
-            A switch rather than a number, and it is the most consequential control on this
-            page: off, the per-person night page is not there at all. Rendered only where the
-            API actually serves the key, because a switch bound to `undefined` is a switch
-            that reads "off" about a feature that is on.
-          */}
-          {settings.member_trace_enabled !== undefined && (
-            <Field settingKey="member_trace_enabled" label={MEMBER_TRACE_LABEL} hint={MEMBER_TRACE_HINT}>
-              <label className="inline-flex min-h-11 items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="h-5 w-5"
-                  checked={settings.member_trace_enabled}
-                  onChange={(e) => setSettings({ ...settings, member_trace_enabled: e.target.checked })}
-                />
-                {settings.member_trace_enabled ? "On — every look is recorded" : "Off — the page is not there"}
-              </label>
-            </Field>
-          )}
-          <SaveBar blockers={blockers} saving={saving} onSave={save} onFocusSetting={focusSetting} />
-        </EcoSection>
 
         <CourtsSection courts={courts} reload={load} />
       </div>
