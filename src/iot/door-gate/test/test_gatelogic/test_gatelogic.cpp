@@ -1421,10 +1421,9 @@ void test_led_asks_to_wait_with_one_slow_pulse_not_the_refusal_stutter() {
 
     // They also do not merely differ in phase: the shapes are different
     // lengths, so no sampling instant makes them the same pattern.
-    TEST_ASSERT_TRUE_MESSAGE(
-        (gatelogic::kWaitBlinks * 2U * gatelogic::kWaitHalfMs)
-            != (gatelogic::kDeniedBlinks * 2U * gatelogic::kDeniedHalfMs),
-        "a wait that lasted exactly as long as a refusal would be a refusal");
+    TEST_ASSERT_TRUE_MESSAGE((gatelogic::kWaitBlinks * 2U * gatelogic::kWaitHalfMs) !=
+                                 (gatelogic::kDeniedBlinks * 2U * gatelogic::kDeniedHalfMs),
+                             "a wait that lasted exactly as long as a refusal would be a refusal");
   }
 }
 
