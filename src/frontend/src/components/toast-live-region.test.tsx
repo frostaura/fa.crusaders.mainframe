@@ -42,28 +42,45 @@ describe("the toast viewport", () => {
   });
 
   /**
-   * R3-28 / B10 — it is anchored to the BOTTOM, away from the line it contradicts.
+   * Where it sits (design-system.md, Components → toast): bottom-centre on a phone, ABOVE the tab
+   * bar and clear of the home indicator; top-right under the measured chrome from `sm`.
    *
    * <p>
-   * B13 moved it off a guessed <code>top-[100px]</code> and under the measured chrome, which
-   * fixed it covering the tab strip. Under the chrome is still where the page puts the thing
-   * the toast argues with: reviewer B failed a shut and read "Could not shut that door." sitting
-   * on top of the door's own status line. The far edge of the screen is the one place no
-   * heading, chip or status line in this product lives.
-   * </p>
-   *
-   * <p>
-   * The geometry itself — that it clears the header and does not cover the page's heading — is
-   * measured in a real engine by `e2e/app-chrome.spec.ts`; jsdom has no layout.
+   * The phone half keeps R3-28 / B10: the bottom is the far side of the screen from the status
+   * line a failure toast most often contradicts. The geometry itself is measured in a real
+   * engine by the e2e suite; jsdom has no layout, so this holds the classes that produce it.
    * </p>
    */
-  it("is anchored to the bottom of the screen, clear of the safe area", () => {
+  it("sits above the tab bar on a phone and top-right from sm, on the toast layer", () => {
     const { container } = render(<ToastProvider><Raise text="Offline." /></ToastProvider>);
 
-    const viewport = container.parentElement!.querySelector<HTMLElement>(".fixed")!;
-    expect(viewport.className).toContain("bottom-[calc(env(safe-area-inset-bottom,0px)+12px)]");
-    expect(viewport.className).not.toMatch(/(^|\s)top-/);
+    const viewport = container.parentElement!.querySelector<HTMLElement>("[data-toast-viewport]")!;
+    const classes = viewport.className.split(/\s+/);
+    expect(classes).toContain("bottom-[calc(max(var(--app-bottom-bar-height,0px),env(safe-area-inset-bottom,0px))+12px)]");
+    expect(classes.filter((c) => /^top-/.test(c)), "no top anchor below sm").toEqual([]);
+    expect(classes).toContain("sm:bottom-auto");
+    expect(classes).toContain("sm:right-6");
+    expect(classes.some((c) => c.startsWith("sm:top-[calc(var(--app-chrome-height"))).toBe(true);
+    expect(classes).toContain("z-toast");
     expect(viewport.style.top).toBe("");
+  });
+
+  it("is a raised surface with a tone bar and a tone mark beside the words", () => {
+    function Raiser() {
+      const toast = useToast();
+      return <button type="button" onClick={() => toast.push({ tone: "success", text: "Saved." })}>Raise</button>;
+    }
+    render(<ToastProvider><Raiser /></ToastProvider>);
+    act(() => { screen.getByRole("button", { name: "Raise" }).click(); });
+
+    const toast = screen.getByRole("status");
+    expect(toast.className).toContain("bg-bg-raised");
+    expect(toast.className).toContain("shadow-lg");
+    expect(toast.querySelector("[data-toast-bar]")!.className).toContain("bg-success-strong");
+    const mark = toast.querySelector("svg")!;
+    expect(mark).toHaveAttribute("aria-hidden", "true");
+    // The mark adds nothing to what is said: the words are the whole announcement.
+    expect(toast).toHaveTextContent(/^Saved\.$/);
   });
 
   /**

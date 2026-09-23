@@ -1,62 +1,39 @@
-@import "@fontsource/figtree/400.css";
-@import "@fontsource/figtree/500.css";
-@import "@fontsource/figtree/600.css";
-@import "@fontsource/figtree/700.css";
+/*
+ * Self-hosted variable faces (design-system.md, Fonts). Figtree carries UI and body text;
+ * Archivo — with its WIDTH axis, hence `wdth.css` — the display numerals and page titles;
+ * JetBrains Mono the codes. In a git worktree `vite.config.ts` must keep `server.fs.allow`
+ * pointing at the resolved node_modules or every face 403s and layout tests measure a fallback.
+ */
+@import "@fontsource-variable/figtree";
+@import "@fontsource-variable/archivo/wdth.css";
+@import "@fontsource-variable/jetbrains-mono";
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
-  :root {
-    /*
-     * Crusaders' own colours, sampled from the club's crest: royal blue #00498D, with a light
-     * tint of it for soft surfaces. Measured against every background in tokens.test.ts — the
-     * tightest pair is text-muted on accent-soft at 4.80:1, clear of the 4.5:1 body floor.
-     *
-     * The comment here used to read "overridden at runtime from tenant.brand_accent_hex", and
-     * that was fiction. `brand_accent_hex` is written into tenant_settings by the seeder and by
-     * ProductionBootstrap, and NOTHING in this frontend has ever read it: there is no fetch, no
-     * setProperty, no consumer of any kind. The per-tenant accent is a value the database
-     * carries and the product ignores, so every tenant renders in whatever is written here.
-     *
-     * Wiring it up needs a public branding endpoint (tenant settings are behind auth, and this
-     * has to apply on the signed-out landing and sign-in screens too), which is more than a
-     * colour change. Until that exists these are the club's colours, stated honestly as
-     * constants rather than described as something they are not.
-     */
-    /*
-     * RGB channels, not hex — see `themeable` in src/lib/tokens.ts for why the hex form
-     * silently deletes every opacity modifier on these tokens.
-     *
-     * CSS cannot import the token module, so these two lines are the one place a token value
-     * is written twice. `tokens.test.ts` reads this file and asserts both against
-     * `rootCssVariables`, so the copy cannot drift without failing a test.
-     */
-    --accent-soft-rgb: 228 237 247;   /* #E4EDF7 */
-    --accent-strong-rgb: 0 73 141;    /* #00498D */
-  }
+/*
+ * NO COLOUR IS WRITTEN IN THIS FILE.
+ *
+ * Every role is an RGB-channel custom property (`--color-<role>`) that the Tailwind plugin in
+ * `tailwind.config.ts` emits from `src/lib/tokens.ts`, once under `:root, .light` and once under
+ * `.dark`. This file only ever READS them — `rgb(var(--color-x))`, never `var(--x, #hex)`: a hex
+ * fallback inside `var()` is how the focus ring rendered a retired sky-blue for months, because
+ * the variable it named had never existed and the fallback silently became the value.
+ * `tokens.test.ts` asserts every variable referenced here is one the token module declares.
+ */
 
+@layer base {
   html, body, #root { height: 100%; }
   body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 
   /*
    * Every clickable surface feels the same.
    *
-   * The fingerprint control on the schedule had a hover lift and a real focus ring
-   * and nothing else in the product did, so which things could be pressed was
-   * something a member learned per screen. This is one rule rather than a prop on
-   * each primitive, deliberately: an affordance applied per component is one that
-   * a new component silently does not get.
-   *
-   * The base selector is behavioural — anything with a button/link role, a real
-   * <a href>, or an explicit `data-interactive` — so a div that has been made
-   * clickable is covered too, and a disabled control is excluded rather than
-   * pretending it can be pressed.
-   *
-   * `:focus-visible`, not `:focus`. A visible ring on every mouse click is noise
-   * that authors then remove wholesale, taking the keyboard user's ring with it —
-   * which is exactly how a codebase ends up with no focus indication at all.
+   * One rule rather than a prop on each primitive, deliberately: an affordance applied per
+   * component is one that a new component silently does not get. The base selector is
+   * behavioural — a button/link role, a real <a href>, or an explicit `data-interactive` — so a
+   * div made clickable is covered too, and a disabled control is excluded rather than pretending.
    */
   button,
   [role="button"],
@@ -67,19 +44,24 @@
   [data-interactive] {
     cursor: pointer;
     transition-property: transform, box-shadow, background-color, border-color, color, opacity;
-    transition-duration: 200ms;
-    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: theme("transitionDuration.base");
+    transition-timing-function: theme("transitionTimingFunction.standard");
   }
 
-  /* The lift. Small enough not to reflow anything around it, large enough to read
-     as a response — and suppressed for anyone who has asked for less motion. */
-  button:not(:disabled):not([aria-disabled="true"]):hover,
-  [role="button"]:not([aria-disabled="true"]):hover,
-  a[href]:hover,
-  summary:hover,
-  [data-interactive]:not([aria-disabled="true"]):hover {
-    transform: translateY(-1px);
-    box-shadow: 0 2px 4px -1px rgb(15 23 42 / 0.06), 0 4px 6px -1px rgb(15 23 42 / 0.08);
+  /*
+   * The lift — only where a pointer can actually hover. On a touch screen `:hover` sticks after
+   * a tap, so a lift there is a card left floating under a finger that has already gone.
+   * Small enough not to reflow anything, large enough to read as a response.
+   */
+  @media (hover: hover) {
+    button:not(:disabled):not([aria-disabled="true"]):hover,
+    [role="button"]:not([aria-disabled="true"]):hover,
+    a[href]:hover,
+    summary:hover,
+    [data-interactive]:not([aria-disabled="true"]):hover {
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-md);
+    }
   }
 
   /* Pressed. The lift going away under the finger is what makes a tap feel landed. */
@@ -88,7 +70,7 @@
   a[href]:active,
   [data-interactive]:not([aria-disabled="true"]):active {
     transform: translateY(0);
-    box-shadow: 0 1px 2px 0 rgb(15 23 42 / 0.04);
+    box-shadow: var(--shadow-xs);
   }
 
   button:disabled,
@@ -98,51 +80,34 @@
     box-shadow: none;
   }
 
-  /* Keyboard focus, on everything focusable rather than only on the controls whose
-     author remembered. Offset so the ring reads on a filled button as well as an
-     outlined one. */
   /*
-   * `--accent-strong-rgb`, not `--accent-strong`.
-   *
-   * This read `var(--accent-strong, #0369A1)`, and `--accent-strong` has never been defined —
-   * not here, not in the Tailwind theme, not anywhere in the repo. So the fallback was not a
-   * fallback, it was the value: every focus ring in the product, on every control, rendered
-   * #0369A1, the sky-blue this palette was moved off. It is the one accent surface a per-tenant
-   * override could never have reached either, because it was not reading the variable the
-   * override sets.
-   *
-   * Nothing about the declaration looks wrong, which is the whole problem with a var() typo —
-   * the browser resolves it happily to the fallback and no tool warns. e2e/affordance.spec.ts
-   * now reads the computed outline colour off a focused control in a real engine.
+   * Keyboard focus, on everything focusable rather than only on the controls whose author
+   * remembered — the house outline. `:focus-visible`, not `:focus`: a ring on every mouse click
+   * is noise that authors then remove wholesale, taking the keyboard user's ring with it. So
+   * primitives never add `outline-none` or `focus-visible:ring-*`; this rule is the ring.
+   * Offset so it reads on a filled button as well as an outlined one. The accent clears 3:1 on
+   * every background in both themes (tokens.themes.test.ts).
    */
   :focus-visible {
-    outline: 2px solid rgb(var(--accent-strong-rgb, 0 73 141));
+    outline: 2px solid rgb(var(--color-accent-strong));
     outline-offset: 2px;
-    border-radius: inherit;
   }
 
   /*
-   * C8 — forced colours, where a control's boundary is the only thing left of it.
-   *
-   * Windows High Contrast (and any `forced-colors: active` mode) throws away every
-   * author background and every author colour and substitutes the user's pair. A
-   * filled button whose ONLY edge is its fill — `bg-danger-soft` with nothing else —
-   * therefore loses the fill, keeps the text, and is left indistinguishable from a
-   * paragraph. Reviewer C found exactly that on the destructive confirms: a control
-   * that shuts a door, rendered as body text.
-   *
-   * The fix is a boundary the mode cannot take away. Every primitive in the product
-   * now carries `border border-transparent`, which costs nothing anywhere else — a
-   * transparent 1 px edge is invisible and already in the box model, so nothing moves
-   * when this rule fires. Here that edge is given a system colour.
-   *
-   * `ButtonText` for things that are pressed, `CanvasText` for banners and cards that
-   * are read: the two roles are different, and forced colours is the one mode in which
-   * a user can tell them apart by colour at all.
+   * Forced colours (Windows High Contrast), where a control's boundary is the only thing left.
+   * The mode discards author backgrounds, so a control whose only edge is its fill becomes body
+   * text. Every primitive carries `border border-transparent`; here that edge gets a system
+   * colour. `ButtonText` for what is pressed, `CanvasText` for what is read.
    */
   @media (forced-colors: active) {
     button,
     [role="button"],
+    [role="checkbox"],
+    [role="switch"],
+    [role="radio"],
+    [role="tab"],
+    [role="menuitem"],
+    [role="option"],
     [data-interactive],
     a[href][class*="border"] {
       border: 1px solid ButtonText;
@@ -150,36 +115,33 @@
 
     [role="alert"],
     [role="status"],
+    [role="dialog"],
+    [role="menu"],
+    [role="listbox"],
     [data-banner] {
       border: 1px solid CanvasText;
     }
 
-    /* A focus ring in a mode that has thrown the accent away. `Highlight` is the
-       system's own, and it is the only colour here guaranteed to differ from the text. */
+    /* A checked box, a thumb that is on, a selected tab: system colours survive the mode. */
+    [role="checkbox"][data-state="checked"],
+    [role="checkbox"][data-state="indeterminate"],
+    [role="switch"][data-state="checked"],
+    [role="radio"][data-state="checked"],
+    [role="tab"][data-state="active"],
+    [role="option"][aria-selected="true"] {
+      background-color: Highlight;
+      color: HighlightText;
+    }
+
+    /* A focus ring in a mode that has thrown the accent away. */
     :focus-visible {
       outline: 2px solid Highlight;
     }
 
     /*
-     * B5 — the two halves of an armed confirm, told apart without colour.
-     *
-     * Everything that distinguishes them ordinarily is colour: the confirm is filled amber,
-     * the way out is a white outline. Forced colours throws both away and leaves two boxes
-     * with the same 1 px `ButtonText` edge from the rule above, side by side, one of which
-     * shuts a door. Reviewer B screenshotted the pair and they are indistinguishable.
-     *
-     * So the distinction is made in WEIGHT and in LINE STYLE, neither of which a forced
-     * palette can take away: the one that acts is heavy and solid, the one that stops is the
-     * dashed secondary. It fires only in this mode — nothing about the ordinary rendering
-     * changes — and `e2e/confirm-armed.spec.ts` measures both under
-     * `emulateMedia({ forcedColors: "active" })` rather than asserting that a class is present.
-     */
-    /*
-     * `button[data-confirm=…]`, not the bare attribute — and measured, not reasoned about.
-     * `[data-confirm="go"]` is (0,1,0), exactly what Tailwind's own `border` utility scores,
-     * and the utilities layer is later in the source: the first draft of this rule lost the
-     * width silently and the e2e print-out read "go 1px solid · stop 1px dashed". Adding the
-     * element carries it to (0,1,1), which beats a utility class on any element.
+     * The two halves of an armed confirm, told apart without colour: the one that acts is heavy
+     * and solid, the way out is dashed. `button[data-confirm=…]` (0,1,1) — the bare attribute is
+     * (0,1,0), exactly Tailwind's `border` utility, which is later in the source and won.
      */
     button[data-confirm="go"] {
       border-width: 3px;
@@ -193,31 +155,10 @@
   }
 
   /*
-   * C6 / C15 / D9 — the heading the router moves focus to on a route change.
-   *
-   * <p>
-   * A heading is not a control, so a ring around it is a statement rather than an
-   * affordance: right for a keyboard user, who needs to see where focus went, and wrong
-   * for a mouse user, who did not ask and gets a rectangle flashing on a title. That is
-   * the whole distinction `:focus-visible` exists for, so the plain `:focus` is silenced
-   * and the visible one is given the product's own ring.
-   * </p>
-   *
-   * <p>
-   * `scroll-margin-top` is D9's half. The header is sticky, a fragment target scrolls to
-   * y=0 of the scroll container, and the two facts together put the section heading
-   * underneath the header — measured at −29 px and −335 px on `/profile#door-history`.
-   * </p>
-   *
-   * <p>
-   * <b>The measured chrome height, not a constant.</b> It was `5rem`, which is 80 px at a
-   * 16 px root and clears a desktop header; on a phone the header plus the section tab
-   * strip is 101 px, so the heading still landed under it — the same guess-a-constant
-   * failure the toast strip had at `top-[100px]`, found the same way, by running the test
-   * under the mobile project. `Layout` already publishes what the header actually
-   * measures for the toast; this reads the same number. The fallback is what a desktop
-   * header comes to, for the screens with no chrome at all.
-   * </p>
+   * The heading the router moves focus to on a route change: a ring for the keyboard user who
+   * needs to see where focus went, none for the mouse user who did not ask. `scroll-margin-top`
+   * reads the chrome height `Layout` measures, so a fragment target lands below a sticky header
+   * on a phone as well as on a desktop.
    */
   [data-route-heading],
   :target {
@@ -229,28 +170,18 @@
   }
 
   [data-route-heading]:focus-visible {
-    outline: 2px solid rgb(var(--accent-strong-rgb, 0 73 141));
+    outline: 2px solid rgb(var(--color-accent-strong));
     outline-offset: 2px;
   }
 
   /*
    * Reduced motion, with the specificity to actually win.
    *
-   * This block used to say `button:hover` — (0,1,1) — against a base rule of
-   * `button:not(:disabled):not([aria-disabled="true"]):hover`, which is (0,3,1). A media query
-   * adds no specificity, so the base rule won and the override did nothing: measured on a live
-   * page under `prefers-reduced-motion: reduce`, a hovered grid cell still reported
-   * `transform: matrix(1, 0, 0, 1, 0, -1)`. All the block achieved was dropping the transition to
-   * 1ms, so instead of easing 1px the element SNAPPED 1px — which is worse than the motion it was
-   * meant to remove.
-   *
-   * The selectors below are therefore the base rules' selectors, character for character. Equal
-   * specificity, later in the source, so this one wins. If a selector above changes, this has to
-   * change with it — which is why they sit next to each other rather than in separate files.
-   *
-   * The shadow goes too. It is not motion, but it is the other half of the lift, and half a lift
-   * reads as a rendering fault rather than as a hover state; the cursor, the background change
-   * and the focus ring are what still say "this can be pressed".
+   * The selectors are the base rules' selectors, character for character: a media query adds no
+   * specificity, and a shorter selector here (`button:hover`, (0,1,1)) once lost to the base
+   * lift ((0,3,1)) so a hovered cell SNAPPED 1px instead of easing it. Equal specificity, later
+   * in the source, so this wins — and `affordance.test.ts` computes it rather than trusting this.
+   * The shadow goes too: half a lift reads as a rendering fault.
    */
   @media (prefers-reduced-motion: reduce) {
     button, [role="button"], a[href], summary, label[for], select, [data-interactive] {
@@ -270,39 +201,30 @@
     }
 
     /*
-     * The action-feedback theme's five keyframes, stood down by name.
-     *
-     * <p>
-     * This is the belt to the `motion-reduce:animate-none` braces at each use site, and it is
-     * NOT a replacement for them — see the note on `keyframes` in tailwind.config.ts. A rule
-     * here can only name animations it knows about; a component that invents a sixth still has
-     * to say so itself. What this catches is the case that class cannot: an animation applied
-     * from a `className` composed at runtime, where the `motion-reduce:` sibling is one branch
-     * of a conditional somebody forgot.
-     * </p>
-     *
-     * <p>
-     * The COLOUR change, the glyph swap and the full hold are deliberately NOT stood down.
-     * They are not motion — they are what the feedback actually is, and a member who has asked
-     * for less movement has not asked to be told less. §3.5 of the member design.
-     * </p>
+     * The feedback keyframes and the zero-balance chip, stood down by name — the belt to the
+     * `motion-reduce:animate-none` braces at each use site, never a replacement. The colour
+     * change, the glyph swap and the hold are NOT stood down: they are what the feedback is.
      */
-    [data-fb] {
+    [data-fb],
+    [data-zero-entice],
+    [data-balance-flyout] {
       animation-name: none !important;
       transform: none !important;
     }
 
     /*
-     * The chip's zero-balance entice, and the flyout above it.
-     *
-     * Under reduce the chip grows the word "Top up" instead — a static affordance that is
-     * always there, which for this audience is better than motion they asked not to see. The
-     * flyout simply does not render; this rule is what makes a stale one harmless.
+     * Every Radix enter/exit (`overlay-in/out`, `pop-in/out`, `sheet-up/down`,
+     * `collapse-down/up`) hangs off `[data-state]`. With the animation named `none`, Radix's
+     * Presence sees no animation and mounts/unmounts at once — nothing waits on an
+     * `animationend` that will never come.
      */
-    [data-zero-entice],
-    [data-balance-flyout] {
+    [data-state="open"],
+    [data-state="closed"],
+    [data-state="delayed-open"],
+    [data-state="instant-open"],
+    [data-state="checked"],
+    [data-state="unchecked"] {
       animation-name: none !important;
-      transform: none !important;
     }
   }
 }
@@ -312,59 +234,65 @@
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
   /*
-   * Opt OUT, for the few surfaces where a lift is wrong: a grid cell that must not
-   * shift its neighbours, a carousel dot that must not jump under a thumb, a
-   * full-width row in a table. They keep the cursor and the focus ring — the parts
-   * that say "this can be pressed" — and lose only the motion.
+   * Hold / blocked slots: `bg-bg-muted bg-stripes`. The stripes are the muted text colour at low
+   * alpha so they follow the theme and never compete with the slot's own label.
+   */
+  .bg-stripes {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      rgb(var(--color-text-muted) / 0.14) 0 2px,
+      transparent 2px 8px
+    );
+  }
+
+  /*
+   * Opt OUT of the lift: a grid cell that must not shift its neighbours, a dot that must not
+   * jump under a thumb — and, by role, every control that is selected rather than pressed
+   * (checkbox, switch, radio, tab, menu item, option, calendar day). They keep the cursor and
+   * the focus ring; they lose only the motion.
    *
-   * The `:not()` pair is not a guard, it is the specificity. This rule read
-   * `.no-lift:hover` — (0,2,0) — against the base lift at
-   * `button:not(:disabled):not([aria-disabled="true"]):hover` — (0,3,1) — and
-   * `a[href]:hover` — (0,2,1). It lost to both, so it did nothing at all: measured in
-   * Chromium, a hovered carousel dot reported `transform: matrix(1, 0, 0, 1, 0, -1)`
-   * and the full two-layer lift shadow, on every one of the three controls that use
-   * the class. Being in a later layer does not help — Tailwind's `@layer` is a source
-   * ordering, not a cascade layer, so specificity is decided first.
-   *
-   * Repeating the base rule's two `:not()`s carries it to (0,4,0), which beats every
-   * selector in that set on the class count alone and does not depend on which element
-   * the class lands on. This is the second time this exact arithmetic has been got
-   * wrong in this file — see the reduced-motion block above — so it is measured rather
-   * than reasoned about: e2e/affordance.spec.ts hovers a real dot in a real engine, and
-   * src/components/affordance.test.ts computes the two specificities and compares them.
+   * The `:not()` pair is not a guard, it is the specificity. `.no-lift:hover` is (0,2,0) and
+   * loses to `button:not(:disabled):not([aria-disabled="true"]):hover` (0,3,1) — it did, for two
+   * rounds, measured in Chromium. Repeating the two `:not()`s makes every selector here (0,4,0),
+   * which beats every lift selector on the class count alone. Tailwind's `@layer` is source
+   * order, not a cascade layer, so specificity decides; `affordance.test.ts` computes it.
    */
   .no-lift:not(:disabled):not([aria-disabled="true"]):hover,
-  .no-lift:not(:disabled):not([aria-disabled="true"]):active {
+  .no-lift:not(:disabled):not([aria-disabled="true"]):active,
+  [role="checkbox"]:not(:disabled):not([aria-disabled="true"]):hover,
+  [role="checkbox"]:not(:disabled):not([aria-disabled="true"]):active,
+  [role="switch"]:not(:disabled):not([aria-disabled="true"]):hover,
+  [role="switch"]:not(:disabled):not([aria-disabled="true"]):active,
+  [role="radio"]:not(:disabled):not([aria-disabled="true"]):hover,
+  [role="radio"]:not(:disabled):not([aria-disabled="true"]):active,
+  [role="tab"]:not(:disabled):not([aria-disabled="true"]):hover,
+  [role="tab"]:not(:disabled):not([aria-disabled="true"]):active,
+  [role="menuitem"]:not(:disabled):not([aria-disabled="true"]):hover,
+  [role="menuitem"]:not(:disabled):not([aria-disabled="true"]):active,
+  [role="option"]:not(:disabled):not([aria-disabled="true"]):hover,
+  [role="option"]:not(:disabled):not([aria-disabled="true"]):active,
+  [data-slot="calendar-day"]:not(:disabled):not([aria-disabled="true"]):hover,
+  [data-slot="calendar-day"]:not(:disabled):not([aria-disabled="true"]):active {
     transform: none;
     box-shadow: none;
   }
 }
 
 /*
- * doors: admin — the product's only print stylesheet.
- *
- * A door card is printed and put in the cupboard beside the board, for somebody standing
- * at a door at six in the morning with a phone that is no use to them. Nothing else in
- * this product has ever been printed, so there was no `@media print` block at all: a
- * browser printing an app screen prints the sticky header, the tab strip, the gear menu
- * and a page of chrome around a card that is 80 mm tall.
- *
- * A5 because that is the paper a club actually has and because the card is short. The
- * rules are deliberately structural — hide the chrome, set the page, let the sheet fill
- * it — rather than a re-skin: a print stylesheet that restyles text is one that drifts
- * from the screen it is supposed to be a copy of.
+ * doors: admin — the product's only print stylesheet. A door card is printed (A5) and put in
+ * the cupboard beside the board. Structural rules only: hide the chrome, set the page, let the
+ * sheet fill it. The Tailwind plugin re-emits the LIGHT variables for `.dark` under print, so a
+ * card printed from the dark theme still prints dark-on-paper.
  */
 @media print {
   @page { size: A5; margin: 12mm; }
 
-  /* The app's shell scrolls a nested <main>; printing that clips the sheet to one
-     viewport, so the overflow has to go as well as the chrome. */
+  /* The shell scrolls a nested <main>; printing that clips the sheet to one viewport. */
   header, nav { display: none !important; }
-  html, body, #root { height: auto !important; overflow: visible !important; background: #FFFFFF !important; }
+  html, body, #root { height: auto !important; overflow: visible !important; background: rgb(var(--color-bg-surface)) !important; }
   main { overflow: visible !important; }
   main > div { max-width: none !important; padding: 0 !important; }
 
-  /* Anything the page marks as screen-only: the Print button itself, the back link and
-     the sentence explaining what the sheet is for. None of it means anything on paper. */
+  /* The Print button itself, the back link, the sentence explaining the sheet. */
   [data-print-hide] { display: none !important; }
 }

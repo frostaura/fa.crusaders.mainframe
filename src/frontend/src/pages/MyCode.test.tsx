@@ -878,7 +878,7 @@ describe("MyCode at a club with a door", () => {
       { ...CODE, starts_at: "2099-01-01T17:00:00Z" },
     );
 
-    const card = (await screen.findByLabelText("Your code")).closest("div.rounded-lg")!;
+    const card = (await screen.findByLabelText("Your code")).closest("[data-slot=\"card\"]")!;
     // The precondition, asserted rather than assumed: a note about which clock these are
     // means nothing unless a clock is on the card.
     expect(card.textContent).toMatch(/\d{1,2}:\d{2}/);
@@ -892,7 +892,7 @@ describe("MyCode at a club with a door", () => {
   it("says nothing about clocks on a card that shows none", async () => {
     renderBoth(memberDoorFixture(), { ...IDENT_CODE, doors: false });
 
-    const card = (await screen.findByLabelText("Your code")).closest("div.rounded-lg")!;
+    const card = (await screen.findByLabelText("Your code")).closest("[data-slot=\"card\"]")!;
     expect(card.textContent).not.toMatch(/\d{1,2}:\d{2}/);
     expect(card.textContent).not.toContain(CLUB_TIME_NOTE);
   });
@@ -2111,7 +2111,7 @@ describe("MyCode at a club with a door", () => {
     // PIXELS, not rem: a touch target is a fingertip and does not scale with the club's
     // text setting, which is the same rule the header row already carries.
     for (const tab of screen.getAllByRole("tab")) {
-      expect(tab.className).toContain("min-h-[44px]");
+      expect(tab.className).toMatch(/\bmin-h-(touch|\[44px\])\b/);
     }
   });
 
@@ -2242,7 +2242,7 @@ describe("MyCode at a club with a door", () => {
    * </p>
    */
   function expectRootInvariantCode(qrBox: HTMLElement) {
-    const card = qrBox.closest("div.rounded-lg")!;
+    const card = qrBox.closest("[data-slot=\"card\"]")!;
     // A rem anywhere in the width chain is the defect, in any spelling: `max-w-xs`, a `p-4`
     // on this card, or a `20rem` inside an arbitrary value.
     const chain = `${qrBox.className} ${card.className}`;

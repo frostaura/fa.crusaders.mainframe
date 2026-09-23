@@ -61,7 +61,7 @@
  * caching path cannot accidentally route around the rule.
  */
 
-const VERSION = "v2";
+const VERSION = "v3";
 const SHELL_CACHE = `crusaders-shell-${VERSION}`;
 const ASSET_CACHE = `crusaders-assets-${VERSION}`;
 const OWNED = [SHELL_CACHE, ASSET_CACHE];
@@ -74,7 +74,8 @@ const OWNED = [SHELL_CACHE, ASSET_CACHE];
 const CACHE_PREFIX = "crusaders-";
 
 /** The shell itself. The hashed build assets are read out of it at install — `precacheBuild`. */
-const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/favicon.svg", "/icon-192.png"];
+/** `/theme-boot.js` is un-hashed and runs before first paint: an offline start without it paints light. */
+const SHELL = ["/", "/index.html", "/theme-boot.js", "/manifest.webmanifest", "/favicon.svg", "/icon-192.png"];
 
 /**
  * The single decision about whether anything may be stored.

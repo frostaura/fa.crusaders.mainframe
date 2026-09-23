@@ -1017,10 +1017,12 @@ describe("Schedule — a refusal that proves the grid is stale refetches it", ()
     // refusal; a press of the header Refresh redrew them all as Closed, so the API was right
     // and only the un-refetched client was wrong.
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: /^Book Court 1 at 11:00/ })).not.toBeInTheDocument());
+      expect(screen.queryByRole("button", { name: /^Book Court 1 at 11:00/, hidden: true })).not.toBeInTheDocument());
     expect(screen.getByLabelText("Court 1 at 11:00 — the club is closed")).toBeInTheDocument();
     // 07:00–09:00 is still open, so this is a redraw and not a blanked grid.
-    expect(screen.getByRole("button", { name: /^Book Court 1 at 08:45/ })).toBeInTheDocument();
+    // `hidden: true` on both: the modal is still open, and a Radix dialog hides everything
+    // outside it from the accessibility tree — without it the absence above passes vacuously.
+    expect(screen.getByRole("button", { name: /^Book Court 1 at 08:45/, hidden: true })).toBeInTheDocument();
   });
 
   /**

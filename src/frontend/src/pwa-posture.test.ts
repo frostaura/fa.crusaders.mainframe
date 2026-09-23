@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { themes } from "./lib/tokens";
 
 /**
  * The installed app and the browser tab have to be the same app.
@@ -9,9 +10,8 @@ import { describe, expect, it } from "vitest";
  * They were not. `manifest.webmanifest` declared `theme_color: "#0369A1"` — the accent — while
  * `index.html` declared `theme-color: "#F8FAFC"` — the app background. Installed-PWA chrome and
  * browser-tab chrome therefore wore different colours for the same product, and neither file
- * gave any hint that the other existed. There was also no `color-scheme`, so a browser in dark
- * mode is free to paint the form controls, the scrollbars and the canvas dark behind a palette
- * that has exactly one, light theme.
+ * gave any hint that the other existed. There was also no `color-scheme`. Since D7 the product
+ * has two themes, so the page declares both and carries one `theme-color` per scheme.
  * </p>
  *
  * <p>
@@ -28,21 +28,34 @@ const manifest = JSON.parse(readFileSync(join(ROOT, "public", "manifest.webmanif
 };
 const html = readFileSync(join(ROOT, "index.html"), "utf8");
 
-/** The `content` of a `<meta name="…">`, or null. */
+/** The `content` of a `<meta name="…">` that carries no media query, or null. */
 const meta = (name: string) =>
   html.match(new RegExp(`<meta\\s+name="${name}"\\s+content="([^"]*)"`, "i"))?.[1] ?? null;
 
+/** Every `theme-color` meta, keyed by its `prefers-color-scheme` media value. */
+const themeColors = () => Object.fromEntries(
+  [...html.matchAll(/<meta\s+name="theme-color"\s+media="\(prefers-color-scheme:\s*(light|dark)\)"\s+content="([^"]*)"/gi)]
+    .map((m) => [m[1].toLowerCase(), m[2]]),
+);
+
 describe("PWA chrome", () => {
-  it("uses one theme colour, not one per surface", () => {
-    expect(meta("theme-color")).not.toBeNull();
-    expect(manifest.theme_color.toUpperCase()).toBe(meta("theme-color")!.toUpperCase());
+  it("tints the browser chrome with each theme's own canvas", () => {
+    // Two metas with media, one per scheme (D7) — and each is the token, not a transcription.
+    expect(themeColors()).toEqual({ light: themes.light.bg.app, dark: themes.dark.bg.app });
+    // No third, unconditional one competing with them.
+    expect(meta("theme-color")).toBeNull();
   });
 
-  it("says which colour scheme it actually has", () => {
-    // There is one palette and no `dark:` class anywhere in the product. Declaring it is what
-    // stops a dark-mode browser painting its own chrome — native selects, date inputs,
-    // scrollbars, the canvas behind the app — dark underneath a light page.
-    expect(meta("color-scheme")).toBe("light");
+  it("gives the installed app the light canvas, the same as the light browser tab", () => {
+    // The manifest has no media query; an installed PWA's splash and title bar use this one value.
+    expect(manifest.theme_color.toUpperCase()).toBe(themes.light.bg.app.toUpperCase());
+  });
+
+  it("says it has both colour schemes", () => {
+    // D7 retired "light only": the product ships a dark theme, and declaring both is what lets
+    // native controls, scrollbars and the canvas follow whichever one is active. The rule that
+    // no component writes `dark:` now lives in theme-vocabulary.test.ts — dark is token-only.
+    expect(meta("color-scheme")).toBe("light dark");
   });
 
   it("keeps the splash background the app's own background", () => {

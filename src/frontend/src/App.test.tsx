@@ -113,7 +113,7 @@ describe("App — while the club does not answer", () => {
     expect(screen.getByText("Can't reach the club right now")).toBeInTheDocument();
 
     const button = screen.getByRole("button", { name: "Try again now" });
-    expect(button).toHaveAttribute("aria-busy", "false");
+    expect(button).not.toHaveAttribute("aria-busy", "true");
 
     fireEvent.click(button);
     await tick(1_500);
@@ -132,6 +132,6 @@ describe("App — while the club does not answer", () => {
     await tick(REQUEST_TIMEOUT_MS + 1_000);
     const settled = screen.getByRole("button", { name: "Try again now" });
     expect(settled).not.toBeDisabled();
-    expect(settled).toHaveAttribute("aria-busy", "false");
+    expect(settled).not.toHaveAttribute("aria-busy", "true");
   });
 });

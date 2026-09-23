@@ -142,7 +142,7 @@ function CourtListEditor({
 }) {
   if (courts.length === 0) {
     return (
-      <p className="text-sm text-amber-800">
+      <p className="text-sm text-warning-strong">
         No courts to assign yet. Add the club's courts under Admin settings first.
       </p>
     );
@@ -156,10 +156,10 @@ function CourtListEditor({
         const label = `${labelPrefix ? `${labelPrefix} relay` : "Relay"} ${relay} court`;
         return (
           <div key={relay} className="flex items-center gap-2">
-            <span className="w-16 shrink-0 text-sm text-slate-500">Relay {relay}</span>
+            <span className="w-16 shrink-0 text-sm text-text-secondary">Relay {relay}</span>
             <select
               aria-label={label}
-              className="min-h-11 rounded-lg border border-slate-200 bg-white px-2 text-sm disabled:opacity-50"
+              className="min-h-11 rounded-lg border border-control bg-bg-surface px-2 text-sm disabled:opacity-50"
               value={current ?? ""}
               disabled={!reachable}
               onChange={(e) => {
@@ -219,7 +219,7 @@ function DeviceButtonMapPanel({
   }
 
   return (
-    <div className="mt-3 space-y-3 rounded-lg bg-slate-50 p-3">
+    <div className="mt-3 space-y-3 rounded-lg bg-bg-muted p-3">
       <div className="flex flex-wrap gap-4 text-sm">
         <label className="flex items-center gap-2">
           <input type="radio" name={group} checked={!own} onChange={() => setOwn(false)} disabled={saving} />
@@ -286,14 +286,14 @@ function DeviceDetailsEditor({
   }
 
   return (
-    <div className="mt-3 space-y-3 rounded-lg bg-slate-50 p-3">
+    <div className="mt-3 space-y-3 rounded-lg bg-bg-muted p-3">
       <div>
         <Label htmlFor={nameId}>Name</Label>
         <Input id={nameId} value={name} onChange={(e) => setName(e.target.value)} placeholder="Court 1 box" disabled={saving} />
       </div>
       <div>
         <Label>Courts, by relay</Label>
-        <p className="mb-2 text-xs text-slate-500">
+        <p className="mb-2 text-xs text-text-secondary">
           Relay A is the first output on the box. Assign the courts in the order they are wired.
         </p>
         <CourtListEditor value={draft} onChange={setDraft} courts={courts} disabled={saving} labelPrefix={device.name} />
@@ -316,8 +316,8 @@ function DeviceRowHeader({ device, online, now }: { device: AdminDevice; online:
     <>
       <div className="flex flex-wrap items-center gap-2">
         {device.enabled && online
-          ? <Wifi className="h-4 w-4 text-emerald-500" aria-label="online" />
-          : <WifiOff className="h-4 w-4 text-slate-300" aria-label={device.enabled ? "offline" : "out of service"} />}
+          ? <Wifi className="h-4 w-4 text-success-strong" aria-label="online" />
+          : <WifiOff className="h-4 w-4 text-text-muted" aria-label={device.enabled ? "offline" : "out of service"} />}
         {/* min-w-0 so a long name gives way inside the flex row instead of setting its
             width; break-words so it wraps rather than running off the card. */}
         <span className="min-w-0 break-words font-medium">{device.name}</span>
@@ -351,7 +351,7 @@ function DeviceRowHeader({ device, online, now }: { device: AdminDevice; online:
           two version strings. The row used to push the page wider than the phone on a long
           device NAME alone (R2 I-F6); an unbreakable 64-character token is the same defect
           with a larger token. */}
-      <div className="mt-1 break-words text-xs text-slate-500">{identityLine(device)}</div>
+      <div className="mt-1 break-words text-xs text-text-muted">{identityLine(device)}</div>
     </>
   );
 }
@@ -398,7 +398,7 @@ function DeviceRowHeader({ device, online, now }: { device: AdminDevice; online:
  */
 function OutOfServiceNotice({ device, coverage }: { device: AdminDevice; coverage: CourtCoverage }) {
   return (
-    <p className="mt-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+    <p className="mt-2 rounded-lg bg-bg-muted p-3 text-xs text-text-secondary">
       {`Out of service. The API refuses this box, so it switches nothing on, and the club is not`
         + ` alerted about its silence. ${outOfServiceConsequences(coverage).join(" ")}`}
       <span className="sr-only">{device.name}</span>
@@ -434,21 +434,21 @@ function ActivityRow({ entry, now }: { entry: DeviceActivityEntry; now: number }
   const why = describeActivityReason(entry);
   const detail = [who, why].filter((part) => part !== null).join(" · ");
   return (
-    <li className="border-t border-slate-100 py-1.5 first:border-t-0">
+    <li className="border-t border-border py-1.5 first:border-t-0">
       <div className="flex items-baseline gap-2">
-        <span className="min-w-0 break-words font-medium text-slate-700" title={entry.action}>
+        <span className="min-w-0 break-words font-medium text-text-primary" title={entry.action}>
           {describeActivityAction(entry)}
         </span>
         {/* Relative for the glance, exact on hover or long-press for the reconciliation —
             the pair the liveness line above and the ledger both already use. */}
-        <time dateTime={entry.at} title={clubInstant(entry.at)} className="ml-auto shrink-0 text-slate-400">
+        <time dateTime={entry.at} title={clubInstant(entry.at)} className="ml-auto shrink-0 text-text-muted">
           {relative(entry.at, now)}
         </time>
       </div>
       {/* min-w-0 AND break-words: a member's display name is the one arbitrarily wide
           thing in this panel, and a row that sets its own width pushes the whole page
           wider than the phone (R2 I-F6) — fifty times over, here. */}
-      {detail && <div className="mt-0.5 min-w-0 break-words text-slate-500">{detail}</div>}
+      {detail && <div className="mt-0.5 min-w-0 break-words text-text-muted">{detail}</div>}
     </li>
   );
 }
@@ -461,12 +461,12 @@ function ActivityBody({ entries, loading, error, gate, now }: {
   gate: boolean;
   now: number;
 }) {
-  if (loading) return <p className="text-xs text-slate-500">Loading…</p>;
+  if (loading) return <p className="text-xs text-text-muted">Loading…</p>;
   // Before empty, deliberately. A failed read that rendered "nothing recorded yet" would
   // be making a claim about the DOOR ("nobody has been through it") out of a claim about
   // the request, which is how an admin concludes a working door is dead.
   if (error) return <p className="text-xs text-danger-strong">{error}</p>;
-  if (!entries || entries.length === 0) return <p className="text-xs text-slate-500">{activityEmptyNotice(gate)}</p>;
+  if (!entries || entries.length === 0) return <p className="text-xs text-text-muted">{activityEmptyNotice(gate)}</p>;
   return (
     <>
       {/* A3, on the panel it was missed on. A reviewer read nine offline rows — some naming
@@ -477,7 +477,7 @@ function ActivityBody({ entries, loading, error, gate, now }: {
           inferred; the doors surface has carried this since the finding landed and this
           panel serves the same rows for a court box. */}
       {entries.some((entry) => entry.offline) && (
-        <p className="mb-1 text-xs text-slate-500">{OFFLINE_WHO_NOTE}</p>
+        <p className="mb-1 text-xs text-text-secondary">{OFFLINE_WHO_NOTE}</p>
       )}
       <ul className="text-xs">
         {entries.map((entry, i) => <ActivityRow key={`${entry.at}-${entry.action}-${i}`} entry={entry} now={now} />)}
@@ -550,7 +550,7 @@ function DeviceActivityPanel({ device, now }: { device: AdminDevice; now: number
         {activityPanelTitle(gate)}
       </Button>
       {open && (
-        <div className="mt-2 rounded-lg bg-slate-50 p-3">
+        <div className="mt-2 rounded-lg bg-bg-muted p-3">
           <ActivityBody entries={entries} loading={loading} error={error} gate={gate} now={now} />
         </div>
       )}
@@ -616,7 +616,7 @@ function DeviceRow({
   const hasOwnMapField = device.button_map !== undefined;
 
   return (
-    <div className="rounded-lg border border-slate-200 p-3">
+    <div className="rounded-lg border border-border p-3">
       <DeviceRowHeader device={device} online={online} now={now} />
 
       {editing === "details" && (
@@ -756,9 +756,9 @@ function GateRows({ gates, tenantHeartbeat, now }: {
 }) {
   if (gates.length === 0) return null;
   return (
-    <div className="mt-4 border-t border-slate-200 pt-4">
+    <div className="mt-4 border-t border-border pt-4">
       <div className="mb-2 flex items-center gap-2">
-        <DoorClosed className="h-4 w-4 text-slate-400" aria-hidden="true" />
+        <DoorClosed className="h-4 w-4 text-text-muted" aria-hidden="true" />
         <h3 className="text-sm font-semibold">Doors</h3>
       </div>
       <ul className="space-y-2">
@@ -771,20 +771,20 @@ function GateRows({ gates, tenantHeartbeat, now }: {
           // that surface, so it cannot call the same board something else.
           const name = doorDisplayName(gate);
           return (
-            <li key={gate.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 p-3">
+            <li key={gate.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border p-3">
               {/* A8: `doorStateChip` answers null where the caller cannot say whether a
                   door is reporting. This page always can — it resolves `online` from a read
                   it has just made — so the chip is always here; the guard is the type
                   saying so rather than a claim this call site is allowed to make. */}
               {chip && <Badge tone={chip.tone}>{chip.label}</Badge>}
               <span className="min-w-0 break-words text-sm font-medium">{name}</span>
-              <span className="min-w-0 break-words text-xs text-slate-500">
+              <span className="min-w-0 break-words text-xs text-text-muted">
                 {`${gate.gate_key ?? UNNAMED_GATE} · ${gate.device_code}`}
               </span>
               <time
                 dateTime={gate.last_seen_at ?? undefined}
                 aria-live="off"
-                className="text-xs text-slate-500"
+                className="text-xs text-text-muted"
               >
                 {relative(gate.last_seen_at, now)}
               </time>
@@ -807,7 +807,7 @@ function GateRows({ gates, tenantHeartbeat, now }: {
           );
         })}
       </ul>
-      <p className="mt-2 text-xs text-slate-500">Doors are set up and shut under Doors.</p>
+      <p className="mt-2 text-xs text-text-muted">Doors are set up and shut under Doors.</p>
     </div>
   );
 }
@@ -877,7 +877,7 @@ function deletedToast(device: AdminDevice): string {
 function UnacknowledgedBoardsNotice({ devices }: { devices: AdminDevice[] }) {
   const notice = unacknowledgedBoardsNotice(devices.filter((d) => d.auto_registered).length);
   if (notice === null) return null;
-  return <p role="status" className="mb-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">{notice}</p>;
+  return <p role="status" className="mb-3 rounded-lg bg-warning-soft p-3 text-xs text-warning-strong">{notice}</p>;
 }
 
 /**
@@ -1092,7 +1092,7 @@ export function AdminDevicesPage() {
 
       <Card className="p-5">
         <div className="mb-1 flex flex-wrap items-center gap-2">
-          <Cpu className="h-5 w-5 text-slate-400" />
+          <Cpu className="h-5 w-5 text-text-muted" />
           {/* `min-w-0 break-words`: a flex item's automatic minimum size is its longest word,
               and at a 32 px root "Connected" alone wants more than the row has. */}
           <h2 className="min-w-0 break-words text-lg font-semibold">Connected boards</h2>
@@ -1109,19 +1109,19 @@ export function AdminDevicesPage() {
             {refreshing ? "Checking…" : "Refresh"}
           </Button>
         </div>
-        <p className="mb-3 text-xs text-slate-500">
+        <p className="mb-3 text-xs text-text-muted">
           {checkedAt ? `Checked ${relative(checkedAt, now)}` : "Checking…"} · this page re-reads the boards every {REFRESH_MS / 1000} seconds while this tab is in front.
         </p>
 
         <UnacknowledgedBoardsNotice devices={devices} />
 
         {loading ? (
-          <p className="text-sm text-slate-500">Loading…</p>
+          <p className="text-sm text-text-muted">Loading…</p>
         ) : devices.length === 0 ? (
           /* A club may own only doors: a gate registers itself on this list exactly as a box
              does, so "no boxes" told such a club its doors did not count as devices. The
              heading above is already "Connected boards". */
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-text-secondary">
             No boards have called in yet. Flash one with the key above and power it on — it registers itself.
           </p>
         ) : (

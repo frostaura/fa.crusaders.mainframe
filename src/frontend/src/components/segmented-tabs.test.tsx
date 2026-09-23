@@ -306,8 +306,9 @@ describe("the thumb and the touch target", () => {
   it("keeps a 44 px floor in pixels, so it does not double with the text", () => {
     render(<Harness />);
     for (const tab of screen.getAllByRole("tab")) {
-      // B12's rule: a touch target is a fingertip. `min-h-11` is 88 px at a 32 px root.
-      expect(tab.className).toContain("min-h-[44px]");
+      // B12's rule: a touch target is a fingertip. `min-h-11` is 88 px at a 32 px root;
+      // `min-h-touch` is the design system's named 44px (`layout.touch`), in pixels.
+      expect(tab.className).toContain("min-h-touch");
     }
   });
 
@@ -315,6 +316,21 @@ describe("the thumb and the touch target", () => {
     render(<Harness />);
     expect(screen.getByRole("tablist").className).toContain("border-transparent");
     for (const tab of screen.getAllByRole("tab")) expect(tab.className).toContain("border-transparent");
+  });
+
+  it("marks the selected segment with accent text, not colour of the thumb alone", () => {
+    render(<Harness />);
+    expect(screen.getByRole("tab", { selected: true }).className).toContain("text-accent-strong");
+    for (const tab of screen.getAllByRole("tab", { selected: false })) {
+      expect(tab.className).not.toContain("text-accent-strong");
+    }
+  });
+
+  it("gives its panel the house focus outline — no outline-none", () => {
+    render(<Harness />);
+    for (const panel of document.querySelectorAll('[role="tabpanel"]')) {
+      expect(panel.className).not.toContain("outline-none");
+    }
   });
 
   it("opts out of the hover lift — a capsule whose segments rise wobbles", () => {

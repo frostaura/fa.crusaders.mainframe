@@ -226,7 +226,8 @@ test("caches the shell and the build, and nothing that belongs to a member", asy
   expect(paths.filter((path) => path.startsWith("/api/")), "a member's own data is in the cache").toEqual([]);
   expect(paths.filter((path) => path.startsWith("/uploads/")), "a member's photo is in the cache").toEqual([]);
   // What it IS allowed to hold: the shell, the icons, the manifest and the hashed build.
-  const stranger = paths.filter((path) => !/^\/(index\.html)?$|^\/assets\/|^\/icon-|^\/apple-touch-icon\.png$|^\/favicon\.svg$|^\/manifest\.webmanifest$/.test(path));
+  // `/theme-boot.js` is shell: it paints the saved theme before first frame, offline included (D7).
+  const stranger = paths.filter((path) => !/^\/(index\.html)?$|^\/assets\/|^\/icon-|^\/apple-touch-icon\.png$|^\/favicon\.svg$|^\/manifest\.webmanifest$|^\/theme-boot\.js$/.test(path));
   expect(stranger, `the worker cached something nobody decided it should: ${JSON.stringify(stranger)}`).toEqual([]);
 });
 

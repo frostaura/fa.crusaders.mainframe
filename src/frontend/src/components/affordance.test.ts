@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { composite, contrastRatio, themes } from "../lib/tokens";
 
 /**
  * "Every clickable surface gets the same subtle affordance the fingerprint icon has."
@@ -213,12 +214,19 @@ describe("the affordance every clickable surface shares", () => {
     const liftRules = rulesWithBody(css, /transform:\s*translateY\(-1px\)/);
     expect(liftRules).toHaveLength(1);
     const lift = liftRules[0];
+    // The class, and — since the design-system facelift — every role that is selected rather
+    // than pressed, plus the calendar day, all in the same (0,4,0) shape.
     const optOut = rulesWithBody(css, /transform:\s*none/)
       .flat()
-      .filter((selector) => selector.includes(".no-lift") && selector.endsWith(":hover"));
+      .filter((selector) => /^(\.no-lift|\[role="(checkbox|switch|radio|tab|menuitem|option)"\]|\[data-slot="calendar-day"\])/.test(selector)
+        && selector.endsWith(":hover"));
 
     expect(lift.length).toBeGreaterThan(1);
     expect(optOut.length).toBeGreaterThan(0);
+    for (const role of ["checkbox", "switch", "radio", "tab", "menuitem", "option"]) {
+      expect(optOut.some((s) => s.startsWith(`[role="${role}"]`)), `no opt-out for role=${role}`).toBe(true);
+    }
+    expect(optOut.some((s) => s.startsWith('[data-slot="calendar-day"]'))).toBe(true);
 
     for (const out of optOut) {
       for (const base of lift) {
@@ -250,6 +258,10 @@ describe("the affordance every clickable surface shares", () => {
     const primitives = new Set([
       "button", "Button", "a", "Link", "NavLink", "select", "summary", "label", "input",
       "option", "ConfirmButton",
+      // The design-system button and what it renders through: `UiButton` is `ui/button`
+      // imported under the shim's name, `Slot.Root` is that button's `asChild` path (it
+      // becomes the caller's own <a>/<Link>), and Radix's `Toolbar.Button` renders <button>.
+      "UiButton", "Slot.Root", "Toolbar.Button",
     ]);
     const offenders: string[] = [];
     for (const file of sourceFiles(SRC)) {
@@ -284,10 +296,22 @@ describe("the affordance every clickable surface shares", () => {
     // The worst case is what the alpha has to survive. White text needs the composite at or
     // below rgb(119,119,119); over a pure-white photo, `255 × (1 − a) ≤ 119` gives `a ≥ 0.53`.
     // Hence the floor below, rather than a number chosen because it looked right on one avatar.
+    //
+    // Since the raw-palette sweep the scrim is the theme's `overlay` colour at a fixed alpha
+    // (`bg-[rgb(var(--color-overlay)/A)]`) and the text is `primary.ink`, so the pair is
+    // MEASURED from the tokens in both themes, composited over a pure-white photo, instead
+    // of pinning a black alpha.
     const profile = readFileSync(join(SRC, "pages", "Profile.tsx"), "utf8");
-    const scrims = [...profile.matchAll(/bg-black\/(\d+)/g)].map((m) => Number(m[1]));
+    expect(profile).not.toMatch(/bg-black|text-white/);
+    const scrims = [...profile.matchAll(/bg-\[rgb\(var\(--color-overlay\)\/(0?\.\d+)\)\]/g)].map((m) => Number(m[1]));
     expect(scrims.length).toBeGreaterThan(0);
-    for (const alpha of scrims) expect(alpha).toBeGreaterThanOrEqual(53);
+    for (const alpha of scrims) {
+      for (const theme of ["light", "dark"] as const) {
+        const { overlay, primary } = themes[theme];
+        const worst = composite(overlay, "#FFFFFF", alpha);
+        expect(contrastRatio(primary.ink, worst), `${theme} scrim at ${alpha}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
   });
 
   it("does not buy the affordance back with contrast", () => {

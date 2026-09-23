@@ -1,7 +1,43 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { Modal, MODAL_KEPT_OPEN } from "./Modal";
+import { CLOSE_LABEL, Modal, MODAL_KEPT_OPEN } from "./Modal";
+import { ToastProvider, useToast } from "./Toast";
+
+/*
+ * Modal now renders through `ui/dialog` (Radix). Three consequences for the harness, none for
+ * the promises being tested:
+ *  - Radix marks everything outside an open modal `aria-hidden`, so elements behind the dialog
+ *    are looked up BEFORE it opens (or with `hidden: true`) — a role query cannot see them after.
+ *  - The dialog is the PANEL now; the scrim is a sibling (`data-slot="dialog-overlay"`), and
+ *    Radix dismisses on the click that follows an outside pointer-down, so a scrim click is the
+ *    full pointer/mouse sequence after one zero-delay tick (see `clickScrim`).
+ *  - Every dialog carries the close × (last in the DOM, named CLOSE_LABEL), so it is the last
+ *    focusable.
+ */
+
+/** Radix registers its outside-pointer listener on a zero-delay timer after mount. */
+async function settle() {
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+}
+
+function scrim(): HTMLElement {
+  const el = document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]');
+  if (!el) throw new Error("no scrim rendered");
+  return el;
+}
+
+/** A mouse click on the scrim (or anything else outside), as a browser sends it. */
+async function clickScrim(el: HTMLElement = scrim()) {
+  await settle();
+  act(() => {
+    fireEvent.pointerDown(el, { button: 0, pointerType: "mouse" });
+    fireEvent.mouseDown(el, { button: 0 });
+    fireEvent.pointerUp(el, { button: 0, pointerType: "mouse" });
+    fireEvent.mouseUp(el, { button: 0 });
+    fireEvent.click(el, { button: 0 });
+  });
+}
 
 /**
  * D3-B05 / D4 §2.3 — the dialog that claimed `aria-modal` and managed no focus.
@@ -68,13 +104,38 @@ describe("focus goes into the dialog", () => {
     expect(screen.getByLabelText("Reason")).toHaveFocus();
   });
 
-  it("falls back to the panel rather than to <body> when there is nothing focusable", () => {
+  it("lands inside the dialog, never on <body>, when it has no control of its own", () => {
     render(
       <Modal title="Temporary password generated" onClose={() => {}}>
         <p>Read this and write it down.</p>
       </Modal>,
     );
-    expect(document.activeElement).toBe(screen.getByRole("dialog").querySelector("[tabindex='-1']"));
+    // The panel used to be the floor under the trap. Every dialog now carries the close ×, so
+    // there is always a real control to land on — and it is inside the dialog.
+    expect(screen.getByRole("button", { name: CLOSE_LABEL })).toHaveFocus();
+    expect(screen.getByRole("dialog")).toContainElement(document.activeElement as HTMLElement);
+  });
+
+  it("always carries a 44px close button, which closes it", () => {
+    const onClose = vi.fn();
+    render(<Modal title="Confirm booking" onClose={onClose}><button>Cancel</button></Modal>);
+    const close = screen.getByRole("button", { name: CLOSE_LABEL });
+    expect(close.className).toContain("size-touch");
+    fireEvent.click(close);
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("names its close × apart from a footer button that already says Close", () => {
+    render(<Modal title="Credit adjusted" onClose={() => {}}><button>Close</button></Modal>);
+    expect(screen.getAllByRole("button", { name: "Close" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: CLOSE_LABEL })).toBeInTheDocument();
+  });
+
+  it("is named by an h2 title, and declares itself modal", () => {
+    render(<Modal title="Confirm booking" onClose={() => {}}><p>Body</p></Modal>);
+    expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
+    expect(screen.getByRole("dialog", { name: "Confirm booking" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Confirm booking" })).toBeInTheDocument();
   });
 });
 
@@ -83,7 +144,8 @@ describe("Tab does not walk out of it", () => {
     render(<Harness />);
     open();
     const first = screen.getByRole("button", { name: "Keep looking" });
-    const last = screen.getByRole("button", { name: "Book for 50.00 cr" });
+    // The close × is last in the DOM, so it is the last stop before the wrap.
+    const last = screen.getByRole("button", { name: CLOSE_LABEL });
 
     act(() => { last.focus(); });
     // Measured before: the third Tab reached "Skip to main content" — outside the dialog the
@@ -96,7 +158,7 @@ describe("Tab does not walk out of it", () => {
     render(<Harness />);
     open();
     const first = screen.getByRole("button", { name: "Keep looking" });
-    const last = screen.getByRole("button", { name: "Book for 50.00 cr" });
+    const last = screen.getByRole("button", { name: CLOSE_LABEL });
 
     act(() => { first.focus(); });
     // Measured before: six Shift+Tabs reached an "Available" grid cell behind the scrim.
@@ -106,8 +168,8 @@ describe("Tab does not walk out of it", () => {
 
   it("pulls focus back in when something outside has taken it", () => {
     render(<Harness />);
-    open();
     const outside = screen.getByRole("link", { name: "Skip to main content" });
+    open();
     act(() => { outside.focus(); });
     fireEvent.keyDown(document, { key: "Tab" });
     expect(screen.getByRole("button", { name: "Keep looking" })).toHaveFocus();
@@ -135,29 +197,32 @@ describe("focus comes back to whoever opened it", () => {
     expect(opener).toHaveFocus();
   });
 
-  it("does not take focus from a page that moved it somewhere deliberate", () => {
+  /**
+   * The page's choice wins. While the dialog is open its trap holds focus, so the deliberate move
+   * happens once it has closed — a receipt heading, the row that replaced the one just edited —
+   * and nothing a tick later (Radix's deferred focus handling runs on a zero-delay timer) may
+   * snatch it back.
+   */
+  it("does not take focus from a page that moved it somewhere deliberate", async () => {
     render(<Harness />);
-    open();
     const elsewhere = screen.getByRole("button", { name: "Book Court 1 at 23:15" });
-    act(() => {
-      elsewhere.focus();
-      fireEvent.keyDown(document, { key: "Escape" });
-    });
+    open();
+    act(() => { fireEvent.keyDown(document, { key: "Escape" }); });
+    act(() => { elsewhere.focus(); });
+    await settle();
     expect(elsewhere).toHaveFocus();
   });
 });
 
 describe("an overlay click never discards what somebody typed", () => {
-  const overlay = () => screen.getByRole("dialog");
-
-  it("still closes a dialog nobody has touched", () => {
+  it("still closes a dialog nobody has touched", async () => {
     const onClose = vi.fn();
     render(<Modal title="Confirm booking" onClose={onClose}><button>Keep looking</button></Modal>);
-    fireEvent.click(overlay());
+    await clickScrim();
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("refuses once there is a typed reason in it", () => {
+  it("refuses once there is a typed reason in it", async () => {
     const onClose = vi.fn();
     render(
       <Modal title="Reject this application" onClose={onClose}>
@@ -165,13 +230,13 @@ describe("an overlay click never discards what somebody typed", () => {
       </Modal>,
     );
     fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Not a member yet" } });
-    fireEvent.click(overlay());
+    await clickScrim();
     // D3-B05: this used to close and take the reason with it, silently.
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Reason")).toHaveValue("Not a member yet");
   });
 
-  it("counts a picked option as something typed", () => {
+  it("counts a picked option as something typed", async () => {
     const onClose = vi.fn();
     render(
       <Modal title="Adjust credit" onClose={onClose}>
@@ -182,18 +247,23 @@ describe("an overlay click never discards what somebody typed", () => {
       </Modal>,
     );
     fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "goodwill" } });
-    fireEvent.click(overlay());
+    await clickScrim();
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("says so out loud, and says it again on a second mis-tap", () => {
+  it("says so out loud, and says it again on a second mis-tap", async () => {
     render(<Modal title="Reject" onClose={() => {}}><input aria-label="Reason" /></Modal>);
     fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "x" } });
 
     const region = screen.getByRole("dialog").querySelector("[aria-live]")!;
     expect(region.textContent).toBe("");
-    fireEvent.click(screen.getByRole("dialog"));
+    await clickScrim();
     expect(region.textContent).toBe(MODAL_KEPT_OPEN);
+    // Re-keyed on every refusal: a live region whose text does not change says nothing twice.
+    const first = region.firstElementChild;
+    await clickScrim();
+    expect(region.textContent).toBe(MODAL_KEPT_OPEN);
+    expect(region.firstElementChild).not.toBe(first);
   });
 
   it("still lets Escape close it, because Escape is not a mis-tap", () => {
@@ -204,11 +274,44 @@ describe("an overlay click never discards what somebody typed", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("stays open when a toast raised over it is tapped away", async () => {
+    const onClose = vi.fn();
+    function Page() {
+      const toast = useToast();
+      return (
+        <Modal title="Confirm booking" onClose={onClose}>
+          <button onClick={() => toast.push({ text: "Court 1 is no longer free." })}>Book</button>
+        </Modal>
+      );
+    }
+    render(<ToastProvider><Page /></ToastProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Book" }));
+    await clickScrim(screen.getByRole("status", { hidden: true }));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("leaves a click inside the panel alone", () => {
     const onClose = vi.fn();
     render(<Modal title="Confirm" onClose={onClose}><button>Keep looking</button></Modal>);
     fireEvent.click(screen.getByRole("button", { name: "Keep looking" }));
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("under StrictMode's mount → cleanup → mount", () => {
+  /*
+   * Two real defects in this product only StrictMode could show (memory/gotchas-frontend.md).
+   * Here the risk is the restore cleanup running on the simulated unmount and dragging focus
+   * back out to the opener while the dialog is still open.
+   */
+  it("still lands inside, traps, and restores the opener on close", async () => {
+    render(<Harness />, { reactStrictMode: true });
+    const opener = screen.getByRole("button", { name: "Book Court 4 at 23:15" });
+    open();
+    await settle();
+    expect(screen.getByRole("button", { name: "Keep looking" })).toHaveFocus();
+    act(() => { fireEvent.keyDown(document, { key: "Escape" }); });
+    expect(opener).toHaveFocus();
   });
 });
 

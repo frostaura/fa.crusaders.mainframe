@@ -548,7 +548,7 @@ function Cell({ label, selectKey, candidateKey, at, selection, roving, children 
       {children}
       {selected && (
         <span aria-hidden="true"
-          className="absolute top-1 right-1 h-4 w-4 rounded-full bg-accent-strong text-white text-[10px] leading-4 text-center">
+          className="absolute top-1 right-1 h-4 w-4 rounded-full bg-accent-strong text-bg-surface text-[10px] leading-4 text-center">
           ✓
         </span>
       )}

@@ -15,10 +15,13 @@ import { useProfile } from "./profile";
  * </p>
  *
  * <p>
- * It sits INSIDE `ProfileProvider` and outside everything that draws a glyph. Before the
- * profile lands, and for a signed-out screen that has no profile at all, `profile` is null and
- * {@link readActionGlyphSet} answers the default — so the sign-in screen's buttons and the
- * booking dialog's buttons wear the same marks, which is the whole reason this is central.
+ * It sits INSIDE `ProfileProvider`. Before the profile lands, and for a signed-out screen that
+ * has no profile at all, `profile` is null and every reader answers its default.
+ * </p>
+ *
+ * <p>
+ * <b>`action_glyphs` is read and carried but inert</b> (R8 / D5): the thumbs-up/down glyph set it
+ * chose between is retired and nothing draws from it. See `ActionGlyphSet` in `clubUi.ts`.
  * </p>
  */
 export function ClubUiProvider({ children }: { children: React.ReactNode }) {

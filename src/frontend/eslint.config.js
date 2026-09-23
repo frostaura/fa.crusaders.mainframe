@@ -22,5 +22,21 @@ export default tseslint.config(
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
     },
+  },
+  // Icons come through ONE barrel (design-system.md, Icons): per-icon paths, one reviewable
+  // vocabulary, no package-root import that drags in ~1 500 icons. `src/icons.test.ts` holds the
+  // same line on every commit. lucide-react is not banned yet — its importers migrate in a later
+  // phase and the ban lands with the last of them.
+  {
+    files: ["**/*.{ts,tsx}"],
+    ignores: ["src/components/ui/icons.ts"],
+    rules: {
+      "no-restricted-imports": ["error", {
+        patterns: [{
+          group: ["@phosphor-icons/react", "@phosphor-icons/react/*"],
+          message: "Import icons from \"@/components/ui/icons\" — add a re-export line there if one is missing.",
+        }],
+      }],
+    },
   }
 );

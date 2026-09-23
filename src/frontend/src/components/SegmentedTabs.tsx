@@ -230,7 +230,9 @@ export function SegmentedTabs<T extends string>({
       aria-orientation={vertical ? "vertical" : "horizontal"}
       onKeyDown={onKeyDown}
       className={cn(
-        "relative isolate flex rounded-xl bg-bg-muted p-1",
+        // The segmented look of `ui/tabs` (design-system.md, Components → tabs): a sunken track
+        // whose active segment is lifted to the surface with a hairline edge and accent text.
+        "relative isolate flex rounded-lg bg-bg-muted p-1",
         vertical ? "flex-col gap-1" : "flex-row gap-1",
         // Forced colours throws the capsule's fill away and leaves two words in a row; the
         // transparent boundary is what `index.css` turns into a real one.
@@ -249,7 +251,7 @@ export function SegmentedTabs<T extends string>({
         <span
           aria-hidden="true"
           data-segmented-thumb
-          className="pointer-events-none absolute -z-10 rounded-lg bg-bg-surface shadow-sm transition-all duration-enter ease-out motion-reduce:transition-none"
+          className="pointer-events-none absolute -z-10 rounded-md border border-border bg-bg-surface shadow-xs transition-all duration-enter ease-out motion-reduce:transition-none"
           style={{ transform: `translate(${thumb.x}px, ${thumb.y}px)`, width: thumb.w, height: thumb.h, left: 0, top: 0 }}
         />
       )}
@@ -296,14 +298,14 @@ export function SegmentedTabs<T extends string>({
             }}
             onKeyUp={(e) => { if (e.key === " ") activate(segment); }}
             className={cn(
-              // 44 px in PIXELS. B12's rule: a touch target is a fingertip and does not scale
-              // with the text. `min-h`, not `h`, so a stacked segment can be taller.
-              "relative z-10 flex-1 min-w-0 min-h-[44px] px-3 rounded-lg text-sm font-medium",
+              // 44px — the `touch` size, which does not scale with the text (B12: a touch target
+              // is a fingertip). `min-h`, not `h`, so a stacked segment can be taller.
+              "relative z-10 flex-1 min-w-0 min-h-touch px-3 rounded-md text-sm font-semibold",
               "inline-flex items-center justify-center gap-1.5 text-center break-words",
               "border border-transparent transition-colors duration-base ease-standard",
               // A capsule whose segments rise under a thumb is a capsule that wobbles.
               "no-lift",
-              selected ? "text-text-primary" : "text-text-secondary",
+              selected ? "text-accent-strong" : "text-text-secondary hover:text-text-primary",
               segment.disabled && "opacity-60",
             )}
           >
@@ -386,7 +388,9 @@ export function SegmentedTabPanel({
       role="tabpanel"
       aria-labelledby={tabId ?? `segment-${id}`}
       tabIndex={0}
-      className={cn("outline-none", className)}
+      // No `outline-none`: a focusable panel shows the house `:focus-visible` outline like
+      // everything else that takes focus.
+      className={className}
     >
       {children}
     </div>

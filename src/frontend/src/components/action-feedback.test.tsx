@@ -2,9 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Button } from "./Button";
 import { ConfirmButton, confirmSubject } from "./ConfirmButton";
-import { ActionGlyph, glyphFor, CheckGlyph, CrossGlyph, ThumbsUpGlyph, ThumbsDownGlyph, AlertGlyph } from "./ActionGlyph";
 import { glyphKindFor, outcomeClassName, pressClassName, useActionFeedback } from "./useActionFeedback";
-import { CLUB_UI_FALLBACK, ClubUiContext, DEFAULT_ACTION_GLYPHS, readActionGlyphSet } from "../lib/clubUi";
+import { CLUB_UI_FALLBACK, ClubUiContext, readActionGlyphSet } from "../lib/clubUi";
+
+/** The marks a button shows, by name — never the hidden spinner the primitive keeps for width. */
+const marks = (root: ParentNode) => [...root.querySelectorAll("[data-glyph]")].map((el) => el.getAttribute("data-glyph"));
+/** Whether the width-locking pending layer (spinner) is the one on show. */
+const working = (button: HTMLElement) =>
+  !button.querySelector('[data-slot="button-pending"]')!.className.includes("opacity-0");
 
 /**
  * Item 12 — the system-wide action feedback theme.
@@ -31,107 +36,70 @@ describe("a neutral button is exactly the button it was", () => {
     expect(screen.getByRole("button", { name: "Save" })).not.toHaveAttribute("data-fb");
   });
 
-  it("draws no glyph at all", () => {
+  it("draws no mark at all", () => {
     const { container } = render(<Button intent="neutral">Save</Button>);
-    expect(container.querySelectorAll("svg")).toHaveLength(0);
+    expect(marks(container)).toEqual([]);
+    // The primitive keeps a spinner in its hidden, width-locking pending layer; that is the only
+    // svg, and it is not on show.
+    expect(container.querySelectorAll("svg")).toHaveLength(1);
+    expect(working(screen.getByRole("button", { name: "Save" }))).toBe(false);
   });
 });
 
-describe("an intent puts a glyph beside the word, never instead of it", () => {
-  it("keeps the visible label, which is the accessible name", () => {
-    render(<Button intent="affirm">Book for 50.00 cr</Button>);
-    // WCAG 2.5.3: the name is the words, and the glyph adds nothing to it.
+/**
+ * R8 / D5 — the thumbs are retired. A button at rest is its word; the thumbs-up/down that affirm
+ * and decline once wore at rest are gone for every club, and the club's `action_glyphs` choice
+ * between thumbs and ✓/✕ is read but has no effect.
+ */
+describe("no glyph at rest (R8)", () => {
+  it.each(["affirm", "decline", "destructive"] as const)("an %s button at rest wears no mark", (intent) => {
+    const { container } = render(<Button intent={intent}>Book for 50.00 cr</Button>);
+    expect(marks(container)).toEqual([]);
+    // WCAG 2.5.3: the name is the words.
     expect(screen.getByRole("button", { name: "Book for 50.00 cr" })).toBeInTheDocument();
   });
 
-  it("hides the glyph from assistive technology", () => {
-    const { container } = render(<Button intent="affirm">Book</Button>);
-    const svg = container.querySelector("svg")!;
-    expect(svg).toHaveAttribute("aria-hidden", "true");
-    // Old Edge and IE put every inline <svg> in the tab order; `focusable` is the other half.
-    expect(svg).toHaveAttribute("focusable", "false");
-  });
-});
-
-describe("the club's glyph set", () => {
-  it("defaults to thumbs, which is the ruling", () => {
-    expect(DEFAULT_ACTION_GLYPHS).toBe("thumbs");
-    expect(glyphFor("affirm", "thumbs")).toBe(ThumbsUpGlyph);
-    expect(glyphFor("decline", "thumbs")).toBe(ThumbsDownGlyph);
+  it("no phase before the work wears a mark, for any intent", () => {
+    for (const intent of ["affirm", "decline", "destructive", "neutral"] as const) {
+      expect(glyphKindFor(intent, "rest")).toBeNull();
+      expect(glyphKindFor(intent, "press")).toBeNull();
+    }
   });
 
-  it("offers marks as the alternative", () => {
-    expect(glyphFor("affirm", "marks")).toBe(CheckGlyph);
-    expect(glyphFor("decline", "marks")).toBe(CrossGlyph);
+  it("ignores the club's retired glyph setting: the same button under either value", () => {
+    const under = (actionGlyphs: "thumbs" | "marks") => render(
+      <ClubUiContext.Provider value={{ ...CLUB_UI_FALLBACK, actionGlyphs }}>
+        <Button intent="affirm">Book</Button>
+      </ClubUiContext.Provider>,
+    ).container.innerHTML;
+    expect(under("marks")).toBe(under("thumbs"));
   });
 
-  it("uses one refusal glyph in both sets — a failure is not a gesture", () => {
-    expect(glyphFor("failure", "thumbs")).toBe(AlertGlyph);
-    expect(glyphFor("failure", "marks")).toBe(AlertGlyph);
-  });
-
-  /**
-   * Each mark names itself on the element, so a browser can tell them apart.
-   *
-   * <p>
-   * The founder's question about item 12 is "is a thumb actually on the button", and it is a
-   * question only a real engine can answer — jsdom draws nothing. Without a name on the
-   * element the browser-side check is a pixel comparison, which passes for a ✓ that shipped
-   * where a thumb was ordered and fails for a 1 px nudge to a curve. `data-glyph` is one
-   * attribute and it makes `e2e/action-feedback.spec.ts` ask the real question.
-   * </p>
-   */
-  it.each([
-    [ThumbsUpGlyph, "thumbs-up"],
-    [ThumbsDownGlyph, "thumbs-down"],
-    [CheckGlyph, "check"],
-    [CrossGlyph, "cross"],
-    [AlertGlyph, "alert"],
-  ])("names itself on the element (%#)", (Glyph, name) => {
-    const { container } = render(<Glyph />);
-    expect(container.querySelector("svg")).toHaveAttribute("data-glyph", name);
-  });
-
-  /**
-   * Unknown is never "the other one". This is the field's commonest value on the day the
-   * theme ships, because the backend key does not exist yet.
-   */
+  /** Still tolerant, so an old payload parses — unknown is the default, never "the other one". */
   it.each([undefined, null, "", "THUMBS", "check_cross", 1, {}, []])(
-    "answers the default for %p rather than guessing",
+    "still reads %p as the default, and nothing draws from it",
     (raw) => { expect(readActionGlyphSet(raw)).toBe("thumbs"); },
   );
-
-  it("takes the club's choice when the club has made one", () => {
-    expect(readActionGlyphSet("marks")).toBe("marks");
-    expect(readActionGlyphSet("thumbs")).toBe("thumbs");
-  });
-
-  it("reaches a button through the provider, not through a prop at the call site", () => {
-    const { container } = render(
-      <ClubUiContext.Provider value={{ ...CLUB_UI_FALLBACK, actionGlyphs: "marks" }}>
-        <ActionGlyph kind="affirm" />
-      </ClubUiContext.Provider>,
-    );
-    // The tick's path, which the thumb does not have.
-    expect(container.innerHTML).toContain("M4.5 12.5");
-  });
-
-  it("answers the default with no provider at all, rather than throwing", () => {
-    // Every primitive test in this suite mounts a bare component; a context that threw would
-    // turn "the button has a glyph now" into two dozen failures that say nothing about it.
-    const { container } = render(<ActionGlyph kind="affirm" />);
-    expect(container.querySelector("svg")).toBeTruthy();
-  });
 });
 
-describe("a destructive action never wears a thumb, and never celebrates", () => {
-  it("draws no glyph of its own — the call site's icon is what it wears", () => {
+describe("a destructive action never celebrates", () => {
+  it("draws no mark of its own on success — the call site's icon is what it wears", () => {
     expect(glyphKindFor("destructive", "rest")).toBeNull();
     expect(glyphKindFor("destructive", "success")).toBeNull();
   });
 
-  it("still says so when it fails", () => {
+  it("still says so when it fails, and still shows it is working", () => {
     expect(glyphKindFor("destructive", "failure")).toBe("failure");
+    expect(glyphKindFor("destructive", "working")).toBe("working");
+  });
+
+  it("shows no tick when a deletion lands", async () => {
+    const { container } = render(
+      <Button intent="destructive" feedbackAnnouncement="Deleted." onAction={() => {}}>Delete</Button>,
+    );
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Delete/ })); });
+    expect(screen.getByRole("button", { name: /Delete/ })).toHaveAttribute("data-fb", "success");
+    expect(marks(container)).toEqual([]);
   });
 
   it("settles to muted, never to the success pair", () => {
@@ -167,6 +135,10 @@ describe("the outcome phases", () => {
     );
     const button = screen.getByRole("button", { name: /Save/ });
     expect(button).toHaveAttribute("data-fb", "rest");
+    // Through the compat shim the pending layer takes no room at rest (B12 widths), and is laid
+    // out only while working — asserted as the class, since jsdom has no layout.
+    const RESTING = "[&_[data-slot=button-pending]]:hidden";
+    expect(button.className).toContain(RESTING);
 
     act(() => { fireEvent.pointerDown(button); });
     expect(button).toHaveAttribute("data-fb", "press");
@@ -174,9 +146,28 @@ describe("the outcome phases", () => {
     act(() => { fireEvent.click(button); });
     expect(button).toHaveAttribute("data-fb", "working");
     expect(button).toHaveAttribute("aria-busy", "true");
+    // Working = the spinner, and nothing else (R8).
+    expect(working(button)).toBe(true);
+    expect(button.className).not.toContain(RESTING);
+    expect(marks(button)).toEqual([]);
 
     await act(async () => { release(); });
     expect(button).toHaveAttribute("data-fb", "success");
+    // Success = the hand-drawn tick, drawn on arrival; the spinner is gone.
+    expect(working(button)).toBe(false);
+    expect(marks(button)).toEqual(["check"]);
+    expect(button.querySelector('[data-glyph="check"]')).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("ignores a second press while it is working, so the work never runs twice", async () => {
+    let release: () => void = () => {};
+    const work = vi.fn(() => new Promise<void>((r) => { release = r; }));
+    render(<Button intent="affirm" feedbackAnnouncement="Saved." onAction={work}>Save</Button>);
+    const button = screen.getByRole("button", { name: /Save/ });
+    act(() => { fireEvent.click(button); });
+    act(() => { fireEvent.click(button); });
+    expect(work).toHaveBeenCalledTimes(1);
+    await act(async () => { release(); });
   });
 
   /**
@@ -206,6 +197,9 @@ describe("the outcome phases", () => {
     const button = screen.getByRole("button", { name: /Save/ });
     await act(async () => { fireEvent.click(button); });
     await waitFor(() => expect(button).toHaveAttribute("data-fb", "failure"));
+    // Failure = the alert mark, plus the shake below.
+    expect(marks(button)).toEqual(["alert"]);
+    expect(button.className).toContain("animate-fb-shake");
   });
 
   /**

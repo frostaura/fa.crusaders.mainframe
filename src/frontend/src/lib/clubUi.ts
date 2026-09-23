@@ -5,55 +5,33 @@ import { DEFAULT_CURRENCY_SYMBOL } from "./currency";
  * The club's choices about how the product talks back — read once, tolerated absent.
  *
  * <p>
- * There is exactly one of these today and it is item 12's: which pair of glyphs a confirm and
- * a decline wear. It is a module rather than a boolean threaded through `Button` because the
- * whole point of the feedback theme is that no call site configures it; the glyph set is a
- * property of the club, not of the button, and a prop would make it a property of whoever
- * remembered to pass one.
+ * Two fields: the currency symbol (live) and `actionGlyphs` (<b>deprecated, read but inert</b>).
  * </p>
  */
 
 /**
- * Which pair of marks an affirm and a decline wear.
- *
- * <p>
- * <b>`thumbs` is the default, and that is a ruling rather than a preference.</b> The member
- * design recommended ✓/✕, on the grounds that a thumbs-up reads as an obscenity in Iran, Iraq
- * and parts of West Africa and as dismissive in Greece — and that the offensive reading
- * persists most strongly among older members. The counter-argument won: this is one club, in
- * Durban, where a thumbs-up is unambiguously positive, and the founder asked for thumbs by
- * name for an audience that finds a gesture easier to read than a mark. The research is not
- * wrong; it is about a different deployment, and the setting is here so a club in one of those
- * places can have ✓/✕ without a code change.
- * </p>
- *
- * <p>
- * Either way the glyph is never alone. NN/g's icon research is unambiguous that without a
- * standard usage an icon needs a text label beside it, and every glyph this theme draws sits
- * beside a word — the glyph is the fast read, the word is the truth.
- * </p>
+ * @deprecated R8 / D5 — the thumbs-up/down `ActionGlyph` is retired, and with it the club's choice
+ * between thumbs and ✓/✕. A button at rest now wears no glyph at all; working is a spinner, and
+ * the outcome is the hand-drawn `AnimatedCheck` / `AnimatedAlert` for every club
+ * (`components/ui/feedback-marks.tsx`). The type and the reader survive only so the settings
+ * payload and `/me/profile` still parse; nothing draws from the value. The key itself is removed
+ * in the hardening phase (P10), with the settings field.
  */
 export type ActionGlyphSet = "thumbs" | "marks";
 
-/** What a club gets when it has never said, and what an older API's silence means. */
+/** @deprecated See {@link ActionGlyphSet}. What an absent setting reads as; it changes nothing. */
 export const DEFAULT_ACTION_GLYPHS: ActionGlyphSet = "thumbs";
 
 /**
- * The club's setting, or the default — for a value that arrived over the wire.
- *
- * <p>
- * <b>Unknown is not false.</b> A field this client has never heard of, a `null`, a number, a
- * mis-cased string: every one of them means "the club has not chosen", which is the default,
- * and never "the other one". The backend lane is still building the settings key, so the
- * commonest case on the day this ships is `undefined` — and a client that treated that as a
- * signal would flip the whole product's glyphs on a deploy nobody asked for.
- * </p>
+ * @deprecated See {@link ActionGlyphSet}. Still tolerant — unknown is the default, never "the
+ * other one" — so an old payload parses; the answer has no effect on anything drawn.
  */
 export function readActionGlyphSet(raw: unknown): ActionGlyphSet {
   return raw === "thumbs" || raw === "marks" ? raw : DEFAULT_ACTION_GLYPHS;
 }
 
 export type ClubUi = {
+  /** @deprecated Read from the profile and carried, but nothing draws from it (R8 / D5). */
   actionGlyphs: ActionGlyphSet;
   /**
    * The symbol the club's REAL MONEY figures wear — `R`, `R$`, `CHF`.

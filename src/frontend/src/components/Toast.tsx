@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
+import { CheckCircle, Info, Warning, WarningCircle, type Icon } from "./ui/icons";
 
 export type ToastTone = "info" | "success" | "danger" | "warning";
 
@@ -84,62 +85,73 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Tone → the coloured bar on the leading edge and the mark beside the words. */
+const TONE_BAR: Record<ToastTone, string> = {
+  info: "bg-info-strong",
+  success: "bg-success-strong",
+  warning: "bg-warning-strong",
+  danger: "bg-danger-strong",
+};
+
+const TONE_INK: Record<ToastTone, string> = {
+  info: "text-info-strong",
+  success: "text-success-strong",
+  warning: "text-warning-strong",
+  danger: "text-danger-strong",
+};
+
+/** The shape carries the tone as well as the colour — colour is never the only signal. */
+const TONE_ICON: Record<ToastTone, Icon> = {
+  info: Info,
+  success: CheckCircle,
+  warning: Warning,
+  danger: WarningCircle,
+};
+
+/**
+ * Where toasts appear (design-system.md, Components → toast).
+ *
+ * <p>
+ * <b>Phone: bottom-centre, ABOVE the tab bar.</b> The shell publishes the bar's height as
+ * `--app-bottom-bar-height` (it already includes the safe area); where there is no bar the
+ * home-indicator inset is the floor, so the strip never sits under the gesture bar (the viewport
+ * meta carries `viewport-fit=cover`). The bottom is also the far side of the screen from the
+ * status lines a failure toast most often contradicts (R3-28 / B10).
+ * </p>
+ *
+ * <p>
+ * <b>From `sm`: top-right, under the measured chrome</b> (`--app-chrome-height`, published by the
+ * layout — B13 replaced a guessed `top-[100px]` that covered the tab strip), 384px wide.
+ * </p>
+ *
+ * <p>
+ * A CLASS, not an inline style: jsdom's CSS parser mangles `env()` in an inline declaration, so
+ * the only assertion that could hold the anchoring would be asserting about a string jsdom
+ * invented. Tailwind emits the arbitrary value verbatim, where the browser parses it.
+ * </p>
+ */
+export const TOAST_VIEWPORT_CLASS = cn(
+  "pointer-events-none fixed inset-x-4 z-toast mx-auto flex max-w-md flex-col items-stretch gap-2",
+  "bottom-[calc(max(var(--app-bottom-bar-height,0px),env(safe-area-inset-bottom,0px))+12px)]",
+  "sm:bottom-auto sm:left-auto sm:right-6 sm:top-[calc(var(--app-chrome-height,4rem)+12px)] sm:mx-0 sm:w-96",
+);
+
 function ToastViewport({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: (id: number) => void }) {
-  // `z-[200]`, above `Modal`'s `z-[100]` overlay and not below it. A toast raised while a
-  // dialog was open painted UNDER the dialog's 30% black scrim, so the only explanation a
-  // member got for a refusal read as greyed-out background chrome — and any dialog taller
-  // than the toast's own strip hid it outright. Booking refusals no longer travel this way
-  // at all (they render inside the dialog), but a toast raised over any other dialog has
-  // the same problem and this is the layer that fixes it.
-  //
   /**
-   * <b>C10 — no `aria-live` here, because each toast already is one.</b>
+   * <b>`z-toast`, above every dialog and popover</b> (z-index scale: modal 50, popover 60,
+   * toast 70). A toast raised while a dialog was open once painted UNDER the scrim, so the only
+   * explanation a member got for a refusal read as greyed-out background chrome.
    *
    * <p>
-   * This container carried `aria-live="polite"` AND every toast inside it carries
-   * `role="status"`, which is the same live region nested in itself. A screen reader
-   * announced the download toast twice: once because a node was inserted into a live
-   * region, and once because the node inserted was itself a live region. The rule is one
-   * live ancestor, and the toast is the better place for it — it is the thing that arrives,
-   * it is what carries the text, and it keeps announcing correctly if the viewport is ever
-   * moved or split.
-   * </p>
-   */
-  //
-  /**
-   * <b>R3-28 / B10 — it sits at the BOTTOM, because what it was covering was the answer.</b>
-   *
-   * <p>
-   * It was anchored under the header (B13: measured rather than the `top-[100px]` guess that
-   * covered the tab strip at a 32 px root font). Under the header is exactly where a page puts
-   * the thing a toast most often contradicts: reviewer B failed a shut and watched "Could not
-   * shut that door." land on top of the door's own status line, so the one sentence that could
-   * have settled which of the two was true was the one hidden by the other.
-   * </p>
-   *
-   * <p>
-   * The bottom edge is the far side of the screen from every heading, chip and status line in
-   * this product, and it is where a phone puts a message anyway. `env(safe-area-inset-bottom)`
-   * keeps it clear of the home indicator on a notched phone — the viewport meta already carries
-   * `viewport-fit=cover`, so without it the strip sits underneath the gesture bar.
-   * </p>
-   *
-   * <p>
-   * `--app-chrome-height` stays published by `Layout` — the route-heading scroll margin in
-   * `index.css` reads it — it is simply no longer this strip's problem.
+   * <b>C10 — no `aria-live` here, because each toast already is one.</b> This container once
+   * carried `aria-live="polite"` AND every toast inside it `role="status"` — the same live region
+   * nested in itself — and a screen reader announced the download toast twice. One live
+   * ancestor per toast, and the toast is the better place for it: it is the thing that arrives,
+   * and it keeps announcing correctly wherever the viewport is moved.
    * </p>
    */
   return (
-    <div
-      /*
-       * A CLASS, not an inline style, and the reason is a test rather than a preference:
-       * jsdom's CSS parser mangles `env()` in an inline declaration — it serialised this one
-       * back as `calc(12px + env(0px * , * safe-area-i…` — so the one assertion that could
-       * hold the anchoring would have been asserting about a string jsdom invented. Tailwind
-       * emits the arbitrary value verbatim into the stylesheet, where the browser parses it.
-       */
-      className="pointer-events-none fixed bottom-[calc(env(safe-area-inset-bottom,0px)+12px)] left-1/2 z-[200] -translate-x-1/2 flex flex-col items-center gap-2 w-[min(92vw,420px)]"
-    >
+    <div data-toast-viewport className={TOAST_VIEWPORT_CLASS}>
       {toasts.map((t) => (
         <ToastView key={t.id} toast={t} onDismiss={onDismiss} />
       ))}
@@ -166,47 +178,39 @@ function ToastView({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: num
     };
   }, [toast.id, toast.durationMs, onDismiss]);
 
-  const tones: Record<ToastTone, string> = {
-    info: "bg-info-soft text-info-strong border-info-strong/20",
-    success: "bg-success-soft text-success-strong border-success-strong/20",
-    warning: "bg-warning-soft text-warning-strong border-warning-strong/20",
-    danger: "bg-danger-soft text-danger-strong border-danger-strong/20",
-  };
-
   const dismiss = () => { setVisible(false); window.setTimeout(() => onDismiss(toast.id), 250); };
+  const Mark = TONE_ICON[toast.tone];
 
-  // A toast is dismissed by tapping it, and it used to be a plain div that said so with
-  // nothing but `cursor-pointer`: no focus ring, no keyboard route to it at all, and none
-  // of the hover treatment the rest of the product now shares. `data-interactive` is what
-  // the base layer in index.css keys on for a surface that is not a <button> — and once a
-  // thing can be pressed, it has to be pressable without a mouse. `role="status"` stays:
-  // the toast still has to ANNOUNCE itself, which is a different job from being pressable.
+  // Dismissed by tapping it, so it is pressable without a mouse too: `tabIndex={0}`, Enter and
+  // Space, and `data-interactive` for the shared affordance layer in index.css. `role="status"`
+  // stays — announcing itself is a different job from being pressable.
   return (
     <div
       role="status"
       data-interactive
+      data-tone={toast.tone}
       tabIndex={0}
       aria-label={`${toast.text} — dismiss`}
       onClick={dismiss}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); dismiss(); } }}
       className={cn(
-        "pointer-events-auto select-none",
-        "rounded-lg border px-4 py-2.5 text-sm font-medium shadow-md w-full",
-        // `duration-enter`, not `duration-300`. This was the one timing in the product that
-        // lived nowhere but here — a third duration beside the theme's two, invisible to
-        // anybody reading tailwind.config.ts and unreachable from TypeScript. The removal
-        // timer below is `durationMs + 250`, which still clears the 220 ms this resolves to.
-        "transition-all duration-enter ease-out",
-        tones[toast.tone],
-        visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-3",
+        "pointer-events-auto relative flex w-full select-none items-start gap-3 overflow-hidden",
+        "rounded-xl border border-border bg-bg-raised py-3 pl-5 pr-4 text-sm text-text-primary shadow-lg",
+        // `duration-enter` — the timing lives in the token layer; the removal timer below is
+        // `durationMs + 250`, which clears the 220ms this resolves to.
+        "transition-all duration-enter ease-out motion-reduce:transition-none",
+        visible ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0",
       )}
     >
-      {toast.text}
-      {/* R3-28 — the second fact, in the same breath as the first. "It did not work" leaves an
-          admin looking at a status line they can no longer trust; "and nothing changed" is the
-          sentence that lets them stop looking. Its own line rather than appended to the text,
-          so a call site cannot half-say it. */}
-      {toast.unchanged && <span className="mt-0.5 block font-normal">{NOTHING_CHANGED}</span>}
+      <span aria-hidden="true" data-toast-bar className={cn("absolute inset-y-0 left-0 w-1", TONE_BAR[toast.tone])} />
+      <Mark size={20} aria-hidden="true" className={cn("shrink-0", TONE_INK[toast.tone])} />
+      <span className="min-w-0 flex-1 break-words font-medium">
+        {toast.text}
+        {/* R3-28 — the second fact, in the same breath as the first. "It did not work" leaves an
+            admin looking at a status line they can no longer trust; "and nothing changed" is the
+            sentence that lets them stop looking. Its own line, so a call site cannot half-say it. */}
+        {toast.unchanged && <span className="mt-0.5 block font-normal text-text-secondary">{NOTHING_CHANGED}</span>}
+      </span>
     </div>
   );
 }

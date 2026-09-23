@@ -1,0 +1,20 @@
+/*
+ * Development gallery only — imported by `pages/dev/WatermarkSection.tsx`, which is reachable only
+ * from the `/dev/primitives` route that `App.tsx` folds out of the production build.
+ *
+ * `data-demo-state="hover|press"` pins a watermark host in its hover or pressed phase so all six
+ * phases of a surface can be compared side by side without a pointer. It reads the SAME per-surface
+ * opacity variables `components/ui/watermark.css` does (`--wm-hover`, `--wm-press`), so it cannot
+ * show a value the real states would not. The selectors are descendant (not child) selectors so a
+ * glyph nested inside a Button's label layer is reached too.
+ *
+ * The cell's nudge and squeeze transforms are repeated from watermark.css (inside the same
+ * reduced-motion guard); that file is the source of truth and this is a dev-only mirror of it.
+ */
+[data-watermark][data-demo-state="hover"] .wm-glyph { opacity: var(--wm-hover); }
+[data-watermark][data-demo-state="press"] .wm-glyph { opacity: var(--wm-press); }
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-watermark="cell"][data-demo-state="hover"] .wm-glyph { transform: translate(-2px, -2px) rotate(-10deg); }
+  [data-watermark="cell"][data-demo-state="press"] .wm-glyph { transform: rotate(-15deg) scale(0.96); }
+}

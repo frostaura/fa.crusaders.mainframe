@@ -5,14 +5,21 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <!--
-      One light palette, declared twice on purpose. `theme-color` tints the browser's own chrome
-      and must match the app bar the member is looking at (bg.app); `color-scheme` is what stops
-      a browser in dark mode painting form controls, scrollbars and the canvas dark behind a page
-      that has no dark theme. The manifest's own theme_color is the same value — it was #0369A1,
-      so an installed PWA and a browser tab wore different colours for the same app.
+      Two themes (D7). `color-scheme` tells the browser both exist, so native controls,
+      scrollbars and the canvas follow whichever is active. The two `theme-color` metas tint the
+      browser chrome to bg.app per OS scheme; theme-boot.js pins both to the member's explicit
+      choice when there is one. The manifest's theme_color is the light value — an installed
+      PWA's splash has no media query. `pwa-posture.test.ts` holds all three to the tokens.
     -->
-    <meta name="theme-color" content="#F8FAFC" />
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F8FAFC" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0A1220" />
+    <!--
+      Blocking and external, before any stylesheet: it sets `html.dark` so the first frame is
+      already in the right theme. External (not inline) so a strict CSP needs no hash for it;
+      tiny, so the block costs nothing a member can see.
+    -->
+    <script src="/theme-boot.js"></script>
     <!--
       Installable, per docs/specs/feature-spec.md §12. The manifest is what Android and desktop
       Chrome read; the apple-* tags are what iOS reads instead, because Safari still ignores the

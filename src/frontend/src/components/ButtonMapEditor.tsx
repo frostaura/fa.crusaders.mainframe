@@ -110,11 +110,11 @@ export function ButtonMapEditor({
           // the whole Devices page 410 px wide inside a 375 px phone even after the confirm
           // button stopped forcing 435. A row that can wrap costs a desktop nothing.
           <div key={index} className="flex flex-wrap items-center gap-2">
-            <span className="w-20 shrink-0 text-sm text-slate-500">Button {index + 1}</span>
+            <span className="w-20 shrink-0 text-sm text-text-secondary">Button {index + 1}</span>
 
             <select
               aria-label={name(index, "action")}
-              className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-sm"
+              className="h-9 min-w-0 rounded-lg border border-control bg-bg-surface px-2 text-sm"
               value={kind}
               disabled={disabled}
               onChange={(e) => update(index, e.target.value as ActionKind, "")}
@@ -128,7 +128,7 @@ export function ButtonMapEditor({
             {kind === "court" && (
               <select
                 aria-label={name(index, "court")}
-                className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-sm"
+                className="h-9 min-w-0 rounded-lg border border-control bg-bg-surface px-2 text-sm"
                 value={detail || "A"}
                 disabled={disabled}
                 onChange={(e) => update(index, "court", e.target.value)}

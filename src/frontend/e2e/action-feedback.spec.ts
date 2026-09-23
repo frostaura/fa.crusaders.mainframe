@@ -7,7 +7,7 @@ import type { Page } from "@playwright/test";
  * <p>
  * The unit suite proves each control DECLARES its intent (`components/member-confirm-intent.
  * test.tsx`). Only a browser can answer the question the founder actually asked, which is
- * whether a thumb is drawn on the glass and whether pressing it does anything you can see.
+ * whether pressing a button does anything you can see.
  * jsdom reports no geometry, runs no CSS animation, resolves no custom property and honours
  * no media query, so every assertion below is one no vitest test can make:
  * </p>
@@ -15,11 +15,11 @@ import type { Page } from "@playwright/test";
  * <ul>
  *   <li>the glyph is a real stroked <code>&lt;svg&gt;</code> with non-zero size, not a
  *       character that fell back to a missing font;</li>
- *   <li>the thumb is the THUMB — ruling 4 overrules D4's ✓/✕ recommendation, and a club that
- *       has set nothing gets thumbs;</li>
+ *   <li>no glyph at rest — the thumbs of ruling 4 are retired by the facelift (R8/D5): a
+ *       button's word is its meaning, and a mark appears only as an OUTCOME (check / alert);</li>
  *   <li>pressing moves the button, and pressing a destructive one does not;</li>
- *   <li>under <code>prefers-reduced-motion</code> the motion goes and the glyph, the colour
- *       and the word stay — which is the half of a reduced-motion implementation that is
+ *   <li>under <code>prefers-reduced-motion</code> the motion goes and the colour and the word
+ *       stay — which is the half of a reduced-motion implementation that is
  *       usually thrown out with the animation.</li>
  * </ul>
  *
@@ -130,33 +130,9 @@ function compressed(transform: string): boolean {
   return a < 0.999 && d < 0.999;
 }
 
-/**
- * What the glyph actually is on the glass.
- *
- * <p>
- * Read off the DOM rather than screenshotted, because the question is not "does something
- * appear" but "is it the drawn mark, at a size, in the current text colour". A glyph rendered
- * as a text character in a font the phone does not have is a 0x0 box that a screenshot
- * comparison would happily accept as "different but fine".
- * </p>
- */
-async function glyphOf(page: Page, name: string | RegExp) {
-  const svg = page.getByRole("button", { name }).locator("svg[aria-hidden='true']").first();
-  await expect(svg).toHaveCount(1);
-  return page.getByRole("button", { name }).evaluate((button) => {
-    const el = button.querySelector("svg[aria-hidden='true']");
-    if (!el) return null;
-    const box = el.getBoundingClientRect();
-    return {
-      width: box.width,
-      height: box.height,
-      kind: el.getAttribute("data-glyph"),
-      stroke: getComputedStyle(el).stroke,
-      // The mark is STROKED, never a background-image and never a mask, which is what makes it
-      // one of the three things that survive forced colours.
-      background: getComputedStyle(el).backgroundImage,
-    };
-  });
+/** Outcome marks (`data-glyph`) inside a button. At rest there are none (R8/D5). */
+async function restingMarks(page: Page, name: string | RegExp) {
+  return page.getByRole("button", { name }).locator("[data-glyph]").count();
 }
 
 async function openBookingDialog(page: Page) {
@@ -175,27 +151,17 @@ async function openBookingDialog(page: Page) {
 }
 
 test.describe("the booking dialog", () => {
-  test("draws a thumb on the yes and on the no, by default", async ({ page }) => {
+  test("wears no glyph at rest on the yes or the way out", async ({ page }) => {
     await onPhone(page);
     await openBookingDialog(page);
 
-    const yes = await glyphOf(page, /Book for/);
-    const no = await glyphOf(page, "Keep looking");
+    // R8/D5 retired ruling 4's thumbs: the founder called them crude. Nothing is drawn at rest;
+    // a check or an alert appears only once the action has an outcome.
+    expect(await restingMarks(page, /Book for/)).toBe(0);
+    const wayOut = page.getByRole("dialog").getByRole("button").filter({ hasNotText: /Book for/ }).first();
+    expect(await wayOut.locator("[data-glyph]").count()).toBe(0);
 
-    // Ruling 4: the club has set nothing, so it gets THUMBS. D4 recommended ✓/✕ and was
-    // overruled — the club is in Durban, where the gesture is unambiguous, and the founder
-    // asked for it by name. `action_glyphs: "marks"` is the way to the other pair.
-    expect(yes?.kind).toBe("thumbs-up");
-    expect(no?.kind).toBe("thumbs-down");
-
-    // Drawn at a size, in the text colour, with no background-image anywhere near it.
-    for (const g of [yes, no]) {
-      expect(g!.width).toBeGreaterThan(8);
-      expect(g!.height).toBeGreaterThan(8);
-      expect(g!.background).toBe("none");
-    }
-
-    // And the word is still the name. NN/g: a glyph without a label is ambiguous, and this
+    // And the word is the name. NN/g: a glyph without a label is ambiguous, and this
     // audience is the one that pays for ambiguity.
     await expect(page.getByRole("button", { name: /Book for 50\.00/ })).toBeVisible();
   });
@@ -225,7 +191,7 @@ test.describe("a destructive confirm", () => {
    * The carve-out, measured. Ruling 4 in one sentence: a thumbs-up on "Cancel the booking" is
    * the software claiming it approves of a member losing a 15.00 penalty.
    */
-  test("wears no thumb and does not snap", async ({ page }) => {
+  test("wears no mark and does not snap", async ({ page }) => {
     await onPhone(page);
     await signIn(page);
     const d = tomorrow();
@@ -261,11 +227,11 @@ test.describe("a destructive confirm", () => {
     await expect(confirm).toHaveAttribute("data-intent", "destructive");
     // No glyph at all — not a different one. `glyphKindFor` returns null for destructive at
     // every phase but failure, which is the whole of the carve-out.
-    await expect(confirm.locator("svg[aria-hidden='true']")).toHaveCount(0);
+    // (`[data-glyph]`, not any svg: the hidden working layer always holds the spinner.)
+    await expect(confirm.locator("[data-glyph]")).toHaveCount(0);
 
-    // The way out is still a thumb: refusing a deletion is not itself destructive.
-    const keep = await glyphOf(page, "Keep the booking");
-    expect(keep?.kind).toBe("thumbs-down");
+    // The way out wears nothing at rest either (R8/D5).
+    expect(await restingMarks(page, "Keep the booking")).toBe(0);
 
     const frames = await samplePress(page, "Cancel the booking");
     expect(frames.some((f) => f.fb === "press")).toBe(true);
@@ -281,14 +247,10 @@ test.describe("reduced motion keeps everything that is not motion", () => {
    * request for less MOVEMENT, not for less information — a member who has asked for it still
    * needs to know which button is the yes.
    */
-  test("drops the transform and keeps the glyph, the colour and the word", async ({ page }) => {
+  test("drops the transform and keeps the colour and the word", async ({ page }) => {
     await onPhone(page);
     await page.emulateMedia({ reducedMotion: "reduce" });
     await openBookingDialog(page);
-
-    const yes = await glyphOf(page, /Book for/);
-    expect(yes?.kind).toBe("thumbs-up");
-    expect(yes?.width).toBeGreaterThan(8);
 
     const frames = await samplePress(page, /Book for/);
 
@@ -309,17 +271,16 @@ test.describe("the money pages a member reaches alone", () => {
     { path: "/api/v1/auth/registration-policy", body: { self_registration: true, requires_approval: true } },
   ];
 
-  test("registration's one commitment wears the affirm", async ({ page }) => {
+  test("registration's one commitment is a plain, named button at rest", async ({ page }) => {
     await onPhone(page);
     await serveApi(page, anonRoutes);
     await page.goto("/register");
     const submit = page.getByRole("button", { name: /Submit application/ });
     await expect(submit).toBeVisible();
-    const glyph = await glyphOf(page, /Submit application/);
-    expect(glyph?.kind).toBe("thumbs-up");
+    expect(await restingMarks(page, /Submit application/)).toBe(0);
   });
 
-  test("top-up marks continue and cancel as the pair they are", async ({ page }) => {
+  test("top-up's continue and cancel wear no glyph at rest", async ({ page }) => {
     await onPhone(page);
     await signIn(page);
     await serveApi(page, [
@@ -330,7 +291,8 @@ test.describe("the money pages a member reaches alone", () => {
     ]);
     await page.goto("/wallet/topup");
 
-    expect((await glyphOf(page, "Continue to PayFast"))?.kind).toBe("thumbs-up");
-    expect((await glyphOf(page, "Cancel"))?.kind).toBe("thumbs-down");
+    await expect(page.getByRole("button", { name: "Continue to PayFast" })).toBeVisible();
+    expect(await restingMarks(page, "Continue to PayFast")).toBe(0);
+    expect(await restingMarks(page, "Cancel")).toBe(0);
   });
 });

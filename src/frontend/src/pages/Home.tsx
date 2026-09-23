@@ -123,7 +123,7 @@ function SignedOutLanding() {
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
             <Link
               to="/login"
-              className="inline-flex h-12 items-center justify-center rounded-lg bg-accent-strong px-6 font-medium text-white hover:opacity-90"
+              className="inline-flex h-12 items-center justify-center rounded-lg bg-primary px-6 font-medium text-primary-ink hover:bg-primary-hover"
             >
               Sign in
             </Link>

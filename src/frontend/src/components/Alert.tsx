@@ -1,6 +1,7 @@
 import { Children, isValidElement, type HTMLAttributes } from "react";
 import { cn } from "../lib/utils";
 import { useStandingAnnouncement } from "../lib/announce";
+import { CheckCircle, Info, Warning, WarningCircle, type Icon } from "./ui/icons";
 
 /**
  * A message the member has to read before they do anything else.
@@ -15,7 +16,9 @@ import { useStandingAnnouncement } from "../lib/announce";
  *
  * <p>
  * The left rule is not decoration. A refusal set as plain red body copy is one a member skims
- * past and then presses the button again, having changed nothing.
+ * past and then presses the button again, having changed nothing. Nor is the icon: colour is
+ * never the only signal (design-system.md, Accessibility floor), so each tone carries its own
+ * Phosphor mark — 16px bold beside sm text, `aria-hidden`, because the words are the message.
  * </p>
  */
 export type AlertTone = "danger" | "success" | "info" | "warning";
@@ -30,6 +33,14 @@ const TONES: Record<AlertTone, string> = {
   success: "border-success-strong bg-success-soft text-success-strong",
   info: "border-info-strong bg-info-soft text-info-strong",
   warning: "border-warning-strong bg-warning-soft text-warning-strong",
+};
+
+/** Tone → mark. The shape differs as well as the colour, so the tone survives forced colours. */
+const ICONS: Record<AlertTone, Icon> = {
+  danger: WarningCircle,
+  success: CheckCircle,
+  info: Info,
+  warning: Warning,
 };
 
 /**
@@ -103,7 +114,8 @@ type AlertProps = HTMLAttributes<HTMLParagraphElement> & {
   announceKey?: string;
 };
 
-export function Alert({ tone = "danger", live, className, announceKey, ...props }: AlertProps) {
+export function Alert({ tone = "danger", live, className, announceKey, children, ...props }: AlertProps) {
+  const Mark = ICONS[tone];
   const notice = (
     <p
       /*
@@ -117,20 +129,26 @@ export function Alert({ tone = "danger", live, className, announceKey, ...props 
        * anything. `live` is the way to say it, and it is the only way.
        */
       className={cn(
-        "rounded-lg border-l-4 px-3 py-2.5 text-sm",
+        // The words stay DIRECT children of the <p> — call sites and tests find the notice by
+        // its text — so the mark hangs in the left padding rather than sitting in a flex row
+        // (a flex row would also make the text an anonymous item that cannot shrink).
+        "relative break-words rounded-lg border-l-4 py-2.5 pl-9 pr-3 text-sm",
         TONES[tone],
         className,
       )}
       {...props}
       role={ROLE_BY_LIVE[live ?? defaultLive(tone)]}
-    />
+    >
+      <Mark size={16} weight="bold" aria-hidden="true" className="absolute left-3 top-3" />
+      {children}
+    </p>
   );
 
   if (live !== "standing") return notice;
   return (
     <>
       {notice}
-      <StandingAnnouncement text={textOf(props.children)} channel={announceKey} />
+      <StandingAnnouncement text={textOf(children)} channel={announceKey} />
     </>
   );
 }

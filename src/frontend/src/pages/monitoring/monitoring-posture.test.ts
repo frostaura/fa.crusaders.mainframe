@@ -73,16 +73,9 @@ describe("the new admin surfaces keep the estate's rules", () => {
     },
   );
 
-  it.each(FILES.map((f) => [f.split("/src/")[1], f] as const))(
-    "%s writes no dark-mode utility",
-    (_name, file) => {
-      // Ruling 11: dark mode is OUT of scope for this programme. `tailwind.config.ts` declares
-      // `darkMode: ["class"]` and nothing in the product uses it, so a stray `dark:` here would
-      // be a half-built theme that only ever fires on one screen.
-      expect(codeOf(file), `${file} starts a theme this programme is not building`)
-        .not.toMatch(/\bdark:/);
-    },
-  );
+  // "%s writes no dark-mode utility" is RETIRED by D7 (light + dark from day one). The rule it
+  // guarded — no `dark:` class in a component — is now estate-wide in theme-vocabulary.test.ts:
+  // dark is expressed only by the token variables, never by a variant.
 
   it.each(FILES.map((f) => [f.split("/src/")[1], f] as const))(
     "%s writes its times through lib/clubClock, never the reader's own locale",

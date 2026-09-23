@@ -77,7 +77,7 @@ export function WalkUpCapNotice({ map, cap }: { map: string[]; cap: number | nul
 
   const one = over.length === 1;
   return (
-    <p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
+    <p className="mt-3 rounded-lg bg-warning-soft p-3 text-xs text-warning-strong">
       {/* The possessive is an expression, not JSX text: lizard reads a lone apostrophe in JSX
           text as a string opener and swallows the rest of the file, which is why this file's
           previous home reported a 166-NLOC WalkUpCapNotice nobody wrote. Output is identical. */}
@@ -144,10 +144,10 @@ export function ClubButtonMapCard({
   return (
     <Card className="p-5">
       <div className="mb-1 flex items-center gap-2">
-        <RefreshCw className="h-5 w-5 text-slate-400" />
+        <RefreshCw className="h-5 w-5 text-text-muted" />
         <h2 className="text-lg font-semibold">Button map</h2>
       </div>
-      <p className="mb-4 text-sm text-slate-500">
+      <p className="mb-4 text-sm text-text-secondary">
         What each of the eight buttons on a court box does. The wiring never changes — button 1 is always
         the same physical button — so you can swap courts around here without anyone touching the hardware.
         "Court A" means whatever court is on relay A of the box being pressed. Boxes pick up a change on their

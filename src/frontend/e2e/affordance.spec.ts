@@ -79,6 +79,9 @@ test("a control marked .no-lift really does not lift, and one that is not marked
   ]);
 
   await page.goto("/reports");
+  // The lift lives inside `@media (hover: hover)`: on a touch screen :hover sticks after a tap,
+  // so a phone never lifts BY DESIGN and this measurement has nothing to read there.
+  test.skip(!(await page.evaluate(() => matchMedia("(hover: hover)").matches)), "touch device: no hover lift by design");
 
   const dot = page.getByTestId("carousel-dot").first();
   await expect(dot).toBeVisible();

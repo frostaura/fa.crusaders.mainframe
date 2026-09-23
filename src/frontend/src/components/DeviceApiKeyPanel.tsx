@@ -91,7 +91,7 @@ function KeyLine({ apiKey }: { apiKey: string }) {
       {/* The id is what `focusAfter` on the regenerate confirm lands on (R3 adoption): the
           key itself is the only thing on this panel that changed, and it carries its own
           accessible name, so focusing it reads the new key out. */}
-      <code id={DEVICE_KEY_LINE_ID} className="block min-w-0 flex-1 break-all rounded-lg bg-slate-100 p-2 font-mono text-xs" aria-label="Device API key">
+      <code id={DEVICE_KEY_LINE_ID} className="block min-w-0 flex-1 break-all rounded-lg bg-bg-muted p-2 font-mono text-xs" aria-label="Device API key">
         {revealed ? apiKey : maskKey(apiKey)}
       </code>
       <Button variant="outline" className="min-h-11 px-2 text-xs" onClick={() => setRevealed((r) => !r)} aria-label={revealed ? "Hide device API key" : "Reveal device API key"}>
@@ -117,8 +117,8 @@ function KeyLine({ apiKey }: { apiKey: string }) {
  */
 function PairingNote() {
   return (
-    <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
-      <h3 className="mb-2 font-semibold text-slate-800">How to pair a board</h3>
+    <div className="mt-4 rounded-lg bg-bg-muted p-3 text-sm text-text-secondary">
+      <h3 className="mb-2 font-semibold text-text-primary">How to pair a board</h3>
       {/* `break-words`: the steps name files and make targets — `secrets.h`, `door_gate`,
           `box-xxxxxx` — and an identifier has no space to wrap at. At a 32 px root font the
           list's own `pl-5` leaves about 86 px here, and a 130 px unbreakable token pushed the
@@ -171,17 +171,17 @@ export function DeviceApiKeyPanel() {
   return (
     <Card className="p-5">
       <div className="mb-3 flex items-center gap-2">
-        <KeyRound className="h-5 w-5 text-slate-400" />
+        <KeyRound className="h-5 w-5 text-text-muted" />
         <h2 className="text-lg font-semibold">Device API key</h2>
       </div>
 
-      <p className="mb-3 text-sm text-slate-500">
+      <p className="mb-3 text-sm text-text-secondary">
         One key for the whole club. Every court box and door gate carries it, and a board that presents it with a device code this club has
         not seen registers itself on its first heartbeat.
       </p>
 
       {failed && (
-        <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+        <p className="rounded-lg bg-warning-soft p-3 text-sm text-warning-strong">
           Could not read the club's device key. Reload the page; if it keeps failing, the API is not serving it yet.
         </p>
       )}
@@ -189,7 +189,7 @@ export function DeviceApiKeyPanel() {
       {key && (
         <>
           <KeyLine apiKey={key.api_key} />
-          <p className="mt-2 text-xs text-slate-500">Last regenerated {describeRegenerated(key.regenerated_at)}.</p>
+          <p className="mt-2 text-xs text-text-muted">Last regenerated {describeRegenerated(key.regenerated_at)}.</p>
 
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <ConfirmButton
@@ -206,7 +206,7 @@ export function DeviceApiKeyPanel() {
               onConfirm={regenerate}
               tone="danger"
             />
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-text-secondary">
               The old key stops working immediately. Every board — court boxes and door gates — has to be reflashed with the new one before it can call in, and until then a door gate opens only for members with a booking on the list it last received, for at most six hours.
             </span>
           </div>

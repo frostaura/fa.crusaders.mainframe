@@ -2,7 +2,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import config from "../tailwind.config";
-import { chartColors, channels, motion, palette, rootCssVariables, themeable } from "./lib/tokens";
+import {
+  chartColors, channels, color, contrastRatio, cssVariables, luminance, motion, palette, tailwindColors, themes,
+} from "./lib/tokens";
 
 /**
  * The tokens, measured — and the copies of them, pinned.
@@ -21,26 +23,19 @@ import { chartColors, channels, motion, palette, rootCssVariables, themeable } f
  * come apart: the charts rendered in a retired sky-blue for as long as the crest colours had
  * been in the theme, and nothing failed. `src/lib/tokens.ts` is now the one place a colour is
  * written, and the tests below assert that every consumer still derives from it, including the
- * one consumer that cannot import it. CSS has no imports, so the two lines in `index.css` are
- * the single unavoidable copy — and they are read off disk and compared here.
+ * one consumer that cannot import it. CSS has no imports, so `index.css` declares NO colour at
+ * all: the Tailwind plugin emits every variable from the module, and the test below asserts that
+ * every variable the stylesheet reads is one the module declares.
+ * </p>
+ *
+ * <p>
+ * The full contrast matrix — every role, both themes — is `tokens.themes.test.ts`. What stays
+ * here is the light theme's measured history (each pair with the incident that made it a test),
+ * the drift guards, and the source bans on hex and timing literals.
  * </p>
  */
 
-/** WCAG 2.1 relative luminance. */
-function luminance(hex: string): number {
-  const value = hex.replace("#", "");
-  const channel = (offset: number) => {
-    const raw = parseInt(value.slice(offset, offset + 2), 16) / 255;
-    return raw <= 0.03928 ? raw / 12.92 : ((raw + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
-}
-
-/** WCAG 2.1 contrast ratio, 1–21. */
-function contrast(a: string, b: string): number {
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-  return (hi + 0.05) / (lo + 0.05);
-}
+const contrast = contrastRatio;
 
 const src = (...parts: string[]) => readFileSync(join(__dirname, ...parts), "utf8");
 const indexCss = src("index.css");
@@ -53,11 +48,12 @@ const BACKGROUNDS: Record<string, string> = {
   "bg.app": palette.bg.app,
   "bg.surface": palette.bg.surface,
   "bg.muted": palette.bg.muted,
+  "bg.raised": palette.bg.raised,
   "success.soft": palette.success.soft,
   "info.soft": palette.info.soft,
   "warning.soft": palette.warning.soft,
   "danger.soft": palette.danger.soft,
-  "accent.soft": themeable["accent-soft"],
+  "accent.soft": palette.accent.soft,
   "brand.soft": palette.brand.soft,
 };
 
@@ -260,58 +256,63 @@ function over(hex: string, onto: string, alpha: number): string {
  * somebody types a colour somewhere other than `src/lib/tokens.ts`.
  */
 describe("nothing keeps its own copy of the palette", () => {
-  it("the Tailwind theme is the palette, not a transcription of it", () => {
+  it("the Tailwind theme is the token module, not a transcription of it", () => {
     const colors = (config.theme?.extend?.colors ?? {}) as Record<string, unknown>;
-    expect(colors.bg).toBe(palette.bg);
-    expect(colors.text).toBe(palette.text);
-    expect(colors.brand).toBe(palette.brand);
-    expect(colors.armed).toBe(palette.armed);
-    expect(colors.border).toEqual({ DEFAULT: palette.border });
+    // Structurally the semantic theme, every leaf a channel variable — never a hex.
+    expect(colors).toEqual(tailwindColors());
+    expect(colors.border).toBe(color("border"));
+    expect((colors.bg as Record<string, string>).app).toBe("rgb(var(--color-bg-app) / <alpha-value>)");
+    expect(JSON.stringify(colors)).not.toMatch(/#[0-9A-Fa-f]{3,8}\b/);
   });
 
-  it("index.css declares exactly the variables the module says it should", () => {
-    // CSS cannot import TypeScript, so this pair of lines is the one unavoidable copy in the
-    // system. Reading it off disk is what stops it being a copy that can drift.
-    for (const [name, value] of Object.entries(rootCssVariables)) {
-      expect(indexCss).toContain(`${name}: ${value};`);
-    }
+  it("index.css writes no colour of its own", () => {
+    // The plugin emits every value. A literal here is a copy that the dark theme cannot reach.
+    const live = indexCss.replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(live).not.toMatch(/#[0-9A-Fa-f]{3,8}\b/);
+    expect(live).not.toMatch(/rgba?\(\s*\d/);
   });
 
-  it("the themeable tokens reach CSS as channels, never as hex", () => {
-    // `var(--x, #hex)` makes Tailwind emit NO rule at all for every /opacity modifier on the
-    // token — not a wrong colour, no rule. Three live classes vanished that way.
-    for (const name of Object.keys(themeable)) {
-      expect(indexCss).not.toMatch(new RegExp(`--${name}(-rgb)?\\s*:\\s*#`));
-    }
-    expect(channels(palette.brand.strong)).toBe("0 73 141");
-  });
-
-  it("the focus ring reads a variable that exists", () => {
+  it("every variable the stylesheet reads is one the token module declares", () => {
     /*
-     * It read `var(--accent-strong, #0369A1)`, and `--accent-strong` has never been defined —
-     * so the fallback WAS the value, and every focus ring in the product rendered the sky-blue
-     * this palette was moved off. A var() typo resolves silently and no tool warns, so the
-     * defined names are asserted rather than trusted.
+     * The focus ring once read `var(--accent-strong, #0369A1)`, and `--accent-strong` had never
+     * been defined — so the fallback WAS the value, and every focus ring rendered a retired
+     * sky-blue. A var() typo resolves silently and no tool warns, so the names are asserted.
+     * Comments are stripped first: a checker that reads its own explanation is not a checker.
      */
-    // Comments stripped first: the block above this rule in index.css quotes the broken
-    // declaration verbatim, and a checker that reads its own explanation is not a checker.
     const live = indexCss.replace(/\/\*[\s\S]*?\*\//g, "");
     const referenced = [...live.matchAll(/var\(\s*(--[\w-]+)/g)].map((m) => m[1]);
-    const declared = new Set(Object.keys(rootCssVariables));
-    for (const name of referenced) {
-      if (name.startsWith("--accent")) expect(declared).toContain(name);
-    }
-    expect(indexCss).toContain("outline: 2px solid rgb(var(--accent-strong-rgb, 0 73 141));");
+    const declared = new Set([...Object.keys(cssVariables("light")), ...Object.keys(cssVariables("dark"))]);
+    const external = /^--(app-chrome-height|radix-|tw-)/; // set at runtime by Layout, Radix, Tailwind
+    const undeclared = referenced.filter((name) => !declared.has(name) && !external.test(name));
+    expect(undeclared).toEqual([]);
+    expect(referenced).toContain("--color-accent-strong");
+    // And never with a fallback: `var(--x, …)` is how the sky-blue ring shipped.
+    expect(live).not.toMatch(/var\(\s*--color-[\w-]+\s*,/);
   });
 
-  it("the charts render in the product's own accent", () => {
-    // jsdom has no stylesheet, so these resolve to the compiled-in defaults — which is exactly
-    // the assertion: the chart accent IS the token, not a constant that once matched it.
+  it("the focus ring is the accent, in channels", () => {
+    expect(indexCss).toContain("outline: 2px solid rgb(var(--color-accent-strong));");
+    expect(channels(palette.brand.strong)).toBe("0 73 141");
+    expect(cssVariables("light")["--color-accent-strong"]).toBe("0 73 141");
+  });
+
+  it("the charts render in the product's own accent, in whichever theme is painted", () => {
+    // jsdom has no stylesheet, so these resolve to the compiled-in values for the theme the
+    // document is in — which is exactly the assertion: the chart accent IS the token.
+    document.documentElement.classList.remove("dark");
     const c = chartColors();
-    expect(c.accent).toBe(themeable["accent-strong"]);
-    expect(c.accentSoft).toBe(themeable["accent-soft"]);
+    expect(c.accent).toBe(palette.accent.strong);
+    expect(c.accentSoft).toBe(palette.accent.soft);
     expect(c.muted).toBe(palette.text.muted);
     expect(c.grid).toBe(palette.border);
+
+    document.documentElement.classList.add("dark");
+    try {
+      expect(chartColors().accent).toBe(themes.dark.accent.strong);
+      expect(chartColors().legend).toBe(themes.dark.text.primary);
+    } finally {
+      document.documentElement.classList.remove("dark");
+    }
   });
 
   it("no component writes a colour of its own", () => {
@@ -330,7 +331,10 @@ describe("nothing keeps its own copy of the palette", () => {
         // #ffffff/#000000 because a scanner wants contrast, not tokens, and a QR rendered
         // in the club's palette is a QR that fails a marginal read in a dark doorway.
         // `CourtCode.tsx` used to be the name of the first of these.
-        if (file.endsWith("MyCode.tsx") || file.endsWith("FullScreenQr.tsx")) continue;
+        // `QrSvg.tsx` is the module that actually paints both — found once this scan went
+        // recursive, which is the only change in what it sees. `pass-card.tsx` is the QR's
+        // paper on the new My Code card: the quiet zone is white in both themes, same reason.
+        if (/(MyCode|FullScreenQr|QrSvg|pass-card)\.tsx$/.test(file)) continue;
         offenders.push(`${relativeToSrc(file)}: ${m[0]}`);
       }
     }
@@ -426,10 +430,12 @@ function relativeToSrc(file: string): string {
   return at < 0 ? file : file.slice(at + 5);
 }
 
-/** The .ts/.tsx files directly under one of the frontend's source folders. */
+/** Every .ts/.tsx file under one of the frontend's source folders, recursively. */
 function listSources(folder: string): string[] {
-  const dir = join(__dirname, folder);
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".ts") || f.endsWith(".tsx"))
-    .map((f) => join(dir, f));
+  const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) return walk(full);
+    return entry.name.endsWith(".ts") || entry.name.endsWith(".tsx") ? [full] : [];
+  });
+  return walk(join(__dirname, folder));
 }

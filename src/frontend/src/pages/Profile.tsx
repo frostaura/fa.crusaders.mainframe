@@ -147,14 +147,16 @@ export default function ProfilePage() {
               <span className="w-full h-full flex items-center justify-center text-3xl font-semibold bg-bg-muted text-text-secondary">{initial}</span>
             )}
             <span className={cn(
-              "absolute inset-0 flex flex-col items-center justify-center gap-1 text-white text-xs font-medium",
+              "absolute inset-0 flex flex-col items-center justify-center gap-1 text-primary-ink text-xs font-medium",
               // 40% was not enough scrim. White 12px text over it composited to rgb(153,153,153)
               // on a mid-tone photo — 2.85:1, against the 4.5:1 floor. The photo underneath is a
               // member's own upload and can be anything, so the alpha has to hold against the
-              // worst case: white text needs the composite at or below rgb(119,119,119), which
-              // over a pure-white photo means at least 53% black. 60% leaves margin (5.9:1) and
-              // still shows the face through it.
-              "bg-black/60 transition-opacity",
+              // worst case: a pure-white photo. The scrim is the theme's `overlay` colour (near
+              // black in both themes) at a FIXED alpha — not `bg-overlay`, whose theme alpha is
+              // 45% in light and composites to 3.1:1 over white. 65% measures 5.5:1 in light and
+              // more in dark (affordance.test.ts computes it from the tokens), and still shows
+              // the face through it. A photo is the same photo in either theme.
+              "bg-[rgb(var(--color-overlay)/0.65)] transition-opacity",
               uploading ? "opacity-100" : "opacity-0 group-hover:opacity-100",
             )}>
               {uploading ? (

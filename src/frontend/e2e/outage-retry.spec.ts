@@ -61,7 +61,7 @@ test("the outage screen's retry says it is working, and comes back so it can be 
   const retry = page.getByRole("button", { name: "Try again now" });
   await expect(page.getByText("Can't reach the club right now")).toBeVisible();
   await expect(retry).toBeEnabled();
-  await expect(retry).toHaveAttribute("aria-busy", "false");
+  await expect(retry).not.toHaveAttribute("aria-busy", "true");
 
   const before = held.length;
   await retry.click();
@@ -90,7 +90,7 @@ test("the outage screen's retry says it is working, and comes back so it can be 
   for (const route of held.splice(0)) await route.abort("failed");
 
   await expect(page.getByRole("button", { name: "Try again now" })).toBeEnabled({ timeout: 15_000 });
-  await expect(page.getByRole("button", { name: "Try again now" })).toHaveAttribute("aria-busy", "false");
+  await expect(page.getByRole("button", { name: "Try again now" })).not.toHaveAttribute("aria-busy", "true");
   await expect(page.getByText("Can't reach the club right now")).toBeVisible();
 });
 

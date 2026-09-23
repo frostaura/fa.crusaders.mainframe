@@ -51,6 +51,71 @@ if (!("EventSource" in globalThis)) {
   });
 }
 
+// Radix, cmdk and react-day-picker call browser APIs jsdom does not implement. Each polyfill is
+// installed ONLY where the API is absent, so a test that stubs its own still wins, and each is
+// inert: nothing is measured, captured or scrolled, because jsdom lays nothing out.
+//
+// - Pointer capture: Radix Select/Slider call `hasPointerCapture` on pointerdown and throw
+//   "is not a function" without it — which reads as a broken component, not a missing API.
+// - `scrollIntoView`: Radix Select and cmdk scroll the active option into view.
+// - `ResizeObserver`: Radix Popper (every popover, select, menu, tooltip) and cmdk observe sizes.
+//   It never fires — recharts' `ResponsiveContainer` stays a 0×0 box, which `Charts.test.tsx`
+//   depends on (it reads the element tree, not pixels).
+// - `DOMRect.fromRect`: floating-ui builds rects with it.
+const elementProto = window.Element.prototype as unknown as Record<string, unknown>;
+const inertMethods: Record<string, () => unknown> = {
+  hasPointerCapture: () => false,
+  setPointerCapture: () => undefined,
+  releasePointerCapture: () => undefined,
+  scrollIntoView: () => undefined,
+};
+for (const [name, impl] of Object.entries(inertMethods)) {
+  if (typeof elementProto[name] !== "function") {
+    Object.defineProperty(elementProto, name, { value: impl, writable: true, configurable: true });
+  }
+}
+
+class InertResizeObserver {
+  observe() { /* jsdom lays nothing out, so nothing ever resizes */ }
+  unobserve() { /* nothing observed */ }
+  disconnect() { /* nothing to disconnect */ }
+}
+if (typeof globalThis.ResizeObserver !== "function") {
+  Object.defineProperty(globalThis, "ResizeObserver", {
+    value: InertResizeObserver, writable: true, configurable: true,
+  });
+}
+
+if (typeof DOMRect === "function" && typeof (DOMRect as { fromRect?: unknown }).fromRect !== "function") {
+  Object.defineProperty(DOMRect, "fromRect", {
+    value: (r: DOMRectInit = {}) => new DOMRect(r.x ?? 0, r.y ?? 0, r.width ?? 0, r.height ?? 0),
+    writable: true, configurable: true,
+  });
+}
+
+// `matchMedia`: absent in jsdom. Installed so `useTheme()`'s OS listener and anything Radix asks
+// has something to call. It answers `matches: false` to every query — light scheme, no reduced-
+// motion preference, no hover — which is what `useCountUp` already assumed from a missing API.
+// `useWalletLive` read a missing API as "do not animate"; the full suite was run with this stub
+// in place and stayed green, and a test that needs either preference stubs `matchMedia` itself
+// (see `lib/theme.test.tsx`), which this never overrides.
+if (typeof window.matchMedia !== "function") {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    configurable: true,
+    value: (query: string): MediaQueryList => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    }),
+  });
+}
+
 // R3-3 — the club's remembered zone is module state, so it outlives a test.
 //
 // `lib/clubZone` holds the zone the club last mentioned, and vitest isolates modules per test

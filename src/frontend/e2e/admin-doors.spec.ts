@@ -242,10 +242,12 @@ test.describe("The doors overview", () => {
      */
     const main = page.getByRole("main");
     const ownControls = (role: "button" | "link") =>
-      main.getByRole(role).locator(':not(nav[aria-label="Monitoring"] *)');
+      // `.and()`, not `.locator()`: the latter matches DESCENDANTS of each control, which since
+      // the design-system button (label and working layers are inner spans) measured 20px spans.
+      main.getByRole(role).and(page.locator(':not(nav[aria-label="Monitoring"] *)'));
     for (const control of await ownControls("button").all()) {
       const box = await control.boundingBox();
-      if (box) expect(box.height).toBeGreaterThanOrEqual(43.5);
+      if (box) expect(box.height, `${await control.evaluate((el) => el.outerHTML.slice(0, 300))}`).toBeGreaterThanOrEqual(43.5);
     }
     for (const link of await ownControls("link").all()) {
       const box = await link.boundingBox();

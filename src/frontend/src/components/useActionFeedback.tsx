@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActionGlyph, type ActionGlyphKind } from "./ActionGlyph";
+import { AnimatedAlert, AnimatedCheck } from "./ui/feedback-marks";
+import { Spinner } from "./ui/spinner";
 import { motion } from "../lib/tokens";
 
 /**
@@ -7,8 +8,15 @@ import { motion } from "../lib/tokens";
  *
  * <p>
  * <b>The decision, in one sentence.</b> Every affirmative and negative action gets the same
- * four phases — rest → press → working → outcome — implemented once, carried by a glyph and a
+ * four phases — rest → press → working → outcome — implemented once, carried by a mark and a
  * colour as well as by motion, and never configured at a call site.
+ * </p>
+ *
+ * <p>
+ * <b>No glyph at rest (R8 / D5).</b> The thumbs-up/down that affirm and decline once wore at rest
+ * are retired, and so is the club's `action_glyphs` choice between thumbs and ✓/✕. A button at
+ * rest is its word. Working is a spinner; a success is the hand-drawn `AnimatedCheck`; a failure
+ * is `AnimatedAlert` plus the shake — `components/ui/feedback-marks.tsx`.
  * </p>
  *
  * <p>
@@ -36,13 +44,13 @@ import { motion } from "../lib/tokens";
  * <ul>
  *   <li><b>neutral</b> — today's look, exactly. No glyph, no outcome phase. The default, so
  *       that every one of the hundred-odd existing `Button` call sites is untouched.</li>
- *   <li><b>affirm</b> — Book, Save, Continue. Thumbs-up (or ✓).</li>
- *   <li><b>decline</b> — Keep looking, Cancel, the way out of an armed pair. Thumbs-down
- *       (or ✕).</li>
- *   <li><b>destructive</b> — Delete, Shut, Revoke. <b>Never a thumb.</b> A thumbs-up on
- *       "Delete" claims the software approves of the deletion; the action keeps its own icon
- *       — a bin, a lock — and the danger treatment it already has. It also does not
- *       celebrate: see {@link outcomeClassName}.</li>
+ *   <li><b>affirm</b> — Book, Save, Continue. A tick when the work lands.</li>
+ *   <li><b>decline</b> — Cancel, the way out of an armed pair. A tick when the work lands too:
+ *       the mark says "that happened", not "yes".</li>
+ *   <li><b>destructive</b> — Delete, Shut, Revoke. <b>Never celebrates.</b> A tick bursting over
+ *       a deletion reads as the software enjoying itself; the action keeps its own icon — a bin,
+ *       a lock — and the danger treatment it already has, and settles to muted: see
+ *       {@link outcomeClassName}. A failure still shows the alert mark.</li>
  * </ul>
  */
 export type ActionIntent = "affirm" | "decline" | "neutral" | "destructive";
@@ -51,15 +59,33 @@ export type FeedbackPhase = "rest" | "press" | "working" | "success" | "failure"
 
 const MS = (value: string) => Number.parseInt(value, 10);
 
-/** Which glyph a phase wears, or none. `null` means "draw whatever the caller already draws". */
-export function glyphKindFor(intent: ActionIntent, phase: FeedbackPhase): ActionGlyphKind | null {
+/** The mark a phase wears. There is none at rest or on the press — R8 retired the thumbs. */
+export type FeedbackMarkKind = "working" | "success" | "failure";
+
+/**
+ * Which mark a phase wears, or none. `null` means "draw whatever the caller already draws".
+ *
+ * <p>
+ * Rest and press are always `null`: a button at rest is its word (R8). A destructive success is
+ * `null` too — the bin stays a bin and nothing celebrates a deletion — but a destructive failure
+ * still says so. `neutral` wears nothing at any phase, so the hundred-odd bare call sites are
+ * untouched.
+ * </p>
+ */
+export function glyphKindFor(intent: ActionIntent, phase: FeedbackPhase): FeedbackMarkKind | null {
   if (intent === "neutral") return null;
   if (phase === "failure") return "failure";
-  // A destructive action wears its own icon at every phase — the bin stays a bin. This is the
-  // whole of ruling 4's carve-out, and it is one line because the alternative (a thumbs-up on
-  // a deletion) is one line too.
-  if (intent === "destructive") return null;
-  return intent === "affirm" ? "affirm" : "decline";
+  if (phase === "working") return "working";
+  if (phase === "success" && intent !== "destructive") return "success";
+  return null;
+}
+
+/** The node for a mark. A switch, not a lookup of components — see `glyph` on {@link ActionFeedback}. */
+function markFor(kind: FeedbackMarkKind | null): React.ReactNode {
+  if (kind === "working") return <Spinner />;
+  if (kind === "success") return <AnimatedCheck size={16} />;
+  if (kind === "failure") return <AnimatedAlert size={16} />;
+  return null;
 }
 
 /**
@@ -131,7 +157,8 @@ export type ActionFeedback = {
   /** The phase's classes, for the caller to compose with its own. */
   className: string;
   /**
-   * The glyph for the current phase, already `aria-hidden`, or null.
+   * The mark for the current phase, already `aria-hidden`, or null — a spinner while working,
+   * `AnimatedCheck` on success, `AnimatedAlert` on failure, nothing at rest.
    *
    * A NODE, not a component. Returning `Glyph: () => …` reads better at the call site and is
    * a component created during render — a form the `react-hooks` rule refuses, because a
@@ -212,9 +239,7 @@ export function useActionFeedback(intent: ActionIntent): ActionFeedback {
     }
   }, [later]);
 
-  const kind = glyphKindFor(intent, phase);
-  const drawing = phase === "success" || phase === "failure";
-  const glyph = kind ? <ActionGlyph kind={kind} draw={drawing} /> : null;
+  const glyph = markFor(glyphKindFor(intent, phase));
 
   return {
     phase,

@@ -1,0 +1,103 @@
+/*
+ * The fingerprint watermark — the club's signature affordance (design-system.md, "The
+ * fingerprint watermark"). Only `interactable.tsx` renders it; this file is imported by
+ * `watermark.tsx` and nowhere else.
+ *
+ * WHY RAW CSS AND NOT TAILWIND CLASSES: every rule below keys on the HOST's state (hovered,
+ * pressed, selected, busy, disabled) and on media the utility layer cannot compose in one class
+ * list without a wall of arbitrary variants. One small, named stylesheet is easier to audit than
+ * twenty `[[aria-busy=true]_&]:hidden` fragments.
+ *
+ * NO VALUE IS WRITTEN HERE. Opacities are the per-theme, per-surface custom properties the
+ * Tailwind plugin emits from `lib/tokens.ts` (`--wm-<surface>-<rest|hover|press>`); geometry
+ * (size, right, bottom) arrives inline from `components.watermarkGeometry`; timing is `theme()`.
+ */
+
+/*
+ * WHERE THE GLYPH SITS. Usually a direct child of the host. On a `ui/button` host
+ * (`<Interactable asChild watermark><Button>`) Slot hands the glyph to Button as a child, so it
+ * lands inside the label layer: host > span.inline-grid > [data-slot=button-label] > glyph. It is
+ * still positioned against the button (the layers are not positioned). Every state rule below
+ * names both paths explicitly rather than using a bare descendant selector, so hovering an
+ * outer watermarked card never lights a watermarked cell nested inside it.
+ */
+
+/* Button's working layer clones non-text children, glyph included; that copy is never shown. */
+[data-slot="button-pending"] .wm-glyph { display: none; }
+
+/* The host picks its surface's three opacities; the glyph reads the generic names. */
+[data-watermark="cell"] { --wm-rest: var(--wm-cell-rest); --wm-hover: var(--wm-cell-hover); --wm-press: var(--wm-cell-press); }
+[data-watermark="card"] { --wm-rest: var(--wm-card-rest); --wm-hover: var(--wm-card-hover); --wm-press: var(--wm-card-press); }
+[data-watermark="tile"] { --wm-rest: var(--wm-tile-rest); --wm-hover: var(--wm-tile-hover); --wm-press: var(--wm-tile-press); }
+[data-watermark="cta"] { --wm-rest: var(--wm-cta-rest); --wm-hover: var(--wm-cta-hover); --wm-press: var(--wm-cta-press); }
+
+/*
+ * Cropped by the host's edge (the host is `relative isolate overflow-hidden`), rotated -15deg,
+ * painted in currentColor. `z-index: -1` inside the host's own stacking context (`isolate`)
+ * paints it ABOVE the host's fill and BELOW its text, so a label is never overlaid.
+ */
+.wm-glyph {
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  user-select: none;
+  opacity: var(--wm-rest);
+  transform: rotate(-15deg);
+  transform-origin: center;
+  transition-property: opacity, transform;
+  transition-duration: theme("transitionDuration.base");
+  transition-timing-function: theme("transitionTimingFunction.standard");
+}
+
+/* Hover only where a pointer can hover: on touch, :hover sticks after a tap. */
+@media (hover: hover) {
+  [data-watermark]:hover > .wm-glyph,
+  [data-watermark]:hover > span > [data-slot="button-label"] > .wm-glyph { opacity: var(--wm-hover); }
+}
+
+/* Keyboard focus earns the hover treatment on every device. */
+[data-watermark]:focus-visible > .wm-glyph,
+[data-watermark]:focus-visible > span > [data-slot="button-label"] > .wm-glyph { opacity: var(--wm-hover); }
+
+/* Pressed. After hover in the source, so a held press wins over the hover it started from. */
+[data-watermark]:active > .wm-glyph,
+[data-watermark]:active > span > [data-slot="button-label"] > .wm-glyph { opacity: var(--wm-press); }
+
+/*
+ * Motion — the cell's nudge and press squeeze. Inside `no-preference`, so under reduced motion
+ * no rule here exists and the glyph keeps its static -15deg: the opacity change (which is not
+ * motion) still says "this responds".
+ */
+@media (prefers-reduced-motion: no-preference) and (hover: hover) {
+  [data-watermark="cell"]:hover > .wm-glyph { transform: translate(-2px, -2px) rotate(-10deg); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-watermark="cell"]:focus-visible > .wm-glyph { transform: translate(-2px, -2px) rotate(-10deg); }
+  [data-watermark="cell"]:active > .wm-glyph { transform: rotate(-15deg) scale(0.96); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wm-glyph { transition-property: opacity; }
+}
+
+/*
+ * Hidden when the host is selected, busy or disabled. Its absence is itself the cue: a mark
+ * that says "press me" on a control that will not respond is a lie.
+ */
+[aria-selected="true"] .wm-glyph,
+[data-state="on"] .wm-glyph,
+[aria-busy="true"] .wm-glyph,
+[aria-disabled="true"] .wm-glyph,
+:disabled .wm-glyph {
+  display: none;
+}
+
+/* Forced colours would paint it as solid system text; paper does not need it. */
+@media (forced-colors: active) {
+  .wm-glyph { display: none; }
+}
+
+@media print {
+  .wm-glyph { display: none; }
+}
