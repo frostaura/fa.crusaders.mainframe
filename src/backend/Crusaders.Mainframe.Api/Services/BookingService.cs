@@ -1049,8 +1049,9 @@ public sealed class BookingService
 
     /// <summary>
     /// Every other admin is told when an admin takes a balance below zero (R23) — staged here,
-    /// beside the change-log row, so it flushes in the same save as the booking and the debit and
-    /// is rolled back with them by the slot-race <c>Detach</c>. The acting admin is not mailed;
+    /// beside the change-log row, after the slot race has already been decided, so it flushes in
+    /// the same save as the booking and the debit and commits with them in the payer-lock
+    /// transaction; a save that is refused takes it down with them. The acting admin is not mailed;
     /// they are looking at the result. The figures are credits and the balance after is the one
     /// the change record states.
     /// </summary>

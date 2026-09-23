@@ -108,7 +108,17 @@ public static class AdminNotificationEndpoints
         };
     }
 
-    /// <summary>One notice as the Overview reads it. Block body for the lizard reason.</summary>
+    /// <summary>
+    /// One notice as the Overview reads it. Block body for the lizard reason.
+    ///
+    /// <para>
+    /// <b><c>sent_at</c> only for a notice that was sent.</b> The column is the instant the row
+    /// stopped being pending — mailed, suppressed by a cooldown, or given up on — and returning
+    /// it as <c>sent_at</c> for all three told the console a suppressed or failed notice had been
+    /// sent. That instant is <c>finished_at</c>; <c>sent_at</c> is null unless the state is
+    /// <c>sent</c>.
+    /// </para>
+    /// </summary>
     private static object Project(AdminNotification row)
     {
         return new
@@ -123,7 +133,8 @@ public static class AdminNotificationEndpoints
             delivery = new
             {
                 state = StateName(row.State),
-                sent_at = row.SentAt,
+                sent_at = row.State == AdminNotificationState.Sent ? row.SentAt : null,
+                finished_at = row.SentAt,
                 recipients = row.RecipientCount,
             },
         };

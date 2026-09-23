@@ -118,7 +118,7 @@ public static partial class EmailTemplates
             [
                 new Paragraph($"A card payment at {club.Name} did not become credits, for a reason the member cannot fix themselves."),
                 new Facts(facts),
-                new Paragraph("No credits were added. A member who was asked for money has been emailed that their top-up did not complete."),
+                TopUpFailureOutcome(t.Reason),
                 new CallToAction("Open Transactions", t.ConsoleUrl),
             ],
             WhyThis: WhyAdmin));
@@ -219,6 +219,36 @@ public static partial class EmailTemplates
                 new CallToAction("Open the Devices page", f.ConsoleUrl),
             ],
             WhyThis: WhyAdmin), highPriority: true);
+
+    /// <summary>
+    /// What has and has not happened to the member's money, and whether anybody told them — per
+    /// reason, because the paths differ. One sentence for all of them ("has been emailed that
+    /// their top-up did not complete") was false on two: a gateway reporting a payment with no
+    /// reference is a member who HAS PAID, whose top-up is still open and who has been told
+    /// nothing; a checkout the gateway refused to start took no money and was shown on screen,
+    /// not mailed. Block body for the lizard reason in <c>memory/gotchas-build.md</c>.
+    /// </summary>
+    private static EmailBlock TopUpFailureOutcome(string reason)
+    {
+        switch (reason)
+        {
+            case "payment_id_missing":
+                return new Callout(CalloutTone.Warning,
+                    "The gateway says this member paid, but no credits were added and the member has not been told anything. "
+                    + "The top-up is still open: if the gateway sends a complete notification it will be credited then. "
+                    + "If it does not, check the payment in the gateway's own dashboard before crediting the member by hand.");
+            case "provider_register_failed":
+                return new Paragraph(
+                    "No payment was taken and no credits were added. The member saw an error on the top-up screen and was not emailed; "
+                    + "nobody can top up until the club's payment settings are fixed.");
+            case "signature_invalid":
+                return new Paragraph(
+                    "Nothing was credited and nothing was changed: the notification was ignored. If the club's payment settings "
+                    + "changed recently the passphrase may not match; otherwise somebody may be sending notifications that did not come from the gateway.");
+            default:
+                return new Paragraph("No credits were added. The member has been emailed that their top-up did not complete.");
+        }
+    }
 
     /// <summary>Why a top-up failed, in the words an admin reads. Block body for the lizard reason in <c>memory/gotchas-build.md</c>.</summary>
     private static string TopUpFailureReason(string reason)

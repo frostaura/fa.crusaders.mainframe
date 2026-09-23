@@ -140,9 +140,17 @@ public sealed class AdminNotificationSweep
     }
 
     /// <summary>
-    /// Many different faults at once: open rows of error severity or worse whose last report
-    /// falls inside the club's window. Distinct rows, not occurrences — one board repeating one
-    /// fault is one row however loudly it repeats, and that is the Faults page's business.
+    /// Many different faults at once: open rows of error severity or worse that OPENED inside the
+    /// club's window. Distinct rows, not occurrences — one board repeating one fault is one row
+    /// however loudly it repeats, and that is the Faults page's business.
+    ///
+    /// <para>
+    /// <b>Opened, not last seen.</b> Counting by <c>LastSeenAt</c> made five faults that opened a
+    /// week ago and are still repeating — a flaky sensor does exactly that — a "spike" in every
+    /// window for ever: about twenty mails a day headlined "5 device faults in 15 minutes" when
+    /// nothing had opened in any of them. A spike is new faults arriving together; old ones that
+    /// keep repeating are already on the Faults page and were already announced.
+    /// </para>
     /// </summary>
     internal static async Task DetectFaultSpikeAsync(
         MainframeDbContext db, Guid tenantId, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
@@ -150,7 +158,7 @@ public sealed class AdminNotificationSweep
         var minutes = AdminNotificationSettings.FaultSpikeMinutes(settings);
         var since = now.AddMinutes(-minutes).ToUniversalTime();
         var faults = await db.DeviceErrors.AsNoTracking()
-            .Where(e => e.ResolvedAt == null && e.Severity >= DeviceErrorSeverity.Error && e.LastSeenAt >= since)
+            .Where(e => e.ResolvedAt == null && e.Severity >= DeviceErrorSeverity.Error && e.FirstSeenAt >= since)
             .Select(e => new { e.DeviceId, e.ClaimedDeviceCode })
             .ToListAsync(ct);
         if (faults.Count < AdminNotificationSettings.FaultSpikeCount(settings)) return;
@@ -170,13 +178,35 @@ public sealed class AdminNotificationSweep
     /// <summary>
     /// Deletes finished notices older than the club's retention. Pending ones are never deleted
     /// by age: a notice nobody has been told about yet is not history.
+    ///
+    /// <para>
+    /// <b>Never kept past the club's own <c>retention_years</c>.</b> A notice carries names, an
+    /// applicant's address, membership numbers and balances; the club's promise about how long it
+    /// keeps personal data is <c>retention_years</c>, and a feed setting of 730 days must not
+    /// outlast a club that said one year. The shorter of the two wins.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>A schedule clash is kept until its first clash has passed.</b> Its row is the only thing
+    /// that stops the sweep raising the same standing clash again (its dedupe key is the schedule
+    /// and the first clash date, and the horizon re-collides every tick). A clash is only ever
+    /// raised for a night inside the horizon, so a row older than the horizon plus a day names a
+    /// night already in the past, which no sweep can re-collide with. Its payload is a schedule
+    /// name and dates, no member's data, so the floor does not reopen the point above.
+    /// </para>
     /// </summary>
     internal static async Task PruneAsync(
         MainframeDbContext db, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
     {
-        var cutoff = now.AddDays(-AdminNotificationSettings.RetentionDays(settings)).ToUniversalTime();
+        var byDays = now.AddDays(-AdminNotificationSettings.RetentionDays(settings));
+        var byYears = now.AddYears(-Math.Max(1, settings.RetentionYears));
+        var cutoff = (byDays > byYears ? byDays : byYears).ToUniversalTime();
+        var clashFloor = now.AddDays(-(ScheduleSettings.EffectiveHorizonDays(settings) + 1)).ToUniversalTime();
+        var clashCutoff = clashFloor < cutoff ? clashFloor : cutoff;
+
         var old = db.AdminNotifications
-            .Where(n => n.State != AdminNotificationState.Pending && n.CreatedAt < cutoff);
+            .Where(n => n.State != AdminNotificationState.Pending && n.CreatedAt < cutoff)
+            .Where(n => n.Kind != AdminEventCatalogue.ScheduleConflict || n.CreatedAt < clashCutoff);
 
         if (db.Database.IsNpgsql())
         {

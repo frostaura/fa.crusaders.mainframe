@@ -196,6 +196,18 @@ public sealed class AdminNotificationDispatcher
         var row = await db.AdminNotifications.IgnoreQueryFilters().FirstOrDefaultAsync(n => n.Id == id, ct);
         if (row is null || row.State != AdminNotificationState.Pending) return false;
 
+        // The backoff gives up only on a failed SEND. A row whose pass throws somewhere else —
+        // the recipient query, the settings read — is re-claimed when its lease runs out, and the
+        // claim counts the attempt, so this is where that row stops instead of being claimed
+        // every ten minutes for ever.
+        if (row.Attempts > MaxAttempts)
+        {
+            _logger.LogError(
+                "Admin notice {Id} ({Kind}) for tenant {Tenant} given up after {Attempts} claims that never finished",
+                row.Id, row.Kind, row.TenantId, row.Attempts);
+            return await FinishAsync(db, row, AdminNotificationState.Failed, now, "attempts_exhausted", ct);
+        }
+
         var tenant = await db.Tenants.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(t => t.Id == row.TenantId, ct);
         if (tenant is null) return await FinishAsync(db, row, AdminNotificationState.Failed, now, "tenant_missing", ct);
         scope.ServiceProvider.GetRequiredService<ITenantContext>().Set(tenant.Id, tenant.Slug);
@@ -311,22 +323,39 @@ public sealed class AdminNotificationDispatcher
     }
 
     /// <summary>
-    /// Whether another notice of this kind and scope was MAILED inside the cooldown before this
-    /// one was raised. Counted from the mailed ones only: a suppressed notice does not extend the
+    /// Whether another notice of this kind and scope was MAILED to anybody within the cooldown of
+    /// this one. Counted from the mailed ones only: a suppressed notice does not extend the
     /// window, or a steady trickle would suppress the whole kind for ever.
+    ///
+    /// <para>
+    /// <b>"Mailed" is "reached somebody", not "finished".</b> A notice that reached every admin
+    /// but one goes back to <c>Pending</c> to retry the one; counting only <c>Sent</c> rows meant
+    /// it counted as nothing, so every sibling raised while it waited was mailed in full — three
+    /// overdraft mails inside one fifteen-minute cooldown to the admins whose mailboxes worked.
+    /// A notice finished as <c>Sent</c> to nobody (everybody opted out, or the only admin was the
+    /// actor) reached nobody, and does not withhold the next one from an admin who is listening.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Both sides of this row, and only before it has reached anybody.</b> A row that failed
+    /// outright and is retried after a later sibling was mailed must not mail a second time
+    /// inside the same window; once a row has reached somebody it has spoken for the window and
+    /// its retry is owed to the admins it missed.
+    /// </para>
     /// </summary>
     private static async Task<bool> CooledDownAsync(
         MainframeDbContext db, AdminNotification row, TimeSpan cooldown, CancellationToken ct)
     {
-        if (cooldown <= TimeSpan.Zero) return false;
-        var since = row.CreatedAt - cooldown;
+        if (cooldown <= TimeSpan.Zero || row.RecipientCount > 0) return false;
+        var from = row.CreatedAt - cooldown;
+        var to = row.CreatedAt + cooldown;
         return await db.AdminNotifications.AsNoTracking().AnyAsync(n =>
             n.Id != row.Id
             && n.Kind == row.Kind
             && n.CooldownScope == row.CooldownScope
-            && n.State == AdminNotificationState.Sent
-            && n.CreatedAt >= since
-            && n.CreatedAt <= row.CreatedAt, ct);
+            && n.RecipientCount > 0
+            && n.CreatedAt >= from
+            && n.CreatedAt <= to, ct);
     }
 
     private static HashSet<Guid> ReadIds(string json)

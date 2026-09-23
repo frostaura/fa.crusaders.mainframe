@@ -158,7 +158,12 @@ public sealed class UserPreferencesView
             ShowInLeaderboards = row.ShowInLeaderboards,
             RatingOptIn = row.RatingOptIn,
             WeeklyRecap = row.WeeklyRecap,
-            AdminNotificationOptouts = UserPreferencesRules.ReadOptouts(row.AdminNotificationOptoutsJson),
+            // A stored opt-out of a kind nobody may opt out of is not an opt-out, and is not
+            // returned as one: the PUT refuses such a list, so a settings screen that saved back
+            // what it read — a theme change carries the whole list — was refused for every
+            // admin whose row predates the kind becoming non-optional.
+            AdminNotificationOptouts = UserPreferencesRules.ReadOptouts(row.AdminNotificationOptoutsJson)
+                .Where(k => !AdminEventCatalogue.IsSecurity(k)).ToList(),
             UpdatedAt = row.UpdatedAt,
         };
     }

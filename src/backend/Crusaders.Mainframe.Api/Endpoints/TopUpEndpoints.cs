@@ -213,7 +213,7 @@ public static partial class TopUpEndpoints
             if (!interp.SignatureValid)
             {
                 logger.LogWarning("topup callback signature invalid for tenant {Slug}", slug);
-                await TopUpAlerts.RaiseAsync(db, tenantRow.Id, TopUpAlerts.SignatureInvalid, TopUpAlerts.HourOf(DateTimeOffset.UtcNow), null, ct);
+                await TopUpAlerts.RaiseAsync(db, tenantRow.Id, TopUpAlerts.SignatureInvalid, TopUpAlerts.DayOf(DateTimeOffset.UtcNow), null, ct);
                 return Results.Unauthorized();
             }
 

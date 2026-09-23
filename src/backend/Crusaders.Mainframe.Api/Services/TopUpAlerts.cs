@@ -20,7 +20,10 @@ namespace Crusaders.Mainframe.Api.Services;
 /// <para>
 /// <b>The ITN route is anonymous</b>, so the two notices raised from a request that changed
 /// nothing are bounded by their dedupe keys rather than by anybody's good behaviour: a forged
-/// notification raises at most one notice per club per hour, however many arrive.
+/// notification raises at most one notice per club per UTC day, however many arrive. It was
+/// one an hour, which let anybody who knew a club's slug put twenty-four mails a day in every
+/// admin's inbox; one a day still tells the club the first time it happens, and a club whose
+/// own passphrase is wrong hears it daily until it is fixed.
 /// </para>
 /// </summary>
 public static class TopUpAlerts
@@ -63,9 +66,9 @@ public static class TopUpAlerts
         await AdminNotices.RaiseAsync(db, tenantId, notice, DateTimeOffset.UtcNow, ct);
     }
 
-    /// <summary>The hour an instant falls in, as a dedupe identity: one notice per club per hour.</summary>
-    public static string HourOf(DateTimeOffset at) =>
-        at.ToUniversalTime().ToString("yyyyMMddHH", CultureInfo.InvariantCulture);
+    /// <summary>The UTC day an instant falls in, as a dedupe identity: one notice per club per day.</summary>
+    public static string DayOf(DateTimeOffset at) =>
+        at.ToUniversalTime().ToString("yyyyMMdd", CultureInfo.InvariantCulture);
 
     private static async Task<string?> NameOfAsync(MainframeDbContext db, Guid userId, CancellationToken ct) =>
         await db.Memberships.AsNoTracking().Where(m => m.UserId == userId).Select(m => m.FullName).FirstOrDefaultAsync(ct);

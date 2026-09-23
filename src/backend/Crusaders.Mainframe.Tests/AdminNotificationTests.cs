@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
@@ -445,7 +446,8 @@ public class AdminNotificationTests
         Assert.Single(await RowsAsync(host, AdminEventCatalogue.ApplicationsPending));
     }
 
-    private static async Task AddFaultsAsync(TestHost host, int count, DateTimeOffset lastSeen, DeviceErrorSeverity severity = DeviceErrorSeverity.Error)
+    private static async Task AddFaultsAsync(
+        TestHost host, int count, DateTimeOffset lastSeen, DeviceErrorSeverity severity = DeviceErrorSeverity.Error, DateTimeOffset? firstSeen = null)
     {
         using var scope = host.NewScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
@@ -455,7 +457,7 @@ public class AdminNotificationTests
             {
                 TenantId = host.Tenant.Id, Code = $"E{i}", Fingerprint = $"fp-{Guid.NewGuid():N}",
                 ClaimedDeviceCode = $"box-{i % 2}", Severity = severity, Source = DeviceErrorSource.Device,
-                FirstSeenAt = lastSeen, LastSeenAt = lastSeen,
+                FirstSeenAt = firstSeen ?? lastSeen, LastSeenAt = lastSeen,
             });
         }
         await db.SaveChangesAsync();
@@ -493,6 +495,27 @@ public class AdminNotificationTests
         Assert.Empty(await RowsAsync(host, AdminEventCatalogue.FaultSpike));
     }
 
+    /// <summary>
+    /// Review F1: faults that opened long ago and are still repeating — a flaky sensor — are not
+    /// a spike. Counted by last report, five week-old faults made a "5 device faults in 15
+    /// minutes" mail in every window of every day. The control: the same five opening now do.
+    /// </summary>
+    [Fact]
+    public async Task Faults_that_opened_before_the_window_and_are_still_repeating_are_not_a_spike()
+    {
+        await using var host = await TestHost.CreateAsync();
+        await AddFaultsAsync(host, 10, T0.AddMinutes(-1), firstSeen: T0.AddDays(-7));
+
+        for (var i = 0; i < 8; i++) await SweepAsync(host, T0.AddMinutes(15 * i));
+        Assert.Empty(await RowsAsync(host, AdminEventCatalogue.FaultSpike));
+
+        await AddFaultsAsync(host, AdminNotificationSettings.DefaultFaultSpikeCount, T0.AddMinutes(104), firstSeen: T0.AddMinutes(104));
+        await SweepAsync(host, T0.AddMinutes(105));
+        var row = Assert.Single(await RowsAsync(host, AdminEventCatalogue.FaultSpike));
+        Assert.Equal(AdminNotificationSettings.DefaultFaultSpikeCount,
+            JsonSerializer.Deserialize<FaultSpikePayload>(row.PayloadJson, AdminEventCatalogue.Json)!.Faults);
+    }
+
     private static async Task<Device> AddGateAsync(TestHost host, bool acknowledged)
     {
         using var scope = host.NewScope();
@@ -523,24 +546,31 @@ public class AdminNotificationTests
         await db.SaveChangesAsync();
     }
 
-    /// <summary>The doors tile's own rule, over the club's own two numbers — so the mail and the flag agree.</summary>
+    /// <summary>
+    /// The doors tile's own rule, over the club's own two numbers — so the mail and the flag agree.
+    /// Pinned two minutes into a spike bucket: at the wall clock, the second sweep thirty seconds
+    /// on crossed a bucket boundary whenever the run started in the last half-minute of one, and
+    /// the "one spike" was two (memory/gotchas-clock.md).
+    /// </summary>
     [Fact]
     public async Task A_door_refusing_more_than_the_clubs_threshold_raises_one_spike_naming_no_member()
     {
         await using var host = await TestHost.CreateAsync();
+        var minutes = DoorSettings.DefaultRefusalSpikeMinutes;
+        var now = DateTimeOffset.FromUnixTimeSeconds(AdminNotificationSweep.Bucket(T0, minutes) * minutes * 60L).AddMinutes(2);
         var gate = await AddGateAsync(host, acknowledged: true);
-        await AddRefusalsAsync(host, gate, DoorSettings.DefaultRefusalSpikeCount - 1, T0.AddMinutes(-5));
+        await AddRefusalsAsync(host, gate, DoorSettings.DefaultRefusalSpikeCount - 1, now.AddMinutes(-5));
 
-        await SweepAsync(host, T0);
+        await SweepAsync(host, now);
         Assert.Empty(await RowsAsync(host, AdminEventCatalogue.RefusalSpike));
 
-        await AddRefusalsAsync(host, gate, 1, T0.AddMinutes(-1));
-        await SweepAsync(host, T0);
-        await SweepAsync(host, T0.AddSeconds(30));
+        await AddRefusalsAsync(host, gate, 1, now.AddMinutes(-1));
+        await SweepAsync(host, now);
+        await SweepAsync(host, now.AddSeconds(30));
 
         var row = Assert.Single(await RowsAsync(host, AdminEventCatalogue.RefusalSpike));
         Assert.Equal($"/admin/monitoring/doors/{gate.Id}", row.Link);
-        await host.DeliverAdminNoticesAsync(T0.AddMinutes(1));
+        await host.DeliverAdminNoticesAsync(now.AddMinutes(1));
         var mail = Assert.Single(host.EmailService.Sent);
         Assert.Equal("Front door is turning people away", mail.Subject);
         Assert.DoesNotContain(host.PlayerUser.Email, mail.HtmlBody, StringComparison.Ordinal);
@@ -578,6 +608,229 @@ public class AdminNotificationTests
         Assert.DoesNotContain(sent, ids);
         Assert.Contains(stuck, ids);
         Assert.Contains(recent, ids);
+    }
+
+    private static async Task PatchSettingsAsync(TestHost host, params (string Key, int Value)[] values)
+    {
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var row = await db.TenantSettings.IgnoreQueryFilters().SingleAsync(t => t.TenantId == host.Tenant.Id);
+        var json = JsonNode.Parse(row.SettingsJson)!.AsObject();
+        foreach (var (key, value) in values) json[key] = value;
+        row.SettingsJson = json.ToJsonString();
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task<List<Guid>> AllIdsAsync(TestHost host)
+    {
+        using var scope = host.NewScope();
+        return await scope.ServiceProvider.GetRequiredService<MainframeDbContext>()
+            .AdminNotifications.IgnoreQueryFilters().Select(n => n.Id).ToListAsync();
+    }
+
+    /// <summary>
+    /// Review (retention): a notice carries names, addresses and balances, and must not outlast
+    /// the club's own <c>retention_years</c> however long the feed setting is.
+    /// </summary>
+    [Fact]
+    public async Task A_notice_is_never_kept_past_the_clubs_retention_years()
+    {
+        await using var host = await TestHost.CreateAsync();
+        await PatchSettingsAsync(host, ("retention_years", 1), ("admin_notification_retention_days", AdminNotificationSettings.MaxRetentionDays));
+        var tooOld = await StageAsync(host, Registration("Past a Year"), T0.AddDays(-400));
+        var kept = await StageAsync(host, Registration("Inside a Year"), T0.AddDays(-300));
+        await host.DeliverAdminNoticesAsync(T0.AddDays(-300));
+
+        await SweepAsync(host, T0);
+
+        var ids = await AllIdsAsync(host);
+        Assert.DoesNotContain(tooOld, ids);
+        Assert.Contains(kept, ids);
+    }
+
+    /// <summary>
+    /// Review F3: a schedule clash's row is the only thing stopping the sweep raising the same
+    /// standing clash again, so a short retention must not delete it while its first clash is
+    /// still ahead. Past the horizon plus a day its night is behind us and it goes like any other.
+    /// </summary>
+    [Fact]
+    public async Task A_schedule_clash_outlives_a_short_retention_until_its_night_has_passed()
+    {
+        await using var host = await TestHost.CreateAsync();
+        await PatchSettingsAsync(host, ("admin_notification_retention_days", AdminNotificationSettings.MinRetentionDays));
+        var schedule = new BookingSchedule { TenantId = host.Tenant.Id, Name = "League night", Label = "League" };
+        var clash = AdminNotices.ScheduleConflict(schedule, [DateOnly.FromDateTime(T0.AddDays(50).UtcDateTime)], 1);
+        var eightDaysAgo = T0.AddDays(-(AdminNotificationSettings.MinRetentionDays + 1));
+        var standing = await StageAsync(host, clash, eightDaysAgo);
+        var registration = await StageAsync(host, Registration("Short Retention"), eightDaysAgo);
+        var horizon = ScheduleSettings.DefaultMaterialisationDays;
+        var passed = await StageAsync(host,
+            AdminNotices.ScheduleConflict(schedule, [DateOnly.FromDateTime(T0.AddDays(-2).UtcDateTime)], 1), T0.AddDays(-(horizon + 2)));
+        await host.DeliverAdminNoticesAsync(eightDaysAgo);
+
+        await SweepAsync(host, T0);
+
+        var ids = await AllIdsAsync(host);
+        Assert.Contains(standing, ids);
+        Assert.DoesNotContain(registration, ids);
+        Assert.DoesNotContain(passed, ids);
+
+        // And the standing clash is still deduplicated: raising it again is "already raised".
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.False(await AdminNotices.RaiseAsync(db, host.Tenant.Id, clash, T0, default));
+    }
+
+    // ------------------------------------------------------------------ review fixes: delivery
+
+    /// <summary>
+    /// Review (cooldown): a notice that reached one admin and is retrying another holds the
+    /// cooldown. Counting only finished rows let every sibling through while it waited — three
+    /// overdraft mails inside one fifteen-minute window to the admin whose mailbox worked.
+    /// </summary>
+    [Fact]
+    public async Task A_notice_that_reached_some_admins_holds_the_cooldown_while_it_retries_the_rest()
+    {
+        await using var host = await TestHost.CreateAsync();
+        var working = await AddPersonAsync(host, "working.admin", isAdmin: true);
+        var flaky = await AddPersonAsync(host, "flaky.admin", isAdmin: true);
+        host.EmailService.FailWhen = m => m.To == flaky.Email;
+
+        var first = await StageAsync(host, Overdraft(host.AdminUser.Id, host.PlayerUser.Id, "Court 1"), T0);
+        await host.DeliverAdminNoticesAsync(T0);
+        var second = await StageAsync(host, Overdraft(host.AdminUser.Id, host.PlayerUser.Id, "Court 2"), T0.AddMinutes(2));
+        await host.DeliverAdminNoticesAsync(T0.AddMinutes(2));
+        var third = await StageAsync(host, Overdraft(host.AdminUser.Id, host.PlayerUser.Id, "Court 3"), T0.AddMinutes(4));
+        await host.DeliverAdminNoticesAsync(T0.AddMinutes(4));
+
+        Assert.Single(host.EmailService.Sent, m => m.To == working.Email);
+        Assert.Equal(AdminNotificationState.Suppressed, (await RowAsync(host, second)).State);
+        Assert.Equal(AdminNotificationState.Suppressed, (await RowAsync(host, third)).State);
+
+        // The retry is still owed to the admin it missed, and only that one.
+        host.EmailService.FailWhen = null;
+        await host.DeliverAdminNoticesAsync(T0.AddHours(1));
+        Assert.Single(host.EmailService.Sent, m => m.To == working.Email);
+        Assert.Single(host.EmailService.Sent, m => m.To == flaky.Email);
+        Assert.Equal(AdminNotificationState.Sent, (await RowAsync(host, first)).State);
+    }
+
+    /// <summary>
+    /// The other side of the window: a notice that reached nobody, retried after a later sibling
+    /// of the same scope was mailed, is withheld rather than making a second mail inside it.
+    /// </summary>
+    [Fact]
+    public async Task A_notice_retried_after_a_later_sibling_was_mailed_is_withheld()
+    {
+        await using var host = await TestHost.CreateAsync();
+        var colleague = await AddPersonAsync(host, "colleague.admin", isAdmin: true);
+        host.EmailService.FailWhen = _ => true;
+        var early = await StageAsync(host, Overdraft(host.AdminUser.Id, host.PlayerUser.Id, "Court 1"), T0);
+        await host.DeliverAdminNoticesAsync(T0);
+        Assert.Equal(0, (await RowAsync(host, early)).RecipientCount);
+
+        host.EmailService.FailWhen = null;
+        var later = await StageAsync(host, Overdraft(host.AdminUser.Id, host.PlayerUser.Id, "Court 2"), T0.AddSeconds(30));
+        await host.DeliverAdminNoticesAsync(T0.AddSeconds(30));
+        await host.DeliverAdminNoticesAsync(T0.AddMinutes(2));
+
+        Assert.Single(host.EmailService.Sent, m => m.To == colleague.Email);
+        Assert.Equal(AdminNotificationState.Sent, (await RowAsync(host, later)).State);
+        Assert.Equal(AdminNotificationState.Suppressed, (await RowAsync(host, early)).State);
+    }
+
+    /// <summary>
+    /// Review (hardening): a row claimed more times than the backoff allows — a pass that threw
+    /// outside the send, so the backoff never judged it — is given up on, not claimed for ever.
+    /// </summary>
+    [Fact]
+    public async Task A_row_claimed_past_the_attempt_limit_is_given_up_without_mailing()
+    {
+        await using var host = await TestHost.CreateAsync();
+        var id = await StageAsync(host, Registration("Never Finished"));
+        using (var scope = host.NewScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var row = await db.AdminNotifications.IgnoreQueryFilters().SingleAsync(n => n.Id == id);
+            row.Attempts = AdminNotificationDispatcher.MaxAttempts;
+            await db.SaveChangesAsync();
+        }
+
+        await host.DeliverAdminNoticesAsync(T0);
+
+        Assert.Empty(host.EmailService.Sent);
+        var after = await RowAsync(host, id);
+        Assert.Equal(AdminNotificationState.Failed, after.State);
+        Assert.Equal("attempts_exhausted", after.LastError);
+    }
+
+    /// <summary>
+    /// Review (header injection): a name with a line break in it reached the subject, which
+    /// <c>MailMessage</c> refuses — the notice could never be sent. The subject is one line.
+    /// </summary>
+    [Fact]
+    public async Task A_name_with_a_line_break_still_makes_a_sendable_one_line_subject()
+    {
+        await using var host = await TestHost.CreateAsync();
+        var colleague = await AddPersonAsync(host, "colleague.admin", isAdmin: true);
+        await StageAsync(host, AdminNotices.OverdraftAuthorised(Guid.NewGuid(), host.AdminUser.Id, host.PlayerUser.Id, new OverdraftPayload(
+            Guid.NewGuid(), "Desk Admin", "Mo\r\nBcc: someone@elsewhere.review.test", Self: false, "Court 1", "Tue 29 Sep, 18:00", 24m, -16m)));
+
+        await host.DeliverAdminNoticesAsync(T0);
+
+        var mail = Assert.Single(host.EmailService.Sent, m => m.To == colleague.Email);
+        Assert.Equal("Desk Admin took Mo Bcc: someone@elsewhere.review.test below zero", mail.Subject);
+        using var message = new System.Net.Mail.MailMessage { Subject = mail.Subject };
+        Assert.Equal(mail.Subject, message.Subject);
+    }
+
+    /// <summary>
+    /// Review F2: the admin mail for a top-up says what actually happened to the member. A payment
+    /// the gateway reported with no reference is a member who HAS PAID and has been told nothing;
+    /// a checkout the gateway refused took no money and was not mailed.
+    /// </summary>
+    [Theory]
+    [InlineData("payment_id_missing", "has not been told anything")]
+    [InlineData("provider_register_failed", "was not emailed")]
+    [InlineData("signature_invalid", "the notification was ignored")]
+    [InlineData("amount_mismatch", "The member has been emailed that their top-up did not complete.")]
+    [InlineData("gateway_error", "The member has been emailed that their top-up did not complete.")]
+    public void The_top_up_mail_says_what_happened_to_the_member_for_each_reason(string reason, string expected)
+    {
+        var message = Crusaders.Mainframe.Api.Email.EmailTemplates.AdminTopUpFailed(
+            EmailCatalogue.Riverside, "desk@riverside.review.test",
+            new Crusaders.Mainframe.Api.Email.TopUpFailure(reason, 100m, "Naledi Khoza", "ref", "R", "https://riverside.review.test/admin/transactions"));
+
+        Assert.Contains(expected, MailText.Unwrap(message.PlainBody), StringComparison.Ordinal);
+        if (reason is "payment_id_missing" or "provider_register_failed" or "signature_invalid")
+        {
+            Assert.DoesNotContain("has been emailed", MailText.Unwrap(message.PlainBody), StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// Review F4: a stored opt-out of a kind nobody may opt out of is not read back as one, so a
+    /// settings screen that saves what it read is not refused.
+    /// </summary>
+    [Fact]
+    public void A_stored_opt_out_of_a_non_optional_kind_is_not_read_back()
+    {
+        var view = UserPreferencesView.From(new UserPreferences
+        {
+            AdminNotificationOptoutsJson = JsonSerializer.Serialize(new[] { AdminEventCatalogue.AdminRoleChanged, AdminEventCatalogue.DeviceOffline }),
+        });
+
+        Assert.Equal(new[] { AdminEventCatalogue.DeviceOffline }, view.AdminNotificationOptouts);
+    }
+
+    /// <summary>Review (cursor): a well-formed number that is not an instant is a bad cursor, not a crash.</summary>
+    [Theory]
+    [InlineData("-1")]
+    [InlineData("9223372036854775807")]
+    public void A_cursor_whose_ticks_are_not_an_instant_is_refused(string ticks)
+    {
+        var raw = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{ticks}:{Guid.NewGuid():N}"));
+        Assert.Null(Crusaders.Mainframe.Api.Endpoints.AdminChangeCursor.Parse(raw));
     }
 
     // ------------------------------------------------------------------ the catalogue

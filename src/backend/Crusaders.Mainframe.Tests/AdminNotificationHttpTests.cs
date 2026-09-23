@@ -403,6 +403,139 @@ public sealed class AdminNotificationHttpTests
         Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
     }
 
+    /// <summary>
+    /// Review F3 + retention, on the Postgres bulk-delete path the in-memory suite cannot reach:
+    /// a short feed retention deletes this club's old finished notices but keeps a schedule clash
+    /// whose night is still ahead, and never touches another club's rows.
+    /// </summary>
+    [SkippableFact]
+    public async Task Pruning_on_postgres_keeps_a_standing_clash_and_only_touches_its_own_club()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+        await using var factory = CreateFactory();
+        var a = await PeopleClub.SeedAsync(factory, "noticeprna");
+        var b = await PeopleClub.SeedAsync(factory, "noticeprnb");
+        var old = DateTimeOffset.UtcNow.AddDays(-(AdminNotificationSettings.MinRetentionDays + 1));
+        var schedule = new BookingSchedule { TenantId = a.TenantId, Name = "League night", Label = "League" };
+        Guid clash, registration, otherClub;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var settings = await db.TenantSettings.IgnoreQueryFilters().SingleAsync(t => t.TenantId == a.TenantId);
+            settings.SettingsJson = $$"""{"timezone":"UTC","admin_notification_retention_days":{{AdminNotificationSettings.MinRetentionDays}}}""";
+            var rows = new[]
+            {
+                AdminNotices.Stage(db, a.TenantId, AdminNotices.ScheduleConflict(schedule, [DateOnly.FromDateTime(DateTime.UtcNow.AddDays(40))], 1), old),
+                AdminNotices.Stage(db, a.TenantId, Registration("Pruned Applicant"), old),
+                AdminNotices.Stage(db, b.TenantId, Registration("Other Club Applicant"), old),
+            };
+            foreach (var row in rows) row.State = AdminNotificationState.Sent;
+            await db.SaveChangesAsync();
+            (clash, registration, otherClub) = (rows[0].Id, rows[1].Id, rows[2].Id);
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Multitenancy.ITenantContext>().Set(a.TenantId, a.Slug);
+            var view = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+            await AdminNotificationSweep.PruneAsync(scope.ServiceProvider.GetRequiredService<MainframeDbContext>(), view, DateTimeOffset.UtcNow, default);
+        }
+
+        var left = await PeopleClub.ReadAsync(factory, db => db.AdminNotifications.IgnoreQueryFilters()
+            .Where(n => n.TenantId == a.TenantId || n.TenantId == b.TenantId).Select(n => n.Id).ToListAsync());
+        Assert.Contains(clash, left);
+        Assert.DoesNotContain(registration, left);
+        Assert.Contains(otherClub, left);
+    }
+
+    /// <summary>
+    /// Review (feed): <c>sent_at</c> is for a notice that was sent. A suppressed one answered the
+    /// instant it was suppressed as its <c>sent_at</c>; that instant is <c>finished_at</c>.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_feed_says_sent_at_only_for_a_sent_notice_and_finished_at_for_every_finished_one()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+        await using var factory = CreateFactory();
+        var mail = new StubEmailService();
+        await using var app = WithMail(factory, mail);
+        var club = await PeopleClub.SeedAsync(app, "noticesent");
+        var actor = await club.AddAsync(app, "Acting Admin", isAdmin: true);
+        var reader = await club.AddAsync(app, "Reading Admin", isAdmin: true);
+        var member = await club.AddAsync(app, "Owing Member", isAdmin: false);
+        var payload = new OverdraftPayload(Guid.NewGuid(), "Acting Admin", "Owing Member", false, "Court 1", "Tue 29 Sep, 18:00", 8m, -8m);
+        await StageAsync(app, club.TenantId, AdminNotices.OverdraftAuthorised(Guid.NewGuid(), actor, member, payload));
+        for (var i = 0; i < 10 && (await NoticesAsync(app, club.TenantId)).Any(n => n.State == AdminNotificationState.Pending); i++)
+        {
+            await PeopleClub.DeliverAdminNoticesAsync(app, DateTimeOffset.UtcNow.AddSeconds(5));
+        }
+        await StageAsync(app, club.TenantId, AdminNotices.OverdraftAuthorised(Guid.NewGuid(), actor, member, payload with { CourtName = "Court 2" }));
+        for (var i = 0; i < 10 && (await NoticesAsync(app, club.TenantId)).Any(n => n.State == AdminNotificationState.Pending); i++)
+        {
+            await PeopleClub.DeliverAdminNoticesAsync(app, DateTimeOffset.UtcNow.AddSeconds(5));
+        }
+
+        var items = JsonDocument.Parse(await club.Client(app, reader, adminRole: true).GetStringAsync(FeedPath))
+            .RootElement.GetProperty("items").EnumerateArray()
+            .ToDictionary(i => i.GetProperty("delivery").GetProperty("state").GetString()!, i => i.GetProperty("delivery").Clone());
+
+        Assert.Equal(JsonValueKind.String, items["sent"].GetProperty("sent_at").ValueKind);
+        Assert.Equal(items["sent"].GetProperty("sent_at").GetString(), items["sent"].GetProperty("finished_at").GetString());
+        Assert.Equal(1, items["sent"].GetProperty("recipients").GetInt32());
+        Assert.Equal(JsonValueKind.Null, items["suppressed"].GetProperty("sent_at").ValueKind);
+        Assert.Equal(JsonValueKind.String, items["suppressed"].GetProperty("finished_at").ValueKind);
+    }
+
+    /// <summary>
+    /// Review (cursor): a cursor whose number is not an instant — negative ticks — is the same
+    /// 400 as any other malformed cursor. It was an unhandled ArgumentOutOfRangeException.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_crafted_cursor_whose_instant_cannot_exist_is_a_400_not_a_500()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+        await using var factory = CreateFactory();
+        var club = await PeopleClub.SeedAsync(factory, "noticecur");
+        var admin = await club.AddAsync(factory, "Cursor Admin", isAdmin: true);
+        var crafted = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"-1:{Guid.NewGuid():N}"));
+
+        var res = await club.Client(factory, admin, adminRole: true).GetAsync($"{FeedPath}?cursor={Uri.EscapeDataString(crafted)}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+        Assert.Equal("cursor_invalid", JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement.GetProperty("error").GetString());
+    }
+
+    /// <summary>
+    /// Review F4: a stored opt-out of a kind that is now non-optional is not read back, so the
+    /// settings screen that saves what it read — a theme change carries the list — is not refused.
+    /// </summary>
+    [SkippableFact]
+    public async Task Preferences_read_back_without_a_non_optional_opt_out_save_back_cleanly()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+        await using var factory = CreateFactory();
+        var club = await PeopleClub.SeedAsync(factory, "noticeprf");
+        var admin = await club.AddAsync(factory, "Legacy Admin", isAdmin: true);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            db.UserPreferences.Add(new UserPreferences
+            {
+                TenantId = club.TenantId, UserId = admin,
+                AdminNotificationOptoutsJson = JsonSerializer.Serialize(new[] { AdminEventCatalogue.AdminRoleChanged, AdminEventCatalogue.DeviceOffline }),
+            });
+            await db.SaveChangesAsync();
+        }
+        var client = club.Client(factory, admin, adminRole: true);
+
+        var read = JsonDocument.Parse(await client.GetStringAsync("/api/v1/me/preferences")).RootElement;
+        var optouts = read.GetProperty("admin_notification_optouts").EnumerateArray().Select(e => e.GetString()!).ToArray();
+        Assert.Equal(new[] { AdminEventCatalogue.DeviceOffline }, optouts);
+
+        var put = await client.PutAsJsonAsync("/api/v1/me/preferences", new { theme = "dark", admin_notification_optouts = optouts });
+        Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+    }
+
     /// <summary>A club's cursor is keyed on its own rows; one crafted from another club's row reveals nothing of it.</summary>
     [SkippableFact]
     public async Task A_member_cannot_read_the_feed_or_the_kinds()
