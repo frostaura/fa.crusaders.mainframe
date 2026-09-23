@@ -1,14 +1,15 @@
+/* eslint-disable react-refresh/only-export-components -- the frame and the palette hook it draws with belong in one module. */
 import { ResponsiveContainer } from "recharts";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactElement } from "react";
+import { activeTheme, chartColors, type ThemeName } from "../lib/tokens";
+import { useTheme } from "../lib/theme";
 
 /**
  * How tall every chart in this product is drawn.
  *
  * <p>
  * Module-private: <c>ChartFrame</c> is the only thing that has ever needed it, because the
- * frame is what gives a chart its height in the first place. It was briefly exported when this
- * component moved out of <c>Charts.tsx</c>, which left an export nobody imported and put a
- * non-component export beside a component — the shape <c>react-refresh</c> warns about.
+ * frame is what gives a chart its height in the first place.
  * </p>
  */
 const CHART_HEIGHT = 240;
@@ -16,63 +17,85 @@ const CHART_HEIGHT = 240;
 type FrameSize = { width: number };
 
 /**
+ * The colours a chart is drawn in, read from the LIVE theme.
+ *
+ * <p>
+ * <b>Why a hook and not a module constant.</b> `Charts.tsx` used to call `chartColors()` once, at
+ * module load, and destructure the answer into constants. That was right while the product had
+ * one theme and wrong the moment it had two (D7): every chart kept the light palette for the
+ * life of the tab, so a member who switched to dark — or whose phone did at sunset — read navy
+ * bars and slate gridlines on a navy-black card. The palette is now read on every render, and
+ * the chart re-renders when the painted theme changes.
+ * </p>
+ *
+ * <p>
+ * <b>Two signals, on purpose.</b> `useTheme()` re-renders on the member's choice, but the
+ * provider paints `html.dark` in an EFFECT, which runs after this render has already read the
+ * variables — so on that render the document is still in the old theme. The second signal is the
+ * document itself: a subscription to `<html>`'s class, which fires once the paint has actually
+ * happened and re-reads the palette against it. Either alone is a chart one theme behind.
+ * </p>
+ */
+export type ChartPalette = ReturnType<typeof chartColors>;
+
+function subscribeToPaint(onChange: () => void): () => void {
+  if (typeof MutationObserver === "undefined" || typeof document === "undefined") return () => undefined;
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
+  return () => observer.disconnect();
+}
+
+const serverTheme = (): ThemeName => "light";
+
+/** The chart palette for whichever theme is painted right now. */
+export function paletteNow(): ChartPalette {
+  return chartColors();
+}
+
+export function useChartColors(): ChartPalette {
+  useTheme();
+  useSyncExternalStore(subscribeToPaint, activeTheme, serverTheme);
+  return paletteNow();
+}
+
+/**
  * The box a chart is drawn in, which does not draw the chart until the box has a size.
  *
  * <p>
  * recharts' <code>ResponsiveContainer</code> measures its parent and, when it cannot, renders
- * nothing and logs <i>"The width(-1) and height(-1) of chart should be greater than 0"</i>. On
- * /reports that happened sixteen times per page load: the report charts live in a carousel whose
- * off-screen slides are laid out at zero width, so every chart that was not the visible slide
- * measured -1 and complained. The charts themselves were fine — they render the moment their
- * slide is scrolled to.
+ * nothing and logs <i>"The width(-1) and height(-1) of chart should be greater than 0"</i>. The
+ * report charts live in a carousel whose off-screen slides are laid out at zero width, so every
+ * chart that was not the visible slide measured -1 and complained. Holding the chart back until
+ * the box is measurable removes the warning at its cause.
  * </p>
  *
  * <p>
- * Sixteen warnings a load is not a cosmetic problem. /reports is the one screen an admin opens
- * when they think something is wrong, and a console that is already full of red is a console
- * nobody reads the seventeenth line of.
- * </p>
- *
- * <p>
- * Holding the chart back until the box is measurable removes the warning at its cause rather
- * than silencing it, and costs nothing visible: a slide with no width has nothing to show
- * anyway. The height is fixed, so only the width is ever in question.
- * </p>
- *
- * <p>
- * <b>The gate alone was not enough, and the round-1 claim above was false as written.</b> A
- * headed pass counted <i>six warnings per /reports load</i> at the same moment all three frames
- * reported <code>data-measurable="true"</code> and <code>clientWidth: 950</code> — so the gate
- * was open and the complaint was coming from inside <code>ResponsiveContainer</code> anyway.
- * It defaults <code>initialDimension</code> to <code>{-1, -1}</code> and warns on its very first
- * render, before its own ResizeObserver has had a chance to run; no parent can prevent that by
- * being the right size, because the parent is not what it reads on that render. jsdom has no
- * layout, so the round-1 test never got the frame measurable and never reached the render that
- * warns — it passed while the defect was untouched. Handing the container the width the frame
- * has already measured is what closes it: the first render is a real size, and there is no
- * frame with nothing in it to warn about.
- * </p>
- *
- * <p>
- * Worth knowing before deciding this is a development-only annoyance: recharts' own
+ * <b>The gate alone was not enough.</b> <code>ResponsiveContainer</code> defaults
+ * <code>initialDimension</code> to <code>{-1, -1}</code> and warns on its very first render,
+ * before its own ResizeObserver has run; no parent can prevent that by being the right size.
+ * Handing the container the width the frame has already measured is what closes it. recharts'
  * <code>LogUtils</code> hard-codes <code>isDev = true</code> in the published build, so these
- * warnings fire in production too.
+ * warnings fired in production too.
+ * </p>
+ *
+ * <p>
+ * <b>The chart is a function of the palette</b> (a render prop), so the frame owns the one
+ * subscription to the theme and every chart inside it redraws in the new colours together.
  * </p>
  */
-export function ChartFrame({ children }: { children: React.ReactNode }) {
+export function ChartFrame({ children }: { children: (palette: ChartPalette) => ReactElement }) {
   const ref = useRef<HTMLDivElement>(null);
+  const palette = useChartColors();
   // Null until the box has a width; the width it FIRST had once it does. Only the first positive
   // measurement is kept, because after that `ResponsiveContainer`'s own ResizeObserver owns the
-  // size — re-rendering the chart on every pixel of a window drag would buy nothing. The state
-  // therefore changes only on a null↔sized transition.
+  // size. The state therefore changes only on a null↔sized transition.
   const [frame, setFrame] = useState<FrameSize | null>(null);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     // `width > 0`, never `width <= 0`: lizard reads a bare `<` in a .tsx file as a JSX open tag
-    // and swallows the rest of the file into whichever function it was last inside, reporting
-    // this one at 268 lines and tripping `-L 200` on a line nobody touched. See memory/gotchas.md.
+    // and swallows the rest of the file into whichever function it was last inside.
     const check = () => {
       const width = el.clientWidth;
       setFrame((previous) => (width > 0 ? previous ?? { width } : null));
@@ -91,7 +114,7 @@ export function ChartFrame({ children }: { children: React.ReactNode }) {
     <div ref={ref} style={{ height: CHART_HEIGHT }} data-testid="chart-frame" data-measurable={frame !== null}>
       {frame && (
         <ResponsiveContainer initialDimension={{ width: frame.width, height: CHART_HEIGHT }}>
-          {children as React.ReactElement}
+          {children(palette)}
         </ResponsiveContainer>
       )}
     </div>

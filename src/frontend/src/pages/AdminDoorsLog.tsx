@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { Card } from "../components/Card";
 import { Alert } from "../components/Alert";
-import { Button, Label, Select } from "../components/Button";
+import { Label, Select } from "../components/Button";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { PageHeader, PageShell } from "../components/ui/page-shell";
+import { RefreshButton } from "../components/ui/refresh-button";
+import { TextLink } from "../components/ui/text-link";
+import { DownloadSimple } from "../components/ui/icons";
 import { useToast } from "../components/Toast";
 import { DoorFeedRow } from "../components/doors/DoorFeedRow";
 import { useTicker } from "../lib/useTicker";
@@ -550,16 +556,21 @@ function AdminDoorsLogPageBody() {
   const anyOffline = scans.some((entry) => entry.offline);
 
   return (
-    <div className="space-y-6">
-      <header className="space-y-2 sm:flex sm:items-start sm:justify-between sm:gap-4 sm:space-y-0">
-        <div>
-          <Link to="/admin/monitoring/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">← Doors</Link>
-          {/* E6 / R3-19: the heading is what a screenshot of this page is read as, and it
-              said "All scans, all doors" over one door's refusals on one Tuesday. */}
-          <h1 className="text-2xl font-bold tracking-tight">
-            {doorLogHeading({ doorName, outcomeLabel, rangeLabel })}
-          </h1>
-          <p className="text-xs text-text-muted">
+    <PageShell width="wide">
+      {/* E6 / R3-19: the heading is what a screenshot of this page is read as, and it said
+          "All scans, all doors" over one door's refusals on one Tuesday. */}
+      <PageHeader
+        back={{ to: "/admin/monitoring/doors", label: "Doors" }}
+        title={doorLogHeading({ doorName, outcomeLabel, rangeLabel })}
+        /*
+          C4: RefreshButton is `aria-disabled`, never `disabled`, while it reads. A browser
+          blurs a disabled element, so disabling the control an admin has just pressed moves
+          focus to `<body>` — measured on every re-rendering button on this surface. The
+          handler guards the double press.
+        */
+        actions={<RefreshButton onRefresh={() => { if (!loading) void load(); }} loading={loading} />}
+        freshness={(
+          <p className="text-xs tabular-nums text-text-muted">
             {/*
               E2 / R3-3, at this call site. `clubClock` renders in whatever zone it is given
               and falls back to the BROWSER's — which is right, because a volunteer standing
@@ -571,17 +582,8 @@ function AdminDoorsLogPageBody() {
             {readAt === null ? "Reading…" : `Read at ${clubClock(readAt, page.timezone)}`}
             {readAt !== null && page.timezone ? " club time" : ""}
           </p>
-        </div>
-        {/*
-          C4: NOT `disabled` while loading. A browser blurs a disabled element, so disabling
-          the control an admin has just pressed moves focus to `<body>` — measured on every
-          re-rendering button on this surface. The node stays mounted and enabled, the label
-          changes, `aria-busy` says what it is doing, and the handler guards the double press.
-        */}
-        <Button variant="outline" onClick={() => { if (!loading) void load(); }} aria-busy={loading}>
-          {loading ? "Reading…" : "Refresh"}
-        </Button>
-      </header>
+        )}
+      />
 
       {/* `min-w-0` on the grid and its columns: a grid item defaults to `min-width: auto`
           and so refuses to shrink below its content's min-content width. Same fault, same
@@ -681,7 +683,7 @@ function AdminDoorsLogPageBody() {
                     side of closing, and an emptied field clears the filter rather than
                     leaving the log narrowed to a day the control no longer shows.
                   */}
-                  <input
+                  <Input
                     id={`${base}-day`}
                     type="date"
                     value={dayDraft}
@@ -694,7 +696,6 @@ function AdminDoorsLogPageBody() {
                       const value = e.target.value;
                       if (isClubDay(value) || value === "") setFilter("day", value);
                     }}
-                    className="min-h-11 w-full rounded-lg border border-control bg-bg-surface px-3 text-sm"
                   />
                   {!isClubDay(params.get("day") ?? "") && (
                     <p className="mt-1 text-xs text-text-muted">Pick a day to narrow the log to it.</p>
@@ -753,8 +754,13 @@ function AdminDoorsLogPageBody() {
             ) : (
               <>
                 {/* C4: enabled throughout, for the reason on Refresh above — `disabled` blurs. */}
-                <Button variant="outline" onClick={() => void download()} aria-busy={downloading}>
-                  {downloading ? "Preparing…" : "Download CSV"}
+                <Button
+                  variant="outline"
+                  onClick={() => void download()}
+                  icon={<DownloadSimple aria-hidden="true" />}
+                  pending={downloading}
+                >
+                  Download CSV
                 </Button>
                 {/* A-H2 / R3-14: the failure stays on the page until the next attempt. The
                     toast is still pushed — it is what a sighted admin sees first — but a
@@ -828,9 +834,9 @@ function AdminDoorsLogPageBody() {
                 <p key={sentence} className="text-sm text-text-secondary">{sentence}</p>
               ))}
               {doorName && !chosenRemoved && (
-                <Link to="/admin/monitoring/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">
+                <TextLink variant="standalone" to="/admin/monitoring/doors" className="text-sm">
                   Check it on Doors
-                </Link>
+                </TextLink>
               )}
             </div>
           ) : (
@@ -862,8 +868,8 @@ function AdminDoorsLogPageBody() {
               </Card>
               {olderFailed && <Alert tone="danger">{`${LOG_OLDER_FAILED} The ${scans.length} above are still correct.`}</Alert>}
               {cursor ? (
-                <Button variant="outline" className="w-full" onClick={() => void loadOlder()} aria-busy={loadingOlder}>
-                  {olderFailed ? "Try again" : loadingOlder ? "Loading…" : "Load older scans"}
+                <Button variant="outline" block onClick={() => void loadOlder()} pending={loadingOlder}>
+                  {olderFailed ? "Try again" : "Load older scans"}
                 </Button>
 
               ) : (
@@ -888,7 +894,7 @@ function AdminDoorsLogPageBody() {
           </Card>
         </aside>
       </div>
-    </div>
+    </PageShell>
   );
 }
 

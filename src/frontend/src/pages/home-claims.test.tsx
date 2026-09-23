@@ -2,8 +2,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { screen } from "@testing-library/react";
+import { Route, Routes, useLocation } from "react-router-dom";
 import HomePage from "./Home";
-import { memberDoorFixture, memberDoorsOnFixture, renderPage, signIn, signOut, stubFetch } from "../test/harness";
+import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
 import { forgetLastKnown } from "../lib/lastKnown";
 
 /**
@@ -88,69 +89,55 @@ describe("the public landing page", () => {
   });
 
   /**
-   * The signed-in tile, which is the entry point to the member's code and therefore the
-   * first half of the door feature.
+   * R15 retired the signed-in tiles, and the tests that pinned their copy with them.
    *
    * <p>
-   * The tile said "Your court code" and "Show this at the court to turn the lights on".
-   * Both are true of a court box and neither gives a member standing at a locked front
-   * door any reason to press it — which is the whole of why the page was renamed rather
-   * than merely taught about doors. The hint's second clause is the one that forks: at a
-   * club with no gate it would be a promise about a door that does not exist.
-   * </p>
-   *
-   * <p>
-   * These live in this file deliberately. It exists because a claim on a home page drifts
-   * from what the product does, and nobody in the club is in a position to correct it.
+   * The tiles were a second home screen that repeated the tab bar; a signed-in member now lands
+   * on My Code itself. What those tests guarded — the member's code named as theirs rather than
+   * the court's, and the door clause said only at a club that has a door and only when that is
+   * known — lives on My Code now and is held by its own suite. What is left to hold HERE is that
+   * "/" hands a member over rather than showing them the visitor's page.
    * </p>
    */
-  describe("the signed-in tile", () => {
-    function renderSignedIn(door: Record<string, unknown>) {
-      const session = signIn({ isAdmin: false });
-      stubFetch([
-        { path: "/api/v1/whoami", body: session },
-        { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
-        { path: "/api/v1/me/door", body: door },
-      ]);
-      return renderPage(<HomePage />);
+  describe("for a member", () => {
+    function Probe() {
+      const { pathname } = useLocation();
+      return <output data-testid="at">{pathname}</output>;
     }
 
-    it("names the member's code rather than the court's, and points at the new route", async () => {
-      renderSignedIn(memberDoorsOnFixture());
-      const tile = await screen.findByRole("link", { name: /Your code/ });
-      expect(tile).toHaveAttribute("href", "/my-code");
-      expect(screen.queryByRole("link", { name: /Your court code/ })).toBeNull();
-    });
+    function renderRoot() {
+      return renderPage(
+        <>
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/my-code" element={<h1>Your code</h1>} />
+          </Routes>
+          <Probe />
+        </>,
+      );
+    }
 
-    it("names both a court box and the club door at a club with a door", async () => {
-      renderSignedIn(memberDoorsOnFixture());
-      expect(await screen.findByText(/Show this at a court box, or at the club door/)).toBeInTheDocument();
-    });
-
-    /** The silent half. A club with no gate is told nothing whatever about one. */
-    it("names only the court box at a club with no door", async () => {
-      renderSignedIn(memberDoorFixture());
-      await screen.findByRole("link", { name: /Your code/ });
-      expect(screen.getByText("Show this at the court box")).toBeInTheDocument();
-      expect(screen.queryByText(/club door/)).toBeNull();
-    });
-
-    /**
-     * A failed read is the silent half too. Claiming a door on a club that has none is
-     * the same falsehood as denying one that exists, and only one of the two can be got
-     * wrong by guessing.
-     */
-    it("says nothing about a door when it could not find out", async () => {
+    it("goes straight to My Code", async () => {
       const session = signIn({ isAdmin: false });
       stubFetch([
         { path: "/api/v1/whoami", body: session },
         { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
-        { path: "/api/v1/me/door", status: 500, body: { error: "boom" } },
       ]);
-      renderPage(<HomePage />);
+      renderRoot();
 
-      await screen.findByRole("link", { name: /Your code/ });
-      expect(screen.queryByText(/club door/)).toBeNull();
+      expect(await screen.findByRole("heading", { name: "Your code" })).toBeInTheDocument();
+      expect(screen.getByTestId("at")).toHaveTextContent("/my-code");
+      expect(screen.queryByText(/hold your code up to the scanner/i)).toBeNull();
+    });
+
+    it("does not flash the visitor's page while the session is still being confirmed", async () => {
+      signIn({ isAdmin: false });
+      // whoami never answers: the stored token alone decides where "/" goes.
+      vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+      renderRoot();
+
+      expect(await screen.findByRole("heading", { name: "Your code" })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: /Crusaders Squash/ })).toBeNull();
     });
   });
 });

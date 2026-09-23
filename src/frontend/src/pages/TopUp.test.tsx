@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import TopUpPage from "./TopUp";
 import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
 
@@ -81,7 +81,7 @@ describe("Top-up — what the checkout actually sends", () => {
     const stub = stubFetch(routes());
     renderPage(<TopUpPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "R200" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "R200" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
     await vi.waitFor(() => expect(stub.calls.some((c) => c.method === "POST")).toBe(true));
@@ -99,7 +99,7 @@ describe("Top-up — what the checkout actually sends", () => {
     stubFetch(routes());
     renderPage(<TopUpPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "R200" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "R200" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
     await vi.waitFor(() => expect(submitted.length).toBe(1));
@@ -139,36 +139,55 @@ describe("Top-up — what the checkout actually sends", () => {
     renderPage(<TopUpPage />);
 
     expect(await screen.findByText(/Min R50\.00 · Max R5000\.00 · Multiples of R50\.00 only/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "R2500" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "R2500" })).toBeInTheDocument();
     expect(screen.queryByText(/R1000\.00 only/)).not.toBeInTheDocument();
 
     // The rate the member is quoted is the club's, and the preview is that rate applied.
     expect(screen.getByText(/Every R1\.00 you pay adds 2\.40 cr to your wallet \(league \/ senior rate\)/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "R500" }));
+    fireEvent.click(screen.getByRole("radio", { name: "R500" }));
     expect(screen.getByText("1200.00 credits")).toBeInTheDocument();
 
     // R2,500 is fine here and would have been refused by the old hardcoded R1,000 cap.
-    fireEvent.click(screen.getByRole("button", { name: "R2500" }));
+    fireEvent.click(screen.getByRole("radio", { name: "R2500" }));
     expect(screen.getByRole("button", { name: "Continue to PayFast" })).not.toBeDisabled();
   });
 
   /**
-   * Item 12 on the page that sends a member to a payment gateway.
+   * Continue is the one action; Cancel is navigation.
    *
    * <p>
-   * `affirm` on Continue and `decline` on Cancel, and NO outcome phase on either: Continue
-   * ends in a redirect, so "it worked" is PayFast's own page arriving, and a tick drawn over
-   * a button the member is being taken away from would be a claim about a payment that has
-   * not happened. The glyph and the press are the whole of the adoption here.
+   * This pinned `data-intent="affirm"` / `"decline"` and the thumbs glyph on both — the
+   * ActionGlyph layer the design system retires (R8, design-system.md "No glyph on buttons at
+   * rest"; D5 for the watermark that replaces it). What that test protected is kept: Continue
+   * is the page's single action and carries a real pending state while the payment is
+   * registered (R12), and "Cancel" leaves for the wallet — which makes it a LINK (R10: links
+   * navigate, buttons act), drawn as a quiet button because it is the form's exit.
    * </p>
    */
-  it("marks Continue the affirm and Cancel the decline", async () => {
+  it("makes Continue the action, with a real pending state, and Cancel a way back to the wallet", async () => {
+    let answer: (() => void) | null = null;
     stubFetch(routes());
-    renderPage(<TopUpPage />);
-    const go = await screen.findByRole("button", { name: "Continue to PayFast" });
-    expect(go).toHaveAttribute("data-intent", "affirm");
-    expect(go.querySelector("svg[aria-hidden]")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Cancel" })).toHaveAttribute("data-intent", "decline");
+    // Hold the registration open, so the pending state can be looked at.
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => (init?.method === "POST"
+      ? new Promise<void>((resolve) => { answer = resolve; }).then(() => realFetch(input, init))
+      : realFetch(input, init)));
+    renderPage(<TopUpPage />, { reactStrictMode: true });
+
+    const cancel = await screen.findByRole("link", { name: "Cancel" });
+    expect(cancel).toHaveAttribute("href", "/wallet");
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "R200" }));
+    const go = screen.getByRole("button", { name: "Continue to PayFast" });
+    fireEvent.click(go);
+    // Pending, not disabled: focus stays on it and a second tap cannot start a second payment.
+    await waitFor(() => expect(go).toHaveAttribute("aria-busy", "true"));
+    expect(go).not.toBeDisabled();
+    expect(screen.queryByText(/Redirecting…/)).not.toBeInTheDocument();
+    await waitFor(() => expect(answer).not.toBeNull());
+    answer!();
+    await waitFor(() => expect(submitted).toHaveLength(1));
   });
 
   it("says why an amount is not accepted, rather than greying the button in silence", async () => {
@@ -231,7 +250,7 @@ describe("Top-up — what the checkout actually sends", () => {
     ]));
     renderPage(<TopUpPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "R100" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "R100" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
     expect(await screen.findByText("Payments aren't set up for this club yet — please ask an admin.")).toBeInTheDocument();
@@ -304,7 +323,7 @@ describe("Top-up — the quoted rate against the registered one", () => {
     ]);
     renderPage(<TopUpPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "R200" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "R200" }));
     // The offer the member is looking at when they press the button.
     expect(screen.getByText("480.00 credits")).toBeInTheDocument();
 
@@ -342,7 +361,7 @@ describe("Top-up — the quoted rate against the registered one", () => {
     ]);
     renderPage(<TopUpPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "R200" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "R200" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
     await screen.findByRole("alert");
 
@@ -371,7 +390,7 @@ describe("Top-up — the quoted rate against the registered one", () => {
     ]);
     renderPage(<TopUpPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "R200" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "R200" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
     await vi.waitFor(() => expect(submitted).toHaveLength(1));

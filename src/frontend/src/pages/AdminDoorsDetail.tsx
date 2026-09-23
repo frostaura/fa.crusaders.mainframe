@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { Card } from "../components/Card";
 import { Alert } from "../components/Alert";
-import { Button } from "../components/Button";
+import { Button } from "../components/ui/button";
+import { PageHeader, PageShell } from "../components/ui/page-shell";
+import { RefreshButton } from "../components/ui/refresh-button";
+import { Skeleton } from "../components/ui/skeleton";
+import { StateBlock } from "../components/ui/state-block";
+import { TextLink } from "../components/ui/text-link";
+import { Door } from "../components/ui/icons";
+import { useAsyncAction } from "../lib/useAsyncAction";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { DoorAge } from "../components/doors/DoorAge";
 import { DoorChips } from "../components/doors/DoorChips";
@@ -52,9 +59,8 @@ function shutAtFace(iso: string | null, timezone: string): string | null {
   return iso ? clubDayAndClock(iso, timezone) : null;
 }
 
-function BackToDoors() {
-  return <Link to="/admin/monitoring/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">← Doors</Link>;
-}
+/** The parent page, as the page header's back link — one shape on every detail screen (R11). */
+const BACK_TO_DOORS = { to: "/admin/monitoring/doors", label: "Doors" };
 
 /** Everything one door's page reads, and whether each read landed. */
 type DoorPageRead = {
@@ -234,6 +240,8 @@ function AdminDoorsDetailPageBody() {
   const nav = useNavigate();
   const now = useTicker(true);
   const { read, load, reload } = useDoorPage(id);
+  // A press re-reads all three halves (doors, settings, the feed) and shows it is working.
+  const manual = useAsyncAction(load);
   // A19: ONE form over all four writable fields, so one boolean rather than a "which of the
   // two editors is open" discriminator.
   const [editing, setEditing] = useState(false);
@@ -250,57 +258,75 @@ function AdminDoorsDetailPageBody() {
     afterDelete: (said: string) => nav("/admin/monitoring/doors", { state: { doorsNotice: said } }),
   });
 
-  if (read.loading) return <p className="text-sm text-text-secondary">Loading this door…</p>;
+  if (read.loading) {
+    // A skeleton the shape of the page (R12): header, the controls column, the feed.
+    return (
+      <PageShell width="wide" aria-busy="true">
+        <p className="sr-only">Reading this door…</p>
+        <div className="flex flex-col gap-3">
+          <Skeleton className="h-5 w-20" />
+          <Skeleton className="h-8 w-64 max-w-full" />
+          <Skeleton className="h-4 w-48 max-w-full" />
+        </div>
+        <div className="grid gap-6 lg:grid-cols-3">
+          <Skeleton className="h-64 lg:col-span-2" />
+          <Skeleton className="h-64" />
+        </div>
+      </PageShell>
+    );
+  }
   if (read.failed) {
     return (
-      <div className="space-y-3">
-        <BackToDoors />
-        <Alert tone="danger">{DOORS_READ_FAILED}</Alert>
-        <Button variant="outline" onClick={() => void load()}>Try again</Button>
-      </div>
+      <PageShell width="wide">
+        <PageHeader back={BACK_TO_DOORS} title="Door" />
+        <div className="flex flex-col items-start gap-3">
+          <Alert tone="danger" className="w-full">{DOORS_READ_FAILED}</Alert>
+          <Button variant="outline" onClick={() => void load()}>Try again</Button>
+        </div>
+      </PageShell>
     );
   }
   if (!row) {
     return (
-      <div className="space-y-3">
-        <BackToDoors />
-        <p className="text-sm text-text-secondary">
-          That door is not on the club's list. It may have been deleted — a board re-registers itself
-          on its next heartbeat, with no name.
-        </p>
-      </div>
+      <PageShell width="wide">
+        <PageHeader back={BACK_TO_DOORS} title="Door not found" />
+        <StateBlock
+          empty
+          emptyIcon={Door}
+          emptyTitle="That door is not on the club's list."
+          emptyHint="It may have been deleted — a board re-registers itself on its next heartbeat, with no name."
+          emptyAction={<TextLink variant="standalone" to="/admin/monitoring/doors">See every door</TextLink>}
+        />
+      </PageShell>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <header className="space-y-2">
-        <BackToDoors />
-        <div className="flex flex-wrap items-center gap-3">
-          {/* A11 / R3-21: ONE fallback. This printed the raw `name`, which for a board
-              nobody has named is the registration placeholder "Door gate" — so the heading,
-              the identity line below it ("no door name yet") and the tile that linked here
-              ("Unnamed scanner (gate-44c103)") were three vocabularies for one state, and
-              the loudest was a word the club never chose and cannot tell apart from the
-              other four doors in it. */}
-          <h1 className="min-w-0 break-words text-2xl font-bold tracking-tight">{displayName}</h1>
-          <DoorChips device={door} online={online} />
-          <span className="sm:ml-auto">
-            <DoorAge at={door.last_seen_at} now={now} prefix={online ? "Heard from" : "Last heard from"} />
-          </span>
-        </div>
-        <p className="min-w-0 break-words text-xs text-text-muted">
-          {`${door.gate_key ?? UNNAMED_GATE} · ${door.device_code}`}
-        </p>
-        {/* B1: it polls, and it says so. The page made zero repeat requests over seventy
-            seconds while its relative clocks went on ticking — another admin's shut was
-            invisible and "Shut this door" was still offered for a door already shut. A page
-            that re-reads silently is only half the fix: the reader has to know how fresh
-            what they are looking at is. */}
-        <p className="text-xs text-text-muted">
-          {`Re-reads every ${DOORS_PAGE_INTERVAL_MS / 1000} seconds while this tab is in front.`}
-        </p>
-      </header>
+    <PageShell width="wide">
+      {/* A11 / R3-21: ONE fallback. This printed the raw `name`, which for a board nobody has
+          named is the registration placeholder "Door gate" — so the heading, the identity line
+          below it ("no door name yet") and the tile that linked here ("Unnamed scanner
+          (gate-44c103)") were three vocabularies for one state, and the loudest was a word the
+          club never chose and cannot tell apart from the other four doors in it.
+          B1: it polls, and it says so — the description names the interval. A page that
+          re-reads silently is only half the fix: the reader has to know how fresh it is. */}
+      <PageHeader
+        back={BACK_TO_DOORS}
+        title={displayName}
+        description={(
+          <>
+            <span className="block min-w-0 break-words font-mono text-xs text-text-muted">
+              {`${door.gate_key ?? UNNAMED_GATE} · ${door.device_code}`}
+            </span>
+            <span className="block">{`Re-reads every ${DOORS_PAGE_INTERVAL_MS / 1000} seconds while this tab is in front.`}</span>
+          </>
+        )}
+        actions={<RefreshButton onRefresh={() => void manual.run()} loading={manual.pending} />}
+      />
+      <div className="-mt-4 flex flex-wrap items-center gap-3">
+        <DoorChips device={door} online={online} />
+        <DoorAge at={door.last_seen_at} now={now} prefix={online ? "Heard from" : "Last heard from"} />
+      </div>
 
       {doorStateNotice(door, online, timezone) && (
         <Card><p className="text-sm text-text-secondary">{doorStateNotice(door, online, timezone)}</p></Card>
@@ -374,7 +400,7 @@ function AdminDoorsDetailPageBody() {
           />
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }
 

@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { Cpu, DoorClosed, Wifi, WifiOff } from "lucide-react";
 import {
   endpoints, isGate, type AdminCourt, type AdminDevice, type AdminSettings, type DeviceActivityEntry,
 } from "../lib/api";
@@ -23,14 +21,19 @@ import {
   coverageWithout, outOfServiceConfirm, outOfServiceConsequences, type CourtCoverage,
 } from "../lib/deviceCoverage";
 import { UNNAMED_GATE, describeGate } from "../lib/gateCopy";
-import { Card } from "../components/Card";
 import { Badge, Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { ButtonMapEditor, buttonMapWithinCap, MAX_GRANT_MINUTES, RELAYS } from "../components/ButtonMapEditor";
 import { ClubButtonMapCard, WalkUpCapNotice } from "../components/ClubButtonMapCard";
 import { DeviceApiKeyPanel } from "../components/DeviceApiKeyPanel";
-import { MonitoringNav } from "../components/monitoring/MonitoringSection";
 import { useToast } from "../components/Toast";
+import { PageHeader, PageShell, Section } from "../components/ui/page-shell";
+import { Freshness, RefreshButton } from "../components/ui/refresh-button";
+import { StateBlock } from "../components/ui/state-block";
+import { Skeleton } from "../components/ui/skeleton";
+import { TextLink } from "../components/ui/text-link";
+import { Cpu, Door, WifiHigh, WifiSlash } from "../components/ui/icons";
+import { CardListSkeleton } from "../components/monitoring/parts";
 
 /**
  * Devices — the club's boxes, under the hobby-grade device contract.
@@ -316,8 +319,8 @@ function DeviceRowHeader({ device, online, now }: { device: AdminDevice; online:
     <>
       <div className="flex flex-wrap items-center gap-2">
         {device.enabled && online
-          ? <Wifi className="h-4 w-4 text-success-strong" aria-label="online" />
-          : <WifiOff className="h-4 w-4 text-text-muted" aria-label={device.enabled ? "offline" : "out of service"} />}
+          ? <WifiHigh size={16} weight="bold" className="shrink-0 text-success-strong" aria-label="online" />
+          : <WifiSlash size={16} weight="bold" className="shrink-0 text-text-muted" aria-label={device.enabled ? "offline" : "out of service"} />}
         {/* min-w-0 so a long name gives way inside the flex row instead of setting its
             width; break-words so it wraps rather than running off the card. */}
         <span className="min-w-0 break-words font-medium">{device.name}</span>
@@ -461,7 +464,16 @@ function ActivityBody({ entries, loading, error, gate, now }: {
   gate: boolean;
   now: number;
 }) {
-  if (loading) return <p className="text-xs text-text-muted">Loading…</p>;
+  if (loading) {
+    return (
+      <div aria-busy="true" className="flex flex-col gap-2">
+        <p role="status" className="sr-only">Reading the trail…</p>
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-5/6" />
+        <Skeleton className="h-4 w-2/3" />
+      </div>
+    );
+  }
   // Before empty, deliberately. A failed read that rendered "nothing recorded yet" would
   // be making a claim about the DOOR ("nobody has been through it") out of a claim about
   // the request, which is how an admin concludes a working door is dead.
@@ -616,7 +628,7 @@ function DeviceRow({
   const hasOwnMapField = device.button_map !== undefined;
 
   return (
-    <div className="rounded-lg border border-border p-3">
+    <div className="rounded-xl border border-border bg-bg-surface p-4 shadow-xs">
       <DeviceRowHeader device={device} online={online} now={now} />
 
       {editing === "details" && (
@@ -756,9 +768,9 @@ function GateRows({ gates, tenantHeartbeat, now }: {
 }) {
   if (gates.length === 0) return null;
   return (
-    <div className="mt-4 border-t border-border pt-4">
+    <div className="mt-2">
       <div className="mb-2 flex items-center gap-2">
-        <DoorClosed className="h-4 w-4 text-text-muted" aria-hidden="true" />
+        <Door size={16} className="text-text-muted" aria-hidden="true" />
         <h3 className="text-sm font-semibold">Doors</h3>
       </div>
       <ul className="space-y-2">
@@ -771,7 +783,7 @@ function GateRows({ gates, tenantHeartbeat, now }: {
           // that surface, so it cannot call the same board something else.
           const name = doorDisplayName(gate);
           return (
-            <li key={gate.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border p-3">
+            <li key={gate.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-bg-surface px-4 py-2 shadow-xs">
               {/* A8: `doorStateChip` answers null where the caller cannot say whether a
                   door is reporting. This page always can — it resolves `online` from a read
                   it has just made — so the chip is always here; the guard is the type
@@ -788,21 +800,21 @@ function GateRows({ gates, tenantHeartbeat, now }: {
               >
                 {relative(gate.last_seen_at, now)}
               </time>
-              <Link
+              {/* R10: navigation is a LINK that looks like one — it was a bordered box posing
+                  as a button. TextLink's label is its own shrinkable box, so the words still
+                  wrap on a narrow row. */}
+              <TextLink
+                variant="standalone"
                 to={`/admin/monitoring/doors/${gate.id}`}
-                className="ml-auto inline-flex min-w-0 max-w-full items-center break-words rounded-lg border border-control px-4 text-sm font-medium min-h-11"
+                className="ml-auto min-w-0 max-w-full text-sm"
                 /* The door's NAME in the accessible name. Reviewer B met three links reading
                    "Manage on Doors" on one screen — identical to anybody tabbing or using
                    speech control, and distinguished only by which row they happen to sit in,
                    which is visual position and therefore nothing at all. */
                 aria-label={`Manage ${name} on Doors`}
               >
-                {/* The label is its own box so it can shrink. `min-w-0` on the link makes the
-                    LINK shrinkable within the row; the text inside an inline-flex is an
-                    anonymous flex item that keeps its own automatic minimum, so without this
-                    span the words still refused to wrap and the row stayed 10 px over. */}
-                <span className="min-w-0 break-words">Manage on Doors</span>
-              </Link>
+                Manage on Doors
+              </TextLink>
             </li>
           );
         })}
@@ -955,6 +967,7 @@ export function AdminDevicesPage() {
   const [settings, setSettings] = useState<AdminSettings | null>(null);
   const [buttonMap, setButtonMap] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [checkedAt, setCheckedAt] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   /**
@@ -988,11 +1001,32 @@ export function AdminDevicesPage() {
     setButtonMap(config.button_map);
     setCourts(courtList);
     setCheckedAt(new Date().toISOString());
+    setLoadError(null);
     setLoading(false);
   }, []);
 
+  /**
+   * The FIRST read, with its failure kept. It used to be `void load()` with no catch, so a
+   * failed read left the page on "Loading…" for ever — a screen the outage email sends an
+   * admin to, saying nothing at all. Now it says what failed and offers the retry.
+   */
+  const firstLoad = useCallback(async () => {
+    try {
+      await load();
+    } catch (e) {
+      setLoadError(e);
+      setLoading(false);
+    }
+  }, [load]);
+
+  const retryLoad = () => {
+    setLoading(true);
+    setLoadError(null);
+    return firstLoad();
+  };
+
   // eslint-disable-next-line react-hooks/set-state-in-effect -- as above
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void firstLoad(); }, [firstLoad]);
 
   /**
    * Keeps the liveness live (finding M-F2).
@@ -1061,96 +1095,72 @@ export function AdminDevicesPage() {
   const gates = devices.filter((d) => isGate(d));
 
   return (
-    // B7 / R3-27: the padding is in PIXELS, for B12's reason. `p-4` is a rem, so at the
-    // 32 px root font an older volunteer uses it becomes 32 px a side — 64 px of this page's
-    // own padding on a 320 px phone, on top of the shell's. What the padding protects is a
-    // GAP, and a gap does not need to grow with the text; what the space it eats protects is
-    // a WORD, which does.
-    //
-    /*
-     * `w-full`, and it is load-bearing rather than tidy. `Layout` renders every page inside
-     * `flex flex-col`, so this div is a flex item — and an item with AUTO cross-axis margins
-     * (`mx-auto`) does not stretch, so without a width it is sized to fit its content, capped
-     * only by `max-w-4xl`. That cap is a rem: 896 px at a 16 px root and 1 792 px at the 32 px
-     * root an older volunteer uses, so on a 320 px phone it caps nothing at all.
-     *
-     * The bug was invisible for as long as nothing on this page was wider than the screen.
-     * The Monitoring strip is: its row is `w-max` by design, and it is meant to be clipped and
-     * scrolled by the `overflow-auto` around it. Instead the whole page grew to the strip's
-     * width — measured 354 px at a 16 px root and 913 px at 32 px, on a 320 px viewport — and
-     * the strip never scrolled, because it was never narrower than its content. `Layout`'s own
-     * wrapper has carried `w-full` beside its `max-w-*` since it was written, for this reason.
-     */
-    <div className="mx-auto w-full min-w-0 max-w-4xl space-y-6 p-[16px]">
-      <h1 className="text-2xl font-bold">Devices</h1>
-      {/* eco: Devices was in a gear menu and is a destination now — the section this page was
-          moved into is invisible from inside it without this strip, which is the IA problem
-          the section was created to fix, re-created one page in. */}
-      <MonitoringNav />
+    // R11: the shell owns width, gutters and rhythm. The page's own `p-[16px]` wrapper (B7) and
+    // its `w-full` fix for the Monitoring strip went with the strip: nothing on this page is
+    // wider than the screen any more, and no page sets its own root spacing.
+    <PageShell width="wide">
+      <PageHeader
+        title="Boards"
+        description={`The club's court boxes and door gates — which are calling in, and what their buttons do. This page re-reads the boards every ${REFRESH_MS / 1000} seconds while this tab is in front.`}
+        // The outage email says "open the Devices page" and watch the box come back, so the
+        // page has to be able to say when it last looked and to look again on demand.
+        actions={<RefreshButton onRefresh={() => void refreshNow()} loading={refreshing} />}
+        freshness={<Freshness at={checkedAt === null ? null : Date.parse(checkedAt)} />}
+      />
 
       <DeviceApiKeyPanel />
 
-      <Card className="p-5">
-        <div className="mb-1 flex flex-wrap items-center gap-2">
-          <Cpu className="h-5 w-5 text-text-muted" />
-          {/* `min-w-0 break-words`: a flex item's automatic minimum size is its longest word,
-              and at a 32 px root "Connected" alone wants more than the row has. */}
-          <h2 className="min-w-0 break-words text-lg font-semibold">Connected boards</h2>
-          {/* The outage email says "open the Devices page" and watch the box come back, so
-              the page has to be able to say when it last looked and to look again on
-              demand — the Bookings screen has had a Refresh button all along, and it is
-              far less time-critical than this one. */}
-          <Button
-            variant="outline"
-            className="ml-auto min-h-11 px-3 text-sm"
-            onClick={() => void refreshNow()}
-            disabled={refreshing || loading}
-          >
-            {refreshing ? "Checking…" : "Refresh"}
-          </Button>
-        </div>
-        <p className="mb-3 text-xs text-text-muted">
-          {checkedAt ? `Checked ${relative(checkedAt, now)}` : "Checking…"} · this page re-reads the boards every {REFRESH_MS / 1000} seconds while this tab is in front.
-        </p>
-
+      <Section
+        title={(
+          <span className="inline-flex items-center gap-2">
+            <Cpu size={20} aria-hidden="true" className="shrink-0 text-text-muted" />
+            {/* `min-w-0 break-words`: a flex item's automatic minimum size is its longest
+                word, and at a 32 px root "Connected" alone wants more than the row has. */}
+            <span className="min-w-0 break-words">Connected boards</span>
+          </span>
+        )}
+      >
         <UnacknowledgedBoardsNotice devices={devices} />
 
-        {loading ? (
-          <p className="text-sm text-text-muted">Loading…</p>
-        ) : devices.length === 0 ? (
+        <StateBlock
+          loading={loading}
+          error={loadError}
+          action="the club's boards"
+          failedCaveat="That does not mean none have called in."
+          onRetry={() => void retryLoad()}
           /* A club may own only doors: a gate registers itself on this list exactly as a box
              does, so "no boxes" told such a club its doors did not count as devices. The
              heading above is already "Connected boards". */
-          <p className="text-sm text-text-secondary">
-            No boards have called in yet. Flash one with the key above and power it on — it registers itself.
-          </p>
-        ) : (
-          <>
-            <div className="space-y-3">
-              {boxes.map((device) => {
-                // One coverage per row: the confirm, the notice and the toast all read it.
-                const coverage = coverageWithout(device, devices,
-                  (d) => isOnline(d, offlineAfterSecondsFor(d, tenantHeartbeat), now));
-                return (
-                  <DeviceRow
-                    key={device.id} device={device}
-                    boxEditing={{ courts, clubMap: buttonMap, walkUpMax: walkUpCap }}
-                    actions={actionsFor(device, coverage)} coverage={coverage}
-                    liveness={{ offlineAfter: offlineAfterSecondsFor(device, tenantHeartbeat), now }}
-                  />
-                );
-              })}
-            </div>
-            {/* A2.5: gates are VISIBLE here and editable only on Doors. */}
-            <GateRows gates={gates} tenantHeartbeat={tenantHeartbeat} now={now} />
-          </>
-        )}
-      </Card>
+          empty={devices.length === 0}
+          emptyIcon={Cpu}
+          emptyTitle="No boards have called in yet."
+          emptyHint="Flash one with the key above and power it on — it registers itself."
+          skeleton={<CardListSkeleton rows={2} />}
+        >
+          <div className="flex flex-col gap-3">
+            {boxes.map((device) => {
+              // One coverage per row: the confirm, the notice and the toast all read it.
+              const coverage = coverageWithout(device, devices,
+                (d) => isOnline(d, offlineAfterSecondsFor(d, tenantHeartbeat), now));
+              return (
+                <DeviceRow
+                  key={device.id} device={device}
+                  boxEditing={{ courts, clubMap: buttonMap, walkUpMax: walkUpCap }}
+                  actions={actionsFor(device, coverage)} coverage={coverage}
+                  liveness={{ offlineAfter: offlineAfterSecondsFor(device, tenantHeartbeat), now }}
+                />
+              );
+            })}
+          </div>
+          {/* A2.5: gates are VISIBLE here and editable only on Doors. */}
+          <GateRows gates={gates} tenantHeartbeat={tenantHeartbeat} now={now} />
+        </StateBlock>
+      </Section>
 
       <ClubButtonMapCard
         settings={settings} value={buttonMap} onChange={setButtonMap}
         loading={loading} walkUpCap={walkUpCap}
       />
-    </div>
+    </PageShell>
   );
 }

@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { Printer } from "lucide-react";
-import { Button } from "../components/Button";
+import { useParams } from "react-router-dom";
 import { Alert } from "../components/Alert";
+import { Button } from "../components/ui/button";
+import { PageHeader, PageShell } from "../components/ui/page-shell";
+import { Skeleton } from "../components/ui/skeleton";
+import { StateBlock } from "../components/ui/state-block";
+import { TextLink } from "../components/ui/text-link";
+import { CaretLeft, Door, Printer } from "../components/ui/icons";
 import { PrintSheet } from "../components/doors/PrintSheet";
 import { DOORS_READ_FAILED, describePowerLoss, doorDisplayName } from "../lib/doorsCopy";
 import { clubDate } from "../lib/clubClock";
@@ -64,7 +68,15 @@ function AdminDoorsCardPageBody() {
   // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader; sync loading flag is the house idiom
   useEffect(() => { void load(); }, [load]);
 
-  if (loading) return <p className="text-sm text-text-secondary">Loading this door's card…</p>;
+  if (loading) {
+    return (
+      <PageShell width="content" aria-busy="true">
+        <p className="sr-only">Reading this door's card…</p>
+        <Skeleton className="h-5 w-24" />
+        <Skeleton className="h-96 w-full" />
+      </PageShell>
+    );
+  }
   /**
    * <b>A-M6 / R3-14 — "The doors could not be read" about a door that is not there.</b>
    *
@@ -78,22 +90,27 @@ function AdminDoorsCardPageBody() {
    */
   if (failed) {
     return (
-      <div className="space-y-3">
-        <Link to="/admin/monitoring/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">← Doors</Link>
-        <Alert tone="danger">{DOORS_READ_FAILED}</Alert>
-        <Button variant="outline" onClick={() => void load()}>Try again</Button>
-      </div>
+      <PageShell width="content">
+        <PageHeader back={{ to: "/admin/monitoring/doors", label: "Doors" }} title="Door card" />
+        <div className="flex flex-col items-start gap-3">
+          <Alert tone="danger" className="w-full">{DOORS_READ_FAILED}</Alert>
+          <Button variant="outline" onClick={() => void load()}>Try again</Button>
+        </div>
+      </PageShell>
     );
   }
   if (!door) {
     return (
-      <div className="space-y-3">
-        <Link to="/admin/monitoring/doors" className="inline-flex min-h-11 items-center text-sm text-accent-strong">← Doors</Link>
-        <p className="text-sm text-text-secondary">
-          That door is not on the club's list. It may have been deleted — a board re-registers itself
-          on its next heartbeat, with no name.
-        </p>
-      </div>
+      <PageShell width="content">
+        <PageHeader back={{ to: "/admin/monitoring/doors", label: "Doors" }} title="Door card" />
+        <StateBlock
+          empty
+          emptyIcon={Door}
+          emptyTitle="That door is not on the club's list."
+          emptyHint="It may have been deleted — a board re-registers itself on its next heartbeat, with no name."
+          emptyAction={<TextLink variant="standalone" to="/admin/monitoring/doors">See every door</TextLink>}
+        />
+      </PageShell>
     );
   }
 
@@ -106,18 +123,27 @@ function AdminDoorsCardPageBody() {
   const printedOn = clubDate(builtAt, timezone);
 
   return (
-    <div className="space-y-4">
-      <div data-print-hide className="space-y-3">
-        <Link to={`/admin/monitoring/doors/${door.id}`} className="inline-flex min-h-11 items-center text-sm text-accent-strong">
-          {`← ${doorDisplayName(door)}`}
-        </Link>
-        <p className="text-sm text-text-secondary">
-          Print this and put it in the cupboard beside the board. It is what somebody standing at the
-          door at six in the morning needs, and none of it is on their phone.
-        </p>
-        <Button variant="outline" onClick={() => window.print()}>
-          <Printer size={16} aria-hidden="true" /> Print
-        </Button>
+    // The sheet's own `<h1>` is the page's only one — it is what gets printed — so the screen
+    // chrome above it is the page header's shape (back link, description, action on the right)
+    // without a second heading.
+    <PageShell width="content">
+      <div data-print-hide className="flex flex-col gap-2">
+        <TextLink
+          to={`/admin/monitoring/doors/${door.id}`}
+          className="-ml-1 inline-flex min-h-touch items-center gap-1 self-start px-1 font-semibold no-underline hover:underline"
+        >
+          <CaretLeft size={16} weight="bold" aria-hidden="true" />
+          {doorDisplayName(door)}
+        </TextLink>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+          <p className="min-w-0 max-w-prose flex-[1_1_16rem] text-sm text-text-secondary">
+            Print this and put it in the cupboard beside the board. It is what somebody standing at the
+            door at six in the morning needs, and none of it is on their phone.
+          </p>
+          <Button variant="primary" onClick={() => window.print()} icon={<Printer aria-hidden="true" />}>
+            Print
+          </Button>
+        </div>
       </div>
 
       <PrintSheet>
@@ -153,7 +179,7 @@ function AdminDoorsCardPageBody() {
           {`Printed ${printedOn} from Crusaders Mainframe. Check it is still right.`}
         </p>
       </PrintSheet>
-    </div>
+    </PageShell>
   );
 }
 

@@ -1,11 +1,18 @@
-import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { ApiError, endpoints, type PayFastFormField, type TopUpOptions } from "../lib/api";
-import { Card } from "../components/Card";
-import { Button, Input, Label } from "../components/Button";
 import { formatCredits, describeTopUpRate, formatMoney } from "../lib/utils";
 import { useBalance, walletTone } from "../lib/balance";
 import { BALANCE_SENTENCE } from "../lib/walletCopy";
+import { PageHeader, PageShell } from "../components/ui/page-shell";
+import { StateBlock } from "../components/ui/state-block";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
+import { Field, FieldDescription, FieldError, FieldLabel } from "../components/ui/field";
+import { Input } from "../components/ui/input";
+import { Skeleton } from "../components/ui/skeleton";
+import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
+import { Alert } from "../components/Alert";
 
 /**
  * Why an amount is not acceptable, or null when it is.
@@ -109,34 +116,20 @@ function reQuote(
   setRestated({ rate, credits: Number.isFinite(credits) ? credits : Number.NaN });
 }
 
-export default function TopUpPage() {
-  const nav = useNavigate();
-  /*
-    Only to say WHY the member is here, never to gate anything: a balance that has not
-    loaded is `null`, which `walletTone` reads as nothing to warn about, and the form
-    behaves identically either way.
-  */
-  const { balance } = useBalance();
-  const emptyWallet = walletTone(balance) === "zero";
+/** The club's top-up rules, read on mount and again whenever the tab regains focus. */
+function useTopUpOptions(setAmount: (update: (current: string) => string) => void) {
   const [options, setOptions] = useState<TopUpOptions | null>(null);
-  const [amount, setAmount] = useState<string>("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  /**
-   * The club's rate moved between this page loading and the member pressing Continue, so
-   * the payment is held HERE rather than sent on to PayFast. It carries the figures the
-   * server registered, and the member's next press proceeds at those.
-   */
-  const [restated, setRestated] = useState<RestatedQuote | null>(null);
+  const [loadError, setLoadError] = useState<unknown>(null);
 
   const loadOptions = useCallback(() => {
     endpoints.topupOptions()
       .then((o) => {
         setOptions(o);
+        setLoadError(null);
         setAmount((current) => (current === "" ? String(o.presets_zar[0] ?? o.min_zar) : current));
       })
-      .catch(() => setError("Couldn't load the club's top-up settings. Try again in a moment."));
-  }, []);
+      .catch((err: unknown) => setLoadError(err ?? new Error("options read failed")));
+  }, [setAmount]);
 
   useEffect(() => { loadOptions(); }, [loadOptions]);
 
@@ -149,28 +142,101 @@ export default function TopUpPage() {
     return () => window.removeEventListener("focus", onFocus);
   }, [loadOptions]);
 
+  return { options, setOptions, loadError, loadOptions };
+}
+
+const UNREACHABLE = "No connection — check your signal and try again.";
+const NOT_STARTED = "We couldn't start this payment. Try again in a moment.";
+const HEADER_COPY = "Pay in rand with PayFast. Your wallet is credited in credits, at your member rate.";
+
+export default function TopUpPage() {
+  /*
+    Only to say WHY the member is here, never to gate anything: a balance that has not
+    loaded is `null`, which `walletTone` reads as nothing to warn about, and the form
+    behaves identically either way.
+  */
+  const { balance } = useBalance();
+  const emptyWallet = walletTone(balance) === "zero";
+  const [amount, setAmount] = useState<string>("");
+  const { options, setOptions, loadError, loadOptions } = useTopUpOptions(setAmount);
+
+  return (
+    <PageShell width="narrow">
+      <PageHeader back={{ to: "/wallet", label: "Wallet" }} title="Top up" description={HEADER_COPY} />
+      {/*
+        Why they are here, when the answer is "you cannot book anything". A member who has
+        followed an empty wallet to this screen has already been told once; saying it again
+        where the decision is made is what turns a form into an errand with a reason. Polite,
+        not an alert: it is a standing condition they arrived into, not an event.
+      */}
+      {emptyWallet && <Alert tone="danger" live="polite">{BALANCE_SENTENCE.zero}</Alert>}
+      <StateBlock
+        loading={options === null && !loadError}
+        error={options === null ? loadError : null}
+        action={loadError ? "load the club's top-up settings" : "the club's top-up settings"}
+        onRetry={loadOptions}
+        skeleton={<TopUpSkeleton />}
+      >
+        {options ? <TopUpForm options={options} setOptions={setOptions} amount={amount} setAmount={setAmount} /> : null}
+      </StateBlock>
+    </PageShell>
+  );
+}
+
+/** The form's shape while the club's rules are read: presets, the field, the summary, the CTA. */
+function TopUpSkeleton() {
+  return (
+    <Card className="px-4 sm:px-6">
+      <div className="flex flex-col gap-3">
+        <Skeleton className="h-4 w-24" />
+        <div className="flex flex-wrap gap-2">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-touch w-20" />)}</div>
+      </div>
+      <Skeleton className="h-touch" />
+      <Skeleton className="h-24" />
+      <Skeleton className="h-touch" />
+    </Card>
+  );
+}
+
+type FormProps = {
+  options: TopUpOptions;
+  setOptions: React.Dispatch<React.SetStateAction<TopUpOptions | null>>;
+  amount: string;
+  setAmount: (value: string) => void;
+};
+
+function TopUpForm(props: FormProps) {
+  // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
+  const { options, setOptions, amount, setAmount } = props;
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  /** Submit was pressed on an amount the club will not take: say why even if the field is empty. */
+  const [tried, setTried] = useState(false);
+  /**
+   * The club's rate moved between this page loading and the member pressing Continue, so
+   * the payment is held HERE rather than sent on to PayFast. It carries the figures the
+   * server registered, and the member's next press proceeds at those.
+   */
+  const [restated, setRestated] = useState<RestatedQuote | null>(null);
+
   const problem = amountProblem(amount, options);
   const value = Number(amount.trim());
-  const canSubmit = options !== null && problem === null;
+  const canSubmit = problem === null;
   const creditsPreview = canSubmit ? value * options.conversion_rate : null;
 
-  const submit = async (e: React.FormEvent) => {
+  const choose = (next: string) => { setAmount(next); setError(null); setRestated(null); };
+
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
-    // The message is shown rather than swallowed. Every one of these branches was
-    // unreachable before, because the same predicate that produced them also disabled the
-    // button — so an invalid amount greyed the button out and said nothing at all, and the
-    // member had to infer the rule from a hint line.
-    if (problem) { setError(problem); return; }
-    if (!options) { setError("Couldn't load the club's top-up settings. Try again in a moment."); return; }
+    // The message is shown rather than swallowed: an invalid amount used to grey the button
+    // out and say nothing at all.
+    if (problem) { setTried(true); return; }
     setError(null);
     setLoading(true);
     try {
       // The quoted rate travels with the amount, so the server can refuse an offer the club
-      // has moved away from rather than registering the member at the new one. Two lanes
-      // fixed this defect independently: one compared the two rates HERE, after the POST had
-      // already written a pending row at the new one, and one sent the quote so the server
-      // could refuse BEFORE writing anything. Only the second cannot be raced, and only the
-      // second binds a client that does not implement the check — so it is the one that ships.
+      // has moved away from rather than registering the member at the new one — before it
+      // writes anything, which is the only version that cannot be raced.
       const res = await endpoints.topupStart(value, options.conversion_rate);
       postToGateway(res.redirect_url, res.form_fields);
     } catch (err) {
@@ -178,134 +244,125 @@ export default function TopUpPage() {
       const code = payload ? String(payload.error ?? "") : "";
       if (code === "topup_rate_changed" && payload) {
         // Not an error: nothing went wrong and nothing was charged, the price simply moved.
-        // It reads as a warning with `role="alert"` below rather than as a red failure line,
-        // because the member's next press is a normal one.
         reQuote(payload, setOptions, setRestated);
       } else {
-        setError(START_ERRORS[code] ?? (err instanceof ApiError
-          ? "We couldn't start this payment. Try again in a moment."
-          : "No connection — check your signal and try again."));
+        setError(START_ERRORS[code] ?? (err instanceof ApiError ? NOT_STARTED : UNREACHABLE));
       }
       setLoading(false);
     }
   };
 
+  const shownProblem = amount.trim() !== "" || tried ? problem : null;
   return (
-    <div className="max-w-md mx-auto px-4">
-      <Card>
-        <h1 className="text-xl font-semibold mb-1">Top up</h1>
-        <p className="text-sm text-text-secondary mb-3">Pay in ZAR via PayFast — your wallet is credited in <strong>credits</strong> at your member-class rate.</p>
-        {/*
-          Why they are here, when the answer is "you cannot book anything". A member who has
-          followed an empty wallet to this screen has already been told once; saying it again
-          where the decision is made is what turns a form into an errand with a reason. It is
-          `role="status"`, not `alert`: it is a standing condition they arrived into, not an
-          event, and an alert would interrupt whatever the screen reader was saying about the
-          heading above it.
-        */}
-        {emptyWallet && (
-          <p role="status" className="mb-5 rounded-lg border-l-4 border-danger-strong bg-danger-soft px-3 py-2 text-sm text-danger-strong">
-            {BALANCE_SENTENCE.zero}
-          </p>
-        )}
-        <form onSubmit={submit} className="space-y-4">
-          <div>
-            <Label>Amount (ZAR)</Label>
-            <div className="flex gap-2 mb-2 flex-wrap">
-              {(options?.presets_zar ?? []).map((p) => (
-                <Button key={p} type="button" variant={String(p) === amount ? "default" : "outline"} onClick={() => { setAmount(String(p)); setError(null); setRestated(null); }}>
-                  R{p}
-                </Button>
-              ))}
-            </div>
-            <Input
-              value={amount}
-              onChange={(e) => { setAmount(e.target.value); setError(null); setRestated(null); }}
-              inputMode="decimal"
-              placeholder={options ? `Custom amount (multiple of ${formatMoney(options.block_zar)})` : "Custom amount"}
-            />
-            <p className="text-xs text-text-muted mt-1">
-              {options
-                ? `Min ${formatMoney(options.min_zar)} · Max ${formatMoney(options.max_zar)} · Multiples of ${formatMoney(options.block_zar)} only`
-                : "Loading the club's limits…"}
-            </p>
-          </div>
+    <Card className="px-4 sm:px-6">
+      <form onSubmit={submit} className="flex flex-col gap-6" noValidate>
+        <AmountFields options={options} amount={amount} onChoose={choose} problem={shownProblem} />
+        <Summary options={options} pay={canSubmit ? value : null} receive={creditsPreview} />
+        {restated && <RestatedNotice value={value} restated={restated} />}
+        {error && <Alert tone="danger">{error}</Alert>}
+        <div className="flex flex-col gap-2">
+          {/* No success mark: this ends in a redirect to PayFast, so "it worked" is the payment
+              page appearing, and a tick on a button the member is leaving would be a claim
+              about a payment that has not happened yet. */}
+          <Button type="submit" block size="lg" pending={loading} disabled={!canSubmit}>Continue to PayFast</Button>
+          <Button asChild variant="ghost" block>
+            <Link to="/wallet">Cancel</Link>
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
 
-          {/* Conversion preview */}
-          <div className="bg-bg-muted rounded-lg p-3 text-sm">
-            <div className="flex items-baseline justify-between">
-              <span className="text-text-secondary">You pay</span>
-              <span className="font-semibold">{canSubmit ? formatMoney(value) : "—"}</span>
-            </div>
-            <div className="flex items-baseline justify-between mt-1">
-              <span className="text-text-secondary">You receive</span>
-              <span className="font-semibold text-accent-strong">{creditsPreview === null ? "—" : formatCredits(creditsPreview, { long: true })}</span>
-            </div>
-            {options && (
-              /*
-                What this sentence may claim is exactly what the code above keeps.
-                It used to read "This rate is locked in when you continue, so it can't
-                change while you're paying" — and the club's rate could move under a tab
-                left open, so the member pressed Continue on 480 credits and the server
-                registered 320. Three finders drove that in round 3. The rate IS frozen
-                from the moment the pending row is written (`PendingTopup.ConversionRate`
-                is what the ITN settles at); what was never true is that the figure ON
-                SCREEN is the one that gets frozen. So the promise now names the moment,
-                and `submit` above stops rather than pays when the two disagree.
-              */
-              <p className="text-[11px] text-text-muted mt-2">
-                {/*
-                  The class label survives a restatement, and stays true through one. A headed
-                  run against the other lane fix showed "At 2.4 credits / R1 (regular rate)" —
-                  the new number beside the old reason for it, a second small untruth arriving
-                  with the fix for the first. That lane dropped the label to avoid it. It does
-                  not have to be dropped: the 409 the server refuses with carries `member_class`
-                  alongside the new rate, so `reQuote` moves both together and the line names
-                  the right class rather than none.
+type AmountProps = { options: TopUpOptions; amount: string; onChoose: (value: string) => void; problem: string | null };
 
-                  Not one apostrophe in this block, deliberately — the same trap the paragraph
-                  further down carries a note about, and this file now holds the second bare
-                  one, which is one more than it resyncs from. Writing the possessive of "lane"
-                  here reported submit at 72 NLOC / 27 CCN / 133 length and turned the gate red
-                  on a line nobody had touched.
-                */}
-                {describeTopUpRate(options.conversion_rate)} ({options.member_class === "LeagueOrSenior" ? "league / senior rate" : "regular rate"}).
-                Your rate is fixed the moment the club registers this payment, and it can't change while you're at PayFast.
-                If the club's rate has moved since this page loaded, we'll show you the new figure before sending you there.
-              </p>
-            )}
-          </div>
-
-          {/*
-            No apostrophe in this paragraph, deliberately. lizard's .tsx lexer treats a bare
-            ' in JSX TEXT as a string-literal opener and swallows the rest of the file into
-            one anonymous function, which `make complexity` then reports at line 183 with 8
-            PARAM and a length nobody wrote. The file's other apostrophes happen to come in
-            pairs, so it resyncs; adding an odd one broke it. Same family as the bare `<`
-            trap already recorded for this parser.
-          */}
-          {restated && (
-            <p role="alert" className="text-sm text-warning-strong">
-              The club changed its rate while this page was open, so nothing has been sent to
-              PayFast yet. {formatMoney(value)} now buys{" "}
-              {formatCredits(Number.isFinite(restated.credits) ? restated.credits : value * restated.rate, { long: true })} at{" "}
-              {describeTopUpRate(restated.rate)}. Press Continue again to pay at that rate.
-            </p>
-          )}
-
-          {/* The reason an amount isn't accepted, shown as soon as it isn't — not only on submit. */}
-          {(error ?? (amount.trim() !== "" && problem)) && (
-            <p className="text-sm text-danger-strong">{error ?? problem}</p>
-          )}
-          {/* Item 12's pair on the page that spends real money. No `onAction`: this is a
-              form submit that ends in a redirect to PayFast, so "it worked" is the payment
-              page appearing, and a green tick on a button the member is about to leave behind
-              would be a claim about a payment that has not happened yet. */}
-          <Button intent="affirm" type="submit" disabled={loading || !canSubmit} className="w-full">{loading ? "Redirecting…" : "Continue to PayFast"}</Button>
-          <Button intent="decline" type="button" variant="ghost" onClick={() => nav("/wallet")} className="w-full">Cancel</Button>
-        </form>
-      </Card>
+/**
+ * The preset amounts are a single choice — a radio group (ToggleGroup) — and the field below
+ * is the same value typed by hand. Choosing a preset fills the field; typing a preset's figure
+ * selects it.
+ */
+function AmountFields({ options, amount, onChoose, problem }: AmountProps) {
+  const selected = options.presets_zar.some((p) => String(p) === amount.trim()) ? amount.trim() : "";
+  const limits = `Min ${formatMoney(options.min_zar)} · Max ${formatMoney(options.max_zar)} · Multiples of ${formatMoney(options.block_zar)} only`;
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-2">
+        <span id="topup-presets" className="text-sm font-medium text-text-primary">Amount</span>
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          aria-labelledby="topup-presets"
+          value={selected}
+          onValueChange={(next) => { if (next) onChoose(next); }}
+          className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4"
+        >
+          {options.presets_zar.map((p) => (
+            <ToggleGroupItem key={p} value={String(p)} className="tabular-nums">{`R${p}`}</ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      </div>
+      <Field>
+        <FieldLabel>Or enter an amount (ZAR)</FieldLabel>
+        <Input
+          value={amount}
+          onChange={(e) => onChoose(e.target.value)}
+          inputMode="decimal"
+          autoComplete="off"
+          placeholder={`Custom amount (multiple of ${formatMoney(options.block_zar)})`}
+        />
+        <FieldDescription>{limits}</FieldDescription>
+        <FieldError>{problem}</FieldError>
+      </Field>
     </div>
+  );
+}
+
+/**
+ * What the member pays and what they get, and exactly what the rate promise covers.
+ *
+ * <p>
+ * It once read "This rate is locked in when you continue, so it can't change while you're
+ * paying" — and the club's rate could move under a tab left open, so a member pressed Continue
+ * on 480 credits and the server registered 320. The rate IS frozen from the moment the pending
+ * row is written; what was never true is that the figure ON SCREEN is the one that gets frozen.
+ * So the promise names the moment, and `submit` stops rather than pays when the two disagree.
+ * The class label moves with a restated rate (`reQuote`), so the line never names the new
+ * number beside the old reason for it.
+ * </p>
+ */
+function Summary({ options, pay, receive }: { options: TopUpOptions; pay: number | null; receive: number | null }) {
+  const rateClass = options.member_class === "LeagueOrSenior" ? "league / senior rate" : "regular rate";
+  return (
+    <div className="flex flex-col gap-3 rounded-lg bg-bg-muted p-4">
+      <dl className="flex flex-col gap-2 text-sm">
+        <div className="flex items-baseline justify-between gap-4">
+          <dt className="text-text-secondary">You pay</dt>
+          <dd className="font-semibold tabular-nums text-text-primary">{pay === null ? "—" : formatMoney(pay)}</dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-4">
+          <dt className="text-text-secondary">You receive</dt>
+          <dd className="text-lg font-semibold tabular-nums text-accent-strong">{receive === null ? "—" : formatCredits(receive, { long: true })}</dd>
+        </div>
+      </dl>
+      <p className="text-xs text-text-secondary">
+        {`${describeTopUpRate(options.conversion_rate)} (${rateClass}). `}
+        {RATE_PROMISE}
+      </p>
+    </div>
+  );
+}
+
+const RATE_PROMISE = "Your rate is fixed the moment the club registers this payment, and it can't change while you're at PayFast. "
+  + "If the club's rate has moved since this page loaded, we'll show you the new figure before sending you there.";
+
+function RestatedNotice({ value, restated }: { value: number; restated: RestatedQuote }) {
+  const credits = Number.isFinite(restated.credits) ? restated.credits : value * restated.rate;
+  return (
+    <Alert tone="warning">
+      {"The club changed its rate while this page was open, so nothing has been sent to PayFast yet. "}
+      {`${formatMoney(value)} now buys ${formatCredits(credits, { long: true })} at ${describeTopUpRate(restated.rate)}. `}
+      {"Press Continue again to pay at that rate."}
+    </Alert>
   );
 }
 

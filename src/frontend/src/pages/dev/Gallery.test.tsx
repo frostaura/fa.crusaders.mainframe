@@ -35,14 +35,16 @@ afterEach(() => {
 });
 
 describe("the gallery", () => {
+  // Every section of the gallery in one jsdom tree: one role scan for the h2s rather than one
+  // per section (each `getByRole` walks the whole tree), and a budget that holds under a full,
+  // parallel suite — it measured 8s against the 5s default there, and under 2s alone.
   it("shows every section, in index order, when no section is asked for", () => {
     open();
     expect(screen.getByRole("heading", { level: 1, name: "Primitives" })).toBeInTheDocument();
     expect(sectionIds()).toEqual(SECTIONS.map((s) => s.id));
-    for (const entry of SECTIONS) {
-      expect(screen.getByRole("heading", { level: 2, name: entry.title })).toBeInTheDocument();
-    }
-  });
+    const titles = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    for (const entry of SECTIONS) expect(titles).toContain(entry.title);
+  }, 20_000);
 
   it("shows only the deep-linked section, and marks it current in the index", () => {
     open("?section=buttons");

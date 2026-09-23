@@ -172,7 +172,8 @@ describe("the control board", () => {
     renderPage(<ControlBoardPage />);
     await screen.findByText("SHOULD BE LIT");
 
-    document.querySelectorAll("button").forEach((b) => { if (b.textContent === "Refresh") b.click(); });
+    // R3: Refresh is the header's icon button now, found by its name rather than its text.
+    screen.getByRole("button", { name: "Refresh" }).click();
 
     await screen.findAllByText(/Can't reach the club\. What you can see below was read at \d\d:\d\d/);
     expect(screen.getByText("SHOULD BE LIT"), "a wall blanked by one failed poll").toBeInTheDocument();

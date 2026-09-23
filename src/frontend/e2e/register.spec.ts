@@ -265,10 +265,11 @@ test.describe("Waiting, and then getting in", () => {
     await page.keyboard.type("Review!2345");
     await page.keyboard.press("Enter");
 
-    await expect(page).toHaveURL(/\/schedule/);
+    // R15 — the signed-in landing moved from /schedule to My Code.
+    await expect(page).toHaveURL(/\/my-code/);
   });
 
-  test("once approved, the same credentials land on the schedule", async ({ page }) => {
+  test("once approved, the same credentials land on My Code", async ({ page }) => {
     await serveApi(page, [
       { path: "/api/v1/session", body: { ...SESSION_ANON, user_id: "u-1", is_authenticated: true } },
       { method: "POST", path: "/api/v1/auth/login", body: { access_token: "t", user_id: "u-1", is_admin: false } },
@@ -282,6 +283,7 @@ test.describe("Waiting, and then getting in", () => {
     await page.getByLabel("Password").fill("Review!2345");
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
 
-    await expect(page).toHaveURL(/\/schedule/);
+    // R15 — the signed-in landing moved from /schedule to My Code.
+    await expect(page).toHaveURL(/\/my-code/);
   });
 });

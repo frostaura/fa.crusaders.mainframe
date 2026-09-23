@@ -97,8 +97,6 @@ const ALLOW: Record<string, Rule[]> = {
   "components/Button.tsx": ["arbitrary-spacing"],
   "components/Card.tsx": ["arbitrary-spacing"],
   "components/ConfirmButton.tsx": ["arbitrary-spacing"],
-  "components/CreditsBadge.tsx": ["arbitrary-spacing"],
-  "components/Layout.tsx": ["arbitrary-spacing"],
   "components/LedgerTable.tsx": ["arbitrary-text-px", "arbitrary-spacing"],
   "components/PhotoPicker.tsx": ["arbitrary-spacing"],
   "components/ScheduleCells.tsx": ["arbitrary-text-px", "arbitrary-spacing"],
@@ -109,18 +107,12 @@ const ALLOW: Record<string, Rule[]> = {
   "components/groups/WeekPainter.tsx": ["arbitrary-spacing"],
   "components/member-door/FullScreenQr.tsx": ["raw-palette", "arbitrary-z"],
   "components/monitoring/CourtTile.tsx": ["arbitrary-spacing"],
-  "components/monitoring/MonitoringSection.tsx": ["arbitrary-spacing"],
   "components/onboarding/Illustrations.tsx": ["arbitrary-spacing"],
   "components/schedules/ConflictPanel.tsx": ["arbitrary-spacing"],
-  "pages/AdminDevices.tsx": ["arbitrary-spacing"],
-  "pages/AdminDoors.tsx": ["arbitrary-spacing"],
   "pages/AdminMembers.tsx": ["arbitrary-text-px", "arbitrary-spacing"],
   "pages/AdminSettings.tsx": ["arbitrary-spacing"],
-  "pages/AdminWebhooks.tsx": ["arbitrary-text-px"],
   "pages/Login.tsx": ["arbitrary-text-px"],
   "pages/MyCode.tsx": ["arbitrary-spacing"],
-  "pages/Reports.tsx": ["arbitrary-text-px"],
-  "pages/TopUp.tsx": ["arbitrary-text-px"],
 };
 
 describe("theme vocabulary (ratchet)", () => {

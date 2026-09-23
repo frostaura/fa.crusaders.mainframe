@@ -1,12 +1,18 @@
-import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { Camera, Fingerprint, Loader2, Plus, Trash2 } from "lucide-react";
-import { endpoints, ApiError, type WebAuthnCredentialRow } from "../lib/api";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { endpoints, ApiError, type WebAuthnCredentialRow, type MyProfile } from "../lib/api";
 import { useProfile } from "../lib/profile";
 import { useToast } from "../components/Toast";
-import { Card } from "../components/Card";
-import { Button, Input, Label } from "../components/Button";
 import { ConfirmButton } from "../components/ConfirmButton";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
+import { Field, FieldDescription, FieldLabel } from "../components/ui/field";
+import { Input } from "../components/ui/input";
+import { PageHeader, PageShell, Section } from "../components/ui/page-shell";
+import { Skeleton } from "../components/ui/skeleton";
+import { Spinner } from "../components/ui/spinner";
+import { StateBlock } from "../components/ui/state-block";
+import { TextLink } from "../components/ui/text-link";
+import { Camera, Fingerprint, Plus, Trash } from "../components/ui/icons";
 import { isPasskeySupported, registerPasskey } from "../lib/webauthn";
 import { ChangePasswordForm } from "./ChangePassword";
 import { cn } from "../lib/utils";
@@ -34,22 +40,118 @@ const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 const NAME_MIN = 2;
 const NAME_MAX = 120;
 
+/**
+ * How long the page waits, with no profile and no read in flight, before it says the read
+ * failed. The provider owns the read and reports only `loading`, so "never asked yet" and
+ * "asked and failed" look the same for a moment on mount; this is that moment, not a delay
+ * anybody waits through — a read that answers clears it.
+ */
+const STALLED_AFTER_MS = 800;
+
+/** True once the profile has been missing, with nothing in flight, for {@link STALLED_AFTER_MS}. */
+function useStalled(missing: boolean): [boolean, () => void] {
+  const [stalled, setStalled] = useState(false);
+  useEffect(() => {
+    if (!missing) return undefined;
+    const timer = window.setTimeout(() => setStalled(true), STALLED_AFTER_MS);
+    return () => window.clearTimeout(timer);
+  }, [missing]);
+  return [stalled && missing, () => setStalled(false)];
+}
+
 export default function ProfilePage() {
-  const { profile, loading, refresh, setLocal } = useProfile();
+  const { profile, loading, refresh } = useProfile();
+  const [failed, clearFailed] = useStalled(!profile && !loading);
+
+  return (
+    <PageShell width="narrow">
+      <PageHeader
+        title="Profile"
+        description="Your photo and name are what other players see on the booking grid and on every booking."
+      />
+      <StateBlock
+        loading={!profile && !failed}
+        error={!profile && failed ? new Error("profile read failed") : null}
+        action={failed ? "load your profile" : "your profile"}
+        onRetry={() => { clearFailed(); void refresh(); }}
+        skeleton={<ProfileSkeleton />}
+        className="gap-8"
+      >
+        {profile ? <ProfileSections profile={profile} /> : null}
+      </StateBlock>
+    </PageShell>
+  );
+}
+
+function ProfileSkeleton() {
+  return (
+    <Card className="px-4 sm:px-6">
+      <div className="flex items-center gap-5">
+        <Skeleton className="size-24 shrink-0 rounded-full" />
+        <div className="flex flex-1 flex-col gap-2">
+          <Skeleton className="h-4 w-48" />
+          <Skeleton className="h-3 w-24" />
+        </div>
+      </div>
+      <Skeleton className="h-touch" />
+    </Card>
+  );
+}
+
+function ProfileSections({ profile }: { profile: MyProfile }) {
+  return (
+    <>
+      <Section title="Your details">
+        <IdentityCard profile={profile} />
+      </Section>
+      <PasswordCard />
+      <MemberDoorHistory />
+      <PasskeysCard />
+      {/*
+        Item 16's third recall point. NN/g's requirement is that dismissible help stay
+        reachable from a permanent place; the other two are the home tile and the link under
+        the code. This is the one a member reaches for when they are already looking for
+        "where is the thing that explains this", which for most people is the account screen.
+      */}
+      <div className="flex flex-col items-start">
+        <TextLink to={GUIDE_PATH} variant="standalone">{GUIDE_LINK_LABEL}</TextLink>
+        <p className="text-sm text-text-secondary">{GUIDE_TILE_HINT}.</p>
+      </div>
+    </>
+  );
+}
+
+/** Photo, email, membership number and name — what the club and the other players see. */
+function IdentityCard({ profile }: { profile: MyProfile }) {
+  return (
+    <Card className="px-4 sm:px-6">
+      <PhotoPicker profile={profile} />
+      <div className="border-t border-border pt-4">
+        {/* Keyed on the saved name, so a name the server settles on resets the buffer. */}
+        <NameForm key={profile.full_name ?? ""} profile={profile} />
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * The photo button's hover scrim. The theme's `overlay` colour at a FIXED 65% — not
+ * `bg-overlay`, whose theme alpha composites to 3.1:1 over a white photo. The photo is a
+ * member's own upload and can be anything; 65% measures ≥5.5:1 in both themes over pure white
+ * (affordance.test.ts computes it from the tokens) and still shows the face.
+ */
+const SCRIM = "absolute inset-0 flex flex-col items-center justify-center gap-1 text-xs font-medium text-primary-ink "
+  + "bg-[rgb(var(--color-overlay)/0.65)] transition-opacity duration-fast ease-standard motion-reduce:transition-none";
+
+function PhotoPicker({ profile }: { profile: MyProfile }) {
+  const { refresh, setLocal } = useProfile();
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
-  // Local-only edits for the name; commits via Save.
-  const [fullName, setFullName] = useState("");
-  const [savingName, setSavingName] = useState(false);
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- mirrors server profile into the local name-edit buffer
-  useEffect(() => { if (profile) setFullName(profile.full_name ?? ""); }, [profile]);
-
   const handleFile = async (file: File) => {
-    if (!file) return;
     if (!ACCEPT.split(",").includes(file.type)) { toast.push({ tone: "danger", text: "Unsupported image type." }); return; }
     if (file.size > MAX_BYTES) { toast.push({ tone: "danger", text: "Image must be under 5 MB." }); return; }
 
@@ -59,11 +161,10 @@ export default function ProfilePage() {
     setUploading(true);
     try {
       const r = await endpoints.meUploadPhoto(file);
-      // Bust any browser cache by appending a timestamp on display.
-      if (profile) setLocal({ ...profile, photo_url: r.photo_url });
+      setLocal({ ...profile, photo_url: r.photo_url });
       toast.push({ tone: "success", text: "Profile photo updated." });
       // Pull fresh profile in the background to keep state honest.
-      refresh();
+      void refresh();
     } catch (err) {
       const msg = err instanceof ApiError ? `Upload failed (${err.status}).` : "Upload failed.";
       toast.push({ tone: "danger", text: msg });
@@ -75,26 +176,77 @@ export default function ProfilePage() {
     }
   };
 
-  const onPick = () => fileRef.current?.click();
-  const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onChange = (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (f) handleFile(f);
+    if (f) void handleFile(f);
     e.target.value = "";
   };
 
-  const onDrop = (e: React.DragEvent) => {
+  const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setDragOver(false);
     const f = e.dataTransfer.files?.[0];
-    if (f) handleFile(f);
+    if (f) void handleFile(f);
   };
+
+  const initial = (profile.full_name?.[0] ?? profile.email[0]).toUpperCase();
+  const showUrl = previewUrl ?? profile.photo_url;
+
+  return (
+    <div className="flex items-center gap-5">
+      <button
+        type="button"
+        onClick={() => fileRef.current?.click()}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={onDrop}
+        disabled={uploading}
+        aria-busy={uploading || undefined}
+        aria-label="Change profile photo"
+        className={cn(
+          "no-lift group relative size-24 shrink-0 overflow-hidden rounded-full border-2 transition-colors duration-fast ease-standard motion-reduce:transition-none sm:size-28",
+          dragOver ? "border-accent-strong ring-4 ring-accent-soft" : "border-border",
+          uploading ? "cursor-progress" : "hover:border-accent-strong",
+        )}
+      >
+        {showUrl ? (
+          <img src={showUrl} alt="" className="size-full object-cover" />
+        ) : (
+          <span className="flex size-full items-center justify-center bg-bg-muted text-3xl font-semibold text-text-secondary">{initial}</span>
+        )}
+        <span className={cn(SCRIM, uploading ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100")}>
+          {uploading ? <Spinner className="size-5" /> : <Camera size={20} aria-hidden="true" />}
+          {uploading ? null : <span>Change</span>}
+        </span>
+      </button>
+
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <p className="break-words text-sm font-medium text-text-primary">{profile.email}</p>
+        {profile.membership_number && (
+          <p className="font-mono text-xs text-text-muted">{profile.membership_number}</p>
+        )}
+        <p className="mt-2 text-xs text-text-secondary">
+          Tap the photo, or drop an image on it. PNG, JPG, WEBP or GIF, up to 5 MB.
+        </p>
+      </div>
+      <input ref={fileRef} type="file" accept={ACCEPT} onChange={onChange} className="hidden" tabIndex={-1} aria-hidden="true" />
+    </div>
+  );
+}
+
+function NameForm({ profile }: { profile: MyProfile }) {
+  const { setLocal } = useProfile();
+  const toast = useToast();
+  // Local-only edits for the name; commits via Save.
+  const [fullName, setFullName] = useState(profile.full_name ?? "");
+  const [savingName, setSavingName] = useState(false);
 
   const trimmedName = fullName.trim();
   const nameTooShort = trimmedName.length < NAME_MIN;
-  const nameUnchanged = trimmedName === (profile?.full_name ?? "").trim();
+  const nameUnchanged = trimmedName === (profile.full_name ?? "").trim();
 
   const saveName = async () => {
-    if (!profile || nameUnchanged || nameTooShort) return;
+    if (savingName || nameUnchanged || nameTooShort) return;
     setSavingName(true);
     try {
       const r = await endpoints.meUpdateProfile({ fullName: trimmedName });
@@ -108,121 +260,30 @@ export default function ProfilePage() {
           action: "save your name",
         }),
       });
-    }
-    finally { setSavingName(false); }
+    } finally { setSavingName(false); }
   };
 
-  if (loading && !profile) return <Card>Loading…</Card>;
-  if (!profile) return <Card>Couldn't load profile.</Card>;
-
-  const initial = (profile.full_name?.[0] ?? profile.email[0]).toUpperCase();
-  const showUrl = previewUrl ?? profile.photo_url;
-
   return (
-    <div className="max-w-xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Profile</h1>
-        <p className="text-sm text-text-secondary">Your photo is shown on the schedule, in admin lists, and on every booking.</p>
+    <form className="flex flex-col gap-4" onSubmit={(e) => { e.preventDefault(); void saveName(); }}>
+      <Field controlId="fullName">
+        <FieldLabel>Full name</FieldLabel>
+        <Input
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
+          placeholder="As it appears on the schedule"
+          maxLength={NAME_MAX}
+          autoComplete="name"
+        />
+        <FieldDescription>At least {NAME_MIN} characters. Shown to other players on the booking grid.</FieldDescription>
+      </Field>
+      {/* Disabled only while the name is not one the server would take — the rule is stated
+          right above it. While it saves it is pending, never disabled, so focus stays put. */}
+      <div className="flex justify-end">
+        <Button type="submit" variant="secondary" pending={savingName} disabled={nameUnchanged || nameTooShort}>
+          Save
+        </Button>
       </div>
-
-      <Card className="space-y-5">
-        <div className="flex items-center gap-5">
-          <button
-            type="button"
-            onClick={onPick}
-            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={onDrop}
-            disabled={uploading}
-            aria-label="Change profile photo"
-            className={cn(
-              "group relative w-28 h-28 rounded-full overflow-hidden border-2 transition-all",
-              dragOver ? "border-accent-strong scale-[1.03]" : "border-border",
-              uploading ? "opacity-90 cursor-wait" : "hover:border-accent-strong/60",
-            )}
-          >
-            {showUrl ? (
-              <img src={showUrl} alt="" className="w-full h-full object-cover" />
-            ) : (
-              <span className="w-full h-full flex items-center justify-center text-3xl font-semibold bg-bg-muted text-text-secondary">{initial}</span>
-            )}
-            <span className={cn(
-              "absolute inset-0 flex flex-col items-center justify-center gap-1 text-primary-ink text-xs font-medium",
-              // 40% was not enough scrim. White 12px text over it composited to rgb(153,153,153)
-              // on a mid-tone photo — 2.85:1, against the 4.5:1 floor. The photo underneath is a
-              // member's own upload and can be anything, so the alpha has to hold against the
-              // worst case: a pure-white photo. The scrim is the theme's `overlay` colour (near
-              // black in both themes) at a FIXED alpha — not `bg-overlay`, whose theme alpha is
-              // 45% in light and composites to 3.1:1 over white. 65% measures 5.5:1 in light and
-              // more in dark (affordance.test.ts computes it from the tokens), and still shows
-              // the face through it. A photo is the same photo in either theme.
-              "bg-[rgb(var(--color-overlay)/0.65)] transition-opacity",
-              uploading ? "opacity-100" : "opacity-0 group-hover:opacity-100",
-            )}>
-              {uploading ? (
-                <Loader2 size={20} className="animate-spin" />
-              ) : (
-                <>
-                  <Camera size={20} />
-                  <span>Change</span>
-                </>
-              )}
-            </span>
-          </button>
-
-          <div className="flex-1 min-w-0">
-            <p className="text-sm text-text-secondary">{profile.email}</p>
-            {profile.membership_number && (
-              <p className="text-xs text-text-muted font-mono mt-1">{profile.membership_number}</p>
-            )}
-            <p className="mt-3 text-xs text-text-muted">
-              Drag and drop, or click the photo. PNG / JPG / WEBP / GIF, up to 5 MB.
-            </p>
-          </div>
-        </div>
-
-        <input ref={fileRef} type="file" accept={ACCEPT} onChange={onChange} className="hidden" />
-
-        <div className="border-t border-border pt-4 space-y-3">
-          <div>
-            <Label htmlFor="fullName">Full name</Label>
-            <Input
-              id="fullName"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              placeholder="As it appears on the schedule"
-              maxLength={NAME_MAX}
-              aria-describedby="fullName-rule"
-            />
-            <p id="fullName-rule" className="text-xs text-text-muted mt-1">
-              At least {NAME_MIN} characters. Shown to other players on the booking grid.
-            </p>
-          </div>
-          <div className="flex justify-end">
-            <Button onClick={saveName} disabled={savingName || nameUnchanged || nameTooShort}>
-              {savingName ? "Saving…" : "Save"}
-            </Button>
-          </div>
-        </div>
-      </Card>
-
-      <PasswordCard />
-      <MemberDoorHistory />
-      <PasskeysCard />
-
-      {/*
-        Item 16's third recall point. NN/g's requirement is that dismissible help stay
-        reachable from a permanent place; the other two are the home tile and the link under
-        the code. This is the one a member reaches for when they are already looking for
-        "where is the thing that explains this", which for most people is the account screen.
-      */}
-      <p className="text-sm text-text-secondary">
-        <Link to={GUIDE_PATH} className="inline-flex min-h-11 items-center text-accent-strong underline underline-offset-2 hover:no-underline">
-          {GUIDE_LINK_LABEL}
-        </Link>
-        {" — "}{GUIDE_TILE_HINT.toLowerCase()}.
-      </p>
-    </div>
+    </form>
   );
 }
 
@@ -269,47 +330,135 @@ function PasswordCard() {
   const [open, setOpen] = useState(false);
 
   return (
-    <Card className="space-y-4">
-      <div>
-        <h2 className="text-base font-semibold">Password</h2>
-        <p className="text-sm text-text-secondary">
-          Change the password you sign in with. We'll email you whenever it changes, so you'd know if
-          somebody else did it.
-        </p>
-      </div>
-      {open ? (
-        <ChangePasswordForm onDone={() => setOpen(false)} />
-      ) : (
-        <Button variant="outline" onClick={() => setOpen(true)}>Change password</Button>
-      )}
-    </Card>
+    <Section
+      title="Password"
+      description="Change the password you sign in with. We'll email you whenever it changes, so you'd know if somebody else did it."
+    >
+      <Card className="px-4 sm:px-6">
+        {open ? (
+          <ChangePasswordForm onDone={() => setOpen(false)} onCancel={() => setOpen(false)} />
+        ) : (
+          <div>
+            <Button variant="outline" onClick={() => setOpen(true)}>Change password</Button>
+          </div>
+        )}
+      </Card>
+    </Section>
   );
 }
 
-function PasskeysCard() {
-  const toast = useToast();
-  const [rows, setRows] = useState<WebAuthnCredentialRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [adding, setAdding] = useState(false);
-  const [label, setLabel] = useState("");
-  const supported = isPasskeySupported();
+const PASSKEY_INTRO = "One-tap sign-in with your device's biometrics or a security key. Add as many as you like — phone, laptop, key.";
+const PASSKEY_UNSUPPORTED = "This browser doesn't support passkeys. Use a recent Chrome, Safari, Edge or Firefox on a device with biometrics or a security key.";
 
-  const load = async () => {
-    setLoading(true);
-    try { setRows(await endpoints.webauthnList()); }
-    catch { /* non-blocking */ }
-    finally { setLoading(false); }
+type PasskeyRead = { rows: WebAuthnCredentialRow[] | null; error: unknown; loading: boolean };
+
+/**
+ * The member's passkeys, read honestly. The read used to swallow its own failure ("non-blocking")
+ * and leave the list at `[]`, so a failed read told the member they had no passkeys — an empty
+ * collection is not an answer. It is now three states: reading, failed (with a retry), and the
+ * list — which may genuinely be empty.
+ */
+function usePasskeys(supported: boolean) {
+  const [read, setRead] = useState<PasskeyRead>({ rows: null, error: null, loading: supported });
+  const load = useCallback(async () => {
+    setRead((r) => ({ ...r, loading: true }));
+    try { setRead({ rows: await endpoints.webauthnList(), error: null, loading: false }); }
+    catch (error) { setRead((r) => ({ rows: r.rows, error, loading: false })); }
+  }, []);
+  useEffect(() => { if (supported) void load(); }, [supported, load]);
+  return { ...read, load };
+}
+
+function PasskeysCard() {
+  const supported = isPasskeySupported();
+  const passkeys = usePasskeys(supported);
+
+  if (!supported) {
+    return (
+      <Section title="Passkeys">
+        <Card className="px-4 sm:px-6">
+          <p className="text-sm text-text-secondary">{PASSKEY_UNSUPPORTED}</p>
+        </Card>
+      </Section>
+    );
+  }
+
+  return (
+    <Section title="Passkeys" description={PASSKEY_INTRO}>
+      <Card className="px-4 sm:px-6">
+        <StateBlock
+          loading={passkeys.rows === null && passkeys.loading}
+          error={passkeys.rows === null ? passkeys.error : null}
+          action={passkeys.error ? "load your passkeys" : "your passkeys"}
+          onRetry={() => void passkeys.load()}
+          empty={passkeys.rows !== null && passkeys.rows.length === 0}
+          emptyIcon={Fingerprint}
+          emptyTitle="No passkeys yet"
+          emptyHint="Add one below to sign in with a touch or a glance."
+          skeleton={<div className="flex flex-col gap-3">{[0, 1].map((i) => <Skeleton key={i} className="h-14" />)}</div>}
+        >
+          <PasskeyList rows={passkeys.rows ?? []} onChanged={passkeys.load} />
+        </StateBlock>
+        <div className="border-t border-border pt-4">
+          <AddPasskey onAdded={passkeys.load} />
+        </div>
+      </Card>
+    </Section>
+  );
+}
+
+const shortDate = (iso: string, withYear: boolean) =>
+  new Date(iso).toLocaleDateString(undefined, withYear ? { day: "2-digit", month: "short", year: "numeric" } : { day: "2-digit", month: "short" });
+
+function PasskeyList({ rows, onChanged }: { rows: WebAuthnCredentialRow[]; onChanged: () => Promise<void> }) {
+  const toast = useToast();
+  const remove = async (id: string) => {
+    try {
+      await endpoints.webauthnDelete(id);
+      await onChanged();
+      toast.push({ tone: "success", text: "Passkey removed." });
+    } catch { toast.push({ tone: "danger", text: "Couldn't remove passkey." }); }
   };
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount loader; sync loading flag is the house idiom
-  useEffect(() => { if (supported) load(); }, [supported]);
+  return (
+    <ul className="divide-y divide-border">
+      {rows.map((r) => (
+        <li key={r.id} className="flex items-center gap-3 py-3 first:pt-0">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-info-soft text-info-strong">
+            <Fingerprint size={20} aria-hidden="true" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-medium text-text-primary">{r.label}</p>
+            <p className="text-xs text-text-muted">
+              {`Added ${shortDate(r.created_at, true)}`}
+              {r.last_used_at ? ` · Last used ${shortDate(r.last_used_at, false)}` : " · Never used"}
+              {r.transports ? ` · ${r.transports}` : ""}
+            </p>
+          </div>
+          <ConfirmButton
+            idleLabel={<span className="inline-flex items-center gap-1"><Trash size={16} aria-hidden="true" /> Remove</span>}
+            confirmLabel="Tap to confirm"
+            onConfirm={() => remove(r.id)}
+            tone="danger"
+          />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function AddPasskey({ onAdded }: { onAdded: () => Promise<void> }) {
+  const toast = useToast();
+  const [label, setLabel] = useState("");
+  const [adding, setAdding] = useState(false);
 
   const add = async () => {
+    if (adding) return;
     if (!label.trim()) { toast.push({ tone: "warning", text: "Give the passkey a label so you can tell devices apart." }); return; }
     setAdding(true);
     try {
       await registerPasskey(label.trim());
       setLabel("");
-      await load();
+      await onAdded();
       toast.push({ tone: "success", text: "Passkey added." });
     } catch (err) {
       if (err instanceof Error && err.message === "passkey_cancelled") return;
@@ -317,84 +466,17 @@ function PasskeysCard() {
     } finally { setAdding(false); }
   };
 
-  const remove = async (id: string) => {
-    try {
-      await endpoints.webauthnDelete(id);
-      await load();
-      toast.push({ tone: "success", text: "Passkey removed." });
-    } catch { toast.push({ tone: "danger", text: "Couldn't remove passkey." }); }
-  };
-
-  if (!supported) {
-    return (
-      <Card>
-        <h2 className="text-base font-semibold mb-1">Passkeys</h2>
-        <p className="text-sm text-text-secondary">
-          This browser doesn't support passkeys. Use a recent build of Chrome, Safari, Edge, or Firefox on a
-          device with biometrics or a security key.
-        </p>
-      </Card>
-    );
-  }
-
   return (
-    <Card className="space-y-4">
-      <div className="flex items-baseline justify-between">
-        <div>
-          <h2 className="text-base font-semibold">Passkeys</h2>
-          <p className="text-sm text-text-secondary">
-            Add a passkey for one-tap sign-in with your device's biometrics or a hardware key. You can register
-            as many as you like — phone, laptop, security key.
-          </p>
-        </div>
-      </div>
-
-      {loading ? (
-        <p className="text-sm text-text-secondary">Loading…</p>
-      ) : rows.length === 0 ? (
-        <div className="border border-dashed border-border rounded-lg py-8 text-center text-sm text-text-secondary">
-          No passkeys yet. Add one below.
-        </div>
-      ) : (
-        <ul className="divide-y divide-border">
-          {rows.map((r) => (
-            <li key={r.id} className="py-3 flex items-center gap-3">
-              <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-info-soft text-info-strong shrink-0">
-                <Fingerprint size={18} />
-              </span>
-              <div className="flex-1 min-w-0">
-                <p className="font-medium truncate">{r.label}</p>
-                <p className="text-xs text-text-muted">
-                  Added {new Date(r.created_at).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" })}
-                  {r.last_used_at ? ` · Last used ${new Date(r.last_used_at).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}` : " · Never used"}
-                  {r.transports ? ` · ${r.transports}` : ""}
-                </p>
-              </div>
-              <ConfirmButton
-                idleLabel={<span className="inline-flex items-center"><Trash2 size={14} className="mr-1" /> Remove</span>}
-                confirmLabel="Tap to confirm"
-                onConfirm={() => remove(r.id)}
-                tone="danger"
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="border-t border-border pt-4">
-        <Label htmlFor="passkey-label">Label</Label>
-        <div className="flex gap-2">
-          <Input id="passkey-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. iPhone, MacBook, YubiKey" />
-          <Button
-            variant="outline"
-            className="bg-info-soft border-info-soft text-info-strong hover:bg-info-soft/70 whitespace-nowrap"
-            onClick={add}
-            disabled={adding}
-          >
-            <Plus size={16} className="mr-1" /> {adding ? "Adding…" : "Add passkey"}
+    <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); void add(); }}>
+      <Field controlId="passkey-label">
+        <FieldLabel>Label</FieldLabel>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. iPhone, MacBook, YubiKey" />
+          <Button type="submit" variant="secondary" icon={<Plus aria-hidden="true" />} pending={adding} className="shrink-0">
+            Add passkey
           </Button>
         </div>
-      </div>
-    </Card>
+      </Field>
+    </form>
   );
 }

@@ -126,7 +126,7 @@ export function StandingLine(props: {
           </Button>
         )}
         {line.action?.kind === "book_a_court" && !props.actionOfferedAbove && (
-          <Link to="/schedule" className={MEMBER_DOOR_ACTION_LINK}>
+          <Link to="/bookings" className={MEMBER_DOOR_ACTION_LINK}>
             {line.action.label}
           </Link>
         )}

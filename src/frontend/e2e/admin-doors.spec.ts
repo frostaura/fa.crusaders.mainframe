@@ -738,7 +738,14 @@ test.describe("The printable door card", () => {
     await expect(page.getByRole("heading", { name: "Side door" })).toBeVisible();
 
     await page.emulateMedia({ media: "print" });
-    await expect(page.locator("header")).toBeHidden();
+    // The app bar and the admin console's own navigation. Not `locator("header")`: since R11
+    // every page has its own PageHeader `<header>` too, and the card's title must print.
+    // Located by attribute, not by role: a role query skips hidden elements and would pass on
+    // an element that was never there.
+    await expect(page.locator("header[data-app-header]")).toHaveCount(1);
+    await expect(page.locator("header[data-app-header]")).toBeHidden();
+    await expect(page.locator("[data-admin-rail]")).toBeHidden();
+    await expect(page.locator("[data-admin-section-bar]")).toBeHidden();
     await expect(page.getByRole("button", { name: /Print/ })).toBeHidden();
     await expect(page.getByRole("heading", { name: "Side door" })).toBeVisible();
     await page.emulateMedia({ media: "screen" });
@@ -993,7 +1000,9 @@ test.describe("A door that has been deleted", () => {
     ]);
 
     await expect(page.getByRole("heading", { name: "All scans, all doors" })).toBeVisible();
-    await expect(page.getByRole("listitem")).toHaveCount(2);
+    // Counted inside the PAGE: the admin console around it (R16's rail and section switcher)
+    // is a list of destinations too, and is not this log's rows.
+    await expect(page.locator("[data-page-shell]").getByRole("listitem")).toHaveCount(2);
     await expect(page.getByText("null")).toHaveCount(0);
     await expect(page.getByText("undefined")).toHaveCount(0);
   });
@@ -1187,7 +1196,9 @@ test.describe("A page somebody left open", () => {
 
     shut = true;
 
-    await expect(page.getByText(/1 of 1 door shut/)).toBeVisible({ timeout: 90_000 });
+    // The banner, by its test id: since P2 the page-level C11 alert says the same sentence to a
+    // screen reader (by design), so a text query has two matches.
+    await expect(page.getByTestId("shut-doors-banner")).toContainText(/1 of 1 door shut/, { timeout: 90_000 });
   });
 
   /**

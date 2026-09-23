@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Card } from "../Card";
+import { Skeleton } from "../ui/skeleton";
 import { DoorFeedRow } from "./DoorFeedRow";
 import { ACTIVITY_READ_FAILED, activityEmptyNotice, isDoorScan } from "../../lib/deviceActivity";
 import {
@@ -78,7 +79,20 @@ function FeedBody({ read, clock, expanded, onExpand, firstMoreRef, onAnnounce }:
   /** C-L3 / R3-26: what the press did, for the region the section keeps. */
   onAnnounce: (said: string) => void;
 }) {
-  if (read.loading) return <p className="text-sm text-text-secondary">Loading…</p>;
+  // The feed's own shape while it reads, never "Loading…" on its own (R12).
+  if (read.loading) {
+    return (
+      <div aria-busy="true" className="flex flex-col gap-3 py-1">
+        <span role="status" className="sr-only">Reading this door's scans…</span>
+        {Array.from({ length: 3 }, (_, i) => (
+          <div key={i} className="flex items-center gap-3">
+            <Skeleton className="h-5 w-16" />
+            <Skeleton className="h-5 flex-1" />
+          </div>
+        ))}
+      </div>
+    );
+  }
   if (read.error) return <p className="text-sm text-danger-strong">{read.error || ACTIVITY_READ_FAILED}</p>;
   const scans = (read.entries ?? []).filter(isDoorScan);
   if (scans.length === 0) return <p className="text-sm text-text-secondary">{activityEmptyNotice(true)}</p>;

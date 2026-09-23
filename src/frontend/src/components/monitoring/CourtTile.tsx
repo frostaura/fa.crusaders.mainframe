@@ -26,8 +26,8 @@ import { type ControlBoardCourt } from "../../lib/adminApi";
  *
  * <p>
  * <b>The colour is never alone.</b> Under `forced-colors: active` the fills are discarded
- * entirely, so each tile carries `border border-transparent` — the idiom `index.css` already
- * keys the forced-colours block on — and the state is text, never a coloured pill.
+ * entirely, so each tile carries a real `border border-border` card edge, which forced colours
+ * repaint as a system edge — and the state is text, never a coloured pill.
  * </p>
  */
 
@@ -93,9 +93,9 @@ export function CourtTile({ court, now, timezone, graceMinutes }: {
 
   return (
     <article
-      // `border-transparent` so `index.css`'s forced-colours block gives every tile a system
-      // edge — without it the tiles merge into one field of text at high contrast.
-      className="flex flex-col gap-[calc(0.5rem*var(--board-scale,1))] rounded-lg border border-transparent bg-bg-surface p-[calc(0.75rem*var(--board-scale,1))] shadow-sm ring-1 ring-border"
+      // A real border (the card edge, same as every other card) so forced colours keep every
+      // tile's edge — without one the tiles merge into one field of text at high contrast.
+      className="flex flex-col gap-[calc(0.5rem*var(--board-scale,1))] rounded-xl border border-border bg-bg-surface p-[calc(1rem*var(--board-scale,1))] shadow-xs"
       aria-labelledby={`court-${court.court_id}-name`}
     >
       <div className="flex min-w-0 flex-wrap items-baseline gap-2">
@@ -106,7 +106,7 @@ export function CourtTile({ court, now, timezone, graceMinutes }: {
           {court.name}
         </h2>
         {boxLine && (
-          <span className="ml-auto shrink-0 text-[calc(0.7rem*var(--board-scale,1))] text-text-muted">
+          <span className="ml-auto shrink-0 text-[calc(0.75rem*var(--board-scale,1))] text-text-muted">
             {court.device?.link ? court.device.link.replace(/_/g, " ") : "unknown link"}
           </span>
         )}
@@ -119,7 +119,7 @@ export function CourtTile({ court, now, timezone, graceMinutes }: {
         squash match. The digits carry `aria-hidden`; what the region actually holds is the
         sentence below, written only when the state word changes — see {@link StateSpeech}.
       */}
-      <div className={cn("rounded-lg px-[calc(0.5rem*var(--board-scale,1))] py-[calc(0.5rem*var(--board-scale,1))]", TONE_BY_STATE[state])}>
+      <div className={cn("rounded-lg px-[calc(0.75rem*var(--board-scale,1))] py-[calc(0.5rem*var(--board-scale,1))]", TONE_BY_STATE[state])}>
         <p className="text-[calc(1.5rem*var(--board-scale,1))] font-bold leading-tight tracking-tight" aria-hidden>
           {EXPECTATION_WORD[state]}
         </p>
@@ -141,7 +141,7 @@ export function CourtTile({ court, now, timezone, graceMinutes }: {
         {expectationMeaning(state, graceMinutes)}
       </p>
 
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[calc(0.8rem*var(--board-scale,1))]">
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[calc(0.875rem*var(--board-scale,1))]">
         {bookedBy && (
           <>
             <dt className="text-text-muted">Booked by</dt>
@@ -165,7 +165,7 @@ export function CourtTile({ court, now, timezone, graceMinutes }: {
       )}
 
       {(boxLine || doorLine) && (
-        <ul className="border-t border-border pt-[calc(0.4rem*var(--board-scale,1))] text-[calc(0.7rem*var(--board-scale,1))] text-text-muted">
+        <ul className="border-t border-border pt-[calc(0.5rem*var(--board-scale,1))] text-[calc(0.75rem*var(--board-scale,1))] text-text-muted">
           {boxLine && <li className="min-w-0 break-words">{boxLine}</li>}
           {doorLine && <li className="min-w-0 break-words">{doorLine}</li>}
         </ul>

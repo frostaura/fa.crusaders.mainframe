@@ -1,10 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ApiError, endpoints, type TopUpStatus } from "../lib/api";
-import { Card } from "../components/Card";
-import { Badge, Button } from "../components/Button";
 import { useBalance } from "../lib/balance";
 import { formatMoney } from "../lib/utils";
+import { typography } from "../lib/typography";
+import { PageHeader, PageShell } from "../components/ui/page-shell";
+import { Freshness } from "../components/ui/refresh-button";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
+import { Skeleton } from "../components/ui/skeleton";
+import { Spinner } from "../components/ui/spinner";
+import { TextLink } from "../components/ui/text-link";
+import { ArrowsClockwise, CheckCircle, Clock, Prohibit, WarningCircle } from "../components/ui/icons";
+import { Alert } from "../components/Alert";
 
 /**
  * What each failure code means, to a member.
@@ -76,6 +85,8 @@ export default function TopUpStatusPage() {
   const [missing, setMissing] = useState(false);
   const [gaveUp, setGaveUp] = useState(false);
   const [checking, setChecking] = useState(false);
+  /** When the status on screen was read — the header's "Updated 12s ago" while it polls. */
+  const [readAt, setReadAt] = useState<number | null>(null);
   /** Bumped by "Check again", which restarts the schedule from the top. */
   const [round, setRound] = useState(0);
   const { refresh: refreshBalance } = useBalance();
@@ -103,6 +114,7 @@ export default function TopUpStatusPage() {
         if (cancelled) return;
         settled();
         setS(snap);
+        setReadAt(Date.now());
         setLoadFailed(false);
         if (snap.status === "Completed" && !refreshedOnce.current) {
           refreshedOnce.current = true;
@@ -137,121 +149,149 @@ export default function TopUpStatusPage() {
     setRound((r) => r + 1);
   };
 
-  if (missing) return <NoSuchTopUp />;
+  const header = <PageHeader back={{ to: "/wallet", label: "Wallet" }} title="Top-up" freshness={<Freshness at={readAt} />} />;
+
+  if (missing) return <StatusShell header={header}><NoSuchTopUp /></StatusShell>;
 
   /*
-    A failed status request is not a dead end, and it used to be one: this branch was a bare
-    sentence in a bare card — no controls at all, no wallet link, not even the page's own
-    layout — so the only way out was the manual browser reload the whole finding is about.
-    The "Check again" button added in the previous round made that reachable in one press: a
-    refuter aborted the status request on a live Pending top-up, pressed it, and the page
-    became "Couldn't load top-up status." with nothing on it.
-
-    Two things follow. A failure BEFORE anything is known keeps the two controls the Pending
-    branch has, so the member can ask again or go look at their wallet. A failure AFTER a
-    status has been read does not throw that status away — the amount, the badge and the
-    controls stay, and the failure is a line beside them saying the screen may be stale. It
-    is also worth saying plainly that nothing here touches the payment: a member watching a
-    R500 top-up needs to know that a page that cannot reach the club has not cancelled it.
+    A failed status request is not a dead end, and it used to be one: a bare sentence in a bare
+    card, no controls, so the only way out was a manual browser reload. A failure BEFORE anything
+    is known keeps the two controls the Pending branch has; a failure AFTER a status has been
+    read keeps that status, and says beside it that the screen may be stale. Nothing here
+    touches the payment, and a member watching a R500 top-up needs to be told so.
   */
   if (loadFailed && !s) {
     return (
-      <div className="max-w-md mx-auto">
-        <Card>
-          <h1 className="text-xl font-semibold mb-2">Top-up</h1>
+      <StatusShell header={header}>
+        <Card className="px-4 sm:px-6">
           {/*
-            "we'll email you either way" was written here before the API could keep it, and a
-            sibling lane removed the sentence for exactly that reason. The money lane then made
-            the promise TRUE instead: `NotifyNotCompletedAsync` in TopUpEndpoints.cs mails a
-            member whose payment ends Failed, Cancelled or amount-mismatched, alongside the
-            confirmation `CompleteAsync` already sent. So the sentence stands, and
-            `topup-status-email-promise.test.ts` holds it to the backend in BOTH directions —
-            it reads the shipped C# and fails if the copy promises a mail nothing sends, or
-            stays silent about one that does. It failed in the second direction the moment the
-            dispatch landed, which is how this sentence came back.
+            "we'll email you either way" is TRUE: `NotifyNotCompletedAsync` in TopUpEndpoints.cs
+            mails a member whose payment ends Failed, Cancelled or amount-mismatched, alongside
+            the confirmation `CompleteAsync` sends. `topup-status-email-promise.test.ts` holds
+            this sentence to the backend in both directions.
           */}
-          <p role="alert" className="text-sm text-danger-strong">
-            We couldn't reach the club to check on this payment. Nothing here cancels or
-            changes it — if it has already cleared, your credits are in your wallet, and
-            we'll email you either way.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button variant="outline" onClick={checkAgain} disabled={checking} aria-busy={checking}>
-              {checking ? "Checking…" : "Check again"}
-            </Button>
-            <Link to="/wallet"><Button variant="ghost">View wallet</Button></Link>
-          </div>
+          <Alert tone="danger">{UNREACHABLE_FIRST}</Alert>
+          <StatusActions checking={checking} onCheck={checkAgain} />
         </Card>
-      </div>
+      </StatusShell>
     );
   }
-  if (!s) return <Card>Loading…</Card>;
-
-  // Cancelled is the member's own decision and gets its own neutral treatment. It used to
-  // be stored and shown as "Failed", so somebody who deliberately backed out at PayFast
-  // was told their payment had failed.
-  const tone = s.status === "Completed" ? "success" : s.status === "Failed" ? "danger" : "info";
+  if (!s) return <StatusShell header={header}><StatusSkeleton /></StatusShell>;
 
   return (
-    <div className="max-w-md mx-auto">
-      <Card>
-        <h1 className="text-xl font-semibold mb-2">Top-up</h1>
-        <p className="text-sm text-text-secondary mb-3">{formatMoney(s.amount_zar)}</p>
-        <Badge tone={tone}>{s.status}</Badge>
-
+    <StatusShell header={header}>
+      <Card className="px-4 sm:px-6">
+        <StatusHead status={s} />
         {/* The status above was read before the club stopped answering, so it is kept and
             labelled rather than replaced by the failure. */}
         {loadFailed && (
-          <p role="alert" className="mt-3 text-sm text-danger-strong">
-            We couldn't reach the club just now, so this may be out of date. Nothing here
-            cancels or changes your payment — press Check again in a moment.
+          <Alert tone="danger">{UNREACHABLE_LATER}</Alert>
+        )}
+        <StatusBody status={s} gaveUp={gaveUp} checking={checking} onCheck={checkAgain} />
+      </Card>
+    </StatusShell>
+  );
+}
+
+function StatusShell({ header, children }: { header: ReactNode; children: ReactNode }) {
+  return <PageShell width="narrow">{header}{children}</PageShell>;
+}
+
+/** The card's shape while the first status is read: the amount, the badge, a line, two controls. */
+function StatusSkeleton() {
+  return (
+    <Card className="px-4 sm:px-6" aria-busy="true">
+      <p role="status" className="sr-only">Checking this payment…</p>
+      <div className="flex items-center justify-between gap-4">
+        <Skeleton className="h-10 w-32" />
+        <Skeleton className="h-6 w-24 rounded-full" />
+      </div>
+      <Skeleton className="h-5 w-full" />
+      <Skeleton className="h-touch w-40" />
+    </Card>
+  );
+}
+
+/**
+ * Cancelled is the member's own decision and gets its own neutral treatment. It used to be
+ * stored and shown as "Failed", so somebody who deliberately backed out at PayFast was told
+ * their payment had failed. Each status carries an icon as well as a colour.
+ */
+const STATUS_LOOK = {
+  Completed: { tone: "success", icon: CheckCircle },
+  Failed: { tone: "danger", icon: WarningCircle },
+  Cancelled: { tone: "neutral", icon: Prohibit },
+  Pending: { tone: "info", icon: Clock },
+} as const;
+
+function StatusHead({ status }: { status: TopUpStatus }) {
+  const look = STATUS_LOOK[status.status];
+  const Icon = look.icon;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <p className={typography({ variant: "display" })}>{formatMoney(status.amount_zar)}</p>
+      <Badge tone={look.tone} icon={<Icon size={14} weight="bold" aria-hidden="true" />}>{status.status}</Badge>
+    </div>
+  );
+}
+
+function StatusActions({ checking, onCheck }: { checking: boolean; onCheck: () => void }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      <Button variant="outline" onClick={onCheck} pending={checking} icon={<ArrowsClockwise aria-hidden="true" />}>Check again</Button>
+      <Button asChild variant="ghost"><Link to="/wallet">View wallet</Link></Button>
+    </div>
+  );
+}
+
+const UNREACHABLE_FIRST = "We couldn't reach the club to check on this payment. Nothing here cancels or changes it — if it has already cleared, your credits are in your wallet, and we'll email you either way.";
+const UNREACHABLE_LATER = "We couldn't reach the club just now, so this may be out of date. Nothing here cancels or changes your payment — press Check again in a moment.";
+const NOT_FOUND = "We can't find this top-up on your account. The link may be wrong, or it may belong to a different account — nothing has been charged for it. Your wallet shows every top-up that did go through.";
+const GAVE_UP = "We've stopped checking on this page. PayFast can take a while — an instant EFT usually lands within minutes and a normal EFT can take until the next working day. Your credits appear the moment it clears, and we'll email you.";
+const CANCELLED = "You cancelled this payment, so nothing was charged and no credits were added.";
+const FAILED_FALLBACK = "This payment didn't go through. Nothing was charged — try again, or tell an admin if it keeps happening.";
+
+type BodyProps = { status: TopUpStatus; gaveUp: boolean; checking: boolean; onCheck: () => void };
+
+/**
+ * What the member reads under the figure, and what they can do. The Pending branch carries a
+ * control and stops claiming to wait once it has stopped asking: it used to be one line — no
+ * Check again, no way out — so a member whose R500 had already landed sat in front of
+ * "Waiting for confirmation from PayFast…" indefinitely.
+ */
+function StatusBody({ status, gaveUp, checking, onCheck }: BodyProps) {
+  if (status.status === "Pending") {
+    return (
+      <>
+        {gaveUp ? (
+          <p className="text-sm text-text-secondary">{GAVE_UP}</p>
+        ) : (
+          <p className="flex items-center gap-2 text-sm text-text-secondary">
+            <Spinner className="text-accent-strong" />
+            <span>Waiting for confirmation from PayFast…</span>
           </p>
         )}
-
-        {/*
-          The Pending branch carries a control now, and stops lying when it has stopped
-          asking. It used to be this one line: no Refresh, no Try again — only Cancelled
-          and Failed got those — so a member whose R500 had already landed sat in front of
-          "Waiting for confirmation from PayFast…" indefinitely while their credits were in
-          the ledger, and the only way out was to reload the browser by hand.
-        */}
-        {s.status === "Pending" && (
-          <>
-            <p className="mt-3 text-sm text-text-secondary">
-              {gaveUp
-                ? "We've stopped checking on this page. PayFast can take a while — an instant EFT usually lands within minutes and a normal EFT can take until the next working day. Your credits appear the moment it clears, and we'll email you."
-                : "Waiting for confirmation from PayFast…"}
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button variant="outline" onClick={checkAgain} disabled={checking} aria-busy={checking}>
-                {checking ? "Checking…" : "Check again"}
-              </Button>
-              <Link to="/wallet"><Button variant="ghost">View wallet</Button></Link>
-            </div>
-          </>
-        )}
-
-        {s.status === "Cancelled" && (
-          <>
-            <p className="mt-3 text-sm text-text-secondary">You cancelled this payment, so nothing was charged and no credits were added.</p>
-            <Link to="/wallet/topup" className="inline-block mt-3"><Button variant="outline">Try again</Button></Link>
-          </>
-        )}
-
-        {s.status === "Failed" && (
-          <>
-            <p className="mt-3 text-sm text-danger-strong">
-              {(s.failure_code && FAILURE_COPY[s.failure_code]) ?? "This payment didn't go through. Nothing was charged — try again, or tell an admin if it keeps happening."}
-            </p>
-            <Link to="/wallet/topup" className="inline-block mt-3"><Button variant="outline">Try again</Button></Link>
-          </>
-        )}
-
-        {s.status === "Completed" && (
-          <p className="mt-3 text-sm">Your wallet has been credited. <Link to="/wallet" className="text-accent-strong hover:underline">View wallet →</Link></p>
-        )}
-      </Card>
-    </div>
+        <StatusActions checking={checking} onCheck={onCheck} />
+      </>
+    );
+  }
+  if (status.status === "Completed") {
+    return (
+      <div className="flex flex-col items-start gap-1">
+        <p className="text-sm text-text-primary">Your wallet has been credited.</p>
+        <TextLink to="/wallet" variant="standalone">View wallet</TextLink>
+      </div>
+    );
+  }
+  const failed = status.status === "Failed";
+  const sentence = failed ? ((status.failure_code && FAILURE_COPY[status.failure_code]) ?? FAILED_FALLBACK) : CANCELLED;
+  return (
+    <>
+      <p className={failed ? "text-sm font-medium text-danger-strong" : "text-sm text-text-secondary"}>{sentence}</p>
+      <div>
+        <Button asChild variant="outline"><Link to="/wallet/topup">Try again</Link></Button>
+      </div>
+    </>
   );
 }
 
@@ -277,19 +317,12 @@ export default function TopUpStatusPage() {
  */
 function NoSuchTopUp() {
   return (
-    <div className="max-w-md mx-auto">
-      <Card>
-        <h1 className="text-xl font-semibold mb-2">Top-up</h1>
-        <p role="alert" className="text-sm text-danger-strong">
-          We can't find this top-up on your account. The link may be wrong, or it may belong
-          to a different account — nothing has been charged for it. Your wallet shows every
-          top-up that did go through.
-        </p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Link to="/wallet"><Button variant="outline">View wallet</Button></Link>
-          <Link to="/wallet/topup"><Button variant="ghost">Top up</Button></Link>
-        </div>
-      </Card>
-    </div>
+    <Card className="px-4 sm:px-6">
+      <Alert tone="danger">{NOT_FOUND}</Alert>
+      <div className="flex flex-wrap gap-2">
+        <Button asChild variant="outline"><Link to="/wallet">View wallet</Link></Button>
+        <Button asChild variant="ghost"><Link to="/wallet/topup">Top up</Link></Button>
+      </div>
+    </Card>
   );
 }

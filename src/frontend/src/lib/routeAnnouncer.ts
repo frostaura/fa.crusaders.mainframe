@@ -46,33 +46,25 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   ["/forgot-password", "Forgotten password"],
   ["/reset-password/:token", "Choose a new password"],
   ["/welcome/:token", "Welcome"],
+  // R15 — the member's three destinations, in the order the tab bar shows them.
+  ["/my-code", "My Code"],
+  ["/bookings", "Bookings"],
   ["/wallet", "Wallet"],
   ["/wallet/topup", "Top up"],
   ["/wallet/topup/:topupId", "Top-up status"],
-  ["/schedule", "Bookings"],
+  ["/wallet/activity", "Wallet activity"],
   ["/profile", "Profile"],
   ["/change-password", "Change password"],
-  ["/my-code", "My code"],
-  ["/court-code", "My code"],
   // item 16 — the always-reachable guide.
   ["/how-it-works", "How it works"],
-  ["/reports", "Reports"],
+  // R16 — the Admin tab and everything under it. The index is the Overview ("Needs attention").
+  ["/admin", "Admin overview"],
   ["/admin/members", "Members"],
-  ["/admin/webhooks", "Webhooks"],
-  ["/admin/biometric", "Members"],
-  /**
-   * The old admin paths. Still named, because they are still ROUTES — permanent redirects
-   * rather than deletions (D3 §3.1), and the title is set before the redirect resolves: a
-   * redirect renders for a tick, and the suite reads every `path=` in the router without
-   * caring what it renders.
-   */
-  ["/admin/devices", "Devices"],
-  ["/admin/doors", "Doors"],
-  ["/admin/doors/log", "Door log"],
-  ["/admin/doors/:id", "Door"],
-  ["/admin/doors/:id/card", "Door card"],
-  // Monitoring (D3 §3.1). The section index is the control board, so it is named for what an
-  // admin opens it to look at rather than for the section.
+  ["/admin/groups", "Member groups"],
+  ["/admin/transactions", "Transactions"],
+  ["/admin/reports", "Club reports"],
+  // Monitoring (R17: courts, hardware and control). The section index is the control board, so
+  // it is named for what an admin opens it to look at rather than for the section.
   ["/admin/monitoring", "Control board"],
   ["/admin/monitoring/doors", "Doors"],
   ["/admin/monitoring/doors/log", "Door log"],
@@ -82,14 +74,28 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   ["/admin/monitoring/faults", "Faults"],
   ["/admin/monitoring/night", "A person's night"],
   ["/admin/monitoring/changes", "Change record"],
-  ["/admin/settings", "Admin settings"],
-  ["/admin/ledger", "Transactions"],
-  // eco / items 14, 3 and 19. Named for what an admin came to look at, never for the
-  // mechanism — these strings are a browser tab, a bookmark, a history entry and the first
-  // thing a screen reader says on arrival, and this audience does not read "recurrence".
+  // Named for what an admin came to look at, never for the mechanism — this audience does not
+  // read "recurrence".
   ["/admin/schedules", "Repeating bookings"],
   ["/admin/schedules/:id", "Repeating booking"],
-  ["/admin/groups", "Member groups"],
+  ["/admin/settings", "Admin settings"],
+  ["/admin/webhooks", "Webhooks"],
+  /**
+   * The old paths. Still named, because they are still ROUTES — permanent redirects rather than
+   * deletions — and the title is set before the redirect resolves: a redirect renders for a
+   * tick, and the reconciliation reads every `path=` in the router without caring what it
+   * renders. Each is named for where it now leads.
+   */
+  ["/schedule", "Bookings"],
+  ["/court-code", "My Code"],
+  ["/reports", "Reports"],
+  ["/admin/ledger", "Transactions"],
+  ["/admin/biometric", "Members"],
+  ["/admin/devices", "Boards"],
+  ["/admin/doors", "Doors"],
+  ["/admin/doors/log", "Door log"],
+  ["/admin/doors/:id", "Door"],
+  ["/admin/doors/:id/card", "Door card"],
   /**
    * Development only — the route is registered behind `import.meta.env.DEV` and is not in the
    * production bundle. It is named here because the suite guard reconciles this table against

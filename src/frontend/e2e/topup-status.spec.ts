@@ -68,7 +68,7 @@ test("pressing Check again against a club that stops answering is not a dead end
   // What the member is left holding. Every one of these was absent in the measured run.
   await expect(page.getByRole("alert")).toContainText(/may be out of date|Nothing here cancels/);
   await expect(page.getByRole("button", { name: "Check again" })).toBeEnabled();
-  await expect(page.getByRole("button", { name: "View wallet" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "View wallet" })).toBeVisible();
   // The status that had already been read is still on screen rather than discarded.
   await expect(page.getByText("Pending")).toBeVisible();
   await expect(page.getByText("R500.00")).toBeVisible();

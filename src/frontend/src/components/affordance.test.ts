@@ -262,6 +262,8 @@ describe("the affordance every clickable surface shares", () => {
       // imported under the shim's name, `Slot.Root` is that button's `asChild` path (it
       // becomes the caller's own <a>/<Link>), and Radix's `Toolbar.Button` renders <button>.
       "UiButton", "Slot.Root", "Toolbar.Button",
+      // `ui/icon-button` renders exactly one `ui/button` with an accessible name (P2).
+      "IconButton",
     ]);
     const offenders: string[] = [];
     for (const file of sourceFiles(SRC)) {

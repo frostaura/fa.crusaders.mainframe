@@ -1,5 +1,7 @@
-import { Link } from "react-router-dom";
-import { Card } from "../components/Card";
+import { Card } from "../components/ui/card";
+import { PageHeader, PageShell } from "../components/ui/page-shell";
+import { TextLink } from "../components/ui/text-link";
+import { typography } from "../lib/typography";
 import { ILLUSTRATIONS } from "../components/onboarding/Illustrations";
 import { useDoorsFlag } from "../components/member-door/useMemberDoor";
 import { GUIDE_INTRO, GUIDE_TITLE, guideSteps } from "../lib/onboardingCopy";
@@ -50,21 +52,23 @@ export default function HowItWorksPage() {
   const steps = guideSteps({ doors });
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold tracking-tight">{GUIDE_TITLE}</h1>
-        <p className="mt-1 text-text-secondary">{GUIDE_INTRO}</p>
-      </header>
-
-      <ol className="space-y-4">
+    <PageShell width="narrow">
+      <PageHeader title={GUIDE_TITLE} description={GUIDE_INTRO} />
+      <ol className="flex flex-col gap-4">
         {steps.map((step, index) => {
           const Illustration = step.illustration ? ILLUSTRATIONS[step.illustration] : null;
           return (
             <li key={step.id}>
-              <Card className="space-y-3">
-                <h2 className="flex items-baseline gap-2 text-lg font-medium">
-                  <span aria-hidden="true" className="text-text-muted">{index + 1}.</span>
-                  {step.title}
+              <Card className="px-4 sm:px-6">
+                <h2 className={`${typography({ variant: "h3" })} flex items-start gap-3`}>
+                  {/* The step's number, as a badge — aria-hidden because the <ol> already says it. */}
+                  <span
+                    aria-hidden="true"
+                    className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-sm font-bold tabular-nums text-accent-strong"
+                  >
+                    {index + 1}
+                  </span>
+                  <span className="min-w-0 self-center break-words">{step.title}</span>
                 </h2>
                 {/*
                   The drawing sits BESIDE the sentences from `sm` up and above them on a phone,
@@ -72,11 +76,11 @@ export default function HowItWorksPage() {
                   below says the same thing in words.
                 */}
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-                  <div className="min-w-0 flex-1 space-y-2 text-sm text-text-secondary">
+                  <div className="flex min-w-0 flex-1 flex-col gap-2 text-sm text-text-secondary sm:pl-11">
                     {step.body.map((line) => <p key={line}>{line}</p>)}
                   </div>
                   {Illustration && (
-                    <div className="shrink-0 self-center sm:self-start">
+                    <div className="shrink-0 self-center text-text-secondary sm:self-start">
                       <Illustration />
                     </div>
                   )}
@@ -87,15 +91,11 @@ export default function HowItWorksPage() {
         })}
       </ol>
 
-      <p className="text-sm text-text-secondary">
-        <Link to="/schedule" className="text-accent-strong underline underline-offset-2 hover:no-underline">
-          Book a court
-        </Link>
-        {" · "}
-        <Link to="/my-code" className="text-accent-strong underline underline-offset-2 hover:no-underline">
-          Your code
-        </Link>
-      </p>
-    </div>
+      {/* Where a member goes next. Links, because both navigate. */}
+      <nav aria-label="Next steps" className="flex flex-wrap gap-x-6">
+        <TextLink to="/bookings" variant="standalone">Book a court</TextLink>
+        <TextLink to="/my-code" variant="standalone">Your code</TextLink>
+      </nav>
+    </PageShell>
   );
 }

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import Layout from "./Layout";
 import { AuthProvider } from "../lib/auth";
 import { BalanceProvider } from "../lib/balance";
@@ -9,14 +9,23 @@ import { ToastProvider } from "./Toast";
 import { memberFixture, signIn, signOut, stubFetch } from "../test/harness";
 
 /**
- * The app chrome, and the one thing it never said.
+ * The P2 app shell's navigation (Target IA → Shell; R15, R16).
  *
  * <p>
- * Spec §2.3 requires every tenant admin to be notified of a new membership application "email +
- * in-app". Only the email existed: an admin could sign in with somebody waiting to be approved
- * and find no badge, no count and nothing in the menu — the sole cue in the whole product was a
- * line INSIDE /admin/members, which you have to already suspect something to go and read. An
- * application could sit for days behind an email nobody opened.
+ * One `<nav aria-label="Main">`: My Code · Bookings · Wallet, and Admin for admins. It is the
+ * desktop top bar's tabs from `md` and the phone's fixed bottom tab bar below it — the same DOM,
+ * restyled — so what is held here is the list, its order, which one is current, the Admin tab's
+ * attention badge, and the bottom bar's decisions (fixed, safe-area aware, publishing its height).
+ * jsdom applies no Tailwind and lays nothing out, so geometry is measured by
+ * `e2e/app-chrome.spec.ts` and `e2e/narrow-viewport.spec.ts`.
+ * </p>
+ *
+ * <p>
+ * Retired here (R16): the two copies of the section tabs and their paired assertions, the
+ * Members / Monitoring / Transactions / Reports tabs, and the gear menu. Everything the gear held
+ * and every admin tab is one Admin tab now, whose single badge counts pending applications +
+ * doors needing attention + open faults (`lib/adminAttention.ts`). The accessible-sentence rule
+ * the old badges carried is kept: the digits are decoration, the sentence is the name.
  * </p>
  */
 
@@ -25,33 +34,30 @@ const PROFILE = {
   full_name: "Club Desk", membership_number: "M-1", photo_url: null, status: "active",
 };
 
-const WALLET = { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 100 };
+const WALLET = { balance_credits: 120, entries: [], total_entries: 0, offset: 0, limit: 100 };
 
 beforeEach(() => {
-  // jsdom has no EventSource; BalanceProvider opens one as soon as a session exists.
   vi.stubGlobal("EventSource", class { close() {} addEventListener() {} } as unknown as typeof EventSource);
 });
 
-afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+afterEach(() => {
+  vi.unstubAllGlobals();
+  signOut();
+  document.documentElement.style.removeProperty("--app-bottom-bar-height");
+});
 
-function renderChrome() {
+function renderShell(route: string) {
   return render(
-    <MemoryRouter initialEntries={["/schedule"]}>
+    <MemoryRouter initialEntries={[route]}>
       <AuthProvider>
         <ProfileProvider>
           <BalanceProvider>
-            {/*
-              The chrome needs a `ToastProvider` now, and that is the wallet chip's doing.
-
-              An admin topping a member up reaches that member's phone over the stream, and a
-              number silently changing in a header corner is not an announcement — a NavLink's
-              `aria-label` changing is not inside a live region and no screen reader reads it.
-              The chip raises exactly one toast for a movement it did not cause, so the toast
-              is the accessibility requirement rather than decoration, and the provider is a
-              real dependency of the header rather than test scaffolding.
-            */}
             <ToastProvider>
-              <Layout />
+              <Routes>
+                <Route element={<Layout />}>
+                  <Route path="*" element={<h1>the page</h1>} />
+                </Route>
+              </Routes>
             </ToastProvider>
           </BalanceProvider>
         </ProfileProvider>
@@ -60,106 +66,220 @@ function renderChrome() {
   );
 }
 
-describe("the in-app half of the new-application notification", () => {
-  it("puts the count of waiting applications on the admin's Members tab", async () => {
-    const whoami = { ...signIn({ isAdmin: true }), user_id: "u1" };
-    stubFetch([
-      { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/me/profile", body: PROFILE },
-      { path: "/api/v1/wallet", body: WALLET },
-      { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
-      { path: "/api/v1/admin/members", body: [memberFixture({ status: "PendingApproval", email_verified: false })] },
+function adminClub(extra: Parameters<typeof stubFetch>[0] = []) {
+  const whoami = { ...signIn({ isAdmin: true }), user_id: "u1" };
+  const base: Parameters<typeof stubFetch>[0] = [
+    { path: "/api/v1/whoami", body: whoami },
+    { path: "/api/v1/me/profile", body: PROFILE },
+    { path: "/api/v1/wallet", body: WALLET },
+    { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
+    { path: "/api/v1/admin/members", body: [] },
+    { path: "/api/v1/admin/monitoring/summary", body: { open: {} } },
+  ];
+  // An extra route REPLACES the base one with its path: the stub breaks a longest-prefix tie by
+  // declaration order, so an appended duplicate would never be reached — a silent pass.
+  return stubFetch([...base.filter((r) => !extra.some((x) => x.path === r.path)), ...extra]);
+}
+
+function memberClub() {
+  const whoami = { ...signIn({ isAdmin: false }), user_id: "u2", is_admin: false };
+  return stubFetch([
+    { path: "/api/v1/whoami", body: whoami },
+    { path: "/api/v1/me/profile", body: { ...PROFILE, is_admin: false } },
+    { path: "/api/v1/wallet", body: WALLET },
+    { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
+  ]);
+}
+
+const mainNav = () => screen.getByRole("navigation", { name: "Main" });
+
+describe("the primary navigation", () => {
+  it("offers a member My Code, Bookings and Wallet, in that order (R15)", async () => {
+    memberClub();
+    renderShell("/bookings");
+
+    const nav = await screen.findByRole("navigation", { name: "Main" });
+    const links = within(nav).getAllByRole("link");
+    expect(links.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+      ["My Code", "/my-code"],
+      ["Bookings", "/bookings"],
+      ["Wallet", "/wallet"],
     ]);
+  });
 
-    renderChrome();
+  it("adds exactly one Admin tab for an admin, last (R16)", async () => {
+    adminClub();
+    renderShell("/my-code");
 
-    // Twice over, deliberately: the chrome carries a desktop nav and a mobile one, and an admin
-    // on a phone is exactly who is standing at the club desk.
-    const badges = await screen.findAllByLabelText("1 membership application awaiting review");
-    expect(badges).toHaveLength(2);
-    // The number alone is meaningless beside the word "Members", so the sentence is the
-    // accessible name and the digit is the decoration.
-    expect(badges[0]).toHaveTextContent("1");
+    await waitFor(() => expect(within(mainNav()).getAllByRole("link")).toHaveLength(4));
+    const admin = within(mainNav()).getAllByRole("link")[3];
+    expect(admin).toHaveAttribute("href", "/admin");
+    expect(admin).toHaveTextContent(/^Admin/);
+    // One nav, not the inline + strip pair the old chrome drew.
+    expect(screen.getAllByRole("navigation")).toHaveLength(1);
+  });
+
+  it("marks the current destination, and only it, for every page under it", async () => {
+    adminClub();
+    renderShell("/admin/monitoring/doors");
+
+    await waitFor(() => expect(within(mainNav()).getAllByRole("link")).toHaveLength(4));
+    const current = within(mainNav()).getAllByRole("link").filter((a) => a.getAttribute("aria-current") === "page");
+    expect(current).toHaveLength(1);
+    expect(current[0]).toHaveAttribute("href", "/admin");
+  });
+
+  it("marks Wallet current on the wallet's own sub-pages too", async () => {
+    memberClub();
+    renderShell("/wallet/activity");
+
+    const wallet = await within(await screen.findByRole("navigation", { name: "Main" })).findByRole("link", { name: "Wallet" });
+    expect(wallet).toHaveAttribute("aria-current", "page");
   });
 
   /**
-   * The header row, at the width where an admin has five tabs in it.
-   *
-   * <p>
-   * The inline nav switched on at <code>md</code> (768) and the row needs 800. Measured in
-   * Chromium against a live stack, signed in as the seeded admin: on <b>all ten</b> routes
-   * <code>document.documentElement.scrollWidth</code> was 795 against a 768px viewport, and
-   * the gear button — <code>aria-label="Open menu"</code>, the only route to Sign out —
-   * ran from x=751 to x=795, so 27 of its 44 pixels were past the right edge. A member,
-   * with three tabs, was clean at every width, which is why it survived.
-   * </p>
-   *
-   * <p>
-   * Between 768 and 1023 the scrolling tab strip takes over: the same nav, announcing its
-   * own overflow, which is what a phone already gets. jsdom applies no Tailwind and
-   * computes no layout, so what this holds is the breakpoint decision; the pixels are
-   * re-measured in a browser.
-   * </p>
+   * R16 — the gear is gone. It was the only route to Settings, Webhooks and Sign out; the first
+   * two are Admin destinations now and Sign out is in the account menu.
    */
-  it("does not put the admin's five tabs in a header row that cannot hold them", async () => {
-    const whoami = { ...signIn({ isAdmin: true }), user_id: "u1" };
-    stubFetch([
-      { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/me/profile", body: PROFILE },
-      { path: "/api/v1/wallet", body: WALLET },
-      { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
-      { path: "/api/v1/admin/members", body: [] },
-    ]);
-
-    renderChrome();
-    await screen.findAllByRole("link", { name: "Bookings" });
-
-    // The inline nav is off until `lg`, and the strip is on until `lg`. They are two halves
-    // of one decision, so both are asserted — a mismatch shows both at once or neither.
-    const inline = document.querySelector("header nav:not([aria-label])")!;
-    expect(inline.className).toContain("hidden");
-    expect(inline.className).toContain("lg:flex");
-    expect(inline.className).not.toContain("md:flex");
-
-    const strip = document.querySelector('header nav[aria-label="Sections"]')!;
-    expect(strip.className).toContain("lg:hidden");
-    expect(strip.className).not.toContain("md:hidden");
-
-    // And the cluster holding the gear cannot end up under the right edge, which is what
-    // put it there in the first place.
-    //
-    // This asserted `shrink-0` on the cluster, and `shrink-0` was the wrong instrument —
-    // see the comment on the cluster in `Layout.tsx`. It stopped the nav squeezing the
-    // cluster and, at the same time, stopped the cluster from ever being given a width
-    // narrow enough to wrap within: measured in Chromium at a 180 px CSS viewport (a 360 px
-    // phone at 200 % zoom) the cluster held one 167 px line inside a 148 px box and the gear
-    // went off the edge anyway. What holds the rule now is that the ROW wraps — a cluster
-    // that does not fit beside the nav takes a line of its own at full width — and that the
-    // cluster wraps inside itself, so the gear moves down rather than out.
-    const gear = screen.getByRole("button", { name: "Open menu" });
-    const cluster = gear.parentElement!.parentElement!;
-    expect(cluster.className).toContain("flex-wrap");
-    expect(cluster.className).toContain("min-w-0");
-    expect(cluster.parentElement!.className).toContain("flex-wrap");
-    // A fixed height cannot hold a row that has been allowed to wrap: it would clip the
-    // second line instead of growing to it.
-    expect(cluster.parentElement!.className).not.toMatch(/\bh-14\b/);
-  });
-
-  it("asks for nothing, and shows nothing, for a member who is not an admin", async () => {
-    const whoami = { ...signIn({ isAdmin: false }), user_id: "u2", is_admin: false };
-    const stub = stubFetch([
-      { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/me/profile", body: { ...PROFILE, is_admin: false } },
-      { path: "/api/v1/wallet", body: WALLET },
-      { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
-    ]);
-
-    renderChrome();
-
-    await screen.findAllByRole("link", { name: "Bookings" });
-    await waitFor(() => expect(stub.calls.some((c) => c.path.startsWith("/api/v1/me/profile"))).toBe(true));
-    expect(stub.calls.some((c) => c.path.startsWith("/api/v1/admin/members"))).toBe(false);
-    expect(screen.queryByLabelText(/awaiting review/)).not.toBeInTheDocument();
+  it("has no gear menu", async () => {
+    adminClub();
+    renderShell("/my-code");
+    await screen.findByRole("button", { name: "Account menu" });
+    expect(screen.queryByRole("button", { name: /Open menu/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Admin settings/ })).toBeNull();
   });
 });
+
+describe("the Admin tab's attention badge", () => {
+  it("counts waiting applications, and its name is the sentence rather than the digit", async () => {
+    adminClub([{ path: "/api/v1/admin/members", body: [memberFixture({ status: "PendingApproval", email_verified: false })] }]);
+    renderShell("/my-code");
+
+    const badge = await screen.findByLabelText("1 membership application awaiting review");
+    expect(badge).toHaveTextContent("1");
+    // It is ON the Admin tab — one badge, not one per copy of the nav.
+    expect(badge.closest("a")).toHaveAttribute("href", "/admin");
+    expect(screen.getAllByLabelText(/awaiting review/)).toHaveLength(1);
+  });
+
+  it("adds the open faults to the same count and the same sentence", async () => {
+    adminClub([
+      { path: "/api/v1/admin/members", body: [memberFixture({ status: "PendingApproval", email_verified: false })] },
+      { path: "/api/v1/admin/monitoring/summary", body: { open: { warning: 2, info: 5 } } },
+    ]);
+    renderShell("/my-code");
+
+    // Info (a board's boot record) is not counted — a badge that fires on every restart is one
+    // an admin learns to ignore.
+    const badge = await screen.findByLabelText("1 membership application awaiting review and 2 faults need attention");
+    expect(badge).toHaveTextContent("3");
+  });
+
+  it("renders nothing at zero", async () => {
+    const stub = adminClub();
+    renderShell("/my-code");
+    await waitFor(() => expect(stub.calls.some((c) => c.path.startsWith("/api/v1/admin/members"))).toBe(true));
+    expect(document.querySelector("[data-attention-badge]")).toBeNull();
+  });
+
+  it("asks for nothing, and shows nothing, for a member", async () => {
+    const stub = memberClub();
+    renderShell("/my-code");
+
+    await screen.findByRole("navigation", { name: "Main" });
+    await waitFor(() => expect(stub.calls.some((c) => c.path.startsWith("/api/v1/me/profile"))).toBe(true));
+    expect(stub.calls.some((c) => c.path.startsWith("/api/v1/admin/"))).toBe(false);
+    expect(screen.queryByLabelText(/awaiting review|need attention/)).not.toBeInTheDocument();
+  });
+});
+
+describe("the phone's bottom tab bar", () => {
+  /** The decision, as classes: fixed to the bottom below `md`, inline in the top bar from it. */
+  it("is fixed to the bottom edge on a phone and inline from md", async () => {
+    memberClub();
+    renderShell("/my-code");
+    const nav = await screen.findByRole("navigation", { name: "Main" });
+
+    for (const token of ["fixed", "bottom-0", "inset-x-0", "md:static"]) expect(nav.className).toContain(token);
+    // The home indicator's inset is a spacer inside the bar (`height: env(safe-area-inset-bottom)`
+    // — jsdom drops `env()` as invalid, so the value itself is measured in the browser), so the
+    // published height already includes it.
+    const spacer = nav.lastElementChild as HTMLElement;
+    expect(spacer).toHaveAttribute("aria-hidden", "true");
+    expect(spacer.className).toContain("md:hidden");
+    // Every tab is a 64px target on the phone and 44px in the top bar — never a 36px one.
+    for (const link of within(nav).getAllByRole("link")) {
+      expect(link.className).toContain("min-h-tabbar");
+      expect(link.className).toContain("md:min-h-touch");
+    }
+  });
+
+  it("keeps the page's last line above it", async () => {
+    memberClub();
+    renderShell("/my-code");
+    await screen.findByRole("navigation", { name: "Main" });
+    expect(document.querySelector("main")!.getAttribute("style")).toContain("var(--app-bottom-bar-height");
+  });
+
+  /**
+   * The toast strip and the multiselect ActionBar read `--app-bottom-bar-height`. It is the bar's
+   * measured height while the bar is fixed, and 0 while it sits in the top bar — so a toast on a
+   * desktop does not float 88px above nothing.
+   */
+  it("publishes its height while it is a bottom bar, and zero while it is not", async () => {
+    memberClub();
+    renderShell("/my-code");
+    const nav = await screen.findByRole("navigation", { name: "Main" });
+    const root = document.documentElement;
+
+    expect(root.style.getPropertyValue("--app-bottom-bar-height")).toBe("0px");
+
+    nav.style.position = "fixed";
+    nav.getBoundingClientRect = () => ({ height: 88.4 } as DOMRect);
+    act(() => { window.dispatchEvent(new Event("resize")); });
+    expect(root.style.getPropertyValue("--app-bottom-bar-height")).toBe("88px");
+
+    nav.style.position = "static";
+    act(() => { window.dispatchEvent(new Event("resize")); });
+    expect(root.style.getPropertyValue("--app-bottom-bar-height")).toBe("0px");
+  });
+});
+
+describe("a page that fails to render", () => {
+  /**
+   * Without a boundary one bad row on one screen unmounted the whole tree: a blank document with
+   * no tab bar and no way anywhere. Now the page takes only itself down, the chrome stays, and
+   * leaving the page clears it.
+   */
+  it("takes only itself down, and leaving it clears the failure", async () => {
+    memberClub();
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    function Broken(): never { throw new Error("bad row"); }
+    render(
+      <MemoryRouter initialEntries={["/wallet"]}>
+        <AuthProvider>
+          <ProfileProvider>
+            <BalanceProvider>
+              <ToastProvider>
+                <Routes>
+                  <Route element={<Layout />}>
+                    <Route path="/wallet" element={<Broken />} />
+                    <Route path="/bookings" element={<h1>Bookings page</h1>} />
+                  </Route>
+                </Routes>
+              </ToastProvider>
+            </BalanceProvider>
+          </ProfileProvider>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "This page hit a problem" })).toBeInTheDocument();
+    const nav = screen.getByRole("navigation", { name: "Main" });
+    act(() => { within(nav).getByRole("link", { name: "Bookings" }).click(); });
+    expect(await screen.findByRole("heading", { name: "Bookings page" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "This page hit a problem" })).toBeNull();
+    quiet.mockRestore();
+  });
+});
+

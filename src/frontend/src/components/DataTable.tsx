@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Inbox, Search } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Input } from "./Button";
+import { Skeleton } from "./ui/skeleton";
 
 export type DataColumn<T> = {
   key: string;
@@ -89,8 +90,10 @@ export function DataTable<T>({
         </div>
       )}
 
-      {sorted.length === 0 ? (
-        <EmptyState loading={!!loading} hasFilter={hasFilter} title={emptyTitle} hint={emptyHint} />
+      {sorted.length === 0 && loading ? (
+        <TableSkeleton />
+      ) : sorted.length === 0 ? (
+        <EmptyState hasFilter={hasFilter} title={emptyTitle} hint={emptyHint} />
       ) : (
         <div
           className="overflow-auto rounded-lg border border-border"
@@ -152,14 +155,24 @@ export function DataTable<T>({
   );
 }
 
-function EmptyState({ loading, hasFilter, title, hint }: { loading: boolean; hasFilter: boolean; title: string; hint?: string }) {
+/** The table's shape while its first read is out — never "Loading…" on its own (R12). */
+function TableSkeleton() {
+  return (
+    <div aria-busy="true" className="flex flex-col gap-3 rounded-lg border border-border bg-bg-surface p-4">
+      <span role="status" className="sr-only">Reading…</span>
+      {Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-6 w-full" />)}
+    </div>
+  );
+}
+
+function EmptyState({ hasFilter, title, hint }: { hasFilter: boolean; title: string; hint?: string }) {
   return (
     <div className="border border-dashed border-border rounded-lg py-12 flex flex-col items-center justify-center gap-2 text-center bg-bg-surface">
       <Inbox size={26} className="text-text-muted" />
       <p className="text-sm text-text-secondary">
-        {loading ? "Loading…" : hasFilter ? "No matches for that search." : title}
+        {hasFilter ? "No matches for that search." : title}
       </p>
-      {!loading && hint && <p className="text-xs text-text-muted">{hasFilter ? "Try clearing the search." : hint}</p>}
+      {hint && <p className="text-xs text-text-muted">{hasFilter ? "Try clearing the search." : hint}</p>}
     </div>
   );
 }

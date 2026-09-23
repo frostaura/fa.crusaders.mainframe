@@ -2,6 +2,7 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 import AdminLedgerPage from "./AdminLedger";
+import { LEDGER_TYPE_LABEL } from "../lib/creditAdjustment";
 import { ledgerRowFixture, renderPage, signIn, signOut, stubFetch } from "../test/harness";
 
 /**
@@ -68,8 +69,13 @@ describe("Admin ledger — an empty date is unbounded, not malformed", () => {
     await vi.waitFor(() => expect(screen.queryByText("Desk credit")).not.toBeInTheDocument());
     expect(screen.queryByText("Booking charge")).not.toBeInTheDocument();
     expect(stub.calls.filter((c) => c.path.startsWith("/api/v1/admin/ledger")).length).toBeGreaterThan(0);
-    // And the member is told, in a sentence that says what to do about it.
-    expect(await screen.findByText(/Couldn't load those movements — check the dates and try again\./)).toBeInTheDocument();
+    // And the admin is told ON THE PAGE, where the table was, in a sentence that says what to
+    // do about it — with a retry. (It was a toast, which floats away and leaves an empty table
+    // reading "no movements"; R12 — a failed read shows retry.)
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/Check the dates and try again\./);
+    expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument();
+    expect(screen.queryByText("No movements match these filters.")).not.toBeInTheDocument();
   });
 });
 
@@ -140,7 +146,7 @@ describe("Admin ledger — the filters are the URL", () => {
     const stub = renderAt("/admin/ledger?from=2026-01-01&to=2026-01-31");
     await vi.waitFor(() => expect(ledgerCalls(stub).length).toBeGreaterThan(0));
 
-    fireEvent.change(screen.getByLabelText("Type"), { target: { value: "TopUp" } });
+    pickType(LEDGER_TYPE_LABEL.TopUp);
     await vi.waitFor(() => expect(search()).toContain("type=TopUp"));
 
     fireEvent.change(screen.getByLabelText("Search (name)"), { target: { value: "Naledi" } });
@@ -148,7 +154,7 @@ describe("Admin ledger — the filters are the URL", () => {
 
     // Cleared is cleared: the key goes rather than sitting there empty, which would read
     // back as "unset" and silently restore a default.
-    fireEvent.change(screen.getByLabelText("Type"), { target: { value: "" } });
+    pickType("All types");
     await vi.waitFor(() => expect(search()).not.toContain("type="));
   });
 
@@ -281,6 +287,15 @@ describe("Admin ledger — the totals are signed by their value, not by their la
     expect(tiles().find((t) => t.text === "−1250.00 cr")!.cls).toMatch(/text-warning-strong/);
   });
 });
+
+/**
+ * Choose a ledger type the way an admin does: open the design-system Select (a Radix combobox,
+ * R7 — it was a raw `<select>`) and press the option by its NAME, never the enum.
+ */
+function pickType(label: string) {
+  fireEvent.pointerDown(screen.getByRole("combobox", { name: "Type" }), { button: 0, ctrlKey: false, pointerType: "mouse" });
+  fireEvent.click(screen.getByRole("option", { name: label }));
+}
 
 function SearchProbe() {
   return <span data-testid="router-search">{useLocation().search}</span>;

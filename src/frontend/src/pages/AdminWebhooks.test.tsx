@@ -18,7 +18,7 @@ function csSources(dir: string): string[] {
   });
 }
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import AdminWebhooksPage from "./AdminWebhooks";
 import { renderPage, stubFetch, type StubRoute } from "../test/harness";
 
@@ -97,11 +97,17 @@ describe("AdminWebhooks", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Deliveries" }));
 
-    expect(await screen.findByText("booking.created")).toBeInTheDocument();
-    expect(screen.getByText("2ms")).toBeInTheDocument();
-    expect(screen.getByText("3")).toBeInTheDocument();
+    // Waited for on the DELIVERIES region itself. `findByText("booking.created")` alone could
+    // resolve on the event catalogue further down the page — which names the same event —
+    // before the deliveries had rendered, and the synchronous reads after it then ran against a
+    // table that was not there yet: an intermittent failure. The region only exists once the
+    // attempts have been read, so everything below is read inside it.
+    const deliveries = within(await screen.findByRole("region", { name: "Recent deliveries" }));
+    expect(deliveries.getByText("booking.created")).toBeInTheDocument();
+    expect(deliveries.getByText("2ms")).toBeInTheDocument();
+    expect(deliveries.getByText("3")).toBeInTheDocument();
     // The state stands in for the status code while there is no response yet.
-    expect(screen.getByText("pending")).toBeInTheDocument();
+    expect(deliveries.getByText("pending")).toBeInTheDocument();
 
     expect(screen.queryByText("Invalid Date")).not.toBeInTheDocument();
     expect(screen.queryByText("undefinedms")).not.toBeInTheDocument();

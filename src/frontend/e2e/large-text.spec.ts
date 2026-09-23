@@ -27,7 +27,7 @@ import { serveApi, signIn, SESSION_ADMIN } from "./fixtures";
 
 const ADMIN_ROUTES: Array<[string, string]> = [
   ["/admin/monitoring/doors", "Doors"],
-  ["/admin/monitoring/devices", "Devices"],
+  ["/admin/monitoring/devices", "Boards"], // R11 — the page is titled after the rail
 ];
 
 const MEMBER_ROUTES: Array<[string, string]> = [
@@ -71,7 +71,16 @@ function routes(isAdmin: boolean) {
     { path: "/api/v1/admin/devices/api-key", body: { api_key: "k", created_at: new Date().toISOString() } },
     { path: "/api/v1/admin/devices/", body: [] },
     { path: "/api/v1/admin/courts/", body: [] },
-    { path: "/api/v1/admin/settings/", body: {} },
+    // Thin, but the shape the API always sends: the Boards page reads `button_map` and
+    // `walk_up_max_minutes` off it, and an empty object threw inside the page. Since P2 a page
+    // that throws renders the error boundary's own h1, so that stopped being invisible.
+    {
+      path: "/api/v1/admin/settings/",
+      body: {
+        timezone: "Africa/Johannesburg", walk_up_max_minutes: 60,
+        button_map: ["court:A", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "off"],
+      },
+    },
   ];
 }
 

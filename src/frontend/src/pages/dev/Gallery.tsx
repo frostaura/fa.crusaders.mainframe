@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Desktop, Moon, Sun, type Icon } from "@/components/ui/icons";
-import { PageHeader, Section } from "@/components/ui/page-shell";
+import { PageHeader, PageShell, Section } from "@/components/ui/page-shell";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { applyTheme, useTheme } from "@/lib/theme";
 import type { ThemeName } from "@/lib/tokens";
@@ -148,7 +148,9 @@ export default function Gallery() {
   const setPageTheme = (next: PageTheme) => setParams((previous) => withTheme(previous, next), { replace: true });
   const visible = current ? [current] : SECTIONS;
   return (
-    <div data-gallery="" className="flex min-w-0 flex-col gap-6">
+    // `wide`: two theme panels side by side beside an index need the admin width; in the member
+    // frame the pass card overflowed its panel at 1280px (axe: scrollable-region-focusable).
+    <PageShell width="wide" data-gallery="" className="gap-6">
       <PageTheme theme={theme} />
       <PageHeader
         title="Primitives"
@@ -161,6 +163,6 @@ export default function Gallery() {
           {visible.map((entry) => <GallerySection key={entry.id} entry={entry} />)}
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

@@ -49,7 +49,7 @@ afterEach(cleanup);
 describe("the standing line's offer of a court", () => {
   it("is drawn when nothing above it is offering the same act", () => {
     line(false);
-    expect(screen.getByRole("link", { name: "Book a court" })).toHaveAttribute("href", "/schedule");
+    expect(screen.getByRole("link", { name: "Book a court" })).toHaveAttribute("href", "/bookings") // R15: Bookings lives at /bookings;
   });
 
   /**

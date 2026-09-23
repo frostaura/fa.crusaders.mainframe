@@ -66,20 +66,22 @@ test("the outage screen's retry says it is working, and comes back so it can be 
   const before = held.length;
   await retry.click();
 
-  // Pressed: disabled, relabelled, announced busy. The finding measured one unchanging button
-  // for 25.3 seconds — a member presses the only control they are given, nothing happens, so
-  // they press it again.
-  const busy = page.getByRole("button", { name: /Trying…/ });
-  await expect(busy).toBeVisible();
-  await expect(busy).toBeDisabled();
-  await expect(busy).toHaveAttribute("aria-busy", "true");
+  // Pressed: announced busy, marked unavailable, spinner showing. The finding measured one
+  // unchanging button for 25.3 seconds — a member presses the only control they are given,
+  // nothing happens, so they press it again. R12 (P2) moved it onto the house pending posture,
+  // which retires the "Trying…" relabel and the `disabled` attribute: the label stays so the
+  // width does not jump, and `aria-disabled` rather than `disabled` keeps focus on the button.
+  await expect(retry).toHaveAttribute("aria-busy", "true");
+  await expect(retry).toHaveAttribute("aria-disabled", "true");
+  await expect(retry.locator('[data-slot="spinner"]')).toBeVisible();
 
   // And it STAYS busy while the probe is in flight. This is the half that catches
-  // `retryConnection` going back to fire-and-forget: the button would flick back to
-  // "Try again now" a microtask after the press, which reads exactly like the ignored
-  // button the pending state exists to replace.
+  // `retryConnection` going back to fire-and-forget: the button would flick back to its
+  // resting state a microtask after the press, which reads exactly like the ignored button the
+  // pending state exists to replace.
   await page.waitForTimeout(3_000);
-  await expect(page.getByRole("button", { name: /Trying…/ })).toBeDisabled();
+  await expect(retry).toHaveAttribute("aria-busy", "true");
+  await expect(retry).toBeDisabled();
 
   // The retry reached the network rather than being a local spinner over nothing.
   expect(held.length).toBeGreaterThan(before);

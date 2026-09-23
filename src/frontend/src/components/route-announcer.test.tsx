@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { RouteAnnouncer } from "./RouteAnnouncer";
-import { NOT_FOUND_PAGE_NAME, routePageName, routeTitle } from "../lib/routeAnnouncer";
+import { NOT_FOUND_PAGE_NAME, knownRoutePatterns, routePageName, routeTitle } from "../lib/routeAnnouncer";
 
 const SRC = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -56,6 +56,29 @@ describe("per-route document titles", () => {
     }
   });
 
+  /**
+   * And the other direction: a name for a route the router no longer declares is a stale row
+   * that makes a moved URL look handled. P2 renamed half the map (/schedule → /bookings,
+   * /admin/ledger → /admin/transactions, /reports split); every old path is still DECLARED — as
+   * a permanent redirect — and so still named.
+   */
+  it("names nothing the router does not declare", () => {
+    const app = readFileSync(join(SRC, "App.tsx"), "utf8");
+    const declared = new Set([...app.matchAll(/<Route\s+path="([^"]+)"/g)].map((m) => m[1]));
+    const stale = knownRoutePatterns().filter((pattern) => !declared.has(pattern));
+    expect(stale, "titles for routes App.tsx does not declare").toEqual([]);
+  });
+
+  it("names the new map for what each page is", () => {
+    expect(routeTitle("/my-code")).toBe("My Code — Crusaders Mainframe");
+    expect(routeTitle("/bookings")).toBe("Bookings — Crusaders Mainframe");
+    expect(routeTitle("/admin")).toBe("Admin overview — Crusaders Mainframe");
+    expect(routeTitle("/admin/transactions")).toBe("Transactions — Crusaders Mainframe");
+    expect(routeTitle("/admin/reports")).toBe("Club reports — Crusaders Mainframe");
+    expect(routeTitle("/wallet/activity")).toBe("Wallet activity — Crusaders Mainframe");
+    expect(routeTitle("/admin/monitoring/devices")).toBe("Boards — Crusaders Mainframe");
+  });
+
   it("puts the page first and the product second, and names an unknown path honestly", () => {
     expect(routeTitle("/admin/doors")).toBe("Doors — Crusaders Mainframe");
     // Declaration order is documentation; specificity is what decides. `/admin/doors/log`
@@ -70,7 +93,7 @@ describe("per-route document titles", () => {
 describe("RouteAnnouncer", () => {
   it("titles the document on the first paint without announcing or grabbing focus", () => {
     render(
-      <MemoryRouter initialEntries={["/schedule"]}>
+      <MemoryRouter initialEntries={["/bookings"]}>
         <RouteAnnouncer />
         <Page title="Bookings" />
       </MemoryRouter>,
@@ -86,11 +109,11 @@ describe("RouteAnnouncer", () => {
 
   it("retitles, announces and moves focus to the page heading on a route change", async () => {
     render(
-      <MemoryRouter initialEntries={["/schedule"]}>
+      <MemoryRouter initialEntries={["/bookings"]}>
         <RouteAnnouncer />
         <Nav to="/admin/doors" />
         <Routes>
-          <Route path="/schedule" element={<Page title="Bookings" />} />
+          <Route path="/bookings" element={<Page title="Bookings" />} />
           <Route path="/admin/doors" element={<Page title="Doors" />} />
         </Routes>
       </MemoryRouter>,
@@ -268,7 +291,7 @@ describe("RouteAnnouncer", () => {
    */
   it("is one polite region and not a landmark", () => {
     render(
-      <MemoryRouter initialEntries={["/schedule"]}>
+      <MemoryRouter initialEntries={["/bookings"]}>
         <RouteAnnouncer />
         <Page title="Bookings" />
       </MemoryRouter>,

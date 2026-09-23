@@ -1,5 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { screen, waitFor } from "@testing-library/react";
 import { walletLabel } from "../lib/balance";
+import { CreditsChip } from "./shell/CreditsChip";
+import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
 import { resetClubCurrencySymbol, setClubCurrencySymbol } from "../lib/currency";
 
 afterEach(resetClubCurrencySymbol);
@@ -127,5 +130,48 @@ describe("the wallet chip says the balance out loud", () => {
     // Additive: a dozen call sites and this file's own tests pass two arguments, and the
     // honesty suffix defaults to saying nothing.
     expect(walletLabel(472, false)).toBe("Wallet balance 472.00 credits. Tap to top up.");
+  });
+});
+
+/**
+ * The chip itself (P2 rebuilt it as `shell/CreditsChip` on the design tokens). The label above
+ * is only worth anything if the chip actually wears it, goes where it says, and shows the figure
+ * whole.
+ */
+describe("the credits chip in the top bar", () => {
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  function renderChip(balance: number) {
+    const whoami = signIn({ isAdmin: false });
+    stubFetch([
+      { path: "/api/v1/whoami", body: whoami },
+      { path: "/api/v1/wallet", body: { balance_credits: balance, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
+    ]);
+    return renderPage(<CreditsChip />);
+  }
+
+  it("wears the spoken balance as its name and shows the figure whole", async () => {
+    renderChip(472);
+    const chip = await screen.findByRole("link", { name: /472\.00 credits/ }, { timeout: 5_000 });
+    expect(chip).toHaveAttribute("href", "/wallet");
+    // The figure is decoration for the name, and it is never cut short.
+    await waitFor(() => expect(chip).toHaveTextContent("472.00 cr"));
+    expect(chip.querySelector("span[aria-hidden]")!.className).not.toContain("truncate");
+  });
+
+  it("goes straight to top-up when there is nothing in the wallet", async () => {
+    renderChip(0);
+    const chip = await screen.findByRole("link", { name: /can't book until you top up/i }, { timeout: 5_000 });
+    expect(chip).toHaveAttribute("href", "/wallet/topup");
+    // Empty is a colour of its own — not the amber of "running low".
+    expect(chip.className).toContain("bg-danger-soft");
+    expect(chip.className).not.toContain("bg-warning-soft");
+  });
+
+  it("is amber, and says so, when running low", async () => {
+    renderChip(12.5);
+    const chip = await screen.findByRole("link", { name: /running low/i }, { timeout: 5_000 });
+    expect(chip.className).toContain("bg-warning-soft");
   });
 });

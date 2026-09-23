@@ -256,7 +256,7 @@ describe("Login — a 403 is two different problems", () => {
 });
 
 describe("Login — the page you actually asked for", () => {
-  it("returns to the deep link RequireAuth captured, not /schedule", async () => {
+  it("returns to the deep link RequireAuth captured, not the default landing", async () => {
     stubFetch([
       { method: "POST", path: "/api/v1/auth/login", body: { access_token: "t", user_id: "u1", is_admin: false } },
     ]);
@@ -274,7 +274,8 @@ describe("Login — the page you actually asked for", () => {
     renderAt(<LoginPage />, [{ pathname: "/login", state: { from: { pathname: "//evil.example.com" } } }]);
     await signInAs("member@club.test", "Password123!");
 
-    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/schedule"));
+    // R15 — the default landing moved from /schedule to /my-code.
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/my-code"));
   });
 });
 
@@ -805,7 +806,9 @@ describe("an admin reset lands on a session that is already open", () => {
 
     render(<App />);
 
-    await screen.findByText(/Wallet/i);
+    // The wallet page's own heading (R11: every page has one h1 in its PageHeader) — "Wallet"
+    // as bare text now also appears in its failure sentence and the chrome.
+    await screen.findByRole("heading", { level: 1, name: "Wallet" });
     await new Promise((r) => setTimeout(r, 40));
     expect(window.location.pathname).toBe("/wallet");
   });

@@ -1,9 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { Alert } from "../../components/Alert";
-import { Button } from "../../components/Button";
-import { MonitoringNav } from "../../components/monitoring/MonitoringSection";
+import { Button } from "../../components/ui/button";
+import { InfoPopover } from "../../components/ui/info-popover";
+import { PageHeader, PageShell } from "../../components/ui/page-shell";
+import { RefreshButton } from "../../components/ui/refresh-button";
+import { StateBlock } from "../../components/ui/state-block";
+import { Switch } from "../../components/ui/switch";
+import { Prohibit, Racquet } from "../../components/ui/icons";
 import { CourtTile } from "../../components/monitoring/CourtTile";
-import { StateBlock } from "../../components/StateBlock";
+import { TileGridSkeleton } from "../../components/monitoring/parts";
+import { useAsyncAction } from "../../lib/useAsyncAction";
+import { cn } from "../../lib/utils";
 import { useControlBoard } from "../../lib/useControlBoard";
 import { useTicker } from "../../lib/useTicker";
 import { clubClock } from "../../lib/clubClock";
@@ -12,7 +19,7 @@ import { type ControlBoardCourt } from "../../lib/adminApi";
 import {
   BOARD_EMPTY_HINT, BOARD_EMPTY_NOTICE, BOARD_NO_REMOTE_CONTROL, BOARD_STANDING_NOTICE,
   WALL_VIEW_HINT, WALL_VIEW_LABEL, boardStaleBand, courtExpectation, freshnessLine,
-  partialBoardNotice,
+  partialBoardNotice, type FreshnessMode,
 } from "../../lib/monitoringCopy";
 
 /**
@@ -107,39 +114,25 @@ export function ControlBoardPage() {
    * fail while we still hold tiles worth showing?
    */
   const unreachable = error !== null && error !== undefined;
+  // A press shows its own pending state; the poll behind it never does.
+  const manual = useAsyncAction(refresh);
 
   return (
-    // `--board-scale` is declared here and consumed ONLY by CourtTile. Wall view is therefore
-    // one declaration rather than a second set of class strings that drift from the first.
-    <div className="space-y-6" style={wall ? ({ "--board-scale": "1.6" } as React.CSSProperties) : undefined}>
-      <header className="space-y-3">
-        <div className="sm:flex sm:items-start sm:justify-between sm:gap-4">
-          <div className="min-w-0">
-            <h1 className="text-2xl font-bold tracking-tight">Control board</h1>
-            {/* The freshness line is a fact about the SCREEN and changes on a timer, so it
-                lives in a polite region of its own rather than being read out on every tick. */}
-            <p className="text-xs text-text-muted" data-testid="board-freshness">
-              {freshnessLine(mode, 10, readAtFace)}
-            </p>
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2 sm:mt-0">
-            <label className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-control bg-bg-surface px-3 text-sm font-medium">
-              <input
-                type="checkbox"
-                checked={wall}
-                onChange={(e) => setWall(e.target.checked)}
-                className="h-5 w-5"
-              />
-              {WALL_VIEW_LABEL}
-            </label>
-            {/* Never `disabled` while it is working: a browser blurs a disabled element, so
-                disabling the control somebody just pressed throws their place away. */}
-            <Button variant="outline" className="min-h-11" onClick={() => void refresh()}>Refresh</Button>
-          </div>
-        </div>
-        <p className="text-xs text-text-muted">{WALL_VIEW_HINT}</p>
-        <MonitoringNav />
-      </header>
+    // `--board-scale` is declared on the shell and consumed ONLY by CourtTile. Wall view is
+    // therefore one declaration rather than a second set of class strings that drift from the first.
+    <PageShell width="wide" style={wall ? ({ "--board-scale": "1.6" } as CSSProperties) : undefined}>
+      <PageHeader
+        title="Control board"
+        // The freshness line is a fact about the SCREEN and changes on a timer: it is the
+        // header's description rather than a live region, so it is never read out on a tick.
+        description={<BoardFreshness mode={mode} line={freshnessLine(mode, 10, readAtFace)} />}
+        actions={<RefreshButton onRefresh={() => void manual.run()} loading={manual.pending} />}
+      />
+      {/* A display preference, so it sits with the page rather than in the header's icon
+          column — a worded switch beside the title does not fit a 360px phone. */}
+      <div className="-mt-4 flex items-center">
+        <WallViewSwitch wall={wall} onWall={setWall} />
+      </div>
 
       {/*
         The two standing facts, and they are `standing` rather than `polite` because this page
@@ -164,11 +157,11 @@ export function ControlBoardPage() {
         explicitly not being updated.
       */}
       {unreachable && courts.length > 0 && (
-        <div className="space-y-3">
-          <Alert tone="danger" live="standing" announceKey="control-board-unreachable">
+        <div className="flex flex-col items-start gap-3">
+          <Alert tone="danger" live="standing" announceKey="control-board-unreachable" className="w-full">
             {boardStaleBand(readAtFace)}
           </Alert>
-          <Button variant="outline" className="min-h-11" onClick={() => void refresh()}>Try again</Button>
+          <Button variant="outline" pending={manual.pending} onClick={() => void manual.run()}>Try again</Button>
         </div>
       )}
 
@@ -179,10 +172,12 @@ export function ControlBoardPage() {
         error={courts.length > 0 ? null : error}
         action="the club's courts"
         failedCaveat="Nothing here is being updated while that is true."
-        onRetry={() => void refresh()}
+        onRetry={() => void manual.run()}
         empty={!loading && !error && courts.length === 0}
         emptyTitle={BOARD_EMPTY_NOTICE}
         emptyHint={BOARD_EMPTY_HINT}
+        emptyIcon={Racquet}
+        skeleton={<TileGridSkeleton tiles={4} />}
       >
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {courts.map((court) => (
@@ -197,7 +192,44 @@ export function ControlBoardPage() {
         </div>
       </StateBlock>
 
-      <p className="text-sm text-text-muted">{BOARD_NO_REMOTE_CONTROL}</p>
+      <p className="flex items-start gap-2 text-sm text-text-muted">
+        <Prohibit size={16} aria-hidden="true" className="mt-0.5 shrink-0" />
+        <span>{BOARD_NO_REMOTE_CONTROL}</span>
+      </p>
+    </PageShell>
+  );
+}
+
+/** The mode dot: a word first, colour second — a wall read by a colour-blind admin still says it. */
+const MODE_DOT: Record<FreshnessMode, string> = {
+  connecting: "bg-text-muted",
+  live: "bg-success-strong",
+  polling: "bg-warning-strong",
+  lost: "bg-danger-strong",
+};
+
+function BoardFreshness({ mode, line }: { mode: FreshnessMode; line: string }) {
+  return (
+    <span className="inline-flex items-start gap-2">
+      <span aria-hidden="true" className={cn("mt-1.5 size-2 shrink-0 rounded-full", MODE_DOT[mode])} />
+      <span data-testid="board-freshness">{line}</span>
+    </span>
+  );
+}
+
+/**
+ * Wall view: a Switch, because it is a setting that takes effect at once — never a checkbox in a
+ * bordered box posing as a button. The hint that used to sit under the header as a paragraph is
+ * guidance, so it lives behind the (i) beside the switch.
+ */
+function WallViewSwitch({ wall, onWall }: { wall: boolean; onWall: (next: boolean) => void }) {
+  return (
+    <div className="inline-flex items-center">
+      <label className="inline-flex min-h-touch cursor-pointer items-center gap-2 pr-1 text-sm font-medium text-text-secondary">
+        <Switch checked={wall} onCheckedChange={onWall} />
+        {WALL_VIEW_LABEL}
+      </label>
+      <InfoPopover label={WALL_VIEW_LABEL} side="bottom">{WALL_VIEW_HINT}</InfoPopover>
     </div>
   );
 }

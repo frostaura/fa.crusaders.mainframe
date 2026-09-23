@@ -15,6 +15,9 @@ import { SESSION_ADMIN, serveApi, signIn, test, expect } from "./fixtures";
  * anywhere a credit figure appears.
  * </p>
  */
+// The app chrome is the page's `banner` landmark. Not `locator("header")`: since R11 every page
+// carries its own <header> (PageHeader, inside <main>, so not a banner), and "the header" is no
+// longer one element.
 test("a credit balance is never shown with a rand sign", async ({ page }) => {
   await signIn(page);
   await serveApi(page, [
@@ -25,7 +28,7 @@ test("a credit balance is never shown with a rand sign", async ({ page }) => {
 
   await page.goto("/wallet");
 
-  const header = page.locator("header");
+  const header = page.getByRole("banner");
   await expect(header).toContainText("240.00 cr");
   // The whole bug, in one assertion: 240 credits is R100 of top-up, not R240.
   await expect(header).not.toContainText("R240");
@@ -204,10 +207,10 @@ test("the wallet chip still speaks a word when the club has a symbol", async ({ 
 
   await page.goto("/wallet");
 
-  const chip = page.locator("header [aria-label*='Wallet balance']");
+  const chip = page.getByRole("banner").locator("[aria-label*='Wallet balance']");
   await expect(chip).toHaveAttribute("aria-label", /240\.00 credits/);
   await expect(chip).not.toHaveAttribute("aria-label", /CHF/);
   // The visible chip keeps the credit unit too — the symbol is money's, and this is not.
-  await expect(page.locator("header")).toContainText("240.00 cr");
-  await expect(page.locator("header")).not.toContainText("CHF240");
+  await expect(page.getByRole("banner")).toContainText("240.00 cr");
+  await expect(page.getByRole("banner")).not.toContainText("CHF240");
 });

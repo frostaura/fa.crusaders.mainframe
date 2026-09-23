@@ -1,9 +1,16 @@
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import TopUpStatusPage from "./TopUpStatus";
 import { BalanceProvider } from "../lib/balance";
 import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
+
+/*
+  R10 (links navigate, buttons act): "View wallet", "Try again" (→ /wallet/topup) and "Top up"
+  were buttons wrapped in links and are now links drawn as buttons, so they are queried as
+  `link`. "Check again" stays a button — it acts — and keeps `toBeEnabled()` while it works,
+  because R12's pending state is aria-busy, never `disabled`.
+*/
 
 /**
  * What a member is told when a payment does not complete.
@@ -69,7 +76,7 @@ describe("Top-up status — failure copy", () => {
     expect(screen.queryByText(/100,00/)).not.toBeInTheDocument();
 
     // And a way back, rather than a dead end.
-    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Try again" })).toBeInTheDocument();
   });
 
   it("treats a cancelled payment as cancelled, not as a failure", async () => {
@@ -80,7 +87,7 @@ describe("Top-up status — failure copy", () => {
     expect(await screen.findByText("Cancelled")).toBeInTheDocument();
     expect(screen.getByText(/You cancelled this payment, so nothing was charged/)).toBeInTheDocument();
     expect(screen.queryByText("Failed")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Try again" })).toBeInTheDocument();
   });
 
   it("falls back to a sentence, not a blank, for a code it has never seen", async () => {
@@ -171,7 +178,7 @@ describe("Top-up status — waiting for a payment that has not landed yet", () =
     expect(screen.getByText(/Waiting for confirmation from PayFast/)).toBeInTheDocument();
     // The Pending branch had no control at all: only Cancelled and Failed got one.
     expect(screen.getByRole("button", { name: "Check again" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "View wallet" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View wallet" })).toBeInTheDocument();
   });
 
   it("says it has stopped rather than claiming to still be waiting", async () => {
@@ -256,7 +263,7 @@ describe("Top-up status — when the club cannot be reached", () => {
 
     // The two controls the Pending branch has. Their absence was the dead end.
     expect(screen.getByRole("button", { name: "Check again" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "View wallet" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View wallet" })).toBeInTheDocument();
 
     // And the one thing a member watching R500 needs to be told.
     expect(screen.getByRole("alert")).toHaveTextContent(/Nothing here cancels or changes it/);
@@ -284,7 +291,7 @@ describe("Top-up status — when the club cannot be reached", () => {
     expect(screen.getByText("Pending")).toBeInTheDocument();
     expect(screen.getByText("R500.00")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Check again" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "View wallet" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View wallet" })).toBeInTheDocument();
     // …and the page says the figures may be stale rather than pretending they are fresh.
     expect(screen.getByRole("alert")).toHaveTextContent(/may be out of date/);
   });
@@ -369,8 +376,8 @@ describe("Top-up status — a top-up that does not exist", () => {
     await screen.findByRole("alert");
 
     // Not a dead end and not a retry: the wallet is where the credits either are or aren't.
-    expect(screen.getByRole("button", { name: "View wallet" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Top up" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View wallet" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Top up" })).toBeInTheDocument();
   });
 
   it("stops asking, because the answer will not change", async () => {
@@ -394,5 +401,41 @@ describe("Top-up status — a top-up that does not exist", () => {
     expect(alert).toHaveTextContent(/we'll email you either way/);
     expect(screen.getByRole("button", { name: "Check again" })).toBeEnabled();
     expect(screen.queryByText(/We can't find this top-up/)).not.toBeInTheDocument();
+  });
+});
+
+/** R12: the first read is the card's own shape, never "Loading…" in a bare card. */
+describe("Top-up status — the first read", () => {
+  const ID = "99999999-2222-3333-4444-555555555555";
+  beforeEach(() => {
+    vi.stubGlobal("EventSource", class { close() {} addEventListener() {} removeEventListener() {} } as unknown as typeof EventSource);
+  });
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  it("shows the card's shape while it asks, then the answer", async () => {
+    let answer: (() => void) | null = null;
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: `/api/v1/credit/topup/${ID}`, body: { id: ID, status: "Completed", amount_zar: 200, conversion_rate: 1.6, failure_code: null } },
+      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
+    ]);
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => (String(input).includes("/credit/topup/")
+      ? new Promise<void>((resolve) => { answer = resolve; }).then(() => realFetch(input, init))
+      : realFetch(input, init)));
+    renderPage(
+      <BalanceProvider>
+        <Routes><Route path="/wallet/topup/:topupId" element={<TopUpStatusPage />} /></Routes>
+      </BalanceProvider>,
+      { initialEntries: [`/wallet/topup/${ID}`], reactStrictMode: true },
+    );
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Checking this payment…");
+    expect(screen.queryByText(/Loading…/)).not.toBeInTheDocument();
+    await waitFor(() => expect(answer).not.toBeNull());
+    answer!();
+    expect(await screen.findByText("Completed")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View wallet" })).toHaveAttribute("href", "/wallet");
   });
 });

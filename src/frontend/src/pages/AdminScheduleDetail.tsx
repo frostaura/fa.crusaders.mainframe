@@ -1,11 +1,15 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useRead } from "../lib/useRead";
 import { Alert } from "../components/Alert";
-import { Badge, Button, Input, Label } from "../components/Button";
+import { Button, Input, Label } from "../components/Button";
 import { Card } from "../components/Card";
 import { ConfirmButton } from "../components/ConfirmButton";
-import { StateBlock } from "../components/StateBlock";
+import { StateBlock } from "../components/ui/state-block";
+import { PageHeader, PageShell } from "../components/ui/page-shell";
+import { Skeleton } from "../components/ui/skeleton";
+import { Badge } from "../components/ui/badge";
+import { CalendarDots } from "../components/ui/icons";
 import { OccurrenceChange, type EditScope } from "../components/schedules/OccurrenceChange";
 import { ScheduleChangeList } from "../components/schedules/ScheduleChangeList";
 import {
@@ -144,7 +148,7 @@ function EndScheduleCard({ row, busy, endReason, onEndReason, consequence, focus
   onEnd: () => string | void | Promise<string | void>;
 }) {
   return (
-          <Card className="space-y-3 p-4">
+          <Card className="space-y-3">
             <h2 className="text-lg font-semibold text-text-primary">End this repeating booking</h2>
             <p className="text-sm text-text-secondary">
               {"There is no delete. A repeating booking that has run is part of the club's "}
@@ -175,12 +179,13 @@ function EndScheduleCard({ row, busy, endReason, onEndReason, consequence, focus
 }
 
 /**
- * What this repeating booking IS, said once at the top.
+ * What this repeating booking IS, said once at the top — as the page header (R11).
  *
  * <p>
- * The `<h1>` carries the ref because it is where focus goes after every write — a confirm that
- * completes and leaves focus on a control that has just been replaced is how a keyboard user
- * loses their place — so the page owns the ref and this component only mounts it.
+ * Focus goes to the `<h1>` after every write — a confirm that completes and leaves focus on a
+ * control that has just been replaced is how a keyboard user loses their place. The header's
+ * `<h1>` is `PageHeader`'s, so the page finds it through its shell and makes it programmatically
+ * focusable, rather than owning a second heading.
  * </p>
  *
  * <p>
@@ -188,21 +193,21 @@ function EndScheduleCard({ row, busy, endReason, onEndReason, consequence, focus
  * "we could not read the dates" must not be rendered as "it holds none".
  * </p>
  */
-function ScheduleHeadline({ row, days, headingRef, partial }: {
+function ScheduleHeadline({ row, days, partial }: {
   row: ScheduleRow;
   days: NonNullable<ScheduleRow["days"]>;
-  headingRef: React.RefObject<HTMLHeadingElement | null>;
   partial: string | null;
 }) {
   return (
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-bold tracking-tight text-text-primary focus:outline-none">
-                {row.name}
-              </h1>
-              {row.status === "ended" && <Badge tone="muted">Ended</Badge>}
-            </div>
-            <p className="text-text-secondary">
+    <>
+      <PageHeader
+        back={BACK}
+        title={row.name}
+        // A word, not a colour: "Ended" is the state, and the badge carries the word.
+        actions={row.status === "ended" ? <Badge tone="neutral">Ended</Badge> : undefined}
+        description={(
+          <>
+            <span className="block text-base text-text-secondary">
               {ruleSentence({
                 courtNames: (row.courts ?? []).map((c) => c.name),
                 days,
@@ -213,11 +218,23 @@ function ScheduleHeadline({ row, days, headingRef, partial }: {
                 endDate: row.end_date,
                 intervalWeeks: row.interval_weeks,
               })}
-            </p>
-            <p className="text-sm text-text-muted">{nextOccurrenceLine(row.next_occurrence, row.status)}</p>
-            {partial && <Alert tone="info" live="polite" announceKey="schedule-partial">{partial}</Alert>}
-          </div>
+            </span>
+            <span className="mt-1 block text-text-muted">{nextOccurrenceLine(row.next_occurrence, row.status)}</span>
+          </>
+        )}
+      />
+      {partial && <Alert tone="info" live="polite" announceKey="schedule-partial">{partial}</Alert>}
+    </>
   );
+}
+
+const BACK = { to: "/admin/schedules", label: "Repeating bookings" };
+
+/** The page's `<h1>`, made focusable for a programmatic move (it is not in the tab order). */
+function headingIn(shell: HTMLElement | null): HTMLElement | null {
+  const heading = shell?.querySelector<HTMLElement>("h1") ?? null;
+  if (heading && !heading.hasAttribute("tabindex")) heading.tabIndex = -1;
+  return heading;
 }
 
 /**
@@ -298,7 +315,8 @@ export function AdminScheduleDetailPage() {
   const [writeError, setWriteError] = useState<unknown>(null);
   const [clampedTo, setClampedTo] = useState<string | null>(null);
   const [endReason, setEndReason] = useState("");
-  const headingRef = useRef<HTMLHeadingElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const focusHeading = useCallback(() => headingIn(shellRef.current), []);
 
   const row = scheduleRead.data;
   const occurrences = occurrencesRead.data?.occurrences ?? null;
@@ -349,116 +367,138 @@ export function AdminScheduleDetailPage() {
     </Alert>
   ) : null;
 
+  if (!row) {
+    return (
+      <PageShell width="wide">
+        {scheduleRead.loading ? null : <PageHeader back={BACK} title="Repeating booking" />}
+        <StateBlock
+          loading={scheduleRead.loading}
+          error={scheduleRead.error}
+          action="this repeating booking"
+          codes={codes}
+          onRetry={reloadSchedule}
+          skeleton={<DetailSkeleton />}
+        />
+      </PageShell>
+    );
+  }
+
   return (
-    <div className="space-y-6">
-      <p>
-        <Link to="/admin/schedules" className="text-sm text-accent-strong underline">
-          All repeating bookings
-        </Link>
-      </p>
+    <PageShell width="wide" ref={shellRef}>
+      <ScheduleHeadline
+        row={row}
+        days={days}
+        partial={occurrences === null ? null : partialMaterialisation(
+          occurrences.filter((o) => (o.courts?.length ?? 0) > 0).length,
+          occurrences.filter((o) => o.status !== "skipped").length,
+          days,
+        )}
+      />
 
-      <StateBlock
-        loading={scheduleRead.loading}
-        error={scheduleRead.error}
-        action="this repeating booking"
-        codes={codes}
-        onRetry={reloadSchedule}
-      >
-        {row && (
-          <div className="space-y-6">
-            <ScheduleHeadline
-              row={row}
-              days={days}
-              headingRef={headingRef}
-              partial={occurrences === null ? null : partialMaterialisation(
-                occurrences.filter((o) => (o.courts?.length ?? 0) > 0).length,
-                occurrences.filter((o) => o.status !== "skipped").length,
-                days,
-              )}
-            />
+      {clampedTo && (
+        <Alert tone="info" live="polite" announceKey={`schedule-clamped-${clampedTo}`}>
+          {clampedNotice(clampedTo)}
+        </Alert>
+      )}
+      {notice}
 
-            {clampedTo && (
-              <Alert tone="info" live="polite" announceKey={`schedule-clamped-${clampedTo}`}>
-                {clampedNotice(clampedTo)}
-              </Alert>
-            )}
-            {notice}
+      {/* D3 §5.5's chips: the ONE place a skipped date is restored from. The occurrence
+          row below shows the word "Skipped" and no control, because two controls for
+          one action is two names for it. */}
+      <SkippedDateChips
+        skipped={skipped}
+        busy={busy}
+        onRestore={(date) => { void runWrite(() => adminEndpoints.scheduleOccurrenceUpdate(id, date, { skip: false })); }}
+      />
 
-            {/* D3 §5.5's chips: the ONE place a skipped date is restored from. The occurrence
-                row below shows the word "Skipped" and no control, because two controls for
-                one action is two names for it. */}
-            <SkippedDateChips
-              skipped={skipped}
-              busy={busy}
-              onRestore={(date) => { void runWrite(() => adminEndpoints.scheduleOccurrenceUpdate(id, date, { skip: false })); }}
-            />
-
-            <Card className="space-y-4 p-4">
-              <h2 className="text-lg font-semibold text-text-primary">The dates it holds</h2>
-              <StateBlock
-                loading={occurrencesRead.loading}
-                error={occurrencesRead.error}
-                action="the dates this holds"
-                codes={codes}
-                failedCaveat="That does not mean it holds none."
-                onRetry={reloadOccurrences}
-                empty={occurrences !== null && occurrences.length === 0}
-                emptyTitle="No dates yet."
-                emptyHint="They are written a few weeks ahead, so a new one can take a minute to appear."
-              >
-                <ul className="divide-y divide-border">
-                  {(occurrences ?? []).map((o) => (
-                    <OccurrenceRow
-                      key={o.date}
-                      occurrence={o}
-                      courtCount={courtCount}
-                      row={row}
-                      busy={busy}
-                      changing={changing === o.date}
-                      onToggleChange={() => setChanging(changing === o.date ? null : o.date)}
-                      onCancelChange={() => setChanging(null)}
-                      onSubmitChange={(choice) => submitChange(o.date, choice)}
-                      onSkip={() => runWrite(
-                        () => adminEndpoints.scheduleOccurrenceUpdate(id, o.date, { skip: true }),
-                      )}
-                      focusAfter={() => headingRef.current}
-                      notice={notice}
-                    />
-                  ))}
-                </ul>
-              </StateBlock>
-            </Card>
-
-            {row.status !== "ended" && (
-              <EndScheduleCard
+      <Card className="space-y-4">
+        <h2 className="text-lg font-semibold text-text-primary">The dates it holds</h2>
+        <StateBlock
+          loading={occurrencesRead.loading}
+          error={occurrencesRead.error}
+          action="the dates this holds"
+          codes={codes}
+          failedCaveat="That does not mean it holds none."
+          onRetry={reloadOccurrences}
+          empty={occurrences !== null && occurrences.length === 0}
+          emptyIcon={CalendarDots}
+          emptyTitle="No dates yet."
+          emptyHint="They are written a few weeks ahead, so a new one can take a minute to appear."
+          skeleton={<RowsSkeleton />}
+        >
+          <ul className="divide-y divide-border">
+            {(occurrences ?? []).map((o) => (
+              <OccurrenceRow
+                key={o.date}
+                occurrence={o}
+                courtCount={courtCount}
                 row={row}
                 busy={busy}
-                endReason={endReason}
-                onEndReason={setEndReason}
-                consequence={endConsequence({
-                  // Both figures are null together: they come from the same read, and a count
-                  // of dates we could not read is not zero.
-                  remaining: occurrences === null ? null : remaining.length,
-                  days,
-                  slots: remainingSlots,
-                  refundCredits: 0,
-                })}
-                focusAfter={() => headingRef.current}
-                onEnd={() => runWrite(() => adminEndpoints.scheduleEnd(id, { reason: endReason.trim() }))}
+                changing={changing === o.date}
+                onToggleChange={() => setChanging(changing === o.date ? null : o.date)}
+                onCancelChange={() => setChanging(null)}
+                onSubmitChange={(choice) => submitChange(o.date, choice)}
+                onSkip={() => runWrite(
+                  () => adminEndpoints.scheduleOccurrenceUpdate(id, o.date, { skip: true }),
+                )}
+                focusAfter={focusHeading}
+                notice={notice}
               />
-            )}
+            ))}
+          </ul>
+        </StateBlock>
+      </Card>
 
-            <Card className="p-4">
-              <ScheduleChangeList
-                page={changesRead.data}
-                loading={changesRead.loading}
-                error={changesRead.error}
-                onRetry={reloadChanges}
-              />
-            </Card>
-          </div>
-        )}
-      </StateBlock>
+      {row.status !== "ended" && (
+        <EndScheduleCard
+          row={row}
+          busy={busy}
+          endReason={endReason}
+          onEndReason={setEndReason}
+          consequence={endConsequence({
+            // Both figures are null together: they come from the same read, and a count
+            // of dates we could not read is not zero.
+            remaining: occurrences === null ? null : remaining.length,
+            days,
+            slots: remainingSlots,
+            refundCredits: 0,
+          })}
+          focusAfter={focusHeading}
+          onEnd={() => runWrite(() => adminEndpoints.scheduleEnd(id, { reason: endReason.trim() }))}
+        />
+      )}
+
+      <Card>
+        <ScheduleChangeList
+          page={changesRead.data}
+          loading={changesRead.loading}
+          error={changesRead.error}
+          onRetry={reloadChanges}
+        />
+      </Card>
+    </PageShell>
+  );
+}
+
+/** The page, loading: a header and two cards' worth of rows (R12 — never "Loading…"). */
+function DetailSkeleton() {
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-3">
+        <Skeleton className="h-5 w-40" />
+        <Skeleton className="h-8 w-72 max-w-full" />
+        <Skeleton className="h-4 w-full max-w-prose" />
+      </div>
+      <Skeleton className="h-48 w-full" />
+    </div>
+  );
+}
+
+/** The dates list, loading. */
+function RowsSkeleton() {
+  return (
+    <div className="flex flex-col gap-2">
+      {[0, 1, 2].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
     </div>
   );
 }

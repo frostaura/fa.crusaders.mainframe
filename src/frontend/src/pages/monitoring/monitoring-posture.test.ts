@@ -51,6 +51,15 @@ function sourcesUnder(rel: string): string[] {
 
 const FILES = SURFACES.flatMap(sourcesUnder);
 
+/**
+ * The path under `src/`, for the test's name. The LAST `/src/`, because a checkout under a
+ * directory called `src` (`~/src/<repo>/src/frontend/src/…`) otherwise names every case after
+ * the checkout folder.
+ */
+function nameOf(file: string): string {
+  return file.slice(file.lastIndexOf("/src/") + "/src/".length);
+}
+
 /** The body with every comment removed — see the header. */
 function codeOf(file: string): string {
   return readFileSync(file, "utf8")
@@ -59,7 +68,7 @@ function codeOf(file: string): string {
 }
 
 describe("the new admin surfaces keep the estate's rules", () => {
-  it.each(FILES.map((f) => [f.split("/src/")[1], f] as const))(
+  it.each(FILES.map((f) => [nameOf(f), f] as const))(
     "%s uses the design tokens, never a raw palette class",
     (_name, file) => {
       /*
@@ -77,7 +86,7 @@ describe("the new admin surfaces keep the estate's rules", () => {
   // guarded — no `dark:` class in a component — is now estate-wide in theme-vocabulary.test.ts:
   // dark is expressed only by the token variables, never by a variant.
 
-  it.each(FILES.map((f) => [f.split("/src/")[1], f] as const))(
+  it.each(FILES.map((f) => [nameOf(f), f] as const))(
     "%s writes its times through lib/clubClock, never the reader's own locale",
     (_name, file) => {
       // The same rule `clubClock.test.ts` holds the doors surface to, applied to the six new
@@ -88,7 +97,7 @@ describe("the new admin surfaces keep the estate's rules", () => {
     },
   );
 
-  it.each(FILES.map((f) => [f.split("/src/")[1], f] as const))(
+  it.each(FILES.map((f) => [nameOf(f), f] as const))(
     "%s sizes no control with a fixed height",
     (_name, file) => {
       /*

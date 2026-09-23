@@ -287,7 +287,10 @@ test.describe("the money pages a member reaches alone", () => {
       { path: "/api/v1/whoami", body: SESSION_MEMBER },
       { path: "/api/v1/me/profile", body: PROFILE },
       { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 10 } },
-      { path: "/api/v1/payments/topup-options", body: { min_zar: 50, max_zar: 5000, step_zar: 50, presets: [100, 500], credits_per_rand: 2 } },
+      // The endpoint the page actually reads. This stubbed `/payments/topup-options`, which
+      // nothing calls: the old page drew its form anyway on a FAILED options read, and R12's
+      // top-up shows that failure (with a retry) instead of a form with no rules behind it.
+      { path: "/api/v1/credit/topup/options", body: { min_zar: 50, max_zar: 5000, block_zar: 50, presets_zar: [100, 500], conversion_rate: 2, member_class: "Regular" } },
     ]);
     await page.goto("/wallet/topup");
 

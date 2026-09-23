@@ -1,13 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Copy, Plus, X } from "lucide-react";
 import { ApiError, endpoints, type WebhookEndpointDto, type WebhookDeliveryDto } from "../lib/api";
 import { describeFailure } from "../lib/errors";
 import { Card } from "../components/Card";
-import { Badge, Button, Input, Label, fieldClassName } from "../components/Button";
+import { Badge, Input, Label, fieldClassName } from "../components/Button";
+import { Button } from "../components/ui/button";
+import { IconButton } from "../components/ui/icon-button";
+import { PageHeader, PageShell } from "../components/ui/page-shell";
+import { RefreshButton } from "../components/ui/refresh-button";
+import { Skeleton } from "../components/ui/skeleton";
+import { Check, Copy, Plus, WebhooksLogo, X } from "../components/ui/icons";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { DataTable, type DataColumn } from "../components/DataTable";
 import { useToast } from "../components/Toast";
 import { cn } from "../lib/utils";
+import { useAsyncAction } from "../lib/useAsyncAction";
 
 type EventDef = { name: string; label: string; description: string; vars: string[] };
 
@@ -282,6 +288,9 @@ export default function AdminWebhooksPage() {
     }
   };
 
+  // Create shows its own pending state and ignores a second press while it works (R12).
+  const createAction = useAsyncAction(create);
+
   const remove = async (id: string) => {
     try {
       await endpoints.adminWebhooksDelete(id);
@@ -300,17 +309,16 @@ export default function AdminWebhooksPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Admin · Webhooks</h1>
-        <p className="text-sm text-text-secondary">
-          Outbound HTTP cues — lights, downstream integrations, audit pipes. URL templates substitute event
-          variables; the catalog below is searchable.
-        </p>
-      </div>
+    <PageShell width="wide">
+      <PageHeader
+        title="Webhooks"
+        description={"Outbound HTTP cues — lights, downstream integrations, audit pipes. URL templates "
+          + "substitute event variables; the catalogue below is searchable."}
+        actions={<RefreshButton onRefresh={() => { load().catch(() => {}); }} loading={loading} />}
+      />
 
       {createdSecret && (
-        <Card className="border-warning-soft bg-warning-soft/40">
+        <Card className="border-warning-strong/40 bg-warning-soft">
           <p className="text-sm font-medium text-warning-strong">
             Endpoint created — save this signing secret. It won't be shown again.
           </p>
@@ -320,11 +328,11 @@ export default function AdminWebhooksPage() {
 
       {creating && (
         <Card className="space-y-5">
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-semibold">New webhook endpoint</h3>
-            <button onClick={() => setCreating(false)} className="text-text-muted hover:text-text-primary" aria-label="Close">
-              <X size={18} />
-            </button>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold">New webhook endpoint</h2>
+            <IconButton label="Close" onClick={() => setCreating(false)}>
+              <X aria-hidden="true" />
+            </IconButton>
           </div>
 
           <div>
@@ -354,13 +362,9 @@ export default function AdminWebhooksPage() {
             <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Scoreboard — court lit" />
           </div>
 
-          <div className="flex gap-2 justify-end">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button variant="ghost" onClick={() => setCreating(false)}>Cancel</Button>
-            <Button
-              variant="outline"
-              className="bg-info-soft border-info-soft text-info-strong hover:bg-info-soft/70"
-              onClick={create}
-            >
+            <Button onClick={() => void createAction.run()} pending={createAction.pending}>
               Create endpoint
             </Button>
           </div>
@@ -368,13 +372,14 @@ export default function AdminWebhooksPage() {
       )}
 
       <Card>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-base font-semibold">Endpoints</h3>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">Endpoints</h2>
           {!creating && (
             <Button
-              variant="outline"
-              className="shrink-0 whitespace-nowrap bg-info-soft border-info-soft text-info-strong hover:bg-info-soft/70"
+              variant="secondary"
               onClick={() => { setCreating(true); setCreatedSecret(null); }}
+              icon={<Plus aria-hidden="true" />}
+              className="shrink-0"
               /*
                * Not offered while the list is unknown. Leaving it live directly above a panel
                * that says "do not create one until this list loads" is an instruction and its
@@ -383,7 +388,7 @@ export default function AdminWebhooksPage() {
               disabled={loadError !== null || loading}
               title={loadError ? "Not while the existing endpoints cannot be read — you could create a duplicate." : undefined}
             >
-              <Plus size={16} className="mr-1" /> New endpoint
+              New endpoint
             </Button>
           )}
         </div>
@@ -398,13 +403,20 @@ export default function AdminWebhooksPage() {
               Existing endpoints are not shown below because they could not be read — this club may already
               have some. Do not create one until this list loads, or you may end up firing every event twice.
             </p>
-            <Button type="button" variant="outline" onClick={() => { load().catch(() => {}); }} disabled={loading}>
-              {loading ? "Retrying…" : "Try again"}
+            <Button type="button" variant="outline" onClick={() => { load().catch(() => {}); }} pending={loading}>
+              Try again
             </Button>
           </div>
+        ) : loading && list.length === 0 ? (
+          // A skeleton the shape of the rows (R12), never "Loading endpoints…".
+          <div aria-busy="true" className="flex flex-col gap-3">
+            <p className="sr-only">Reading the webhook endpoints…</p>
+            {[0, 1].map((i) => <Skeleton key={i} className="h-20 w-full" />)}
+          </div>
         ) : list.length === 0 ? (
-          <div className="border border-dashed border-border rounded-lg py-12 text-center text-sm text-text-secondary">
-            {loading ? "Loading endpoints…" : "No webhook endpoints yet. Create one above to start firing events."}
+          <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border px-4 py-10 text-center">
+            <WebhooksLogo size={40} weight="duotone" aria-hidden="true" className="text-text-muted" />
+            <p className="text-sm text-text-secondary">No webhook endpoints yet. Create one above to start firing events.</p>
           </div>
         ) : (
           <ul className="divide-y divide-border -mx-4 sm:-mx-6">
@@ -430,12 +442,14 @@ export default function AdminWebhooksPage() {
                       </div>
                     </div>
                     <div className="flex flex-col gap-2 shrink-0">
-                      <Button variant="outline" onClick={() => openDeliveries(w.id)}>
-                        {isOpen ? "Hide" : "Deliveries"}
+                      {/* The name does not flip with the state — `aria-expanded` carries it, so a
+                          screen-reader user is not left re-finding a control after every press. */}
+                      <Button variant="outline" aria-expanded={isOpen} onClick={() => openDeliveries(w.id)}>
+                        Deliveries
                       </Button>
                       <ConfirmButton
                         idleLabel="Delete"
-                        confirmLabel="Tap to confirm"
+                        confirmLabel="Tap again to delete"
                         onConfirm={() => remove(w.id)}
                         tone="danger"
                       />
@@ -450,7 +464,7 @@ export default function AdminWebhooksPage() {
       </Card>
 
       <VariableCatalogCard />
-    </div>
+    </PageShell>
   );
 }
 
@@ -472,24 +486,17 @@ function SecretBlock({ secret, onDismiss }: { secret: string; onDismiss: () => v
       <code className="flex-1 font-mono text-xs break-all bg-bg-surface border border-border rounded px-2 py-2 select-all">
         {secret}
       </code>
-      <button
+      <Button
         type="button"
+        variant="outline"
         onClick={copy}
-        title="Copy to clipboard"
-        className="inline-flex items-center gap-1.5 px-3 rounded-md border border-border bg-bg-surface hover:bg-bg-muted text-sm text-text-primary"
+        icon={copied ? <Check aria-hidden="true" className="text-success-strong" /> : <Copy aria-hidden="true" />}
       >
-        {copied ? <Check size={14} className="text-success-strong" /> : <Copy size={14} />}
-        <span>{copied ? "Copied" : "Copy"}</span>
-      </button>
-      <button
-        type="button"
-        onClick={onDismiss}
-        title="Dismiss"
-        className="inline-flex items-center justify-center w-9 rounded-md border border-border bg-bg-surface hover:bg-bg-muted text-text-secondary"
-        aria-label="Dismiss"
-      >
-        <X size={14} />
-      </button>
+        {copied ? "Copied" : "Copy"}
+      </Button>
+      <IconButton label="Dismiss" variant="outline" onClick={onDismiss}>
+        <X aria-hidden="true" />
+      </IconButton>
     </div>
   );
 }
@@ -647,7 +654,7 @@ function TemplateInput({
       {showPopover && (
         <ul
           role="listbox"
-          className="absolute z-20 left-0 right-0 mt-1 max-h-60 overflow-auto rounded-md border border-border bg-bg-surface shadow-lg"
+          className="absolute z-popover left-0 right-0 mt-1 max-h-60 overflow-auto rounded-md border border-border bg-bg-surface shadow-lg"
         >
           {suggestions.map((s, i) => (
             <li
@@ -662,7 +669,7 @@ function TemplateInput({
               )}
             >
               <span>{s}</span>
-              <span className="text-[10px] uppercase tracking-wide text-text-muted">insert</span>
+              <span className="text-xs uppercase tracking-wide text-text-muted">insert</span>
             </li>
           ))}
         </ul>
@@ -676,7 +683,7 @@ function TemplateInput({
             type="button"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => insertAtCaret(v)}
-            className="font-mono text-[11px] px-2 py-0.5 rounded border border-border bg-bg-muted/40 text-text-secondary hover:bg-info-soft hover:text-info-strong hover:border-info-soft transition"
+            className="font-mono text-xs px-2 py-0.5 rounded border border-border bg-bg-muted/40 text-text-secondary hover:bg-info-soft hover:text-info-strong hover:border-info-soft transition"
           >
             {`{${v}}`}
           </button>
@@ -769,7 +776,7 @@ function DeliveriesTable({ rows }: { rows: WebhookDeliveryDto[] }) {
     { key: "latency", header: "Latency", width: 100, align: "right", cell: (r) => `${r.latency_ms}ms`, sortValue: (r) => r.latency_ms },
   ];
   return (
-    <div className="mt-3">
+    <section aria-label="Recent deliveries" className="mt-3">
       <DataTable
         rows={rows}
         columns={cols}
@@ -778,7 +785,7 @@ function DeliveriesTable({ rows }: { rows: WebhookDeliveryDto[] }) {
         emptyTitle="No deliveries yet"
         emptyHint="Once an event matches this endpoint, attempts will appear here."
       />
-    </div>
+    </section>
   );
 }
 
@@ -801,7 +808,7 @@ function VariableCatalogCard() {
         <p className="text-xs font-medium uppercase tracking-wide text-text-muted mb-2">Envelope (every event)</p>
         <div className="flex flex-wrap gap-1.5">
           {ENVELOPE_VARS.map((v) => (
-            <span key={v} className="font-mono text-[11px] px-2 py-0.5 rounded border border-border bg-bg-muted/40 text-text-secondary">
+            <span key={v} className="font-mono text-xs px-2 py-0.5 rounded border border-border bg-bg-muted/40 text-text-secondary">
               {`{${v}}`}
             </span>
           ))}
@@ -825,7 +832,7 @@ function VariableCatalogCard() {
                 <td className="px-4 py-2 align-top">
                   <div className="flex flex-wrap gap-1.5">
                     {e.vars.map((v) => (
-                      <span key={v} className="font-mono text-[11px] px-2 py-0.5 rounded border border-border bg-bg-muted/40 text-text-secondary">
+                      <span key={v} className="font-mono text-xs px-2 py-0.5 rounded border border-border bg-bg-muted/40 text-text-secondary">
                         {`{${v}}`}
                       </span>
                     ))}

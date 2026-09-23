@@ -8,13 +8,14 @@ import { AuthShell } from "../components/AuthShell";
 import { Alert } from "../components/Alert";
 import { Button, Input, Label } from "../components/Button";
 import { PENDING_APPROVAL } from "../lib/registrationCopy";
+import { LANDING_PATH } from "../components/shell/nav";
 
 // Seeded by Seeder.cs in Development. Hidden behind import.meta.env.DEV so it disappears in prod builds.
 const DEV_ADMIN_EMAIL = "any@frostaura.net";
 const DEV_ADMIN_PASSWORD = "ChangeMeOnFirstLogin!";
 
-/** Where a signed-in member goes when they did not ask for anywhere in particular. */
-const DEFAULT_LANDING = "/schedule";
+/** Where a signed-in member goes when they did not ask for anywhere in particular (R15: My Code). */
+const DEFAULT_LANDING = LANDING_PATH;
 
 /**
  * A refused sign-in, told apart by the membership status the API sends with it.

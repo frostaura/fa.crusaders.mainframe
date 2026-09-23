@@ -444,6 +444,12 @@ for (const [width, drawn] of [[768, false], [1024, true], [1440, true], [1920, t
           .filter((cell) => {
             const node = cell.firstChild;
             if (!node || !node.textContent?.trim()) return false;
+            // Bring the row on screen VERTICALLY only — the page scroller, never the table's own
+            // horizontal one, which is the thing under test. `elementFromPoint` answers null for
+            // a point below the fold, and since R16 put the admin section bar above the table
+            // at 1024px the last row starts past a 900px viewport: that is not occlusion.
+            const main = document.getElementById("main-content")!;
+            main.scrollTop += cell.getBoundingClientRect().top - window.innerHeight / 2;
             const r = document.createRange();
             r.selectNodeContents(cell);
             const rect = r.getBoundingClientRect();

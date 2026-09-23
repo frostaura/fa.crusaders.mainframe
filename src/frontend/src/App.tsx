@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState } from "react";
+import { Suspense, lazy, type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AuthProvider, readLastIdentity, useAuth } from "./lib/auth";
 import Layout from "./components/Layout";
@@ -25,28 +25,29 @@ import AdminLedgerPage from "./pages/AdminLedger";
 import ProfilePage from "./pages/Profile";
 import MyCodePage from "./pages/MyCode";
 import HowItWorksPage from "./pages/HowItWorks";
-import ReportsPage from "./pages/Reports";
 import { AdminDevicesPage } from "./pages/AdminDevices";
 // doors: admin — the four doors routes and their pages, in one block.
 import { AdminDoorsPage } from "./pages/AdminDoors";
 import { AdminDoorsDetailPage } from "./pages/AdminDoorsDetail";
 import { AdminDoorsLogPage } from "./pages/AdminDoorsLog";
 import { AdminDoorsCardPage } from "./pages/AdminDoorsCard";
-// eco: Monitoring — the section that absorbs Doors and Devices and adds the four surfaces
-// GOAL items 6, 7, 10 and 14 asked for. The section shell and the nav entry belong to the
-// chrome lane; these are the pages.
+// Monitoring — courts, hardware and control (R17): the control board, doors, boards, faults and
+// the change record. A person's night stays here until it moves onto the member (P5).
 import { ControlBoardPage } from "./pages/monitoring/ControlBoard";
 import { MonitoringFaultsPage } from "./pages/monitoring/MonitoringFaults";
 import { MemberNightPage } from "./pages/monitoring/MemberNight";
 import { AdminChangeRecordPage } from "./pages/monitoring/AdminChangeRecord";
-// eco: item 14's calendar half, and items 3 + 19's admin half.
 import { AdminSchedulesPage } from "./pages/AdminSchedules";
 import { AdminScheduleDetailPage } from "./pages/AdminScheduleDetail";
 import { AdminGroupsPage } from "./pages/AdminGroups";
 import NotFoundPage from "./pages/NotFound";
-import { Card } from "./components/Card";
-import { Button } from "./components/Button";
+// `/reports` split in two (Target IA → Routes): club reports under Admin, a member's own under Wallet.
+import { ReportsRedirect } from "./pages/Reports";
+import AdminLayout from "./components/admin/AdminLayout";
+import AdminHomePage from "./pages/admin/AdminHome";
 import { RouteAnnouncer } from "./components/RouteAnnouncer";
+import { LANDING_PATH } from "./components/shell/nav";
+import { BootSplash, ConnectionLost, RouteSkeleton } from "./components/shell/SessionScreens";
 
 /**
  * The primitives preview — development only, and dropped from the production bundle.
@@ -62,131 +63,143 @@ import { RouteAnnouncer } from "./components/RouteAnnouncer";
  */
 const DevPrimitivesPage = import.meta.env.DEV ? lazy(() => import("./pages/DevPrimitives")) : null;
 
+/**
+ * The two report screens carry the chart library, so they load when first opened: a member who
+ * never looks at their activity never downloads Recharts, and neither does an admin who never
+ * opens the club's reports.
+ *
+ * <p>
+ * <b>The admin console's frame and Overview are NOT lazy, deliberately.</b> Both read the
+ * club's doors through the shared doors store, which dedupes only while a read is in flight — a
+ * reader that mounts after a Suspense boundary resolves joins late and fires a second identical
+ * GET (E-L6: "one read on arrival, not one per reader"; `e2e/admin-doors.spec.ts` counts it).
+ * </p>
+ */
+const AdminReportsPage = lazy(() => import("./pages/admin/AdminReports"));
+const WalletActivityPage = lazy(() => import("./pages/WalletActivity"));
+
+/** A lazily loaded route: the page's own shape while its code arrives, never "Loading…". */
+function Lazy({ children }: { children: ReactNode }) {
+  return <Suspense fallback={<RouteSkeleton />}>{children}</Suspense>;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       {/*
         C6 — the three things a real page load does that a single-page app does not: name the
         document, move focus to where the new page begins, and say where you have arrived.
-        Above `Routes` rather than inside `Layout`, because `Layout` returns early for the
+        Above `Routes` rather than inside the shell, because the shell returns early for the
         public landing and for every auth-flow screen, and those are routes too.
       */}
       <RouteAnnouncer />
       <AuthProvider>
         <ProfileProvider>
         {/* Inside ProfileProvider, because that is where the club's glyph choice arrives, and
-            outside everything that draws one — so a sign-in button and a booking confirm wear
-            the same marks. Absent or unrecognised, it is the default; never "the other one". */}
+            outside everything that draws one. */}
         <ClubUiProvider>
         <BalanceProvider>
         <ToastProvider>
-        <Routes>
-          <Route element={<Layout />}>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
-            <Route path="/verify-email/:token" element={<VerifyEmailPage />} />
-            {/* Both halves of the self-service reset. The link on /login and the link in the
-                reset email have always pointed here; neither route existed, so the catch-all
-                below sent a locked-out member to the marketing page with no explanation. */}
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-            <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
-            <Route path="/welcome/:token" element={<WelcomePage />} />
-            <Route path="/wallet" element={<RequireAuth><WalletPage /></RequireAuth>} />
-            <Route path="/wallet/topup" element={<RequireAuth><TopUpPage /></RequireAuth>} />
-            <Route path="/wallet/topup/:topupId" element={<RequireAuth><TopUpStatusPage /></RequireAuth>} />
-            <Route path="/schedule" element={<RequireAuth><SchedulePage /></RequireAuth>} />
-            <Route path="/profile" element={<RequireAuth><ProfilePage /></RequireAuth>} />
-            <Route path="/change-password" element={<RequireAuth><ChangePasswordPage /></RequireAuth>} />
-            {/* doors: member — the code page becomes door-aware, and is renamed with it.
-                `/court-code` is a PERMANENT redirect, not a deletion: it is in bookmarks,
-                in the PWA manifest's shortcut, and in links already emailed to members.
-                A dead link in an email is how a member ends up at the marketing page
-                holding a phone at a locked door. */}
-            <Route path="/my-code" element={<RequireAuth><MyCodePage /></RequireAuth>} />
-            <Route path="/court-code" element={<Navigate to="/my-code" replace />} />
-            {/*
-              Item 16. Deliberately NOT behind RequireAuth: a member who cannot get their
-              password to work, and an applicant waiting for approval, are exactly the people
-              wondering how any of this works. It reads one thing — whether the club has
-              doors — and that read answers "unknown" for them, which promises nothing.
-            */}
-            <Route path="/how-it-works" element={<HowItWorksPage />} />
-            {/* end doors: member */}
-            <Route path="/reports" element={<RequireAuth><ReportsPage /></RequireAuth>} />
-            <Route path="/admin/members" element={<RequireAuth admin><AdminMembersPage /></RequireAuth>} />
-            <Route path="/admin/webhooks" element={<RequireAuth admin><AdminWebhooksPage /></RequireAuth>} />
-            <Route path="/admin/biometric" element={<Navigate to="/admin/members" replace />} />
-            {/*
-              MONITORING (D3 §3.1, ruling 10) — one section for "how is the club's estate
-              doing", and the six pages under it.
-
-              Doors was a top-level tab and Devices was buried in the gear menu, while the two
-              pages already linked to each other across that boundary. Both MOVE here; neither
-              gets a copy, and the doors pages have not moved on disk, so those routes point at
-              the same components they always did. The old paths below are permanent redirects
-              for the same reason `/court-code` is one: they are in outage emails, in
-              bookmarks, in the pairing instructions on the Devices page and on the printed
-              card that is screwed to a door frame. A moved URL that 404s is a dead link
-              somebody finds while standing at a locked door.
-
-              `/log` is declared BEFORE `/:id` or it resolves as a door id and the club log
-              becomes a 404 nobody can explain. `/card` is a child of a door because it is that
-              door's card, and its back link says so.
-            */}
-            <Route path="/admin/monitoring" element={<RequireAuth admin><ControlBoardPage /></RequireAuth>} />
-            <Route path="/admin/monitoring/doors" element={<RequireAuth admin><AdminDoorsPage /></RequireAuth>} />
-            <Route path="/admin/monitoring/doors/log" element={<RequireAuth admin><AdminDoorsLogPage /></RequireAuth>} />
-            <Route path="/admin/monitoring/doors/:id" element={<RequireAuth admin><AdminDoorsDetailPage /></RequireAuth>} />
-            <Route path="/admin/monitoring/doors/:id/card" element={<RequireAuth admin><AdminDoorsCardPage /></RequireAuth>} />
-            <Route path="/admin/monitoring/devices" element={<RequireAuth admin><AdminDevicesPage /></RequireAuth>} />
-            <Route path="/admin/monitoring/faults" element={<RequireAuth admin><MonitoringFaultsPage /></RequireAuth>} />
-            <Route path="/admin/monitoring/night" element={<RequireAuth admin><MemberNightPage /></RequireAuth>} />
-            <Route path="/admin/monitoring/changes" element={<RequireAuth admin><AdminChangeRecordPage /></RequireAuth>} />
-
-            {/*
-              PERMANENT redirects, not deletions — the same decision, and the same reason, as
-              `/court-code` above.
-
-              These URLs are in outage emails, in bookmarks, and printed on the door card that
-              lives in a cupboard beside the board. `AdminDeviceApiKeyPanel`'s pairing
-              instructions point at one of them. A dead link in an email is how somebody ends
-              up at a 404 while standing in front of a door that will not open.
-
-              `:id` and `:id/card` are declared after `/log` here too: the ordering trap is
-              the router's, not the destination's.
-            */}
-            <Route path="/admin/devices" element={<RedirectKeepingQuery to="/admin/monitoring/devices" />} />
-            <Route path="/admin/doors" element={<RedirectKeepingQuery to="/admin/monitoring/doors" />} />
-            <Route path="/admin/doors/log" element={<RedirectKeepingQuery to="/admin/monitoring/doors/log" />} />
-            <Route path="/admin/doors/:id" element={<RedirectDoor />} />
-            <Route path="/admin/doors/:id/card" element={<RedirectDoor card />} />
-
-            {/* eco / item 14 — the calendar half. Under /admin rather than beside the grid,
-                because a plan is a thing with a life of its own; the grid links to it. */}
-            <Route path="/admin/schedules" element={<RequireAuth admin><AdminSchedulesPage /></RequireAuth>} />
-            <Route path="/admin/schedules/:id" element={<RequireAuth admin><AdminScheduleDetailPage /></RequireAuth>} />
-            {/* eco / items 3 + 19 — groups, rates, windows and the per-day ceiling. */}
-            <Route path="/admin/groups" element={<RequireAuth admin><AdminGroupsPage /></RequireAuth>} />
-            <Route path="/admin/settings" element={<RequireAuth admin><AdminSettingsPage /></RequireAuth>} />
-            <Route path="/admin/ledger" element={<RequireAuth admin><AdminLedgerPage /></RequireAuth>} />
-            {DevPrimitivesPage && (
-              <Route
-                path="/dev/primitives"
-                element={<Suspense fallback={null}><DevPrimitivesPage /></Suspense>}
-              />
-            )}
-            {/* A real 404, not a redirect. The catch-all used to send every unknown path to the
-                marketing page, which is how a dead link in an email looked like a working one. */}
-            <Route path="*" element={<NotFoundPage />} />
-          </Route>
-        </Routes>
+          <AppRoutes />
         </ToastProvider>
         </BalanceProvider>
         </ClubUiProvider>
         </ProfileProvider>
       </AuthProvider>
     </BrowserRouter>
+  );
+}
+
+/**
+ * The route map (P2, Target IA → Routes). Exported so `routes.test.tsx` can drive it inside a
+ * `MemoryRouter` — `App` itself owns a `BrowserRouter`.
+ *
+ * <p>
+ * <b>Every moved URL is a permanent redirect that keeps its query and hash</b>, never a deletion:
+ * old paths are in emails, bookmarks, the installed app's shortcuts and on a door card printed and
+ * screwed to a frame. A dead link in an email is how somebody ends up at a 404 while standing in
+ * front of a door that will not open.
+ * </p>
+ *
+ * <p>
+ * <b>Admin routes nest under one guarded element</b> — `AdminLayout` renders the rail and an
+ * `Outlet` — so the guard is stated once and the rail is on every admin screen. Child paths are
+ * written absolute (react-router accepts an absolute child that begins with its parent's path) so
+ * each line still reads as the URL it serves, and the route-title reconciliation can read them.
+ * `/log` is declared before `/:id` in the doors block: the router ranks by specificity, but a
+ * reader should not have to know that.
+ * </p>
+ */
+export function AppRoutes() {
+  return (
+    <Routes>
+      <Route element={<Layout />}>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/verify-email/:token" element={<VerifyEmailPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
+        <Route path="/welcome/:token" element={<WelcomePage />} />
+
+        {/* R15 — My Code is the landing, then Bookings, then Wallet. */}
+        <Route path="/my-code" element={<RequireAuth><MyCodePage /></RequireAuth>} />
+        <Route path="/bookings" element={<RequireAuth><SchedulePage /></RequireAuth>} />
+        <Route path="/wallet" element={<RequireAuth><WalletPage /></RequireAuth>} />
+        <Route path="/wallet/topup" element={<RequireAuth><TopUpPage /></RequireAuth>} />
+        <Route path="/wallet/topup/:topupId" element={<RequireAuth><TopUpStatusPage /></RequireAuth>} />
+        <Route path="/wallet/activity" element={<RequireAuth><Lazy><WalletActivityPage /></Lazy></RequireAuth>} />
+        <Route path="/profile" element={<RequireAuth><ProfilePage /></RequireAuth>} />
+        <Route path="/change-password" element={<RequireAuth><ChangePasswordPage /></RequireAuth>} />
+        {/* Deliberately NOT behind RequireAuth: an applicant waiting for approval and a member who
+            cannot sign in are exactly the people wondering how any of this works (item 16). */}
+        <Route path="/how-it-works" element={<HowItWorksPage />} />
+
+        {/* R16 — one Admin tab. Everything the gear menu held is in here now. */}
+        <Route path="/admin" element={<RequireAuth admin><AdminLayout /></RequireAuth>}>
+          <Route index element={<AdminHomePage />} />
+          <Route path="/admin/members" element={<AdminMembersPage />} />
+          <Route path="/admin/groups" element={<AdminGroupsPage />} />
+          <Route path="/admin/transactions" element={<AdminLedgerPage />} />
+          <Route path="/admin/reports" element={<Lazy><AdminReportsPage /></Lazy>} />
+          <Route path="/admin/monitoring" element={<ControlBoardPage />} />
+          <Route path="/admin/monitoring/doors" element={<AdminDoorsPage />} />
+          <Route path="/admin/monitoring/doors/log" element={<AdminDoorsLogPage />} />
+          <Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} />
+          <Route path="/admin/monitoring/doors/:id/card" element={<AdminDoorsCardPage />} />
+          <Route path="/admin/monitoring/devices" element={<AdminDevicesPage />} />
+          <Route path="/admin/monitoring/faults" element={<MonitoringFaultsPage />} />
+          <Route path="/admin/monitoring/changes" element={<AdminChangeRecordPage />} />
+          {/* Until P5 moves a person's night onto the member's own page (R17). */}
+          <Route path="/admin/monitoring/night" element={<MemberNightPage />} />
+          <Route path="/admin/schedules" element={<AdminSchedulesPage />} />
+          <Route path="/admin/schedules/:id" element={<AdminScheduleDetailPage />} />
+          <Route path="/admin/settings" element={<AdminSettingsPage />} />
+          <Route path="/admin/webhooks" element={<AdminWebhooksPage />} />
+        </Route>
+
+        {/* PERMANENT redirects — query and hash carried across (see `RedirectKeepingQuery`). */}
+        <Route path="/schedule" element={<RedirectKeepingQuery to="/bookings" />} />
+        <Route path="/court-code" element={<RedirectKeepingQuery to="/my-code" />} />
+        <Route path="/reports" element={<RequireAuth><ReportsRedirect /></RequireAuth>} />
+        <Route path="/admin/ledger" element={<RedirectKeepingQuery to="/admin/transactions" />} />
+        <Route path="/admin/biometric" element={<RedirectKeepingQuery to="/admin/members" />} />
+        <Route path="/admin/devices" element={<RedirectKeepingQuery to="/admin/monitoring/devices" />} />
+        <Route path="/admin/doors" element={<RedirectKeepingQuery to="/admin/monitoring/doors" />} />
+        <Route path="/admin/doors/log" element={<RedirectKeepingQuery to="/admin/monitoring/doors/log" />} />
+        <Route path="/admin/doors/:id" element={<RedirectDoor />} />
+        <Route path="/admin/doors/:id/card" element={<RedirectDoor card />} />
+
+        {DevPrimitivesPage && (
+          <Route
+            path="/dev/primitives"
+            element={<Suspense fallback={null}><DevPrimitivesPage /></Suspense>}
+          />
+        )}
+        {/* A real 404, not a redirect: a redirect is how a dead link in an email looks like a working one. */}
+        <Route path="*" element={<NotFoundPage />} />
+      </Route>
+    </Routes>
   );
 }
 
@@ -249,8 +262,8 @@ const OFFLINE_CAPABLE = new Set(["/my-code"]);
  * <p>
  * It carries the location it turned away in router state, so `/login` can finish the journey the
  * member actually started. Without that, a "top up" link from an email or a bookmarked
- * `/wallet` was silently discarded and every sign-in landed on `/schedule` — the member had to
- * navigate to the thing they had already asked for.
+ * `/wallet` was silently discarded and every sign-in landed on the default screen — the member
+ * had to navigate to the thing they had already asked for.
  * </p>
  *
  * <p>
@@ -302,109 +315,7 @@ export function RequireAuth({ children, admin = false }: { children: React.React
   if (auth.mustChangePassword && location.pathname !== "/change-password") {
     return <Navigate to="/change-password" replace />;
   }
-  if (admin && !auth.isAdmin) return <Navigate to="/" replace />;
+  // A member who follows an admin link lands on their own landing, not on a redirect to it.
+  if (admin && !auth.isAdmin) return <Navigate to={LANDING_PATH} replace />;
   return <>{children}</>;
 }
-
-/**
- * The screen a member looks at while the app works out whether they are still signed in.
- *
- * <p>
- * It used to be the literal word "Loading…" at 14px in the top-left corner, and it stayed that
- * way for the full twenty seconds of the request budget against a backend that accepts the
- * connection and never answers. Measured on a live page: identical at 2s, 6s, 12s and 20.1s —
- * no spinner, no skeleton, no explanation, nothing to press. Twenty seconds of that reads as a
- * broken app, not as a slow one, and it is a member's first impression of the club's software.
- * </p>
- *
- * <p>
- * So: something moving from the first frame, and a sentence that grows a second line once the
- * wait stops being ordinary. The threshold is deliberately not a progress bar — nothing here
- * knows how long the backend will take, and a bar that fills at a made-up rate and then sits at
- * 95% is a worse lie than silence. The 20s ceiling itself is right and stays
- * (`REQUEST_TIMEOUT_MS`): it does not spin for ever, which is the important half.
- * </p>
- */
-function BootSplash() {
-  const [slow, setSlow] = useState(false);
-  useEffect(() => {
-    const t = window.setTimeout(() => setSlow(true), 4000);
-    return () => window.clearTimeout(t);
-  }, []);
-
-  return (
-    <div className="max-w-md mx-auto p-4" data-testid="boot-splash">
-      <Card>
-        {/* aria-live, because a screen-reader user gets nothing at all from a spinner. */}
-        <div className="flex items-center gap-3" role="status" aria-live="polite">
-          <Spinner />
-          <p className="text-text-secondary">Connecting to the club…</p>
-        </div>
-        {slow && (
-          <p className="mt-3 text-sm text-text-muted">
-            This is taking longer than usual. We'll keep trying for a few more seconds.
-          </p>
-        )}
-      </Card>
-    </div>
-  );
-}
-
-/** The one spinner in the product. `motion-reduce` so it holds still for anyone who asked it to. */
-function Spinner() {
-  return (
-    <span
-      aria-hidden
-      className="inline-block w-5 h-5 shrink-0 rounded-full border-2 border-border border-t-accent-strong animate-spin motion-reduce:animate-none"
-    />
-  );
-}
-
-/**
- * Shown while a stored session exists and the club cannot be reached to confirm it.
- *
- * <p>
- * The member keeps their token throughout, so the moment the backend answers again the app
- * carries on where it was — no re-typed password, and nothing lost to a redeploy.
- * </p>
- *
- * <p>
- * The button has a pending state because it is the only control this screen offers and, against
- * a stalled backend, it did nothing observable for 25 seconds: measured, one button state
- * throughout — not disabled, no `aria-busy`, no label change, no spinner. A member presses the
- * one thing they are given and the app says nothing, so they press it again, and again. The
- * retry now resolves when the probe does, which is what lets the label say so.
- * </p>
- */
-function ConnectionLost({ onRetry }: { onRetry: () => void | Promise<void> }) {
-  const [retrying, setRetrying] = useState(false);
-
-  const retry = async () => {
-    setRetrying(true);
-    try {
-      await onRetry();
-    } finally {
-      // The probe resolving does not mean it succeeded — on failure this component stays mounted
-      // and the button has to come back, or the member is left with a dead control.
-      setRetrying(false);
-    }
-  };
-
-  return (
-    <div className="max-w-md mx-auto p-4">
-      <Card>
-        <h1 className="text-xl font-semibold text-text-primary">Can't reach the club right now</h1>
-        <p className="mt-2 text-text-secondary">
-          You're still signed in. This is usually a brief interruption — we'll keep trying, and the
-          page will carry on by itself once the connection is back.
-        </p>
-        <div className="mt-4">
-          <Button onClick={retry} disabled={retrying} aria-busy={retrying}>
-            {retrying ? <><Spinner />&nbsp;Trying…</> : "Try again now"}
-          </Button>
-        </div>
-      </Card>
-    </div>
-  );
-}
-

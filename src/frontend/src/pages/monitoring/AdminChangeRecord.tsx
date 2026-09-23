@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert } from "../../components/Alert";
-import { Label, Select } from "../../components/Button";
-import { Card } from "../../components/Card";
-import { MonitoringNav } from "../../components/monitoring/MonitoringSection";
-import { StateBlock } from "../../components/StateBlock";
+import { PageHeader, PageShell } from "../../components/ui/page-shell";
+import { Freshness, RefreshButton } from "../../components/ui/refresh-button";
+import { StateBlock } from "../../components/ui/state-block";
+import { CaretDown, ListChecks } from "../../components/ui/icons";
+import {
+  CardListSkeleton, DownloadCsvLink, FilterBar, FilterSelect, type FilterOption,
+} from "../../components/monitoring/parts";
+import { useAsyncAction } from "../../lib/useAsyncAction";
 import { clubDayAndClock } from "../../lib/clubClock";
 import {
   ADMIN_CHANGE_AREAS, adminEndpoints, type AdminChangePage, type AdminChangeRow,
@@ -61,6 +65,7 @@ export function AdminChangeRecordPage() {
   const [error, setError] = useState<unknown>(null);
   const [area, setArea] = useState("");
   const [period, setPeriod] = useState("last_7d");
+  const [readAt, setReadAt] = useState<number | null>(null);
 
   const load = useCallback(async (which: string, when: string) => {
     setLoading(true);
@@ -70,6 +75,7 @@ export function AdminChangeRecordPage() {
         period: when,
       }));
       setError(null);
+      setReadAt(Date.now());
     } catch (err) {
       // Cleared, unlike the control board: a filtered list that keeps the PREVIOUS filter's
       // rows under the new filter's heading is a screen that answers a question nobody asked.
@@ -88,80 +94,81 @@ export function AdminChangeRecordPage() {
 
   const rows = page?.rows ?? [];
   const timezone = page?.timezone;
+  const manual = useAsyncAction(() => load(area, period));
 
   return (
-    <div className="space-y-6">
-      <header className="space-y-3">
-        <h1 className="text-2xl font-bold tracking-tight">Admin change record</h1>
-        <MonitoringNav />
-      </header>
+    <PageShell width="wide">
+      <PageHeader
+        title="Change record"
+        description={page?.retention
+          // The retention sentence comes from the SERVER, never composed here from a number.
+          // The two horizons on this estate are different — audit rows age out, these do not —
+          // and a page that hardcoded one of them would be wrong the day a club edits the other.
+          ? `Every admin action, in the order it happened. How long these are kept: ${page.retention}`
+          : "Every admin action, in the order it happened."}
+        actions={<RefreshButton onRefresh={() => void manual.run()} loading={manual.pending} />}
+        freshness={<Freshness at={readAt} />}
+      />
 
       <Alert tone="info" live="standing" announceKey="changes-immutability">
         {CHANGES_STANDING_NOTICE}
       </Alert>
 
-      {/*
-        The retention sentence comes from the SERVER, never composed here from a number.
-        The two horizons on this estate are different — audit rows age out, these do not —
-        and a page that hardcoded one of them would be wrong the day a club edits the other.
-      */}
-      {page?.retention && <p className="text-sm text-text-muted">{`How long these are kept: ${page.retention}`}</p>}
-
-      <Card className="flex flex-wrap items-end gap-3">
-        <div>
-          <Label htmlFor="changes-area">What</Label>
-          <Select
+      <div className="flex flex-col gap-2">
+        <FilterBar>
+          <FilterSelect
             id="changes-area"
-            className="min-h-11"
+            label="What"
             value={area}
-            onChange={(e) => setArea(e.target.value)}
-          >
-            <option value="">Everything</option>
-            {ADMIN_CHANGE_AREAS.map((a) => (
-              <option key={a} value={a}>{AREA_LABEL[a] ?? a}</option>
-            ))}
-          </Select>
-        </div>
-        <div>
-          <Label htmlFor="changes-period">When</Label>
-          <Select
+            options={AREA_OPTIONS}
+            onChange={setArea}
+          />
+          <FilterSelect
             id="changes-period"
-            className="min-h-11"
+            label="When"
             value={period}
-            onChange={(e) => setPeriod(e.target.value)}
-          >
-            <option value="today">Today</option>
-            <option value="yesterday">Yesterday</option>
-            <option value="last_7d">Last 7 days</option>
-            <option value="last_30d">Last 30 days</option>
-          </Select>
-        </div>
-        <a
-          className="ml-auto inline-flex min-h-11 items-center rounded-lg border border-control bg-bg-surface px-4 text-sm font-medium"
-          href={adminEndpoints.adminChangesCsvUrl({ ...(area ? { area } : {}), period })}
-        >
-          Download CSV
-        </a>
-        <p className="w-full text-xs text-text-muted">{CHANGES_EXPORT_NOTE}</p>
-      </Card>
+            options={PERIOD_OPTIONS}
+            onChange={setPeriod}
+          />
+          <DownloadCsvLink
+            className="sm:ml-auto"
+            href={adminEndpoints.adminChangesCsvUrl({ ...(area ? { area } : {}), period })}
+          />
+        </FilterBar>
+        <p className="text-xs text-text-muted">{CHANGES_EXPORT_NOTE}</p>
+      </div>
 
       <StateBlock
         loading={loading}
         error={error}
         action="the change record"
         failedCaveat="That does not mean nothing happened."
-        onRetry={() => void load(area, period)}
+        onRetry={() => void manual.run()}
         empty={!loading && !error && rows.length === 0}
+        emptyIcon={ListChecks}
         emptyTitle={CHANGES_EMPTY}
         emptyHint="Every admin action lands here the moment it happens, so an empty range means nobody did anything in it."
+        skeleton={<CardListSkeleton rows={4} />}
       >
-        <ul className="space-y-3">
+        <ul className="flex flex-col gap-3">
           {rows.map((row) => <ChangeRow key={row.id} row={row} timezone={timezone} />)}
         </ul>
       </StateBlock>
-    </div>
+    </PageShell>
   );
 }
+
+const AREA_OPTIONS: FilterOption[] = [
+  { value: "", label: "Everything" },
+  ...ADMIN_CHANGE_AREAS.map((a) => ({ value: a, label: AREA_LABEL[a] ?? a })),
+];
+
+const PERIOD_OPTIONS: FilterOption[] = [
+  { value: "today", label: "Today" },
+  { value: "yesterday", label: "Yesterday" },
+  { value: "last_7d", label: "Last 7 days" },
+  { value: "last_30d", label: "Last 30 days" },
+];
 
 /**
  * One change — a card at 375, and the same card at 1440 because it reads perfectly well.
@@ -176,7 +183,7 @@ export function AdminChangeRecordPage() {
 function ChangeRow({ row, timezone }: { row: AdminChangeRow; timezone: string | undefined }) {
   const diff = row.changes ?? [];
   return (
-    <li className="rounded-lg border border-border bg-bg-surface p-3">
+    <li className="flex flex-col gap-1 rounded-xl border border-border bg-bg-surface p-4 shadow-xs">
       <div className="flex min-w-0 flex-wrap items-baseline gap-2">
         <time dateTime={row.occurred_at} className="shrink-0 text-sm tabular-nums text-text-muted">
           {clubDayAndClock(row.occurred_at, timezone)}
@@ -192,11 +199,12 @@ function ChangeRow({ row, timezone }: { row: AdminChangeRow; timezone: string | 
       {row.reason && <p className="text-sm text-text-secondary">{`Reason: “${row.reason}”`}</p>}
 
       {diff.length > 0 ? (
-        <details className="mt-2">
-          <summary className="inline-flex min-h-11 cursor-pointer items-center text-sm font-medium">
+        <details className="group mt-1">
+          <summary className="no-lift inline-flex min-h-touch cursor-pointer list-none items-center gap-1 text-sm font-semibold text-accent-strong [&::-webkit-details-marker]:hidden">
             Show what changed
+            <CaretDown size={16} aria-hidden="true" className="transition-transform duration-fast group-open:rotate-180 motion-reduce:transition-none" />
           </summary>
-          <dl className="mt-1 grid grid-cols-[auto_1fr_1fr] gap-x-3 gap-y-1 text-sm">
+          <dl className="mt-2 grid rounded-lg bg-bg-muted p-3 grid-cols-[auto_1fr_1fr] gap-x-3 gap-y-1 text-sm">
             <dt className="text-text-muted">Field</dt>
             <dd className="text-text-muted">Before</dd>
             <dd className="text-text-muted">After</dd>
@@ -212,7 +220,7 @@ function ChangeRow({ row, timezone }: { row: AdminChangeRow; timezone: string | 
           </dl>
         </details>
       ) : (
-        <p className="mt-1 text-sm text-text-muted">{CHANGES_NO_DIFF}</p>
+        <p className="text-sm text-text-muted">{CHANGES_NO_DIFF}</p>
       )}
     </li>
   );

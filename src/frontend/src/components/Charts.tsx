@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- the drawings (and the axis arithmetic) are exported for the tests that read their element trees; the components below wrap them. */
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart,
   ReferenceLine, Tooltip, XAxis, YAxis, Line, LineChart,
@@ -5,170 +6,113 @@ import {
 import { createElement } from "react";
 import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
 import { formatCredits } from "../lib/utils";
-import { chartColors } from "../lib/tokens";
-import { ChartFrame } from "./ChartFrame";
+import { ChartFrame, type ChartPalette } from "./ChartFrame";
 
 /**
- * The chart palette, from the token module rather than from a copy.
+ * The report charts.
  *
  * <p>
- * These eight names used to be eight hex literals declared here, and three of them had gone
- * stale without anything saying so. `ACCENT` was `#0369A1` — the sky-blue this product moved off
- * when it adopted the club's crest colours — so every chart rendered in an accent that appeared
- * nowhere else on the page around it. `ACCENT_SOFT` was that dead palette's tint. `TEXT_MUTED`
- * was `#6B7280` against a token of `#5B6879`, two greys nobody chose to be different. Beyond
- * these, the gridlines and the tooltip border were `#E5E7EB` inline, a fourth grey that is
- * neither the border token nor the muted one.
- * </p>
- *
- * <p>
- * Resolved once at module load, which is after `index.css` has applied, so `ACCENT` follows a
- * tenant override exactly as a `bg-accent-strong` class would.
+ * <b>Every colour comes from the palette the frame hands in</b>, read from the live theme on
+ * each render (see `ChartFrame.useChartColors`). These used to be eight module constants
+ * resolved once at load — first as hex literals that had drifted (a retired sky-blue accent, a
+ * fourth grey nobody chose), then as token reads frozen at whichever theme the tab opened in.
+ * Neither survives a product with a dark theme. Each chart is now a pure function of its data
+ * and a {@link ChartPalette}; the exported component wraps it in the frame.
  * </p>
  */
-const {
-  accent: ACCENT,
-  accentSoft: ACCENT_SOFT,
-  success: SUCCESS,
-  successSoft: SUCCESS_SOFT,
-  warning: WARNING,
-  danger: DANGER,
-  muted: TEXT_MUTED,
-  legend: LEGEND_TEXT,
-  grid: GRID,
-} = chartColors();
-
 
 /**
- * The height reserved above the plot for the topmost y-axis tick.
- *
- * <p>
- * At 8px the top label was sliced in half by the SVG's own edge — "50.00 cr" rendered as a row
- * of half-height digits above an intact "45.00 cr", which reads as a rendering fault rather than
- * as a number. A tick is centred on its gridline, so the margin has to clear half a line of text
- * at the 11px the axis is set in.
- * </p>
+ * The axis type size: the product's 12px floor (design-system.md, Type — nothing smaller than
+ * `xs` exists). It was 11, the one place on the report pages still under the floor.
+ */
+const AXIS_FONT_PX = 12;
+
+/**
+ * The height reserved above the plot for the topmost y-axis tick. A tick is centred on its
+ * gridline, so the margin has to clear half a line of text; at 8px the top label was sliced in
+ * half by the SVG's own edge.
  */
 const TOP_MARGIN = 16;
 
 /**
- * The narrowest y-axis gutter a credit-denominated axis is ever given.
- *
- * <p>
- * 48 was under the width of "50.00 cr" at 11px, and recharts wraps a tick that does not fit
- * rather than overflowing it — so every single tick on the wallet-balance chart rendered on two
- * lines, doubling the label column's height and pushing the top one into the clip described
- * above. Counts ({@link COUNT_AXIS_WIDTH}) are short enough not to need it.
- * </p>
- *
- * <p>
- * <b>It is now a FLOOR rather than the answer.</b> 64 was measured against "50.00 cr" and then
- * shipped as a constant for every credit axis in the product, which is the whole defect: these
- * series are net, net goes four figures negative on any day whose penalty rows reverse an
- * earlier sweep, and no constant chosen against one label survives the next wider one. The
- * width each chart actually uses comes from {@link creditAxisWidth}, computed from its own
- * data. This value stays as the lower bound so that a chart whose numbers are small keeps the
- * gutter that was measured right for it, instead of reclaiming a few pixels of plot on the
- * strength of the same arithmetic that is being introduced to widen the others.
- * </p>
+ * The narrowest y-axis gutter a credit-denominated axis is ever given — a FLOOR, not the answer.
+ * The width each chart uses comes from {@link creditAxisWidth}, computed from its own data;
+ * these series are net and go four figures negative, and no constant survives that.
  */
 const CREDIT_AXIS_MIN_WIDTH = 64;
 
 /**
- * The parts of a credit tick label, in pixels, <b>measured in Chromium</b> at the 11px Figtree
- * 400 the axis is drawn in — not estimated from character counts, which is how 64 was arrived
- * at. `getComputedTextLength` on the rendered ticks: "0.00 cr" 35.83, "50.00 cr" 42.16,
- * "-1000.00 cr" 59.06, "-8000.00 cr" 61.28.
- *
- * <p>
- * Figtree's figures are proportional, not tabular — "0" is 7.06px and "1" is 4.55px — so a
- * label's width depends on which digits are in it. The widest digit is used for all of them,
- * which makes {@link creditLabelWidth} an upper bound for any number of that many digits: 61.67
- * against a real "-8000.00 cr" of 61.28. An upper bound is the right side to be wrong on, and
- * it also means an intermediate tick can never need more room than the extreme one that sized
- * the axis.
- * </p>
+ * The parts of a credit tick label, in pixels, measured in Chromium at 11px Figtree 400 with
+ * `getComputedTextLength` ("0.00 cr" 35.83, "50.00 cr" 42.16, "-1000.00 cr" 59.06, "-8000.00 cr"
+ * 61.28), then scaled to the {@link AXIS_FONT_PX} the axis is now set in — an outline font's
+ * advance widths scale linearly with its size. Figtree's figures are proportional, so every
+ * digit is costed as the widest one: {@link creditLabelWidth} is an upper bound, which is the
+ * right side to be wrong on.
  */
-const AXIS_WIDEST_DIGIT_PX = 7.07;
-const AXIS_MINUS_PX = 4.6;
+const MEASURED_AT_PX = 11;
+const SCALE = AXIS_FONT_PX / MEASURED_AT_PX;
+const AXIS_WIDEST_DIGIT_PX = 7.07 * SCALE;
+const AXIS_MINUS_PX = 4.6 * SCALE;
 /** ".00 cr" — the tail every credit label carries, measured whole so its kerning is included. */
-const AXIS_DECIMALS_AND_UNIT_PX = 28.79;
+const AXIS_DECIMALS_AND_UNIT_PX = 28.79 * SCALE;
 
 /**
- * What recharts keeps between the plot and the tick text: `tickSize` 6 plus `tickMargin` 2.
- *
- * A left axis anchors its tick text at `x + width - tickSize - tickMargin` with `text-anchor:
- * end`, so a label wider than `width - 8` starts to the left of the chart's own box — which is
- * where the carousel's Previous arrow sits, and is the collision {@link LEFT_MARGIN} records.
+ * What recharts keeps between the plot and the tick text: `tickSize` 6 plus `tickMargin` 2. A
+ * left axis anchors its tick text at `x + width - 8` with `text-anchor: end`, so a label wider
+ * than `width - 8` starts left of the chart's own box — under the carousel's Previous arrow.
  */
 const AXIS_TICK_GAP_PX = 8;
 
-/** The same gutter for an axis of plain integers — "12" needs nothing like the room "50.00 cr" does. */
+/** The gutter for an axis of plain integers — "12" needs nothing like the room "50.00 cr" does. */
 const COUNT_AXIS_WIDTH = 36;
 
 /**
- * The left margin. Zero, not negative.
- *
- * <p>
- * <code>left: -12</code> bought a little plot width by pulling the axis labels 12px outside the
- * chart's own box — straight underneath the carousel's Previous arrow, which sits at the
- * container's left edge less 12px. The arrow landed on top of the tick labels. The gutter above
- * is what recovers the space, honestly, inside the box.
- * </p>
+ * The left margin. Zero, not negative: `left: -12` pulled the axis labels outside the chart's
+ * box, straight under the carousel's Previous arrow.
  */
 const LEFT_MARGIN = 0;
 
-/**
- * The measured width of a {@link ChartFrame}'s box.
- *
- * A named alias rather than an inline `useState<{ width: number } | null>`, and that is not
- * style: lizard's TSX parser reads the `<` of the generic as a JSX open tag and then swallows the
- * rest of the file into whichever function it was last inside — it reported `ChartFrame` at 243
- * lines and lost every function after it, tripping `make complexity`'s `-L 200` on lines nobody
- * had touched. Naming the type puts the braces outside the angle brackets. See memory/gotchas.md.
- */
-
-
-
-const tooltipStyle = {
-  contentStyle: { borderRadius: 8, border: `1px solid ${GRID}`, fontSize: 12, padding: "6px 10px" },
-  labelStyle: { color: TEXT_MUTED, fontWeight: 500, marginBottom: 2 },
-} as const;
+const MARGIN = { top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN } as const;
 
 /**
- * A legend whose labels can be read.
- *
- * <p>
- * recharts paints each legend label in that series' own colour. Three of the five labels on
- * /reports used a <code>*-strong</code> token and were fine; the two that used the series
- * <i>fill</i> — "Refunds (net)" on <code>success.soft</code> and "Booked" on
- * <code>accent.soft</code> — measured <b>1.10:1 and 1.15:1 on white</b>. Those are pale ghosts
- * beside a legible neighbour, against the 4.5:1 floor `docs/specs/design-system.md` commits to,
- * and there is only one theme, so there is nowhere for them to become readable.
- * </p>
- *
- * <p>
- * The fix is not to darken the two fills: a soft fill next to a strong one is the whole point of
- * the pairing, and "Booked" being lighter than "Played" is what makes the gap between the bars
- * legible. The label is a different job from the swatch. The swatch keeps the series colour and
- * carries the identification; the text is set in <code>text.primary</code> like every other
- * label in the product, and a `formatter` is the only hook recharts offers for it.
- * </p>
- *
- * <p>
- * Applied through one shared object rather than per chart, for the reason the whole affordance
- * layer in <code>index.css</code> exists: a rule applied per component is one a new component
- * silently does not get, and that is precisely how two of these five ended up wrong.
- * </p>
+ * The tooltip, on the raised surface like every other floating thing (design-system.md,
+ * Charts). recharts' default is a white box with `#ccc` edges and each row in its series'
+ * colour — which on the dark theme is a white slab, and for a SOFT series (`success.soft`,
+ * `accent.soft`) is a pale ghost of a row. Rows are body text here, and the swatch beside the
+ * name is what identifies the series.
  */
-const legendProps = {
-  wrapperStyle: { fontSize: 11 },
-  // `createElement`, not JSX. lizard reads a bare `<` in a .tsx file as a JSX open tag and
-  // swallows the rest of the file into whichever function it was last inside — this one-line
-  // arrow was reported at 145 lines and dragged ChartFrame to 268, tripping `-L 200` on lines
-  // nobody had touched. See memory/gotchas.md.
-  formatter: (value: string) => createElement("span", { style: { color: LEGEND_TEXT } }, value),
-} as const;
+function tooltipProps(c: ChartPalette) {
+  return {
+    contentStyle: {
+      borderRadius: 10, border: `1px solid ${c.grid}`, background: c.tooltip,
+      color: c.legend, fontSize: AXIS_FONT_PX, padding: "6px 10px",
+    },
+    labelStyle: { color: c.muted, fontWeight: 500, marginBottom: 2 },
+    itemStyle: { color: c.legend },
+    // A bar chart's hover band and a line chart's hover rule: the hairline role, not recharts'
+    // #ccc — which is a bright slab behind the bars on the dark theme.
+    cursor: { fill: c.grid, fillOpacity: 0.5, stroke: c.grid },
+  } as const;
+}
+
+/**
+ * A legend whose labels can be read. recharts paints each label in its series' colour, and the
+ * two series drawn with a SOFT fill measured 1.10:1 and 1.15:1 on white. The swatch keeps the
+ * series colour and carries the identification; the text is set in `text.primary` like every
+ * other label. `createElement`, not JSX: lizard reads a bare `<` in a .tsx file as a JSX open
+ * tag and swallows the rest of the file into whichever function it was last inside.
+ */
+function legendProps(c: ChartPalette) {
+  return {
+    wrapperStyle: { fontSize: AXIS_FONT_PX },
+    formatter: (value: string) => createElement("span", { style: { color: c.legend } }, value),
+  } as const;
+}
+
+/** Axis ticks and the axis line, in the muted token. */
+function axisProps(c: ChartPalette) {
+  return { fontSize: AXIS_FONT_PX, stroke: c.muted, tick: { fill: c.muted } } as const;
+}
 
 // Credits, not rand. These charts plot ledger movements and court spend, both of
 // which are credit-denominated — a rand sign here overstates every bar by the
@@ -176,9 +120,9 @@ const legendProps = {
 const fmtCredits = (v: number | string) => formatCredits(Number(v));
 
 /**
- * U+00A0, written as an escape on purpose: a literal non-breaking space in source is
- * invisible, survives no copy-paste reliably, and an editor that helpfully normalises
- * whitespace would silently put every credit tick back onto two lines.
+ * U+00A0, written as an escape on purpose: a literal non-breaking space in source is invisible,
+ * and an editor that normalises whitespace would silently put every credit tick back onto two
+ * lines.
  */
 const NON_BREAKING_SPACE = "\u00a0";
 
@@ -186,40 +130,15 @@ const NON_BREAKING_SPACE = "\u00a0";
  * The same figure for an axis tick, with the space before the unit made non-breaking.
  *
  * <p>
- * <b>This is not typography. It is what stops every credit tick above 99 rendering on two
- * lines.</b> recharts decides whether a tick fits by splitting it on spaces and measuring the
- * words with `getStringSize`, which puts them in a hidden `span` appended to `document.body` —
- * a span that inherits the BODY's 16px, while the tick itself is drawn at the axis's 11px. It
- * was therefore judging every label about 45% wider than it draws, and breaking it accordingly:
- * measured in Chromium at the shipped 64px gutter, "100.00 cr" came out as "100.00" above "cr",
- * and so did 150, 200 and every four-figure negative. The unit column doubled in height and the
- * topmost tick went into the SVG's clip — the exact fault {@link TOP_MARGIN} was added to fix,
- * arriving by a different route.
- * </p>
- *
- * <p>
- * A label with no breaking space in it is one word, and recharts never breaks a word: the
- * mis-measurement stops being able to express itself, whatever font size it thinks it is
- * working in. What remains is the honest question of whether the label FITS, which
- * {@link creditAxisWidth} answers from the data. The character is U+00A0, so the rendered text
- * is identical to a reader and to a screenshot; only the line-breaking opportunity is gone.
- * </p>
- *
- * <p>
- * Deliberately not applied to {@link fmtCredits}, which the tooltips use: a tooltip is laid out
- * in HTML, has no gutter to overflow, and its text is matched by tests and read by people who
- * may copy it.
+ * recharts decides whether a tick fits by measuring its words in a hidden span that inherits
+ * the BODY's font size, not the axis's, and breaks the label accordingly — "100.00" above "cr".
+ * A label with no breaking space in it is one word, and recharts never breaks a word. Not
+ * applied to {@link fmtCredits}: a tooltip is laid out in HTML and its text is copied by people.
  * </p>
  */
 const fmtAxisCredits = (v: number | string) => formatCredits(Number(v)).replace(" ", NON_BREAKING_SPACE);
 
-/**
- * The width of the widest label an axis reaching `value` can draw, in pixels.
- *
- * Upper bound, by construction: every digit is costed as the widest one in the face. See the
- * metric constants above for where the numbers come from and why they are measured rather than
- * counted.
- */
+/** The width of the widest label an axis reaching `value` can draw, in pixels. Upper bound. */
 function creditLabelWidth(value: number): number {
   const digits = String(Math.floor(Math.abs(value))).length;
   const sign = 0 > value ? AXIS_MINUS_PX : 0;
@@ -227,18 +146,9 @@ function creditLabelWidth(value: number): number {
 }
 
 /**
- * A value rounded AWAY from zero to the next multiple of its own leading power of ten.
- *
- * <p>
- * The axis does not label the data; it labels the ticks, and recharts picks round ones that
- * reach past the extreme value. A series topping out at 950 is drawn with a tick at 1000 —
- * one digit wider than anything in the data — so sizing the gutter from the data alone
- * under-fits it by exactly one character on precisely the series that were about to overflow
- * anyway. This is a deliberate over-estimate of where the tick lands rather than a
- * reimplementation of recharts' tick algorithm: it is never narrower than the real top tick,
- * and it only ever changes the answer at a digit boundary, which is the only place the answer
- * changes at all.
- * </p>
+ * A value rounded AWAY from zero to the next multiple of its own leading power of ten. The axis
+ * labels its ticks, not the data, and recharts picks round ones past the extreme: a series
+ * topping out at 950 is drawn with a tick at 1000, one digit wider than anything in the data.
  */
 function niceAway(value: number): number {
   if (value === 0) return 0;
@@ -248,17 +158,9 @@ function niceAway(value: number): number {
 }
 
 /**
- * The gutter a credit y-axis needs for the widest label its own data can produce.
- *
- * <p>
- * Exported so `chart-geometry.test.tsx` can rebuild the expectation from the series each chart
- * declares rather than restating them — the one drift this design can suffer is a `Bar` added
- * to a chart and not to the list of keys its width is computed from.
- * </p>
- *
- * <p>
+ * The gutter a credit y-axis needs for the widest label its own data can produce. Exported so
+ * `chart-geometry.test.tsx` can rebuild the expectation from the series each chart declares.
  * Zero is always in the range, because every one of these axes draws a zero line.
- * </p>
  */
 export function creditAxisWidth(values: readonly number[]): number {
   const finite = values.filter(Number.isFinite);
@@ -270,19 +172,9 @@ export function creditAxisWidth(values: readonly number[]): number {
 }
 
 /**
- * The values a stacked signed chart's y-axis has to reach.
- *
- * <p>
- * Not the largest single bar: `stackOffset="sign"` accumulates a stack's positives upward and
- * its negatives downward, so a day's reach is the sum of each sign within each stack. A chart
- * with no stacks passes one key per group and gets the values themselves back.
- * </p>
- *
- * <p>
- * The comparisons are written `0 > v` rather than `v < 0` for the reason recorded on
- * {@link ChartFrame}: lizard reads a bare `<` in a .tsx file as a JSX open tag and swallows the
- * rest of the file into whichever function it was last inside.
- * </p>
+ * The values a stacked signed chart's y-axis has to reach: `stackOffset="sign"` accumulates a
+ * stack's positives upward and its negatives downward, so a day's reach is the sum of each sign
+ * within each stack. `0 > v` rather than `v < 0` for the lizard reason above.
  */
 function stackedExtremes(rows: readonly Record<string, unknown>[], stacks: readonly (readonly string[])[]): number[] {
   const out: number[] = [];
@@ -296,12 +188,7 @@ function stackedExtremes(rows: readonly Record<string, unknown>[], stacks: reado
   return out;
 }
 
-/**
- * Which series share a stack, per chart — mirroring the `stackId`s on the bars below.
- *
- * The geometry test reads the real ones off the rendered elements and checks the width against
- * them, so these cannot fall out of step with the chart without a test failing.
- */
+/** Which series share a stack, per chart — mirroring the `stackId`s on the bars below. */
 const CLUB_FLOW_STACKS = [["top_ups_credits"], ["booking_charges_credits", "penalties_credits"]];
 const MEMBER_FLOW_STACKS = [["top_ups_credits", "refunds_credits"], ["spent_credits"]];
 const fmtDate = (d: string) => {
@@ -310,204 +197,189 @@ const fmtDate = (d: string) => {
 };
 
 /**
- * The y-axis floor for a chart plotting ledger movements: zero, or below it exactly as
- * far as the data goes.
- *
- * <p>
- * These series are <b>net</b>, and net means a day can be negative. Settlement-model
- * I11 posts every correction as a new row of the same type with the opposite sign
- * rather than editing the original, and a reversal routinely lands in a different day's
- * bucket from the sweep it reverses — so a day whose only penalty row is a reversal
- * reads as a negative penalty. The API is right; the chart has to be able to draw it.
- * </p>
- *
- * <p>
- * Recharts' default numeric domain is <code>[0, 'auto']</code>, which reads as a floor
- * at zero. It survives a negative today only because <code>extendDomain</code> widens a
- * user domain to the data rather than clipping to it — an implementation detail of the
- * version in <code>package.json</code>, not a contract. Saying the floor out loud costs
- * one prop and cannot regress quietly. <code>Math.floor</code> leaves the bar a little
- * room instead of ending the axis exactly on the most negative value.
- * </p>
+ * The y-axis floor for a chart plotting ledger movements: zero, or below it exactly as far as
+ * the data goes. These series are <b>net</b> (settlement-model I11 posts every correction as a
+ * new opposite-sign row), so a day can be negative. recharts' default `[0, 'auto']` survives a
+ * negative only through an implementation detail; saying the floor out loud cannot regress.
  */
 export const signedFloor = (dataMin: number) => (Number.isFinite(dataMin) ? Math.min(0, Math.floor(dataMin)) : 0);
 
 /** {@link signedFloor} as a recharts y-domain: signed floor, auto ceiling. */
 export const SIGNED_DOMAIN = [signedFloor, "auto"] as const;
 
-/**
- * The zero line is drawn solid on the signed charts, so a bar hanging under it reads as
- * a reversal rather than as a mis-drawn bar. The grid's own line at zero is dashed and
- * the same weight as every other tick, which is exactly wrong on a chart where the sign
- * is the information. Written inline at each call site rather than wrapped in a
- * component: recharts discovers its own elements, and a wrapper is a needless bet on how.
- */
-const ZERO_LINE_STROKE = TEXT_MUTED;
+const creditTooltip = { formatter: ((v: number) => fmtCredits(v)) as never, labelFormatter: ((l: string) => fmtDate(l)) as never };
+const dateTooltip = { labelFormatter: ((l: string) => fmtDate(l)) as never };
 
-export function RevenueAreaChart({ data }: { data: DailyAdminPoint[] }) {
+/** A soft vertical wash under an area series, in the series' own colour. */
+function fillGradient(id: string, color: string, top: number) {
+  return createElement(
+    "defs", null,
+    createElement(
+      "linearGradient", { id, x1: "0", y1: "0", x2: "0", y2: "1" },
+      createElement("stop", { offset: "0%", stopColor: color, stopOpacity: top }),
+      createElement("stop", { offset: "100%", stopColor: color, stopOpacity: 0 }),
+    ),
+  );
+}
+
+export function drawRevenueArea(data: DailyAdminPoint[], c: ChartPalette) {
   return (
-    <ChartFrame>
-        <AreaChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }}>
-          <defs>
-            <linearGradient id="revFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={ACCENT} stopOpacity={0.4} />
-              <stop offset="100%" stopColor={ACCENT} stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
-          <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtAxisCredits} fontSize={11} stroke={TEXT_MUTED} width={creditAxisWidth(stackedExtremes(data, [["top_ups_credits"]]))} />
-          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
-          <Area type="monotone" dataKey="top_ups_credits" name="Top-ups" stroke={ACCENT} fill="url(#revFill)" strokeWidth={2} />
-        </AreaChart>
-    </ChartFrame>
+    <AreaChart data={data} margin={MARGIN}>
+      {fillGradient("revFill", c.accent, 0.35)}
+      <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
+      <XAxis dataKey="date" tickFormatter={fmtDate} {...axisProps(c)} />
+      <YAxis tickFormatter={fmtAxisCredits} {...axisProps(c)} width={creditAxisWidth(stackedExtremes(data, [["top_ups_credits"]]))} />
+      <Tooltip {...tooltipProps(c)} {...creditTooltip} />
+      <Area type="monotone" dataKey="top_ups_credits" name="Top-ups" stroke={c.accent} fill="url(#revFill)" strokeWidth={2} />
+    </AreaChart>
   );
 }
 
 /**
- * The club's money by day. <b>Penalties are net</b> — see {@link signedFloor} — so the
- * series is labelled as such in the legend and the tooltip, and the bar goes below the
- * zero line on a day whose penalty rows are reversals of an earlier day's sweep.
+ * The club's money by day. <b>Penalties are net</b> — see {@link signedFloor} — so the series is
+ * labelled as such, and the bar goes below the solid zero line on a reversal day.
  */
-export function DailyFlowBarChart({ data }: { data: DailyAdminPoint[] }) {
+export function drawDailyFlow(data: DailyAdminPoint[], c: ChartPalette) {
   return (
-    <ChartFrame>
-        <BarChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }} stackOffset="sign">
-          <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
-          <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtAxisCredits} fontSize={11} stroke={TEXT_MUTED} width={creditAxisWidth(stackedExtremes(data, CLUB_FLOW_STACKS))} domain={SIGNED_DOMAIN} />
-          <ReferenceLine y={0} stroke={ZERO_LINE_STROKE} strokeWidth={1} />
-          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
-          <Legend {...legendProps} />
-          <Bar dataKey="top_ups_credits" name="Top-ups" stackId="a" fill={SUCCESS} radius={[3, 3, 0, 0]} />
-          <Bar dataKey="booking_charges_credits" name="Bookings" stackId="b" fill={ACCENT} radius={[3, 3, 0, 0]} />
-          <Bar dataKey="penalties_credits" name="Penalties (net)" stackId="b" fill={WARNING} radius={[3, 3, 0, 0]} />
-        </BarChart>
-    </ChartFrame>
+    <BarChart data={data} margin={MARGIN} stackOffset="sign">
+      <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
+      <XAxis dataKey="date" tickFormatter={fmtDate} {...axisProps(c)} />
+      <YAxis tickFormatter={fmtAxisCredits} {...axisProps(c)} width={creditAxisWidth(stackedExtremes(data, CLUB_FLOW_STACKS))} domain={SIGNED_DOMAIN} />
+      <ReferenceLine y={0} stroke={c.muted} strokeWidth={1} />
+      <Tooltip {...tooltipProps(c)} {...creditTooltip} />
+      <Legend {...legendProps(c)} />
+      <Bar dataKey="top_ups_credits" name="Top-ups" stackId="a" fill={c.success} radius={[3, 3, 0, 0]} />
+      <Bar dataKey="booking_charges_credits" name="Bookings" stackId="b" fill={c.accent} radius={[3, 3, 0, 0]} />
+      <Bar dataKey="penalties_credits" name="Penalties (net)" stackId="b" fill={c.warning} radius={[3, 3, 0, 0]} />
+    </BarChart>
   );
+}
+
+export function drawBookingsLine(data: DailyAdminPoint[], c: ChartPalette) {
+  return (
+    <LineChart data={data} margin={MARGIN}>
+      <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
+      <XAxis dataKey="date" tickFormatter={fmtDate} {...axisProps(c)} />
+      <YAxis allowDecimals={false} {...axisProps(c)} width={COUNT_AXIS_WIDTH} />
+      <Tooltip {...tooltipProps(c)} {...dateTooltip} />
+      <Legend {...legendProps(c)} />
+      <Line type="monotone" dataKey="bookings" name="Bookings" stroke={c.accent} strokeWidth={2} dot={false} />
+      <Line type="monotone" dataKey="no_shows" name="No-shows" stroke={c.danger} strokeWidth={2} dot={false} />
+    </LineChart>
+  );
+}
+
+type CourtRevenue = { court_name: string; revenue_credits: number; bookings: number };
+
+export function drawCourtsRevenue(data: CourtRevenue[], c: ChartPalette) {
+  return (
+    <BarChart data={data} margin={MARGIN}>
+      <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
+      <XAxis dataKey="court_name" {...axisProps(c)} />
+      <YAxis tickFormatter={fmtAxisCredits} {...axisProps(c)} width={creditAxisWidth(stackedExtremes(data, [["revenue_credits"]]))} />
+      <Tooltip {...tooltipProps(c)} formatter={creditTooltip.formatter} />
+      <Bar dataKey="revenue_credits" name="Revenue" fill={c.accent} radius={[6, 6, 0, 0]} />
+    </BarChart>
+  );
+}
+
+export function drawNoShowDonut(total: number, noShow: number, c: ChartPalette) {
+  const showed = Math.max(0, total - noShow);
+  const data = [
+    { name: "Showed up", value: showed, color: c.success },
+    { name: "No-shows", value: noShow, color: c.danger },
+  ];
+  return (
+    <PieChart>
+      <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={2} stroke="none">
+        {data.map((d) => <Cell key={d.name} fill={d.color} />)}
+      </Pie>
+      <Tooltip {...tooltipProps(c)} />
+      <Legend verticalAlign="bottom" {...legendProps(c)} />
+    </PieChart>
+  );
+}
+
+export function drawMyBalance(data: DailyMePoint[], c: ChartPalette) {
+  return (
+    <AreaChart data={data} margin={MARGIN}>
+      {fillGradient("balFill", c.accent, 0.3)}
+      <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
+      <XAxis dataKey="date" tickFormatter={fmtDate} {...axisProps(c)} />
+      <YAxis tickFormatter={fmtAxisCredits} {...axisProps(c)} width={creditAxisWidth(stackedExtremes(data, [["balance_credits"]]))} />
+      <Tooltip {...tooltipProps(c)} {...creditTooltip} />
+      <Area type="monotone" dataKey="balance_credits" name="Balance" stroke={c.accent} fill="url(#balFill)" strokeWidth={2} />
+    </AreaChart>
+  );
+}
+
+/**
+ * A member's own money by day. <b>Refunds are net</b> — see {@link signedFloor}: a member whose
+ * no-show was reversed a day later sees the refund taken back on the day the evidence landed.
+ */
+export function drawMyFlow(data: DailyMePoint[], c: ChartPalette) {
+  return (
+    <BarChart data={data} margin={MARGIN} stackOffset="sign">
+      <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
+      <XAxis dataKey="date" tickFormatter={fmtDate} {...axisProps(c)} />
+      <YAxis tickFormatter={fmtAxisCredits} {...axisProps(c)} width={creditAxisWidth(stackedExtremes(data, MEMBER_FLOW_STACKS))} domain={SIGNED_DOMAIN} />
+      <ReferenceLine y={0} stroke={c.muted} strokeWidth={1} />
+      <Tooltip {...tooltipProps(c)} {...creditTooltip} />
+      <Legend {...legendProps(c)} />
+      <Bar dataKey="top_ups_credits" name="Top-ups" stackId="a" fill={c.success} radius={[3, 3, 0, 0]} />
+      <Bar dataKey="refunds_credits" name="Refunds (net)" stackId="a" fill={c.successSoft} radius={[3, 3, 0, 0]} />
+      <Bar dataKey="spent_credits" name="Spent" stackId="b" fill={c.accent} radius={[3, 3, 0, 0]} />
+    </BarChart>
+  );
+}
+
+/**
+ * Bookings against attendance, per day. The second bar is `attended`, counted off
+ * `CheckedInAt` — the at-court identification event, the source of truth for attendance — so a
+ * gap between the bars is the days that cost a penalty.
+ */
+export function drawMyBookings(data: DailyMePoint[], c: ChartPalette) {
+  return (
+    <BarChart data={data} margin={MARGIN}>
+      <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
+      <XAxis dataKey="date" tickFormatter={fmtDate} {...axisProps(c)} />
+      <YAxis allowDecimals={false} {...axisProps(c)} width={COUNT_AXIS_WIDTH} />
+      <Tooltip {...tooltipProps(c)} {...dateTooltip} />
+      <Legend {...legendProps(c)} />
+      <Bar dataKey="bookings" name="Booked" fill={c.accentSoft} radius={[3, 3, 0, 0]} />
+      <Bar dataKey="attended" name="Played" fill={c.accent} radius={[3, 3, 0, 0]} />
+    </BarChart>
+  );
+}
+
+export function RevenueAreaChart({ data }: { data: DailyAdminPoint[] }) {
+  return <ChartFrame>{(c) => drawRevenueArea(data, c)}</ChartFrame>;
+}
+
+export function DailyFlowBarChart({ data }: { data: DailyAdminPoint[] }) {
+  return <ChartFrame>{(c) => drawDailyFlow(data, c)}</ChartFrame>;
 }
 
 export function BookingsLineChart({ data }: { data: DailyAdminPoint[] }) {
-  return (
-    <ChartFrame>
-        <LineChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }}>
-          <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
-          <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis allowDecimals={false} fontSize={11} stroke={TEXT_MUTED} width={COUNT_AXIS_WIDTH} />
-          <Tooltip {...tooltipStyle} labelFormatter={((l: string) => fmtDate(l)) as never} />
-          <Legend {...legendProps} />
-          <Line type="monotone" dataKey="bookings" name="Bookings" stroke={ACCENT} strokeWidth={2} dot={false} />
-          <Line type="monotone" dataKey="no_shows" name="No-shows" stroke={DANGER} strokeWidth={2} dot={false} />
-        </LineChart>
-    </ChartFrame>
-  );
+  return <ChartFrame>{(c) => drawBookingsLine(data, c)}</ChartFrame>;
 }
 
-export function CourtsRevenueBarChart({ data }: { data: { court_name: string; revenue_credits: number; bookings: number }[] }) {
-  return (
-    <ChartFrame>
-        <BarChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }}>
-          <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
-          <XAxis dataKey="court_name" fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtAxisCredits} fontSize={11} stroke={TEXT_MUTED} width={creditAxisWidth(stackedExtremes(data, [["revenue_credits"]]))} />
-          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} />
-          <Bar dataKey="revenue_credits" name="Revenue" fill={ACCENT} radius={[6, 6, 0, 0]} />
-        </BarChart>
-    </ChartFrame>
-  );
+export function CourtsRevenueBarChart({ data }: { data: CourtRevenue[] }) {
+  return <ChartFrame>{(c) => drawCourtsRevenue(data, c)}</ChartFrame>;
 }
 
 export function NoShowDonut({ total, noShow }: { total: number; noShow: number }) {
-  const showed = Math.max(0, total - noShow);
-  const data = [
-    { name: "Showed up", value: showed, color: SUCCESS },
-    { name: "No-shows", value: noShow, color: DANGER },
-  ];
-  return (
-    <ChartFrame>
-        <PieChart>
-          <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={2} stroke="none">
-            {data.map((d) => <Cell key={d.name} fill={d.color} />)}
-          </Pie>
-          <Tooltip {...tooltipStyle} />
-          <Legend verticalAlign="bottom" {...legendProps} />
-        </PieChart>
-    </ChartFrame>
-  );
+  return <ChartFrame>{(c) => drawNoShowDonut(total, noShow, c)}</ChartFrame>;
 }
 
 export function MyBalanceLineChart({ data }: { data: DailyMePoint[] }) {
-  return (
-    <ChartFrame>
-        <AreaChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }}>
-          <defs>
-            <linearGradient id="balFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={ACCENT} stopOpacity={0.35} />
-              <stop offset="100%" stopColor={ACCENT} stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
-          <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtAxisCredits} fontSize={11} stroke={TEXT_MUTED} width={creditAxisWidth(stackedExtremes(data, [["balance_credits"]]))} />
-          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
-          <Area type="monotone" dataKey="balance_credits" name="Balance" stroke={ACCENT} fill="url(#balFill)" strokeWidth={2} />
-        </AreaChart>
-    </ChartFrame>
-  );
+  return <ChartFrame>{(c) => drawMyBalance(data, c)}</ChartFrame>;
 }
 
-/**
- * A member's own money by day. <b>Refunds are net</b> — see {@link signedFloor}. A member
- * whose no-show was reversed a day later sees the refund the sweep gave them taken back
- * on the day the box's evidence landed, which is a negative refund on that day and is
- * exactly what happened to them.
- */
 export function MyFlowBarChart({ data }: { data: DailyMePoint[] }) {
-  return (
-    <ChartFrame>
-        <BarChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }} stackOffset="sign">
-          <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
-          <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis tickFormatter={fmtAxisCredits} fontSize={11} stroke={TEXT_MUTED} width={creditAxisWidth(stackedExtremes(data, MEMBER_FLOW_STACKS))} domain={SIGNED_DOMAIN} />
-          <ReferenceLine y={0} stroke={ZERO_LINE_STROKE} strokeWidth={1} />
-          <Tooltip {...tooltipStyle} formatter={((v: number) => fmtCredits(v)) as never} labelFormatter={((l: string) => fmtDate(l)) as never} />
-          <Legend {...legendProps} />
-          <Bar dataKey="top_ups_credits" name="Top-ups" stackId="a" fill={SUCCESS} radius={[3, 3, 0, 0]} />
-          <Bar dataKey="refunds_credits" name="Refunds (net)" stackId="a" fill={SUCCESS_SOFT} radius={[3, 3, 0, 0]} />
-          <Bar dataKey="spent_credits" name="Spent" stackId="b" fill={ACCENT} radius={[3, 3, 0, 0]} />
-        </BarChart>
-    </ChartFrame>
-  );
+  return <ChartFrame>{(c) => drawMyFlow(data, c)}</ChartFrame>;
 }
 
-/**
- * Bookings against attendance, per day.
- *
- * <p>
- * The second bar is <code>attended</code>, counted off <code>CheckedInAt</code> — the
- * at-court identification event, which `CLAUDE.md` makes the source of truth for
- * attendance and which settlement-model S4/S5 hang the refund and the no-show penalty
- * on. Nothing in the product rendered it anywhere: a slot a member turned up and played
- * drew character-for-character the same as one she was swept as a no-show for and
- * charged a penalty over, and this was the only screen with the data on hand to tell
- * them apart. A gap between the bars is the days that cost her a penalty.
- * </p>
- */
 export function MyBookingsBarChart({ data }: { data: DailyMePoint[] }) {
-  return (
-    <ChartFrame>
-        <BarChart data={data} margin={{ top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN }}>
-          <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
-          <XAxis dataKey="date" tickFormatter={fmtDate} fontSize={11} stroke={TEXT_MUTED} />
-          <YAxis allowDecimals={false} fontSize={11} stroke={TEXT_MUTED} width={COUNT_AXIS_WIDTH} />
-          <Tooltip {...tooltipStyle} labelFormatter={((l: string) => fmtDate(l)) as never} />
-          <Legend {...legendProps} />
-          <Bar dataKey="bookings" name="Booked" fill={ACCENT_SOFT} radius={[3, 3, 0, 0]} />
-          <Bar dataKey="attended" name="Played" fill={ACCENT} radius={[3, 3, 0, 0]} />
-        </BarChart>
-    </ChartFrame>
-  );
+  return <ChartFrame>{(c) => drawMyBookings(data, c)}</ChartFrame>;
 }
-
-// Re-export the soft palette so call-sites don't need to know recharts.
-export const ChartColors = { ACCENT, ACCENT_SOFT, SUCCESS, WARNING, DANGER };

@@ -32,6 +32,18 @@ import {
 const DOOR_ID = "99999999-9999-9999-9999-999999999999";
 const OTHER_ID = "99999999-9999-9999-9999-99999999aaaa";
 
+
+/**
+ * Press Refresh once it is ready to be pressed. `RefreshButton` spins for at least 400ms after a
+ * press and IGNORES a press while it spins (design-system.md, Patterns → Refresh) — so two
+ * presses in a row are one press unless the second waits for the first to settle.
+ */
+async function pressRefresh() {
+  const button = await screen.findByRole("button", { name: "Refresh" });
+  await waitFor(() => expect(button).not.toHaveAttribute("aria-busy"), { timeout: 2000 });
+  fireEvent.click(button);
+}
+
 describe("the doors surface", () => {
   beforeEach(() => { vi.useRealTimers(); });
   afterEach(() => { vi.unstubAllGlobals(); });
@@ -207,7 +219,9 @@ describe("the doors surface", () => {
 
       expect(await screen.findByText("No doors have called in yet.")).toBeInTheDocument();
       expect(screen.getByText(/registers itself the first time it is powered on/)).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "Go to Devices" })).toHaveAttribute("href", "/admin/monitoring/devices");
+      // R11: the page is "Boards" in the rail, the announcer and its own heading, so the link
+      // says the same word.
+      expect(screen.getByRole("link", { name: "Go to Boards" })).toHaveAttribute("href", "/admin/monitoring/devices");
     });
 
     /** <b>A2.3.</b> No sort control at any width — a sorted door list is a footfall ranking. */
@@ -319,9 +333,9 @@ describe("the doors surface", () => {
       // Two failed checks — the same threshold the staleness notice uses, so the page tells
       // one story rather than two.
       offline.now = true;
-      fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+      await pressRefresh();
       await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Still can't"));
-      fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+      await pressRefresh();
 
       await waitFor(() => {
         expect(screen.getByText(/can't say whether the doors are reporting/)).toBeInTheDocument();
@@ -346,11 +360,11 @@ describe("the doors surface", () => {
       ]);
       renderPage(<AdminDoorsPage />);
 
-      fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
+      await pressRefresh();
       await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Checked just now."));
 
       offline.now = true;
-      fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+      await pressRefresh();
       await waitFor(() => {
         expect(screen.getByRole("status")).toHaveTextContent("Still can't reach the club.");
       });

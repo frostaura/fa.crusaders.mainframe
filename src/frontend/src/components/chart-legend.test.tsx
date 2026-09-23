@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { Legend } from "recharts";
 import {
-  BookingsLineChart, CourtsRevenueBarChart, DailyFlowBarChart, MyBalanceLineChart,
-  MyBookingsBarChart, MyFlowBarChart, NoShowDonut, RevenueAreaChart,
+  drawBookingsLine, drawCourtsRevenue, drawDailyFlow, drawMyBalance, drawMyBookings, drawMyFlow,
+  drawNoShowDonut, drawRevenueArea,
 } from "./Charts";
+import { paletteNow, type ChartPalette } from "./ChartFrame";
 import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
+import { contrastRatio, themes, type ThemeName } from "../lib/tokens";
 
 /**
  * Every legend label on /reports has to be readable.
@@ -27,21 +29,6 @@ import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
  */
 
 const AA_BODY = 4.5;
-const WHITE = "#FFFFFF";
-
-function luminance(hex: string): number {
-  const value = hex.replace("#", "");
-  const channel = (offset: number) => {
-    const raw = parseInt(value.slice(offset, offset + 2), 16) / 255;
-    return raw <= 0.03928 ? raw / 12.92 : ((raw + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
-}
-
-function contrast(a: string, b: string): number {
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-  return (hi + 0.05) / (lo + 0.05);
-}
 
 /** Every element in a chart's tree, depth first — same walk as Charts.test.tsx. */
 function flatten(node: ReactNode): ReactElement[] {
@@ -59,45 +46,61 @@ const ME: DailyMePoint[] = [
 ];
 
 /** Every chart in the product, by the name a reader would recognise it under. */
-const CHARTS: [string, ReactNode][] = [
-  ["Top-ups over time", RevenueAreaChart({ data: ADMIN })],
-  ["Daily money flow (club)", DailyFlowBarChart({ data: ADMIN })],
-  ["Bookings & no-shows", BookingsLineChart({ data: ADMIN })],
-  ["Revenue by court", CourtsRevenueBarChart({ data: [{ court_name: "Court 1", revenue_credits: 80, bookings: 4 }] })],
-  ["Show rate", NoShowDonut({ total: 10, noShow: 2 })],
-  ["Wallet balance", MyBalanceLineChart({ data: ME })],
-  ["Daily money flow (member)", MyFlowBarChart({ data: ME })],
-  ["My bookings", MyBookingsBarChart({ data: ME })],
+const CHARTS: [string, (c: ChartPalette) => ReactNode][] = [
+  ["Top-ups over time", (c) => drawRevenueArea(ADMIN, c)],
+  ["Daily money flow (club)", (c) => drawDailyFlow(ADMIN, c)],
+  ["Bookings & no-shows", (c) => drawBookingsLine(ADMIN, c)],
+  ["Revenue by court", (c) => drawCourtsRevenue([{ court_name: "Court 1", revenue_credits: 80, bookings: 4 }], c)],
+  ["Show rate", (c) => drawNoShowDonut(10, 2, c)],
+  ["Wallet balance", (c) => drawMyBalance(ME, c)],
+  ["Daily money flow (member)", (c) => drawMyFlow(ME, c)],
+  ["My bookings", (c) => drawMyBookings(ME, c)],
 ];
 
+/** The palette as the document paints it in `theme`. */
+function paletteIn(theme: ThemeName): ChartPalette {
+  document.documentElement.classList.toggle("dark", theme === "dark");
+  try {
+    return paletteNow();
+  } finally {
+    document.documentElement.classList.remove("dark");
+  }
+}
+
 describe("chart legends", () => {
-  for (const [name, chart] of CHARTS) {
-    const legends = flatten(chart).filter((e) => e.type === Legend);
-    if (legends.length === 0) continue;
+  for (const theme of ["light", "dark"] as const) {
+    const surface = themes[theme].bg.surface;
+    const palette = paletteIn(theme);
 
-    it(`${name}: every label is set in a colour that clears AA on the card`, () => {
-      for (const legend of legends) {
-        const { formatter } = legend.props as {
-          formatter?: (value: string, entry: unknown, index: number) => ReactNode;
-        };
+    for (const [name, draw] of CHARTS) {
+      const legends = flatten(draw(palette)).filter((e) => e.type === Legend);
+      if (legends.length === 0) continue;
 
-        // A legend with no formatter falls back to the series colour, which is how the two
-        // soft-filled series ended up at 1.1:1. This is the assertion that stops a NEW chart
-        // reintroducing it.
-        expect(formatter, `${name} renders its legend labels in the series colour`).toBeTypeOf("function");
+      it(`${name} (${theme}): every label is set in a colour that clears AA on the card`, () => {
+        for (const legend of legends) {
+          const { formatter } = legend.props as {
+            formatter?: (value: string, entry: unknown, index: number) => ReactNode;
+          };
 
-        const rendered = formatter!("Refunds (net)", {}, 0);
-        expect(isValidElement(rendered)).toBe(true);
+          // A legend with no formatter falls back to the series colour, which is how the two
+          // soft-filled series ended up at 1.1:1. This is the assertion that stops a NEW chart
+          // reintroducing it.
+          expect(formatter, `${name} renders its legend labels in the series colour`).toBeTypeOf("function");
 
-        const { style, children } = (rendered as ReactElement).props as {
-          style?: { color?: string };
-          children?: ReactNode;
-        };
-        // The label text itself must survive the wrapping — a formatter that dropped it would
-        // pass a colour check and show an empty legend.
-        expect(children).toBe("Refunds (net)");
-        expect(contrast(style?.color ?? WHITE, WHITE)).toBeGreaterThanOrEqual(AA_BODY);
-      }
-    });
+          const rendered = formatter!("Refunds (net)", {}, 0);
+          expect(isValidElement(rendered)).toBe(true);
+
+          const { style, children } = (rendered as ReactElement).props as {
+            style?: { color?: string };
+            children?: ReactNode;
+          };
+          // The label text itself must survive the wrapping — a formatter that dropped it would
+          // pass a colour check and show an empty legend.
+          expect(children).toBe("Refunds (net)");
+          expect(style?.color, `${name} (${theme}) legend has no colour of its own`).toBeTruthy();
+          expect(contrastRatio(style!.color!, surface)).toBeGreaterThanOrEqual(AA_BODY);
+        }
+      });
+    }
   }
 });

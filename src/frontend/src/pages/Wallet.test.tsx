@@ -129,8 +129,11 @@ describe("Wallet — one balance, and a way to refresh it", () => {
 
     // The control that did not exist. Pressing it is the member's own answer to "the
     // number at the top and the number in the middle do not match".
+    // The header's RefreshButton (R3: refresh is a right-aligned icon button). It is never
+    // `disabled` — it stays focusable and says `aria-busy` while a read is in flight, and
+    // ignores a press until that read lands — so "ready" is the absence of aria-busy.
     const refresh = screen.getByRole("button", { name: "Refresh" });
-    await waitFor(() => expect(refresh).toBeEnabled());
+    await waitFor(() => expect(refresh).not.toHaveAttribute("aria-busy"));
     const readsBefore = pageReads(stub);
     server.credited = true;
     fireEvent.click(refresh);
@@ -173,8 +176,38 @@ describe("Wallet — one balance, and a way to refresh it", () => {
     ]);
     renderPage(<BalanceProvider><WalletPage /></BalanceProvider>);
 
-    expect(await screen.findByText("Couldn't load wallet.")).toBeInTheDocument();
+    // R12: the failure is the shared StateBlock's sentence — the action, then why.
+    expect(await screen.findByText(/Couldn't load wallet/)).toBeInTheDocument();
     // "No movements yet" over a failed fetch tells a member their history is gone.
     expect(screen.queryByText(/No movements yet/)).not.toBeInTheDocument();
+  });
+
+  /*
+    R11 / R12: one page shell, the wallet's two views as links, and a read in flight shown as
+    the page's own shape rather than "Loading…".
+  */
+  it("draws its own shape while it reads, and offers its Activity view as a link", async () => {
+    let answer: (() => void) | null = null;
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/wallet", body: page(510.01, [ROW]) },
+    ]);
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => (String(input).startsWith("/api/v1/wallet?")
+      ? new Promise<void>((resolve) => { answer = resolve; }).then(() => realFetch(input, init))
+      : realFetch(input, init)));
+    renderPage(<BalanceProvider><WalletPage /></BalanceProvider>, { initialEntries: ["/wallet"], reactStrictMode: true });
+
+    await waitFor(() => expect(document.querySelector("[data-state-block=loading][aria-busy=true]")).not.toBeNull());
+    expect(screen.queryByText(/Loading…/)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Wallet" })).toBeInTheDocument();
+    const views = screen.getByRole("navigation", { name: "Wallet views" });
+    expect(within(views).getByRole("link", { name: "Activity" })).toHaveAttribute("href", "/wallet/activity");
+    expect(within(views).getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
+
+    await waitFor(() => expect(answer).not.toBeNull());
+    answer!();
+    await waitFor(() => expect(within(card()).getByText("510.01")).toBeInTheDocument());
+    expect(document.querySelector("[data-state-block=loading]")).toBeNull();
   });
 });

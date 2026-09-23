@@ -1,12 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert } from "../../components/Alert";
-import { Badge, Button, Label, Select } from "../../components/Button";
-import { Card } from "../../components/Card";
 import { ConfirmButton } from "../../components/ConfirmButton";
-import { StateBlock } from "../../components/StateBlock";
-import { MonitoringNav } from "../../components/monitoring/MonitoringSection";
 import { useToast } from "../../components/Toast";
+import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "../../components/ui/card";
+import { Checkbox } from "../../components/ui/checkbox";
+import { PageHeader, PageShell } from "../../components/ui/page-shell";
+import { Freshness, RefreshButton } from "../../components/ui/refresh-button";
+import { StateBlock } from "../../components/ui/state-block";
+import { Check, CheckCircle, X } from "../../components/ui/icons";
+import {
+  CardListSkeleton, DownloadCsvLink, FilterBar, FilterSelect, type FilterOption,
+} from "../../components/monitoring/parts";
+import { useAsyncAction } from "../../lib/useAsyncAction";
 import { useTicker } from "../../lib/useTicker";
+import { cn } from "../../lib/utils";
 import { clubDayAndClock, clubRowTime } from "../../lib/clubClock";
 import { relative } from "../../lib/deviceLiveness";
 import { ApiError } from "../../lib/api";
@@ -87,30 +96,27 @@ export function groupByBoard(rows: DeviceErrorRow[]): Board[] {
   });
 }
 
-export function MonitoringFaultsPage() {
-  const toast = useToast();
+/**
+ * The fault list's read: the filters, the rows, and the fifteen-second poll while the tab is in
+ * front. Its own hook so the page is a layout and not also a loader.
+ */
+function useFaultList() {
   const [page, setPage] = useState<DeviceErrorPage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [filters, setFilters] = useState<Filters>({ state: "open", severity: "", device: "" });
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
-  const now = useTicker(true);
 
   const load = useCallback(async (f: Filters) => {
     try {
-      const next = await adminEndpoints.monitoringErrors({
-        state: f.state,
-        ...(f.severity ? { severity: f.severity } : {}),
-        ...(f.device ? { device: f.device } : {}),
-      });
+      const next = await adminEndpoints.monitoringErrors(filterQuery(f));
       setPage(next);
       setError(null);
       setCheckedAt(Date.now());
     } catch (err) {
       // The rows are NOT cleared. A failed re-read is a fact about the request and the rows
       // on screen are still the last thing the club actually said; what would be dishonest
-      // is showing them with no qualifier, which the band below prevents.
+      // is showing them with no qualifier, which the band on the page prevents.
       setError(err);
     } finally {
       setLoading(false);
@@ -132,10 +138,41 @@ export function MonitoringFaultsPage() {
     return () => clearInterval(timer);
   }, [load, filters]);
 
-  const rows = page?.rows ?? [];
-  const boards = useMemo(() => groupByBoard(rows), [rows]);
-  const timezone = page?.timezone;
-  const selectedIds = [...selected].filter((id) => rows.some((r) => r.id === id));
+  const reload = useCallback(() => load(filters), [load, filters]);
+  return { page, loading, error, filters, setFilters, checkedAt, reload };
+}
+
+/** The query a set of filters asks — "" means "anything" and is left off, never sent empty. */
+function filterQuery(f: Filters) {
+  return {
+    state: f.state,
+    ...(f.severity ? { severity: f.severity } : {}),
+    ...(f.device ? { device: f.device } : {}),
+  };
+}
+
+type BatchLine = { id: string; ok: boolean; said: string };
+
+/** What one item of a batch resolve came back as, in words. */
+function batchLine(r: { id: string; status: string; error?: string | null }): BatchLine {
+  return {
+    id: r.id,
+    ok: r.status === "resolved",
+    said: r.status === "already_resolved"
+      ? "Somebody else marked this one resolved while you were deciding."
+      : r.error ?? (r.status === "resolved" ? "Marked resolved." : r.status),
+  };
+}
+
+/**
+ * Selecting and resolving. Partial by nature — a fault somebody else resolved while this admin
+ * was deciding comes back `already_resolved`, which is a per-item outcome and not a failure of
+ * the batch.
+ */
+function useFaultResolve(reload: () => Promise<void>) {
+  const toast = useToast();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [batch, setBatch] = useState<BatchLine[] | null>(null);
 
   const toggle = (id: string) => setSelected((current) => {
     const next = new Set(current);
@@ -143,11 +180,6 @@ export function MonitoringFaultsPage() {
     return next;
   });
 
-  /**
-   * Resolve one or several. Partial by nature — a fault somebody else resolved while this
-   * admin was deciding comes back `already_resolved`, which is a per-item outcome and not a
-   * failure of the batch.
-   */
   const resolve = async (ids: string[], note: string) => {
     try {
       if (ids.length === 1) {
@@ -157,16 +189,10 @@ export function MonitoringFaultsPage() {
         const result = await adminEndpoints.resolveErrors(ids, note);
         // Never a toast for a batch: four seconds is not long enough to read six outcomes,
         // and the toast viewport deliberately carries no live region of its own.
-        setBatch(result.results.map((r) => ({
-          id: r.id,
-          ok: r.status === "resolved",
-          said: r.status === "already_resolved"
-            ? "Somebody else marked this one resolved while you were deciding."
-            : r.error ?? (r.status === "resolved" ? "Marked resolved." : r.status),
-        })));
+        setBatch(result.results.map(batchLine));
       }
       setSelected(new Set());
-      await load(filters);
+      await reload();
       return "Marked resolved.";
     } catch (err) {
       // `unchanged` only where it is KNOWN. A 4xx is the server refusing before it wrote; a
@@ -183,21 +209,30 @@ export function MonitoringFaultsPage() {
     }
   };
 
-  const [batch, setBatch] = useState<Array<{ id: string; ok: boolean; said: string }> | null>(null);
+  return { selected, toggle, clear: () => setSelected(new Set()), batch, closeBatch: () => setBatch(null), resolve };
+}
 
+export function MonitoringFaultsPage() {
+  const { page, loading, error, filters, setFilters, checkedAt, reload } = useFaultList();
+  const { selected, toggle, clear, batch, closeBatch, resolve } = useFaultResolve(reload);
+  const now = useTicker(true);
+  // A press shows its own pending state; the fifteen-second poll behind it never does.
+  const manual = useAsyncAction(reload);
+
+  const rows = useMemo(() => page?.rows ?? [], [page]);
+  const boards = useMemo(() => groupByBoard(rows), [rows]);
+  const timezone = page?.timezone;
+  const selectedIds = [...selected].filter((id) => rows.some((r) => r.id === id));
   const boardCount = boards.filter((b) => b.key !== "__no_board__").length;
-  const checkedFace = checkedAt === null ? null : clubRowTime(checkedAt, now, timezone);
 
   return (
-    <div className="space-y-6">
-      <header className="space-y-3">
-        <h1 className="text-2xl font-bold tracking-tight">Faults</h1>
-        <p className="text-xs text-text-muted">
-          {checkedAt === null ? "Checking…" : `Checked ${relative(new Date(checkedAt).toISOString(), now)}`}
-          {` · re-reads every ${REFRESH_MS / 1000} seconds while this tab is in front`}
-        </p>
-        <MonitoringNav />
-      </header>
+    <PageShell width="wide">
+      <PageHeader
+        title="Faults"
+        description={`What the club's boards have reported going wrong, grouped by board. Re-reads every ${REFRESH_MS / 1000} seconds while this tab is in front.`}
+        actions={<RefreshButton onRefresh={() => void manual.run()} loading={manual.pending} />}
+        freshness={<Freshness at={checkedAt} />}
+      />
 
       {/* Standing, not polite: this page re-reads itself every fifteen seconds, and a polite
           region announces the same paragraph on every remount. */}
@@ -205,96 +240,13 @@ export function MonitoringFaultsPage() {
         {RESOLVE_MEANING}
       </Alert>
 
-      <Card className="space-y-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <Label htmlFor="fault-state">Show</Label>
-            <Select
-              id="fault-state"
-              className="min-h-11"
-              value={filters.state}
-              onChange={(e) => setFilters((f) => ({ ...f, state: e.target.value as DeviceErrorState }))}
-            >
-              <option value="open">Still open</option>
-              <option value="resolved">Marked resolved</option>
-              <option value="all">Everything</option>
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="fault-severity">How bad</Label>
-            <Select
-              id="fault-severity"
-              className="min-h-11"
-              value={filters.severity}
-              onChange={(e) => setFilters((f) => ({ ...f, severity: e.target.value as DeviceErrorSeverity | "" }))}
-            >
-              <option value="">Anything</option>
-              {DEVICE_ERROR_SEVERITIES.map((s) => (
-                <option key={s} value={s}>{SEVERITY_WORD[s]}</option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="fault-device">Board</Label>
-            <Select
-              id="fault-device"
-              className="min-h-11"
-              value={filters.device}
-              onChange={(e) => setFilters((f) => ({ ...f, device: e.target.value }))}
-            >
-              <option value="">Every board</option>
-              {boards.filter((b) => b.key !== "__no_board__").map((b) => (
-                <option key={b.key} value={b.key}>{b.name}</option>
-              ))}
-            </Select>
-          </div>
-          <a
-            className="ml-auto inline-flex min-h-11 items-center rounded-lg border border-control bg-bg-surface px-4 text-sm font-medium"
-            href={adminEndpoints.monitoringErrorsCsvUrl({
-              state: filters.state,
-              ...(filters.severity ? { severity: filters.severity } : {}),
-              ...(filters.device ? { device: filters.device } : {}),
-            })}
-          >
-            Download CSV
-          </a>
-        </div>
-      </Card>
+      <FaultFilters filters={filters} onFilters={setFilters} boards={boards} />
 
       {selectedIds.length > 0 && (
-        // The selection strip. It is not a toast and it is not a modal: the rows stay on
-        // screen, because the decision an admin is making is about the rows.
-        <Card className="flex flex-wrap items-center gap-3" role="region" aria-label="Selected faults">
-          <p className="text-sm font-medium">
-            {selectedIds.length === 1 ? "1 fault selected" : `${selectedIds.length} faults selected`}
-          </p>
-          <ConfirmButton
-            idleLabel={selectedIds.length === 1 ? "Mark it resolved" : `Mark ${selectedIds.length} resolved`}
-            cancelLabel="Leave them open"
-            confirmLabel={resolveConfirm(selectedIds.length)}
-            subject={selectedIds.length === 1 ? "this fault" : `these ${selectedIds.length} faults`}
-            onConfirm={() => resolve(selectedIds, "")}
-            className="min-h-11"
-          />
-          <Button variant="ghost" className="min-h-11" onClick={() => setSelected(new Set())}>Clear</Button>
-        </Card>
+        <SelectionStrip ids={selectedIds} onClear={clear} onResolve={() => resolve(selectedIds, "")} />
       )}
 
-      {batch && (
-        <Card className="space-y-2">
-          <h2 className="text-lg font-semibold" aria-live="polite">
-            {`${batch.filter((b) => b.ok).length} of ${batch.length} done.`}
-          </h2>
-          <ul className="space-y-1 text-sm">
-            {batch.map((b) => (
-              <li key={b.id} className={b.ok ? "text-text-secondary" : "text-danger-strong"}>
-                {b.ok ? "✓ " : "✗ "}{b.said}
-              </li>
-            ))}
-          </ul>
-          <Button variant="outline" className="min-h-11" onClick={() => setBatch(null)}>Done</Button>
-        </Card>
-      )}
+      {batch && <BatchOutcome batch={batch} onDone={closeBatch} />}
 
       {/* A failed RE-read with rows in hand: the rows stay, the band says they are not being
           updated. A failed FIRST read has nothing to qualify and goes to StateBlock below. */}
@@ -302,47 +254,218 @@ export function MonitoringFaultsPage() {
         <Alert tone="danger" live="standing" announceKey="faults-unreachable">{FAULTS_READ_FAILED}</Alert>
       )}
 
-      <StateBlock
-        loading={loading}
-        error={rows.length > 0 ? null : error}
-        action="the fault list"
-        failedCaveat="That does not mean there are none."
-        onRetry={() => void load(filters)}
-        empty={!loading && !error && rows.length === 0}
-        emptyTitle={faultsEmptyNotice(boardCount || null, page?.retention_days ?? null)}
-        emptyHint={filters.state === "open"
-          ? "Anything a board has reported and somebody has since marked resolved is under “Marked resolved”."
-          : undefined}
-      >
-        <div className="space-y-4">
-          {boards.map((board) => (
-            <Card key={board.key} className="space-y-3">
-              <h2 className="text-lg font-semibold">{board.name}</h2>
-              <ul className="space-y-4">
+      <FaultBoards
+        read={{ loading, error, rows, boards, boardCount, retentionDays: page?.retention_days ?? null }}
+        showingOpen={filters.state === "open"}
+        clock={{ now, timezone }}
+        selection={{ selected, toggle, resolve }}
+        onRetry={() => void manual.run()}
+      />
+
+      <RetentionNote retentionDays={page?.retention_days ?? null} checkedAt={checkedAt} now={now} timezone={timezone} />
+    </PageShell>
+  );
+}
+
+type FaultBoardsProps = {
+  read: {
+    loading: boolean;
+    error: unknown;
+    rows: DeviceErrorRow[];
+    boards: Board[];
+    boardCount: number;
+    retentionDays: number | null;
+  };
+  /** The "Still open" filter is on — the empty state then points at "Marked resolved". */
+  showingOpen: boolean;
+  clock: { now: number; timezone: string | undefined };
+  selection: {
+    selected: Set<string>;
+    toggle: (id: string) => void;
+    resolve: (ids: string[], note: string) => Promise<string>;
+  };
+  onRetry: () => void;
+};
+
+/**
+ * The list itself — failed, loading, empty, or one card per board. Failed only when there is
+ * nothing to fall back on: rows the club already gave us stay, under the page's band.
+ */
+function FaultBoards(props: FaultBoardsProps) {
+  // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
+  const { read, showingOpen, clock, selection, onRetry } = props;
+  return (
+    <StateBlock
+      loading={read.loading}
+      error={read.rows.length > 0 ? null : read.error}
+      action="the fault list"
+      failedCaveat="That does not mean there are none."
+      onRetry={onRetry}
+      empty={!read.loading && !read.error && read.rows.length === 0}
+      emptyIcon={CheckCircle}
+      emptyTitle={faultsEmptyNotice(read.boardCount || null, read.retentionDays)}
+      emptyHint={showingOpen
+        ? "Anything a board has reported and somebody has since marked resolved is under “Marked resolved”."
+        : undefined}
+      skeleton={<CardListSkeleton rows={2} />}
+    >
+      <div className="flex flex-col gap-4">
+        {read.boards.map((board) => (
+          <Card key={board.key}>
+            <CardHeader>
+              <CardTitle asChild><h2>{board.name}</h2></CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ul className="flex flex-col gap-4">
                 {board.rows.map((row) => (
                   <FaultRow
                     key={row.id}
                     row={row}
-                    now={now}
-                    timezone={timezone}
-                    selected={selected.has(row.id)}
-                    onToggle={() => toggle(row.id)}
-                    onResolve={(note) => resolve([row.id], note)}
+                    now={clock.now}
+                    timezone={clock.timezone}
+                    selected={selection.selected.has(row.id)}
+                    onToggle={() => selection.toggle(row.id)}
+                    onResolve={(note) => selection.resolve([row.id], note)}
                   />
                 ))}
               </ul>
-            </Card>
-          ))}
-        </div>
-      </StateBlock>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </StateBlock>
+  );
+}
 
-      <p className="text-xs text-text-muted">
-        {page?.retention_days
-          ? `Faults are kept for ${page.retention_days} days. One that stops being reported is closed by itself and kept, rather than deleted, so the club's count stays honest.`
-          : "Faults are kept for as long as the club's settings say."}
-        {checkedFace ? ` Read at ${checkedFace} club time.` : ""}
+/** Show / How bad / Board, and the export of exactly what they select. */
+function FaultFilters({ filters, onFilters, boards }: {
+  filters: Filters;
+  onFilters: (update: (f: Filters) => Filters) => void;
+  boards: Board[];
+}) {
+  return (
+    <FilterBar>
+      <FilterSelect
+        id="fault-state"
+        label="Show"
+        value={filters.state}
+        options={STATE_OPTIONS}
+        onChange={(next) => onFilters((f) => ({ ...f, state: next as DeviceErrorState }))}
+      />
+      <FilterSelect
+        id="fault-severity"
+        label="How bad"
+        value={filters.severity}
+        options={SEVERITY_OPTIONS}
+        onChange={(next) => onFilters((f) => ({ ...f, severity: next as DeviceErrorSeverity | "" }))}
+      />
+      <FilterSelect
+        id="fault-device"
+        label="Board"
+        value={filters.device}
+        options={[
+          { value: "", label: "Every board" },
+          ...boards.filter((b) => b.key !== "__no_board__").map((b) => ({ value: b.key, label: b.name })),
+        ]}
+        onChange={(next) => onFilters((f) => ({ ...f, device: next }))}
+      />
+      <DownloadCsvLink className="sm:ml-auto" href={adminEndpoints.monitoringErrorsCsvUrl(filterQuery(filters))} />
+    </FilterBar>
+  );
+}
+
+/**
+ * The selection strip. It is not a toast and it is not a modal: the rows stay on screen,
+ * because the decision an admin is making is about the rows.
+ */
+function SelectionStrip({ ids, onClear, onResolve }: {
+  ids: string[];
+  onClear: () => void;
+  onResolve: () => Promise<string>;
+}) {
+  const one = ids.length === 1;
+  return (
+    <div
+      role="region"
+      aria-label="Selected faults"
+      className="flex flex-wrap items-center gap-3 rounded-xl border border-accent-strong bg-accent-soft p-4"
+    >
+      <p className="mr-auto text-sm font-semibold text-text-primary">
+        {one ? "1 fault selected" : `${ids.length} faults selected`}
       </p>
+      <Button variant="ghost" onClick={onClear}>Clear</Button>
+      <ConfirmButton
+        idleLabel={one ? "Mark it resolved" : `Mark ${ids.length} resolved`}
+        cancelLabel="Leave them open"
+        confirmLabel={resolveConfirm(ids.length)}
+        subject={one ? "this fault" : `these ${ids.length} faults`}
+        onConfirm={onResolve}
+      />
     </div>
+  );
+}
+
+/** How long faults are kept, and when this list was read — in the club's clock. */
+function RetentionNote({ retentionDays, checkedAt, now, timezone }: {
+  retentionDays: number | null;
+  checkedAt: number | null;
+  now: number;
+  timezone: string | undefined;
+}) {
+  const checkedFace = checkedAt === null ? null : clubRowTime(checkedAt, now, timezone);
+  return (
+    <p className="text-xs text-text-muted">
+      {retentionDays
+        ? `Faults are kept for ${retentionDays} days. One that stops being reported is closed by itself and kept, rather than deleted, so the club's count stays honest.`
+        : "Faults are kept for as long as the club's settings say."}
+      {checkedFace ? ` Read at ${checkedFace} club time.` : ""}
+    </p>
+  );
+}
+
+const STATE_OPTIONS: FilterOption[] = [
+  { value: "open", label: "Still open" },
+  { value: "resolved", label: "Marked resolved" },
+  { value: "all", label: "Everything" },
+];
+
+const SEVERITY_OPTIONS: FilterOption[] = [
+  { value: "", label: "Anything" },
+  ...DEVICE_ERROR_SEVERITIES.map((s) => ({ value: s, label: SEVERITY_WORD[s] })),
+];
+
+/**
+ * What a batch resolve did, item by item. Never a toast: four seconds is not long enough to read
+ * six outcomes, and the toast viewport deliberately carries no live region of its own. Each line
+ * says ok or not in WORDS as well as the icon, because colour and a glyph are never alone.
+ */
+function BatchOutcome({ batch, onDone }: {
+  batch: Array<{ id: string; ok: boolean; said: string }>;
+  onDone: () => void;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle asChild>
+          <h2 aria-live="polite">{`${batch.filter((b) => b.ok).length} of ${batch.length} done.`}</h2>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ul className="flex flex-col gap-2 text-sm">
+          {batch.map((b) => (
+            <li key={b.id} className={cn("flex items-start gap-2", b.ok ? "text-text-secondary" : "text-danger-strong")}>
+              {b.ok
+                ? <Check size={16} weight="bold" aria-label="Done:" className="mt-0.5 shrink-0 text-success-strong" />
+                : <X size={16} weight="bold" aria-label="Not done:" className="mt-0.5 shrink-0" />}
+              <span>{b.said}</span>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+      <CardFooter>
+        <Button variant="outline" onClick={onDone}>Done</Button>
+      </CardFooter>
+    </Card>
   );
 }
 
@@ -365,18 +488,17 @@ function FaultRow({ row, now, timezone, selected, onToggle, onResolve }: {
   const resolved = Boolean(row.resolved_at);
 
   return (
-    <li className="border-t border-border pt-3 first:border-t-0 first:pt-0">
+    <li className="border-t border-border pt-4 first:border-t-0 first:pt-0">
       <div className="flex min-w-0 flex-wrap items-start gap-2">
         {!resolved && (
-          <label className="inline-flex min-h-11 min-w-11 items-center justify-center">
-            <input
-              type="checkbox"
-              className="h-5 w-5"
+          // The checkbox's own after: box extends its hit area to 44px; the span holds the row.
+          <span className="inline-flex size-touch shrink-0 items-center justify-center">
+            <Checkbox
               checked={selected}
-              onChange={onToggle}
+              onCheckedChange={onToggle}
               aria-label={`Select ${said.title}`}
             />
-          </label>
+          </span>
         )}
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -385,7 +507,7 @@ function FaultRow({ row, now, timezone, selected, onToggle, onResolve }: {
             {/* The raw code stays reachable for whoever has to report it upstream. Losing it
                 would make a humanised unknown unsearchable. */}
             {said.unrecognised && (
-              <code className="rounded bg-bg-muted px-1 text-xs text-text-muted">{row.code}</code>
+              <code className="rounded-sm bg-bg-muted px-1.5 py-0.5 font-mono text-xs text-text-muted">{row.code}</code>
             )}
           </div>
           <p className="text-xs text-text-muted">
@@ -422,7 +544,6 @@ function FaultRow({ row, now, timezone, selected, onToggle, onResolve }: {
             ariaLabel={said.title}
             subject={said.title}
             onConfirm={() => onResolve("")}
-            className="min-h-11"
           />
         )}
       </div>

@@ -460,7 +460,8 @@ export default function AdminMembersPage() {
         which the plain div had. It was built in round 1 for exactly this and applied only to
         the ledger.
       */}
-      <Card className="!p-0 overflow-hidden">
+      {/* The card is the size container the column thresholds query (see COLUMN_DISPLAY). */}
+      <Card className="!p-0 overflow-hidden [container-type:inline-size]">
         {filtered.length === 0 ? (
           <EmptyState loading={loading} hasFilters={search.trim().length > 0 || status !== "all"} error={loadError} onRetry={load} />
         ) : (
@@ -469,11 +470,11 @@ export default function AdminMembersPage() {
               <thead className="hidden sm:table-header-group bg-bg-muted text-xs uppercase tracking-wide text-text-muted">
                 <tr>
                   <SortHeader label="Name" k="full_name" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="sticky left-0 z-20 bg-bg-muted" />
-                  <SortHeader label="Email" k="email" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className={cn("hidden xl:table-cell", COLUMN_WIDTH.email)} />
-                  <SortHeader label="Member #" k="membership_number" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className={cn("hidden lg:table-cell", COLUMN_WIDTH.memberNumber)} />
+                  <SortHeader label="Email" k="email" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className={cn(HEADER_DISPLAY.fromXl, COLUMN_WIDTH.email)} />
+                  <SortHeader label="Member #" k="membership_number" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className={cn(HEADER_DISPLAY.fromLg, COLUMN_WIDTH.memberNumber)} />
                   <SortHeader label="Status" k="status" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className={COLUMN_WIDTH.status} />
-                  <th className={cn("hidden md:table-cell text-left px-3 py-3", COLUMN_WIDTH.memberClass)}>Class</th>
-                  <SortHeader label="Joined" k="created_at" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className={cn("hidden lg:table-cell", COLUMN_WIDTH.joined)} />
+                  <th className={cn(HEADER_DISPLAY.fromMd, "text-left px-3 py-3", COLUMN_WIDTH.memberClass)}>Class</th>
+                  <SortHeader label="Joined" k="created_at" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className={cn(HEADER_DISPLAY.fromLg, COLUMN_WIDTH.joined)} />
                   <th className={cn("text-right px-3 py-3 whitespace-nowrap sticky right-[200px] z-20 bg-bg-muted border-l border-border", COLUMN_WIDTH.balance)}>Balance</th>
                   <th className={cn("text-right px-3 py-3 whitespace-nowrap sticky right-0 z-20 bg-bg-muted min-w-[200px] border-l border-border", COLUMN_WIDTH.actions)}>Actions</th>
                 </tr>
@@ -739,9 +740,15 @@ type MemberRowActions = {
  * </p>
  *
  * <p>
- * The breakpoints come from the declared widths in {@link COLUMN_WIDTH} against the
- * container at each one — 606 at `sm`, 734 at `md`, 990 at `lg`, 1246 at `xl` and above,
- * measured in Chromium — with `Name` taking whatever is left. Changing a width or a
+ * <b>The thresholds are CONTAINER queries on the table's card, not viewport breakpoints</b>
+ * (P2). Since the admin console gained its rail (R16) the card's width is no longer a function
+ * of the viewport alone — at 1440px the rail takes 16rem of it — and a viewport breakpoint drew
+ * `Member #` and `Joined` into a card that could not hold them: the Name column squeezed to
+ * 0px. Each threshold is the sum of the declared widths in {@link COLUMN_WIDTH} for the columns
+ * it adds, plus a 96px floor for `Name` (what `Name` had at the old `md`):
+ * `Class` from 734px of card (118 + 176 + 144 + 200 + 96), `Member #` and `Joined` from 938px
+ * (+ 104 + 100), `Email` from 1154px (+ 216) — stated in rem so a raised root font, which
+ * grows the balance column and every header, drops columns rather than squeezing Name. Changing a width or a
  * breakpoint means re-running `e2e/admin-members-layout.spec.ts`, which measures the result
  * in a real browser at four widths against two clubs with different-length names.
  * </p>
@@ -749,12 +756,19 @@ type MemberRowActions = {
 const COLUMN_DISPLAY = {
   /** Card field below `sm`, table cell above it. */
   always: "block sm:table-cell",
-  /** Card field below `sm`; from 768 up, once `Class` fits beside the pinned pair. */
-  fromMd: "block sm:hidden md:table-cell",
-  /** Card field below `sm`; from 1024 up — `Member #` and `Joined`. */
-  fromLg: "block sm:hidden lg:table-cell",
-  /** Card field below `sm`; from 1280 up, where the full table finally fits its container. */
-  fromXl: "block sm:hidden xl:table-cell",
+  /** Card field below `sm`; from a 734px card, once `Class` fits beside the pinned pair. */
+  fromMd: "block sm:hidden [@container(min-width:45.875rem)]:!table-cell",
+  /** Card field below `sm`; from a 938px card — `Member #` and `Joined`. */
+  fromLg: "block sm:hidden [@container(min-width:58.625rem)]:!table-cell",
+  /** Card field below `sm`; from a 1154px card, where the full table fits. */
+  fromXl: "block sm:hidden [@container(min-width:72.125rem)]:!table-cell",
+} as const;
+
+/** The same thresholds for the header cells, which have no card mode to fall back to. */
+const HEADER_DISPLAY = {
+  fromMd: "hidden [@container(min-width:45.875rem)]:!table-cell",
+  fromLg: "hidden [@container(min-width:58.625rem)]:!table-cell",
+  fromXl: "hidden [@container(min-width:72.125rem)]:!table-cell",
 } as const;
 
 /**

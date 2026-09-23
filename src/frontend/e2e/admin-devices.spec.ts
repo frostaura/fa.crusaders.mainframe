@@ -139,7 +139,8 @@ async function openDevices(page: Page, devices: unknown[], extra: ApiRoute[] = [
   await signIn(page);
   await serveApi(page, routes(devices, extra));
   await page.goto("/admin/devices");
-  await expect(page.getByRole("heading", { name: "Devices" })).toBeVisible();
+  // R11: the page is "Boards" — the rail's word, the route announcer's and its own heading's.
+  await expect(page.getByRole("heading", { name: "Boards", level: 1 })).toBeVisible();
 }
 
 test.describe("A box that registered itself", () => {
@@ -849,10 +850,10 @@ test.describe("Devices at 320 px with a 32 px root font", () => {
         if (e.classList.contains("sr-only")) return false;
         /*
          * A scroll container is not a box that refuses to hold its content — holding more
-         * than it shows, and saying so, is the entire job. `ScrollArea` is the one on this
-         * page: the Monitoring strip's row is `w-max` by design, the region scrolls it, and
-         * a fade plus a sentence announce that there is more. Measuring it here would make
-         * this sweep demand that a deliberately scrollable strip not scroll.
+         * than it shows, and saying so, is the entire job. (The Monitoring strip that was the
+         * one on this page went with R16; a table or code block that scrolls is the same case.)
+         * Measuring it here would make this sweep demand that a deliberately scrollable box
+         * not scroll.
          */
         if (getComputedStyle(e).overflowX !== "visible") return false;
         return e.scrollWidth - e.clientWidth > 1 && e.getBoundingClientRect().width > 0;
@@ -867,22 +868,23 @@ test.describe("Devices at 320 px with a 32 px root font", () => {
   });
 
   /**
-   * <b>B12's rule, applied to this page's own box.</b>
+   * <b>B12's padding rule is RETIRED by R11</b> (consistent page shells).
    *
-   * A rem padding is 32 px a side at a 32 px root — 64 px of this page's own margin on a
-   * 320 px phone. What padding protects is a GAP, and a gap does not need to grow with the
-   * text; what the space it eats protects is a WORD, which does.
+   * It measured the page's own `p-[16px]` wrapper at a 32 px root. The page no longer sets any
+   * root spacing: the one `PageShell` owns width, gutters and rhythm for every page, so a page
+   * that sets its own padding is now the defect. What is held instead is exactly that — the
+   * heading sits in the shell, and nothing between them adds a box of its own.
    */
-  test("does not scale its own page padding with the text", async ({ page }) => {
+  test("sets no page padding of its own — the shell owns it", async ({ page }) => {
     await openDevices(page, [FRESH]);
     await large(page);
 
-    const padding = await page.evaluate(() => {
+    const owner = await page.evaluate(() => {
       const heading = document.querySelector("main h1")!;
-      const wrapper = heading.parentElement as HTMLElement;
-      return Math.round(Number.parseFloat(getComputedStyle(wrapper).paddingLeft));
+      // h1 → the header's title row → the page header → the shell.
+      return heading.closest("[data-page-header]")?.parentElement?.getAttribute("data-page-shell") ?? null;
     });
-    expect(padding).toBeLessThanOrEqual(16);
+    expect(owner).toBe("wide");
   });
 
   test("keeps the out-of-service question on screen once it is armed", async ({ page }) => {

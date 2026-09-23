@@ -50,13 +50,14 @@ describe("a single-use link is spent exactly once", () => {
         <AuthProvider>
           <Routes>
             <Route path="/welcome/:token" element={<WelcomePage />} />
-            <Route path="/schedule" element={<span>Schedule</span>} />
+            <Route path="/my-code" element={<span>My Code</span>} />
           </Routes>
         </AuthProvider>
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("Schedule")).toBeInTheDocument();
+    // R15 — a signed-in member lands on My Code, not the schedule.
+    expect(await screen.findByText("My Code")).toBeInTheDocument();
     expect(consumed(stub.calls, "/api/v1/auth/magic-link/")).toBe(1);
     expect(screen.queryByText(/sign-in link has expired/i)).not.toBeInTheDocument();
   });
@@ -114,7 +115,7 @@ describe("a welcome link that has already been spent", () => {
         <AuthProvider>
           <Routes>
             <Route path="/welcome/:token" element={<WelcomePage />} />
-            <Route path="/schedule" element={<span>Schedule</span>} />
+            <Route path="/my-code" element={<span>My Code</span>} />
             <Route path="/login" element={<span>Sign-in screen</span>} />
             <Route path="/forgot-password" element={<span>Reset screen</span>} />
           </Routes>
@@ -158,7 +159,7 @@ describe("a welcome link that has already been spent", () => {
         <AuthProvider>
           <Routes>
             <Route path="/welcome/:token" element={<WelcomePage />} />
-            <Route path="/schedule" element={<span>Schedule</span>} />
+            <Route path="/my-code" element={<span>My Code</span>} />
             <Route path="/login" element={<span>Sign-in screen</span>} />
             <Route path="/forgot-password" element={<span>Reset screen</span>} />
           </Routes>
@@ -166,7 +167,8 @@ describe("a welcome link that has already been spent", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("Schedule")).toBeInTheDocument();
+    // R15 — a signed-in member lands on My Code, not the schedule.
+    expect(await screen.findByText("My Code")).toBeInTheDocument();
   });
 
   it("spends the link once and shows one card under StrictMode's double-invoke", async () => {
@@ -183,7 +185,7 @@ describe("a welcome link that has already been spent", () => {
           <AuthProvider>
             <Routes>
               <Route path="/welcome/:token" element={<WelcomePage />} />
-              <Route path="/schedule" element={<span>Schedule</span>} />
+              <Route path="/my-code" element={<span>My Code</span>} />
               <Route path="/login" element={<span>Sign-in screen</span>} />
               <Route path="/forgot-password" element={<span>Reset screen</span>} />
             </Routes>

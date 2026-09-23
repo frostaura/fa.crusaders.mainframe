@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { AuthShell } from "../components/AuthShell";
 import { Button } from "../components/Button";
+import { LANDING_PATH } from "../components/shell/nav";
 
 export default function WelcomePage() {
   const { token } = useParams<{ token: string }>();
@@ -34,7 +35,7 @@ export default function WelcomePage() {
     if (spent.current === token) return;
     spent.current = token;
     auth.setSessionFromMagicLink(token)
-      .then(() => nav("/schedule", { replace: true }))
+      .then(() => nav(LANDING_PATH, { replace: true }))
       // `POST /auth/magic-link/{token}` answers ONE code, `invalid_or_expired`, for a link
       // that has expired and for one that has already been used — `ConsumeMagicLinkAsync`
       // filters on `UsedAt == null` and on the expiry in the same query and cannot tell the
@@ -47,7 +48,7 @@ export default function WelcomePage() {
   // Already signed in on this device and the link is spent: the second click is almost always
   // the same person on the same phone, or a mail client that pre-fetched the link. Send them
   // into the club rather than showing them a refusal about a session they already have.
-  if (error && auth.status === "authenticated") return <Navigate to="/schedule" replace />;
+  if (error && auth.status === "authenticated") return <Navigate to={LANDING_PATH} replace />;
 
   return (
     <AuthShell className="my-auto" subline="Welcome to the club.">

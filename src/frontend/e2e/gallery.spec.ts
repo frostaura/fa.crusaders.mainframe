@@ -111,11 +111,18 @@ const OVERLAYS: Overlay[] = [
     // Keyboard focus, as a keyboard user arrives. Centred FIRST: Radix closes a tooltip when its
     // trigger's scroller scrolls, and focusing a trigger at the viewport's edge nudges `<main>` —
     // traced on the phone project: open, a scroll event on #main-content, closed, inside 20ms.
+    //
+    // Retried as a unit: under a full parallel run a late layout scroll (fonts, the lazy chunk)
+    // can still land after the focus and close it — seen once in 810 tests, 0 in 32 repeats alone.
+    // Every attempt is the same keyboard arrival, and the tooltip must be open at the end of one.
     open: async (page) => {
-      await page.getByRole("button", { name: "Grid settings" }).evaluate((el) => el.scrollIntoView({ block: "center" }));
-      await page.getByRole("button", { name: "Open popover" }).focus();
-      await page.keyboard.press("Tab");
-      await expect(page.getByRole("button", { name: "Grid settings" })).toBeFocused();
+      await expect(async () => {
+        await page.getByRole("button", { name: "Grid settings" }).evaluate((el) => el.scrollIntoView({ block: "center" }));
+        await page.getByRole("button", { name: "Open popover" }).focus();
+        await page.keyboard.press("Tab");
+        await expect(page.getByRole("button", { name: "Grid settings" })).toBeFocused();
+        await expect(page.locator("[data-slot=tooltip-content]").first()).toBeVisible({ timeout: 1_500 });
+      }).toPass({ timeout: 10_000 });
     },
     target: "[data-slot=tooltip-content]",
   },
@@ -227,6 +234,11 @@ test.describe("the watermark phases", () => {
 
 test.describe("the page", () => {
   test("never scrolls sideways at 320px, whichever section is open", async ({ page }) => {
+    // One full page load per section against the dev server — every section, in one test. The
+    // P2 shell made each cold load heavier (the app bar, the admin frame and its stores are
+    // static imports), and the mobile project measured 31s against a 30s budget with nothing
+    // wrong. The budget is time, not an invariant: tripled rather than splitting the loop.
+    test.slow();
     await page.setViewportSize({ width: 320, height: 640 });
     for (const section of SECTIONS) {
       await openGallery(page, section, "light");

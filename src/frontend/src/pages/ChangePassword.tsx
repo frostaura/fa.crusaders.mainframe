@@ -1,11 +1,17 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { endpoints } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useToast } from "../components/Toast";
-import { Card } from "../components/Card";
-import { Button, Input, Label } from "../components/Button";
+import { Alert } from "../components/Alert";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
+import { Field, FieldDescription, FieldLabel } from "../components/ui/field";
+import { Input } from "../components/ui/input";
+import { PageHeader, PageShell } from "../components/ui/page-shell";
+import { TextLink } from "../components/ui/text-link";
 import { describeFailure } from "../lib/errors";
+import { LANDING_PATH } from "../components/shell/nav";
 
 /**
  * The API's refusal codes, as sentences. A member never sees a code, and never sees the same
@@ -24,7 +30,7 @@ const MESSAGES: Record<string, string> = {
  * from Profile by choice, and — when an admin has issued a temporary password — as the only
  * screen the session can reach at all.
  */
-export function ChangePasswordForm({ onDone, forced }: { onDone?: () => void; forced?: boolean }) {
+export function ChangePasswordForm({ onDone, onCancel, forced }: { onDone?: () => void; onCancel?: () => void; forced?: boolean }) {
   const auth = useAuth();
   const toast = useToast();
   const [current, setCurrent] = useState("");
@@ -33,12 +39,13 @@ export function ChangePasswordForm({ onDone, forced }: { onDone?: () => void; fo
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const submit = async (e: React.FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (saving) return;
     setError(null);
-    if (next !== confirm) { setError("The two new passwords don't match."); return; }
-    if (next.length < 8) { setError("Your new password must be at least 8 characters."); return; }
-    if (next === current) { setError("Your new password has to be different from your current one."); return; }
+    if (next !== confirm) { setError(MISMATCH); return; }
+    if (next.length < 8) { setError(MESSAGES.password_too_short); return; }
+    if (next === current) { setError(MESSAGES.password_unchanged); return; }
 
     setSaving(true);
     try {
@@ -55,36 +62,41 @@ export function ChangePasswordForm({ onDone, forced }: { onDone?: () => void; fo
   };
 
   return (
-    <form onSubmit={submit} className="space-y-4">
-      <div>
-        <Label htmlFor="currentPassword">{forced ? "Temporary password" : "Current password"}</Label>
+    <form onSubmit={submit} className="flex flex-col gap-4">
+      <Field controlId="currentPassword">
+        <FieldLabel>{forced ? "Temporary password" : "Current password"}</FieldLabel>
         <Input
-          id="currentPassword" type="password" required value={current}
+          type="password" required value={current}
           onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password"
         />
-      </div>
-      <div>
-        <Label htmlFor="newPassword">New password</Label>
+      </Field>
+      <Field controlId="newPassword">
+        <FieldLabel>New password</FieldLabel>
         <Input
-          id="newPassword" type="password" required minLength={8} value={next}
+          type="password" required minLength={8} value={next}
           onChange={(e) => setNext(e.target.value)} autoComplete="new-password"
         />
-        <p className="text-xs text-text-muted mt-1">At least 8 characters, and different from your current one.</p>
-      </div>
-      <div>
-        <Label htmlFor="confirmPassword">Confirm new password</Label>
+        <FieldDescription>At least 8 characters, and different from your current one.</FieldDescription>
+      </Field>
+      <Field controlId="confirmPassword">
+        <FieldLabel>Confirm new password</FieldLabel>
         <Input
-          id="confirmPassword" type="password" required minLength={8} value={confirm}
+          type="password" required minLength={8} value={confirm}
           onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password"
         />
+      </Field>
+      {error && <Alert tone="danger">{error}</Alert>}
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        {onCancel ? <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button> : null}
+        <Button type="submit" pending={saving} block={!onCancel}>Change password</Button>
       </div>
-      {error && <p className="text-sm text-danger-strong">{error}</p>}
-      <Button type="submit" variant="primary" loading={saving} className="w-full">
-        {saving ? "Saving…" : "Change password"}
-      </Button>
     </form>
   );
 }
+
+const MISMATCH = "The two new passwords don't match.";
+const FORCED_LEAD = "Your account is on a temporary password. Choose your own to carry on — the temporary one stops working the moment you do.";
+const CHOSEN_LEAD = "You'll need your current password to set a new one.";
 
 /**
  * `/change-password` — the forced-change destination.
@@ -107,38 +119,33 @@ export default function ChangePasswordPage() {
   const forced = auth.status === "authenticated" && auth.mustChangePassword;
 
   return (
-    <div className="max-w-md mx-auto pt-6">
-      <Card>
-        <h1 className="text-xl font-semibold mb-1">{forced ? "Choose your own password" : "Change your password"}</h1>
-        {/*
-          N-F10: this said "the one you just used is temporary", and this screen has three
-          arrivals and only one of them used anything. A member who clicked the welcome magic
-          link did not type a password at all; a member whose password an admin reset while
-          they were signed in did not either (L-F4 routes them here mid-session). Naming the
-          temporary password as a thing that EXISTS is true in all three, and the link below
-          is what a member who has not got it can actually do — before, they had to know that
-          "Forgot password?" on the sign-in screen was the way out of a screen that does not
-          mention it.
-        */}
-        <p className="text-sm text-text-secondary mb-5">
-          {forced
-            // Deliberately does NOT say "an admin has reset your password". That is false for
-            // the first person who ever signs in to a club: ProductionBootstrap creates the
-            // opening admin account from the compose file with must-change-password set, and
-            // nobody reset anything — they ARE the admin. The forced change has exactly one
-            // meaning the screen can rely on, which is that the current password is temporary.
-            ? "Your account is on a temporary password. Choose your own to carry on — the temporary one stops working the moment you do."
-            : "You'll need your current password to set a new one."}
-        </p>
-        <ChangePasswordForm forced={forced} onDone={() => nav(forced ? "/schedule" : "/profile")} />
-        {forced && (
-          <p className="text-sm text-text-secondary mt-4">
-            Haven't got the temporary password?{" "}
-            <Link to="/forgot-password" className="text-accent-strong hover:underline">Email yourself a reset link</Link>{" "}
-            instead.
-          </p>
-        )}
+    <PageShell width="narrow">
+      {/*
+        N-F10: the forced lead deliberately does NOT say "an admin has reset your password" — the
+        first person ever to sign in to a club was created by ProductionBootstrap with
+        must-change-password set, and nobody reset anything. The one meaning the screen can rely
+        on is that the current password is temporary.
+      */}
+      <PageHeader
+        back={forced ? undefined : { to: "/profile", label: "Profile" }}
+        title={forced ? "Choose your own password" : "Change your password"}
+        description={forced ? FORCED_LEAD : CHOSEN_LEAD}
+      />
+      <Card className="px-4 sm:px-6">
+        <ChangePasswordForm forced={forced} onDone={() => nav(forced ? LANDING_PATH : "/profile")} />
       </Card>
-    </div>
+      {/*
+        This screen has three arrivals and only one of them typed a password: a member who
+        clicked the welcome magic link, or whose password an admin reset mid-session (L-F4),
+        has none to type. The way out for them is a reset link.
+      */}
+      {forced && (
+        <p className="text-sm text-text-secondary">
+          {"Haven't got the temporary password? "}
+          <TextLink to="/forgot-password">Email yourself a reset link</TextLink>
+          {" instead."}
+        </p>
+      )}
+    </PageShell>
   );
 }

@@ -1,216 +1,177 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { Route, Routes } from "react-router-dom";
 import Layout from "./Layout";
 import { ProfileProvider } from "../lib/profile";
+import { tokenStore } from "../lib/api";
+import { THEME_STORAGE_KEY, ThemeProvider } from "../lib/theme";
 import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
 
 /**
- * The settings menu, from a keyboard.
+ * The account menu, behind the avatar (P2, Target IA → Shell; R16, D7).
  *
  * <p>
- * Every other way out of it worked — a click outside, choosing an item — and Escape did
- * nothing, twice, on two different sessions: the effect registered a `mousedown` document
- * listener and no `keydown`. Tab moves focus INTO the menu, so it was otherwise perfectly
- * keyboard-usable; a keyboard user simply could not dismiss it without reaching for the mouse.
- * WAI-ARIA's menu pattern makes Escape the way out.
+ * <b>Retired with the gear (R16):</b> the settings menu's items — Admin settings and Webhooks —
+ * and the tests that pinned them. Both are Admin destinations now, reached from the Admin tab,
+ * and this menu holds only the person's own things. What those tests held is kept, because it is
+ * the WAI-ARIA menu contract and it applies to this menu just as much (B15): focus moves in on
+ * open, Escape closes and puts focus back on the button, arrow keys rove and wrap, Tab out
+ * closes, navigations are real links (so they open in a new tab) and Sign out is a button (it is
+ * not a destination). Radix implements it; these tests make sure it stays wired.
  * </p>
  *
  * <p>
- * Returning focus to the gear is the half that is easy to leave out and just as load-bearing:
- * closing the menu while focus sits on a node that has just been unmounted drops the keyboard
- * user at the top of the document, several tab stops from where they were.
- * </p>
- *
- * <p>
- * `fireEvent.keyDown`, not `user-event` — its keyboard path never settles under jsdom 28 here
- * and hangs to the test timeout, which reads as a component that ignores input. See
- * memory/gotchas.md.
+ * `fireEvent`, not `user-event` — its keyboard path never settles under jsdom here and hangs to
+ * the test timeout, which reads as a component that ignores input (memory/gotchas.md).
  * </p>
  */
 
-afterEach(() => signOut());
+afterEach(() => {
+  signOut();
+  localStorage.clear();
+  document.documentElement.classList.remove("dark");
+});
 
-function renderChrome() {
-  const whoami = signIn({ isAdmin: false });
+function renderChrome({ isAdmin = false }: { isAdmin?: boolean } = {}) {
+  const whoami = signIn({ isAdmin });
   stubFetch([
     { path: "/api/v1/whoami", body: whoami },
     { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
-    { path: "/api/v1/me/profile", body: { user_id: whoami.user_id, email: "naledi@sample.local", full_name: "Naledi", photo_url: null, membership_number: "C-104" } },
-  ]);
-  // ProfileProvider is wrapped here rather than added to the shared harness: Layout is the only
-  // thing that reads it, and the harness is a file every route test depends on.
-  return renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: ["/schedule"] });
-}
-
-/**
- * The admin's menu — five items rather than one, which is what makes the keyboard contract
- * below testable at all. A member's menu holds only Sign out, and a single-item menu proves
- * nothing about roving focus.
- *
- * <p>
- * An empty doors view on purpose: this file is about the menu's behaviour, and a dot, a badge
- * and a banner would all be noise in it. The doors cues have their own tests.
- * </p>
- */
-function renderAdminChrome() {
-  const whoami = signIn({ isAdmin: true });
-  stubFetch([
-    { path: "/api/v1/whoami", body: whoami },
-    { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
-    { path: "/api/v1/me/profile", body: { user_id: whoami.user_id, email: "desk@sample.local", full_name: "Club Desk", photo_url: null, membership_number: "C-1" } },
+    { path: "/api/v1/me/profile", body: { user_id: whoami.user_id, email: "naledi@sample.local", full_name: "Naledi Dube", photo_url: null, membership_number: "C-104" } },
     { path: "/api/v1/admin/members", body: [] },
-    {
-      path: "/api/v1/admin/doors",
-      body: {
-        day_started_at: new Date().toISOString(),
-        timezone: "Africa/Johannesburg",
-        shut_all_active: false,
-        doors: [],
-      },
-    },
+    { path: "/api/v1/admin/monitoring/summary", body: { open: {} } },
+    { path: "/api/v1/admin/doors", body: { day_started_at: new Date().toISOString(), timezone: "Africa/Johannesburg", shut_all_active: false, doors: [] } },
+    { method: "POST", path: "/api/v1/auth/logout", body: {} },
   ]);
-  return renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: ["/schedule"] });
+  return renderPage(
+    <ThemeProvider>
+      <ProfileProvider>
+        <Routes>
+          <Route element={<Layout />}>
+            <Route path="/my-code" element={<h1>Your code</h1>} />
+          </Route>
+          <Route path="/login" element={<h1>Sign in</h1>} />
+        </Routes>
+      </ProfileProvider>
+    </ThemeProvider>,
+    { initialEntries: ["/my-code"] },
+  );
 }
 
-describe("the settings menu", () => {
-  it("closes on Escape and puts focus back on the button that opened it", async () => {
-    renderChrome();
+async function openMenu() {
+  const trigger = await screen.findByRole("button", { name: "Account menu" });
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  const menu = await screen.findByRole("menu");
+  return { trigger, menu };
+}
 
-    const gear = await screen.findByRole("button", { name: "Open menu" });
-    fireEvent.click(gear);
-    expect(screen.getByRole("menu")).toBeInTheDocument();
+describe("the account menu", () => {
+  it("says who is signed in, and offers their own things only", async () => {
+    renderChrome({ isAdmin: true });
+    const { menu } = await openMenu();
 
-    fireEvent.keyDown(document, { key: "Escape" });
-
-    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
-    expect(gear).toHaveFocus();
-    expect(gear).toHaveAttribute("aria-expanded", "false");
+    expect(menu).toHaveTextContent("Naledi Dube");
+    expect(menu).toHaveTextContent("naledi@sample.local");
+    const items = screen.getAllByRole("menuitem").map((item) => item.textContent);
+    expect(items).toEqual(["Profile", "How it works", "Sign out"]);
+    // R16 — even for an admin: the admin destinations are under the Admin tab, not in here.
+    expect(menu).not.toHaveTextContent(/Admin settings|Webhooks/);
   });
 
-  it("still closes on a click outside", async () => {
+  it("moves focus onto the first item when it opens", async () => {
     renderChrome();
+    await openMenu();
+    await waitFor(() => expect(screen.getAllByRole("menuitem")[0]).toHaveFocus());
+  });
 
-    const gear = await screen.findByRole("button", { name: "Open menu" });
-    fireEvent.click(gear);
-    expect(screen.getByRole("menu")).toBeInTheDocument();
+  it("closes on Escape and puts focus back on the button that opened it", async () => {
+    renderChrome();
+    const { trigger, menu } = await openMenu();
 
-    fireEvent.mouseDown(document.body);
+    fireEvent.keyDown(menu, { key: "Escape" });
+
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("walks its items with the arrow keys and wraps at both ends", async () => {
+    renderChrome();
+    await openMenu();
+    const profile = screen.getByRole("menuitem", { name: "Profile" });
+    await waitFor(() => expect(profile).toHaveFocus());
+
+    // Radix moves roving focus on the next task, so each step is awaited.
+    const press = async (key: string, lands: HTMLElement) => {
+      fireEvent.keyDown(document.activeElement!, { key });
+      await waitFor(() => expect(lands).toHaveFocus());
+    };
+    const signOut = screen.getByRole("menuitem", { name: "Sign out" });
+
+    await press("ArrowDown", screen.getByRole("menuitem", { name: "How it works" }));
+    await press("ArrowUp", profile);
+    // Wrapping is the half a keyboard user notices: ArrowUp from the top reaches Sign out.
+    await press("ArrowUp", signOut);
+    await press("ArrowDown", profile);
+    await press("End", signOut);
+    await press("Home", profile);
+  });
+
+  /**
+   * <b>Real links, not buttons</b>: a navigation that is a button cannot be middle-clicked,
+   * cmd-clicked or copied (B15). Sign out stays a button — a link to /login would be openable in
+   * a new tab without ending the session.
+   */
+  it("navigates with real links and signs out with a button", async () => {
+    renderChrome();
+    await openMenu();
+
+    for (const [label, href] of [["Profile", "/profile"], ["How it works", "/how-it-works"]] as const) {
+      const item = screen.getByRole("menuitem", { name: label });
+      expect(item.tagName).toBe("A");
+      expect(item).toHaveAttribute("href", href);
+    }
+    expect(screen.getByRole("menuitem", { name: "Sign out" }).tagName).toBe("DIV");
+    expect(screen.getByRole("menuitem", { name: "Sign out" })).not.toHaveAttribute("href");
+  });
+
+  it("signs out: the session ends and the member lands on sign-in", async () => {
+    renderChrome();
+    await openMenu();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Sign out" }));
+
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+    expect(tokenStore.get()).toBeNull();
   });
 });
 
 /**
- * B15 — the rest of what `role="menu"` promises.
- *
- * <p>
- * The menu declared the role and had none of the behaviour. Escape worked (above); nothing
- * else did. Focus never moved into it, so opening it from the keyboard left you on the gear
- * with an open panel over the page and nothing focused inside it; Tab walked out of it and
- * left it open behind you; and every item was a <code>&lt;button&gt;</code>, so four
- * navigations could not be middle-clicked, cmd-clicked or copied.
- * </p>
- *
- * <p>
- * The choice the finding demanded was <i>menu, properly</i> or <i>not a menu at all</i>. This
- * is the first: the role stays and the keyboard contract that goes with it is implemented,
- * because a half-implemented <code>role="menu"</code> is worse than no role — a screen-reader
- * user is told to expect arrow keys that do nothing.
- * </p>
- *
- * <p>
- * <code>fireEvent.focusOut</code> rather than <code>fireEvent.blur</code>: React's
- * <code>onBlur</code> is delivered from the bubbling <code>focusout</code> event, and a
- * non-bubbling <code>blur</code> dispatched at the item never reaches the container's
- * handler. The distinction is invisible in the passing direction and total in the failing one.
- * </p>
+ * D7 — dark mode is live from here. System / Light / Dark are a radio group on `useTheme()`;
+ * the choice paints `html.dark`, persists for `theme-boot.js` to apply before the next first
+ * paint, and leaves the menu open so a member can compare before deciding.
  */
-describe("the settings menu's keyboard contract", () => {
-  it("moves focus onto the first item when it opens", async () => {
-    renderAdminChrome();
+describe("Appearance", () => {
+  it("shows the current choice and switches the theme without closing the menu", async () => {
+    renderChrome();
+    await openMenu();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Open menu/ }));
+    const system = screen.getByRole("menuitemradio", { name: "System" });
+    expect(system).toHaveAttribute("aria-checked", "true");
 
-    const items = screen.getAllByRole("menuitem");
-    // "Admin settings" since D3 §3.1 took Doors and Devices out of this menu and into the
-    // Monitoring section. What is under test is the focus move, not which item is first.
-    expect(items[0]).toHaveTextContent("Admin settings");
-    await waitFor(() => expect(items[0]).toHaveFocus());
-  });
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Dark" }));
 
-  /**
-   * <b>Real links, not buttons.</b> An admin standing at the desk wants Doors in a second tab
-   * while keeping the bookings screen they are looking at, and a button that navigates cannot
-   * give them that however it is styled.
-   */
-  it("navigates with real links, so they can be opened in a new tab", async () => {
-    renderAdminChrome();
-
-    fireEvent.click(await screen.findByRole("button", { name: /Open menu/ }));
-
-    const destinations = [
-      ["Admin settings", "/admin/settings"],
-      ["Webhooks", "/admin/webhooks"],
-    ] as const;
-    for (const [label, href] of destinations) {
-      const item = screen.getByRole("menuitem", { name: new RegExp(`^${label}`) });
-      expect(item.tagName).toBe("A");
-      expect(item).toHaveAttribute("href", href);
-    }
-
-    // Sign out is deliberately NOT a link: it is not a destination, and a `Link` to /login
-    // would be openable in a new tab without ending the session.
-    expect(screen.getByRole("menuitem", { name: "Sign out" }).tagName).toBe("BUTTON");
-  });
-
-  it("closes when focus leaves it, which is what Tab does", async () => {
-    renderAdminChrome();
-
-    fireEvent.click(await screen.findByRole("button", { name: /Open menu/ }));
-    const menu = screen.getByRole("menu");
-    const last = screen.getAllByRole("menuitem").at(-1)!;
-
-    // Somewhere outside the menu — the club name is the first stop in the header and is
-    // certainly not inside it.
-    const outside = screen.getAllByRole("link", { name: "Crusaders Squash" })[0];
-    fireEvent.focusOut(last, { relatedTarget: outside });
-
-    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
-    expect(menu).not.toBeInTheDocument();
-  });
-
-  it("stays open while focus moves between its own items", async () => {
-    renderAdminChrome();
-
-    fireEvent.click(await screen.findByRole("button", { name: /Open menu/ }));
-    const items = screen.getAllByRole("menuitem");
-    fireEvent.focusOut(items[0], { relatedTarget: items[1] });
-
+    await waitFor(() => expect(document.documentElement.classList.contains("dark")).toBe(true));
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark");
     expect(screen.getByRole("menu")).toBeInTheDocument();
-  });
+    expect(screen.getByRole("menuitemradio", { name: "Dark" })).toHaveAttribute("aria-checked", "true");
 
-  it("walks the items with the arrow keys and wraps at both ends", async () => {
-    renderAdminChrome();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Light" }));
+    await waitFor(() => expect(document.documentElement.classList.contains("dark")).toBe(false));
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("light");
 
-    fireEvent.click(await screen.findByRole("button", { name: /Open menu/ }));
-    const menu = screen.getByRole("menu");
-    const items = screen.getAllByRole("menuitem");
-    await waitFor(() => expect(items[0]).toHaveFocus());
-
-    fireEvent.keyDown(menu, { key: "ArrowDown" });
-    expect(items[1]).toHaveFocus();
-
-    fireEvent.keyDown(menu, { key: "ArrowUp" });
-    expect(items[0]).toHaveFocus();
-
-    // Wrapping is the half that is easy to leave out, and the half a keyboard user notices:
-    // ArrowUp from the top is how you reach Sign out in one press.
-    fireEvent.keyDown(menu, { key: "ArrowUp" });
-    expect(items.at(-1)).toHaveFocus();
-
-    fireEvent.keyDown(menu, { key: "Home" });
-    expect(items[0]).toHaveFocus();
-
-    fireEvent.keyDown(menu, { key: "End" });
-    expect(items.at(-1)).toHaveFocus();
+    // System is the ABSENCE of a stored choice, so the OS decides again from the next load.
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "System" }));
+    await waitFor(() => expect(localStorage.getItem(THEME_STORAGE_KEY)).toBeNull());
   });
 });

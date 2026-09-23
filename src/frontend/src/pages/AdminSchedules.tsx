@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { Alert } from "../components/Alert";
-import { Badge, Button, Label, Select } from "../components/Button";
-import { Card } from "../components/Card";
-import { StateBlock } from "../components/StateBlock";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { PageHeader, PageShell } from "../components/ui/page-shell";
+import { StateBlock } from "../components/ui/state-block";
+import { TextLink } from "../components/ui/text-link";
+import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
+import { CalendarDots, Plus } from "../components/ui/icons";
+import { CardListSkeleton } from "../components/monitoring/parts";
 import { ScheduleEditor } from "../components/schedules/ScheduleEditor";
 import { adminEndpoints, type ScheduleRow } from "../lib/adminApi";
 import {
@@ -53,27 +57,24 @@ function ScheduleListRow({ row }: { row: ScheduleRow }) {
     intervalWeeks: row.interval_weeks,
   });
   return (
-    <li className="border-b border-border last:border-b-0">
-      <div className="flex flex-col gap-2 py-4 sm:flex-row sm:items-start sm:justify-between">
+    <li>
+      <div className="flex flex-col gap-2 px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-6">
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-base font-semibold text-text-primary">{row.name}</h2>
             {/* A word, not a colour: "Ended" is the state, and the badge carries the word. */}
-            {row.status === "ended" && <Badge tone="muted">Ended</Badge>}
+            {row.status === "ended" && <Badge tone="neutral">Ended</Badge>}
           </div>
           <p className="text-sm text-text-secondary">{sentence}</p>
           <p className="text-sm text-text-muted">{nextOccurrenceLine(row.next_occurrence, row.status)}</p>
         </div>
         {/* Named by the thing it opens, because a column of links all reading "Open" says
             nothing to anybody tabbing down it. */}
-        <Link
-          to={`/admin/schedules/${row.id}`}
-          // `border-control` is the token a CONTROL's boundary is measured at 3:1 with;
-          // `border-border` is deliberately quieter and is for a card edge or a table rule.
-          className="inline-flex min-h-11 items-center justify-center rounded-lg border border-control px-4 text-sm font-medium text-text-primary hover:bg-bg-muted"
-        >
+        {/* R10: it navigates, so it is a link that looks like one — it was a bordered box
+            posing as a button. */}
+        <TextLink variant="standalone" to={`/admin/schedules/${row.id}`} className="shrink-0 text-sm">
           {`Open ${row.name}`}
-        </Link>
+        </TextLink>
       </div>
     </li>
   );
@@ -115,55 +116,59 @@ export function AdminSchedulesPage() {
 
   const codes = useMemo(() => scheduleCodes({}), []);
 
+  const header = (
+    <PageHeader
+      title="Repeating bookings"
+      description={"A repeating booking holds the same courts at the same time, week after week — "
+        + "league nights, coaching, court maintenance. Members see its name on the grid and "
+        + "cannot book those slots."}
+    />
+  );
+
   if (creating) {
     return (
-      <div className="space-y-6">
+      <PageShell width="wide">
+        {header}
         <ScheduleEditor
           onCancel={() => { setCreating(false); }}
           onCreated={(row) => { setCreating(false); setCreated(row); load(); }}
         />
-      </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-2">
-        <h1 className="text-2xl font-bold tracking-tight text-text-primary">Repeating bookings</h1>
-        <p className="text-sm text-text-secondary">
-          {"A repeating booking holds the same courts at the same time, week after week — "}
-          {"league nights, coaching, court maintenance. Members see its name on the grid and "}
-          {"cannot book those slots."}
-        </p>
-      </div>
+    <PageShell width="wide">
+      {header}
 
       {created && (
         <Alert tone="success" live="polite" announceKey={`schedule-created-${created.id}`}>
           {`“${created.name}” was created. `}
-          <Link className="underline" to={`/admin/schedules/${created.id}`}>
+          <TextLink to={`/admin/schedules/${created.id}`}>
             {`Open ${created.name} to see its dates`}
-          </Link>
+          </TextLink>
         </Alert>
       )}
 
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="space-y-1">
-          <Label htmlFor="schedule-status">Which ones</Label>
-          <Select
-            id="schedule-status"
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* Three choices, always visible: a segmented control, not a select that hides two. */}
+          <ToggleGroup
+            type="single"
+            aria-label="Which ones"
             value={status}
-            onChange={(e) => setStatus(e.target.value as Status)}
-            className="min-h-11"
+            onValueChange={(next) => { if (next) setStatus(next as Status); }}
+            className="rounded-lg bg-bg-muted p-1"
           >
-            {STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-          </Select>
+            {STATUSES.map((s) => (
+              <ToggleGroupItem key={s.value} value={s.value}>{s.label}</ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+          <Button onClick={() => setCreating(true)} icon={<Plus aria-hidden="true" />}>
+            Create a repeating booking
+          </Button>
         </div>
-        <Button className="min-h-11" onClick={() => setCreating(true)}>
-          Create a repeating booking
-        </Button>
-      </div>
 
-      <Card className="px-4">
         <StateBlock
           loading={loading}
           error={error}
@@ -172,14 +177,16 @@ export function AdminSchedulesPage() {
           failedCaveat={LIST_FAILED_CAVEAT}
           onRetry={load}
           empty={rows !== null && rows.length === 0}
+          emptyIcon={CalendarDots}
           emptyTitle={status === "active" ? LIST_EMPTY_TITLE : "None in that list."}
           emptyHint={status === "active" ? LIST_EMPTY_HINT : "Try “All of them”."}
+          skeleton={<CardListSkeleton rows={3} />}
         >
-          <ul className="divide-y divide-border">
+          <ul className="divide-y divide-border rounded-xl border border-border bg-bg-surface shadow-xs">
             {(rows ?? []).map((row) => <ScheduleListRow key={row.id} row={row} />)}
           </ul>
         </StateBlock>
-      </Card>
-    </div>
+      </div>
+    </PageShell>
   );
 }

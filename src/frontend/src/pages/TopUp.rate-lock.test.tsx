@@ -74,7 +74,7 @@ describe("Top-up — the quoted rate is the registered rate", () => {
     ]);
     renderPage(<TopUpPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "R100" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "R100" }));
     expect(screen.getByText("240.00 credits")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
@@ -94,7 +94,7 @@ describe("Top-up — the quoted rate is the registered rate", () => {
     ]);
     renderPage(<TopUpPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "R100" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "R100" }));
     expect(screen.getByText("240.00 credits")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
@@ -143,7 +143,7 @@ describe("Top-up — the quoted rate is the registered rate", () => {
     // which is why this line changed. `reactStrictMode` is applied outside the wrapper.
     renderPage(<TopUpPage />, { reactStrictMode: true });
 
-    fireEvent.click(await screen.findByRole("button", { name: "R100" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "R100" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("R100.00 now buys 160.00 credits");
@@ -160,7 +160,7 @@ describe("Top-up — the quoted rate is the registered rate", () => {
     ]);
     renderPage(<TopUpPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "R100" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "R100" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue to PayFast" }));
 
     expect(await screen.findByText("Payments aren't set up for this club yet — please ask an admin."))

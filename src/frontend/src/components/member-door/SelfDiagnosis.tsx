@@ -121,7 +121,7 @@ export function SelfDiagnosis(props: {
               </Button>
             )}
             {input.policy === "booking_window" && !input.hasBooking && (
-              <Link to="/schedule" className={MEMBER_DOOR_ACTION_LINK}>
+              <Link to="/bookings" className={MEMBER_DOOR_ACTION_LINK}>
                 Book a court
               </Link>
             )}

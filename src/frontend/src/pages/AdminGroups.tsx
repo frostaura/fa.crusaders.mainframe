@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert } from "../components/Alert";
-import { Button } from "../components/Button";
-import { StateBlock } from "../components/StateBlock";
+import { Button } from "../components/ui/button";
+import { PageHeader, PageShell } from "../components/ui/page-shell";
+import { StateBlock } from "../components/ui/state-block";
+import { Plus, UsersThree } from "../components/ui/icons";
+import { CardListSkeleton } from "../components/monitoring/parts";
 import { MemberPicker, type PickableMember } from "../components/MemberPicker";
 import { useToast } from "../components/Toast";
 import { GroupCard } from "../components/groups/GroupCard";
@@ -313,9 +316,11 @@ function GroupList({
       failedCaveat={GROUPS_READ_FAILED.replace("Couldn't read the club's groups. ", "")}
       onRetry={onRetry}
       empty={!loading && !error && (groups ?? []).length === 0}
+      emptyIcon={UsersThree}
       emptyTitle={GROUPS_EMPTY_TITLE}
+      skeleton={<CardListSkeleton rows={2} />}
     >
-      <div className="space-y-4">
+      <div className="flex flex-col gap-4">
         {(groups ?? []).map((group) => (
           <GroupCard
             key={group.id}
@@ -443,14 +448,27 @@ export function AdminGroupsPage() {
   });
 
   return (
-    <div className="space-y-6">
-      <header className="space-y-2">
-        <h1 className="text-2xl font-bold tracking-tight">Member groups</h1>
-        <p className="text-sm text-text-secondary">
-          What each kind of member pays for a slot, when they may book, and how many slots a day
-          they may hold. The club-wide limits live under Booking on the settings page.
-        </p>
-      </header>
+    <PageShell width="wide">
+      <PageHeader
+        title="Member groups"
+        description={"What each kind of member pays for a slot, when they may book, and how many slots a day "
+          + "they may hold. The club-wide limits live under Booking on the settings page."}
+      />
+
+      {/* The page's two actions, as a toolbar row rather than in the header: the header's
+          actions column is for icon buttons, and two worded buttons beside a title do not fit
+          a 360px phone. Primary first — it is the thing this page is most often opened for. */}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          onClick={() => { setDraftGroup(BLANK); openPanel({ kind: "edit", id: "" }); }}
+          icon={<Plus aria-hidden="true" />}
+        >
+          Create a group
+        </Button>
+        <Button variant="outline" onClick={() => openPanel({ kind: "member-preview" })}>
+          Preview for one member
+        </Button>
+      </div>
 
       {/* Standing, not polite: this page re-renders on every save, and a polite region would
           announce the same paragraph each time. */}
@@ -465,18 +483,6 @@ export function AdminGroupsPage() {
       {error != null && groups !== null && (
         <Alert tone="danger" live="standing" announceKey="groups-read-failed">{GROUPS_READ_FAILED}</Alert>
       )}
-
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant="primary" className="min-h-11"
-          onClick={() => { setDraftGroup(BLANK); openPanel({ kind: "edit", id: "" }); }}
-        >
-          Create a group
-        </Button>
-        <Button variant="outline" className="min-h-11" onClick={() => openPanel({ kind: "member-preview" })}>
-          Preview for one member
-        </Button>
-      </div>
 
       <GroupList
         groups={groups}
@@ -515,7 +521,7 @@ export function AdminGroupsPage() {
         onCloseWeekPreview={() => { setWeekPreviewId(null); setPreviewBasis(null); }}
         onMembersChanged={() => void load()}
       />
-    </div>
+    </PageShell>
   );
 }
 

@@ -149,7 +149,7 @@ describe("the code tabs", () => {
     expect(why?.textContent).toMatch(/no booking of yours to make a code for/i);
     // …and visible, with the one thing that would change the answer.
     expect(screen.getByText(/no booking of yours to make a code for/i)).toBeVisible();
-    expect(screen.getByRole("link", { name: "Book a court to get one" })).toHaveAttribute("href", "/schedule");
+    expect(screen.getByRole("link", { name: "Book a court to get one" })).toHaveAttribute("href", "/bookings") // R15: Bookings lives at /bookings;
   });
 
   /** Tapping a dimmed tab costs nothing — it must not mint a code the server will not give. */

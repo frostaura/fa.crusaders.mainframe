@@ -557,7 +557,7 @@ function CodeChoice(props: {
         */}
         {bookingDisabled && (
           <p className="text-xs text-text-muted">
-            <Link to="/schedule" className="text-accent-strong underline underline-offset-2 hover:no-underline">
+            <Link to="/bookings" className="text-accent-strong underline underline-offset-2 hover:no-underline">
               Book a court to get one
             </Link>
           </p>

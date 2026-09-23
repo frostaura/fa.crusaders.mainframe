@@ -96,7 +96,8 @@ describe("the list", () => {
     renderPage(<AdminSchedulesPage />);
     await screen.findByRole("heading", { name: "Tuesday league" });
 
-    await userEvent.selectOptions(screen.getByLabelText("Which ones"), "ended");
+    // Three choices, always visible (R7): a segmented control rather than a select.
+    await userEvent.click(screen.getByRole("radio", { name: "Ended" }));
 
     await waitFor(() => {
       expect(stub.calls.some((c) => c.path.includes("status=ended"))).toBe(true);

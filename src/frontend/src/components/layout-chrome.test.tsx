@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { Route, Routes } from "react-router-dom";
 import Layout from "./Layout";
 import { ProfileProvider } from "../lib/profile";
 import { doorFixture, doorsServer, renderPage, signIn, signOut, stubFetch } from "../test/harness";
@@ -16,9 +17,10 @@ import { doorFixture, doorsServer, renderPage, signIn, signOut, stubFetch } from
  * <li><b>B11</b> — no skip link. Nine tab stops stood between the top of the document and
  * the page's own content, on every route, after every navigation.</li>
  * <li><b>C16</b> — every interactive target in the header was 36 px tall: the section tabs,
- * the avatar and the wallet chip.</li>
+ * the avatar and the wallet chip. (P2 rebuilt the chrome — one primary nav that is the phone's
+ * bottom tab bar, a credits chip, an account menu — and the 44 px rule carried over.)</li>
  * <li><b>C8</b> — the club-wide shut banner rendered on paths beginning <code>/admin/</code>,
- * and an admin lands on <code>/schedule</code>.</li>
+ * and an admin lands on a member route (<code>/my-code</code> since R15).</li>
  * </ul>
  *
  * <p>
@@ -38,7 +40,7 @@ const PROFILE = {
   email: "desk@club.test", full_name: "Club Desk", photo_url: null, membership_number: "C-1",
 };
 
-function chrome({ isAdmin, route = "/schedule", doors = [doorFixture()] }: {
+function chrome({ isAdmin, route = "/bookings", doors = [doorFixture()] }: {
   isAdmin: boolean;
   route?: string;
   doors?: Record<string, unknown>[];
@@ -50,6 +52,7 @@ function chrome({ isAdmin, route = "/schedule", doors = [doorFixture()] }: {
     { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
     { path: "/api/v1/me/profile", body: PROFILE },
     { path: "/api/v1/admin/members", body: [] },
+    { path: "/api/v1/admin/monitoring/summary", body: { open: {} } },
     ...server.routes,
   ]);
   renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: [route] });
@@ -70,7 +73,7 @@ describe("the skip link", () => {
    */
   it("is the first thing a keyboard reaches in the chrome", async () => {
     chrome({ isAdmin: true });
-    await screen.findByRole("button", { name: /Open menu/ });
+    await screen.findByRole("button", { name: "Account menu" });
 
     const first = focusableInOrder()[0];
     expect(first).toHaveTextContent("Skip to main content");
@@ -121,6 +124,38 @@ describe("the skip link", () => {
     expect(main).toHaveFocus();
   });
 
+  /**
+   * P2 — and past ALL the navigation, onto the page's own heading when it has one. The admin
+   * console's rail and section switcher are inside `<main>`, ahead of the page: a skip link that
+   * stopped at the top of `<main>` would leave an admin a dozen rail links from the page (C14).
+   */
+  it("lands on the page's heading, past any navigation inside main", async () => {
+    const whoami = signIn({ isAdmin: false });
+    stubFetch([
+      { path: "/api/v1/whoami", body: whoami },
+      { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
+      { path: "/api/v1/me/profile", body: PROFILE },
+    ]);
+    renderPage(
+      <ProfileProvider>
+        <Routes>
+          <Route element={<Layout />}>
+            <Route path="/wallet" element={<><nav aria-label="Section"><a href="/x">A rail link</a></nav><h1>Wallet</h1></>} />
+          </Route>
+        </Routes>
+      </ProfileProvider>,
+      { initialEntries: ["/wallet"] },
+    );
+
+    fireEvent.click(await screen.findByRole("link", { name: "Skip to main content" }));
+
+    const heading = screen.getByRole("heading", { name: "Wallet" });
+    expect(heading).toHaveFocus();
+    // Focusable without becoming a tab stop, and carrying the scroll margin / keyboard ring hook.
+    expect(heading).toHaveAttribute("tabindex", "-1");
+    expect(heading).toHaveAttribute("data-route-heading");
+  });
+
   /** It costs a sighted mouse user no pixels until it is focused. */
   it("is invisible until it is focused", async () => {
     chrome({ isAdmin: true });
@@ -131,57 +166,48 @@ describe("the skip link", () => {
   });
 });
 
-describe("the header's touch targets", () => {
+describe("the chrome's touch targets", () => {
   /**
-   * C16 — 36 px on every one of them: `h-9` on the tabs and the wallet chip, and a hard
-   * `style={{width: 36}}` on the avatar. The constraint is a fingertip, so the increase is
-   * gated on a coarse pointer: a 44 px chip in a 56 px desktop header row is a chip that has
-   * stopped being a chip.
+   * C16 — every target in the old header was 36 px: the tabs, the avatar and the wallet chip.
+   * The rebuilt chrome states each in named tokens, and each one's decision is pinned here as a
+   * class (jsdom applies no Tailwind); `e2e/narrow-viewport.spec.ts` measures the pixels.
    *
    * <p>
-   * The avatar and the gear are asserted in PIXELS rather than on the rem scale for a second
-   * reason (D6): everything around them doubles at a 32 px root font size and a fixed 36 px
-   * avatar did not, so the cluster overflowed a 360 px screen while the target inside it was
-   * still too small to hit.
+   * B12's rule carries over: a touch target is a fingertip and does not double with the text, so
+   * every one is a token in PIXELS (`touch` 44, `tabbar` 64), never `h-11`.
    * </p>
    */
-  it("raises every one of them to 44 px on a coarse pointer", async () => {
+  it("gives every one of them a fingertip", async () => {
     chrome({ isAdmin: true });
 
-    /**
-     * B12 — the target is stated in PIXELS now, and that is the point of the finding.
-     *
-     * <p>
-     * `[@media(pointer:coarse)]:h-11` is 2.75rem, which is 44 px at a 16 px root font size
-     * and <b>88 px at a 32 px one</b>. Reviewer B measured what that did on a 320×568
-     * screen: the header and this strip together took 54 % of the phone, so the page the
-     * chrome exists to get you to had less than half of it. None of that height is a touch
-     * target — 44 px is — it was a touch target written in a unit that doubles when the text
-     * doubles. `min-h-[44px]` is the same 44 px at every root font size, and it is a floor,
-     * so the text inside is still free to grow.
-     * </p>
-     */
-    const tabs = await screen.findAllByRole("link", { name: "Bookings" });
-    for (const tab of tabs) expect(tab.className).toContain("[@media(pointer:coarse)]:min-h-[44px]");
+    // The primary nav: 64 px tabs in the phone's bottom bar, 44 px pills in the top bar.
+    const nav = await screen.findByRole("navigation", { name: "Main" });
+    for (const tab of within(nav).getAllByRole("link")) {
+      expect(tab.className).toContain("min-h-tabbar");
+      expect(tab.className).toContain("md:min-h-touch");
+      expect(tab.className).not.toMatch(/\bh-11\b/);
+    }
 
-    // `/^Wallet balance/`, not the figure. The chip's accessible name is the BALANCE, and it
-    // passes through "Wallet balance, loading" before the wallet read lands — a query on the
-    // number is a query that depends on which of those two the render happened to be in, and
-    // this test is about a class, not about a figure.
+    // The account menu's trigger is 44 px at every pointer: it is the only way to Sign out.
+    const account = screen.getByRole("button", { name: "Account menu" });
+    expect(account.className).toContain("size-touch");
+
+    // The crest is the way home and a 44 px target, though it carries no other action.
+    const crest = screen.getByRole("link", { name: "Crusaders Squash — home" });
+    expect(crest.className).toContain("min-h-touch");
+    expect(crest.className).toContain("min-w-touch");
+    expect(crest).toHaveAttribute("href", "/my-code");
+
+    // The credits chip: a 44 px floor at every pointer, and no fixed height — a box that did not
+    // grow with a 32 px root's text would clip the one number it exists to show.
     const wallet = screen.getByRole("link", { name: /^Wallet balance/ });
-    expect(wallet.className).toContain("[@media(pointer:coarse)]:min-h-[44px]");
+    expect(wallet.className).toContain("min-h-touch");
+    expect(wallet.className).not.toMatch(/(^|\s)h-\d/);
     /**
-     * B12's other half on this chip: it never abbreviates the one number it exists to show.
-     * At a 32 px root font size the `max-w-[35vw]` + `truncate` pair rendered a balance of
-     * 0 as "0…".
-     *
-     * <p>
-     * <b>Asserted on the FIGURE, not on the link.</b> The first draft of this checked the
-     * link's own class list, and a mutation that put `truncate` back on the span holding
-     * the number survived it — the guard was on the element that never carried the class.
-     * `truncate` is `overflow-hidden text-ellipsis whitespace-nowrap`, and it is the
-     * ellipsis that cut the figure, so the bound belongs on the node the digits are in.
-     * </p>
+     * B12's other half on this chip: it never abbreviates the one number it exists to show. At a
+     * 32 px root the old `max-w-[35vw]` + `truncate` pair rendered a balance of 0 as "0…".
+     * Asserted on the FIGURE as well as the link — a mutation that put `truncate` on the span
+     * holding the digits once survived a link-only check.
      */
     const figure = wallet.querySelector("span[aria-hidden]")!;
     expect(figure).toBeTruthy();
@@ -189,32 +215,21 @@ describe("the header's touch targets", () => {
       expect(node.className).not.toContain("truncate");
       expect(node.className).not.toContain("text-ellipsis");
     }
-    expect(wallet.className).not.toContain("max-w-[35vw]");
-
-    const avatar = screen.getByRole("link", { name: "Edit profile" });
-    expect(avatar.className).toContain("[@media(pointer:coarse)]:h-[44px]");
-    expect(avatar.className).toContain("[@media(pointer:coarse)]:w-[44px]");
-    // No inline 36 px left behind — the class and a `style` would disagree and the style wins.
-    expect(avatar.getAttribute("style")).toBeNull();
-
-    // The gear is 44 px at every pointer, because it is the only route to Doors and to
-    // Sign out and must never be the thing that is too small OR the thing pushed off screen.
-    const gear = screen.getByRole("button", { name: /Open menu/ });
-    expect(gear.className).toContain("w-[44px]");
-    expect(gear.className).toContain("h-[44px]");
+    // No inline pixel sizes left behind: a class and a `style` would disagree and the style wins.
+    expect(account.getAttribute("style")).toBeNull();
   });
 });
 
 describe("the club-wide shut banner", () => {
   /**
    * C8 — "every admin route" and "every path beginning `/admin/`" are not the same set, and
-   * the difference is the landing screen. An admin signs in and arrives at `/schedule`; so
+   * the difference is the landing screen. An admin signs in and arrived at `/schedule`; so
    * are `/reports`, `/wallet` and `/my-code` member routes by path. A club that shut every
    * door after an incident could sign in the next morning, look at the day's bookings, and
-   * be told nothing at all.
+   * be told nothing at all. Since R15 the landing is My Code, which is a member route too.
    */
   it("is on a member-pathed route while the signed-in user is an admin", async () => {
-    chrome({ isAdmin: true, route: "/schedule", doors: [doorFixture({ enabled: false })] });
+    chrome({ isAdmin: true, route: "/my-code", doors: [doorFixture({ enabled: false })] });
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
   });
@@ -239,9 +254,9 @@ describe("the club-wide shut banner", () => {
   });
 
   it("is absent on that same route while every door is open", async () => {
-    chrome({ isAdmin: true, route: "/schedule" });
+    chrome({ isAdmin: true, route: "/my-code" });
 
-    await screen.findByRole("button", { name: /Open menu/ });
+    await screen.findByRole("button", { name: "Account menu" });
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 
@@ -251,9 +266,9 @@ describe("the club-wide shut banner", () => {
    * still the path — so what is asserted is that the admin-only endpoint is never called.
    */
   it("is not rendered, and not even read, for a member", async () => {
-    const stub = chrome({ isAdmin: false, route: "/schedule", doors: [doorFixture({ enabled: false })] });
+    const stub = chrome({ isAdmin: false, route: "/my-code", doors: [doorFixture({ enabled: false })] });
 
-    await screen.findByRole("button", { name: /Open menu/ });
+    await screen.findByRole("button", { name: "Account menu" });
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     expect(stub.calls.some((c) => c.path.startsWith("/api/v1/admin/doors"))).toBe(false);
   });

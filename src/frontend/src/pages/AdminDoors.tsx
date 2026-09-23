@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
-import { Button } from "../components/Button";
+import { useLocation } from "react-router-dom";
 import { Alert } from "../components/Alert";
+import { Button } from "../components/ui/button";
+import { PageHeader, PageShell } from "../components/ui/page-shell";
+import { Freshness, RefreshButton } from "../components/ui/refresh-button";
+import { TextLink } from "../components/ui/text-link";
+import { Door, WarningCircle } from "../components/ui/icons";
+import { TileGridSkeleton } from "../components/monitoring/parts";
 import { DoorTile } from "../components/doors/DoorTile";
 import { FleetShutPanel } from "../components/doors/FleetShutPanel";
 import {
@@ -9,13 +14,12 @@ import {
   type DoorsState,
 } from "../components/doors/useDoorsChrome";
 import { useTicker } from "../lib/useTicker";
-import { isOnline, offlineAfterSecondsFor, relative } from "../lib/deviceLiveness";
+import { isOnline, offlineAfterSecondsFor } from "../lib/deviceLiveness";
 import {
   DOORS_EMPTY_HINT, DOORS_EMPTY_NOTICE, DOORS_LIVENESS_SUSPENDED, DOORS_READ_FAILED,
   doorAttentionReason, doorDisplayName, doorStaleChecksNotice, doorsAttentionSummary,
 } from "../lib/doorsCopy";
 import { withDoorsBoundary } from "../components/doors/DoorsErrorBoundary";
-import { MonitoringNav } from "../components/monitoring/MonitoringSection";
 import { endpoints, type AdminSettings, type DoorRow } from "../lib/api";
 
 /**
@@ -121,21 +125,30 @@ function DoorsList({ store, rows, now, livenessOf, settings }: {
   const { view, chrome, loading, failed } = store;
   if (failed && view === null) {
     return (
-      <div className="space-y-3">
-        <Alert tone="danger">{DOORS_READ_FAILED}</Alert>
+      <div className="flex flex-col items-start gap-3">
+        <Alert tone="danger" className="w-full">{DOORS_READ_FAILED}</Alert>
         <Button variant="outline" onClick={() => void refreshDoorsView()}>Try again</Button>
       </div>
     );
   }
-  if (loading) return <p className="text-sm text-text-secondary">Loading the club's doors…</p>;
+  if (loading) {
+    // A skeleton the shape of the tiles, never "Loading…" (R12). Not a `status` role: the
+    // page's one polite region is Refresh's, and two would make "what did Refresh find"
+    // ambiguous to anybody asking for it.
+    return (
+      <div aria-busy="true">
+        <p className="sr-only">Reading the club's doors…</p>
+        <TileGridSkeleton tiles={3} />
+      </div>
+    );
+  }
   if (rows.length === 0) {
     return (
-      <div className="space-y-2">
-        <p className="text-sm text-text-secondary">{DOORS_EMPTY_NOTICE}</p>
-        <p className="text-sm text-text-muted">{DOORS_EMPTY_HINT}</p>
-        <Link to="/admin/monitoring/devices" className="inline-flex min-h-11 items-center text-sm text-accent-strong">
-          Go to Devices
-        </Link>
+      <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border px-4 py-10 text-center">
+        <Door size={40} weight="duotone" aria-hidden="true" className="text-text-muted" />
+        <p className="text-base font-semibold text-text-primary">{DOORS_EMPTY_NOTICE}</p>
+        <p className="max-w-prose text-sm text-text-secondary">{DOORS_EMPTY_HINT}</p>
+        <TextLink variant="standalone" to="/admin/monitoring/devices" className="text-sm">Go to Boards</TextLink>
       </div>
     );
   }
@@ -257,49 +270,30 @@ function AdminDoorsPageBody() {
   const stale = doorStaleChecksNotice(failures, secondsSinceRead);
 
   return (
-    <div className="space-y-6">
-      <header className="space-y-2 sm:flex sm:items-start sm:justify-between sm:gap-4 sm:space-y-0">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Doors</h1>
-          {/* A16: the header said "Checked 12s ago" confidently for the whole ~30 s a failed
-              poll took to be noticed, while the banner below it said something else. Both
-              now count from the same `checkedAt` against the same tick, so the two ages on
-              one screen cannot disagree. */}
-          <p className="text-xs text-text-muted">
-            {checkedAt === null ? "Checking…" : `Checked ${relative(new Date(checkedAt).toISOString(), now)}`}
-            {` · re-reads every ${DOORS_PAGE_INTERVAL_MS / 1000} seconds while this tab is in front`}
-          </p>
-          {stale && <p className="mt-1 text-xs text-warning-strong">{stale}</p>}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Link
-            to="/admin/monitoring/doors/log"
-            className="inline-flex min-h-11 items-center rounded-lg border border-control bg-bg-surface px-5 text-sm font-medium"
-          >
-            All scans, all doors
-          </Link>
-          {/* C4: never `disabled` — a browser blurs a disabled element, so disabling the
-              control an admin just pressed throws their place away. */}
-          <Button variant="outline" onClick={() => void refreshNow()} aria-busy={refreshing}>
-            {refreshing ? "Checking…" : "Refresh"}
-          </Button>
-        </div>
-      </header>
-      {/*
-        eco: Doors lives inside Monitoring now. The strip is on the page rather than only in
-        the chrome because an admin arriving from a bookmark or an outage email lands HERE,
-        and without it the section they are in is invisible from inside it.
-
-        OUTSIDE the header, and that is the whole of a measured defect. The header is
-        `sm:flex`, so from 640 px up the strip became a third COLUMN beside the title and the
-        buttons — not what it is, and worse than cosmetic: a flex item's automatic minimum
-        size is its content, so the strip could not shrink, its `overflow-auto` never clipped
-        anything, and `main` measured 1 444 px inside an 820 px viewport. Below `sm` the
-        header is a block and the same markup was fine, which is why only the wide case went
-        red. Out here it is a full-width row of its own at every width, which is what the
-        other five Monitoring pages do.
-      */}
-      <MonitoringNav />
+    <PageShell width="wide">
+      {/* A16: the freshness and the staleness notice below it count from the same
+          `checkedAt` against the same tick, so the two ages on one screen cannot disagree. */}
+      <PageHeader
+        title="Doors"
+        description={`The club's door gates, today's scans at each, and shutting or reopening them. Re-reads every ${DOORS_PAGE_INTERVAL_MS / 1000} seconds while this tab is in front.`}
+        /* C4: never `disabled` — a browser blurs a disabled element, so disabling the control
+           an admin just pressed throws their place away. RefreshButton is `aria-disabled`
+           while it spins, for the same reason. */
+        actions={<RefreshButton onRefresh={() => void refreshNow()} loading={refreshing} />}
+        freshness={<Freshness at={checkedAt} />}
+      />
+      {/* Navigation to the club-wide log, so it is a link that looks like one (R10) — below
+          the header rather than in it, because the actions column is for icon buttons, and a
+          standalone link's words wrap where a button's cannot (320px at a 32px root). */}
+      <p className="-mt-4">
+        <TextLink variant="standalone" to="/admin/monitoring/doors/log">All scans, all doors</TextLink>
+      </p>
+      {stale && (
+        <p className="-mt-4 flex items-start gap-2 text-sm text-warning-strong">
+          <WarningCircle size={16} weight="bold" aria-hidden="true" className="mt-0.5 shrink-0" />
+          <span>{stale}</span>
+        </p>
+      )}
 
       {/* A8 / C4: one polite region carrying what Refresh found and whether this page can
           currently say anything about liveness at all. */}
@@ -318,15 +312,11 @@ function AdminDoorsPageBody() {
       {/*
         A10: the banner used to ARRIVE and shift everything under it by 164 px, which on a
         phone moves the card a thumb is already descending on. The slot is reserved, so the
-        summary appearing and disappearing across polls costs no layout at all.
+        summary appearing and disappearing across polls costs no layout at all. A-L1 / R3-27
+        raised the reserve when the summary's link became a 44 px target; `min-h-20` is that
+        reserve on the spacing scale (it was 76px, arbitrary).
       */}
-      {/*
-        A-L1 / R3-27 raised this reserve. The summary's link to the door is a 44 px target
-        now — it was 17 px — so the banner is taller than the 56 px slot it used to fit in,
-        and a slot that is too small is the A10 defect it exists to prevent: the banner
-        ARRIVES on a poll and shifts the card a thumb is already descending on.
-      */}
-      <div className="min-h-[76px]">
+      <div className="min-h-20">
         {summary && (
           <p role="status" className="rounded-lg bg-warning-soft px-3 py-2.5 text-sm text-warning-strong">
             {summary}
@@ -336,16 +326,15 @@ function AdminDoorsPageBody() {
                 {/*
                   A-L1 / C-L1 / R3-27: it measured 17 px tall. This is the control the
                   summary exists to offer — the whole point of naming one door rather than
-                  counting three is that the reader can get to it — and it was a third of
-                  the 44 px every other control on this surface is built to. `inline-flex`
-                  with a minimum on BOTH axes, so a door called "A" is still a target.
+                  counting three is that the reader can get to it — so it keeps a 44 px
+                  minimum on BOTH axes, and a door called "A" is still a target.
                 */}
-                <Link
+                <TextLink
                   to={`/admin/monitoring/doors/${first.doorId}`}
-                  className="inline-flex min-h-11 min-w-11 items-center font-medium underline"
+                  className="inline-flex min-h-touch min-w-touch items-center text-warning-strong"
                 >
                   {`Go to ${first.doorName}`}
-                </Link>
+                </TextLink>
               </>
             )}
           </p>
@@ -362,11 +351,9 @@ function AdminDoorsPageBody() {
       />
 
       <p className="text-sm">
-        <Link to="/admin/monitoring/devices" className="inline-flex min-h-11 items-center text-accent-strong">
-          Court boxes are on Devices
-        </Link>
+        <TextLink variant="standalone" to="/admin/monitoring/devices">Court boxes are on Boards</TextLink>
       </p>
-    </div>
+    </PageShell>
   );
 }
 

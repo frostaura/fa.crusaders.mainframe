@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { DoorClosed } from "lucide-react";
+import { Door } from "../ui/icons";
 import { useDoorsChrome } from "./useDoorsChrome";
 import { doorsAttentionSummary } from "../../lib/doorsCopy";
 
@@ -36,9 +36,9 @@ export function AdminDoorsHomeRow() {
   return (
     <Link
       to="/admin/monitoring/doors"
-      className="flex items-start gap-3 rounded-lg border border-accent-strong bg-accent-soft p-4"
+      className="flex items-start gap-3 rounded-xl border border-accent-strong bg-accent-soft p-4"
     >
-      <DoorClosed size={20} className="mt-0.5 shrink-0 text-accent-strong" aria-hidden="true" />
+      <Door size={20} className="mt-0.5 shrink-0 text-accent-strong" aria-hidden="true" />
       <span>
         <span className="block font-medium">Admin · Doors</span>
         <span className="block text-sm text-text-secondary">{hint}</span>

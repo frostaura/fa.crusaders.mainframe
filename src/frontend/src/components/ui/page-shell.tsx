@@ -80,9 +80,11 @@ function BackLink({ to, label }: { to: string; label: string }) {
  * </p>
  *
  * <p>
- * <b>The title row never loses its icon actions.</b> The title column has a 12rem floor and the
- * actions column is `auto`, so on a 360px phone a refresh button stays beside the title; a wider
- * cluster wraps inside its own column rather than pushing the title off the row.
+ * <b>The title row never loses its icon actions.</b> The actions column is `auto` and the title
+ * column is `minmax(0, 1fr)` — it yields and the title wraps (`break-words`), so a refresh button
+ * stays beside the title on a 360px phone; a wider cluster wraps inside its own column. No rem
+ * floor on the title: at a 32px root font a 12rem floor alone is wider than a 320px screen, and
+ * the header pushed the page sideways (e2e/admin-devices, admin-doors, large-text).
  * </p>
  */
 export function PageHeader(props: PageHeaderProps) {
@@ -92,7 +94,7 @@ export function PageHeader(props: PageHeaderProps) {
     <header data-page-header="" className={cn("-mb-2 flex flex-col gap-2", className)}>
       {back ? <BackLink to={back.to} label={back.label} /> : null}
       {eyebrow ? <p className={typography({ variant: "overline" })}>{eyebrow}</p> : null}
-      <div className="grid grid-cols-[minmax(min(12rem,100%),1fr)_auto] items-center gap-x-4 gap-y-1 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
         <h1 data-route-heading="" className={cn(typography({ variant: "h1" }), "col-start-1 row-start-1 min-w-0 break-words")}>
           {title}
         </h1>

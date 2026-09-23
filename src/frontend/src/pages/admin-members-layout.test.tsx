@@ -119,7 +119,7 @@ describe("the admin members table", () => {
    * <p>
    * Column ORDER cannot fix that — the band is wherever the pins land, so every arrangement
    * has a victim — which is why three rounds arguing about order got nowhere. The overflow
-   * itself is what goes: `/admin/*` gets `max-w-7xl` (Layout.tsx), and below the width at
+   * itself is what goes: `/admin/*` gets the `wide` frame (AdminLayout), and below the width at
    * which a column fits it is <b>not drawn</b> rather than drawn underneath something. The
    * card layout below `sm` keeps every field, because nothing is a column there.
    * </p>
@@ -133,25 +133,29 @@ describe("the admin members table", () => {
     renderMembers();
     await screen.findByRole("button", { name: "Top up" });
 
+    // R16 (P2) retired the viewport breakpoints (`md`/`lg`/`xl:table-cell`): the admin rail
+    // takes 16rem of the viewport, so the thresholds are now container queries on the card,
+    // stated in rem. The invariant is unchanged — each optional column has ONE threshold, and
+    // the order they arrive in is Class, then Member # and Joined together, then Email.
     const expected: Record<string, string> = {
       // Email is the widest optional column and lands last, at the width where the whole
       // table finally fits its container.
-      Email: "xl",
-      "Member #": "lg",
-      Joined: "lg",
-      Class: "md",
+      Email: "[@container(min-width:72.125rem)]:!table-cell",
+      "Member #": "[@container(min-width:58.625rem)]:!table-cell",
+      Joined: "[@container(min-width:58.625rem)]:!table-cell",
+      Class: "[@container(min-width:45.875rem)]:!table-cell",
     };
 
     for (const [label, bp] of Object.entries(expected)) {
       const header = screen.getByRole("columnheader", { name: new RegExp(`^${label}`) });
       expect(header.className, `${label} header`).toContain("hidden");
-      expect(header.className, `${label} header`).toContain(`${bp}:table-cell`);
+      expect(header.className, `${label} header`).toContain(bp);
 
       const cell = document.querySelector<HTMLElement>(`tbody td[data-label="${label}"]`)!;
       // `block` first: below `sm` the row is a card and every field is on screen.
       expect(cell.className, `${label} cell`).toMatch(/(^|\s)block(\s|$)/);
       expect(cell.className, `${label} cell`).toContain("sm:hidden");
-      expect(cell.className, `${label} cell`).toContain(`${bp}:table-cell`);
+      expect(cell.className, `${label} cell`).toContain(bp);
     }
 
     // Name, Status, Balance and Actions are the four that never drop: identity, state,

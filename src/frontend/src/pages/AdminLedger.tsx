@@ -3,14 +3,28 @@ import { useSearchParams } from "react-router-dom";
 import { endpoints, LEDGER_ENTRY_TYPES, type LedgerRow } from "../lib/api";
 import { formatSignedCredits } from "../lib/utils";
 import { Card } from "../components/Card";
-import { Button, Input, Label, fieldClassName } from "../components/Button";
 import { LedgerTable } from "../components/LedgerTable";
-import { useToast } from "../components/Toast";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Field, FieldLabel } from "../components/ui/field";
+import { Input } from "../components/ui/input";
+import { PageHeader, PageShell } from "../components/ui/page-shell";
+import { Freshness, RefreshButton } from "../components/ui/refresh-button";
+import { StateBlock } from "../components/ui/state-block";
+import { MagnifyingGlass } from "../components/ui/icons";
+import { FilterBar, FilterSelect, TableSkeleton, type FilterOption } from "../components/monitoring/parts";
+import { LEDGER_TYPE_LABEL } from "../lib/creditAdjustment";
 
 // Derived from the union in api.ts rather than hand-maintained here. This was a
 // literal array with no connection to the type, so a ledger type added on the
 // backend became unfilterable with nothing to warn anyone.
 const TYPES = LEDGER_ENTRY_TYPES;
+
+/** "All types" first, then every ledger type by the name an admin reads, never the enum. */
+const TYPE_OPTIONS: FilterOption[] = [
+  { value: "", label: "All types" },
+  ...TYPES.map((t) => ({ value: t, label: LEDGER_TYPE_LABEL[t] ?? t })),
+];
 
 /**
  * The filters live in the URL, because `reporting.md` § Filters says they do:
@@ -35,10 +49,11 @@ const TYPES = LEDGER_ENTRY_TYPES;
 const DEFAULT_FROM_DAYS = 30;
 
 export default function AdminLedgerPage() {
-  const toast = useToast();
   const [params, setParams] = useSearchParams();
   const [rows, setRows] = useState<LedgerRow[] | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<unknown>(null);
+  const [readAt, setReadAt] = useState<number | null>(null);
 
   const from = params.get("from") ?? isoDate(daysAgo(DEFAULT_FROM_DAYS));
   const to = params.get("to") ?? isoDate(daysAgo(-1));
@@ -89,11 +104,15 @@ export default function AdminLedgerPage() {
         limit: 1000,
       });
       setRows(r);
-    } catch {
+      setLoadError(null);
+      setReadAt(Date.now());
+    } catch (e) {
       // And the stale rows go with it. Showing the last successful answer under a failed
       // filter is worse than showing nothing, because nothing on screen says it is stale.
+      // The failure is ON the page, with a retry, where the table was: a toast floats away,
+      // and an empty table under a failed read reads "no movements" (R12).
       setRows(null);
-      toast.push({ tone: "danger", text: "Couldn't load those movements — check the dates and try again." });
+      setLoadError(e);
     }
     finally { setLoading(false); }
   };
@@ -125,86 +144,96 @@ export default function AdminLedgerPage() {
   }, [filtered]);
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-4">
-      <div>
-        <h1 className="text-xl font-semibold">Transactions</h1>
-        <p className="text-sm text-text-secondary">Every credit movement across the tenant — top-ups, charges, refunds, penalties, manual adjustments.</p>
-      </div>
+    <PageShell width="wide">
+      <PageHeader
+        title="Transactions"
+        description="Every credit movement across the club — top-ups, charges, refunds, penalties and manual adjustments."
+        actions={<RefreshButton onRefresh={() => void load()} loading={loading} />}
+        freshness={<Freshness at={readAt} />}
+      />
 
-      <Card className="space-y-4">
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <div>
-            <Label htmlFor="ledger-from">From</Label>
-            <Input id="ledger-from" type="date" value={from} onChange={(e) => setFilter("from", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="ledger-to">To</Label>
-            <Input id="ledger-to" type="date" value={to} onChange={(e) => setFilter("to", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="ledger-type">Type</Label>
-            <select
-              id="ledger-type"
-              value={type}
-              onChange={(e) => setFilter("type", e.target.value)}
-              className={fieldClassName}
-            >
-              <option value="">All types</option>
-              {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-        </div>
-
-        <div>
-          <Label htmlFor="ledger-search">Search (name)</Label>
-          <Input id="ledger-search" placeholder="Filter by member or admin name…" value={userQuery} onChange={(e) => setFilter("q", e.target.value)} />
-          {loading && <p className="text-xs text-text-muted mt-1">Refreshing…</p>}
-        </div>
+      <div className="flex flex-col gap-3">
+        <FilterBar>
+          <Field controlId="ledger-from" className="flex-[1_1_9rem] sm:flex-none">
+            <FieldLabel>From</FieldLabel>
+            <Input type="date" value={from} onChange={(e) => setFilter("from", e.target.value)} />
+          </Field>
+          <Field controlId="ledger-to" className="flex-[1_1_9rem] sm:flex-none">
+            <FieldLabel>To</FieldLabel>
+            <Input type="date" value={to} onChange={(e) => setFilter("to", e.target.value)} />
+          </Field>
+          <FilterSelect
+            id="ledger-type"
+            label="Type"
+            value={type}
+            options={TYPE_OPTIONS}
+            onChange={(next) => setFilter("type", next)}
+          />
+          <Field controlId="ledger-search" className="min-w-48 flex-[2_1_14rem]">
+            <FieldLabel>Search (name)</FieldLabel>
+            <div className="relative">
+              <MagnifyingGlass size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+              <Input
+                className="pl-9"
+                placeholder="Member or admin name"
+                value={userQuery}
+                onChange={(e) => setFilter("q", e.target.value)}
+              />
+            </div>
+          </Field>
+        </FilterBar>
 
         {userId && (
           // `?userId=` is answered by the API and had no way in from the screen, so a link to
           // one member's movements silently showed the whole club's. It is honoured now, and
           // said out loud — an unexplained short list is the same defect wearing a filter.
-          <div className="flex items-center gap-2 text-xs">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-info-soft text-info-strong font-medium">
-              Showing one member’s movements
-            </span>
-            <Button variant="ghost" type="button" className="h-8 px-2 text-xs" onClick={() => setFilter("userId", "")}>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone="info">Showing one member’s movements</Badge>
+            <Button variant="ghost" size="sm" type="button" onClick={() => setFilter("userId", "")}>
               Show everyone
             </Button>
           </div>
         )}
-      </Card>
+      </div>
 
-      <Card className="!p-0 flex flex-col flex-1 min-h-0">
-        <div className="px-4 sm:px-6 pt-4 pb-2 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm shrink-0">
-          {/*
-            Every signed figure through `formatSignedCredits`, never a sign composed around
-            `formatCredits`.
+      <StateBlock
+        loading={loading && rows === null}
+        error={loadError}
+        action="those movements"
+        failedCaveat="Check the dates and try again."
+        onRetry={() => void load()}
+        skeleton={<TableSkeleton rows={6} />}
+      >
+        <Card className="!p-0 flex flex-col" aria-busy={loading || undefined}>
+          <div className="grid shrink-0 grid-cols-2 gap-3 px-4 pb-2 pt-4 text-sm sm:grid-cols-4 sm:px-6">
+            {/*
+              Every signed figure through `formatSignedCredits`, never a sign composed around
+              `formatCredits`.
 
-            These two read `+${formatCredits(...)}` and `−${formatCredits(...)}`, so the sign
-            was decided by which tile it was rather than by the figure in it, and a filter
-            that matched nothing rendered "+0.00 cr" beside "−0.00 cr" on the one screen whose
-            whole job is reconciling money. A signed zero reads as a movement that did not
-            happen. `formatSignedCredits` already answers this — its own comment records the
-            reports card that made the identical mistake and was brought through it — and its
-            zero arm is why the fix is here at the formatter boundary rather than in a guard on
-            the empty case: a genuine zero-valued adjustment row is wrong in exactly the same
-            way, with a table full of rows underneath it.
+              These two read `+${formatCredits(...)}` and `−${formatCredits(...)}`, so the sign
+              was decided by which tile it was rather than by the figure in it, and a filter
+              that matched nothing rendered "+0.00 cr" beside "−0.00 cr" on the one screen whose
+              whole job is reconciling money. A signed zero reads as a movement that did not
+              happen. `formatSignedCredits` already answers this — its own comment records the
+              reports card that made the identical mistake and was brought through it — and its
+              zero arm is why the fix is here at the formatter boundary rather than in a guard on
+              the empty case: a genuine zero-valued adjustment row is wrong in exactly the same
+              way, with a table full of rows underneath it.
 
-            Debits are summed as a MAGNITUDE (`amountCredits` of the rows whose signed amount
-            is negative), so the negation is what tells the formatter which direction this tile
-            is counting. The sign on screen is then the sign of a number, which is the property
-            that cannot drift.
-          */}
-          <Stat label="Movements" value={String(totals.count)} />
-          <Stat label="Credits" value={formatSignedCredits(totals.credits)} tone={toneOf(totals.credits)} />
-          <Stat label="Debits" value={formatSignedCredits(-totals.debits)} tone={toneOf(-totals.debits)} />
-          <Stat label="Net" value={formatSignedCredits(totals.net)} tone={toneOf(totals.net)} />
-        </div>
-        <LedgerTable rows={filtered} emptyText={loading ? "Loading…" : "No movements match these filters."} fill label="Club ledger" />
-      </Card>
-    </div>
+              Debits are summed as a MAGNITUDE (`amountCredits` of the rows whose signed amount
+              is negative), so the negation is what tells the formatter which direction this tile
+              is counting. The sign on screen is then the sign of a number, which is the property
+              that cannot drift.
+            */}
+            <Stat label="Movements" value={String(totals.count)} />
+            <Stat label="Credits" value={formatSignedCredits(totals.credits)} tone={toneOf(totals.credits)} />
+            <Stat label="Debits" value={formatSignedCredits(-totals.debits)} tone={toneOf(-totals.debits)} />
+            <Stat label="Net" value={formatSignedCredits(totals.net)} tone={toneOf(totals.net)} />
+          </div>
+          <LedgerTable rows={filtered} emptyText="No movements match these filters." label="Club ledger" />
+        </Card>
+      </StateBlock>
+    </PageShell>
   );
 }
 

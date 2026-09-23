@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { isValidElement, type ElementType, type ReactElement, type ReactNode } from "react";
 import { Bar, BarChart, ReferenceLine, YAxis } from "recharts";
 import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
-import { DailyFlowBarChart, MyFlowBarChart, SIGNED_DOMAIN, signedFloor } from "./Charts";
+import { drawDailyFlow, drawMyFlow, SIGNED_DOMAIN, signedFloor } from "./Charts";
+import { paletteNow } from "./ChartFrame";
 
 /**
  * The money charts, on the day a bucket goes negative.
@@ -74,7 +75,7 @@ describe("Charts — net series and the sign of a day", () => {
   });
 
   it("gives the club's flow chart a signed floor, a zero line, and a net penalty series", () => {
-    const tree = flatten(DailyFlowBarChart({ data: ADMIN_DAYS }));
+    const tree = flatten(drawDailyFlow(ADMIN_DAYS, paletteNow()));
 
     // The y-axis floor is ours, not recharts' default `[0, 'auto']`.
     expect(propsOf(tree, YAxis)[0].domain).toBe(SIGNED_DOMAIN);
@@ -95,7 +96,7 @@ describe("Charts — net series and the sign of a day", () => {
   });
 
   it("gives the member's flow chart the same treatment for refunds", () => {
-    const tree = flatten(MyFlowBarChart({ data: ME_DAYS }));
+    const tree = flatten(drawMyFlow(ME_DAYS, paletteNow()));
 
     expect(propsOf(tree, YAxis)[0].domain).toBe(SIGNED_DOMAIN);
     expect(propsOf(tree, ReferenceLine)).toEqual([expect.objectContaining({ y: 0 })]);

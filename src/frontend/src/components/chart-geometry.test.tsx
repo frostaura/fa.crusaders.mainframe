@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { Area, Bar, AreaChart, BarChart, Line, LineChart, YAxis } from "recharts";
 import {
-  BookingsLineChart, CourtsRevenueBarChart, DailyFlowBarChart, MyBalanceLineChart,
-  MyBookingsBarChart, MyFlowBarChart, RevenueAreaChart, creditAxisWidth,
+  creditAxisWidth, drawBookingsLine, drawCourtsRevenue, drawDailyFlow, drawMyBalance, drawMyBookings,
+  drawMyFlow, drawRevenueArea,
 } from "./Charts";
+import { paletteNow } from "./ChartFrame";
 import type { DailyAdminPoint, DailyMePoint } from "../lib/api";
 
 /**
@@ -38,6 +39,9 @@ const ME: DailyMePoint[] = [
   { date: "2026-09-01", top_ups_credits: 160, spent_credits: 24, refunds_credits: 8, bookings: 1, attended: 1, minutes_on_court: 45, balance_credits: 136 },
 ];
 
+/** The palette the drawings are handed; geometry does not depend on which theme it is. */
+const P = paletteNow();
+
 function flatten(node: ReactNode): ReactElement[] {
   if (Array.isArray(node)) return node.flatMap(flatten);
   if (!isValidElement(node)) return [];
@@ -47,16 +51,16 @@ function flatten(node: ReactNode): ReactElement[] {
 
 /** Every cartesian chart, and whether its y-axis carries credits or plain counts. */
 const CHARTS: [string, ReactNode, "credits" | "counts"][] = [
-  ["Top-ups over time", RevenueAreaChart({ data: ADMIN }), "credits"],
-  ["Daily money flow (club)", DailyFlowBarChart({ data: ADMIN }), "credits"],
-  ["Bookings & no-shows", BookingsLineChart({ data: ADMIN }), "counts"],
-  ["Revenue by court", CourtsRevenueBarChart({ data: [{ court_name: "Court 1", revenue_credits: 80, bookings: 4 }] }), "credits"],
-  ["Wallet balance", MyBalanceLineChart({ data: ME }), "credits"],
-  ["Daily money flow (member)", MyFlowBarChart({ data: ME }), "credits"],
-  ["My bookings", MyBookingsBarChart({ data: ME }), "counts"],
+  ["Top-ups over time", drawRevenueArea(ADMIN, P), "credits"],
+  ["Daily money flow (club)", drawDailyFlow(ADMIN, P), "credits"],
+  ["Bookings & no-shows", drawBookingsLine(ADMIN, P), "counts"],
+  ["Revenue by court", drawCourtsRevenue([{ court_name: "Court 1", revenue_credits: 80, bookings: 4 }], P), "credits"],
+  ["Wallet balance", drawMyBalance(ME, P), "credits"],
+  ["Daily money flow (member)", drawMyFlow(ME, P), "credits"],
+  ["My bookings", drawMyBookings(ME, P), "counts"],
 ];
 
-/** Wide enough for "50.00 cr" at 11px, which is what wrapped at 48. */
+/** Wide enough for "50.00 cr" at the axis size, which is what wrapped at 48. */
 const CREDIT_GUTTER = 64;
 
 describe("chart plot area", () => {
@@ -127,13 +131,13 @@ describe("a credit axis is as wide as its own numbers", () => {
   it("fits a four-figure negative, which is what the shipped 64 did not", () => {
     // 61.7px for the widest "-9999.00 cr" shaped label at 11px Figtree, plus the 8px recharts
     // reserves between the plot and the tick text. Measured, not counted from characters.
-    expect(widthsOf(DailyFlowBarChart({ data: bigNegative }))[0]).toBeGreaterThanOrEqual(70);
+    expect(widthsOf(drawDailyFlow(bigNegative, P))[0]).toBeGreaterThanOrEqual(70);
   });
 
   it("does not narrow the charts that were already right", () => {
     // The floor stays at the measured 64. This is a fix for labels that do not fit, not a
     // licence to reclaim plot width from the ones that do.
-    expect(widthsOf(RevenueAreaChart({ data: ADMIN }))[0]).toBe(64);
+    expect(widthsOf(drawRevenueArea(ADMIN, P))[0]).toBe(64);
     expect(creditAxisWidth([0, 45])).toBe(64);
   });
 
@@ -158,7 +162,7 @@ describe("a credit axis is as wide as its own numbers", () => {
     const stacked: DailyAdminPoint[] = [
       { date: "2026-09-01", top_ups_credits: 160, booking_charges_credits: -760, refunds_credits: 0, penalties_credits: -700, adjustments_credits: 0, reversals_credits: 0, net_movement_credits: -1300, bookings: 2, no_shows: 0 },
     ];
-    const width = widthsOf(DailyFlowBarChart({ data: stacked }))[0];
+    const width = widthsOf(drawDailyFlow(stacked, P))[0];
     expect(width).toBe(creditAxisWidth([-1460]));
     // Sized for four figures, though no single series in the fixture reaches them.
     expect(width).toBeGreaterThanOrEqual(70);
@@ -175,10 +179,10 @@ describe("a credit axis is as wide as its own numbers", () => {
     // calculation is not told about it. The expectation is rebuilt from the elements rather
     // than restated, so the two cannot disagree quietly.
     const charts: [string, ReactNode, Record<string, number>[]][] = [
-      ["Daily money flow (club)", DailyFlowBarChart({ data: bigNegative }), bigNegative as unknown as Record<string, number>[]],
-      ["Daily money flow (member)", MyFlowBarChart({ data: ME }), ME as unknown as Record<string, number>[]],
-      ["Top-ups over time", RevenueAreaChart({ data: ADMIN }), ADMIN as unknown as Record<string, number>[]],
-      ["Wallet balance", MyBalanceLineChart({ data: ME }), ME as unknown as Record<string, number>[]],
+      ["Daily money flow (club)", drawDailyFlow(bigNegative, P), bigNegative as unknown as Record<string, number>[]],
+      ["Daily money flow (member)", drawMyFlow(ME, P), ME as unknown as Record<string, number>[]],
+      ["Top-ups over time", drawRevenueArea(ADMIN, P), ADMIN as unknown as Record<string, number>[]],
+      ["Wallet balance", drawMyBalance(ME, P), ME as unknown as Record<string, number>[]],
     ];
 
     for (const [name, chart, rows] of charts) {

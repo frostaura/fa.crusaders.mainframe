@@ -1,16 +1,13 @@
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import {
-  BookOpen, CalendarDays, ExternalLink, Facebook, Instagram, MapPin, QrCode, Trophy, Users, Wallet,
-} from "lucide-react";
+  ArrowSquareOut, CalendarDots, FacebookLogo, InstagramLogo, MapPin, Trophy, Users, Wallet,
+} from "@/components/ui/icons";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { tokenStore } from "@/lib/api";
 import { useAuth } from "../lib/auth";
-import { Card } from "../components/Card";
-// doors: admin
-import { AdminDoorsHomeRow } from "../components/doors/AdminDoorsHomeRow";
-// doors: member — one boolean, for one clause of one tile hint. See SignedInHome.
-import { useDoorsFlag, useMemberDoor } from "../components/member-door/useMemberDoor";
-// item 16 — the one pushed thing, and the always-reachable guide it links to.
-import { WhatsNextCard } from "../components/onboarding/WhatsNextCard";
-import { GUIDE_LINK_LABEL, GUIDE_PATH, GUIDE_TILE_HINT } from "../lib/onboardingCopy";
+import { CrestMark } from "../components/shell/Crest";
+import { LANDING_PATH } from "../components/shell/nav";
 
 /**
  * The club's front door, and — while both of Northwood Crusaders' own domains are parked — very
@@ -84,6 +81,11 @@ function Stat({ value, label }: { value: string; label: string }) {
   );
 }
 
+/** A landing card: the design-system card with its content gutter. */
+function Panel({ children }: { children: React.ReactNode }) {
+  return <Card><CardContent>{children}</CardContent></Card>;
+}
+
 /** League nights, from the KZN Squash league rules cross-checked against the 2026 fixture dates. */
 const LEAGUE_NIGHTS: { night: string; who: string }[] = [
   { night: "Monday", who: "Ladies 1st Division · Racketball from 5:30pm" },
@@ -96,14 +98,15 @@ function SignedOutLanding() {
   return (
     // Owns its own gutter and width cap, because Layout gives the public landing a bare,
     // full-bleed <main> rather than the app's boxed content column.
-    <div className="mx-auto w-full max-w-5xl space-y-10 px-4 py-10 sm:space-y-14 sm:py-14">
+    <div className="mx-auto w-full max-w-content space-y-10 px-4 py-10 sm:space-y-14 sm:py-14">
       {/* ---- Hero ---------------------------------------------------------------- */}
       <header className="grid items-center gap-6 sm:grid-cols-[1fr_auto]">
         <div>
+          <CrestMark className="mb-4 h-14 w-12" />
           <p className="text-sm font-medium uppercase tracking-wider text-accent-strong">
             Durban North · KwaZulu-Natal
           </p>
-          <h1 className="mt-1 text-3xl font-bold leading-tight tracking-tight sm:text-4xl">
+          <h1 className="mt-1 font-display text-3xl font-bold leading-tight tracking-tight sm:text-4xl">
             Crusaders Squash
           </h1>
           {/*
@@ -121,18 +124,8 @@ function SignedOutLanding() {
           {/* The two things a visitor came to do. Buttons, not the pair of bare text links this
               page used to offer. */}
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-            <Link
-              to="/login"
-              className="inline-flex h-12 items-center justify-center rounded-lg bg-primary px-6 font-medium text-primary-ink hover:bg-primary-hover"
-            >
-              Sign in
-            </Link>
-            <Link
-              to="/register"
-              className="inline-flex h-12 items-center justify-center rounded-lg border border-accent-strong px-6 font-medium text-accent-strong hover:bg-accent-soft"
-            >
-              Join the club
-            </Link>
+            <Button asChild size="lg"><Link to="/login">Sign in</Link></Button>
+            <Button asChild size="lg" variant="outline"><Link to="/register">Join the club</Link></Button>
           </div>
         </div>
 
@@ -153,9 +146,9 @@ function SignedOutLanding() {
 
       {/* ---- League ---------------------------------------------------------------- */}
       <section aria-labelledby="league" className="grid gap-6 lg:grid-cols-2">
-        <Card>
+        <Panel>
           <h2 id="league" className="flex items-center gap-2 text-lg font-semibold">
-            <Trophy size={18} className="text-accent-strong" aria-hidden="true" />
+            <Trophy size={20} className="text-accent-strong" aria-hidden="true" />
             League squash
           </h2>
           <p className="mt-2 text-sm text-text-secondary">
@@ -174,11 +167,11 @@ function SignedOutLanding() {
           <p className="mt-3 text-xs text-text-muted">
             League fixtures start at 6pm. The season runs from about April to November.
           </p>
-        </Card>
+        </Panel>
 
-        <Card>
+        <Panel>
           <h2 className="flex items-center gap-2 text-lg font-semibold">
-            <CalendarDays size={18} className="text-accent-strong" aria-hidden="true" />
+            <CalendarDots size={20} className="text-accent-strong" aria-hidden="true" />
             The Crusaders Open
           </h2>
           {/*
@@ -192,7 +185,7 @@ function SignedOutLanding() {
             calendar. The 2026 edition ran from 5 to 8 March with R25 000 in prize money.
           </p>
           <h3 className="mt-5 flex items-center gap-2 text-base font-semibold">
-            <Users size={18} className="text-accent-strong" aria-hidden="true" />
+            <Users size={20} className="text-accent-strong" aria-hidden="true" />
             New to squash?
           </h3>
           <p className="mt-2 text-sm text-text-secondary">
@@ -200,7 +193,7 @@ function SignedOutLanding() {
             experienced, and from kids to adults"</em>. Coaching is available, and there is a free
             coaching clinic for members' children. Northwood School plays its squash here too.
           </p>
-        </Card>
+        </Panel>
       </section>
 
       {/* ---- What this app is for -------------------------------------------------- */}
@@ -239,16 +232,16 @@ function SignedOutLanding() {
           serves them; there is nothing to state here that is both specific and reliably true.
         */}
         <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm text-text-secondary">
-          <span className="inline-flex items-center gap-1.5"><CalendarDays size={15} aria-hidden="true" /> Courts bookable through the day, seven days a week in season</span>
-          <span className="inline-flex items-center gap-1.5"><Wallet size={15} aria-hidden="true" /> Pay from credits, not at the door</span>
+          <span className="inline-flex items-center gap-1.5"><CalendarDots size={16} aria-hidden="true" /> Courts bookable through the day, seven days a week in season</span>
+          <span className="inline-flex items-center gap-1.5"><Wallet size={16} aria-hidden="true" /> Pay from credits, not at the door</span>
         </div>
       </section>
 
       {/* ---- Find us ---------------------------------------------------------------- */}
       <section aria-labelledby="find-us" className="grid gap-6 lg:grid-cols-2">
-        <Card>
+        <Panel>
           <h2 id="find-us" className="flex items-center gap-2 text-lg font-semibold">
-            <MapPin size={18} className="text-accent-strong" aria-hidden="true" />
+            <MapPin size={20} className="text-accent-strong" aria-hidden="true" />
             Where to find us
           </h2>
           <address className="mt-2 not-italic text-sm text-text-secondary">
@@ -267,11 +260,11 @@ function SignedOutLanding() {
             target="_blank"
             rel="noreferrer noopener"
           >
-            Open in Google Maps <ExternalLink size={14} aria-hidden="true" />
+            Open in Google Maps <ArrowSquareOut size={16} aria-hidden="true" />
           </a>
-        </Card>
+        </Panel>
 
-        <Card>
+        <Panel>
           <h2 className="text-lg font-semibold">Get in touch</h2>
           <p className="mt-2 text-sm text-text-secondary">
             For membership, fees and coaching, the club is the place to ask — those are not
@@ -287,7 +280,7 @@ function SignedOutLanding() {
             <li>
               <a className="inline-flex items-center gap-2 text-accent-strong underline underline-offset-2 hover:no-underline"
                  href="https://www.facebook.com/northwoodcrusaders/" target="_blank" rel="noreferrer noopener">
-                <Facebook size={15} aria-hidden="true" /> Northwood Crusaders on Facebook
+                <FacebookLogo size={16} aria-hidden="true" /> Northwood Crusaders on Facebook
               </a>
             </li>
             <li>
@@ -297,7 +290,7 @@ function SignedOutLanding() {
               */}
               <a className="inline-flex items-center gap-2 text-accent-strong underline underline-offset-2 hover:no-underline"
                  href="https://www.instagram.com/northwoodcrusaderssport/" target="_blank" rel="noreferrer noopener">
-                <Instagram size={15} aria-hidden="true" /> @northwoodcrusaderssport
+                <InstagramLogo size={16} aria-hidden="true" /> @northwoodcrusaderssport
               </a>
             </li>
             <li>
@@ -317,102 +310,38 @@ function SignedOutLanding() {
               */}
               <a className="inline-flex items-center gap-2 text-accent-strong underline underline-offset-2 hover:no-underline"
                  href="https://www.facebook.com/groups/235624123200990/" target="_blank" rel="noreferrer noopener">
-                <Facebook size={15} aria-hidden="true" /> Crusaders Squash &amp; Racketball group
+                <FacebookLogo size={16} aria-hidden="true" /> Crusaders Squash &amp; Racketball group
               </a>
             </li>
           </ul>
-        </Card>
+        </Panel>
       </section>
     </div>
   );
 }
 
-function SignedInHome({ isAdmin }: { isAdmin: boolean }) {
-  // doors: member — the tile's hint forks on whether this club has a door, and on nothing
-  // else. At a club with a gate the member's code is their key to the building as well as
-  // to the court, and a tile that says only "show this at the court" is what sends them
-  // looking for a court box while standing at a locked front door. At a club with no gate
-  // the second clause would be a promise about a door that does not exist, so it is not
-  // said — the same silence `describeDoor()` keeps, for the same reason. A failed read
-  // leaves it silent, which is the safe half of the conditional.
-  const doors = useDoorsFlag();
-  /*
-    Item 16 — the member's next booking, for the "what happens next" card. It is the same
-    `/me/door` read the flag above makes, so this costs one request rather than two; the hook
-    keeps its own answer and the card renders nothing at all without a booking.
-  */
-  const glance = useMemberDoor(true);
-  const links = [
-    { to: "/schedule", label: "Book a court", hint: "Today's grid across all four courts", icon: CalendarDays, primary: true },
-    // QrCode, not Trophy. The code IS a QR code held up to a scanner; a trophy beside it
-    // says "achievement", which is a different thing entirely and the only icon on this screen
-    // that pointed at the wrong idea.
-    {
-      to: "/my-code",
-      label: "Your code",
-      // `=== "yes"`, so both "no" and "this read never landed" keep the silent half. The
-      // flag answers three ways now (D11); only one of them may add the door clause.
-      hint: doors === "yes" ? "Show this at a court box, or at the club door" : "Show this at the court box",
-      icon: QrCode,
-    },
-    { to: "/wallet", label: "Wallet", hint: "Balance, top-ups and charges", icon: Wallet },
-    // Item 16's third recall point. A tile rather than a line of small print: for the audience
-    // the goal note names, the guide is a destination, not a footnote.
-    { to: GUIDE_PATH, label: GUIDE_LINK_LABEL, hint: GUIDE_TILE_HINT, icon: BookOpen },
-    ...(isAdmin ? [{ to: "/admin/members", label: "Admin · Members", hint: "Approve applications and manage members", icon: Users }] : []),
-  ];
-
-  return (
-    <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Crusaders Squash</h1>
-        <p className="mt-1 text-text-secondary">What would you like to do?</p>
-      </header>
-      {/*
-        Item 16 — the ONE pushed thing, and it is about a booking that exists rather than a
-        tour of a product. Above the tiles, because it is the answer to "what would you like
-        to do?" for somebody who has already decided. It renders nothing without a booking,
-        and nothing once dismissed for that booking.
-      */}
-      <WhatsNextCard
-        booking={glance.door?.next_booking}
-        timezone={glance.door?.timezone}
-        doors={doors}
-      />
-      <div className="grid gap-3 sm:grid-cols-2">
-        {/* doors: admin — one row, and ONLY when a door is silent, shut or unnamed (A2.6).
-            On a normal day Home says nothing about doors at all: P7 is a rule about email and
-            it is the right rule for a home screen too, because a panel that is always there is
-            one an admin skims past and is therefore worth nothing on the morning it matters.
-            The component renders null unless there is something to act on, and a failed read
-            renders null too. */}
-        {isAdmin && <AdminDoorsHomeRow />}
-        {links.map(({ to, label, hint, icon: Icon, primary }) => (
-          <Link
-            key={to}
-            to={to}
-            className={
-              "flex items-start gap-3 rounded-lg border p-4 " +
-              (primary
-                ? "border-accent-strong bg-accent-soft"
-                : "border-border bg-bg-surface hover:bg-bg-muted")
-            }
-          >
-            <Icon size={20} className="mt-0.5 shrink-0 text-accent-strong" aria-hidden="true" />
-            <span>
-              <span className="block font-medium">{label}</span>
-              <span className="block text-sm text-text-secondary">{hint}</span>
-            </span>
-          </Link>
-        ))}
-      </div>
-    </div>
-  );
-}
-
+/**
+ * "/" — the club's public page for a visitor, and the way in for a member.
+ *
+ * <p>
+ * R15: a signed-in member lands on My Code, so "/" sends them there rather than to a second home
+ * screen that repeated the tab bar as tiles. The signed-in home (its tiles, and the admin's doors
+ * row) is retired with it; the "what happens next" card already lives on My Code.
+ * </p>
+ *
+ * <p>
+ * <b>Also while the session is unconfirmed.</b> A stored token during the first probe, or a
+ * session the club cannot be reached to confirm (offline), goes straight to My Code too: that
+ * route's own guard decides what it may show — the member's last-known code with no signal (D3),
+ * the connection notice, or sign-in if the token turns out to be refused. Showing the marketing
+ * page to a member standing at a locked door with no signal would be the worst answer of the
+ * four.
+ * </p>
+ */
 export default function HomePage() {
   const auth = useAuth();
-  return auth.status === "authenticated"
-    ? <SignedInHome isAdmin={auth.isAdmin} />
-    : <SignedOutLanding />;
+  const holdsSession = auth.status === "authenticated"
+    || ((auth.status === "loading" || auth.status === "offline") && Boolean(tokenStore.get()));
+  if (holdsSession) return <Navigate to={LANDING_PATH} replace />;
+  return <SignedOutLanding />;
 }

@@ -738,7 +738,12 @@ describe("AdminDevices", () => {
     // different elements at different moments, so it would still pass if the two sentences
     // drifted into separate paragraphs. One element, found by the slower half, is the form
     // that keeps proving what the test is named for.
-    const status = await screen.findByText(/^Checked /);
+    //
+    // R3 / R11: the freshness is the header's `<Freshness>` ("Updated just now"), which appears
+    // only once the load has resolved — so it is what the test waits on — and the interval is
+    // promised in the same header's description. The invariant is unchanged: ONE element (the
+    // page header), found by the half that only appears after the load.
+    const status = (await screen.findByText(/^Updated /)).closest("header")!;
     // "boards", not "boxes": a gate is on this list exactly as a box is, and a club that owns
     // only doors was being told this page re-reads something it does not have.
     expect(status).toHaveTextContent(/re-reads the boards every 15 seconds/);

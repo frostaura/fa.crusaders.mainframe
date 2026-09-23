@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert } from "../../components/Alert";
-import { Button, Input, Label } from "../../components/Button";
-import { Card } from "../../components/Card";
+import { Input, Label } from "../../components/Button";
 import { MemberPicker, type PickableMember } from "../../components/MemberPicker";
-import { MonitoringNav } from "../../components/monitoring/MonitoringSection";
-import { StateBlock } from "../../components/StateBlock";
+import { Button } from "../../components/ui/button";
+import { Card, CardContent } from "../../components/ui/card";
+import { PageHeader, PageShell } from "../../components/ui/page-shell";
+import { StateBlock } from "../../components/ui/state-block";
+import { CardListSkeleton, DownloadCsvLink } from "../../components/monitoring/parts";
 import { clubClock, clubDate } from "../../lib/clubClock";
 import { endpoints, type AdminMember } from "../../lib/api";
 import { adminEndpoints, type TraceView } from "../../lib/adminApi";
@@ -121,45 +123,47 @@ function NightChooser({
   rangeHint: string;
 }) {
   return (
-    <Card className="space-y-4">
-      <MemberPicker
-        label="Which member?"
-        hint="There is nothing to trace for a visitor booked in under a written-in name, so only members appear here."
-        members={pickable}
-        value={member}
-        onChange={onMember}
-        loading={membersLoading}
-        failed={membersFailed}
-      />
-
-      <div>
-        <Label htmlFor="night-day">Which night?</Label>
-        {/* Disabled until the first half is answered, and the disabled half SAYS WHY —
-            a greyed-out control with no explanation is a dead end somebody stares at. */}
-        {!member && <p className="text-sm text-text-muted">{NIGHT_NO_MEMBER_YET}</p>}
-        <Input
-          id="night-day"
-          type="date"
-          className="mt-1 min-h-11"
-          value={day}
-          disabled={!member}
-          onChange={(e) => onDay(e.target.value)}
+    <Card>
+      <CardContent className="flex flex-col gap-4">
+        <MemberPicker
+          label="Which member?"
+          hint="There is nothing to trace for a visitor booked in under a written-in name, so only members appear here."
+          members={pickable}
+          value={member}
+          onChange={onMember}
+          loading={membersLoading}
+          failed={membersFailed}
         />
-        <div className="mt-2 flex flex-wrap gap-2">
-          {recentNights(new Date()).map((night) => (
-            <Button
-              key={night.iso}
-              variant="outline"
-              className="min-h-11"
-              disabled={!member}
-              onClick={() => onDay(night.iso)}
-            >
-              {night.label}
-            </Button>
-          ))}
+
+        <div>
+          <Label htmlFor="night-day">Which night?</Label>
+          {/* Disabled until the first half is answered, and the disabled half SAYS WHY —
+              a greyed-out control with no explanation is a dead end somebody stares at. */}
+          {!member && <p className="text-sm text-text-muted">{NIGHT_NO_MEMBER_YET}</p>}
+          <Input
+            id="night-day"
+            type="date"
+            className="mt-1 min-h-11"
+            value={day}
+            disabled={!member}
+            onChange={(e) => onDay(e.target.value)}
+          />
+          <div className="mt-2 flex flex-wrap gap-2">
+            {recentNights(new Date()).map((night) => (
+              <Button
+                key={night.iso}
+                variant={night.iso === day ? "secondary" : "outline"}
+                aria-pressed={night.iso === day}
+                disabled={!member}
+                onClick={() => onDay(night.iso)}
+              >
+                {night.label}
+              </Button>
+            ))}
+          </div>
+          <p className="mt-2 text-sm text-text-muted">{rangeHint}</p>
         </div>
-        <p className="mt-2 text-sm text-text-muted">{rangeHint}</p>
-      </div>
+      </CardContent>
     </Card>
   );
 }
@@ -271,11 +275,13 @@ export function MemberNightPage() {
   const { timezone, events, rows, subjectName, caveat, retentionKey, rangeHint } = nightView(view, member);
 
   return (
-    <div className="space-y-6">
-      <header className="space-y-3">
-        <h1 className="text-2xl font-bold tracking-tight">A person&rsquo;s night</h1>
-        <MonitoringNav />
-      </header>
+    // R17: this is a view of a MEMBER, not of the hardware, so Monitoring no longer links here.
+    // The route still answers until P5 moves it onto the member's own page.
+    <PageShell width="content">
+      <PageHeader
+        title="A person’s night"
+        description="One member's evening at the club, in the order it happened — to settle a question, never to browse."
+      />
 
       {/* Standing, and said once. It is a fact about the screen somebody has arrived at, not
           an event — and this block re-renders on every read, so `polite` would announce the
@@ -311,7 +317,7 @@ export function MemberNightPage() {
           onRetry={() => read(member.user_id, day)}
         />
       )}
-    </div>
+    </PageShell>
   );
 }
 
@@ -348,17 +354,13 @@ function NightResult({
       empty={!loading && !error && events.length === 0}
       emptyTitle={nightEmptyNotice(subjectName, clubDate(day, timezone))}
       emptyHint={NIGHT_EMPTY_HINT}
+      skeleton={<CardListSkeleton rows={3} />}
     >
       <div className="space-y-3">
         <NightTimeline rows={rows} subjectName={subjectName} timezone={timezone} />
 
         <div className="flex flex-wrap items-center gap-3">
-          <a
-            className="inline-flex min-h-11 items-center rounded-lg border border-control bg-bg-surface px-4 text-sm font-medium"
-            href={adminEndpoints.memberTraceCsvUrl(member.user_id, { day })}
-          >
-            Download CSV
-          </a>
+          <DownloadCsvLink href={adminEndpoints.memberTraceCsvUrl(member.user_id, { day })} />
           <p className="min-w-0 flex-1 text-xs text-text-muted">{NIGHT_EXPORT_NOTE}</p>
         </div>
       </div>

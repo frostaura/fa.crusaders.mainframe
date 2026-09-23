@@ -156,7 +156,7 @@ function DecisionPeek({ headline, tone }: { headline: string; tone: DecisionTone
 function ActionControl({ action }: { action: DecisionAction; }) {
   if (action.kind === "book_a_court") {
     return (
-      <Link to="/schedule" className={MEMBER_DOOR_ACTION_LINK}>{action.label}</Link>
+      <Link to="/bookings" className={MEMBER_DOOR_ACTION_LINK}>{action.label}</Link>
     );
   }
   if (action.kind === "refresh_the_code") return null;

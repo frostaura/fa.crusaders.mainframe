@@ -1,7 +1,34 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { screen, within } from "@testing-library/react";
-import ReportsPage from "./Reports";
-import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { Route, Routes, useLocation } from "react-router-dom";
+import { ReportsRedirect } from "./Reports";
+import AdminReportsPage from "./admin/AdminReports";
+import WalletActivityPage from "./WalletActivity";
+import { refuse, renderPage, signIn, signOut, stubFetch } from "../test/harness";
+import { formatClubDayLabel } from "../components/ui/date-picker";
+import { clubToday, presetRange } from "../components/reports/range";
+
+/*
+  The reports split (R16): what was one `/reports` page forking on `isAdmin` is now the club's
+  `/admin/reports` (AdminReportsPage) and the member's `/wallet/activity` (WalletActivityPage).
+  Every invariant below is the one the old page held, pinned against the page that now owns it.
+  Structure pins were rewritten, not dropped: a card's heading is now a `Section` — a named
+  `region` — so "the card under this heading" is `getByRole("region", { name })` rather than
+  the heading's parent element (R11: one page shell and one section anatomy everywhere).
+*/
+
+/** The named section, once it has arrived. */
+async function regionNamed(name: string) {
+  return within(await screen.findByRole("region", { name }));
+}
+
+/** The admin page or the member page, under StrictMode as `main.tsx` renders the app. */
+function renderAdmin(entry = "/admin/reports") {
+  return renderPage(<AdminReportsPage />, { initialEntries: [entry], reactStrictMode: true });
+}
+function renderMember(entry = "/wallet/activity") {
+  return renderPage(<WalletActivityPage />, { initialEntries: [entry], reactStrictMode: true });
+}
 
 /**
  * The daily breakdown, on a day whose bucket is negative.
@@ -61,16 +88,11 @@ describe("Reports — net daily buckets", () => {
   ];
 
   /** The table under the given heading, once it has arrived. */
-  async function tableUnder(heading: string) {
-    const title = await screen.findByRole("heading", { name: heading });
-    const card = title.closest("div")?.parentElement;
-    if (!card) throw new Error(`No card around "${heading}"`);
-    return within(card);
-  }
+  const tableUnder = regionNamed;
 
   it("labels the club's refund and penalty columns net, and keeps the sign of a reversal day", async () => {
     stubFetch(routes(true));
-    renderPage(<ReportsPage />);
+    renderAdmin();
 
     const table = await tableUnder("Daily breakdown");
     // The headers. "Refunds" alone reads as gross, and a reader who believes that reads
@@ -106,19 +128,19 @@ describe("Reports — net daily buckets", () => {
    */
   it("gives the admin the club's money, including what the desk adjusted — and not their own empty wallet", async () => {
     stubFetch(routes(true));
-    renderPage(<ReportsPage />);
+    renderAdmin();
 
     // The card itself, not the page: the daily table below carries the same column labels.
-    const heading = await screen.findByRole("heading", { name: "Club money — totals" });
-    const card = heading.parentElement!;
-    const stats = within(card.querySelector("dl")!);
+    const region = await screen.findByRole("region", { name: "Club money — totals" });
+    const card = within(region);
+    const stats = within(region.querySelector("dl")!);
 
     expect(stats.getByText("Adjustments")).toBeInTheDocument();
     expect(stats.getByText("+25.50 cr")).toBeInTheDocument();
-    expect(within(card).getByText(/what the desk added or took back by hand/)).toBeInTheDocument();
+    expect(card.getByText(/what the desk added or took back by hand/)).toBeInTheDocument();
 
-    // The desk's own wallet is gone from the club's report.
-    expect(screen.queryByRole("heading", { name: "My wallet — totals" })).not.toBeInTheDocument();
+    // The desk's own wallet is gone from the club's report — and is not even asked for.
+    expect(screen.queryByRole("region", { name: "Totals" })).not.toBeInTheDocument();
     expect(screen.queryByText(/is exactly what your balance moved by/)).not.toBeInTheDocument();
   });
 
@@ -135,25 +157,25 @@ describe("Reports — net daily buckets", () => {
    */
   it("sums every ledger movement in the club, reversals included, and says so truthfully", async () => {
     stubFetch(routes(true));
-    renderPage(<ReportsPage />);
+    renderAdmin();
 
-    const heading = await screen.findByRole("heading", { name: "Club money — totals" });
-    const card = heading.parentElement!;
-    const stats = within(card.querySelector("dl")!);
+    const region = await screen.findByRole("region", { name: "Club money — totals" });
+    const card = within(region);
+    const stats = within(region.querySelector("dl")!);
 
     // The bucket that was on no screen, with its sign.
     expect(stats.getByText("Reversals")).toBeInTheDocument();
     expect(stats.getByText("−160.00 cr")).toBeInTheDocument();
 
     // The net, which is the whole point: 160 − 24 + 0 − 0 + 25.5 − 160.
-    expect(within(card).getByText("+1.50 cr")).toBeInTheDocument();
+    expect(card.getByText("+1.50 cr")).toBeInTheDocument();
     // And NOT the number the five-bucket sum produced. This is the assertion that fails if
     // the reversal is dropped anywhere between the endpoint and this paragraph.
-    expect(within(card).queryByText("+161.50 cr")).not.toBeInTheDocument();
+    expect(card.queryByText("+161.50 cr")).not.toBeInTheDocument();
 
     // The copy names the sixth term, so the arithmetic on the page can be checked by hand.
-    expect(within(card).getByText(/\+ reversals, which is every ledger movement in the club summed/)).toBeInTheDocument();
-    expect(within(card).getByText(/clawed back after the fact/)).toBeInTheDocument();
+    expect(card.getByText(/\+ reversals, which is every ledger movement in the club summed/)).toBeInTheDocument();
+    expect(card.getByText(/clawed back after the fact/)).toBeInTheDocument();
   });
 
   /**
@@ -164,28 +186,29 @@ describe("Reports — net daily buckets", () => {
    * names — and build the club's own days from them. A well-meaning "fix" that localises
    * either marker (`new Date(from).toISOString()` on a machine west of UTC) names the day
    * before, and the club silently gets a report starting a day early. So the exact shape is
-   * pinned, against the values in the two date inputs.
+   * pinned, against the two days the pickers SHOW (they were native date inputs; R7 made them
+   * the club-day DatePicker, whose trigger names its day — "From: Tue 1 Sep").
    * </p>
    */
   it("asks for the two dates the admin picked, as UTC day markers", async () => {
     const stub = stubFetch(routes(true));
-    renderPage(<ReportsPage />);
+    renderAdmin("/admin/reports?from=2026-09-01&to=2026-09-02");
 
-    await screen.findByRole("heading", { name: "Club money — totals" });
+    await regionNamed("Club money — totals");
     const call = stub.calls.find((c) => c.path.includes("/admin/reports/daily"))!;
     expect(call, "the daily report was never requested").toBeTruthy();
 
-    const dates = screen.getAllByDisplayValue(/^\d{4}-\d{2}-\d{2}$/) as HTMLInputElement[];
-    const [fromDate, toDate] = dates.map((d) => d.value);
+    expect(screen.getByRole("button", { name: `From: ${formatClubDayLabel("2026-09-01")}` })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: `To: ${formatClubDayLabel("2026-09-02")}` })).toBeInTheDocument();
     // Decoded, because the colons travel percent-encoded on the wire.
     const query = decodeURIComponent(call.path);
-    expect(query).toContain(`from=${fromDate}T00:00:00Z`);
-    expect(query).toContain(`to=${toDate}T23:59:59Z`);
+    expect(query).toContain("from=2026-09-01T00:00:00Z");
+    expect(query).toContain("to=2026-09-02T23:59:59Z");
   });
 
   it("shows a reversal in the daily table too, so the table reconciles to the card", async () => {
     stubFetch(routes(true));
-    renderPage(<ReportsPage />);
+    renderAdmin();
 
     const table = await tableUnder("Daily breakdown");
     expect(table.getByRole("columnheader", { name: /Reversals/ })).toBeInTheDocument();
@@ -194,7 +217,7 @@ describe("Reports — net daily buckets", () => {
 
   it("puts the desk's adjustments in the daily table and says which clock each column is on", async () => {
     stubFetch(routes(true));
-    renderPage(<ReportsPage />);
+    renderAdmin();
 
     const table = await tableUnder("Daily breakdown");
     expect(table.getByRole("columnheader", { name: /Adjustments/ })).toBeInTheDocument();
@@ -211,7 +234,7 @@ describe("Reports — net daily buckets", () => {
 
   it("does the same on the member's own daily breakdown", async () => {
     stubFetch(routes(false));
-    renderPage(<ReportsPage />);
+    renderMember();
 
     const table = await tableUnder("Daily breakdown");
     expect(table.getByRole("columnheader", { name: /Refunds \(net\)/ })).toBeInTheDocument();
@@ -278,11 +301,9 @@ describe("Reports — the member's summary reconciles to their balance", () => {
 
   it("shows every bucket, the penalty TOTAL, and a net that equals the balance move", async () => {
     stubFetch(routes());
-    renderPage(<ReportsPage />);
+    renderMember();
 
-    await screen.findByRole("heading", { name: "My wallet — totals" });
-    const card = screen.getByRole("heading", { name: "My wallet — totals" }).parentElement!;
-    const w = within(card);
+    const w = await regionNamed("Totals");
 
     // The two that were invisible. Without the adjustments line the page is off by 2,500
     // and says nothing about it; without the penalty total the 15.00 appears NOWHERE in
@@ -304,7 +325,7 @@ describe("Reports — the member's summary reconciles to their balance", () => {
 
   it("shows attendance, which nothing in the product showed anywhere", async () => {
     stubFetch(routes());
-    renderPage(<ReportsPage />);
+    renderMember();
 
     // `reporting.md` has promised "Time on court" since it was written, and a checked-in
     // slot rendered identically to one that cost a no-show penalty. 225 minutes is 3 h 45.
@@ -322,9 +343,10 @@ describe("Reports — the member's summary reconciles to their balance", () => {
       revokeObjectURL: () => {},
     }));
     const stub = stubFetch(routes());
-    renderPage(<ReportsPage />);
+    renderMember();
 
-    (await screen.findByRole("button", { name: "Download wallet CSV" })).click();
+    // R12: the download is an async action like any other — `Button pending` while it runs.
+    fireEvent.click(await screen.findByRole("button", { name: "Download CSV" }));
     await vi.waitFor(() => {
       const csv = stub.calls.find((c) => c.path.includes("/wallet.csv"));
       expect(csv, "the CSV endpoint was never called").toBeTruthy();
@@ -381,10 +403,9 @@ describe("Reports — utilisation says what it counts", () => {
       { path: "/api/v1/admin/reports/no-shows", body: { from: "", to: "", total: 1, no_show: 1, no_show_pct: 100 } },
       { path: "/api/v1/admin/reports/daily", body: [] },
     ]);
-    renderPage(<ReportsPage />);
+    renderAdmin();
 
-    const title = await screen.findByRole("heading", { name: "Utilisation by court" });
-    const card = within(title.closest("div")!.parentElement!);
+    const card = await regionNamed("Utilisation by court");
 
     // Two columns, because they are two different numbers and the old single "Revenue"
     // column was the wrong one of them.
@@ -434,11 +455,10 @@ describe("Reports — the totals card on a period with no movement", () => {
       { path: "/api/v1/reports/me/wallet", body: EMPTY_WALLET },
       { path: "/api/v1/reports/me/daily", body: [] },
     ]);
-    renderPage(<ReportsPage />);
+    renderMember();
 
-    const title = await screen.findByRole("heading", { name: "My wallet — totals" });
     // The <dl> itself, not the card: the tiles above it carry the same labels.
-    const card = within(title.parentElement!.querySelector("dl")!);
+    const card = within((await screen.findByRole("region", { name: "Totals" })).querySelector("dl")!);
 
     // U+2212 MINUS is what the card actually printed, so look for that as well as a hyphen.
     expect(card.queryByText("−0.00 cr")).not.toBeInTheDocument();
@@ -458,14 +478,189 @@ describe("Reports — the totals card on a period with no movement", () => {
       { path: "/api/v1/reports/me/wallet", body: { ...EMPTY_WALLET, top_ups_credits: 160, spent_credits: 24, net_movement_credits: 136 } },
       { path: "/api/v1/reports/me/daily", body: [] },
     ]);
-    renderPage(<ReportsPage />);
+    renderMember();
 
-    const title = await screen.findByRole("heading", { name: "My wallet — totals" });
     // The <dl> itself, not the card: the tiles above it carry the same labels.
-    const card = within(title.parentElement!.querySelector("dl")!);
+    const card = within((await screen.findByRole("region", { name: "Totals" })).querySelector("dl")!);
 
     expect(card.getByText("Top-ups").parentElement).toHaveTextContent("Top-ups+160.00 cr");
     // Spend leaves the wallet, so it is negated — not merely labelled with a minus.
     expect(card.getByText("Spent").parentElement).toHaveTextContent("Spent−24.00 cr");
+  });
+});
+
+/**
+ * The split itself (R16): each reader gets one page with one subject, and the old address takes
+ * each of them to theirs — dates intact.
+ */
+describe("Reports — one page per reader", () => {
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  const EMPTY_WALLET = {
+    from: "", to: "", top_ups_credits: 0, spent_credits: 0, refunds_credits: 0,
+    penalties_credits: 0, adjustments_credits: 0, reversals_credits: 0,
+    net_movement_credits: 0, penalty_count: 0, attended_bookings: 0, minutes_on_court: 0, count: 0,
+  };
+  const CLUB = [
+    { path: "/api/v1/admin/reports/revenue", body: { from: "", to: "", gross_topups_zar: 0, reversals_zar: 0, net_zar: 0, gross_topups_credits: 0, reversals_credits: 0, net_credits: 0 } },
+    { path: "/api/v1/admin/reports/utilisation", body: { from: "", to: "", by_court: [] } },
+    { path: "/api/v1/admin/reports/no-shows", body: { from: "", to: "", total: 0, no_show: 0, no_show_pct: 0 } },
+    { path: "/api/v1/admin/reports/daily", body: [] },
+  ];
+  const MINE = [
+    { path: "/api/v1/reports/me/wallet", body: EMPTY_WALLET },
+    { path: "/api/v1/reports/me/daily", body: [] },
+  ];
+
+  function Where() {
+    const { pathname, search } = useLocation();
+    return <output aria-label="where">{`${pathname}${search}`}</output>;
+  }
+
+  it("sends an admin from /reports to the club's report, keeping the period", async () => {
+    stubFetch([{ path: "/api/v1/whoami", body: signIn({ isAdmin: true }) }]);
+    renderPage(
+      <Routes><Route path="/reports" element={<ReportsRedirect />} /><Route path="*" element={<Where />} /></Routes>,
+      { initialEntries: ["/reports?from=2026-09-01&to=2026-09-02"] },
+    );
+    expect(await screen.findByLabelText("where")).toHaveTextContent("/admin/reports?from=2026-09-01&to=2026-09-02");
+  });
+
+  it("sends a member from /reports to their own activity, keeping the period", async () => {
+    stubFetch([{ path: "/api/v1/whoami", body: signIn({ isAdmin: false }) }]);
+    renderPage(
+      <Routes><Route path="/reports" element={<ReportsRedirect />} /><Route path="*" element={<Where />} /></Routes>,
+      { initialEntries: ["/reports?from=2026-09-01&to=2026-09-02"] },
+    );
+    expect(await screen.findByLabelText("where")).toHaveTextContent("/wallet/activity?from=2026-09-01&to=2026-09-02");
+  });
+
+  it("never asks for the admin's own wallet on the club's report", async () => {
+    const stub = stubFetch([{ path: "/api/v1/whoami", body: signIn({ isAdmin: true }) }, ...CLUB]);
+    renderAdmin();
+    await screen.findByRole("region", { name: "Club money — totals" });
+    expect(stub.calls.filter((c) => c.path.startsWith("/api/v1/reports/me/"))).toEqual([]);
+  });
+
+  it("never asks for the club's figures on a member's activity", async () => {
+    const stub = stubFetch([{ path: "/api/v1/whoami", body: signIn({ isAdmin: false }) }, ...MINE]);
+    renderMember();
+    await screen.findByRole("region", { name: "Totals" });
+    expect(stub.calls.filter((c) => c.path.startsWith("/api/v1/admin/"))).toEqual([]);
+    // And the activity is the wallet's second view, reachable from it and back.
+    const views = screen.getByRole("navigation", { name: "Wallet views" });
+    expect(within(views).getByRole("link", { name: "Activity" })).toHaveAttribute("aria-current", "page");
+    expect(within(views).getByRole("link", { name: "Overview" })).toHaveAttribute("href", "/wallet");
+  });
+
+  it("opens on the last 30 CLUB days, and a preset moves both dates and says it is on", async () => {
+    const stub = stubFetch([{ path: "/api/v1/whoami", body: signIn({ isAdmin: false }) }, ...MINE]);
+    renderMember();
+    await screen.findByRole("region", { name: "Totals" });
+
+    // The club's today, not the UTC one — between 00:00 and 02:00 SAST those differ.
+    const today = clubToday();
+    const last30 = presetRange("last30", today);
+    expect(screen.getByRole("button", { name: `To: ${formatClubDayLabel(today)}` })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: `From: ${formatClubDayLabel(last30.from)}` })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Last 30 days" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Last month" }));
+    const lastMonth = presetRange("lastMonth", today);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Last month" })).toHaveAttribute("aria-pressed", "true"));
+    expect(screen.getByRole("button", { name: "Last 30 days" })).toHaveAttribute("aria-pressed", "false");
+    await waitFor(() => {
+      const asked = stub.calls.map((c) => decodeURIComponent(c.path)).filter((p) => p.includes("/reports/me/daily"));
+      expect(asked.at(-1)).toContain(`from=${lastMonth.from}T00:00:00Z`);
+      expect(asked.at(-1)).toContain(`to=${lastMonth.to}T23:59:59Z`);
+    });
+  });
+});
+
+/**
+ * The three states a read can be in, held apart (R12): in flight is a skeleton shaped like the
+ * report, never "Loading…"; failed is a sentence and a retry, never an empty report; and a
+ * refresh keeps the figures on screen while it asks again.
+ */
+describe("Reports — reading, failing, refreshing", () => {
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  const WALLET = {
+    from: "", to: "", top_ups_credits: 160, spent_credits: 24, refunds_credits: 0,
+    penalties_credits: 0, adjustments_credits: 0, reversals_credits: 0,
+    net_movement_credits: 136, penalty_count: 0, attended_bookings: 1, minutes_on_court: 45, count: 2,
+  };
+
+  it("shows the report's shape while it reads, and no Loading… text", async () => {
+    let answer: (() => void) | null = null;
+    const held = new Promise<void>((resolve) => { answer = resolve; });
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/reports/me/wallet", body: WALLET },
+      { path: "/api/v1/reports/me/daily", body: [] },
+    ]);
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).includes("/reports/me/") ? held.then(() => realFetch(input, init)) : realFetch(input, init));
+    const { container } = renderMember();
+
+    await waitFor(() => expect(container.querySelector("[data-state-block=loading][aria-busy=true]")).not.toBeNull());
+    expect(container.querySelectorAll("[data-slot=skeleton]").length).toBeGreaterThan(3);
+    expect(screen.queryByText(/Loading…/)).not.toBeInTheDocument();
+
+    answer!();
+    expect(await screen.findByRole("region", { name: "Totals" })).toBeInTheDocument();
+    expect(container.querySelector("[data-state-block=loading]")).toBeNull();
+  });
+
+  it("says a failed read failed, offers a retry, and shows no figures it does not have", async () => {
+    let fail = true;
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/reports/me/wallet", respond: () => (fail ? refuse(429, { error: "rate_limited" }) : WALLET) },
+      { path: "/api/v1/reports/me/daily", body: [] },
+    ]);
+    renderMember();
+
+    const retry = await screen.findByRole("button", { name: "Try again" });
+    // An empty report over a failed read tells a member they did nothing all month.
+    expect(screen.queryByRole("region", { name: "Totals" })).not.toBeInTheDocument();
+    expect(screen.queryByText("0.00 cr")).not.toBeInTheDocument();
+
+    fail = false;
+    fireEvent.click(retry);
+    const totals = await screen.findByRole("region", { name: "Totals" });
+    expect(within(totals).getByText("+160.00 cr")).toBeInTheDocument();
+  });
+
+  it("keeps the figures on screen while Refresh asks again, and marks the control busy", async () => {
+    let release: (() => void) | null = null;
+    let calls = 0;
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/reports/me/wallet", body: WALLET },
+      { path: "/api/v1/reports/me/daily", body: [] },
+    ]);
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/reports/me/wallet") && ++calls > 2) {
+        return new Promise<void>((resolve) => { release = resolve; }).then(() => realFetch(input, init));
+      }
+      return realFetch(input, init);
+    });
+    renderMember();
+    const totals = await screen.findByRole("region", { name: "Totals" });
+    const refresh = screen.getByRole("button", { name: "Refresh" });
+    await waitFor(() => expect(refresh).not.toHaveAttribute("aria-busy"));
+
+    fireEvent.click(refresh);
+    await waitFor(() => expect(refresh).toHaveAttribute("aria-busy", "true"));
+    // Still the figures it had — not a skeleton, not a blank.
+    expect(within(totals).getByText("+160.00 cr")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Totals" })).toBe(totals);
+
+    await waitFor(() => expect(release).not.toBeNull());
+    release!();
+    await waitFor(() => expect(screen.getByText(/^Updated/)).toBeInTheDocument());
   });
 });

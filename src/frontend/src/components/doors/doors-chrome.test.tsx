@@ -1,21 +1,28 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import Layout from "../Layout";
-import HomePage from "../../pages/Home";
 import { ProfileProvider } from "../../lib/profile";
-import { markOwnDoorsAction } from "./useDoorsChrome";
+import { AdminDoorsHomeRow } from "./AdminDoorsHomeRow";
+import { markOwnDoorsAction, useDoorsStore } from "./useDoorsChrome";
 import { SETTINGS_FIXTURE, doorFixture, doorsServer, renderPage, signIn, signOut, stubFetch } from "../../test/harness";
 
 /**
  * What the doors surface puts into the app chrome, and onto Home.
  *
  * <p>
- * Three cues, all on one read, all on the `usePendingApplicationCount` posture this product
- * already has: a dot on the gear, a count on the Doors menu item, and the club-wide shut
- * banner. That hook's own comment carries the rule these are held to — <i>a badge is a cue,
- * not a screen: a failed read shows nothing rather than an error</i> — which is also what
- * makes the banner safe: its ABSENCE is the default, so a failed read has never meant "no
- * doors are shut".
+ * Three cues, all on one read: the doors needing somebody (which the admin console counts —
+ * the Admin tab's badge and the rail's Doors badge, `lib/adminAttention.ts`), the club-wide
+ * shut banner, and the admin Home row. The rule they are held to — <i>a badge is a cue, not a
+ * screen: a failed read shows nothing rather than an error</i> — is also what makes the banner
+ * safe: its ABSENCE is the default, so a failed read has never meant "no doors are shut".
+ * </p>
+ *
+ * <p>
+ * <b>R16 retired the gear.</b> These tests used to read the count off the gear's accessible
+ * name and the Monitoring tab's badge. Both surfaces are gone: the admin destinations are under
+ * the one Admin tab, and its badge and the rail's are the adminframe lane's, tested beside
+ * them. What is held HERE is the count those badges are built from — `useDoorsChrome`'s
+ * `attention` — read through a probe, so the invariants survive the chrome being rebuilt.
  * </p>
  */
 
@@ -26,7 +33,7 @@ const ago = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOStri
 function chrome(doors: Record<string, unknown>[], route = "/admin/settings") {
   const whoami = signIn({ isAdmin: true });
   const server = doorsServer(doors);
-  stubFetch([
+  const stub = stubFetch([
     { path: "/api/v1/whoami", body: whoami },
     { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
     { path: "/api/v1/me/profile", body: { user_id: whoami.user_id, email: "a@b.c", full_name: "Ada", photo_url: null, membership_number: "C-1" } },
@@ -34,7 +41,49 @@ function chrome(doors: Record<string, unknown>[], route = "/admin/settings") {
     { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
     ...server.routes,
   ]);
-  return renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: [route] });
+  renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: [route] });
+  return stub;
+}
+
+type Calls = { calls: { path: string }[] };
+
+/**
+ * The doors read has been ASKED and has had time to land. An absence asserted before the read
+ * is an absence of nothing; this is what replaced waiting for the gear to render (R16).
+ */
+async function doorsReadSettled(stub: Calls) {
+  await waitFor(() => expect(stub.calls.some((c) => c.path === "/api/v1/admin/doors")).toBe(true));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+}
+
+/**
+ * The count the console's badges are built from, read straight off the store, with the store's
+ * own read state beside it so a test can wait for the read rather than for a piece of chrome.
+ */
+function AttentionProbe() {
+  const { chrome: summary, checkedAt, failed } = useDoorsStore(true);
+  return (
+    <>
+      <p data-testid="doors-read">{checkedAt !== null ? "read" : failed ? "failed" : "reading"}</p>
+      <p data-testid="doors-attention-count">{summary.attention.length}</p>
+      <ol>{summary.attention.map((line) => <li key={line}>{line}</li>)}</ol>
+    </>
+  );
+}
+
+function probe(doors: Record<string, unknown>[], options: Parameters<typeof doorsServer>[1] = {}) {
+  signIn({ isAdmin: true });
+  const server = doorsServer(doors, options);
+  stubFetch(server.routes);
+  renderPage(<AttentionProbe />);
+}
+
+async function attentionAfterRead(state: "read" | "failed" = "read") {
+  await waitFor(() => expect(screen.getByTestId("doors-read")).toHaveTextContent(state));
+  return {
+    count: Number(screen.getByTestId("doors-attention-count").textContent),
+    lines: screen.queryAllByRole("listitem").map((li) => li.textContent ?? ""),
+  };
 }
 
 /**
@@ -106,7 +155,7 @@ afterEach(() => { for (const o of observers.splice(0)) o.disconnect(); });
 
 function chromeWithFailedDoors(route = "/admin/settings") {
   const whoami = signIn({ isAdmin: true });
-  stubFetch([
+  const stub = stubFetch([
     { path: "/api/v1/whoami", body: whoami },
     { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
     { path: "/api/v1/me/profile", body: { user_id: whoami.user_id, email: "a@b.c", full_name: "Ada", photo_url: null, membership_number: "C-1" } },
@@ -114,122 +163,57 @@ function chromeWithFailedDoors(route = "/admin/settings") {
     { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
     { path: "/api/v1/admin/doors", status: 503, body: {} },
   ]);
-  return renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: [route] });
+  renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: [route] });
+  return stub;
 }
 
-describe("the doors cue in the chrome", () => {
-  /**
-   * <b>Doors and Devices have LEFT the gear menu (D3 §3.1), and that is the fix.</b>
-   *
-   * <p>
-   * This test asserted that Doors was first in the menu and Devices second. They were there
-   * because there was nowhere better, and the arrangement was its own finding: Devices sat in
-   * a settings menu while rendering an inline link to Doors, which was a top-level tab —
-   * two pages that already knew they were one subject, linking to each other across a nav
-   * boundary. They are destinations now, under Monitoring. What is left in the gear is the
-   * two things that really are configuration.
-   * </p>
+describe("the doors the console counts", () => {
+  /*
+   * RETIRED by R16 (one Admin parent tab; nothing hidden in the gear):
+   *   "leaves only configuration in the gear" and "is reachable without opening the gear" —
+   *   there is no gear. Every admin destination is on the admin rail / section switcher, whose
+   *   one list (`components/admin/adminNav.ts`) is the adminframe lane's and is tested there.
+   *   "names how many doors need attention on the gear" / "pluralises the gear's name" /
+   *   "puts the same sentence on the Monitoring tab's badge" — the gear and the Monitoring tab
+   *   are gone; the sentence is `doorsAttentionLabel` in `lib/adminAttention.ts`, on the Admin
+   *   tab's and the rail's badges, tested beside them. The COUNT those sentences carry is this
+   *   file's, and every invariant about it is kept below.
    */
-  it("leaves only configuration in the gear", async () => {
-    chrome([doorFixture()]);
 
-    fireEvent.click(await screen.findByRole("button", { name: /Open menu/ }));
-    const items = screen.getAllByRole("menuitem").map((i) => i.textContent);
-    expect(items[0]).toContain("Admin settings");
-    expect(items[1]).toContain("Webhooks");
-    expect(items.join(" ")).not.toContain("Devices");
+  it("counts a door that has gone quiet", async () => {
+    probe([doorFixture({ last_seen_at: ago(3600) })]);
+
+    expect((await attentionAfterRead()).count).toBe(1);
   });
 
-  /**
-   * <b>A20, and the constraint it had to be measured against.</b>
-   *
-   * Nothing on an admin's landing screen said "Doors": a 6 px dot on a cog was the only cue,
-   * and a volunteer never found the surface. The obvious fix — a sixth tab — is the one this
-   * file's own nav comment warns about: five admin tabs already measured a 795 px
-   * `scrollWidth` against a 768 px viewport, which is why the inline nav switches at `lg`
-   * rather than `md`. So the tab exists, and `e2e/narrow-viewport.spec.ts` holds it to no
-   * horizontal page scroll at every width it renders at. This test pins that the entry is
-   * reachable from BOTH places rather than from the gear alone.
-   */
-  it("is reachable without opening the gear", async () => {
-    chrome([doorFixture()]);
-
-    // The tab is "Monitoring" now — the section the doors overview lives in, and the chrome
-    // lane has shipped it, so the admin lane's "either spelling" hedge is settled rather than
-    // carried. The point the test was written to pin is unchanged: an admin's landing screen
-    // names the surface, and it is not a 6 px dot on a cog.
-    const inNav = (await screen.findAllByRole("link", { name: /Monitoring/ }))
-      .some((link) => link.getAttribute("href") === "/admin/monitoring");
-    expect(inNav).toBe(true);
-  });
-
-  /**
-   * <b>The count goes in the NAME.</b> A number inside a 44 px circular icon button is
-   * unreadable at 360 and a dot is not — and colour alone is never the signal, so the dot
-   * is decorative and the sentence is the accessible name.
-   */
-  it("names how many doors need attention on the gear, and dots it", async () => {
-    chrome([doorFixture({ last_seen_at: ago(3600) })]);
-
-    expect(await screen.findByRole("button", { name: "Open menu — 1 door needs attention" }))
-      .toBeInTheDocument();
-  });
-
-  it("pluralises the gear's name for more than one", async () => {
-    chrome([
+  it("counts every door that needs somebody, not just the first", async () => {
+    probe([
       doorFixture({ last_seen_at: ago(3600) }),
       doorFixture({ id: "99999999-9999-9999-9999-99999999aaaa", name: "Front door", gate_key: null }),
     ]);
 
-    expect(await screen.findByRole("button", { name: "Open menu — 2 doors need attention" }))
-      .toBeInTheDocument();
-  });
-
-  it("puts the same sentence on the Monitoring tab's badge", async () => {
-    chrome([doorFixture({ last_seen_at: ago(3600) })]);
-
-    // The badge moved with the section: it was on the Doors menu item, and the gear no longer
-    // has one. Twice over, because the chrome carries a desktop nav and a mobile strip and an
-    // admin on a phone is exactly who is standing at the club desk.
-    const badges = await screen.findAllByLabelText("1 door needs attention");
-    expect(badges.length).toBeGreaterThanOrEqual(2);
-    expect(badges[0]).toHaveTextContent("1");
-    // And the gear still says it in its own accessible name, because on a phone the strip may
-    // have scrolled the tab out of sight.
-    expect(screen.getByRole("button", { name: "Open menu — 1 door needs attention" })).toBeInTheDocument();
+    expect((await attentionAfterRead()).count).toBe(2);
   });
 
   /**
    * <b>A3 — the finding this cue was blind to.</b>
    *
-   * A door flagged "Refusing a lot" or "May not be releasing" was never counted here, never
-   * named in the doors page's banner, and — same predicate — sorted below the fold. A
-   * reviewer found a front door turning away thirty scans in twenty minutes by scrolling
-   * past three healthy ones. A2.6 keeps signals off admin HOME, which is a different screen
-   * with a different reader; it never said anything about the gear that is the only route
-   * to Doors.
+   * A door flagged "Refusing a lot" or "May not be releasing" was never counted, never named in
+   * the doors page's banner, and — same predicate — sorted below the fold. A reviewer found a
+   * front door turning away thirty scans in twenty minutes by scrolling past three healthy
+   * ones. A2.6 keeps signals off admin HOME, which is a different screen with a different
+   * reader; it never said anything about the badge that is the route to Doors.
    */
   it("counts a door that is turning people away", async () => {
-    const whoami = signIn({ isAdmin: true });
-    const server = doorsServer([doorFixture({ name: "Front door" })], {
+    probe([doorFixture({ name: "Front door" })], {
       rows: {
         "99999999-9999-9999-9999-999999999999": {
           signals: [{ kind: "refusal_spike", since: ago(1200), until: ago(0), scans: 30 }],
         },
       },
     });
-    stubFetch([
-      { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
-      { path: "/api/v1/me/profile", body: { user_id: whoami.user_id, email: "a@b.c", full_name: "Ada", photo_url: null, membership_number: "C-1" } },
-      { path: "/api/v1/admin/members", body: [] },
-      { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
-      ...server.routes,
-    ]);
-    renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: ["/admin/settings"] });
 
-    expect(await screen.findByRole("button", { name: "Open menu — 1 door needs attention" }))
-      .toBeInTheDocument();
+    expect((await attentionAfterRead()).count).toBe(1);
   });
 
   /**
@@ -237,8 +221,7 @@ describe("the doors cue in the chrome", () => {
    * right board, and a cue that names the least urgent of two sends them to the wrong one.
    */
   it("names the silent door first when a door is also signalling", async () => {
-    const whoami = signIn({ isAdmin: true });
-    const server = doorsServer([
+    probe([
       doorFixture({ name: "Front door" }),
       doorFixture({ id: "99999999-9999-9999-9999-99999999aaaa", name: "Side door", gate_key: "side", last_seen_at: ago(3600) }),
     ], {
@@ -248,36 +231,26 @@ describe("the doors cue in the chrome", () => {
         },
       },
     });
-    stubFetch([
-      { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
-      { path: "/api/v1/me/profile", body: { user_id: whoami.user_id, email: "a@b.c", full_name: "Ada", photo_url: null, membership_number: "C-1" } },
-      { path: "/api/v1/admin/members", body: [] },
-      { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
-      ...server.routes,
-    ]);
-    renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: ["/admin/settings"] });
 
-    expect(await screen.findByRole("button", { name: "Open menu — 2 doors need attention" }))
-      .toBeInTheDocument();
+    const { count, lines } = await attentionAfterRead();
+    expect(count).toBe(2);
+    expect(lines[0]).toContain("Side door");
   });
 
-  /** Counted: silent, shut, unnamed. Not counted: a door that is simply reporting. */
-  it("says nothing at all when every door is reporting, named and open", async () => {
-    chrome([doorFixture()]);
+  /** Counted: silent, shut, unnamed, signalling. Not counted: a door that is simply reporting. */
+  it("counts nothing when every door is reporting, named and open", async () => {
+    probe([doorFixture()]);
 
-    const gear = await screen.findByRole("button", { name: "Open menu" });
-    fireEvent.click(gear);
-    await waitFor(() => expect(screen.getByRole("menu")).toBeInTheDocument());
-    expect(screen.queryByLabelText(/needs attention/)).toBeNull();
+    expect((await attentionAfterRead()).count).toBe(0);
   });
 
-  /** A cue, not a screen: a failed read shows nothing rather than an error. */
-  it("renders no dot and no error when the doors read fails", async () => {
-    chromeWithFailedDoors();
+  /** A cue, not a screen: a failed read counts nothing rather than inventing an error. */
+  it("counts nothing, and raises no error, when the doors read fails", async () => {
+    signIn({ isAdmin: true });
+    stubFetch([{ path: "/api/v1/admin/doors", status: 503, body: {} }]);
+    renderPage(<AttentionProbe />);
 
-    expect(await screen.findByRole("button", { name: "Open menu" })).toBeInTheDocument();
-    expect(screen.queryByLabelText(/needs attention/)).toBeNull();
+    expect((await attentionAfterRead("failed")).count).toBe(0);
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });
@@ -348,17 +321,16 @@ describe("the club-wide shut banner", () => {
   });
 
   it("is absent while every door is open", async () => {
-    chrome([doorFixture()]);
+    const stub = chrome([doorFixture()]);
 
-    await screen.findByRole("button", { name: "Open menu" });
+    await doorsReadSettled(stub);
     expect(screen.queryByText(/door shut/)).toBeNull();
   });
 
   /** Its absence is its default, so a failed read cannot produce a false all-clear. */
   it("renders nothing when the doors read fails, and reports no failure of its own", async () => {
-    chromeWithFailedDoors();
+    await doorsReadSettled(chromeWithFailedDoors());
 
-    await screen.findByRole("button", { name: "Open menu" });
     expect(screen.queryByText(/door shut/)).toBeNull();
   });
 
@@ -375,14 +347,17 @@ describe("the club-wide shut banner", () => {
 
   it("stays away from a member entirely", async () => {
     const whoami = signIn({ isAdmin: false });
-    stubFetch([
+    const stub = stubFetch([
       { path: "/api/v1/whoami", body: whoami },
       { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
       { path: "/api/v1/me/profile", body: { user_id: whoami.user_id, email: "a@b.c", full_name: "Ada", photo_url: null, membership_number: "C-1" } },
     ]);
     renderPage(<ProfileProvider><Layout /></ProfileProvider>, { initialEntries: ["/schedule"] });
 
-    await screen.findByRole("button", { name: /Open menu/ });
+    // The session has resolved as a MEMBER's, and a member's chrome never asks for the doors.
+    await waitFor(() => expect(stub.calls.some((c) => c.path === "/api/v1/whoami")).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(stub.calls.some((c) => c.path === "/api/v1/admin/doors")).toBe(false);
     expect(screen.queryByText(/door shut/)).toBeNull();
   });
 
@@ -502,15 +477,19 @@ describe("the club-wide shut banner", () => {
 });
 
 describe("the admin Home row", () => {
-  function home(doors: Record<string, unknown>[]) {
-    const whoami = signIn({ isAdmin: true });
-    const server = doorsServer(doors);
-    stubFetch([
-      { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
-      ...server.routes,
-    ]);
-    return renderPage(<HomePage />, { initialEntries: ["/"] });
+  /*
+   * Rendered on its own. The P2 home rebuild (R15: My Code is the landing) no longer places
+   * this row on Home, and admin Overview carries its own "Needs attention" cards — so what is
+   * held here is the component's own contract (A2.6's narrowing, the shut wording), whichever
+   * screen places it next. "Book a court" was the old Home's heading and is no longer a thing
+   * to wait for; the tests wait for the doors read instead.
+   */
+  function home(doors: Record<string, unknown>[], options: Parameters<typeof doorsServer>[1] = {}) {
+    signIn({ isAdmin: true });
+    const server = doorsServer(doors, options);
+    const stub = stubFetch(server.routes);
+    renderPage(<AdminDoorsHomeRow />, { initialEntries: ["/admin"] });
+    return stub;
   }
 
   /**
@@ -520,9 +499,8 @@ describe("the admin Home row", () => {
    * reporting" would be a standing claim of exactly the kind the chip refuses to make.
    */
   it("is absent when every door is reporting, named and open", async () => {
-    home([doorFixture()]);
+    await doorsReadSettled(home([doorFixture()]));
 
-    await screen.findByText("Book a court");
     expect(screen.queryByText("Admin · Doors")).toBeNull();
   });
 
@@ -586,32 +564,20 @@ describe("the admin Home row", () => {
 
   /** Never for a signal or a count — those are operational detail, and belong on the door. */
   it("says nothing about a refusal spike", async () => {
-    const whoami = signIn({ isAdmin: true });
-    const server = doorsServer([doorFixture()], {
+    await doorsReadSettled(home([doorFixture()], {
       rows: { "99999999-9999-9999-9999-999999999999": { signals: [{ kind: "refusal_spike", since: ago(1200), until: ago(0), scans: 11 }] } },
-    });
-    stubFetch([
-      { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
-      ...server.routes,
-    ]);
-    renderPage(<HomePage />, { initialEntries: ["/"] });
+    }));
 
-    await screen.findByText("Book a court");
     expect(screen.queryByText("Admin · Doors")).toBeNull();
     expect(document.body.textContent).not.toContain("Refusing a lot");
   });
 
   it("renders no row when the doors read fails", async () => {
-    const whoami = signIn({ isAdmin: true });
-    stubFetch([
-      { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: { balance_credits: 120, entries: [], count: 0 } },
-      { path: "/api/v1/admin/doors", status: 503, body: {} },
-    ]);
-    renderPage(<HomePage />, { initialEntries: ["/"] });
+    signIn({ isAdmin: true });
+    const stub = stubFetch([{ path: "/api/v1/admin/doors", status: 503, body: {} }]);
+    renderPage(<AdminDoorsHomeRow />, { initialEntries: ["/admin"] });
 
-    await screen.findByText("Book a court");
+    await doorsReadSettled(stub);
     expect(screen.queryByText("Admin · Doors")).toBeNull();
   });
 });

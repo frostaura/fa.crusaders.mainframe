@@ -1,54 +1,88 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
-import { MONITORING_TABS, MonitoringNav } from "./MonitoringSection";
-import { monitoringAttentionLabel } from "../Layout";
+import { MONITORING_TABS } from "./MonitoringSection";
 import { routePageName, NOT_FOUND_PAGE_NAME } from "../../lib/routeAnnouncer";
 
 const SRC = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const app = readFileSync(join(SRC, "App.tsx"), "utf8");
 
 /**
- * The Monitoring section's shell (D3 §3.1, ruling 10).
+ * The Monitoring section's one list of destinations (D3 §3.1, ruling 10; R16, R17).
  *
  * <p>
- * The pages belong to the admin lane. What is held here is the scaffolding that has to be
- * right on the day they land: one list behind the sub-nav and the route table, a permanent
- * redirect from every old path, and an attention sentence that says both halves.
+ * What is held here is the scaffolding every Monitoring page is reconciled against: one list
+ * behind the route table and the admin rail, a permanent redirect from every old path, no
+ * page-local sub-navigation (the rail IS the navigation now), and Monitoring meaning courts,
+ * hardware and control only.
  * </p>
  */
 
-describe("the sub-nav and the route table are one list", () => {
-  it("registers a route for every tab, so the strip has no dead link", () => {
+describe("the destination list and the route table are one list", () => {
+  it("registers a route for every destination, so nothing links to a dead path", () => {
     for (const tab of MONITORING_TABS) {
-      // A sub-nav written out separately from the routes it points at acquires a dead link
-      // the first time a path moves, and nothing says so.
+      // A nav written out separately from the routes it points at acquires a dead link the
+      // first time a path moves, and nothing says so.
       expect(app, `no route for ${tab.to}`).toContain(`path="${tab.to}"`);
     }
   });
 
-  it("names every tab for the announcer, or the tab title is 'Page not found'", () => {
+  it("names every destination for the announcer, or the tab title is 'Page not found'", () => {
     for (const tab of MONITORING_TABS) {
       expect(routePageName(tab.to), tab.to).not.toBe(NOT_FOUND_PAGE_NAME);
     }
   });
 
-  it("marks only the index as `end`, or every child lights two tabs", () => {
+  it("marks only the index as `end`, or every child lights two entries", () => {
     const ends = MONITORING_TABS.filter((t) => t.end);
     expect(ends).toHaveLength(1);
     expect(ends[0].to).toBe("/admin/monitoring");
   });
 
-  it("renders the strip with a 44 px floor in pixels", () => {
-    render(<MemoryRouter initialEntries={["/admin/monitoring"]}><MonitoringNav /></MemoryRouter>);
-    for (const tab of MONITORING_TABS) {
-      const link = screen.getByRole("link", { name: tab.label });
-      // B12: a touch target is a fingertip and does not double with the text.
-      expect(link.className).toContain("[@media(pointer:coarse)]:min-h-[44px]");
-    }
+  // "renders the strip with a 44 px floor in pixels" is RETIRED by R16: there is no strip. The
+  // 44px floor is now the admin rail's and section switcher's, tested with them.
+});
+
+describe("Monitoring is courts, hardware and control (R17)", () => {
+  /**
+   * "A person's night" is a view of a MEMBER. It stays reachable at its route until P5 moves it
+   * onto the member's own page, but it is no longer a Monitoring destination.
+   */
+  it("does not list a person's night", () => {
+    expect(MONITORING_TABS.map((t) => t.to)).not.toContain("/admin/monitoring/night");
+    expect(MONITORING_TABS.map((t) => t.label).join(" ")).not.toMatch(/night/i);
+  });
+
+  it("keeps the night's route answering until it moves", () => {
+    expect(app).toContain('path="/admin/monitoring/night"');
+  });
+});
+
+describe("no Monitoring page carries its own section nav (R16)", () => {
+  /**
+   * The rail (desktop) and the section switcher (phone) are the navigation. A strip of tabs
+   * under every page's heading was a second nav naming the same places, one level down, and
+   * the first thing to disagree with the rail the day a path moved.
+   */
+  const PAGES = [
+    "pages/monitoring",
+    "pages/AdminDoors.tsx",
+    "pages/AdminDoorsLog.tsx",
+    "pages/AdminDoorsDetail.tsx",
+    "pages/AdminDoorsCard.tsx",
+    "pages/AdminDevices.tsx",
+  ];
+  const files = PAGES.flatMap((rel) => {
+    const full = join(SRC, rel);
+    if (!statSync(full).isDirectory()) return [full];
+    return readdirSync(full).filter((n) => /\.tsx$/.test(n) && !n.includes(".test.")).map((n) => join(full, n));
+  });
+
+  it.each(files.map((f) => [f.split("/src/")[1], f] as const))("%s renders no Monitoring nav", (_name, file) => {
+    const code = readFileSync(file, "utf8");
+    expect(code).not.toMatch(/MonitoringNav/);
+    expect(code).not.toMatch(/aria-label="Monitoring"/);
   });
 });
 
@@ -103,36 +137,23 @@ describe("the old URLs keep working", () => {
   });
 });
 
-describe("the attention sentence says both halves", () => {
-  it("counts doors, as it always did", () => {
-    expect(monitoringAttentionLabel(1)).toBe("1 door needs attention");
-    expect(monitoringAttentionLabel(2)).toBe("2 doors need attention");
-  });
+/*
+ * "the attention sentence says both halves" is RETIRED here by R16: the sentence moved with the
+ * counts to `lib/adminAttention.ts` (the Admin tab's and the rail's badges), and its wording and
+ * its both-halves rule are tested beside it in `components/admin/__tests__/adminNav.test.ts`.
+ */
 
-  it("adds boards once there are any, without any caller changing", () => {
-    // An admin who sees a number on Monitoring and finds every door fine concludes the badge
-    // is wrong. The section covers both, so the sentence has to.
-    expect(monitoringAttentionLabel(2, 1)).toBe("2 doors need attention and 1 board has a fault");
-    expect(monitoringAttentionLabel(0, 2)).toBe("2 boards have a fault");
-  });
-
-  it("says nothing at all when there is nothing to say", () => {
-    expect(monitoringAttentionLabel(0)).toBe("");
-    expect(monitoringAttentionLabel(0, 0)).toBe("");
-  });
-});
-
-describe("every destination is a real page now", () => {
+describe("every destination is a real page", () => {
   /**
-   * This replaces "an unbuilt destination says so", which rendered `MonitoringPlaceholder`
-   * and asserted it admitted to being one. All six pages have landed, the placeholder is
-   * deleted, and the thing worth pinning is the opposite: no tab may quietly go back to
-   * being a stub, and none may be wired to a component that does not exist.
+   * No destination may quietly go back to being a stub, and none may be wired to a component
+   * that does not exist. The admin guard is on the ONE parent route (`AdminLayout`), so each
+   * child names its page directly.
    */
-  it("wires each tab to a page, never to a placeholder", () => {
+  it("wires each destination to a page, never to a placeholder, under the admin guard", () => {
     expect(app, "a placeholder is back under Monitoring").not.toContain("MonitoringPlaceholder");
+    expect(app).toMatch(/<Route path="\/admin" element=\{<RequireAuth admin>/);
     for (const tab of MONITORING_TABS) {
-      const route = new RegExp(`path="${tab.to}"\\s+element=\\{<RequireAuth admin><([A-Za-z]+)\\s*/>`);
+      const route = new RegExp(`path="${tab.to}"\\s+element=\\{<([A-Za-z]+)\\s*/>`);
       const found = app.match(route);
       expect(found, `${tab.to} does not render a page component`).not.toBeNull();
       // A route is only as real as the import behind it.

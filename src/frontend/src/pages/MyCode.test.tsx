@@ -1184,7 +1184,7 @@ describe("MyCode at a club with a door", () => {
     */
     const books = await screen.findAllByRole("link", { name: "Book a court" });
     expect(books).toHaveLength(1);
-    expect(books[0]).toHaveAttribute("href", "/schedule");
+    expect(books[0]).toHaveAttribute("href", "/bookings") // R15: Bookings lives at /bookings;
   });
 
   /**

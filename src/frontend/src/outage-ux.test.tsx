@@ -94,22 +94,27 @@ describe("the outage screen's only control", () => {
 
     fireEvent.click(button);
 
+    // R12 (P2) moved this button onto the house pending posture, which retires the old "Trying…"
+    // label and `disabled` assertions: the label stays (so the width does not jump), a spinner
+    // joins it, and the button is `aria-busy` + `aria-disabled` rather than `disabled` — so focus
+    // stays on it and a screen reader is not dropped to the top of the page. Same element.
     await waitFor(() => {
-      const busy = screen.getByRole("button", { name: /trying/i });
-      expect(busy).toBeDisabled();
+      const busy = screen.getByRole("button", { name: /try again now/i });
+      expect(busy).toBe(button);
       expect(busy).toHaveAttribute("aria-busy", "true");
+      expect(busy).toHaveAttribute("aria-disabled", "true");
     });
 
     // The assertion above is not enough on its own, and a refuter proved it: `waitFor` runs its
     // first check synchronously, so it passes on the render that `setRetrying(true)` caused and
     // never looks again. Replace `return refreshFromToken()` in `retryConnection` with
     // `void refreshFromToken()` — the exact regression this pending state exists to prevent — and
-    // the button flicks back to "Try again now" a microtask later while everything above stays
+    // the button flicks back to its resting state a microtask later while everything above stays
     // green. So: still busy after the clock has actually moved, with the probe still in flight.
     await settle();
-    const stillBusy = screen.getByRole("button", { name: /trying/i });
-    expect(stillBusy).toBeDisabled();
+    const stillBusy = screen.getByRole("button", { name: /try again now/i });
     expect(stillBusy).toHaveAttribute("aria-busy", "true");
-    expect(screen.queryByRole("button", { name: /try again now/i })).not.toBeInTheDocument();
+    expect(stillBusy).toHaveAttribute("aria-disabled", "true");
+    expect(stillBusy.querySelector('[data-slot="spinner"]')).not.toBeNull();
   });
 });

@@ -118,20 +118,30 @@ describe("App — while the club does not answer", () => {
     fireEvent.click(button);
     await tick(1_500);
 
-    // The measured failure was one unchanging button state for 25.3s: same label, enabled,
-    // no aria-busy. All three have to move, and stay moved while the probe is in flight.
-    const busy = screen.getByRole("button", { name: /Trying…/ });
-    expect(busy).toBeDisabled();
+    // The measured failure was one unchanging button state for 25.3s. R12 (P2) moved it onto the
+    // house pending posture, which retires the old "Trying…" label and `disabled` assertions: the
+    // label stays (so the width does not jump), a spinner replaces nothing and joins it, and the
+    // button is `aria-busy` + `aria-disabled` rather than `disabled` — so focus stays on it and a
+    // screen reader is not dropped to the top of the page. It is still the same element.
+    const busy = screen.getByRole("button", { name: "Try again now" });
+    expect(busy).toBe(button);
     expect(busy).toHaveAttribute("aria-busy", "true");
-    expect(screen.queryByRole("button", { name: "Try again now" })).not.toBeInTheDocument();
+    expect(busy).toHaveAttribute("aria-disabled", "true");
+    expect(busy.querySelector('[data-slot="spinner"]')).not.toBeNull();
+
+    // A second press while it is working is ignored, not queued: one probe in flight.
+    const probes = (fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
+    fireEvent.click(busy);
+    await tick(10);
+    expect((fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length).toBe(probes);
 
     // And it comes back when the attempt is over, so it can be pressed again. This is the
-    // assertion the StrictMode wrapper above exists for: a mounted-ref guard round the
-    // `setRetrying(false)` passes every line before this one and then never reaches this one,
-    // because StrictMode's extra unmount has already flipped the ref.
+    // assertion the StrictMode wrapper above exists for: a mounted-ref guard round the reset
+    // passes every line before this one and then never reaches this one, because StrictMode's
+    // extra unmount has already flipped the ref.
     await tick(REQUEST_TIMEOUT_MS + 1_000);
     const settled = screen.getByRole("button", { name: "Try again now" });
-    expect(settled).not.toBeDisabled();
     expect(settled).not.toHaveAttribute("aria-busy", "true");
+    expect(settled).not.toHaveAttribute("aria-disabled", "true");
   });
 });
