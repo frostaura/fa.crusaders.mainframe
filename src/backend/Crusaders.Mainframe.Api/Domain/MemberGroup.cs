@@ -1,5 +1,22 @@
 namespace Crusaders.Mainframe.Api.Domain;
 
+/// <summary>The <see cref="MemberGroup.SystemKey"/> vocabulary.</summary>
+public static class MemberGroupSystemKeys
+{
+    /// <summary>The group that replaced the <c>LeagueOrSenior</c> member class.</summary>
+    public const string League = "league";
+
+    /// <summary>
+    /// The value the deprecated <c>member_class</c> wire field carries for a member of the league
+    /// group, and <see cref="RegularClassName"/> for everyone else. Kept for ONE release so a
+    /// webhook template or an old screen reading it does not break mid-deploy.
+    /// </summary>
+    public const string LeagueClassName = "LeagueOrSenior";
+
+    /// <inheritdoc cref="LeagueClassName"/>
+    public const string RegularClassName = "Regular";
+}
+
 /// <summary>How a group prices a slice, relative to the court's own price.</summary>
 public enum GroupPricingMode
 {
@@ -28,10 +45,14 @@ public enum MemberGroupStatus
 /// that are allowed to book between… The most restrictive of the group rules apply."
 ///
 /// <para>
-/// <b>A second axis, orthogonal to <see cref="MemberClass"/>.</b> The class keeps doing what it
-/// has always done — it drives the top-up conversion rate and blueprint A.12's peak rule — and is
-/// untouched by this. Folding the two together would migrate live economics in the same change
-/// as a new feature, which is two risks wearing one commit.
+/// <b>The ONE configurable concept (decision D2, 2026-09-23).</b> A group used to be a second axis
+/// beside a two-value member class that drove the top-up rate and blueprint A.12's peak rule.
+/// The class is gone: a group now also carries the top-up conversion rate
+/// (<see cref="CreditsPerZar"/>) and the peak priority (<see cref="PeakPriority"/>), and what was
+/// "LeagueOrSenior" is membership of the system group whose <see cref="SystemKey"/> is
+/// <see cref="MemberGroupSystemKeys.League"/>. How several groups combine is
+/// <see cref="Services.MemberTariffs"/>' question for the rate and the peak, and
+/// <see cref="Services.GroupRules"/>' for windows, prices and caps.
 /// </para>
 ///
 /// <para>
@@ -70,6 +91,29 @@ public sealed class MemberGroup : ITenantScoped
 
     /// <summary>Null inherits the tenant setting.</summary>
     public int? AdvanceBookingDays { get; set; }
+
+    /// <summary>
+    /// Credits per one unit of the club's currency on a top-up, for members of this group. Null
+    /// inherits the tenant's <c>credits_per_zar_regular</c>. Same precision as the ledger's own
+    /// <c>ConversionRate</c> column, because the rate is copied onto the top-up row and then the
+    /// ledger row verbatim and a narrower column here would round the offer.
+    /// </summary>
+    public decimal? CreditsPerZar { get; set; }
+
+    /// <summary>
+    /// Whether members of this group may book inside the club's peak window at any time
+    /// (blueprint A.12). A member has the priority only when EVERY active group they are in grants
+    /// it — see <see cref="Services.MemberTariffs"/>.
+    /// </summary>
+    public bool PeakPriority { get; set; }
+
+    /// <summary>
+    /// A stable handle for a group the system itself relies on, unique per tenant when set. Only
+    /// <see cref="MemberGroupSystemKeys.League"/> exists: it is how the migration, the seeder and
+    /// the one-release deprecated <c>member_class</c> field find the group that replaced
+    /// <c>LeagueOrSenior</c> after an admin has renamed it. Never written by the admin API.
+    /// </summary>
+    public string? SystemKey { get; set; }
 
     /// <summary>
     /// The two groups the seeder writes. Renameable and editable, not deletable, so the groups

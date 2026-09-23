@@ -145,7 +145,6 @@ public class MainframeDbContext : DbContext
             e.Property(m => m.MembershipNumber).HasMaxLength(64).IsRequired();
             e.Property(m => m.PhotoUrl).HasMaxLength(1024);
             e.Property(m => m.Status).HasConversion<int>();
-            e.Property(m => m.MemberClass).HasConversion<int>().HasDefaultValue(MemberClass.Regular);
             e.HasQueryFilter(m => m.TenantId == _tenant.TenantId);
         });
 
@@ -278,7 +277,6 @@ public class MainframeDbContext : DbContext
             // Same precision as ledger_entries.ConversionRate — the two hold the same number
             // and a narrower column here would silently round the rate the ledger then quotes.
             e.Property(p => p.ConversionRate).HasColumnType("numeric(8,4)");
-            e.Property(p => p.MemberClass).HasConversion<int?>();
             e.Property(p => p.IdempotencyKey).HasMaxLength(64).IsRequired();
             e.Property(p => p.GatewayCheckoutId).HasMaxLength(128);
             e.Property(p => p.ExternalReference).HasMaxLength(255);
@@ -307,6 +305,19 @@ public class MainframeDbContext : DbContext
             // and a narrower column here would round a price the ledger then quotes.
             e.Property(g => g.FlatSlicePriceCredits).HasColumnType("numeric(10,2)");
             e.HasIndex(g => new { g.TenantId, g.Status });
+            // Same precision as ledger_entries.ConversionRate and pending_topups.ConversionRate:
+            // the rate is copied onto both verbatim, so a narrower column here would round the offer.
+            e.Property(g => g.CreditsPerZar).HasColumnType("numeric(8,4)");
+            e.Property(g => g.SystemKey).HasMaxLength(32);
+            // One league group per club: the deprecated member_class field, the seeder and the
+            // migration all find it by this key, so two of them would be two answers.
+            e.HasIndex(g => new { g.TenantId, g.SystemKey })
+                .IsUnique().HasFilter("\"SystemKey\" IS NOT NULL");
+            // A top-up rate of zero would take a member's money and credit nothing; the API
+            // refuses it and the database has the last word, as it does on the price (D2-B06).
+            e.ToTable(t => t.HasCheckConstraint(
+                "ck_member_groups_credits_per_zar",
+                "\"CreditsPerZar\" IS NULL OR (\"CreditsPerZar\" > 0 AND \"CreditsPerZar\" <= 1000)"));
             // The database is the last place a nonsense price can be refused, which is the whole
             // lesson of D2-B06: the settings PUT was not the only way a negative one got in.
             e.ToTable(t => t.HasCheckConstraint(

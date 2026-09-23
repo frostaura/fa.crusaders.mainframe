@@ -39,7 +39,7 @@ public sealed class TopUpFlowTests
     private const string Passphrase = "not-a-real-passphrase-test-fixture-only";
     private const string MerchantId = "10000100";
 
-    private sealed record Seeded(Guid TenantId, string Slug, Guid MemberUserId, string Email);
+    private sealed record Seeded(Guid TenantId, string Slug, Guid MemberUserId, string Email, Guid LeagueGroupId);
 
     private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
 
@@ -54,7 +54,6 @@ public sealed class TopUpFlowTests
         $$"""
         {
           "credits_per_zar_regular": {{N(regularRate)}},
-          "credits_per_zar_league": 2.4,
           "topup_block_zar": {{N(blockZar)}},
           "topup_max_zar_per_member": {{N(maxZar)}},
           "payfast": {
@@ -87,11 +86,13 @@ public sealed class TopUpFlowTests
             FullName = "Naledi Khoza",
             MembershipNumber = slug,
             Status = MembershipStatus.Active,
-            MemberClass = MemberClass.Regular,
         });
+        // D2: the club's league group, at 2.4 with peak priority, with nobody in it yet.
+        var league = TestHost.LeagueGroup(tenant.Id);
+        db.MemberGroups.Add(league);
 
         await db.SaveChangesAsync();
-        return new Seeded(tenant.Id, slug, member.Id, email);
+        return new Seeded(tenant.Id, slug, member.Id, email, league.Id);
     }
 
     private static HttpClient MemberClient(TestWebAppFactory factory, Seeded s)
@@ -243,6 +244,123 @@ public sealed class TopUpFlowTests
             Assert.Equal((decimal)registered, entry.ConversionRate);
             Assert.Equal(100m, entry.ZarPaid);
         }
+    }
+
+    // ---- D2: the rate is the member's GROUPS', and still locked at checkout -----
+
+    /// <summary>Puts the member into a group, optionally a new one with the given rate and status.</summary>
+    private static async Task<Guid> JoinAsync(
+        TestWebAppFactory factory, Seeded s, Guid? groupId = null, string? name = null, decimal? rate = null,
+        MemberGroupStatus status = MemberGroupStatus.Active)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var id = groupId ?? Guid.NewGuid();
+        if (groupId is null)
+        {
+            db.MemberGroups.Add(new MemberGroup
+            {
+                Id = id,
+                TenantId = s.TenantId,
+                Name = name!,
+                CreditsPerZar = rate,
+                Status = status,
+                SortOrder = 3,
+            });
+        }
+        db.MemberGroupMembers.Add(new MemberGroupMember
+        {
+            TenantId = s.TenantId,
+            GroupId = id,
+            UserId = s.MemberUserId,
+            AddedByUserId = s.MemberUserId,
+        });
+        await db.SaveChangesAsync();
+        return id;
+    }
+
+    /// <summary>
+    /// <b>The D2 money test.</b> A league member is quoted the league GROUP's rate, the pending
+    /// row locks both the rate and the group it came from, an admin then moves the group's rate
+    /// while the member is on PayFast's card page — and the ITN still credits the quoted rate.
+    /// The rate lock survived the class becoming a group.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_group_rate_is_locked_at_checkout_with_the_group_it_came_from()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        await JoinAsync(factory, seeded, groupId: seeded.LeagueGroupId);
+        var client = MemberClient(factory, seeded);
+
+        var options = await client.GetFromJsonAsync<JsonElement>("/api/v1/credit/topup/options");
+        Assert.Equal(2.4m, options.GetProperty("conversion_rate").GetDecimal());
+        Assert.Equal(seeded.LeagueGroupId, options.GetProperty("rate_group").GetProperty("id").GetGuid());
+        Assert.Equal("LeagueOrSenior", options.GetProperty("member_class").GetString());
+
+        var body = await RegisterAsync(client, 100m);
+        Assert.Equal(2.4m, body.GetProperty("conversion_rate").GetDecimal());
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var pending = await db.PendingTopups.IgnoreQueryFilters().SingleAsync(p => p.UserId == seeded.MemberUserId);
+            Assert.Equal(2.4m, pending.ConversionRate);
+            Assert.Equal(seeded.LeagueGroupId, pending.GroupId);
+
+            // The admin moves the group's rate while the member is at the gateway.
+            var league = await db.MemberGroups.IgnoreQueryFilters().FirstAsync(g => g.Id == seeded.LeagueGroupId);
+            league.CreditsPerZar = 3.0m;
+            await db.SaveChangesAsync();
+        }
+
+        var itn = await factory.CreateClient().PostAsync(
+            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
+            SignedItn(body.GetProperty("checkout_id").GetString()!, "100.00"));
+
+        Assert.Equal(HttpStatusCode.OK, itn.StatusCode);
+        var settled = await itn.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(240m, settled.GetProperty("credits").GetDecimal());
+        Assert.Equal(2.4m, settled.GetProperty("conversion_rate").GetDecimal());
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var entry = await db.LedgerEntries.IgnoreQueryFilters()
+                .SingleAsync(l => l.UserId == seeded.MemberUserId && l.Type == LedgerEntryType.TopUp);
+            Assert.Equal(240m, entry.AmountCredits);
+            Assert.Equal(2.4m, entry.ConversionRate);
+        }
+    }
+
+    /// <summary>
+    /// Several groups: the LOWEST rate any active group sets is quoted and locked, with that
+    /// group named; a group with no rate and an archived group have no say.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_lowest_rate_among_the_members_active_groups_is_quoted_and_locked()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        await JoinAsync(factory, seeded, groupId: seeded.LeagueGroupId);
+        var coaching = await JoinAsync(factory, seeded, name: "Coaching", rate: 2.0m);
+        await JoinAsync(factory, seeded, name: "Juniors", rate: null);
+        await JoinAsync(factory, seeded, name: "Old promo", rate: 1.0m, status: MemberGroupStatus.Archived);
+        var client = MemberClient(factory, seeded);
+
+        var options = await client.GetFromJsonAsync<JsonElement>("/api/v1/credit/topup/options");
+        Assert.Equal(2.0m, options.GetProperty("conversion_rate").GetDecimal());
+        Assert.Equal("Coaching", options.GetProperty("rate_group").GetProperty("name").GetString());
+
+        var body = await RegisterAsync(client, 100m);
+        Assert.Equal(2.0m, body.GetProperty("conversion_rate").GetDecimal());
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        Assert.Equal(coaching, (await db.PendingTopups.IgnoreQueryFilters().SingleAsync(p => p.UserId == seeded.MemberUserId)).GroupId);
     }
 
     // ---- F13: failure reasons are codes, and a cancellation is not a failure
@@ -477,7 +595,8 @@ public sealed class TopUpFlowTests
         Assert.Equal(50m, options.GetProperty("min_zar").GetDecimal());
         Assert.Equal(300m, options.GetProperty("max_zar").GetDecimal());
         Assert.Equal(1.0m, options.GetProperty("conversion_rate").GetDecimal());
-        Assert.Equal("Regular", options.GetProperty("member_class").GetString());
+        Assert.Equal("Regular", options.GetProperty("member_class").GetString()); // deprecated, one release (D2)
+        Assert.Equal(JsonValueKind.Null, options.GetProperty("rate_group").ValueKind);
         Assert.Equal(
             [50m, 100m, 250m, 300m],
             options.GetProperty("presets_zar").EnumerateArray().Select(x => x.GetDecimal()));
@@ -558,13 +677,13 @@ public sealed class TopUpFlowTests
     /// return null unconditionally puts both cases back to 200 with a 160.00-credit pending row
     /// against a 240.00 quote, and this test fails on the status code. The two rows of the
     /// theory vary the fixture as well as the rule — one moves the club rate down, the other
-    /// moves this member's class up — so a fixture that stopped discriminating in one direction
+    /// moves this member into the league group (their class, before D2) — so a fixture that stopped discriminating in one direction
     /// still fails in the other.
     /// </para>
     /// </summary>
     [SkippableTheory]
     [InlineData(true, 1.0)]   // an admin edits credits_per_zar_regular: 1.6 -> 1.0, for everyone
-    [InlineData(false, 2.4)]  // an admin moves this member to league/senior: 1.6 -> 2.4
+    [InlineData(false, 2.4)]  // an admin puts this member in the league group: 1.6 -> 2.4 (D2)
     public async Task A_quote_the_club_has_moved_away_from_is_refused_rather_than_silently_repriced(
         bool moveTheClubRate, double newRate)
     {
@@ -589,9 +708,13 @@ public sealed class TopUpFlowTests
             }
             else
             {
-                var membership = await db.Memberships.IgnoreQueryFilters()
-                    .FirstAsync(m => m.UserId == seeded.MemberUserId);
-                membership.MemberClass = MemberClass.LeagueOrSenior;
+                db.MemberGroupMembers.Add(new MemberGroupMember
+                {
+                    TenantId = seeded.TenantId,
+                    GroupId = seeded.LeagueGroupId,
+                    UserId = seeded.MemberUserId,
+                    AddedByUserId = seeded.MemberUserId,
+                });
             }
             await db.SaveChangesAsync();
         }

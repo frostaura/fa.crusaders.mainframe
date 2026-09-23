@@ -9,7 +9,7 @@ namespace Crusaders.Mainframe.Tests;
 
 /// <summary>
 /// Tests for Phase 8 client-blueprint deltas:
-///   8.2 credits unit of account + class-driven conversion (R100 → 160 / 240 credits)
+///   8.2 credits unit of account + group-driven conversion (R100 → 160 / 240 credits; class until D2)
 ///   8.3 charge-at-booking (the debit fires at CreateAsync; activation only settles WHO pays)
 ///   8.4 per-day cap (with same-day relaxation) + peak-hours league exclusivity
 ///   8.5 at-court payer override (BookedByUserId vs PaidByUserId)
@@ -27,9 +27,10 @@ public class Phase8Tests
         var settings = scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>();
         var s = await settings.GetAsync(default);
 
-        // Simulate the TopUp callback's conversion logic.
-        var membership = await scope.ServiceProvider.GetRequiredService<MainframeDbContext>().Memberships.FirstAsync(m => m.UserId == host.PlayerUser.Id);
-        var rate = s.ConversionRateFor(membership.MemberClass);
+        // Simulate the TopUp callback's conversion logic: the member's groups' tariff (D2).
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var tariff = await MemberTariffs.ForAsync(db, host.PlayerUser.Id, s, default);
+        var rate = tariff.TopUpRate;
         var credits = 100m * rate;
 
         await ledger.PostAsync(new LedgerPosting(
@@ -37,7 +38,7 @@ public class Phase8Tests
             ZarPaid: 100m, ConversionRate: rate, Reason: "test top-up"), default);
 
         var balance = await ledger.GetBalanceAsync(host.PlayerUser.Id, default);
-        Assert.Equal(MemberClass.Regular, membership.MemberClass);
+        Assert.Null(tariff.RateGroup);
         Assert.Equal(1.6m, rate);
         Assert.Equal(160m, balance);
     }
@@ -51,8 +52,9 @@ public class Phase8Tests
         var settings = scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>();
         var s = await settings.GetAsync(default);
 
-        var membership = await scope.ServiceProvider.GetRequiredService<MainframeDbContext>().Memberships.FirstAsync(m => m.UserId == host.LeaguePlayerUser.Id);
-        var rate = s.ConversionRateFor(membership.MemberClass);
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var tariff = await MemberTariffs.ForAsync(db, host.LeaguePlayerUser.Id, s, default);
+        var rate = tariff.TopUpRate;
         var credits = 100m * rate;
 
         await ledger.PostAsync(new LedgerPosting(
@@ -60,7 +62,7 @@ public class Phase8Tests
             ZarPaid: 100m, ConversionRate: rate, Reason: "test top-up"), default);
 
         var balance = await ledger.GetBalanceAsync(host.LeaguePlayerUser.Id, default);
-        Assert.Equal(MemberClass.LeagueOrSenior, membership.MemberClass);
+        Assert.Equal(MemberGroupSystemKeys.League, tariff.RateGroup?.SystemKey);
         Assert.Equal(2.4m, rate);
         Assert.Equal(240m, balance);
     }
@@ -342,7 +344,7 @@ public class Phase8Tests
         // Pick a slot inside 16:00–19:00 UTC tomorrow (test fixture uses UTC timezone).
         var tomorrowPeak = new DateTimeOffset(DateTime.UtcNow.Date.AddDays(1).AddHours(17), TimeSpan.Zero);
         var blocked = await booking.CreateAsync(host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, tomorrowPeak, 1, default);
-        Assert.IsType<BookingResult.PeakHoursLeagueOnly>(blocked);
+        Assert.IsType<BookingResult.PeakHoursPriorityOnly>(blocked);
     }
 
     [Fact]

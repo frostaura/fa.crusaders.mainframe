@@ -73,8 +73,8 @@ public sealed class BookingMembershipGateTests
         var member = new User { TenantId = tenant.Id, Email = $"member-{slug}@test.local", PasswordHash = "x", EmailVerified = true };
         db.Users.AddRange(admin, member);
         db.Memberships.AddRange(
-            new Membership { TenantId = tenant.Id, UserId = admin.Id, FullName = "Desk Admin", MembershipNumber = $"{slug}-A", Status = MembershipStatus.Active, MemberClass = MemberClass.Regular },
-            new Membership { TenantId = tenant.Id, UserId = member.Id, FullName = "Mia Bekker", MembershipNumber = $"{slug}-M", Status = memberStatus, MemberClass = MemberClass.Regular });
+            new Membership { TenantId = tenant.Id, UserId = admin.Id, FullName = "Desk Admin", MembershipNumber = $"{slug}-A", Status = MembershipStatus.Active },
+            new Membership { TenantId = tenant.Id, UserId = member.Id, FullName = "Mia Bekker", MembershipNumber = $"{slug}-M", Status = memberStatus });
 
         db.Courts.Add(new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = SlicePriceCredits });
 

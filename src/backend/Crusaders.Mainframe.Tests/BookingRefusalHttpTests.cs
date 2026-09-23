@@ -81,9 +81,13 @@ public sealed class BookingRefusalHttpTests
         var league = new User { TenantId = tenant.Id, Email = $"league-{slug}@test.local", PasswordHash = "x", EmailVerified = true };
         db.Users.AddRange(admin, member, league);
         db.Memberships.AddRange(
-            new Membership { TenantId = tenant.Id, UserId = admin.Id, FullName = "Refusal Admin", MembershipNumber = $"{slug}-A", Status = MembershipStatus.Active, MemberClass = MemberClass.Regular },
-            new Membership { TenantId = tenant.Id, UserId = member.Id, FullName = "Naledi Khoza", MembershipNumber = $"{slug}-M", Status = MembershipStatus.Active, MemberClass = MemberClass.Regular },
-            new Membership { TenantId = tenant.Id, UserId = league.Id, FullName = "Liam O'Connor", MembershipNumber = $"{slug}-L", Status = MembershipStatus.Active, MemberClass = MemberClass.LeagueOrSenior });
+            new Membership { TenantId = tenant.Id, UserId = admin.Id, FullName = "Refusal Admin", MembershipNumber = $"{slug}-A", Status = MembershipStatus.Active },
+            new Membership { TenantId = tenant.Id, UserId = member.Id, FullName = "Naledi Khoza", MembershipNumber = $"{slug}-M", Status = MembershipStatus.Active },
+            new Membership { TenantId = tenant.Id, UserId = league.Id, FullName = "Liam O'Connor", MembershipNumber = $"{slug}-L", Status = MembershipStatus.Active });
+        // D2: the league member is a member of the league system group, which grants peak priority.
+        var leagueGroup = TestHost.LeagueGroup(tenant.Id);
+        db.MemberGroups.Add(leagueGroup);
+        db.MemberGroupMembers.Add(new MemberGroupMember { TenantId = tenant.Id, GroupId = leagueGroup.Id, UserId = league.Id, AddedByUserId = admin.Id });
 
         var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = SlicePriceCredits };
         var court2 = new Court { TenantId = tenant.Id, CourtNumber = 2, Name = "Court 2", SlicePriceCredits = SlicePriceCredits };
@@ -175,6 +179,8 @@ public sealed class BookingRefusalHttpTests
         Assert.Equal("16:00", body.GetProperty("peak_start").GetString());
         Assert.Equal("19:00", body.GetProperty("peak_end").GetString());
         Assert.Equal(1, body.GetProperty("regular_advance_hours").GetInt32());
+        // In no group at all: the lack of priority is the club default, no group's doing (D2).
+        Assert.Equal(0, body.GetProperty("withheld_by_groups").GetArrayLength());
     }
 
     [SkippableFact]

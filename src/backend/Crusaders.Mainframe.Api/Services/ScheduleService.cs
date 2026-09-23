@@ -108,11 +108,11 @@ public sealed class ScheduleService
         // so 44 cells a day rendered to a Regular member as green, clickable "Available" —
         // same colour, same cursor, same "Book Court 2 at 17:00 for 50.00 cr" label as a slot
         // they could actually have — and the refusal arrived only after they had read a price
-        // and pressed Confirm. The client cannot infer this: the member's class is not on any
+        // and pressed Confirm. The client cannot infer this: the member's peak standing is not on any
         // member-facing payload and peak_hours is admin-only. So the day carries the window,
         // the advance allowance, and one flag saying whether THIS viewer is bound by it.
         var peak = settings.PeakHours();
-        var viewerMayBookPeak = viewerIsAdmin || await ViewerBypassesPeakAsync(viewingUserId, ct);
+        var viewerMayBookPeak = viewerIsAdmin || await ViewerBypassesPeakAsync(viewingUserId, settings, ct);
 
         var rules = await ViewerRulesAsync(date, viewingUserId, viewerIsAdmin, settings, ct);
 
@@ -250,23 +250,18 @@ public sealed class ScheduleService
     }
 
     /// <summary>
-    /// Is this viewer exempt from the peak-hours league/senior rule?
+    /// Does this viewer hold peak priority (blueprint A.12, granted by groups since D2)?
     /// </summary>
     /// <remarks>
-    /// Mirrors <c>BookingService.CheckPeakHoursRule</c>'s first line, which returns null — no
-    /// refusal — for <see cref="MemberClass.LeagueOrSenior"/>. An anonymous or membership-less
-    /// viewer falls to <c>Regular</c>, the stricter answer: the grid may never offer a slot the
-    /// booking service would refuse, and the cost of being wrong the other way is one extra
-    /// cell drawn as restricted.
+    /// The same <see cref="MemberTariffs"/> answer <c>BookingRules.PeakRefusal</c> reads, so the
+    /// grid and the booking path cannot disagree. An anonymous viewer, or one in no group, gets
+    /// the stricter answer: the grid may never offer a slot the booking service would refuse,
+    /// and the cost of being wrong the other way is one extra cell drawn as restricted.
     /// </remarks>
-    private async Task<bool> ViewerBypassesPeakAsync(Guid? viewingUserId, CancellationToken ct)
+    private async Task<bool> ViewerBypassesPeakAsync(Guid? viewingUserId, TenantSettingsView settings, CancellationToken ct)
     {
         if (viewingUserId is not { } userId) return false;
-        var cls = await _db.Memberships
-            .Where(m => m.UserId == userId)
-            .Select(m => m.MemberClass)
-            .FirstOrDefaultAsync(ct);
-        return cls == MemberClass.LeagueOrSenior;
+        return (await MemberTariffs.ForAsync(_db, userId, settings, ct)).PeakPriority;
     }
 
     private static string FirstName(string fullName)
@@ -291,7 +286,7 @@ public sealed record ScheduleDay(
     int? PeakEndMinute,
     /// <summary>How close to a peak slot a Regular member may take it anyway (A.12).</summary>
     int PeakAdvanceHoursForRegular,
-    /// <summary>True for an admin or a league/senior member — the two the peak rule never refuses.</summary>
+    /// <summary>True for an admin or a member with peak priority (D2: every one of their groups grants it) — the two the peak rule never refuses.</summary>
     bool ViewerMayBookPeak,
     List<ScheduleCourt> Courts,
     List<ScheduleSlot> Slots,

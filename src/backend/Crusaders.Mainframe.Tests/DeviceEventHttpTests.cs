@@ -118,7 +118,6 @@ public sealed class DeviceEventHttpTests
             FullName = "Walk Up",
             MembershipNumber = slug,
             Status = MembershipStatus.Active,
-            MemberClass = MemberClass.Regular,
         });
 
         var mac = Guid.NewGuid().ToString("N")[..12];
@@ -1692,7 +1691,7 @@ public sealed class DeviceEventHttpTests
         db.Memberships.Add(new Membership
         {
             TenantId = box.TenantId, UserId = other.Id, FullName = "Second Buyer",
-            MembershipNumber = $"o-{Guid.NewGuid():N}"[..20], Status = MembershipStatus.Active, MemberClass = MemberClass.Regular,
+            MembershipNumber = $"o-{Guid.NewGuid():N}"[..20], Status = MembershipStatus.Active,
         });
         db.LedgerEntries.Add(new LedgerEntry
         {

@@ -79,7 +79,6 @@ public static class AdminChangeActions
     public const string GroupDeleted = "group.deleted";
 
     // ---- member ----
-    public const string MemberClassChanged = "member.class_changed";
     public const string MemberApproved = "member.approved";
     public const string MemberRejected = "member.rejected";
     public const string MemberSuspended = "member.suspended";
@@ -168,7 +167,7 @@ public static class AdminChangeActions
         BookingBookedOnBehalf, BookingOverdraftAuthorised,
         CreditAdjusted, CreditToppedUp,
         GroupCreated, GroupUpdated, GroupArchived, GroupMembersChanged, GroupDeleted,
-        MemberClassChanged, MemberApproved, MemberRejected, MemberSuspended, MemberReactivated,
+        MemberApproved, MemberRejected, MemberSuspended, MemberReactivated,
         MemberPasswordReset, MemberTraceViewed, MemberDoorHistoryViewed, MemberAdminGranted, MemberAdminRevoked,
         SettingsUpdated, CourtCreated, CourtUpdated, CourtDeactivated, ChangesExported,
         DeviceUpdated, DeviceDeleted, DeviceApiKeyRegenerated, DoorsShutAll, DoorsReopenedAll, MonitoringErrorResolved,
@@ -204,7 +203,7 @@ public static class AdminChangeActions
             CreditAdjusted or CreditToppedUp => AdminChangeAreas.Credit,
             GroupCreated or GroupUpdated or GroupArchived or GroupMembersChanged
                 or GroupDeleted => AdminChangeAreas.Group,
-            MemberClassChanged or MemberApproved or MemberRejected or MemberSuspended
+            MemberApproved or MemberRejected or MemberSuspended
                 or MemberReactivated or MemberPasswordReset or MemberTraceViewed
                 or MemberDoorHistoryViewed or MemberAdminGranted or MemberAdminRevoked => AdminChangeAreas.Member,
             SettingsUpdated or CourtCreated or CourtUpdated or CourtDeactivated
@@ -254,7 +253,6 @@ public static class AdminChangeActions
             GroupMembersChanged => $"Changed who is in a member group{of}",
             GroupDeleted => $"Deleted a member group{of}",
 
-            MemberClassChanged => $"Changed a member's class{of}",
             MemberApproved => $"Approved a member{of}",
             MemberRejected => $"Rejected an applicant{of}",
             MemberSuspended => $"Suspended a member{of}",

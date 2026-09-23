@@ -85,9 +85,11 @@ needs a separate signed request and the ITN already retries until acknowledged.
 
 ## Credits, not rand
 
-The member pays rand; the ledger records **credits**. Conversion happens at the tenant's
-class-specific rate — `credits_per_zar_regular` (1.6 by default) or `credits_per_zar_league`
-(2.4) — and the rand figure is kept on the `PendingTopup` row for reconciliation only.
+The member pays rand; the ledger records **credits**. Conversion happens at the member's
+groups' rate (D2) — the lowest `credits_per_zar` any of their active groups sets, else the
+tenant's `credits_per_zar_regular` (1.6 by default); the league group carries 2.4 by default.
+The rate and the group it came from (`GroupId`, null for the club default) are locked on the
+`PendingTopup` row at checkout, with the rand figure, for reconciliation.
 
 A ledger field whose name says rand while the column holds credits is a money-correctness
 bug, and `CLAUDE.md` forbids adding a second one. See `AmountCredits`, which is

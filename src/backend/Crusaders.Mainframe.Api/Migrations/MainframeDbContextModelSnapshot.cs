@@ -983,6 +983,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<Guid>("CreatedByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<decimal?>("CreditsPerZar")
+                        .HasColumnType("numeric(8,4)");
+
                     b.Property<string>("Description")
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
@@ -1004,6 +1007,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<bool>("PeakPriority")
+                        .HasColumnType("boolean");
+
                     b.Property<int>("PriceMultiplierBps")
                         .HasColumnType("integer");
 
@@ -1016,6 +1022,10 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
+                    b.Property<string>("SystemKey")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
 
@@ -1026,8 +1036,14 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.HasIndex("TenantId", "Status");
 
+                    b.HasIndex("TenantId", "SystemKey")
+                        .IsUnique()
+                        .HasFilter("\"SystemKey\" IS NOT NULL");
+
                     b.ToTable("member_groups", null, t =>
                         {
+                            t.HasCheckConstraint("ck_member_groups_credits_per_zar", "\"CreditsPerZar\" IS NULL OR (\"CreditsPerZar\" > 0 AND \"CreditsPerZar\" <= 1000)");
+
                             t.HasCheckConstraint("ck_member_groups_pricing", "(\"PricingMode\" = 0) OR (\"PricingMode\" = 1 AND \"PriceMultiplierBps\" BETWEEN 0 AND 1000000) OR (\"PricingMode\" = 2 AND \"FlatSlicePriceCredits\" IS NOT NULL AND \"FlatSlicePriceCredits\" >= 0)");
                         });
                 });
@@ -1108,11 +1124,6 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
-                    b.Property<int>("MemberClass")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0);
-
                     b.Property<string>("MembershipNumber")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -1181,13 +1192,13 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<Guid?>("GroupId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("IdempotencyKey")
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
-
-                    b.Property<int?>("MemberClass")
-                        .HasColumnType("integer");
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");

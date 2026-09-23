@@ -82,7 +82,6 @@ public sealed class SessionRevocationHttpTests
             FullName = "Revo Member",
             MembershipNumber = slug,
             Status = MembershipStatus.Active,
-            MemberClass = MemberClass.Regular,
         });
         await db.SaveChangesAsync();
 

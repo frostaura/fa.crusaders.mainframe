@@ -73,13 +73,15 @@ public static class AdminMemberDetailEndpoints
     /// <c>GET /api/v1/admin/members/{userId}</c> — one person, aggregated.
     /// </summary>
     public static async Task<IResult> DetailAsync(
-        Guid userId, MainframeDbContext db, InherentAdmins inherent, LedgerService ledger, CancellationToken ct)
+        Guid userId, MainframeDbContext db, InherentAdmins inherent, LedgerService ledger,
+        TenantSettingsAccessor settings, CancellationToken ct)
     {
         var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId, ct);
         if (user is null) return Results.NotFound(new { error = MemberNotFound });
 
         var membership = await db.Memberships.AsNoTracking().FirstOrDefaultAsync(m => m.UserId == userId, ct);
         var now = DateTimeOffset.UtcNow;
+        var tariff = await MemberTariffs.ForAsync(db, userId, await settings.GetAsync(ct), ct);
 
         return Results.Ok(new
         {
@@ -100,32 +102,23 @@ public static class AdminMemberDetailEndpoints
             photo_url = membership?.PhotoUrl,
             is_admin = user.IsAdmin,
             admin_source = AdminSource.Of(user.IsAdmin, user.Email, inherent),
-            groups = await GroupsAsync(db, userId, ct),
+            groups = AdminMemberEndpoints.GroupsWire(tariff.Groups),
+            // D2: what the groups add up to for money and the peak window, resolved by the same
+            // MemberTariffs rule the top-up and the booking path read, so the screen cannot
+            // explain a rate the POST would not quote.
+            tariff = new
+            {
+                top_up_credits_per_zar = tariff.TopUpRate,
+                rate_group_id = tariff.RateGroup?.Id,
+                peak_priority = tariff.PeakPriority,
+                peak_withheld_by = tariff.PeakWithheldBy,
+            },
             balance_credits = await ledger.GetBalanceAsync(userId, ct),
             passkey_count = await db.WebAuthnCredentials.AsNoTracking().CountAsync(c => c.UserId == userId, ct),
             fingerprints = await FingerprintsAsync(db, userId, ct),
             next_bookings = await NextBookingsAsync(db, userId, now, ct),
             counts_30d = await CountsAsync(db, userId, now, ct),
         });
-    }
-
-    /// <summary>
-    /// The groups this person is in, active ones only and in the club's own order.
-    ///
-    /// <para>
-    /// An ARCHIVED group is left out because it no longer binds anything — <c>GroupRules</c>
-    /// reads active groups only — and listing it on the member would show an admin a rule that
-    /// is not being applied.
-    /// </para>
-    /// </summary>
-    private static async Task<List<GroupRef>> GroupsAsync(MainframeDbContext db, Guid userId, CancellationToken ct)
-    {
-        var ids = db.MemberGroupMembers.AsNoTracking().Where(m => m.UserId == userId).Select(m => m.GroupId);
-        return await db.MemberGroups.AsNoTracking()
-            .Where(g => ids.Contains(g.Id) && g.Status == MemberGroupStatus.Active)
-            .OrderBy(g => g.SortOrder).ThenBy(g => g.Name)
-            .Select(g => new GroupRef(g.Id, g.Name))
-            .ToListAsync(ct);
     }
 
     /// <summary>
@@ -236,10 +229,6 @@ public static class AdminMemberDetailEndpoints
         });
     }
 
-    /// <summary>One group as the detail names it.</summary>
-    private sealed record GroupRef(
-        [property: JsonPropertyName("id")] Guid Id,
-        [property: JsonPropertyName("name")] string Name);
 }
 
 /// <summary>

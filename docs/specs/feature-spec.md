@@ -2,16 +2,15 @@
 
 This is the canonical functional spec. Engineering implements this; deviations require a spec update first.
 
-## 1. Roles & member classes
+## 1. Roles & member groups
 - **Player** — end-user, member of a tenant (club). Books, plays, pays, cancels.
 - **Admin** — tenant-scoped operator. Can do anything a player can plus all admin operations within their tenant.
 - **Platform admin** — cross-tenant operator (Dean by default). Can onboard new tenants and act as any tenant admin. *Implementation note: this is the same `User` entity with a `is_platform_admin` flag, scoped above `tenant_id`.*
 
-**Member class** — every active membership has a class that drives pricing and access (per [client blueprint](./client-blueprints/Crusaders-Blueprint-2026-05-Rev2.md) A.7):
-- `Regular` — standard member.
-- `LeagueOrSenior` — league players and members aged 65+. More credits per rand on top-up (A.8) and exclusive access to peak-hour slots until close to slot start (A.12).
-
-Class is admin-assignable and editable, audit-logged on every change.
+**Member groups** — the one configurable concept for pricing and access (decision D2, 2026-09-23; it replaced the two-value member class of [client blueprint](./client-blueprints/Crusaders-Blueprint-2026-05-Rev2.md) A.7). A group carries booking windows, a slice price, per-day caps and a booking horizon, **a top-up rate** (`credits_per_zar`, null = the club's `credits_per_zar_regular`) and **peak priority** (A.12). A member may be in several groups; the most restrictive rule wins — narrowest windows, highest price, lowest caps, **lowest top-up rate among the groups that set one**, and **peak priority only if the member is in at least one group and every one of their groups grants it**. A member in no group tops up at the regular rate and has no peak priority.
+- The **league group** (system key `league`, seeded as "League members") is what `LeagueOrSenior` became: the league rate (A.8, R100 → 240 credits at Crusaders) and peak priority. Renameable, not deletable.
+- Groups and memberships are admin-assigned and every change is written to the change record (`group.created` / `group.updated` with the changed fields / `group.members_changed`).
+- For one release the wire still carries a deprecated `member_class` (`LeagueOrSenior` for a member of the league group, else `Regular`) beside the new `groups`.
 
 ## 2. Registration & identity verification
 1. Player visits the tenant's mobile web app and selects "Register".
@@ -48,7 +47,7 @@ Class is admin-assignable and editable, audit-logged on every change.
 
 ## 4. Credit (the wallet)
 - Each player has a credit balance denominated in **credits** (NOT rand). Two-decimal precision; backed by an immutable ledger.
-- ZAR is only the payment rail — the unit of account inside the system is credits. Top-ups convert ZAR → credits at the member's class-specific rate (Crusaders defaults: R100 → 160 credits for `Regular`, R100 → 240 credits for `LeagueOrSenior`, per blueprint A.8).
+- ZAR is only the payment rail — the unit of account inside the system is credits. Top-ups convert ZAR → credits at the member's groups' rate — the lowest any of their groups sets, else the club's regular rate (Crusaders defaults: R100 → 160 credits, R100 → 240 credits for the league group, per blueprint A.8). The rate and the group it came from are locked on the top-up row at checkout.
 - Balance is the sum of ledger entries — never a stored field. Ledger types:
   - `top_up` (positive credits, source: PeachPayments — also captures `zar_paid` and `conversion_rate` for reconciliation)
   - `booking_charge` (negative credits, source: **lights-on activation** per blueprint A.9, NOT booking creation — see §6)
@@ -69,7 +68,7 @@ Class is admin-assignable and editable, audit-logged on every change.
 > - Slice length default **15 minutes** (B.4).
 > - Slice price denominated in **credits** (not ZAR) — A.8 + A.9.
 > - Per-member-per-day cap: max 60 minutes total (A.4 + B.3). Same-day-empty-slot relaxation: a player at the cap can still book a slot starting today if it's still empty.
-> - Peak-hours league/senior exclusivity: 16:00–19:00 reserved for `LeagueOrSenior` until 1 hour before slot start; inside that window any class can book if free (A.12).
+> - Peak-hours exclusivity: 16:00–19:00 reserved for members with peak priority (the league group, since D2) until 1 hour before slot start; inside that window any member can book if free (A.12). The refusal code is still `peak_hours_league_only`, and it names the member's groups that withhold priority (`withheld_by_groups`).
 > - Admin always bypasses caps and peak-hour rules (A.6, A.11).
 
 - The schedule is a grid: courts on the X axis, time slices on the Y axis, displayed for one day at a time.
@@ -83,7 +82,7 @@ Class is admin-assignable and editable, audit-logged on every change.
   - `reserved_by_me` — distinct color, shows my own name.
   - `reserved_by_other` — neutral color, shows the other player's photo + first name only.
   - `admin_block` — distinct color, label e.g. "Tournament", "Maintenance". Not bookable.
-  - `peak_league_only` — inside the peak window (A.12), for a member the rule would refuse: rendered and inert, in its own colour, labelled for the rule rather than for the price. It becomes `available` once the slot is within `peak_advance_hours_for_regular` of starting, and it never appears for an admin or a `LeagueOrSenior` member. Not a state the API stores — `GET /schedule` carries the window, the advance allowance and one flag saying whether *this viewer* is bound by the rule, and the grid derives the state. *(Added 2026-09-07. The rule was enforced only in `BookingService`, so a finder counted 44 cells a day drawn to a Regular member as `available` — "green, clickable", same cursor, same "Book Court 2 at 17:00 for 50.00 cr" label — each of which opened a modal quoting court, time, cost and balance-after before refusing after Confirm. `available` is a promise the grid makes; the client cannot infer this one, because the member's class is on no member-facing payload and `peak_hours` is admin-only.)*
+  - `peak_league_only` — inside the peak window (A.12), for a member the rule would refuse: rendered and inert, in its own colour, labelled for the rule rather than for the price. It becomes `available` once the slot is within `peak_advance_hours_for_regular` of starting, and it never appears for an admin or a member with peak priority (a `LeagueOrSenior` member before D2). Not a state the API stores — `GET /schedule` carries the window, the advance allowance and one flag saying whether *this viewer* is bound by the rule, and the grid derives the state. *(Added 2026-09-07. The rule was enforced only in `BookingService`, so a finder counted 44 cells a day drawn to a Regular member as `available` — "green, clickable", same cursor, same "Book Court 2 at 17:00 for 50.00 cr" label — each of which opened a modal quoting court, time, cost and balance-after before refusing after Confirm. `available` is a promise the grid makes; the client cannot infer this one, because the member's class is on no member-facing payload and `peak_hours` is admin-only.)*
   - `out_of_hours` — greyed out and not bookable. *(This line used to read "greyed out, not displayed", which asks for two contradictory things. Rendered-and-inert is the reading that keeps the grid legible: a row that vanishes leaves the player unable to tell a closed club from a bug, and a booking that already exists outside hours — an admin block, a walk-up that ran to closing, a slot sold before the rule was enforced — must still be visible to its owner. The grid draws the day's operating window plus whatever range any existing booking on that day occupies.)*
 - **Booking action:**
   - Tap an `available` slot → confirmation modal showing court, time, duration, cost, current balance, balance after.

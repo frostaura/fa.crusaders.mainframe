@@ -68,8 +68,8 @@ public sealed class CourtsideEndpointTests
         db.Users.AddRange(admin, player);
 
         db.Memberships.AddRange(
-            new Membership { TenantId = tenant.Id, UserId = admin.Id, FullName = "Court Admin", MembershipNumber = $"A-{slug}", Status = MembershipStatus.Active, MemberClass = MemberClass.Regular },
-            new Membership { TenantId = tenant.Id, UserId = player.Id, FullName = "Court Player", MembershipNumber = $"P-{slug}", Status = MembershipStatus.Active, MemberClass = MemberClass.Regular });
+            new Membership { TenantId = tenant.Id, UserId = admin.Id, FullName = "Court Admin", MembershipNumber = $"A-{slug}", Status = MembershipStatus.Active },
+            new Membership { TenantId = tenant.Id, UserId = player.Id, FullName = "Court Player", MembershipNumber = $"P-{slug}", Status = MembershipStatus.Active });
 
         var court = new Court { TenantId = tenant.Id, CourtNumber = 1, Name = "Court 1", SlicePriceCredits = 8m };
         db.Courts.Add(court);

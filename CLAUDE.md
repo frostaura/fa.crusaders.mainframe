@@ -2,7 +2,7 @@
 
 ## What this is
 
-A mobile-first, multi-tenant SaaS for racquet-sport clubs that runs **court-light scheduling on a credit-based booking model**. Players top up in ZAR via **PayFast**, the top-up converts to **credits** at a member-class-specific rate, and they reserve court time slices. At the court a physical peripheral — biometric, PIN or QR — identifies the player, and the box decides locally: it switches the lights on through its own relay bank — via online activation or its cached roster — and the attendance event posts to the API.
+A mobile-first, multi-tenant SaaS for racquet-sport clubs that runs **court-light scheduling on a credit-based booking model**. Players top up in ZAR via **PayFast**, the top-up converts to **credits** at the rate the member's groups set (groups replaced member classes — D2), and they reserve court time slices. At the court a physical peripheral — biometric, PIN or QR — identifies the player, and the box decides locally: it switches the lights on through its own relay bank — via online activation or its cached roster — and the attendance event posts to the API.
 
 First customer is **Crusaders Squash Club**, the namesake. Multi-tenancy is structural from day one, not a later port.
 

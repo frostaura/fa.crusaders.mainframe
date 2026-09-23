@@ -96,7 +96,6 @@ public sealed record ControlBoardClub(Guid TenantId, string Slug, Guid AdminUser
             MembershipNumber = handle,
             PhotoUrl = photo,
             Status = MembershipStatus.Active,
-            MemberClass = MemberClass.Regular,
         });
         return user.Id;
     }
