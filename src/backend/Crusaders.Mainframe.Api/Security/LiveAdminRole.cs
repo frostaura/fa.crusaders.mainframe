@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Claims;
 using Crusaders.Mainframe.Api.Endpoints;
 using Crusaders.Mainframe.Api.Persistence;
@@ -50,6 +51,13 @@ public sealed class LiveAdminRole
 
     private readonly IMemoryCache _cache;
 
+    /// <summary>
+    /// A counter per account, bumped by every <see cref="Invalidate"/>. See <see cref="HoldsAsync"/>
+    /// for the race it closes. Grows by one entry per account whose role has ever changed on this
+    /// process — a club's handful of admins, not its members.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, long> _generations = new();
+
     public LiveAdminRole(IMemoryCache cache)
     {
         _cache = cache;
@@ -79,24 +87,67 @@ public sealed class LiveAdminRole
     /// </summary>
     public void Invalidate(Guid tenantId, Guid userId)
     {
-        _cache.Remove(Key(tenantId, userId));
+        var key = Key(tenantId, userId);
+        _generations.AddOrUpdate(key, 1, (_, n) => n + 1);
+        _cache.Remove(key);
+    }
+
+    /// <summary>
+    /// Whether the account behind <paramref name="principal"/> is an admin NOW — for a
+    /// connection that outlives the request that authenticated it.
+    ///
+    /// <para>
+    /// <see cref="EnforceAsync"/> runs once, when a token is validated. A live stream is
+    /// validated when it opens and then stays open for hours: a demoted admin's monitoring
+    /// stream went on delivering the club's device faults after every other request of theirs
+    /// was already answered 403. The admin streams ask this before every frame they write
+    /// (<see cref="Services.Realtime.SseStream"/>), and close when it says no. Answered from the
+    /// same cache, so a quiet stream costs a read per <see cref="CacheFor"/> at most.
+    /// </para>
+    /// </summary>
+    public async Task<bool> StillHoldsAsync(ClaimsPrincipal principal, IServiceProvider services, CancellationToken ct)
+    {
+        var tenantClaim = principal.FindFirst("tenant_id")?.Value;
+        if (principal.Id() is not { } userId || !Guid.TryParse(tenantClaim, out var tenantId)) return false;
+
+        using var scope = services.GetRequiredService<IServiceScopeFactory>().CreateScope();
+        return await HoldsAsync(tenantId, userId, scope.ServiceProvider, ct);
     }
 
     /// <summary>
     /// Whether the account is an active admin in the club its token names. Tenant filters are
     /// off because this runs before tenant resolution, so the tenant is matched explicitly: a
     /// user id is only an admin in the club the token was minted for.
+    ///
+    /// <para>
+    /// <b>A read that was already in flight when a revoke committed must not cache its answer.</b>
+    /// The revoke's <see cref="Invalidate"/> removes an entry that does not exist yet; the read
+    /// then finishes with <c>IsAdmin = true</c> and stores it, and every request the demoted
+    /// admin makes for the next <see cref="CacheFor"/> passes admin routes — on the single
+    /// container this deployment runs, where the whole design promises the next request bites.
+    /// So the account's generation is read BEFORE the database, and the answer is cached only if
+    /// no invalidation landed in between. It is still RETURNED either way: that one request was
+    /// admitted by a read that began before the revoke, which is the ordering a transaction
+    /// would give it too. The generation is checked again AFTER the store, because an
+    /// invalidation can land between the comparison and the write; <see cref="Invalidate"/>
+    /// bumps before it removes, so one of the two always sees the other.
+    /// </para>
     /// </summary>
     private async Task<bool> HoldsAsync(Guid tenantId, Guid userId, IServiceProvider services, CancellationToken ct)
     {
         var key = Key(tenantId, userId);
         if (_cache.TryGetValue(key, out bool cached)) return cached;
 
+        var generation = _generations.GetValueOrDefault(key);
         var db = services.GetRequiredService<MainframeDbContext>();
         var holds = await db.Users.IgnoreQueryFilters().AsNoTracking()
             .AnyAsync(u => u.Id == userId && u.TenantId == tenantId && u.IsAdmin && u.Status == "active", ct);
 
-        _cache.Set(key, holds, CacheFor);
+        if (_generations.GetValueOrDefault(key) == generation)
+        {
+            _cache.Set(key, holds, CacheFor);
+            if (_generations.GetValueOrDefault(key) != generation) _cache.Remove(key);
+        }
         return holds;
     }
 

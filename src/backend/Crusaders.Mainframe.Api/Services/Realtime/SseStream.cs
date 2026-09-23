@@ -153,8 +153,28 @@ public static class SseStream
     /// is a channel the bus writes to for the lifetime of the process.
     /// </para>
     /// </summary>
-    public static async Task RunAsync(
+    public static Task RunAsync(
         HttpContext ctx, IRealtimeBus bus, RealtimeTopic topic, TimeSpan keepAlive,
+        Func<Task> writeOpening, CancellationToken ct)
+    {
+        return RunAsync(ctx, bus, topic, new SseGuard(keepAlive, null), writeOpening, ct);
+    }
+
+    /// <summary>
+    /// <see cref="RunAsync(HttpContext, IRealtimeBus, RealtimeTopic, TimeSpan, Func{Task}, CancellationToken)"/>
+    /// for a stream whose right to exist can lapse while it is open.
+    ///
+    /// <para>
+    /// <see cref="SseGuard.StillAllowed"/> is asked before EVERY frame — events and keep-alives
+    /// alike — and a "no" ends the stream there, unsubscribed, without writing the frame. The
+    /// admin streams pass the live admin role: the role was checked once, when the stream opened,
+    /// and a demoted admin's open <c>EventSource</c> went on receiving the club's frames after
+    /// every other request of theirs was refused. Asking per frame rather than per keep-alive is
+    /// the point — a busy stream may never go quiet long enough to ping.
+    /// </para>
+    /// </summary>
+    public static async Task RunAsync(
+        HttpContext ctx, IRealtimeBus bus, RealtimeTopic topic, SseGuard guard,
         Func<Task> writeOpening, CancellationToken ct)
     {
         WriteHeaders(ctx);
@@ -164,15 +184,40 @@ public static class SseStream
         {
             channel = await SubscribeThenSendAsync(bus, topic, writeOpening);
             await PumpAsync(
-                channel.Reader, keepAlive,
-                (message, token) => WriteEventAsync(ctx, message, token),
-                token => WriteKeepAliveAsync(ctx, token),
+                channel.Reader, guard.KeepAlive,
+                async (message, token) =>
+                {
+                    await RequireAllowedAsync(guard, token);
+                    await WriteEventAsync(ctx, message, token);
+                },
+                async token =>
+                {
+                    await RequireAllowedAsync(guard, token);
+                    await WriteKeepAliveAsync(ctx, token);
+                },
                 ct);
         }
+        catch (StreamRevokedException) { /* the reader lost the right to it; see RunAsync */ }
         catch (OperationCanceledException) { /* the client closed the tab */ }
         finally
         {
             if (channel is not null) bus.Unsubscribe(topic, channel);
         }
     }
+
+    private static async Task RequireAllowedAsync(SseGuard guard, CancellationToken ct)
+    {
+        if (guard.StillAllowed is { } allowed && !await allowed(ct)) throw new StreamRevokedException();
+    }
+
+    /// <summary>The stream's reader no longer holds what opened it. Caught in <c>RunAsync</c> only.</summary>
+    private sealed class StreamRevokedException : Exception
+    {
+    }
 }
+
+/// <summary>
+/// How one stream is kept alive, and whether it may go on: <paramref name="StillAllowed"/> is
+/// asked before every frame, and null for a stream nothing can revoke.
+/// </summary>
+public sealed record SseGuard(TimeSpan KeepAlive, Func<CancellationToken, Task<bool>>? StillAllowed);

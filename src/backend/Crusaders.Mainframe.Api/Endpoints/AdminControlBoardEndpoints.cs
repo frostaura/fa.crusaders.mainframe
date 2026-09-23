@@ -122,8 +122,10 @@ public static class AdminControlBoardEndpoints
             catch (OperationCanceledException) { /* the stream closed */ }
         }, linked.Token);
 
+        // The role is re-asked before every frame, not only here: a demoted admin's open board
+        // must stop, not run until the connection drops. See SseStream.RunAsync's guard.
         await SseStream.RunAsync(
-            ctx, bus, topic, RealtimeSettings.KeepAlive(s),
+            ctx, bus, topic, AdminStreamGuard.For(ctx, RealtimeSettings.KeepAlive(s)),
             async () => await SseStream.WriteEventAsync(ctx, Snapshot(await reader.BuildAsync(ct)), ct),
             ct);
 

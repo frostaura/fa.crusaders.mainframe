@@ -573,8 +573,10 @@ public static class AdminMonitoringEndpoints
         var settings = await settingsAccessor.GetAsync(ct);
         var topic = RealtimeTopic.Monitoring(tenant.TenantId);
 
+        // The role is re-asked before every frame, not only here: a demoted admin's open stream
+        // must stop, not run until the connection drops. See SseStream.RunAsync's guard.
         await SseStream.RunAsync(
-            ctx, bus, topic, RealtimeSettings.KeepAlive(settings),
+            ctx, bus, topic, AdminStreamGuard.For(ctx, RealtimeSettings.KeepAlive(settings)),
             async () => await SseStream.WriteEventAsync(ctx, await OpeningCountsAsync(db, ct), ct),
             ct);
     }
