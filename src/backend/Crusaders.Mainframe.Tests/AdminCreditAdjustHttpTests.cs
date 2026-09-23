@@ -78,13 +78,11 @@ public sealed class AdminCreditAdjustHttpTests
             {
                 TenantId = tenant.Id, UserId = admin.Id, FullName = "Desk Admin",
                 MembershipNumber = $"A-{slug}"[..12], Status = MembershipStatus.Active,
-                MemberClass = MemberClass.Regular,
             },
             new Membership
             {
                 TenantId = tenant.Id, UserId = member.Id, FullName = "Naledi Khoza",
                 MembershipNumber = $"M-{slug}"[..12], Status = MembershipStatus.Active,
-                MemberClass = MemberClass.Regular,
             });
 
         await db.SaveChangesAsync();

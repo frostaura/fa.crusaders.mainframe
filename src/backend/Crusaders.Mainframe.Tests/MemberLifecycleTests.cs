@@ -104,6 +104,37 @@ public class MemberLifecycleTests
     }
 
     /// <summary>
+    /// D2: a <c>member.*</c> event carries the member's active <c>groups</c> (id, name, system
+    /// key), and — for ONE release — a <c>member_class</c> derived from the league group, so a
+    /// club's existing webhook template naming <c>{member_class}</c> does not start failing as a
+    /// missing variable the day the class is removed.
+    /// </summary>
+    [Fact]
+    public async Task A_member_event_carries_the_groups_and_the_deprecated_class_derived_from_them()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var svc = scope.ServiceProvider.GetRequiredService<MemberApprovalService>();
+        var league = await db.Memberships.FirstAsync(m => m.UserId == host.LeaguePlayerUser.Id);
+        var regular = await ActiveMemberAsync(db, host);
+        Drain(host);
+
+        await svc.SuspendAsync(league.Id, host.AdminUser.Id, "Dues unpaid.", default);
+        await svc.SuspendAsync(regular.Id, host.AdminUser.Id, "Dues unpaid.", default);
+        var events = Drain(host).Where(e => e.Type == "member.suspended").ToList();
+
+        var leagueEvent = Assert.Single(events, e => e.SubjectUserId == host.LeaguePlayerUser.Id);
+        Assert.Equal("LeagueOrSenior", leagueEvent.Data["member_class"]);
+        var group = Assert.Single((IEnumerable<Dictionary<string, object?>>)leagueEvent.Data["groups"]!);
+        Assert.Equal(MemberGroupSystemKeys.League, group["system_key"]);
+
+        var regularEvent = Assert.Single(events, e => e.SubjectUserId == host.PlayerUser.Id);
+        Assert.Equal("Regular", regularEvent.Data["member_class"]);
+        Assert.Empty((IEnumerable<Dictionary<string, object?>>)regularEvent.Data["groups"]!);
+    }
+
+    /// <summary>
     /// A suspension is audited, emails the member, and is reversible — the row, the ledger
     /// and the bookings are untouched, which is the whole difference between suspending
     /// somebody and rejecting them.
@@ -247,7 +278,10 @@ public class MemberLifecycleTests
         var created = Assert.IsType<RegistrationResult.Created>(
             await auth.RegisterAsync("newcomer@test.local", "Passw0rd!", "New Comer", "MEM-9001", null, default));
 
-        // Dispatched in the background by AuthService; see StubEmailService.WaitFor.
+        // The admins' copy is an admin notice staged in the registration's own save and mailed
+        // by the outbox (R23), so it arrives when the outbox runs — and not before.
+        Assert.DoesNotContain(host.EmailService.Sent, m => m.To == host.AdminUser.Email);
+        await host.DeliverAdminNoticesAsync();
         Assert.NotNull(await host.EmailService.WaitFor(m => m.To == host.AdminUser.Email && m.Subject.Contains("New membership application")));
         Assert.NotNull(await host.EmailService.WaitFor(m => m.To == "newcomer@test.local"));
 

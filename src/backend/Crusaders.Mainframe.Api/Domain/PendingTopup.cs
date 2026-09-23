@@ -40,8 +40,18 @@ public sealed class PendingTopup : ITenantScoped
     /// </summary>
     public decimal? ConversionRate { get; set; }
 
-    /// <summary>The member class the rate above was quoted for, recorded so a reconciliation can see which tariff applied.</summary>
-    public MemberClass? MemberClass { get; set; }
+    /// <summary>
+    /// The group whose <see cref="MemberGroup.CreditsPerZar"/> the rate above was quoted from, or
+    /// null when it was the tenant's default rate — recorded so a reconciliation can see which
+    /// tariff applied. It replaced the member-class column (D2); a row written before that
+    /// carries the league group's id when it was quoted at the league rate.
+    ///
+    /// <para>
+    /// A reference, not a foreign key: an empty group may be deleted, and a top-up row is
+    /// history that must outlive it. The change record keeps the deleted group's name.
+    /// </para>
+    /// </summary>
+    public Guid? GroupId { get; set; }
 
     public required string IdempotencyKey { get; set; }     // matches the merchantTransactionId
     /// <summary>The gateway's own reference for this attempt. For PayFast this is the

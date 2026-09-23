@@ -305,7 +305,7 @@ public class EmailDesignTests
         // the templates that state real money, so a renderer that simply stopped printing it
         // does not pass this test by rendering nothing.
         Assert.Equal(
-            ["TopUpCancelled", "TopUpConfirmation", "TopUpMismatched", "TopUpNotCompleted"],
+            ["AdminTopUpFailed", "TopUpCancelled", "TopUpConfirmation", "TopUpMismatched", "TopUpNotCompleted"],
             carriesMoney.Distinct().OrderBy(n => n, StringComparer.Ordinal).ToList());
 
         // And the credit figures on the one template that shows both units are stated as

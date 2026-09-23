@@ -86,14 +86,12 @@ public sealed class AdminMemberNotificationHttpTests
         {
             TenantId = tenant.Id, UserId = applicant.Id, FullName = "Ada Lovelace",
             MembershipNumber = $"M-{slug}"[..12], Status = MembershipStatus.PendingApproval,
-            MemberClass = MemberClass.Regular,
         };
         db.Memberships.AddRange(
             new Membership
             {
                 TenantId = tenant.Id, UserId = admin.Id, FullName = "Desk Admin",
                 MembershipNumber = $"A-{slug}"[..12], Status = MembershipStatus.Active,
-                MemberClass = MemberClass.Regular,
             },
             applicantMembership);
 

@@ -20,7 +20,7 @@ namespace Crusaders.Mainframe.Api.Services;
 ///   <item><b>Per-day cap.</b> A member can't have more than <c>member_per_day_max_minutes</c> of
 ///         bookings on a single day (A.4). Same-day relaxation: a slot starting today can still be
 ///         booked even if the member is over their cap, as long as the slot is otherwise empty (B.3).</item>
-///   <item><b>Peak-hours rule.</b> 16:00–19:00 slots are reserved for LeagueOrSenior members until
+///   <item><b>Peak-hours rule.</b> 16:00–19:00 slots are reserved for members with peak priority (their groups', D2) until
 ///         <c>peak_advance_hours_for_regular</c> hours before slot start (A.12). Admins bypass.</item>
 ///   <item><b>Payer override.</b> <see cref="BookedByUserId"/> defaults to the booking user;
 ///         <see cref="PaidByUserId"/> can be overridden at the court via a second identification (B.2).</item>
@@ -90,19 +90,17 @@ public sealed class BookingService
     }
 
     /// <summary>
-    /// The subject of a rule evaluation: who is paying, who is acting, their class and their
-    /// groups for the club day the slot falls on.
+    /// The subject of a rule evaluation: who is paying, who is acting, their peak standing and
+    /// their groups for the club day the slot falls on.
     /// </summary>
     private async Task<RuleSubject> SubjectAsync(
         BookingPayer payer, DateTimeOffset startsAt, TenantSettingsView settings, CancellationToken ct)
     {
-        var membership = await _db.Memberships.AsNoTracking()
-            .FirstOrDefaultAsync(m => m.UserId == payer.UserId, ct);
         var day = ClubClock.DateOf(settings, startsAt).DayOfWeek;
 
         return new RuleSubject(
             payer.UserId, payer.ActorId, payer.ActorIsAdmin,
-            membership?.MemberClass ?? MemberClass.Regular,
+            PeakAccess.Of(await MemberTariffs.ForAsync(_db, payer.UserId, settings, ct)),
             await _rules.GroupsForAsync(payer.UserId, day, settings, ct));
     }
 
@@ -1027,6 +1025,7 @@ public sealed class BookingService
 
         if (overdrawn)
         {
+            await StageOverdraftNoticeAsync(spec, openingBalance, label, ct);
             await _changes.StageAsync(new AdminChange(
                 Action: AdminChangeActions.BookingOverdraftAuthorised,
                 ActorUserId: actorId,
@@ -1044,6 +1043,32 @@ public sealed class BookingService
                     self = actorId == booking.UserId,
                 }), ct);
         }
+    }
+
+    /// <summary>
+    /// Every other admin is told when an admin takes a balance below zero (R23) — staged here,
+    /// beside the change-log row, after the slot race has already been decided, so it flushes in
+    /// the same save as the booking and the debit and commits with them in the payer-lock
+    /// transaction; a save that is refused takes it down with them. The acting admin is not mailed;
+    /// they are looking at the result. The figures are credits and the balance after is the one
+    /// the change record states.
+    /// </summary>
+    private async Task StageOverdraftNoticeAsync(NewBooking spec, decimal openingBalance, string? memberName, CancellationToken ct)
+    {
+        var booking = spec.Row;
+        var actorId = booking.ActorUserId;
+        var actorName = PersonNames.Of(actorId, await PersonNames.ForAsync(_db, [actorId], ct)) ?? "An administrator";
+        var payload = new OverdraftPayload(
+            BookingId: booking.Id,
+            ActorName: actorName,
+            MemberName: memberName ?? "a member",
+            Self: actorId == booking.UserId,
+            CourtName: spec.Court.Name,
+            StartsAtLocal: await StartsAtLocalAsync(booking.StartsAt, ct),
+            AmountCredits: spec.TotalCost,
+            BalanceAfterCredits: openingBalance - spec.TotalCost);
+        AdminNotices.Stage(_db, _tenant.TenantId,
+            AdminNotices.OverdraftAuthorised(booking.Id, actorId, booking.UserId ?? actorId, payload));
     }
 
     /// <summary>
@@ -2791,7 +2816,16 @@ public abstract record BookingResult
     public sealed record TooFarAhead : BookingResult;
     public sealed record SlotTaken : BookingResult;
     public sealed record InsufficientBalance(decimal CurrentCredits, decimal RequiredCredits) : BookingResult;
-    public sealed record PeakHoursLeagueOnly(string PeakStart, string PeakEnd, int RegularAdvanceHours) : BookingResult;
+    /// <summary>
+    /// Blueprint A.12's refusal. Wire code <c>peak_hours_league_only</c>, kept although the
+    /// league class is gone (D2) because refusal codes are a stable contract; the rule is now
+    /// "peak priority", granted by groups.
+    /// </summary>
+    public sealed record PeakHoursPriorityOnly(string PeakStart, string PeakEnd, int RegularAdvanceHours) : BookingResult
+    {
+        /// <summary>The member's groups that do not grant peak priority; empty when they are in none.</summary>
+        public IReadOnlyList<string> WithheldByGroups { get; init; } = [];
+    }
 
     /// <summary>The club is shut for the whole or part of the requested window. Carries that day's hours so the member is told when to come back.</summary>
     public sealed record OutOfHours(string OpensAt, string ClosesAt) : BookingResult;

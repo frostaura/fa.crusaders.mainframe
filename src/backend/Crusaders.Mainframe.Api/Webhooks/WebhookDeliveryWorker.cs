@@ -85,7 +85,8 @@ public sealed class WebhookDeliveryWorker : BackgroundService
             };
             db.WebhookDeliveries.Add(delivery);
 
-            await _sender.AttemptAsync(delivery, endpoint, envelopeJson, ct);
+            var outcome = await _sender.AttemptAsync(delivery, endpoint, envelopeJson, ct);
+            WebhookSender.StageDisabledNotice(db, delivery, endpoint, outcome);
         }
         await db.SaveChangesAsync(ct);
     }

@@ -59,7 +59,8 @@ public static class AdminConfigEndpoints
                 // the database by hand — on a live money system, with no audit trail and
                 // no validation.
                 credits_per_zar_regular = GetDecimal(doc, "credits_per_zar_regular", defaults.CreditsPerZarRegular),
-                credits_per_zar_league = GetDecimal(doc, "credits_per_zar_league", defaults.CreditsPerZarLeague),
+                // credits_per_zar_league is gone from this document: the league rate is the
+                // league GROUP's credits_per_zar now (D2), edited on the Groups screen.
                 topup_block_zar = GetDecimal(doc, "topup_block_zar", defaults.TopupBlockZar),
                 topup_max_zar_per_member = GetDecimal(doc, "topup_max_zar_per_member", defaults.TopupMaxZarPerMember),
                 member_per_day_max_minutes = GetInt(doc, "member_per_day_max_minutes", defaults.MemberPerDayMaxMinutes),
@@ -128,6 +129,14 @@ public static class AdminConfigEndpoints
                 device_error_retention_days = MonitoringSettings.RetentionDays(defaults),
                 device_error_max_open_rows = MonitoringSettings.MaxOpenRows(defaults),
                 device_error_ingest_per_minute = MonitoringSettings.IngestPerMinute(defaults),
+
+                // The admin notifier's six (R23), from the clamped readers for the same reason.
+                fault_spike_count = AdminNotificationSettings.FaultSpikeCount(defaults),
+                fault_spike_minutes = AdminNotificationSettings.FaultSpikeMinutes(defaults),
+                application_reminder_hours = AdminNotificationSettings.ApplicationReminderHours(defaults),
+                admin_notification_retention_days = AdminNotificationSettings.RetentionDays(defaults),
+                topup_failure_cooldown_minutes = AdminNotificationSettings.TopUpFailureCooldownMinutes(defaults),
+                overdraft_cooldown_minutes = AdminNotificationSettings.OverdraftCooldownMinutes(defaults),
 
                 sse_keepalive_seconds = (int)RealtimeSettings.KeepAlive(defaults).TotalSeconds,
                 control_board_resync_seconds = RealtimeSettings.ResyncSeconds(defaults),
@@ -260,7 +269,7 @@ public static class AdminConfigEndpoints
             var realtimeError = ValidateRealtime(req);
             if (realtimeError is not null) return Results.BadRequest(realtimeError);
 
-            var liveError = ValidateLiveSettings(req);
+            var liveError = ValidateLiveSettings(req) ?? ValidateNotifierSettings(req);
             if (liveError is not null) return Results.BadRequest(new { error = liveError });
             var adminError = ValidateAdminSettings(req);
             if (adminError is not null) return Results.BadRequest(new { error = adminError });
@@ -363,6 +372,7 @@ public static class AdminConfigEndpoints
             WriteOptionalDoorSettings(doc, req);
             WriteOptionalBoxSettings(doc, req);
             WriteOptionalLiveSettings(doc, req);
+            WriteOptionalNotifierSettings(doc, req);
             WriteOptionalAdminSettings(doc, req);
             WriteOptionalMemberLimits(doc, req);
             WriteOptionalRealtime(doc, req);
@@ -483,12 +493,19 @@ public static class AdminConfigEndpoints
     /// zero makes every top-up worthless, and a negative one credits the member for
     /// paying. These are the values a form should never be able to submit.
     /// </summary>
+    /// <summary>The refusal for a PUT that still carries the league rate (D2).</summary>
+    internal const string CreditsPerZarLeagueMoved = "credits_per_zar_league_moved_to_groups";
+
     private static string? ValidateEconomics(UpdateSettingsRequest req)
     {
         if (ValidateSlicePrice(req.SlicePriceCredits) is { } priceError) return priceError;
 
         if (req.CreditsPerZarRegular is <= 0 or > 1000) return "credits_per_zar_regular_out_of_range";
-        if (req.CreditsPerZarLeague is <= 0 or > 1000) return "credits_per_zar_league_out_of_range";
+        // D2: the league rate moved onto the league group. Refused rather than ignored — an
+        // admin who typed a new league rate into an old settings screen and was told "saved"
+        // would believe the club was charging it, which is the silent-write failure this
+        // endpoint's whole omitted-means-unchanged contract exists to prevent.
+        if (req.CreditsPerZarLeague is not null) return CreditsPerZarLeagueMoved;
         if (req.TopupBlockZar is <= 0 or > 100000) return "topup_block_zar_out_of_range";
         if (req.TopupMaxZarPerMember is not null && req.TopupBlockZar is not null
             && req.TopupMaxZarPerMember < req.TopupBlockZar)
@@ -757,6 +774,39 @@ public static class AdminConfigEndpoints
         if (OutOfRange(req.RealtimePollSecondsControlBoard, RealtimeSettings.MinPollSecondsControlBoard, RealtimeSettings.MaxPollSecondsControlBoard))
             return "realtime_poll_control_board_out_of_range";
         return null;
+    }
+
+    /// <summary>
+    /// Bounds on the admin notifier's six (R23), from <see cref="AdminNotificationSettings"/>'
+    /// own constants so the number an admin is refused at and the number the notifier clamps to
+    /// cannot drift apart.
+    /// </summary>
+    private static string? ValidateNotifierSettings(UpdateSettingsRequest req)
+    {
+        if (OutOfRange(req.FaultSpikeCount, AdminNotificationSettings.MinFaultSpikeCount, AdminNotificationSettings.MaxFaultSpikeCount))
+            return "fault_spike_count_out_of_range";
+        if (OutOfRange(req.FaultSpikeMinutes, AdminNotificationSettings.MinFaultSpikeMinutes, AdminNotificationSettings.MaxFaultSpikeMinutes))
+            return "fault_spike_minutes_out_of_range";
+        if (OutOfRange(req.ApplicationReminderHours, AdminNotificationSettings.MinApplicationReminderHours, AdminNotificationSettings.MaxApplicationReminderHours))
+            return "application_reminder_hours_out_of_range";
+        if (OutOfRange(req.AdminNotificationRetentionDays, AdminNotificationSettings.MinRetentionDays, AdminNotificationSettings.MaxRetentionDays))
+            return "admin_notification_retention_days_out_of_range";
+        if (OutOfRange(req.TopUpFailureCooldownMinutes, AdminNotificationSettings.MinTopUpFailureCooldownMinutes, AdminNotificationSettings.MaxTopUpFailureCooldownMinutes))
+            return "topup_failure_cooldown_minutes_out_of_range";
+        if (OutOfRange(req.OverdraftCooldownMinutes, AdminNotificationSettings.MinOverdraftCooldownMinutes, AdminNotificationSettings.MaxOverdraftCooldownMinutes))
+            return "overdraft_cooldown_minutes_out_of_range";
+        return null;
+    }
+
+    /// <summary>Same omitted-means-unchanged rule as the economics keys, for the notifier's six.</summary>
+    private static void WriteOptionalNotifierSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
+    {
+        if (req.FaultSpikeCount is { } count) doc["fault_spike_count"] = ToElement(count);
+        if (req.FaultSpikeMinutes is { } minutes) doc["fault_spike_minutes"] = ToElement(minutes);
+        if (req.ApplicationReminderHours is { } hours) doc["application_reminder_hours"] = ToElement(hours);
+        if (req.AdminNotificationRetentionDays is { } days) doc["admin_notification_retention_days"] = ToElement(days);
+        if (req.TopUpFailureCooldownMinutes is { } topUp) doc["topup_failure_cooldown_minutes"] = ToElement(topUp);
+        if (req.OverdraftCooldownMinutes is { } overdraft) doc["overdraft_cooldown_minutes"] = ToElement(overdraft);
     }
 
     /// <summary>
@@ -1062,7 +1112,6 @@ public static class AdminConfigEndpoints
     private static void WriteOptionalEconomics(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
     {
         if (req.CreditsPerZarRegular is not null) doc["credits_per_zar_regular"] = ToElement(req.CreditsPerZarRegular);
-        if (req.CreditsPerZarLeague is not null) doc["credits_per_zar_league"] = ToElement(req.CreditsPerZarLeague);
         if (req.TopupBlockZar is not null) doc["topup_block_zar"] = ToElement(req.TopupBlockZar);
         if (req.TopupMaxZarPerMember is not null) doc["topup_max_zar_per_member"] = ToElement(req.TopupMaxZarPerMember);
         if (req.MemberPerDayMaxMinutes is not null) doc["member_per_day_max_minutes"] = ToElement(req.MemberPerDayMaxMinutes);
@@ -1150,6 +1199,11 @@ public sealed record UpdateSettingsRequest(
     // screen that edits only booking settings cannot revert an economics change made from
     // another one.
     decimal? CreditsPerZarRegular = null,
+    /// <summary>
+    /// Refused with <c>credits_per_zar_league_moved_to_groups</c> whenever it is sent: the
+    /// league rate is the league group's <c>credits_per_zar</c> now (D2). Still bound so an old
+    /// screen that sends it is told, rather than silently ignored.
+    /// </summary>
     decimal? CreditsPerZarLeague = null,
     decimal? TopupBlockZar = null,
     decimal? TopupMaxZarPerMember = null,
@@ -1242,6 +1296,15 @@ public sealed record UpdateSettingsRequest(
     [property: JsonPropertyName("device_error_retention_days")] int? DeviceErrorRetentionDays = null,
     [property: JsonPropertyName("device_error_max_open_rows")] int? DeviceErrorMaxOpenRows = null,
     [property: JsonPropertyName("device_error_ingest_per_minute")] int? DeviceErrorIngestPerMinute = null,
+
+    // The admin notifier's six (R23). Snake-case only, for the reason the block above gives:
+    // nothing has ever sent them under another spelling.
+    [property: JsonPropertyName("fault_spike_count")] int? FaultSpikeCount = null,
+    [property: JsonPropertyName("fault_spike_minutes")] int? FaultSpikeMinutes = null,
+    [property: JsonPropertyName("application_reminder_hours")] int? ApplicationReminderHours = null,
+    [property: JsonPropertyName("admin_notification_retention_days")] int? AdminNotificationRetentionDays = null,
+    [property: JsonPropertyName("topup_failure_cooldown_minutes")] int? TopUpFailureCooldownMinutes = null,
+    [property: JsonPropertyName("overdraft_cooldown_minutes")] int? OverdraftCooldownMinutes = null,
 
     [property: JsonPropertyName("control_board_resync_seconds")] int? ControlBoardResyncSeconds = null,
     [property: JsonPropertyName("control_board_stale_multiplier")] int? ControlBoardStaleMultiplier = null,

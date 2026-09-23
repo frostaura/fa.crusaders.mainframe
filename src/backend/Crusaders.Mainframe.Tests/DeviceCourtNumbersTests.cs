@@ -120,7 +120,6 @@ public sealed class DeviceCourtNumbersTests
             FullName = "Device Admin",
             MembershipNumber = slug,
             Status = MembershipStatus.Active,
-            MemberClass = MemberClass.Regular,
         });
         // The club's courts: a court list is checked against them on every save, so a
         // typo cannot register a relay that can never light.

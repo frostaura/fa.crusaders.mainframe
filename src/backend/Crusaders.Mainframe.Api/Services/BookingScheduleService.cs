@@ -261,6 +261,7 @@ public sealed class BookingScheduleService
 
         var written = 0;
         var collisions = 0;
+        var clashDates = new List<DateOnly>();
         var cap = ScheduleSettings.MaxRowsPerChange(view);
         var reached = schedule.MaterialisedThrough;
 
@@ -278,11 +279,23 @@ public sealed class BookingScheduleService
             // court was already sold is a night the club has not cleared, and reporting it as
             // materialised would hide exactly the thing an admin has to act on.
             if (clashed == 0) reached = occurrence.EndsAt.ToUniversalTime();
+            else clashDates.Add(occurrence.Date);
         }
 
         schedule.MaterialisedThrough = reached;
         schedule.UpdatedAt = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync(ct);
+
+        // The admins hear about a clash (R23). Raised on its own save rather than staged into the
+        // one above: a clash is the ABSENCE of a write, so there is no event row to commit it with,
+        // and this path runs on every sweep while the clash stands — the dedupe key (the schedule
+        // and its first clash) is what makes that one notice, and a collision on it must never be
+        // able to fail the save that advances the horizon.
+        if (clashDates.Count > 0)
+        {
+            await AdminNotices.RaiseAsync(_db, _tenant.TenantId,
+                AdminNotices.ScheduleConflict(schedule, clashDates, collisions), DateTimeOffset.UtcNow, ct);
+        }
 
         return new MaterialisationOutcome(written, reached, collisions);
     }

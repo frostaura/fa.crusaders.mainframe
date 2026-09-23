@@ -40,6 +40,10 @@ internal static class MemberGroupChanges
             ["max_slots_per_day"] = group.MaxSlotsPerDay,
             ["max_minutes_per_day"] = group.MaxMinutesPerDay,
             ["advance_booking_days"] = group.AdvanceBookingDays,
+            // D2: a group's top-up rate and peak priority move money and court time for every
+            // member in it, so they are recorded like its price.
+            ["credits_per_zar"] = group.CreditsPerZar,
+            ["peak_priority"] = group.PeakPriority,
         };
 
         if (windows is not null)

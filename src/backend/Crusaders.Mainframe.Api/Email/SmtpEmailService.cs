@@ -68,7 +68,7 @@ public sealed class SmtpEmailService : IEmailService
             // deployment do not both arrive from the same sender. SMTP_FROM_NAME stays the
             // fallback for anything with no tenant behind it.
             From = new MailAddress(from, NonEmpty(message.FromName) ?? fromName),
-            Subject = message.Subject,
+            Subject = EmailChrome.SubjectLine(message.Subject),
             Body = hasPlain ? message.PlainBody! : message.HtmlBody,
             IsBodyHtml = !hasPlain,
             // A real header, not a loud subject. See EmailMessage.HighPriority.

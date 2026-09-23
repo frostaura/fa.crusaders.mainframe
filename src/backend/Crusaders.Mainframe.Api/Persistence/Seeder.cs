@@ -54,7 +54,6 @@ public static class Seeder
                   "penalty_window_minutes": 15,
                   "advance_booking_days": 14,
                   "credits_per_zar_regular": 1.6,
-                  "credits_per_zar_league": 2.4,
                   "topup_block_zar": 100.00,
                   "topup_max_zar_per_member": 1000.00,
                   "member_per_day_max_minutes": 60,
@@ -146,13 +145,14 @@ public static class Seeder
         await SeedSampleMembersAndBookingsAsync(db, tenant.Id, admin.Id, logger);
     }
 
-    private static readonly (string FullName, string MembershipNumber, string Email, string Hex, MemberClass Class)[] SampleMembers =
+    /// <summary>The sample club. <c>League</c> puts the member in the league group (D2 — it was their class).</summary>
+    private static readonly (string FullName, string MembershipNumber, string Email, string Hex, bool League)[] SampleMembers =
     {
-        ("Naledi Khoza",       "MEM-1001", "naledi@sample.local", "#7AB07A", MemberClass.Regular),
-        ("Liam O'Connor",      "MEM-1002", "liam@sample.local",   "#5B8DEF", MemberClass.LeagueOrSenior),
-        ("Aisha Patel",        "MEM-1003", "aisha@sample.local",  "#E07A7A", MemberClass.Regular),
-        ("Sipho Dlamini",      "MEM-1004", "sipho@sample.local",  "#F2B441", MemberClass.LeagueOrSenior),
-        ("Mia van der Merwe",  "MEM-1005", "mia@sample.local",    "#A07AC0", MemberClass.Regular),
+        ("Naledi Khoza",       "MEM-1001", "naledi@sample.local", "#7AB07A", false),
+        ("Liam O'Connor",      "MEM-1002", "liam@sample.local",   "#5B8DEF", true),
+        ("Aisha Patel",        "MEM-1003", "aisha@sample.local",  "#E07A7A", false),
+        ("Sipho Dlamini",      "MEM-1004", "sipho@sample.local",  "#F2B441", true),
+        ("Mia van der Merwe",  "MEM-1005", "mia@sample.local",    "#A07AC0", false),
     };
 
     private static async Task SeedSampleMembersAndBookingsAsync(
@@ -168,6 +168,12 @@ public static class Seeder
 
         var courts = await db.Courts.OrderBy(c => c.CourtNumber).ToListAsync();
         if (courts.Count == 0) return;
+
+        // The league group the seeder guarantees (MemberGroupSeeder), by its system key.
+        var leagueGroupId = await db.MemberGroups
+            .Where(g => g.SystemKey == Domain.MemberGroupSystemKeys.League)
+            .Select(g => (Guid?)g.Id)
+            .FirstOrDefaultAsync();
 
         // Pre-create each missing user + membership + opening top-up.
         var createdUsers = new Dictionary<string, Guid>();
@@ -192,8 +198,17 @@ public static class Seeder
                 MembershipNumber = s.MembershipNumber,
                 PhotoUrl = BuildAvatarSvg(s.FullName, s.Hex),
                 Status = Domain.MembershipStatus.Active,
-                MemberClass = s.Class,
             });
+            if (s.League && leagueGroupId is { } leagueId)
+            {
+                db.MemberGroupMembers.Add(new Domain.MemberGroupMember
+                {
+                    TenantId = tenantId,
+                    GroupId = leagueId,
+                    UserId = user.Id,
+                    AddedByUserId = adminUserId,
+                });
+            }
             // ZAR 500 opening balance so bookings have funds.
             db.LedgerEntries.Add(new Domain.LedgerEntry
             {

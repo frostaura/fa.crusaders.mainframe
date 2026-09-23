@@ -23,6 +23,11 @@ public sealed record AdminChangeCursor(DateTimeOffset At, Guid Id)
             var parts = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(encoded)).Split(':');
             if (parts.Length != 2) return null;
             if (!long.TryParse(parts[0], out var ticks) || !Guid.TryParseExact(parts[1], "N", out var id)) return null;
+
+            // A well-formed number is not a representable instant. Negative or past year 9999
+            // made the DateTimeOffset constructor throw ArgumentOutOfRangeException, which the
+            // catch below did not name — a crafted cursor was a 500, not cursor_invalid.
+            if (ticks < DateTimeOffset.MinValue.UtcTicks || ticks > DateTimeOffset.MaxValue.UtcTicks) return null;
             return new AdminChangeCursor(new DateTimeOffset(ticks, TimeSpan.Zero), id);
         }
         catch (FormatException)

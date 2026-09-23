@@ -36,7 +36,9 @@ public sealed class TenantSettingsAccessor
 
         // Phase 8 additions per client blueprint Rev 2.
         decimal creditsPerZarRegular = TryDecimal(root, "credits_per_zar_regular", 1.6m);    // A.8 — R100 → 160 credits.
-        decimal creditsPerZarLeague = TryDecimal(root, "credits_per_zar_league", 2.4m);      // A.8 — R100 → 240 credits.
+        // credits_per_zar_league is no longer read: the league rate lives on the league group
+        // (D2, migration GroupsReplaceClass), and the regular rate is the default for a member
+        // whose groups set none.
         decimal topupBlockZar = TryDecimal(root, "topup_block_zar", 100m);                   // A.3 — block of R100.
         decimal topupMaxZarPerMember = TryDecimal(root, "topup_max_zar_per_member", 1000m);  // A.3 — R1000 cap.
         int memberPerDayMaxMinutes = TryInt(root, "member_per_day_max_minutes", 60);         // A.4 / B.3 — 60 minutes per day per member.
@@ -61,7 +63,7 @@ public sealed class TenantSettingsAccessor
 
         return new TenantSettingsView(
             sliceMinutes, slicePrice, penaltyPct, graceMin, penaltyMin, advanceDays, tz,
-            creditsPerZarRegular, creditsPerZarLeague,
+            creditsPerZarRegular,
             topupBlockZar, topupMaxZarPerMember,
             memberPerDayMaxMinutes,
             peakHours, peakAdvanceHoursForRegular,
@@ -128,6 +130,19 @@ public sealed class TenantSettingsAccessor
             DeviceErrorRetentionDays = TryInt(root, "device_error_retention_days", MonitoringSettings.DefaultRetentionDays),
             DeviceErrorMaxOpenRows = TryInt(root, "device_error_max_open_rows", MonitoringSettings.DefaultMaxOpenRows),
             DeviceErrorIngestPerMinute = TryInt(root, "device_error_ingest_per_minute", MonitoringSettings.DefaultIngestPerMinute),
+
+            // The admin notifier's six (R23). Raw here, bounded by AdminNotificationSettings at
+            // each reader, on the split every block above keeps.
+            FaultSpikeCount = TryInt(root, "fault_spike_count", AdminNotificationSettings.DefaultFaultSpikeCount),
+            FaultSpikeMinutes = TryInt(root, "fault_spike_minutes", AdminNotificationSettings.DefaultFaultSpikeMinutes),
+            ApplicationReminderHours = TryInt(
+                root, "application_reminder_hours", AdminNotificationSettings.DefaultApplicationReminderHours),
+            AdminNotificationRetentionDays = TryInt(
+                root, "admin_notification_retention_days", AdminNotificationSettings.DefaultRetentionDays),
+            TopUpFailureCooldownMinutes = TryInt(
+                root, "topup_failure_cooldown_minutes", AdminNotificationSettings.DefaultTopUpFailureCooldownMinutes),
+            OverdraftCooldownMinutes = TryInt(
+                root, "overdraft_cooldown_minutes", AdminNotificationSettings.DefaultOverdraftCooldownMinutes),
 
             SseKeepaliveSeconds = TryInt(root, "sse_keepalive_seconds", RealtimeSettings.DefaultKeepaliveSeconds),
             ControlBoardResyncSeconds = TryInt(root, "control_board_resync_seconds", RealtimeSettings.DefaultResyncSeconds),
@@ -251,7 +266,6 @@ public sealed record TenantSettingsView(
     int AdvanceBookingDays,
     string Timezone,
     decimal CreditsPerZarRegular,
-    decimal CreditsPerZarLeague,
     decimal TopupBlockZar,
     decimal TopupMaxZarPerMember,
     int MemberPerDayMaxMinutes,
@@ -521,6 +535,26 @@ public sealed record TenantSettingsView(
     /// <summary>Reports one board may record per minute. Read via <see cref="MonitoringSettings.IngestPerMinute"/>.</summary>
     public int DeviceErrorIngestPerMinute { get; init; } = MonitoringSettings.DefaultIngestPerMinute;
 
+    // ---- The admin notifier's six (R23) ----
+
+    /// <summary>Open faults inside the window that make a spike. Read via <see cref="AdminNotificationSettings.FaultSpikeCount"/>.</summary>
+    public int FaultSpikeCount { get; init; } = AdminNotificationSettings.DefaultFaultSpikeCount;
+
+    /// <summary>The fault-spike window, minutes. Read via <see cref="AdminNotificationSettings.FaultSpikeMinutes"/>.</summary>
+    public int FaultSpikeMinutes { get; init; } = AdminNotificationSettings.DefaultFaultSpikeMinutes;
+
+    /// <summary>Hours an application may wait before the admins are reminded. Read via <see cref="AdminNotificationSettings.ApplicationReminderHours"/>.</summary>
+    public int ApplicationReminderHours { get; init; } = AdminNotificationSettings.DefaultApplicationReminderHours;
+
+    /// <summary>Days a finished admin notice stays on the feed. Read via <see cref="AdminNotificationSettings.RetentionDays"/>.</summary>
+    public int AdminNotificationRetentionDays { get; init; } = AdminNotificationSettings.DefaultRetentionDays;
+
+    /// <summary>Minutes inside which top-up failures of one reason are one mail. Read via <see cref="AdminNotificationSettings.TopUpFailureCooldown"/>.</summary>
+    public int TopUpFailureCooldownMinutes { get; init; } = AdminNotificationSettings.DefaultTopUpFailureCooldownMinutes;
+
+    /// <summary>Minutes inside which one admin overdrawing one member is one mail. Read via <see cref="AdminNotificationSettings.OverdraftCooldown"/>.</summary>
+    public int OverdraftCooldownMinutes { get; init; } = AdminNotificationSettings.DefaultOverdraftCooldownMinutes;
+
     // ---- The live streams' seven numbers ----
 
     /// <summary>Seconds of quiet before a stream writes a <c>ping</c>. Read via <see cref="RealtimeSettings.KeepAlive"/>.</summary>
@@ -571,9 +605,16 @@ public sealed record TenantSettingsView(
     public bool WalkUpHonoursDayCap { get; init; }
 
     /// <summary>
-    /// Whether member groups (GOAL item 3) are consulted at all. On by default and harmless
-    /// there, because the seeded groups are unrestricted and inheriting: a club that never
-    /// opens the groups screen behaves exactly as it does today.
+    /// Whether member groups' BOOKING RESTRICTIONS (GOAL item 3 — windows, prices, caps) are
+    /// consulted. On by default and harmless there, because the seeded groups are unrestricted
+    /// and inheriting: a club that never opens the groups screen behaves exactly as it does today.
+    ///
+    /// <para>
+    /// <b>It does not switch off a group's tariff</b> — its top-up rate and peak priority, the
+    /// two things the member class carried before D2. No switch ever turned the class off, and a
+    /// club that disabled restrictions must not silently move every league member to the regular
+    /// rate. See <see cref="MemberTariffs"/>.
+    /// </para>
     /// </summary>
     public bool MemberGroupsEnabled { get; init; } = true;
 
@@ -610,10 +651,6 @@ public sealed record TenantSettingsView(
     /// </summary>
     public (int OpenMinute, int CloseMinute) HoursFor(DayOfWeek day)
         => OperatingHours.For(day) ?? (DayStartMinute, DayEndMinute);
-
-    /// <summary>Returns credits-per-rand for a given member class. Defaults to <see cref="CreditsPerZarRegular"/> if unknown.</summary>
-    public decimal ConversionRateFor(Crusaders.Mainframe.Api.Domain.MemberClass cls)
-        => cls == Crusaders.Mainframe.Api.Domain.MemberClass.LeagueOrSenior ? CreditsPerZarLeague : CreditsPerZarRegular;
 
     /// <summary>
     /// The club's peak window, as the booking rule will actually apply it.

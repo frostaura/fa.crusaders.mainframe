@@ -13,10 +13,10 @@ the current economics and supersedes anything older. **It is the customer's own 
 internal specs on economics** — a conflict is resolved in the blueprint's favour or escalated, never
 decided in the repo. Line-by-line reconciliation lives in `docs/specs/client-blueprint-deltas.md`.
 
-- **Credits are the unit of account, not rand.** R100 buys **160 credits (Regular)** or **240
-  (League or 65+)**. *Why:* the club wanted class-based value without class-based pricing visible on
+- **Credits are the unit of account, not rand.** R100 buys **160 credits (regular rate)** or **240
+  (the league group's rate)**. *Why:* the club wanted class-based value without class-based pricing visible on
   the court. ZAR survives only on `PendingTopup` for reconciliation.
-- **Two member classes**, `Regular` and `LeagueOrSenior`, assigned by an admin at approval.
+- **No member classes since D2 (2026-09-23)** — groups carry rate and peak: [`decisions-groups.md`](decisions-groups.md).
 - **Charge at booking, not at lights-on.** A booking debits the full slot cost immediately; a
   no-show keeps a configurable penalty and refunds the rest. *Why:* it collapses hold-then-charge
   into one movement and makes a lost-slot race unable to leave a member paying for a court they
@@ -27,8 +27,8 @@ decided in the repo. Line-by-line reconciliation lives in `docs/specs/client-blu
 - **15-minute slices** (Crusaders moved 30 → 15) · **2-week booking horizon** · **1 hour per member
   per day**, relaxed same-day when courts are free · **top-ups in R100 blocks, R1000 cap per
   member**, admin credit unlimited · **unfunded accounts cannot book** (402).
-- **Peak-hours league exclusivity 16:00–19:00.** A Regular member takes a peak slot only inside the
-  last hour before start and only if still empty; admins bypass.
+- **Peak-hours exclusivity 16:00–19:00.** A member without peak priority takes a peak slot only
+  inside the last hour before start and only if still empty; admins bypass.
 - **At-court payer override.** Another identified player presses "I'll pay"; the booking carries
   `booked_by_user_id` and `paid_by_user_id`, both audit-logged and emailed.
 - **Identification is biometric + PIN + code**, stated goal "do away with cards". Face recognition

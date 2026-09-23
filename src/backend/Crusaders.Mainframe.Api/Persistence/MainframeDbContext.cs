@@ -78,6 +78,9 @@ public class MainframeDbContext : DbContext
     /// <summary>One row per person who has changed a default. See <see cref="UserPreferences"/>.</summary>
     public DbSet<UserPreferences> UserPreferences => Set<UserPreferences>();
 
+    /// <summary>The admin notice outbox (R23). See <see cref="AdminNotification"/>.</summary>
+    public DbSet<AdminNotification> AdminNotifications => Set<AdminNotification>();
+
     /// <summary>
     /// Builds the model, including the global query filter on every tenant-scoped entity.
     /// </summary>
@@ -145,7 +148,6 @@ public class MainframeDbContext : DbContext
             e.Property(m => m.MembershipNumber).HasMaxLength(64).IsRequired();
             e.Property(m => m.PhotoUrl).HasMaxLength(1024);
             e.Property(m => m.Status).HasConversion<int>();
-            e.Property(m => m.MemberClass).HasConversion<int>().HasDefaultValue(MemberClass.Regular);
             e.HasQueryFilter(m => m.TenantId == _tenant.TenantId);
         });
 
@@ -165,6 +167,7 @@ public class MainframeDbContext : DbContext
         ConfigureCourtLightState(modelBuilder);
         ConfigureDeviceErrors(modelBuilder);
         ConfigureUserPreferences(modelBuilder);
+        ConfigureAdminNotifications(modelBuilder);
 
         modelBuilder.Entity<Court>(e =>
         {
@@ -278,7 +281,6 @@ public class MainframeDbContext : DbContext
             // Same precision as ledger_entries.ConversionRate — the two hold the same number
             // and a narrower column here would silently round the rate the ledger then quotes.
             e.Property(p => p.ConversionRate).HasColumnType("numeric(8,4)");
-            e.Property(p => p.MemberClass).HasConversion<int?>();
             e.Property(p => p.IdempotencyKey).HasMaxLength(64).IsRequired();
             e.Property(p => p.GatewayCheckoutId).HasMaxLength(128);
             e.Property(p => p.ExternalReference).HasMaxLength(255);
@@ -307,6 +309,19 @@ public class MainframeDbContext : DbContext
             // and a narrower column here would round a price the ledger then quotes.
             e.Property(g => g.FlatSlicePriceCredits).HasColumnType("numeric(10,2)");
             e.HasIndex(g => new { g.TenantId, g.Status });
+            // Same precision as ledger_entries.ConversionRate and pending_topups.ConversionRate:
+            // the rate is copied onto both verbatim, so a narrower column here would round the offer.
+            e.Property(g => g.CreditsPerZar).HasColumnType("numeric(8,4)");
+            e.Property(g => g.SystemKey).HasMaxLength(32);
+            // One league group per club: the deprecated member_class field, the seeder and the
+            // migration all find it by this key, so two of them would be two answers.
+            e.HasIndex(g => new { g.TenantId, g.SystemKey })
+                .IsUnique().HasFilter("\"SystemKey\" IS NOT NULL");
+            // A top-up rate of zero would take a member's money and credit nothing; the API
+            // refuses it and the database has the last word, as it does on the price (D2-B06).
+            e.ToTable(t => t.HasCheckConstraint(
+                "ck_member_groups_credits_per_zar",
+                "\"CreditsPerZar\" IS NULL OR (\"CreditsPerZar\" > 0 AND \"CreditsPerZar\" <= 1000)"));
             // The database is the last place a nonsense price can be refused, which is the whole
             // lesson of D2-B06: the settings PUT was not the only way a negative one got in.
             e.ToTable(t => t.HasCheckConstraint(
@@ -373,6 +388,45 @@ public class MainframeDbContext : DbContext
             e.ToTable(t => t.HasCheckConstraint(
                 "ck_user_preferences_theme", "\"Theme\" IN ('system', 'light', 'dark')"));
             e.HasQueryFilter(p => p.TenantId == _tenant.TenantId);
+        });
+    }
+
+    /// <summary>
+    /// The admin notice outbox, lifted out of <c>OnModelCreating</c> for the 200-line reason.
+    ///
+    /// <para>
+    /// <b>Four indexes, one per reader.</b> The dedupe key is the outbox's whole idempotency
+    /// promise, so it is unique per club and enforced here rather than checked. The dispatcher's
+    /// claim reads only pending rows by due time, across every club, so its index is partial on
+    /// the pending state and carries no tenant. The feed pages one club newest first. And a
+    /// cooldown asks "was one of these mailed lately" per kind and scope.
+    /// </para>
+    /// </summary>
+    private void ConfigureAdminNotifications(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AdminNotification>(e =>
+        {
+            e.ToTable("admin_notifications", t =>
+            {
+                t.HasCheckConstraint("ck_admin_notifications_state", "\"State\" BETWEEN 0 AND 3");
+                t.HasCheckConstraint("ck_admin_notifications_attempts", "\"Attempts\" >= 0");
+            });
+            e.HasKey(n => n.Id);
+            e.Property(n => n.Kind).HasMaxLength(AdminNotification.KindMaxLength).IsRequired();
+            e.Property(n => n.DedupeKey).HasMaxLength(AdminNotification.DedupeKeyMaxLength).IsRequired();
+            e.Property(n => n.PayloadJson).HasColumnType("jsonb").IsRequired().HasDefaultValueSql("'{}'::jsonb");
+            e.Property(n => n.Headline).HasMaxLength(AdminNotification.HeadlineMaxLength).IsRequired();
+            e.Property(n => n.Link).HasMaxLength(AdminNotification.LinkMaxLength);
+            e.Property(n => n.CooldownScope).HasMaxLength(AdminNotification.CooldownScopeMaxLength);
+            e.Property(n => n.LastError).HasMaxLength(AdminNotification.LastErrorMaxLength);
+            e.Property(n => n.DeliveredToJson).HasColumnType("jsonb").IsRequired().HasDefaultValueSql("'[]'::jsonb");
+            e.Property(n => n.State).HasConversion<int>();
+
+            e.HasIndex(n => new { n.TenantId, n.DedupeKey }).IsUnique();
+            e.HasIndex(n => new { n.TenantId, n.CreatedAt, n.Id });
+            e.HasIndex(n => new { n.TenantId, n.Kind, n.CooldownScope, n.CreatedAt });
+            e.HasIndex(n => n.DueAt).HasFilter("\"State\" = 0");
+            e.HasQueryFilter(n => n.TenantId == _tenant.TenantId);
         });
     }
 

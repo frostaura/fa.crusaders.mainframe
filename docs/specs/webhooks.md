@@ -97,13 +97,28 @@ All payloads are JSON, structured:
 }
 ```
 
+**Groups replaced the member class (D2, 2026-09-23).** Two payloads carried `member_class`:
+
+- `member.approved` / `member.rejected` / `member.suspended` / `member.reactivated` — `data` now carries
+  `groups`: an array of the member's ACTIVE groups, `[{"id": "<uuid>", "name": "League members", "system_key": "league"}]`
+  (`system_key` is null for any group an admin made).
+- `credit.topped_up` — `data` now carries `rate_group_id` (the group whose rate was locked at checkout;
+  null for the club's regular rate) and the same `groups` array.
+
+Both keep **`member_class` for ONE release, deprecated**: `"LeagueOrSenior"` when the member is in the
+league group (for `credit.topped_up`: when the LOCKED rate group is the league group), otherwise
+`"Regular"`. It is kept so a URL template naming `{member_class}` does not start failing as a missing
+variable — a config error, never retried — the day the class is removed. `groups` is an array and is
+not flattened, so a URL template cannot name it; a body consumer reads it. Remove `member_class` in the
+release after the Groups page ships.
+
 (Exact per-event payloads documented in code via JSON Schema; out of spec scope to enumerate every one here.)
 
 ## Delivery semantics
 - **At-least-once.** Receivers must be idempotent on `id`.
 - **Signed.** `X-Crusaders-Signature: sha256=<hex>` header — HMAC-SHA256 of the raw body using the endpoint's secret.
 - **Timestamped.** `X-Crusaders-Timestamp: <unix-seconds>` — receivers should reject events older than 5 minutes to mitigate replay.
-- **Retry policy.** On any non-2xx response (or timeout >10s): retry with exponential backoff at 1m, 5m, 30m, 2h, 12h, 24h. After 6 failures the endpoint is auto-disabled and the owner is emailed. Driven by `WebhookRetryWorker`, which sweeps due deliveries every 30s in batches of 50. A blocked destination is exempt and is abandoned on the first attempt.
+- **Retry policy.** On any non-2xx response (or timeout >10s): retry with exponential backoff at 1m, 5m, 30m, 2h, 12h, 24h. After 6 failures the endpoint is auto-disabled and the owner is emailed. Driven by `WebhookRetryWorker`, which sweeps due deliveries every 30s in batches of 50. A blocked destination is exempt and is abandoned on the first attempt — and is disabled on that attempt, with the same email. **For a club endpoint the owner is the club, so the email is the `webhook.auto_disabled` admin notice to every administrator** (R23, non-optional), staged in the same save as the disable and naming the destination by scheme and host only. **A member-registered endpoint's owner is not yet emailed** — that mail is still owed.
 - **Per-endpoint queue.** Slow / failing endpoints don't block others. Each endpoint has its own delivery worker.
 - **Retention.** Each event keeps its delivery log (status code, response time, retry count) for 30 days, viewable in admin UI.
 

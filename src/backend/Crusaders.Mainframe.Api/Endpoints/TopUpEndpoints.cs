@@ -32,7 +32,7 @@ public static partial class TopUpEndpoints
         {
             var s = await settings.GetAsync(ct);
             var userId = ctx.User.Id() ?? Guid.Empty;
-            var memberClass = await MemberClassOfAsync(db, userId, ct);
+            var tariff = await MemberTariffs.ForAsync(db, userId, s, ct);
 
             // What this member has already put in, so the screen can say "R200 of your R1000
             // left" instead of offering an amount the POST is about to refuse. The cap is per
@@ -47,8 +47,12 @@ public static partial class TopUpEndpoints
                 already_zar = already,
                 remaining_zar = Math.Max(s.TopupMaxZarPerMember - already, 0m),
                 presets_zar = Presets(s.TopupBlockZar, s.TopupMaxZarPerMember),
-                conversion_rate = s.ConversionRateFor(memberClass),
-                member_class = memberClass.ToString(),
+                conversion_rate = tariff.TopUpRate,
+                // D2: the group the rate comes from, or null for the club's default rate — so
+                // the screen can say "League rate" in the club's own words.
+                rate_group = RateGroupWire(tariff),
+                // Deprecated for one release; derived from the league group. See MemberTariff.
+                member_class = tariff.LegacyMemberClass,
             });
         });
 
@@ -88,11 +92,13 @@ public static partial class TopUpEndpoints
             // See PendingTopup.ConversionRate: settling at the live rate meant an admin
             // editing credits_per_zar_* while a member sat on PayFast's card page changed
             // what that member got for money already paid.
-            var memberClass = await MemberClassOfAsync(db, userId, ct);
-            var rate = s.ConversionRateFor(memberClass);
+            // D2: the rate is the member's GROUPS' (the lowest any of them sets, else the club
+            // default), and the group it came from is locked beside it.
+            var tariff = await MemberTariffs.ForAsync(db, userId, s, ct);
+            var rate = tariff.TopUpRate;
 
             // ...and the offer the member is looking at has to still be this one.
-            if (RefuseStaleQuote(req.QuotedConversionRate, rate, req.AmountZar, memberClass) is { } stale)
+            if (RefuseStaleQuote(req.QuotedConversionRate, req.AmountZar, tariff) is { } stale)
                 return stale;
 
             var pending = new PendingTopup
@@ -101,7 +107,7 @@ public static partial class TopUpEndpoints
                 UserId = userId,
                 AmountZar = req.AmountZar,
                 ConversionRate = rate,
-                MemberClass = memberClass,
+                GroupId = tariff.RateGroup?.Id,
                 IdempotencyKey = $"tu_{Guid.NewGuid():N}",
                 Status = TopUpStatus.Pending,
             };
@@ -126,6 +132,7 @@ public static partial class TopUpEndpoints
             {
                 pending.Status = TopUpStatus.Failed;
                 pending.FailureReason = FailureCodes.ProviderRegisterFailed;
+                await TopUpAlerts.StageAsync(db, tenant.TenantId, pending, ct);
                 await db.SaveChangesAsync(ct);
                 return Results.Json(new { error = "provider_register_failed", reason = register.FailureReason }, statusCode: 502);
             }
@@ -212,6 +219,7 @@ public static partial class TopUpEndpoints
             if (!interp.SignatureValid)
             {
                 logger.LogWarning("topup callback signature invalid for tenant {Slug}", slug);
+                await TopUpAlerts.RaiseAsync(db, tenantRow.Id, TopUpAlerts.SignatureInvalid, TopUpAlerts.DayOf(DateTimeOffset.UtcNow), null, ct);
                 return Results.Unauthorized();
             }
 
@@ -268,6 +276,7 @@ public static partial class TopUpEndpoints
 
                 pending.Status = TopUpStatus.Failed;
                 pending.FailureReason = FailureCodes.AmountMismatch;
+                await TopUpAlerts.StageAsync(db, tenantRow.Id, pending, ct);
                 await db.SaveChangesAsync(ct);
 
                 if (wasPending) await NotifyNotCompletedAsync(db, mailer, pending, ct);
@@ -298,6 +307,7 @@ public static partial class TopUpEndpoints
                     logger.LogWarning(
                         "topup {Key}: a COMPLETE notification arrived with no pf_payment_id — refusing, "
                         + "because nothing can make it idempotent", pending.IdempotencyKey);
+                    await TopUpAlerts.RaiseAsync(db, tenantRow.Id, TopUpAlerts.PaymentIdMissing, pending.Id.ToString("N"), pending, ct);
                     return Results.BadRequest(new { error = "payment_id_missing" });
                 }
 
@@ -322,6 +332,7 @@ public static partial class TopUpEndpoints
                 : string.Equals(interp.ResultCode, "FAILED", StringComparison.OrdinalIgnoreCase) ? FailureCodes.Declined
                 : FailureCodes.GatewayError;
             pending.CompletedAt = DateTimeOffset.UtcNow;
+            await TopUpAlerts.StageAsync(db, tenantRow.Id, pending, ct);
             await db.SaveChangesAsync(ct);
 
             if (wasPending) await NotifyNotCompletedAsync(db, mailer, pending, ct);
@@ -416,17 +427,18 @@ public static partial class TopUpEndpoints
         pending.CompletedAt = DateTimeOffset.UtcNow;
 
         var settings = await c.Settings.GetAsync(ct);
-        var memberClass = pending.MemberClass
-            ?? await MemberClassOfAsync(c.Db, pending.UserId, ct);
 
         decimal rate;
+        Guid? rateGroupId = pending.GroupId;
         if (pending.ConversionRate is { } quoted)
         {
             rate = quoted;
         }
         else
         {
-            rate = settings.ConversionRateFor(memberClass);
+            var live = await MemberTariffs.ForAsync(c.Db, pending.UserId, settings, ct);
+            rate = live.TopUpRate;
+            rateGroupId = live.RateGroup?.Id;
             c.Logger.LogInformation(
                 "topup {Key} carries no quoted rate (pre-dates the column) — settling at the live rate {Rate}",
                 pending.IdempotencyKey, rate);
@@ -527,7 +539,12 @@ public static partial class TopUpEndpoints
                 ["zar_paid"] = pending.AmountZar,
                 ["credits"] = credits,
                 ["conversion_rate"] = rate,
-                ["member_class"] = memberClass.ToString(),
+                // D2: which group's rate was locked at checkout (null: the club default).
+                ["rate_group_id"] = rateGroupId,
+                ["groups"] = await GroupsWireAsync(c.Db, pending.UserId, ct),
+                // Deprecated for one release: derived from the LOCKED group, so it says what the
+                // column it replaced said — the tariff the member was quoted, not their class now.
+                ["member_class"] = await LegacyClassOfGroupAsync(c.Db, rateGroupId, ct),
                 ["external_reference"] = interp.PaymentId,
             }), ct);
 
@@ -691,8 +708,8 @@ public static partial class TopUpEndpoints
     /// revalidated, and the screen promises the member the rate beside the figure "is locked
     /// in when you continue, so it can't change while you're paying". It was locked from the
     /// POST onward and not before it, so the half of the window the member actually looks at
-    /// was unprotected: an admin changing that member's class, or editing
-    /// <c>credits_per_zar_*</c> for the whole club, moved the price under an open tab and the
+    /// was unprotected: an admin changing that member's groups (their class, before D2), or editing
+    /// a group's rate or <c>credits_per_zar_regular</c>, moved the price under an open tab and the
     /// member was handed to the gateway at the new one. Two independent testers reproduced it
     /// on the same day — R100 offered at 240 credits, settled at 160.
     /// </para>
@@ -705,20 +722,23 @@ public static partial class TopUpEndpoints
     /// </para>
     /// <para>
     /// Exact equality is the right test. Both sides come from the same
-    /// <c>ConversionRateFor</c> over the same numeric(*,4) setting, so a rate that has not been
+    /// <c>MemberTariffs.Resolve</c> over the same numeric(8,4) values, so a rate that has not been
     /// edited round-trips identically through JSON; a tolerance here would silently accept
     /// exactly the small edits (1.6 → 1.5999) this exists to catch.
     /// </para>
     /// </remarks>
-    internal static IResult? RefuseStaleQuote(decimal? quotedRate, decimal liveRate, decimal amountZar, MemberClass memberClass)
+    internal static IResult? RefuseStaleQuote(decimal? quotedRate, decimal amountZar, MemberTariff tariff)
     {
+        var liveRate = tariff.TopUpRate;
         if (quotedRate is null || quotedRate.Value == liveRate) return null;
         return Results.Json(new
         {
             error = "topup_rate_changed",
             conversion_rate = liveRate,
             quoted_credits = Convert(amountZar, liveRate),
-            member_class = memberClass.ToString(),
+            rate_group = RateGroupWire(tariff),
+            // Deprecated for one release — see MemberTariff.LegacyMemberClass.
+            member_class = tariff.LegacyMemberClass,
         }, statusCode: StatusCodes.Status409Conflict);
     }
 
@@ -726,9 +746,34 @@ public static partial class TopUpEndpoints
     internal static decimal Convert(decimal amountZar, decimal rate)
         => Math.Round(amountZar * rate, 2, MidpointRounding.AwayFromZero);
 
-    private static async Task<MemberClass> MemberClassOfAsync(MainframeDbContext db, Guid userId, CancellationToken ct)
-        => (await db.Memberships.AsNoTracking().FirstOrDefaultAsync(m => m.UserId == userId, ct))?.MemberClass
-           ?? MemberClass.Regular;
+    /// <summary>The group a rate came from, as the wire names it; null for the club's default rate.</summary>
+    internal static object? RateGroupWire(MemberTariff tariff)
+    {
+        return tariff.RateGroup is { } g ? new { id = g.Id, name = g.Name, system_key = g.SystemKey } : null;
+    }
+
+    /// <summary>A member's active groups for an event payload: id, name and system key only.</summary>
+    private static async Task<List<Dictionary<string, object?>>> GroupsWireAsync(
+        MainframeDbContext db, Guid userId, CancellationToken ct)
+    {
+        return (await MemberTariffs.GroupsOfAsync(db, userId, ct))
+            .Select(g => new Dictionary<string, object?> { ["id"] = g.Id, ["name"] = g.Name, ["system_key"] = g.SystemKey })
+            .ToList();
+    }
+
+    /// <summary>
+    /// The deprecated <c>member_class</c> of a locked top-up: <c>LeagueOrSenior</c> when the
+    /// locked rate group is the league system group, <c>Regular</c> otherwise. The tenant
+    /// query filter applies, so an id that is not this club's reads as Regular.
+    /// </summary>
+    private static async Task<string> LegacyClassOfGroupAsync(MainframeDbContext db, Guid? groupId, CancellationToken ct)
+    {
+        if (groupId is not { } id) return MemberGroupSystemKeys.RegularClassName;
+        var key = await db.MemberGroups.AsNoTracking().Where(g => g.Id == id).Select(g => g.SystemKey).FirstOrDefaultAsync(ct);
+        return key == MemberGroupSystemKeys.League
+            ? MemberGroupSystemKeys.LeagueClassName
+            : MemberGroupSystemKeys.RegularClassName;
+    }
 
     /// <summary>
     /// The refusal for an amount the club will not take, or null when it will.

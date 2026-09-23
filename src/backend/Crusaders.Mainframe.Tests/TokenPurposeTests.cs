@@ -127,7 +127,6 @@ public sealed class TokenPurposeTests
             FullName = "Purpose Player",
             MembershipNumber = slug,
             Status = MembershipStatus.Active,
-            MemberClass = MemberClass.Regular,
         });
         await db.SaveChangesAsync();
 

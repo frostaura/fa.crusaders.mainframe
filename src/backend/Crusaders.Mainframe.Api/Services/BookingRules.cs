@@ -16,12 +16,27 @@ namespace Crusaders.Mainframe.Api.Services;
 /// inference turned out to be an in-tenant IDOR; half the file learned the lesson and
 /// <c>CreateAsync</c> did not.
 /// </param>
+/// <param name="Peak">
+/// Whether this member holds peak priority, and which of their groups withhold it — from
+/// <see cref="MemberTariffs"/>, which replaced the member class (D2).
+/// </param>
 public readonly record struct RuleSubject(
     Guid UserId,
     Guid ActorUserId,
     bool ActorIsAdmin,
-    MemberClass Class,
+    PeakAccess Peak,
     IReadOnlyList<MemberGroupRules> Groups);
+
+/// <summary>
+/// A member's standing against blueprint A.12's peak rule: granted, or not and by which groups.
+/// <paramref name="WithheldBy"/> is empty for a member in no group at all — the club default,
+/// not any group's doing.
+/// </summary>
+public readonly record struct PeakAccess(bool Granted, IReadOnlyList<string> WithheldBy)
+{
+    /// <summary>The standing a tariff implies.</summary>
+    public static PeakAccess Of(MemberTariff tariff) => new(tariff.PeakPriority, tariff.PeakWithheldBy);
+}
 
 /// <summary>The court time being asked for.</summary>
 public readonly record struct RuleSlot(
@@ -146,7 +161,7 @@ public sealed class BookingRules
         if (AccessRefusal(subject, slot, settings, day, onBehalf) is { } access) return Refuse(access);
 
         // A.12 peak, which an on-behalf admin booking bypasses: the desk is taking the decision.
-        if (!onBehalf && !slot.IsWalkUp && PeakRefusal(subject.Class, slot, settings) is { } peak)
+        if (!onBehalf && !slot.IsWalkUp && PeakRefusal(subject.Peak, slot, settings) is { } peak)
         {
             return Refuse(peak);
         }
@@ -273,9 +288,14 @@ public sealed class BookingRules
                 (BookingService.MinutesToHhmm(w.Start), BookingService.MinutesToHhmm(w.End))).ToList());
     }
 
-    private static BookingResult? PeakRefusal(MemberClass memberClass, RuleSlot slot, TenantSettingsView settings)
+    /// <summary>
+    /// Blueprint A.12: inside the peak window, a member without peak priority may book only in
+    /// the last <c>peak_advance_hours_for_regular</c> before the slot. Priority is their groups'
+    /// (D2), granted only when every group they are in grants it — see <see cref="MemberTariffs"/>.
+    /// </summary>
+    private static BookingResult? PeakRefusal(PeakAccess peakAccess, RuleSlot slot, TenantSettingsView settings)
     {
-        if (memberClass == MemberClass.LeagueOrSenior) return null;
+        if (peakAccess.Granted) return null;
         if (settings.PeakHours() is not { } peak) return null;
 
         var local = TimeZoneInfo.ConvertTime(slot.StartsAt, ClubClock.ZoneOf(settings));
@@ -284,8 +304,11 @@ public sealed class BookingRules
 
         var hoursUntil = (slot.StartsAt - DateTimeOffset.UtcNow).TotalHours;
         return hoursUntil > settings.PeakAdvanceHoursForRegular
-            ? new BookingResult.PeakHoursLeagueOnly(
+            ? new BookingResult.PeakHoursPriorityOnly(
                 peak.start.ToString("HH:mm"), peak.end.ToString("HH:mm"), settings.PeakAdvanceHoursForRegular)
+            {
+                WithheldByGroups = peakAccess.WithheldBy,
+            }
             : null;
     }
 

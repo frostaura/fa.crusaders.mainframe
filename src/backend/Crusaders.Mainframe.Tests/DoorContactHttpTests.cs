@@ -269,7 +269,6 @@ public sealed class DoorContactHttpTests
             FullName = "Barred Member",
             MembershipNumber = $"{club.Slug}-b",
             Status = status,
-            MemberClass = MemberClass.Regular,
         });
         await db.SaveChangesAsync();
         return email;
