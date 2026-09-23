@@ -221,8 +221,9 @@ public sealed class AdminOverdraftBookingHttpTests
     /// <summary>
     /// The boundary. A member sending the same field on their own booking gets the ordinary
     /// refusal — the field is not on <c>CreateBookingRequest</c> at all, and the service
-    /// would refuse it anyway because the actor is the payer. Both halves are asserted at
-    /// once by sending the field and watching nothing happen.
+    /// would refuse it anyway because the member holds no admin role (the rule since decision
+    /// R19; it used to be "because the actor is the payer"). Both halves are asserted at once
+    /// by sending the field and watching nothing happen.
     /// </summary>
     [SkippableFact]
     public async Task A_member_cannot_overdraw_themselves_by_sending_the_field()
@@ -252,12 +253,16 @@ public sealed class AdminOverdraftBookingHttpTests
     }
 
     /// <summary>
-    /// The other boundary, and the one that would be worth abusing: an admin pointing the
-    /// override at their own account through the admin route. The actor is the payer, so it
-    /// is not an on-behalf booking and the override does not apply.
+    /// <b>Flipped deliberately by decision R19 (2026-09-23, "admin god mode").</b> This was
+    /// <c>An_admin_cannot_overdraw_their_own_wallet_through_the_admin_route</c>. The admin
+    /// route with <c>userId</c> = self and the flag set is now HOW an admin books themselves
+    /// into the red: one ordinary <c>BookingCharge</c>, and a
+    /// <c>booking.overdraft_authorised</c> row in the undeletable change record. The member
+    /// route still cannot — see <see cref="A_member_cannot_overdraw_themselves_by_sending_the_field"/>
+    /// and <see cref="An_admin_on_the_member_route_cannot_overdraw_even_with_the_field"/>.
     /// </summary>
     [SkippableFact]
-    public async Task An_admin_cannot_overdraw_their_own_wallet_through_the_admin_route()
+    public async Task An_admin_can_overdraw_their_own_wallet_through_the_admin_route_on_the_record()
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
@@ -274,8 +279,50 @@ public sealed class AdminOverdraftBookingHttpTests
             allowNegativeBalance = true,
         });
 
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal(-SlicePriceCredits, body.GetProperty("balance_after_credits").GetDecimal());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var charge = Assert.Single(await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.TenantId == s.TenantId && l.UserId == s.AdminUserId).ToListAsync());
+        Assert.Equal(LedgerEntryType.BookingCharge, charge.Type);
+        Assert.Equal(-SlicePriceCredits, charge.AmountCredits);
+
+        var row = Assert.Single(await db.AdminChangeLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == s.TenantId).ToListAsync());
+        Assert.Equal("booking.overdraft_authorised", row.Action);
+        Assert.Equal(s.AdminUserId, row.ActorUserId);
+        Assert.Equal(s.AdminUserId, row.SubjectId);
+        using var after = JsonDocument.Parse(row.AfterJson!);
+        Assert.Equal(-SlicePriceCredits, after.RootElement.GetProperty("balance_credits").GetDecimal());
+        Assert.True(after.RootElement.GetProperty("self").GetBoolean());
+    }
+
+    /// <summary>
+    /// God mode is the ADMIN route. An admin booking on the member route is booking as a
+    /// member for money purposes: that request record has no flag, so sending one binds to
+    /// nothing and the ordinary 402 comes back.
+    /// </summary>
+    [SkippableFact]
+    public async Task An_admin_on_the_member_route_cannot_overdraw_even_with_the_field()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var s = await SeedAsync(factory);
+        var admin = ClientFor(factory, s, s.AdminUserId, isAdmin: true);
+
+        var (status, body) = await PostAsync(admin, MemberBookingsPath, new
+        {
+            courtId = s.CourtId,
+            startsAt = SlotAt(),
+            sliceCount = 1,
+            allowNegativeBalance = true,
+        });
+
         Assert.Equal(HttpStatusCode.PaymentRequired, status);
-        Assert.Equal(0m, body.GetProperty("current_credits").GetDecimal());
+        Assert.Equal("insufficient_balance", body.GetProperty("error").GetString());
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();

@@ -63,9 +63,11 @@ public static class BookingEndpoints
         //
         // `allowNegativeBalance` is the override, and it exists on THIS request record and
         // not on the member's own — a member has no way to send it, and the service refuses
-        // it anyway unless the actor differs from the payer. The desk is expected to see the
-        // ordinary 402 first, with the member's balance and the price in it, and to come
-        // back having read them; nothing here makes the overdraft the default.
+        // it anyway unless the actor holds the admin role. Since decision R19 the payer may be
+        // the admin themselves (userId = self): god mode is the admin route, never the member
+        // one. The console reads GET /quote first and sends the flag deliberately; the 402 is
+        // still the answer to a request that did not ask for it. Nothing here makes the
+        // overdraft the default.
         admin.MapPost("/", async (AdminBookingRequest req, HttpContext ctx, BookingService svc, MainframeDbContext db, CancellationToken ct) =>
         {
             // The PAYER, not the desk. This route tested membership status not at all, so an
@@ -86,6 +88,9 @@ public static class BookingEndpoints
         });
 
         admin.MapPost("/{bookingId:guid}/cancel", AdminCancelAsync);
+
+        // R19: the consequence, before the booking. See AdminQuoteAsync.
+        admin.MapGet("/quote", AdminQuoteAsync);
 
         // Admin: block a slot for an event.
         //
@@ -144,6 +149,72 @@ public static class BookingEndpoints
     }
 
     /// <summary>
+    /// <c>GET /api/v1/admin/bookings/quote?userId&amp;courtId&amp;startsAt&amp;slices</c> — what a
+    /// booking would cost its payer and where it would leave their balance, before anything is
+    /// booked (decision R19).
+    ///
+    /// <para>
+    /// <b>Why it exists.</b> The console used to learn about a short balance by being refused:
+    /// POST, read the 402, show the figures, POST again with the override. That made the
+    /// override something an admin reaches for after a failure rather than a consequence they
+    /// read up front — "this takes Naledi to −16 cr" — and then choose. The quote answers the
+    /// question first so the flag is sent deliberately.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The price is the booking's price.</b> It comes from
+    /// <see cref="BookingService.QuoteAsync"/>, which is the same code path the booking runs up
+    /// to the point money would move — group pricing, court price, every rule. A refusal the
+    /// booking would meet is answered with the SAME status and body the POST would give, so the
+    /// console has one mapping for both. The balance guard is not a refusal here; it is the
+    /// <c>overdraws</c> flag.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>No <c>currency_symbol</c>.</b> Every figure here is credits, and
+    /// <see cref="CurrencySymbol"/> records the decision that the club's symbol is rand's and
+    /// never goes in front of a credit figure.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>userId</c> is optional and defaults to the admin, so the admin's own booking is quoted
+    /// the same way. The payer is gated exactly as the POST gates them.
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> AdminQuoteAsync(
+        [AsParameters] AdminQuoteQuery query, HttpContext ctx, BookingService svc,
+        MainframeDbContext db, LedgerService ledger, CancellationToken ct)
+    {
+        var actorId = ctx.User.Id() ?? Guid.Empty;
+        var payerId = query.UserId ?? actorId;
+        if (await BookingMembershipGate.RefuseIfBarredAsync(db, payerId, ct) is { } refused) return refused;
+
+        // The payer the POST would build, flag and all, so the quote walks the rules as the
+        // admin's booking will — an on-behalf booking skips the caps, a self-booking skips
+        // everything.
+        var payer = new BookingPayer(payerId, actorId, ActorIsAdmin: ctx.User.IsInRole("admin"));
+        var quote = await svc.QuoteAsync(query.CourtId, payer, query.StartsAt, query.Slices, ct);
+        if (quote.PriceCredits is not { } price) return ToHttpResult(quote.Refusal!, ctx);
+
+        var balance = await ledger.GetBalanceAsync(payerId, ct);
+        return Results.Ok(new
+        {
+            user_id = payerId,
+            court_id = query.CourtId,
+            court_name = quote.CourtName,
+            starts_at = query.StartsAt,
+            ends_at = quote.EndsAt,
+            slices = query.Slices,
+            price_credits = price,
+            balance_credits = balance,
+            balance_after_credits = balance - price,
+            // Exactly the guard CreateAsync applies, `balance < totalCost`, so "overdraws" is
+            // true precisely when the POST without the flag would answer 402.
+            overdraws = balance < price,
+        });
+    }
+
+    /// <summary>
     /// Every <see cref="BookingResult"/> the service can return, as an HTTP answer with a
     /// stable snake_case <c>error</c> code the client maps to a sentence.
     ///
@@ -169,7 +240,7 @@ public static class BookingEndpoints
     // object initialiser as the END of the function and dumps the rest of the file into a
     // *global* pseudo-function whose length trips `-L 200`. See memory/gotchas.md and
     // whitelizard.txt's header.
-    private static IResult ToHttpResult(BookingResult result, HttpContext ctx)
+    internal static IResult ToHttpResult(BookingResult result, HttpContext ctx)
     {
         return result switch
         {
@@ -285,10 +356,10 @@ public sealed record CreateBlockRequest(Guid CourtId, DateTimeOffset StartsAt, i
 public sealed record CreateBookingRequest(Guid CourtId, DateTimeOffset StartsAt, int SliceCount);
 /// <summary>
 /// <paramref name="AllowNegativeBalance"/> is §8's admin override, and it is deliberately
-/// absent from <see cref="CreateBookingRequest"/>: a member cannot ask to be overdrawn, and
-/// an admin booking for themselves gets no benefit from it either, because the service only
-/// honours it when the actor and the payer differ. Defaulted so an older client that does
-/// not send the field books exactly as it did before.
+/// absent from <see cref="CreateBookingRequest"/>: a member cannot ask to be overdrawn. An
+/// admin may point it at their OWN wallet through this record (decision R19, 2026-09-23) —
+/// that is how an admin books themselves into the red, on the record. Defaulted so an older
+/// client that does not send the field books exactly as it did before.
 /// </summary>
 public sealed record AdminBookingRequest(
     Guid CourtId, Guid UserId, DateTimeOffset StartsAt, int SliceCount, bool AllowNegativeBalance = false);
@@ -298,3 +369,9 @@ public sealed record AdminBookingRequest(
 /// no reason, and so an older client that never waives is unaffected.
 /// </summary>
 public sealed record AdminCancelRequest(bool WaivePenalty, string? WaiveReason = null);
+
+/// <summary>
+/// The query of <c>GET /api/v1/admin/bookings/quote</c>. <paramref name="UserId"/> is the payer
+/// and defaults to the calling admin; <paramref name="Slices"/> is the booking's slice count.
+/// </summary>
+public sealed record AdminQuoteQuery(Guid? UserId, Guid CourtId, DateTimeOffset StartsAt, int Slices);

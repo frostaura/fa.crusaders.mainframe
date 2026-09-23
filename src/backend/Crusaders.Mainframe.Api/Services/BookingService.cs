@@ -53,11 +53,19 @@ public sealed class BookingService
     public BookingService(
         MainframeDbContext db, ITenantContext tenant, LedgerService ledger, TenantSettingsAccessor settings,
         IEmailService email, IEventBus bus, AccessCodeService codes, Realtime.RealtimeOutbox outbox,
-        BookingRules rules, ILogger<BookingService> logger, Email.ClubIdentityResolver club)
+        BookingRules rules, ILogger<BookingService> logger, Email.ClubIdentityResolver club,
+        AdminChangeRecorder changes)
     {
         _db = db; _tenant = tenant; _ledger = ledger; _settings = settings; _email = email; _bus = bus;
-        _codes = codes; _outbox = outbox; _rules = rules; _logger = logger; _club = club;
+        _codes = codes; _outbox = outbox; _rules = rules; _logger = logger; _club = club; _changes = changes;
     }
+
+    /// <summary>
+    /// The club's undeletable change record. A booking writes to it only when an admin decision
+    /// is in it — an on-behalf booking or an overdraft (decision R19); a member's own booking
+    /// never does.
+    /// </summary>
+    private readonly AdminChangeRecorder _changes;
 
     /// <summary>
     /// Which club these mails are from. Was <c>tenant?.DisplayName ?? "Crusaders Mainframe"</c>
@@ -146,76 +154,43 @@ public sealed class BookingService
         string? externalReference = null)
     {
         var (userId, actorId) = (payer.UserId, payer.ActorId);
-        // Bounds before arithmetic, because the arithmetic is signed.
-        //
-        // sliceCount arrives straight off the request body and was never checked. A negative
-        // count runs the whole method backwards: endsAt lands BEFORE startsAt, the overlap
-        // predicate cannot match an inverted range, the per-day cap sees negative minutes
-        // and passes, totalCost comes out negative, and the balance guard `balance <
-        // totalCost` reads 0 < -200 and passes too. The debit is posted as -(-200), which
-        // CREDITS the member 200 for a booking they did not pay for.
-        //
-        // The only thing standing in the way today is Postgres refusing tstzrange(lower >
-        // upper) when it maintains the exclusion-constraint index — SQLSTATE 22000, which is
-        // not the 23P01 the overlap catch filters on, so it surfaces as a 500. That is
-        // protection by accident, and it is invisible to the test suite: the in-memory
-        // provider has neither the constraint nor the numeric column.
-        if (sliceCount is < 1 or > MaxSlicesPerBooking)
-            return new BookingResult.InvalidDuration(sliceCount, MaxSlicesPerBooking);
 
-        var settings = await _settings.GetAsync(ct);
-        var court = await _db.Courts.FirstOrDefaultAsync(c => c.Id == courtId && c.IsActive, ct);
-        if (court is null) return new BookingResult.NotFound();
-
-        var endsAt = startsAt.AddMinutes(settings.SliceMinutes * sliceCount);
-        if (startsAt < DateTimeOffset.UtcNow) return new BookingResult.PastTime();
-        if (startsAt > DateTimeOffset.UtcNow.AddDays(settings.AdvanceBookingDays)) return new BookingResult.TooFarAhead();
-
-        // Overlap check
-        var overlap = await _db.Bookings.AnyAsync(b =>
-            b.CourtId == courtId &&
-            b.Status != BookingStatus.Cancelled &&
-            b.StartsAt < endsAt && b.EndsAt > startsAt, ct);
-        if (overlap) return new BookingResult.SlotTaken();
-
-        // Every access, window, peak and cap rule, in ONE evaluator (see BookingRules). This is
-        // the FAST refusal: it reads an unlocked world, exactly as the balance check above it
-        // does, and the authoritative evaluation happens again inside CommitAsync under the payer
-        // lock. Two tabs beat a rule that is only read here — that is D2-B12, and it is why the
-        // cap has to be re-asked where the money is decided.
-        var subject = await SubjectAsync(payer, startsAt, settings, ct);
-        var slot = new RuleSlot(courtId, startsAt, endsAt, sliceCount, court.SlicePriceCredits, IsWalkUp: false);
-
-        var verdict = await _rules.EvaluateAsync(subject, slot, settings, ct);
-        if (verdict is RuleVerdict.Refused fastRefusal) return fastRefusal.Result;
-
-        // The member's own price, which their groups may have raised above the court's (GOAL
-        // item 3, most-restrictive = highest).
-        var totalCost = ((RuleVerdict.Allowed)verdict).SlicePriceCredits * sliceCount;
+        // Everything that decides WHETHER and AT WHAT PRICE, shared with QuoteAsync so the figure
+        // an admin is shown before booking is the figure this method then charges. Two copies of
+        // the pricing path would be two answers to "what does this court cost this member".
+        var (priced, refusal) = await PriceAsync(courtId, payer, startsAt, sliceCount, ct);
+        if (priced is null) return refusal!;
+        var (court, settings, endsAt, rules, totalCost) = priced;
 
         // §8's third admin action: "Book on behalf of any member (charges that member's
         // credit; if insufficient, admin can override and create a negative balance,
-        // logged)."
+        // logged)." — widened by decision R19 (2026-09-23, "admin god mode") to the admin's
+        // OWN wallet as well.
         //
-        // The override is DELIBERATE and NARROW, and both halves matter.
+        // The override is DELIBERATE and ADMIN-ONLY, and both halves matter.
         //
-        // Deliberate: it is never implied by being an admin. The desk gets the ordinary
-        // 402 first, with the member's balance and the price in it, and has to come back
-        // asking for the overdraft by name. An admin who mis-picks a member from a
-        // dropdown must not silently put a stranger 50 credits in the red.
+        // Deliberate: it is never implied by being an admin. It has to be asked for by name,
+        // and the console now asks the quote endpoint first (GET /admin/bookings/quote) so the
+        // admin reads "this takes X to −16 cr" before sending it. An admin who mis-picks a
+        // member from a dropdown must not silently put a stranger 50 credits in the red.
         //
-        // Narrow: `isAdminActor` is `actorId != userId`, so it is true only when somebody
-        // is acting FOR somebody else — and the flag only reaches here from the
-        // admin-only route group. An admin cannot overdraw their own wallet with it, and
-        // a member's own POST carries no such field to set. The rule lives here, next to
-        // the check it lifts, rather than in the endpoint that happens to pass it.
+        // Admin-only: ActorIsAdmin is the route group's role claim, and the flag only exists on
+        // the admin request records. A member's own POST carries no such field, and even a
+        // hand-built payer with the flag and no admin role is refused here. R19 dropped the
+        // old third condition, `actorId != userId`: it was there to stop an admin handing
+        // themselves a free court, but the court is not free — the debit is the same
+        // BookingCharge at the same price, the admin simply owes it — and the club wanted its
+        // admins able to book themselves into the red on the record rather than topping
+        // themselves up first. Every overdraft, self included, is written to the undeletable
+        // admin_change_log (booking.overdraft_authorised) in CommitAsync.
         //
-        // Nothing else about the booking changes: the debit is the same BookingCharge for
-        // the same price, so `Owed(b) = P` and settlement-model.md I1 is untouched. What
-        // moves is the WALLET, which is a sum over the ledger and has never been
-        // constrained to be non-negative — DeviceEventHttpTests already covers a member
-        // going negative when a release correction lands on spent credit.
-        var overdraftAuthorised = payer.AllowNegativeBalance && payer.ActorIsAdmin && actorId != userId;
+        // Device paths never reach this: the walk-up, activation charge and kiosk build their
+        // payer without the flag, so an admin at a court box gets no override.
+        //
+        // Nothing else about the booking changes: `Owed(b) = P` and settlement-model.md I1 is
+        // untouched. What moves is the WALLET, which is a sum over the ledger and has never
+        // been constrained to be non-negative.
+        var overdraftAuthorised = payer.AllowNegativeBalance && payer.ActorIsAdmin;
 
         var balance = await _ledger.GetBalanceAsync(userId, ct);
         if (!overdraftAuthorised && balance < totalCost) return new BookingResult.InsufficientBalance(balance, totalCost);
@@ -247,7 +222,89 @@ public sealed class BookingService
             IsWalkUp: false,
             ExternalReference: externalReference,
             AllowNegativeBalance: overdraftAuthorised,
-            Rules: (subject, slot)), ct);
+            Rules: rules,
+            // One admin_change_log row per SINGLE on-behalf booking. A batch writes its own one
+            // row for the whole list (bookings.bulk_booked) — the intent — and recording every
+            // item again here would say the same decision forty times.
+            RecordOnBehalf: payer.ActorIsAdmin && actorId != userId && !payer.PartOfBatch), ct);
+    }
+
+    /// <summary>
+    /// What a booking WOULD cost this payer, or the refusal it would meet — without reserving
+    /// anything, reading the balance or moving money.
+    ///
+    /// <para>
+    /// <b>The same path <see cref="CreateAsync(Guid, BookingPayer, DateTimeOffset, int, CancellationToken, string?)"/>
+    /// takes</b>, stopping where the money would start. That is the whole guarantee the admin
+    /// quote endpoints make (decision R19): the number the console shows before the admin
+    /// ticks "allow negative balance" is the number the booking then charges, because there is
+    /// only one place that number is computed. The authoritative re-evaluation still happens
+    /// under the payer lock at commit time, so a quote is a forecast — a slot can be taken, or a
+    /// group changed, between the two.
+    /// </para>
+    /// </summary>
+    public async Task<BookingQuote> QuoteAsync(
+        Guid courtId, BookingPayer payer, DateTimeOffset startsAt, int sliceCount, CancellationToken ct)
+    {
+        var (priced, refusal) = await PriceAsync(courtId, payer, startsAt, sliceCount, ct);
+        if (priced is null) return new BookingQuote(null, null, null, refusal);
+        return new BookingQuote(priced.TotalCost, priced.Court.Name, priced.EndsAt, null);
+    }
+
+    /// <summary>
+    /// The shared front half of a booking: bounds, court, clock, overlap, every rule, and the
+    /// price. Returns the priced slot or the refusal, never both.
+    /// </summary>
+    private async Task<(PricedSlot? Priced, BookingResult? Refusal)> PriceAsync(
+        Guid courtId, BookingPayer payer, DateTimeOffset startsAt, int sliceCount, CancellationToken ct)
+    {
+        // Bounds before arithmetic, because the arithmetic is signed.
+        //
+        // sliceCount arrives straight off the request body and was never checked. A negative
+        // count runs the whole method backwards: endsAt lands BEFORE startsAt, the overlap
+        // predicate cannot match an inverted range, the per-day cap sees negative minutes
+        // and passes, totalCost comes out negative, and the balance guard `balance <
+        // totalCost` reads 0 < -200 and passes too. The debit is posted as -(-200), which
+        // CREDITS the member 200 for a booking they did not pay for.
+        //
+        // The only thing standing in the way today is Postgres refusing tstzrange(lower >
+        // upper) when it maintains the exclusion-constraint index — SQLSTATE 22000, which is
+        // not the 23P01 the overlap catch filters on, so it surfaces as a 500. That is
+        // protection by accident, and it is invisible to the test suite: the in-memory
+        // provider has neither the constraint nor the numeric column.
+        if (sliceCount is < 1 or > MaxSlicesPerBooking)
+            return (null, new BookingResult.InvalidDuration(sliceCount, MaxSlicesPerBooking));
+
+        var settings = await _settings.GetAsync(ct);
+        var court = await _db.Courts.FirstOrDefaultAsync(c => c.Id == courtId && c.IsActive, ct);
+        if (court is null) return (null, new BookingResult.NotFound());
+
+        var endsAt = startsAt.AddMinutes(settings.SliceMinutes * sliceCount);
+        if (startsAt < DateTimeOffset.UtcNow) return (null, new BookingResult.PastTime());
+        if (startsAt > DateTimeOffset.UtcNow.AddDays(settings.AdvanceBookingDays)) return (null, new BookingResult.TooFarAhead());
+
+        // Overlap check
+        var overlap = await _db.Bookings.AnyAsync(b =>
+            b.CourtId == courtId &&
+            b.Status != BookingStatus.Cancelled &&
+            b.StartsAt < endsAt && b.EndsAt > startsAt, ct);
+        if (overlap) return (null, new BookingResult.SlotTaken());
+
+        // Every access, window, peak and cap rule, in ONE evaluator (see BookingRules). This is
+        // the FAST refusal: it reads an unlocked world, exactly as the balance check after it
+        // does, and the authoritative evaluation happens again inside CommitAsync under the payer
+        // lock. Two tabs beat a rule that is only read here — that is D2-B12, and it is why the
+        // cap has to be re-asked where the money is decided.
+        var subject = await SubjectAsync(payer, startsAt, settings, ct);
+        var slot = new RuleSlot(courtId, startsAt, endsAt, sliceCount, court.SlicePriceCredits, IsWalkUp: false);
+
+        var verdict = await _rules.EvaluateAsync(subject, slot, settings, ct);
+        if (verdict is RuleVerdict.Refused fastRefusal) return (null, fastRefusal.Result);
+
+        // The member's own price, which their groups may have raised above the court's (GOAL
+        // item 3, most-restrictive = highest).
+        var totalCost = ((RuleVerdict.Allowed)verdict).SlicePriceCredits * sliceCount;
+        return (new PricedSlot(court, settings, endsAt, (subject, slot), totalCost), null);
     }
 
     /// <summary>
@@ -592,7 +649,7 @@ public sealed class BookingService
     /// </summary>
     /// <summary>
     /// <c>AllowNegativeBalance</c> is the desk's explicit §8 overdraft authorisation, already
-    /// checked against "the actor is not the payer" by the caller. It travels on the spec
+    /// checked against "the actor holds the admin role" by the caller (decision R19). It travels on the spec
     /// rather than being re-derived here because <see cref="CommitAsync"/> must lift the
     /// same guard the caller lifted, under the lock, or the two disagree at the one moment
     /// that decides whether money moves.
@@ -612,7 +669,20 @@ public sealed class BookingService
         // flips lizard's C# scoping for every method BELOW it in the file, and the gate then
         // goes red on functions nobody edited — the instability whitelizard.txt's own header
         // is about.
-        (RuleSubject Subject, RuleSlot Slot)? Rules = null);
+        (RuleSubject Subject, RuleSlot Slot)? Rules = null,
+        // Write booking.booked_on_behalf to admin_change_log in the same unit of work as the
+        // booking. Decided by CreateAsync, which is the only caller that knows whether this row
+        // is a single desk booking or one item of a batch.
+        bool RecordOnBehalf = false);
+
+    /// <summary>
+    /// A slot that passed every rule, at its price — what <c>PriceAsync</c> hands both
+    /// <c>CreateAsync</c> and <c>QuoteAsync</c>. Positional, for the lizard reason on
+    /// <see cref="NewBooking"/>.
+    /// </summary>
+    private sealed record PricedSlot(
+        Court Court, TenantSettingsView Settings, DateTimeOffset EndsAt,
+        (RuleSubject Subject, RuleSlot Slot) Rules, decimal TotalCost);
 
     private async Task<BookingResult> CommitAsync(NewBooking spec, CancellationToken ct)
     {
@@ -787,6 +857,8 @@ public sealed class BookingService
             }),
         });
 
+        await StageAdminChangesAsync(spec, openingBalance, overdrawn, ct);
+
         await _db.SaveChangesAsync(ct);
 
         // Re-read after the charge: the member has just paid, and the confirmation and the
@@ -821,7 +893,10 @@ public sealed class BookingService
             court.Name, startsAtLocal, spec.DurationLabel,
             spec.TotalCost, balance,
             settings.PenaltyWindowMinutes, settings.PenaltyPct,
-            IsWalkUp: spec.IsWalkUp);
+            IsWalkUp: spec.IsWalkUp,
+            // R19: an admin may now overdraw their OWN wallet, and "the club made this booking
+            // for you" is false when you made it yourself.
+            MadeByClub: actorId != userId);
 
         async Task SendConfirmationAsync(CancellationToken cancel) =>
             await MailConfirmationAsync(booking, user.Email, userId, details, cancel);
@@ -874,6 +949,73 @@ public sealed class BookingService
         foreach (var entry in _db.ChangeTracker.Entries().Where(e => e.State == EntityState.Added).ToList())
         {
             entry.State = EntityState.Detached;
+        }
+    }
+
+    /// <summary>
+    /// The admin half of a new booking's record, staged beside the <c>audit_log</c> row so it
+    /// flushes in the same <c>SaveChanges</c> as the booking and the debit — a record of a
+    /// booking that rolled back would be worse than none.
+    ///
+    /// <para>
+    /// <b>Why these land in <c>admin_change_log</c> as well as <c>audit_log</c></b> (decision
+    /// R19). <c>audit_log</c> already carries the effect, with both balances; but it has a
+    /// delete path and this table does not, and an overdraft is exactly the thing a club
+    /// reviews at month end and must still be able to read in two years. The self-overdraft
+    /// R19 allows is the one an admin would most want to hide.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>booking.overdraft_authorised</c> is written for EVERY booking that overdrew — self,
+    /// on behalf, or one item of a batch — because each is its own money decision with its own
+    /// balances. <c>booking.booked_on_behalf</c> is written only for a single desk booking;
+    /// a batch has its own one row.
+    /// </para>
+    /// </summary>
+    private async Task StageAdminChangesAsync(
+        NewBooking spec, decimal openingBalance, bool overdrawn, CancellationToken ct)
+    {
+        var booking = spec.Row;
+        var actorId = booking.ActorUserId;
+        var label = PersonNames.Of(booking.UserId, await PersonNames.ForAsync(_db, [booking.UserId], ct));
+        var what = new
+        {
+            booking_id = booking.Id,
+            court = spec.Court.Name,
+            starts_at = booking.StartsAt,
+            minutes = booking.SliceMinutes * booking.SliceCount,
+            amount_credits = spec.TotalCost,
+        };
+
+        if (spec.RecordOnBehalf)
+        {
+            await _changes.StageAsync(new AdminChange(
+                Action: AdminChangeActions.BookingBookedOnBehalf,
+                ActorUserId: actorId,
+                SubjectKind: AdminChangeSubjects.User,
+                SubjectId: booking.UserId,
+                SubjectLabel: label,
+                After: what), ct);
+        }
+
+        if (overdrawn)
+        {
+            await _changes.StageAsync(new AdminChange(
+                Action: AdminChangeActions.BookingOverdraftAuthorised,
+                ActorUserId: actorId,
+                SubjectKind: AdminChangeSubjects.User,
+                SubjectId: booking.UserId,
+                SubjectLabel: label,
+                Before: new { balance_credits = openingBalance },
+                After: new
+                {
+                    balance_credits = openingBalance - spec.TotalCost,
+                    what.booking_id,
+                    what.court,
+                    what.starts_at,
+                    what.amount_credits,
+                    self = actorId == booking.UserId,
+                }), ct);
         }
     }
 
@@ -2549,8 +2691,8 @@ public sealed class BookingService
 /// </param>
 /// <param name="AllowNegativeBalance">
 /// <c>feature-spec.md</c> §8's admin override, asked for by name. It is honoured only when
-/// <paramref name="ActorId"/> differs from <paramref name="UserId"/>, so it can never
-/// overdraw the actor's own wallet, and it defaults to <c>false</c> so no existing caller
+/// <paramref name="ActorIsAdmin"/> is true — the admin's own wallet included, by decision R19
+/// (2026-09-23) — and it defaults to <c>false</c> so no existing caller, and no device path,
 /// acquires it by accident.
 /// </param>
 /// <param name="ActorIsAdmin">
@@ -2569,8 +2711,23 @@ public sealed class BookingService
 /// same defensive default <paramref name="AllowNegativeBalance"/> already uses.
 /// </para>
 /// </param>
+/// <param name="PartOfBatch">
+/// This booking is one item of an admin bulk book, which records its intent as ONE
+/// <c>bookings.bulk_booked</c> row. Suppresses the per-booking <c>booking.booked_on_behalf</c>
+/// row only; an overdraft is still recorded per booking.
+/// </param>
 public readonly record struct BookingPayer(
-    Guid UserId, Guid ActorId, bool AllowNegativeBalance = false, bool ActorIsAdmin = false);
+    Guid UserId, Guid ActorId, bool AllowNegativeBalance = false, bool ActorIsAdmin = false,
+    bool PartOfBatch = false);
+
+/// <summary>
+/// What a booking would cost, or why it would be refused — see <c>BookingService.QuoteAsync</c>.
+/// Exactly one of <paramref name="PriceCredits"/> and <paramref name="Refusal"/> is set.
+/// </summary>
+/// <param name="CourtName">The court's name, for a quote line an admin can read.</param>
+/// <param name="EndsAt">When the booking would end, so a batch can see two items overlap.</param>
+public sealed record BookingQuote(
+    decimal? PriceCredits, string? CourtName, DateTimeOffset? EndsAt, BookingResult? Refusal);
 
 public abstract record BookingResult
 {

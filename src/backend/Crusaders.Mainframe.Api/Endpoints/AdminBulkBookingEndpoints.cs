@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Security;
 using Crusaders.Mainframe.Api.Services;
@@ -46,6 +47,7 @@ public static class AdminBulkBookingEndpoints
 
         g.MapPost("/bulk-cancel", CancelAsync);
         g.MapPost("/bulk", BookAsync);
+        g.MapPost("/bulk/quote", QuoteAsync);
 
         return app;
     }
@@ -215,6 +217,103 @@ public static class AdminBulkBookingEndpoints
         });
     }
 
+    // ------------------------------------------------------------------ quote
+
+    /// <summary>
+    /// <c>POST /api/v1/admin/bookings/bulk/quote</c> — what a batch would cost its payer, item
+    /// by item, and whether it takes them below zero, before anything is booked (decision R19).
+    ///
+    /// <para>
+    /// The single-booking quote's reasoning applies whole: the console reads the consequence
+    /// first and then sends <c>allowNegativeBalance</c> deliberately, instead of learning about
+    /// a short balance from a halted batch. Every item is priced by the booking's own path (see
+    /// <see cref="AdminBulkBookingService.QuoteAsync"/>); refusals are per-item <c>reason</c>
+    /// codes in the booking's own vocabulary, never a failed request.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Both spellings bind</b> — <c>user_id</c>/<c>court_id</c>/<c>starts_at</c>/<c>slices</c>
+    /// and the bulk book body's own <c>userId</c>/<c>courtId</c>/<c>startsAt</c>/<c>sliceCount</c>
+    /// — for the reason <c>AdjustRequest</c> documents: the wrong side of this API's
+    /// camel/snake split binds to null rather than failing, and a console that sends the same
+    /// items array to the quote and then to the book must not have one of the two quietly empty.
+    /// </para>
+    ///
+    /// <para>
+    /// No guest shape: a written-in guest becomes an admin block that charges nobody, so there
+    /// is nothing to quote. No idempotency key: nothing is written.
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> QuoteAsync(
+        BulkQuoteRequest req, HttpContext ctx, [AsParameters] BulkDeps deps, CancellationToken ct)
+    {
+        var view = await deps.Settings.GetAsync(ct);
+        var (items, invalid) = QuoteItems(req, BulkSettings.MaxItems(view));
+        if (invalid is not null) return invalid;
+
+        var actorId = ctx.User.Id() ?? Guid.Empty;
+        var payerId = req.UserId ?? req.UserIdCamel ?? actorId;
+
+        // The same two refusals the bulk book gives for the same payer, in the same order.
+        if (payerId != actorId
+            && !await deps.Db.Users.AsNoTracking().AnyAsync(u => u.Id == payerId, ct))
+        {
+            return Results.BadRequest(new { error = "member_not_found" });
+        }
+        if (await BookingMembershipGate.RefuseIfBarredAsync(deps.Db, payerId, ct) is { } barred) return barred;
+
+        var payer = new BookingPayer(payerId, actorId, ActorIsAdmin: ctx.User.IsInRole("admin"));
+        var quote = await deps.Bulk.QuoteAsync(items, payer, ct);
+        var anyBookable = quote.Lines.Any(l => l.Bookable);
+
+        return Results.Ok(new
+        {
+            user_id = payerId,
+            total_credits = quote.TotalCredits,
+            balance_credits = quote.BalanceCredits,
+            balance_after_credits = quote.BalanceCredits - quote.TotalCredits,
+            // True exactly when the batch sent WITHOUT the flag would halt on
+            // insufficient_balance. Prices are never negative, so the running balance first
+            // falls short of an item's price iff the balance is below the whole total.
+            overdraws = anyBookable && quote.BalanceCredits < quote.TotalCredits,
+            items = quote.Lines.Select((l, index) => new
+            {
+                index,
+                court_id = l.Item.CourtId,
+                court_name = l.CourtName,
+                starts_at = l.Item.StartsAt,
+                slices = l.Item.SliceCount,
+                price_credits = l.PriceCredits,
+                bookable = l.Bookable,
+                reason = l.Reason,
+            }).ToList(),
+        });
+    }
+
+    /// <summary>The items of a quote under either spelling, or the 400 for the first bad one.</summary>
+    private static (List<BulkBookItem> Items, IResult? Invalid) QuoteItems(BulkQuoteRequest req, int maxItems)
+    {
+        var raw = req.Items ?? [];
+        if (raw.Count == 0) return ([], Results.BadRequest(new { error = "no_items" }));
+        if (raw.Count > maxItems) return ([], Results.BadRequest(new { error = "too_many_items", max_items = maxItems }));
+
+        var items = new List<BulkBookItem>(raw.Count);
+        for (var index = 0; index < raw.Count; index++)
+        {
+            var i = raw[index];
+            var courtId = i.CourtId ?? i.CourtIdCamel;
+            var startsAt = i.StartsAt ?? i.StartsAtCamel;
+            var slices = i.Slices ?? i.SliceCountCamel;
+            if (courtId is null || startsAt is null || slices is null)
+            {
+                return ([], Results.BadRequest(new { error = "item_invalid", index }));
+            }
+            items.Add(new BulkBookItem(courtId.Value, startsAt.Value, slices.Value));
+        }
+
+        return (items, null);
+    }
+
     /// <summary>
     /// Which of the four <c>on_behalf</c> shapes this is, or the refusal.
     ///
@@ -321,3 +420,22 @@ public sealed record BulkBookRequestItem(Guid CourtId, DateTimeOffset StartsAt, 
 public sealed record BulkBookRequest(
     string? IdempotencyKey, BulkBookOnBehalf? OnBehalf = null, bool AllowNegativeBalance = false,
     string? Note = null, IReadOnlyList<BulkBookRequestItem>? Items = null);
+
+/// <summary>
+/// One slot in a bulk quote, under either spelling — see <c>AdminBulkBookingEndpoints.QuoteAsync</c>.
+/// </summary>
+public sealed record BulkQuoteRequestItem(
+    [property: JsonPropertyName("court_id")] Guid? CourtId = null,
+    [property: JsonPropertyName("starts_at")] DateTimeOffset? StartsAt = null,
+    [property: JsonPropertyName("slices")] int? Slices = null,
+    [property: JsonPropertyName("courtId")] Guid? CourtIdCamel = null,
+    [property: JsonPropertyName("startsAt")] DateTimeOffset? StartsAtCamel = null,
+    [property: JsonPropertyName("sliceCount")] int? SliceCountCamel = null);
+
+/// <summary>
+/// A batch to price. <c>user_id</c> is the payer and defaults to the calling admin.
+/// </summary>
+public sealed record BulkQuoteRequest(
+    [property: JsonPropertyName("user_id")] Guid? UserId = null,
+    [property: JsonPropertyName("items")] IReadOnlyList<BulkQuoteRequestItem>? Items = null,
+    [property: JsonPropertyName("userId")] Guid? UserIdCamel = null);

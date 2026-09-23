@@ -234,8 +234,12 @@ public sealed class AdminBulkBookingService
         // re-derived from actorId != userId — that inference is D2-B13, and every row this
         // method books satisfies it, so losing it silently would refuse a whole league night
         // with member-class reason codes.
+        // PartOfBatch: this batch writes ONE bookings.bulk_booked row for its intent, so the
+        // per-booking booked_on_behalf row is suppressed. An overdraft is still recorded per
+        // booking — each is its own money decision with its own balances (R19).
         var payer = new BookingPayer(
-            request.PayerUserId.Value, actorId, request.AllowNegativeBalance, request.ActorIsAdmin);
+            request.PayerUserId.Value, actorId, request.AllowNegativeBalance, request.ActorIsAdmin,
+            PartOfBatch: true);
         var outcome = await _bookings.CreateAsync(
             item.CourtId, payer, item.StartsAt, item.SliceCount, ct, externalReference: reference);
 
@@ -288,6 +292,57 @@ public sealed class AdminBulkBookingService
     }
 
     /// <summary>
+    /// What a batch WOULD cost its payer, item by item, without booking anything (decision R19).
+    ///
+    /// <para>
+    /// <b>Each item is priced by <see cref="BookingService.QuoteAsync"/></b> — the same path
+    /// <see cref="BookingService.CreateAsync(Guid, BookingPayer, DateTimeOffset, int, CancellationToken, string?)"/>
+    /// takes — so the total the console shows is the total the batch then charges. Nothing is
+    /// duplicated here except the one thing a single quote cannot see: two items of the SAME
+    /// batch that overlap on one court. The booking loop would book the first and refuse the
+    /// second <c>slot_taken</c>; the quote says so up front rather than totalling both.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>No balance halt.</b> The booking loop stops at the first <c>insufficient_balance</c>;
+    /// the quote prices every item and reports <c>overdraws</c> instead, which is the whole point
+    /// — the admin decides on the override before sending the batch, not after half of it.
+    /// </para>
+    /// </summary>
+    public async Task<BulkQuote> QuoteAsync(
+        IReadOnlyList<BulkBookItem> items, BookingPayer payer, CancellationToken ct)
+    {
+        var lines = new List<BulkQuoteLine>(items.Count);
+        var accepted = new List<(Guid CourtId, DateTimeOffset StartsAt, DateTimeOffset EndsAt)>();
+
+        foreach (var item in items)
+        {
+            var quote = await _bookings.QuoteAsync(item.CourtId, payer, item.StartsAt, item.SliceCount, ct);
+            if (quote.PriceCredits is not { } price)
+            {
+                lines.Add(new BulkQuoteLine(item, quote.CourtName, 0m, false, RefusalCodeOf(quote.Refusal!)));
+                continue;
+            }
+
+            var endsAt = quote.EndsAt!.Value;
+            var clashes = accepted.Any(a =>
+                a.CourtId == item.CourtId && a.StartsAt < endsAt && a.EndsAt > item.StartsAt);
+            if (clashes)
+            {
+                lines.Add(new BulkQuoteLine(item, quote.CourtName, 0m, false, "slot_taken"));
+                continue;
+            }
+
+            accepted.Add((item.CourtId, item.StartsAt, endsAt));
+            lines.Add(new BulkQuoteLine(item, quote.CourtName, price, true, null));
+        }
+
+        var total = lines.Where(l => l.Bookable).Sum(l => l.PriceCredits);
+        var balance = await _ledger.GetBalanceAsync(payer.UserId, ct);
+        return new BulkQuote(lines, total, balance);
+    }
+
+    /// <summary>
     /// The booking a previous attempt under this reference produced, or null.
     ///
     /// <para>
@@ -313,8 +368,15 @@ public sealed class AdminBulkBookingService
     /// The single-booking refusal vocabulary, verbatim. A batch does not invent codes — the
     /// console already maps these to sentences, and a second spelling of "slot taken" would be
     /// a sentence it has never heard of.
+    ///
+    /// <para>
+    /// <b>Every arm <c>BookingEndpoints.ToHttpResult</c> names, and no fewer.</b> Four of them
+    /// — the group window, the slot cap, crossing midnight and no bookable window — used to fall
+    /// through to <c>booking_failed</c>, a code no screen has a sentence for. The quote endpoint
+    /// (R19) reads this too, and a quote that says "booking_failed" tells an admin nothing.
+    /// </para>
     /// </summary>
-    private static string RefusalCodeOf(BookingResult result)
+    internal static string RefusalCodeOf(BookingResult result)
     {
         // Block body rather than an expression body, for the lizard reason in
         // memory/gotchas.md. lizard's C# parser cannot follow `=> x switch { … }`: it loses
@@ -329,6 +391,10 @@ public sealed class AdminBulkBookingService
             BookingResult.InsufficientBalance => "insufficient_balance",
             BookingResult.PeakHoursLeagueOnly => "peak_hours_league_only",
             BookingResult.PerDayCapExceeded => "per_day_cap_exceeded",
+            BookingResult.PerDaySlotCapExceeded => "per_day_slot_cap_exceeded",
+            BookingResult.GroupWindow => "group_window",
+            BookingResult.CrossesMidnight => "crosses_midnight",
+            BookingResult.NoBookableWindow => "no_bookable_window",
             BookingResult.OutOfHours => "out_of_hours",
             BookingResult.NoTimeAvailable => "no_time_available",
             BookingResult.InvalidDuration => "invalid_duration",

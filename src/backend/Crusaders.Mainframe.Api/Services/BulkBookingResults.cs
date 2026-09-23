@@ -65,3 +65,14 @@ public sealed record BulkBookResult(
 /// <summary>A whole bulk book's answer.</summary>
 public sealed record BulkBookOutcome(
     IReadOnlyList<BulkBookResult> Results, decimal TotalChargedCredits, int? HaltedAt, string? HaltedReason);
+
+/// <summary>One item of a bulk quote: its price when bookable, or the refusal code it would meet.</summary>
+public sealed record BulkQuoteLine(
+    BulkBookItem Item, string? CourtName, decimal PriceCredits, bool Bookable, string? Reason);
+
+/// <summary>
+/// A whole batch, priced. <paramref name="TotalCredits"/> sums the bookable lines only;
+/// <paramref name="BalanceCredits"/> is the payer's balance now.
+/// </summary>
+public sealed record BulkQuote(
+    IReadOnlyList<BulkQuoteLine> Lines, decimal TotalCredits, decimal BalanceCredits);

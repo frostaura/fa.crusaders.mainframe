@@ -34,6 +34,31 @@ public static class AdminChangeActions
     public const string BookingBlocked = "booking.blocked";
     public const string BookingBlockLifted = "booking.block_lifted";
 
+    /// <summary>
+    /// An admin booked one court for a member, on that member's wallet (decision R19).
+    ///
+    /// <para>
+    /// <b>One row per SINGLE desk booking.</b> A bulk book already writes its own one
+    /// <see cref="BookingsBulkBooked"/> row for the whole list, and a row per item as well would
+    /// state one decision forty times. The per-booking effects stay in <c>audit_log</c>.
+    /// </para>
+    /// </summary>
+    public const string BookingBookedOnBehalf = "booking.booked_on_behalf";
+
+    /// <summary>
+    /// A booking took its payer's balance below zero because an admin asked for it by name —
+    /// on behalf of a member, or on the admin's OWN wallet, which R19 (2026-09-23) allows.
+    ///
+    /// <para>
+    /// <b>Written for every booking that overdrew</b>, single or batch item, with the balance
+    /// before and after. <c>audit_log</c> records the same effect but has a delete path; an
+    /// overdraft, and above all an admin's overdraft of their own wallet, is the entry a club
+    /// most needs to still be able to read. No reason is demanded: the override is already a
+    /// deliberate, named request, and a batch has no per-item reason to give.
+    /// </para>
+    /// </summary>
+    public const string BookingOverdraftAuthorised = "booking.overdraft_authorised";
+
     // ---- credit ----
     public const string CreditAdjusted = "credit.adjusted";
     public const string CreditToppedUp = "credit.topped_up";
@@ -43,6 +68,13 @@ public static class AdminChangeActions
     public const string GroupUpdated = "group.updated";
     public const string GroupArchived = "group.archived";
     public const string GroupMembersChanged = "group.members_changed";
+
+    /// <summary>
+    /// A member group with no members was deleted outright. Not in D2's original list; added
+    /// because a group that vanished with no row here is a change the club cannot see ever
+    /// happened. A group WITH members cannot be deleted, only archived.
+    /// </summary>
+    public const string GroupDeleted = "group.deleted";
 
     // ---- member ----
     public const string MemberClassChanged = "member.class_changed";
@@ -120,8 +152,9 @@ public static class AdminChangeActions
     [
         ScheduleCreated, ScheduleUpdatedFuture, ScheduleOccurrenceSkipped, ScheduleOccurrenceOverridden, ScheduleEnded,
         BookingsBulkCancelled, BookingsBulkBooked, BookingCancelledByAdmin, BookingBlocked, BookingBlockLifted,
+        BookingBookedOnBehalf, BookingOverdraftAuthorised,
         CreditAdjusted, CreditToppedUp,
-        GroupCreated, GroupUpdated, GroupArchived, GroupMembersChanged,
+        GroupCreated, GroupUpdated, GroupArchived, GroupMembersChanged, GroupDeleted,
         MemberClassChanged, MemberApproved, MemberRejected, MemberSuspended, MemberReactivated,
         MemberPasswordReset, MemberTraceViewed, MemberAdminGranted, MemberAdminRevoked,
         SettingsUpdated, CourtCreated, CourtUpdated, CourtDeactivated, ChangesExported,
@@ -153,9 +186,11 @@ public static class AdminChangeActions
             ScheduleCreated or ScheduleUpdatedFuture or ScheduleOccurrenceSkipped
                 or ScheduleOccurrenceOverridden or ScheduleEnded => AdminChangeAreas.Schedule,
             BookingsBulkCancelled or BookingsBulkBooked or BookingCancelledByAdmin
-                or BookingBlocked or BookingBlockLifted => AdminChangeAreas.Booking,
+                or BookingBlocked or BookingBlockLifted
+                or BookingBookedOnBehalf or BookingOverdraftAuthorised => AdminChangeAreas.Booking,
             CreditAdjusted or CreditToppedUp => AdminChangeAreas.Credit,
-            GroupCreated or GroupUpdated or GroupArchived or GroupMembersChanged => AdminChangeAreas.Group,
+            GroupCreated or GroupUpdated or GroupArchived or GroupMembersChanged
+                or GroupDeleted => AdminChangeAreas.Group,
             MemberClassChanged or MemberApproved or MemberRejected or MemberSuspended
                 or MemberReactivated or MemberPasswordReset or MemberTraceViewed
                 or MemberAdminGranted or MemberAdminRevoked => AdminChangeAreas.Member,
@@ -194,6 +229,8 @@ public static class AdminChangeActions
             BookingCancelledByAdmin => $"Cancelled a booking{of}",
             BookingBlocked => $"Blocked a court{of}",
             BookingBlockLifted => $"Lifted a court block{of}",
+            BookingBookedOnBehalf => $"Booked a court for a member{of}",
+            BookingOverdraftAuthorised => $"Let a booking take a balance below zero{of}",
 
             CreditAdjusted => $"Adjusted a member's credits{of}",
             CreditToppedUp => $"Topped up a member's credits{of}",
@@ -202,6 +239,7 @@ public static class AdminChangeActions
             GroupUpdated => $"Changed a member group{of}",
             GroupArchived => $"Archived a member group{of}",
             GroupMembersChanged => $"Changed who is in a member group{of}",
+            GroupDeleted => $"Deleted a member group{of}",
 
             MemberClassChanged => $"Changed a member's class{of}",
             MemberApproved => $"Approved a member{of}",

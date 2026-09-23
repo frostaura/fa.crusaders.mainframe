@@ -23,8 +23,8 @@ namespace Crusaders.Mainframe.Tests;
 ///
 /// <para>
 /// What these pin is the shape of the override, not just its existence: it is asked for by
-/// name (an admin does not get it for being an admin), it cannot be turned on the actor's
-/// own wallet, it is audited with the actor, the member and the balance it left behind, and
+/// name (an admin does not get it for being an admin), it is an admin's alone — on their own
+/// wallet too since decision R19 — it is audited with the actor, the member and the balance it left behind, and
 /// it changes nothing about the money model. <c>settlement-model.md</c> S1 still says
 /// <c>Owed(b) = P</c> and I1 still bounds it at <c>[0, P]</c>: the debit is the same
 /// <c>BookingCharge</c> of the same price. What moves is the wallet, which is a sum over the
@@ -118,12 +118,43 @@ public class AdminOverdraftBookingTests
     }
 
     /// <summary>
-    /// The narrow half of the rule. <c>isAdminActor</c> is "the actor is not the payer", so
-    /// the override can only ever be spent on somebody else — an admin cannot hand
-    /// themselves a free court with it, and nothing a member could send would reach it.
+    /// <b>Flipped deliberately by decision R19 (2026-09-23, "admin god mode").</b> This test was
+    /// <c>The_override_cannot_be_turned_on_the_actors_own_wallet</c> and pinned the old third
+    /// condition, <c>actorId != userId</c>. The club decided its admins may book themselves
+    /// into the red — the court is not free, it is the same <c>BookingCharge</c> at the same
+    /// price and the admin owes it — so an admin asking for the override by name on their own
+    /// wallet now gets it, and the undeletable change record says so (see the next test).
     /// </summary>
     [Fact]
-    public async Task The_override_cannot_be_turned_on_the_actors_own_wallet()
+    public async Task An_admin_may_overdraw_their_own_wallet_when_they_ask_for_it_by_name()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var (bookings, ledger, db) = await ArrangeAsync(host, scope, seedCredits: 0m);
+
+        var result = await bookings.CreateAsync(
+            host.Courts[0].Id,
+            new BookingPayer(host.AdminUser.Id, host.AdminUser.Id, AllowNegativeBalance: true, ActorIsAdmin: true),
+            TestHost.BookableSlot(2), sliceCount: 1, default);
+
+        var ok = Assert.IsType<BookingResult.Ok>(result);
+        Assert.Equal(host.AdminUser.Id, ok.Booking.UserId);
+        Assert.Equal(-SlicePriceCredits, ok.BalanceAfterCredits);
+        Assert.Equal(-SlicePriceCredits, await ledger.GetBalanceAsync(host.AdminUser.Id, default));
+
+        // Still one BookingCharge at the full price: god mode moves the wallet, never the price.
+        var charge = Assert.Single(await db.LedgerEntries.IgnoreQueryFilters()
+            .Where(l => l.RelatedBookingId == ok.Booking.Id).ToListAsync());
+        Assert.Equal(-SlicePriceCredits, charge.AmountCredits);
+    }
+
+    /// <summary>
+    /// The half of the old rule R19 keeps: the override is an ADMIN's. A payer built with the
+    /// flag but without the role — which is what the member route could produce if the field
+    /// ever reached it — is refused on their own wallet exactly as before.
+    /// </summary>
+    [Fact]
+    public async Task Without_the_admin_role_the_override_does_nothing_even_on_your_own_wallet()
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
@@ -136,6 +167,90 @@ public class AdminOverdraftBookingTests
 
         Assert.IsType<BookingResult.InsufficientBalance>(result);
         Assert.Equal(3m, await ledger.GetBalanceAsync(host.PlayerUser.Id, default));
+    }
+
+    /// <summary>
+    /// R19's "all audited", in the table nobody can delete from. An admin's overdraft of their
+    /// own wallet is the one most worth hiding, so it is written to <c>admin_change_log</c>
+    /// with both balances and <c>self: true</c> — and it is NOT recorded as an on-behalf
+    /// booking, because it was not one.
+    /// </summary>
+    [Fact]
+    public async Task A_self_overdraft_is_written_to_the_change_record_with_both_balances()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var (bookings, _, db) = await ArrangeAsync(host, scope, seedCredits: 0m);
+
+        var ok = Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
+            host.Courts[0].Id,
+            new BookingPayer(host.AdminUser.Id, host.AdminUser.Id, AllowNegativeBalance: true, ActorIsAdmin: true),
+            TestHost.BookableSlot(2), sliceCount: 1, default));
+
+        var rows = await db.AdminChangeLogs.IgnoreQueryFilters().ToListAsync();
+        var row = Assert.Single(rows);
+        Assert.Equal(AdminChangeActions.BookingOverdraftAuthorised, row.Action);
+        Assert.Equal(AdminChangeAreas.Booking, row.Area);
+        Assert.Equal(host.AdminUser.Id, row.ActorUserId);
+        Assert.Equal(host.AdminUser.Id, row.SubjectId);
+
+        using var before = JsonDocument.Parse(row.BeforeJson!);
+        using var after = JsonDocument.Parse(row.AfterJson!);
+        Assert.Equal(0m, before.RootElement.GetProperty("balance_credits").GetDecimal());
+        Assert.Equal(-SlicePriceCredits, after.RootElement.GetProperty("balance_credits").GetDecimal());
+        Assert.True(after.RootElement.GetProperty("self").GetBoolean());
+        Assert.Equal(ok.Booking.Id, after.RootElement.GetProperty("booking_id").GetGuid());
+    }
+
+    /// <summary>
+    /// A desk booking for somebody else writes <c>booking.booked_on_behalf</c>, and when it
+    /// overdrew them, <c>booking.overdraft_authorised</c> beside it — two decisions, two rows.
+    /// A member's own booking writes neither: the change record is for admin decisions.
+    /// </summary>
+    [Fact]
+    public async Task An_on_behalf_overdraft_writes_both_rows_and_a_members_own_booking_writes_none()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var (bookings, _, db) = await ArrangeAsync(host, scope, seedCredits: 3m);
+
+        Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
+            host.Courts[0].Id,
+            new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, AllowNegativeBalance: true, ActorIsAdmin: true),
+            TestHost.BookableSlot(2), sliceCount: 1, default));
+
+        var actions = (await db.AdminChangeLogs.IgnoreQueryFilters().ToListAsync()).Select(r => r.Action).ToList();
+        Assert.Equal(2, actions.Count);
+        Assert.Contains(AdminChangeActions.BookingBookedOnBehalf, actions);
+        Assert.Contains(AdminChangeActions.BookingOverdraftAuthorised, actions);
+
+        // The member's own booking, funded: nothing new in the change record.
+        await host.NewScope().ServiceProvider.GetRequiredService<LedgerService>().PostAsync(
+            new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
+            host.Courts[0].Id, new BookingPayer(host.PlayerUser.Id, host.PlayerUser.Id),
+            TestHost.BookableSlot(3), sliceCount: 1, default));
+        Assert.Equal(2, await db.AdminChangeLogs.IgnoreQueryFilters().CountAsync());
+    }
+
+    /// <summary>
+    /// An item of a batch does not write its own <c>booking.booked_on_behalf</c> — the batch
+    /// writes one <c>bookings.bulk_booked</c> for its whole list — and an item that did not
+    /// overdraw writes nothing at all.
+    /// </summary>
+    [Fact]
+    public async Task A_batch_item_that_did_not_overdraw_writes_no_change_record_row_of_its_own()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var (bookings, _, db) = await ArrangeAsync(host, scope, seedCredits: 200m);
+
+        Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
+            host.Courts[0].Id,
+            new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, ActorIsAdmin: true, PartOfBatch: true),
+            TestHost.BookableSlot(2), sliceCount: 1, default));
+
+        Assert.Empty(await db.AdminChangeLogs.IgnoreQueryFilters().ToListAsync());
     }
 
     /// <summary>
@@ -258,5 +373,26 @@ public class AdminOverdraftBookingTests
         }
         Assert.DoesNotContain("The club made this booking for you", ordinary.HtmlBody);
         Assert.DoesNotContain("The club made this booking for you", MailText.Unwrap(ordinary.PlainBody));
+    }
+
+    /// <summary>
+    /// R19 lets an admin overdraw their OWN wallet, and "the club made this booking for you"
+    /// is then false. The negative balance still gets its explanation; the clause about who
+    /// made the booking goes.
+    /// </summary>
+    [Fact]
+    public void An_admins_own_overdraft_email_does_not_claim_the_club_made_the_booking()
+    {
+        var club = new Crusaders.Mainframe.Api.Email.ClubIdentity(
+            "Riverside Racquet Club", "+27 31 555 0188", "desk@riverside.review.test");
+        var own = EmailTemplates.BookingConfirmation(club, "desk@example.test", new BookingConfirmationDetails(
+            "Court 1", "Sat 06 Sep 09:00", "15 min", 8m, -8m, 15, 30m, MadeByClub: false));
+
+        foreach (var body in new[] { own.HtmlBody, MailText.Unwrap(own.PlainBody) })
+        {
+            Assert.DoesNotContain("The club made this booking for you", body);
+            Assert.Contains("This booking takes your balance to", body);
+            Assert.Contains("Top up to clear it", body);
+        }
     }
 }
