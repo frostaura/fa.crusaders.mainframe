@@ -11,9 +11,11 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// W1.7 and W1.8 — what a member standing at a door is told, and their own history.
 ///
 /// <para>
-/// <b>This is the other half of P3.</b> The admin door log filters by door, time and outcome
+/// <b>This is the other half of P3.</b> The club's door log filters by door, time and outcome
 /// and has no per-member filter, because a member's door history belongs to the member. These
-/// two routes are where it belongs to them — and nowhere else in the product may render it.
+/// two routes are where it belongs to them. Since D9 (2026-09-23) an admin may also read one
+/// named member's history, through <see cref="AdminMemberDoorEndpoints"/>, and every such read
+/// is audited — that route, and no other, is the exception.
 /// </para>
 ///
 /// <para>
