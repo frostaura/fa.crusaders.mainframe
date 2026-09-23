@@ -440,6 +440,30 @@ down:
 down-reset:
 	docker compose down -v
 
+# Real-stack walk — a browser against the RUNNING compose stack (`make up`, Development, mail to
+# MailHog), not against Vite with the API intercepted. Never run by CI. Runbook:
+# docs/runbooks/local-walk.md.
+#
+# The browser is Playwright's cached Chromium when one is present, because the revision the
+# installed @playwright/test pins is often not the one in the cache and it refuses to launch any
+# other. An exported PLAYWRIGHT_CHROMIUM_PATH wins; empty falls back to Playwright's own.
+.PHONY: walk walk-smoke walk-reset
+WALK_CHROMIUM ?= $(or $(PLAYWRIGHT_CHROMIUM_PATH),$(shell ls -d "$(HOME)"/Library/Caches/ms-playwright/chromium-*/chrome-mac-arm64/"Google Chrome for Testing.app"/Contents/MacOS/"Google Chrome for Testing" 2>/dev/null | sort -V | tail -1))
+
+# Headed and slowed so a person can follow it. Pass ARGS to narrow, e.g. ARGS="--project=mobile".
+walk:
+	cd src/frontend && HEADED=1 SLOWMO=$${SLOWMO:-300} PLAYWRIGHT_CHROMIUM_PATH="$(WALK_CHROMIUM)" npm run e2e:real -- $(ARGS)
+
+# Headless, both viewports — the quick "is the stack still walkable" check.
+walk-smoke:
+	cd src/frontend && PLAYWRIGHT_CHROMIUM_PATH="$(WALK_CHROMIUM)" npm run e2e:real -- $(ARGS)
+
+# WIPES ALL LOCAL DATA: drops the compose volumes (Postgres, uploaded photos) and rebuilds, so the
+# Seeder starts from nothing. Every member a walk registered, every booking and ledger row, gone.
+walk-reset:
+	@echo "walk-reset: dropping every local compose volume — all local data is wiped."
+	docker compose down -v && docker compose up --build -d
+
 # Clean build artifacts
 clean:
 	cd src/backend && dotnet clean --nologo -v q
