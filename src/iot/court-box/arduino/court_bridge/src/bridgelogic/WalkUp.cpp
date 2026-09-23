@@ -77,6 +77,10 @@ constexpr ErrorLines kErrors[] = {
     // after the token resolved and after a booking was committed for that member, so
     // it is a verdict about somebody the API knows.
     {"activation_refused", "COULD NOT START", "SCAN TO RETRY", true},
+    // A single rotating code the server already acted on (docs/specs/member-
+    // code.md §4.4). The member's next code works; the same words the activate
+    // path and the offline path use. Not recognised: a used code may be a photo.
+    {"code_used", "CODE USED", "WAIT 30 SECONDS", false},
 };
 
 /// The one refusal on this path whose second line is not fixed text.

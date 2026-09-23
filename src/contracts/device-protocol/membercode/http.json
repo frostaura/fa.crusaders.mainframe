@@ -176,6 +176,35 @@
       }
     },
     {
+      "id": "activate-response-code-used",
+      "kind": "activate",
+      "note": "a single rotating code the server already acted on (§4.4): a decision, not an outage — the roster must not get a second opinion — and it arms nothing",
+      "body_hex": "7b22616374697661746564223a66616c73652c22726561736f6e223a22636f64655f75736564222c22636f7572745f6e756d626572223a322c226772616e7465645f7365636f6e6473223a307d",
+      "expect": {
+        "fallback": false,
+        "lines": [
+          "CODE USED",
+          "WAIT 30 SECONDS"
+        ],
+        "recognised": true
+      }
+    },
+    {
+      "id": "walkup-response-code-used",
+      "kind": "walkup",
+      "note": "the walk-up's own shape: 409 with error code_used; decided, and not recognised — a used code may be a photo",
+      "body_hex": "7b226572726f72223a22636f64655f75736564227d",
+      "expect": {
+        "status": 409,
+        "decided": true,
+        "lines": [
+          "CODE USED",
+          "WAIT 30 SECONDS"
+        ],
+        "recognised": false
+      }
+    },
+    {
       "id": "payfor-quote-ok",
       "kind": "payfor_quote",
       "note": "payable: the glass asks CT2 BOOKED / PAY 50cr? / PRESS CT2 TO PAY",

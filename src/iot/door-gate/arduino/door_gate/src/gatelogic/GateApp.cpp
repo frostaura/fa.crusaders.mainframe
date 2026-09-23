@@ -432,29 +432,13 @@ void GateApp::decideScan(const char* token) {
     // whichever of the three paths this board happened to speak on first.
     commitEmptyRoster();
   }
-  // A SINGLE ROTATING MEMBER CODE is never in the roster — it changes every
-  // thirty seconds — so it is VERIFIED rather than matched, and the member it
-  // proves is looked up in the roster's REF lists. See fromMemberCode.
   memcode::Verdict member;
-  if (decision.fallbackToRoster && memcode::looksLikeV1(token)) {
-    const memcode::OfflineCodes<memcode::KeyRing<kGateKeyRingSlots>, memcode::ReplayRing<kGateReplaySlots>>
-        codes = {stepClock_, codeKeys_, codeUses_};
-    const OfflineCodeDecision offline =
-        decideOfflineMemberCode(token, codes, roster_, unlockMs_, kGateConfig.unlockHardCapMs, now);
-    decision = offline.decision;
-    member = offline.verdict;
-  } else if (decision.fallbackToRoster) {
-    decision = fromRoster(roster_.decide(token, roster::CourtCount(1U), now), unlockMs_,
-                          kGateConfig.unlockHardCapMs);
+  if (decision.fallbackToRoster) {
+    decision = decideFromRoster(token, now, member);
   }
 
   const uint32_t granted = apply(decision, now);
-  if (member.status == memcode::Status::Ok && decision.released && granted > 0U) {
-    // USED only once the lock was actually given time. A relocking refusal
-    // opened nothing, and the member's next scan with the same code must not be
-    // refused as a replay of an opening that did not happen.
-    codeUses_.commit(member.token.ref, member.step);
-  }
+  recordCodeUse(decision, member, token, granted, now);
   // What the lock was ACTUALLY given, not what was asked for. The two differ
   // whenever the window bound bites, and an event claiming a release the cap
   // never allowed is a club reading an audit trail that is not true.
@@ -464,6 +448,40 @@ void GateApp::decideScan(const char* token) {
   // already queued. An observer that ran first would be an observer a reader
   // could mistake for a step.
   report(decision, token, now, granted);
+}
+
+ScanDecision GateApp::decideFromRoster(const char* token, uint32_t nowMs, memcode::Verdict& member) {
+  if (!memcode::looksLikeV1(token)) {
+    return fromRoster(roster_.decide(token, roster::CourtCount(1U), nowMs), unlockMs_,
+                      kGateConfig.unlockHardCapMs);
+  }
+  // A SINGLE ROTATING MEMBER CODE is never in the roster — it changes every
+  // thirty seconds — so it is VERIFIED rather than matched, and the member it
+  // proves is looked up in the roster's REF lists. See fromMemberCode.
+  const memcode::OfflineCodes<memcode::KeyRing<kGateKeyRingSlots>, memcode::ReplayRing<kGateReplaySlots>>
+      codes = {stepClock_, codeKeys_, codeUses_, codeGuard_};
+  const OfflineCodeDecision offline =
+      decideOfflineMemberCode(token, codes, roster_, unlockMs_, kGateConfig.unlockHardCapMs, nowMs);
+  member = offline.verdict;
+  return offline.decision;
+}
+
+void GateApp::recordCodeUse(const ScanDecision& decision, const memcode::Verdict& member, const char* token,
+                            uint32_t grantedMs, uint32_t nowMs) {
+  if (!decision.released || grantedMs == 0U) {
+    // A relocking refusal, or any refusal: nothing opened, and the member's
+    // next scan with the same code must not be refused as a replay of an
+    // opening that did not happen.
+    return;
+  }
+  if (member.status == memcode::Status::Ok) {
+    codeUses_.commit(member.token.ref, member.step);
+  } else if (!decision.queueEvent) {
+    // THE SERVER opened this door for this code. Record the use here too, or a
+    // photo of the same v1 code could open it again offline inside its window
+    // the moment the link drops. A legacy code records nothing.
+    memcode::recordOnlineUse(token, stepClock_, codeKeys_, codeUses_, nowMs);
+  }
 }
 
 void GateApp::report(const ScanDecision& decision, const char* token, uint32_t nowMs, uint32_t grantedMs) {

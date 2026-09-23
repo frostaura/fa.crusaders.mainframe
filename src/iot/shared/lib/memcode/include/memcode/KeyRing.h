@@ -43,6 +43,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "devcrypto/Sha256.h"
 #include "memcode/Token.h"
 #include "memcode/Totp.h"
 
@@ -51,8 +52,9 @@ namespace memcode {
 /// Day slots a ring can hold: today, and the day a roster window runs into.
 inline constexpr uint8_t kMaxDaySlots = 2U;
 
-/// The longest day a slot may span: a 25-hour day (daylight saving ending).
-inline constexpr uint32_t kMaxDaySteps = 3000U;
+/// The longest day a slot may span: 26 hours. Daylight saving's usual hour
+/// makes 25; one inhabited zone (Antarctica/Troll) shifts by two.
+inline constexpr uint32_t kMaxDaySteps = 3120U;
 
 /// Characters of a `code_keys` element, and of its base64url key field.
 inline constexpr size_t kKeyFieldLen = 16U;
@@ -127,6 +129,9 @@ public:
     return true;
   }
 
+  /// Commits the replacement. KEY MATERIAL IS WIPED on the way: the staging
+  /// copy once it is live, and whatever tail of the old ring the new one did
+  /// not overwrite — a key a board no longer holds must not still be in its RAM.
   void commitReplace() {
     if (!replacing_) {
       return;
@@ -134,17 +139,24 @@ public:
     for (uint8_t i = 0U; i < stagingCount_; ++i) {
       keys_[i] = staging_[i];
     }
+    dc::wipe(keys_ + stagingCount_, sizeof(DayKey) * (Capacity - stagingCount_));
+    dc::wipe(staging_, sizeof(staging_));
     for (uint8_t i = 0U; i < kMaxDaySlots; ++i) {
       days_[i] = stagingDays_[i];
     }
     count_ = stagingCount_;
     dropped_ = stagingDropped_;
+    stagingCount_ = 0U;
     replacing_ = false;
   }
 
-  /// Empties the ring now. A board taken out of service verifies nobody.
+  /// Empties the ring now, keys wiped. A board taken out of service verifies
+  /// nobody and keeps nothing.
   void clear() {
+    dc::wipe(keys_, sizeof(keys_));
+    dc::wipe(staging_, sizeof(staging_));
     count_ = 0U;
+    stagingCount_ = 0U;
     dropped_ = 0U;
     for (uint8_t i = 0U; i < kMaxDaySlots; ++i) {
       days_[i] = DaySlot();

@@ -69,7 +69,7 @@
       ],
       "case_count": {
         "encode": 9,
-        "decode": 16
+        "decode": 18
       }
     },
     "verify.json": {
@@ -86,7 +86,7 @@
         "csharp"
       ],
       "case_count": {
-        "elements": 12,
+        "elements": 14,
         "decide": 11
       }
     },
@@ -96,9 +96,9 @@
         "csharp"
       ],
       "case_count": {
-        "key_elements": 10,
-        "day_elements": 8,
-        "apply": 11
+        "key_elements": 11,
+        "day_elements": 12,
+        "apply": 14
       }
     },
     "http.json": {
@@ -108,7 +108,7 @@
       ],
       "case_count": {
         "requests": 8,
-        "responses": 21
+        "responses": 23
       }
     },
     "gate.json": {

@@ -23,10 +23,13 @@
 #include "gatelogic/GateConfig.h"
 #include "gatelogic/GateFlow.h"
 #include "gatelogic/GateHeartbeat.h"
+#include "memcode/GuessGuard.h"
 #include "memcode/KeyRing.h"
 #include "memcode/ReplayRing.h"
 #include "memcode/StepClock.h"
 #include "memcode/Token.h"
+#include "memcode/Totp.h"
+#include "roster/Roster.h"
 #include "support/CorpusJson.h"
 
 void setUp(void) {
@@ -167,6 +170,7 @@ void runOffline(const char* c) {
   memcode::StepClock clock(gatelogic::kGateConfig.rosterMaxAgeMs);
   Keys keys;
   Uses uses;
+  memcode::GuessGuard guard;
   TEST_ASSERT_TRUE_MESSAGE(devlink::applyRoster(doc, len, cache, at).replaced, id);
   TEST_ASSERT_TRUE_MESSAGE(devlink::applyCodeSync(doc, len, clock, keys, at).clockSynced, id);
 
@@ -178,7 +182,7 @@ void runOffline(const char* c) {
     text(s, "token", token, sizeof(token));
     text(s, "reason", reason, sizeof(reason));
     const uint32_t now = static_cast<uint32_t>(number(s, "at_ms"));
-    const memcode::OfflineCodes<Keys, Uses> codes = {clock, keys, uses};
+    const memcode::OfflineCodes<Keys, Uses> codes = {clock, keys, uses, guard};
     const gatelogic::OfflineCodeDecision offline = gatelogic::decideOfflineMemberCode(
         token, codes, cache, 15000U, gatelogic::kGateConfig.unlockHardCapMs, now);
     const gatelogic::ScanDecision& d = offline.decision;
@@ -250,6 +254,52 @@ void test_every_declared_gate_case_was_executed(void) {
                            g_offlineRun);
 }
 
+void test_the_door_throttles_offline_guessing(void) {
+  // A REF is public, so a door in its offline fallback fed rotating codes is a
+  // door being guessed at. Five wrong codes and it stops trying anybody's.
+  gatelogic::GateRoster cache(gatelogic::kGateConfig.rosterMaxAgeMs);
+  memcode::StepClock clock(gatelogic::kGateConfig.rosterMaxAgeMs);
+  Keys keys;
+  Uses uses;
+  memcode::GuessGuard guard;
+  memcode::DayKey key;
+  key.ref = 0x0A3C9U;
+  for (uint8_t i = 0U; i < memcode::kDayKeyBytes; ++i) {
+    key.key[i] = static_cast<uint8_t>(0x40U + i);
+  }
+  memcode::DaySlot day;
+  day.firstStep = 900U;
+  day.endStep = 1900U;
+  day.valid = true;
+  keys.beginReplace();
+  TEST_ASSERT_TRUE(keys.setDay(0U, day));
+  TEST_ASSERT_TRUE(keys.add(key));
+  keys.commitReplace();
+  TEST_ASSERT_TRUE(clock.sync(1000U, 0U, 0U));
+  roster::Entry entry;
+  TEST_ASSERT_TRUE(devlink::parseRosterElement("m18Y9|0|0|3600", entry));
+  cache.beginReplace(0U);
+  TEST_ASSERT_TRUE(cache.add(entry));
+  cache.commitReplace();
+  const memcode::OfflineCodes<Keys, Uses> codes = {clock, keys, uses, guard};
+
+  char wrong[memcode::kTokenLen + 1U] = {};
+  TEST_ASSERT_TRUE(memcode::format(0x0A3C9U, 1U, (memcode::offCode(key.key, 1000U) + 1U) % 1000000U, wrong,
+                                   sizeof(wrong)));
+  for (uint8_t i = 0U; i < memcode::kGuessFailures; ++i) {
+    TEST_ASSERT_EQUAL_STRING(
+        gatelogic::kReasonNotRecognised,
+        gatelogic::decideOfflineMemberCode(wrong, codes, cache, 15000U, 30000U, 1000U + i).decision.reason);
+  }
+  char good[memcode::kTokenLen + 1U] = {};
+  TEST_ASSERT_TRUE(memcode::format(0x0A3C9U, 1U, memcode::offCode(key.key, 1000U), good, sizeof(good)));
+  const gatelogic::OfflineCodeDecision locked =
+      gatelogic::decideOfflineMemberCode(good, codes, cache, 15000U, 30000U, 2000U);
+  TEST_ASSERT_FALSE(locked.decision.released);
+  TEST_ASSERT_EQUAL_STRING(gatelogic::kReasonTooFast, locked.decision.reason);
+  TEST_ASSERT_TRUE(locked.decision.queueEvent);
+}
+
 void test_a_board_that_names_no_capability_renders_the_body_it_always_did(void) {
   char out[256] = {};
   TEST_ASSERT_TRUE(gatelogic::renderGateHeartbeatBody(out, sizeof(out), "5ccf7f0a1b2c", "1.0.0", 86400000ULL,
@@ -270,6 +320,7 @@ int main(int, char**) {
   RUN_TEST(test_every_gate_heartbeat_with_codes_is_adopted_whole);
   RUN_TEST(test_the_door_decides_a_v1_code_offline_as_the_contract_says);
   RUN_TEST(test_every_declared_gate_case_was_executed);
+  RUN_TEST(test_the_door_throttles_offline_guessing);
   RUN_TEST(test_a_board_that_names_no_capability_renders_the_body_it_always_did);
   return UNITY_END();
 }

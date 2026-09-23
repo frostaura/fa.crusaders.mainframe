@@ -26,6 +26,9 @@
 //   Replayed   OFF matched, at a step this device has already acted on.
 //   Ok         OFF matched at `step`, which is newer than any use.
 //
+// And, from verifyGuarded only: Throttled — too many wrong codes lately, so
+// nothing is verified at all for a while (GuessGuard.h says why and how long).
+//
 // Candidates are tried as t, t-1, t+1 — the device's own step first, so the
 // step reported is the likeliest one when (one time in a million) two adjacent
 // steps share an OFF value.
@@ -37,6 +40,7 @@
 
 #include <stdint.h>
 
+#include "../memcode/GuessGuard.h"
 #include "../memcode/KeyRing.h"
 #include "../memcode/ReplayRing.h"
 #include "../memcode/StepClock.h"
@@ -52,6 +56,8 @@ enum class Status : uint8_t {
   NoKey = 3U,
   WrongCode = 4U,
   Replayed = 5U,
+  /// verifyGuarded refused to verify at all: the guess guard is locked.
+  Throttled = 6U,
 };
 
 /// The wire/log word for a status, as the corpus spells it.
@@ -67,11 +73,13 @@ struct Verdict {
 };
 
 /// What a device holds to verify codes offline, bundled so a caller hands over
-/// one thing rather than three that must always travel together.
+/// one thing rather than four that must always travel together. The guard is
+/// the one member verification CHANGES.
 template <class KeyRingT, class ReplayRingT> struct OfflineCodes {
   const StepClock& clock;
   const KeyRingT& keys;
   const ReplayRingT& used;
+  GuessGuard& guard;
 };
 
 template <class KeyRingT, class ReplayRingT>
@@ -107,9 +115,47 @@ Verdict verify(const char* text, const StepClock& clock, const KeyRingT& keys, c
   return verdict;
 }
 
+/// The verification a DEVICE runs: verify, behind the guess guard. A locked
+/// guard answers Throttled without trying a key; a wrong code feeds the guard; a
+/// good one resets it. The token is still parsed first, so a caller can say
+/// whose code was throttled.
 template <class KeyRingT, class ReplayRingT>
-Verdict verify(const char* text, const OfflineCodes<KeyRingT, ReplayRingT>& codes, uint32_t nowMs) {
-  return verify(text, codes.clock, codes.keys, codes.used, nowMs);
+Verdict verifyGuarded(const char* text, const OfflineCodes<KeyRingT, ReplayRingT>& codes, uint32_t nowMs) {
+  if (codes.guard.locked(nowMs)) {
+    Verdict throttled;
+    throttled.status = parse(text, throttled.token) ? Status::Throttled : Status::Malformed;
+    return throttled;
+  }
+  const Verdict verdict = verify(text, codes.clock, codes.keys, codes.used, nowMs);
+  if (verdict.status == Status::WrongCode) {
+    codes.guard.failed(nowMs);
+  } else if (verdict.status == Status::Ok) {
+    codes.guard.succeeded();
+  }
+  return verdict;
+}
+
+/// The SERVER just acted on `text` — an online grant, an open, a charge — so
+/// this device records the use too, or a photo of the same code could be used
+/// here offline inside its window the moment the link drops.
+///
+/// The exact step when this device can find it (the member is in its ring);
+/// otherwise the device's step plus one, which covers every step the server can
+/// have accepted around it — at the cost of refusing the member's NEXT code
+/// offline for up to one more step, which is the safe direction. Nothing
+/// without a trusted clock, and nothing for a token that is not a v1 code.
+template <class KeyRingT, class ReplayRingT>
+void recordOnlineUse(const char* text, const StepClock& clock, const KeyRingT& keys, ReplayRingT& used,
+                     uint32_t nowMs) {
+  if (!clock.trusted(nowMs)) {
+    return;
+  }
+  const Verdict verdict = verify(text, clock, keys, used, nowMs);
+  if (verdict.status == Status::Ok || verdict.status == Status::Replayed) {
+    used.commit(verdict.token.ref, verdict.step);
+  } else if (verdict.status != Status::Malformed) {
+    used.commit(verdict.token.ref, clock.stepAt(nowMs) + kWindowSteps);
+  }
 }
 
 } // namespace memcode

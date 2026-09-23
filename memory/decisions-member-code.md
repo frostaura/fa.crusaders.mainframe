@@ -26,7 +26,17 @@ by `src/iot/tools/membercode_vectors.py` and checked by `make corpus-check`. Lan
   legacy entries and a PROVED REF matches only REF lists. *Why:* a REF is printed in every code;
   if the paths crossed, `m` + somebody's REF would open their court. Pinned both ways.
 - **Replay rings record only ACTIONS** (a court actually lit, a lock actually given time), per REF
-  the highest step. *Why:* a member told TOO EARLY who rescans is not replaying.
+  the highest step, **online ones included**. *Why:* a member told TOO EARLY who rescans is not
+  replaying; and without the online record a photo of a code the server just accepted opened the
+  same door again the moment the link dropped (found by an independent review, 2026-09-23).
+- **Offline OFF guessing is bounded by a guard, not denied** — five wrong codes a minute lock
+  offline checks, doubling to 30 min (`GuessGuard.h`). *Why:* a REF is public and 6 digits at 3
+  steps is 3e-6 a guess; unguarded, rotating QR codes at scanner speed opened a door in hours.
+  Only `wrong_code` counts, so a member without a key cannot lock the door for everybody.
+- **Server use table is per (REF, step, class ∈ door/court/money)**; a used code arms no buttons.
+  *Why:* front door then court inside one step is two uses, not a replay or a forgery.
+- **A device that loses its key entitlement is sent EMPTY `code_days`/`code_keys`, never an
+  omission** — an absent key means "no member codes here" and keeps the old ring.
 - **`caps:["codes:m1"]` on every heartbeat, last**; an image that names nothing renders its old
   body byte for byte, so every existing vector still holds.
 - **D10 pay-for runs down three rows, not the founder's two lines** — `CT2 BOOKED` / `PAY 50cr?` /

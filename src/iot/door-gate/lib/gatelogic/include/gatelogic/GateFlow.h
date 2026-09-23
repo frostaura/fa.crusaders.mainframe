@@ -252,6 +252,7 @@ ScanDecision fromRoster(const roster::Decision& decision, uint32_t adoptedUnlock
 ///   Ok        -> fromRoster(decision): ok / too_early / too_late / roster_stale
 ///   Replayed  -> refused, `replayed`
 ///   NoClock   -> refused, `roster_stale` — the step is judged at the roster's age
+///   Throttled -> refused, `too_fast` — the guess guard has offline checks locked
 ///   otherwise -> refused, `not_recognised`
 ///
 /// Everything is queued, as every roster decision is: the API heard nothing.
@@ -275,7 +276,7 @@ OfflineCodeDecision
 decideOfflineMemberCode(const char* token, const memcode::OfflineCodes<KeysT, UsesT>& codes,
                         const RosterT& cache, uint32_t adoptedUnlockMs, uint32_t hardCapMs, uint32_t nowMs) {
   OfflineCodeDecision out;
-  out.verdict = memcode::verify(token, codes, nowMs);
+  out.verdict = memcode::verifyGuarded(token, codes, nowMs);
   roster::Decision booked;
   if (out.verdict.status == memcode::Status::Ok) {
     booked = cache.decideMember(out.verdict.token.refText, roster::CourtCount(1U), nowMs);

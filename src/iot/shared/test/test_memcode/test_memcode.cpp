@@ -31,6 +31,7 @@
 #include "devcrypto/Sha256.h"
 #include "devlink/CodeSync.h"
 #include "devlink/RosterSync.h"
+#include "memcode/GuessGuard.h"
 #include "memcode/KeyRing.h"
 #include "memcode/ReplayRing.h"
 #include "memcode/StepClock.h"
@@ -638,6 +639,7 @@ template <uint8_t Cap> void checkApply(const char* c, const char* id) {
   const char* d = nullptr;
   uint8_t slot = 0U;
   while (days.next(&d)) {
+    TEST_ASSERT_TRUE_MESSAGE(slot < memcode::kMaxDaySlots, id);
     const char* p = corpus::skipWs(d);
     if (strncmp(p, "null", 4) == 0) {
       TEST_ASSERT_FALSE_MESSAGE(ring.day(slot).valid, id);
@@ -649,6 +651,11 @@ template <uint8_t Cap> void checkApply(const char* c, const char* id) {
                                        id);
     }
     ++slot;
+  }
+  // Every slot the vector does not name is EMPTY — the sentinel day the ring
+  // held before this body must not survive a replacement.
+  for (; slot < memcode::kMaxDaySlots; ++slot) {
+    TEST_ASSERT_FALSE_MESSAGE(ring.day(slot).valid, id);
   }
 }
 
@@ -878,6 +885,131 @@ void test_a_scanned_ref_list_never_matches_and_a_ref_never_matches_a_code(void) 
   TEST_ASSERT_FALSE(cache.occupied(0U, 900000U));
 }
 
+void test_guess_guard_locks_after_five_wrong_codes_and_backs_off(void) {
+  memcode::GuessGuard guard;
+  const uint32_t t0 = 0xFFFFF000U; // across the millis() wrap, as a box runs for months
+  for (uint8_t i = 0U; i < memcode::kGuessFailures - 1U; ++i) {
+    guard.failed(t0 + i);
+    TEST_ASSERT_FALSE(guard.locked(t0 + i));
+  }
+  guard.failed(t0 + 10U);
+  TEST_ASSERT_TRUE(guard.locked(t0 + 10U));
+  TEST_ASSERT_TRUE(guard.locked(t0 + 10U + memcode::kGuessLockBaseMs - 1U));
+  TEST_ASSERT_FALSE(guard.locked(t0 + 10U + memcode::kGuessLockBaseMs));
+  // The next trip locks for twice as long.
+  TEST_ASSERT_EQUAL_UINT32(memcode::kGuessLockBaseMs * 2U, guard.nextLockMs());
+  // Wrong codes spread wider than the window never add up to a lock.
+  memcode::GuessGuard slow;
+  for (uint32_t i = 0U; i < 20U; ++i) {
+    slow.failed(i * (memcode::kGuessWindowMs / 4U));
+    TEST_ASSERT_FALSE(slow.locked(i * (memcode::kGuessWindowMs / 4U)));
+  }
+  // A code that verifies resets everything.
+  guard.succeeded();
+  TEST_ASSERT_FALSE(guard.locked(t0 + 11U));
+  TEST_ASSERT_EQUAL_UINT32(memcode::kGuessLockBaseMs, guard.nextLockMs());
+  // The back-off is capped.
+  memcode::GuessGuard capped;
+  uint32_t now = 0U;
+  for (int trip = 0; trip < 12; ++trip) {
+    for (uint8_t i = 0U; i < memcode::kGuessFailures; ++i) {
+      capped.failed(now);
+    }
+    now += memcode::kGuessLockMaxMs + 1U;
+  }
+  TEST_ASSERT_EQUAL_UINT32(memcode::kGuessLockMaxMs, capped.nextLockMs());
+}
+
+namespace {
+
+/// A ring with one member's key for day [900, 1900) and a clock at step 1000.
+struct OneKey {
+  OneKey() : clock(21600000UL) {
+    for (uint8_t i = 0U; i < memcode::kDayKeyBytes; ++i) {
+      key.key[i] = static_cast<uint8_t>(i + 1U);
+    }
+    key.ref = 77U;
+    memcode::DaySlot day;
+    day.firstStep = 900U;
+    day.endStep = 1900U;
+    day.valid = true;
+    ring.beginReplace();
+    TEST_ASSERT_TRUE(ring.setDay(0U, day));
+    TEST_ASSERT_TRUE(ring.add(key));
+    ring.commitReplace();
+    TEST_ASSERT_TRUE(clock.sync(1000U, 0U, 0U));
+  }
+
+  void token(uint32_t ref, uint32_t off, char* out) {
+    TEST_ASSERT_TRUE(memcode::format(ref, 12345678U, off, out, memcode::kTokenLen + 1U));
+  }
+
+  memcode::StepClock clock;
+  memcode::KeyRing<4U> ring;
+  memcode::ReplayRing<4U> used;
+  memcode::GuessGuard guard;
+  memcode::DayKey key;
+};
+
+} // namespace
+
+void test_verify_guarded_throttles_guessing_and_a_good_code_resets_it(void) {
+  OneKey f;
+  const memcode::OfflineCodes<memcode::KeyRing<4U>, memcode::ReplayRing<4U>> codes = {f.clock, f.ring, f.used,
+                                                                                      f.guard};
+  const uint32_t right = memcode::offCode(f.key.key, 1000U);
+  char wrong[memcode::kTokenLen + 1U] = {};
+  f.token(77U, (right + 1U) % 1000000U, wrong);
+  for (uint8_t i = 0U; i < memcode::kGuessFailures; ++i) {
+    TEST_ASSERT_EQUAL(memcode::Status::WrongCode, memcode::verifyGuarded(wrong, codes, 100U).status);
+  }
+  char good[memcode::kTokenLen + 1U] = {};
+  f.token(77U, right, good);
+  // Locked: even the RIGHT code is not tried — that is the stated trade.
+  const memcode::Verdict locked = memcode::verifyGuarded(good, codes, 200U);
+  TEST_ASSERT_EQUAL(memcode::Status::Throttled, locked.status);
+  TEST_ASSERT_EQUAL_UINT32(77U, locked.token.ref);
+  // A key the ring does not hold, or a malformed scan, never feeds the guard.
+  memcode::GuessGuard fresh;
+  const memcode::OfflineCodes<memcode::KeyRing<4U>, memcode::ReplayRing<4U>> other = {f.clock, f.ring, f.used,
+                                                                                      fresh};
+  char nokey[memcode::kTokenLen + 1U] = {};
+  f.token(78U, right, nokey);
+  for (int i = 0; i < 20; ++i) {
+    TEST_ASSERT_EQUAL(memcode::Status::NoKey, memcode::verifyGuarded(nokey, other, 300U).status);
+    TEST_ASSERT_EQUAL(memcode::Status::Malformed, memcode::verifyGuarded("7Q3F9KM2XZ8B", other, 300U).status);
+  }
+  TEST_ASSERT_FALSE(fresh.locked(300U));
+  // After the lock, a good code — the one for the step it now is — verifies and
+  // resets the back-off.
+  const uint32_t after = 200U + memcode::kGuessLockBaseMs;
+  char later[memcode::kTokenLen + 1U] = {};
+  f.token(77U, memcode::offCode(f.key.key, f.clock.stepAt(after)), later);
+  TEST_ASSERT_EQUAL(memcode::Status::Ok, memcode::verifyGuarded(later, codes, after).status);
+  TEST_ASSERT_EQUAL_UINT32(memcode::kGuessLockBaseMs, f.guard.nextLockMs());
+}
+
+void test_an_online_use_is_recorded_so_the_code_cannot_be_used_offline_after(void) {
+  OneKey f;
+  char good[memcode::kTokenLen + 1U] = {};
+  f.token(77U, memcode::offCode(f.key.key, 1000U), good);
+  memcode::recordOnlineUse(good, f.clock, f.ring, f.used, 5000U);
+  TEST_ASSERT_EQUAL(memcode::Status::Replayed, memcode::verify(good, f.clock, f.ring, f.used, 6000U).status);
+  // A member this device holds no key for is recorded one step AHEAD, which
+  // covers every step the server can have accepted around it.
+  char unknown[memcode::kTokenLen + 1U] = {};
+  f.token(99U, 123456U, unknown);
+  memcode::recordOnlineUse(unknown, f.clock, f.ring, f.used, 5000U);
+  TEST_ASSERT_TRUE(f.used.seen(99U, 1001U));
+  TEST_ASSERT_FALSE(f.used.seen(99U, 1002U));
+  // A legacy code, or a board with no trusted clock, records nothing.
+  const uint8_t before = f.used.size();
+  memcode::recordOnlineUse("7Q3F9KM2XZ8B", f.clock, f.ring, f.used, 5000U);
+  memcode::StepClock unsynced(1000U);
+  memcode::recordOnlineUse(good, unsynced, f.ring, f.used, 5000U);
+  TEST_ASSERT_EQUAL_UINT8(before, f.used.size());
+}
+
 // ---------------------------------------------------------------------------
 // Executed == declared
 // ---------------------------------------------------------------------------
@@ -935,6 +1067,9 @@ int main(int, char**) {
   RUN_TEST(test_replay_ring_keeps_the_highest_step_and_evicts_the_oldest);
   RUN_TEST(test_key_ring_looks_keys_up_by_the_slot_whose_range_holds_the_step);
   RUN_TEST(test_a_scanned_ref_list_never_matches_and_a_ref_never_matches_a_code);
+  RUN_TEST(test_guess_guard_locks_after_five_wrong_codes_and_backs_off);
+  RUN_TEST(test_verify_guarded_throttles_guessing_and_a_good_code_resets_it);
+  RUN_TEST(test_an_online_use_is_recorded_so_the_code_cannot_be_used_offline_after);
   RUN_TEST(test_every_declared_fw_shared_case_was_executed);
   return UNITY_END();
 }

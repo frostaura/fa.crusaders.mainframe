@@ -2474,6 +2474,14 @@ void test_app_a_v1_member_code_opens_the_door_offline_once_and_is_recorded_as_sc
     rig.tick();
     TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(), "a code the door has acted on opens nothing twice");
     TEST_ASSERT_EQUAL_STRING(gatelogic::kReasonReplayed, rig.log.last().reason);
+
+    // THE CLUB TAKES THE BOARD OUT OF SERVICE: the keys and the clock go with
+    // the roster, so an offline board verifies nobody at all.
+    rig.link.set(true);
+    rig.http.onPath(gatelogic::kPathHeartbeat, 403U, "", 0U);
+    rig.forceHeartbeat();
+    TEST_ASSERT_EQUAL_UINT8(0U, rig.app.codeKeys());
+    TEST_ASSERT_FALSE(rig.app.stepClock().synced());
   }
 }
 

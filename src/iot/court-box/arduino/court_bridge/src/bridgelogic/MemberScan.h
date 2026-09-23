@@ -50,6 +50,11 @@ namespace bridgelogic {
 inline constexpr char kCodeUsedLine1[] = "CODE USED";
 inline constexpr char kCodeUsedLine2[] = "WAIT 30 SECONDS";
 
+/// What a member reads while the guess guard has offline verification locked
+/// (memcode/GuessGuard.h): somebody has been presenting wrong codes here.
+inline constexpr char kThrottledLine1[] = "TOO MANY TRIES";
+inline constexpr char kThrottledLine2[] = "TRY IN A MINUTE";
+
 /// Key ring and replay ring sizes for the court box. 24 keys fit the 2048-byte
 /// heartbeat contract beside sixteen four-player entries (the corpus's
 /// `heartbeat-response-codes-full` is the proof); 16 remembered uses cover more
@@ -68,6 +73,20 @@ struct MemberScanResult {
   bool alreadyOn = false;
 };
 
+/// A refused v1 scan, recorded as an unknown scan and told in its own words.
+/// Never recognised: nothing about it arms the buttons.
+template <class SessionT>
+MemberScanResult refusedAs(const char* token, roster::CourtCount courts, SessionT& session, uint32_t nowMs,
+                           const char* line1, const char* line2) {
+  MemberScanResult result;
+  result.outcome =
+      session.onMemberScan(token, nullptr, roster::Verdict::Unknown, courts, eventq::Method::Qr, nowMs);
+  court::detail::setLine(result.outcome.line1, line1);
+  court::detail::setLine(result.outcome.line2, line2);
+  result.outcome.recognised = false;
+  return result;
+}
+
 /// The courts this box drives and what it believes about each: the held
 /// state the re-scan guard reads, and how many relays the scanner serves.
 struct BoxCourts {
@@ -81,7 +100,7 @@ MemberScanResult
 decideOfflineMemberCode(const char* token, const memcode::OfflineCodes<KeyRingT, ReplayT>& codes,
                         const RosterT& cache, SessionT& session, BoxCourts box, uint32_t nowMs) {
   MemberScanResult result;
-  result.verdict = memcode::verify(token, codes, nowMs);
+  result.verdict = memcode::verifyGuarded(token, codes, nowMs);
   const roster::CourtCount courts(box.count);
 
   switch (result.verdict.status) {
@@ -97,14 +116,17 @@ decideOfflineMemberCode(const char* token, const memcode::OfflineCodes<KeyRingT,
   }
   case memcode::Status::Replayed:
     // Recorded as a refused scan, so the club can see a code presented twice,
-    // and told as what it is. The member IS known — the code was theirs — so
-    // the scan is recognised, which is what arms the button window.
-    result.outcome =
-        session.onMemberScan(token, nullptr, roster::Verdict::Unknown, courts, eventq::Method::Qr, nowMs);
-    court::detail::setLine(result.outcome.line1, kCodeUsedLine1);
-    court::detail::setLine(result.outcome.line2, kCodeUsedLine2);
-    result.outcome.recognised = true;
+    // and told as what it is. NOT recognised: whoever is holding a used code
+    // may be holding a photo of somebody else's screen, and a recognised scan
+    // arms the buttons — a walk-up or a pay-for on the victim's identity.
+  case memcode::Status::Throttled: {
+    const bool used = result.verdict.status == memcode::Status::Replayed;
+    const memcode::Verdict verdict = result.verdict;
+    result = refusedAs(token, courts, session, nowMs, used ? kCodeUsedLine1 : kThrottledLine1,
+                       used ? kCodeUsedLine2 : kThrottledLine2);
+    result.verdict = verdict;
     return result;
+  }
   case memcode::Status::NoClock:
     // The box no longer knows which step it is. The roster is judged the same
     // way at the same age, so the member reads the roster's own stale screen.

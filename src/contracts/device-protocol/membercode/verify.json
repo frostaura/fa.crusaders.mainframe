@@ -190,12 +190,10 @@
         "at_ms": 1000000
       },
       "days": [
-        "59667600|59670480",
         "59670480|59673360"
       ],
       "keys": [
-        "18Y90MQsrOitz87bB65_f",
-        "18Y91HkE5WHvWQ0Oe9Rdl"
+        "18Y90HkE5WHvWQ0Oe9Rdl"
       ],
       "replay_capacity": 4,
       "scans": [
@@ -218,23 +216,25 @@
     },
     {
       "id": "step-outside-every-day",
-      "note": "the ring holds only yesterday's key; today's step falls in no day it holds, so there is no key to try",
+      "note": "the ring holds today only; two steps past midnight (with a clock trusted a little past six hours) no candidate step falls in a day the ring holds — there is no key to try",
       "sync": {
         "step": 59672640,
         "step_ms": 17000,
         "at_ms": 1000000
       },
       "days": [
-        "59667600|59670480"
+        "59670480|59673360"
       ],
       "keys": [
-        "18Y90MQsrOitz87bB65_f"
+        "18Y90HkE5WHvWQ0Oe9Rdl",
+        "BWDJ0IksrpX8Aq55NF6dh"
       ],
       "replay_capacity": 4,
+      "max_age_ms": 21700000,
       "scans": [
         {
-          "at_ms": 1005000,
-          "token": "118Y956008441714835",
+          "at_ms": 22648000,
+          "token": "118Y921600139388089",
           "expect": "no_key",
           "ref": "18Y9",
           "commit": false

@@ -196,6 +196,12 @@ ScanDecision fromMemberCode(memcode::Status status, const roster::Decision& deci
     // stops trusting its roster, and the same refusal a member reads for that.
     setReason(out, kReasonRosterStale);
     return out;
+  case memcode::Status::Throttled:
+    // Too many wrong codes here lately (memcode/GuessGuard.h): the board's own
+    // limit, not a verdict about this member — the same word the online path
+    // uses for this board being asked too fast.
+    setReason(out, kReasonTooFast);
+    return out;
   case memcode::Status::Ok:
   case memcode::Status::Malformed:
   case memcode::Status::NoKey:

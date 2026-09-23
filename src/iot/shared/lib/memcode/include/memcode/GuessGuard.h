@@ -1,0 +1,66 @@
+// Crusaders Mainframe — how many OFF guesses a device lets anybody make.
+//
+// WHY THIS EXISTS
+// ---------------
+// OFF is six digits and a verifier tries three steps, so a random token naming
+// a REF this device holds a key for passes with probability 3 in a million. A
+// REF is not a secret — it is printed in every code — so a board pushed into
+// its offline fallback (a jammed radio, an API that is down) and fed rotating
+// tokens at the rate a scanner can read them would, unguarded, open a door
+// within hours with no key material at all. This caps the guessing.
+//
+// THE RULE
+// --------
+// Only a WRONG CODE counts: a guess against a key the device actually holds.
+// `no_key` and `malformed` cannot become a success whatever is presented, and
+// counting them would let a member without a key lock the door for everybody.
+// kGuessFailures wrong codes inside kGuessWindowMs lock offline v1 verification
+// for kGuessLockBaseMs; every lock after that doubles, to kGuessLockMaxMs, until
+// a code verifies. A lock refuses LEGITIMATE members offline too — that is the
+// trade, stated: offline admission is a degraded mode, and a jammer can deny it
+// anyway. Online nothing here runs; the server's own limits apply.
+//
+// With these numbers an attacker gets a handful of guesses a minute and then
+// fewer and fewer: well under one in a thousand of opening anything in a day of
+// sustained offline operation, against three in a million per guess.
+//
+// No Arduino headers, no heap. Compiles for AVR, Xtensa and the host.
+
+#ifndef CRUSADERS_MEMCODE_GUESSGUARD_H
+#define CRUSADERS_MEMCODE_GUESSGUARD_H
+
+#include <stdint.h>
+
+#include "timebase/TimeBase.h"
+
+namespace memcode {
+
+inline constexpr uint8_t kGuessFailures = 5U;
+inline constexpr uint32_t kGuessWindowMs = 60000UL;
+inline constexpr uint32_t kGuessLockBaseMs = 60000UL;
+inline constexpr uint32_t kGuessLockMaxMs = 1800000UL;
+
+class GuessGuard {
+public:
+  /// True while offline v1 verification is refused.
+  bool locked(uint32_t nowMs) const { return lockedUntil_.isArmed() && !lockedUntil_.expired(nowMs); }
+
+  /// A wrong code was presented. The kGuessFailures-th inside one window locks.
+  void failed(uint32_t nowMs);
+
+  /// A code verified: the guessing, if any, is over.
+  void succeeded();
+
+  /// The lock the NEXT trip would impose.
+  uint32_t nextLockMs() const { return lockMs_; }
+
+private:
+  tb::Deadline window_;
+  tb::Deadline lockedUntil_;
+  uint32_t lockMs_ = kGuessLockBaseMs;
+  uint8_t failures_ = 0U;
+};
+
+} // namespace memcode
+
+#endif // CRUSADERS_MEMCODE_GUESSGUARD_H

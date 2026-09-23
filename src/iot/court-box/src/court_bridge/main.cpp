@@ -115,6 +115,7 @@
 #include "devlink/RosterSync.h"
 #include "eventq/EventQueue.h"
 #include "fwversion/Version.h"
+#include "memcode/GuessGuard.h"
 #include "memcode/KeyRing.h"
 #include "memcode/ReplayRing.h"
 #include "memcode/StepClock.h"
@@ -285,6 +286,18 @@ court::Session<roster::Roster<kRosterSlots>, eventq::EventQueue<EVENTQ_SLOTS>> g
 memcode::StepClock gStepClock(ROSTER_MAX_AGE_MS);
 memcode::KeyRing<bridgelogic::kCourtKeyRingSlots> gKeyRing;
 memcode::ReplayRing<bridgelogic::kCourtReplaySlots> gReplay;
+
+/// How many wrong OFF codes anybody may present here before offline
+/// verification locks for a while — a REF is public, so an unguarded box in its
+/// offline fallback is a box that can be guessed open. memcode/GuessGuard.h.
+memcode::GuessGuard gGuessGuard;
+
+/// The server just acted on the remembered scan: record the use here too, so a
+/// photo of the same v1 code cannot be used offline at this box inside its
+/// window the moment the link drops. A legacy code records nothing.
+void noteOnlineUse(const char* token) {
+  memcode::recordOnlineUse(token, gStepClock, gKeyRing, gReplay, gClock.nowMs());
+}
 
 /// Bytes for walk-up purchase nonces, from the ESP8266's hardware RNG register.
 ///
@@ -828,7 +841,7 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   if (memcode::looksLikeV1(frame.arg(0))) {
     const memcode::OfflineCodes<memcode::KeyRing<bridgelogic::kCourtKeyRingSlots>,
                                 memcode::ReplayRing<bridgelogic::kCourtReplaySlots>>
-        codes = {gStepClock, gKeyRing, gReplay};
+        codes = {gStepClock, gKeyRing, gReplay, gGuessGuard};
     const bridgelogic::BoxCourts box = {gHeld, gCourtCount};
     const bridgelogic::MemberScanResult member =
         bridgelogic::decideOfflineMemberCode(frame.arg(0), codes, gRoster, gSession, box, now);
@@ -1286,6 +1299,9 @@ bool activateOnline(const char* token) {
   // four seconds old at birth let a `!STATE` already in flight synthesise a
   // Release for a court that was coming on. (decision.disarmAuth is what
   // settleScan's spendsScan reads; the two are pinned to agree.)
+  if (decision.outcome.action == court::Action::TurnOn) {
+    noteOnlineUse(token);
+  }
   settleScan(decision.outcome, gClock.nowMs());
   return true;
 }
@@ -1345,6 +1361,9 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
   }
   // After the call, for the same reason as activateOnline.
   const uint32_t nowMs = gClock.nowMs();
+  if (answer.outcome.action == court::Action::TurnOn) {
+    noteOnlineUse(gLastScan);
+  }
   applyOutcome(answer.outcome, nowMs);
   if (bridgelogic::spendsScan(answer.outcome)) {
     // The identity is spent on the purchase: the next member's presses must not
@@ -1398,13 +1417,21 @@ void confirmPayFor() {
   const bridgelogic::ScreenFacts facts = payForFacts(relay, answer.amountLabel, nowMs);
 
   if (answer.kind == bridgelogic::PayForKind::Undecided) {
-    // The quote and its nonce stay armed: pressing the court again asks the
-    // server whether THIS payment happened, never for a second one.
+    // The quote and its nonce stay armed — re-armed from now, so the retry has
+    // the whole choice window — and pressing the court again asks the server
+    // whether THIS payment happened, never for a second one. The selection
+    // goes: a duration press must not turn a pending payment into a walk-up on
+    // a court somebody is playing on.
+    gPayFor.arm(relay, gPayFor.courtNumber(), gPayFor.amountLabel(), gLcdSettings.choiceMs, nowMs);
+    gPad.clear();
     sendScreen(bridgelogic::screenFor(answer.screen, facts, gLcdSettings));
     return;
   }
   gPayFor.clear();
   gPad.clear();
+  if (answer.kind == bridgelogic::PayForKind::Paid) {
+    noteOnlineUse(gLastScan);
+  }
   if (answer.kind != bridgelogic::PayForKind::Paid) {
     sendScreen(bridgelogic::screenFor(answer.screen, facts, gLcdSettings));
     return;
@@ -1441,25 +1468,42 @@ void confirmPayFor() {
   forgetScan();
 }
 
-/// A court button was pressed with a scan behind it. True when the press was a
-/// pay-for — asked, answered or confirmed — and the walk-up choice must NOT be
-/// shown; false when it is an ordinary walk-up court choice after all.
-bool offerPayFor(uint8_t relay, uint32_t nowMs) {
-  if (gPayFor.quoted(relay, nowMs)) {
-    confirmPayFor();
-    return true;
-  }
-  // A different court, or a quote that lapsed: whatever was asked is gone.
-  gPayFor.clear();
+/// Whether a press on `relay` is one a pay-for could be about: a scan behind
+/// it, a court this box drives, a link, and somebody holding the court now.
+bool payForCandidate(uint8_t relay, uint32_t nowMs) {
   if (gLastScan[0] == '\0' || relay >= gCourtCount || relay >= bridgelogic::kStateCourts || !gWifiUp ||
       gBreaker.open(nowMs)) {
     return false;
   }
-  if (!gRoster.occupied(relay, nowMs) && !gHeld[relay].held) {
-    // Nobody holds it now, as far as this box knows: a walk-up court.
-    return false;
-  }
+  // Nobody holds it now, as far as this box knows: a walk-up court.
+  return gRoster.occupied(relay, nowMs) || gHeld[relay].held;
+}
 
+/// The quote came back: arm it and ask. See offerPayFor.
+void armPayForQuote(uint8_t relay, const bridgelogic::PayForAnswer& answer, uint32_t now) {
+  gPayFor.arm(relay, gCourtNumbers[relay], answer.amountLabel, gLcdSettings.choiceMs, now);
+  // The selection goes: the only answer to this question is the SAME court
+  // again, which re-selects it, and a duration press must not buy walk-up
+  // time on a court somebody is playing on.
+  gPad.clear();
+  // The member is being asked to press again, so the scan they are paying
+  // with stays remembered for the question — but never past scan memory plus
+  // one choice window from the SCAN itself: a member who scans, is quoted and
+  // walks away must not leave an identity that re-quotes on every press.
+  const uint32_t read = tb::since(now, gScanReadMs);
+  const uint32_t limit = gScanMemoryMs + gLcdSettings.choiceMs;
+  if (read < limit) {
+    gScanAt.arm(now, limit - read);
+  }
+  applyAuth(gAuth.afterPayForQuote(now));
+  sendScreen(bridgelogic::screenFor(bridgelogic::ScreenId::PayForQuote,
+                                    payForFacts(relay, answer.amountLabel, now), gLcdSettings));
+}
+
+/// Asks the server what paying for `relay` would cost. True when the press was
+/// answered as a pay-for — quoted or refused — and false when it is the walk-up
+/// court choice after all.
+bool quotePayFor(uint8_t relay, uint32_t nowMs) {
   sendScreen(bridgelogic::screenFor(bridgelogic::ScreenId::PayForWorking, screenFacts(nowMs), gLcdSettings));
   bridgelogic::PayForRequest request;
   request.mac = gMacHex;
@@ -1482,14 +1526,7 @@ bool offerPayFor(uint8_t relay, uint32_t nowMs) {
 
   switch (answer.kind) {
   case bridgelogic::PayForKind::Quote:
-    gPayFor.arm(relay, gCourtNumbers[relay], answer.amountLabel, gLcdSettings.choiceMs, now);
-    // The member is being asked to press again: the scan they are paying with
-    // stays remembered, and the Mega's button window re-arms to forward that
-    // press, for as long as the question stands.
-    gScanAt.arm(now, gScanMemoryMs);
-    applyAuth(gAuth.afterPayForQuote(now));
-    sendScreen(bridgelogic::screenFor(bridgelogic::ScreenId::PayForQuote,
-                                      payForFacts(relay, answer.amountLabel, now), gLcdSettings));
+    armPayForQuote(relay, answer, now);
     return true;
   case bridgelogic::PayForKind::Refused:
   case bridgelogic::PayForKind::Paid:
@@ -1505,6 +1542,27 @@ bool offerPayFor(uint8_t relay, uint32_t nowMs) {
     break;
   }
   return false;
+}
+
+/// A court button was pressed with a scan behind it. True when the press was a
+/// pay-for — asked, answered or confirmed — and the walk-up choice must NOT be
+/// shown; false when it is an ordinary walk-up court choice after all.
+bool offerPayFor(uint8_t relay, uint32_t nowMs) {
+  if (gPayFor.quoted(relay, nowMs)) {
+    confirmPayFor();
+    return true;
+  }
+  if (gAuth.allowsRelease(relay, nowMs)) {
+    // THE WINDOW IS BOUND TO THIS COURT: it is the member's own game — they lit
+    // it, bought it, or rescanned on it — and a court press here is the first
+    // half of switching it OFF, exactly as before D10. Asking the server would
+    // answer `own_booking`, clear the selection, and leave the OFF press with
+    // nothing to act on.
+    return false;
+  }
+  // A different court, or a quote that lapsed: whatever was asked is gone.
+  gPayFor.clear();
+  return payForCandidate(relay, nowMs) && quotePayFor(relay, nowMs);
 }
 
 /// Moves at most ONE due fault into the event queue per pass.
@@ -1755,6 +1813,16 @@ void pumpHeartbeat(uint32_t nowMs) {
     // exactly like a quiet club.
     gFaults.note(bridgelogic::Fault::HeartbeatRejected, gClock.nowMs());
     return;
+  }
+
+  if (!devapi::json::isCompleteObject(response, responseLen)) {
+    // ACCEPTED, AND NOTHING TO ADOPT. A body longer than gHeartbeatBody arrives
+    // here as an empty buffer (callApi refuses to keep half of one) and a cut
+    // one as a partial object; every reader below would silently keep what it
+    // had — roster, keys, clock, settings — until they all went stale. Counted,
+    // because the member-code keys brought the widest body within 64 bytes of
+    // its contract and a server that outgrows it must not be silent.
+    gFaults.note(bridgelogic::Fault::HeartbeatRejected, gClock.nowMs());
   }
 
   // The nine operator settings, before anything that consumes them. Each is

@@ -44,7 +44,18 @@ that; it narrows what a code is worth.
 - **A code is a 90-second bearer token** (±1 step around a verifier's own step), not a standing
   key. Anybody holding the phone, or a photo of its screen, can use it inside that window —
   once: the server's use table and each device's replay ring make every code single-use per
-  acting use (§4.4, §6.4).
+  acting use (§4.4, §6.4), and a device records an online use too, so a code the server acted on
+  cannot be used again offline at that device when the link drops. **One widening, stated:** the
+  server checks a code at the instant the device says it was read (`scan_age_ms`, §4.2), so a
+  holder of the club's device key could present a photographed, unused code as up to
+  `scan_memory_seconds + lcd_choice_seconds` (at most 6 minutes) old. The device key is already
+  worth more than any code (`door-gate.md` §10a).
+- **OFF can be guessed, and that is bounded rather than denied.** Six digits tried at three steps
+  is 3 in a million per guess, and a REF is public. A device therefore counts wrong codes: five
+  inside a minute lock its offline verification for a minute, each further lock doubling to 30
+  minutes, until a code verifies (`memcode/GuessGuard.h`). That leaves an attacker with a
+  sustained offline door under a one-in-a-thousand chance a day (about 260 guesses), at the price — stated —
+  that a lock refuses legitimate members offline too. Online, the server's own limits apply.
 - **ON is keyed by the member secret S, which exists only on the server and on the member's
   phone.** No device ever holds S, an ON, or the master key. Every money movement needs ON.
 - **OFF is keyed by K_day, which devices hold** for the members their roster names, for the club
@@ -89,8 +100,9 @@ Crockford base32 characters, most significant first, alphabet
 server, randomly, unique within the tenant, **stable across rotations**, and never reassigned to a
 different member while the old member row exists.
 
-**Decoding normalises** (for the token only — §3.8): case-fold; `I`, `i`, `L`, `l` read as `1`;
-`O`, `o` read as `0`; `U`, `u`, a hyphen, whitespace or anything else refuses. **Server-produced
+**Decoding normalises** (for the token only — §3.8): ASCII only, then case-fold; `I`, `i`, `L`,
+`l` read as `1`; `O`, `o` read as `0`; `U`, `u`, a hyphen, whitespace, any non-ASCII character
+(a dotless `ı` is not an `I`) or anything else refuses. **Server-produced
 REFs (roster entries, key elements) must be canonical** — upper-case, no substitutions — and a
 device refuses a non-canonical one rather than normalising it.
 
@@ -115,7 +127,8 @@ in `totp.json`. Rendered zero-padded to 8 digits.
 The tenant-local calendar date (IANA time zone of the tenant) of the step's **first** instant,
 `T × 30` seconds, formatted `YYYY-MM-DD`. A club day is the half-open step range
 `[first, end)` from local midnight to the next local midnight: 2880 steps normally, 2760 or 3000
-on a daylight-saving change. Local midnight falls on a step boundary in every real zone.
+on a daylight-saving change, 3120 in the one inhabited zone that shifts by two hours
+(Antarctica/Troll). Local midnight falls on a step boundary in every real zone.
 
 ### 3.7 K_day (12 bytes) and OFF (6 digits)
 
@@ -168,7 +181,10 @@ Activate, walk-up and pay-for requests carrying a **v1** token append `"scan_age
 long ago the scanner read it — **last** in the body. A walk-up or a pay-for is sent after one or
 two button presses, so the code on the wire can be several steps old by then. Absent means 0 (the
 door gate never sends it: it asks the moment it reads). A legacy token's body is byte-for-byte
-what it always was. The server refuses a value above **600 000** as `not_recognised`.
+what it always was. The server refuses a value above **`(scan_memory_seconds +
+lcd_choice_seconds) × 1000 + 30 000`** — the tenant's own settings, at most 390 000 — as
+`not_recognised`: the box never remembers a scan longer than scan memory plus one pay-for
+question.
 
 ### 4.3 The check
 
@@ -187,11 +203,17 @@ one reason for every case, so the path is not an oracle for which REFs exist.
 
 ### 4.4 Single use
 
-Table `member_code_uses(tenant_id, ref, step, used_at, device_id, kind)`, unique on
-`(tenant_id, ref, step)`. A row is written **only when the server acts** — a grant, a door
-opened, a walk-up charged, a pay-for paid — never for a refusal or a quote, so a member told
-`too_early` who scans again is not refused as a replay. A second acting use is refused with reason
-**`code_used`** (the court box reads it as `CODE USED / WAIT 30 SECONDS`). Idempotent retries are
+Table `member_code_uses(tenant_id, ref, step, use_class, used_at, device_id, kind)`, unique on
+`(tenant_id, ref, step, use_class)`, where `use_class` is **`door`** (a gate opened), **`court`**
+(an activation granted, online or as offline evidence) or **`money`** (a walk-up charged, a
+pay-for paid). A code is used once **per class**: a member who opens the front door and scans at
+their court inside the same 30-second step is doing two different things, and must not read
+`CODE USED` at the court — or, offline, have their attendance treated as a duplicate. A row is
+written **only when the server acts**, never for a refusal or a quote, so a member told
+`too_early` who scans again is not refused as a replay. A second acting use in the same class is
+refused with reason **`code_used`** — on `/activate`, `/gate` and `/pay-for` as a 200 decision,
+on `/walkup` as `409 {"error":"code_used"}` (the court box reads both as `CODE USED / WAIT 30
+SECONDS`, and neither arms its buttons: a used code may be a photo). Idempotent retries are
 checked **before** the use table: a walk-up or pay-for replaying its own nonce is answered with the
 first result (`replayed: true`), never `code_used`. Rows older than a day are purged.
 
@@ -227,14 +249,19 @@ Four more **top-level** keys, after `roster`:
   ONE clock read, the same instant the roster's relative seconds are computed from. Sent to every
   `codes:m1` device in every phase. This is a step counter, not a time: `server_unix` stays off the
   wire. A phase outside `0..29999` is a server bug and the device ignores the pair.
-- **`code_days`** — at most two slots, each `"<first>|<end>"`, half-open steps, 1 to 3000 steps
-  long. Slot 0 is the club day containing `code_step`; slot 1 is the next club day, present **only**
+- **`code_days`** — at most two slots, each `"<first>|<end>"`, half-open steps, 1 to 3120 steps
+  long. Array position is the slot number, so a device keeps every element's position and ignores
+  a third. Slot 0 is the club day containing `code_step`; slot 1 is the next club day, present **only**
   when some roster entry's window runs into it. Array position is the slot number.
 - **`code_keys`** — each element exactly 21 characters, no separator:
   `REF (4, canonical) + slot ('0' | '1') + K_day (16 base64url characters = 12 bytes, unpadded)`.
-- **`code_keys` and `code_days` are sent only when** the tenant's phase is `v1` or `v1_only` (§8)
-  **and** the device is acknowledged — a court box an admin has acknowledged, a door with a
-  `gate_key`. An unacknowledged device gets the step and no keys, so it verifies nobody offline.
+- **`code_keys` and `code_days` carry keys only when** the tenant's phase is `v1` or `v1_only`
+  (§8) **and** the device is acknowledged — a court box an admin has acknowledged, a door with a
+  `gate_key`. **Every other `codes:m1` device is sent both arrays EMPTY, never omitted**: an absent
+  `code_keys` means "this server does not do member codes" and a device keeps whatever ring it had
+  (§5.5), so omitting them from a board that lost its entitlement — un-acknowledged, a door whose
+  `gate_key` was cleared, a club that rolled back — would leave it verifying members until its day
+  slots ran out. `codesync.json`'s `withdrawn` case pins the device half.
 
 ### 5.3 The roster's v1 element
 
@@ -272,7 +299,11 @@ A body that is not one complete JSON object adopts nothing, not even the clock. 
 a `code_keys` nested elsewhere is not the ring. An absent `code_keys` leaves the ring and its days
 untouched; a present one replaces them wholesale, **empty included**. A malformed key, or a key
 naming a slot `code_days` did not fill, is refused and counted; the rest is committed. The clock
-needs `code_step` **and** `code_step_ms`. Everything is RAM: a reboot verifies nobody until the
+needs `code_step` **and** `code_step_ms`. An array element that is not a string is skipped
+whole and keeps its position — it never renumbers the day slots, and a string nested inside it is
+not a key. An accepted heartbeat whose body is not a complete object (a response longer than the
+court box's 2560-byte buffer arrives as an empty one) is counted as a `heartbeat_rejected` fault
+rather than silently adopting nothing. Everything is RAM: a reboot verifies nobody until the
 first accepted heartbeat, which is also when the roster returns. A door taken out of service (a
 `403` on any path) empties its roster **and** its keys and forgets its clock.
 
@@ -294,7 +325,10 @@ with `tb::since` so a sync taken just before `millis()` wraps still counts corre
 **trusted for as long as the roster is** (`ROSTER_MAX_AGE_MS`, six hours). Candidates `t, t−1,
 t+1`, in that order; each finds the slot whose range holds it and the key `(REF, slot)`; the first
 whose `OFF` matches wins. Verdicts, in order: `malformed`, `no_clock`, `no_key` (no candidate had a
-key), `wrong_code` (a key was tried, nothing matched), `replayed`, `ok`. **ON is not checked** — a
+key), `wrong_code` (a key was tried, nothing matched), `replayed`, `ok` — and ahead of all of
+them `throttled`, while the guess guard (§2) has offline verification locked. Only `wrong_code`
+feeds the guard: `no_key` and `malformed` can never become a success, and counting them would let
+a member without a key lock the door for everybody. **ON is not checked** — a
 device cannot — so a token whose OFF is right and whose ON is garbage is accepted offline; that is
 exactly the evidence the server rejects (§7), and `verify.json` pins it.
 
@@ -309,6 +343,8 @@ entries only**. The two paths never cross: `m` + a REF presented as a barcode ma
 
 A replay ring holds, per REF, the highest step the device has **acted on** — a court actually lit
 (`!ON` left the bridge), a lock actually given time — and refuses that step or any earlier one.
+An **online** grant, open or charge on a v1 code is recorded too: at the step the device can
+verify when it holds the member's key, otherwise at its own step plus one.
 Capacity 16 (court box), 32 (door), oldest evicted: a REF evicted inside its own window could
 replay once, which needs more distinct members at one device in 90 seconds than a club has, and the
 server still sees both uploads.
@@ -320,7 +356,8 @@ server still sees both uploads.
 | ok + allow | the grant, as for any roster grant | `ok`, released for `unlock_seconds` | `activation` / `gate_open`, **subject = the scanned token** |
 | ok + too early / late / wrong court / stale | the roster's own screens | `too_early` / `too_late` / `roster_stale` | `unknown_scan` |
 | ok on a court already lit | `COURT B IS ON / ALREADY LIT` — the re-scan guard | — | nothing |
-| replayed | `CODE USED` / `WAIT 30 SECONDS` | `replayed` | `unknown_scan` |
+| replayed | `CODE USED` / `WAIT 30 SECONDS` (arms nothing) | `replayed` | `unknown_scan` |
+| throttled | `TOO MANY TRIES` / `TRY IN A MINUTE` (arms nothing) | `too_fast` | `unknown_scan` |
 | no_clock | the stale roster's screen | `roster_stale` | `unknown_scan` |
 | malformed / no_key / wrong_code | the unknown-token screen | `not_recognised` | `unknown_scan` |
 
@@ -338,7 +375,8 @@ an OFF match under the member's K_day, then check ON at that same `s`.
 - **OFF matches nowhere** → the device accepted a code the server cannot reproduce: a firmware
   defect or tampering.
 - **OFF matches, ON does not** → somebody held K_day and not S: a copied roster or a stolen box.
-- **Both match, but `(ref, s)` is already in the use table** → one code used twice across devices.
+- **Both match, but `(ref, s, class)` is already in the use table** → one code used twice for the
+  same kind of thing across devices.
 
 All three raise the admin alert **`code.forgery_suspected`** (P9's catalogue; security kind, not
 optional) naming the device, the member, the event and which of the three it was. The event is
@@ -394,11 +432,15 @@ upload never used. Only the ESP8266 half of the court box and the door ESP32s.
 1. The payer **scans** their code. Online, `/activate` answers as today — a member with no booking
    of their own on this box reads the no-booking refusal, and the button window arms.
 2. The payer **presses the court button** of a court somebody holds now — the box's roster has an
-   open booking on that relay, or the relay is lit. (Any other court press is the walk-up choice it
-   always was.) The box asks `POST /api/v1/device/pay-for` with `confirm:false` — the **quote**,
+   open booking on that relay, or the relay is lit — **and that is not the court their own button
+   window is bound to**: a member who lit a court, bought it or rescanned on it and presses its
+   button is starting to switch it OFF, exactly as before D10. (Any other court press is the
+   walk-up choice it always was.) The box asks `POST /api/v1/device/pay-for` with `confirm:false` — the **quote**,
    which moves no money.
-3. The glass asks (§9.3). The window re-arms and the scan stays remembered for the question's
-   lifetime (`lcd_choice_seconds`).
+3. The glass asks (§9.3). The window re-arms; the court selection is cleared, so a duration
+   press cannot turn the question into a walk-up on a court somebody is playing on (the only answer
+   is the same court again, which re-selects it); and the scan stays remembered for the question —
+   but never past `scan_memory_seconds + lcd_choice_seconds` from the scan itself.
 4. The payer **presses the same court again**: `confirm:true`, echoing the label the glass showed.
    Paid → the booker is refunded, both are emailed (server side), and if nobody had started the
    booking the server may grant its remainder and the court lights as an activation would.
@@ -406,8 +448,9 @@ upload never used. Only the ESP8266 half of the court box and the door ESP32s.
 **Online only.** A quote that is not a decision — no connection, a 404 from a server that has not
 shipped pay-for, a cut body — is the old walk-up choice (`ChooseTime`), so a box flashed before its
 server is upgraded behaves exactly as before. `not_booked` is the same. A confirm that got no
-decision (0, 429, 5xx, an unreadable 200) keeps the quote and its nonce armed, so the next press
-retries **the same payment** and is answered with the first (`replayed:true`).
+decision (0, 429, 5xx, an unreadable 200) keeps the quote and its nonce armed — re-armed for a
+full choice window — so the next press retries **the same payment** and is answered with the
+first (`replayed:true`).
 
 ### 9.2 The endpoint
 
@@ -498,8 +541,11 @@ keeping the instruction verbatim. Other refusals reuse the existing screens:
   secret). On every online open the phone refreshes its offset (`server_time_ms` minus the request's
   local midpoint) and re-enrols if `generation` moved.
 - **Compute, offline**: `now = Date.now() + offset`; `T = floor(now / 30000)`;
-  `ON = HOTP(sign(S, T as 8 bytes BE), 8)`; `day =` `new Intl.DateTimeFormat("en-CA", {timeZone:
-  tz, year:"numeric", month:"2-digit", day:"2-digit"}).format(new Date(T * 30000))`;
+  `ON = HOTP(sign(S, T as 8 bytes BE), 8)`; `day =` the `year`, `month` and `day` parts of
+  `new Intl.DateTimeFormat("en-US", {timeZone: tz, year:"numeric", month:"2-digit",
+  day:"2-digit"}).formatToParts(new Date(T * 30000))`, joined as `YYYY-MM-DD` — built from the
+  parts, never from a locale's formatted string, whose layout is locale data the phone does not
+  control;
   `K_day = first 12 bytes of sign(S, utf8("crusaders/kday/v1|" + day))`, imported as a
   non-extractable HMAC key; `OFF = HOTP(sign(K_day, T), 6)`; token `"1" + ref + ON + OFF`.
   Refresh at every step boundary; the countdown ring is `30000 − (now mod 30000)`.
@@ -517,6 +563,8 @@ keeping the instruction verbatim. Other refusals reuse the existing screens:
   booking start so it is the latest-starting players who lose offline access.
 - After cut-over, legacy codes work online only.
 - A device replay ring can evict inside a window (§6.4); the server catches the second use.
+- OFF can be guessed offline at 3 in a million a try; the guess guard bounds the rate and a lock
+  refuses legitimate members offline while it lasts (§2).
 - Within its day, a stolen box forges OFF for the members it holds; every forged use is flagged the
   moment it is uploaded, and an unacknowledged board holds no keys at all.
 - Nothing here is a life-safety device; the door's egress rules (`door-gate.md` §11) are unchanged.
@@ -534,8 +582,10 @@ keeping the instruction verbatim. Other refusals reuse the existing screens:
 | Roster REF lists, 1–4 players, the two paths never cross | `roster.json` + `test_a_scanned_ref_list_never_matches_and_a_ref_never_matches_a_code` |
 | Code sync grammar and the roster rules | `codesync.json` → `test_key_and_day_elements`, `test_code_sync_applies_a_whole_body_by_the_roster_rules` |
 | Court box bodies, capability, scan age, pay-for answers, the 2048 budget | `http.json` → `court-box/test/test_membercode` |
-| Offline v1 at the box: partner lights, subject = scanned token, CODE USED, re-scan guard | `court-box/test/test_membercode` (`test_offline_v1_*`) |
+| Offline v1 at the box: partner lights, subject = scanned token, CODE USED (arming nothing), throttling, re-scan guard | `court-box/test/test_membercode` (`test_offline_v1_*`) |
+| The guess guard; online uses recorded on the device | `test_guess_guard_locks_after_five_wrong_codes_and_backs_off`, `test_verify_guarded_throttles_guessing_and_a_good_code_resets_it`, `test_an_online_use_is_recorded_so_the_code_cannot_be_used_offline_after`, `test_the_door_throttles_offline_guessing` |
+| `code_used` on activate and walk-up | `http.json` `activate-response-code-used`, `walkup-response-code-used` |
 | Every pay-for screen fits the safe subset at its widest | `test_every_screen_holds_the_layout_contract` |
 | Door bodies, the 4096 budget, offline door decisions | `gate.json` → `door-gate/test/test_gate_membercode` |
-| The whole door: sync, offline open, recorded token, replay, capability | `test_app_a_v1_member_code_opens_the_door_offline_once_and_is_recorded_as_scanned` |
+| The whole door: sync, offline open, recorded token, replay, capability, a 403 emptying keys and clock | `test_app_a_v1_member_code_opens_the_door_offline_once_and_is_recorded_as_scanned` |
 | The corpus is what this file says | `make corpus-check` regenerates it and fails on any diff |

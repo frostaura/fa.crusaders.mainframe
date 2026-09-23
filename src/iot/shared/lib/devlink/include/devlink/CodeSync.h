@@ -73,6 +73,63 @@ namespace detail {
 /// The clock half of the sync. True when the body anchored `clock`.
 bool syncStepClock(const char* body, size_t len, memcode::StepClock& clock, uint32_t nowMs);
 
+/// The next element of the array being walked at `at`. A STRING yields its
+/// contents' span with `isString` true; ANY OTHER value — a number, `null`, an
+/// object, a nested array — is skipped whole with `isString` false, so it still
+/// occupies its position and nothing inside it is read as an element. False at
+/// the closing bracket, or when the array is cut short.
+///
+/// Stricter than detail::nextStringSpan, which hunts for the next quote: that
+/// walk would let `[null,"a|b"]` renumber the day slots and read a string
+/// nested in an object inside `code_keys` as a key.
+bool nextArrayElement(const char* body, size_t len, size_t& at, size_t& start, size_t& n, bool& isString);
+
+} // namespace detail
+
+namespace detail {
+
+/// The day slots out of `code_days` into the replacement in progress. Position
+/// is the slot number, so every element occupies one — a value that is not a
+/// day leaves its slot empty rather than renumbering the rest — and a third
+/// element is past the two slots a ring has and is ignored.
+template <class KeyRingT> void stageDays(const char* body, size_t len, KeyRingT& ring) {
+  size_t at = devapi::json::findTopLevelArray(body, len, "code_days");
+  if (at == devapi::json::kNotFound) {
+    return;
+  }
+  size_t start = 0U;
+  size_t n = 0U;
+  bool isString = false;
+  uint8_t slot = 0U;
+  while (slot < memcode::kMaxDaySlots && nextArrayElement(body, len, at, start, n, isString)) {
+    memcode::DaySlot day;
+    if (isString && memcode::parseDaySlot(body + start, n, day)) {
+      static_cast<void>(ring.setDay(slot, day));
+    }
+    ++slot;
+  }
+}
+
+/// The keys out of `code_keys`, starting at element position `at`, into the
+/// replacement in progress. Malformed or slot-less keys are counted; the local
+/// copy of every key is wiped whichever way it went.
+template <class KeyRingT>
+void stageKeys(const char* body, size_t len, size_t at, KeyRingT& ring, CodeSyncResult& result) {
+  size_t start = 0U;
+  size_t n = 0U;
+  bool isString = false;
+  while (nextArrayElement(body, len, at, start, n, isString)) {
+    memcode::DayKey key;
+    const bool good = isString && memcode::parseKeyElement(body + start, n, key) && ring.stagedDay(key.slot);
+    if (!good) {
+      result.rejected = result.rejected < UINT8_MAX ? static_cast<uint8_t>(result.rejected + 1U) : UINT8_MAX;
+    } else if (ring.add(key) && result.accepted < UINT8_MAX) {
+      ++result.accepted;
+    }
+    dc::wipe(key.key, sizeof(key.key));
+  }
+}
+
 } // namespace detail
 
 /// Applies the member-code sync in `body` to `clock` and `ring`, anchored at
@@ -86,42 +143,13 @@ CodeSyncResult applyCodeSync(const char* body, size_t len, memcode::StepClock& c
   }
   result.clockSynced = detail::syncStepClock(body, len, clock, nowMs);
 
-  size_t at = devapi::json::findTopLevelArray(body, len, "code_keys");
+  const size_t at = devapi::json::findTopLevelArray(body, len, "code_keys");
   if (at == devapi::json::kNotFound) {
     return result;
   }
-
   ring.beginReplace();
-  size_t dayAt = devapi::json::findTopLevelArray(body, len, "code_days");
-  if (dayAt != devapi::json::kNotFound) {
-    size_t start = 0U;
-    size_t n = 0U;
-    uint8_t slot = 0U;
-    while (slot < memcode::kMaxDaySlots && detail::nextStringSpan(body, len, dayAt, start, n)) {
-      memcode::DaySlot day;
-      if (memcode::parseDaySlot(body + start, n, day)) {
-        static_cast<void>(ring.setDay(slot, day));
-      }
-      ++slot;
-    }
-  }
-
-  size_t start = 0U;
-  size_t n = 0U;
-  while (detail::nextStringSpan(body, len, at, start, n)) {
-    memcode::DayKey key;
-    if (!memcode::parseKeyElement(body + start, n, key) || !ring.stagedDay(key.slot)) {
-      if (result.rejected < UINT8_MAX) {
-        ++result.rejected;
-      }
-      dc::wipe(key.key, sizeof(key.key));
-      continue;
-    }
-    if (ring.add(key) && result.accepted < UINT8_MAX) {
-      ++result.accepted;
-    }
-    dc::wipe(key.key, sizeof(key.key));
-  }
+  detail::stageDays(body, len, ring);
+  detail::stageKeys(body, len, at, ring, result);
   ring.commitReplace();
   result.dropped = ring.dropped();
   result.keysReplaced = true;

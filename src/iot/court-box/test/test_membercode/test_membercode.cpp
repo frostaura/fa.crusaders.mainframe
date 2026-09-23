@@ -30,6 +30,7 @@
 #include "devlink/RosterSync.h"
 #include "eventq/EventQueue.h"
 #include "fakes/FakeStore.h"
+#include "memcode/GuessGuard.h"
 #include "memcode/KeyRing.h"
 #include "memcode/ReplayRing.h"
 #include "memcode/StepClock.h"
@@ -349,12 +350,54 @@ void runPayFor(const char* c, const char* id, bool confirm) {
   checkRows(expect, bridgelogic::screenFor(answer.screen, facts), id);
 }
 
+void checkLines(const char* expect, const court::Outcome& outcome, const char* id) {
+  corpus::ArrayIter lines(array(expect, "lines"));
+  const char* l = nullptr;
+  char wanted[2][32] = {};
+  size_t n = 0U;
+  while (lines.next(&l) && n < 2U) {
+    TEST_ASSERT_TRUE(corpus::stringValue(l, wanted[n], sizeof(wanted[n]), nullptr));
+    ++n;
+  }
+  TEST_ASSERT_EQUAL_size_t_MESSAGE(2U, n, id);
+  TEST_ASSERT_EQUAL_STRING_MESSAGE(wanted[0], outcome.line1, id);
+  TEST_ASSERT_EQUAL_STRING_MESSAGE(wanted[1], outcome.line2, id);
+  TEST_ASSERT_EQUAL_MESSAGE(flag(expect, "recognised"), outcome.recognised, id);
+}
+
+void runActivate(const char* c, const char* id) {
+  size_t len = 0U;
+  const char* doc = body(c, len);
+  const char* expect = corpus::member(c, "expect");
+  const int16_t courts[devlink::kMaxCourts] = {1, 2, 3, 4};
+  const bridgelogic::ActivationResult r =
+      bridgelogic::ScanFlow().onActivateResponse(200U, doc, len, courts, 4U);
+  TEST_ASSERT_EQUAL_MESSAGE(flag(expect, "fallback"), r.fallbackToRoster, id);
+  TEST_ASSERT_EQUAL_MESSAGE(court::Action::Refuse, r.outcome.action, id);
+  checkLines(expect, r.outcome, id);
+}
+
+void runWalkUp(const char* c, const char* id) {
+  size_t len = 0U;
+  const char* doc = body(c, len);
+  const char* expect = corpus::member(c, "expect");
+  const bridgelogic::WalkUpResult r =
+      bridgelogic::onWalkUpResponse(static_cast<uint16_t>(number(expect, "status")), doc, len, 1U, 60U);
+  TEST_ASSERT_EQUAL_MESSAGE(flag(expect, "decided"), r.decided, id);
+  TEST_ASSERT_EQUAL_MESSAGE(court::Action::Refuse, r.outcome.action, id);
+  checkLines(expect, r.outcome, id);
+}
+
 void runResponse(const char* c) {
   char id[64] = {};
   char kind[32] = {};
   text(c, "id", id, sizeof(id));
   text(c, "kind", kind, sizeof(kind));
-  if (strcmp(kind, "heartbeat") == 0) {
+  if (strcmp(kind, "activate") == 0) {
+    runActivate(c, id);
+  } else if (strcmp(kind, "walkup") == 0) {
+    runWalkUp(c, id);
+  } else if (strcmp(kind, "heartbeat") == 0) {
     runHeartbeat(c, id);
   } else if (strcmp(kind, "payfor_quote") == 0) {
     runPayFor(c, id, false);
@@ -446,8 +489,8 @@ struct Offline {
     }
   }
 
-  memcode::OfflineCodes<Keys, memcode::ReplayRing<bridgelogic::kCourtReplaySlots>> codes() const {
-    return {clock, keys, uses};
+  memcode::OfflineCodes<Keys, memcode::ReplayRing<bridgelogic::kCourtReplaySlots>> codes() {
+    return {clock, keys, uses, guard};
   }
 
   bridgelogic::BoxCourts box() const { return {held, 4U}; }
@@ -465,6 +508,7 @@ struct Offline {
   memcode::StepClock clock;
   Keys keys;
   memcode::ReplayRing<bridgelogic::kCourtReplaySlots> uses;
+  memcode::GuessGuard guard;
   memcode::DayKey key;
   bridgelogic::HeldState held[bridgelogic::kStateCourts];
 };
@@ -515,7 +559,32 @@ void test_offline_v1_code_used_once_is_refused_the_second_time_and_says_so(void)
   TEST_ASSERT_EQUAL_STRING(bridgelogic::kCodeUsedLine2, r.outcome.line2);
   TEST_ASSERT_TRUE(strlen(r.outcome.line1) <= court::kSafeSubsetCols);
   TEST_ASSERT_TRUE(strlen(r.outcome.line2) <= court::kSafeSubsetCols);
-  TEST_ASSERT_TRUE(r.outcome.recognised);
+  // NOT recognised: a used code may be a photo of somebody else's screen, and a
+  // recognised scan arms the buttons that buy and pay on that identity.
+  TEST_ASSERT_FALSE(r.outcome.recognised);
+}
+
+void test_offline_v1_guessing_is_throttled_and_says_so(void) {
+  Offline f;
+  char wrong[memcode::kTokenLen + 1U] = {};
+  TEST_ASSERT_TRUE(memcode::format(0x0A3C9U, 12345678U, (memcode::offCode(f.key.key, 1000U) + 1U) % 1000000U,
+                                   wrong, sizeof(wrong)));
+  for (uint8_t i = 0U; i < memcode::kGuessFailures; ++i) {
+    TEST_ASSERT_EQUAL(memcode::Status::WrongCode, bridgelogic::decideOfflineMemberCode(
+                                                      wrong, f.codes(), f.cache, f.session, f.box(), 10000U)
+                                                      .verdict.status);
+  }
+  char token[memcode::kTokenLen + 1U] = {};
+  f.token(1000U, token);
+  const bridgelogic::MemberScanResult r =
+      bridgelogic::decideOfflineMemberCode(token, f.codes(), f.cache, f.session, f.box(), 11000U);
+  TEST_ASSERT_EQUAL(memcode::Status::Throttled, r.verdict.status);
+  TEST_ASSERT_EQUAL(court::Action::Refuse, r.outcome.action);
+  TEST_ASSERT_EQUAL_STRING(bridgelogic::kThrottledLine1, r.outcome.line1);
+  TEST_ASSERT_EQUAL_STRING(bridgelogic::kThrottledLine2, r.outcome.line2);
+  TEST_ASSERT_TRUE(strlen(r.outcome.line1) <= court::kSafeSubsetCols);
+  TEST_ASSERT_TRUE(strlen(r.outcome.line2) <= court::kSafeSubsetCols);
+  TEST_ASSERT_FALSE(r.outcome.recognised);
 }
 
 void test_offline_v1_rescan_on_a_lit_court_is_the_already_on_screen_and_records_nothing(void) {
@@ -671,6 +740,7 @@ int main(int, char**) {
   RUN_TEST(test_every_declared_court_box_case_was_executed);
   RUN_TEST(test_offline_v1_code_lights_the_partners_court_and_records_the_scanned_token);
   RUN_TEST(test_offline_v1_code_used_once_is_refused_the_second_time_and_says_so);
+  RUN_TEST(test_offline_v1_guessing_is_throttled_and_says_so);
   RUN_TEST(test_offline_v1_rescan_on_a_lit_court_is_the_already_on_screen_and_records_nothing);
   RUN_TEST(test_offline_v1_code_with_no_clock_reads_as_the_stale_roster);
   RUN_TEST(test_a_wrong_off_is_refused_as_not_recognised_and_arms_nothing);

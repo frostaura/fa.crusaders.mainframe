@@ -70,6 +70,12 @@
       "note": "REF 0000 is reserved",
       "element": "00000HkE5WHvWQ0Oe9Rdl",
       "ok": false
+    },
+    {
+      "id": "l-for-one-in-ref",
+      "note": "an L for a 1: server data is canonical, never normalised",
+      "element": "0LLL0HkE5WHvWQ0Oe9Rdl",
+      "ok": false
     }
   ],
   "day_elements": [
@@ -91,9 +97,37 @@
     },
     {
       "id": "26-hour-day",
+      "note": "Antarctica/Troll's two-hour shift: the longest real day",
+      "element": "59670480|59673600",
+      "ok": true,
+      "first_step": 59670480,
+      "end_step": 59673600
+    },
+    {
+      "id": "27-hour-day",
       "note": "past the longest real day",
-      "element": "59670480|59673481",
+      "element": "59670480|59673601",
       "ok": false
+    },
+    {
+      "id": "eleven-digits",
+      "note": "more digits than a step has",
+      "element": "59670480|12345678901",
+      "ok": false
+    },
+    {
+      "id": "past-uint32",
+      "note": "a step past 2^32 - 1",
+      "element": "4294967000|4294967296",
+      "ok": false
+    },
+    {
+      "id": "leading-zeros",
+      "note": "leading zeros are digits: the same range",
+      "element": "059670480|059673360",
+      "ok": true,
+      "first_step": 59670480,
+      "end_step": 59673360
     },
     {
       "id": "empty",
@@ -362,6 +396,99 @@
         },
         "keys": {
           "replaced": false
+        }
+      }
+    },
+    {
+      "id": "withdrawn",
+      "note": "a device that is no longer entitled to keys is sent EMPTY arrays, never an omission: the ring it held is emptied (an omission would leave it verifying members for up to two days)",
+      "body_hex": "7b227365727665725f74696d65223a22323032362d30392d32335431363a30303a31372b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22636f7572742d626f782d31222c22636f7572745f6e756d62657273223a5b312c322c332c345d2c226865617274626561745f7365636f6e6473223a36302c22726f73746572223a5b5d2c22636f64655f73746570223a35393637323634302c22636f64655f737465705f6d73223a302c22636f64655f64617973223a5b5d2c22636f64655f6b657973223a5b5d7d",
+      "received_at_ms": 5000,
+      "key_capacity": 24,
+      "expect": {
+        "clock": {
+          "synced": true,
+          "step": 59672640,
+          "step_ms": 0
+        },
+        "keys": {
+          "replaced": true,
+          "accepted": 0,
+          "rejected": 0,
+          "dropped": 0,
+          "entries": [],
+          "days": []
+        }
+      }
+    },
+    {
+      "id": "third-day-ignored",
+      "note": "a ring has two day slots; a third day element is ignored, and a key naming slot 2 is refused by the grammar",
+      "body_hex": "7b227365727665725f74696d65223a22323032362d30392d32335431363a30303a31372b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22636f7572742d626f782d31222c22636f7572745f6e756d62657273223a5b312c322c332c345d2c226865617274626561745f7365636f6e6473223a36302c22726f73746572223a5b5d2c22636f64655f73746570223a35393637323634302c22636f64655f737465705f6d73223a302c22636f64655f64617973223a5b2235393637303438307c3539363733333630222c2235393637333336307c3539363736323430222c2235393637363234307c3539363739313230225d2c22636f64655f6b657973223a5b223138593930486b45355748765751304f653952646c222c223138593932486b45355748765751304f653952646c225d7d",
+      "received_at_ms": 5000,
+      "key_capacity": 24,
+      "expect": {
+        "clock": {
+          "synced": true,
+          "step": 59672640,
+          "step_ms": 0
+        },
+        "keys": {
+          "replaced": true,
+          "accepted": 1,
+          "rejected": 1,
+          "dropped": 0,
+          "entries": [
+            {
+              "ref": "18Y9",
+              "slot": 0,
+              "key_hex": "1e4139587bd643439ef51765"
+            }
+          ],
+          "days": [
+            {
+              "first_step": 59670480,
+              "end_step": 59673360
+            },
+            {
+              "first_step": 59673360,
+              "end_step": 59676240
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "non-string-elements",
+      "note": "a value that is not a string keeps its POSITION — `null` leaves day slot 0 empty rather than renumbering slot 1 — and a string inside an object in code_keys is not a key",
+      "body_hex": "7b227365727665725f74696d65223a22323032362d30392d32335431363a30303a31372b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22636f7572742d626f782d31222c22636f7572745f6e756d62657273223a5b312c322c332c345d2c226865617274626561745f7365636f6e6473223a36302c22726f73746572223a5b5d2c22636f64655f73746570223a35393637323634302c22636f64655f737465705f6d73223a302c22636f64655f64617973223a5b6e756c6c2c2235393637303438307c3539363733333630225d2c22636f64655f6b657973223a5b7b226b223a223138593931486b45355748765751304f653952646c227d2c223138593931486b45355748765751304f653952646c225d7d",
+      "received_at_ms": 5000,
+      "key_capacity": 24,
+      "expect": {
+        "clock": {
+          "synced": true,
+          "step": 59672640,
+          "step_ms": 0
+        },
+        "keys": {
+          "replaced": true,
+          "accepted": 1,
+          "rejected": 1,
+          "dropped": 0,
+          "entries": [
+            {
+              "ref": "18Y9",
+              "slot": 1,
+              "key_hex": "1e4139587bd643439ef51765"
+            }
+          ],
+          "days": [
+            null,
+            {
+              "first_step": 59670480,
+              "end_step": 59673360
+            }
+          ]
         }
       }
     },

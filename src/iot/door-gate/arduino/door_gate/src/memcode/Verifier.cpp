@@ -18,6 +18,8 @@ const char* statusName(Status status) {
     return "wrong_code";
   case Status::Replayed:
     return "replayed";
+  case Status::Throttled:
+    return "throttled";
   }
   // Only from a status byte no enumerator covers.
   return "malformed";

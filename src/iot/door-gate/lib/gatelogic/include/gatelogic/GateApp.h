@@ -130,6 +130,7 @@
 #include "gatelogic/ScanAssembler.h"
 #include "gatelogic/ScanDebounce.h"
 #include "gatelogic/UnlockTimer.h"
+#include "memcode/GuessGuard.h"
 #include "memcode/KeyRing.h"
 #include "memcode/ReplayRing.h"
 #include "memcode/StepClock.h"
@@ -335,6 +336,16 @@ private:
   void feedByte(uint8_t byte);
   void refuseUnreadableLine();
   void decideScan(const char* token);
+
+  /// The roster's answer — or, for a v1 member code, the offline verifier's
+  /// and then the roster's by REF. `member` is filled for a v1 code.
+  ScanDecision decideFromRoster(const char* token, uint32_t nowMs, memcode::Verdict& member);
+
+  /// Records a v1 code as used once the lock was actually given time: the
+  /// offline verdict's step, or — for an open the SERVER decided — whatever
+  /// this board can establish (memcode::recordOnlineUse).
+  void recordCodeUse(const ScanDecision& decision, const memcode::Verdict& member, const char* token,
+                     uint32_t grantedMs, uint32_t nowMs);
   void pumpLock();
   void pumpLink();
   void pumpEvents();
@@ -553,6 +564,9 @@ private:
   memcode::StepClock stepClock_{kGateConfig.rosterMaxAgeMs};
   memcode::KeyRing<kGateKeyRingSlots> codeKeys_;
   memcode::ReplayRing<kGateReplaySlots> codeUses_;
+  /// Wrong OFF codes presented here lately. A REF is public, so a door in its
+  /// offline fallback is a door that could be guessed open. GuessGuard.h.
+  memcode::GuessGuard codeGuard_;
 };
 
 } // namespace gatelogic

@@ -61,7 +61,7 @@ HKDF_SALT = b"crusaders/member-code/v1"
 KDAY_LABEL = "crusaders/kday/v1|"
 ROSTER_MARKER = "m"
 CAP_CODES = "codes:m1"
-MAX_DAY_STEPS = 3000  # a 25-hour day (DST fall-back) is 3000 steps
+MAX_DAY_STEPS = 3120  # a 26-hour day: DST's usual hour makes 25, Antarctica/Troll shifts by two
 
 COURT_KEY_CAP = 24
 GATE_KEY_CAP = 72
@@ -151,7 +151,9 @@ def ref_decode(text: str):
     """Normalising Crockford decode of exactly four characters: case-folded,
     I and L read as 1, O read as 0, U refused, anything else refused. Returns
     (value, canonical) or None. Value 0 ("0000") is reserved and refused."""
-    if len(text) != REF_LEN:
+    if len(text) != REF_LEN or not text.isascii():
+        # ASCII first: str.upper() folds 'ı' to 'I', 'ſ' to 'S', the Kelvin sign
+        # to 'K', and 'ß' to two letters — none of which a device will ever read.
         return None
     value = 0
     for ch in text.upper():
@@ -491,6 +493,9 @@ def token_cases():
     dec("legacy-booking-code", "7Q3F9KM2XZ8B", "a twelve-character legacy code is not a v1 token and must never "
         "be parsed as one — length alone separates the two")
     dec("roster-ref-list", "m" + DEAN.ref, "a roster REF list presented as a scan is not a token")
+    dec("non-ascii-dotless-i", good[0] + "\u0131" + good[2:], "a dotless i is not I: only ASCII is normalised "
+        "(19 characters, 20 UTF-8 bytes — refused either way)")
+    dec("non-ascii-sharp-s", good[0] + "\u00df" + good[2:], "sharp s would upper-case to two letters: refused")
     return {"description": "The token: '1' + REF (4 Crockford) + ON (8 digits) + OFF (6 digits) = 19 characters. "
             "Canonical output is upper-case; the REF alone is decoded with Crockford normalisation.",
             "token_len": TOKEN_LEN, "encode": encode, "decode": decode}
@@ -569,16 +574,19 @@ def verify_cases():
     scenarios.append({"id": "wrong-day", "note": "OFF computed under YESTERDAY's K_day at today's step: a stolen "
                       "roster's key forges nothing the day after",
                       "sync": {"step": ANCHOR_STEP, "step_ms": ANCHOR_STEP_MS, "at_ms": sync_at},
-                      "days": days_for(YESTERDAY, TODAY),
-                      "keys": keys_for([(DEAN, 0, YESTERDAY), (DEAN, 1, TODAY)]), "replay_capacity": 4,
+                      "days": days_for(TODAY),
+                      "keys": keys_for([(DEAN, 0, TODAY)]), "replay_capacity": 4,
                       "scans": [scan(at(t), yesterdays, "wrong_code", DEAN.ref),
                                 scan(at(t), DEAN.token(t), "ok", DEAN.ref, t)]})
-    only_yday = keys_for([(DEAN, 0, YESTERDAY)])
-    scenarios.append({"id": "step-outside-every-day", "note": "the ring holds only yesterday's key; today's step "
-                      "falls in no day it holds, so there is no key to try",
+    first_tomorrow_step, _ = day_steps(TOMORROW, TZ)
+    past = first_tomorrow_step + 2
+    late = sync_at + (past - ANCHOR_STEP) * STEP_MS - ANCHOR_STEP_MS + 5000
+    scenarios.append({"id": "step-outside-every-day", "note": "the ring holds today only; two steps past "
+                      "midnight (with a clock trusted a little past six hours) no candidate step falls in a day the "
+                      "ring holds — there is no key to try",
                       "sync": {"step": ANCHOR_STEP, "step_ms": ANCHOR_STEP_MS, "at_ms": sync_at},
-                      "days": days_for(YESTERDAY), "keys": only_yday, "replay_capacity": 4,
-                      "scans": [scan(at(t), DEAN.token(t), "no_key", DEAN.ref)]})
+                      "days": base_days, "keys": base_keys, "replay_capacity": 4, "max_age_ms": 21700000,
+                      "scans": [scan(late, DEAN.token(past), "no_key", DEAN.ref)]})
     # Midnight: sync a few steps before, scan at the first step of tomorrow.
     first_tomorrow, _ = day_steps(TOMORROW, TZ)
     ms0 = 2_000_000
@@ -691,6 +699,10 @@ def roster_cases():
        "roster REF")
     el("u-in-ref", "mU" + DEAN.ref[1:] + "|0|0|900", False, "U is not Crockford")
     el("reserved-ref", "m0000|0|0|900", False, "REF 0000 is reserved")
+    zero_one = ref_encode(0x00421)  # "0111"
+    el("o-for-zero-in-ref", "m" + zero_one.replace("0", "O") + "|0|0|900", False, "an O where the canonical REF has "
+       "0 is a server bug, refused rather than normalised")
+    el("i-for-one-in-ref", "m" + zero_one.replace("1", "I") + "|0|0|900", False, "likewise an I for a 1")
     el("capital-marker", f"M{DEAN.ref}|0|0|900", True, "a capital M is NOT the marker: this is an ordinary "
        "five-character token and matches only those exact bytes", None, 0, 0, 900000)
 
@@ -762,6 +774,9 @@ def codesync_cases():
     ke("padding", f"{DEAN.ref}0" + b64url(k)[:-1] + "=", False, "no padding")
     ke("lowercase-ref", f"{DEAN.ref.lower()}0{b64url(k)}", False, "server data is canonical")
     ke("reserved-ref", f"00000{b64url(k)}", False, "REF 0000 is reserved")
+    zero_one = ref_encode(0x00421)
+    ke("l-for-one-in-ref", f"{zero_one.replace('1', 'L')}0{b64url(k)}", False, "an L for a 1: server data is "
+       "canonical, never normalised")
 
     day_elements = []
 
@@ -775,7 +790,12 @@ def codesync_cases():
     de("today", f"{f0}|{e0}", True, "a 24-hour day is 2880 steps", f0, e0)
     fl, el_ = day_steps("2026-10-25", "Europe/London")
     de("25-hour-day", f"{fl}|{el_}", True, "3000 steps is the longest a day slot may be", fl, el_)
-    de("26-hour-day", f"{f0}|{f0 + 3001}", False, "past the longest real day")
+    de("26-hour-day", f"{f0}|{f0 + 3120}", True, "Antarctica/Troll's two-hour shift: the longest real day",
+       f0, f0 + 3120)
+    de("27-hour-day", f"{f0}|{f0 + 3121}", False, "past the longest real day")
+    de("eleven-digits", f"{f0}|12345678901", False, "more digits than a step has")
+    de("past-uint32", "4294967000|4294967296", False, "a step past 2^32 - 1")
+    de("leading-zeros", f"0{f0}|0{e0}", True, "leading zeros are digits: the same range", f0, e0)
     de("empty", f"{f0}|{f0}", False, "a day of no steps")
     de("backwards", f"{e0}|{f0}", False, "ends before it starts")
     de("negative", f"-1|{f0}", False, "steps are unsigned")
@@ -835,6 +855,29 @@ def codesync_cases():
     text = compact(full)
     ap("truncated", "a body cut short is not a document: nothing is adopted, not even the clock", text[:-40],
        {"clock": {"synced": False}, "keys": {"replaced": False}})
+    ap("withdrawn", "a device that is no longer entitled to keys is sent EMPTY arrays, never an omission: the "
+       "ring it held is emptied (an omission would leave it verifying members for up to two days)",
+       code_sync_doc({"code_step": ANCHOR_STEP, "code_step_ms": 0, "code_days": [], "code_keys": []}),
+       {"clock": {"synced": True, "step": ANCHOR_STEP, "step_ms": 0},
+        "keys": {"replaced": True, "accepted": 0, "rejected": 0, "dropped": 0, "entries": [], "days": []}})
+    ap("third-day-ignored", "a ring has two day slots; a third day element is ignored, and a key naming slot 2 is "
+       "refused by the grammar",
+       code_sync_doc({"code_step": ANCHOR_STEP, "code_step_ms": 0,
+                      "code_days": [f"{f0}|{e0}", f"{e0}|{e0 + 2880}", f"{e0 + 2880}|{e0 + 5760}"],
+                      "code_keys": [key_element(DEAN.ref, 0, DEAN.kday(TODAY)), f"{DEAN.ref}2{b64url(k)}"]}),
+       {"clock": {"synced": True, "step": ANCHOR_STEP, "step_ms": 0},
+        "keys": {"replaced": True, "accepted": 1, "rejected": 1, "dropped": 0,
+                 "entries": [{"ref": DEAN.ref, "slot": 0, "key_hex": DEAN.kday(TODAY).hex()}],
+                 "days": [{"first_step": f0, "end_step": e0}, {"first_step": e0, "end_step": e0 + 2880}]}})
+    ap("non-string-elements", "a value that is not a string keeps its POSITION — `null` leaves day slot 0 empty "
+       "rather than renumbering slot 1 — and a string inside an object in code_keys is not a key",
+       code_sync_doc({"code_step": ANCHOR_STEP, "code_step_ms": 0, "code_days": [None, f"{f0}|{e0}"],
+                      "code_keys": [{"k": key_element(DEAN.ref, 1, DEAN.kday(TODAY))},
+                                    key_element(DEAN.ref, 1, DEAN.kday(TODAY))]}),
+       {"clock": {"synced": True, "step": ANCHOR_STEP, "step_ms": 0},
+        "keys": {"replaced": True, "accepted": 1, "rejected": 1, "dropped": 0,
+                 "entries": [{"ref": DEAN.ref, "slot": 1, "key_hex": DEAN.kday(TODAY).hex()}],
+                 "days": [None, {"first_step": f0, "end_step": e0}]}})
     ap("bad-day-slot", "a malformed day element leaves that slot empty; keys naming it are refused",
        code_sync_doc({"code_step": ANCHOR_STEP, "code_step_ms": 0, "code_days": ["bad", f"{f0}|{e0}"],
                       "code_keys": [key_element(DEAN.ref, 0, DEAN.kday(TODAY)),
@@ -985,6 +1028,14 @@ def http_cases():
     rs("heartbeat-response-no-codes", "heartbeat", "a server that has not shipped member codes: no code_* keys, "
        "so an m1 box keeps whatever clock and ring it had (none, after a boot) and decides legacy codes exactly "
        "as before", legacy, {"code_step": None, "keys_accepted": None})
+
+    rs("activate-response-code-used", "activate", "a single rotating code the server already acted on (§4.4): a "
+       "decision, not an outage — the roster must not get a second opinion — and it arms nothing",
+       {"activated": False, "reason": "code_used", "court_number": 2, "granted_seconds": 0},
+       {"fallback": False, "lines": ["CODE USED", "WAIT 30 SECONDS"], "recognised": True})
+    rs("walkup-response-code-used", "walkup", "the walk-up's own shape: 409 with error code_used; decided, and not "
+       "recognised — a used code may be a photo", {"error": "code_used"},
+       {"status": 409, "decided": True, "lines": ["CODE USED", "WAIT 30 SECONDS"], "recognised": False})
 
     def pq(cid, note, body, expect):
         rs(cid, "payfor_quote", note, body, expect)

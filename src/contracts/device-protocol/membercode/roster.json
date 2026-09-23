@@ -108,6 +108,18 @@
       "ok": false
     },
     {
+      "id": "o-for-zero-in-ref",
+      "note": "an O where the canonical REF has 0 is a server bug, refused rather than normalised",
+      "element": "mO111|0|0|900",
+      "ok": false
+    },
+    {
+      "id": "i-for-one-in-ref",
+      "note": "likewise an I for a 1",
+      "element": "m0III|0|0|900",
+      "ok": false
+    },
+    {
       "id": "capital-marker",
       "note": "a capital M is NOT the marker: this is an ordinary five-character token and matches only those exact bytes",
       "element": "M18Y9|0|0|900",
