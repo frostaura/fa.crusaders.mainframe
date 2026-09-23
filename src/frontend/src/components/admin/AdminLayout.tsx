@@ -2,6 +2,7 @@ import { Outlet, useLocation } from "react-router-dom";
 import { useAdminAttention } from "@/lib/adminAttention";
 import { AdminRail } from "./AdminRail";
 import { AdminSectionSwitcher } from "./AdminSectionSwitcher";
+import { AdminTour } from "../onboarding/AdminTour";
 
 /**
  * The admin console's frame (plan: Target IA → Admin, R16): every `/admin/*` route renders inside it
@@ -58,6 +59,8 @@ export default function AdminLayout() {
           <Outlet />
         </div>
       </div>
+      {/* P8 — the first-visit tour of the rail / section bar above. Renders nothing once finished. */}
+      <AdminTour />
     </div>
   );
 }

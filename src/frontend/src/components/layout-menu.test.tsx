@@ -73,7 +73,9 @@ describe("the account menu", () => {
     expect(menu).toHaveTextContent("Naledi Dube");
     expect(menu).toHaveTextContent("naledi@sample.local");
     const items = screen.getAllByRole("menuitem").map((item) => item.textContent);
-    expect(items).toEqual(["Profile", "How it works", "Sign out"]);
+    // P8 — the admin's own tour is one of their own things; "Replay welcome" is for an ACTIVE
+    // member and this profile carries no membership status, so it is absent rather than greyed.
+    expect(items).toEqual(["Profile", "How it works", "Replay admin tour", "Sign out"]);
     // R16 — even for an admin: the admin destinations are under the Admin tab, not in here.
     expect(menu).not.toHaveTextContent(/Admin settings|Webhooks/);
   });

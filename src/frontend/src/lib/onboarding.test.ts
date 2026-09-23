@@ -1,0 +1,222 @@
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  adminTourDue, currentStep, initialWizard, isLastStep, memberSteps, memberTourDue, normalisePrefs,
+  ONBOARDING_STORAGE_KEY, readLocalOnboarding, shouldOfferWizard, startingStep, wasOffered, markOffered,
+  wizardReducer, writeLocalOnboarding, type OnboardingPrefs,
+} from "./onboarding";
+import { installRoute, isIos } from "./installPrompt";
+import { GET_STARTED } from "./onboardingCopy";
+
+/**
+ * P8 — the rules the wizard, the gate and the tour stand on, without a DOM.
+ *
+ * <p>
+ * The mutants worth killing: a failed read treated as "owed" (the wizard pushed at somebody who
+ * finished it), a completion counted for a newer tour than it stamped, a dismissal ignored,
+ * a gate that fires off the landing, and a late resume point yanking a member who has moved.
+ * </p>
+ */
+
+const FRESH: OnboardingPrefs = {
+  member_onboarding_completed_at: null,
+  member_onboarding_dismissed_at: null,
+  member_onboarding_last_step: null,
+  admin_onboarding_completed_at: null,
+  onboarding_version: 1,
+  current_onboarding_version: 1,
+};
+
+afterEach(() => {
+  window.localStorage.removeItem(ONBOARDING_STORAGE_KEY);
+  window.sessionStorage.clear();
+});
+
+describe("the step list", () => {
+  it("walks the seven built steps in order, and not the reserved privacy slot", () => {
+    expect(memberSteps()).toEqual(["welcome", "code", "passkey", "fingerprint", "topup", "book", "install"]);
+    // TODO(P11) lives in the slot list; until then a switch that governs nothing is not shown.
+    expect(memberSteps()).not.toContain("privacy");
+  });
+
+  it("has a title for every step it walks", () => {
+    for (const step of memberSteps()) {
+      expect(GET_STARTED.steps[step as keyof typeof GET_STARTED.steps].title.length).toBeGreaterThan(3);
+    }
+  });
+});
+
+describe("where the wizard opens", () => {
+  it("resumes at the last step reached", () => {
+    expect(startingStep({ last: "topup" })).toBe("topup");
+  });
+
+  it("opens at a step a link names, over the resume point", () => {
+    expect(startingStep({ requested: "install", last: "topup" })).toBe("install");
+  });
+
+  it("starts from the beginning on a replay", () => {
+    expect(startingStep({ replay: true, last: "topup" })).toBe("welcome");
+  });
+
+  it.each([["an unknown step", "nope"], ["the disabled slot", "privacy"], ["nothing", null]])(
+    "starts from the beginning for %s",
+    (_why, last) => {
+      expect(startingStep({ last })).toBe("welcome");
+    },
+  );
+});
+
+describe("the wizard's state machine", () => {
+  it("moves forward and back and clamps at both ends", () => {
+    let state = initialWizard("welcome");
+    state = wizardReducer(state, { type: "back" });
+    expect(currentStep(state)).toBe("welcome");
+    state = wizardReducer(state, { type: "next" });
+    expect(currentStep(state)).toBe("code");
+    for (let i = 0; i < 20; i++) state = wizardReducer(state, { type: "next" });
+    expect(currentStep(state)).toBe("install");
+    expect(isLastStep(state)).toBe(true);
+    state = wizardReducer(state, { type: "back" });
+    expect(currentStep(state)).toBe("book");
+  });
+
+  it("ignores a goto for a step it does not walk", () => {
+    const state = initialWizard("code");
+    expect(wizardReducer(state, { type: "goto", step: "privacy" })).toBe(state);
+  });
+
+  it("adopts a late resume point only while the member has not moved", () => {
+    const fresh = initialWizard("welcome");
+    expect(currentStep(wizardReducer(fresh, { type: "adopt", step: "book" }))).toBe("book");
+
+    const moved = wizardReducer(fresh, { type: "next" });
+    expect(currentStep(wizardReducer(moved, { type: "adopt", step: "book" }))).toBe("code");
+  });
+
+  it("marks the member as having moved, which is what lets the step be saved", () => {
+    expect(initialWizard("welcome").touched).toBe(false);
+    expect(wizardReducer(initialWizard("welcome"), { type: "next" }).touched).toBe(true);
+  });
+});
+
+describe("whether the member wizard is owed", () => {
+  it("cannot tell with nothing read, and says so", () => {
+    expect(memberTourDue(null)).toBeNull();
+    expect(memberTourDue(normalisePrefs(undefined))).toBeNull();
+  });
+
+  it("is owed to a member who has done nothing", () => {
+    expect(memberTourDue(FRESH)).toBe(true);
+  });
+
+  it("is not owed once completed at the current version", () => {
+    expect(memberTourDue({ ...FRESH, member_onboarding_completed_at: "2026-09-01T10:00:00Z" })).toBe(false);
+  });
+
+  it("is owed again when the club ships a newer tour than the one completed", () => {
+    expect(memberTourDue({
+      ...FRESH, member_onboarding_completed_at: "2026-09-01T10:00:00Z", onboarding_version: 1, current_onboarding_version: 2,
+    })).toBe(true);
+  });
+
+  it("is not owed after a dismissal, whatever the version", () => {
+    expect(memberTourDue({ ...FRESH, member_onboarding_dismissed_at: "2026-09-01T10:00:00Z", current_onboarding_version: 3 })).toBe(false);
+  });
+
+  it("honours this device's mirror when the server has not heard yet", () => {
+    expect(memberTourDue(FRESH, { memberDoneVersion: 1 })).toBe(false);
+    expect(memberTourDue(FRESH, { memberDismissedAt: "2026-09-01T10:00:00Z" })).toBe(false);
+    // …but a mirror of an OLDER tour does not cover a newer one.
+    expect(memberTourDue({ ...FRESH, current_onboarding_version: 2 }, { memberDoneVersion: 1 })).toBe(true);
+  });
+
+  it("fills an older API's missing fields rather than reading them as owed", () => {
+    expect(normalisePrefs({ member_onboarding_completed_at: "2026-09-01T10:00:00Z" })).toMatchObject({
+      onboarding_version: 1, current_onboarding_version: 1,
+    });
+  });
+});
+
+describe("whether the admin tour is owed", () => {
+  it("cannot tell with nothing read", () => {
+    expect(adminTourDue(null)).toBeNull();
+  });
+
+  it("is owed until the admin completes it, here or on the server", () => {
+    expect(adminTourDue(FRESH)).toBe(true);
+    expect(adminTourDue({ ...FRESH, admin_onboarding_completed_at: "2026-09-01T10:00:00Z" })).toBe(false);
+    expect(adminTourDue(FRESH, { adminDoneAt: "2026-09-01T10:00:00Z" })).toBe(false);
+  });
+});
+
+describe("the first-run gate", () => {
+  const base = {
+    signedIn: true, mustChangePassword: false, pathname: "/my-code", landing: "/my-code",
+    status: "active", due: true as boolean | null, alreadyOffered: false,
+  };
+
+  it("offers the wizard to an active member arriving at the landing with it owed", () => {
+    expect(shouldOfferWizard(base)).toBe(true);
+  });
+
+  it.each([
+    ["on any other route", { pathname: "/bookings" }],
+    ["on an admin route mid-task", { pathname: "/admin/members" }],
+    ["when already offered in this tab", { alreadyOffered: true }],
+    ["when it cannot tell", { due: null }],
+    ["when it is not owed", { due: false }],
+    ["to a member awaiting approval", { status: "pendingapproval" }],
+    ["to an account with no membership", { status: null }],
+    ["on a password-change session", { mustChangePassword: true }],
+    ["when signed out or offline", { signedIn: false }],
+  ])("does nothing %s", (_why, over) => {
+    expect(shouldOfferWizard({ ...base, ...over })).toBe(false);
+  });
+
+  it("remembers the offer per user, for this tab only", () => {
+    expect(wasOffered("u1")).toBe(false);
+    markOffered("u1");
+    expect(wasOffered("u1")).toBe(true);
+    expect(wasOffered("u2")).toBe(false);
+    expect(window.localStorage.getItem("crusaders.onboarding.offered")).toBeNull();
+  });
+});
+
+describe("the device mirror", () => {
+  it("keeps each user's record apart on a shared device", () => {
+    writeLocalOnboarding("a", { lastStep: "topup" });
+    writeLocalOnboarding("b", { lastStep: "code" });
+    expect(readLocalOnboarding("a").lastStep).toBe("topup");
+    expect(readLocalOnboarding("b").lastStep).toBe("code");
+    expect(readLocalOnboarding(null)).toEqual({});
+  });
+
+  it("survives storage it cannot parse", () => {
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, "{not json");
+    expect(readLocalOnboarding("a")).toEqual({});
+  });
+});
+
+describe("the install step's four answers", () => {
+  const none = { standalone: false, installed: false, canPrompt: false, ios: false };
+
+  it("says installed when it is running as the app, or installed here", () => {
+    expect(installRoute({ ...none, standalone: true, canPrompt: true })).toBe("installed");
+    expect(installRoute({ ...none, installed: true })).toBe("installed");
+  });
+
+  it("offers the browser's own prompt when there is one", () => {
+    expect(installRoute({ ...none, canPrompt: true, ios: true })).toBe("prompt");
+  });
+
+  it("gives iPhone instructions in words, and admits a browser that can do neither", () => {
+    expect(installRoute({ ...none, ios: true })).toBe("ios");
+    expect(installRoute(none)).toBe("browser");
+  });
+
+  it("recognises an iPad that says it is a Mac", () => {
+    expect(isIos("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", 5)).toBe(true);
+    expect(isIos("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", 5)).toBe(true);
+    expect(isIos("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", 0)).toBe(false);
+  });
+});

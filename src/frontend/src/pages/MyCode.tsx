@@ -49,6 +49,7 @@ import { SegmentedTabs } from "../components/SegmentedTabs";
 // item 16 — the pushed card about the booking in hand, and the way to the whole guide.
 import { WhatsNextCard } from "../components/onboarding/WhatsNextCard";
 import { GUIDE_FROM_CODE, GUIDE_PATH } from "../lib/onboardingCopy";
+import { SetupChecklist } from "../components/onboarding/SetupChecklist";
 
 /**
  * The member's code — what they hold up to the scanner on the court box, and at the
@@ -841,6 +842,8 @@ export default function MyCodePage() {
       >
         {GUIDE_FROM_CODE}
       </Link>
+
+      <SetupChecklist />
 
       {doorBlocks}
 

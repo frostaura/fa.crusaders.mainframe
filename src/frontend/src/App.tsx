@@ -25,6 +25,9 @@ import AdminLedgerPage from "./pages/AdminLedger";
 import ProfilePage from "./pages/Profile";
 import MyCodePage from "./pages/MyCode";
 import HowItWorksPage from "./pages/HowItWorks";
+// P8 — the member welcome wizard, and the gate that offers it once to a newly approved member.
+import GetStartedPage from "./pages/GetStarted";
+import { FirstRunGate } from "./components/onboarding/FirstRunGate";
 import { AdminDevicesPage } from "./pages/AdminDevices";
 // doors: admin — the four doors routes and their pages, in one block.
 import { AdminDoorsPage } from "./pages/AdminDoors";
@@ -106,6 +109,7 @@ export default function App() {
         <ClubUiProvider>
         <BalanceProvider>
         <ToastProvider>
+          <FirstRunGate />
           <AppRoutes />
         </ToastProvider>
         </BalanceProvider>
@@ -160,6 +164,8 @@ export function AppRoutes() {
         {/* Deliberately NOT behind RequireAuth: an applicant waiting for approval and a member who
             cannot sign in are exactly the people wondering how any of this works (item 16). */}
         <Route path="/how-it-works" element={<HowItWorksPage />} />
+        {/* P8 — the welcome wizard. Signed-in only: every step is about the member's own account. */}
+        <Route path="/get-started" element={<RequireAuth><GetStartedPage /></RequireAuth>} />
 
         {/* R16 — one Admin tab. Everything the gear menu held is in here now. */}
         <Route path="/admin" element={<RequireAuth admin><AdminLayout /></RequireAuth>}>

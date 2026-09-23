@@ -4,9 +4,11 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup,
   DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Desktop, Moon, Question, SignOut, Sun, UserCircle, type Icon } from "@/components/ui/icons";
+import { Desktop, HandWaving, MapTrifold, Moon, Question, SignOut, Sun, UserCircle, type Icon } from "@/components/ui/icons";
 import { useAuth } from "@/lib/auth";
-import { GUIDE_LINK_LABEL, GUIDE_PATH } from "@/lib/onboardingCopy";
+import {
+  ADMIN_TOUR_PATH, GET_STARTED_PATH, GUIDE_LINK_LABEL, GUIDE_PATH, REPLAY_ADMIN_TOUR, REPLAY_WELCOME,
+} from "@/lib/onboardingCopy";
 import { useProfile } from "@/lib/profile";
 import { useTheme, type ThemeChoice } from "@/lib/theme";
 
@@ -22,8 +24,10 @@ import { useTheme, type ThemeChoice } from "@/lib/theme";
  * </p>
  *
  * <p>
- * <b>"Replay welcome" is omitted, not disabled.</b> The welcome wizard is P8's; a greyed item
- * would be a control that does nothing and cannot say why. It arrives with the wizard.
+ * <b>"Replay welcome" and "Replay admin tour" (P8)</b> are links, because each goes somewhere:
+ * the wizard from its first step, and the console's Overview with the tour asked for. Each is
+ * shown only to whoever has that tour — an active member, an admin — never greyed for anyone
+ * else.
  * </p>
  *
  * <p>
@@ -50,6 +54,8 @@ export function AccountMenu() {
   const { profile } = useProfile();
   const { theme, setTheme } = useTheme();
   const name = profile?.full_name?.trim() || profile?.email || "Your account";
+  const member = (profile?.status ?? "").toLowerCase() === "active";
+  const admin = auth.status === "authenticated" && auth.isAdmin;
 
   return (
     <DropdownMenu>
@@ -78,6 +84,22 @@ export function AccountMenu() {
             {GUIDE_LINK_LABEL}
           </Link>
         </DropdownMenuItem>
+        {member ? (
+          <DropdownMenuItem asChild>
+            <Link to={`${GET_STARTED_PATH}?replay=1`}>
+              <HandWaving size={16} aria-hidden="true" className="text-text-muted" />
+              {REPLAY_WELCOME}
+            </Link>
+          </DropdownMenuItem>
+        ) : null}
+        {admin ? (
+          <DropdownMenuItem asChild>
+            <Link to={ADMIN_TOUR_PATH}>
+              <MapTrifold size={16} aria-hidden="true" className="text-text-muted" />
+              {REPLAY_ADMIN_TOUR}
+            </Link>
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Appearance</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={theme} onValueChange={(value) => { if (isThemeChoice(value)) setTheme(value); }}>

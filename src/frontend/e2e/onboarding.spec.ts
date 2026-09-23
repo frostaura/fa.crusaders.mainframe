@@ -1,4 +1,5 @@
-import { SESSION_ANON, serveApi, signIn, test, expect } from "./fixtures";
+import { SESSION_ADMIN, SESSION_ANON, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { ADMIN_TOUR, CHECKLIST, GET_STARTED, REPLAY_ADMIN_TOUR, REPLAY_WELCOME } from "../src/lib/onboardingCopy";
 
 /**
  * Item 16 — "How it works", and the one card that is pushed.
@@ -177,5 +178,217 @@ test.describe("the card that is pushed", () => {
       return card ? card.querySelectorAll("[aria-live], [role=status], [role=alert]").length : -1;
     });
     expect(live).toBe(0);
+  });
+});
+
+/* ------------------------------------------------------------------------------------------
+ * P8 — the welcome wizard, the first-run gate, the setup checklist and the admin tour.
+ *
+ * Walked the way a new member and a new admin meet them: sign in, land, and see what the
+ * product does next. Every string comes from `lib/onboardingCopy.ts` so the spec reads as
+ * the screens do. Runs in both projects — the phone (section bar, bottom tab bar) and the
+ * desktop (the admin rail from xl).
+ * ---------------------------------------------------------------------------------------- */
+
+
+const PREFS = {
+  theme: "system",
+  member_onboarding_completed_at: null as string | null,
+  member_onboarding_dismissed_at: null as string | null,
+  member_onboarding_last_step: null as string | null,
+  admin_onboarding_completed_at: null as string | null,
+  onboarding_version: 1,
+  current_onboarding_version: 1,
+};
+
+type Recorder = { calls: Array<{ method: string; path: string; body: unknown }> };
+
+function p8Routes(opts: { admin?: boolean; prefs?: Partial<typeof PREFS>; recorder: Recorder; extra?: ApiRoute[] }): ApiRoute[] {
+  const session = opts.admin ? SESSION_ADMIN : SESSION_MEMBER;
+  const prefs = { ...PREFS, ...(opts.prefs ?? {}) };
+  const record = (answer: (body: unknown) => unknown) => (r: { method: string; path: string; body: unknown }) => {
+    opts.recorder.calls.push(r);
+    return answer(r.body);
+  };
+  return [
+    ...(opts.extra ?? []),
+    { path: "/api/v1/session", body: session },
+    { path: "/api/v1/whoami", body: { ...session, is_admin: Boolean(opts.admin) } },
+    {
+      path: "/api/v1/me/profile",
+      body: {
+        user_id: session.user_id, email: "thandi@review.test", is_admin: Boolean(opts.admin), tenant_slug: "crusaders",
+        full_name: "Thandi Probe", membership_number: "M-9", photo_url: null, status: "active", preferences: prefs,
+      },
+    },
+    { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { path: "/api/v1/me/webauthn/credentials", body: [] },
+    { path: "/api/v1/me/door", body: door({ next_booking: null }) },
+    { path: "/api/v1/me/door/history", body: { items: [], has_more: false } },
+    { method: "POST", path: "/api/v1/me/qr/generate", body: { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true } },
+    { method: "PUT", path: "/api/v1/me/onboarding/member/step", respond: record((b) => ({ ...prefs, member_onboarding_last_step: (b as { step: string }).step })) },
+    { method: "POST", path: "/api/v1/me/onboarding/member/complete", respond: record(() => ({ ...prefs, member_onboarding_completed_at: "2026-09-23T10:00:00Z" })) },
+    { method: "POST", path: "/api/v1/me/onboarding/member/dismiss", respond: record(() => ({ ...prefs, member_onboarding_dismissed_at: "2026-09-23T10:00:00Z" })) },
+    { method: "POST", path: "/api/v1/me/onboarding/admin/complete", respond: record(() => ({ ...prefs, admin_onboarding_completed_at: "2026-09-23T10:00:00Z" })) },
+    { path: "/api/v1/admin/members", body: [] },
+    { path: "/api/v1/admin/monitoring/summary", body: { open: {} } },
+    { path: "/api/v1/admin/doors", body: { day_started_at: "2026-09-23T00:00:00Z", timezone: "Africa/Johannesburg", shut_all_active: false, doors: [] } },
+  ];
+}
+
+test.describe("P8: the welcome wizard", () => {
+  test("a newly approved member lands on it once, walks it, and finishes on My Code", async ({ page }) => {
+    const recorder: Recorder = { calls: [] };
+    await signIn(page);
+    await serveApi(page, p8Routes({ recorder }));
+    await page.goto("/my-code");
+
+    await expect(page).toHaveURL(/\/get-started$/);
+    await expect(page.getByRole("heading", { level: 1, name: GET_STARTED.title })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: GET_STARTED.steps.welcome.title })).toBeVisible();
+
+    const titles = [
+      GET_STARTED.steps.code.title, GET_STARTED.steps.passkey.title, GET_STARTED.steps.fingerprint.title,
+      GET_STARTED.steps.topup.title, GET_STARTED.steps.book.title, GET_STARTED.steps.install.title,
+    ];
+    for (const [i, title] of titles.entries()) {
+      await page.getByRole("button", { name: GET_STARTED.next, exact: true }).click();
+      await expect(page.getByRole("heading", { level: 2, name: title })).toBeVisible();
+      await expect(page.getByText(GET_STARTED.stepOf(i + 2, 7))).toBeVisible();
+    }
+    // The court-box fingerprint step was an explanation, never a control: nothing it said was pressable.
+    await page.getByRole("button", { name: GET_STARTED.finish }).click();
+    await expect(page).toHaveURL(/\/my-code$/);
+    expect(recorder.calls.some((c) => c.path.endsWith("/member/complete"))).toBe(true);
+    expect(recorder.calls.filter((c) => c.path.endsWith("/member/step")).map((c) => (c.body as { step: string }).step))
+      .toEqual(["code", "passkey", "fingerprint", "topup", "book", "install"]);
+
+    // Once per sign-in: arriving at the landing again does not send the member round again.
+    await page.goto("/my-code");
+    await expect(page.getByRole("heading", { level: 1, name: "Your code" })).toBeVisible();
+    await expect(page).toHaveURL(/\/my-code$/);
+  });
+
+  test("can be skipped, which the club records as a dismissal", async ({ page }) => {
+    const recorder: Recorder = { calls: [] };
+    await signIn(page);
+    await serveApi(page, p8Routes({ recorder }));
+    await page.goto("/my-code");
+    await expect(page).toHaveURL(/\/get-started$/);
+
+    await page.getByRole("button", { name: GET_STARTED.skip }).click();
+    await expect(page).toHaveURL(/\/my-code$/);
+    expect(recorder.calls.some((c) => c.path.endsWith("/member/dismiss"))).toBe(true);
+  });
+
+  test("is never pushed at a member who finished it, and is reopened from the account menu", async ({ page }) => {
+    const recorder: Recorder = { calls: [] };
+    await signIn(page);
+    await serveApi(page, p8Routes({ recorder, prefs: { member_onboarding_completed_at: "2026-09-01T10:00:00Z", member_onboarding_last_step: "book" } }));
+    await page.goto("/my-code");
+    await expect(page.getByRole("heading", { level: 1, name: "Your code" })).toBeVisible();
+    await expect(page).toHaveURL(/\/my-code$/);
+
+    await page.getByRole("button", { name: "Account menu" }).click();
+    await page.getByRole("menuitem", { name: REPLAY_WELCOME }).click();
+    await expect(page).toHaveURL(/\/get-started\?replay=1$/);
+    // A replay starts at the beginning, whatever the resume point says.
+    await expect(page.getByRole("heading", { level: 2, name: GET_STARTED.steps.welcome.title })).toBeVisible();
+  });
+
+  test("fits a 320px phone at a 16px root or a 32px one", async ({ page }) => {
+    const recorder: Recorder = { calls: [] };
+    await signIn(page);
+    await serveApi(page, p8Routes({ recorder }));
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/get-started?step=install");
+    await expect(page.getByRole("heading", { level: 2, name: GET_STARTED.steps.install.title })).toBeVisible();
+    for (const root of [16, 32]) {
+      await page.addStyleTag({ content: `html { font-size: ${root}px }` });
+      const past = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>("main *")]
+        .filter((el) => el.getBoundingClientRect().right > window.innerWidth + 1).length);
+      expect(past, `elements past the right edge at a ${root}px root`).toBe(0);
+    }
+  });
+});
+
+test.describe("P8: the setup checklist on My Code", () => {
+  test("counts what is done from real reads, links to each, and can be hidden", async ({ page }) => {
+    const recorder: Recorder = { calls: [] };
+    await signIn(page);
+    await serveApi(page, p8Routes({
+      recorder,
+      prefs: { member_onboarding_dismissed_at: "2026-09-01T10:00:00Z" },
+      extra: [
+        { path: "/api/v1/me/webauthn/credentials", body: [{ id: "p", label: "iPhone", transports: null, created_at: "2026-09-01T10:00:00Z", last_used_at: null }] },
+      ],
+    }));
+    await page.goto("/my-code");
+
+    const card = page.getByRole("region", { name: CHECKLIST.title });
+    await expect(card).toBeVisible();
+    await expect(card).toContainText(CHECKLIST.progress(1, 4));
+    await expect(card.getByRole("link", { name: CHECKLIST.items.passkey.done })).toBeVisible();
+    await expect(card.getByRole("link", { name: CHECKLIST.items.topup.label })).toHaveAttribute("href", "/wallet/topup");
+
+    await card.getByRole("button", { name: CHECKLIST.hide }).click();
+    await expect(card).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByRole("heading", { level: 1, name: "Your code" })).toBeVisible();
+    await expect(page.getByRole("region", { name: CHECKLIST.title })).toHaveCount(0);
+  });
+});
+
+test.describe("P8: the admin tour", () => {
+  test("fires on the first Admin visit, points at each section, and is recorded when done", async ({ page }, info) => {
+    const recorder: Recorder = { calls: [] };
+    await signIn(page);
+    await serveApi(page, p8Routes({ admin: true, recorder, prefs: { member_onboarding_dismissed_at: "2026-09-01T10:00:00Z" } }));
+    await page.goto("/admin");
+
+    for (const [i, stop] of ADMIN_TOUR.stops.entries()) {
+      const mark = page.getByRole("dialog", { name: stop.title });
+      await expect(mark).toBeVisible();
+      await expect(mark).toContainText(ADMIN_TOUR.stepOf(i + 1, ADMIN_TOUR.stops.length));
+      const box = (await mark.boundingBox())!;
+      const viewport = page.viewportSize()!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
+      // Anchored to the real control: beside the rail row on a wide screen, under the section
+      // bar on a phone — where the section actually is at this width.
+      const railRow = page.locator(`[data-admin-rail] [data-admin-nav="${stop.navId}"]`);
+      if (await railRow.isVisible()) {
+        expect(box.x).toBeGreaterThan((await railRow.boundingBox())!.x);
+      } else {
+        const bar = (await page.locator("[data-admin-section-bar] button").boundingBox())!;
+        expect(box.y).toBeGreaterThanOrEqual(bar.y + bar.height - 1);
+        await expect(mark).toContainText(ADMIN_TOUR.bar);
+      }
+      const last = i === ADMIN_TOUR.stops.length - 1;
+      await mark.getByRole("button", { name: last ? ADMIN_TOUR.done : ADMIN_TOUR.next, exact: true }).click();
+    }
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(recorder.calls.some((c) => c.path.endsWith("/admin/complete"))).toBe(true);
+    expect(info.project.name === "desktop" || info.project.name === "mobile").toBe(true);
+  });
+
+  test("is skippable, stays away on a deep link, and is replayed from the account menu", async ({ page }) => {
+    const recorder: Recorder = { calls: [] };
+    await signIn(page);
+    await serveApi(page, p8Routes({
+      admin: true, recorder,
+      prefs: { member_onboarding_dismissed_at: "2026-09-01T10:00:00Z", admin_onboarding_completed_at: "2026-09-01T10:00:00Z" },
+    }));
+    await page.goto("/admin/members");
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Account menu" }).click();
+    await page.getByRole("menuitem", { name: REPLAY_ADMIN_TOUR }).click();
+    const first = page.getByRole("dialog", { name: ADMIN_TOUR.stops[0].title });
+    await expect(first).toBeVisible();
+    await first.getByRole("button", { name: ADMIN_TOUR.skip }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page).toHaveURL(/\/admin$/);
   });
 });

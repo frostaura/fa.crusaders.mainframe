@@ -1,3 +1,4 @@
+import { formatCredits } from "./utils";
 /**
  * GOAL item 16 — what happens after you book, in words for somebody who is not good with
  * technology.
@@ -291,3 +292,156 @@ export const GUIDE_FROM_CODE = "New here? How it works, step by step";
  * </p>
  */
 export const WHATS_NEXT_DISMISS_KEY = "crusaders.onboarding.whats-next-until";
+
+// --- P8: the welcome wizard, the setup checklist and the admin tour ----------------------
+
+/**
+ * P8 (R14, D3) — every word the welcome wizard, the checklist on My Code and the admin tour
+ * say. Tests query by these, so a rewording is one edit here.
+ *
+ * <p>
+ * <b>Only what the product does.</b> The fingerprint step describes the enrolment the club
+ * actually runs — in person, witnessed by a club admin at the club's reader, consent first
+ * (`docs/specs/biometric-abstraction.md` § Admin-led enrollment flow) — because there is no
+ * self-service enrolment and a wizard that implied one would send a member to a box that
+ * cannot help them. The notifications line says email, because every player-affecting event
+ * sends one and there are no push notifications.
+ * </p>
+ */
+export const GET_STARTED_PATH = "/get-started";
+
+export const GET_STARTED = {
+  title: "Welcome to the club",
+  description: "A few things worth setting up now. Every step can wait — skip anything and come back from My Code.",
+  stepOf: (n: number, total: number) => `Step ${n} of ${total}`,
+  back: "Back",
+  next: "Next",
+  finish: "Finish",
+  skip: "Skip for now",
+  skipAction: "put the welcome aside",
+  finishAction: "finish the welcome",
+  /** The finish or the skip reached this phone but not the club. */
+  savedHereOnly: "Couldn't reach the club, so this phone remembers it for now.",
+  steps: {
+    welcome: {
+      title: "You're in",
+      body: [
+        "Your membership is approved. This app is how you book a court, get in the door and switch the lights on.",
+        "Setting up takes a moment, and nothing here costs anything.",
+      ],
+    },
+    code: {
+      title: "Your one code",
+      body: [
+        "Everything at the club runs on one code: the door scanner, the court box, and paying for a court.",
+        "It lives on My Code and keeps changing on its own — that is what stops anyone copying it. My Code still "
+          + "shows it when your phone has no signal.",
+      ],
+      link: "Open My Code",
+    },
+    passkey: {
+      title: "Sign in with your face or fingerprint",
+      body: [
+        "A passkey lets this phone sign you in with Face ID, your fingerprint or your screen lock — no password to type.",
+        "Your face or fingerprint never leaves your phone. The club only ever sees a key your phone makes for this app.",
+      ],
+      add: "Add a passkey",
+      addAction: "add the passkey",
+      added: "Passkey added. Next time, sign in with Use a passkey.",
+      already: (n: number) => (n === 1 ? "You already have a passkey." : `You already have ${n} passkeys.`),
+      unsupported: "This browser can't make passkeys. You can add one later from Profile on a phone that can.",
+      checking: "Checking your passkeys",
+      manage: "Manage passkeys in Profile",
+      failed: "Couldn't add the passkey. Nothing was saved — try again.",
+    },
+    fingerprint: {
+      title: "Your fingerprint at the court box",
+      body: [
+        "The court box can also recognise a fingerprint, so you can switch on a court you've booked without your phone.",
+        "Fingerprints are enrolled in person: ask a club admin at the club, and they will enrol a finger for you at "
+          + "the club's reader while you're there. You'll be asked to agree first.",
+        "The fingerprint is kept on the club's own machine and never leaves it. You can ask for it to be deleted at any time.",
+      ],
+      tip: "Enrol a second finger too, in case the first one doesn't read on the day.",
+      optional: "Optional — your code always works.",
+    },
+    topup: {
+      title: "Put credit in your wallet",
+      body: [
+        "Courts are paid for in credits. Top up in rand, and your wallet shows exactly what you have before you book.",
+      ],
+      balance: (credits: number) => credits < 0
+        ? `Your wallet is ${formatCredits(-credits)} below zero — a top-up covers that first.`
+        : `Your wallet has ${formatCredits(credits)}.`,
+      cta: "Top up",
+    },
+    book: {
+      title: "Book your first court",
+      body: [
+        "Pick a green box on the bookings grid. Each box is one court for a short slice of time, and you see the price "
+          + "before anything is charged.",
+      ],
+      cta: "Book a court",
+    },
+    install: {
+      title: "Put the app on your home screen",
+      body: ["Open it like any other app, straight to your code — handy at the door."],
+      prompt: "Install the app",
+      promptAction: "install the app",
+      installed: "The app is installed on this device.",
+      ios: [
+        "On iPhone or iPad, in Safari:",
+        "Tap the Share button at the bottom of the screen.",
+        "Choose Add to Home Screen, then Add.",
+      ],
+      browser: "This browser can't install apps. Everything works here in the browser just the same.",
+      emailTitle: "What we tell you",
+      email: "Bookings, cancellations, top-ups and anything else that affects you arrive by email, so keep an eye on "
+        + "the inbox you signed up with.",
+    },
+  },
+} as const;
+
+export const CHECKLIST = {
+  title: "Finish setting up",
+  progress: (done: number, total: number) => `${done} of ${total} done`,
+  hide: "Hide setup checklist",
+  resume: "Continue setup",
+  unknown: "Couldn't check just now",
+  items: {
+    passkey: { label: "Add a passkey", done: "Passkey added", to: `${GET_STARTED_PATH}?step=passkey` },
+    topup: { label: "Top up your wallet", done: "Wallet topped up", to: "/wallet/topup" },
+    booking: { label: "Book your first court", done: "First court booked", to: "/bookings" },
+    install: { label: "Install the app", done: "App installed", to: `${GET_STARTED_PATH}?step=install` },
+  },
+} as const;
+
+export const REPLAY_WELCOME = "Replay welcome";
+export const REPLAY_ADMIN_TOUR = "Replay admin tour";
+/** The query that starts the admin tour on demand. */
+export const ADMIN_TOUR_QUERY = "tour";
+export const ADMIN_TOUR_PATH = `/admin?${ADMIN_TOUR_QUERY}=replay`;
+
+/**
+ * The admin tour's six stops, keyed by the admin nav item each one points at
+ * (`components/admin/adminNav.ts`). `rail` is said on a wide screen, where the item is on the
+ * left; `bar` on a phone or tablet, where every section is behind the section bar.
+ */
+export const ADMIN_TOUR = {
+  label: "Admin tour",
+  stepOf: (n: number, total: number) => `${n} of ${total}`,
+  back: "Back",
+  next: "Next",
+  done: "Done",
+  skip: "Skip tour",
+  close: "Close the tour",
+  bar: "Tap the section bar to get here.",
+  stops: [
+    { navId: "overview", title: "Overview", body: "What needs you right now — applications waiting, doors and faults — across the whole club." },
+    { navId: "members", title: "Members", body: "Approve new applications, top up wallets and open anybody's bookings, wallet or door history." },
+    { navId: "groups", title: "Groups", body: "Who may book when, at what top-up rate, and the limits each group plays under." },
+    { navId: "transactions", title: "Transactions", body: "Every credit movement in the club's ledger, with who did it and why." },
+    { navId: "control-board", title: "Monitoring", body: "Every court's lights and bookings live, plus doors, boards and faults." },
+    { navId: "settings", title: "Settings", body: "Prices, opening hours, booking rules and the club's details." },
+  ],
+} as const;

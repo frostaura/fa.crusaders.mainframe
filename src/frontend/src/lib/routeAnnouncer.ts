@@ -57,6 +57,8 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   ["/change-password", "Change password"],
   // item 16 — the always-reachable guide.
   ["/how-it-works", "How it works"],
+  // P8 — the member welcome wizard.
+  ["/get-started", "Get started"],
   // R16 — the Admin tab and everything under it. The index is the Overview ("Needs attention").
   ["/admin", "Overview"],
   ["/admin/members", "Members"],
