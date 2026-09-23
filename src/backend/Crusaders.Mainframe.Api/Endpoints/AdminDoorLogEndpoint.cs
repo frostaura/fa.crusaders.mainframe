@@ -20,8 +20,10 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// </para>
 ///
 /// <para>
-/// <b>Door, time, outcome. There is no member filter and there will not be one</b> — P3, and
-/// <see cref="DoorLogQuery"/> has nowhere to put one. The CSV carries the member COLUMN,
+/// <b>Door, time, outcome. There is no member filter on THIS log and there will not be one</b>
+/// — P3, and <see cref="DoorLogQuery"/> has nowhere to put one. One named person's rows are a
+/// different, audited route since D9 (<see cref="AdminMemberDoorEndpoints"/>); this log still
+/// cannot be searched by a person. The CSV carries the member COLUMN,
 /// because an export of the club's own log is the club's record and a row with no identity in
 /// it answers nothing; what P3 forbids is the club searching its log BY a person, which is the
 /// shape that turns an operations log into an attendance report.

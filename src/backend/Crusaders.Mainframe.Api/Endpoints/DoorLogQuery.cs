@@ -9,12 +9,21 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// What the club's door log was asked for — door, time, outcome, reason — and nothing else.
 ///
 /// <para>
-/// <b>The fields this type does NOT have are its point.</b> P3: the admin door log filters by
-/// DOOR, TIME and OUTCOME only, and there is no per-member filter and no per-member admin
-/// history anywhere in this product. A member's own door history belongs to the member
-/// (<c>GET /api/v1/me/door/history</c>) and to nobody else. Making that structural — a request
-/// type with no place to put a member — is worth more than a convention, because a convention
-/// is what a well-meaning console adds a parameter past.
+/// <b>The fields this type does NOT have are its point.</b> P3: the CLUB's door log filters by
+/// DOOR, TIME and OUTCOME only and cannot be searched by a person. Making that structural — a
+/// request type with no place to put a member — is worth more than a convention, because a
+/// convention is what a well-meaning console adds a parameter past.
+/// </para>
+///
+/// <para>
+/// <b>P3 is no longer absolute, and what changed is narrow (D9, Dean, 2026-09-23).</b> P3 also
+/// said there was no per-member ADMIN history anywhere in the product, and that half is
+/// reversed: <c>GET /api/v1/admin/members/{userId}/doors</c> (<see cref="AdminMemberDoorEndpoints"/>)
+/// answers one named person's door rows to an admin, with the member as a path segment and
+/// every read written to <c>audit_log</c> as <c>member.door_history_viewed</c>. It composes its
+/// one extra predicate on top of THIS type's <see cref="Apply"/> / <see cref="Filtered"/> rather
+/// than adding a field here, so the club log itself is exactly as unsearchable by a person as
+/// it was. The rationale is in <c>memory/decisions-doors-member.md</c>.
 /// </para>
 ///
 /// <para>
