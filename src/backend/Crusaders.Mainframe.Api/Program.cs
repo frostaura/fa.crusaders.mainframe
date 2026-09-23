@@ -322,6 +322,9 @@ builder.Services.AddScoped<AdminBulkBookingService>();
 // Item 14 — repeating schedules, materialised as real AdminBlock rows so the GiST
 // exclusion constraint is what actually reserves the court.
 builder.Services.AddScoped<BookingScheduleService>();
+// One person's theme, onboarding progress and opt-ins. Scoped: it writes through the
+// request's DbContext and stamps the request's tenant on a row it creates.
+builder.Services.AddScoped<UserPreferencesService>();
 
 // Phase 4 — webhook engine + lights cue worker + no-show worker
 builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
@@ -551,6 +554,7 @@ app.MapAdminMemberTraceEndpoints();
 app.MapAdminBulkBookingEndpoints();
 app.MapAdminScheduleEndpoints();
 app.MapMeProfileEndpoints();
+app.MapMePreferencesEndpoints();
 app.MapMeDoorEndpoints();
 app.MapWebhookEndpoints();
 app.MapBiometricEndpoints();

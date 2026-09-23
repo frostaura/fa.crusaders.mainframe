@@ -147,6 +147,7 @@ public sealed class TestHost : IAsyncDisposable
         services.AddScoped<AdminChangeRecorder>();
         services.AddScoped<AdminBulkBookingService>();
         services.AddScoped<BookingScheduleService>();
+        services.AddScoped<UserPreferencesService>();
 
         var sp = services.BuildServiceProvider();
 

@@ -16,7 +16,7 @@ public static class MeProfileEndpoints
 
         g.MapGet("/profile", async (
             HttpContext ctx, ITenantContext tenant, MainframeDbContext db,
-            TenantSettingsAccessor settings, CancellationToken ct) =>
+            TenantSettingsAccessor settings, UserPreferencesService prefs, CancellationToken ct) =>
         {
             var userId = ctx.User.Id() ?? Guid.Empty;
             var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId, ct);
@@ -48,6 +48,12 @@ public static class MeProfileEndpoints
                 // token, so no member can ask for another club's. The alternative, a second
                 // endpoint for one string, would be a round trip on the first paint.
                 currency_symbol = CurrencySymbol.For(clubSettings),
+
+                // The same object GET /me/preferences answers, embedded so the first paint
+                // knows the theme before it draws anything — a separate round trip would flash
+                // the wrong theme on every cold load. Defaults when the member has never
+                // changed one; reading never creates the row.
+                preferences = await prefs.GetAsync(user.Id, ct),
             });
         });
 
