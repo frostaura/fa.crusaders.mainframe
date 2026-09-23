@@ -50,7 +50,7 @@ public class BookingCapAndGroupTests
     /// <summary>The next 15-minute boundary at or after an instant, on the CLUB'S clock.</summary>
     private static DateTimeOffset OnTheGrid(DateTimeOffset at)
     {
-        var local = TimeZoneInfo.ConvertTime(at, Johannesburg);
+        var local = TimeZoneInfo.ConvertTime(at, ClubZone);
         var minutes = (local.Hour * 60) + local.Minute;
         var forward = (15 - (minutes % 15)) % 15;
         return at.AddMinutes(forward).AddSeconds(-local.Second).AddMilliseconds(-local.Millisecond);
@@ -65,13 +65,61 @@ public class BookingCapAndGroupTests
     /// <summary>
     /// A club that is NOT in UTC — <c>memory/gotchas-postgres-offsets.md</c>: every test club in
     /// this repository runs UTC, where the offset is zero and a whole class of club-day defect is
-    /// invisible, while every real club is outside it. Johannesburg has no DST, so this varies
-    /// the offset without also varying the transitions.
+    /// invisible, while every real club is outside it — and one where it is MORNING right now.
     /// </summary>
-    private static string ClubInJohannesburg(string extra)
-        => $$"""{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"timezone":"Africa/Johannesburg","peak_hours":"",{{extra}}}""";
+    /// <remarks>
+    /// These tests are about TODAY on the club's clock, so they need enough of the club's day left
+    /// to place their slots in. Pinned to Johannesburg they skipped every afternoon — the cap test
+    /// from about 14:25 SAST — and a suite that skips its D2-B11 test half the day is a suite that
+    /// does not test D2-B11 half the day. Choosing the zone rather than freezing a clock keeps the
+    /// real day-window code under test; <c>DoorClub.DaytimeZone</c> is the same move for the
+    /// opposite need. Johannesburg is still first, so the offset under test is the club's own
+    /// whenever its morning allows.
+    /// </remarks>
+    private static string ClubInMorningZone(string extra)
+        => $$"""{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"timezone":"{{ClubZoneId}}","peak_hours":"",{{extra}}}""";
 
-    private static readonly TimeZoneInfo Johannesburg = TimeZoneInfo.FindSystemTimeZoneById("Africa/Johannesburg");
+    /// <summary>A real, non-UTC zone in which <paramref name="now"/> reads between 01:00 and noon.</summary>
+    /// <remarks>
+    /// The zones run from UTC-11 to UTC+14 with no gap wider than two hours, so an eleven-hour
+    /// window always holds one of them; <see cref="Some_zone_is_in_its_morning_at_every_hour"/>
+    /// pins that for all 24 hours rather than trusting the arithmetic.
+    /// </remarks>
+    internal static string MorningZone(DateTimeOffset now)
+    {
+        string[] zones =
+        [
+            "Africa/Johannesburg", "Asia/Dubai", "Asia/Kolkata", "Asia/Bangkok", "Asia/Tokyo",
+            "Australia/Brisbane", "Pacific/Noumea", "Pacific/Auckland", "Pacific/Kiritimati",
+            "Pacific/Pago_Pago", "Pacific/Honolulu", "America/Anchorage", "America/Los_Angeles",
+            "America/Denver", "America/Chicago", "America/New_York", "America/Sao_Paulo",
+            "Atlantic/Cape_Verde",
+        ];
+        return zones.First(
+            z => TimeZoneInfo.ConvertTime(now, TimeZoneInfo.FindSystemTimeZoneById(z)).Hour is >= 1 and < 12);
+    }
+
+    private static readonly string ClubZoneId = MorningZone(DateTimeOffset.UtcNow);
+
+    private static readonly TimeZoneInfo ClubZone = TimeZoneInfo.FindSystemTimeZoneById(ClubZoneId);
+
+    [Theory]
+    [MemberData(nameof(EveryHour))]
+    public void Some_zone_is_in_its_morning_at_every_hour(int hour)
+    {
+        var now = new DateTimeOffset(2026, 9, 23, hour, 30, 0, TimeSpan.Zero);
+        var zone = TimeZoneInfo.FindSystemTimeZoneById(MorningZone(now));
+
+        Assert.InRange(TimeZoneInfo.ConvertTime(now, zone).Hour, 1, 11);
+        Assert.NotEqual(TimeSpan.Zero, zone.GetUtcOffset(now));
+    }
+
+    public static TheoryData<int> EveryHour()
+    {
+        var data = new TheoryData<int>();
+        for (var h = 0; h < 24; h++) data.Add(h);
+        return data;
+    }
 
     /// <summary>
     /// Whether a run of slots starting at <paramref name="start"/> all land on the CLUB'S day
@@ -79,9 +127,9 @@ public class BookingCapAndGroupTests
     /// fixture that silently crosses it is testing something else.
     /// </summary>
     private static bool SameClubDay(DateTimeOffset start, DateTimeOffset lastEnd)
-        => TimeZoneInfo.ConvertTime(start, Johannesburg).Date == TimeZoneInfo.ConvertTime(lastEnd, Johannesburg).Date
-        && TimeZoneInfo.ConvertTime(start, Johannesburg).Date
-           == TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, Johannesburg).Date;
+        => TimeZoneInfo.ConvertTime(start, ClubZone).Date == TimeZoneInfo.ConvertTime(lastEnd, ClubZone).Date
+        && TimeZoneInfo.ConvertTime(start, ClubZone).Date
+           == TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, ClubZone).Date;
 
     // ---- D2-B11: the cap did not work for TODAY, at all ---------------------
 
@@ -98,11 +146,11 @@ public class BookingCapAndGroupTests
     /// about to go unused, not a blanket exemption for the rest of the day.
     /// </para>
     /// </summary>
-    [SkippableFact]
+    [Fact]
     public async Task A_member_cannot_fill_today_past_their_cap()
     {
         await using var host = await TestHost.CreateAsync();
-        await GiveSettingsAsync(host, ClubInJohannesburg("\"member_per_day_max_minutes\":60"));
+        await GiveSettingsAsync(host, ClubInMorningZone("\"member_per_day_max_minutes\":60"));
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
@@ -115,8 +163,10 @@ public class BookingCapAndGroupTests
         // Skip rather than assert a falsehood when the club's own day has not enough left in it:
         // a test that books relative to UtcNow inherits the wall clock as a hidden input
         // (memory/gotchas-clock.md).
-        Skip.If(!SameClubDay(baseStart, baseStart.AddMinutes(215)),
-            "not enough of the club day is left to place four future slots on it");
+        // An assertion, not a skip: the club's zone is chosen so its morning always leaves room,
+        // and a skip here would hide exactly the hours this test used to vanish in.
+        Assert.True(SameClubDay(baseStart, baseStart.AddMinutes(215)),
+            $"the club day in {ClubZoneId} has no room for four future slots — MorningZone is wrong");
 
         for (var i = 0; i < 4; i++)
         {
@@ -138,11 +188,11 @@ public class BookingCapAndGroupTests
     /// otherwise empty is allowed through a cap the member is already at. All four conditions
     /// have to hold, which is the half D2-B11 says was never evaluated.
     /// </summary>
-    [SkippableFact]
+    [Fact]
     public async Task A_free_court_starting_soon_is_allowed_through_the_cap()
     {
         await using var host = await TestHost.CreateAsync();
-        await GiveSettingsAsync(host, ClubInJohannesburg("\"member_max_slots_per_day\":1,\"member_per_day_max_minutes\":0"));
+        await GiveSettingsAsync(host, ClubInMorningZone("\"member_max_slots_per_day\":1,\"member_per_day_max_minutes\":0"));
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
         var booking = scope.ServiceProvider.GetRequiredService<BookingService>();
@@ -152,7 +202,7 @@ public class BookingCapAndGroupTests
         // gotchas-clock.md: a test that books relative to UtcNow inherits the wall clock as a
         // hidden input. Both slots and their lengths have to fit inside today, or the club's own
         // closing time refuses them and the test reads as a broken cap.
-        Skip.If(soon is null, "not enough of the UTC day is left to place two short slots on it");
+        Assert.True(soon is not null, $"the club day in {ClubZoneId} has no room for two short slots — MorningZone is wrong");
 
         Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
             host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, soon!.Value, 1, default));
@@ -164,11 +214,11 @@ public class BookingCapAndGroupTests
     }
 
     /// <summary>Turn the relaxation off and the same second booking is refused.</summary>
-    [SkippableFact]
+    [Fact]
     public async Task The_relaxation_can_be_turned_off()
     {
         await using var host = await TestHost.CreateAsync();
-        await GiveSettingsAsync(host, ClubInJohannesburg(
+        await GiveSettingsAsync(host, ClubInMorningZone(
             "\"member_max_slots_per_day\":1,\"member_per_day_max_minutes\":0,\"same_day_cap_relaxation\":false"));
         using var scope = host.NewScope();
         var ledger = scope.ServiceProvider.GetRequiredService<LedgerService>();
@@ -176,7 +226,7 @@ public class BookingCapAndGroupTests
         await ledger.PostAsync(new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 5000m, host.PlayerUser.Id), default);
 
         var soon = SoonInsideTheDay();
-        Skip.If(soon is null, "not enough of the UTC day is left to place two short slots on it");
+        Assert.True(soon is not null, $"the club day in {ClubZoneId} has no room for two short slots — MorningZone is wrong");
 
         Assert.IsType<BookingResult.Ok>(await booking.CreateAsync(
             host.Courts[0].Id, host.PlayerUser.Id, host.PlayerUser.Id, soon!.Value, 1, default));
