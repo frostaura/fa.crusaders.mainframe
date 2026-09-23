@@ -105,8 +105,16 @@ jobs:
   # and backend-integration jobs.
   # ============================================================================
   e2e:
-    name: End-to-end (Playwright)
+    name: End-to-end (Playwright ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
+    # Sharded three ways (2026-09-23): the facelift took the suite past 800 specs on a runner
+    # that gives Playwright ONE worker, and the unsharded job hit its 30-minute budget and was
+    # cancelled at spec ~630 with everything passing. `needs: [e2e]` downstream waits for every
+    # shard. Each shard builds and serves the app itself, so the timeout below is per shard.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     # 30, not 15. The 15 was set when this job took 4 minutes and the suite was a few hundred
     # specs; it is 644 now, run across a desktop and a mobile project, on top of a browser
     # install and a production build. Measured on the runs of 2026-09-23 it needs the better
@@ -143,13 +151,13 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run end-to-end tests
-        run: npx playwright test
+        run: npx playwright test --shard=${{ matrix.shard }}/3
 
       - name: Upload trace on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: src/frontend/playwright-report/
           retention-days: 7
 
