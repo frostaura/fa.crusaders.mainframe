@@ -1,0 +1,241 @@
+#include "devcrypto/Sha256.h"
+
+#include <string.h>
+
+namespace dc {
+namespace {
+
+const uint32_t kRoundConstants[64] = {
+    0x428a2f98U, 0x71374491U, 0xb5c0fbcfU, 0xe9b5dba5U, 0x3956c25bU, 0x59f111f1U, 0x923f82a4U, 0xab1c5ed5U,
+    0xd807aa98U, 0x12835b01U, 0x243185beU, 0x550c7dc3U, 0x72be5d74U, 0x80deb1feU, 0x9bdc06a7U, 0xc19bf174U,
+    0xe49b69c1U, 0xefbe4786U, 0x0fc19dc6U, 0x240ca1ccU, 0x2de92c6fU, 0x4a7484aaU, 0x5cb0a9dcU, 0x76f988daU,
+    0x983e5152U, 0xa831c66dU, 0xb00327c8U, 0xbf597fc7U, 0xc6e00bf3U, 0xd5a79147U, 0x06ca6351U, 0x14292967U,
+    0x27b70a85U, 0x2e1b2138U, 0x4d2c6dfcU, 0x53380d13U, 0x650a7354U, 0x766a0abbU, 0x81c2c92eU, 0x92722c85U,
+    0xa2bfe8a1U, 0xa81a664bU, 0xc24b8b70U, 0xc76c51a3U, 0xd192e819U, 0xd6990624U, 0xf40e3585U, 0x106aa070U,
+    0x19a4c116U, 0x1e376c08U, 0x2748774cU, 0x34b0bcb5U, 0x391c0cb3U, 0x4ed8aa4aU, 0x5b9cca4fU, 0x682e6ff3U,
+    0x748f82eeU, 0x78a5636fU, 0x84c87814U, 0x8cc70208U, 0x90befffaU, 0xa4506cebU, 0xbef9a3f7U, 0xc67178f2U,
+};
+
+const uint32_t kInitialState[8] = {0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,
+                                   0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U};
+
+const uint8_t kInnerPad = 0x36U;
+const uint8_t kOuterPad = 0x5cU;
+
+uint32_t rotr(uint32_t x, uint32_t n) {
+  return (x >> n) | (x << (32U - n));
+}
+
+uint32_t loadBigEndian(const uint8_t* p) {
+  return (static_cast<uint32_t>(p[0]) << 24) | (static_cast<uint32_t>(p[1]) << 16) |
+         (static_cast<uint32_t>(p[2]) << 8) | static_cast<uint32_t>(p[3]);
+}
+
+void storeBigEndian(uint32_t value, uint8_t* p) {
+  p[0] = static_cast<uint8_t>(value >> 24);
+  p[1] = static_cast<uint8_t>(value >> 16);
+  p[2] = static_cast<uint8_t>(value >> 8);
+  p[3] = static_cast<uint8_t>(value);
+}
+
+} // namespace
+
+void wipe(void* data, size_t len) {
+  // Through a volatile pointer, byte by byte: a plain memset of a buffer that
+  // is about to go out of scope is a dead store the optimiser is entitled to
+  // delete, and "key material wiped" would then be a comment rather than a fact.
+  volatile uint8_t* p = static_cast<volatile uint8_t*>(data);
+  for (size_t i = 0U; i < len; ++i) {
+    p[i] = 0U;
+  }
+}
+
+void Sha256::reset() {
+  for (size_t i = 0U; i < 8U; ++i) {
+    state_[i] = kInitialState[i];
+  }
+  memset(buffer_, 0, sizeof(buffer_));
+  totalBytes_ = 0U;
+  fill_ = 0U;
+}
+
+void Sha256::compress(const uint8_t* block) {
+  uint32_t w[64];
+  for (size_t i = 0U; i < 16U; ++i) {
+    w[i] = loadBigEndian(block + (i * 4U));
+  }
+  for (size_t i = 16U; i < 64U; ++i) {
+    const uint32_t s0 = rotr(w[i - 15U], 7U) ^ rotr(w[i - 15U], 18U) ^ (w[i - 15U] >> 3);
+    const uint32_t s1 = rotr(w[i - 2U], 17U) ^ rotr(w[i - 2U], 19U) ^ (w[i - 2U] >> 10);
+    w[i] = w[i - 16U] + s0 + w[i - 7U] + s1;
+  }
+
+  uint32_t a = state_[0];
+  uint32_t b = state_[1];
+  uint32_t c = state_[2];
+  uint32_t d = state_[3];
+  uint32_t e = state_[4];
+  uint32_t f = state_[5];
+  uint32_t g = state_[6];
+  uint32_t h = state_[7];
+
+  for (size_t i = 0U; i < 64U; ++i) {
+    const uint32_t s1 = rotr(e, 6U) ^ rotr(e, 11U) ^ rotr(e, 25U);
+    const uint32_t choose = (e & f) ^ (~e & g);
+    const uint32_t t1 = h + s1 + choose + kRoundConstants[i] + w[i];
+    const uint32_t s0 = rotr(a, 2U) ^ rotr(a, 13U) ^ rotr(a, 22U);
+    const uint32_t majority = (a & b) ^ (a & c) ^ (b & c);
+    const uint32_t t2 = s0 + majority;
+    h = g;
+    g = f;
+    f = e;
+    e = d + t1;
+    d = c;
+    c = b;
+    b = a;
+    a = t1 + t2;
+  }
+
+  state_[0] += a;
+  state_[1] += b;
+  state_[2] += c;
+  state_[3] += d;
+  state_[4] += e;
+  state_[5] += f;
+  state_[6] += g;
+  state_[7] += h;
+  wipe(w, sizeof(w));
+}
+
+void Sha256::update(const uint8_t* data, size_t len) {
+  if (data == nullptr) {
+    return;
+  }
+  totalBytes_ += static_cast<uint64_t>(len);
+  size_t at = 0U;
+  while (at < len) {
+    const size_t room = kSha256BlockBytes - fill_;
+    const size_t take = (len - at) < room ? (len - at) : room;
+    memcpy(buffer_ + fill_, data + at, take);
+    fill_ += take;
+    at += take;
+    if (fill_ == kSha256BlockBytes) {
+      compress(buffer_);
+      fill_ = 0U;
+    }
+  }
+}
+
+void Sha256::finish(uint8_t* out) {
+  const uint64_t bits = totalBytes_ * 8U;
+
+  // 0x80, then zeros up to 56 mod 64, then the 64-bit big-endian bit length.
+  // A message whose tail leaves fewer than nine bytes of room in the block
+  // spills the length into a second block — the 55/56-byte vectors pin that.
+  buffer_[fill_] = 0x80U;
+  ++fill_;
+  if (fill_ > kSha256BlockBytes - 8U) {
+    memset(buffer_ + fill_, 0, kSha256BlockBytes - fill_);
+    compress(buffer_);
+    fill_ = 0U;
+  }
+  memset(buffer_ + fill_, 0, (kSha256BlockBytes - 8U) - fill_);
+  for (size_t i = 0U; i < 8U; ++i) {
+    buffer_[kSha256BlockBytes - 1U - i] = static_cast<uint8_t>(bits >> (8U * i));
+  }
+  compress(buffer_);
+
+  for (size_t i = 0U; i < 8U; ++i) {
+    storeBigEndian(state_[i], out + (i * 4U));
+  }
+  reset();
+}
+
+void sha256(const uint8_t* data, size_t len, uint8_t* out) {
+  Sha256 hash;
+  hash.update(data, len);
+  hash.finish(out);
+}
+
+HmacSha256::HmacSha256(const uint8_t* key, size_t keyLen) {
+  uint8_t block[kSha256BlockBytes];
+  memset(block, 0, sizeof(block));
+  if (key != nullptr && keyLen > kSha256BlockBytes) {
+    sha256(key, keyLen, block);
+  } else if (key != nullptr && keyLen > 0U) {
+    memcpy(block, key, keyLen);
+  }
+
+  uint8_t innerPad[kSha256BlockBytes];
+  for (size_t i = 0U; i < kSha256BlockBytes; ++i) {
+    innerPad[i] = static_cast<uint8_t>(block[i] ^ kInnerPad);
+    outerPad_[i] = static_cast<uint8_t>(block[i] ^ kOuterPad);
+  }
+  inner_.update(innerPad, sizeof(innerPad));
+  wipe(innerPad, sizeof(innerPad));
+  wipe(block, sizeof(block));
+}
+
+HmacSha256::~HmacSha256() {
+  wipe(outerPad_, sizeof(outerPad_));
+}
+
+void HmacSha256::update(const uint8_t* data, size_t len) {
+  inner_.update(data, len);
+}
+
+void HmacSha256::finish(uint8_t* out) {
+  uint8_t innerDigest[kSha256Bytes];
+  inner_.finish(innerDigest);
+  Sha256 outer;
+  outer.update(outerPad_, sizeof(outerPad_));
+  outer.update(innerDigest, sizeof(innerDigest));
+  outer.finish(out);
+  wipe(innerDigest, sizeof(innerDigest));
+}
+
+void hmacSha256(const uint8_t* key, size_t keyLen, const uint8_t* data, size_t len, uint8_t* out) {
+  HmacSha256 mac(key, keyLen);
+  mac.update(data, len);
+  mac.finish(out);
+}
+
+bool hkdfSha256(ByteSpan salt, ByteSpan ikm, ByteSpan info, uint8_t* out, size_t outLen) {
+  if (out == nullptr || outLen == 0U || outLen > 255U * kSha256Bytes) {
+    return false;
+  }
+
+  // Extract. RFC 5869 §2.2: an absent salt is HashLen zero bytes.
+  uint8_t zeroSalt[kSha256Bytes];
+  memset(zeroSalt, 0, sizeof(zeroSalt));
+  uint8_t prk[kSha256Bytes];
+  if (salt.data == nullptr || salt.len == 0U) {
+    hmacSha256(zeroSalt, sizeof(zeroSalt), ikm.data, ikm.len, prk);
+  } else {
+    hmacSha256(salt.data, salt.len, ikm.data, ikm.len, prk);
+  }
+
+  // Expand. T(i) = HMAC(PRK, T(i-1) | info | i).
+  uint8_t t[kSha256Bytes];
+  memset(t, 0, sizeof(t));
+  size_t tLen = 0U;
+  size_t written = 0U;
+  uint8_t counter = 1U;
+  while (written < outLen) {
+    HmacSha256 mac(prk, sizeof(prk));
+    mac.update(t, tLen);
+    mac.update(info.data, info.len);
+    mac.update(&counter, 1U);
+    mac.finish(t);
+    tLen = sizeof(t);
+    const size_t take = (outLen - written) < tLen ? (outLen - written) : tLen;
+    memcpy(out + written, t, take);
+    written += take;
+    ++counter;
+  }
+  wipe(prk, sizeof(prk));
+  wipe(t, sizeof(t));
+  return true;
+}
+
+} // namespace dc

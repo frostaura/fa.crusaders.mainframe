@@ -1,0 +1,54 @@
+// Crusaders Mainframe — base64url (RFC 4648 §5), unpadded and strict.
+//
+// WHY BASE64URL AND NOT HEX
+// -------------------------
+// A per-day member key is twelve bytes, and a heartbeat carries up to 24 of
+// them to a court box and up to 72 to a door, inside response bodies whose
+// contract ceilings are 2048 and 4096 bytes. Hex costs 24 characters a key;
+// base64url costs 16, and twelve bytes is exactly sixteen characters with no
+// padding and no leftover bits. At 72 keys that is 576 bytes of a door's
+// budget, which is the difference between a body with headroom and one without.
+//
+// Url-safe rather than standard because `+` and `/` are the two characters of
+// standard base64 that mean something to somebody else on this path, and the
+// url alphabet — letters, digits, `-` and `_` — is exactly roster::isTokenChar's
+// set, which every other opaque string on this wire already keeps to.
+//
+// STRICT, BECAUSE A KEY IS NOT PROSE
+// ----------------------------------
+// Padding, whitespace, the standard alphabet's `+` and `/`, a length no
+// encoder produces, and non-zero trailing bits are all REFUSED. A lenient
+// decoder turns two different strings into one key, and a key that decodes
+// "close enough" is a member refused at a door for a reason nobody can see.
+//
+// No Arduino headers, no heap. Compiles for AVR, Xtensa and the host.
+
+#ifndef CRUSADERS_DEVCRYPTO_BASE64URL_H
+#define CRUSADERS_DEVCRYPTO_BASE64URL_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+namespace dc {
+namespace b64url {
+
+/// Characters `byteCount` bytes encode to, unpadded. One return statement: the
+/// generated sketches build at gnu++11.
+constexpr size_t encodedLen(size_t byteCount) {
+  return ((byteCount * 4U) + 2U) / 3U;
+}
+
+/// Writes the unpadded encoding plus a NUL. False, with nothing written, when
+/// `outCap` cannot hold it.
+bool encode(const uint8_t* data, size_t len, char* out, size_t outCap);
+
+/// Decodes exactly `textLen` characters. False — `out` untouched, `outLen`
+/// untouched — on any character outside the url alphabet, on `=` padding, on a
+/// length that leaves one dangling character, on non-zero trailing bits, or
+/// when the result would not fit `outCap`.
+bool decode(const char* text, size_t textLen, uint8_t* out, size_t outCap, size_t* outLen);
+
+} // namespace b64url
+} // namespace dc
+
+#endif // CRUSADERS_DEVCRYPTO_BASE64URL_H

@@ -92,6 +92,13 @@ public:
   /// the buyer can release it; a refusal leaves the window as it was.
   AuthCommand afterWalkUp(const court::Outcome& outcome, uint32_t nowMs);
 
+  /// A pay-for quote is on the glass (D10). The window is re-armed, unbound,
+  /// for a full scan-memory TTL: the member is being asked to press the court
+  /// again, and the Mega's window is the thing that forwards that press. A
+  /// PAID answer afterwards goes through afterWalkUp, which binds the window
+  /// to a court it lit.
+  AuthCommand afterPayForQuote(uint32_t nowMs);
+
   /// Whether an OFF press for `court` is honoured right now: the window must
   /// be armed, unexpired and bound to exactly that court.
   bool allowsRelease(uint8_t court, uint32_t nowMs) const;

@@ -130,6 +130,9 @@
 #include "gatelogic/ScanAssembler.h"
 #include "gatelogic/ScanDebounce.h"
 #include "gatelogic/UnlockTimer.h"
+#include "memcode/KeyRing.h"
+#include "memcode/ReplayRing.h"
+#include "memcode/StepClock.h"
 #include "roster/Roster.h"
 #include "timebase/TimeBase.h"
 
@@ -311,8 +314,17 @@ public:
 
   /// The two since-boot counters exactly as the next request will carry them.
   GateDiagnostics diagnostics() const {
-    return GateDiagnostics{noPushHeartbeats_, saturate(queue_.overflowed())};
+    // `codes:m1` on every heartbeat: this image verifies the single rotating
+    // member code offline, and the server keys what it sends and the club's
+    // automatic cut-over on the latest heartbeat it saw.
+    return GateDiagnostics{noPushHeartbeats_, saturate(queue_.overflowed()), true};
   }
+
+  /// The member-code sync as the last heartbeat left it — for the host suite
+  /// and the simulator's console.
+  const memcode::StepClock& stepClock() const { return stepClock_; }
+
+  uint8_t codeKeys() const { return codeKeys_.size(); }
 
   /// The fault aggregator, for the host suite and the simulator's console.
   /// Non-const because a console prints a drain in the simulator's own loop.
@@ -531,6 +543,16 @@ private:
   bool blocked_ = false;
   uint16_t blockingCalls_ = 0U;
   devlink::SyncResult lastSync_;
+
+  /// THE SINGLE ROTATING MEMBER CODE, offline (docs/specs/member-code.md §6):
+  /// the step clock counted from the last heartbeat's `code_step`, the per-day
+  /// keys a v1 code's OFF half is checked with, and the uses this door has
+  /// acted on. Owned here rather than injected: nothing about them is a
+  /// platform fact, and all three are RAM that the next heartbeat refills.
+  /// Emptied with the roster when the club takes this board out of service.
+  memcode::StepClock stepClock_{kGateConfig.rosterMaxAgeMs};
+  memcode::KeyRing<kGateKeyRingSlots> codeKeys_;
+  memcode::ReplayRing<kGateReplaySlots> codeUses_;
 };
 
 } // namespace gatelogic

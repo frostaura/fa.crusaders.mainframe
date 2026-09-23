@@ -1,0 +1,10 @@
+{
+  "name": "memcode",
+  "version": "1.0.0",
+  "description": "The single rotating member code (docs/specs/member-code.md): the 19-character token and its Crockford REF, the TOTP arithmetic of ON and OFF, the step clock a clockless board counts on, the per-day key ring, the replay ring, and the offline verifier. Knows nothing about courts, doors or relays. No Arduino headers, no heap; compiles for AVR, Xtensa and host.",
+  "keywords": "totp, member, code, embedded",
+  "frameworks": "*",
+  "platforms": "*",
+  "dependencies": { "devcrypto": "*", "timebase": "*" },
+  "build": { "flags": ["-I include"] }
+}

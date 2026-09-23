@@ -67,6 +67,8 @@
 #include "../gatelogic/ApiBaseUrl.h"
 #include "../gatelogic/GateConfig.h"
 #include "../gatelogic/StaticText.h"
+#include "../memcode/Token.h"
+#include "../memcode/Verifier.h"
 #include "../roster/Roster.h"
 
 namespace gatelogic {
@@ -136,6 +138,18 @@ static_assert(text::length(kReasonOutOfService) <= kMaxReasonLen &&
                   text::length(kReasonRelocking) <= kMaxReasonLen &&
                   text::length(kReasonTooFast) <= kMaxReasonLen,
               "a reason longer than the buffer reads as an empty reason at the door");
+
+/// A single rotating member code this board has already opened the door for,
+/// presented again inside its window — a photo of somebody's screen, or the
+/// member's own second scan inside one step. Decided by the board, offline only:
+/// online the server's use table answers, in its own vocabulary (`code_used`).
+inline constexpr char kReasonReplayed[] = "replayed";
+
+// A v1 member code transits this board's scanner line, which is bounded by the
+// roster's token cap: a code longer than that is one the door could never read.
+// Nineteen against twenty; this is where the two meet.
+static_assert(memcode::kTokenLen <= roster::kMaxTokenLen,
+              "a v1 member code must fit the scanner line the roster's token cap bounds");
 
 /// Whether to ask the API at all.
 enum class Attempt : uint8_t {
@@ -229,6 +243,48 @@ ScanDecision onGateResponse(uint16_t status, const char* body, size_t len, uint3
 /// the booking. A door is released for long enough to walk through; the
 /// booking's remaining minutes are the court's business, not the lock's.
 ScanDecision fromRoster(const roster::Decision& decision, uint32_t adoptedUnlockMs, uint32_t hardCapMs);
+
+/// The OFFLINE decision for a scan that looks like a v1 member code
+/// (docs/specs/member-code.md §6). A code this board cannot hold in a roster —
+/// it changes every thirty seconds — is VERIFIED instead: `status` is what
+/// memcode::verify said, and for Ok `decision` is the roster's answer for the
+/// REF it proved, through the REF lists, so an accepted partner opens the door
+/// exactly as the organiser does and on the same window rules.
+///
+///   Ok        -> fromRoster(decision): ok / too_early / too_late / roster_stale
+///   Replayed  -> refused, `replayed`
+///   NoClock   -> refused, `roster_stale` — the step is judged at the roster's age
+///   otherwise -> refused, `not_recognised`
+///
+/// Everything is queued, as every roster decision is: the API heard nothing.
+/// The caller records the use in its replay ring only if the lock was actually
+/// given time — a relocking refusal opened nothing and consumed nothing.
+ScanDecision fromMemberCode(memcode::Status status, const roster::Decision& decision,
+                            uint32_t adoptedUnlockMs, uint32_t hardCapMs);
+
+/// A door's offline answer to a v1 code, and the verdict behind it — whose REF
+/// and which step the caller records as used once the lock was given time.
+struct OfflineCodeDecision {
+  ScanDecision decision;
+  memcode::Verdict verdict;
+};
+
+/// The whole offline question for a v1 code, in one call the host suite and
+/// GateApp share: verify it, and if it proved a member, ask the roster's REF
+/// lists about them.
+template <class RosterT, class KeysT, class UsesT>
+OfflineCodeDecision
+decideOfflineMemberCode(const char* token, const memcode::OfflineCodes<KeysT, UsesT>& codes,
+                        const RosterT& cache, uint32_t adoptedUnlockMs, uint32_t hardCapMs, uint32_t nowMs) {
+  OfflineCodeDecision out;
+  out.verdict = memcode::verify(token, codes, nowMs);
+  roster::Decision booked;
+  if (out.verdict.status == memcode::Status::Ok) {
+    booked = cache.decideMember(out.verdict.token.refText, roster::CourtCount(1U), nowMs);
+  }
+  out.decision = fromMemberCode(out.verdict.status, booked, adoptedUnlockMs, hardCapMs);
+  return out;
+}
 
 /// A scan this board will not put on the wire: a line longer than the token cap.
 ///

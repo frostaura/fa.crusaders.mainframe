@@ -2793,6 +2793,14 @@ const ScreenContract kContract[] = {
     {bridgelogic::ScreenId::CardBooked, "COURT", false, true},
     {bridgelogic::ScreenId::CardNoBooking, "BOOKING", true, true},
     {bridgelogic::ScreenId::CardBookedOffline, "BOOKING", false, false},
+    // D10. The quote's key noun is BOOKED and its question PAY survives the
+    // clip; the instruction is row 2, which is the reason it is three rows.
+    {bridgelogic::ScreenId::PayForQuote, "BOOKED", true, false},
+    {bridgelogic::ScreenId::PayForPaid, "PAID", false, false},
+    {bridgelogic::ScreenId::PayForSplit, "PAY IN APP", false, false},
+    {bridgelogic::ScreenId::PayForNothingToPay, "NOTHING TO PAY", false, false},
+    {bridgelogic::ScreenId::PayForPriceChanged, "PRICE", true, false},
+    {bridgelogic::ScreenId::PayForWorking, "MOMENT", false, false},
 };
 
 constexpr size_t kContractCount = sizeof(kContract) / sizeof(kContract[0]);
@@ -2811,6 +2819,8 @@ bridgelogic::ScreenFacts fullFacts(const court::ButtonMap* map) {
   snprintf(facts.fromTime, sizeof(facts.fromTime), "%s", "18:00");
   snprintf(facts.toTime, sizeof(facts.toTime), "%s", "18:45");
   snprintf(facts.name, sizeof(facts.name), "%s", "Dean");
+  // The widest label the glass accepts: six characters.
+  snprintf(facts.amount, sizeof(facts.amount), "%s", "9999.5");
   facts.buttons = map;
   return facts;
 }

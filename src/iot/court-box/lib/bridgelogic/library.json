@@ -1,10 +1,10 @@
 {
   "name": "bridgelogic",
   "version": "1.0.0",
-  "description": "ESP8266-side decision logic for THIS box that used to live in the composition root: the online-then-roster scan flow, the auth window, walk-up request shaping, relight, the !ON retry and !STATE reconciliation. The device-agnostic half (heartbeat, event upload, roster parsing, circuit breaker) is `devlink` in ../../shared/lib. No Arduino headers, no heap; compiles for Xtensa and host.",
+  "description": "ESP8266-side decision logic for THIS box that used to live in the composition root: the online-then-roster scan flow, the auth window, walk-up and pay-for request shaping, the offline single-code scan, relight, the !ON retry and !STATE reconciliation. The device-agnostic half (heartbeat, event upload, roster parsing, circuit breaker) is `devlink` in ../../shared/lib. No Arduino headers, no heap; compiles for Xtensa and host.",
   "keywords": "bridge, roster, activation, embedded",
   "frameworks": "*",
   "platforms": "*",
-  "dependencies": { "roster": "*", "protocol": "*", "court": "*", "devapi": "*", "devcrypto": "*", "devlink": "*", "eventq": "*", "timebase": "*" },
+  "dependencies": { "roster": "*", "protocol": "*", "court": "*", "devapi": "*", "devcrypto": "*", "devlink": "*", "eventq": "*", "memcode": "*", "timebase": "*" },
   "build": { "flags": ["-I include"] }
 }

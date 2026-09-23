@@ -32,4 +32,31 @@ bool copyToken(char* dest, size_t destCap, const char* src) {
 }
 
 } // namespace detail
+
+bool refListNames(const char* token, const char* ref) {
+  if (!isRefList(token) || ref == nullptr) {
+    return false;
+  }
+  for (size_t i = 0U; i < kRefLen; ++i) {
+    if (ref[i] == '\0') {
+      return false;
+    }
+  }
+  // Whole-REF positions only: 1, 5, 9, 13. Reading `mAAAABBBB` at offset 3 is
+  // a REF nobody holds.
+  for (size_t at = 1U; token[at] != '\0' && at + kRefLen <= kMaxTokenLen + 1U; at += kRefLen) {
+    bool same = true;
+    for (size_t i = 0U; i < kRefLen; ++i) {
+      if (token[at + i] != ref[i]) {
+        same = false;
+        break;
+      }
+    }
+    if (same) {
+      return true;
+    }
+  }
+  return false;
+}
+
 } // namespace roster

@@ -139,7 +139,12 @@ bool regrantsHeldCourt(const roster::Decision& decision, const HeldState held[kS
 /// and is refused. It is 12 lowercase hex characters with no separators —
 /// upper case or colons are a different string to the server, and the symptom
 /// is a box that authenticates fine and activates nothing.
-size_t renderActivateBody(char* out, size_t cap, const char* mac, const char* token);
+///
+/// A v1 member code (memcode::looksLikeV1) also carries `scan_age_ms` — how
+/// long ago the scanner read it — LAST, so the server verifies its ON half at
+/// the instant it was read (docs/specs/member-code.md §5). A legacy code's body
+/// is byte-for-byte the one the server has always been sent.
+size_t renderActivateBody(char* out, size_t cap, const char* mac, const char* token, uint32_t scanAgeMs = 0U);
 
 /// The decision core. Stateless; every input is an argument so the host suite
 /// can drive each branch without a socket.

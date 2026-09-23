@@ -1,0 +1,75 @@
+#include "memcode/Totp.h"
+
+#include <stdio.h>
+#include <string.h>
+
+#include "devcrypto/Sha256.h"
+
+namespace memcode {
+
+uint32_t hotp(const uint8_t* key, size_t keyLen, uint64_t counter, uint8_t digits) {
+  if (key == nullptr || digits == 0U || digits > 9U) {
+    return 0U;
+  }
+  uint8_t message[8];
+  for (size_t i = 0U; i < 8U; ++i) {
+    message[7U - i] = static_cast<uint8_t>(counter >> (8U * i));
+  }
+  uint8_t mac[dc::kSha256Bytes];
+  dc::hmacSha256(key, keyLen, message, sizeof(message), mac);
+
+  // RFC 4226 §5.3, with the digest's LAST byte choosing the offset — byte 31
+  // for SHA-256, which is what RFC 6238's reference implementation does and
+  // what its Appendix B vectors pin.
+  const size_t offset = mac[dc::kSha256Bytes - 1U] & 0x0FU;
+  const uint32_t binary =
+      ((static_cast<uint32_t>(mac[offset]) & 0x7FU) << 24) | (static_cast<uint32_t>(mac[offset + 1U]) << 16) |
+      (static_cast<uint32_t>(mac[offset + 2U]) << 8) | static_cast<uint32_t>(mac[offset + 3U]);
+  dc::wipe(mac, sizeof(mac));
+
+  uint32_t modulus = 1U;
+  for (uint8_t i = 0U; i < digits; ++i) {
+    modulus *= 10U;
+  }
+  return binary % modulus;
+}
+
+uint32_t onCode(const uint8_t* secret, uint32_t step) {
+  return hotp(secret, kSecretBytes, step, 8U);
+}
+
+uint32_t offCode(const uint8_t* dayKey, uint32_t step) {
+  return hotp(dayKey, kDayKeyBytes, step, 6U);
+}
+
+bool deriveDayKey(const uint8_t* secret, const char* clubDay, uint8_t* out) {
+  if (secret == nullptr || clubDay == nullptr || out == nullptr || strlen(clubDay) != 10U) {
+    return false;
+  }
+  char label[sizeof(kDayKeyLabel) + 10U] = {};
+  snprintf(label, sizeof(label), "%s%s", kDayKeyLabel, clubDay);
+  uint8_t mac[dc::kSha256Bytes];
+  dc::hmacSha256(secret, kSecretBytes, reinterpret_cast<const uint8_t*>(label), strlen(label), mac);
+  memcpy(out, mac, kDayKeyBytes);
+  dc::wipe(mac, sizeof(mac));
+  return true;
+}
+
+bool deriveMemberSecret(const uint8_t* master, size_t masterLen, const char* tenantId, const char* userId,
+                        uint32_t generation, uint8_t* out) {
+  if (master == nullptr || tenantId == nullptr || userId == nullptr || out == nullptr || generation == 0U) {
+    return false;
+  }
+  char info[160] = {};
+  const int n = snprintf(info, sizeof(info), "%s%s|%s|%lu", kSecretInfoPrefix, tenantId, userId,
+                         static_cast<unsigned long>(generation));
+  if (n <= 0 || static_cast<size_t>(n) >= sizeof(info)) {
+    return false;
+  }
+  const dc::ByteSpan salt = {reinterpret_cast<const uint8_t*>(kSecretSalt), strlen(kSecretSalt)};
+  const dc::ByteSpan ikm = {master, masterLen};
+  const dc::ByteSpan label = {reinterpret_cast<const uint8_t*>(info), static_cast<size_t>(n)};
+  return dc::hkdfSha256(salt, ikm, label, out, kSecretBytes);
+}
+
+} // namespace memcode

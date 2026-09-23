@@ -1,0 +1,19 @@
+#include "devlink/CodeSync.h"
+
+namespace devlink {
+namespace detail {
+
+bool syncStepClock(const char* body, size_t len, memcode::StepClock& clock, uint32_t nowMs) {
+  uint32_t step = 0U;
+  uint32_t stepMs = 0U;
+  // BOTH, or the clock is left alone. A step with no phase is up to thirty
+  // seconds wrong in a direction nobody can tell, which is a whole window.
+  if (!devapi::json::topLevelUnsignedField(body, len, "code_step", step) ||
+      !devapi::json::topLevelUnsignedField(body, len, "code_step_ms", stepMs)) {
+    return false;
+  }
+  return clock.sync(step, stepMs, nowMs);
+}
+
+} // namespace detail
+} // namespace devlink

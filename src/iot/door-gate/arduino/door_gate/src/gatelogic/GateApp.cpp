@@ -6,6 +6,7 @@
 
 #include "../devapi/DeviceClient.h"
 #include "../devapi/Json.h"
+#include "../devlink/CodeSync.h"
 #include "../devlink/EventUpload.h"
 #include "../gatelogic/GateHeartbeat.h"
 
@@ -431,12 +432,29 @@ void GateApp::decideScan(const char* token) {
     // whichever of the three paths this board happened to speak on first.
     commitEmptyRoster();
   }
-  if (decision.fallbackToRoster) {
+  // A SINGLE ROTATING MEMBER CODE is never in the roster — it changes every
+  // thirty seconds — so it is VERIFIED rather than matched, and the member it
+  // proves is looked up in the roster's REF lists. See fromMemberCode.
+  memcode::Verdict member;
+  if (decision.fallbackToRoster && memcode::looksLikeV1(token)) {
+    const memcode::OfflineCodes<memcode::KeyRing<kGateKeyRingSlots>, memcode::ReplayRing<kGateReplaySlots>>
+        codes = {stepClock_, codeKeys_, codeUses_};
+    const OfflineCodeDecision offline =
+        decideOfflineMemberCode(token, codes, roster_, unlockMs_, kGateConfig.unlockHardCapMs, now);
+    decision = offline.decision;
+    member = offline.verdict;
+  } else if (decision.fallbackToRoster) {
     decision = fromRoster(roster_.decide(token, roster::CourtCount(1U), now), unlockMs_,
                           kGateConfig.unlockHardCapMs);
   }
 
   const uint32_t granted = apply(decision, now);
+  if (member.status == memcode::Status::Ok && decision.released && granted > 0U) {
+    // USED only once the lock was actually given time. A relocking refusal
+    // opened nothing, and the member's next scan with the same code must not be
+    // refused as a replay of an opening that did not happen.
+    codeUses_.commit(member.token.ref, member.step);
+  }
   // What the lock was ACTUALLY given, not what was asked for. The two differ
   // whenever the window bound bites, and an event claiming a release the cap
   // never allowed is a club reading an audit trail that is not true.
@@ -808,6 +826,9 @@ void GateApp::commitEmptyRoster() {
   // hears it on whichever of the three paths it speaks on first.
   roster_.beginReplace(clock_.nowMs());
   roster_.commitReplace();
+  // And the member-code keys with it: a board out of service verifies nobody.
+  codeKeys_.clear();
+  stepClock_.forget();
 }
 
 void GateApp::adoptGateSettings(const char* body, size_t len) {
@@ -885,6 +906,14 @@ void GateApp::adoptHeartbeat(const HttpOutcome& outcome) {
   // re-anchors it, which is what resets staleness; ROSTER_MAX_AGE_MS only
   // governs how long the last one survives offline.
   lastSync_ = devlink::applyRoster(heartbeatBody_, len, roster_, clock_.nowMs());
+  // The member-code sync — step clock, day slots, per-day keys — anchored to a
+  // fresh read like the roster, and wholesale like it: a server that has not
+  // shipped member codes sends no `code_keys`, and nothing here changes.
+  //
+  // Refused and dropped keys are NOT recorded as faults, exactly as refused
+  // roster elements are not: the gate's fault vocabulary is closed and the
+  // server validates it, so a new code is a wire change of its own.
+  static_cast<void>(devlink::applyCodeSync(heartbeatBody_, len, stepClock_, codeKeys_, clock_.nowMs()));
   if (!lastSync_.replaced) {
     // AN ACCEPTED HEARTBEAT THAT PUSHED NOTHING. A body cut short by a peer
     // that hung up, or one missing the `roster` key the contract says is

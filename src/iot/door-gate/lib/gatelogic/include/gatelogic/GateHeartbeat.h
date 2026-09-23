@@ -36,9 +36,10 @@ namespace gatelogic {
 /// The smallest buffer renderGateHeartbeatBody is ever given.
 ///
 /// The court box's four keys plus `kind` is 96 bytes at this firmware's MAC and
-/// version; `,"no_push":2147483647` is 21 more and `,"events_lost":2147483647`
-/// is 25. 192 holds all of it with 50 to spare, and the renderer refuses rather
-/// than truncating if a future key ever makes that untrue.
+/// version; `,"no_push":2147483647` is 21 more, `,"events_lost":2147483647` is
+/// 25 and `,"caps":["codes:m1"]` 20. 192 holds all of it with 30 to spare, and
+/// the renderer refuses rather than truncating if a future key ever makes that
+/// untrue.
 inline constexpr size_t kGateHeartbeatBodyCap = 192U;
 
 /// THE TWO SINCE-BOOT COUNTERS THAT RIDE IN THE REQUEST.
@@ -59,11 +60,19 @@ struct GateDiagnostics {
   /// Events the ring discarded because it was full while this board could not
   /// reach the API. `EventQueue::overflowed()`.
   uint32_t eventsLost;
+
+  /// Whether this image speaks the single rotating member code — rendered as
+  /// `"caps":["codes:m1"]`, LAST, after the two counters. Not a counter and
+  /// not a diagnostic, but it travels with them because it is also something
+  /// the board says about itself on every heartbeat. A brace-initialiser that
+  /// names only the two counters leaves it false, which is the body every image
+  /// before this one rendered, byte for byte.
+  bool codesCapability;
 };
 
 /// No board has anything to report yet.
 constexpr GateDiagnostics quietDiagnostics() {
-  return GateDiagnostics{0U, 0U};
+  return GateDiagnostics{0U, 0U, false};
 }
 
 /// Adds one without ever wrapping. See `kMaxDiagnosticCount`.

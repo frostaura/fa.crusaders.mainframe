@@ -181,6 +181,33 @@ ScanDecision fromRoster(const roster::Decision& decision, uint32_t adoptedUnlock
   return out;
 }
 
+ScanDecision fromMemberCode(memcode::Status status, const roster::Decision& decision,
+                            uint32_t adoptedUnlockMs, uint32_t hardCapMs) {
+  if (status == memcode::Status::Ok) {
+    return fromRoster(decision, adoptedUnlockMs, hardCapMs);
+  }
+  ScanDecision out;
+  out.queueEvent = true;
+  out.eventKind = eventq::Kind::UnknownScan;
+  switch (status) {
+  case memcode::Status::Replayed:
+    setReason(out, kReasonReplayed);
+    return out;
+  case memcode::Status::NoClock:
+    // The board no longer knows which step it is — the same age at which it
+    // stops trusting its roster, and the same refusal a member reads for that.
+    setReason(out, kReasonRosterStale);
+    return out;
+  case memcode::Status::Ok:
+  case memcode::Status::Malformed:
+  case memcode::Status::NoKey:
+  case memcode::Status::WrongCode:
+    break;
+  }
+  setReason(out, kReasonNotRecognised);
+  return out;
+}
+
 ScanDecision refuseUnreadable(bool offline) {
   ScanDecision decision;
   setReason(decision, kReasonNotRecognised);

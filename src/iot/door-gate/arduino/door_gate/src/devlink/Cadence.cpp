@@ -119,8 +119,14 @@ size_t renderHeartbeatBody(char* out, size_t cap, const char* mac, const char* f
   renderRestored(restored, sizeof(restored), report.restoredRelays);
   renderRelayState(relayState, sizeof(relayState), report.relayState, report.relayStateCount);
 
-  const int written = snprintf(out, cap, "{\"mac\":\"%s\",\"firmware_version\":\"%s\",\"uptime_ms\":%s%s%s}",
-                               mac, firmwareVersion, uptime, restored, relayState);
+  // `caps` LAST, after every diagnostic, and absent unless the firmware speaks
+  // something the server must negotiate — so a board that names no capability
+  // still renders the body every image before it rendered, byte for byte.
+  const char* caps = report.codesCapability ? kCodesCapsSuffix : "";
+
+  const int written =
+      snprintf(out, cap, "{\"mac\":\"%s\",\"firmware_version\":\"%s\",\"uptime_ms\":%s%s%s%s}", mac,
+               firmwareVersion, uptime, restored, relayState, caps);
   if (written < 0 || static_cast<size_t>(written) >= cap) {
     out[0] = '\0';
     return 0U;

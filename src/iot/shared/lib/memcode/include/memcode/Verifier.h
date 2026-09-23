@@ -1,0 +1,115 @@
+// Crusaders Mainframe — is this code good, here, now, with no network?
+//
+// WHAT IS CHECKED, AND WHAT IS NOT
+// --------------------------------
+// OFF, under the member's K_day, at the device's step or one either side. That
+// is ALL a device can check and all it tries to: ON is keyed by the member
+// secret, which never leaves the server and the member's phone. So a device
+// accepts a token whose OFF is right and whose ON is garbage — the corpus pins
+// exactly that case — and the upload of what it then did is what the server
+// re-checks with ON (`code.forgery_suspected`).
+//
+// Online, NONE of this runs: the device hands the scanned token to the server,
+// whose answer is final, exactly as for a legacy code. This is the roster's
+// fallback, and it decides only whether the member is who the code says; the
+// roster then decides whether that member may open this court or this door.
+//
+// THE ORDER OF THE VERDICTS
+// -------------------------
+//   Malformed  the scan is not a well-formed v1 token.
+//   NoClock    the device's step is unknown or too old to trust.
+//   NoKey      no candidate step has a key for this REF — the member is not in
+//              this device's ring for any day those steps fall in.
+//   WrongCode  a key was tried and OFF matched at no candidate step.
+//   Replayed   OFF matched, at a step this device has already acted on.
+//   Ok         OFF matched at `step`, which is newer than any use.
+//
+// Candidates are tried as t, t-1, t+1 — the device's own step first, so the
+// step reported is the likeliest one when (one time in a million) two adjacent
+// steps share an OFF value.
+//
+// No Arduino headers, no heap. Compiles for AVR, Xtensa and the host.
+
+#ifndef CRUSADERS_MEMCODE_VERIFIER_H
+#define CRUSADERS_MEMCODE_VERIFIER_H
+
+#include <stdint.h>
+
+#include "memcode/KeyRing.h"
+#include "memcode/ReplayRing.h"
+#include "memcode/StepClock.h"
+#include "memcode/Token.h"
+#include "memcode/Totp.h"
+
+namespace memcode {
+
+enum class Status : uint8_t {
+  Ok = 0U,
+  Malformed = 1U,
+  NoClock = 2U,
+  NoKey = 3U,
+  WrongCode = 4U,
+  Replayed = 5U,
+};
+
+/// The wire/log word for a status, as the corpus spells it.
+const char* statusName(Status status);
+
+struct Verdict {
+  Status status = Status::Malformed;
+  /// The parsed token — populated for every status but Malformed, so a caller
+  /// can say WHOSE code was refused and at which REF to look in the roster.
+  Token token;
+  /// The step OFF matched at. Populated for Ok and Replayed.
+  uint32_t step = 0U;
+};
+
+/// What a device holds to verify codes offline, bundled so a caller hands over
+/// one thing rather than three that must always travel together.
+template <class KeyRingT, class ReplayRingT> struct OfflineCodes {
+  const StepClock& clock;
+  const KeyRingT& keys;
+  const ReplayRingT& used;
+};
+
+template <class KeyRingT, class ReplayRingT>
+Verdict verify(const char* text, const StepClock& clock, const KeyRingT& keys, const ReplayRingT& used,
+               uint32_t nowMs) {
+  Verdict verdict;
+  if (!parse(text, verdict.token)) {
+    verdict.status = Status::Malformed;
+    return verdict;
+  }
+  if (!clock.trusted(nowMs)) {
+    verdict.status = Status::NoClock;
+    return verdict;
+  }
+
+  const uint32_t t = clock.stepAt(nowMs);
+  const uint32_t candidates[3] = {t, t - kWindowSteps, t + kWindowSteps};
+  bool anyKey = false;
+  for (uint8_t i = 0U; i < 3U; ++i) {
+    const uint8_t* key = keys.keyFor(verdict.token.ref, candidates[i]);
+    if (key == nullptr) {
+      continue;
+    }
+    anyKey = true;
+    if (offCode(key, candidates[i]) != verdict.token.off) {
+      continue;
+    }
+    verdict.step = candidates[i];
+    verdict.status = used.seen(verdict.token.ref, candidates[i]) ? Status::Replayed : Status::Ok;
+    return verdict;
+  }
+  verdict.status = anyKey ? Status::WrongCode : Status::NoKey;
+  return verdict;
+}
+
+template <class KeyRingT, class ReplayRingT>
+Verdict verify(const char* text, const OfflineCodes<KeyRingT, ReplayRingT>& codes, uint32_t nowMs) {
+  return verify(text, codes.clock, codes.keys, codes.used, nowMs);
+}
+
+} // namespace memcode
+
+#endif // CRUSADERS_MEMCODE_VERIFIER_H

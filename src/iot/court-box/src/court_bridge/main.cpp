@@ -91,7 +91,9 @@
 #include "bridgelogic/BootId.h"
 #include "bridgelogic/FaultLog.h"
 #include "bridgelogic/MegaLink.h"
+#include "bridgelogic/MemberScan.h"
 #include "bridgelogic/OnRetry.h"
+#include "bridgelogic/PayFor.h"
 #include "bridgelogic/Relight.h"
 #include "bridgelogic/RestorePlan.h"
 #include "bridgelogic/ScanFlow.h"
@@ -107,11 +109,16 @@
 #include "devcrypto/Hex.h"
 #include "devlink/ApiBreaker.h"
 #include "devlink/Cadence.h"
+#include "devlink/CodeSync.h"
 #include "devlink/EventUpload.h"
 #include "devlink/LcdSettings.h"
 #include "devlink/RosterSync.h"
 #include "eventq/EventQueue.h"
 #include "fwversion/Version.h"
+#include "memcode/KeyRing.h"
+#include "memcode/ReplayRing.h"
+#include "memcode/StepClock.h"
+#include "memcode/Token.h"
 #include "protocol/Codec.h"
 #include "protocol/Protocol.h"
 #include "roster/Roster.h"
@@ -266,6 +273,18 @@ constexpr uint8_t kRosterSlots = devlink::kMaxRosterEntries;
 eventq::EventQueue<EVENTQ_SLOTS> gQueue(&gStore);
 roster::Roster<kRosterSlots> gRoster(ROSTER_MAX_AGE_MS);
 court::Session<roster::Roster<kRosterSlots>, eventq::EventQueue<EVENTQ_SLOTS>> gSession(gRoster, gQueue);
+
+/// THE SINGLE ROTATING MEMBER CODE, offline (docs/specs/member-code.md §6).
+///
+/// Which 30-second step it is, counted on millis() from the last heartbeat's
+/// `code_step`; the per-day keys that let this box check a code's OFF half;
+/// and the uses it has acted on. All three are filled by the heartbeat alone,
+/// all three are RAM only — a reboot is a box that verifies nothing until its
+/// first accepted heartbeat, which is also when its roster comes back — and the
+/// clock is trusted for exactly as long as the roster is.
+memcode::StepClock gStepClock(ROSTER_MAX_AGE_MS);
+memcode::KeyRing<bridgelogic::kCourtKeyRingSlots> gKeyRing;
+memcode::ReplayRing<bridgelogic::kCourtReplaySlots> gReplay;
 
 /// Bytes for walk-up purchase nonces, from the ESP8266's hardware RNG register.
 ///
@@ -429,6 +448,22 @@ uint16_t authSeconds() {
 /// The last thing the scanner read, verbatim. Cleared when it lapses or is spent.
 char gLastScan[proto::kMaxArgLen + 1] = {'\0'};
 tb::Deadline gScanAt;
+
+/// When the scanner read it — the millis() of the pass that decoded the frame.
+/// A v1 member code carries `scan_age_ms` on every call it is sent with, and a
+/// walk-up or a pay-for is sent after one or two button presses, so the server
+/// has to be told how old the code on the wire is to check it at the instant
+/// it was read. Measured with tb::since, never compared raw.
+uint32_t gScanReadMs = 0U;
+
+/// The state between a pay-for's two presses (D10): which court was quoted, at
+/// what price label, under which nonce.
+bridgelogic::PayForFlow gPayFor;
+
+/// Milliseconds since the remembered scan was read.
+uint32_t scanAgeMs() {
+  return tb::since(gClock.nowMs(), gScanReadMs);
+}
 
 /// When the Mega's button window is armed, and which court an OFF press may
 /// release. Armed only for a scan somebody recognised; bound to the court a
@@ -740,6 +775,7 @@ void settleScan(const court::Outcome& outcome, uint32_t nowMs) {
 /// away from the code they belong with.
 bool activateOnline(const char* token);
 void requestWalkUp(const court::WalkUpIntent& intent);
+bool offerPayFor(uint8_t relay, uint32_t nowMs);
 
 void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   // Remembered so a following walk-up knows WHO is buying. The scanned bytes, not the
@@ -747,6 +783,10 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   // the only thing that can verify a 60-second signed QR anyway.
   snprintf(gLastScan, sizeof(gLastScan), "%s", frame.arg(0));
   gScanAt.arm(nowMs, kScanMemoryMs);
+  gScanReadMs = nowMs;
+  // A new identity at the panel: any pay-for quote on the glass was somebody
+  // else's question.
+  gPayFor.clear();
 
   // No `!AUTH` yet. The window used to be armed HERE, before anything had
   // decided what the scan was — so any barcode bought thirty seconds of
@@ -779,6 +819,35 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   // four seconds in a connect timeout, and a held-since stamped before that
   // call is old enough for the next `!STATE` to read as a lost release.
   const uint32_t now = gClock.nowMs();
+
+  // A SINGLE ROTATING MEMBER CODE is never in the roster — it changes every
+  // thirty seconds — so it cannot be matched there as bytes. It is VERIFIED
+  // instead, and the member it proves is looked up in the roster's REF lists.
+  // The re-scan guard, the event and the relay are the same rules as below;
+  // bridgelogic::decideOfflineMemberCode is where the host suite drives them.
+  if (memcode::looksLikeV1(frame.arg(0))) {
+    const memcode::OfflineCodes<memcode::KeyRing<bridgelogic::kCourtKeyRingSlots>,
+                                memcode::ReplayRing<bridgelogic::kCourtReplaySlots>>
+        codes = {gStepClock, gKeyRing, gReplay};
+    const bridgelogic::BoxCourts box = {gHeld, gCourtCount};
+    const bridgelogic::MemberScanResult member =
+        bridgelogic::decideOfflineMemberCode(frame.arg(0), codes, gRoster, gSession, box, now);
+    if (member.alreadyOn) {
+      static_cast<void>(sendToMega(proto::Frame::lcd(member.outcome.line1, member.outcome.line2)));
+      applyAuth(gAuth.afterHeldCourtRescan(member.outcome.court, now));
+      return;
+    }
+    settleScan(member.outcome, now);
+    if (member.outcome.action == court::Action::TurnOn && member.outcome.court < bridgelogic::kStateCourts &&
+        gHeld[member.outcome.court].held) {
+      // USED only once the court is actually lit. A code whose `!ON` never
+      // left the bridge is a member told TRY AGAIN, and the code they try
+      // again with must not be refused as a replay of a lighting that did not
+      // happen.
+      gReplay.commit(member.verdict.token.ref, member.verdict.step);
+    }
+    return;
+  }
 
   // The roster has no idea whether a court is already lit — it holds bookings,
   // and a booking is "allowed" for its whole window — so a member who scanned
@@ -998,6 +1067,13 @@ void handleButton(const proto::Frame& frame, uint32_t nowMs) {
 
   switch (gPad.press(gButtons, index, nowMs)) {
   case court::PadResult::CourtSelected: {
+    // D10 FIRST: a court somebody else holds right now is a court this member
+    // may pay for, and the glass asks before it offers to sell time on it. Any
+    // answer that is not a pay-for decision falls through to the walk-up
+    // choice below, exactly as a box before D10 did.
+    if (offerPayFor(gPad.selectedCourt(), nowMs)) {
+      return;
+    }
     // The one screen whose hold is the CHOICE window and whose countdown is the
     // point: a half-made purchase is the one thing on this box a timeout can
     // lose, so the member watches it go rather than finding out afterwards.
@@ -1187,7 +1263,7 @@ bool activateOnline(const char* token) {
   showScreen(bridgelogic::ScreenId::OneMoment, gClock.nowMs());
 
   char body[128];
-  if (bridgelogic::renderActivateBody(body, sizeof(body), gMacHex, token) == 0U) {
+  if (bridgelogic::renderActivateBody(body, sizeof(body), gMacHex, token, scanAgeMs()) == 0U) {
     return false;
   }
 
@@ -1244,6 +1320,7 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
   request.courtNumber = gCourtNumbers[intent.court];
   request.token = gLastScan;
   request.nonce = gWalkUpNonce.forPurchase(intent, gLastScan, gRequestEntropy);
+  request.scanAgeMs = scanAgeMs();
 
   // 320 holds the contract body with ~180 bytes to spare: a 12-hex MAC, minutes
   // (3), a 24-byte token, a court number (5) and a 16-hex nonce come to under 140.
@@ -1277,6 +1354,157 @@ void requestWalkUp(const court::WalkUpIntent& intent) {
     gRelight.onGrant(answer.outcome, nowMs);
   }
   applyAuth(gAuth.afterWalkUp(answer.outcome, nowMs));
+}
+
+/// The facts a pay-for screen names: the club's court number and the server's
+/// own label for the price.
+bridgelogic::ScreenFacts payForFacts(uint8_t relay, const char* amountLabel, uint32_t nowMs) {
+  bridgelogic::ScreenFacts facts = screenFacts(nowMs);
+  facts.court = relay;
+  facts.courtNumber = relay < gCourtCount ? gCourtNumbers[relay] : static_cast<int16_t>(0);
+  snprintf(facts.amount, sizeof(facts.amount), "%s", amountLabel != nullptr ? amountLabel : "");
+  return facts;
+}
+
+/// The second press: pay what the glass asked about. The nonce is the quote's,
+/// so a press after an undecided answer retries the SAME payment.
+void confirmPayFor() {
+  const uint8_t relay = gPayFor.relay();
+  sendScreen(bridgelogic::screenFor(bridgelogic::ScreenId::PayForWorking, screenFacts(gClock.nowMs()),
+                                    gLcdSettings));
+
+  bridgelogic::PayForRequest request;
+  request.mac = gMacHex;
+  request.token = gLastScan;
+  request.courtNumber = gPayFor.courtNumber();
+  request.nonce = gPayFor.nonce();
+  request.confirm = true;
+  request.amountLabel = gPayFor.amountLabel();
+  request.scanAgeMs = scanAgeMs();
+  char body[256];
+  if (bridgelogic::renderPayForBody(body, sizeof(body), request) == 0U) {
+    gPayFor.clear();
+    gPad.clear();
+    showScreen(bridgelogic::ScreenId::SeeTheDesk, gClock.nowMs());
+    return;
+  }
+
+  static char response[384];
+  response[0] = '\0';
+  const uint16_t status = callApi(bridgelogic::kPathPayFor, body, response, sizeof(response));
+  const bridgelogic::PayForAnswer answer =
+      bridgelogic::onPayForConfirm(status, response, strlen(response), gPayFor.amountLabel());
+  const uint32_t nowMs = gClock.nowMs();
+  const bridgelogic::ScreenFacts facts = payForFacts(relay, answer.amountLabel, nowMs);
+
+  if (answer.kind == bridgelogic::PayForKind::Undecided) {
+    // The quote and its nonce stay armed: pressing the court again asks the
+    // server whether THIS payment happened, never for a second one.
+    sendScreen(bridgelogic::screenFor(answer.screen, facts, gLcdSettings));
+    return;
+  }
+  gPayFor.clear();
+  gPad.clear();
+  if (answer.kind != bridgelogic::PayForKind::Paid) {
+    sendScreen(bridgelogic::screenFor(answer.screen, facts, gLcdSettings));
+    return;
+  }
+
+  const bridgelogic::Screen paid =
+      bridgelogic::screenFor(bridgelogic::ScreenId::PayForPaid, facts, gLcdSettings);
+  if (answer.grantedSeconds > 0U && relay < gCourtCount && relay < bridgelogic::kStateCourts &&
+      !gHeld[relay].held) {
+    // Paid for a booking nobody had started: the server granted what is left
+    // of it and the court lights exactly as an activation's would — capped at
+    // what one `!ON` can hold, with the remainder kept for `!EXT`.
+    court::Outcome grant;
+    grant.action = court::Action::TurnOn;
+    grant.court = relay;
+    grant.recognised = true;
+    const uint32_t capped = answer.grantedSeconds > proto::kRelayHardCapSeconds
+                                ? static_cast<uint32_t>(proto::kRelayHardCapSeconds)
+                                : answer.grantedSeconds;
+    grant.durationMs = capped * 1000U;
+    grant.bookingRemainingMs =
+        answer.grantedSeconds > UINT32_MAX / 1000U ? UINT32_MAX : answer.grantedSeconds * 1000U;
+    court::detail::setLine(grant.line1, paid.rows[0]);
+    court::detail::setLine(grant.line2, paid.rows[1]);
+    applyOutcome(grant, nowMs);
+    spendScan();
+    gRelight.onGrant(grant, nowMs);
+    applyAuth(gAuth.afterWalkUp(grant, nowMs));
+    return;
+  }
+  sendScreen(paid);
+  // The identity is spent on the payment: the next member's presses must not
+  // pay, or buy, on this one's code.
+  forgetScan();
+}
+
+/// A court button was pressed with a scan behind it. True when the press was a
+/// pay-for — asked, answered or confirmed — and the walk-up choice must NOT be
+/// shown; false when it is an ordinary walk-up court choice after all.
+bool offerPayFor(uint8_t relay, uint32_t nowMs) {
+  if (gPayFor.quoted(relay, nowMs)) {
+    confirmPayFor();
+    return true;
+  }
+  // A different court, or a quote that lapsed: whatever was asked is gone.
+  gPayFor.clear();
+  if (gLastScan[0] == '\0' || relay >= gCourtCount || relay >= bridgelogic::kStateCourts || !gWifiUp ||
+      gBreaker.open(nowMs)) {
+    return false;
+  }
+  if (!gRoster.occupied(relay, nowMs) && !gHeld[relay].held) {
+    // Nobody holds it now, as far as this box knows: a walk-up court.
+    return false;
+  }
+
+  sendScreen(bridgelogic::screenFor(bridgelogic::ScreenId::PayForWorking, screenFacts(nowMs), gLcdSettings));
+  bridgelogic::PayForRequest request;
+  request.mac = gMacHex;
+  request.token = gLastScan;
+  request.courtNumber = gCourtNumbers[relay];
+  request.nonce = gPayFor.quoteNonce(gRequestEntropy);
+  request.confirm = false;
+  request.scanAgeMs = scanAgeMs();
+  char body[256];
+  if (bridgelogic::renderPayForBody(body, sizeof(body), request) == 0U) {
+    return false;
+  }
+
+  static char response[384];
+  response[0] = '\0';
+  const uint16_t status = callApi(bridgelogic::kPathPayFor, body, response, sizeof(response));
+  const bridgelogic::PayForAnswer answer =
+      bridgelogic::onPayForQuote(status, response, strlen(response), gCourtNumbers[relay]);
+  const uint32_t now = gClock.nowMs();
+
+  switch (answer.kind) {
+  case bridgelogic::PayForKind::Quote:
+    gPayFor.arm(relay, gCourtNumbers[relay], answer.amountLabel, gLcdSettings.choiceMs, now);
+    // The member is being asked to press again: the scan they are paying with
+    // stays remembered, and the Mega's button window re-arms to forward that
+    // press, for as long as the question stands.
+    gScanAt.arm(now, gScanMemoryMs);
+    applyAuth(gAuth.afterPayForQuote(now));
+    sendScreen(bridgelogic::screenFor(bridgelogic::ScreenId::PayForQuote,
+                                      payForFacts(relay, answer.amountLabel, now), gLcdSettings));
+    return true;
+  case bridgelogic::PayForKind::Refused:
+  case bridgelogic::PayForKind::Paid:
+  case bridgelogic::PayForKind::Undecided:
+    // A decided refusal of the quote. The selection goes with it, so a
+    // duration press cannot turn a refused pay-for into a walk-up on a court
+    // somebody is playing on.
+    gPad.clear();
+    sendScreen(
+        bridgelogic::screenFor(answer.screen, payForFacts(relay, answer.amountLabel, now), gLcdSettings));
+    return true;
+  case bridgelogic::PayForKind::WalkUp:
+    break;
+  }
+  return false;
 }
 
 /// Moves at most ONE due fault into the event queue per pass.
@@ -1502,6 +1730,9 @@ void pumpHeartbeat(uint32_t nowMs) {
   // means "this firmware does not report". The control board needs both.
   report.relayState = gRelayState;
   report.relayStateCount = gRelayStateCount;
+  // Every heartbeat: the server keys what it sends this box, and the club's
+  // automatic cut-over to the single code, on the latest one it saw.
+  report.codesCapability = true;
 
   char body[devlink::kHeartbeatBodyCap];
   if (devlink::renderHeartbeatBody(body, sizeof(body), gMacHex, fw::kFirmwareVersion, gUptime.value(),
@@ -1553,6 +1784,19 @@ void pumpHeartbeat(uint32_t nowMs) {
     // element changing under a firmware that cannot be updated over the air is
     // exactly the thing an admin needs to hear about early.
     gFaults.noteMany(bridgelogic::Fault::RosterRejected, sync.rejected, eventq::Event::kNoCourt,
+                     gClock.nowMs());
+  }
+  // The member-code sync: the step clock, the day slots and the per-day keys.
+  // Anchored to a FRESH read for the roster's reason, and wholesale like the
+  // roster — an absent `code_keys` (a server that has not shipped member codes)
+  // leaves both exactly as they were.
+  const devlink::CodeSyncResult codes =
+      devlink::applyCodeSync(response, responseLen, gStepClock, gKeyRing, gClock.nowMs());
+  if (codes.rejected > 0U || codes.dropped > 0U) {
+    // A key this box could not read, or could not hold, is a member it will
+    // refuse offline. Contract drift or a server over the cap — both an admin's.
+    gFaults.noteMany(bridgelogic::Fault::RosterRejected,
+                     static_cast<uint32_t>(codes.rejected) + codes.dropped, eventq::Event::kNoCourt,
                      gClock.nowMs());
   }
   // The tenant's cadence, bounded. Takes effect from the NEXT arm; the one
@@ -1665,6 +1909,8 @@ void loop() {
   if (gPad.tick(now)) {
     showIdentityScreen();
   }
+  // A pay-for question nobody answered lapses on its own, for the same reason.
+  static_cast<void>(gPayFor.tick(now));
   if (gLastScan[0] != '\0' && gScanAt.expired(now)) {
     // Lapsed unspent. The Mega's own window lapses at the same TTL, but the
     // explicit `!AUTH,0` is what keeps the two from drifting by a loop pass.
