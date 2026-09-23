@@ -1184,18 +1184,26 @@ public sealed class DeviceEventHttpTests
 
         await using var factory = CreateFactory();
         var box = await SeedAsync(factory, courtNumbers: [1, 2]);
+        var beforeBooking = DateTimeOffset.UtcNow;
         var booked = await BookAsync(factory, box, courtNumber: 2, startsInMinutes: 5, minutes: 45, mintCode: false);
 
         var body = await HeartbeatAsync(factory, box);
+
+        // The seconds are relative to the RESPONSE, so they drift by however long the booking
+        // and the heartbeat took between them. A fixed five-second allowance went red at -308
+        // on a machine under load 20 while the same test passed alone: the tolerance is the
+        // measured time from before the booking's clock read to after the response, plus one
+        // for the rounding of whole seconds.
+        var slack = 1 + (long)Math.Ceiling((DateTimeOffset.UtcNow - beforeBooking).TotalSeconds);
 
         var roster = body.GetProperty("roster").EnumerateArray().Select(e => e.GetString()!).ToList();
         var entry = Assert.Single(roster);
         Assert.Matches(DeviceProtocolCorpusTests.RosterEntryPattern, entry);
 
         var fields = entry.Split('|');
-        Assert.Equal(1, int.Parse(fields[1]));                                   // court 2 is relay B on this box
-        Assert.InRange(long.Parse(fields[2]), (5 - 10) * 60 - 5, (5 - 10) * 60);  // cue of 10 opened five minutes ago
-        Assert.InRange(long.Parse(fields[3]), 50 * 60 - 5, 50 * 60);             // ends in fifty
+        Assert.Equal(1, int.Parse(fields[1]));                                       // court 2 is relay B on this box
+        Assert.InRange(long.Parse(fields[2]), (5 - 10) * 60 - slack, (5 - 10) * 60);  // cue of 10 opened five minutes ago
+        Assert.InRange(long.Parse(fields[3]), 50 * 60 - slack, 50 * 60);             // ends in fifty
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();

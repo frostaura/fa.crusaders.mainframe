@@ -73,9 +73,24 @@ public sealed class AdminBulkBookingService
     /// second one should lose the slot race and say so — not be silently deduplicated into
     /// looking like it worked.
     /// </para>
+    ///
+    /// <para>
+    /// <b>And on the PAYER.</b> It was <c>bulkbook:{tenant}:{key}:{index}</c>, and the console
+    /// mints one key per sheet: a batch for member A that failed on the network, re-sent with
+    /// the payer changed to B, found A's debit under the same reference and answered
+    /// <c>duplicate</c> — "succeeded: 1", with A's booking id and A's 09:00 slot reported as B's
+    /// result — while B had no booking and no charge. The payer is now part of the reference,
+    /// as it is on the member route, and the replay is checked rather than trusted
+    /// (<see cref="BulkReplay.RefusalFor"/>). The key is hashed, as the member route's is, so a
+    /// 200-character key beside three guids still fits the 255-character column untruncated.
+    /// </para>
     /// </summary>
-    public string BookReference(string key, int index)
-        => $"bulkbook:{_tenant.TenantId:N}:{key}:{index}";
+    public string BookReference(string key, Guid payerUserId, int index)
+    {
+        var digest = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key)))[..32].ToLowerInvariant();
+        return $"bulkbook:{_tenant.TenantId:N}:{payerUserId:N}:{digest}:{index}";
+    }
 
     // ------------------------------------------------------------------ cancel
 
@@ -200,10 +215,10 @@ public sealed class AdminBulkBookingService
             results.Add(result);
             charged += result.AmountCredits;
 
-            if (result.Error == "insufficient_balance")
+            if (result.Error == BookingRefusals.InsufficientBalance)
             {
                 haltedAt = index;
-                haltedReason = "insufficient_balance";
+                haltedReason = BookingRefusals.InsufficientBalance;
                 break;
             }
         }
@@ -224,18 +239,24 @@ public sealed class AdminBulkBookingService
             return await BlockForGuestAsync(item, index, courtName, request, actorId, ct);
         }
 
-        var reference = BookReference(request.IdempotencyKey, index);
-        if (await ReplayedBookingAsync(reference, ct) is { } already)
+        var payerId = request.PayerUserId.Value;
+        var reference = BookReference(request.IdempotencyKey, payerId, index);
+        if (await BulkReplay.FindAsync(_db, reference, payerId, item, ct) is { } already)
         {
-            return BulkBookResult.Replay(index, already, courtName);
+            return Replayed(index, item, courtName, already, payerId);
         }
 
         // ActorIsAdmin is carried on the context from the route group's role claim, never
         // re-derived from actorId != userId — that inference is D2-B13, and every row this
         // method books satisfies it, so losing it silently would refuse a whole league night
         // with member-class reason codes.
+        // PartOfBatch: the per-booking booked_on_behalf row is still written, in the booking's
+        // own unit of work, and marks itself as one item of a batch. The batch's one
+        // bookings.bulk_booked row is the summary, written after the loop — so it cannot be the
+        // only record: a request that dies mid-batch has already charged every item before it.
         var payer = new BookingPayer(
-            request.PayerUserId.Value, actorId, request.AllowNegativeBalance, request.ActorIsAdmin);
+            payerId, actorId, request.AllowNegativeBalance, request.ActorIsAdmin,
+            PartOfBatch: true);
         var outcome = await _bookings.CreateAsync(
             item.CourtId, payer, item.StartsAt, item.SliceCount, ct, externalReference: reference);
 
@@ -253,7 +274,29 @@ public sealed class AdminBulkBookingService
             return BulkBookResult.Booked(index, ok.Booking, courtName, ok.Booking.AmountChargedCredits);
         }
 
-        return BulkBookResult.Failure(index, RefusalCodeOf(outcome), courtName, item.StartsAt);
+        // A free court posts no debit (I10), so a retried item finds nothing under its
+        // reference and loses the slot race to the booking it made itself. That booking is the
+        // answer, exactly as a found reference would have been.
+        if (outcome is BookingResult.DuplicateRequest or BookingResult.SlotTaken
+            && await BulkReplay.FindAsync(_db, reference, payerId, item, ct) is { } twin)
+        {
+            return Replayed(index, item, courtName, twin, payerId);
+        }
+
+        return BulkBookResult.Failure(index, BookingRefusals.CodeOf(outcome), courtName, item.StartsAt);
+    }
+
+    /// <summary>
+    /// An item an earlier attempt under this key booked: <c>duplicate</c> when it is this item's
+    /// own live booking, and refused — <c>idempotency_key_reused</c> or
+    /// <c>already_cancelled</c> — when it is not (<see cref="BulkReplay.RefusalFor"/>).
+    /// </summary>
+    private static BulkBookResult Replayed(
+        int index, BulkBookItem item, string? courtName, Booking earlier, Guid payerId)
+    {
+        return BulkReplay.RefusalFor(earlier, payerId, item) is { } refusal
+            ? BulkBookResult.Failure(index, refusal, courtName, item.StartsAt)
+            : BulkBookResult.Replay(index, earlier, courtName);
     }
 
     private async Task<BulkBookResult> BlockForGuestAsync(
@@ -284,57 +327,58 @@ public sealed class AdminBulkBookingService
 
         return outcome is BookingResult.Ok ok
             ? BulkBookResult.Blocked(index, ok.Booking, courtName)
-            : BulkBookResult.Failure(index, RefusalCodeOf(outcome), courtName, item.StartsAt);
+            : BulkBookResult.Failure(index, BookingRefusals.CodeOf(outcome), courtName, item.StartsAt);
     }
 
     /// <summary>
-    /// The booking a previous attempt under this reference produced, or null.
+    /// What a batch WOULD cost its payer, item by item, without booking anything (decision R19).
     ///
     /// <para>
-    /// Read-then-write, exactly as the credit-adjust endpoint does: the index is the backstop
-    /// for two attempts in flight at once, and this is what turns the ordinary case — a retry
-    /// after the first batch halted — into an honest <c>duplicate</c> rather than a
-    /// <c>slot_taken</c> about a court the admin already has.
+    /// <b>Each item is priced by <see cref="BookingService.QuoteAsync"/></b> — the same path
+    /// <see cref="BookingService.CreateAsync(Guid, BookingPayer, DateTimeOffset, int, CancellationToken, string?)"/>
+    /// takes — so the total the console shows is the total the batch then charges. Nothing is
+    /// duplicated here except the one thing a single quote cannot see: two items of the SAME
+    /// batch that overlap on one court. The booking loop would book the first and refuse the
+    /// second <c>slot_taken</c>; the quote says so up front rather than totalling both.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>No balance halt.</b> The booking loop stops at the first <c>insufficient_balance</c>;
+    /// the quote prices every item and reports <c>overdraws</c> instead, which is the whole point
+    /// — the admin decides on the override before sending the batch, not after half of it.
     /// </para>
     /// </summary>
-    private async Task<Booking?> ReplayedBookingAsync(string reference, CancellationToken ct)
+    public async Task<BulkQuote> QuoteAsync(
+        IReadOnlyList<BulkBookItem> items, BookingPayer payer, CancellationToken ct)
     {
-        var bookingId = await _db.LedgerEntries.AsNoTracking()
-            .Where(l => l.ExternalReference == reference)
-            .Select(l => l.RelatedBookingId)
-            .FirstOrDefaultAsync(ct);
+        var lines = new List<BulkQuoteLine>(items.Count);
+        var accepted = new List<(Guid CourtId, DateTimeOffset StartsAt, DateTimeOffset EndsAt)>();
 
-        return bookingId is null
-            ? null
-            : await _db.Bookings.AsNoTracking().FirstOrDefaultAsync(b => b.Id == bookingId, ct);
-    }
-
-    /// <summary>
-    /// The single-booking refusal vocabulary, verbatim. A batch does not invent codes — the
-    /// console already maps these to sentences, and a second spelling of "slot taken" would be
-    /// a sentence it has never heard of.
-    /// </summary>
-    private static string RefusalCodeOf(BookingResult result)
-    {
-        // Block body rather than an expression body, for the lizard reason in
-        // memory/gotchas.md. lizard's C# parser cannot follow `=> x switch { … }`: it loses
-        // scope and emits a *global* pseudo-function spanning the whole FILE, which then trips
-        // the 200-line function gate on any file long enough to matter.
-        return result switch
+        foreach (var item in items)
         {
-            BookingResult.NotFound => "court_not_found",
-            BookingResult.PastTime => "past_time",
-            BookingResult.TooFarAhead => "too_far_ahead",
-            BookingResult.SlotTaken => "slot_taken",
-            BookingResult.InsufficientBalance => "insufficient_balance",
-            BookingResult.PeakHoursLeagueOnly => "peak_hours_league_only",
-            BookingResult.PerDayCapExceeded => "per_day_cap_exceeded",
-            BookingResult.OutOfHours => "out_of_hours",
-            BookingResult.NoTimeAvailable => "no_time_available",
-            BookingResult.InvalidDuration => "invalid_duration",
-            BookingResult.DuplicateRequest => "duplicate_request",
-            _ => "booking_failed",
-        };
+            var quote = await _bookings.QuoteAsync(item.CourtId, payer, item.StartsAt, item.SliceCount, ct);
+            if (quote.PriceCredits is not { } price)
+            {
+                lines.Add(new BulkQuoteLine(item, quote.CourtName, 0m, false, BookingRefusals.CodeOf(quote.Refusal!)));
+                continue;
+            }
+
+            var endsAt = quote.EndsAt!.Value;
+            var clashes = accepted.Any(a =>
+                a.CourtId == item.CourtId && a.StartsAt < endsAt && a.EndsAt > item.StartsAt);
+            if (clashes)
+            {
+                lines.Add(new BulkQuoteLine(item, quote.CourtName, 0m, false, BookingRefusals.SlotTaken));
+                continue;
+            }
+
+            accepted.Add((item.CourtId, item.StartsAt, endsAt));
+            lines.Add(new BulkQuoteLine(item, quote.CourtName, price, true, null));
+        }
+
+        var total = lines.Where(l => l.Bookable).Sum(l => l.PriceCredits);
+        var balance = await _ledger.GetBalanceAsync(payer.UserId, ct);
+        return new BulkQuote(lines, total, balance);
     }
 
     /// <summary>Every name and court title one batch's result rows need, in two reads rather than 2n.</summary>

@@ -34,6 +34,33 @@ public static class AdminChangeActions
     public const string BookingBlocked = "booking.blocked";
     public const string BookingBlockLifted = "booking.block_lifted";
 
+    /// <summary>
+    /// An admin booked one court for a member, on that member's wallet (decision R19).
+    ///
+    /// <para>
+    /// <b>One row per on-behalf booking, a batch's items included</b> — written in the booking's
+    /// own unit of work and marked <c>part_of_batch</c> when it is one. It used to be suppressed
+    /// for a batch in favour of the one <see cref="BookingsBulkBooked"/> row, but that row is
+    /// saved after the whole loop: a request that died mid-batch left members charged for
+    /// bookings this table said nothing about. The batch row is now the summary, not the record.
+    /// </para>
+    /// </summary>
+    public const string BookingBookedOnBehalf = "booking.booked_on_behalf";
+
+    /// <summary>
+    /// A booking took its payer's balance below zero because an admin asked for it by name —
+    /// on behalf of a member, or on the admin's OWN wallet, which R19 (2026-09-23) allows.
+    ///
+    /// <para>
+    /// <b>Written for every booking that overdrew</b>, single or batch item, with the balance
+    /// before and after. <c>audit_log</c> records the same effect but has a delete path; an
+    /// overdraft, and above all an admin's overdraft of their own wallet, is the entry a club
+    /// most needs to still be able to read. No reason is demanded: the override is already a
+    /// deliberate, named request, and a batch has no per-item reason to give.
+    /// </para>
+    /// </summary>
+    public const string BookingOverdraftAuthorised = "booking.overdraft_authorised";
+
     // ---- credit ----
     public const string CreditAdjusted = "credit.adjusted";
     public const string CreditToppedUp = "credit.topped_up";
@@ -44,6 +71,13 @@ public static class AdminChangeActions
     public const string GroupArchived = "group.archived";
     public const string GroupMembersChanged = "group.members_changed";
 
+    /// <summary>
+    /// A member group with no members was deleted outright. Not in D2's original list; added
+    /// because a group that vanished with no row here is a change the club cannot see ever
+    /// happened. A group WITH members cannot be deleted, only archived.
+    /// </summary>
+    public const string GroupDeleted = "group.deleted";
+
     // ---- member ----
     public const string MemberClassChanged = "member.class_changed";
     public const string MemberApproved = "member.approved";
@@ -51,6 +85,22 @@ public static class AdminChangeActions
     public const string MemberSuspended = "member.suspended";
     public const string MemberReactivated = "member.reactivated";
     public const string MemberPasswordReset = "member.password_reset";
+
+    /// <summary>
+    /// A member was made an administrator, or stopped being one (R20).
+    ///
+    /// <para>
+    /// <b>In THIS table, not only in <c>audit_log</c>.</b> Who can administer the club is the
+    /// one change that can be used to hide every other change: an admin who appoints an
+    /// accomplice, or quietly removes the colleague who would notice, has changed who reads this
+    /// record. <c>audit_log</c> has a delete path; this table does not. The revoke carries a
+    /// reason because "why was I removed?" is the question the club will actually be asked.
+    /// </para>
+    /// </summary>
+    public const string MemberAdminGranted = "member.admin_granted";
+
+    /// <inheritdoc cref="MemberAdminGranted"/>
+    public const string MemberAdminRevoked = "member.admin_revoked";
 
     /// <summary>
     /// An admin looked at one member's night.
@@ -63,6 +113,17 @@ public static class AdminChangeActions
     /// </para>
     /// </summary>
     public const string MemberTraceViewed = "member.trace_viewed";
+
+    /// <summary>
+    /// An admin looked at, or exported, one member's door history (decision D9).
+    ///
+    /// <para>
+    /// <b>In THIS table as well as <c>audit_log</c></b>, for the trace's reason: D9 reversed a
+    /// privacy rule, and the reversal is only defensible if who looked cannot be quietly
+    /// removed. <c>audit_log</c> has a delete path; this table does not.
+    /// </para>
+    /// </summary>
+    public const string MemberDoorHistoryViewed = "member.door_history_viewed";
 
     // ---- setting ----
     public const string SettingsUpdated = "settings.updated";
@@ -104,10 +165,11 @@ public static class AdminChangeActions
     [
         ScheduleCreated, ScheduleUpdatedFuture, ScheduleOccurrenceSkipped, ScheduleOccurrenceOverridden, ScheduleEnded,
         BookingsBulkCancelled, BookingsBulkBooked, BookingCancelledByAdmin, BookingBlocked, BookingBlockLifted,
+        BookingBookedOnBehalf, BookingOverdraftAuthorised,
         CreditAdjusted, CreditToppedUp,
-        GroupCreated, GroupUpdated, GroupArchived, GroupMembersChanged,
+        GroupCreated, GroupUpdated, GroupArchived, GroupMembersChanged, GroupDeleted,
         MemberClassChanged, MemberApproved, MemberRejected, MemberSuspended, MemberReactivated,
-        MemberPasswordReset, MemberTraceViewed,
+        MemberPasswordReset, MemberTraceViewed, MemberDoorHistoryViewed, MemberAdminGranted, MemberAdminRevoked,
         SettingsUpdated, CourtCreated, CourtUpdated, CourtDeactivated, ChangesExported,
         DeviceUpdated, DeviceDeleted, DeviceApiKeyRegenerated, DoorsShutAll, DoorsReopenedAll, MonitoringErrorResolved,
     ];
@@ -121,7 +183,7 @@ public static class AdminChangeActions
     [
         BookingsBulkCancelled, BookingCancelledByAdmin, ScheduleEnded, ScheduleOccurrenceSkipped,
         CreditAdjusted, CreditToppedUp, GroupArchived, MemberSuspended, MemberRejected, CourtDeactivated,
-        DeviceDeleted,
+        DeviceDeleted, MemberAdminRevoked,
     ];
 
     /// <summary>The area an action belongs to, or null when the action is not one of ours.</summary>
@@ -137,11 +199,14 @@ public static class AdminChangeActions
             ScheduleCreated or ScheduleUpdatedFuture or ScheduleOccurrenceSkipped
                 or ScheduleOccurrenceOverridden or ScheduleEnded => AdminChangeAreas.Schedule,
             BookingsBulkCancelled or BookingsBulkBooked or BookingCancelledByAdmin
-                or BookingBlocked or BookingBlockLifted => AdminChangeAreas.Booking,
+                or BookingBlocked or BookingBlockLifted
+                or BookingBookedOnBehalf or BookingOverdraftAuthorised => AdminChangeAreas.Booking,
             CreditAdjusted or CreditToppedUp => AdminChangeAreas.Credit,
-            GroupCreated or GroupUpdated or GroupArchived or GroupMembersChanged => AdminChangeAreas.Group,
+            GroupCreated or GroupUpdated or GroupArchived or GroupMembersChanged
+                or GroupDeleted => AdminChangeAreas.Group,
             MemberClassChanged or MemberApproved or MemberRejected or MemberSuspended
-                or MemberReactivated or MemberPasswordReset or MemberTraceViewed => AdminChangeAreas.Member,
+                or MemberReactivated or MemberPasswordReset or MemberTraceViewed
+                or MemberDoorHistoryViewed or MemberAdminGranted or MemberAdminRevoked => AdminChangeAreas.Member,
             SettingsUpdated or CourtCreated or CourtUpdated or CourtDeactivated
                 or ChangesExported => AdminChangeAreas.Setting,
             DeviceUpdated or DeviceDeleted or DeviceApiKeyRegenerated or DoorsShutAll
@@ -177,6 +242,8 @@ public static class AdminChangeActions
             BookingCancelledByAdmin => $"Cancelled a booking{of}",
             BookingBlocked => $"Blocked a court{of}",
             BookingBlockLifted => $"Lifted a court block{of}",
+            BookingBookedOnBehalf => $"Booked a court for a member{of}",
+            BookingOverdraftAuthorised => $"Let a booking take a balance below zero{of}",
 
             CreditAdjusted => $"Adjusted a member's credits{of}",
             CreditToppedUp => $"Topped up a member's credits{of}",
@@ -185,6 +252,7 @@ public static class AdminChangeActions
             GroupUpdated => $"Changed a member group{of}",
             GroupArchived => $"Archived a member group{of}",
             GroupMembersChanged => $"Changed who is in a member group{of}",
+            GroupDeleted => $"Deleted a member group{of}",
 
             MemberClassChanged => $"Changed a member's class{of}",
             MemberApproved => $"Approved a member{of}",
@@ -193,6 +261,9 @@ public static class AdminChangeActions
             MemberReactivated => $"Reactivated a member{of}",
             MemberPasswordReset => $"Reset a member's password{of}",
             MemberTraceViewed => $"Looked at one member's activity{of}",
+            MemberDoorHistoryViewed => $"Looked at one member's door history{of}",
+            MemberAdminGranted => $"Made a member an administrator{of}",
+            MemberAdminRevoked => $"Removed a member's administrator rights{of}",
 
             SettingsUpdated => "Changed the club's settings",
             CourtCreated => $"Added a court{of}",

@@ -16,6 +16,15 @@ namespace Crusaders.Mainframe.Api.Workers;
 /// <c>MatchedUserId</c> (where applicable) so the data can no longer be tied to a member.
 ///
 /// Idempotent: re-running on already-anonymised rows is a no-op.
+///
+/// <para>
+/// <b><c>user_preferences</c> is deliberately not swept.</b> This worker retires usage HISTORY —
+/// rows describing something a member did on a date. A preferences row describes no event and
+/// has no age that means anything: it is the member's current choice of theme and opt-ins, read
+/// on every page load, and anonymising it would not make the club forget anything about
+/// anyone's movements; it would silently reset a living member's settings two years after they
+/// last touched them.
+/// </para>
 /// </summary>
 public sealed class RetentionWorker : BackgroundService
 {

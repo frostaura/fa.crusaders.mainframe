@@ -137,8 +137,9 @@ public static class MemberGroupEndpoints
     }
 
     private static async Task<IResult> CreateAsync(
-        MemberGroupRequest req, MainframeDbContext db, ITenantContext tenant, HttpContext ctx, CancellationToken ct)
+        MemberGroupRequest req, [AsParameters] GroupDeps deps, HttpContext ctx, CancellationToken ct)
     {
+        var (db, tenant, changes) = (deps.Db, deps.Tenant, deps.Changes);
         if (MemberGroupValidation.Refuse(req, forCreate: true) is { } bad) return bad;
 
         if (await db.MemberGroups.CountAsync(ct) >= GroupRules.MaxGroupsPerTenant)
@@ -163,22 +164,42 @@ public static class MemberGroupEndpoints
         Apply(group, req);
         db.MemberGroups.Add(group);
 
-        foreach (var window in MemberGroupValidation.Windows(req, tenant.TenantId, group.Id))
+        var windows = MemberGroupValidation.Windows(req, tenant.TenantId, group.Id).ToList();
+        foreach (var window in windows)
         {
             db.MemberGroupWindows.Add(window);
         }
+
+        // Staged, so the record flushes with the group it describes.
+        await changes.StageAsync(new AdminChange(
+            Action: AdminChangeActions.GroupCreated,
+            ActorUserId: ctx.User.Id() ?? Guid.Empty,
+            SubjectKind: AdminChangeSubjects.Group,
+            SubjectId: group.Id,
+            SubjectLabel: group.Name,
+            Reason: req.Reason?.Trim(),
+            After: MemberGroupChanges.Snapshot(group, windows)), ct);
 
         await db.SaveChangesAsync(ct);
         return Results.Created($"/api/v1/admin/member-groups/{group.Id}", new { id = group.Id, name = group.Name });
     }
 
     private static async Task<IResult> PatchAsync(
-        Guid id, MemberGroupRequest req, MainframeDbContext db, ITenantContext tenant, CancellationToken ct)
+        Guid id, MemberGroupRequest req, [AsParameters] GroupDeps deps, HttpContext ctx, CancellationToken ct)
     {
+        var (db, tenant) = (deps.Db, deps.Tenant);
         if (MemberGroupValidation.Refuse(req, forCreate: false) is { } bad) return bad;
 
         var group = await db.MemberGroups.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (group is null) return Results.NotFound();
+
+        // Read BEFORE anything is applied, windows only when this PATCH names them — a PATCH
+        // that leaves the windows alone must not record them as changed or unchanged.
+        var existingWindows = req.Windows is null
+            ? null
+            : await db.MemberGroupWindows.Where(w => w.GroupId == id).ToListAsync(ct);
+        var before = MemberGroupChanges.Snapshot(group, existingWindows);
+        var wasArchived = group.Status == MemberGroupStatus.Archived;
 
         if (req.Name is not null)
         {
@@ -202,18 +223,55 @@ public static class MemberGroupEndpoints
         // Windows replace wholesale when they are named at all, and are left alone when they are
         // not — the same omitted-means-unchanged rule the settings PUT uses, for the same reason:
         // the rates screen and the times screen are different forms.
-        if (req.Windows is not null)
+        List<MemberGroupWindow>? newWindows = null;
+        if (existingWindows is not null)
         {
-            var existing = await db.MemberGroupWindows.Where(w => w.GroupId == id).ToListAsync(ct);
-            db.MemberGroupWindows.RemoveRange(existing);
-            foreach (var window in MemberGroupValidation.Windows(req, tenant.TenantId, id))
+            db.MemberGroupWindows.RemoveRange(existingWindows);
+            newWindows = MemberGroupValidation.Windows(req, tenant.TenantId, id).ToList();
+            foreach (var window in newWindows)
             {
                 db.MemberGroupWindows.Add(window);
             }
         }
 
+        await StagePatchChangeAsync(
+            deps.Changes, ctx, new GroupPatchChange(group, req.Reason, before, newWindows, wasArchived), ct);
+
         await db.SaveChangesAsync(ct);
         return Results.Ok(new { id = group.Id, name = group.Name });
+    }
+
+    /// <summary>
+    /// One change-record row for one PATCH: <c>group.archived</c> when this edit archived the
+    /// group, <c>group.updated</c> otherwise, and nothing at all when nothing changed.
+    ///
+    /// <para>
+    /// <b>The archive's reason is recorded when sent, not yet demanded.</b>
+    /// <see cref="AdminChangeActions.ReasonRequired"/> lists <c>group.archived</c>, but the
+    /// Groups page in production archives with a bare <c>{status:"archived"}</c> and would start
+    /// failing the moment this deployed. The facelift's Groups rebuild (P6) sends
+    /// <c>reason</c>; enforcing it belongs to that change, in the same commit as the screen that
+    /// asks for it.
+    /// </para>
+    /// </summary>
+    private static async Task StagePatchChangeAsync(
+        AdminChangeRecorder changes, HttpContext ctx, GroupPatchChange patch, CancellationToken ct)
+    {
+        var group = patch.Group;
+        var (changedBefore, changedAfter) = MemberGroupChanges.Diff(
+            patch.Before, MemberGroupChanges.Snapshot(group, patch.NewWindows));
+        if (changedAfter.Count == 0) return;
+
+        var archived = !patch.WasArchived && group.Status == MemberGroupStatus.Archived;
+        await changes.StageAsync(new AdminChange(
+            Action: archived ? AdminChangeActions.GroupArchived : AdminChangeActions.GroupUpdated,
+            ActorUserId: ctx.User.Id() ?? Guid.Empty,
+            SubjectKind: AdminChangeSubjects.Group,
+            SubjectId: group.Id,
+            SubjectLabel: group.Name,
+            Reason: patch.Reason?.Trim(),
+            Before: changedBefore,
+            After: changedAfter), ct);
     }
 
     private static void Apply(MemberGroup group, MemberGroupRequest req)
@@ -245,7 +303,8 @@ public static class MemberGroupEndpoints
         => db.MemberGroups.AnyAsync(
             x => x.Name.ToLower() == name.ToLower() && (excluding == null || x.Id != excluding), ct);
 
-    private static async Task<IResult> DeleteAsync(Guid id, MainframeDbContext db, CancellationToken ct)
+    private static async Task<IResult> DeleteAsync(
+        Guid id, MainframeDbContext db, AdminChangeRecorder changes, HttpContext ctx, CancellationToken ct)
     {
         var group = await db.MemberGroups.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (group is null) return Results.NotFound();
@@ -263,7 +322,16 @@ public static class MemberGroupEndpoints
                 statusCode: StatusCodes.Status409Conflict);
         }
 
-        db.MemberGroupWindows.RemoveRange(await db.MemberGroupWindows.Where(w => w.GroupId == id).ToListAsync(ct));
+        var windows = await db.MemberGroupWindows.Where(w => w.GroupId == id).ToListAsync(ct);
+        await changes.StageAsync(new AdminChange(
+            Action: AdminChangeActions.GroupDeleted,
+            ActorUserId: ctx.User.Id() ?? Guid.Empty,
+            SubjectKind: AdminChangeSubjects.Group,
+            SubjectId: group.Id,
+            SubjectLabel: group.Name,
+            Before: MemberGroupChanges.Snapshot(group, windows)), ct);
+
+        db.MemberGroupWindows.RemoveRange(windows);
         db.MemberGroups.Remove(group);
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
@@ -297,10 +365,11 @@ public static class MemberGroupEndpoints
     }
 
     private static async Task<IResult> AddMembersAsync(
-        Guid id, GroupMembersRequest req, MainframeDbContext db, ITenantContext tenant,
-        HttpContext ctx, CancellationToken ct)
+        Guid id, GroupMembersRequest req, [AsParameters] GroupDeps deps, HttpContext ctx, CancellationToken ct)
     {
-        if (!await db.MemberGroups.AnyAsync(x => x.Id == id, ct)) return Results.NotFound();
+        var (db, tenant) = (deps.Db, deps.Tenant);
+        var group = await db.MemberGroups.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (group is null) return Results.NotFound();
 
         var wanted = (req.UserIds ?? []).Distinct().ToList();
         if (wanted.Count > GroupRules.MaxMembersPerCall)
@@ -315,6 +384,7 @@ public static class MemberGroupEndpoints
         var real = await db.Users.Where(u => wanted.Contains(u.Id)).Select(u => u.Id).ToListAsync(ct);
 
         var results = new List<object>(wanted.Count);
+        var added = new List<Guid>();
         foreach (var userId in wanted)
         {
             if (!real.Contains(userId)) { results.Add(new { user_id = userId, result = "member_not_found" }); continue; }
@@ -328,6 +398,14 @@ public static class MemberGroupEndpoints
                 AddedByUserId = ctx.User.Id() ?? Guid.Empty,
             });
             results.Add(new { user_id = userId, result = "added" });
+            added.Add(userId);
+        }
+
+        // ONE row per call, naming everybody it added — the bulk-cancel discipline: one
+        // decision, one row. A call that added nobody changed nobody's rules and records nothing.
+        if (added.Count > 0)
+        {
+            await StageMembersChangedAsync(deps, ctx, group, added, removed: [], ct);
         }
 
         await db.SaveChangesAsync(ct);
@@ -335,14 +413,41 @@ public static class MemberGroupEndpoints
     }
 
     private static async Task<IResult> RemoveMemberAsync(
-        Guid id, Guid userId, MainframeDbContext db, CancellationToken ct)
+        Guid id, Guid userId, [AsParameters] GroupDeps deps, HttpContext ctx, CancellationToken ct)
     {
+        var db = deps.Db;
         var row = await db.MemberGroupMembers.FirstOrDefaultAsync(m => m.GroupId == id && m.UserId == userId, ct);
         if (row is null) return Results.NotFound();
+
+        var group = await db.MemberGroups.AsNoTracking().FirstAsync(x => x.Id == id, ct);
+        await StageMembersChangedAsync(deps, ctx, group, added: [], removed: [userId], ct);
 
         db.MemberGroupMembers.Remove(row);
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
+    }
+
+    /// <summary>
+    /// <c>group.members_changed</c>, naming who went in and who came out — by id AND by name,
+    /// because the row must still read correctly after a member is anonymised.
+    /// </summary>
+    private static async Task StageMembersChangedAsync(
+        GroupDeps deps, HttpContext ctx, MemberGroup group,
+        IReadOnlyList<Guid> added, IReadOnlyList<Guid> removed, CancellationToken ct)
+    {
+        var names = await PersonNames.ForAsync(deps.Db, added.Concat(removed).Select(g => (Guid?)g), ct);
+
+        await deps.Changes.StageAsync(new AdminChange(
+            Action: AdminChangeActions.GroupMembersChanged,
+            ActorUserId: ctx.User.Id() ?? Guid.Empty,
+            SubjectKind: AdminChangeSubjects.Group,
+            SubjectId: group.Id,
+            SubjectLabel: group.Name,
+            After: new
+            {
+                added = added.Select(u => new { user_id = u, name = PersonNames.Of(u, names) }).ToList(),
+                removed = removed.Select(u => new { user_id = u, name = PersonNames.Of(u, names) }).ToList(),
+            }), ct);
     }
 
     private static async Task<IResult> RulesForMemberAsync(
@@ -415,13 +520,25 @@ public static class MemberGroupEndpoints
 }
 
 /// <summary>The group body, every field optional so the PATCH and the POST share one shape.</summary>
+/// <param name="Reason">
+/// The admin's own words for the change record. Optional today, and recorded whenever it is
+/// sent — see <c>MemberGroupEndpoints.StagePatchChangeAsync</c> for why an archive does not yet
+/// demand one.
+/// </param>
 public sealed record MemberGroupRequest(
     string? Name = null,
     string? Description = null,
     string? Status = null,
     GroupPricingRequest? Pricing = null,
     GroupCapsRequest? Caps = null,
-    IReadOnlyList<GroupWindowRequest>? Windows = null);
+    IReadOnlyList<GroupWindowRequest>? Windows = null,
+    string? Reason = null);
+
+/// <summary>
+/// What the group writes resolve from the container, bound as one parameter — the complexity
+/// gate caps a signature at six arguments, and recording to the change record added a seventh.
+/// </summary>
+public sealed record GroupDeps(MainframeDbContext Db, ITenantContext Tenant, AdminChangeRecorder Changes);
 
 public sealed record GroupPricingRequest(string Mode, int? MultiplierBps = null, decimal? FlatSlicePriceCredits = null);
 

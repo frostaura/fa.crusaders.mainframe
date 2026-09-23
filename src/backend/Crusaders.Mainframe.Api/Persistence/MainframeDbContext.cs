@@ -75,6 +75,9 @@ public class MainframeDbContext : DbContext
     public DbSet<MemberGroupWindow> MemberGroupWindows => Set<MemberGroupWindow>();
     public DbSet<MemberGroupMember> MemberGroupMembers => Set<MemberGroupMember>();
 
+    /// <summary>One row per person who has changed a default. See <see cref="UserPreferences"/>.</summary>
+    public DbSet<UserPreferences> UserPreferences => Set<UserPreferences>();
+
     /// <summary>
     /// Builds the model, including the global query filter on every tenant-scoped entity.
     /// </summary>
@@ -161,6 +164,7 @@ public class MainframeDbContext : DbContext
         ConfigureAccessCodes(modelBuilder);
         ConfigureCourtLightState(modelBuilder);
         ConfigureDeviceErrors(modelBuilder);
+        ConfigureUserPreferences(modelBuilder);
 
         modelBuilder.Entity<Court>(e =>
         {
@@ -338,6 +342,37 @@ public class MainframeDbContext : DbContext
             // And this is the one the GRID uses, on every read of every member's own rules.
             e.HasIndex(m => new { m.TenantId, m.UserId });
             e.HasQueryFilter(m => m.TenantId == _tenant.TenantId);
+        });
+    }
+
+    /// <summary>
+    /// <c>user_preferences</c>, lifted out of <c>OnModelCreating</c> for the reason every table
+    /// since the devices one has been: that method is at its stated 200-line ceiling.
+    /// </summary>
+    private void ConfigureUserPreferences(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<UserPreferences>(e =>
+        {
+            e.ToTable("user_preferences");
+            e.HasKey(p => p.Id);
+            // One row per person. The lazy create in UserPreferencesService races on a double
+            // first-toggle, and this index is what turns the loser into a retry rather than a
+            // second, contradictory row for the same member.
+            e.HasIndex(p => new { p.TenantId, p.UserId }).IsUnique();
+            e.Property(p => p.Theme).HasMaxLength(16).IsRequired().HasDefaultValue("system");
+            e.Property(p => p.MemberOnboardingLastStep).HasMaxLength(UserPreferencesRules.MaxStepLength);
+            e.Property(p => p.OnboardingVersion).HasDefaultValue(1);
+            e.Property(p => p.Findable).HasDefaultValue(false);
+            e.Property(p => p.ShowInLeaderboards).HasDefaultValue(false);
+            e.Property(p => p.RatingOptIn).HasDefaultValue(false);
+            e.Property(p => p.WeeklyRecap).HasDefaultValue(false);
+            e.Property(p => p.AdminNotificationOptoutsJson)
+                .HasColumnType("jsonb").IsRequired().HasDefaultValueSql("'[]'::jsonb");
+            // The database has the last word on a theme, for the D2-B06 reason: a validator in
+            // one endpoint is not the only way a value reaches a column.
+            e.ToTable(t => t.HasCheckConstraint(
+                "ck_user_preferences_theme", "\"Theme\" IN ('system', 'light', 'dark')"));
+            e.HasQueryFilter(p => p.TenantId == _tenant.TenantId);
         });
     }
 

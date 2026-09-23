@@ -261,6 +261,13 @@ public static class TraceKinds
     /// <see cref="DoorAuditActions.EventTimeClamped"/> documents — and it is a fact about a
     /// board's clock, never about a person.
     /// </para>
+    ///
+    /// <para>
+    /// <c>member.door_history_viewed</c> (D9) is excluded because it is something an ADMIN did
+    /// while reading about the member, not something the member did or had done to them that
+    /// night — and it is written on every read, so a trace would otherwise grow a row each time
+    /// somebody looked at it. It stays in <c>audit_log</c> as the access record it is.
+    /// </para>
     /// </summary>
     public static readonly string[] NotAPersonsNight =
     [
@@ -272,6 +279,7 @@ public static class TraceKinds
         "booking.payer_reassigned",
         "booking.block_lifted",
         DoorAuditActions.EventTimeClamped,
+        Endpoints.AdminMemberDoorEndpoints.ViewedAction,
     ];
 
     // ------------------------------------------------------------------ mapping
@@ -301,7 +309,7 @@ public static class TraceKinds
             LightsOffAction => LightsOff,
             ActivationRefusedAction => CourtRefused,
 
-            "booking.created" => BookingMade,
+            "booking.created" or "booking.created_overdrawn" => BookingMade,
             "booking.created_on_behalf" or "booking.created_on_behalf_overdrawn" => BookingMadeForThem,
             "booking.walk_up_created" => WalkUpBought,
             "booking.walk_up_voided" => WalkUpRefunded,

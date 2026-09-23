@@ -26,7 +26,8 @@ public sealed record BookingConfirmationDetails(
     decimal BalanceAfterCredits,
     int PenaltyWindowMinutes,
     decimal PenaltyPct,
-    bool IsWalkUp = false);
+    bool IsWalkUp = false,
+    bool MadeByClub = true);
 
 /// <summary>
 /// The two things a member needs when the <b>club</b> cancelled their booking rather than they
@@ -93,7 +94,7 @@ public sealed record GateAlert(
     int Minutes,
     string ConsoleUrl);
 
-public static class EmailTemplates
+public static partial class EmailTemplates
 {
     // ---- units ----
 
@@ -392,7 +393,7 @@ public static class EmailTemplates
                 new FactRow("Balance after", Cr(d.BalanceAfterCredits)),
             ]),
         };
-        if (d.BalanceAfterCredits < 0) blocks.Add(OverdrawnNotice(d.BalanceAfterCredits));
+        if (d.BalanceAfterCredits < 0) blocks.Add(OverdrawnNotice(d.BalanceAfterCredits, d.MadeByClub));
         blocks.Add(CancellationTerms(d));
         if (receipt is not null) blocks.Add(new Footnote("Your receipt is attached to this email as a PDF."));
 
@@ -417,11 +418,20 @@ public static class EmailTemplates
     /// negative number with no account of itself, on the artifact a member reconciles against.
     /// The club took the booking deliberately and the member is owed the reason, not just the
     /// figure.
+    /// <para>
+    /// <paramref name="madeByClub"/> is false when an admin booked their OWN court into the red
+    /// (decision R19); the opening clause is then about the booking, not about the club.
+    /// </para>
     /// </remarks>
-    private static EmailBlock OverdrawnNotice(decimal balanceAfterCredits) =>
-        new Callout(CalloutTone.Danger,
-            $"The club made this booking for you, and it takes your balance to {Cr(balanceAfterCredits)}. "
+    private static EmailBlock OverdrawnNotice(decimal balanceAfterCredits, bool madeByClub)
+    {
+        var opening = madeByClub
+            ? "The club made this booking for you, and it takes"
+            : "This booking takes";
+        return new Callout(CalloutTone.Danger,
+            $"{opening} your balance to {Cr(balanceAfterCredits)}. "
             + "Top up to clear it — what you owe comes off your next top-up before anything else.");
+    }
 
     /// <summary>
     /// What this particular booking can still be cancelled for — the one part of the

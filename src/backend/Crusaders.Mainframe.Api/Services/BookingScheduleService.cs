@@ -182,7 +182,7 @@ public sealed class BookingScheduleService
     private static string StatusWord(BookingStatus status)
     {
         // Block body rather than an expression body, for the lizard reason in
-        // memory/gotchas.md — see RefusalCodeOf in AdminBulkBookingService for the mechanism.
+        // memory/gotchas.md — see BookingRefusals.CodeOf for the mechanism.
         return status switch
         {
             BookingStatus.Booked => "booked",

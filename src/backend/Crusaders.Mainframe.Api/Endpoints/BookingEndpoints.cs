@@ -63,9 +63,11 @@ public static class BookingEndpoints
         //
         // `allowNegativeBalance` is the override, and it exists on THIS request record and
         // not on the member's own — a member has no way to send it, and the service refuses
-        // it anyway unless the actor differs from the payer. The desk is expected to see the
-        // ordinary 402 first, with the member's balance and the price in it, and to come
-        // back having read them; nothing here makes the overdraft the default.
+        // it anyway unless the actor holds the admin role. Since decision R19 the payer may be
+        // the admin themselves (userId = self): god mode is the admin route, never the member
+        // one. The console reads GET /quote first and sends the flag deliberately; the 402 is
+        // still the answer to a request that did not ask for it. Nothing here makes the
+        // overdraft the default.
         admin.MapPost("/", async (AdminBookingRequest req, HttpContext ctx, BookingService svc, MainframeDbContext db, CancellationToken ct) =>
         {
             // The PAYER, not the desk. This route tested membership status not at all, so an
@@ -86,6 +88,17 @@ public static class BookingEndpoints
         });
 
         admin.MapPost("/{bookingId:guid}/cancel", AdminCancelAsync);
+
+        // R19: the consequence, before the booking. See AdminQuoteAsync.
+        //
+        // In a group of its own WITHOUT the `auth` limiter. That bucket is ten a minute per
+        // user and is shared with the booking it quotes: the console re-quotes as the admin
+        // changes the member, the length or the slot, so ten quotes in a minute made the
+        // booking they were for answer 429. A quote writes nothing and takes no lock — it is a
+        // read, bounded by the global per-IP bucket like every other read.
+        app.MapGroup("/api/v1/admin/bookings")
+            .RequireAuthorization(p => p.RequireRole("admin"))
+            .MapGet("/quote", AdminQuoteAsync);
 
         // Admin: block a slot for an event.
         //
@@ -144,6 +157,74 @@ public static class BookingEndpoints
     }
 
     /// <summary>
+    /// <c>GET /api/v1/admin/bookings/quote?userId&amp;courtId&amp;startsAt&amp;slices</c> — what a
+    /// booking would cost its payer and where it would leave their balance, before anything is
+    /// booked (decision R19).
+    ///
+    /// <para>
+    /// <b>Why it exists.</b> The console used to learn about a short balance by being refused:
+    /// POST, read the 402, show the figures, POST again with the override. That made the
+    /// override something an admin reaches for after a failure rather than a consequence they
+    /// read up front — "this takes Naledi to −16 cr" — and then choose. The quote answers the
+    /// question first so the flag is sent deliberately.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>The price is the booking's price.</b> It comes from
+    /// <see cref="BookingService.QuoteAsync"/>, which is the same code path the booking runs up
+    /// to the point money would move — group pricing, court price, every rule. A refusal the
+    /// booking would meet is answered with the SAME status and body the POST would give, so the
+    /// console has one mapping for both. The balance guard is not a refusal here; it is the
+    /// <c>overdraws</c> flag.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>No <c>currency_symbol</c>.</b> Every figure here is credits, and
+    /// <see cref="CurrencySymbol"/> records the decision that the club's symbol is rand's and
+    /// never goes in front of a credit figure.
+    /// </para>
+    ///
+    /// <para>
+    /// <c>userId</c> is optional and defaults to the admin, so the admin's own booking is quoted
+    /// the same way. The payer is gated exactly as the POST gates them.
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> AdminQuoteAsync(
+        [AsParameters] AdminQuoteQuery raw, HttpContext ctx, BookingService svc,
+        MainframeDbContext db, LedgerService ledger, CancellationToken ct)
+    {
+        if (raw.Parse() is not { } query) return Results.BadRequest(new { error = "quote_query_invalid" });
+
+        var actorId = ctx.User.Id() ?? Guid.Empty;
+        var payerId = query.UserId ?? actorId;
+        if (await BookingMembershipGate.RefuseIfBarredAsync(db, payerId, ct) is { } refused) return refused;
+
+        // The payer the POST would build, flag and all, so the quote walks the rules as the
+        // admin's booking will — an on-behalf booking skips the caps, a self-booking skips
+        // everything.
+        var payer = new BookingPayer(payerId, actorId, ActorIsAdmin: ctx.User.IsInRole("admin"));
+        var quote = await svc.QuoteAsync(query.CourtId, payer, query.StartsAt, query.Slices, ct);
+        if (quote.PriceCredits is not { } price) return ToHttpResult(quote.Refusal!, ctx);
+
+        var balance = await ledger.GetBalanceAsync(payerId, ct);
+        return Results.Ok(new
+        {
+            user_id = payerId,
+            court_id = query.CourtId,
+            court_name = quote.CourtName,
+            starts_at = query.StartsAt,
+            ends_at = quote.EndsAt,
+            slices = query.Slices,
+            price_credits = price,
+            balance_credits = balance,
+            balance_after_credits = balance - price,
+            // Exactly the guard CreateAsync applies, `balance < totalCost`, so "overdraws" is
+            // true precisely when the POST without the flag would answer 402.
+            overdraws = balance < price,
+        });
+    }
+
+    /// <summary>
     /// Every <see cref="BookingResult"/> the service can return, as an HTTP answer with a
     /// stable snake_case <c>error</c> code the client maps to a sentence.
     ///
@@ -169,19 +250,22 @@ public static class BookingEndpoints
     // object initialiser as the END of the function and dumps the rest of the file into a
     // *global* pseudo-function whose length trips `-L 200`. See memory/gotchas.md and
     // whitelizard.txt's header.
-    private static IResult ToHttpResult(BookingResult result, HttpContext ctx)
+    internal static IResult ToHttpResult(BookingResult result, HttpContext ctx)
     {
+        // The wire word is BookingRefusals' — the one mapping every booking path reads — and
+        // this switch adds only the status and the figures each refusal's sentence needs.
+        var error = BookingRefusals.CodeOf(result);
         return result switch
         {
         BookingResult.Ok ok => Results.Ok(new { booking_id = ok.Booking.Id, balance_after_credits = ok.BalanceAfterCredits }),
-        BookingResult.NotFound => Results.NotFound(new { error = "court_not_found" }),
-        BookingResult.PastTime => Results.BadRequest(new { error = "past_time" }),
-        BookingResult.TooFarAhead => Results.BadRequest(new { error = "too_far_ahead" }),
-        BookingResult.SlotTaken => Results.Conflict(new { error = "slot_taken" }),
+        BookingResult.NotFound => Results.NotFound(new { error }),
+        BookingResult.PastTime => Results.BadRequest(new { error }),
+        BookingResult.TooFarAhead => Results.BadRequest(new { error }),
+        BookingResult.SlotTaken => Results.Conflict(new { error }),
         BookingResult.InsufficientBalance ib => Results.Json(
-            new { error = "insufficient_balance", current_credits = ib.CurrentCredits, required_credits = ib.RequiredCredits }, statusCode: 402),
+            new { error, current_credits = ib.CurrentCredits, required_credits = ib.RequiredCredits }, statusCode: 402),
         BookingResult.PeakHoursLeagueOnly p => Results.Conflict(
-            new { error = "peak_hours_league_only", peak_start = p.PeakStart, peak_end = p.PeakEnd, regular_advance_hours = p.RegularAdvanceHours }),
+            new { error, peak_start = p.PeakStart, peak_end = p.PeakEnd, regular_advance_hours = p.RegularAdvanceHours }),
         // The minutes cap — blueprint A.4's. The three original figures are unchanged so no
         // existing client breaks; the three new ones are what the member's sentence needs, and
         // resets_at is here so a browser never has to compute a club midnight (which is D2-B33
@@ -189,7 +273,7 @@ public static class BookingEndpoints
         BookingResult.PerDayCapExceeded c => Results.Conflict(
             new
             {
-                error = "per_day_cap_exceeded",
+                error,
                 cap_minutes = c.CapMinutes,
                 already_booked_minutes = c.AlreadyBookedMinutes,
                 attempted_minutes = c.AttemptedMinutes,
@@ -205,7 +289,7 @@ public static class BookingEndpoints
         BookingResult.PerDaySlotCapExceeded c => Results.Conflict(
             new
             {
-                error = "per_day_slot_cap_exceeded",
+                error,
                 cap_slots = c.CapSlots,
                 booked_slots = c.BookedSlots,
                 attempted_slots = c.AttemptedSlots,
@@ -221,7 +305,7 @@ public static class BookingEndpoints
         BookingResult.GroupWindow w => Results.Conflict(
             new
             {
-                error = "group_window",
+                error,
                 groups = w.GroupNames,
                 day = w.Day,
                 allowed_windows = w.AllowedWindows.Select(x => new { start = x.Start, end = x.End }).ToList(),
@@ -231,7 +315,7 @@ public static class BookingEndpoints
         BookingResult.CrossesMidnight m => Results.Conflict(
             new
             {
-                error = "crosses_midnight",
+                error,
                 starts_at = m.StartsAt,
                 ends_at = m.EndsAt,
                 minutes_past_midnight = m.MinutesPastMidnight,
@@ -240,14 +324,14 @@ public static class BookingEndpoints
         // so there is nothing they can book. Its own code, because the honest sentence is
         // completely different and because an empty grid reads as "the club is shut".
         BookingResult.NoBookableWindow n => Results.Conflict(
-            new { error = "no_bookable_window", groups = n.GroupNames, day = n.Day }),
+            new { error, groups = n.GroupNames, day = n.Day }),
         BookingResult.OutOfHours h => Results.Conflict(
-            new { error = "out_of_hours", opens_at = h.OpensAt, closes_at = h.ClosesAt }),
+            new { error, opens_at = h.OpensAt, closes_at = h.ClosesAt }),
         BookingResult.NoTimeAvailable n => Results.Conflict(
-            new { error = "no_time_available", requested_minutes = n.RequestedMinutes, available_minutes = n.AvailableMinutes }),
+            new { error, requested_minutes = n.RequestedMinutes, available_minutes = n.AvailableMinutes }),
         BookingResult.InvalidDuration id => Results.BadRequest(
-            new { error = "invalid_duration", requested_slices = id.RequestedSlices, max_slices = id.MaxSlices }),
-        BookingResult.DuplicateRequest => Results.Conflict(new { error = "duplicate_request" }),
+            new { error, requested_slices = id.RequestedSlices, max_slices = id.MaxSlices }),
+        BookingResult.DuplicateRequest => Results.Conflict(new { error }),
             _ => Unmapped(result, ctx),
         };
     }
@@ -285,10 +369,10 @@ public sealed record CreateBlockRequest(Guid CourtId, DateTimeOffset StartsAt, i
 public sealed record CreateBookingRequest(Guid CourtId, DateTimeOffset StartsAt, int SliceCount);
 /// <summary>
 /// <paramref name="AllowNegativeBalance"/> is §8's admin override, and it is deliberately
-/// absent from <see cref="CreateBookingRequest"/>: a member cannot ask to be overdrawn, and
-/// an admin booking for themselves gets no benefit from it either, because the service only
-/// honours it when the actor and the payer differ. Defaulted so an older client that does
-/// not send the field books exactly as it did before.
+/// absent from <see cref="CreateBookingRequest"/>: a member cannot ask to be overdrawn. An
+/// admin may point it at their OWN wallet through this record (decision R19, 2026-09-23) —
+/// that is how an admin books themselves into the red, on the record. Defaulted so an older
+/// client that does not send the field books exactly as it did before.
 /// </summary>
 public sealed record AdminBookingRequest(
     Guid CourtId, Guid UserId, DateTimeOffset StartsAt, int SliceCount, bool AllowNegativeBalance = false);
@@ -298,3 +382,49 @@ public sealed record AdminBookingRequest(
 /// no reason, and so an older client that never waives is unaffected.
 /// </summary>
 public sealed record AdminCancelRequest(bool WaivePenalty, string? WaiveReason = null);
+
+/// <summary>
+/// The query of <c>GET /api/v1/admin/bookings/quote</c>, as sent. <c>userId</c> is the payer and
+/// defaults to the calling admin; the slice count is <c>slices</c> or — the booking POST's own
+/// word — <c>sliceCount</c>.
+///
+/// <para>
+/// <b>Strings, parsed by hand, under both spellings.</b> Typed parameters answered a 400 with an
+/// EMPTY body for <c>?sliceCount=1</c> (the POST's name for the same number) and for snake_case
+/// <c>court_id</c>, where every other refusal in this API is an <c>{error}</c> the console maps to
+/// a sentence. The bulk quote already binds both spellings for the reason <c>AdjustRequest</c>
+/// documents; this is the same promise for the single quote.
+/// </para>
+/// </summary>
+public sealed record AdminQuoteQuery(
+    string? UserId = null, string? CourtId = null, string? StartsAt = null,
+    string? Slices = null, string? SliceCount = null,
+    [Microsoft.AspNetCore.Mvc.FromQuery(Name = "user_id")] string? UserIdSnake = null,
+    [Microsoft.AspNetCore.Mvc.FromQuery(Name = "court_id")] string? CourtIdSnake = null,
+    [Microsoft.AspNetCore.Mvc.FromQuery(Name = "starts_at")] string? StartsAtSnake = null,
+    [Microsoft.AspNetCore.Mvc.FromQuery(Name = "slice_count")] string? SliceCountSnake = null)
+{
+    /// <summary>The query, parsed — or null when anything required is missing or malformed.</summary>
+    public ParsedAdminQuote? Parse()
+    {
+        var user = UserId ?? UserIdSnake;
+        Guid? userId = null;
+        if (user is not null)
+        {
+            if (!Guid.TryParse(user, out var parsedUser)) return null;
+            userId = parsedUser;
+        }
+
+        var ok = Guid.TryParse(CourtId ?? CourtIdSnake, out var courtId)
+                 & DateTimeOffset.TryParse(StartsAt ?? StartsAtSnake,
+                     System.Globalization.CultureInfo.InvariantCulture,
+                     System.Globalization.DateTimeStyles.None, out var startsAt)
+                 & int.TryParse(Slices ?? SliceCount ?? SliceCountSnake,
+                     System.Globalization.NumberStyles.Integer,
+                     System.Globalization.CultureInfo.InvariantCulture, out var slices);
+        return ok ? new ParsedAdminQuote(userId, courtId, startsAt, slices) : null;
+    }
+}
+
+/// <summary>A well-formed <see cref="AdminQuoteQuery"/>.</summary>
+public sealed record ParsedAdminQuote(Guid? UserId, Guid CourtId, DateTimeOffset StartsAt, int Slices);

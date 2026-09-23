@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Crusaders.Mainframe.Api.Endpoints;
 using Crusaders.Mainframe.Api.Services;
+using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Tests;
 
@@ -233,7 +234,10 @@ public sealed class DoorEventChangeHttpTests
 
         await club.AdminClient(factory).PatchAsJsonAsync($"/api/v1/admin/devices/{doorId}", new { enabled = false });
 
-        // Somebody else entirely, reading the same door.
+        // Somebody else entirely, reading the same door. A real second admin: since R20 an admin
+        // role on a token is honoured only for an account that holds it (LiveAdminRole).
+        await PeopleClub.ReadAsync(factory, db => db.Users.IgnoreQueryFilters()
+            .Where(u => u.Id == club.MemberUserId).ExecuteUpdateAsync(u => u.SetProperty(x => x.IsAdmin, true)));
         var other = club.ClientFor(factory, club.MemberUserId, "admin");
         var doors = await other.GetFromJsonAsync<JsonElement>("/api/v1/admin/doors");
         var device = doors.GetProperty("doors").EnumerateArray().Single().GetProperty("device");

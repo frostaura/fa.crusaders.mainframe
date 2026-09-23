@@ -452,6 +452,47 @@ public sealed class MonitoringStreamTests
     }
 
     /// <summary>
+    /// An admin demoted while their stream is open stops receiving the club's frames. The role
+    /// was checked once, when the stream opened, and the stream then ran until the connection
+    /// dropped — a demoted admin's <c>EventSource</c> went on delivering device faults after every
+    /// other request of theirs was answered 403 (review finding authz P3-2). The role is now
+    /// re-asked before every frame, and a "no" ends the stream.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_demoted_admins_open_stream_stops_delivering()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory, "strdemote");
+
+        await using var sse = await OpenAsync(factory, club);
+        Assert.Contains(
+            "event: counts",
+            await sse.WaitForAsync("event: counts", TimeSpan.FromSeconds(10)),
+            StringComparison.Ordinal);
+
+        // What the R20 revoke does: the flag, committed, then the live role's eviction.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Persistence.MainframeDbContext>();
+            var admin = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstAsync(
+                Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.IgnoreQueryFilters(db.Users),
+                u => u.Id == club.AdminUserId);
+            admin.IsAdmin = false;
+            await db.SaveChangesAsync();
+        }
+        factory.Services.GetRequiredService<LiveAdminRole>().Invalidate(club.TenantId, club.AdminUserId);
+        var mark = sse.Mark();
+
+        Publish(factory, club.TenantId, new RealtimeMessage(
+            "error_opened", JsonSerializer.Serialize(new { device_code = "box-strdemote", code = DeviceErrorCodes.MegaLinkLost })));
+
+        var heard = await sse.SettleAsync(TimeSpan.FromSeconds(3), mark);
+        Assert.DoesNotContain("error_opened", heard, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A fault RECORDED while a stream is open announces itself, through the writer the device
     /// routes actually use — so the wire this page listens on is the wire the ingest publishes
     /// on, rather than two shapes that agree in a doc comment.

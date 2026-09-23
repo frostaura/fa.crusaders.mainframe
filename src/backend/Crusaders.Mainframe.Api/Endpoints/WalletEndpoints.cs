@@ -226,7 +226,7 @@ public static class WalletEndpoints
         [AsParameters] AdjustServices services,
         CancellationToken ct)
     {
-        var (ledger, db, tenant, email, loggerFactory, _) = services;
+        var (ledger, db, tenant, email, loggerFactory, _, _, _) = services;
         var logger = loggerFactory.CreateLogger("CreditAdjustment");
 
         var (refusal, kind) = RefuseRequest(req, logger);
@@ -249,33 +249,93 @@ public static class WalletEndpoints
             return Replay(already, req, kind!.Value, balanceBefore, user);
         }
 
+        // One unit of work for the money AND its record. See PostAndRecordAsync.
+        var (posted, raced) = await PostAndRecordAsync(
+            new AdjustmentWork(userId, req, kind!.Value, reference, ctx), services, ct);
+        if (posted is null)
+        {
+            // The lookup above loses the race when both clicks are in flight at once, which is
+            // exactly what a double-click produces. The unique filtered index on
+            // ExternalReference is what actually holds the line; this turns its violation into
+            // the same answer the first request got, so the desk sees one success rather than a
+            // 500 beside a movement that did happen. The transaction has already rolled back, so
+            // the re-read runs on a clean connection.
+            db.ChangeTracker.Clear();
+            var twin = await ExistingAdjustmentAsync(db, reference!, ct);
+            if (twin is null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(raced!);
+            return Replay(twin!, req, kind!.Value, balanceBefore, user);
+        }
+
+        var (entry, balanceAfter) = (posted.Entry, posted.BalanceAfter);
+        balanceBefore = posted.BalanceBefore;
+
+        // "Every player-affecting event sends an email" — and an admin moving a member's balance
+        // by hand is about as player-affecting as it gets. Nothing was sent, so the first a
+        // member knew of a desk adjustment was the next time they opened their wallet. Background
+        // dispatch: an admin is waiting on this form and SMTP is not what decides whether the
+        // movement stands.
+        Crusaders.Mainframe.Api.Email.EmailDispatch.InBackground(
+            email, logger,
+            Crusaders.Mainframe.Api.Email.EmailTemplates.CreditAdjustment(
+                await services.Club.GetAsync(ct), user.Email, entry.AmountCredits, balanceAfter, req.Reason),
+            $"credit adjustment {entry.Id}");
+
+        return AdjustmentResult(entry, kind!.Value, balanceBefore, balanceAfter, user);
+    }
+
+    /// <summary>
+    /// The by-hand movement, its <c>audit_log</c> row and its <c>admin_change_log</c> row, as ONE
+    /// unit of work under the payer's lock.
+    ///
+    /// <para>
+    /// <see cref="LedgerService.PostAsync"/> saves on its own, so posting first and recording
+    /// second was two commits: a record that failed to save — or a request aborted between the
+    /// two, which is what a desk closing the tab does — left the money moved with no audit row,
+    /// no change-log row and no email, and answered 500. The admin then retried, and without an
+    /// idempotency key the retry credited the member again. Proven with a trigger that refused
+    /// the change-log insert: two +25 adjusts left 50 credits on the ledger and nothing in
+    /// either record. Now the post joins a transaction the lock owns, the two records flush
+    /// beside it, and a failure anywhere rolls all three back — the ledger never holds a
+    /// by-hand movement the club's record cannot show.
+    /// </para>
+    ///
+    /// <para>
+    /// The lock is <see cref="PayerLock"/>, the same one a booking takes on this wallet, so the
+    /// two balances in the record are read where nothing else can move them, and the live
+    /// balance frame waits for the commit (D2-B07) instead of announcing money that may yet roll
+    /// back. Returns the exception instead of a result when the post lost an idempotency race,
+    /// AFTER the transaction has rolled back, so the caller can re-read on a clean connection.
+    /// </para>
+    /// </summary>
+    private static async Task<(AdjustmentPosted? Posted, DbUpdateException? Raced)> PostAndRecordAsync(
+        AdjustmentWork work, AdjustServices services, CancellationToken ct)
+    {
+        var (ledger, db, tenant) = (services.Ledger, services.Db, services.Tenant);
+        var (userId, req, kind, ctx) = (work.UserId, work.Request, work.Kind, work.Http);
+        var actorId = ctx.User.Id() ?? Guid.Empty;
+
+        await using var payerLock = await PayerLock.BeginAsync(db, tenant.TenantId, userId, services.Outbox, ct);
+        var balanceBefore = await ledger.GetBalanceAsync(userId, ct);
+
         LedgerEntry entry;
         try
         {
             entry = await ledger.PostAsync(new LedgerPosting(
                 UserId: userId,
-                Type: kind!.Value.Type,
+                Type: kind.Type,
                 AmountCredits: req.AmountCredits,
-                ActorUserId: ctx.User.Id() ?? Guid.Empty,
+                ActorUserId: actorId,
                 // Naming the booking is what nets this adjustment, per leg, against a late
                 // box upload's automatic reversal of the same no-show, instead of correcting
                 // the member twice. See BookingService.SettledLegsAsync and the settlement
                 // model's I3/I4.
                 RelatedBookingId: req.RelatedBookingId,
                 Reason: req.Reason,
-                ExternalReference: reference), ct);
+                ExternalReference: work.Reference), ct);
         }
-        catch (DbUpdateException) when (reference is not null)
+        catch (DbUpdateException ex) when (work.Reference is not null)
         {
-            // The lookup above loses the race when both clicks are in flight at once, which is
-            // exactly what a double-click produces. The unique filtered index on
-            // ExternalReference is what actually holds the line; this turns its violation into
-            // the same answer the first request got, so the desk sees one success rather than a
-            // 500 beside a movement that did happen.
-            db.ChangeTracker.Clear();
-            var raced = await ExistingAdjustmentAsync(db, reference, ct);
-            if (raced is null) throw;
-            return Replay(raced, req, kind!.Value, balanceBefore, user);
+            return (null, ex);
         }
 
         var balanceAfter = await ledger.GetBalanceAsync(userId, ct);
@@ -291,7 +351,7 @@ public static class WalletEndpoints
         db.AuditLogs.Add(new Domain.AuditLog
         {
             TenantId = tenant.TenantId,
-            ActorUserId = ctx.User.Id() ?? Guid.Empty,
+            ActorUserId = actorId,
             SubjectUserId = userId,
             Action = AdminCreditReasons.AuditAction,
             IpAddress = ctx.Connection.RemoteIpAddress?.ToString(),
@@ -300,31 +360,54 @@ public static class WalletEndpoints
             {
                 user_id = userId,
                 entry_id = entry.Id,
-                entry_type = kind!.Value.Type.ToString(),
+                entry_type = kind.Type.ToString(),
                 amount_credits = req.AmountCredits,
                 reason = req.Reason,
-                reason_code = kind.Value.Code,
+                reason_code = kind.Code,
                 balance_before_credits = balanceBefore,
                 balance_after_credits = balanceAfter,
                 related_booking_id = req.RelatedBookingId,
                 idempotency_key = req.IdempotencyKey,
             }),
         });
+
+        // The club's undeletable record. The vocabulary has carried credit.adjusted and
+        // credit.topped_up since the change record was built, and nothing wrote either — so the
+        // one by-hand money movement in the product was the one admin action the change record
+        // could not show. audit_log has a delete path; this table does not. A top-up code files
+        // as credit.topped_up because it counts as revenue and a club reads the two differently;
+        // every other code is an adjustment. Both require a reason, which RefuseRequest already
+        // demands.
+        await services.Changes.StageAsync(new AdminChange(
+            Action: kind.Type == LedgerEntryType.AdminTopUp
+                ? AdminChangeActions.CreditToppedUp
+                : AdminChangeActions.CreditAdjusted,
+            ActorUserId: actorId,
+            SubjectKind: AdminChangeSubjects.User,
+            SubjectId: userId,
+            SubjectLabel: PersonNames.Of(userId, await PersonNames.ForAsync(db, [userId], ct)),
+            Reason: req.Reason,
+            Before: new { balance_credits = balanceBefore },
+            After: new
+            {
+                balance_credits = balanceAfter,
+                amount_credits = req.AmountCredits,
+                reason_code = kind.Code,
+                entry_id = entry.Id,
+                related_booking_id = req.RelatedBookingId,
+            }), ct);
         await db.SaveChangesAsync(ct);
+        await payerLock.CommitAsync(ct);
 
-        // "Every player-affecting event sends an email" — and an admin moving a member's balance
-        // by hand is about as player-affecting as it gets. Nothing was sent, so the first a
-        // member knew of a desk adjustment was the next time they opened their wallet. Background
-        // dispatch: an admin is waiting on this form and SMTP is not what decides whether the
-        // movement stands.
-        Crusaders.Mainframe.Api.Email.EmailDispatch.InBackground(
-            email, logger,
-            Crusaders.Mainframe.Api.Email.EmailTemplates.CreditAdjustment(
-                await services.Club.GetAsync(ct), user.Email, entry.AmountCredits, balanceAfter, req.Reason),
-            $"credit adjustment {entry.Id}");
-
-        return AdjustmentResult(entry, kind!.Value, balanceBefore, balanceAfter, user);
+        return (new AdjustmentPosted(entry, balanceBefore, balanceAfter), null);
     }
+
+    /// <summary>One by-hand movement to post, bundled for the complexity gate's parameter bound.</summary>
+    private sealed record AdjustmentWork(
+        Guid UserId, AdjustRequest Request, AdminCreditReasons.Kind Kind, string? Reference, HttpContext Http);
+
+    /// <summary>A committed by-hand movement and the two balances it moved between.</summary>
+    private sealed record AdjustmentPosted(LedgerEntry Entry, decimal BalanceBefore, decimal BalanceAfter);
 
     /// <summary>
     /// Everything that can refuse a by-hand movement before anything is read from the database,
@@ -559,7 +642,11 @@ public sealed record AdjustServices(
     Crusaders.Mainframe.Api.Multitenancy.ITenantContext Tenant,
     Crusaders.Mainframe.Api.Email.IEmailService Email,
     ILoggerFactory LoggerFactory,
-    Crusaders.Mainframe.Api.Email.ClubIdentityResolver Club);
+    Crusaders.Mainframe.Api.Email.ClubIdentityResolver Club,
+    AdminChangeRecorder Changes,
+    // The adjustment's live balance frame is held until its transaction commits; see
+    // WalletEndpoints.PostAndRecordAsync.
+    RealtimeOutbox Outbox);
 
 /// <summary>
 /// <paramref name="RelatedBookingId"/> is optional: set it when the adjustment compensates

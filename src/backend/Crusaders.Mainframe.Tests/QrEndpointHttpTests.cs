@@ -336,6 +336,11 @@ public sealed class QrEndpointHttpTests
 
         var code = (await GenerateAsync(MemberClient(factory, s))).GetProperty("code").GetString()!;
 
+        // The token below claims the admin role for this same user, and since R20 a claimed role
+        // is honoured only for an account that really holds it (LiveAdminRole) — so the account
+        // is made one. Promoting AFTER the code was generated keeps the code a member's.
+        await PeopleClub.ReadAsync(factory, db => db.Users.IgnoreQueryFilters()
+            .Where(u => u.Id == s.MemberId).ExecuteUpdateAsync(u => u.SetProperty(x => x.IsAdmin, true)));
         var admin = MemberClient(factory, s);   // any authenticated principal; role is added below
         admin.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", AdminToken(s));
         var match = await admin.PostAsJsonAsync("/api/v1/court/2/qr/match", new { Token = code });
