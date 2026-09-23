@@ -5,6 +5,6 @@
   "keywords": "gate, door, lock, relay, scanner, fault, embedded",
   "frameworks": "*",
   "platforms": "*",
-  "dependencies": { "devapi": "*", "devlink": "*", "eventq": "*", "hal": "*", "roster": "*", "timebase": "*" },
+  "dependencies": { "devapi": "*", "devlink": "*", "eventq": "*", "hal": "*", "memcode": "*", "roster": "*", "timebase": "*" },
   "build": { "flags": ["-I include"] }
 }

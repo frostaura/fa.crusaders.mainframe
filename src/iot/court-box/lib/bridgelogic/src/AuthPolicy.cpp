@@ -43,6 +43,10 @@ AuthCommand AuthPolicy::afterWalkUp(const court::Outcome& outcome, uint32_t nowM
   return arm(outcome.court, nowMs);
 }
 
+AuthCommand AuthPolicy::afterPayForQuote(uint32_t nowMs) {
+  return arm(kUnbound, nowMs);
+}
+
 bool AuthPolicy::allowsRelease(uint8_t court, uint32_t nowMs) const {
   return armed(nowMs) && court_ != kUnbound && court_ == court;
 }

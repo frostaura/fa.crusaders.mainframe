@@ -155,6 +155,18 @@ public:
   /// be a barcode that opens any court in the club.
   Outcome onScan(const char* token, roster::CourtCount courts, eventq::Method method, uint32_t nowMs);
 
+  /// A member presented a SINGLE ROTATING CODE (docs/specs/member-code.md) and
+  /// the offline verifier has judged it. `ref` is the REF it proved, or null
+  /// when it proved nothing — then `refusal` says what the box treats the scan
+  /// as (Unknown for a bad code, Stale for a clock it no longer trusts).
+  ///
+  /// The booking comes from the roster's REF lists, so an accepted partner
+  /// opens the court exactly as the organiser does; and the event's subject is
+  /// the SCANNED token, never the roster's REF list, because the scanned token
+  /// is the evidence the server re-checks with ON when it hears about this.
+  Outcome onMemberScan(const char* token, const char* ref, roster::Verdict refusal, roster::CourtCount courts,
+                       eventq::Method method, uint32_t nowMs);
+
   /// A court's lights went out — the Mega's timer expired, or somebody pressed
   /// off. Recorded so the club can see how long the court was actually used,
   /// which is the number a dispute about a 45-minute booking turns on.
@@ -239,6 +251,19 @@ Outcome Session<RosterT, QueueT>::onScan(const char* token, roster::CourtCount c
 }
 
 template <typename RosterT, typename QueueT>
+Outcome Session<RosterT, QueueT>::onMemberScan(const char* token, const char* ref, roster::Verdict refusal,
+                                               roster::CourtCount courts, eventq::Method method,
+                                               uint32_t nowMs) {
+  roster::Decision decision;
+  if (ref != nullptr) {
+    decision = roster_.decideMember(ref, courts, nowMs);
+  } else {
+    decision.verdict = refusal;
+  }
+  return applyDecision(decision, token, eventq::Event::kNoCourt, method, nowMs);
+}
+
+template <typename RosterT, typename QueueT>
 Outcome Session<RosterT, QueueT>::applyDecision(const roster::Decision& decision, const char* token,
                                                 uint8_t fallbackCourt, eventq::Method method,
                                                 uint32_t nowMs) {
@@ -274,10 +299,17 @@ Outcome Session<RosterT, QueueT>::applyDecision(const roster::Decision& decision
 
     event.kind = eventq::Kind::Activation;
     event.durationMs = grantMs;
-    // The roster's token, not the scanned bytes. They are equal by construction
-    // here, and taking the stored one means a scanner that appends a stray
-    // character cannot put it in the ledger reference.
-    static_cast<void>(event.setSubject(decision.entry.token));
+    // The roster's token, not the scanned bytes, for a legacy code: they are
+    // equal by construction, and taking the stored one means a scanner that
+    // appends a stray character cannot put it in the ledger reference.
+    //
+    // For a v1 entry the roster holds the booking's PLAYERS, not a code, and
+    // the evidence the server needs is the code that was actually presented —
+    // it re-checks that token's ON half, which this box cannot (see
+    // onMemberScan). The verifier has already parsed it whole, so it is the
+    // nineteen characters it proved and nothing a scanner appended.
+    static_cast<void>(
+        event.setSubject(roster::isRefList(decision.entry.token) ? token : decision.entry.token));
   } else {
     outcome.action = Action::Refuse;
     event.kind = eventq::Kind::UnknownScan;

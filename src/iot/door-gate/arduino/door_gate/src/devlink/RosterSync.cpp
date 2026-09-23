@@ -4,6 +4,8 @@
 
 #include <string.h>
 
+#include "../memcode/Token.h"
+
 namespace devlink {
 
 namespace {
@@ -85,6 +87,24 @@ bool parseRelay(const char* text, Field field, uint8_t& out) {
   return detail::parseRelayDigit(text + field.start, field.end - field.start, out);
 }
 
+/// A v1 entry's REF list — `m` then one to four WHOLE, CANONICAL REFs. Server
+/// data, so a lower-case or substituted REF is a bug to refuse, not a typo to
+/// forgive, and a list that is not whole REFs would match a REF nobody holds.
+bool validRefList(const char* token, size_t n) {
+  const size_t body = n - 1U;
+  if (body == 0U || (body % roster::kRefLen) != 0U || body / roster::kRefLen > roster::kMaxRefs) {
+    return false;
+  }
+  for (size_t at = 1U; at < n; at += roster::kRefLen) {
+    char ref[roster::kRefLen + 1U] = {};
+    memcpy(ref, token + at, roster::kRefLen);
+    if (!memcode::isCanonicalRef(ref)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool parseToken(const char* text, Field field, char* out, size_t outCap) {
   const size_t n = field.end - field.start;
   if (n == 0U || n > roster::kMaxTokenLen || n + 1U > outCap) {
@@ -97,6 +117,10 @@ bool parseToken(const char* text, Field field, char* out, size_t outCap) {
     out[i] = text[field.start + i];
   }
   out[n] = '\0';
+  if (roster::isRefList(out) && !validRefList(out, n)) {
+    out[0] = '\0';
+    return false;
+  }
   return true;
 }
 

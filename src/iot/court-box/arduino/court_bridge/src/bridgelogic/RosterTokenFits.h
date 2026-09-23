@@ -28,6 +28,7 @@
 #ifndef CRUSADERS_BRIDGELOGIC_ROSTERTOKENFITS_H
 #define CRUSADERS_BRIDGELOGIC_ROSTERTOKENFITS_H
 
+#include "../memcode/Token.h"
 #include "../protocol/Protocol.h"
 #include "../roster/Roster.h"
 
@@ -35,6 +36,14 @@ namespace bridgelogic {
 
 static_assert(roster::kMaxTokenLen <= proto::kMaxArgLen,
               "a roster token must fit a !SCAN argument or the box holds bookings it can never match");
+
+// THE SINGLE ROTATING MEMBER CODE MUST FIT THE MEGA AS IT IS. The Mega is not
+// reflashed for member codes — its scanner line and the `!SCAN` frame are
+// bounded by proto::kMaxArgLen, and the bridge remembers a scan in a buffer of
+// the same size — so a v1 token longer than that is a code the box can never
+// read. Nineteen characters against twenty-four; this is where the two meet.
+static_assert(memcode::kTokenLen <= proto::kMaxArgLen,
+              "a v1 member code must fit a !SCAN argument: the Mega is untouched by member codes");
 
 } // namespace bridgelogic
 

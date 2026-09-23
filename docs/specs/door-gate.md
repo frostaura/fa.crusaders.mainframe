@@ -1071,6 +1071,15 @@ moment it loses the server it opens for nobody. That is a narrower failure than 
 replaces — a board anybody could self-register being handed the club's whole live code set —
 and it lasts exactly until an admin names the door.
 
+**With the single rotating member code (firmware 1.1.0, [`member-code.md`](member-code.md))**
+the offline rule is the same rule by members instead of by codes: a door that cannot reach the
+server **verifies** a v1 code's OFF half against the per-day key its heartbeat delivered, then
+admits the member only if a rostered booking names them — organiser or accepted partner — inside
+that booking's window. A code the door has already opened for is refused as `replayed`; a sync
+older than the roster's six hours is `roster_stale`; everything else it cannot prove is
+`not_recognised`. What the door records is the scanned token, which the server re-checks with the
+ON half no door ever holds. Online nothing changes: the bytes go up and the answer is final.
+
 ---
 
 ## 10a. The threat model, stated honestly

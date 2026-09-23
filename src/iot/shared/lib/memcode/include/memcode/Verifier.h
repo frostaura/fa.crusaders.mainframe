@@ -1,0 +1,161 @@
+// Crusaders Mainframe — is this code good, here, now, with no network?
+//
+// WHAT IS CHECKED, AND WHAT IS NOT
+// --------------------------------
+// OFF, under the member's K_day, at the device's step or one either side. That
+// is ALL a device can check and all it tries to: ON is keyed by the member
+// secret, which never leaves the server and the member's phone. So a device
+// accepts a token whose OFF is right and whose ON is garbage — the corpus pins
+// exactly that case — and the upload of what it then did is what the server
+// re-checks with ON (`code.forgery_suspected`).
+//
+// Online, NONE of this runs: the device hands the scanned token to the server,
+// whose answer is final, exactly as for a legacy code. This is the roster's
+// fallback, and it decides only whether the member is who the code says; the
+// roster then decides whether that member may open this court or this door.
+//
+// THE ORDER OF THE VERDICTS
+// -------------------------
+//   Malformed  the scan is not a well-formed v1 token.
+//   NoClock    the device's step is unknown or too old to trust.
+//   NoKey      no candidate step has a key for this REF — the member is not in
+//              this device's ring for any day those steps fall in.
+//   WrongCode  a key was tried and OFF matched at no candidate step.
+//   Replayed   OFF matched, at a step this device has already acted on.
+//   Ok         OFF matched at `step`, which is newer than any use.
+//
+// And, from verifyGuarded only: Throttled — too many wrong codes lately, so
+// nothing is verified at all for a while (GuessGuard.h says why and how long).
+//
+// Candidates are tried as t, t-1, t+1 — the device's own step first, so the
+// step reported is the likeliest one when (one time in a million) two adjacent
+// steps share an OFF value.
+//
+// No Arduino headers, no heap. Compiles for AVR, Xtensa and the host.
+
+#ifndef CRUSADERS_MEMCODE_VERIFIER_H
+#define CRUSADERS_MEMCODE_VERIFIER_H
+
+#include <stdint.h>
+
+#include "memcode/GuessGuard.h"
+#include "memcode/KeyRing.h"
+#include "memcode/ReplayRing.h"
+#include "memcode/StepClock.h"
+#include "memcode/Token.h"
+#include "memcode/Totp.h"
+
+namespace memcode {
+
+enum class Status : uint8_t {
+  Ok = 0U,
+  Malformed = 1U,
+  NoClock = 2U,
+  NoKey = 3U,
+  WrongCode = 4U,
+  Replayed = 5U,
+  /// verifyGuarded refused to verify at all: the guess guard is locked.
+  Throttled = 6U,
+};
+
+/// The wire/log word for a status, as the corpus spells it.
+const char* statusName(Status status);
+
+struct Verdict {
+  Status status = Status::Malformed;
+  /// The parsed token — populated for every status but Malformed, so a caller
+  /// can say WHOSE code was refused and at which REF to look in the roster.
+  Token token;
+  /// The step OFF matched at. Populated for Ok and Replayed.
+  uint32_t step = 0U;
+};
+
+/// What a device holds to verify codes offline, bundled so a caller hands over
+/// one thing rather than four that must always travel together. The guard is
+/// the one member verification CHANGES.
+template <class KeyRingT, class ReplayRingT> struct OfflineCodes {
+  const StepClock& clock;
+  const KeyRingT& keys;
+  const ReplayRingT& used;
+  GuessGuard& guard;
+};
+
+template <class KeyRingT, class ReplayRingT>
+Verdict verify(const char* text, const StepClock& clock, const KeyRingT& keys, const ReplayRingT& used,
+               uint32_t nowMs) {
+  Verdict verdict;
+  if (!parse(text, verdict.token)) {
+    verdict.status = Status::Malformed;
+    return verdict;
+  }
+  if (!clock.trusted(nowMs)) {
+    verdict.status = Status::NoClock;
+    return verdict;
+  }
+
+  const uint32_t t = clock.stepAt(nowMs);
+  const uint32_t candidates[3] = {t, t - kWindowSteps, t + kWindowSteps};
+  bool anyKey = false;
+  for (uint8_t i = 0U; i < 3U; ++i) {
+    const uint8_t* key = keys.keyFor(verdict.token.ref, candidates[i]);
+    if (key == nullptr) {
+      continue;
+    }
+    anyKey = true;
+    if (offCode(key, candidates[i]) != verdict.token.off) {
+      continue;
+    }
+    verdict.step = candidates[i];
+    verdict.status = used.seen(verdict.token.ref, candidates[i]) ? Status::Replayed : Status::Ok;
+    return verdict;
+  }
+  verdict.status = anyKey ? Status::WrongCode : Status::NoKey;
+  return verdict;
+}
+
+/// The verification a DEVICE runs: verify, behind the guess guard. A locked
+/// guard answers Throttled without trying a key; a wrong code feeds the guard; a
+/// good one resets it. The token is still parsed first, so a caller can say
+/// whose code was throttled.
+template <class KeyRingT, class ReplayRingT>
+Verdict verifyGuarded(const char* text, const OfflineCodes<KeyRingT, ReplayRingT>& codes, uint32_t nowMs) {
+  if (codes.guard.locked(nowMs)) {
+    Verdict throttled;
+    throttled.status = parse(text, throttled.token) ? Status::Throttled : Status::Malformed;
+    return throttled;
+  }
+  const Verdict verdict = verify(text, codes.clock, codes.keys, codes.used, nowMs);
+  if (verdict.status == Status::WrongCode) {
+    codes.guard.failed(nowMs);
+  } else if (verdict.status == Status::Ok) {
+    codes.guard.succeeded();
+  }
+  return verdict;
+}
+
+/// The SERVER just acted on `text` — an online grant, an open, a charge — so
+/// this device records the use too, or a photo of the same code could be used
+/// here offline inside its window the moment the link drops.
+///
+/// The exact step when this device can find it (the member is in its ring);
+/// otherwise the device's step plus one, which covers every step the server can
+/// have accepted around it — at the cost of refusing the member's NEXT code
+/// offline for up to one more step, which is the safe direction. Nothing
+/// without a trusted clock, and nothing for a token that is not a v1 code.
+template <class KeyRingT, class ReplayRingT>
+void recordOnlineUse(const char* text, const StepClock& clock, const KeyRingT& keys, ReplayRingT& used,
+                     uint32_t nowMs) {
+  if (!clock.trusted(nowMs)) {
+    return;
+  }
+  const Verdict verdict = verify(text, clock, keys, used, nowMs);
+  if (verdict.status == Status::Ok || verdict.status == Status::Replayed) {
+    used.commit(verdict.token.ref, verdict.step);
+  } else if (verdict.status != Status::Malformed) {
+    used.commit(verdict.token.ref, clock.stepAt(nowMs) + kWindowSteps);
+  }
+}
+
+} // namespace memcode
+
+#endif // CRUSADERS_MEMCODE_VERIFIER_H

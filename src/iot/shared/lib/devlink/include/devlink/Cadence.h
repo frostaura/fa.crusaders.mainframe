@@ -82,7 +82,18 @@ struct HeartbeatReport {
   /// court as dark.
   const RelayState* relayState = nullptr;
   uint8_t relayStateCount = 0U;
+
+  /// Whether this firmware speaks the single rotating member code — the
+  /// `codes:m1` capability (docs/specs/member-code.md §8). Rendered as
+  /// `"caps":["codes:m1"]`, LAST, on every heartbeat, because the server keys
+  /// both what it sends this device and the club's automatic cut-over on the
+  /// latest heartbeat it saw. Absent at false, so a board that says nothing
+  /// renders the body it always rendered.
+  bool codesCapability = false;
 };
+
+/// The rendered capability suffix, exactly as the corpus pins it.
+inline constexpr char kCodesCapsSuffix[] = ",\"caps\":[\"codes:m1\"]";
 
 /// The smallest buffer renderHeartbeatBody is ever given.
 ///
@@ -90,14 +101,15 @@ struct HeartbeatReport {
 /// `","firmware_version":"` (22) + a 16-character version + `","uptime_ms":`
 /// (14) + 20 digits of uint64 + `,"restored_relays":` (19) + 3 digits +
 /// `,"relay_state":[` (16) + four elements of `"0|4294967295"` (14 each) and
-/// three commas (59) + `]}` (2) = 191 bytes, plus the NUL = 192.
+/// three commas (59) + `]` (1) + `,"caps":["codes:m1"]` (20) + `}` (1) =
+/// 211 bytes, plus the NUL = 212.
 ///
-/// 224 rather than 192 because a refusal here is not a truncated field, it is
+/// 256 rather than 212 because a refusal here is not a truncated field, it is
 /// NO HEARTBEAT AT ALL — and a box that cannot heartbeat has no court list and
-/// refuses every scan. The 32 bytes are the margin a longer version string or
-/// one more diagnostic would otherwise eat silently. It was 128 before the two
-/// report fields existed.
-inline constexpr size_t kHeartbeatBodyCap = 224U;
+/// refuses every scan. The margin is what a longer version string or one more
+/// diagnostic would otherwise eat silently. It was 128 before the two report
+/// fields existed and 224 before the capability.
+inline constexpr size_t kHeartbeatBodyCap = 256U;
 
 /// Renders the `/api/v1/device/heartbeat` body. Returns the length written, or
 /// 0 — with `out` empty — when it would not fit or `mac` is missing. Never a
@@ -111,7 +123,7 @@ inline constexpr size_t kHeartbeatBodyCap = 224U;
 /// THE SHAPE, and the ORDER IS PART OF IT because the corpus asserts bytes:
 ///
 ///     {"mac":…,"firmware_version":…,"uptime_ms":…
-///      [,"restored_relays":N][,"relay_state":["0|1834",…]]}
+///      [,"restored_relays":N][,"relay_state":["0|1834",…]][,"caps":["codes:m1"]]}
 ///
 /// <b>A DIAGNOSTIC MUST NEVER BE ABLE TO STOP A HEARTBEAT.</b> That is the
 /// exact mirror of the server-side rule that made `no_push` a `long?` rather

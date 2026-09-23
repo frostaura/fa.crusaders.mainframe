@@ -220,6 +220,13 @@ them off the glass and the spec is where their meaning is pinned:
 | `TRY AGAIN / SCAN TO START` | The grant was painted but the `!ON` could not be sent (full TX ring, dead cable); the court is left dark in the bridge's books so the next `!STATE` does not synthesise a Release for a session that never started. |
 | `CONNECTED / SCAN TO START` | The box is on the club WiFi. Painted once at the end of `setup()` and again on the first `!PONG` of the boot, so it appears in the **run** DIP position — including after a USB flash of the ESP, where the Mega was not on the other end of the UART to receive it. |
 | `CRUSADERS COURTS / SCAN TO START` | The box is **not** on the WiFi. Deliberately the same words the Mega paints when it is idle: the court still works offline from the roster cache, so the glass does not shout an error at a member who can simply scan. Same two paint points as the line above. |
+| `CODE USED / WAIT 30 SECONDS` | A single rotating member code (bridge 2.1.0) that this box, offline, or the server (`code_used`) has already acted on. The member's next code, thirty seconds later, works. |
+
+The D10 pay-for screens (`CT2 BOOKED / PAY 50cr? / PRESS CT2 TO PAY` and its answers) are
+staged with `!ROW`/`!SHOW` like every other multi-row screen; their exact text and the proof that
+each fits the safe subset are in [`member-code.md`](member-code.md) §9.3. **Member codes add no
+verb, no frame and no argument to this protocol**: a v1 code is 19 characters and travels in the
+`!SCAN` argument the Mega already bounds at 24.
 
 Those are the only two identity screens, and there are no others to add. There
 is no claim-code screen, because there is nothing to claim: the API base URL and

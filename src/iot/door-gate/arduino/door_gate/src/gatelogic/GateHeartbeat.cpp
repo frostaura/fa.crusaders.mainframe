@@ -5,6 +5,7 @@
 #include <stdio.h>
 
 #include "../devapi/Json.h"
+#include "../devlink/Cadence.h"
 #include "../timebase/TimeBase.h"
 
 namespace gatelogic {
@@ -72,9 +73,12 @@ size_t renderGateHeartbeatBody(char* out, size_t cap, const char* mac, const cha
     return 0U;
   }
 
+  // The capability LAST: the same suffix, byte for byte, as the court box's —
+  // one server reads both.
+  const char* caps = diagnostics.codesCapability ? devlink::kCodesCapsSuffix : "";
   const int written = snprintf(
-      out, cap, "{\"mac\":\"%s\",\"firmware_version\":\"%s\",\"uptime_ms\":%s,\"kind\":\"gate\"%s%s}", mac,
-      firmwareVersion, uptime, noPush, eventsLost);
+      out, cap, "{\"mac\":\"%s\",\"firmware_version\":\"%s\",\"uptime_ms\":%s,\"kind\":\"gate\"%s%s%s}", mac,
+      firmwareVersion, uptime, noPush, eventsLost, caps);
   if (written < 0 || static_cast<size_t>(written) >= cap) {
     out[0] = '\0';
     return 0U;

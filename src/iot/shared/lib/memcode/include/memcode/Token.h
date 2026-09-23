@@ -1,0 +1,105 @@
+// Crusaders Mainframe — the single rotating member code, as characters.
+//
+// WHAT A TOKEN IS
+// ---------------
+// Nineteen characters a member's phone renders as a QR code and every scanner
+// in the club reads (docs/specs/member-code.md §3):
+//
+//     1  K7M2  56008441  714835
+//     ^  ^^^^  ^^^^^^^^  ^^^^^^
+//     |  REF   ON        OFF
+//     version
+//
+//   * `1`   — the version. Nothing else is a v1 token.
+//   * REF   — four Crockford base32 characters: the member, within the club. It
+//             is NOT a secret; it is how an offline device finds the member's
+//             per-day key and the member's booking in its roster.
+//   * ON    — eight digits of TOTP-SHA-256 under the member's secret. Only the
+//             server can check it; every spend of money needs it.
+//   * OFF   — six digits of TOTP-SHA-256 under that member's key for the club
+//             day. A court box or a door checks it offline.
+//
+// WHY NINETEEN IS LOAD-BEARING
+// ----------------------------
+// It fits the Mega's scan line and the `!SCAN` argument (24), the door gate's
+// assembler and the roster token cap (20) — the Mega is untouched by this
+// change, and the ONLY reason it can be is that the whole token fits the limits
+// its firmware already enforces. The device projects static_assert it where the
+// two constants meet (court-box `RosterTokenFits.h`, gate `GateConfig.h`).
+//
+// AND IT IS WHAT SEPARATES A V1 TOKEN FROM A LEGACY ONE
+// -----------------------------------------------------
+// Every legacy code — a booking code or a sixty-second member QR — is exactly
+// twelve characters, so length alone tells the two apart: there is no scan that
+// could be read both ways. `looksLikeV1` is that test and nothing more; `parse`
+// is the strict one.
+//
+// No Arduino headers, no heap. Compiles for AVR, Xtensa and the host, and is
+// valid C++11: every constexpr function is one return statement.
+
+#ifndef CRUSADERS_MEMCODE_TOKEN_H
+#define CRUSADERS_MEMCODE_TOKEN_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+namespace memcode {
+
+inline constexpr char kVersion = '1';
+inline constexpr size_t kRefLen = 4U;
+inline constexpr size_t kOnDigits = 8U;
+inline constexpr size_t kOffDigits = 6U;
+inline constexpr size_t kTokenLen = 1U + kRefLen + kOnDigits + kOffDigits;
+
+static_assert(kTokenLen == 19U, "the token is nineteen characters by contract");
+
+/// The REF's value space: twenty bits. Zero ("0000") is reserved and never
+/// assigned, so a zeroed buffer can never name a member.
+inline constexpr uint32_t kMaxRef = (1UL << 20) - 1UL;
+
+/// The capability a device that speaks this contract reports on its heartbeat.
+inline constexpr char kCapability[] = "codes:m1";
+
+/// A parsed token. The REF is held both as its value and as its CANONICAL text
+/// — upper-case, `O` read as `0`, `I` and `L` read as `1` — because the roster
+/// and the key ring compare canonical text and the server compares values.
+struct Token {
+  uint32_t ref = 0U;
+  char refText[kRefLen + 1U] = {};
+  uint32_t on = 0U;
+  uint32_t off = 0U;
+};
+
+/// Nineteen characters beginning with the version character. The CHEAP test,
+/// deciding which path a scan takes; a token that passes it and fails `parse`
+/// is a malformed v1 token, never a legacy one.
+bool looksLikeV1(const char* text);
+
+/// The strict parse. False, with `out` untouched, on any length but nineteen,
+/// any version but `1`, a REF outside Crockford (U, punctuation, whitespace) or
+/// equal to the reserved zero, or a non-digit in ON or OFF. The REF alone is
+/// normalised; the digits are digits.
+bool parse(const char* text, Token& out);
+
+/// Decodes four characters of REF with Crockford normalisation. False on
+/// anything that is not a Crockford character, and on the reserved zero.
+bool decodeRef(const char* text, uint32_t& value);
+
+/// Writes the canonical four characters of `value` plus a NUL into `out`
+/// (at least kRefLen + 1 bytes). False when `value` is zero or past kMaxRef.
+bool encodeRef(uint32_t value, char* out);
+
+/// True when `text` is exactly the canonical rendering of a valid REF — what
+/// server-produced data (a roster entry, a key element) must be. A lower-case
+/// or substituted REF there is a server bug, not a member's typo, and is
+/// refused rather than normalised.
+bool isCanonicalRef(const char* text);
+
+/// Renders a token into `out` (at least kTokenLen + 1 bytes). False when any
+/// field is out of range. Used by the host suite and by nothing on a board —
+/// a device reads tokens, it never makes one.
+bool format(uint32_t ref, uint32_t on, uint32_t off, char* out, size_t outCap);
+
+} // namespace memcode
+
+#endif // CRUSADERS_MEMCODE_TOKEN_H

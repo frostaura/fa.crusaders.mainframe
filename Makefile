@@ -236,13 +236,24 @@ test-integration:
 #
 # Both diffs are evaluated before the target fails, so one stale family does not
 # hide the other.
+#
+# THE THIRD, `membercode/`, is the gate's direction — the corpus is the derived
+# file — and its generator is the REFERENCE implementation of the single
+# rotating member code (docs/specs/member-code.md), written with Python's own
+# hmac, hashlib and zoneinfo so that none of the four implementations reading
+# it (both firmwares, the server, the phone) is checked against itself. It is
+# the whole directory, not a list: a family that gains a file must not be able
+# to gain it silently.
+MEMBERCODE_CORPUS = src/contracts/device-protocol/membercode
 CORPUS_GENERATED = $(IOT_DIR)/court-box/test/test_protocol/corpus_generated.h \
 	src/contracts/device-protocol/gate/cases.json \
-	src/contracts/device-protocol/gate/manifest.json
+	src/contracts/device-protocol/gate/manifest.json \
+	$(MEMBERCODE_CORPUS)
 
 corpus-check:
 	$(PY) $(IOT_TOOLS)/gen_corpus.py
 	$(PY) src/contracts/device-protocol/gate/gen_cases.py
+	$(PY) $(IOT_SHARED_TOOLS)/membercode_vectors.py
 	@git diff --exit-code --stat -- $(CORPUS_GENERATED) \
 	  || (echo "generated corpus files are stale — rerun the generators and commit" && exit 1)
 	@untracked="$$(git ls-files --others --exclude-standard -- $(CORPUS_GENERATED))"; \

@@ -97,8 +97,11 @@
 #error                                                                                                       \
     "the gate's firmware version did not reach the compiler — see [env:door_gate] in src/iot/door-gate/platformio.ini"
 #endif
-#if (FW_VERSION_MAJOR != 1) || (FW_VERSION_MINOR != 0) || (FW_VERSION_PATCH != 0)
-#error "this image is not reporting the gate's own firmware version (1.0.0)"
+// 1.1.0 is the single rotating member code (docs/specs/member-code.md): the
+// first gate image that verifies a v1 code offline and reports `codes:m1`. The
+// Devices page showing 1.1.0 is how the person who flashed it knows it landed.
+#if (FW_VERSION_MAJOR != 1) || (FW_VERSION_MINOR != 1) || (FW_VERSION_PATCH != 0)
+#error "this image is not reporting the gate's own firmware version (1.1.0)"
 #endif
 
 // The four compiled-in values, all MANDATORY. There is no runtime store and no

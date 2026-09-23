@@ -8,6 +8,7 @@
 #include "../bridgelogic/ScanFlow.h"
 #include "../devapi/Json.h"
 #include "../devcrypto/Hex.h"
+#include "../memcode/Token.h"
 
 namespace bridgelogic {
 
@@ -76,6 +77,10 @@ constexpr ErrorLines kErrors[] = {
     // after the token resolved and after a booking was committed for that member, so
     // it is a verdict about somebody the API knows.
     {"activation_refused", "COULD NOT START", "SCAN TO RETRY", true},
+    // A single rotating code the server already acted on (docs/specs/member-
+    // code.md §4.4). The member's next code works; the same words the activate
+    // path and the offline path use. Not recognised: a used code may be a photo.
+    {"code_used", "CODE USED", "WAIT 30 SECONDS", false},
 };
 
 /// The one refusal on this path whose second line is not fixed text.
@@ -183,11 +188,15 @@ size_t renderWalkUpBody(char* out, size_t cap, const WalkUpRequest& request) {
       request.mac == nullptr || request.mac[0] == '\0') {
     return 0U;
   }
+  char age[32] = {};
+  if (memcode::looksLikeV1(request.token)) {
+    snprintf(age, sizeof(age), ",\"scan_age_ms\":%lu", static_cast<unsigned long>(request.scanAgeMs));
+  }
   const int n = snprintf(
       out, cap,
-      "{\"mac\":\"%s\",\"minutes\":%u,\"method\":\"qr\",\"token\":\"%s\",\"court\":%d,\"nonce\":\"%s\"}",
+      "{\"mac\":\"%s\",\"minutes\":%u,\"method\":\"qr\",\"token\":\"%s\",\"court\":%d,\"nonce\":\"%s\"%s}",
       request.mac, static_cast<unsigned>(request.intent.minutes), request.token,
-      static_cast<int>(request.courtNumber), request.nonce);
+      static_cast<int>(request.courtNumber), request.nonce, age);
   if (n <= 0 || static_cast<size_t>(n) >= cap) {
     out[0] = '\0';
     return 0U;

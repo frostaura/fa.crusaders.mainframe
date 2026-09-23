@@ -7,7 +7,7 @@
 #pragma once
 
 #define FW_VERSION_MAJOR 1
-#define FW_VERSION_MINOR 0
+#define FW_VERSION_MINOR 1
 #define FW_VERSION_PATCH 0
 #define TARGET_DOOR_GATE 1
 #define GATE_SCANNER_RX_PIN 4

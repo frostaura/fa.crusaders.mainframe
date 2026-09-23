@@ -190,6 +190,14 @@ namespace gatelogic {
 /// roster sized to this holds every entry there can be.
 inline constexpr uint8_t kGateRosterEntries = 48U;
 
+/// THE SINGLE ROTATING MEMBER CODE's per-day keys this board can hold, and the
+/// uses it remembers (docs/specs/member-code.md §6). 72 keys is what fits the
+/// 4096-byte contract beside forty-eight four-player entries — the corpus's
+/// `gate-heartbeat-response-codes-full` is the proof — and 32 remembered uses
+/// cover more distinct members than one door sees inside ninety seconds.
+inline constexpr uint8_t kGateKeyRingSlots = 72U;
+inline constexpr uint8_t kGateReplaySlots = 32U;
+
 /// The event ring's depth, as a value rather than as a macro, so the queue type
 /// the orchestration is written against is the one the board actually builds.
 inline constexpr uint16_t kGateEventSlots = static_cast<uint16_t>(EVENTQ_SLOTS);

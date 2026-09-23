@@ -1,0 +1,313 @@
+{
+  "description": "The roster element grammar for a v1 booking, TOKEN = 'm' + one to four REFs (organiser first, then accepted partners), 5 to 17 characters, inside the unchanged TOKEN|relay|opens_in|closes_in element. Then how a device decides a VERIFIED REF against it.",
+  "marker": "m",
+  "elements": [
+    {
+      "id": "refs-1",
+      "note": "1 member REF(s): organiser first",
+      "element": "m18Y9|2|-120|2580",
+      "ok": true,
+      "token": "m18Y9",
+      "refs": [
+        "18Y9"
+      ],
+      "relay": 2,
+      "opens_ms": 0,
+      "closes_ms": 2580000
+    },
+    {
+      "id": "refs-2",
+      "note": "2 member REF(s): organiser first",
+      "element": "m18Y9BWDJ|2|-120|2580",
+      "ok": true,
+      "token": "m18Y9BWDJ",
+      "refs": [
+        "18Y9",
+        "BWDJ"
+      ],
+      "relay": 2,
+      "opens_ms": 0,
+      "closes_ms": 2580000
+    },
+    {
+      "id": "refs-3",
+      "note": "3 member REF(s): organiser first",
+      "element": "m18Y9BWDJHN77|2|-120|2580",
+      "ok": true,
+      "token": "m18Y9BWDJHN77",
+      "refs": [
+        "18Y9",
+        "BWDJ",
+        "HN77"
+      ],
+      "relay": 2,
+      "opens_ms": 0,
+      "closes_ms": 2580000
+    },
+    {
+      "id": "refs-4",
+      "note": "4 member REF(s): organiser first",
+      "element": "m18Y9BWDJHN77R8GQ|2|-120|2580",
+      "ok": true,
+      "token": "m18Y9BWDJHN77R8GQ",
+      "refs": [
+        "18Y9",
+        "BWDJ",
+        "HN77",
+        "R8GQ"
+      ],
+      "relay": 2,
+      "opens_ms": 0,
+      "closes_ms": 2580000
+    },
+    {
+      "id": "legacy-token-still-parses",
+      "note": "a legacy booking code in the same roster is untouched",
+      "element": "7Q3F9KM2XZ8B|0|60|900",
+      "ok": true,
+      "token": "7Q3F9KM2XZ8B",
+      "refs": null,
+      "relay": 0,
+      "opens_ms": 60000,
+      "closes_ms": 900000
+    },
+    {
+      "id": "marker-alone",
+      "note": "a REF list with no REF",
+      "element": "m|0|0|900",
+      "ok": false
+    },
+    {
+      "id": "partial-ref",
+      "note": "7 characters after the marker: not whole REFs",
+      "element": "m18Y9BWD|0|0|900",
+      "ok": false
+    },
+    {
+      "id": "five-refs",
+      "note": "five REFs is 21 characters, past the token cap — and past the four players a booking may have",
+      "element": "m18Y9BWDJHN77R8GQ67RA|0|0|900",
+      "ok": false
+    },
+    {
+      "id": "lowercase-ref",
+      "note": "server data is canonical: no normalisation on a roster REF",
+      "element": "m18y9|0|0|900",
+      "ok": false
+    },
+    {
+      "id": "u-in-ref",
+      "note": "U is not Crockford",
+      "element": "mU8Y9|0|0|900",
+      "ok": false
+    },
+    {
+      "id": "reserved-ref",
+      "note": "REF 0000 is reserved",
+      "element": "m0000|0|0|900",
+      "ok": false
+    },
+    {
+      "id": "o-for-zero-in-ref",
+      "note": "an O where the canonical REF has 0 is a server bug, refused rather than normalised",
+      "element": "mO111|0|0|900",
+      "ok": false
+    },
+    {
+      "id": "i-for-one-in-ref",
+      "note": "likewise an I for a 1",
+      "element": "m0III|0|0|900",
+      "ok": false
+    },
+    {
+      "id": "capital-marker",
+      "note": "a capital M is NOT the marker: this is an ordinary five-character token and matches only those exact bytes",
+      "element": "M18Y9|0|0|900",
+      "ok": true,
+      "token": "M18Y9",
+      "refs": null,
+      "relay": 0,
+      "opens_ms": 0,
+      "closes_ms": 900000
+    }
+  ],
+  "decide": [
+    {
+      "id": "organiser",
+      "note": "the organiser's REF lights the booking's court for what is left of it",
+      "roster": [
+        "m18Y9BWDJ|1|-300|2400",
+        "mHN77R8GQ67RADCPM|3|1800|4500",
+        "7Q3F9KM2XZ8B|0|-60|1200"
+      ],
+      "accepted_at_ms": 0,
+      "max_age_ms": 21600000,
+      "courts": 4,
+      "at_ms": 60000,
+      "verdict": "allow",
+      "ref": "18Y9",
+      "court": 1,
+      "grant_ms": 2340000
+    },
+    {
+      "id": "partner",
+      "note": "an accepted partner's REF lights the same court",
+      "roster": [
+        "m18Y9BWDJ|1|-300|2400",
+        "mHN77R8GQ67RADCPM|3|1800|4500",
+        "7Q3F9KM2XZ8B|0|-60|1200"
+      ],
+      "accepted_at_ms": 0,
+      "max_age_ms": 21600000,
+      "courts": 4,
+      "at_ms": 60000,
+      "verdict": "allow",
+      "ref": "BWDJ",
+      "court": 1,
+      "grant_ms": 2340000
+    },
+    {
+      "id": "fourth-player",
+      "note": "the fourth REF of a full booking",
+      "roster": [
+        "m18Y9BWDJ|1|-300|2400",
+        "mHN77R8GQ67RADCPM|3|1800|4500",
+        "7Q3F9KM2XZ8B|0|-60|1200"
+      ],
+      "accepted_at_ms": 0,
+      "max_age_ms": 21600000,
+      "courts": 4,
+      "at_ms": 1900000,
+      "verdict": "allow",
+      "ref": "DCPM",
+      "court": 3,
+      "grant_ms": 2600000
+    },
+    {
+      "id": "too-early",
+      "note": "Alex's booking opens in thirty minutes",
+      "roster": [
+        "m18Y9BWDJ|1|-300|2400",
+        "mHN77R8GQ67RADCPM|3|1800|4500",
+        "7Q3F9KM2XZ8B|0|-60|1200"
+      ],
+      "accepted_at_ms": 0,
+      "max_age_ms": 21600000,
+      "courts": 4,
+      "at_ms": 60000,
+      "verdict": "too_early",
+      "ref": "HN77",
+      "court": 3
+    },
+    {
+      "id": "too-late",
+      "note": "Sam's booking closed",
+      "roster": [
+        "m18Y9BWDJ|1|-300|2400",
+        "mHN77R8GQ67RADCPM|3|1800|4500",
+        "7Q3F9KM2XZ8B|0|-60|1200"
+      ],
+      "accepted_at_ms": 0,
+      "max_age_ms": 21600000,
+      "courts": 4,
+      "at_ms": 2400000,
+      "verdict": "too_late",
+      "ref": "BWDJ",
+      "court": 1
+    },
+    {
+      "id": "wrong-court",
+      "note": "a box driving two courts holds a booking on relay 3",
+      "roster": [
+        "m18Y9BWDJ|1|-300|2400",
+        "mHN77R8GQ67RADCPM|3|1800|4500",
+        "7Q3F9KM2XZ8B|0|-60|1200"
+      ],
+      "accepted_at_ms": 0,
+      "max_age_ms": 21600000,
+      "courts": 2,
+      "at_ms": 1900000,
+      "verdict": "wrong_court",
+      "ref": "HN77",
+      "court": 3
+    },
+    {
+      "id": "partner-in-a-later-booking",
+      "note": "Kim is the third player of a booking that has not opened",
+      "roster": [
+        "m18Y9BWDJ|1|-300|2400",
+        "mHN77R8GQ67RADCPM|3|1800|4500",
+        "7Q3F9KM2XZ8B|0|-60|1200"
+      ],
+      "accepted_at_ms": 0,
+      "max_age_ms": 21600000,
+      "courts": 4,
+      "at_ms": 60000,
+      "verdict": "too_early",
+      "ref": "67RA",
+      "court": 3
+    },
+    {
+      "id": "absent-ref",
+      "note": "a REF the roster does not name at all",
+      "roster": [
+        "m18Y9BWDJ|1|-300|2400",
+        "mHN77R8GQ67RADCPM|3|1800|4500",
+        "7Q3F9KM2XZ8B|0|-60|1200"
+      ],
+      "accepted_at_ms": 0,
+      "max_age_ms": 21600000,
+      "courts": 4,
+      "at_ms": 60000,
+      "verdict": "unknown",
+      "ref": "ZZZZ"
+    },
+    {
+      "id": "stale",
+      "note": "a roster past its maximum age admits nobody",
+      "roster": [
+        "m18Y9BWDJ|1|-300|2400",
+        "mHN77R8GQ67RADCPM|3|1800|4500",
+        "7Q3F9KM2XZ8B|0|-60|1200"
+      ],
+      "accepted_at_ms": 0,
+      "max_age_ms": 21600000,
+      "courts": 4,
+      "at_ms": 21600001,
+      "verdict": "stale",
+      "ref": "18Y9"
+    },
+    {
+      "id": "ref-list-never-matches-as-a-token",
+      "note": "presenting the roster's own bytes as a scan must not match: a REF is not secret, so 'm' + a REF would otherwise be a key to the court",
+      "roster": [
+        "m18Y9BWDJ|1|-300|2400",
+        "mHN77R8GQ67RADCPM|3|1800|4500",
+        "7Q3F9KM2XZ8B|0|-60|1200"
+      ],
+      "accepted_at_ms": 0,
+      "max_age_ms": 21600000,
+      "courts": 4,
+      "at_ms": 60000,
+      "verdict": "unknown",
+      "token": "m18Y9BWDJ"
+    },
+    {
+      "id": "legacy-token-path",
+      "note": "a legacy code still matches its own entry by bytes",
+      "roster": [
+        "m18Y9BWDJ|1|-300|2400",
+        "mHN77R8GQ67RADCPM|3|1800|4500",
+        "7Q3F9KM2XZ8B|0|-60|1200"
+      ],
+      "accepted_at_ms": 0,
+      "max_age_ms": 21600000,
+      "courts": 4,
+      "at_ms": 60000,
+      "verdict": "allow",
+      "token": "7Q3F9KM2XZ8B",
+      "court": 0,
+      "grant_ms": 1140000
+    }
+  ]
+}

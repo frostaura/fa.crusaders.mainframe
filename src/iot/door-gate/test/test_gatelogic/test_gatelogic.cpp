@@ -34,6 +34,7 @@
 
 #include "hal/PinLevel.h"
 
+#include "devcrypto/Base64Url.h"
 #include "devlink/ApiBreaker.h"
 #include "devlink/EventUpload.h"
 #include "devlink/RosterSync.h"
@@ -58,6 +59,8 @@
 #include "gatelogic/ScanDebounce.h"
 #include "gatelogic/StaticText.h"
 #include "gatelogic/UnlockTimer.h"
+#include "memcode/Token.h"
+#include "memcode/Totp.h"
 #include "roster/Roster.h"
 
 namespace {
@@ -2401,6 +2404,85 @@ void test_app_the_debounce_window_starts_when_the_decision_was_made() {
   rig.scanner.feed("7Q3F9KM2XZ8B\n");
   rig.tick();
   TEST_ASSERT_EQUAL_UINT16(2U, rig.http.calls());
+}
+
+/// THE SINGLE ROTATING MEMBER CODE, through the whole board (member-code.md §6).
+///
+/// A heartbeat carrying a v1 roster entry and the code sync; the link drops;
+/// the member's current code opens the door from the roster's REF list, and the
+/// record queued for the server carries the SCANNED token — the evidence the
+/// server re-checks with ON. The same code again is a replay and opens nothing.
+/// Every base, because the step clock counts on millis() across the wrap.
+void test_app_a_v1_member_code_opens_the_door_offline_once_and_is_recorded_as_scanned() {
+  uint8_t key[memcode::kDayKeyBytes];
+  for (uint8_t i = 0U; i < memcode::kDayKeyBytes; ++i) {
+    key[i] = static_cast<uint8_t>(0x40U + i);
+  }
+  char key64[dc::b64url::encodedLen(memcode::kDayKeyBytes) + 1U] = {};
+  TEST_ASSERT_TRUE(dc::b64url::encode(key, sizeof(key), key64, sizeof(key64)));
+  char body[400] = {};
+  snprintf(body, sizeof(body),
+           "{\"kind\":\"gate\",\"gate\":{\"unlock_seconds\":3},\"roster\":[\"m000118Y9|0|0|86399\"],"
+           "\"code_step\":1000,\"code_step_ms\":0,\"code_days\":[\"900|3900\"],\"code_keys\":[\"18Y90%s\"],"
+           "\"accepted_through\":0}",
+           key64);
+
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    Rig rig(kBases[b]);
+    rig.boot(true);
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, body, 0U);
+    rig.forceHeartbeat();
+    // The board SAID it speaks the code: the server keys what it sends, and the
+    // club's cut-over, on this suffix.
+    TEST_ASSERT_EQUAL_STRING(gatelogic::kPathHeartbeat, rig.http.lastPath());
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(rig.http.lastBody(), "\"caps\":[\"codes:m1\"]"), rig.http.lastBody());
+    TEST_ASSERT_EQUAL_UINT8(1U, rig.app.codeKeys());
+    TEST_ASSERT_TRUE(rig.app.stepClock().trusted(rig.clock.value()));
+
+    rig.link.set(false);
+    rig.tick();
+    rig.log.forget();
+    const uint32_t step = rig.app.stepClock().stepAt(rig.clock.value());
+    char token[memcode::kTokenLen + 2U] = {};
+    TEST_ASSERT_TRUE(memcode::format(0x0A3C9U, 12345678U, memcode::offCode(key, step), token, sizeof(token)));
+    char line[memcode::kTokenLen + 2U] = {};
+    snprintf(line, sizeof(line), "%s\n", token);
+
+    const uint16_t queuedBefore = rig.queue.size();
+    rig.scanner.feed(line);
+    rig.tick();
+    TEST_ASSERT_TRUE_MESSAGE(rig.lock.released(), "the partner's own code opens the door offline");
+    TEST_ASSERT_EQUAL_STRING(gatelogic::kReasonOk, rig.log.last().reason);
+    TEST_ASSERT_EQUAL_UINT16(queuedBefore + 1U, rig.queue.size());
+    eventq::Event event;
+    bool found = false;
+    while (rig.queue.peek(event)) {
+      if (event.kind == eventq::Kind::GateOpen) {
+        found = true;
+        TEST_ASSERT_TRUE_MESSAGE(event.subjectEquals(token),
+                                 "the record is the scanned token, not the REF list");
+      }
+      TEST_ASSERT_TRUE(rig.queue.release());
+    }
+    TEST_ASSERT_TRUE(found);
+
+    // Past the release, the relock dwell and the debounce: the same code is a
+    // replay, whichever side of a step boundary the clock now sits.
+    rig.runUntilLocked(2000U);
+    rig.runFor(2500U);
+    rig.scanner.feed(line);
+    rig.tick();
+    TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(), "a code the door has acted on opens nothing twice");
+    TEST_ASSERT_EQUAL_STRING(gatelogic::kReasonReplayed, rig.log.last().reason);
+
+    // THE CLUB TAKES THE BOARD OUT OF SERVICE: the keys and the clock go with
+    // the roster, so an offline board verifies nobody at all.
+    rig.link.set(true);
+    rig.http.onPath(gatelogic::kPathHeartbeat, 403U, "", 0U);
+    rig.forceHeartbeat();
+    TEST_ASSERT_EQUAL_UINT8(0U, rig.app.codeKeys());
+    TEST_ASSERT_FALSE(rig.app.stepClock().synced());
+  }
 }
 
 /// (c) AT MOST ONE BLOCKING CALL PER PASS. MUTATION-PROVED.
@@ -6169,6 +6251,7 @@ int main(int, char**) {
 
   RUN_TEST(test_app_a_release_is_timed_from_after_the_call_that_granted_it);
   RUN_TEST(test_app_the_debounce_window_starts_when_the_decision_was_made);
+  RUN_TEST(test_app_a_v1_member_code_opens_the_door_offline_once_and_is_recorded_as_scanned);
   RUN_TEST(test_app_a_pass_makes_at_most_one_blocking_call);
   RUN_TEST(test_app_the_watchdog_is_kicked_around_every_blocking_call);
   RUN_TEST(test_app_a_dead_api_host_never_starves_the_watchdog_or_the_lock);

@@ -32,6 +32,8 @@ enum class RowArg : uint8_t {
   /// The four green buttons, then the four black ones, from the live map.
   CourtCells,
   DurationCells,
+  /// `amount_label`, as the server rendered it.
+  Amount,
 };
 
 struct RowSpec {
@@ -281,6 +283,60 @@ constexpr ScreenSpec kScreenSpecs[kScreenCount] = {
       {"LIGHTS COMING ON", RowArg::None, ""}},
      kCardSeconds,
      0U},
+
+    // --- D10: pay for somebody else's court ----------------------------------
+    // The founder's words are `CT2 BOOKED / PAY 50cr? PRESS CT2`. On the fitted
+    // 20x4 they would fit as two lines, but row 1 would then be nineteen columns
+    // and the safe-subset contract clips it at sixteen to `PAY 50cr? PRESS ` —
+    // a question with the instruction cut off. So the same words run down three
+    // rows: the verdict (row 0), the question (row 1), the instruction (row 2).
+    // On a 1602 the member still reads `CT2 BOOKED / PAY 50cr?`, which is true
+    // and complete as a question; the second press is the only answer there is.
+    {ScreenId::PayForQuote,
+     {{"CT", RowArg::CourtNumber, " BOOKED"},
+      {"PAY ", RowArg::Amount, "cr?"},
+      {"PRESS CT", RowArg::CourtNumber, " TO PAY"},
+      {"", RowArg::CourtCells, ""}},
+     kChoiceSeconds,
+     kShowFlagCountdown},
+    {ScreenId::PayForPaid,
+     {{"PAID FOR CT", RowArg::CourtNumber, ""},
+      {"", RowArg::Amount, "cr CHARGED"},
+      {"Booker refunded", RowArg::None, ""},
+      {"THANK YOU", RowArg::None, ""}},
+     kRevertSeconds,
+     kShowFlagCountdown},
+    // The founder's `SPLIT - PAY IN APP` is eighteen columns; the safe subset
+    // holds sixteen. The verdict and the instruction take a row each, and the
+    // instruction keeps the founder's words.
+    {ScreenId::PayForSplit,
+     {{"SPLIT BOOKING", RowArg::None, ""},
+      {"PAY IN APP", RowArg::None, ""},
+      {"Each player's share", RowArg::None, ""},
+      {"NOTHING CHARGED", RowArg::None, ""}},
+     kRevertSeconds,
+     kShowFlagCountdown},
+    {ScreenId::PayForNothingToPay,
+     {{"NOTHING TO PAY", RowArg::None, ""},
+      {"Already paid for", RowArg::None, ""},
+      kBlank,
+      {"NOTHING CHARGED", RowArg::None, ""}},
+     kRevertSeconds,
+     kShowFlagCountdown},
+    {ScreenId::PayForPriceChanged,
+     {{"PRICE CHANGED", RowArg::None, ""},
+      {"Nothing charged", RowArg::None, ""},
+      {"Press court again", RowArg::None, ""},
+      {"", RowArg::CourtCells, ""}},
+     kRevertSeconds,
+     kShowFlagCountdown},
+    {ScreenId::PayForWorking,
+     {{"ONE MOMENT", RowArg::None, ""},
+      {"Asking the club", RowArg::None, ""},
+      kBlank,
+      {"PLEASE WAIT", RowArg::None, ""}},
+     kWaitSeconds,
+     0U},
 };
 
 /// kScreenSpecs is indexed by the ScreenId value, so a row in the wrong place
@@ -341,6 +397,13 @@ const char* timeFor(RowArg arg, const ScreenFacts& facts) {
   return facts.fromTime;
 }
 
+/// The four cells of the green or the black row, from the live map.
+void appendCells(RowArg arg, const ScreenFacts& facts, char* out, size_t cap) {
+  const court::ButtonMap fallback;
+  const court::ButtonMap& map = facts.buttons != nullptr ? *facts.buttons : fallback;
+  renderActionRow(map, arg == RowArg::CourtCells ? kCourtCellsFrom : kDurationCellsFrom, out, cap);
+}
+
 /// The row's variable part, appended to `out`.
 void appendArg(RowArg arg, const ScreenFacts& facts, char* out, size_t cap) {
   switch (arg) {
@@ -367,13 +430,13 @@ void appendArg(RowArg arg, const ScreenFacts& facts, char* out, size_t cap) {
   case RowArg::Name:
     append(out, cap, facts.name[0] == '\0' ? kNoName : facts.name);
     return;
-  case RowArg::CourtCells:
-  case RowArg::DurationCells: {
-    const court::ButtonMap fallback;
-    const court::ButtonMap& map = facts.buttons != nullptr ? *facts.buttons : fallback;
-    renderActionRow(map, arg == RowArg::CourtCells ? kCourtCellsFrom : kDurationCellsFrom, out, cap);
+  case RowArg::Amount:
+    append(out, cap, facts.amount);
     return;
-  }
+  case RowArg::CourtCells:
+  case RowArg::DurationCells:
+    appendCells(arg, facts, out, cap);
+    return;
   }
 }
 

@@ -180,9 +180,34 @@ enum class ScreenId : uint8_t {
   /// and `BOOKING FOUND` is honest where `HI THERE` on a named-member screen
   /// would be a shrug.
   CardBookedOffline,
+
+  // --- D10: paying for somebody else's court (docs/specs/member-code.md §9) ---
+  // APPENDED, never inserted: kScreenSpecs is indexed by this value.
+
+  /// The member pressed a court somebody else has booked and the server quoted
+  /// it: `CT2 BOOKED` / `PAY 50cr?` / `PRESS CT2 TO PAY`, the court cells, and
+  /// the choice window counting down. The second press is the only OK there is.
+  PayForQuote,
+  /// Paid. The booker is refunded and both are emailed by the server.
+  PayForPaid,
+  /// A split booking is paid share by share in the app, never at the box.
+  PayForSplit,
+  /// Their own booking, or somebody already paid for it.
+  PayForNothingToPay,
+  /// The price moved between the two presses; nothing was charged.
+  PayForPriceChanged,
+  /// A pay-for call is in flight — the quote or the payment. The wait class,
+  /// like OneMoment, whose "Buying your time" would be a lie here.
+  PayForWorking,
 };
 
-inline constexpr uint8_t kScreenCount = 24U;
+inline constexpr uint8_t kScreenCount = 30U;
+
+/// The longest `amount_label` the glass will show: `PAY 9999.5cr?` is thirteen
+/// columns and `9999.5cr CHARGED` sixteen, both inside the safe subset. A
+/// longer label is refused, never cut — a member must never be asked to agree
+/// to a number the glass shortened.
+inline constexpr size_t kMaxAmountLabelLen = 6U;
 
 /// Everything any screen might name. One struct rather than a parameter list
 /// because the complexity gate caps a function at six arguments and this is
@@ -205,6 +230,9 @@ struct ScreenFacts {
   char toTime[kDisplayTimeLen] = {};
   /// `member_display`, or empty for kNoName.
   char name[kMaxMemberNameLen + 1U] = {};
+  /// The server's own rendering of a credit amount (`50`, `32.5`) — the box
+  /// has no decimal arithmetic and must not invent one. See kMaxAmountLabelLen.
+  char amount[kMaxAmountLabelLen + 1U] = {};
   /// The LIVE panel. Null falls back to the compiled-in default map, which is
   /// the original wiring — the same rule court::ButtonMap follows.
   const court::ButtonMap* buttons = nullptr;

@@ -7,9 +7,9 @@
 #pragma once
 
 #define FW_VERSION_MAJOR 2
-#define FW_VERSION_MINOR 0
 #define FW_VERSION_PATCH 0
 #define TARGET_COURT_BRIDGE 1
+#define FW_VERSION_MINOR 1
 #define LCD_COLS 20
 #define LCD_ROWS 4
 #define LCD_PHYSICAL_COLS 20

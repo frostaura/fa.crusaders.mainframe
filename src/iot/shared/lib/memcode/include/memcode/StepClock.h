@@ -1,0 +1,85 @@
+// Crusaders Mainframe — which 30-second step it is, on a board with no clock.
+//
+// WHY A STEP COUNTER AND NOT A TIME
+// ---------------------------------
+// Neither board has an RTC, and firmware 2.0.0 took the server's Unix time off
+// the wire with the request signing it served; that removal stands. What an
+// offline verification needs is not the time — it is the TOTP counter the
+// member's phone is using, the step. So every heartbeat answer carries two
+// numbers, `code_step` (the step the server was in when it wrote the body) and
+// `code_step_ms` (how far into it), and the board counts forward from the
+// moment it RECEIVED them on its own millis(). No date, no time zone, no
+// calendar: the board never needs to know what day it is, only which step, and
+// the server hands it the day boundaries in steps as well (KeyRing).
+//
+// HOW WRONG IT CAN BE, AND WHY THAT IS FINE
+// -----------------------------------------
+// The anchor is taken after the HTTP call returns, so it is late by the
+// response's transit — under the 4 s call bound. Crystal drift over the six
+// hours the clock is trusted for is about a second. Both are small beside the
+// ±1-step window (a code is good for up to 90 s of a verifier's time), which is
+// what the window is for.
+//
+// WHY IT GOES UNTRUSTED
+// ---------------------
+// Past `maxAgeMs` since the last sync the step is refused rather than guessed,
+// on the roster's own rule and at the roster's own age (ROSTER_MAX_AGE_MS):
+// a board whose sync is that old is also holding a roster it no longer trusts,
+// and a clock that is right by construction for six hours is not right for
+// ever. Refusing is the safe direction because the member goes to the desk.
+//
+// ROLLOVER
+// --------
+// The age is `tb::since`, never a subtraction of raw readings, so a sync taken
+// seconds before millis() wraps still counts forward correctly after it — the
+// corpus's `across-the-millis-wrap` scenario pins it.
+//
+// No Arduino headers, no heap. Compiles for AVR, Xtensa and the host.
+
+#ifndef CRUSADERS_MEMCODE_STEPCLOCK_H
+#define CRUSADERS_MEMCODE_STEPCLOCK_H
+
+#include <stdint.h>
+
+#include "memcode/Totp.h"
+#include "timebase/TimeBase.h"
+
+namespace memcode {
+
+class StepClock {
+public:
+  explicit StepClock(uint32_t maxAgeMs) : maxAgeMs_(maxAgeMs) {}
+
+  /// Adopts a sync. False, and nothing changes, when `stepMs` is not inside a
+  /// step — a phase of 30000 ms is a server bug, and a clock anchored to it is
+  /// a step off for its whole life.
+  bool sync(uint32_t step, uint32_t stepMs, uint32_t nowMs);
+
+  /// Drops the sync. A board taken out of service verifies nothing.
+  void forget() { synced_ = false; }
+
+  bool synced() const { return synced_; }
+
+  /// Synced, and the sync is no older than maxAgeMs.
+  bool trusted(uint32_t nowMs) const;
+
+  /// Milliseconds since the last sync, or 0 when never synced.
+  uint32_t ageMs(uint32_t nowMs) const;
+
+  /// The step at `nowMs`. Meaningful only while trusted(); 0 otherwise, which
+  /// is a step no real verification is ever made in (1970-01-01T00:00:00Z).
+  uint32_t stepAt(uint32_t nowMs) const;
+
+  uint32_t maxAgeMs() const { return maxAgeMs_; }
+
+private:
+  uint32_t maxAgeMs_;
+  uint32_t step_ = 0U;
+  uint32_t stepMs_ = 0U;
+  uint32_t anchorMs_ = 0U;
+  bool synced_ = false;
+};
+
+} // namespace memcode
+
+#endif // CRUSADERS_MEMCODE_STEPCLOCK_H

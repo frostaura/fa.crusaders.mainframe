@@ -1,0 +1,71 @@
+{
+  "description": "The club day of a step: the tenant-local calendar date of the step's first instant, and that day's [first, end) step range. The SERVER computes these (and the PHONE, for K_day); a device never does — it is handed the ranges.",
+  "cases": [
+    {
+      "id": "sast-anchor",
+      "note": "the corpus anchor: 18:00:17 local",
+      "tz": "Africa/Johannesburg",
+      "unix": 1790179217,
+      "step": 59672640,
+      "club_day": "2026-09-23",
+      "day_first_step": 59670480,
+      "day_end_step": 59673360,
+      "day_steps": 2880
+    },
+    {
+      "id": "sast-last-step",
+      "note": "23:59:59 local is still today",
+      "tz": "Africa/Johannesburg",
+      "unix": 1790200799,
+      "step": 59673359,
+      "club_day": "2026-09-23",
+      "day_first_step": 59670480,
+      "day_end_step": 59673360,
+      "day_steps": 2880
+    },
+    {
+      "id": "sast-midnight",
+      "note": "00:00:00 local is tomorrow",
+      "tz": "Africa/Johannesburg",
+      "unix": 1790200800,
+      "step": 59673360,
+      "club_day": "2026-09-24",
+      "day_first_step": 59673360,
+      "day_end_step": 59676240,
+      "day_steps": 2880
+    },
+    {
+      "id": "london-spring-forward",
+      "note": "the 23-hour day: 2760 steps",
+      "tz": "Europe/London",
+      "unix": 1774782000,
+      "step": 59159400,
+      "club_day": "2026-03-29",
+      "day_first_step": 59158080,
+      "day_end_step": 59160840,
+      "day_steps": 2760
+    },
+    {
+      "id": "london-fall-back",
+      "note": "the 25-hour day: 3000 steps, the most a day slot may span",
+      "tz": "Europe/London",
+      "unix": 1792929600,
+      "step": 59764320,
+      "club_day": "2026-10-25",
+      "day_first_step": 59762760,
+      "day_end_step": 59765760,
+      "day_steps": 3000
+    },
+    {
+      "id": "utc",
+      "note": "UTC midnight",
+      "tz": "UTC",
+      "unix": 1790121600,
+      "step": 59670720,
+      "club_day": "2026-09-23",
+      "day_first_step": 59670720,
+      "day_end_step": 59673600,
+      "day_steps": 2880
+    }
+  ]
+}

@@ -8,13 +8,14 @@
 // fatal in a comparison, so the encoder here only ever emits [0-9a-f] and there
 // is no case parameter to get wrong at a call site.
 //
-// WHAT USED TO BE BESIDE THIS, AND WHY IT IS NOT
-// ----------------------------------------------
-// SHA-256, HMAC-SHA256, HKDF, the canonical-string request signer, and a
-// constant-time comparison for checking a presented MAC. All of it went with
-// request signing in firmware 2.0.0: one club, one box, one static bearer key,
-// so the device computes no digests at all and has nothing secret to compare in
-// constant time. What is left is an encoder and a decoder.
+// WHAT ELSE IS BESIDE THIS
+// ------------------------
+// Firmware 2.0.0 deleted SHA-256, HMAC-SHA256, HKDF and the canonical-string
+// request signer with request signing — one club, one box, one static bearer
+// key. SHA-256, HMAC and HKDF came back in `Sha256.h`, with `Base64Url.h`, for
+// a narrower job: verifying the OFF half of a member's single rotating code
+// offline (docs/specs/member-code.md). Requests are still NOT signed; the
+// request signer and its canonical string are gone for good.
 //
 // No Arduino headers, no heap, no String. Compiles for AVR, Xtensa and the host.
 

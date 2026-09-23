@@ -89,6 +89,11 @@ struct WalkUpRequest {
   const char* token = nullptr;
   /// The 16-hex per-purchase idempotency key. See the file header.
   const char* nonce = nullptr;
+  /// Milliseconds since the scan. Rendered LAST and only for a v1 member code:
+  /// two button presses lie between the scan and this request, so the code on
+  /// the wire can be several steps old, and the server verifies its ON half at
+  /// the instant it was read. A legacy code's body is unchanged.
+  uint32_t scanAgeMs = 0U;
 };
 
 /// Renders the walk-up request body. Returns the length, or 0 when it would not

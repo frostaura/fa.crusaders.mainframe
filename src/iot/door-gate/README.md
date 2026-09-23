@@ -858,8 +858,10 @@ and every flag in `build_config.h` that is safe to change.
 That folder is **generated** and is never hand-edited: `make arduino-export`
 writes it from `lib/`, `../shared/lib/`, `src/` and the `-D` flags in
 [`platformio.ini`](platformio.ini) (with `build_unflags` applied, which is what
-makes the sketch report **1.0.0** rather than the 2.0.0 `[common]` pins for the
-court box), and `make arduino-check` regenerates and fails on a diff. A hand-edit
+makes the sketch report **1.1.0** — the single rotating member code,
+[`docs/specs/member-code.md`](../../../docs/specs/member-code.md) — rather than
+the 2.0.0 `[common]` pins for the court box), and `make arduino-check`
+regenerates and fails on a diff. A hand-edit
 there is deleted by the next export, not flagged.
 
 The developer route is PlatformIO, and it is what the tests and the gates run

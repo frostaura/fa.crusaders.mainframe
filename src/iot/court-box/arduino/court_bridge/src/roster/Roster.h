@@ -88,6 +88,41 @@ constexpr bool isTokenChar(char c) {
   return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '-' || c == '_';
 }
 
+/// THE v1 ENTRY: A BOOKING NAMED BY ITS PLAYERS, NOT BY A CODE.
+///
+/// Under the single rotating member code (docs/specs/member-code.md) a member's
+/// code changes every thirty seconds, so a roster cannot hold it. It holds the
+/// booking's PLAYERS instead: `m` followed by one to four four-character member
+/// REFs, organiser first, then accepted partners — `mK7M2P4XR` is a booking two
+/// people may open. Five to seventeen characters, inside the same `TOKEN|relay|
+/// opens_in|closes_in` element and the same kMaxTokenLen, so a court box's four
+/// players fit (4 x 4 = 16 <= 20) and nothing about the element grammar moves.
+///
+/// A lower-case `m` cannot begin a legacy code — those are upper-case Crockford
+/// — so the marker is unambiguous. `devlink::parseRosterElement` refuses a REF
+/// list that is not whole, canonical REFs.
+///
+/// A REF IS NOT A SECRET — it is printed in every code a member shows — and that
+/// is why the two paths below never cross. A REF list is matched only against a
+/// REF the member code verifier has already PROVED (decideMember); a scanned
+/// string is matched only against entries that are NOT REF lists. Otherwise
+/// `m` plus somebody's REF, typed into anything that emits a barcode, would be a
+/// key to their court.
+inline constexpr char kRefListMarker = 'm';
+inline constexpr size_t kRefLen = 4U;
+inline constexpr uint8_t kMaxRefs = 4U;
+
+static_assert(1U + (kRefLen * kMaxRefs) <= kMaxTokenLen, "four players must fit one roster token");
+
+/// True when `token` is a v1 entry's REF list rather than a code.
+inline bool isRefList(const char* token) {
+  return token != nullptr && token[0] == kRefListMarker;
+}
+
+/// True when the REF list `token` names `ref` (exactly kRefLen characters) in
+/// one of its whole-REF positions. A REF straddling two slots never matches.
+bool refListNames(const char* token, const char* ref);
+
 /// One booking, as far as the box needs to know about it.
 ///
 /// No member name and no membership number. See the header — the box holds a
@@ -183,7 +218,22 @@ public:
   /// How the box should answer `token` presented at its ONE scanner, when that
   /// scanner serves the first `courts.value` relays. The matched entry names the
   /// court; an entry on a relay this box does not drive is WrongCourt.
+  ///
+  /// A scanned token is compared with legacy entries ONLY — never with a v1
+  /// entry's REF list. See kRefListMarker.
   Decision decide(const char* token, CourtCount courts, uint32_t nowMs) const;
+
+  /// The same decisions for a member whose single code the verifier has
+  /// already proved: `ref` is their canonical four-character REF, matched
+  /// against v1 entries' REF lists and nothing else. Every player a booking
+  /// names — organiser or accepted partner — may open it.
+  Decision decideMember(const char* ref, uint8_t court, uint32_t nowMs) const;
+  Decision decideMember(const char* ref, CourtCount courts, uint32_t nowMs) const;
+
+  /// True when an entry on relay `court` is open at `nowMs`: somebody holds the
+  /// court now. What the court box asks before it offers to let a member PAY
+  /// for a court (D10) rather than buy time on it. False on a stale roster.
+  bool occupied(uint8_t court, uint32_t nowMs) const;
 
   /// True when the roster has aged out and can no longer be trusted.
   bool stale(uint32_t nowMs) const;
@@ -204,10 +254,15 @@ public:
 private:
   static bool tokenEquals(const char* a, const char* b);
 
-  /// The one matching loop both overloads share. An entry is "at this scanner"
-  /// when `firstCourt <= entry.court < endCourt`: a single court is the range
-  /// [court, court + 1) and a shared scanner is [0, count).
-  Decision decideWithin(const char* token, uint8_t firstCourt, uint8_t endCourt, uint32_t nowMs) const;
+  /// The one matching loop every overload shares. An entry is "at this
+  /// scanner" when `firstCourt <= entry.court < endCourt`: a single court is the
+  /// range [court, court + 1) and a shared scanner is [0, count). `byRef`
+  /// chooses which of the two never-crossing paths `key` is matched on.
+  Decision decideWithin(const char* key, bool byRef, uint8_t firstCourt, uint8_t endCourt,
+                        uint32_t nowMs) const;
+
+  /// Whether entry `e` is the one `key` names on the path `byRef` chooses.
+  static bool entryMatches(const Entry& e, const char* key, bool byRef);
 
   uint32_t maxAgeMs_;
 
@@ -296,20 +351,53 @@ template <uint8_t Capacity> bool Roster<Capacity>::tokenEquals(const char* a, co
 
 template <uint8_t Capacity>
 Decision Roster<Capacity>::decide(const char* token, uint8_t court, uint32_t nowMs) const {
-  return decideWithin(token, court, static_cast<uint8_t>(court + 1U), nowMs);
+  return decideWithin(token, false, court, static_cast<uint8_t>(court + 1U), nowMs);
 }
 
 template <uint8_t Capacity>
 Decision Roster<Capacity>::decide(const char* token, CourtCount courts, uint32_t nowMs) const {
-  return decideWithin(token, 0U, courts.value, nowMs);
+  return decideWithin(token, false, 0U, courts.value, nowMs);
 }
 
 template <uint8_t Capacity>
-Decision Roster<Capacity>::decideWithin(const char* token, uint8_t firstCourt, uint8_t endCourt,
+Decision Roster<Capacity>::decideMember(const char* ref, uint8_t court, uint32_t nowMs) const {
+  return decideWithin(ref, true, court, static_cast<uint8_t>(court + 1U), nowMs);
+}
+
+template <uint8_t Capacity>
+Decision Roster<Capacity>::decideMember(const char* ref, CourtCount courts, uint32_t nowMs) const {
+  return decideWithin(ref, true, 0U, courts.value, nowMs);
+}
+
+template <uint8_t Capacity> bool Roster<Capacity>::entryMatches(const Entry& e, const char* key, bool byRef) {
+  if (!e.valid) {
+    return false;
+  }
+  // THE TWO PATHS NEVER CROSS. A REF list answers only a proved REF; a code
+  // answers only a legacy entry. See kRefListMarker for what crossing costs.
+  return byRef ? refListNames(e.token, key) : (!isRefList(e.token) && tokenEquals(e.token, key));
+}
+
+template <uint8_t Capacity> bool Roster<Capacity>::occupied(uint8_t court, uint32_t nowMs) const {
+  if (stale(nowMs)) {
+    return false;
+  }
+  const uint32_t age = ageMs(nowMs);
+  for (uint8_t i = 0U; i < count_; ++i) {
+    const Entry& e = entries_[i];
+    if (e.valid && e.court == court && age >= e.opensAtMs && age < e.closesAtMs) {
+      return true;
+    }
+  }
+  return false;
+}
+
+template <uint8_t Capacity>
+Decision Roster<Capacity>::decideWithin(const char* key, bool byRef, uint8_t firstCourt, uint8_t endCourt,
                                         uint32_t nowMs) const {
   Decision decision;
 
-  if (token == nullptr || token[0] == '\0') {
+  if (key == nullptr || key[0] == '\0') {
     decision.verdict = Verdict::Unknown;
     return decision;
   }
@@ -325,7 +413,7 @@ Decision Roster<Capacity>::decideWithin(const char* token, uint8_t firstCourt, u
 
   for (uint8_t i = 0U; i < count_; ++i) {
     const Entry& e = entries_[i];
-    if (!e.valid || !tokenEquals(e.token, token)) {
+    if (!entryMatches(e, key, byRef)) {
       continue;
     }
     sawToken = true;

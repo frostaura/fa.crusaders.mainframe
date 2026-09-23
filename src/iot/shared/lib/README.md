@@ -2,11 +2,13 @@
 
 Every Crusaders firmware compiles these, and none of them owns any of it. A
 module earns a place here when a **second, unrelated device would want it
-unchanged**: rollover-safe time, the HAL ports and their recording fakes, hex,
-the firmware-version string, the device API client, the event queue, the roster
-cache, and the API-link logic in `devlink` — the heartbeat body and the interval
-it adopts, one queued event as an upload body, the roster push out of a
-heartbeat response, and the circuit breaker in front of every call.
+unchanged**: rollover-safe time, the HAL ports and their recording fakes, hex
+and the SHA-256/HMAC/base64url primitives, the firmware-version string, the
+device API client, the event queue, the roster cache, `memcode` — the single
+rotating member code a court box and a door both verify offline — and the
+API-link logic in `devlink` — the heartbeat body and the interval it adopts, one
+queued event as an upload body, the roster push and the member-code sync out of
+a heartbeat response, and the circuit breaker in front of every call.
 
 Anything that knows about a relay, a DIP switch, a court or a particular serial
 dialect belongs to the firmware project that owns that hardware — see

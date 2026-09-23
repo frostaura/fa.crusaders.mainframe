@@ -54,7 +54,10 @@
 namespace corpus {
 
 constexpr size_t kMaxFileSize = 65536;
-constexpr size_t kMaxStringLen = 4096;
+// 16384: the widest door heartbeat the member-code contract allows is ~3.9 KB,
+// which is ~7.8 KB of hex in `body_hex`. Static buffers only; nothing here is
+// on a Unity stack frame.
+constexpr size_t kMaxStringLen = 16384;
 constexpr size_t kMaxNameLen = 64;
 
 // --- scanning ---------------------------------------------------------------

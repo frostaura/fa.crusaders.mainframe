@@ -1,0 +1,93 @@
+{
+  "description": "SHA-256 (FIPS 180-4). The primitive under everything else.",
+  "cases": [
+    {
+      "id": "fips-empty",
+      "note": "the empty message: padding alone fills one block",
+      "message_ascii": "",
+      "message_hex": "",
+      "repeat": 1,
+      "digest_hex": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "fips-abc",
+      "note": "FIPS 180-2 B.1",
+      "message_ascii": "abc",
+      "message_hex": "616263",
+      "repeat": 1,
+      "digest_hex": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    },
+    {
+      "id": "fips-two-block",
+      "note": "FIPS 180-2 B.2: 448 bits, so the length no longer fits the first block",
+      "message_ascii": "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
+      "message_hex": "6162636462636465636465666465666765666768666768696768696a68696a6b696a6b6c6a6b6c6d6b6c6d6e6c6d6e6f6d6e6f706e6f7071",
+      "repeat": 1,
+      "digest_hex": "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+    },
+    {
+      "id": "fips-million-a",
+      "note": "FIPS 180-2 B.3: one million 'a' — `repeat` copies of the message, fed in any split",
+      "message_ascii": "a",
+      "message_hex": "61",
+      "repeat": 1000000,
+      "digest_hex": "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"
+    },
+    {
+      "id": "boundary-55",
+      "note": "55 bytes: a padding edge — 55 is the last length whose length field fits the same block, 56 the first that needs a second, 64 a whole block of message",
+      "message_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d",
+      "repeat": 1,
+      "digest_hex": "e7313d333c272e639f790978283f9eb392e843d0f29b7016828bb1daa4aac70b"
+    },
+    {
+      "id": "boundary-56",
+      "note": "56 bytes: a padding edge — 55 is the last length whose length field fits the same block, 56 the first that needs a second, 64 a whole block of message",
+      "message_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d84",
+      "repeat": 1,
+      "digest_hex": "4324d65f3c103567f5589c710bc08f8523f929a9272e3af36fc968e52abc6c27"
+    },
+    {
+      "id": "boundary-63",
+      "note": "63 bytes: a padding edge — 55 is the last length whose length field fits the same block, 56 the first that needs a second, 64 a whole block of message",
+      "message_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5",
+      "repeat": 1,
+      "digest_hex": "81c80242132f230c3bd41b3e63bbcff16107339549214a99614ff26664625055"
+    },
+    {
+      "id": "boundary-64",
+      "note": "64 bytes: a padding edge — 55 is the last length whose length field fits the same block, 56 the first that needs a second, 64 a whole block of message",
+      "message_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bc",
+      "repeat": 1,
+      "digest_hex": "39e3d7b6b5d075d37d053ad89b24b41bef4f3c29760c84447cab3f3be1882241"
+    },
+    {
+      "id": "boundary-65",
+      "note": "65 bytes: a padding edge — 55 is the last length whose length field fits the same block, 56 the first that needs a second, 64 a whole block of message",
+      "message_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3",
+      "repeat": 1,
+      "digest_hex": "aacca6ff74fdbb296d165a45cecfa04e5127bc008770fbbdd48006f2d2fae95e"
+    },
+    {
+      "id": "boundary-119",
+      "note": "119 bytes: a padding edge — 55 is the last length whose length field fits the same block, 56 the first that needs a second, 64 a whole block of message",
+      "message_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d",
+      "repeat": 1,
+      "digest_hex": "9ce7368e4daf32341631b492e80359dc9f594b48453cd0dd5bf0b19279cc177e"
+    },
+    {
+      "id": "boundary-120",
+      "note": "120 bytes: a padding edge — 55 is the last length whose length field fits the same block, 56 the first that needs a second, 64 a whole block of message",
+      "message_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d44",
+      "repeat": 1,
+      "digest_hex": "7836b787757e95e58b3ca5aec90b1b004e8deba1e50e9675af9cabf1a13a04b5"
+    },
+    {
+      "id": "boundary-128",
+      "note": "128 bytes: a padding edge — 55 is the last length whose length field fits the same block, 56 the first that needs a second, 64 a whole block of message",
+      "message_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f363d444b525960676e757c",
+      "repeat": 1,
+      "digest_hex": "d2742f1f4ac6bb7ca2b239ee18402ba8b3f9f8e652d2a72973c2b9ba11c08cf6"
+    }
+  ]
+}
