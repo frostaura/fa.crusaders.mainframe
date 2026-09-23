@@ -19,6 +19,13 @@ public static partial class UserPreferencesRules
     public const string InvalidTheme = "invalid_theme";
     public const string InvalidNotificationKind = "invalid_notification_kind";
     public const string TooManyOptouts = "too_many_optouts";
+
+    /// <summary>
+    /// An opt-out naming a kind the notifier sends to every admin regardless — an admin-rights
+    /// change, a switched-off webhook, a suspected forged code (R23). Refused rather than stored,
+    /// because a stored one would be a toggle reading "off" beside mail that keeps arriving.
+    /// </summary>
+    public const string NotificationKindNotOptional = "notification_kind_not_optional";
     public const string InvalidStep = "invalid_step";
 
     /// <summary>Longest onboarding step name. Generous for a slug; a sentence is not a step name.</summary>
@@ -35,9 +42,10 @@ public static partial class UserPreferencesRules
 
     /// <summary>
     /// A notification kind is a dotted lower-case identifier — <c>device.offline</c>,
-    /// <c>member.registered</c>. The catalogue itself belongs to the notifier and is not
-    /// checked here: an opt-out naming a kind that does not exist yet is inert, and refusing it
-    /// would make the two features ship in lock-step.
+    /// <c>member.registered</c>. Whether the kind EXISTS is not checked here: an opt-out naming a
+    /// kind this build does not know is inert, and refusing it would make a client and the
+    /// notifier ship in lock-step. Whether a known kind may be switched off at all is checked by
+    /// the PUT, against <see cref="AdminEventCatalogue"/>.
     /// </summary>
     [GeneratedRegex("^[a-z][a-z0-9_.]*$")]
     private static partial Regex KindPattern();

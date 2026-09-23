@@ -104,14 +104,13 @@ public sealed class AdminRoleService
     private readonly AdminChangeRecorder _recorder;
     private readonly InherentAdmins _inherent;
     private readonly LiveAdminRole _liveRole;
-    private readonly AdminRoleNotifier _notifier;
 
     public AdminRoleService(
         MainframeDbContext db, ITenantContext tenant, AdminChangeRecorder recorder,
-        InherentAdmins inherent, LiveAdminRole liveRole, AdminRoleNotifier notifier)
+        InherentAdmins inherent, LiveAdminRole liveRole)
     {
         _db = db; _tenant = tenant; _recorder = recorder;
-        _inherent = inherent; _liveRole = liveRole; _notifier = notifier;
+        _inherent = inherent; _liveRole = liveRole;
     }
 
     public async Task<AdminRoleResult> ChangeAsync(AdminRoleRequest request, CancellationToken ct)
@@ -144,9 +143,9 @@ public sealed class AdminRoleService
         if (tx is not null) await tx.CommitAsync(ct);
 
         // After the commit, never before: evicting first would let a request in between cache
-        // the old answer for another full window.
+        // the old answer for another full window. The mail is not sent from here any more: it
+        // was staged by StageRecordsAsync and committed with the change (R23).
         _liveRole.Invalidate(target.TenantId, target.Id);
-        await _notifier.NotifyAsync(target, request, ct);
 
         return new AdminRoleResult
         {
@@ -234,6 +233,36 @@ public sealed class AdminRoleService
             Reason: reason,
             Before: new { is_admin = !request.Grant },
             After: new { is_admin = request.Grant }), ct);
+
+        await StageNoticeAsync(target, request, label, ct);
+    }
+
+    /// <summary>
+    /// The mail every rights change sends — the person it happened to, and every OTHER active
+    /// admin — as one admin notice in the change's own save (R23).
+    ///
+    /// <para>
+    /// It used to be <c>AdminRoleNotifier</c>, a loop of background sends dispatched after the
+    /// commit: a crash in between told nobody about the one change that decides who can see and
+    /// undo every other one. A notice nobody may opt out of, whose subject is mailed their own
+    /// message and whose actor is not mailed at all — the rules that class kept, kept.
+    /// </para>
+    /// </summary>
+    private async Task StageNoticeAsync(User target, AdminRoleRequest request, string? label, CancellationToken ct)
+    {
+        var actorName = await _db.Memberships.AsNoTracking()
+            .Where(m => m.UserId == request.ActorUserId).Select(m => m.FullName).FirstOrDefaultAsync(ct)
+            ?? await _db.Users.AsNoTracking()
+                .Where(u => u.Id == request.ActorUserId).Select(u => u.Email).FirstOrDefaultAsync(ct)
+            ?? "An administrator";
+
+        var payload = new AdminRolePayload(
+            SubjectName: string.IsNullOrWhiteSpace(label) ? target.Email : label,
+            ActorName: actorName,
+            Granted: request.Grant,
+            Reason: request.Grant ? null : request.Reason?.Trim());
+        AdminNotices.Stage(_db, target.TenantId,
+            AdminNotices.AdminRoleChanged(target.Id, request.ActorUserId, payload, StorableTime.UtcNow));
     }
 
     /// <summary>

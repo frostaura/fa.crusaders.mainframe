@@ -126,6 +126,7 @@ public static partial class TopUpEndpoints
             {
                 pending.Status = TopUpStatus.Failed;
                 pending.FailureReason = FailureCodes.ProviderRegisterFailed;
+                await TopUpAlerts.StageAsync(db, tenant.TenantId, pending, ct);
                 await db.SaveChangesAsync(ct);
                 return Results.Json(new { error = "provider_register_failed", reason = register.FailureReason }, statusCode: 502);
             }
@@ -212,6 +213,7 @@ public static partial class TopUpEndpoints
             if (!interp.SignatureValid)
             {
                 logger.LogWarning("topup callback signature invalid for tenant {Slug}", slug);
+                await TopUpAlerts.RaiseAsync(db, tenantRow.Id, TopUpAlerts.SignatureInvalid, TopUpAlerts.HourOf(DateTimeOffset.UtcNow), null, ct);
                 return Results.Unauthorized();
             }
 
@@ -268,6 +270,7 @@ public static partial class TopUpEndpoints
 
                 pending.Status = TopUpStatus.Failed;
                 pending.FailureReason = FailureCodes.AmountMismatch;
+                await TopUpAlerts.StageAsync(db, tenantRow.Id, pending, ct);
                 await db.SaveChangesAsync(ct);
 
                 if (wasPending) await NotifyNotCompletedAsync(db, mailer, pending, ct);
@@ -298,6 +301,7 @@ public static partial class TopUpEndpoints
                     logger.LogWarning(
                         "topup {Key}: a COMPLETE notification arrived with no pf_payment_id — refusing, "
                         + "because nothing can make it idempotent", pending.IdempotencyKey);
+                    await TopUpAlerts.RaiseAsync(db, tenantRow.Id, TopUpAlerts.PaymentIdMissing, pending.Id.ToString("N"), pending, ct);
                     return Results.BadRequest(new { error = "payment_id_missing" });
                 }
 
@@ -322,6 +326,7 @@ public static partial class TopUpEndpoints
                 : string.Equals(interp.ResultCode, "FAILED", StringComparison.OrdinalIgnoreCase) ? FailureCodes.Declined
                 : FailureCodes.GatewayError;
             pending.CompletedAt = DateTimeOffset.UtcNow;
+            await TopUpAlerts.StageAsync(db, tenantRow.Id, pending, ct);
             await db.SaveChangesAsync(ct);
 
             if (wasPending) await NotifyNotCompletedAsync(db, mailer, pending, ct);

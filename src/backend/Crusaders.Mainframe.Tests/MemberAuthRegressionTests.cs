@@ -128,10 +128,12 @@ public class MemberAuthRegressionTests
             await Auth(scope).RegisterAsync("applicant@test.local", "Pass1234!", "New Applicant", "NEW-1", null, default);
         }
 
-        // The club's desk is notified via EmailDispatch.InBackground, so that the applicant's
-        // request is not held open for one SMTP round trip per admin. Wait for it rather than
-        // reading the list the instant RegisterAsync returns — asserted synchronously, this
-        // test failed four runs in six.
+        // The club's desk is notified through the admin notice outbox (R23): staged in the
+        // registration's own save, so the applicant's request never waits on SMTP at all, and
+        // mailed when the outbox runs. Delivered twice on purpose — a second pass over a row
+        // already sent must not mail the desk again.
+        await host.DeliverAdminNoticesAsync();
+        await host.DeliverAdminNoticesAsync();
         Assert.NotNull(await host.EmailService.WaitFor(m => m.To == host.AdminUser.Email));
         var toAdmin = host.EmailService.Sent.Where(m => m.To == host.AdminUser.Email).ToList();
         Assert.NotEmpty(toAdmin);

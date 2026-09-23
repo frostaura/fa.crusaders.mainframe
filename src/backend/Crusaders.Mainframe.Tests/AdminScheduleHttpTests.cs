@@ -517,6 +517,52 @@ public sealed class AdminScheduleHttpTests
     }
 
     /// <summary>
+    /// A night a repeating booking cannot take — a member holds the court — is raised to the
+    /// admins once (R23), however many sweeps re-collide with it while it stands: the notice is
+    /// keyed on the schedule and its first clash, which is the night the horizon is stuck behind.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_clash_found_by_materialisation_is_one_admin_notice_across_sweeps()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await ClubAsync(factory, "schnotice");
+        var from = NextTuesday();
+        var created = await club.AdminClient(factory).PostAsJsonAsync(Path + "/", Body(club, from, from.AddDays(21)));
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("schedule").GetProperty("id").GetGuid();
+
+        // Free one night the way a cancelled occurrence is freed, and let a member take it.
+        var clash = from.AddDays(14);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var row = await db.Bookings.IgnoreQueryFilters().SingleAsync(b => b.ScheduleId == id && b.ScheduleOccurrenceDate == clash);
+            row.Status = BookingStatus.Cancelled;
+            await db.SaveChangesAsync();
+        }
+        await SeedMemberBookingAsync(factory, club, new DateTimeOffset(clash.ToDateTime(new TimeOnly(18, 0)), TimeSpan.Zero));
+
+        for (var i = 0; i < 3; i++)
+        {
+            using var scope = factory.Services.CreateScope();
+            scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Multitenancy.ITenantContext>().Set(club.TenantId, club.Slug);
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var outcome = await scope.ServiceProvider.GetRequiredService<BookingScheduleService>()
+                .MaterialiseAsync(await db.BookingSchedules.FirstAsync(s => s.Id == id), default);
+            Assert.Equal(1, outcome.Collisions);
+        }
+
+        var notices = await PeopleClub.ReadAsync(factory, db => db.AdminNotifications.IgnoreQueryFilters()
+            .Where(n => n.TenantId == club.TenantId && n.Kind == AdminEventCatalogue.ScheduleConflict).ToListAsync());
+        var notice = Assert.Single(notices);
+        Assert.Equal($"/admin/schedules/{id}", notice.Link);
+        var payload = JsonSerializer.Deserialize<ScheduleConflictPayload>(notice.PayloadJson, AdminEventCatalogue.Json)!;
+        Assert.Equal(clash.ToString("yyyy-MM-dd"), payload.FirstDate);
+        Assert.Equal(1, payload.Collisions);
+    }
+
+    /// <summary>
     /// A past date cannot be skipped or re-timed, and the refusal names the date.
     ///
     /// <para>

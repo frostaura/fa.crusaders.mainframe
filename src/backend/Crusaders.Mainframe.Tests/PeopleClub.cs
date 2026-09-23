@@ -123,6 +123,15 @@ public sealed class PeopleClub
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
+    /// <summary>
+    /// One pass of the admin notice outbox, as the worker would run it (R23). The test factories
+    /// remove every hosted service, so admin mail — staged in the event's own save, never sent by
+    /// the request — goes out only when a test says so.
+    /// </summary>
+    public static Task<int> DeliverAdminNoticesAsync(WebApplicationFactory<Program> factory, DateTimeOffset? now = null) =>
+        factory.Services.GetRequiredService<Crusaders.Mainframe.Api.Services.AdminNotificationDispatcher>()
+            .DeliverDueAsync(now ?? DateTimeOffset.UtcNow, default);
+
     /// <summary>A read of the database outside any request, tenant filters off.</summary>
     public static async Task<T> ReadAsync<T>(WebApplicationFactory<Program> factory, Func<MainframeDbContext, Task<T>> read)
     {

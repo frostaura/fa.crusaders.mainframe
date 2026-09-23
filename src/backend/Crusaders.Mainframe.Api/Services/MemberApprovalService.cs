@@ -208,56 +208,23 @@ public sealed class MemberApprovalService
     }
 
     /// <summary>
-    /// The club's admins, told a new application is waiting, plus the
-    /// <c>member.registered</c> webhook (spec §2.3 / §9).
+    /// The <c>member.registered</c> webhook (spec §2.3 / §9) for an application that has just
+    /// been committed.
     ///
     /// <para>
-    /// It lives here rather than in <see cref="AuthService"/> because it is a membership
-    /// lifecycle notification like the four above it, and because the registration path owns
-    /// exactly one line of it: the call. Mail failures are logged, never thrown — the account
-    /// is already committed by the time this runs, and an unreachable SMTP host must not turn
-    /// a successful registration into a 500 the applicant can never retry past.
+    /// <b>The admins' email is no longer sent from here.</b> It used to be a loop of background
+    /// sends to every admin, dispatched after the registration had committed — so a crash in
+    /// between, or a mail server that refused one address, lost the desk's only cue. It is now an
+    /// admin notice staged in the registration's own save (<see cref="AdminNotices.MemberRegistered"/>,
+    /// in <see cref="AuthService.RegisterAsync"/>), delivered by the outbox to every active,
+    /// confirmed admin who has not opted out, with the same wording. This method keeps its name
+    /// and its one call site so the webhook still fires exactly once per application.
     /// </para>
     /// </summary>
     public async Task AnnounceRegistrationAsync(Guid userId, CancellationToken ct)
     {
         var membership = await _db.Memberships.FirstOrDefaultAsync(m => m.UserId == userId, ct);
         if (membership is null) return;
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
-        if (user is null) return;
-
-        var club = await _club.GetAsync(ct);
-        var consoleUrl = $"{_config["App:PublicBaseUrl"] ?? "http://localhost:8088"}/admin/members";
-
-        // Admin users of this tenant only. Query filters already scope to the tenant; the
-        // IsAdmin flag is what makes this the club's desk rather than every member.
-        var adminEmails = await _db.Users.AsNoTracking()
-            .Where(u => u.IsAdmin)
-            .Select(u => u.Email)
-            .ToListAsync(ct);
-
-        // DISPATCHED, not awaited — the one call site in this class that must not block.
-        //
-        // The four notices above are raised by an admin acting at the desk, and each USES the
-        // returned bool to tell that admin whether the member was actually reached; waiting is
-        // correct there. This one is different in both respects: it is raised by a member's own
-        // registration request, and its result is discarded. Awaiting it put SMTP on the
-        // applicant's critical path — once per admin, in a loop — so a club with three admins
-        // and a slow mail server spent three SMTP round trips before the browser heard
-        // anything. The browser gives up at twenty seconds, on an account that was committed
-        // before the first send, and the retry then tells the applicant their membership number
-        // belongs to somebody else.
-        //
-        // The comment above this method already promised a dead SMTP host "must not turn a
-        // successful registration into a 500". A slow one turned it into a timeout, which from
-        // the applicant's side is the same thing.
-        foreach (var to in adminEmails)
-        {
-            EmailDispatch.InBackground(
-                _email, _logger,
-                EmailTemplates.AdminNewRegistration(club, to, membership.FullName, user.Email, membership.MembershipNumber, consoleUrl),
-                $"new-registration notice to {to}");
-        }
 
         await EmitAsync("member.registered", membership, actorId: userId, reason: null, ct);
     }

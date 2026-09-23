@@ -150,8 +150,12 @@ public sealed class TestHost : IAsyncDisposable
         services.AddScoped<UserPreferencesService>();
         // Mirrors Program.cs: the role cache is a singleton so an eviction reaches the reader.
         services.AddSingleton<LiveAdminRole>();
-        services.AddScoped<AdminRoleNotifier>();
         services.AddScoped<AdminRoleService>();
+        // Mirrors Program.cs: the admin notice outbox's two halves. Singletons over the scope
+        // factory, exactly as the application registers them, so DeliverAdminNoticesAsync below
+        // runs the real dispatcher against this host's store.
+        services.AddSingleton<AdminNotificationDispatcher>();
+        services.AddSingleton<AdminNotificationSweep>();
 
         var sp = services.BuildServiceProvider();
 
@@ -458,6 +462,21 @@ public sealed class TestHost : IAsyncDisposable
 
     public IServiceScope NewScope() => Services.CreateScope();
 
+    /// <summary>
+    /// Runs the admin notice outbox once at <paramref name="now"/> (default: the wall clock),
+    /// so a test that raised an admin notice can assert on the mail it becomes.
+    ///
+    /// <para>
+    /// <b>Why tests have to call this.</b> Admin mail is no longer sent by the path that raises
+    /// it; the path stages an outbox row in its own save and the dispatcher mails it (R23). No
+    /// host in this suite runs hosted services, so nothing delivers unless the test says so — and
+    /// a test that ticks a worker at a stated instant must deliver at that same instant, or a
+    /// notice stamped in the future of the wall clock is not yet due.
+    /// </para>
+    /// </summary>
+    public Task<int> DeliverAdminNoticesAsync(DateTimeOffset? now = null) =>
+        Services.GetRequiredService<AdminNotificationDispatcher>().DeliverDueAsync(now ?? DateTimeOffset.UtcNow, default);
+
     public async ValueTask DisposeAsync()
     {
         try { if (Directory.Exists(MediaRoot)) Directory.Delete(MediaRoot, recursive: true); }
@@ -492,8 +511,20 @@ public sealed class StubEmailService : IEmailService
         get { lock (_gate) return _sent.ToList(); }
     }
 
+    /// <summary>
+    /// When set, a message it matches is refused the way a mail server that is down refuses it,
+    /// and is NOT recorded as sent. For the outbox's retry tests: a mail that failed must not be
+    /// in <see cref="Sent"/>, or a test could not tell a retry from a duplicate.
+    /// </summary>
+    public Func<EmailMessage, bool>? FailWhen { get; set; }
+
     public Task SendAsync(EmailMessage message, CancellationToken ct = default)
     {
+        if (FailWhen?.Invoke(message) == true)
+        {
+            throw new System.Net.Mail.SmtpException(
+                System.Net.Mail.SmtpStatusCode.MailboxUnavailable, "Refused (test).");
+        }
         lock (_gate) _sent.Add(message);
         return Task.CompletedTask;
     }

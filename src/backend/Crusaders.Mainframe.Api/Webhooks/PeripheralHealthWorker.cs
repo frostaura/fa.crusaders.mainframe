@@ -1,5 +1,4 @@
 using Crusaders.Mainframe.Api.Domain;
-using Crusaders.Mainframe.Api.Email;
 using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
@@ -11,8 +10,10 @@ namespace Crusaders.Mainframe.Api.Webhooks;
 /// <summary>
 /// Notices a court box that has stopped heart-beating, and notices when it comes back.
 /// Emits <c>peripheral.unhealthy</c> once per outage and <c>peripheral.recovered</c> once when
-/// it ends, and mails every admin of the affected club — <c>feature-spec.md</c> §6a's
-/// "admin gets a high-priority alert" and §9's peripheral events.
+/// it ends, and tells every admin of the affected club — <c>feature-spec.md</c> §6a's
+/// "admin gets a high-priority alert" and §9's peripheral events. The alert is an admin notice
+/// (<c>device.offline</c> / <c>device.recovered</c>) staged in the same save as the outage row,
+/// and mailed by the outbox (R23).
 ///
 /// <para>
 /// <b>Nothing here is invented.</b> The liveness signal already existed and the product already
@@ -54,7 +55,6 @@ public sealed class PeripheralHealthWorker : BackgroundService
     /// <summary>Everything one device's verdict needs, bundled — the six-parameter gate, as in the no-show sweep.</summary>
     private sealed record Health(
         MainframeDbContext Db,
-        IEmailService Email,
         Tenant Tenant,
         int OfflineAfterSeconds,
         DateTimeOffset Now)
@@ -69,22 +69,6 @@ public sealed class PeripheralHealthWorker : BackgroundService
         /// </para>
         /// </summary>
         public CourtLightStateService Lights { get; init; } = null!;
-
-        /// <summary>Console link for the alert, resolved once per tick rather than per device.</summary>
-        public string ConsoleUrl { get; init; } = "/admin/devices";
-
-        /// <summary>
-        /// Whose club this pass is about, as a message needs it.
-        ///
-        /// <para>
-        /// Built from <see cref="Tenant"/> and that tenant's settings rather than from the
-        /// scoped resolver, for the reason the sweep's shape forces: <c>TickAsync</c> walks
-        /// every tenant inside ONE scope, resetting <c>ITenantContext</c> as it goes, so a
-        /// scoped resolver would memoise the first club and sign every other club's alerts
-        /// with its name and phone number.
-        /// </para>
-        /// </summary>
-        public Email.ClubIdentity Club { get; init; } = new("the club", "", "");
 
         /// <summary>The club's <c>device_alert_cooldown_minutes</c>. See <see cref="AnnouncedAsync"/>.</summary>
         public TimeSpan Cooldown { get; init; } = TimeSpan.FromMinutes(TenantSettingsView.DefaultDeviceAlertCooldownMinutes);
@@ -104,22 +88,16 @@ public sealed class PeripheralHealthWorker : BackgroundService
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
         var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
         var settings = scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>();
-        var email = scope.ServiceProvider.GetRequiredService<IEmailService>();
-        var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
         var lights = scope.ServiceProvider.GetRequiredService<CourtLightStateService>();
-
-        var baseUrl = config["App:PublicBaseUrl"] ?? "http://localhost:8088";
 
         var tenants = await db.Tenants.IgnoreQueryFilters().ToListAsync(ct);
         foreach (var tenant in tenants)
         {
             tenantContext.Set(tenant.Id, tenant.Slug);
             var s = await settings.GetAsync(ct);
-            var health = new Health(db, email, tenant, HeartbeatCadence.OfflineAfterSeconds(s.HeartbeatSeconds), now)
+            var health = new Health(db, tenant, HeartbeatCadence.OfflineAfterSeconds(s.HeartbeatSeconds), now)
             {
                 Lights = lights,
-                ConsoleUrl = $"{baseUrl}/admin/devices",
-                Club = Email.ClubIdentityResolver.For(tenant, s),
                 Cooldown = TimeSpan.FromMinutes(Math.Clamp(
                     s.DeviceAlertCooldownMinutes,
                     TenantSettingsView.MinDeviceAlertCooldownMinutes,
@@ -275,6 +253,18 @@ public sealed class PeripheralHealthWorker : BackgroundService
         };
         health.Db.DeviceOutages.Add(outage);
 
+        // The admins' alert is staged BESIDE the row rather than sent after it (R23), so the one
+        // save commits both: the row is still the once-per-outage guard, and a process that dies
+        // after it can no longer lose the alert — the outbox delivers it on the next pass. The
+        // announcement is decided before the save, from the rows already there plus this one,
+        // which is the same replay AnnouncedAsync always ran.
+        var minutes = (int)Math.Round((health.Now - lastSeen).TotalMinutes, MidpointRounding.AwayFromZero);
+        var announce = Mailable(device) && await AnnouncedAsync(health, device, outage, ct);
+        var notice = announce
+            ? AdminNotices.Stage(health.Db, health.Tenant.Id,
+                AdminNotices.DeviceOutage(outage.Id, device, minutes, recovered: false), health.Now)
+            : null;
+
         try
         {
             await health.Db.SaveChangesAsync(ct);
@@ -282,8 +272,10 @@ public sealed class PeripheralHealthWorker : BackgroundService
         catch (DbUpdateException)
         {
             // The filtered unique index refused a second open outage for this box — another
-            // tick got there first. Nothing to announce and nothing wrong.
+            // tick got there first. Nothing to announce and nothing wrong; the notice goes with
+            // the row it belonged to.
             health.Db.Entry(outage).State = EntityState.Detached;
+            if (notice is not null) health.Db.Entry(notice).State = EntityState.Detached;
             _logger.LogInformation("Peripheral outage for {DeviceCode} was already open", device.DeviceCode);
             return;
         }
@@ -299,32 +291,17 @@ public sealed class PeripheralHealthWorker : BackgroundService
         // projection has one.
         await DarkenAsync(health, device, ct);
 
-        var minutes = (int)Math.Round((health.Now - lastSeen).TotalMinutes, MidpointRounding.AwayFromZero);
-        var announce = Mailable(device) && await AnnouncedAsync(health, device, outage, ct);
-
         if (device.Kind == DeviceKind.Gate)
         {
             _logger.LogWarning(
                 "Door gate {DeviceCode} ({GateKey}) unreachable — last heartbeat {LastSeen}, threshold {Threshold}s, mailed {Mailed}",
                 device.DeviceCode, device.GateKey, lastSeen, health.OfflineAfterSeconds, announce);
-
-            if (announce)
-            {
-                await AlertAdminsAsync(health, m => EmailTemplates.AdminGateUnhealthy(health.Club, m, GateAlertFor(health, device, minutes)), ct);
-            }
         }
         else
         {
             _logger.LogWarning(
                 "Court box {DeviceCode} unreachable — last heartbeat {LastSeen}, threshold {Threshold}s, mailed {Mailed}",
                 device.DeviceCode, lastSeen, health.OfflineAfterSeconds, announce);
-
-            if (announce)
-            {
-                var alert = new PeripheralAlert(
-                    device.Name, device.DeviceCode, device.CourtNumbers, minutes, health.ConsoleUrl);
-                await AlertAdminsAsync(health, m => EmailTemplates.AdminPeripheralUnhealthy(health.Club, m, alert), ct);
-            }
         }
 
         await EmitAsync(health, device, "peripheral.unhealthy", new()
@@ -335,38 +312,34 @@ public sealed class PeripheralHealthWorker : BackgroundService
         }, ct);
     }
 
-    /// <summary>The box called in again: close the row, tell the club it is back.</summary>
+    /// <summary>
+    /// The box called in again: close the row, tell the club it is back — the all-clear staged in
+    /// the same save as the close, for the reason <see cref="OpenAsync"/> gives.
+    /// </summary>
     private async Task CloseAsync(Health health, Device device, DeviceOutage outage, DateTimeOffset lastSeen, CancellationToken ct)
     {
         outage.EndedAt = lastSeen;
-        await health.Db.SaveChangesAsync(ct);
-
-        var minutes = (int)Math.Round((outage.EndedAt.Value - outage.StartedAt).TotalMinutes, MidpointRounding.AwayFromZero);
+        var minutes = (int)Math.Round((lastSeen - outage.StartedAt).TotalMinutes, MidpointRounding.AwayFromZero);
 
         // An all-clear for an alarm nobody was given is noise about an event the club never
         // heard of. Same predicate, same rows, so the two decisions cannot disagree.
         var announce = Mailable(device) && await AnnouncedAsync(health, device, outage, ct);
+        if (announce)
+        {
+            AdminNotices.Stage(health.Db, health.Tenant.Id,
+                AdminNotices.DeviceOutage(outage.Id, device, minutes, recovered: true), health.Now);
+        }
+        await health.Db.SaveChangesAsync(ct);
 
         if (device.Kind == DeviceKind.Gate)
         {
             _logger.LogInformation(
                 "Door gate {DeviceCode} is back after {Minutes} minutes, mailed {Mailed}", device.DeviceCode, minutes, announce);
-            if (announce)
-            {
-                await AlertAdminsAsync(health, m => EmailTemplates.AdminGateRecovered(health.Club, m, GateAlertFor(health, device, minutes)), ct);
-            }
         }
         else
         {
             _logger.LogInformation(
                 "Court box {DeviceCode} is back after {Minutes} minutes, mailed {Mailed}", device.DeviceCode, minutes, announce);
-
-            if (announce)
-            {
-                var alert = new PeripheralAlert(
-                    device.Name, device.DeviceCode, device.CourtNumbers, minutes, health.ConsoleUrl);
-                await AlertAdminsAsync(health, m => EmailTemplates.AdminPeripheralRecovered(health.Club, m, alert), ct);
-            }
         }
 
         await EmitAsync(health, device, "peripheral.recovered", new()
@@ -375,31 +348,6 @@ public sealed class PeripheralHealthWorker : BackgroundService
             ["recovered_at"] = outage.EndedAt,
             ["outage_minutes"] = minutes,
         }, ct);
-    }
-
-    /// <summary>
-    /// The alert for a door, which names the door rather than a court list.
-    ///
-    /// <para>
-    /// The kind branch above it is the whole fix: this sweep took every enabled row with no
-    /// filter on its kind, so a silent gate mailed the club "Court box not reporting", warned
-    /// about members on "those courts" and promised refunds with no no-show penalty. A gate
-    /// drives no courts, stamps no attendance and is invisible to <c>DeviceOutageIndex</c>, so
-    /// none of that happens — the admin goes looking for a box that is working fine while the
-    /// door stays shut.
-    /// </para>
-    ///
-    /// <para>
-    /// The outage ROW and the <c>peripheral.*</c> events are deliberately unchanged and shared:
-    /// a door going dark is a real incident, it is once per outage like any other, and the
-    /// Devices page reads the same rows. What differs is only what an admin is told to do
-    /// about it.
-    /// </para>
-    /// </summary>
-    private static GateAlert GateAlertFor(Health health, Device device, int minutes)
-    {
-        return new GateAlert(
-            device.Name, device.DeviceCode, device.GateKey, minutes, health.ConsoleUrl);
     }
 
     /// <summary>
@@ -470,9 +418,14 @@ public sealed class PeripheralHealthWorker : BackgroundService
         Health health, Device device, DeviceOutage outage, CancellationToken ct)
     {
         var history = await health.Db.DeviceOutages.AsNoTracking()
-            .Where(o => o.DeviceId == device.Id && o.DetectedAt <= outage.DetectedAt)
+            .Where(o => o.DeviceId == device.Id && o.DetectedAt <= outage.DetectedAt && o.Id != outage.Id)
             .Select(o => new { o.Id, o.DetectedAt })
             .ToListAsync(ct);
+
+        // The row itself joins its own history from memory rather than from the table, because
+        // OpenAsync asks BEFORE the row is saved — the alert is staged in the same save. Its
+        // DetectedAt is immutable, so the replay is the one it always was, at open and at close.
+        history.Add(new { outage.Id, outage.DetectedAt });
 
         var last = DateTimeOffset.MinValue;
         foreach (var row in history.OrderBy(o => o.DetectedAt).ThenBy(o => o.Id))
@@ -482,27 +435,7 @@ public sealed class PeripheralHealthWorker : BackgroundService
             if (row.Id == outage.Id) return announced;
         }
 
-        // The row is not in its own history: it has not been saved, which OpenAsync guarantees
-        // it has. Silence is the safe reading of a state that should not arise.
         return false;
-    }
-
-    /// <summary>
-    /// The club's own admins, and only them. Mail failures are logged, never thrown: an
-    /// unreachable SMTP host must not stop the sweep for every other club on the deployment.
-    /// </summary>
-    private async Task AlertAdminsAsync(Health health, Func<string, EmailMessage> compose, CancellationToken ct)
-    {
-        var admins = await health.Db.Users.AsNoTracking()
-            .Where(u => u.IsAdmin)
-            .Select(u => u.Email)
-            .ToListAsync(ct);
-
-        foreach (var to in admins)
-        {
-            try { await health.Email.SendAsync(compose(to), ct); }
-            catch (Exception ex) { _logger.LogWarning(ex, "Peripheral alert to {To} failed", to); }
-        }
     }
 
     /// <summary>One shape for both peripheral events, so a template written against one works against the other.</summary>

@@ -2,6 +2,7 @@ using System.Net;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Security.Outbound;
+using Crusaders.Mainframe.Api.Services;
 using Crusaders.Mainframe.Api.Webhooks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -353,5 +354,93 @@ public class WebhookRetryTests
             Assert.Equal("delivered", row.FinalState);
             Assert.Equal(2, handler.Requests.Count);
         }
+    }
+
+    // ---- R23: the owner is told --------------------------------------------
+
+    private static async Task<List<AdminNotification>> DisableNoticesAsync(TestHost host)
+    {
+        using var scope = host.NewScope();
+        return await scope.ServiceProvider.GetRequiredService<MainframeDbContext>().AdminNotifications
+            .IgnoreQueryFilters().Where(n => n.Kind == AdminEventCatalogue.WebhookAutoDisabled).ToListAsync();
+    }
+
+    /// <summary>
+    /// The sixth failure switches a club endpoint off, and the admins are mailed — the email to
+    /// the owner <c>webhooks.md</c> documented and nothing sent. Staged in the sweep's own save,
+    /// so the disable and the notice cannot come apart; and named by host only, never the path.
+    /// </summary>
+    [Fact]
+    public async Task The_sixth_failure_switches_a_club_endpoint_off_and_the_admins_are_told_once()
+    {
+        await using var host = await TestHost.CreateAsync();
+        var (endpoint, _) = await SeedDueAsync(host, DateTimeOffset.UtcNow.AddMinutes(-1));
+        using (var scope = host.NewScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var row = await db.WebhookEndpoints.SingleAsync(e => e.Id == endpoint.Id);
+            row.FailureCount = WebhookSender.Backoffs.Length - 1;
+            row.Description = "Results board";
+            await db.SaveChangesAsync();
+        }
+
+        await WorkerFor(host, new ScriptedHandler(HttpStatusCode.InternalServerError)).SweepAsync(default);
+
+        var notice = Assert.Single(await DisableNoticesAsync(host));
+        Assert.Equal(host.Tenant.Id, notice.TenantId);
+        await host.DeliverAdminNoticesAsync();
+        await host.DeliverAdminNoticesAsync();
+
+        var mail = Assert.Single(host.EmailService.Sent);
+        Assert.Equal(host.AdminUser.Email, mail.To);
+        Assert.Equal("A webhook has been switched off", mail.Subject);
+        Assert.Contains("https://hooks.example.com", mail.HtmlBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("/crusaders", mail.HtmlBody, StringComparison.Ordinal);
+        Assert.Contains("failed 6 deliveries", MailText.Unwrap(mail.PlainBody), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_failure_that_only_schedules_a_retry_tells_nobody()
+    {
+        await using var host = await TestHost.CreateAsync();
+        await SeedDueAsync(host, DateTimeOffset.UtcNow.AddMinutes(-1));
+
+        await WorkerFor(host, new ScriptedHandler(HttpStatusCode.InternalServerError)).SweepAsync(default);
+
+        Assert.Empty(await DisableNoticesAsync(host));
+    }
+
+    /// <summary>
+    /// A member's own endpoint is the member's: switching it off is not reported to every admin.
+    /// </summary>
+    [Fact]
+    public async Task A_members_endpoint_switched_off_is_not_reported_to_the_admins()
+    {
+        await using var host = await TestHost.CreateAsync();
+        var (endpoint, _) = await SeedDueAsync(host, DateTimeOffset.UtcNow.AddMinutes(-1));
+        using (var scope = host.NewScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            var row = await db.WebhookEndpoints.SingleAsync(e => e.Id == endpoint.Id);
+            row.FailureCount = WebhookSender.Backoffs.Length - 1;
+            row.OwnerKind = WebhookOwnerKind.User;
+            row.OwnerUserId = host.PlayerUser.Id;
+            await db.SaveChangesAsync();
+        }
+
+        await WorkerFor(host, new ScriptedHandler(HttpStatusCode.InternalServerError)).SweepAsync(default);
+
+        Assert.Empty(await DisableNoticesAsync(host));
+    }
+
+    [Fact]
+    public async Task A_blocked_destination_is_reported_as_blocked()
+    {
+        var (endpoint, delivery) = Fixture(Guid.NewGuid());
+        var outcome = await Sender(new BlockingHandler()).AttemptAsync(delivery, endpoint, delivery.RequestBody, default);
+
+        Assert.Equal(WebhookAttemptOutcome.DisabledBlocked, outcome);
+        Assert.Equal("https://hooks.example.com", WebhookSender.DestinationOf("https://hooks.example.com/x/y?token=secret"));
+        Assert.Equal("http://10.0.0.4:8080", WebhookSender.DestinationOf("http://10.0.0.4:8080/relay"));
     }
 }

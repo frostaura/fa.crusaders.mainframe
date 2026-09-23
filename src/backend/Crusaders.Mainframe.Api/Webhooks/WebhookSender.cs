@@ -2,9 +2,24 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Security.Outbound;
+using Crusaders.Mainframe.Api.Services;
 
 namespace Crusaders.Mainframe.Api.Webhooks;
+
+/// <summary>What one delivery attempt did to the delivery and to its endpoint.</summary>
+public enum WebhookAttemptOutcome
+{
+    Delivered,
+    WillRetry,
+
+    /// <summary>The sixth consecutive failure: the endpoint has been switched off.</summary>
+    DisabledAfterFailures,
+
+    /// <summary>The destination is not permitted from this deployment: switched off on the first attempt.</summary>
+    DisabledBlocked,
+}
 
 /// <summary>
 /// One delivery attempt and the bookkeeping that follows it.
@@ -43,9 +58,11 @@ public sealed class WebhookSender
 
     /// <summary>
     /// Sends once and records the outcome on <paramref name="delivery"/> and
-    /// <paramref name="endpoint"/>. Does not save — the caller owns the transaction.
+    /// <paramref name="endpoint"/>. Does not save — the caller owns the transaction, which is
+    /// also why switching an endpoint off answers an outcome rather than raising the admins'
+    /// notice itself: see <see cref="StageDisabledNotice"/>.
     /// </summary>
-    public async Task AttemptAsync(WebhookDelivery delivery, WebhookEndpoint endpoint, string body, CancellationToken ct)
+    public async Task<WebhookAttemptOutcome> AttemptAsync(WebhookDelivery delivery, WebhookEndpoint endpoint, string body, CancellationToken ct)
     {
         var result = await PostAsync(delivery.Url, body, endpoint.Secret, endpoint.OwnerKind, ct);
 
@@ -59,7 +76,7 @@ public sealed class WebhookSender
             delivery.FinalState = "delivered";
             endpoint.FailureCount = 0;
             endpoint.LastSuccessAt = DateTimeOffset.UtcNow;
-            return;
+            return WebhookAttemptOutcome.Delivered;
         }
 
         endpoint.FailureCount++;
@@ -75,7 +92,7 @@ public sealed class WebhookSender
             endpoint.Enabled = false;
             _logger.LogWarning(
                 "webhook {EndpointId} disabled: destination is not permitted from this deployment", endpoint.Id);
-            return;
+            return WebhookAttemptOutcome.DisabledBlocked;
         }
 
         if (endpoint.FailureCount >= Backoffs.Length)
@@ -83,12 +100,49 @@ public sealed class WebhookSender
             delivery.FinalState = "abandoned";
             endpoint.Enabled = false;
             _logger.LogWarning("webhook {EndpointId} auto-disabled after {N} failures", endpoint.Id, endpoint.FailureCount);
-            return;
+            return WebhookAttemptOutcome.DisabledAfterFailures;
         }
 
         delivery.FinalState = "pending";
         delivery.Attempt++;
         delivery.NextRetryAt = DateTimeOffset.UtcNow.Add(Backoffs[Math.Min(endpoint.FailureCount - 1, Backoffs.Length - 1)]);
+        return WebhookAttemptOutcome.WillRetry;
+    }
+
+    /// <summary>
+    /// Stages the admins' notice when <paramref name="outcome"/> switched a CLUB endpoint off —
+    /// the email to the owner that <c>docs/specs/webhooks.md</c> has promised since it was
+    /// written and nothing sent (R23). Staged into the caller's context so it commits with the
+    /// disable itself: the delivery row, the endpoint's <c>enabled = false</c> and the notice are
+    /// one save.
+    ///
+    /// <para>
+    /// <b>A club endpoint only.</b> A club's endpoints are owned by the club, so its
+    /// administrators are the owner. A member-registered endpoint is the member's, and mailing
+    /// every admin about a member's private integration would be reporting on the member; that
+    /// owner's own mail is still owed.
+    /// </para>
+    ///
+    /// <para>
+    /// The destination is named by scheme and host only. The rendered URL can carry template
+    /// variables — a member's id, a token in the query — and a mail is not where those go.
+    /// </para>
+    /// </summary>
+    public static void StageDisabledNotice(
+        MainframeDbContext db, WebhookDelivery delivery, WebhookEndpoint endpoint, WebhookAttemptOutcome outcome)
+    {
+        if (endpoint.OwnerKind != WebhookOwnerKind.Tenant) return;
+        if (outcome is not (WebhookAttemptOutcome.DisabledAfterFailures or WebhookAttemptOutcome.DisabledBlocked)) return;
+
+        AdminNotices.Stage(db, endpoint.TenantId, AdminNotices.WebhookAutoDisabled(
+            endpoint, delivery.Id, DestinationOf(delivery.Url), outcome == WebhookAttemptOutcome.DisabledBlocked));
+    }
+
+    /// <summary>Scheme, host and a non-default port; never the path or the query.</summary>
+    internal static string DestinationOf(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return "an address that is not a URL";
+        return uri.IsDefaultPort ? $"{uri.Scheme}://{uri.Host}" : $"{uri.Scheme}://{uri.Host}:{uri.Port}";
     }
 
     private sealed record SendResult(int? Status, int LatencyMs, string? Excerpt, bool Blocked);

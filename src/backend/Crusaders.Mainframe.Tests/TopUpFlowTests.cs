@@ -8,6 +8,7 @@ using System.Text.Json;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Payments.PayFast;
 using Crusaders.Mainframe.Api.Persistence;
+using Crusaders.Mainframe.Api.Services;
 using Crusaders.Mainframe.Api.Email;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -632,5 +633,108 @@ public sealed class TopUpFlowTests
 
         Assert.Equal(1.6m, body.GetProperty("conversion_rate").GetDecimal());
         Assert.Equal(160m, body.GetProperty("quoted_credits").GetDecimal());
+    }
+
+    // ---- R23: the failures the club has to look at reach its admins ---------
+
+    private static async Task<List<AdminNotification>> TopUpNoticesAsync(TestWebAppFactory factory, Guid tenantId)
+    {
+        using var scope = factory.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<MainframeDbContext>().AdminNotifications
+            .IgnoreQueryFilters().Where(n => n.TenantId == tenantId && n.Kind == AdminEventCatalogue.TopUpFailed)
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// A gateway that reports a different amount is the club's problem, not the member's: one
+    /// notice, staged with the row that records the refusal, and one however often PayFast retries.
+    /// </summary>
+    [SkippableFact]
+    public async Task An_amount_mismatch_raises_one_admin_notice_however_often_it_is_retried()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var body = await RegisterAsync(MemberClient(factory, seeded), 500m);
+        var checkoutId = body.GetProperty("checkout_id").GetString()!;
+
+        for (var i = 0; i < 3; i++)
+        {
+            await factory.CreateClient().PostAsync(
+                $"/api/v1/credit/topup/callback?tenant={seeded.Slug}", SignedItn(checkoutId, "100.00"));
+        }
+
+        var notice = Assert.Single(await TopUpNoticesAsync(factory, seeded.TenantId));
+        var payload = JsonSerializer.Deserialize<TopUpFailedPayload>(notice.PayloadJson, AdminEventCatalogue.Json)!;
+        Assert.Equal("amount_mismatch", payload.Reason);
+        Assert.Equal(500m, payload.AmountZar);
+        Assert.Equal("Naledi Khoza", payload.MemberName);
+    }
+
+    /// <summary>A decline is the member's card and a cancellation is the member's choice: the member is told, the desk is not.</summary>
+    [SkippableTheory]
+    [InlineData("FAILED")]
+    [InlineData("CANCELLED")]
+    public async Task A_decline_or_a_cancellation_raises_no_admin_notice(string status)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var body = await RegisterAsync(MemberClient(factory, seeded), 100m);
+
+        var itn = await factory.CreateClient().PostAsync(
+            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
+            SignedItn(body.GetProperty("checkout_id").GetString()!, "100.00", status: status));
+        Assert.Equal(HttpStatusCode.OK, itn.StatusCode);
+
+        Assert.Empty(await TopUpNoticesAsync(factory, seeded.TenantId));
+    }
+
+    /// <summary>
+    /// A gateway answer nobody recognises IS the club's to look at, and is the control that keeps
+    /// the two cases above from passing because nothing is ever raised.
+    /// </summary>
+    [SkippableFact]
+    public async Task An_unrecognised_gateway_answer_raises_an_admin_notice()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var body = await RegisterAsync(MemberClient(factory, seeded), 100m);
+
+        await factory.CreateClient().PostAsync(
+            $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
+            SignedItn(body.GetProperty("checkout_id").GetString()!, "100.00", status: "SOMETHING_ELSE"));
+
+        var notice = Assert.Single(await TopUpNoticesAsync(factory, seeded.TenantId));
+        Assert.Equal("topup.failed:gateway_error:" + body.GetProperty("topup_id").GetGuid().ToString("N"), notice.DedupeKey);
+    }
+
+    /// <summary>
+    /// The ITN route is anonymous. A flood of unsigned notifications is one notice an hour, not
+    /// one per request — bounded by the dedupe key, not by the sender's manners.
+    /// </summary>
+    [SkippableFact]
+    public async Task Unsigned_notifications_raise_at_most_one_notice_an_hour()
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+
+        for (var i = 0; i < 4; i++)
+        {
+            var forged = await factory.CreateClient().PostAsync(
+                $"/api/v1/credit/topup/callback?tenant={seeded.Slug}",
+                new StringContent("m_payment_id=tu_x&payment_status=COMPLETE&amount_gross=100.00&signature=forged",
+                    Encoding.UTF8, "application/x-www-form-urlencoded"));
+            Assert.Equal(HttpStatusCode.Unauthorized, forged.StatusCode);
+        }
+
+        var notice = Assert.Single(await TopUpNoticesAsync(factory, seeded.TenantId));
+        Assert.StartsWith("topup.failed:signature_invalid:", notice.DedupeKey, StringComparison.Ordinal);
     }
 }

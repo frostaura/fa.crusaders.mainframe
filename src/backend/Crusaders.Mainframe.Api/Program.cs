@@ -342,8 +342,8 @@ builder.Services.AddScoped<BookingScheduleService>();
 // One person's theme, onboarding progress and opt-ins. Scoped: it writes through the
 // request's DbContext and stamps the request's tenant on a row it creates.
 builder.Services.AddScoped<UserPreferencesService>();
-// R20 — granting and revoking a member's admin rights, and the mail every such change sends.
-builder.Services.AddScoped<AdminRoleNotifier>();
+// R20 — granting and revoking a member's admin rights. The mail every such change sends goes
+// through the admin notice outbox below, staged in the same save as the change.
 builder.Services.AddScoped<AdminRoleService>();
 
 // Phase 4 — webhook engine + lights cue worker + no-show worker
@@ -377,6 +377,14 @@ builder.Services.AddHostedService<Crusaders.Mainframe.Api.Workers.RetentionWorke
 // Tops each club's schedule horizon up. The create and edit paths materialise
 // synchronously as well, so an admin sees their own click land.
 builder.Services.AddHostedService<Crusaders.Mainframe.Api.Workers.ScheduleMaterialisationWorker>();
+
+// R23 — the admin notice outbox. Rows are staged in the same save as the event that raises
+// them; the dispatcher delivers them to every active, confirmed admin who has not opted out,
+// and the sweep raises the notices that are observations rather than writes. Singletons the
+// worker drives, so a test can drive them too at a stated instant.
+builder.Services.AddSingleton<AdminNotificationDispatcher>();
+builder.Services.AddSingleton<AdminNotificationSweep>();
+builder.Services.AddHostedService<Crusaders.Mainframe.Api.Workers.AdminNotificationWorker>();
 
 // Phase 5 — biometric abstraction
 builder.Services.AddSingleton<IBiometricDevice, NullBiometricDevice>();
@@ -572,6 +580,7 @@ app.MapAdminDeviceEndpoints();
 app.MapAdminDoorEndpoints();
 app.MapAdminLedgerEndpoints();
 app.MapAdminChangeEndpoints();
+app.MapAdminNotificationEndpoints();
 app.MapAdminMemberTraceEndpoints();
 app.MapAdminMemberDetailEndpoints();
 app.MapAdminMemberDoorEndpoints();

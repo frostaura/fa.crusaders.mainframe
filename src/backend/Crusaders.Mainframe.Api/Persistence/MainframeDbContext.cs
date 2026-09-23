@@ -78,6 +78,9 @@ public class MainframeDbContext : DbContext
     /// <summary>One row per person who has changed a default. See <see cref="UserPreferences"/>.</summary>
     public DbSet<UserPreferences> UserPreferences => Set<UserPreferences>();
 
+    /// <summary>The admin notice outbox (R23). See <see cref="AdminNotification"/>.</summary>
+    public DbSet<AdminNotification> AdminNotifications => Set<AdminNotification>();
+
     /// <summary>
     /// Builds the model, including the global query filter on every tenant-scoped entity.
     /// </summary>
@@ -165,6 +168,7 @@ public class MainframeDbContext : DbContext
         ConfigureCourtLightState(modelBuilder);
         ConfigureDeviceErrors(modelBuilder);
         ConfigureUserPreferences(modelBuilder);
+        ConfigureAdminNotifications(modelBuilder);
 
         modelBuilder.Entity<Court>(e =>
         {
@@ -373,6 +377,45 @@ public class MainframeDbContext : DbContext
             e.ToTable(t => t.HasCheckConstraint(
                 "ck_user_preferences_theme", "\"Theme\" IN ('system', 'light', 'dark')"));
             e.HasQueryFilter(p => p.TenantId == _tenant.TenantId);
+        });
+    }
+
+    /// <summary>
+    /// The admin notice outbox, lifted out of <c>OnModelCreating</c> for the 200-line reason.
+    ///
+    /// <para>
+    /// <b>Four indexes, one per reader.</b> The dedupe key is the outbox's whole idempotency
+    /// promise, so it is unique per club and enforced here rather than checked. The dispatcher's
+    /// claim reads only pending rows by due time, across every club, so its index is partial on
+    /// the pending state and carries no tenant. The feed pages one club newest first. And a
+    /// cooldown asks "was one of these mailed lately" per kind and scope.
+    /// </para>
+    /// </summary>
+    private void ConfigureAdminNotifications(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AdminNotification>(e =>
+        {
+            e.ToTable("admin_notifications", t =>
+            {
+                t.HasCheckConstraint("ck_admin_notifications_state", "\"State\" BETWEEN 0 AND 3");
+                t.HasCheckConstraint("ck_admin_notifications_attempts", "\"Attempts\" >= 0");
+            });
+            e.HasKey(n => n.Id);
+            e.Property(n => n.Kind).HasMaxLength(AdminNotification.KindMaxLength).IsRequired();
+            e.Property(n => n.DedupeKey).HasMaxLength(AdminNotification.DedupeKeyMaxLength).IsRequired();
+            e.Property(n => n.PayloadJson).HasColumnType("jsonb").IsRequired().HasDefaultValueSql("'{}'::jsonb");
+            e.Property(n => n.Headline).HasMaxLength(AdminNotification.HeadlineMaxLength).IsRequired();
+            e.Property(n => n.Link).HasMaxLength(AdminNotification.LinkMaxLength);
+            e.Property(n => n.CooldownScope).HasMaxLength(AdminNotification.CooldownScopeMaxLength);
+            e.Property(n => n.LastError).HasMaxLength(AdminNotification.LastErrorMaxLength);
+            e.Property(n => n.DeliveredToJson).HasColumnType("jsonb").IsRequired().HasDefaultValueSql("'[]'::jsonb");
+            e.Property(n => n.State).HasConversion<int>();
+
+            e.HasIndex(n => new { n.TenantId, n.DedupeKey }).IsUnique();
+            e.HasIndex(n => new { n.TenantId, n.CreatedAt, n.Id });
+            e.HasIndex(n => new { n.TenantId, n.Kind, n.CooldownScope, n.CreatedAt });
+            e.HasIndex(n => n.DueAt).HasFilter("\"State\" = 0");
+            e.HasQueryFilter(n => n.TenantId == _tenant.TenantId);
         });
     }
 

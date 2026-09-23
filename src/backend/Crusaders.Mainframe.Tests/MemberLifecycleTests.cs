@@ -247,7 +247,10 @@ public class MemberLifecycleTests
         var created = Assert.IsType<RegistrationResult.Created>(
             await auth.RegisterAsync("newcomer@test.local", "Passw0rd!", "New Comer", "MEM-9001", null, default));
 
-        // Dispatched in the background by AuthService; see StubEmailService.WaitFor.
+        // The admins' copy is an admin notice staged in the registration's own save and mailed
+        // by the outbox (R23), so it arrives when the outbox runs — and not before.
+        Assert.DoesNotContain(host.EmailService.Sent, m => m.To == host.AdminUser.Email);
+        await host.DeliverAdminNoticesAsync();
         Assert.NotNull(await host.EmailService.WaitFor(m => m.To == host.AdminUser.Email && m.Subject.Contains("New membership application")));
         Assert.NotNull(await host.EmailService.WaitFor(m => m.To == "newcomer@test.local"));
 

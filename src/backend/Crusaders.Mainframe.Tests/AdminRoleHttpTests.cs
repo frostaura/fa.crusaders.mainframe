@@ -91,13 +91,23 @@ public sealed class AdminRoleHttpTests
         Assert.Equal("Mandla Member", change.SubjectLabel);
         Assert.Equal(AdminChangeAreas.Member, change.Area);
 
+        // The mail is an admin notice committed with the change (R23), and goes when the outbox
+        // runs. Twice, because a second pass must not mail anybody again.
+        // Scoped to this club's addresses: the Postgres tier shares one database, so a pass also
+        // delivers whatever another class left pending for ITS club.
+        bool Ours(EmailMessage m) => m.To.EndsWith($"@{club.Slug}.test", StringComparison.Ordinal);
+        Assert.DoesNotContain(mail.Sent, Ours);
+        await PeopleClub.DeliverAdminNoticesAsync(app);
+        await PeopleClub.DeliverAdminNoticesAsync(app);
+
         var memberEmail = $"mandla.member@{club.Slug}.test";
         var colleagueEmail = $"colin.colleague@{club.Slug}.test";
-        Assert.NotNull(await mail.WaitFor(m => m.To == memberEmail && m.Subject == "You're now an administrator"));
-        Assert.NotNull(await mail.WaitFor(m => m.To == colleagueEmail && m.Subject == "New administrator — Mandla Member"));
-        // The actor is not told about what they just did.
-        await Task.Delay(200);
+        Assert.Single(mail.Sent, m => m.To == memberEmail && m.Subject == "You're now an administrator");
+        Assert.Single(mail.Sent, m => m.To == colleagueEmail && m.Subject == "New administrator — Mandla Member");
+        // The actor is not told about what they just did, and the new admin gets their own
+        // message rather than the colleagues' notice as well.
         Assert.DoesNotContain(mail.Sent, m => m.To == $"anna.actor@{club.Slug}.test");
+        Assert.Equal(2, mail.Sent.Count(Ours));
     }
 
     [SkippableTheory]
@@ -211,6 +221,7 @@ public sealed class AdminRoleHttpTests
             .SingleAsync(a => a.SubjectUserId == target && a.Action == AdminRoleService.RevokedAction));
         Assert.Contains("Stepped down from the committee", audit.DetailsJson);
 
+        await PeopleClub.DeliverAdminNoticesAsync(app);
         var toTarget = await mail.WaitFor(m => m.To == $"themba.target@{club.Slug}.test");
         Assert.NotNull(toTarget);
         Assert.Equal("You're no longer an administrator", toTarget!.Subject);

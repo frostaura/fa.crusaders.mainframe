@@ -107,7 +107,11 @@ public sealed class WebhookRetryWorker : BackgroundService
                 continue;
             }
 
-            await _sender.AttemptAsync(delivery, endpoint, delivery.RequestBody, ct);
+            // The endpoint's tenant is stamped on the notice explicitly: this sweep spans every
+            // club and has no tenant set, which is fine for an insert and is why the notice
+            // takes one rather than reading it from a context.
+            var outcome = await _sender.AttemptAsync(delivery, endpoint, delivery.RequestBody, ct);
+            WebhookSender.StageDisabledNotice(db, delivery, endpoint, outcome);
             sent++;
         }
 
