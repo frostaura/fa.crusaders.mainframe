@@ -113,6 +113,11 @@ public sealed class TokenPurposeTests
             Email = $"{slug}@test.local",
             PasswordHash = "x",
             EmailVerified = true,
+            // A real admin, because two tests below mint this user an ADMIN access token as the
+            // control half of a purpose check. Since R20 the admin role on a token is checked
+            // against the account (LiveAdminRole), so a role claimed for a non-admin is stripped
+            // and the control would fail for a reason that has nothing to do with purpose.
+            IsAdmin = true,
         };
         db.Users.Add(user);
         db.Memberships.Add(new Membership

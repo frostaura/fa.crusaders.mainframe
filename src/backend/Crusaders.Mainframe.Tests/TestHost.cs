@@ -148,6 +148,8 @@ public sealed class TestHost : IAsyncDisposable
         services.AddScoped<AdminBulkBookingService>();
         services.AddScoped<BookingScheduleService>();
         services.AddScoped<UserPreferencesService>();
+        // Mirrors Program.cs: the role cache is a singleton so an eviction reaches the reader.
+        services.AddSingleton<LiveAdminRole>();
 
         var sp = services.BuildServiceProvider();
 

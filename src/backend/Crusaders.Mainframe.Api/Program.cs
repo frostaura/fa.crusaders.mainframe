@@ -115,13 +115,13 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             // Enforced here rather than per-endpoint so a new endpoint is covered by
             // default; an endpoint that genuinely wants a one-time token validates it
             // itself, out of band, as the QR match endpoint already does.
-            OnTokenValidated = ctx =>
+            OnTokenValidated = async ctx =>
             {
                 var purpose = ctx.Principal?.FindFirst("purpose")?.Value;
                 if (!TokenPurposes.IsValidFor(purpose, ctx.HttpContext.Request.Path))
                 {
                     ctx.Fail($"Token purpose '{purpose ?? "(none)"}' is not valid for API access.");
-                    return Task.CompletedTask;
+                    return;
                 }
 
                 // Sign-out has to mean the credential stops working, not that one browser stopped
@@ -133,8 +133,21 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 if (jti is not null && revoked.IsRevoked(jti))
                 {
                     ctx.Fail("This session has been signed out.");
+                    return;
                 }
-                return Task.CompletedTask;
+
+                // The admin role in a token is what was true when it was minted. A demoted admin's
+                // token would otherwise keep every admin route open for the rest of its fifteen
+                // minutes, so the role is checked against the account here — cached, and only for
+                // tokens that claim it, so a member's request never reaches the database on this
+                // line. See LiveAdminRole. Here rather than per-endpoint for the reason the two
+                // checks above give: a new admin route inherits it without having to remember it.
+                if (ctx.Principal is { } principal)
+                {
+                    var services = ctx.HttpContext.RequestServices;
+                    await services.GetRequiredService<LiveAdminRole>()
+                        .EnforceAsync(principal, services, ctx.HttpContext.RequestAborted);
+                }
             },
         };
     });
@@ -298,6 +311,9 @@ builder.Services.AddScoped<DeviceFaultSink>();
 builder.Services.AddScoped<CourtLightStateService>();
 builder.Services.AddScoped<ControlBoardReader>();
 builder.Services.AddSingleton<AccessTokenRevocationList>();
+// Singleton, like the revocation list beside it: the cache it keeps is what makes the role
+// check nearly free, and the admin-role endpoint evicts from the same instance it reads.
+builder.Services.AddSingleton<LiveAdminRole>();
 builder.Services.AddScoped<LedgerService>();
 builder.Services.AddScoped<ScheduleService>();
 builder.Services.AddScoped<BookingRules>();
