@@ -81,7 +81,9 @@ public sealed class AdminMemberDetailHttpTests
             var active = new MemberGroup { TenantId = club.TenantId, Name = "League", SortOrder = 1 };
             var archived = new MemberGroup
             {
-                TenantId = club.TenantId, Name = "Old juniors", Status = MemberGroupStatus.Archived,
+                TenantId = club.TenantId,
+                Name = "Old juniors",
+                Status = MemberGroupStatus.Archived,
             };
             league = active.Id;
             db.MemberGroups.AddRange(active, archived);
@@ -91,21 +93,31 @@ public sealed class AdminMemberDetailHttpTests
 
             db.LedgerEntries.Add(new LedgerEntry
             {
-                TenantId = club.TenantId, UserId = member, Type = LedgerEntryType.TopUp,
-                AmountCredits = 120m, ActorUserId = Guid.Empty, Reason = "fixture",
+                TenantId = club.TenantId,
+                UserId = member,
+                Type = LedgerEntryType.TopUp,
+                AmountCredits = 120m,
+                ActorUserId = Guid.Empty,
+                Reason = "fixture",
             });
 
             db.WebAuthnCredentials.Add(new WebAuthnCredential
             {
-                TenantId = club.TenantId, UserId = member, CredentialId = [1, 2, 3],
-                PublicKey = [4], UserHandle = [5],
+                TenantId = club.TenantId,
+                UserId = member,
+                CredentialId = [1, 2, 3],
+                PublicKey = [4],
+                UserHandle = [5],
             });
 
             db.EnrolledTemplates.AddRange(
                 new EnrolledTemplate { TenantId = club.TenantId, UserId = member, TemplateId = "tpl-live", FingerLabel = "Right index" },
                 new EnrolledTemplate
                 {
-                    TenantId = club.TenantId, UserId = member, TemplateId = "tpl-gone", FingerLabel = "Left thumb",
+                    TenantId = club.TenantId,
+                    UserId = member,
+                    TemplateId = "tpl-gone",
+                    FingerLabel = "Left thumb",
                     SupersededAt = now.AddDays(-1),
                 });
 
