@@ -93,7 +93,7 @@ public sealed record GateAlert(
     int Minutes,
     string ConsoleUrl);
 
-public static class EmailTemplates
+public static partial class EmailTemplates
 {
     // ---- units ----
 

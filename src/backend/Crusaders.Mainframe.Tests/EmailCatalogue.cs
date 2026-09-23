@@ -74,6 +74,21 @@ internal static class EmailCatalogue
             PenaltyWindowMinutes: 15, PenaltyPct: 30m);
         var peripheral = new PeripheralAlert("Court box 1-4", "box-2ad001", [1, 2], 12, ConsoleUrl);
         var gate = new GateAlert("Front door", "gate-44c101", "front-door", 12, ConsoleUrl);
+        var adminGranted = new AdminRoleChange
+        {
+            SubjectName = "Thandi Mokoena",
+            ActorName = "Jason Fourie",
+            Granted = true,
+            ConsoleUrl = ConsoleUrl,
+        };
+        var adminRevoked = new AdminRoleChange
+        {
+            SubjectName = "Thandi Mokoena",
+            ActorName = "Jason Fourie",
+            Granted = false,
+            Reason = "Stepped down from the committee.",
+            ConsoleUrl = ConsoleUrl,
+        };
 
         return
         [
@@ -112,6 +127,11 @@ internal static class EmailCatalogue
             ("AdminGateUnhealthyUnnamed", EmailTemplates.AdminGateUnhealthy(club, to, gate with { GateKey = null })),
             ("BookingRefundedForOutage", EmailTemplates.BookingRefundedForOutage(club, to, "Court 2", 24m)),
             ("BookingRefundedForOutOfServiceBox", EmailTemplates.BookingRefundedForOutOfServiceBox(club, to, "Court 2", 24m)),
+            ("AdminRoleGranted", EmailTemplates.AdminRoleGranted(club, to, adminGranted)),
+            ("AdminRoleRevoked", EmailTemplates.AdminRoleRevoked(club, to, adminRevoked)),
+            ("AdminRoleRevokedNoReason", EmailTemplates.AdminRoleRevoked(club, to, adminRevoked with { Reason = null })),
+            ("AdminRoleChangedNotice", EmailTemplates.AdminRoleChangedNotice(club, to, adminGranted)),
+            ("AdminRoleChangedNoticeRevoked", EmailTemplates.AdminRoleChangedNotice(club, to, adminRevoked)),
         ];
     }
 

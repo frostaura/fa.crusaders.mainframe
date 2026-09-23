@@ -341,6 +341,9 @@ builder.Services.AddScoped<BookingScheduleService>();
 // One person's theme, onboarding progress and opt-ins. Scoped: it writes through the
 // request's DbContext and stamps the request's tenant on a row it creates.
 builder.Services.AddScoped<UserPreferencesService>();
+// R20 — granting and revoking a member's admin rights, and the mail every such change sends.
+builder.Services.AddScoped<AdminRoleNotifier>();
+builder.Services.AddScoped<AdminRoleService>();
 
 // Phase 4 — webhook engine + lights cue worker + no-show worker
 builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
@@ -557,6 +560,7 @@ app.MapGet("/api/v1/whoami", async (HttpContext ctx, ITenantContext tenant, Main
 // ---- Mounted endpoint groups ----
 app.MapAuthEndpoints();
 app.MapAdminMemberEndpoints();
+app.MapAdminRoleEndpoints();
 app.MapWalletEndpoints();
 app.MapScheduleEndpoints();
 app.MapMemberGroupEndpoints();

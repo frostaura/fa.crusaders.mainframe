@@ -15,8 +15,11 @@ public static class AdminMemberEndpoints
     {
         var g = app.MapGroup("/api/v1/admin/members").RequireAuthorization(p => p.RequireRole("admin"));
 
-        g.MapGet("/", async (string? status, MainframeDbContext db, CancellationToken ct) =>
+        g.MapGet("/", async (string? status, MainframeDbContext db, InherentAdmins inherent, CancellationToken ct) =>
         {
+            // An array, not the set itself: EF translates Contains over an array to `= ANY(...)`,
+            // and it is the list's `admin_source` below that needs it.
+            var configAdmins = inherent.Emails.ToArray();
             var q = db.Memberships.AsNoTracking().Include(m => m.User).AsQueryable();
             if (Enum.TryParse<MembershipStatus>(status, true, out var s)) q = q.Where(m => m.Status == s);
             var rows = await q.OrderBy(m => m.CreatedAt).Select(m => new
@@ -33,6 +36,14 @@ public static class AdminMemberEndpoints
                 // so "they say the app won't let them in" had no answer here. The console
                 // now shows it and offers a resend.
                 email_verified = m.User!.EmailVerified,
+                // R20. Who can administer the club, and where that came from: "config" is an
+                // address in Admins:Emails, which only an operator can remove, so the console
+                // can say so before anybody presses Remove and meets a 409; "granted" is
+                // everyone the club appointed itself; null is not an admin.
+                is_admin = m.User!.IsAdmin,
+                admin_source = m.User!.IsAdmin
+                    ? (configAdmins.Contains(m.User!.Email) ? AdminSource.Config : AdminSource.Granted)
+                    : null,
                 created_at = m.CreatedAt,
                 rejection_reason = m.RejectionReason,
                 // Correlated subquery — EF translates to a single per-row SUM. Cheap at member-list scale.

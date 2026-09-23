@@ -53,6 +53,22 @@ public static class AdminChangeActions
     public const string MemberPasswordReset = "member.password_reset";
 
     /// <summary>
+    /// A member was made an administrator, or stopped being one (R20).
+    ///
+    /// <para>
+    /// <b>In THIS table, not only in <c>audit_log</c>.</b> Who can administer the club is the
+    /// one change that can be used to hide every other change: an admin who appoints an
+    /// accomplice, or quietly removes the colleague who would notice, has changed who reads this
+    /// record. <c>audit_log</c> has a delete path; this table does not. The revoke carries a
+    /// reason because "why was I removed?" is the question the club will actually be asked.
+    /// </para>
+    /// </summary>
+    public const string MemberAdminGranted = "member.admin_granted";
+
+    /// <inheritdoc cref="MemberAdminGranted"/>
+    public const string MemberAdminRevoked = "member.admin_revoked";
+
+    /// <summary>
     /// An admin looked at one member's night.
     ///
     /// <para>
@@ -107,7 +123,7 @@ public static class AdminChangeActions
         CreditAdjusted, CreditToppedUp,
         GroupCreated, GroupUpdated, GroupArchived, GroupMembersChanged,
         MemberClassChanged, MemberApproved, MemberRejected, MemberSuspended, MemberReactivated,
-        MemberPasswordReset, MemberTraceViewed,
+        MemberPasswordReset, MemberTraceViewed, MemberAdminGranted, MemberAdminRevoked,
         SettingsUpdated, CourtCreated, CourtUpdated, CourtDeactivated, ChangesExported,
         DeviceUpdated, DeviceDeleted, DeviceApiKeyRegenerated, DoorsShutAll, DoorsReopenedAll, MonitoringErrorResolved,
     ];
@@ -121,7 +137,7 @@ public static class AdminChangeActions
     [
         BookingsBulkCancelled, BookingCancelledByAdmin, ScheduleEnded, ScheduleOccurrenceSkipped,
         CreditAdjusted, CreditToppedUp, GroupArchived, MemberSuspended, MemberRejected, CourtDeactivated,
-        DeviceDeleted,
+        DeviceDeleted, MemberAdminRevoked,
     ];
 
     /// <summary>The area an action belongs to, or null when the action is not one of ours.</summary>
@@ -141,7 +157,8 @@ public static class AdminChangeActions
             CreditAdjusted or CreditToppedUp => AdminChangeAreas.Credit,
             GroupCreated or GroupUpdated or GroupArchived or GroupMembersChanged => AdminChangeAreas.Group,
             MemberClassChanged or MemberApproved or MemberRejected or MemberSuspended
-                or MemberReactivated or MemberPasswordReset or MemberTraceViewed => AdminChangeAreas.Member,
+                or MemberReactivated or MemberPasswordReset or MemberTraceViewed
+                or MemberAdminGranted or MemberAdminRevoked => AdminChangeAreas.Member,
             SettingsUpdated or CourtCreated or CourtUpdated or CourtDeactivated
                 or ChangesExported => AdminChangeAreas.Setting,
             DeviceUpdated or DeviceDeleted or DeviceApiKeyRegenerated or DoorsShutAll
@@ -193,6 +210,8 @@ public static class AdminChangeActions
             MemberReactivated => $"Reactivated a member{of}",
             MemberPasswordReset => $"Reset a member's password{of}",
             MemberTraceViewed => $"Looked at one member's activity{of}",
+            MemberAdminGranted => $"Made a member an administrator{of}",
+            MemberAdminRevoked => $"Removed a member's administrator rights{of}",
 
             SettingsUpdated => "Changed the club's settings",
             CourtCreated => $"Added a court{of}",
