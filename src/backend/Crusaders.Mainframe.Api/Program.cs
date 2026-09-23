@@ -335,6 +335,7 @@ builder.Services.AddScoped<MemberApprovalService>();
 builder.Services.AddScoped<AdminChangeRecorder>();
 // Items 5 + 13 — the per-item, never-transactional bulk cancel and bulk book.
 builder.Services.AddScoped<AdminBulkBookingService>();
+builder.Services.AddScoped<MemberBulkBookingService>();
 // Item 14 — repeating schedules, materialised as real AdminBlock rows so the GiST
 // exclusion constraint is what actually reserves the court.
 builder.Services.AddScoped<BookingScheduleService>();
@@ -565,6 +566,7 @@ app.MapWalletEndpoints();
 app.MapScheduleEndpoints();
 app.MapMemberGroupEndpoints();
 app.MapBookingEndpoints();
+app.MapMemberBulkBookingEndpoints();
 app.MapAdminConfigEndpoints();
 app.MapAdminDeviceEndpoints();
 app.MapAdminDoorEndpoints();
