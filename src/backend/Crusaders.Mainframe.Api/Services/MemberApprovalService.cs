@@ -292,19 +292,31 @@ public sealed class MemberApprovalService
     /// </summary>
     private async Task EmitAsync(string type, Membership membership, Guid actorId, string? reason, CancellationToken ct)
     {
-        var data = new Dictionary<string, object?>
-        {
-            ["membership_id"] = membership.Id,
-            ["user_id"] = membership.UserId,
-            ["full_name"] = membership.FullName,
-            ["membership_number"] = membership.MembershipNumber,
-            ["status"] = membership.Status.ToString(),
-            ["member_class"] = membership.MemberClass.ToString(),
-        };
-        if (reason is not null) data["reason"] = reason;
-
         try
         {
+            // D2: the member's active groups replace their class. `groups` is an array, so a URL
+            // template cannot name it — a body consumer reads it; `member_class` is derived from the
+            // league group and kept for ONE release so an existing template does not start failing
+            // as a missing variable (a config error, never retried) the day this deploys. Read
+            // inside the guard: it runs after the commit, like everything else here.
+            var groups = await MemberTariffs.GroupsOfAsync(_db, membership.UserId, ct);
+            var data = new Dictionary<string, object?>
+            {
+                ["membership_id"] = membership.Id,
+                ["user_id"] = membership.UserId,
+                ["full_name"] = membership.FullName,
+                ["membership_number"] = membership.MembershipNumber,
+                ["status"] = membership.Status.ToString(),
+                ["groups"] = groups.Select(g => new Dictionary<string, object?>
+                {
+                    ["id"] = g.Id,
+                    ["name"] = g.Name,
+                    ["system_key"] = g.SystemKey,
+                }).ToList(),
+                ["member_class"] = MemberTariff.LegacyClassOf(groups),
+            };
+            if (reason is not null) data["reason"] = reason;
+
             await _bus.EmitAsync(new DomainEvent(
                 Id: $"evt_{Guid.NewGuid():N}",
                 Type: type,

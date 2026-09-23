@@ -405,7 +405,6 @@ public sealed class CurrencySymbolTests
             FullName = "Currency Admin",
             MembershipNumber = slug,
             Status = MembershipStatus.Active,
-            MemberClass = MemberClass.Regular,
         });
 
         await db.SaveChangesAsync();

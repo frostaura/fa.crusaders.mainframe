@@ -21,7 +21,7 @@ A line-by-line reconciliation of [`client-blueprints/Crusaders-Blueprint-2026-05
 | A.4 — 2-week horizon, **1 hour / day per member** | 🟡 | 14-day horizon already there. **New rule:** per-member-per-day max minutes (default 60), enforced at booking-create. Admin can override. |
 | A.5 — unfunded accounts can't book | ✅ | `BookingResult.InsufficientBalance` already returned 402. |
 | A.6 — admin override unlimited | ✅ | Admin booking endpoint bypasses windows + caps. |
-| A.7 — **two member classes:** member, league/65+ | 🆕 | Add `MemberClass` enum to `Membership` (`Regular`, `LeagueOrSenior`). Default `Regular`. Admin assigns class. |
+| A.7 — **two member classes:** member, league/65+ | 🆕 | ~~Add `MemberClass` enum to `Membership`.~~ **Superseded by D2 (2026-09-23):** the class is removed and GROUPS carry it — the league group (system key `league`) holds the A.8 league rate and the A.12 peak priority; `GroupsReplaceClass` moved every `LeagueOrSenior` member into it. Same economics per member; any number of groups beyond the two. |
 | A.8 — **differential top-up rates by class:** R100 → 160 credits (Regular) / 240 credits (League/65+) | 🆕 | Major model change — the ledger unit is **credits**, not ZAR. Top-up converts at class-specific rate. ZAR amount is captured on the `PendingTopup` row for reconciliation; ledger entry is denominated in credits. Slice prices are also in credits. |
 | A.9 — **debit on lights-on**, not on booking | ⚠️ | **Built the other way, on purpose.** `CreateAsync` posts the `BookingCharge` debit at booking time; the court settles only *who* pays. See [D-1](#d-1--the-debit-happens-at-booking-not-at-lights-on) — **needs committee sign-off**. |
 | A.10 — league games booked by admin, paid by member | ✅ | Admin booking-on-behalf charges the member's credit. |
@@ -100,6 +100,10 @@ and the only honest witness to attendance is the identification event itself.
 booking comes next, and charged **pro rata** — the first fractional price in the system.
 
 ### 3. Member classes drive pricing AND access
+
+> **Superseded by decision D2 (2026-09-23).** Groups replaced the class; the league group carries
+> the rate and the peak priority described below. See `feature-spec.md` §1 and
+> `memory/decisions-groups.md`. The text below is the original reconciliation, kept for provenance.
 
 `Membership.MemberClass` enum: `Regular`, `LeagueOrSenior`. Admin assigns at approval (or later via member edit).
 

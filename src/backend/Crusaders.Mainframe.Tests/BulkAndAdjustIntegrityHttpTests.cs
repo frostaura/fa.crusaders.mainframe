@@ -75,7 +75,6 @@ public sealed class BulkAndAdjustIntegrityHttpTests
             FullName = name,
             MembershipNumber = handle,
             Status = MembershipStatus.Active,
-            MemberClass = MemberClass.Regular,
         });
         await db.SaveChangesAsync();
         return user.Id;

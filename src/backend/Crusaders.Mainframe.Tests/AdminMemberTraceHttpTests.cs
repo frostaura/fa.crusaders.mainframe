@@ -822,7 +822,6 @@ public sealed class AdminMemberTraceHttpTests
             FullName = fullName,
             MembershipNumber = $"{Guid.NewGuid():N}"[..8],
             Status = MembershipStatus.Active,
-            MemberClass = MemberClass.Regular,
         });
         await db.SaveChangesAsync();
         return user.Id;

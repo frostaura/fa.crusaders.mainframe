@@ -23,6 +23,7 @@ public static class MeProfileEndpoints
             if (user is null) return Results.NotFound();
             var membership = await db.Memberships.AsNoTracking().FirstOrDefaultAsync(m => m.UserId == userId, ct);
             var clubSettings = await settings.GetAsync(ct);
+            var tariff = await MemberTariffs.ForAsync(db, userId, clubSettings, ct);
             return Results.Ok(new
             {
                 user_id = user.Id,
@@ -34,6 +35,13 @@ public static class MeProfileEndpoints
                 photo_url = membership?.PhotoUrl,
                 status = membership?.Status.ToString().ToLowerInvariant(),
                 must_change_password = user.MustChangePassword,
+
+                // D2: the member's OWN active groups (names only — never who else is in them,
+                // the booking grid's photo-and-name rule) and what they add up to for the two
+                // things the member class used to decide.
+                groups = tariff.Groups.Select(g => new { id = g.Id, name = g.Name }).ToList(),
+                top_up_credits_per_zar = tariff.TopUpRate,
+                peak_priority = tariff.PeakPriority,
 
                 // GOAL item 12: which glyph pair this club's confirm/decline buttons wear. Here
                 // rather than on a settings route because this is the one club-wide value a

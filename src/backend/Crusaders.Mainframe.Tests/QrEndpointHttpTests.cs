@@ -61,7 +61,6 @@ public sealed class QrEndpointHttpTests
             FullName = "QR Member",
             MembershipNumber = slug,
             Status = MembershipStatus.Active,
-            MemberClass = MemberClass.Regular,
         });
 
         var court = new Court { TenantId = tenant.Id, CourtNumber = 2, Name = "Court 2", SlicePriceCredits = 8m };

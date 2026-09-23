@@ -264,8 +264,14 @@ public static class BookingEndpoints
         BookingResult.SlotTaken => Results.Conflict(new { error }),
         BookingResult.InsufficientBalance ib => Results.Json(
             new { error, current_credits = ib.CurrentCredits, required_credits = ib.RequiredCredits }, statusCode: 402),
-        BookingResult.PeakHoursLeagueOnly p => Results.Conflict(
-            new { error, peak_start = p.PeakStart, peak_end = p.PeakEnd, regular_advance_hours = p.RegularAdvanceHours }),
+        // withheld_by_groups (D2): the member's own groups that do not grant peak priority, so
+        // the sentence can name the rule that stopped them. Empty when they are in no group.
+        BookingResult.PeakHoursPriorityOnly p => Results.Conflict(
+            new
+            {
+                error, peak_start = p.PeakStart, peak_end = p.PeakEnd, regular_advance_hours = p.RegularAdvanceHours,
+                withheld_by_groups = p.WithheldByGroups,
+            }),
         // The minutes cap — blueprint A.4's. The three original figures are unchanged so no
         // existing client breaks; the three new ones are what the member's sentence needs, and
         // resets_at is here so a browser never has to compute a club midnight (which is D2-B33

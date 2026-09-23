@@ -26,12 +26,12 @@ All "configurable" knobs from the brief live here. Default values are the Crusad
 | `court_count` | int | 4 | Each court has its own row in `courts`; this is informational. |
 | `slice_minutes` | int (15/30/60) | **15** | Crusaders default per blueprint B.4. Configurable per tenant. |
 | `slice_price_credits` | int per court | 8 | Per-court pricing in credits (whole credits, not ZAR — see blueprint A.8/A.9). |
-| `credits_per_zar_regular` | decimal(8,4) | 1.6000 | R100 → 160 credits for `Regular` members (blueprint A.8). |
-| `credits_per_zar_league` | decimal(8,4) | 2.4000 | R100 → 240 credits for `LeagueOrSenior` members (blueprint A.8). |
+| `credits_per_zar_regular` | decimal(8,4) | 1.6000 | R100 → 160 credits (blueprint A.8) — the rate for a member none of whose groups sets one. |
+| ~~`credits_per_zar_league`~~ | — | — | **Removed (D2).** The league rate is the league group's `credits_per_zar` (`member_groups."CreditsPerZar"`, default 2.4 for a new club); migration `GroupsReplaceClass` moved it there and the settings PUT refuses the key with `credits_per_zar_league_moved_to_groups`. |
 | `topup_block_zar` | decimal(10,2) | 100.00 | Top-ups must be a multiple of this (blueprint A.3). |
 | `topup_max_zar_per_member` | decimal(10,2) | 1000.00 | Per-top-up cap for non-admin users (blueprint A.3). |
 | `member_per_day_max_minutes` | int | 60 | Per-member-per-day booking cap (blueprint A.4 / B.3). Same-day relaxation. |
-| `peak_hours` | string | `16:00-19:00` | League/senior exclusivity window (blueprint A.12). |
+| `peak_hours` | string | `16:00-19:00` | Peak window reserved for members with peak priority — granted by groups since D2 (blueprint A.12). |
 | `peak_advance_hours_for_regular` | int | 1 | Inside this many hours of a peak slot, regular members can also book if free. |
 | `retention_years` | int | 2 | Auto-anonymise usage history older than this (blueprint D.1). |
 | `penalty_pct` | decimal(5,2) | 30.00 | Applied to slice price on no-show / late cancel. |

@@ -59,7 +59,8 @@ public static class AdminConfigEndpoints
                 // the database by hand — on a live money system, with no audit trail and
                 // no validation.
                 credits_per_zar_regular = GetDecimal(doc, "credits_per_zar_regular", defaults.CreditsPerZarRegular),
-                credits_per_zar_league = GetDecimal(doc, "credits_per_zar_league", defaults.CreditsPerZarLeague),
+                // credits_per_zar_league is gone from this document: the league rate is the
+                // league GROUP's credits_per_zar now (D2), edited on the Groups screen.
                 topup_block_zar = GetDecimal(doc, "topup_block_zar", defaults.TopupBlockZar),
                 topup_max_zar_per_member = GetDecimal(doc, "topup_max_zar_per_member", defaults.TopupMaxZarPerMember),
                 member_per_day_max_minutes = GetInt(doc, "member_per_day_max_minutes", defaults.MemberPerDayMaxMinutes),
@@ -483,12 +484,19 @@ public static class AdminConfigEndpoints
     /// zero makes every top-up worthless, and a negative one credits the member for
     /// paying. These are the values a form should never be able to submit.
     /// </summary>
+    /// <summary>The refusal for a PUT that still carries the league rate (D2).</summary>
+    internal const string CreditsPerZarLeagueMoved = "credits_per_zar_league_moved_to_groups";
+
     private static string? ValidateEconomics(UpdateSettingsRequest req)
     {
         if (ValidateSlicePrice(req.SlicePriceCredits) is { } priceError) return priceError;
 
         if (req.CreditsPerZarRegular is <= 0 or > 1000) return "credits_per_zar_regular_out_of_range";
-        if (req.CreditsPerZarLeague is <= 0 or > 1000) return "credits_per_zar_league_out_of_range";
+        // D2: the league rate moved onto the league group. Refused rather than ignored — an
+        // admin who typed a new league rate into an old settings screen and was told "saved"
+        // would believe the club was charging it, which is the silent-write failure this
+        // endpoint's whole omitted-means-unchanged contract exists to prevent.
+        if (req.CreditsPerZarLeague is not null) return CreditsPerZarLeagueMoved;
         if (req.TopupBlockZar is <= 0 or > 100000) return "topup_block_zar_out_of_range";
         if (req.TopupMaxZarPerMember is not null && req.TopupBlockZar is not null
             && req.TopupMaxZarPerMember < req.TopupBlockZar)
@@ -1062,7 +1070,6 @@ public static class AdminConfigEndpoints
     private static void WriteOptionalEconomics(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
     {
         if (req.CreditsPerZarRegular is not null) doc["credits_per_zar_regular"] = ToElement(req.CreditsPerZarRegular);
-        if (req.CreditsPerZarLeague is not null) doc["credits_per_zar_league"] = ToElement(req.CreditsPerZarLeague);
         if (req.TopupBlockZar is not null) doc["topup_block_zar"] = ToElement(req.TopupBlockZar);
         if (req.TopupMaxZarPerMember is not null) doc["topup_max_zar_per_member"] = ToElement(req.TopupMaxZarPerMember);
         if (req.MemberPerDayMaxMinutes is not null) doc["member_per_day_max_minutes"] = ToElement(req.MemberPerDayMaxMinutes);
@@ -1150,6 +1157,11 @@ public sealed record UpdateSettingsRequest(
     // screen that edits only booking settings cannot revert an economics change made from
     // another one.
     decimal? CreditsPerZarRegular = null,
+    /// <summary>
+    /// Refused with <c>credits_per_zar_league_moved_to_groups</c> whenever it is sent: the
+    /// league rate is the league group's <c>credits_per_zar</c> now (D2). Still bound so an old
+    /// screen that sends it is told, rather than silently ignored.
+    /// </summary>
     decimal? CreditsPerZarLeague = null,
     decimal? TopupBlockZar = null,
     decimal? TopupMaxZarPerMember = null,

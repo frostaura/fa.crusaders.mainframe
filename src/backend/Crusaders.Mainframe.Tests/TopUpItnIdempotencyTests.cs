@@ -83,7 +83,6 @@ public sealed class TopUpItnIdempotencyTests
             FullName = "Naledi Khoza",
             MembershipNumber = slug,
             Status = MembershipStatus.Active,
-            MemberClass = MemberClass.Regular,
         });
 
         await db.SaveChangesAsync();

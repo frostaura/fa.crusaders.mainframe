@@ -74,7 +74,6 @@ public sealed class AdminSettingsHttpTests
             FullName = "Config Admin",
             MembershipNumber = slug,
             Status = MembershipStatus.Active,
-            MemberClass = MemberClass.Regular,
         });
 
         await db.SaveChangesAsync();
@@ -391,7 +390,9 @@ public sealed class AdminSettingsHttpTests
 
         var shown = await client.GetFromJsonAsync<JsonElement>(SettingsPath);
         Assert.Equal(1.6m, shown.GetProperty("credits_per_zar_regular").GetDecimal());
-        Assert.Equal(2.4m, shown.GetProperty("credits_per_zar_league").GetDecimal());
+        // D2: the league rate is the league GROUP's now, and the settings document no longer
+        // shows a second, dead copy of it.
+        Assert.False(shown.TryGetProperty("credits_per_zar_league", out _));
         Assert.Equal("16:00-19:00", shown.GetProperty("peak_hours").GetString());
         Assert.Equal(60, shown.GetProperty("member_per_day_max_minutes").GetInt32());
 
@@ -405,7 +406,7 @@ public sealed class AdminSettingsHttpTests
             penaltyPct = 30m,
             graceWindowMinutes = 5,
             penaltyWindowMinutes = 15,
-            creditsPerZarLeague = 2.8m,
+            creditsPerZarRegular = 1.7m,
             peakHours = "17:00-20:00",
             memberPerDayMaxMinutes = 90,
         });
@@ -416,14 +417,55 @@ public sealed class AdminSettingsHttpTests
         tenantContext.Set(seeded.TenantId, seeded.Slug);
         var after = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
 
-        Assert.Equal(2.8m, after.CreditsPerZarLeague);
+        Assert.Equal(1.7m, after.CreditsPerZarRegular);
         Assert.Equal("17:00-20:00", after.PeakHoursRange);
         Assert.Equal(90, after.MemberPerDayMaxMinutes);
 
         // Omitted means unchanged. The booking-settings form and the economics form are
         // different screens; a save from one must not revert the other.
-        Assert.Equal(1.6m, after.CreditsPerZarRegular);
+        Assert.Equal(1, after.PeakAdvanceHoursForRegular);
         Assert.Equal(2, after.RetentionYears);
+    }
+
+    /// <summary>
+    /// D2: a settings PUT that still carries the league rate is REFUSED, not silently ignored —
+    /// an admin typing a league rate into an old screen and reading "saved" would believe the
+    /// club charged it. Both spellings, and the refusal writes nothing at all.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData("creditsPerZarLeague")]
+    [InlineData("CreditsPerZarLeague")]
+    public async Task A_league_rate_on_the_settings_PUT_is_refused_because_it_moved_to_groups(string key)
+    {
+        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
+
+        await using var factory = CreateFactory();
+        var seeded = await SeedAsync(factory);
+        var client = AdminClient(factory, seeded);
+
+        var body = new Dictionary<string, object>
+        {
+            ["sliceMinutes"] = 15,
+            ["slicePriceCredits"] = 8m,
+            ["advanceBookingDays"] = 14,
+            ["dayStartMinute"] = 360,
+            ["dayEndMinute"] = 1320,
+            ["penaltyPct"] = 30m,
+            ["graceWindowMinutes"] = 5,
+            ["penaltyWindowMinutes"] = 15,
+            ["creditsPerZarRegular"] = 1.9m,
+            [key] = 2.8m,
+        };
+        var res = await client.PutAsJsonAsync(SettingsPath, body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+        var error = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("credits_per_zar_league_moved_to_groups", error.GetProperty("error").GetString());
+
+        using var scope = factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<Api.Multitenancy.ITenantContext>().Set(seeded.TenantId, seeded.Slug);
+        var after = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+        Assert.Equal(1.6m, after.CreditsPerZarRegular);
     }
 
     [SkippableTheory]

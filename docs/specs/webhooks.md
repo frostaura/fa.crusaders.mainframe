@@ -97,6 +97,21 @@ All payloads are JSON, structured:
 }
 ```
 
+**Groups replaced the member class (D2, 2026-09-23).** Two payloads carried `member_class`:
+
+- `member.approved` / `member.rejected` / `member.suspended` / `member.reactivated` — `data` now carries
+  `groups`: an array of the member's ACTIVE groups, `[{"id": "<uuid>", "name": "League members", "system_key": "league"}]`
+  (`system_key` is null for any group an admin made).
+- `credit.topped_up` — `data` now carries `rate_group_id` (the group whose rate was locked at checkout;
+  null for the club's regular rate) and the same `groups` array.
+
+Both keep **`member_class` for ONE release, deprecated**: `"LeagueOrSenior"` when the member is in the
+league group (for `credit.topped_up`: when the LOCKED rate group is the league group), otherwise
+`"Regular"`. It is kept so a URL template naming `{member_class}` does not start failing as a missing
+variable — a config error, never retried — the day the class is removed. `groups` is an array and is
+not flattened, so a URL template cannot name it; a body consumer reads it. Remove `member_class` in the
+release after the Groups page ships.
+
 (Exact per-event payloads documented in code via JSON Schema; out of spec scope to enumerate every one here.)
 
 ## Delivery semantics

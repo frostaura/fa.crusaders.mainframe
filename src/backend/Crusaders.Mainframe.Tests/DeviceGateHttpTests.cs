@@ -85,7 +85,6 @@ public sealed class DeviceGateHttpTests
             FullName = "Gate Member",
             MembershipNumber = slug,
             Status = MembershipStatus.Active,
-            MemberClass = MemberClass.Regular,
         });
 
         await db.SaveChangesAsync();
@@ -1015,7 +1014,6 @@ public sealed class DeviceGateHttpTests
             FullName = "Gate Admin",
             MembershipNumber = $"A-{Guid.NewGuid():N}"[..12],
             Status = MembershipStatus.Active,
-            MemberClass = MemberClass.Regular,
         });
         await db.SaveChangesAsync();
         return admin.Id;

@@ -31,7 +31,6 @@ public static class AdminMemberEndpoints
                 membership_number = m.MembershipNumber,
                 photo_url = m.PhotoUrl,
                 status = m.Status.ToString(),
-                member_class = m.MemberClass.ToString(),
                 // An unverified member cannot sign in and nothing on this screen said so,
                 // so "they say the app won't let them in" had no answer here. The console
                 // now shows it and offers a resend.
@@ -49,36 +48,38 @@ public static class AdminMemberEndpoints
                 // Correlated subquery — EF translates to a single per-row SUM. Cheap at member-list scale.
                 balance_credits = db.LedgerEntries.Where(l => l.UserId == m.UserId).Sum(l => (decimal?)l.AmountCredits) ?? 0m,
             }).ToListAsync(ct);
-            return Results.Ok(rows);
-        });
 
-        // Phase 8.1 — admin assigns / changes a member's class (Regular / LeagueOrSenior).
-        // Drives both the top-up conversion rate (blueprint A.8) and peak-hours access (A.12).
-        g.MapPost("/{memberId:guid}/class", async (
-            Guid memberId, AssignClassRequest req, HttpContext ctx,
-            MainframeDbContext db, CancellationToken ct) =>
-        {
-            if (!Enum.TryParse<MemberClass>(req.MemberClass, ignoreCase: true, out var cls))
-                return Results.BadRequest(new { error = "invalid_member_class", allowed = new[] { "Regular", "LeagueOrSenior" } });
-
-            var m = await db.Memberships.FirstOrDefaultAsync(x => x.Id == memberId, ct);
-            if (m is null) return Results.NotFound();
-
-            var previous = m.MemberClass;
-            if (previous == cls) return Results.Ok(new { member_class = cls.ToString(), changed = false });
-
-            m.MemberClass = cls;
-            db.AuditLogs.Add(new AuditLog
+            // D2: the member's active groups replace their class — one read for the whole list,
+            // not one per row. `member_class` stays for ONE release, derived from the league
+            // group, so the members screen in production keeps its column until it is rebuilt.
+            var groups = await MemberTariffs.GroupsOfManyAsync(db, rows.Select(r => r.user_id).ToList(), ct);
+            return Results.Ok(rows.Select(r =>
             {
-                TenantId = m.TenantId,
-                ActorUserId = ctx.User.Id() ?? Guid.Empty,
-                SubjectUserId = m.UserId,
-                Action = "member.class_changed",
-                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { from = previous.ToString(), to = cls.ToString() }),
-            });
-            await db.SaveChangesAsync(ct);
-            return Results.Ok(new { member_class = cls.ToString(), changed = true, previous = previous.ToString() });
+                var mine = groups.GetValueOrDefault(r.user_id) ?? [];
+                return new
+                {
+                    r.membership_id,
+                    r.user_id,
+                    r.email,
+                    r.full_name,
+                    r.membership_number,
+                    r.photo_url,
+                    r.status,
+                    groups = GroupsWire(mine),
+                    member_class = MemberTariff.LegacyClassOf(mine),
+                    r.email_verified,
+                    r.is_admin,
+                    r.admin_source,
+                    r.created_at,
+                    r.rejection_reason,
+                    r.balance_credits,
+                };
+            }).ToList());
         });
+
+        // D2: POST /{memberId}/class is gone with the member class. A member's groups are set
+        // with PUT /api/v1/admin/members/{userId}/groups (AdminMemberDetailEndpoints) or one
+        // group at a time on /api/v1/admin/member-groups/{id}/members.
 
         g.MapPost("/{memberId:guid}/approve", async (Guid memberId, HttpContext ctx, MemberApprovalService svc, CancellationToken ct) =>
         {
@@ -176,6 +177,7 @@ public static class AdminMemberEndpoints
 
             var t = to ?? DateTimeOffset.UtcNow;
             var f = from ?? t.AddMonths(-12);
+            var spendGroups = await MemberTariffs.GroupsOfAsync(db, membership.UserId, ct);
 
             var entries = await db.LedgerEntries
                 .Where(l => l.UserId == membership.UserId && l.CreatedAt >= f && l.CreatedAt < t)
@@ -209,7 +211,9 @@ public static class AdminMemberEndpoints
                     user_id = membership.UserId,
                     full_name = membership.FullName,
                     membership_number = membership.MembershipNumber,
-                    member_class = membership.MemberClass.ToString(),
+                    groups = GroupsWire(spendGroups),
+                    // Deprecated for one release — derived from the league group (D2).
+                    member_class = MemberTariff.LegacyClassOf(spendGroups),
                 },
                 totals = new
                 {
@@ -250,6 +254,22 @@ public static class AdminMemberEndpoints
         };
     }
 
+    /// <summary>
+    /// A member's groups as every admin read names them: id, name, system key, and the two
+    /// tariff fields a screen needs to explain a rate or a peak refusal.
+    /// </summary>
+    internal static List<object> GroupsWire(IEnumerable<TariffGroup> groups)
+    {
+        return groups.Select(g => (object)new
+        {
+            id = g.Id,
+            name = g.Name,
+            system_key = g.SystemKey,
+            credits_per_zar = g.CreditsPerZar,
+            peak_priority = g.PeakPriority,
+        }).ToList();
+    }
+
     private static string GenerateTempPassword()
     {
         // 12 chars, mixed case + digits, no easily-confused glyphs.
@@ -263,4 +283,3 @@ public static class AdminMemberEndpoints
 
 public sealed record RejectRequest(string Reason);
 public sealed record SuspendRequest(string Reason);
-public sealed record AssignClassRequest(string MemberClass);

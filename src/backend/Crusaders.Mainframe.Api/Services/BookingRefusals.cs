@@ -54,7 +54,7 @@ public static class BookingRefusals
             BookingResult.TooFarAhead => "too_far_ahead",
             BookingResult.SlotTaken => SlotTaken,
             BookingResult.InsufficientBalance => InsufficientBalance,
-            BookingResult.PeakHoursLeagueOnly => "peak_hours_league_only",
+            BookingResult.PeakHoursPriorityOnly => "peak_hours_league_only",
             BookingResult.PerDayCapExceeded => "per_day_cap_exceeded",
             BookingResult.PerDaySlotCapExceeded => "per_day_slot_cap_exceeded",
             BookingResult.GroupWindow => "group_window",

@@ -24,7 +24,7 @@ public sealed class TestHost : IAsyncDisposable
     public Tenant Tenant { get; }
     public User AdminUser { get; }
     public User PlayerUser { get; }                  // Regular member
-    public User LeaguePlayerUser { get; }            // LeagueOrSenior member
+    public User LeaguePlayerUser { get; }            // in the league group (was LeagueOrSenior — D2)
     public List<Court> Courts { get; }
     public StubEmailService EmailService { get; }
 
@@ -169,7 +169,7 @@ public sealed class TestHost : IAsyncDisposable
                 TenantId = tenant.Id,
                 // Crusaders-defaults per the client blueprint Rev 2:
                 //  - slice 15 min, slice price 8 credits
-                //  - conversion: regular 1.6, league 2.4
+                //  - conversion: regular 1.6 (league 2.4 is the league GROUP's rate — D2)
                 //  - block R100 cap R1000, per-day cap 60 min
                 //  - peak 16:00-19:00, regular-advance 1h
                 // Test fixture uses UTC for deterministic time-math.
@@ -180,7 +180,7 @@ public sealed class TestHost : IAsyncDisposable
                 // UTC — the same "passes all morning, fails after lunch" trap BookableSlot
                 // below exists to close, arriving from a second direction. Tests ABOUT
                 // operating hours set their own window; see OperatingHoursTests.
-                SettingsJson = """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"slice_price_credits":8,"penalty_pct":30,"grace_window_minutes":5,"penalty_window_minutes":15,"advance_booking_days":14,"timezone":"UTC","credits_per_zar_regular":1.6,"credits_per_zar_league":2.4,"topup_block_zar":100,"topup_max_zar_per_member":1000,"member_per_day_max_minutes":60,"peak_hours":"16:00-19:00","peak_advance_hours_for_regular":1,"retention_years":2}""",
+                SettingsJson = """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"slice_price_credits":8,"penalty_pct":30,"grace_window_minutes":5,"penalty_window_minutes":15,"advance_booking_days":14,"timezone":"UTC","credits_per_zar_regular":1.6,"topup_block_zar":100,"topup_max_zar_per_member":1000,"member_per_day_max_minutes":60,"peak_hours":"16:00-19:00","peak_advance_hours_for_regular":1,"retention_years":2}""",
             });
 
             var admin = new User { TenantId = tenant.Id, Email = $"admin-{slug}@test.local", PasswordHash = hasher.Hash("AdminPass!"), EmailVerified = true, IsAdmin = true };
@@ -188,10 +188,22 @@ public sealed class TestHost : IAsyncDisposable
             var league = new User { TenantId = tenant.Id, Email = $"league-{slug}@test.local", PasswordHash = hasher.Hash("LeaguePass!"), EmailVerified = true };
             db.Users.AddRange(admin, player, league);
             db.Memberships.AddRange(
-                new Membership { TenantId = tenant.Id, UserId = admin.Id, FullName = "Test Admin", MembershipNumber = "ADMIN-1", Status = MembershipStatus.Active, MemberClass = MemberClass.Regular },
-                new Membership { TenantId = tenant.Id, UserId = player.Id, FullName = "Test Player", MembershipNumber = "PLAYER-1", Status = MembershipStatus.Active, MemberClass = MemberClass.Regular },
-                new Membership { TenantId = tenant.Id, UserId = league.Id, FullName = "Test League", MembershipNumber = "LEAGUE-1", Status = MembershipStatus.Active, MemberClass = MemberClass.LeagueOrSenior }
+                new Membership { TenantId = tenant.Id, UserId = admin.Id, FullName = "Test Admin", MembershipNumber = "ADMIN-1", Status = MembershipStatus.Active },
+                new Membership { TenantId = tenant.Id, UserId = player.Id, FullName = "Test Player", MembershipNumber = "PLAYER-1", Status = MembershipStatus.Active },
+                new Membership { TenantId = tenant.Id, UserId = league.Id, FullName = "Test League", MembershipNumber = "LEAGUE-1", Status = MembershipStatus.Active }
             );
+            // D2: "LeagueOrSenior" is membership of the league system group, which carries the
+            // league top-up rate (blueprint A.8) and peak priority (A.12). Unrestricted and
+            // inheriting otherwise, exactly as MemberGroupSeeder writes it.
+            var leagueGroup = LeagueGroup(tenant.Id);
+            db.MemberGroups.Add(leagueGroup);
+            db.MemberGroupMembers.Add(new MemberGroupMember
+            {
+                TenantId = tenant.Id,
+                GroupId = leagueGroup.Id,
+                UserId = league.Id,
+                AddedByUserId = admin.Id,
+            });
             var courts = new List<Court>();
             for (var i = 1; i <= 4; i++) courts.Add(new Court { TenantId = tenant.Id, CourtNumber = i, Name = $"Court {i}", SlicePriceCredits = 8m });
             db.Courts.AddRange(courts);
@@ -201,6 +213,23 @@ public sealed class TestHost : IAsyncDisposable
             return new TestHost(dbName, tenant, admin, player, league, courts, sp, emailStub, mediaRoot);
         }
     }
+
+    /// <summary>The league rate the fixture's league group carries — blueprint A.8's R100 → 240.</summary>
+    public const decimal LeagueCreditsPerZar = 2.4m;
+
+    /// <summary>
+    /// The league system group as <c>MemberGroupSeeder</c> writes it (D2): the league top-up rate,
+    /// peak priority, and nothing else — no windows, inherited price and caps.
+    /// </summary>
+    public static MemberGroup LeagueGroup(Guid tenantId) => new()
+    {
+        TenantId = tenantId,
+        Name = "League members",
+        IsSystemDefault = true,
+        SystemKey = MemberGroupSystemKeys.League,
+        CreditsPerZar = LeagueCreditsPerZar,
+        PeakPriority = true,
+    };
 
     /// <summary>
     /// <paramref name="instant"/> reduced to a value Postgres can store exactly: whole

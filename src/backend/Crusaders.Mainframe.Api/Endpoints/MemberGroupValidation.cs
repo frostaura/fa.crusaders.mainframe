@@ -38,7 +38,46 @@ public static class MemberGroupValidation
             return Bad("group_status_invalid", new { valid = new[] { "active", "archived" } });
         }
 
-        return RefusePricing(req.Pricing) ?? RefuseCaps(req.Caps) ?? RefuseWindows(req.Windows);
+        return RefusePricing(req.Pricing) ?? RefuseCaps(req.Caps) ?? RefuseWindows(req.Windows) ?? RefuseTariff(req);
+    }
+
+    /// <summary>D2's two tariff fields — split out so <see cref="Refuse"/> stays under the complexity gate.</summary>
+    private static IResult? RefuseTariff(MemberGroupRequest req)
+        => RefuseRate(req.RateElement) ?? RefusePeak(req.PeakElement);
+
+    /// <summary>
+    /// A group's peak say: absent, <c>true</c>, <c>false</c> or JSON <c>null</c> (no say). A string
+    /// "true" is refused rather than coerced — a console that sends one has a bug worth hearing.
+    /// </summary>
+    private static IResult? RefusePeak(System.Text.Json.JsonElement peak)
+    {
+        if (peak.ValueKind is System.Text.Json.JsonValueKind.Undefined or System.Text.Json.JsonValueKind.Null
+            or System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False) return null;
+        return Bad("group_peak_priority_invalid", new { valid = new object?[] { true, false, null } });
+    }
+
+    /// <summary>The top-up rate a group may carry — D2, the same bounds the old league setting had.</summary>
+    public const decimal MaxCreditsPerZar = 1000m;
+
+    /// <summary>Four decimal places: the column's own precision, so nothing is rounded on the way in.</summary>
+    public const int CreditsPerZarScale = 4;
+
+    /// <summary>
+    /// A group's top-up rate: absent, JSON null (inherit the club default), or a number in
+    /// (0, 1000] with at most four decimals. Zero would take a member's money and credit nothing;
+    /// a fifth decimal would be rounded by the column into a rate nobody typed.
+    /// </summary>
+    private static IResult? RefuseRate(System.Text.Json.JsonElement rate)
+    {
+        if (rate.ValueKind is System.Text.Json.JsonValueKind.Undefined or System.Text.Json.JsonValueKind.Null) return null;
+        if (rate.ValueKind != System.Text.Json.JsonValueKind.Number
+            || !rate.TryGetDecimal(out var value)
+            || value <= 0 || value > MaxCreditsPerZar
+            || decimal.Round(value, CreditsPerZarScale) != value)
+        {
+            return Bad("group_credits_per_zar_invalid", new { min_exclusive = 0, max = MaxCreditsPerZar, decimals = CreditsPerZarScale });
+        }
+        return null;
     }
 
     private static IResult? RefusePricing(GroupPricingRequest? pricing)

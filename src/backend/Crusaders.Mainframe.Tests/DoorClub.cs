@@ -144,7 +144,6 @@ public sealed record DoorClub(
             FullName = name,
             MembershipNumber = handle,
             Status = MembershipStatus.Active,
-            MemberClass = MemberClass.Regular,
         });
         return user.Id;
     }
