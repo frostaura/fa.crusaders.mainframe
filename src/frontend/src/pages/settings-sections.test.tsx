@@ -1,108 +1,98 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { Link, Route, Routes } from "react-router-dom";
 import AdminSettingsPage from "./AdminSettings";
 import { SETTINGS_FIXTURE, renderPage, stubFetch } from "../test/harness";
+import {
+  choose, control, findControl, querySaveButton, saveButton, sectionTrigger,
+} from "../components/settings/testKit";
+import { SETTINGS_SECTIONS } from "../lib/settingsSchema";
+import { SETTINGS_COPY, SETTINGS_INTRO_KEY } from "../lib/settingsCopy";
 
 /**
- * The three things reviewer C found wrong with this screen as a DOCUMENT rather than as a
- * form: you cannot get to a section (C14), a refused field does not look refused and never
- * says so (C12), and the one derived sentence on it does not say where its number came from
- * (C13).
+ * The settings screen as a DOCUMENT rather than as a form (C12–C14), and the R13 rebuild that
+ * made it navigable: ten sections that open and close, a search, live summaries, "unsaved"
+ * marks, a save bar that appears when there is something to save, and a guard on leaving.
  */
+const routes = (over: Record<string, unknown> = {}) => [
+  { path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, ...over } },
+  { method: "PUT", path: "/api/v1/admin/settings/", body: { saved: true } },
+];
+
+afterEach(() => { vi.unstubAllGlobals(); window.location.hash = ""; });
+beforeEach(() => window.localStorage.removeItem(SETTINGS_INTRO_KEY));
+
 describe("the settings screen as a document", () => {
-  afterEach(() => vi.unstubAllGlobals());
-
-  const routes = (over: Record<string, unknown> = {}) => [
-    { path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, ...over } },
-    { path: "/api/v1/admin/courts/", body: [] },
-  ];
-
   /**
-   * C14. Reviewer C counted the tab stops from the top of the document to the first door
-   * setting: <b>seventy-six</b>. The page is nine cards and about thirty fields long and the
-   * door numbers are seventh, so a keyboard user sent here by the doors page's "change how
-   * long the lock is released" link paid for the booking, credits and court-box blocks first,
-   * every time.
+   * C14, as R13 answers it. Reviewer C counted SEVENTY-SIX tab stops from the top of the page to
+   * the first door setting. The jump nav that fixed it is retired: every section is now a header
+   * button at the top level of one accordion, closed by default, so the door settings are one
+   * stop per section away — and each header is a real h2, so a screen reader lists them too.
    */
-  it("is a named region per card, with a jump nav that names every one of them", async () => {
+  it("names every section by a heading whose button opens it", async () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    await screen.findByRole("heading", { name: "Booking" });
-
-    // Every card is a region named by its own heading — `aria-labelledby` rather than an
-    // `aria-label` repeating the words, so a rename cannot leave the region announcing the
-    // old name.
-    const regions = screen.getAllByRole("region");
-    const names = regions.map((region) => region.getAttribute("aria-labelledby"))
-      .filter((id): id is string => id !== null)
-      .map((id) => document.getElementById(id)!.textContent);
-    for (const heading of [
-      "Booking", "Opening hours", "No-show & cancellation policy", "Credits & top-ups",
-      "Court access", "Court boxes & identification", "Door gates", "Records",
-      // eco — ruling 13's three new blocks. Counted rather than listed separately, because
-      // the property being held is that the nav and the document cannot drift apart: a block
-      // added without a nav entry is the seventy-six-tab-stops finding, re-shipped.
-      "Box screens & scanning", "Limits & confirmations", "Monitoring & live updates",
-      "Courts",
-    ]) {
-      expect(names, `no region named ${heading}`).toContain(heading);
+    await screen.findByRole("heading", { name: "Bookings" });
+    for (const section of SETTINGS_SECTIONS) {
+      const heading = screen.getByRole("heading", { name: section.title, level: 2 });
+      const trigger = within(heading).getByRole("button", { name: section.title });
+      expect(trigger).toHaveAttribute("aria-expanded", "false");
     }
-
-    const nav = screen.getByRole("navigation", { name: "Jump to section" });
-    // Derived from the regions rather than pinned to a number, so adding a block and its nav
-    // entry together passes and adding one without the other does not.
-    expect(within(nav).getAllByRole("link")).toHaveLength(names.length);
+    // Exactly one header button per section: nothing else on the page poses as one.
+    expect(screen.getAllByRole("button", { expanded: false }).filter((b) => b.closest("h2")))
+      .toHaveLength(SETTINGS_SECTIONS.length);
   });
 
-  /**
-   * And the jump moves FOCUS, not only the scroll. A bare fragment navigation leaves focus
-   * at the top of the document, which is C15's finding in a different place: the person who
-   * most needs the jump is the one it does nothing for.
-   */
-  it("focuses the section heading rather than only scrolling to it", async () => {
+  it("opens a section to its fields, and its region is named by the section", async () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const nav = await screen.findByRole("navigation", { name: "Jump to section" });
-    fireEvent.click(within(nav).getByRole("link", { name: "Door gates" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Door gates" }));
+    expect(sectionTrigger("Door gates")).toHaveAttribute("aria-expanded", "true");
+    const region = screen.getByRole("region", { name: "Door gates" });
+    expect(within(region).getByLabelText(/Unlock time/, { selector: "input" })).toBeInTheDocument();
+    // The others stay shut — the page opens on ten one-line answers, not seventy fields.
+    expect(sectionTrigger("Bookings")).toHaveAttribute("aria-expanded", "false");
+  });
 
-    const heading = screen.getByRole("heading", { name: "Door gates" });
-    expect(heading).toHaveFocus();
-    // The same attribute the router uses, which is what carries the scroll-margin that keeps
-    // a heading out from under the sticky header, and the mouse/keyboard ring distinction.
-    expect(heading).toHaveAttribute("data-route-heading");
+  /** "Open all" and "Close all" — for the admin who does want the whole document. */
+  it("opens and closes every section at once", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: SETTINGS_COPY.expandAll }));
+    for (const section of SETTINGS_SECTIONS) {
+      expect(sectionTrigger(section.title)).toHaveAttribute("aria-expanded", "true");
+    }
+    fireEvent.click(screen.getByRole("button", { name: SETTINGS_COPY.collapseAll }));
+    expect(sectionTrigger("Door gates")).toHaveAttribute("aria-expanded", "false");
   });
 
   /**
-   * C12. A refused field was marked by <code>aria-invalid</code> and nothing else: measured,
-   * a refused input and a good one were pixel-identical, and the complaint — which has been
-   * on <code>aria-describedby</code> since B5 — is read when a screen reader ARRIVES at the
-   * field, never when the value inside it goes bad. So an admin typing 400 into a field
-   * bounded at 30 and tabbing on was told nothing at all until Save, thirty fields later.
+   * C12. A refused field was marked by `aria-invalid` and nothing else, and the complaint was
+   * read when a screen reader ARRIVED at the field, never when the value went bad.
    */
   it("marks a refused field and says so when the person leaves it", async () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const unlock = await screen.findByLabelText(/Unlock time/);
+    const unlock = await findControl(/Unlock time/);
     fireEvent.change(unlock, { target: { value: "400" } });
 
-    // The boundary says something is wrong with it, rather than being the border every other
-    // field on the page is wearing.
+    // The boundary says something is wrong: `aria-invalid` paints the danger edge, and a ring
+    // makes it more than a one-pixel colour change.
     expect(unlock).toHaveAttribute("aria-invalid", "true");
-    expect(unlock.className).toContain("border-danger-strong");
+    expect(unlock.className).toContain("ring-danger-strong");
 
-    // And a shape beside the words, because danger red on white is a colour and colour alone
-    // is never the signal (SC 1.4.1).
+    // A shape beside the words — colour alone is never the signal (SC 1.4.1).
     const field = unlock.closest("[data-invalid]")!;
-    expect(field).toBeTruthy();
-    expect(field.querySelector("svg")).toBeTruthy();
+    expect(field.querySelector("[data-slot='field-error'] svg")).toBeTruthy();
 
     // Nothing announced while the answer is half typed…
     const live = field.querySelector("[aria-live='polite']")!;
     expect(live.textContent).toBe("");
-    // …and the complaint, named by the field it is about, when the person moves on.
+    // …and the complaint, named by its field, when the person moves on.
     fireEvent.blur(unlock, { relatedTarget: document.body });
     await waitFor(() => expect(live.textContent).toContain("Unlock time (seconds)"));
     expect(live.textContent).toContain("between 1 and 30");
@@ -112,40 +102,31 @@ describe("the settings screen as a document", () => {
     expect(live.textContent).toBe("");
   });
 
-  /**
-   * C13. The derived horizon sentence was correct, unresponsive to the field directly beside
-   * it, and silent about why — so an admin narrowing "Early entry" narrowed nothing and had
-   * nothing on screen to tell them which two fields they wanted instead.
-   */
-  it("says which fields the door horizon was read from, and follows the policy select", async () => {
+  /** C13. The derived horizon sentence says which fields it was read from, and follows the policy. */
+  it("says which fields the door horizon was read from, and follows the policy picker", async () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    // The default policy: the two fields on the OTHER card, named by the captions they wear.
     const openBasis = await screen.findByText(/it comes from/);
     expect(openBasis).toHaveTextContent("Offline roster reach (minutes)");
     expect(openBasis).toHaveTextContent("Lights on this early (minutes before a booking)");
     expect(openBasis).toHaveTextContent("Court boxes & identification");
-    // And why the field beside it did nothing.
     expect(openBasis).toHaveTextContent("only sets a floor (currently 30)");
-    // The half of the open policy a horizon sentence on its own would hide.
     expect(openBasis).toHaveTextContent("a member's own code opens a door whenever their membership is active");
 
-    // The select is one of the fields ON SCREEN it is computed from.
-    fireEvent.change(screen.getByLabelText(/Who may open a door/), { target: { value: "booking_window" } });
+    choose(/Who may open a door/, "Only a member with a booking");
     const strictBasis = screen.getByText(/on this block and nothing else/);
     expect(strictBasis).toHaveTextContent("Early entry (minutes before a booking)");
     expect(strictBasis).not.toHaveTextContent("Offline roster reach");
     expect(strictBasis).not.toHaveTextContent("a member's own code");
   });
 
-  /** The floor branch: raising early entry past the pair makes it the field that decides. */
   it("switches which field it names once early entry becomes the floor that wins", async () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
     await screen.findByText(/it comes from/);
-    fireEvent.change(screen.getByLabelText(/Early entry/), { target: { value: "200" } });
+    fireEvent.change(control(/Early entry/), { target: { value: "200" } });
 
     const basis = screen.getByText(/it comes from/);
     expect(basis).toHaveTextContent("Early entry (minutes before a booking)");
@@ -153,11 +134,243 @@ describe("the settings screen as a document", () => {
     expect(basis).toHaveTextContent("never opens less early than this floor");
   });
 
-  /** And the cap says it is a cap rather than leaving the arithmetic to be re-done. */
   it("says when the four-hour cap is what stopped the number", async () => {
     stubFetch(routes({ roster_window_minutes: 1440, activation_cue_window_minutes: 1440 }));
     renderPage(<AdminSettingsPage />);
 
     expect(await screen.findByText(/which is the cap, so the answer stops there/)).toBeInTheDocument();
+  });
+});
+
+describe("R13 — summaries, unsaved marks and the save bar", () => {
+  /** Collapsed, a section still answers: its header carries a live one-line summary. */
+  it("summarises each section from the working copy, and follows an edit", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    const doors = await screen.findByRole("button", { name: "Door gates" });
+    expect(doors).toHaveAccessibleDescription(/Any member in good standing · lock released 15 s/);
+    expect(sectionTrigger("Bookings")).toHaveAccessibleDescription(/15-min slices · 14 days ahead · 60 min a day each/);
+    expect(sectionTrigger("Cancellations & no-shows")).toHaveAccessibleDescription(/30% penalty inside 15 min/);
+
+    fireEvent.change(control(/Unlock time/), { target: { value: "20" } });
+    expect(doors).toHaveAccessibleDescription(/lock released 20 s/);
+  });
+
+  it("shows no save bar until something changes, then counts the changes and marks the section", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    await findControl(/Unlock time/);
+    expect(querySaveButton()).toBeNull();
+    expect(sectionTrigger("Door gates")).not.toHaveAccessibleDescription(/Unsaved changes/);
+
+    fireEvent.change(control(/Unlock time/), { target: { value: "20" } });
+    fireEvent.change(control(/Walk-up maximum/), { target: { value: "60" } });
+    fireEvent.change(control(/Grace window/), { target: { value: "10" } });
+
+    expect(screen.getByText(SETTINGS_COPY.changes(3))).toBeInTheDocument();
+    expect(sectionTrigger("Door gates")).toHaveAccessibleDescription(/Unsaved changes/);
+    expect(sectionTrigger("Court boxes & identification")).toHaveAccessibleDescription(/Unsaved changes/);
+    expect(sectionTrigger("Bookings")).not.toHaveAccessibleDescription(/Unsaved changes/);
+
+    // Put back by hand: not a change any more.
+    fireEvent.change(control(/Grace window/), { target: { value: "5" } });
+    expect(screen.getByText(SETTINGS_COPY.changes(2))).toBeInTheDocument();
+  });
+
+  it("saves, and the bar goes away once what was sent is the saved copy", async () => {
+    const stub = stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    fireEvent.change(await findControl(/Unlock time/), { target: { value: "20" } });
+    fireEvent.click(saveButton());
+
+    await waitFor(() => expect(stub.calls.some((c) => c.method === "PUT")).toBe(true));
+    expect(await screen.findByText(SETTINGS_COPY.saved)).toBeInTheDocument();
+    await waitFor(() => expect(querySaveButton()).toBeNull());
+    expect(sectionTrigger("Door gates")).not.toHaveAccessibleDescription(/Unsaved changes/);
+  });
+
+  /** Discard asks first — it throws work away — and then puts every field back as saved. */
+  it("discards every change after a confirm, and sends nothing", async () => {
+    const stub = stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    fireEvent.change(await findControl(/Unlock time/), { target: { value: "20" } });
+    fireEvent.click(screen.getByRole("button", { name: SETTINGS_COPY.discard }));
+    const dialog = await screen.findByRole("dialog", { name: SETTINGS_COPY.discardTitle });
+    fireEvent.click(within(dialog).getByRole("button", { name: SETTINGS_COPY.discardConfirm }));
+
+    await waitFor(() => expect(control(/Unlock time/)).toHaveValue(15));
+    expect(querySaveButton()).toBeNull();
+    expect(stub.calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
+  /** A failed read is a failed read — never "Loading settings…" for ever, never an empty form. */
+  it("says the read failed and offers a retry rather than a form of nothing", async () => {
+    // A 408, not a 5xx: `StateBlock` rightly offers no retry for a deployment fault.
+    stubFetch([{ path: "/api/v1/admin/settings/", status: 408, body: { error: "timeout" } }]);
+    renderPage(<AdminSettingsPage />);
+
+    expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Door gates" })).toBeNull();
+  });
+});
+
+describe("R13 — search", () => {
+  it("filters to the settings that match, opens their sections and marks the words", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    await findControl(/Unlock time/);
+    fireEvent.change(screen.getByRole("searchbox", { name: SETTINGS_COPY.searchLabel }), { target: { value: "unlock" } });
+
+    // Door gates opens by itself, showing the one setting that answers — and the word is marked.
+    expect(sectionTrigger("Door gates")).toHaveAttribute("aria-expanded", "true");
+    const unlock = control(/Unlock time/);
+    expect(unlock.closest("[data-setting]")).not.toHaveAttribute("hidden");
+    expect(document.querySelector("label mark")?.textContent?.toLowerCase()).toBe("unlock");
+    expect(control(/Early entry/).closest("[data-setting]")).toHaveAttribute("hidden");
+    // Sections with no match leave the page while the search runs.
+    expect(screen.queryByRole("button", { name: "Bookings" })).toBeNull();
+    expect(screen.getByText(SETTINGS_COPY.matchCount(1))).toBeInTheDocument();
+  });
+
+  it("finds a setting by what it does, not only by its name", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    await findControl(/Unlock time/);
+    fireEvent.change(screen.getByRole("searchbox", { name: SETTINGS_COPY.searchLabel }), { target: { value: "no-show" } });
+    expect(control(/Grace window/).closest("[data-setting]")).not.toHaveAttribute("hidden");
+  });
+
+  it("opens the advanced disclosure when the match is behind it", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    await findControl(/Unlock time/);
+    fireEvent.change(screen.getByRole("searchbox", { name: SETTINGS_COPY.searchLabel }), { target: { value: "heartbeat" } });
+    expect(screen.getByRole("button", { name: SETTINGS_COPY.advancedHide })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("says so when nothing matches, and Escape clears the search", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    await findControl(/Unlock time/);
+    const box = screen.getByRole("searchbox", { name: SETTINGS_COPY.searchLabel });
+    fireEvent.change(box, { target: { value: "zebra crossing" } });
+    expect(screen.getByText(SETTINGS_COPY.noMatches("zebra crossing"))).toBeInTheDocument();
+
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(box).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Bookings" })).toBeInTheDocument();
+  });
+});
+
+describe("R13 — guidance and the first visit", () => {
+  it("puts the full guidance behind a named (i) and on the control's description", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Door gates" }));
+    // Also on the control's description, for a screen reader that never opens the popover.
+    expect(control(/Unlock time/)).toHaveAccessibleDescription(/never holds it open longer than 30 seconds/);
+    fireEvent.click(screen.getByRole("button", { name: "More about Unlock time (seconds)" }));
+    const guidance = await screen.findByRole("dialog", { name: "Unlock time (seconds)" });
+    expect(guidance).toHaveTextContent("never holds it open longer than 30 seconds");
+  });
+
+  it("explains the page once, and remembers being dismissed", async () => {
+    stubFetch(routes());
+    const { unmount } = renderPage(<AdminSettingsPage />);
+
+    await screen.findByText(SETTINGS_COPY.introTitle);
+    fireEvent.click(screen.getByRole("button", { name: SETTINGS_COPY.introDismiss }));
+    expect(screen.queryByText(SETTINGS_COPY.introTitle)).toBeNull();
+    unmount();
+
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+    await findControl(/Unlock time/);
+    expect(screen.queryByText(SETTINGS_COPY.introTitle)).toBeNull();
+  });
+
+  it("names the credit rates as moving to Groups", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    expect(await screen.findByRole("button", { name: "Credits & top-ups" })).toHaveTextContent(SETTINGS_COPY.movingToGroups);
+    expect(screen.getByText(SETTINGS_COPY.movingToGroupsNote)).toBeInTheDocument();
+  });
+});
+
+describe("R13 — leaving with unsaved changes", () => {
+  function WithElsewhere() {
+    return (
+      <Routes>
+        <Route path="/admin/settings" element={<><Link to="/wallet">Wallet</Link><AdminSettingsPage /></>} />
+        <Route path="/wallet" element={<h1>Wallet page</h1>} />
+      </Routes>
+    );
+  }
+
+  it("asks before a link takes the admin away from unsaved changes", async () => {
+    stubFetch(routes());
+    renderPage(<WithElsewhere />, { initialEntries: ["/admin/settings"] });
+
+    fireEvent.change(await findControl(/Unlock time/), { target: { value: "20" } });
+    fireEvent.click(screen.getByRole("link", { name: "Wallet" }));
+
+    const dialog = await screen.findByRole("dialog", { name: SETTINGS_COPY.leaveTitle });
+    expect(dialog).toHaveTextContent("1 unsaved change");
+    expect(screen.queryByText("Wallet page")).toBeNull();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: SETTINGS_COPY.leaveConfirm }));
+    expect(await screen.findByText("Wallet page")).toBeInTheDocument();
+  });
+
+  it("lets a link through untouched when there is nothing to lose", async () => {
+    stubFetch(routes());
+    renderPage(<WithElsewhere />, { initialEntries: ["/admin/settings"] });
+
+    await findControl(/Unlock time/);
+    fireEvent.click(screen.getByRole("link", { name: "Wallet" }));
+    expect(await screen.findByText("Wallet page")).toBeInTheDocument();
+  });
+
+  it("asks the browser to hold a tab close while there are changes", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    fireEvent.change(await findControl(/Unlock time/), { target: { value: "20" } });
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+  });
+});
+
+describe("R13 — deep links to a section", () => {
+  it("opens the section a #settings-<id> hash names and focuses its header", async () => {
+    window.location.hash = "#settings-doors";
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    const trigger = await screen.findByRole("button", { name: "Door gates" });
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("opens a closed section, and its advanced disclosure, to reach a #setting-<key> field", async () => {
+    window.location.hash = "#setting-heartbeat-seconds";
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+
+    const heartbeat = await findControl(/Heartbeat interval/);
+    await waitFor(() => expect(heartbeat).toHaveFocus());
+    expect(sectionTrigger("Court boxes & identification")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: SETTINGS_COPY.advancedHide })).toHaveAttribute("aria-expanded", "true");
   });
 });

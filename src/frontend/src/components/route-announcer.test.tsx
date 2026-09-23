@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { RouteAnnouncer } from "./RouteAnnouncer";
-import { NOT_FOUND_PAGE_NAME, knownRoutePatterns, routePageName, routeTitle } from "../lib/routeAnnouncer";
+import { NOT_FOUND_PAGE_NAME, focusFragmentTarget, knownRoutePatterns, routePageName, routeTitle } from "../lib/routeAnnouncer";
 import { ADMIN_NAV_ITEMS } from "./admin/adminNav";
 
 const SRC = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -79,19 +79,33 @@ describe("per-route document titles", () => {
     expect(routeTitle("/admin/reports")).toBe("Reports — Crusaders Mainframe");
     expect(routeTitle("/wallet/activity")).toBe("Wallet activity — Crusaders Mainframe");
     expect(routeTitle("/admin/monitoring/devices")).toBe("Boards — Crusaders Mainframe");
+    // P6 — the courts left Settings for a page of their own.
+    expect(routeTitle("/admin/courts")).toBe("Courts — Crusaders Mainframe");
+  });
+
+  /**
+   * P5 — a member's own page. Each tab is a URL, so each is named: an admin with three members'
+   * wallets open in three tabs can at least tell the wallet tabs from the night tabs. The id is
+   * never read as a word, and "/admin/members/abc" must not fall through to the 404's name.
+   */
+  it("names a member's page and each of its tabs", () => {
+    expect(routeTitle("/admin/members/2c9f")).toBe("Member — Crusaders Mainframe");
+    expect(routeTitle("/admin/members/2c9f/wallet")).toBe("Member wallet & ledger — Crusaders Mainframe");
+    expect(routeTitle("/admin/members/2c9f/bookings")).toBe("Member bookings — Crusaders Mainframe");
+    expect(routeTitle("/admin/members/2c9f/doors")).toBe("Member door history — Crusaders Mainframe");
+    expect(routeTitle("/admin/members/2c9f/night")).toBe("Member's night — Crusaders Mainframe");
+    expect(routeTitle("/admin/members/2c9f/access")).toBe("Member sign-in & biometrics — Crusaders Mainframe");
   });
 
   /**
    * The rail and the announcer name every admin destination with the SAME word. They disagreed
    * ("Member groups" under a rail item called "Groups", "Club reports" under "Reports", "Admin
    * overview" under "Overview"): a screen-reader user clicked one word and heard another.
-   * Settings is the one known exception, owned by the Settings rebuild (P6), and listed so the
-   * exception cannot spread silently.
+   * Settings was the last exception ("Admin settings"); the Settings rebuild (P6) retired it, so
+   * there are none — every destination is heard by the word the rail shows.
    */
   it("announces every admin destination by its rail label", () => {
-    const KNOWN_EXCEPTIONS = new Set(["settings"]);
     const mismatched = ADMIN_NAV_ITEMS
-      .filter((item) => !KNOWN_EXCEPTIONS.has(item.id))
       .filter((item) => routeTitle(item.path) !== `${item.label} — Crusaders Mainframe`)
       .map((item) => `${item.path}: rail "${item.label}" vs "${routeTitle(item.path)}"`);
     expect(mismatched).toEqual([]);
@@ -319,5 +333,33 @@ describe("RouteAnnouncer", () => {
     expect(region).toHaveAttribute("aria-live", "polite");
     expect(region).not.toHaveAttribute("role");
     expect(screen.queryByRole("status")).toBeNull();
+  });
+});
+
+/**
+ * R13 — a fragment that names an accordion section. The section's header is an `<h2>` wrapping
+ * its one button; focus belongs on the button (Enter opens it), never on an inert heading round
+ * it. Found in Chromium: the router's fragment jump focused the heading AFTER the settings page
+ * had focused the button, so `/admin/settings#settings-doors` left the keyboard on a heading.
+ */
+describe("a fragment that names an accordion header", () => {
+  it("focuses the header's button rather than the heading around it", () => {
+    render(
+      <section id="settings-doors">
+        <h2><button type="button">Door gates</button></h2>
+        <p>fields</p>
+      </section>,
+    );
+    expect(focusFragmentTarget("#settings-doors")).toBe(true);
+    expect(screen.getByRole("button", { name: "Door gates" })).toHaveFocus();
+    expect(screen.getByRole("heading", { name: "Door gates" })).not.toHaveAttribute("tabindex");
+  });
+
+  it("still focuses a plain heading itself", () => {
+    render(<section id="plain"><h2>Plain heading</h2></section>);
+    expect(focusFragmentTarget("#plain")).toBe(true);
+    const heading = screen.getByRole("heading", { name: "Plain heading" });
+    expect(heading).toHaveFocus();
+    expect(heading).toHaveAttribute("tabindex", "-1");
   });
 });

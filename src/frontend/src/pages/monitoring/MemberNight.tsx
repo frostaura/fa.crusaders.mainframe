@@ -1,29 +1,38 @@
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Alert } from "../../components/Alert";
+import { useToast } from "../../components/Toast";
+import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
-import { DatePicker } from "../../components/ui/date-picker";
+import { DatePicker, formatClubDayLabel } from "../../components/ui/date-picker";
+import { DownloadSimple } from "../../components/ui/icons";
 import { MemberCombobox } from "../../components/ui/member-combobox";
 import { ToggleGroup, ToggleGroupItem } from "../../components/ui/toggle-group";
 import { PageHeader, PageShell } from "../../components/ui/page-shell";
 import { StateBlock } from "../../components/ui/state-block";
-import { CardListSkeleton, DownloadCsvLink } from "../../components/monitoring/parts";
+import { CardListSkeleton } from "../../components/monitoring/parts";
 import { clubClock, clubDate } from "../../lib/clubClock";
 import { endpoints, type AdminMember } from "../../lib/api";
-
-/** A member as this page holds one: the id it reads by, the name it shows. */
-type PickableMember = { user_id: string; full_name: string; membership_number?: string | null };
-
-const MEMBERS_FAILED = "Couldn't read the club's members. That is not the same as the club having none — try again.";
 import { adminEndpoints, type TraceView } from "../../lib/adminApi";
+import { describeFailure } from "../../lib/errors";
+import { clubDayOf, shiftClubDay } from "../../lib/gridClock";
+import { memberDetailEndpoints, saveFile } from "../../lib/memberDetailApi";
+import { NIGHT_TAB_COPY } from "../../lib/memberDetailCopy";
 import { buildTimeline, burstOutcomes, durationInWords, hasApproximateTimes } from "../../lib/nightTimeline";
 import {
-  APPROXIMATE_EXPLANATION, NIGHT_EMPTY_HINT, NIGHT_EXPORT_NOTE, NIGHT_NO_MEMBER_YET,
+  APPROXIMATE_EXPLANATION, NIGHT_EMPTY_HINT, NIGHT_EXPORT_NOTE,
   NIGHT_PRIVACY_NOTICE, actorClause, gapLine, isOnBehalf, nightEmptyNotice, nightWindowHint,
   retentionCaveat,
 } from "../../lib/nightCopy";
+import { useAsyncAction } from "../../lib/useAsyncAction";
+import { validClubDay } from "../../lib/scheduleDay";
+import { useRead } from "../../lib/useRead";
+import { useTicker } from "../../lib/useTicker";
 
 /**
- * A person's night — GOAL item 6. `/admin/monitoring/night`.
+ * A person's night — GOAL item 6. Since P5 it lives ON THE MEMBER: `/admin/members/:userId/night`
+ * (R17 — "the per-person views live on the member"). The old `/admin/monitoring/night` route
+ * answers with {@link MemberNightPage}, a picker that sends the admin to that member's own page.
  *
  * <p>
  * <b>This surface exists because Dean asked for it and it overrides a standing contract.</b>
@@ -39,24 +48,28 @@ import {
  * <b>The member is a path segment on the wire, and that is structural rather than stylistic.</b>
  * A query parameter would eventually be made optional by somebody, and an optional member
  * filter on a log IS the thing the doors contract exists to prevent. There is no list of
- * traces, no search, and no index: the only way in is a member an admin already named. You
- * cannot discover a person here; you can only ask about one you already have.
+ * traces, no search, and no index: the only way in is a member an admin already named.
+ * </p>
+ *
+ * <p>
+ * <b>The default night is the CLUB's today, never UTC's.</b> This page used
+ * `new Date().toISOString().slice(0, 10)` — the UTC date — so a club east of Greenwich opened
+ * on YESTERDAY for the first two hours after its midnight, and a club west of it opened on
+ * TOMORROW every evening (the same defect D3-B03 fixed on the grid). The day is now
+ * `clubDayOf(now)` in the club's zone; a `?day=` in the link wins over it.
  * </p>
  *
  * <p>
  * <b>Actor versus subject is the spine.</b> Every card says who did it, and a card where
- * somebody acted ON this member is marked — that is the `{actor, subject}` invariant made
- * visible for the first time in this product.
+ * somebody acted ON this member is marked — the `{actor, subject}` invariant made visible.
  * </p>
  */
 
-/** The three nights offered as buttons, newest first, ending with today. */
-function recentNights(today: Date): Array<{ iso: string; label: string }> {
+/** The three nights offered as buttons, newest first, ending with the club's today. */
+function recentNights(today: string): Array<{ iso: string; label: string }> {
   return [0, 1, 2].map((back) => {
-    const day = new Date(today);
-    day.setDate(day.getDate() - back);
-    const iso = day.toISOString().slice(0, 10);
-    return { iso, label: back === 0 ? "Tonight" : back === 1 ? "Last night" : clubDate(day) };
+    const iso = shiftClubDay(today, -back);
+    return { iso, label: back === 0 ? "Tonight" : back === 1 ? "Last night" : formatClubDayLabel(iso) ?? iso };
   });
 }
 
@@ -65,8 +78,7 @@ function recentNights(today: Date): Array<{ iso: string; label: string }> {
  *
  * <p>
  * Its own component because the three arms are the whole of what this surface draws, and
- * because the page around it is a chooser — a member, a night, and the states a read can be
- * in. Keeping the two together made one function that both fetched and rendered a timeline.
+ * because the page around it is a chooser — a night, and the states a read can be in.
  * </p>
  */
 function NightTimeline({ rows, subjectName, timezone }: {
@@ -106,61 +118,28 @@ function NightTimeline({ rows, subjectName, timezone }: {
   );
 }
 
-/**
- * Who, and which night — the two questions this surface cannot do anything without.
- *
- * <p>
- * Its own component because the page's remaining branching was almost entirely here: three
- * separate `!member` guards disabling a control and saying why, plus the picker's own
- * loading and failed states. None of it is about a timeline.
- * </p>
- */
-function NightChooser({
-  pickable, member, onMember, membersLoading, membersFailed, day, onDay, rangeHint,
-}: {
-  pickable: PickableMember[];
-  member: PickableMember | null;
-  onMember: (next: PickableMember | null) => void;
-  membersLoading: boolean;
-  membersFailed: boolean;
+/** Which night — the one question this surface cannot answer anything without. */
+function NightDayChooser({ day, today, onDay, rangeHint }: {
   day: string;
+  today: string;
   onDay: (next: string) => void;
   rangeHint: string;
 }) {
   return (
     <Card>
-      <CardContent className="grid gap-6 md:grid-cols-2">
-        <div className="flex flex-col gap-1.5">
-          <MemberCombobox
-            label="Which member?"
-            placeholder="Search the club's members"
-            members={pickable.map((m) => ({ id: m.user_id, name: m.full_name, subtitle: m.membership_number ?? null }))}
-            value={member?.user_id ?? null}
-            onChange={(id) => onMember(pickable.find((m) => m.user_id === id) ?? null)}
-            loading={membersLoading}
-            error={membersFailed ? MEMBERS_FAILED : null}
-          />
-          <p className="text-sm text-text-muted">
-            There is nothing to trace for a visitor booked in under a written-in name, so only members appear here.
-          </p>
-        </div>
-
+      <CardContent className="flex flex-col gap-1.5">
         <div role="group" aria-labelledby="night-day-label" className="flex flex-col gap-1.5">
           <span id="night-day-label" className="text-sm font-medium text-text-primary">Which night?</span>
-          {/* Disabled until the first half is answered, and the disabled half SAYS WHY —
-              a greyed-out control with no explanation is a dead end somebody stares at. */}
-          {!member && <p className="text-sm text-text-secondary">{NIGHT_NO_MEMBER_YET}</p>}
           <div className="flex flex-wrap items-center gap-2">
-            <DatePicker label="Which night?" value={day} onChange={onDay} disabled={!member} />
+            <DatePicker label="Which night?" value={day} onChange={onDay} max={today} />
             <ToggleGroup
               type="single"
               aria-label="Recent nights"
               value={day}
-              disabled={!member}
               onValueChange={(next) => { if (next) onDay(next); }}
               className="rounded-lg bg-bg-muted p-1"
             >
-              {recentNights(new Date()).map((night) => (
+              {recentNights(today).map((night) => (
                 <ToggleGroupItem key={night.iso} value={night.iso}>{night.label}</ToggleGroupItem>
               ))}
             </ToggleGroup>
@@ -173,11 +152,135 @@ function NightChooser({
 }
 
 /**
+ * One member's night, re-read whenever the night changes.
+ *
+ * <p>
+ * Keyed through `useRead`, so the previous night is GONE the moment a different one is asked for,
+ * deliberately and unlike the control board: a timeline for the wrong night is not stale truth, it
+ * is a different fact, and on this surface of all surfaces it must not outlive its question for
+ * even one paint.
+ * </p>
+ */
+function useMemberNight(userId: string, day: string) {
+  const load = useCallback(() => adminEndpoints.memberTrace(userId, { day }), [userId, day]);
+  const [read, retry] = useRead(`${userId}:${day}`, load);
+  return { view: read.data, loading: read.loading, error: read.error, retry };
+}
+
+/**
+ * Everything the page draws that is derived rather than fetched.
+ *
+ * <p>
+ * Each fallback is a decision: `subjectName` falls back from the name the server returned, to
+ * the name the page holds, to a phrase that names nobody, so a card never says "undefined
+ * scanned".
+ * </p>
+ */
+function nightView(view: TraceView | null, name: string | null) {
+  const read = view ?? EMPTY_NIGHT;
+  const timezone = read.timezone;
+  const events = read.events ?? [];
+  return {
+    timezone,
+    events,
+    rows: buildTimeline(events),
+    subjectName: read.member?.name ?? name ?? "this member",
+    caveat: retentionCaveat(read.retention, timezone),
+    retentionKey: read.club_day ?? "",
+    rangeHint: nightWindowHint(read.range, timezone),
+  };
+}
+
+/** What a night looks like before one has been read. Fields the wire may omit stay absent. */
+const EMPTY_NIGHT = {} as Partial<TraceView>;
+
+/**
+ * The night of one member the caller already named — the body of the member page's Night tab.
+ *
+ * <p>
+ * The chosen night lives in the URL (`?day=`), so "Thandi's Saturday" is a link. With no day in
+ * the link it is the club's today, computed in the club's zone — see the file header. Until the
+ * club has told this browser its zone, `clubDayOf` answers the reader's own day; the first trace
+ * carries the zone, and the default re-derives from it on the very next render.
+ * </p>
+ */
+export function MemberNight({ userId, name }: { userId: string; name: string | null }) {
+  const [params, setParams] = useSearchParams();
+  // The clock moves on while the tab is open: at the club's midnight "Tonight" becomes a new day.
+  const today = clubDayOf(useTicker(true, 60_000));
+  const day = validClubDay(params.get("day")) ?? today;
+  const setDay = (next: string) => {
+    setParams((prev) => {
+      const out = new URLSearchParams(prev);
+      if (next === today) out.delete("day"); else out.set("day", next);
+      return out;
+    }, { replace: true });
+  };
+  const { view, loading, error, retry } = useMemberNight(userId, day);
+  const { timezone, events, rows, subjectName, caveat, retentionKey, rangeHint } = nightView(view, name);
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* Standing, and said once. It is a fact about the screen, not an event — and this block
+          re-renders on every read, so `polite` would announce the paragraph again each time. */}
+      <Alert tone="warning" live="standing" announceKey="night-privacy">{NIGHT_PRIVACY_NOTICE}</Alert>
+      <NightDayChooser day={day} today={today} onDay={setDay} rangeHint={rangeHint} />
+      {caveat && <Alert tone="info" live="standing" announceKey={`night-retention:${retentionKey}`}>{caveat}</Alert>}
+      {hasApproximateTimes(events) && <p className="text-sm text-text-muted">{APPROXIMATE_EXPLANATION}</p>}
+      <NightResult
+        userId={userId}
+        day={day}
+        loading={loading}
+        error={error}
+        events={events}
+        rows={rows}
+        subjectName={subjectName}
+        timezone={timezone}
+        onRetry={retry}
+      />
+    </div>
+  );
+}
+
+/**
+ * The old `/admin/monitoring/night` — kept answering so a bookmark still lands somewhere useful.
+ * It asks WHO, and opens that member's own Night tab; the night itself is read only there.
+ */
+export function MemberNightPage() {
+  const { pickable, membersLoading, membersFailed } = useClubMembers();
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const day = validClubDay(params.get("day"));
+  const open = (userId: string | null) => {
+    if (!userId) return;
+    navigate(`/admin/members/${encodeURIComponent(userId)}/night${day ? `?day=${day}` : ""}`);
+  };
+  return (
+    <PageShell width="content">
+      <PageHeader title={NIGHT_TAB_COPY.pickerTitle} description={NIGHT_TAB_COPY.pickerDescription} />
+      <Alert tone="warning" live="standing" announceKey="night-privacy">{NIGHT_PRIVACY_NOTICE}</Alert>
+      <Card>
+        <CardContent className="flex flex-col gap-1.5">
+          <MemberCombobox
+            label={NIGHT_TAB_COPY.pickerLabel}
+            placeholder={NIGHT_TAB_COPY.pickerPlaceholder}
+            members={pickable}
+            value={null}
+            onChange={open}
+            loading={membersLoading}
+            error={membersFailed ? NIGHT_TAB_COPY.membersFailed : null}
+          />
+        </CardContent>
+      </Card>
+    </PageShell>
+  );
+}
+
+/**
  * The club's members, as the picker needs them, with its failure kept separate.
  *
  * A failed read must never reach the picker as an empty list — "the club has no members" is a
- * different sentence from "we could not ask", and rendering the first from the second is the
- * three-state trap this release is written against.
+ * different sentence from "we could not ask".
  */
 function useClubMembers() {
   const [members, setMembers] = useState<AdminMember[] | null>(null);
@@ -191,151 +294,15 @@ function useClubMembers() {
     return () => { cancelled = true; };
   }, []);
 
-  const pickable: PickableMember[] = (members ?? []).map((m) => ({
-    user_id: m.user_id,
-    full_name: m.full_name,
-    membership_number: m.membership_number ?? null,
-  }));
+  const pickable = (members ?? []).map((m) => ({ id: m.user_id, name: m.full_name, subtitle: m.membership_number ?? null }));
   return { pickable, membersLoading: members === null, membersFailed };
 }
 
 /**
- * One member's night, re-read whenever either half of the question changes.
- *
- * <p>
- * The previous night is CLEARED on a failure and on an unset member, deliberately and unlike
- * the control board: a timeline for the wrong person or the wrong night is not stale truth,
- * it is a different fact. On this surface of all surfaces, a timeline that outlives its
- * subject for even one paint is the wrong person's night.
- * </p>
- */
-function useMemberNight(member: PickableMember | null, day: string) {
-  const [view, setView] = useState<TraceView | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-
-  const read = useCallback(async (userId: string, when: string) => {
-    setLoading(true);
-    try {
-      setView(await adminEndpoints.memberTrace(userId, { day: when }));
-      setError(null);
-    } catch (err) {
-      setView(null);
-      setError(err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // Clearing the view when the member is unset IS the synchronisation — see above. The read
-  // itself is async and every setState inside it runs in a promise callback.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
-    if (!member) { setView(null); setError(null); return; }
-    void read(member.user_id, day);
-  }, [member, day, read]);
-
-  return { view, loading, error, read };
-}
-
-/**
- * Everything the page draws that is derived rather than fetched.
- *
- * <p>
- * Out of the component body because it is a run of optional chains over a read that may not
- * have happened yet — and a page component whose branching is all `?.` and `??` is one that
- * reads as complicated while doing nothing. Each fallback is a decision, though, and they are
- * the reason this is a function and not a spread: `subjectName` falls back from the name the
- * server returned, to the name the picker holds, to a phrase that names nobody, so a card
- * never says "undefined scanned".
- * </p>
- */
-function nightView(view: TraceView | null, member: PickableMember | null) {
-  // One guard instead of an optional chain per field: every line below reads a night that is
-  // known to exist, and the absent case is answered once, here, where it is obvious.
-  const read = view ?? EMPTY_NIGHT;
-  const timezone = read.timezone;
-  const events = read.events ?? [];
-  return {
-    timezone,
-    events,
-    rows: buildTimeline(events),
-    subjectName: read.member?.name ?? member?.full_name ?? "this member",
-    caveat: retentionCaveat(read.retention, timezone),
-    retentionKey: read.club_day ?? "",
-    rangeHint: nightWindowHint(read.range, timezone),
-  };
-}
-
-/** What a night looks like before one has been read. Fields the wire may omit stay absent. */
-const EMPTY_NIGHT = {} as Partial<TraceView>;
-
-export function MemberNightPage() {
-  const { pickable, membersLoading, membersFailed } = useClubMembers();
-  const [member, setMember] = useState<PickableMember | null>(null);
-  const [day, setDay] = useState<string>(() => new Date().toISOString().slice(0, 10));
-  const { view, loading, error, read } = useMemberNight(member, day);
-
-  const { timezone, events, rows, subjectName, caveat, retentionKey, rangeHint } = nightView(view, member);
-
-  return (
-    // R17: this is a view of a MEMBER, not of the hardware, so Monitoring no longer links here.
-    // The route still answers until P5 moves it onto the member's own page.
-    <PageShell width="content">
-      <PageHeader
-        title="A person’s night"
-        description="One member's evening at the club, in the order it happened — to settle a question, never to browse."
-      />
-
-      {/* Standing, and said once. It is a fact about the screen somebody has arrived at, not
-          an event — and this block re-renders on every read, so `polite` would announce the
-          whole paragraph again each time a night is chosen. */}
-      <Alert tone="warning" live="standing" announceKey="night-privacy">
-        {NIGHT_PRIVACY_NOTICE}
-      </Alert>
-
-      <NightChooser
-        pickable={pickable}
-        member={member}
-        onMember={setMember}
-        membersLoading={membersLoading}
-        membersFailed={membersFailed}
-        day={day}
-        onDay={setDay}
-        rangeHint={rangeHint}
-      />
-
-      {caveat && <Alert tone="info" live="standing" announceKey={`night-retention:${retentionKey}`}>{caveat}</Alert>}
-      {hasApproximateTimes(events) && <p className="text-sm text-text-muted">{APPROXIMATE_EXPLANATION}</p>}
-
-      {member && (
-        <NightResult
-          member={member}
-          day={day}
-          loading={loading}
-          error={error}
-          events={events}
-          rows={rows}
-          subjectName={subjectName}
-          timezone={timezone}
-          onRetry={() => read(member.user_id, day)}
-        />
-      )}
-    </PageShell>
-  );
-}
-
-/**
  * What the read produced — its three states, the timeline, and the export beside it.
- *
- * Its own component because the page above is now a question (who, and which night) and this
- * is the answer. It also takes the whole of the page's remaining branching with it: the empty
- * condition is three terms, and the export needs the member it was read for.
  */
-function NightResult({
-  member, day, loading, error, events, rows, subjectName, timezone, onRetry,
-}: {
-  member: PickableMember;
+function NightResult(props: {
+  userId: string;
   day: string;
   loading: boolean;
   error: unknown;
@@ -345,6 +312,8 @@ function NightResult({
   timezone: string | undefined;
   onRetry: () => void | Promise<unknown>;
 }) {
+  // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
+  const { userId, day, loading, error, events, rows, subjectName, timezone, onRetry } = props;
   return (
     <StateBlock
       loading={loading}
@@ -356,15 +325,14 @@ function NightResult({
       failedCaveat="Nothing was recorded about this look-up."
       onRetry={() => void onRetry()}
       empty={!loading && !error && events.length === 0}
-      emptyTitle={nightEmptyNotice(subjectName, clubDate(day, timezone))}
+      emptyTitle={nightEmptyNotice(subjectName, clubDate(`${day}T12:00:00Z`, timezone))}
       emptyHint={NIGHT_EMPTY_HINT}
       skeleton={<CardListSkeleton rows={3} />}
     >
       <div className="space-y-3">
         <NightTimeline rows={rows} subjectName={subjectName} timezone={timezone} />
-
         <div className="flex flex-wrap items-center gap-3">
-          <DownloadCsvLink href={adminEndpoints.memberTraceCsvUrl(member.user_id, { day })} />
+          <NightCsvButton userId={userId} day={day} />
           <p className="min-w-0 flex-1 text-xs text-text-muted">{NIGHT_EXPORT_NOTE}</p>
         </div>
       </div>
@@ -373,11 +341,30 @@ function NightResult({
 }
 
 /**
+ * The export, FETCHED with the session's token and saved from a blob. It used to be a bare
+ * `<a href>` to `trace.csv`, which navigates with no Authorization header: the API could not
+ * resolve a tenant and the "download" was a JSON refusal (the wallet CSV's and the door log's
+ * shipped defect, a third time). A button, because it acts: it fetches, then saves.
+ */
+function NightCsvButton({ userId, day }: { userId: string; day: string }) {
+  const toast = useToast();
+  const download = useAsyncAction(
+    async () => saveFile(await memberDetailEndpoints.nightCsv(userId, { day })),
+    { failure: (err) => toast.push({ tone: "danger", text: describeFailure(err, { action: "download that night" }), durationMs: 8000 }) },
+  );
+  return (
+    <Button variant="outline" onClick={() => void download.run()} pending={download.pending} icon={<DownloadSimple aria-hidden="true" />}>
+      {NIGHT_TAB_COPY.download}
+    </Button>
+  );
+}
+
+/**
  * One event on the rail.
  *
  * The left rule is `info` where somebody acted ON this member, and the clause under the
- * headline names them. That is the `{actor, subject}` invariant this product has always had
- * in its audit table and has never shown anybody.
+ * headline names them — the `{actor, subject}` invariant this product has always had in its
+ * audit table and never shown anybody.
  */
 function TraceCard({ event, subjectName, timezone }: {
   event: Parameters<typeof burstOutcomes>[0][number];

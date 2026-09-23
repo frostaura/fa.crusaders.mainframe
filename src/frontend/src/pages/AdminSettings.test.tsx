@@ -2,6 +2,9 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import AdminSettingsPage from "./AdminSettings";
 import { SETTINGS_FIXTURE, renderPage, stubFetch } from "../test/harness";
+import {
+  choose, control, describedBy, findControl, optionsOf, queryControl, querySaveButton, saveButton,
+} from "../components/settings/testKit";
 
 /**
  * The settings screen.
@@ -31,15 +34,17 @@ describe("AdminSettings", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    expect(await screen.findByLabelText(/Credits per R1 — members/)).toHaveValue(1.6);
-    expect(screen.getByLabelText(/Credits per R1 — league/)).toHaveValue(2.4);
-    expect(screen.getByLabelText(/Top-up block/)).toHaveValue(100);
-    expect(screen.getByLabelText(/Top-up cap per member/)).toHaveValue(1000);
-    expect(screen.getByLabelText(/Court time per member per day/)).toHaveValue(60);
-    expect(screen.getByLabelText(/^Peak hours/)).toHaveValue("16:00-19:00");
-    expect(screen.getByLabelText(/Peak opens to everyone/)).toHaveValue(1);
-    expect(screen.getByLabelText(/Keep usage history/)).toHaveValue(2);
-    expect(screen.getByLabelText(/No-show sweep looks back/)).toHaveValue(7);
+    expect(await findControl(/Credits per R1 — members/)).toHaveValue(1.6);
+    expect(control(/Credits per R1 — league/)).toHaveValue(2.4);
+    expect(control(/Top-up block/)).toHaveValue(100);
+    expect(control(/Top-up cap per member/)).toHaveValue(1000);
+    expect(control(/Court time per member per day/)).toHaveValue(60);
+    // Peak hours is two pickers now (R7: times are chosen, never typed), one each end.
+    expect(control("Peak starts")).toHaveTextContent("16:00");
+    expect(control("Peak ends")).toHaveTextContent("19:00");
+    expect(control(/Peak opens to everyone/)).toHaveValue(1);
+    expect(control(/Keep usage history/)).toHaveValue(2);
+    expect(control(/No-show sweep looks back/)).toHaveValue(7);
   });
 
   it("sends an edited economics value and leaves the button map alone", async () => {
@@ -50,8 +55,8 @@ describe("AdminSettings", () => {
 
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await screen.findByLabelText(/Credits per R1 — league/), { target: { value: "2.8" } });
-    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    fireEvent.change(await findControl(/Credits per R1 — league/), { target: { value: "2.8" } });
+    fireEvent.click(saveButton());
 
     await waitFor(() => {
       const save = stub.calls.find((c) => c.method === "PUT");
@@ -77,23 +82,23 @@ describe("AdminSettings", () => {
 
     // Served by GET /admin/settings since the programme added them, and until now
     // absent from this page — an admin could see none of them and change none of them.
-    expect(await screen.findByLabelText(/Walk-up maximum/)).toHaveValue(90);
-    expect(screen.getByLabelText(/Heartbeat interval/)).toHaveValue(60);
-    expect(screen.getByLabelText(/Booking lookahead at the box/)).toHaveValue(120);
-    expect(screen.getByLabelText(/Lights on this early/)).toHaveValue(10);
-    expect(screen.getByLabelText(/Court code lifetime/)).toHaveValue(60);
-    expect(screen.getByLabelText(/Offline roster reach/)).toHaveValue(120);
+    expect(await findControl(/Walk-up maximum/)).toHaveValue(90);
+    expect(control(/Heartbeat interval/)).toHaveValue(60);
+    expect(control(/Booking lookahead at the box/)).toHaveValue(120);
+    expect(control(/Lights on this early/)).toHaveValue(10);
+    expect(control(/Court code lifetime/)).toHaveValue(60);
+    expect(control(/Offline roster reach/)).toHaveValue(120);
 
     // The API's bounds, on the inputs, so the form cannot offer a value the save refuses.
-    expect(screen.getByLabelText(/Walk-up maximum/)).toHaveAttribute("max", "90");
+    expect(control(/Walk-up maximum/)).toHaveAttribute("max", "90");
     // 15-300, not the API's old 10-3600: the box clamps its own cadence to 15-300, so
     // anything outside it is a number no box runs, and the Devices page's offline
     // threshold is three beats of it (review finding 22).
-    expect(screen.getByLabelText(/Heartbeat interval/)).toHaveAttribute("min", "15");
-    expect(screen.getByLabelText(/Heartbeat interval/)).toHaveAttribute("max", "300");
-    expect(screen.getByLabelText(/Court code lifetime/)).toHaveAttribute("min", "15");
+    expect(control(/Heartbeat interval/)).toHaveAttribute("min", "15");
+    expect(control(/Heartbeat interval/)).toHaveAttribute("max", "300");
+    expect(control(/Court code lifetime/)).toHaveAttribute("min", "15");
     // The cue must fit inside the forward window; the cap follows the window's value.
-    expect(screen.getByLabelText(/Lights on this early/)).toHaveAttribute("max", "120");
+    expect(control(/Lights on this early/)).toHaveAttribute("max", "120");
 
     // The two court-box windows, named for what they actually do.
     //
@@ -115,19 +120,19 @@ describe("AdminSettings", () => {
       .map((id) => document.getElementById(id)?.textContent ?? "")
       .join(" ");
 
-    const cueHint = hintOf(screen.getByLabelText(/Lights on this early/));
+    const cueHint = hintOf(control(/Lights on this early/));
     expect(cueHint).toMatch(/decides how early a scan actually switches a booking's lights on/);
 
-    const lookaheadHint = hintOf(screen.getByLabelText(/Booking lookahead at the box/));
+    const lookaheadHint = hintOf(control(/Booking lookahead at the box/));
     expect(lookaheadHint).toMatch(/recognises a booking at all/);
     expect(lookaheadHint).toMatch(/does NOT decide when the lights come on/i);
 
     // And the sentence that sent admins to the wrong field is gone for good.
     expect(screen.queryByText(/How early a scan may switch a booking's lights on/)).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText(/Court code lifetime/), { target: { value: "45" } });
-    fireEvent.change(screen.getByLabelText(/Walk-up maximum/), { target: { value: "60" } });
-    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    fireEvent.change(control(/Court code lifetime/), { target: { value: "45" } });
+    fireEvent.change(control(/Walk-up maximum/), { target: { value: "60" } });
+    fireEvent.click(saveButton());
 
     await waitFor(() => {
       const save = stub.calls.find((c) => c.method === "PUT");
@@ -146,20 +151,8 @@ describe("AdminSettings", () => {
     });
   });
 
-  it("prices courts in credits, not rand", async () => {
-    stubFetch([
-      { path: "/api/v1/admin/settings/", body: SETTINGS_FIXTURE },
-      { path: "/api/v1/admin/courts/", body: [{ id: "c1", court_number: 1, name: "Court 1", court_type: "Squash", slice_price_credits: 8, is_active: true }] },
-    ]);
-
-    renderPage(<AdminSettingsPage />);
-
-    // A court's slice price is what a member is CHARGED, in credits — the unit of
-    // account. The field was labelled "(R)", so the admin priced courts in the wrong unit.
-    expect(await screen.findByLabelText(/Price per slice \(credits\)/)).toBeInTheDocument();
-    expect(screen.getByLabelText("Court 1 price per slice (credits)")).toHaveValue(8);
-    expect(screen.queryByLabelText(/Price per slice \(R\)/)).not.toBeInTheDocument();
-  });
+  // "prices courts in credits, not rand" moved with the Courts editor to /admin/courts (plan P6):
+  // `pages/admin/__tests__/AdminCourts.test.tsx` holds the same invariant on the new page.
 
   it("shows the API's reason when a value is refused", async () => {
     stubFetch([
@@ -169,8 +162,8 @@ describe("AdminSettings", () => {
 
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await screen.findByLabelText(/Top-up cap per member/), { target: { value: "50" } });
-    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    fireEvent.change(await findControl(/Top-up cap per member/), { target: { value: "50" } });
+    fireEvent.click(saveButton());
 
     // A cap below the block size means no top-up is ever legal, which reads to a member
     // as the payment page being broken. The admin has to be told which value, not just
@@ -197,15 +190,17 @@ describe("AdminSettings — timezone and the offline threshold", () => {
    * outside South Africa read its whole schedule in Johannesburg time with no correction
    * short of an UPDATE on a JSON column.
    */
-  it("offers the club's timezone and sends a change", async () => {
+  // Its own timeout: opening the zone picker mounts ~400 options, which jsdom lays out slowly and
+  // which timed out at the 5 s default while four lanes were building beside it.
+  it("offers the club's timezone and sends a change", { timeout: 15_000 }, async () => {
     const stub = stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const tz = await screen.findByLabelText("Timezone");
-    expect(tz).toHaveValue("Africa/Johannesburg");
+    // A picker now (R7), so the zone is read off the trigger and chosen by name.
+    expect(await findControl("Timezone")).toHaveTextContent("Africa/Johannesburg");
 
-    fireEvent.change(tz, { target: { value: "Europe/London" } });
-    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    choose("Timezone", "Europe/London");
+    fireEvent.click(saveButton());
 
     await waitFor(() => {
       const save = stub.calls.find((c) => c.method === "PUT");
@@ -221,7 +216,7 @@ describe("AdminSettings — timezone and the offline threshold", () => {
     stubFetch(routes({ timezone: "Mars/Olympus_Mons" }));
     renderPage(<AdminSettingsPage />);
 
-    expect(await screen.findByLabelText("Timezone")).toHaveValue("Mars/Olympus_Mons");
+    expect(await findControl("Timezone")).toHaveTextContent("Mars/Olympus_Mons");
   });
 
   /**
@@ -233,8 +228,7 @@ describe("AdminSettings — timezone and the offline threshold", () => {
     stubFetch(routes({ heartbeat_seconds: 15 }));
     renderPage(<AdminSettingsPage />);
 
-    const hint = (await screen.findByLabelText(/Heartbeat interval/)).getAttribute("aria-describedby");
-    const text = document.getElementById(hint!)!.textContent!;
+    const text = describedBy(await findControl(/Heartbeat interval/));
 
     // At 15s the box reports offline_after_seconds: 180, not 45.
     expect(text).toMatch(/three missed beats or 3 minutes, whichever is longer/);
@@ -245,8 +239,7 @@ describe("AdminSettings — timezone and the offline threshold", () => {
     stubFetch(routes({ heartbeat_seconds: 120 }));
     renderPage(<AdminSettingsPage />);
 
-    const hint = (await screen.findByLabelText(/Heartbeat interval/)).getAttribute("aria-describedby");
-    expect(document.getElementById(hint!)!.textContent).toMatch(/at 120s that is 6 minutes/);
+    expect(describedBy(await findControl(/Heartbeat interval/))).toMatch(/at 120s that is 6 minutes/);
   });
 });
 
@@ -274,13 +267,14 @@ describe("AdminSettings — opening hours per weekday", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    expect(await screen.findByLabelText("Saturday opens")).toHaveValue("07:00");
-    expect(screen.getByLabelText("Saturday closes")).toHaveValue("20:00");
-    expect(screen.getByLabelText("Monday opens")).toHaveValue("06:00");
+    // Times are chosen from aligned options now (R7), so each is read off its picker.
+    expect(await findControl("Saturday opens")).toHaveTextContent("07:00");
+    expect(control("Saturday closes")).toHaveTextContent("20:00");
+    expect(control("Monday opens")).toHaveTextContent("06:00");
 
     // Sunday is not in the map, so it follows the flat pair — and the row says so rather
     // than showing hours nobody set.
-    expect(screen.getByLabelText("Sunday has its own hours")).not.toBeChecked();
+    expect(control("Sunday has its own hours")).not.toBeChecked();
     expect(screen.getByText(/Club default — 06:00 to 22:00/)).toBeInTheDocument();
   });
 
@@ -288,8 +282,9 @@ describe("AdminSettings — opening hours per weekday", () => {
     const stub = stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await screen.findByLabelText("Saturday closes"), { target: { value: "13:00" } });
-    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    await findControl("Saturday closes");
+    choose("Saturday closes", "13:00");
+    fireEvent.click(saveButton());
 
     await waitFor(() => {
       const save = stub.calls.find((c) => c.method === "PUT");
@@ -307,8 +302,8 @@ describe("AdminSettings — opening hours per weekday", () => {
     const stub = stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.click(await screen.findByLabelText("Saturday has its own hours"));
-    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    fireEvent.click(await findControl("Saturday has its own hours"));
+    fireEvent.click(saveButton());
 
     await waitFor(() => {
       const save = stub.calls.find((c) => c.method === "PUT");
@@ -322,30 +317,31 @@ describe("AdminSettings — opening hours per weekday", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.click(await screen.findByLabelText("Sunday has its own hours"));
+    fireEvent.click(await findControl("Sunday has its own hours"));
 
-    expect(screen.getByLabelText("Sunday opens")).toHaveValue("06:00");
-    expect(screen.getByLabelText("Sunday closes")).toHaveValue("22:00");
+    expect(control("Sunday opens")).toHaveTextContent("06:00");
+    expect(control("Sunday closes")).toHaveTextContent("22:00");
   });
 
   it("refuses a close that is not after the open, at the row, before anything is sent", async () => {
     const stub = stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await screen.findByLabelText("Saturday closes"), { target: { value: "06:00" } });
+    await findControl("Saturday closes");
+    choose("Saturday closes", "06:00");
 
     // Said where the mistake is. A club that means "shut on Saturday" has to say so by
     // some other means — the engine has no closed-all-day, and reading 20:00–07:00 as an
     // overnight club would sell the small hours.
     //
     // TWICE, deliberately (B5 / C11): on the row that carries the mistake, and again in the
-    // summary beside Save, which is six cards below it.
+    // save bar's summary beside Save.
     expect(screen.getAllByText(/Closing time has to be after opening time/)).toHaveLength(2);
     // `aria-disabled`, not `disabled`: a disabled button leaves the tab order, so the one
     // control that could explain the state was the one a keyboard user could not reach.
-    expect(screen.getByRole("button", { name: /Save settings/ })).toHaveAttribute("aria-disabled", "true");
+    expect(saveButton()).toHaveAttribute("aria-disabled", "true");
 
-    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    fireEvent.click(saveButton());
     await waitFor(() => expect(stub.calls.some((c) => c.method === "PUT")).toBe(false));
   });
 });
@@ -381,7 +377,7 @@ describe("AdminSettings — door gates", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const unlock = await screen.findByLabelText(/Unlock time/);
+    const unlock = await findControl(/Unlock time/);
     // Ruling 5 / GOAL item 2: the shipping default moved from 3 seconds to 15, because three
     // is not long enough to get a door open while holding a bag. The BOUNDS are unchanged —
     // the firmware still caps the lock at 30 seconds whatever is set here.
@@ -389,23 +385,21 @@ describe("AdminSettings — door gates", () => {
     expect(unlock).toHaveAttribute("min", "1");
     expect(unlock).toHaveAttribute("max", "30");
 
-    const early = screen.getByLabelText(/Early entry/);
+    const early = control(/Early entry/);
     expect(early).toHaveValue(30);
     expect(early).toHaveAttribute("min", "0");
     expect(early).toHaveAttribute("max", "240");
 
-    expect(screen.getByLabelText(/Who may open a door/)).toHaveValue("active_member");
+    expect(control(/Who may open a door/)).toHaveTextContent("Any member in good standing");
   });
 
   it("offers both policies and nothing else", async () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const picker = await screen.findByLabelText(/Who may open a door/);
-    const values = Array.from(picker.querySelectorAll("option")).map((o) => o.getAttribute("value"));
-    expect(values).toEqual(["active_member", "booking_window"]);
-    expect(picker.textContent).toContain("Any member in good standing");
-    expect(picker.textContent).toContain("Only a member with a booking");
+    await findControl(/Who may open a door/);
+    // A design-system picker now (R7): the two policies, by the words an admin chooses between.
+    expect(optionsOf(/Who may open a door/)).toEqual(["Any member in good standing", "Only a member with a booking"]);
   });
 
   /**
@@ -418,7 +412,7 @@ describe("AdminSettings — door gates", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const hint = hintOf(await screen.findByLabelText(/Unlock time/));
+    const hint = hintOf(await findControl(/Unlock time/));
     expect(hint).toMatch(/1–30/);
     expect(hint).toMatch(/never holds it open longer than 30 seconds, whatever is set here/);
   });
@@ -439,24 +433,24 @@ describe("AdminSettings — door gates", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const picker = await screen.findByLabelText(/Who may open a door/);
+    const picker = await findControl(/Who may open a door/);
     expect(hintOf(picker)).toMatch(/unless their membership is suspended, pending approval or rejected/);
     // No exemption on the open policy, and the word "operator" nowhere on the screen.
     expect(hintOf(picker)).not.toMatch(/always pass/);
     expect(hintOf(picker).toLowerCase()).not.toMatch(/operator/);
 
-    fireEvent.change(picker, { target: { value: "booking_window" } });
+    choose(/Who may open a door/, "Only a member with a booking");
     // The hint follows the choice rather than describing both at once, and it spells out the
     // early-entry number rather than making an admin scroll and do arithmetic.
-    expect(hintOf(screen.getByLabelText(/Who may open a door/)))
+    expect(hintOf(control(/Who may open a door/)))
       .toMatch(/starts within the next 30 minutes/);
-    expect(hintOf(screen.getByLabelText(/Who may open a door/))).toMatch(/Anyone else is turned away/);
+    expect(hintOf(control(/Who may open a door/))).toMatch(/Anyone else is turned away/);
     // The exemption, and the limit on it in the same breath.
-    expect(hintOf(screen.getByLabelText(/Who may open a door/)))
+    expect(hintOf(control(/Who may open a door/)))
       .toMatch(/Club admins always pass this booking check/);
-    expect(hintOf(screen.getByLabelText(/Who may open a door/)))
+    expect(hintOf(control(/Who may open a door/)))
       .toMatch(/still turns anyone away, admin or not/);
-    expect(hintOf(screen.getByLabelText(/Who may open a door/)).toLowerCase()).not.toMatch(/operator/);
+    expect(hintOf(control(/Who may open a door/)).toLowerCase()).not.toMatch(/operator/);
   });
 
   /**
@@ -469,7 +463,7 @@ describe("AdminSettings — door gates", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const hint = hintOf(await screen.findByLabelText(/Who may open a door/));
+    const hint = hintOf(await findControl(/Who may open a door/));
     expect(hint).toMatch(/own code scans opens the door at any hour/);
     expect(hint).toMatch(/A booking's QR is narrower/);
     expect(hint).toMatch(/only while that code is still live/);
@@ -489,12 +483,12 @@ describe("AdminSettings — door gates", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const picker = await screen.findByLabelText(/Who may open a door/);
+    const picker = await findControl(/Who may open a door/);
     expect(hintOf(picker)).toMatch(/Arriving late is not a lockout/);
     expect(hintOf(picker)).toMatch(/no-show sweep does not take that code away/);
 
-    fireEvent.change(picker, { target: { value: "booking_window" } });
-    const strict = hintOf(screen.getByLabelText(/Who may open a door/));
+    choose(/Who may open a door/, "Only a member with a booking");
+    const strict = hintOf(control(/Who may open a door/));
     expect(strict).toMatch(/Arriving late is not a lockout/);
     expect(strict).toMatch(/whose code for that booking is still live/);
     expect(strict).not.toMatch(/has not yet ended/);
@@ -510,7 +504,7 @@ describe("AdminSettings — door gates", () => {
     stubFetch(routes({ gate_access_policy: "booking_window" }));
     renderPage(<AdminSettingsPage />);
 
-    const hint = hintOf(await screen.findByLabelText(/Who may open a door/));
+    const hint = hintOf(await findControl(/Who may open a door/));
     const sentence = hint.split(". ").find((s) => s.includes("Club admins always pass"))!;
     expect(sentence).toContain("only at a door that can still reach the club");
     expect(sentence).toContain("an offline door holds bookings, not admins");
@@ -520,11 +514,11 @@ describe("AdminSettings — door gates", () => {
     stubFetch(routes({ gate_access_policy: "booking_window", gate_early_entry_minutes: 90 }));
     renderPage(<AdminSettingsPage />);
 
-    expect(hintOf(await screen.findByLabelText(/Who may open a door/)))
+    expect(hintOf(await findControl(/Who may open a door/)))
       .toMatch(/starts within the next 90 minutes/);
 
-    fireEvent.change(screen.getByLabelText(/Early entry/), { target: { value: "5" } });
-    expect(hintOf(screen.getByLabelText(/Who may open a door/)))
+    fireEvent.change(control(/Early entry/), { target: { value: "5" } });
+    expect(hintOf(control(/Who may open a door/)))
       .toMatch(/starts within the next 5 minutes/);
   });
 
@@ -550,10 +544,10 @@ describe("AdminSettings — door gates", () => {
     const stub = stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await screen.findByLabelText(/Unlock time/), { target: { value: "7" } });
-    fireEvent.change(screen.getByLabelText(/Who may open a door/), { target: { value: "booking_window" } });
-    fireEvent.change(screen.getByLabelText(/Early entry/), { target: { value: "45" } });
-    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    fireEvent.change(await findControl(/Unlock time/), { target: { value: "7" } });
+    choose(/Who may open a door/, "Only a member with a booking");
+    fireEvent.change(control(/Early entry/), { target: { value: "45" } });
+    fireEvent.click(saveButton());
 
     await waitFor(() => {
       const save = stub.calls.find((c) => c.method === "PUT");
@@ -579,38 +573,38 @@ describe("AdminSettings — door gates", () => {
     const stub = stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await screen.findByLabelText(/Unlock time/), { target: { value: "45" } });
+    fireEvent.change(await findControl(/Unlock time/), { target: { value: "45" } });
     // On the field itself, through aria-describedby — not only at the foot of the card,
     // where a screen reader moving field by field never meets it (B5).
-    expect(hintOf(screen.getByLabelText(/Unlock time/)))
+    expect(hintOf(control(/Unlock time/)))
       .toContain("Unlock time has to be a whole number of seconds between 1 and 30.");
-    expect(screen.getByLabelText(/Unlock time/)).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByRole("button", { name: /Save settings/ })).toHaveAttribute("aria-disabled", "true");
-    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    expect(control(/Unlock time/)).toHaveAttribute("aria-invalid", "true");
+    expect(saveButton()).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(saveButton());
     await waitFor(() => expect(stub.calls.some((c) => c.method === "PUT")).toBe(false));
 
     // And zero, which is the other end and the one that reads as broken hardware: a door
     // that never releases the lock at all.
-    fireEvent.change(screen.getByLabelText(/Unlock time/), { target: { value: "0" } });
-    expect(screen.getByRole("button", { name: /Save settings/ })).toHaveAttribute("aria-disabled", "true");
+    fireEvent.change(control(/Unlock time/), { target: { value: "0" } });
+    expect(saveButton()).toHaveAttribute("aria-disabled", "true");
 
-    fireEvent.change(screen.getByLabelText(/Unlock time/), { target: { value: "30" } });
-    expect(screen.getByRole("button", { name: /Save settings/ })).not.toHaveAttribute("aria-disabled");
+    fireEvent.change(control(/Unlock time/), { target: { value: "30" } });
+    expect(saveButton()).not.toHaveAttribute("aria-disabled");
   });
 
   it("holds Save on an early-entry value past 240 minutes, and allows 0", async () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await screen.findByLabelText(/Early entry/), { target: { value: "300" } });
-    expect(hintOf(screen.getByLabelText(/Early entry/)))
+    fireEvent.change(await findControl(/Early entry/), { target: { value: "300" } });
+    expect(hintOf(control(/Early entry/)))
       .toContain("Early entry has to be a whole number of minutes between 0 and 240.");
-    expect(screen.getByRole("button", { name: /Save settings/ })).toHaveAttribute("aria-disabled", "true");
+    expect(saveButton()).toHaveAttribute("aria-disabled", "true");
 
     // Zero is legal — a club that wants nobody in before their booking starts — so it must
     // not be caught by a falsy check standing in for the range.
-    fireEvent.change(screen.getByLabelText(/Early entry/), { target: { value: "0" } });
-    expect(screen.getByRole("button", { name: /Save settings/ })).not.toHaveAttribute("aria-disabled");
+    fireEvent.change(control(/Early entry/), { target: { value: "0" } });
+    expect(saveButton()).not.toHaveAttribute("aria-disabled");
   });
 
   /**
@@ -626,8 +620,8 @@ describe("AdminSettings — door gates", () => {
     ]);
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await screen.findByLabelText(/Unlock time/), { target: { value: "5" } });
-    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    fireEvent.change(await findControl(/Unlock time/), { target: { value: "5" } });
+    fireEvent.click(saveButton());
 
     expect(await screen.findByText(/Unlock time has to be between 1 and 30 seconds/))
       .toHaveTextContent(/never holds the lock open longer than 30 seconds/);
@@ -646,8 +640,8 @@ describe("AdminSettings — door gates", () => {
     ]);
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await screen.findByLabelText(/Top-up cap per member/), { target: { value: "50" } });
-    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    fireEvent.change(await findControl(/Top-up cap per member/), { target: { value: "50" } });
+    fireEvent.click(saveButton());
 
     expect(await screen.findByText(/topup max below block/)).toBeInTheDocument();
   });
@@ -662,13 +656,13 @@ describe("AdminSettings — door gates", () => {
     renderPage(<AdminSettingsPage />);
 
     expect(await screen.findByText("Pick who may open a door.")).toBeInTheDocument();
-    expect(hintOf(screen.getByLabelText(/Who may open a door/))).toContain("Pick who may open a door.");
-    expect(screen.getByRole("button", { name: /Save settings/ })).toHaveAttribute("aria-disabled", "true");
-    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    expect(hintOf(control(/Who may open a door/))).toContain("Pick who may open a door.");
+    expect(saveButton()).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(saveButton());
     await waitFor(() => expect(stub.calls.some((c) => c.method === "PUT")).toBe(false));
 
-    fireEvent.change(screen.getByLabelText(/Who may open a door/), { target: { value: "booking_window" } });
-    expect(screen.getByRole("button", { name: /Save settings/ })).not.toHaveAttribute("aria-disabled");
+    choose(/Who may open a door/, "Only a member with a booking");
+    expect(saveButton()).not.toHaveAttribute("aria-disabled");
   });
 
   /**
@@ -690,7 +684,7 @@ describe("AdminSettings — door gates", () => {
     expect(await screen.findByText(
       "With these settings a booking QR opens a door from 130 minutes before the booking.",
     )).toBeInTheDocument();
-    expect(screen.getByLabelText(/Early entry/)).toHaveValue(30);
+    expect(control(/Early entry/)).toHaveValue(30);
   });
 
   /** And it follows every one of the three fields that feed it, live. */
@@ -701,18 +695,18 @@ describe("AdminSettings — door gates", () => {
     await screen.findByText(/booking QR opens a door from 130 minutes/);
 
     // The lights cue, which is on the Court boxes block and reaches the doors.
-    fireEvent.change(screen.getByLabelText(/Lights on this early/), { target: { value: "40" } });
+    fireEvent.change(control(/Lights on this early/), { target: { value: "40" } });
     expect(screen.getByText(/booking QR opens a door from 160 minutes/)).toBeInTheDocument();
 
     // The roster reach, same block, same effect.
-    fireEvent.change(screen.getByLabelText(/Offline roster reach/), { target: { value: "60" } });
+    fireEvent.change(control(/Offline roster reach/), { target: { value: "60" } });
     expect(screen.getByText(/booking QR opens a door from 100 minutes/)).toBeInTheDocument();
 
     // Early entry is the FLOOR, so raising it past the pair moves the answer and lowering it
     // below them does not — which is the half an admin cannot guess.
-    fireEvent.change(screen.getByLabelText(/Early entry/), { target: { value: "200" } });
+    fireEvent.change(control(/Early entry/), { target: { value: "200" } });
     expect(screen.getByText(/booking QR opens a door from 200 minutes/)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/Early entry/), { target: { value: "5" } });
+    fireEvent.change(control(/Early entry/), { target: { value: "5" } });
     expect(screen.getByText(/booking QR opens a door from 100 minutes/)).toBeInTheDocument();
   });
 
@@ -730,7 +724,7 @@ describe("AdminSettings — door gates", () => {
     renderPage(<AdminSettingsPage />);
 
     expect(await screen.findByText(/booking QR opens a door from 45 minutes/)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/Offline roster reach/), { target: { value: "1440" } });
+    fireEvent.change(control(/Offline roster reach/), { target: { value: "1440" } });
     expect(screen.getByText(/booking QR opens a door from 45 minutes/)).toBeInTheDocument();
   });
 
@@ -743,12 +737,12 @@ describe("AdminSettings — door gates", () => {
     stubFetch(routes({ gate_access_policy: "booking_window" }));
     renderPage(<AdminSettingsPage />);
 
-    const strict = hintOf(await screen.findByLabelText(/Early entry/));
+    const strict = hintOf(await findControl(/Early entry/));
     expect(strict).toMatch(/Under the policy above this is the door/);
     expect(strict).toMatch(/cached roster reaches exactly that far/);
 
-    fireEvent.change(screen.getByLabelText(/Who may open a door/), { target: { value: "active_member" } });
-    const open = hintOf(screen.getByLabelText(/Early entry/));
+    choose(/Who may open a door/, "Any member in good standing");
+    const open = hintOf(control(/Early entry/));
     expect(open).toMatch(/the offline list and the floor/);
     expect(open).toMatch(/never opens a door less early than this/);
     // And it names the two fields that decide the rest, by the labels they carry on screen.
@@ -774,16 +768,16 @@ describe("AdminSettings — door gates", () => {
     renderPage(<AdminSettingsPage />);
 
     for (const label of [/Lights on this early/, /Offline roster reach/]) {
-      const hint = hintOf(await screen.findByLabelText(label));
+      const hint = hintOf(await findControl(label));
       expect(hint).toMatch(/also decides how early a booking's QR opens a door/);
       expect(hint).toMatch(/capped at 240 minutes/);
     }
 
     // And the opposite under the strict policy, rather than going silent — with the field that
     // took over named, so an admin is not left looking for it.
-    fireEvent.change(screen.getByLabelText(/Who may open a door/), { target: { value: "booking_window" } });
+    choose(/Who may open a door/, "Only a member with a booking");
     for (const label of [/Lights on this early/, /Offline roster reach/]) {
-      const hint = hintOf(screen.getByLabelText(label));
+      const hint = hintOf(control(label));
       expect(hint).toMatch(/does not reach the doors/);
       expect(hint).toMatch(/“Early entry” under Door gates does that/);
     }
@@ -819,14 +813,14 @@ describe("AdminSettings — alert cooldown", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const field = await screen.findByLabelText(/Alert cooldown/);
+    const field = await findControl(/Alert cooldown/);
     expect(field).toHaveValue(60);
     expect(field).toHaveAttribute("min", "5");
     expect(field).toHaveAttribute("max", "1440");
 
-    // It belongs to the boards, not to the doors: it is inside the Court boxes card, which is
+    // It belongs to the boards, not to the doors: it is inside the Court boxes section, which is
     // where an admin looking for "why am I being mailed about this box" would go.
-    expect(field.closest("div.space-y-5")).toHaveTextContent("Court boxes & identification");
+    expect(field.closest('[role="region"]')).toHaveAttribute("aria-labelledby", "settings-boxes-title");
   });
 
   /**
@@ -838,7 +832,7 @@ describe("AdminSettings — alert cooldown", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const hint = hintOf(await screen.findByLabelText(/Alert cooldown/));
+    const hint = hintOf(await findControl(/Alert cooldown/));
     expect(hint).toMatch(/At most one “not reporting” email per board in this many minutes/);
     expect(hint).toMatch(/a door nobody has named never alerts/);
     expect(hint).toMatch(/5–1440/);
@@ -848,8 +842,8 @@ describe("AdminSettings — alert cooldown", () => {
     const stub = stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await screen.findByLabelText(/Alert cooldown/), { target: { value: "15" } });
-    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    fireEvent.change(await findControl(/Alert cooldown/), { target: { value: "15" } });
+    fireEvent.click(saveButton());
 
     await waitFor(() => {
       const save = stub.calls.find((c) => c.method === "PUT");
@@ -868,16 +862,16 @@ describe("AdminSettings — alert cooldown", () => {
     const stub = stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await screen.findByLabelText(/Alert cooldown/), { target: { value: "1" } });
-    expect(hintOf(screen.getByLabelText(/Alert cooldown/)))
+    fireEvent.change(await findControl(/Alert cooldown/), { target: { value: "1" } });
+    expect(hintOf(control(/Alert cooldown/)))
       .toContain("Alert cooldown has to be a whole number of minutes between 5 and 1440.");
-    expect(screen.getByLabelText(/Alert cooldown/)).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByRole("button", { name: /Save settings/ })).toHaveAttribute("aria-disabled", "true");
-    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    expect(control(/Alert cooldown/)).toHaveAttribute("aria-invalid", "true");
+    expect(saveButton()).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(saveButton());
     await waitFor(() => expect(stub.calls.some((c) => c.method === "PUT")).toBe(false));
 
-    fireEvent.change(screen.getByLabelText(/Alert cooldown/), { target: { value: "5" } });
-    expect(screen.getByRole("button", { name: /Save settings/ })).not.toHaveAttribute("aria-disabled");
+    fireEvent.change(control(/Alert cooldown/), { target: { value: "5" } });
+    expect(saveButton()).not.toHaveAttribute("aria-disabled");
   });
 
   /** The refusal, decoded through the shared dictionary rather than the underscore swap. */
@@ -892,8 +886,8 @@ describe("AdminSettings — alert cooldown", () => {
     ]);
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await screen.findByLabelText(/Alert cooldown/), { target: { value: "30" } });
-    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    fireEvent.change(await findControl(/Alert cooldown/), { target: { value: "30" } });
+    fireEvent.click(saveButton());
 
     expect(await screen.findByText(/Alert cooldown has to be between 5 and 1440 minutes/))
       .toHaveTextContent(/one “not reporting” email per board/);
@@ -920,17 +914,16 @@ describe("AdminSettings — alert cooldown", () => {
       stubFetch(withDoors());
       renderPage(<AdminSettingsPage />);
 
-      expect(await screen.findByLabelText(/Keep door scans for/)).toHaveValue(90);
-      expect(screen.getByLabelText(/Refusal spike \(scans\)/)).toHaveValue(8);
-      expect(screen.getByLabelText(/Refusal spike window/)).toHaveValue(20);
-      expect(screen.getByLabelText(/Club contact number/)).toHaveValue("076 226 1390");
-      expect(screen.getByLabelText(/Club contact email/)).toHaveValue("squash@example.co.za");
+      expect(await findControl(/Keep door scans for/)).toHaveValue(90);
+      expect(control(/Refusal spike \(scans\)/)).toHaveValue(8);
+      expect(control(/Refusal spike window/)).toHaveValue(20);
+      expect(control(/Club contact number/)).toHaveValue("076 226 1390");
+      expect(control(/Club contact email/)).toHaveValue("squash@example.co.za");
 
       // Each hint names its own bound, through aria-describedby rather than by proximity.
-      const retention = screen.getByLabelText(/Keep door scans for/);
-      const hint = document.getElementById(retention.getAttribute("aria-describedby")!);
-      expect(hint).toHaveTextContent("7–730");
-      expect(hint).toHaveTextContent("DELETED");
+      const hint = describedBy(control(/Keep door scans for/));
+      expect(hint).toContain("7–730");
+      expect(hint).toContain("DELETED");
     });
 
     /** The consequence in the club's own words, so a number is not just a number. */
@@ -946,7 +939,7 @@ describe("AdminSettings — alert cooldown", () => {
       stubFetch(withDoors());
       renderPage(<AdminSettingsPage />);
 
-      fireEvent.change(await screen.findByLabelText(/Keep door scans for/), { target: { value: "8" } });
+      fireEvent.change(await findControl(/Keep door scans for/), { target: { value: "8" } });
       expect(screen.getByText(/kept for 8 days and then deleted/)).toBeInTheDocument();
     });
 
@@ -959,24 +952,24 @@ describe("AdminSettings — alert cooldown", () => {
       stubFetch(withDoors());
       renderPage(<AdminSettingsPage />);
 
-      fireEvent.change(await screen.findByLabelText(/Keep door scans for/), { target: { value: "3" } });
+      fireEvent.change(await findControl(/Keep door scans for/), { target: { value: "3" } });
       // On the field, through aria-describedby — and again in the summary beside Save, which
       // is why the page-wide text now matches twice (B5 / C11).
-      expect(hintOf(screen.getByLabelText(/Keep door scans for/))).toMatch(/between 7 and 730/);
+      expect(hintOf(control(/Keep door scans for/))).toMatch(/between 7 and 730/);
       expect(screen.getAllByText(/between 7 and 730/)).toHaveLength(2);
-      expect(screen.getByRole("button", { name: "Save settings" })).toHaveAttribute("aria-disabled", "true");
+      expect(saveButton()).toHaveAttribute("aria-disabled", "true");
     });
 
     it("refuses a spike count and a window outside their own bounds", async () => {
       stubFetch(withDoors());
       renderPage(<AdminSettingsPage />);
 
-      fireEvent.change(await screen.findByLabelText(/Refusal spike \(scans\)/), { target: { value: "1" } });
-      expect(hintOf(screen.getByLabelText(/Refusal spike \(scans\)/))).toMatch(/between 3 and 100/);
+      fireEvent.change(await findControl(/Refusal spike \(scans\)/), { target: { value: "1" } });
+      expect(hintOf(control(/Refusal spike \(scans\)/))).toMatch(/between 3 and 100/);
 
-      fireEvent.change(screen.getByLabelText(/Refusal spike \(scans\)/), { target: { value: "8" } });
-      fireEvent.change(screen.getByLabelText(/Refusal spike window/), { target: { value: "1" } });
-      expect(hintOf(screen.getByLabelText(/Refusal spike window/))).toMatch(/between 5 and 240/);
+      fireEvent.change(control(/Refusal spike \(scans\)/), { target: { value: "8" } });
+      fireEvent.change(control(/Refusal spike window/), { target: { value: "1" } });
+      expect(hintOf(control(/Refusal spike window/))).toMatch(/between 5 and 240/);
     });
 
     /**
@@ -991,9 +984,9 @@ describe("AdminSettings — alert cooldown", () => {
       ]);
       renderPage(<AdminSettingsPage />);
 
-      fireEvent.change(await screen.findByLabelText(/Club contact number/), { target: { value: "" } });
-      expect(screen.getByRole("button", { name: "Save settings" })).toBeEnabled();
-      fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+      fireEvent.change(await findControl(/Club contact number/), { target: { value: "" } });
+      expect(saveButton()).not.toHaveAttribute("aria-disabled");
+      fireEvent.click(saveButton());
 
       await waitFor(() => {
         const put = stub.calls.find((c) => c.method === "PUT");
@@ -1009,7 +1002,10 @@ describe("AdminSettings — alert cooldown", () => {
       ]);
       renderPage(<AdminSettingsPage />);
 
-      fireEvent.click(await screen.findByRole("button", { name: "Save settings" }));
+      // The save bar appears with something to save (R13), so one edit comes first; every door
+      // key still goes, edited or not.
+      fireEvent.change(await findControl(/Unlock time/), { target: { value: "16" } });
+      fireEvent.click(saveButton());
 
       await waitFor(() => {
         const put = stub.calls.find((c) => c.method === "PUT");
@@ -1036,10 +1032,11 @@ describe("AdminSettings — alert cooldown", () => {
       ]);
       renderPage(<AdminSettingsPage />);
 
-      await screen.findByLabelText(/Unlock time/);
-      expect(screen.queryByLabelText(/Keep door scans for/)).toBeNull();
-      expect(screen.queryByLabelText(/Club contact number/)).toBeNull();
-      expect(screen.getByRole("button", { name: "Save settings" })).toBeEnabled();
+      await findControl(/Unlock time/);
+      expect(queryControl(/Keep door scans for/)).toBeNull();
+      expect(queryControl(/Club contact number/)).toBeNull();
+      // Nothing to save and nothing refused: no save bar at all.
+      expect(querySaveButton()).toBeNull();
       // And the retention sentence takes its no-number arm rather than guessing 90.
       expect(screen.getByText(/the number of days set under Admin settings/)).toBeInTheDocument();
     });

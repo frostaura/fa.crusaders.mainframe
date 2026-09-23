@@ -101,7 +101,7 @@ describe("the admin rail", () => {
     expect(hrefs).toEqual([
       "/admin", "/admin/members", "/admin/groups", "/admin/transactions", "/admin/reports",
       "/admin/monitoring", "/admin/monitoring/doors", "/admin/monitoring/devices", "/admin/monitoring/faults",
-      "/admin/monitoring/changes", "/admin/schedules", "/admin/settings", "/admin/webhooks",
+      "/admin/monitoring/changes", "/admin/schedules", "/admin/courts", "/admin/settings", "/admin/webhooks",
     ]);
     // Grouped: each group is a list named by its heading.
     for (const group of ["People", "Money", "Courts & hardware", "Setup"]) {
@@ -164,7 +164,8 @@ describe("the section switcher (below xl)", () => {
     const sheet = await screen.findByRole("dialog", { name: "Admin sections" });
     const current = within(sheet).getByRole("link", { current: "page" });
     expect(current).toHaveAccessibleName("Settings");
-    expect(within(sheet).getAllByRole("link")).toHaveLength(13);
+    // 14 since P6 gave Courts its own page.
+    expect(within(sheet).getAllByRole("link")).toHaveLength(14);
 
     fireEvent.keyDown(sheet, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());

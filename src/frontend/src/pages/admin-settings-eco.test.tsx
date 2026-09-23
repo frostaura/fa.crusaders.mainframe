@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import AdminSettingsPage from "./AdminSettings";
 import { COURTS_FIXTURE, SETTINGS_FIXTURE, renderPage, stubFetch, type StubRoute } from "../test/harness";
+import { control, findControl, queryControl, saveButton } from "../components/settings/testKit";
+import { MEMBER_TRACE_LABEL } from "../lib/ecoSettings";
 
 /**
  * The settings rows for everything this release made configurable — ruling 13.
@@ -56,7 +58,7 @@ describe("the club's money symbol", () => {
     stubFetch(routes(ALL));
     renderPage(<AdminSettingsPage />);
 
-    const field = await screen.findByLabelText(/Currency symbol/);
+    const field = await findControl(/Currency symbol/);
     expect(field).toHaveValue("R");
     // Bounded in the markup as well as in the validator, so the box cannot hold an essay.
     expect(field).toHaveAttribute("maxLength", "4");
@@ -75,13 +77,13 @@ describe("the club's money symbol", () => {
     stubFetch(routes(ALL));
     renderPage(<AdminSettingsPage />);
 
-    await screen.findByLabelText(/Credits per R1 — members/);
-    fireEvent.change(screen.getByLabelText(/Currency symbol/), { target: { value: "CHF" } });
+    await findControl(/Credits per R1 — members/);
+    fireEvent.change(control(/Currency symbol/), { target: { value: "CHF" } });
 
-    expect(await screen.findByLabelText(/Credits per CHF1 — members/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Top-up block \(CHF\)/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Top-up cap per member \(CHF\)/)).toBeInTheDocument();
-    expect(screen.queryByLabelText(/Credits per R1 — members/)).not.toBeInTheDocument();
+    expect(await findControl(/Credits per CHF1 — members/)).toBeInTheDocument();
+    expect(control(/Top-up block \(CHF\)/)).toBeInTheDocument();
+    expect(control(/Top-up cap per member \(CHF\)/)).toBeInTheDocument();
+    expect(queryControl(/Credits per R1 — members/)).not.toBeInTheDocument();
   });
 
   /**
@@ -91,13 +93,13 @@ describe("the club's money symbol", () => {
     const stub = stubFetch(routes(ALL));
     renderPage(<AdminSettingsPage />);
 
-    await screen.findByLabelText(/Currency symbol/);
-    fireEvent.change(screen.getByLabelText(/Currency symbol/), { target: { value: "50" } });
+    await findControl(/Currency symbol/);
+    fireEvent.change(control(/Currency symbol/), { target: { value: "50" } });
 
     // The caption falls back rather than reading "Credits per 501 — members".
-    expect(await screen.findByLabelText(/Credits per R1 — members/)).toBeInTheDocument();
+    expect(await findControl(/Credits per R1 — members/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    fireEvent.click(saveButton());
     await waitFor(() => {
       expect(stub.calls.find((c) => c.method === "PUT")).toBeUndefined();
     });
@@ -110,8 +112,8 @@ describe("the settings rows this release owes", () => {
     renderPage(<AdminSettingsPage />);
 
     // GOAL item 1 and item 18. Both were firmware constants with no way to change them.
-    expect(await screen.findByLabelText(/Screen returns to the start after/)).toHaveValue(10);
-    expect(screen.getByLabelText(/Next person may scan within/)).toHaveValue(10);
+    expect(await findControl(/Screen returns to the start after/)).toHaveValue(10);
+    expect(control(/Next person may scan within/)).toHaveValue(10);
     // And the block says WHEN a change takes effect, because a pull-only box is never told
     // anything except in the answer to a call it made itself. In the estate's own words —
     // "the next time it calls in" — and NOT "on its next heartbeat", which is a protocol
@@ -123,7 +125,7 @@ describe("the settings rows this release owes", () => {
   it("gives the per-day slot ceiling a row, in slots, as Dean asked", async () => {
     stubFetch(routes(ALL));
     renderPage(<AdminSettingsPage />);
-    expect(await screen.findByLabelText("Slots per member per day")).toHaveValue(4);
+    expect(await findControl("Slots per member per day")).toHaveValue(4);
   });
 
   /**
@@ -153,7 +155,7 @@ describe("the settings rows this release owes", () => {
     stubFetch(routes({ member_per_day_max_minutes: 60 }));
     renderPage(<AdminSettingsPage />);
     expect(await screen.findByText(/Today a member may hold 60 minutes a day/)).toBeInTheDocument();
-    expect(screen.queryByLabelText("Slots per member per day")).not.toBeInTheDocument();
+    expect(queryControl("Slots per member per day")).not.toBeInTheDocument();
   });
 
   /**
@@ -166,7 +168,7 @@ describe("the settings rows this release owes", () => {
     renderPage(<AdminSettingsPage />);
 
     await screen.findByRole("heading", { name: "Box screens & scanning" });
-    expect(screen.queryByLabelText(/Screen returns to the start after/)).not.toBeInTheDocument();
+    expect(queryControl(/Screen returns to the start after/)).not.toBeInTheDocument();
     // Both halves: the club's system has not got these, which is not the same as the club
     // having turned them off.
     expect(screen.getAllByText(/not serving these settings yet/).length).toBeGreaterThan(0);
@@ -176,10 +178,10 @@ describe("the settings rows this release owes", () => {
     const stub = stubFetch(routes(ALL));
     renderPage(<AdminSettingsPage />);
 
-    const field = await screen.findByLabelText("Slots per member per day");
+    const field = await findControl("Slots per member per day");
     fireEvent.change(field, { target: { value: "200" } });
 
-    const save = screen.getByRole("button", { name: /Save settings/ });
+    const save = saveButton();
     fireEvent.click(save);
     // Twice, on purpose and as the name of this test says: at the field, and on the save bar
     // that lists everything standing between this page and a save.
@@ -197,8 +199,8 @@ describe("the settings rows this release owes", () => {
     const stub = stubFetch(routes({ ...ALL, advance_booking_days: 14 }));
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await screen.findByLabelText(/Reserve window/), { target: { value: "90" } });
-    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    fireEvent.change(await findControl(/Reserve window/), { target: { value: "90" } });
+    fireEvent.click(saveButton());
 
     expect((await screen.findAllByText(/book into a league night that has not been written yet/)).length)
       .toBeGreaterThanOrEqual(1);
@@ -209,8 +211,8 @@ describe("the settings rows this release owes", () => {
     const stub = stubFetch(routes(ALL));
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await screen.findByLabelText(/Screen returns to the start after/), { target: { value: "20" } });
-    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    fireEvent.change(await findControl(/Screen returns to the start after/), { target: { value: "20" } });
+    fireEvent.click(saveButton());
 
     await waitFor(() => {
       const put = stub.calls.find((c) => c.method === "PUT");
@@ -226,7 +228,9 @@ describe("the settings rows this release owes", () => {
     renderPage(<AdminSettingsPage />);
 
     await screen.findByRole("heading", { name: "Monitoring & live updates" });
-    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    // The save bar appears with something to save (R13): one unrelated edit first.
+    fireEvent.change(await findControl(/Unlock time/), { target: { value: "16" } });
+    fireEvent.click(saveButton());
 
     await waitFor(() => {
       const put = stub.calls.find((c) => c.method === "PUT");
@@ -243,7 +247,7 @@ describe("the settings rows this release owes", () => {
 
     // Ruling 4: Dean asked for thumbs and the club is South African, where a thumbs-up is
     // unambiguously positive. A club that reads it otherwise flips one key.
-    expect(await screen.findByLabelText("Yes and no icons")).toHaveValue("thumbs");
+    expect(await findControl("Yes and no icons")).toHaveTextContent("Thumbs up and down");
     expect(screen.getByText(/a thumbs-up on “Delete” would be wrong/)).toBeInTheDocument();
   });
 
@@ -256,8 +260,10 @@ describe("the settings rows this release owes", () => {
     stubFetch(routes(ALL));
     renderPage(<AdminSettingsPage />);
 
-    const toggle = await screen.findByLabelText(/every look is recorded/);
+    // Named by its caption now; the state sentence ("On — every look is recorded") sits beside it.
+    const toggle = await findControl(MEMBER_TRACE_LABEL);
     expect(toggle).toBeChecked();
+    expect(screen.getByText(/On — every look is recorded/)).toBeInTheDocument();
     expect(screen.getByText(/not there at all — not greyed out, not refused, simply absent/))
       .toBeInTheDocument();
   });
@@ -267,18 +273,19 @@ describe("the settings rows this release owes", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
     await screen.findByRole("heading", { name: "Monitoring & live updates" });
-    expect(screen.queryByLabelText(/every look is recorded/)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/the page is not there/)).not.toBeInTheDocument();
+    expect(queryControl(MEMBER_TRACE_LABEL)).not.toBeInTheDocument();
+    expect(screen.queryByText(/every look is recorded/)).not.toBeInTheDocument();
   });
 
-  it("names the three new blocks in the jump nav, so they are reachable by keyboard", async () => {
+  // R13 retired the jump nav: every section's header is now a button at the top level of one
+  // accordion, so a keyboard reaches each in one stop. The invariant — the new blocks are
+  // reachable by keyboard — is held by `settings-sections.test.tsx`.
+  it("gives the new blocks section headers a keyboard reaches directly", async () => {
     stubFetch(routes(ALL));
     renderPage(<AdminSettingsPage />);
 
-    // The nav exists because a keyboard user counted seventy-six tab stops to the first door
-    // setting. Three more blocks without three more nav entries is that finding, re-shipped.
-    for (const name of ["Box screens & scanning", "Limits & confirmations", "Monitoring & live updates"]) {
-      expect((await screen.findAllByText(name)).length).toBeGreaterThan(1);
+    for (const name of ["Box screens & scanning", "Repeating bookings", "Monitoring & live updates"]) {
+      expect(await screen.findByRole("button", { name })).toHaveAttribute("aria-expanded", "false");
     }
   });
 });

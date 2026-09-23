@@ -347,7 +347,7 @@ export function partialBoardNotice(names: string[], readAt: string | null): stri
 }
 
 export const BOARD_EMPTY_NOTICE = "This club has no courts set up yet, so there is nothing to watch.";
-export const BOARD_EMPTY_HINT = "Add the club's courts under Admin settings, then this wall fills itself in.";
+export const BOARD_EMPTY_HINT = "Add the club's courts under Courts, then this wall fills itself in.";
 
 /** The wall-view switch, and the thing people ask about it straight afterwards. */
 export const WALL_VIEW_LABEL = "Wall view";

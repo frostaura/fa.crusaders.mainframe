@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
 import AdminSettingsPage from "./AdminSettings";
 import { SETTINGS_FIXTURE, renderPage, stubFetch } from "../test/harness";
+import { control, findControl } from "../components/settings/testKit";
 
 /**
  * The credit-conversion rate fields, held to the one thing they exist for: expressing the
@@ -38,10 +38,10 @@ describe("the credit-conversion rate fields", () => {
   it("accept the rates the club actually uses", async () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
-    await screen.findByLabelText(RATES[0][0]);
+    await findControl(RATES[0][0]);
 
     for (const [label, rate] of RATES) {
-      const field = screen.getByLabelText(label) as HTMLInputElement;
+      const field = control(label) as HTMLInputElement;
       expect(field).toHaveValue(rate);
       expect(field.validity.stepMismatch).toBe(false);
       expect(field.validity.valid).toBe(true);
@@ -51,7 +51,7 @@ describe("the credit-conversion rate fields", () => {
   it("accept every round rate an admin would plausibly type", async () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
-    const field = (await screen.findByLabelText(RATES[0][0])) as HTMLInputElement;
+    const field = (await findControl(RATES[0][0])) as HTMLInputElement;
 
     for (const rate of ["1.5", "1.6", "2", "2.4", "2.5", "3", "0.75"]) {
       field.value = rate;
@@ -62,10 +62,10 @@ describe("the credit-conversion rate fields", () => {
   it("step in cents, so the arrows cannot nudge the rate by a hundredth of nowhere", async () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
-    await screen.findByLabelText(RATES[0][0]);
+    await findControl(RATES[0][0]);
 
     for (const [label] of RATES) {
-      const field = screen.getByLabelText(label) as HTMLInputElement;
+      const field = control(label) as HTMLInputElement;
       // A rand rate has no unit smaller than a cent, and the step base is `min`, so `min` and
       // `step` have to agree or every round value falls between two valid ones.
       expect(field.step).toBe("0.01");

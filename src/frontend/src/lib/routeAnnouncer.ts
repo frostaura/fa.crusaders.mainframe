@@ -60,6 +60,13 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   // R16 — the Admin tab and everything under it. The index is the Overview ("Needs attention").
   ["/admin", "Overview"],
   ["/admin/members", "Members"],
+  // P5 — one member's page. Named per route, not per person: the name is on the page's <h1>.
+  ["/admin/members/:userId", "Member"],
+  ["/admin/members/:userId/wallet", "Member wallet & ledger"],
+  ["/admin/members/:userId/bookings", "Member bookings"],
+  ["/admin/members/:userId/doors", "Member door history"],
+  ["/admin/members/:userId/night", "Member's night"],
+  ["/admin/members/:userId/access", "Member sign-in & biometrics"],
   ["/admin/groups", "Groups"],
   ["/admin/transactions", "Transactions"],
   ["/admin/reports", "Reports"],
@@ -72,13 +79,15 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   ["/admin/monitoring/doors/:id/card", "Door card"],
   ["/admin/monitoring/devices", "Boards"],
   ["/admin/monitoring/faults", "Faults"],
+  // R17: a picker now — it asks who, then opens that member's Night tab.
   ["/admin/monitoring/night", "A person's night"],
   ["/admin/monitoring/changes", "Change record"],
   // Named for what an admin came to look at, never for the mechanism — this audience does not
   // read "recurrence".
   ["/admin/schedules", "Repeating bookings"],
   ["/admin/schedules/:id", "Repeating booking"],
-  ["/admin/settings", "Admin settings"],
+  ["/admin/courts", "Courts"],
+  ["/admin/settings", "Settings"],
   ["/admin/webhooks", "Webhooks"],
   /**
    * The old paths. Still named, because they are still ROUTES — permanent redirects rather than
@@ -166,8 +175,32 @@ export function knownRoutePatterns(): string[] {
 export function focusFragmentTarget(hash: string): boolean {
   const heading = headingFor(hash);
   if (!heading) return false;
+  const control = headerControlOf(heading);
+  if (control) {
+    // Scrolled by the HEADING, which carries the scroll margin that clears the sticky header.
+    heading.setAttribute("data-route-heading", "");
+    heading.scrollIntoView?.({ block: "start" });
+    control.focus({ preventScroll: true });
+    return true;
+  }
   focusHeading(heading, true);
   return true;
+}
+
+/**
+ * The control a heading IS, when it is one: an accordion or disclosure header is an `<h2>` whose
+ * content is a single button (the WAI-ARIA accordion pattern — the Settings sections, R13).
+ *
+ * <p>
+ * Focus goes to that button, not to the heading around it. A heading made focusable here would be
+ * a second, inert tab stop wrapped round the real one: Enter on it does nothing, and it raced the
+ * page's own "open this section and focus its header" — whichever ran last won, and the loser was
+ * the keyboard user, left on a heading that could not open the section they were sent to.
+ * </p>
+ */
+function headerControlOf(heading: HTMLElement): HTMLElement | null {
+  const controls = heading.querySelectorAll<HTMLElement>("button, a[href]");
+  return controls.length === 1 ? controls[0] : null;
 }
 
 /** The heading a fragment names: the target itself if it is one, else the first inside it. */

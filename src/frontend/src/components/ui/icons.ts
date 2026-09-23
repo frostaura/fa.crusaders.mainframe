@@ -121,3 +121,4 @@ export { LinkBreakIcon, LinkBreakIcon as LinkBreak } from "@phosphor-icons/react
 export { UserMinusIcon, UserMinusIcon as UserMinus } from "@phosphor-icons/react/dist/csr/UserMinus";
 export { UserPlusIcon, UserPlusIcon as UserPlus } from "@phosphor-icons/react/dist/csr/UserPlus";
 export { ArrowDownIcon, ArrowDownIcon as ArrowDown } from "@phosphor-icons/react/dist/csr/ArrowDown";
+export { PasswordIcon, PasswordIcon as Password } from "@phosphor-icons/react/dist/csr/Password";

@@ -2,83 +2,74 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
 import AdminMembersPage from "./AdminMembers";
 import { memberFixture, renderPage, stubFetch, type StubRoute } from "../test/harness";
+import { COLUMNS, MEMBERS_PAGE, ROW_ACTIONS, SUSPENDED_NOTE } from "../lib/membersCopy";
 
 /**
- * The members table's shape, which was measured wrong at both ends of the range.
+ * The members table's shape — the decisions that produced the measured pixels, since jsdom has
+ * no layout. `e2e/admin-members-layout.spec.ts` re-measures the pixels in Chromium.
  *
  * <p>
- * At 1440px — the widest desktop breakpoint this app will ever get — the table was 1006px inside
- * a 990px scroll container, so the last header ("ACTIONS") was cut off, and each row was
- * <b>164.5px tall</b>: the four row actions were laid out <code>flex-col</code>, so Adjust
- * credit / Enroll fingerprint / Reset password / Suspend stacked one above the other at 32px
- * each and six members filled roughly a thousand pixels of screen. Stacking them also squeezed
- * the column to one icon's width, which is why the header was the widest thing in it.
- * </p>
- *
- * <p>
- * At 375px the same table showed Name and a truncated Email and nothing else — every other
- * column, including all four actions, off-screen behind a horizontal scroll whose scrollbar the
- * app hides. A container that hides content without saying so is worse than one that does not
- * hide it, which is the whole reason <code>ScrollArea</code> exists in this codebase.
- * </p>
- *
- * <p>
- * Round 4 measured all of it in Chromium against a live stack — a seeded club of seven members
- * at 375, 768 and 1440px — because rounds 3 and 4 had by then asserted <code>flex-wrap</code>
- * and <code>flex-row</code> against each other on the same element with no measurement behind
- * either. The numbers: wrapping lets the table squeeze the actions column from 197px to 96px
- * and the row grows to <b>92.5–136.5px</b>; not wrapping holds it at <b>60.5–69px</b>. So
- * wrapping causes the tall row rather than curing it, and this file's original claim — that
- * stacking is what produces a 164px row — was right about the cause and would have been
- * defeated by the "fix".
- * </p>
- *
- * <p>
- * The second measurement is the one neither round took: with the actions merely on one line,
- * <b>0 of 27</b> action controls were inside the scroller's box before the admin scrolled, at
- * both 768 and 1440px — the table is 1141px against a 990px card. Pinning the actions column
- * to the right edge, as the identity column is already pinned to the left, makes that
- * <b>27 of 27</b>.
- * </p>
- *
- * <p>
- * jsdom has no layout, so no pixel here can be re-measured; what these assertions hold is the
- * three decisions that produced the pixels — the actions run along the row, the actions column
- * is pinned, and the scroll region announces itself. <code>e2e/admin-members-layout.spec.ts</code>
- * re-measures the pixels in a real browser.
+ * <b>What P5 changed, and what it kept.</b> The table is now a table only when its CARD is at least
+ * 48rem wide, and a stack of cards below that — one threshold family, all container queries in
+ * rem, so a raised root font gets cards rather than a squeezed Name column. The columns were
+ * re-cut (Email and Member # moved under the name; Class moved into the ⋯ menu; Groups arrived),
+ * so the assertions that named the old columns and their px widths were rewritten. Every
+ * invariant they held is still here: the scroll region names itself; every field carries the
+ * label its card form prints; the name stays put while the row scrolls; the row actions run
+ * along one line; Balance and Actions are pinned with ONE shared number; each optional column
+ * has exactly one threshold and is not drawn below it.
  * </p>
  */
 
 afterEach(() => vi.unstubAllGlobals());
 
-function renderMembers() {
+const TABLE = "[@container(min-width:48rem)]";
+
+function renderMembers(extra: StubRoute[] = [], members = [memberFixture()]) {
   stubFetch([
-    { path: "/api/v1/admin/members/", body: [memberFixture()] },
+    { path: "/api/v1/admin/members/", body: members },
     { path: "/api/v1/admin/biometric/enrollments", body: [] },
+    ...extra,
   ]);
   return renderPage(<AdminMembersPage />);
 }
 
+/** A club whose groups can be read, so the Groups column is drawn. */
+const GROUP_ROUTES: StubRoute[] = [
+  { path: "/api/v1/admin/member-groups", body: { groups: [{ id: "g1", name: "League" }] } },
+  { path: "/api/v1/admin/member-groups/g1/members", body: { members: [{ user_id: "44444444-4444-4444-4444-444444444444", name: "Ada Lovelace" }], cursor: null } },
+];
+
 describe("the admin members table", () => {
   it("says it scrolls sideways instead of hiding the columns silently", async () => {
     renderMembers();
-    // ScrollArea's region is focusable and named, so the columns off the right-hand edge are
-    // reachable by keyboard and announced rather than simply missing.
-    const region = await screen.findByRole("region", { name: "Members table" });
+    const region = await screen.findByRole("region", { name: MEMBERS_PAGE.tableLabel });
     expect(region).toHaveAttribute("tabindex", "0");
     expect(region.querySelector("table")).not.toBeNull();
   });
 
+  it("labels every field, so the phone card says what the header row would have said", async () => {
+    renderMembers(GROUP_ROUTES);
+    await screen.findByText("League");
+    const labelled = Array.from(document.querySelectorAll("tbody td[data-label]")).map((td) => td.getAttribute("data-label"));
+    expect(labelled).toEqual([COLUMNS.status, COLUMNS.groups, COLUMNS.joined, COLUMNS.balance, COLUMNS.actions]);
+  });
+
+  it("keeps the member's name in place while the rest of the row scrolls", async () => {
+    renderMembers();
+    await screen.findByText("Ada Lovelace");
+    const identity = document.querySelector("tbody tr > td:first-child")!;
+    // An opaque fill as well, or the columns passing underneath read straight through it.
+    expect(identity.className).toContain(`${TABLE}:sticky`);
+    expect(identity.className).toContain(`${TABLE}:left-0`);
+    expect(identity.className).toContain(`${TABLE}:bg-bg-surface`);
+  });
+
   it("lays the row actions along the row, not down it", async () => {
     renderMembers();
-    // D3-B06: this control was a 32×32 icon-only button, four to a row, twelve rows —
-    // WCAG 2.5.5 asks 44, and the rest of this chrome already uses a coarse-pointer minimum.
-    // It is now a labelled 44px button, in the same place in the same row.
-    const adjust = await screen.findByRole("button", { name: "Top up" });
-    const actions = adjust.parentElement!;
-    // Four 32px buttons stacked vertically is a 164px row. This is the assertion that stops it
-    // coming back as a "tidier" column — or as a wrapping one, which measures at 136.5px and
-    // is the same defect wearing a different class name.
+    const actions = (await screen.findByRole("button", { name: ROW_ACTIONS.topUp })).parentElement!;
+    // Wrapping lets the table squeeze this column and the buttons stack — measured at 92.5-136.5px
+    // rows against 60.5-69px on one line. Wrapping is the cause of the tall row, not the cure.
     expect(actions.className).toContain("flex-row");
     expect(actions.className).not.toContain("flex-col");
     expect(actions.className).not.toContain("flex-wrap");
@@ -86,129 +77,87 @@ describe("the admin members table", () => {
 
   it("pins the actions column so the buttons do not start off-screen", async () => {
     renderMembers();
-    // D3-B06: this control was a 32×32 icon-only button, four to a row, twelve rows —
-    // WCAG 2.5.5 asks 44, and the rest of this chrome already uses a coarse-pointer minimum.
-    // It is now a labelled 44px button, in the same place in the same row.
-    const adjust = await screen.findByRole("button", { name: "Top up" });
-    const cell = adjust.closest("td")!;
-    const header = screen.getByRole("columnheader", { name: "Actions" });
-    // 0 of 27 controls on screen before this, 27 of 27 after — see the file comment. The
-    // header is pinned with the cells or it slides away from the column it names, and both
-    // need an opaque background because the other columns pass underneath.
-    expect(cell.className).toMatch(/sm:sticky/);
-    expect(cell.className).toMatch(/sm:right-0/);
-    expect(cell.className).toMatch(/bg-bg-surface/);
-    expect(header.className).toMatch(/sticky/);
-    expect(header.className).toMatch(/right-0/);
-    expect(header.className).toMatch(/bg-bg-muted/);
+    const cell = (await screen.findByRole("button", { name: ROW_ACTIONS.topUp })).closest("td")!;
+    const header = screen.getByRole("columnheader", { name: COLUMNS.actions });
+    expect(cell.className).toContain(`${TABLE}:sticky`);
+    expect(cell.className).toContain(`${TABLE}:right-0`);
+    expect(cell.className).toContain(`${TABLE}:bg-bg-surface`);
+    expect(header.className).toMatch(/(^|\s)sticky(\s|$)/);
+    expect(header.className).toMatch(/(^|\s)right-0(\s|$)/);
   });
 
   /**
-   * The column that was drawn and invisible.
-   *
-   * <p>
-   * A right-pinned column is pulled left of its in-flow position by exactly the un-scrolled
-   * overflow, so whatever sits in that band is underneath it. Measured in Chromium against
-   * a live stack: the table is 1079px, the scroll container was <b>990px at 1440 AND at
-   * 1920</b>, and the 89px band immediately left of the pins is where the 99px `Joined`
-   * column sat — header rendering as a bare glyph, each cell as a single `S`, at every
-   * desktop width, with ~800px of page beside it unused. At 768 the overflow is 345px and
-   * `Status` and `Class` go under as well.
-   * </p>
-   *
-   * <p>
-   * Column ORDER cannot fix that — the band is wherever the pins land, so every arrangement
-   * has a victim — which is why three rounds arguing about order got nowhere. The overflow
-   * itself is what goes: `/admin/*` gets the `wide` frame (AdminLayout), and below the width at
-   * which a column fits it is <b>not drawn</b> rather than drawn underneath something. The
-   * card layout below `sm` keeps every field, because nothing is a column there.
-   * </p>
-   *
-   * <p>
-   * jsdom has no layout, so what is asserted here is the decision, not the pixels:
-   * `e2e/admin-members-layout.spec.ts` re-measures those in a browser.
-   * </p>
+   * A balance partly covered once read `123456.78 cr` as `12345`. The balance's pin offset must
+   * equal the width the actions column is held to — one number, compared rather than asserted
+   * alone — and the two pinned cells must be adjacent, or a scrolling column shows through the seam.
    */
-  it("draws a column only at the widths where it fits, and keeps every field in card mode", async () => {
+  it("pins the balance beside the actions, at the offset that clears them", async () => {
     renderMembers();
-    await screen.findByRole("button", { name: "Top up" });
+    await screen.findByText("Ada Lovelace");
+    const balance = document.querySelector<HTMLElement>('tbody td[data-label="Balance"]')!;
+    const actions = document.querySelector<HTMLElement>('tbody td[data-label="Actions"]')!;
+    const offset = new RegExp(`${escape(TABLE)}:right-(\\d+)`).exec(balance.className)?.[1];
+    const width = new RegExp(`${escape(TABLE)}:w-(\\d+)`).exec(actions.className)?.[1];
+    expect(balance.className).toContain(`${TABLE}:sticky`);
+    expect(offset, "balance cell needs a pin offset on the spacing scale").toBeDefined();
+    expect(offset).toBe(width);
 
-    // R16 (P2) retired the viewport breakpoints (`md`/`lg`/`xl:table-cell`): the admin rail
-    // takes 16rem of the viewport, so the thresholds are now container queries on the card,
-    // stated in rem. The invariant is unchanged — each optional column has ONE threshold, and
-    // the order they arrive in is Class, then Member # and Joined together, then Email.
+    const header = screen.getByRole("columnheader", { name: COLUMNS.balance });
+    const actionsHeader = screen.getByRole("columnheader", { name: COLUMNS.actions });
+    expect(/(?:^|\s)right-(\d+)/.exec(header.className)?.[1]).toBe(offset);
+    expect(/(?:^|\s)w-(\d+)/.exec(actionsHeader.className)?.[1]).toBe(width);
+
+    const labels = Array.from(document.querySelectorAll("tbody tr:first-child td[data-label]")).map((td) => td.getAttribute("data-label"));
+    expect(labels.indexOf(COLUMNS.balance)).toBe(labels.indexOf(COLUMNS.actions) - 1);
+  });
+
+  /**
+   * Each optional column has ONE threshold, on the card's width in rem, and below it the column is
+   * not drawn rather than drawn under a pin. Below the table threshold nothing is a column at all:
+   * every field is on the card.
+   */
+  it("draws a column only from the card width at which it fits", async () => {
+    renderMembers(GROUP_ROUTES);
+    await screen.findByText("League");
+
     const expected: Record<string, string> = {
-      // Email is the widest optional column and lands last, at the width where the whole
-      // table finally fits its container.
-      Email: "[@container(min-width:72.125rem)]:!table-cell",
-      "Member #": "[@container(min-width:58.625rem)]:!table-cell",
-      Joined: "[@container(min-width:58.625rem)]:!table-cell",
-      Class: "[@container(min-width:45.875rem)]:!table-cell",
+      [COLUMNS.groups]: "[@container(min-width:59rem)]:!table-cell",
+      [COLUMNS.joined]: "[@container(min-width:65rem)]:!table-cell",
     };
-
-    for (const [label, bp] of Object.entries(expected)) {
+    for (const [label, threshold] of Object.entries(expected)) {
       const header = screen.getByRole("columnheader", { name: new RegExp(`^${label}`) });
-      expect(header.className, `${label} header`).toContain("hidden");
-      expect(header.className, `${label} header`).toContain(bp);
-
+      expect(header.className, `${label} header`).toMatch(/(^|\s)hidden(\s|$)/);
+      expect(header.className, `${label} header`).toContain(threshold);
       const cell = document.querySelector<HTMLElement>(`tbody td[data-label="${label}"]`)!;
-      // `block` first: below `sm` the row is a card and every field is on screen.
-      expect(cell.className, `${label} cell`).toMatch(/(^|\s)block(\s|$)/);
-      expect(cell.className, `${label} cell`).toContain("sm:hidden");
-      expect(cell.className, `${label} cell`).toContain(bp);
+      expect(cell.className, `${label} cell`).toContain(`${TABLE}:hidden`);
+      expect(cell.className, `${label} cell`).toContain(threshold);
     }
-
-    // Name, Status, Balance and Actions are the four that never drop: identity, state,
-    // money, and the things an admin came here to press.
-    for (const label of ["Status", "Balance", "Actions"]) {
+    // Identity, state, money and the things an admin came here to press never drop.
+    for (const label of [COLUMNS.status, COLUMNS.balance, COLUMNS.actions]) {
       const cell = document.querySelector<HTMLElement>(`tbody td[data-label="${label}"]`)!;
-      expect(cell.className, `${label} cell`).not.toContain("sm:hidden");
+      expect(cell.className, `${label} cell`).not.toContain(`${TABLE}:hidden`);
+      expect(cell.className, `${label} cell`).toContain(`${TABLE}:table-cell`);
     }
   });
 
-  it("pins the balance header with its cells, at the same offset", async () => {
+  it("is a table only from the card width where its fixed columns and a readable name fit", async () => {
     renderMembers();
-    await screen.findByRole("button", { name: "Top up" });
-    const balance = screen.getByRole("columnheader", { name: "Balance" });
-    const actions = screen.getByRole("columnheader", { name: "Actions" });
-    // Balance is pinned beside Actions rather than left to scroll under it — measured in
-    // Chromium, the unpinned column showed `123456.78 cr` as `12345` at rest at 1440px and
-    // `1500.00 cr` as `150` at scrollLeft 96. See the note on the Actions cell in
-    // AdminMembers.tsx for why column order could not fix that at 768px.
-    //
-    // The header carries the same two numbers as the body cells and they have to agree with
-    // them, or the header names one column while sitting over another. A single mismatched
-    // bracket here is the whole defect coming back, so the offset is compared to the width
-    // rather than either being asserted alone.
-    expect(balance.className).toMatch(/sticky/);
-    expect(balance.className).toMatch(/bg-bg-muted/);
-    const headerOffset = /right-\[(\d+)px\]/.exec(balance.className)?.[1];
-    const headerWidth = /min-w-\[(\d+)px\]/.exec(actions.className)?.[1];
-    expect(headerOffset, "balance header needs an explicit right-[Npx]").toBeDefined();
-    expect(headerWidth, "actions header needs an explicit min-w-[Npx]").toBeDefined();
-    expect(headerOffset).toBe(headerWidth);
-
-    // ...and agree with the body cells, which are what the balance is actually drawn in.
-    const cell = document.querySelector<HTMLElement>('tbody td[data-label="Balance"]')!;
-    expect(/sm:right-\[(\d+)px\]/.exec(cell.className)?.[1]).toBe(headerOffset);
+    const table = (await screen.findByRole("region", { name: MEMBERS_PAGE.tableLabel })).querySelector("table")!;
+    expect(table.className).toContain(`${TABLE}:table`);
+    expect(table.className).toContain(`${TABLE}:table-fixed`);
+    expect(table.className).toMatch(/(^|\s)block(\s|$)/);
   });
 });
 
+/** Escape a class prefix for a RegExp. */
+function escape(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\:@]/g, "\\$&");
+}
+
 /**
- * The three findings D3 raised about this table's own controls, each verified against the
- * code before it was fixed — designers can be wrong, and one of the four was.
- *
- * <p>
- * <b>D3-B12 does not reproduce and is deliberately not "fixed".</b> The finding was that
- * `Name`, `Email`, `Member #`, `Status` and `Joined` render sentence-case while `CLASS`,
- * `BALANCE` and `ACTIONS` render upper-case, because the first five come from `SortHeader`
- * and the last three from `Cell`'s `data-label`. On this tree the whole `<thead>` carries
- * `uppercase`, so every desktop header renders the same way and the phone card labels are a
- * separate, deliberately different treatment. The design read an older tip. Recorded here
- * rather than silently dropped, so nobody re-opens it.
- * </p>
+ * The row's own controls, at the size a club actually uses.
  */
-describe("the members table's own controls, at the size a club actually uses", () => {
+describe("the members table's own controls", () => {
   const routes = (): StubRoute[] => [
     { path: "/api/v1/admin/members/", body: [
       memberFixture({ status: "PendingApproval" }),
@@ -216,55 +165,35 @@ describe("the members table's own controls, at the size a club actually uses", (
       memberFixture({ membership_id: "m3", user_id: "u3", full_name: "Alan Turing", member_class: "LeagueOrSenior" }),
     ] },
     { path: "/api/v1/admin/biometric/enrollments", body: [] },
-    { path: "/api/v1/admin/ledger/", body: [] },
   ];
 
-  /** D3-B07: measured at 72×36 and 61×36. Approving somebody is what lets them through a door. */
+  /**
+   * D3-B07: approving somebody is what lets them through a door, so these are never smaller than
+   * a finger. P5 uses the design system's dense admin size — 36px to the eye, 44px to the finger
+   * through the button's own extended hit area — so a pending row's three controls fit its line.
+   */
   it("gives Approve and Reject a 44px target", async () => {
     stubFetch(routes());
     renderPage(<AdminMembersPage />);
-
-    for (const name of ["Approve", "Reject"]) {
+    for (const name of [ROW_ACTIONS.approve, ROW_ACTIONS.reject]) {
       const control = await screen.findByRole("button", { name });
-      expect(control.className, `${name} is still 36px`).toContain("min-h-11");
-      expect(control.className).not.toContain("h-9");
+      expect(control.className, `${name} lost its extended hit area`).toContain("after:-inset-y-[5px]");
     }
+    const more = screen.getByRole("button", { name: ROW_ACTIONS.more("Ada Lovelace") });
+    expect(more.className).toContain("after:-inset-[5px]");
   });
 
   /**
-   * D3-B13: a native select does not shrink its own text, so a fixed-width column clipped
-   * "League or senior" to "League or senio" — one of only two values the column can hold.
+   * D3-B18: two controls vanishing from a suspended row with nothing saying why reads as a
+   * rendering fault. In the row, not in a tooltip — a title is invisible on a phone.
    */
-  it("gives the class select a 44px target and a way to read its full value", async () => {
+  it("says why a suspended member's row has no Top up", async () => {
     stubFetch(routes());
     renderPage(<AdminMembersPage />);
-
-    const select = await screen.findByLabelText("Member class for Alan Turing");
-    expect(select.className).toContain("min-h-11");
-    expect(select).toHaveAttribute("title", "League or senior");
-  });
-
-  /**
-   * D3-B18: two controls vanished from a suspended row with nothing saying why, which reads
-   * as a rendering fault rather than as a rule.
-   */
-  it("says why a suspended member's row is shorter than everybody else's", async () => {
-    stubFetch(routes());
-    renderPage(<AdminMembersPage />);
-
-    await screen.findByText("Grace Hopper");
-    // In the row, not in a tooltip: a title is invisible on a phone, to a screen reader and
-    // to touch, which is the whole of this audience.
-    const said = await screen.findByText(/no top-ups or fingerprints until they are reactivated/);
-    expect(said.closest("tr")).toContainElement(screen.getByTitle("Reactivate member"));
-  });
-
-  it("offers no top-up on a suspended row at all, rather than one that refuses", async () => {
-    stubFetch(routes());
-    renderPage(<AdminMembersPage />);
-
-    await screen.findByText("Grace Hopper");
-    const row = screen.getByText(/no top-ups or fingerprints/).closest("tr")!;
-    expect(within(row).queryByRole("button", { name: "Top up" })).not.toBeInTheDocument();
+    const said = await screen.findByText(SUSPENDED_NOTE);
+    const row = said.closest("tr")!;
+    expect(within(row).getByText("Grace Hopper")).toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: ROW_ACTIONS.topUp })).not.toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: ROW_ACTIONS.more("Grace Hopper") })).toBeInTheDocument();
   });
 });

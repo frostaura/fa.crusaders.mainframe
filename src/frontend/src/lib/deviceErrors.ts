@@ -34,7 +34,7 @@ const DEVICE_ERROR_TEXT: Record<string, string> = {
   // The API checks every court number against the courts table on update
   // (DeviceRegistryService.CourtNumberNotFound). The pickers only offer real courts, so
   // this mostly means a court was deleted while the form was open.
-  court_number_not_found: "One of those court numbers is not a court at this club. Refresh the page and pick the court again — if it is missing, add it under Admin settings.",
+  court_number_not_found: "One of those court numbers is not a court at this club. Refresh the page and pick the court again — if it is missing, add it under Courts.",
   // ButtonMap.TryParse refused the map itself — an unknown token, or a grant past the
   // relay's hard cap. The editor bounds the field, so this is a map that arrived from
   // somewhere else, or a hand-edited one.

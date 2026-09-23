@@ -33,6 +33,20 @@ vi.mock("../../pages/AdminLedger", () => page("transactions page"));
 vi.mock("../../pages/AdminMembers", () => page("members page"));
 vi.mock("../../pages/admin/AdminHome", () => page("admin overview page"));
 vi.mock("../../pages/admin/AdminReports", () => page("club reports page"));
+vi.mock("../../pages/admin/AdminCourts", () => page("courts page"));
+// P5 — the member page's frame is a layout with an <Outlet />, and each tab a named export.
+vi.mock("../../pages/admin/member", () => {
+  const tab = (name: string) => () => <h1>{name}</h1>;
+  return {
+    default: () => <div><p>member frame</p><Outlet /></div>,
+    MemberOverview: tab("member overview tab"),
+    MemberWallet: tab("member wallet tab"),
+    MemberBookings: tab("member bookings tab"),
+    MemberDoors: tab("member door history tab"),
+    MemberNightTab: tab("member night tab"),
+    MemberAccess: tab("member access tab"),
+  };
+});
 vi.mock("../../pages/AdminDoorsLog", () => ({ AdminDoorsLogPage: () => <h1>door log page</h1> }));
 vi.mock("../../pages/AdminDoorsCard", () => ({ AdminDoorsCardPage: () => <h1>door card page</h1> }));
 
@@ -143,6 +157,33 @@ describe("the Admin section is one guarded, nested route (R16)", () => {
     renderAt("/admin/transactions");
     await arrivesAt("/admin/transactions", "transactions page");
     expect(screen.getByText("admin rail")).toBeInTheDocument();
+  });
+
+  it("renders Courts (P6) inside the same frame", async () => {
+    session(true);
+    renderAt("/admin/courts");
+    await arrivesAt("/admin/courts", "courts page");
+    expect(screen.getByText("admin rail")).toBeInTheDocument();
+  });
+
+  /**
+   * P5 / R17 — a member's page, and each tab a URL of its own inside BOTH frames: the console's
+   * and the member's. "A person's night should be navigated from clicking member in grid" is
+   * only true if `/admin/members/:id/night` is a real place a link can go.
+   */
+  it.each([
+    ["/admin/members/7f1c", "member overview tab"],
+    ["/admin/members/7f1c/wallet", "member wallet tab"],
+    ["/admin/members/7f1c/bookings", "member bookings tab"],
+    ["/admin/members/7f1c/doors", "member door history tab"],
+    ["/admin/members/7f1c/night?day=2026-09-20", "member night tab"],
+    ["/admin/members/7f1c/access", "member access tab"],
+  ])("renders %s as the %s, inside the member's frame", async (path, heading) => {
+    session(true);
+    renderAt(path);
+    await arrivesAt(path, heading);
+    expect(screen.getByText("admin rail")).toBeInTheDocument();
+    expect(screen.getByText("member frame")).toBeInTheDocument();
   });
 
   it("sends a member who follows an admin link to their own landing, frame and all withheld", async () => {

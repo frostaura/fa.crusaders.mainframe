@@ -91,12 +91,13 @@ function base(extra: ApiRoute[] = []): ApiRoute[] {
 }
 
 /**
- * Two screens outside the doors surface that carry a destructive confirm. P3: /admin/devices
- * no longer does (the devices lane moved its deletes into dialogs), so the second screen is
- * the member's own passkey list on /profile — a phone-first page, which is the harder test.
+ * The screens outside the doors surface that carry a destructive confirm. P3: /admin/devices
+ * no longer does (the devices lane moved its deletes into dialogs). P6: nor does
+ * /admin/settings — its only one was the Courts row's "Deactivate", and the courts moved to
+ * their own page, where "In use" is a switch inside the edit sheet. What is left is the
+ * member's own passkey list on /profile — a phone-first page, which is the harder test.
  */
 const PAGES = [
-  { label: "admin settings", path: "/admin/settings", ready: /Unlock time/ },
   { label: "profile passkeys", path: "/profile", ready: /iPhone 15/ },
 ];
 
@@ -343,6 +344,8 @@ for (const size of SIZES) {
  * </p>
  *
  * <p>
+ * <b>P6 moved this from `/admin/settings` to `/profile`</b>, because the settings page no longer
+ * carries an armed confirm at all (the Courts row left with the courts). The history, kept:
  * <b>`/admin/settings` only, and the reason is a live one rather than an oversight.</b> Six
  * other call sites still hand this control padding in `rem` — `AdminDevices` (`h-8 px-3`,
  * twice), `AdminMembers` and `AdminWebhooks` (`h-11 px-4`), `Profile` (`h-9 px-3 text-xs`) and
@@ -357,8 +360,8 @@ for (const size of SIZES) {
  */
 test("keeps the frame round its words in pixels, whatever the root font size", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
-  await open(page, "/admin/settings", 0);
-  await expect(page.getByLabel(/Unlock time/)).toBeVisible();
+  await open(page, "/profile", 0);
+  await expect(page.getByText("iPhone 15").first()).toBeVisible();
 
   const padding = async () => {
     const wrappers = page.locator(CONFIRMS);
@@ -542,8 +545,9 @@ test("Tab from the armed way out reaches the confirm instead of leaving the cont
  * finding out.
  */
 test("says out loud what it is about to do, and that it did not do it", async ({ page }) => {
-  await open(page, "/admin/settings", 0);
-  await expect(page.getByLabel(/Unlock time/)).toBeVisible();
+  // P6: /profile, the one page left with an armed confirm (see PAGES).
+  await open(page, "/profile", 0);
+  await expect(page.getByText("iPhone 15").first()).toBeVisible();
 
   const wrapper = page.locator(CONFIRMS).first();
   const live = wrapper.locator('> span[aria-live="polite"]');
@@ -580,10 +584,14 @@ test.describe("under forced colours", () => {
   test("every button and every banner still has a visible boundary", async ({ page }) => {
     await page.emulateMedia({ forcedColors: "active" });
     await open(page, "/admin/settings", 0);
-    await expect(page.getByLabel(/Unlock time/)).toBeVisible();
+    // R13: the door fields sit inside a closed accordion section, and each setting's (i) is
+    // named "More about <label>", so the field is found by its role rather than a label regex.
+    await page.getByRole("button", { name: "Door gates" }).click();
+    const unlock = page.getByRole("spinbutton", { name: "Unlock time (seconds)" });
+    await expect(unlock).toBeVisible();
 
     // Put the page into its blocked state so the warning banner is on screen too.
-    await page.getByLabel(/Unlock time/).fill("400");
+    await unlock.fill("400");
     await expect(page.getByText(/setting needs fixing before this can be saved/)).toBeVisible();
 
     const offenders = await page.evaluate(() => {
@@ -645,7 +653,7 @@ test.describe("under forced colours", () => {
    */
   test("gives every Button variant a boundary, and moves nothing to get it", async ({ page }) => {
     await open(page, "/admin/settings", 0);
-    await expect(page.getByLabel(/Unlock time/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Door gates" })).toBeVisible();
 
     const variants = Object.entries(BUTTON_VARIANT_CLASS);
     expect(variants.length, "the variant table is empty — nothing was measured").toBeGreaterThan(0);

@@ -101,8 +101,6 @@ const ALLOW: Record<string, Rule[]> = {
   "components/member-door/FullScreenQr.tsx": ["raw-palette", "arbitrary-z"],
   "components/monitoring/CourtTile.tsx": ["arbitrary-spacing"],
   "components/onboarding/Illustrations.tsx": ["arbitrary-spacing"],
-  "pages/AdminMembers.tsx": ["arbitrary-text-px", "arbitrary-spacing"],
-  "pages/AdminSettings.tsx": ["arbitrary-spacing"],
   "pages/MyCode.tsx": ["arbitrary-spacing"],
 };
 

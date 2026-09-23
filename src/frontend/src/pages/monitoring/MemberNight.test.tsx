@@ -1,9 +1,12 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
-import { MemberNightPage } from "./MemberNight";
+import { Route, Routes } from "react-router-dom";
+import { MemberNight, MemberNightPage } from "./MemberNight";
 import { AdminChangeRecordPage } from "./AdminChangeRecord";
 import { memberFixture, renderPage, signIn, stubFetch, unreachable, type StubRoute } from "../../test/harness";
 import type { TraceEvent, TraceView } from "../../lib/adminApi";
+import { rememberClubZone } from "../../lib/clubZone";
+import { NIGHT_TAB_COPY } from "../../lib/memberDetailCopy";
 
 /**
  * A person's night, and the club's record of its own admins.
@@ -13,6 +16,13 @@ import type { TraceEvent, TraceView } from "../../lib/adminApi";
  * the night page says "opening this is recorded", and the change record is where that record
  * appears and is the page that has to be able to prove nobody can delete it. A defect in
  * either makes the other a lie.
+ * </p>
+ *
+ * <p>
+ * <b>P5 moved the night onto the member (R17).</b> It is `MemberNight` inside the member page's
+ * Night tab; the old `/admin/monitoring/night` is now only a picker that opens that tab. The
+ * tests that drove the in-page member picker now render the night for a named member, and the
+ * "nothing until a member is named" rule is kept by the picker page, which reads no night at all.
  * </p>
  */
 
@@ -54,10 +64,9 @@ const nightRoutes = (view: TraceView | null, extra: StubRoute[] = []): StubRoute
   ...extra,
 ];
 
-/** Pick Thandi out of the MemberCombobox (P3 — it replaced the hand-built MemberPicker). */
-async function pickThandi() {
-  fireEvent.click(await screen.findByRole("combobox", { name: /Which member/ }));
-  fireEvent.click(await screen.findByRole("option", { name: /Thandi Mokoena/ }));
+/** Thandi's night, as the member page's Night tab mounts it. */
+function renderNight(path = "/admin/members/u1/night") {
+  return renderPage(<MemberNight userId="u1" name="Thandi Mokoena" />, { initialEntries: [path] });
 }
 
 describe("a person's night", () => {
@@ -65,30 +74,16 @@ describe("a person's night", () => {
 
   it("says what looking at this costs, before anything is looked at", async () => {
     stubFetch(nightRoutes(traceView([traceEvent()])));
-    renderPage(<MemberNightPage />);
+    renderNight();
 
     // The whole of the privacy exception is this sentence plus the server's audit row.
     expect((await screen.findAllByText(/Opening it is recorded/)).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/not here to browse/).length).toBeGreaterThan(0);
   });
 
-  /**
-   * There is no list, no search and no index of traces — by design and by wire. You cannot
-   * discover a person here; you can only ask about one you already named.
-   */
-  it("shows nothing at all until a member has been named, and says why the date is dead", async () => {
-    stubFetch(nightRoutes(traceView([traceEvent()])));
-    renderPage(<MemberNightPage />);
-
-    expect(await screen.findByText(/Pick a member first/)).toBeInTheDocument();
-    // A greyed control with no explanation is a dead end somebody stares at.
-    expect(screen.getByRole("button", { name: /^Which night\?/ })).toBeDisabled();
-  });
-
-  it("reads the night once a member is named, through a path segment and never a filter", async () => {
+  it("reads the member's night through a path segment and never a filter", async () => {
     const stub = stubFetch(nightRoutes(traceView([traceEvent()])));
-    renderPage(<MemberNightPage />);
-    await pickThandi();
+    renderNight();
 
     await waitFor(() => expect(
       stub.calls.some((c) => c.path.startsWith("/api/v1/admin/members/u1/trace")),
@@ -97,6 +92,37 @@ describe("a person's night", () => {
     // eventually make it optional, and an optional member filter on a log is the thing.
     expect(stub.calls.every((c) => !/[?&](member|user|userId|user_id)=/.test(c.path))).toBe(true);
     expect(await screen.findByText("Booked Court 2 for 18:00")).toBeInTheDocument();
+  });
+
+  /**
+   * The club-date defect this move fixed. The page defaulted to `new Date().toISOString()` —
+   * the UTC date — so a club east of Greenwich opened on yesterday after its own midnight. Here
+   * the three clocks disagree on purpose: UTC and the runner (Johannesburg) say the 22nd, the
+   * club (Auckland, UTC+12) says the 23rd. The club wins.
+   */
+  describe("with the club in a zone whose date differs from UTC's", () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-09-22T13:00:00Z"));
+      rememberClubZone("Pacific/Auckland");
+    });
+    afterEach(() => { vi.useRealTimers(); });
+
+    it("opens on the CLUB's today, not UTC's and not the reader's", async () => {
+      const stub = stubFetch(nightRoutes(traceView([traceEvent()], { timezone: "Pacific/Auckland", club_day: "2026-09-23" })));
+      renderNight();
+
+      await waitFor(() => expect(stub.calls.some((c) => c.path.includes("/trace?day="))).toBe(true));
+      const asked = stub.calls.filter((c) => c.path.includes("/trace?day=")).map((c) => c.path);
+      expect(asked.every((p) => p.endsWith("day=2026-09-23"))).toBe(true);
+      expect(screen.getByRole("radio", { name: "Tonight" })).toHaveAttribute("aria-checked", "true");
+    });
+
+    it("lets a ?day= in the link win over the default", async () => {
+      const stub = stubFetch(nightRoutes(traceView([traceEvent()], { timezone: "Pacific/Auckland" })));
+      renderNight("/admin/members/u1/night?day=2026-09-20");
+      await waitFor(() => expect(stub.calls.some((c) => c.path.endsWith("/trace?day=2026-09-20"))).toBe(true));
+    });
   });
 
   it("names the actor on every card, and marks the ones where somebody acted ON the member", async () => {
@@ -109,8 +135,7 @@ describe("a person's night", () => {
         actor: { user_id: "a1", name: "Review Admin", kind: "admin", is_self: false },
       }),
     ])));
-    renderPage(<MemberNightPage />);
-    await pickThandi();
+    renderNight();
 
     expect(await screen.findByText("by Thandi Mokoena themselves")).toBeInTheDocument();
     expect(screen.getByText("by Review Admin, an admin")).toBeInTheDocument();
@@ -126,8 +151,7 @@ describe("a person's night", () => {
       kind: "booking.no_show", headline: "Marked as a no-show",
       actor: { user_id: null, name: null, kind: "system", is_self: false },
     })])));
-    renderPage(<MemberNightPage />);
-    await pickThandi();
+    renderNight();
 
     expect(await screen.findByText("by the club's own automatic check")).toBeInTheDocument();
     expect(screen.queryByText(/an admin/)).not.toBeInTheDocument();
@@ -138,8 +162,7 @@ describe("a person's night", () => {
       traceEvent({ at: "2026-09-22T16:03:00.000Z" }),
       traceEvent({ at: "2026-09-22T17:07:00.000Z", kind: "door.opened", strand: "door", headline: "Lock released" }),
     ])));
-    renderPage(<MemberNightPage />);
-    await pickThandi();
+    renderNight();
 
     // Those words: *nothing was recorded* and *nothing happened* are different claims and
     // this product can only ever make the first.
@@ -148,8 +171,7 @@ describe("a person's night", () => {
 
   it("marks an approximate time in the time itself, and explains it once", async () => {
     stubFetch(nightRoutes(traceView([traceEvent({ approximate: true })])));
-    renderPage(<MemberNightPage />);
-    await pickThandi();
+    renderNight();
 
     expect(await screen.findByText(/^≈/)).toBeInTheDocument();
     expect(screen.getByText(/came from the board's own clock/)).toBeInTheDocument();
@@ -159,8 +181,7 @@ describe("a person's night", () => {
     stubFetch(nightRoutes(traceView([traceEvent()], {
       retention: { door_days: 90, door_horizon: "2026-06-24", door_rows_may_be_incomplete: true },
     })));
-    renderPage(<MemberNightPage />);
-    await pickThandi();
+    renderNight();
 
     const said = (await screen.findAllByText(/may already have been deleted/))[0];
     expect(said).toHaveTextContent("That is not evidence that nobody came in.");
@@ -168,8 +189,7 @@ describe("a person's night", () => {
 
   it("says nothing was recorded about the LOOK-UP when the read failed", async () => {
     stubFetch(nightRoutes(null));
-    renderPage(<MemberNightPage />);
-    await pickThandi();
+    renderNight();
 
     // The server writes its audit row on a 200. Without this half, the standing notice above
     // would be a lie about the one thing this surface promises.
@@ -178,20 +198,55 @@ describe("a person's night", () => {
 
   it("offers the three nearest nights rather than an empty page", async () => {
     stubFetch(nightRoutes(traceView([])));
-    renderPage(<MemberNightPage />);
-    await pickThandi();
+    renderNight();
 
     expect(await screen.findByText(/Nothing was recorded for Thandi Mokoena/)).toBeInTheDocument();
     expect(screen.getByText(/may not have uploaded yet/)).toBeInTheDocument();
+    expect(screen.getAllByRole("radio")).toHaveLength(3);
   });
 
-  it("warns that the download leaves the club's rules behind", async () => {
-    stubFetch(nightRoutes(traceView([traceEvent()])));
-    renderPage(<MemberNightPage />);
-    await pickThandi();
+  /**
+   * The export used to be a bare `<a href>` — no Authorization header, so the API answered the
+   * "download" with a JSON refusal. It is a button now (it acts: fetch, then save), and the
+   * request it makes carries the session's token.
+   */
+  it("downloads the CSV with the session's token, and warns that the file leaves the club's rules", async () => {
+    const stub = stubFetch(nightRoutes(traceView([traceEvent()]), [
+      { path: "/api/v1/admin/members/u1/trace.csv", body: "at,kind\n", headers: { "content-disposition": 'attachment; filename="night.csv"' } },
+    ]));
+    URL.createObjectURL = (() => "blob:x") as typeof URL.createObjectURL;
+    URL.revokeObjectURL = (() => undefined) as typeof URL.revokeObjectURL;
+    renderNight();
 
-    expect(await screen.findByRole("link", { name: "Download CSV" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Download CSV" })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Download CSV" }));
+    await waitFor(() => expect(stub.calls.some((c) => c.path.startsWith("/api/v1/admin/members/u1/trace.csv"))).toBe(true));
+    expect(stub.calls.find((c) => c.path.startsWith("/api/v1/admin/members/u1/trace.csv"))?.headers.authorization).toMatch(/^Bearer /);
     expect(screen.getByText(/writes another line in the change record/)).toBeInTheDocument();
+  });
+});
+
+describe("the old night route — a picker onto the member's own page (R17)", () => {
+  beforeEach(() => { signIn({ isAdmin: true }); });
+
+  /**
+   * There is no list, no search and no index of traces — by design and by wire. The picker
+   * reads NO night at all; it only sends the admin to the member they named.
+   */
+  it("reads no night, and opens the named member's Night tab", async () => {
+    const stub = stubFetch(nightRoutes(traceView([traceEvent()])));
+    renderPage(
+      <Routes>
+        <Route path="/admin/monitoring/night" element={<MemberNightPage />} />
+        <Route path="/admin/members/:userId/night" element={<p>Thandi's night tab</p>} />
+      </Routes>,
+      { initialEntries: ["/admin/monitoring/night"] },
+    );
+
+    fireEvent.click(await screen.findByRole("combobox", { name: new RegExp(NIGHT_TAB_COPY.pickerLabel) }));
+    fireEvent.click(await screen.findByRole("option", { name: /Thandi Mokoena/ }));
+    expect(await screen.findByText("Thandi's night tab")).toBeInTheDocument();
+    expect(stub.calls.some((c) => c.path.includes("/trace"))).toBe(false);
   });
 
   it("does not report the club as empty of members when the member read failed", async () => {

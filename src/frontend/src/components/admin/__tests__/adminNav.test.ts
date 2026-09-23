@@ -21,7 +21,7 @@ describe("the admin IA", () => {
       "Overview",
       "Members", "Groups",
       "Transactions", "Reports",
-      "Control board", "Doors", "Boards", "Faults", "Change record", "Repeating bookings",
+      "Control board", "Doors", "Boards", "Faults", "Change record", "Repeating bookings", "Courts",
       "Settings", "Webhooks",
     ]);
   });
@@ -48,6 +48,10 @@ describe("the admin IA", () => {
     ["/admin/members", "members"],
     ["/admin/members/", "members"],
     ["/admin/members/7f1c/wallet", "members"],
+    // P5 — a member's own page and its night tab are Members, never Control board.
+    ["/admin/members/7f1c", "members"],
+    ["/admin/members/7f1c/night", "members"],
+    ["/admin/courts", "courts"],
     ["/admin/groups", "groups"],
     ["/admin/transactions", "transactions"],
     ["/admin/reports", "reports"],

@@ -1,0 +1,93 @@
+import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { CalendarBlank } from "@/components/ui/icons";
+import { Section } from "@/components/ui/page-shell";
+import { StateBlock } from "@/components/ui/state-block";
+import { TextLink } from "@/components/ui/text-link";
+import { clubDate, clubInstant } from "@/lib/clubClock";
+import type { MemberDetail } from "@/lib/memberDetailApi";
+import { MEMBER_COPY, OVERVIEW_COPY as COPY, countOf } from "@/lib/memberDetailCopy";
+import { cn } from "@/lib/utils";
+import { BookingLine, StatTile } from "./parts";
+import { zoneNow } from "./memberTime";
+import { useMemberDetail } from "./useMemberDetail";
+
+/**
+ * Overview — what a desk needs to know at a glance: when they are next on court, how the last
+ * month went, and whether their account can actually sign in.
+ */
+export function MemberOverview() {
+  const { detail, userId } = useMemberDetail();
+  const zone = zoneNow();
+  const root = `/admin/members/${encodeURIComponent(userId)}`;
+  return (
+    <div className="flex flex-col gap-8">
+      <Section
+        title={COPY.nextTitle}
+        description={COPY.nextDescription}
+        actions={<TextLink to={`${root}/bookings`} variant="standalone">{COPY.allBookings}</TextLink>}
+      >
+        <StateBlock
+          empty={detail.next_bookings.length === 0}
+          emptyIcon={CalendarBlank}
+          emptyTitle={COPY.nextEmpty}
+          emptyHint={COPY.nextEmptyHint}
+          emptyAction={detail.status === "Active" ? (
+            <Button asChild variant="outline">
+              <Link to={`/bookings?as=${encodeURIComponent(userId)}`}>{MEMBER_COPY.bookFor}</Link>
+            </Button>
+          ) : null}
+        >
+          <ul className="flex flex-col gap-3">
+            {detail.next_bookings.map((row) => <BookingLine key={row.booking_id} row={row} zone={zone} />)}
+          </ul>
+        </StateBlock>
+      </Section>
+
+      <Section title={COPY.countsTitle} description={COPY.countsDescription}>
+        <dl className="grid gap-3 sm:grid-cols-3">
+          <StatTile label={COPY.bookings} value={detail.counts_30d.bookings} hint={COPY.bookingsHint} />
+          <StatTile label={COPY.played} value={detail.counts_30d.sessions_played} hint={COPY.playedHint} />
+          <StatTile label={COPY.noShows} value={detail.counts_30d.no_shows} hint={COPY.noShowsHint} tone="danger" />
+        </dl>
+      </Section>
+
+      <Section
+        title={COPY.accountTitle}
+        actions={<TextLink to={`${root}/access`} variant="standalone">{COPY.manageAccess}</TextLink>}
+      >
+        <AccountFacts detail={detail} />
+      </Section>
+    </div>
+  );
+}
+
+function Fact({ term, children, tone }: { term: string; children: ReactNode; tone?: "warning" }) {
+  return (
+    <div className="flex flex-col gap-0.5 border-b border-border py-3 last:border-0 sm:grid sm:grid-cols-[12rem_minmax(0,1fr)] sm:gap-4">
+      <dt className="text-sm text-text-secondary">{term}</dt>
+      <dd className={cn("min-w-0 break-words text-sm font-medium text-text-primary", tone === "warning" && "text-warning-strong")}>
+        {children}
+      </dd>
+    </div>
+  );
+}
+
+function AccountFacts({ detail }: { detail: MemberDetail }) {
+  const zone = zoneNow();
+  return (
+    <dl className="rounded-xl border border-border bg-bg-surface px-4 sm:px-6">
+      <Fact term={COPY.email}>{detail.email}</Fact>
+      <Fact term={COPY.verified} tone={detail.email_verified ? undefined : "warning"}>
+        {detail.email_verified ? COPY.verifiedYes : COPY.unverified}
+      </Fact>
+      {detail.membership_number ? <Fact term={COPY.membershipNumber}>{detail.membership_number}</Fact> : null}
+      <Fact term={COPY.memberSince}>{clubDate(detail.created_at, zone)}</Fact>
+      <Fact term={COPY.lastSignIn}>{detail.last_login_at ? clubInstant(detail.last_login_at, zone) : COPY.neverSignedIn}</Fact>
+      <Fact term={COPY.accountStatus}>{detail.account_status}</Fact>
+      <Fact term={COPY.passkeys}>{countOf(detail.passkey_count, "passkey", "passkeys")}</Fact>
+      <Fact term={COPY.fingerprints}>{countOf(detail.fingerprints.count, "finger enrolled", "fingers enrolled")}</Fact>
+    </dl>
+  );
+}

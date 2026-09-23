@@ -65,16 +65,25 @@ function routes(extra: ApiRoute[] = []): ApiRoute[] {
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
     { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@sample.local", photo_url: null, membership_number: "ADMIN-0001", member_class: "Regular" } },
     { path: "/api/v1/admin/settings/", body: SETTINGS },
-    { path: "/api/v1/admin/courts/", body: [] },
     ...extra,
   ];
 }
 
+/** The controls, by role and exact name — each setting's (i) is also named after its caption. */
+const unlockField = (page: Page) => page.getByRole("spinbutton", { name: "Unlock time (seconds)" });
+const retentionField = (page: Page) => page.getByRole("spinbutton", { name: "Keep door scans for (days)" });
+const saveButton = (page: Page) => page.getByRole("button", { name: "Save changes" });
+
+/**
+ * Open the page — and, unless a hash is doing it, the Door gates section the fields live in
+ * (R13: sections start closed, one line each).
+ */
 async function openSettings(page: Page, extra: ApiRoute[] = [], hash = "") {
   await signIn(page);
   await serveApi(page, routes(extra));
   await page.goto(`/admin/settings${hash}`);
-  await expect(page.getByLabel(/Unlock time/)).toBeVisible();
+  if (!hash) await page.getByRole("button", { name: "Door gates" }).click();
+  await expect(unlockField(page)).toBeVisible();
 }
 
 /** WCAG 2.1 relative luminance of a `rgb(r, g, b)` string as the browser reports it. */
@@ -94,16 +103,16 @@ function contrast(a: string, b: string): number {
 
 test.describe("the settings page when the admin is wrong", () => {
   /**
-   * The distance the finding is really about: the field is near the bottom of a very tall
-   * page and Save is below it, and an admin who scrolls back up to the door block cannot see
-   * the button at all.
+   * The distance the finding is really about: Save used to be ~5 400 px below the door fields.
+   * R13's save bar floats, so the summary is always beside Save — and its link still has to take
+   * the admin back to a field that may have scrolled away.
    */
   test("says why it will not save without making the admin hunt for the field", async ({ page }) => {
     await openSettings(page);
 
-    await page.getByLabel(/Unlock time/).fill("45");
+    await unlockField(page).fill("45");
 
-    const save = page.getByRole("button", { name: "Save settings" });
+    const save = saveButton(page);
     await expect(save).toHaveAttribute("aria-disabled", "true");
     await expect(page.getByText(/1 setting needs fixing before this can be saved/)).toBeVisible();
 
@@ -116,8 +125,8 @@ test.describe("the settings page when the admin is wrong", () => {
 
     // And the link takes the admin back up to the field, which is off-screen from here.
     await page.getByRole("link", { name: "Unlock time (seconds)" }).click();
-    await expect(page.getByLabel(/Unlock time/)).toBeFocused();
-    await expect(page.getByLabel(/Unlock time/)).toBeInViewport();
+    await expect(unlockField(page)).toBeFocused();
+    await expect(unlockField(page)).toBeInViewport();
   });
 
   /**
@@ -126,15 +135,15 @@ test.describe("the settings page when the admin is wrong", () => {
    */
   test("leaves Save reachable from the keyboard while it will not save", async ({ page }) => {
     await openSettings(page);
-    await page.getByLabel(/Unlock time/).fill("45");
+    await unlockField(page).fill("45");
 
-    const save = page.getByRole("button", { name: "Save settings" });
+    const save = saveButton(page);
     await save.focus();
     await expect(save).toBeFocused();
 
     // Pressing it is not a no-op: it takes the admin to the field that stopped it.
     await page.keyboard.press("Enter");
-    await expect(page.getByLabel(/Unlock time/)).toBeFocused();
+    await expect(unlockField(page)).toBeFocused();
   });
 
   /**
@@ -151,9 +160,9 @@ test.describe("the settings page when the admin is wrong", () => {
    */
   test("paints the cannot-save state at a ratio a person can read", async ({ page }) => {
     await openSettings(page);
-    await page.getByLabel(/Unlock time/).fill("45");
+    await unlockField(page).fill("45");
 
-    const save = page.getByRole("button", { name: "Save settings" });
+    const save = saveButton(page);
     const painted = () => save.evaluate((el) => {
       const style = getComputedStyle(el);
       return { color: style.color, background: style.backgroundColor, border: style.borderTopColor, opacity: style.opacity };
@@ -178,7 +187,7 @@ test.describe("the settings page when the admin is wrong", () => {
   test("lands on the unlock field when entered on #setting-gate-unlock-seconds", async ({ page }) => {
     await openSettings(page, [], "#setting-gate-unlock-seconds");
 
-    const unlock = page.getByLabel(/Unlock time/);
+    const unlock = unlockField(page);
     await expect(unlock).toBeFocused();
     await expect(unlock).toBeInViewport();
   });
@@ -194,19 +203,20 @@ test.describe("the settings page when the admin is wrong", () => {
       },
     ]);
 
-    await page.getByLabel(/Keep door scans for/).fill("");
+    await page.getByRole("button", { name: "Records & privacy" }).click();
+    await retentionField(page).fill("");
     // Pressed from the keyboard rather than `.click()`: Playwright's own actionability check
     // reads `aria-disabled="true"` as "not enabled" and waits for it to clear, which it never
     // does. A person with a mouse can press this button — that is the entire point of it not
     // being `disabled` — so the press has to go in by a route that does not re-apply the
     // assumption the fix removes.
-    await page.getByRole("button", { name: "Save settings" }).focus();
+    await saveButton(page).focus();
     await page.keyboard.press("Enter");
-    await expect(page.getByLabel(/Keep door scans for/)).toBeFocused();
+    await expect(retentionField(page)).toBeFocused();
     expect(sent).toHaveLength(0);
 
-    await page.getByLabel(/Keep door scans for/).fill("30");
-    await page.getByRole("button", { name: "Save settings" }).click();
+    await retentionField(page).fill("30");
+    await saveButton(page).click();
     await expect.poll(() => sent.length).toBe(1);
     expect((sent[0] as Record<string, unknown>).doorLogRetentionDays).toBe(30);
   });

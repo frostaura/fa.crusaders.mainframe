@@ -63,7 +63,9 @@ describe("a list that could not be read", () => {
     renderPage(<AdminMembersPage />);
 
     await waitFor(() => expect(screen.getByText("No members yet.")).toBeInTheDocument());
-    expect(screen.getByText("total")).toBeInTheDocument();
+    // P5: the count is one sentence ("0 members in total") rather than a "<strong>0</strong> total"
+    // pair — the invariant is that a SUCCESSFUL read states its count, zero included.
+    expect(screen.getByText("0 members in total")).toBeInTheDocument();
     expect(screen.queryByText(/could not be read/i)).not.toBeInTheDocument();
   });
 

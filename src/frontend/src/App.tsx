@@ -32,7 +32,7 @@ import { AdminDoorsDetailPage } from "./pages/AdminDoorsDetail";
 import { AdminDoorsLogPage } from "./pages/AdminDoorsLog";
 import { AdminDoorsCardPage } from "./pages/AdminDoorsCard";
 // Monitoring — courts, hardware and control (R17): the control board, doors, boards, faults and
-// the change record. A person's night stays here until it moves onto the member (P5).
+// the change record. A person's night lives on the member now (P5); its old route asks who.
 import { ControlBoardPage } from "./pages/monitoring/ControlBoard";
 import { MonitoringFaultsPage } from "./pages/monitoring/MonitoringFaults";
 import { MemberNightPage } from "./pages/monitoring/MemberNight";
@@ -40,6 +40,12 @@ import { AdminChangeRecordPage } from "./pages/monitoring/AdminChangeRecord";
 import { AdminSchedulesPage } from "./pages/AdminSchedules";
 import { AdminScheduleDetailPage } from "./pages/AdminScheduleDetail";
 import { AdminGroupsPage } from "./pages/AdminGroups";
+// P5 — a member's own page and its six tabs (Target IA → Member detail). Each tab is a URL.
+import MemberDetailLayout, {
+  MemberAccess, MemberBookings, MemberDoors, MemberNightTab, MemberOverview, MemberWallet,
+} from "./pages/admin/member";
+// P6 — the courts left Settings for a page of their own.
+import AdminCourtsPage from "./pages/admin/AdminCourts";
 import NotFoundPage from "./pages/NotFound";
 // `/reports` split in two (Target IA → Routes): club reports under Admin, a member's own under Wallet.
 import { ReportsRedirect } from "./pages/Reports";
@@ -159,6 +165,15 @@ export function AppRoutes() {
         <Route path="/admin" element={<RequireAuth admin><AdminLayout /></RequireAuth>}>
           <Route index element={<AdminHomePage />} />
           <Route path="/admin/members" element={<AdminMembersPage />} />
+          {/* Absolute child paths, so every `path=` here is a whole URL the title table can name. */}
+          <Route path="/admin/members/:userId" element={<MemberDetailLayout />}>
+            <Route index element={<MemberOverview />} />
+            <Route path="/admin/members/:userId/wallet" element={<MemberWallet />} />
+            <Route path="/admin/members/:userId/bookings" element={<MemberBookings />} />
+            <Route path="/admin/members/:userId/doors" element={<MemberDoors />} />
+            <Route path="/admin/members/:userId/night" element={<MemberNightTab />} />
+            <Route path="/admin/members/:userId/access" element={<MemberAccess />} />
+          </Route>
           <Route path="/admin/groups" element={<AdminGroupsPage />} />
           <Route path="/admin/transactions" element={<AdminLedgerPage />} />
           <Route path="/admin/reports" element={<Lazy><AdminReportsPage /></Lazy>} />
@@ -170,10 +185,12 @@ export function AppRoutes() {
           <Route path="/admin/monitoring/devices" element={<AdminDevicesPage />} />
           <Route path="/admin/monitoring/faults" element={<MonitoringFaultsPage />} />
           <Route path="/admin/monitoring/changes" element={<AdminChangeRecordPage />} />
-          {/* Until P5 moves a person's night onto the member's own page (R17). */}
+          {/* R17: a person's night lives on the member (`/admin/members/:userId/night`). The old
+              route stays a picker so a bookmark still lands somewhere — it asks who, then goes there. */}
           <Route path="/admin/monitoring/night" element={<MemberNightPage />} />
           <Route path="/admin/schedules" element={<AdminSchedulesPage />} />
           <Route path="/admin/schedules/:id" element={<AdminScheduleDetailPage />} />
+          <Route path="/admin/courts" element={<AdminCourtsPage />} />
           <Route path="/admin/settings" element={<AdminSettingsPage />} />
           <Route path="/admin/webhooks" element={<AdminWebhooksPage />} />
         </Route>

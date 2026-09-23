@@ -1,0 +1,140 @@
+import type { AdminSettings } from "./api";
+import { GATE_POLICY_LABELS } from "./gateCopy";
+import { DAY_KEYS } from "./tenantSettings";
+import { minuteLabel, parsePeakHours, type SettingsSectionId } from "./settingsSchema";
+
+/**
+ * One line per Settings section, read off the WORKING copy (plan R13: "each header showing title +
+ * live one-line summary").
+ *
+ * <p>
+ * <b>Why a summary at all.</b> Collapsed, a section is a title — and "Door gates" says nothing
+ * about how the doors are set. The summary is the section's answer in one breath, so an admin can
+ * read the whole club's configuration down ten collapsed rows and only open the one that is wrong.
+ * It follows the working copy rather than the saved one because the admin editing a field is the
+ * person who most needs to see the headline move.
+ * </p>
+ *
+ * <p>
+ * <b>Only what is true.</b> A key the API does not serve is left out of the line rather than
+ * quoted at a default this console invented, and an emptied box reads as "not set" rather than as
+ * `NaN`. A section with nothing to say says so plainly.
+ * </p>
+ */
+
+type Held = Record<string, unknown>;
+
+const num = (settings: AdminSettings, key: string): number | null => {
+  const value = (settings as unknown as Held)[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+};
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+const join = (parts: (string | null | false | undefined)[]) =>
+  parts.filter((part): part is string => typeof part === "string" && part.length > 0).join(" · ");
+
+function bookings(settings: AdminSettings): string {
+  const slice = num(settings, "slice_minutes");
+  const ahead = num(settings, "advance_booking_days");
+  const minutes = num(settings, "member_per_day_max_minutes");
+  const slots = num(settings, "member_max_slots_per_day");
+  const peak = parsePeakHours(settings.peak_hours ?? "");
+  return join([
+    slice !== null && `${slice}-min slices`,
+    ahead !== null && `${plural(ahead, "day")} ahead`,
+    minutes !== null && (minutes > 0 ? `${minutes} min a day each` : "no daily time cap"),
+    slots !== null && slots > 0 && `${plural(slots, "slot")} a day`,
+    peak && `peak ${peak.start}–${peak.end}`,
+  ]);
+}
+
+function hours(settings: AdminSettings): string {
+  const own = DAY_KEYS.filter((day) => settings.operating_hours?.[day] !== undefined).length;
+  const club = `${minuteLabel(settings.day_start_minute)}–${minuteLabel(settings.day_end_minute)} by default`;
+  if (own === 0) return club;
+  if (own === DAY_KEYS.length) return "Every day has its own hours";
+  return join([club, `${plural(own, "day")} with ${own === 1 ? "its" : "their"} own hours`]);
+}
+
+function cancellations(settings: AdminSettings): string {
+  const pct = num(settings, "penalty_pct");
+  const window = num(settings, "penalty_window_minutes");
+  const grace = num(settings, "grace_window_minutes");
+  return join([
+    pct !== null && window !== null && (pct > 0 ? `${pct}% penalty inside ${window} min` : "no late-cancel penalty"),
+    grace !== null && `${grace}-min grace before a no-show`,
+  ]);
+}
+
+function credits(settings: AdminSettings, currency: string): string {
+  const regular = num(settings, "credits_per_zar_regular");
+  const league = num(settings, "credits_per_zar_league");
+  const block = num(settings, "topup_block_zar");
+  const cap = num(settings, "topup_max_zar_per_member");
+  return join([
+    regular !== null && `${currency}1 buys ${regular} cr${league !== null ? ` (${league} league)` : ""}`,
+    block !== null && `top up in ${currency}${block}s`,
+    cap !== null && `up to ${currency}${cap}`,
+  ]);
+}
+
+function schedules(settings: AdminSettings): string {
+  const days = num(settings, "schedule_materialisation_days");
+  return days === null ? "" : `Written ${plural(days, "day")} ahead`;
+}
+
+function boxes(settings: AdminSettings): string {
+  const walkUp = num(settings, "walk_up_max_minutes");
+  const cue = num(settings, "activation_cue_window_minutes");
+  return join([
+    walkUp !== null && `walk-ups up to ${walkUp} min`,
+    cue !== null && `lights on ${cue} min early`,
+  ]);
+}
+
+function screens(settings: AdminSettings): string {
+  const revert = num(settings, "lcd_revert_seconds");
+  const rapid = num(settings, "rapid_scan_window_seconds");
+  return join([
+    revert !== null && `results show ${revert} s`,
+    rapid !== null && (rapid > 0 ? `next scan within ${rapid} s` : "one person at a time"),
+  ]);
+}
+
+function doors(settings: AdminSettings): string {
+  const policy = GATE_POLICY_LABELS[settings.gate_access_policy] as string | undefined;
+  const unlock = num(settings, "gate_unlock_seconds");
+  return join([policy, unlock !== null && `lock released ${unlock} s`]);
+}
+
+function records(settings: AdminSettings): string {
+  const years = num(settings, "retention_years");
+  const doorDays = num(settings, "door_log_retention_days");
+  const trace = settings.member_trace_enabled;
+  return join([
+    years !== null && `history ${plural(years, "year")}`,
+    doorDays !== null && `door scans ${plural(doorDays, "day")}`,
+    trace !== undefined && (trace ? "night view on" : "night view off"),
+  ]);
+}
+
+function monitoring(settings: AdminSettings): string {
+  const faults = num(settings, "device_error_retention_days");
+  const fallback = num(settings, "realtime_fallback_after_failures");
+  return join([
+    faults !== null && `faults kept ${plural(faults, "day")}`,
+    fallback !== null && `live, timer after ${plural(fallback, "failure")}`,
+  ]);
+}
+
+const SUMMARY: Record<SettingsSectionId, (settings: AdminSettings, currency: string) => string> = {
+  bookings, hours, cancellations, credits, schedules, boxes, screens, doors, records, monitoring,
+};
+
+/** What a collapsed section says about itself. Never empty: an unserved section says so. */
+export function sectionSummary(id: SettingsSectionId, settings: AdminSettings, currency: string): string {
+  const line = SUMMARY[id](settings, currency);
+  if (!line) return "Not available on this club's system yet";
+  return line.charAt(0).toUpperCase() + line.slice(1);
+}

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import AdminSettingsPage from "./AdminSettings";
 import { SETTINGS_FIXTURE, renderPage, stubFetch } from "../test/harness";
+import { captionOf, control, describedBy, findControl, saveButton } from "../components/settings/testKit";
 
 /**
  * B5 / C11 / B10 / C12 / A9 — the settings screen's validation, as a person meets it.
@@ -45,27 +46,8 @@ const routes = (overrides: Record<string, unknown> = {}) => [
   { method: "PUT", path: "/api/v1/admin/settings/", body: { saved: true } },
 ];
 
-/**
- * Everything a screen reader would read out with this control.
- *
- * <p>
- * <code>aria-describedby</code> is a LIST of ids, which is the whole point here: the field
- * already had a hint wired to it and the error has to join that hint rather than replace it.
- * A test that read only the first id would pass against exactly the regression worth catching.
- * </p>
- */
-const describedBy = (field: HTMLElement) =>
-  (field.getAttribute("aria-describedby") ?? "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((id) => document.getElementById(id)?.textContent ?? "")
-    .join(" ");
-
-/** The field's own visible caption, read off the `<label for>` that points at it. */
-const captionOf = (field: HTMLElement) =>
-  document.querySelector(`label[for="${field.id}"]`)?.textContent ?? "";
-
-const saveButton = () => screen.getByRole("button", { name: /Save settings/ });
+// `describedBy` (every id on aria-describedby — a LIST, so the error must JOIN the hint rather
+// than replace it), `captionOf` and `saveButton` live in the settings test kit.
 
 describe("AdminSettings — a bad value is tied to the field that holds it", () => {
   afterEach(() => { vi.unstubAllGlobals(); window.location.hash = ""; });
@@ -79,7 +61,7 @@ describe("AdminSettings — a bad value is tied to the field that holds it", () 
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const unlock = await screen.findByLabelText(/Unlock time/);
+    const unlock = await findControl(/Unlock time/);
     expect(unlock).not.toHaveAttribute("aria-invalid");
 
     fireEvent.change(unlock, { target: { value: "45" } });
@@ -96,12 +78,12 @@ describe("AdminSettings — a bad value is tied to the field that holds it", () 
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const unlock = await screen.findByLabelText(/Unlock time/);
+    const unlock = await findControl(/Unlock time/);
     fireEvent.change(unlock, { target: { value: "45" } });
     expect(unlock).toHaveAttribute("aria-invalid", "true");
 
-    fireEvent.change(screen.getByLabelText(/Unlock time/), { target: { value: "30" } });
-    expect(screen.getByLabelText(/Unlock time/)).not.toHaveAttribute("aria-invalid");
+    fireEvent.change(control(/Unlock time/), { target: { value: "30" } });
+    expect(control(/Unlock time/)).not.toHaveAttribute("aria-invalid");
   });
 
   /** The same treatment on the records numbers, which are three blocks further down. */
@@ -109,7 +91,7 @@ describe("AdminSettings — a bad value is tied to the field that holds it", () 
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const spike = await screen.findByLabelText(/Refusal spike \(scans\)/);
+    const spike = await findControl(/Refusal spike \(scans\)/);
     fireEvent.change(spike, { target: { value: "1" } });
 
     expect(spike).toHaveAttribute("aria-invalid", "true");
@@ -130,7 +112,7 @@ describe("AdminSettings — Save stays reachable when it cannot save", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await screen.findByLabelText(/Unlock time/), { target: { value: "45" } });
+    fireEvent.change(await findControl(/Unlock time/), { target: { value: "45" } });
 
     const save = saveButton();
     expect(save).toBeEnabled();
@@ -151,11 +133,11 @@ describe("AdminSettings — Save stays reachable when it cannot save", () => {
     const stub = stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await screen.findByLabelText(/Unlock time/), { target: { value: "45" } });
+    fireEvent.change(await findControl(/Unlock time/), { target: { value: "45" } });
     fireEvent.click(saveButton());
 
     await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByLabelText(/Unlock time/)));
+      expect(document.activeElement).toBe(control(/Unlock time/)));
     expect(screen.getByText(/Settings cannot be saved yet\. Moved to Unlock time/))
       .toBeInTheDocument();
     expect(stub.calls.find((c) => c.method === "PUT")).toBeUndefined();
@@ -165,7 +147,7 @@ describe("AdminSettings — Save stays reachable when it cannot save", () => {
     const stub = stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await screen.findByLabelText(/Unlock time/), { target: { value: "7" } });
+    fireEvent.change(await findControl(/Unlock time/), { target: { value: "7" } });
     const save = saveButton();
     expect(save).not.toHaveAttribute("aria-disabled");
     fireEvent.click(save);
@@ -189,9 +171,9 @@ describe("AdminSettings — the error summary beside Save", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const unlock = await screen.findByLabelText(/Unlock time/);
+    const unlock = await findControl(/Unlock time/);
     fireEvent.change(unlock, { target: { value: "45" } });
-    fireEvent.change(screen.getByLabelText(/Club contact email/), { target: { value: "not-an-email" } });
+    fireEvent.change(control(/Club contact email/), { target: { value: "not-an-email" } });
 
     expect(screen.getByText(/2 settings need fixing before this can be saved/)).toBeInTheDocument();
 
@@ -203,14 +185,14 @@ describe("AdminSettings — the error summary beside Save", () => {
 
     fireEvent.click(link);
     await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByLabelText(/Unlock time/)));
+      expect(document.activeElement).toBe(control(/Unlock time/)));
   });
 
   it("says nothing at all while every value is fine", async () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    await screen.findByLabelText(/Unlock time/);
+    await findControl(/Unlock time/);
     expect(screen.queryByText(/need(s)? fixing before this can be saved/)).toBeNull();
   });
 });
@@ -228,7 +210,7 @@ describe("AdminSettings — an empty number is not zero", () => {
     const stub = stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const retention = await screen.findByLabelText(/Keep door scans for/);
+    const retention = await findControl(/Keep door scans for/);
     fireEvent.change(retention, { target: { value: "" } });
 
     expect(retention).toHaveValue(null);
@@ -238,7 +220,7 @@ describe("AdminSettings — an empty number is not zero", () => {
 
     fireEvent.click(saveButton());
     await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByLabelText(/Keep door scans for/)));
+      expect(document.activeElement).toBe(control(/Keep door scans for/)));
 
     expect(stub.calls.find((c) => c.method === "PUT")).toBeUndefined();
     // The raw body, not the parsed one: a key that must never have carried 0 is only
@@ -255,7 +237,7 @@ describe("AdminSettings — an empty number is not zero", () => {
     const stub = stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const early = await screen.findByLabelText(/Early entry/);
+    const early = await findControl(/Early entry/);
     fireEvent.change(early, { target: { value: "" } });
 
     expect(early).toHaveAttribute("aria-invalid", "true");
@@ -265,7 +247,7 @@ describe("AdminSettings — an empty number is not zero", () => {
     await waitFor(() => expect(stub.calls.find((c) => c.method === "PUT")).toBeUndefined());
 
     // And 0 typed deliberately is still a save, because it is a real answer.
-    fireEvent.change(screen.getByLabelText(/Early entry/), { target: { value: "0" } });
+    fireEvent.change(control(/Early entry/), { target: { value: "0" } });
     expect(saveButton()).not.toHaveAttribute("aria-disabled");
     fireEvent.click(saveButton());
     await waitFor(() => {
@@ -315,15 +297,15 @@ describe("AdminSettings — an empty number is not zero", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    await screen.findByLabelText(/Unlock time/);
+    await findControl(/Unlock time/);
     const captions = [
       /Reserve window/, /Penalty \(% of slice price\)/, /Credits per R1 — members/,
       /Court time per member per day/, /Heartbeat interval/, /Alert cooldown/,
       /Unlock time/, /Keep door scans for/, /Keep usage history/,
     ].map((label) => {
-      const field = screen.getByLabelText(label);
+      const field = control(label);
       fireEvent.change(field, { target: { value: "" } });
-      return captionOf(screen.getByLabelText(label));
+      return captionOf(control(label));
     });
 
     for (const caption of captions) {
@@ -346,7 +328,7 @@ describe("AdminSettings — the club's contact details go on a wall", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const email = await screen.findByLabelText(/Club contact email/);
+    const email = await findControl(/Club contact email/);
     fireEvent.change(email, { target: { value: "squash at example" } });
 
     expect(email).toHaveAttribute("aria-invalid", "true");
@@ -358,7 +340,7 @@ describe("AdminSettings — the club's contact details go on a wall", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const phone = await screen.findByLabelText(/Club contact number/);
+    const phone = await findControl(/Club contact number/);
     fireEvent.change(phone, { target: { value: "076 226 1390 🎾" } });
 
     expect(phone).toHaveAttribute("aria-invalid", "true");
@@ -371,7 +353,7 @@ describe("AdminSettings — the club's contact details go on a wall", () => {
     const stub = stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await screen.findByLabelText(/Club contact number/), { target: { value: "" } });
+    fireEvent.change(await findControl(/Club contact number/), { target: { value: "" } });
     expect(saveButton()).not.toHaveAttribute("aria-disabled");
     fireEvent.click(saveButton());
 
@@ -396,7 +378,7 @@ describe("AdminSettings — deep-linking to one field", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const unlock = await screen.findByLabelText(/Unlock time/);
+    const unlock = await findControl(/Unlock time/);
     await waitFor(() => expect(document.activeElement).toBe(unlock));
     expect(document.getElementById("setting-gate-unlock-seconds")).toContainElement(unlock);
   });
@@ -404,11 +386,11 @@ describe("AdminSettings — deep-linking to one field", () => {
   it("follows a later hash change to any other setting, not just that one", async () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
-    await screen.findByLabelText(/Unlock time/);
+    await findControl(/Unlock time/);
 
     window.location.hash = "#setting-door-refusal-spike-count";
     await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByLabelText(/Refusal spike \(scans\)/)));
+      expect(document.activeElement).toBe(control(/Refusal spike \(scans\)/)));
   });
 
   it("ignores a hash that names no setting rather than throwing", async () => {
@@ -416,7 +398,7 @@ describe("AdminSettings — deep-linking to one field", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    const unlock = await screen.findByLabelText(/Unlock time/);
+    const unlock = await findControl(/Unlock time/);
     expect(document.activeElement).not.toBe(unlock);
   });
 });
@@ -433,7 +415,7 @@ describe("AdminSettings — the words an admin reads", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    await screen.findByLabelText(/Unlock time/);
+    await findControl(/Unlock time/);
     expect(screen.getByText(/Court schedule, booking limits/)).toHaveTextContent("for this club.");
     expect(document.body.textContent).not.toMatch(/tenant/i);
   });
@@ -443,7 +425,7 @@ describe("AdminSettings — the words an admin reads", () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    await screen.findByLabelText(/Unlock time/);
+    await findControl(/Unlock time/);
     expect(document.body.textContent).not.toMatch(/next heartbeat/i);
     expect(screen.getByText(/How the doors behave/)).toHaveTextContent("the next time it calls in");
   });

@@ -1,5 +1,5 @@
 import {
-  ChartBar, ClockCounterClockwise, Cpu, Door, Gauge, Gear, Receipt, Repeat, SquaresFour, Users,
+  ChartBar, ClockCounterClockwise, Cpu, Door, Gauge, Gear, Racquet, Receipt, Repeat, SquaresFour, Users,
   UsersThree, Warning, WebhooksLogo, type Icon,
 } from "@/components/ui/icons";
 
@@ -14,9 +14,8 @@ import {
  * </p>
  *
  * <p>
- * <b>Only destinations that exist.</b> The plan's IA also names Courts (P6) and a person's night
- * moving onto the member (R17). An entry is added in the same change as its route: a rail item that
- * 404s teaches an admin that the console is broken.
+ * <b>Only destinations that exist.</b> An entry is added in the same change as its route: a rail item
+ * that 404s teaches an admin that the console is broken. (Courts, P6, arrived with `/admin/courts`.)
  * </p>
  */
 
@@ -44,9 +43,8 @@ export type AdminNavGroup = {
  * Where "review the waiting applications" goes.
  *
  * <p>
- * The members page does not read a `status` query yet (it keeps its filter in local state), so today
- * this lands on the full list with the pending rows among them. The members rebuild (P5) honours
- * it; the link is written once here so that change needs no caller to move.
+ * The members page keeps its status filter in the URL (P5), so this opens the list already filtered
+ * to the waiting applications. Written once here so no caller spells the query itself.
  * </p>
  */
 export const PENDING_APPLICATIONS_HREF = "/admin/members?status=PendingApproval";
@@ -119,6 +117,10 @@ export const ADMIN_NAV: readonly AdminNavGroup[] = [
       {
         id: "schedules", label: "Repeating bookings", path: "/admin/schedules", icon: Repeat,
         description: "Leagues, coaching and other standing court bookings.",
+      },
+      {
+        id: "courts", label: "Courts", path: "/admin/courts", icon: Racquet,
+        description: "The club's courts, what a slice on each costs, and which are in use.",
       },
     ],
   },

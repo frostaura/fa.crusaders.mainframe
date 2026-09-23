@@ -1,0 +1,138 @@
+import { useCallback, useRef, type Dispatch, type SetStateAction } from "react";
+import { useToast } from "@/components/Toast";
+import { endpoints, type MemberClass } from "@/lib/api";
+import { OUTCOMES } from "@/lib/membersCopy";
+import { patchRow, type MemberRow } from "./membersModel";
+
+export type ResetResult = { tempPassword: string; emailSentTo: string | null };
+
+type Deps = {
+  load: () => Promise<void>;
+  setMembers: Dispatch<SetStateAction<MemberRow[] | null>>;
+};
+
+/**
+ * Every membership transition the list can start, each saying the TRUE thing afterwards.
+ *
+ * <p>
+ * <b>Two different true things per transition.</b> The status change commits first; the email is
+ * a consequence of it, and the API says which of the two happened (`member_notified`). So each
+ * success has two sentences, and a failure reloads the club anyway.
+ * </p>
+ *
+ * <p>
+ * <b>The reload is in `finally`, whatever happened.</b> With SMTP refusing connections the API
+ * once committed an approval and then answered 500; the admin read "Approval failed." about a
+ * member who was already Active, and pressing Approve again answered 404. The screen shows what
+ * the server says, not what the console hoped — and because the loader is what notifies the
+ * chrome's pending badge, the two numbers move together.
+ * </p>
+ *
+ * <p>
+ * The dialog-driven ones (reject, suspend, reactivate, reset) THROW on failure so `ConfirmDialog`
+ * keeps itself open and says why; Approve and Resend fire from the row and speak by toast. A
+ * per-member in-flight guard sits under all of them: a double-click on Reactivate once sent a 200
+ * and a 409, and the admin saw "active again" in green above "couldn't reactivate" in red.
+ * </p>
+ */
+export function useMemberLifecycle({ load, setMembers }: Deps) {
+  const toast = useToast();
+  const inFlight = useRef(new Set<string>());
+
+  /** Run `work` once per key at a time; a second call while the first is out is ignored. */
+  const once = useCallback(async <T,>(key: string, work: () => Promise<T>): Promise<T | undefined> => {
+    if (inFlight.current.has(key)) return undefined;
+    inFlight.current.add(key);
+    try { return await work(); } finally { inFlight.current.delete(key); }
+  }, []);
+
+  const approve = useCallback((m: MemberRow) => once(`approve:${m.user_id}`, async () => {
+    try {
+      const r = await endpoints.adminApprove(m.membership_id);
+      toast.push(r.member_notified
+        ? { tone: "success", text: OUTCOMES.approved(m.full_name) }
+        : { tone: "warning", text: OUTCOMES.approvedUnnotified(m.full_name) });
+    } catch {
+      toast.push({ tone: "danger", text: OUTCOMES.approveFailed });
+    } finally {
+      await load();
+    }
+  }), [load, once, toast]);
+
+  const reject = useCallback((m: MemberRow, reason: string) => once(`reject:${m.user_id}`, async () => {
+    try {
+      const r = await endpoints.adminReject(m.membership_id, reason.trim());
+      toast.push(r.member_notified
+        ? { tone: "success", text: OUTCOMES.rejected }
+        : { tone: "warning", text: OUTCOMES.rejectedUnnotified(m.full_name) });
+    } finally {
+      void load();
+    }
+  }), [load, once, toast]);
+
+  const suspend = useCallback((m: MemberRow, reason: string) => once(`suspend:${m.user_id}`, async () => {
+    try {
+      const r = await endpoints.adminSuspend(m.membership_id, reason.trim());
+      toast.push(r.member_notified
+        ? { tone: "success", text: OUTCOMES.suspended(m.full_name) }
+        : { tone: "warning", text: OUTCOMES.suspendedUnnotified(m.full_name) });
+    } finally {
+      void load();
+    }
+  }), [load, once, toast]);
+
+  const reactivate = useCallback((m: MemberRow) => once(`reactivate:${m.user_id}`, async () => {
+    try {
+      const r = await endpoints.adminReactivate(m.membership_id);
+      toast.push(r.member_notified
+        ? { tone: "success", text: OUTCOMES.reactivated(m.full_name) }
+        : { tone: "warning", text: OUTCOMES.reactivatedUnnotified(m.full_name) });
+    } finally {
+      void load();
+    }
+  }), [load, once, toast]);
+
+  const resetPassword = useCallback(async (m: MemberRow): Promise<ResetResult | undefined> => once(`reset:${m.user_id}`, async () => {
+    const r = await endpoints.adminResetMemberPassword(m.membership_id);
+    toast.push(r.member_notified
+      ? { tone: "success", text: OUTCOMES.reset(m.full_name) }
+      : { tone: "warning", text: OUTCOMES.resetUnnotified(m.full_name) });
+    return { tempPassword: r.temp_password, emailSentTo: r.email_sent_to };
+  }), [once, toast]);
+
+  /**
+   * Send the verification email again. The endpoint answers the same way for an address it does
+   * not hold, so the toast promises delivery to the address rather than confirming an account.
+   * Once per member at a time: a resend spends any earlier unused link, so a double-click used to
+   * send the member a dead link first.
+   */
+  const resend = useCallback((m: MemberRow) => once(`resend:${m.user_id}`, async () => {
+    try {
+      await endpoints.resendVerification(m.email);
+      toast.push({ tone: "success", text: OUTCOMES.resendSent(m.email) });
+    } catch {
+      toast.push({ tone: "danger", text: OUTCOMES.resendFailed });
+    }
+  }), [once, toast]);
+
+  /**
+   * The member's rate class, corrected in place and put back if the server refuses: a class the
+   * server did not accept is a lie about what the member's money buys.
+   */
+  const setClass = useCallback((m: MemberRow, next: MemberClass) => once(`class:${m.user_id}`, async () => {
+    const previous = m.member_class;
+    if (next === (previous ?? "Regular")) return;
+    setMembers((rows) => patchRow(rows, m.user_id, { member_class: next }));
+    try {
+      await endpoints.adminSetMemberClass(m.membership_id, next);
+      toast.push({ tone: "success", text: OUTCOMES.classChanged(m.full_name, next) });
+    } catch {
+      setMembers((rows) => patchRow(rows, m.user_id, { member_class: previous }));
+      toast.push({ tone: "danger", text: OUTCOMES.classFailed(m.full_name) });
+    }
+  }), [once, setMembers, toast]);
+
+  return { approve, reject, suspend, reactivate, resetPassword, resend, setClass };
+}
+
+export type MemberLifecycle = ReturnType<typeof useMemberLifecycle>;

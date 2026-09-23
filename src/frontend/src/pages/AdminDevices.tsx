@@ -153,7 +153,7 @@ function CourtListEditor({
   if (courts.length === 0) {
     return (
       <p className="text-sm text-warning-strong">
-        No courts to assign yet. Add the club's courts under Admin settings first.
+        No courts to assign yet. Add the club's courts under Courts first.
       </p>
     );
   }

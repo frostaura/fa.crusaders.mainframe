@@ -105,12 +105,11 @@ function stubClub(members: MemberRow[], commitButFail = false) {
 }
 
 /**
- * The console's own "N pending" summary. It is `<strong>N</strong> pending`, so the count
- * and the word are two nodes and `getByText` reads only the loose text — the sentence has
- * to be matched on the span's whole textContent.
+ * The console's own pending count: since P5 it is the Pending filter chip's badge, read as one
+ * accessible name — "Pending, 2 applications waiting".
  */
-function summaryLine(text: string) {
-  return screen.getByText((_content, el) => el?.tagName === "SPAN" && el.textContent === text);
+function summaryLine(count: number) {
+  return screen.getByRole("radio", { name: `Pending, ${count} ${count === 1 ? "application" : "applications"} waiting` });
 }
 
 beforeEach(() => {
@@ -150,13 +149,13 @@ describe("the pending-applications badge, after an approval on the same screen",
 
     // Both navs carry the badge, so the count is asserted through its accessible name.
     await waitFor(() => expect(screen.getAllByLabelText("2 membership applications awaiting review").length).toBeGreaterThan(0));
-    expect(summaryLine("2 pending")).toBeInTheDocument();
+    expect(summaryLine(2)).toBeInTheDocument();
 
     const approveButtons = await screen.findAllByRole("button", { name: "Approve" });
     await userEvent.click(approveButtons[0]);
 
     // The screen's own summary line, and the chrome, now say the same thing.
-    await waitFor(() => expect(summaryLine("1 pending")).toBeInTheDocument());
+    await waitFor(() => expect(summaryLine(1)).toBeInTheDocument());
     await waitFor(() =>
       expect(screen.getAllByLabelText("1 membership application awaiting review").length).toBeGreaterThan(0));
     expect(screen.queryByLabelText("2 membership applications awaiting review")).not.toBeInTheDocument();
@@ -189,7 +188,7 @@ describe("the pending-applications badge, after an approval on the same screen",
     // The admin is correctly told the call failed...
     expect(await screen.findByText("Approval failed.")).toBeInTheDocument();
     // ...and both numbers still tell them what is actually true of the club.
-    await waitFor(() => expect(summaryLine("1 pending")).toBeInTheDocument());
+    await waitFor(() => expect(summaryLine(1)).toBeInTheDocument());
     await waitFor(() =>
       expect(screen.getAllByLabelText("1 membership application awaiting review").length).toBeGreaterThan(0));
     expect(screen.queryByLabelText("2 membership applications awaiting review")).not.toBeInTheDocument();

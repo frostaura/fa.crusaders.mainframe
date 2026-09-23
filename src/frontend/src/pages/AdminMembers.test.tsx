@@ -2,63 +2,40 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import AdminMembersPage from "./AdminMembers";
 import { ledgerRowFixture, memberFixture, renderPage, stubFetch, type StubRoute } from "../test/harness";
+import {
+  OUTCOMES, PASSWORD_DIALOG, RELATED_BOOKING, REJECT_DIALOG, RESET_DIALOG, ROW_ACTIONS, SUSPEND_DIALOG,
+  TOP_UP_SHEET, UNVERIFIED,
+} from "../lib/membersCopy";
 
 /**
  * <b>This file's cases need longer than the 5-second default, and the reason is the fix.</b>
- *
- * <p>
- * Credit used to move through one signed field and an Apply button — two `fireEvent`s. D3-B08
- * replaced it with three steps, because a volunteer typing <code>-100</code> where they meant
- * <code>100</code> moved a member two hundred credits the wrong way and nothing on the screen
- * would have stopped them. Each step is a render of a members table that already holds every
- * row in the club, and in jsdom that is seconds rather than milliseconds.
- * </p>
- *
- * <p>
- * Raised here rather than in `vite.config.ts`, deliberately: a global raise hides a slow test
- * everywhere, and the cost is this file's alone.
- * </p>
+ * Credit moves through three steps (D3-B08), each a render of a table that already holds every
+ * row in the club; in jsdom that is seconds. Raised here, not globally, so the cost is this file's.
  */
 vi.setConfig({ testTimeout: 20_000 });
 
-/**
- * The members screen — the credit-adjustment form specifically.
- *
- * <p>
- * An admin adjustment can name the booking it compensates for (`relatedBookingId` on
- * `AdjustRequest`). That is not decoration: the no-show reversal reads this booking's
- * ledger and nets what it finds, so a positive adjustment already sitting there is
- * counted rather than paid a second time. These tests hold the wire shape both ways —
- * the id goes when picked, and no key goes when it is not — and the shape of the id,
- * because the endpoint binds a Guid? and answers a bare 400 for anything else.
- * </p>
- *
- * <p>
- * They also hold the <em>copy</em>, which is the part that went wrong twice (review
- * finding 17, then its own fix). The field first read as though a credit were the repair
- * for a wrongly-recorded no-show; the repair for that then read as though a credit on
- * top left the member "holding both". Both are wrong under settlement-model I3: the
- * reversal always runs, and the hand adjustment is netted into it one leg at a time —
- * a positive one reduces the penalty the reversal gives back, a negative one reduces the
- * refund it takes away. A wrong steer here costs real money on every league night, so
- * the copy is pinned like any other contract.
- * </p>
- *
- * <p>
- * And they hold the two refusals the endpoint answers when the named booking is not
- * this member's to name (I4): they are different mistakes with different repairs, they
- * are shown at the field rather than as a toast, and the form stays open on both.
- * </p>
- */
+/** A Radix trigger opens on pointerdown, the way a pointer opens it; options exist only while open. */
+const POINTER = { button: 0, ctrlKey: false, pointerType: "mouse" } as const;
+
+/** Open a row's ⋯ menu and pick one of its items. (P5: row actions = Top up + ⋯.) */
+async function fromMenu(item: string, member = "Ada Lovelace") {
+  fireEvent.pointerDown(await screen.findByRole("button", { name: ROW_ACTIONS.more(member) }), POINTER);
+  fireEvent.click(await screen.findByRole("menuitem", { name: item }));
+}
+
+async function choose(label: string, option: string | RegExp) {
+  fireEvent.pointerDown(await screen.findByRole("combobox", { name: label }), POINTER);
+  fireEvent.click(await screen.findByRole("option", { name: option }));
+}
+
 /**
  * What the admin is told they have just done to a member.
  *
  * <p>
  * The temporary password used to be described as something "the member should change after
  * signing in" — the advisory wording from before the forced-change gate existed. It is now the
- * only thing that session can reach, and an admin who reads the weaker sentence cannot tell
- * from this screen that the member is locked out of everything else until they replace it. The
- * API's own response to the same call already says so.
+ * only thing that session can reach, and an admin who reads the weaker sentence cannot tell from
+ * this screen that the member is locked out of everything else until they replace it.
  * </p>
  */
 describe("AdminMembers — the temporary password an admin issues", () => {
@@ -75,11 +52,11 @@ describe("AdminMembers — the temporary password an admin issues", () => {
     ]);
     renderPage(<AdminMembersPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Reset password" }));
-    const confirm = await screen.findByRole("dialog", { name: /Reset password for Ada Lovelace/ });
-    fireEvent.click(within(confirm).getByRole("button", { name: "Reset password" }));
+    await fromMenu(ROW_ACTIONS.reset);
+    const confirm = await screen.findByRole("dialog", { name: RESET_DIALOG.title("Ada Lovelace") });
+    fireEvent.click(within(confirm).getByRole("button", { name: RESET_DIALOG.confirm }));
 
-    const dialog = await screen.findByRole("dialog", { name: "Temporary password generated" });
+    const dialog = await screen.findByRole("dialog", { name: PASSWORD_DIALOG.title });
     expect(dialog).toHaveTextContent("Xk7-tempo-92");
     expect(dialog).toHaveTextContent(/only unlocks the change-password screen/i);
     expect(dialog).toHaveTextContent(/must choose a new password before they can do anything else/i);
@@ -87,6 +64,18 @@ describe("AdminMembers — the temporary password an admin issues", () => {
   });
 });
 
+/**
+ * The credit sheet — the booking an adjustment names, and the copy that explains why.
+ *
+ * <p>
+ * An admin adjustment can name the booking it compensates for (`relatedBookingId`). The no-show
+ * reversal reads that booking's ledger and nets what it finds, so these hold the wire shape both
+ * ways — the id goes when picked, and no key goes when it is not — and the shape of the id, because
+ * the endpoint binds a Guid? and answers a bare 400 for anything else. They also hold the COPY,
+ * which went wrong twice (review finding 17, then its own fix): under settlement-model I3 the
+ * reversal always runs and the hand adjustment is netted into it one leg at a time.
+ * </p>
+ */
 describe("AdminMembers — adjust credit", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -98,8 +87,8 @@ describe("AdminMembers — adjust credit", () => {
     { path: "/api/v1/admin/biometric/enrollments", body: [] },
     {
       path: "/api/v1/admin/ledger/",
-      // Three rows, two bookings' worth: the penalty and the charge are the same booking,
-      // and a top-up is not a booking at all. One option, then.
+      // Three rows, two bookings' worth: the penalty and the charge are the same booking, and a
+      // top-up is not a booking at all. One option, then.
       body: [
         ledgerRowFixture({ id: "1", type: "NoShowPenalty", amountCredits: 7.2, signedAmountCredits: -7.2, relatedBookingId: BOOKING, at: "2026-09-02T18:00:00Z" }),
         ledgerRowFixture({ id: "2", type: "BookingCharge", amountCredits: 24, signedAmountCredits: -24, relatedBookingId: BOOKING, at: "2026-09-01T10:00:00Z" }),
@@ -110,46 +99,27 @@ describe("AdminMembers — adjust credit", () => {
   ];
 
   /**
-   * Drive the three-step sheet as far as the check step. (D3-B08)
-   *
-   * <p>
-   * The form this replaces was ONE signed field and an Apply button, so every case below used
-   * to be two `fireEvent`s. It is three steps now because money is three questions — how
-   * much, why, and is this right — and the third exists because the resulting balance used to
-   * appear only in a four-second toast AFTER the movement, over a row that had already
-   * changed. The extra keystrokes here are the fix, not an accident of it.
-   * </p>
-   *
-   * <p>
-   * <b>There is no sign anywhere in this flow.</b> A negative movement is a differently
-   * titled, differently toned path reached by name — `takeBack` below — because a sign is a
-   * character somebody types and not a decision they make.
-   * </p>
+   * Drive the sheet to the reason step and fill it. <b>There is no sign anywhere in this flow</b>:
+   * taking credit back is its own path, reached by name, because a sign is a character somebody
+   * types and not a decision they make.
    */
-  async function openAdjustAndFill(
-    amount: string, reason: string, opts: { takeBack?: boolean; booking?: string } = {},
-  ) {
-    fireEvent.click(await screen.findByRole("button", { name: /Top up/ }));
+  async function openAdjustAndFill(amount: string, reason: string, opts: { takeBack?: boolean } = {}) {
+    fireEvent.click(await screen.findByRole("button", { name: ROW_ACTIONS.topUp }));
     if (opts.takeBack) fireEvent.click(await screen.findByRole("button", { name: "Take credit back instead" }));
-    fireEvent.change(await screen.findByLabelText("Another amount"), { target: { value: amount } });
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    fireEvent.click(await screen.findByLabelText(opts.takeBack ? "Correcting a mistake" : "Goodwill — something went wrong"));
-    fireEvent.change(screen.getByLabelText("And why this one?"), { target: { value: reason } });
-    if (opts.booking !== undefined) {
-      fireEvent.change(await screen.findByLabelText("For booking (optional)"), { target: { value: opts.booking } });
-    }
-    return opts;
+    fireEvent.change(await screen.findByLabelText(TOP_UP_SHEET.amountLabel), { target: { value: amount } });
+    fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.next }));
+    await choose(TOP_UP_SHEET.reasonLabel, opts.takeBack ? "Correcting a mistake" : "Goodwill — something went wrong");
+    fireEvent.change(screen.getByLabelText(TOP_UP_SHEET.detailLabel), { target: { value: reason } });
   }
 
-  /** Step 2 → step 3. Separated because several cases assert on step 2 before moving on. */
+  /** Step 2 → step 3. */
   async function toCheck() {
-    fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+    fireEvent.click(await screen.findByRole("button", { name: TOP_UP_SHEET.next }));
   }
 
-  /** The confirm: arm it, then fire it. There is no bare "Apply" any more. */
+  /** The confirm: arm it, then fire it. There is no bare "Apply". */
   async function apply() {
-    const idle = await screen.findByRole("button", { name: /^(Add|Take back) / });
-    fireEvent.click(idle);
+    fireEvent.click(await screen.findByRole("button", { name: /^(Add|Take back) / }));
     fireEvent.click(await screen.findByRole("button", { name: /choose again to confirm/ }));
   }
 
@@ -158,36 +128,34 @@ describe("AdminMembers — adjust credit", () => {
     renderPage(<AdminMembersPage />);
 
     await openAdjustAndFill("24", "Box was offline; no-show was wrong");
-
-    // No admin endpoint lists a member's bookings; the ledger filtered to them is the
-    // list of bookings money has moved on, which is what an adjustment could be for.
-    const option = await screen.findByRole("option", { name: /No-show penalty 7\.20 cr · aaaaaaaa/ });
-    expect(option).toHaveValue(BOOKING);
-    // One option per booking — the charge row for the same booking does not repeat it.
-    expect(screen.queryByRole("option", { name: /Booking charge/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(stub.calls.some((c) => c.path.startsWith("/api/v1/admin/ledger/"))).toBe(true));
+    // No admin endpoint lists a member's bookings; the ledger filtered to them is the list of
+    // bookings money has moved on, which is what an adjustment could be for.
     const ledgerCall = stub.calls.find((c) => c.path.startsWith("/api/v1/admin/ledger/"));
     expect(ledgerCall?.path).toContain(`userId=${USER}`);
 
-    fireEvent.change(screen.getByLabelText("For booking (optional)"), { target: { value: BOOKING } });
+    fireEvent.pointerDown(screen.getByRole("combobox", { name: RELATED_BOOKING.label }), POINTER);
+    // One option per booking — the charge row for the same booking does not repeat it.
+    expect(await screen.findByRole("option", { name: /No-show penalty 7\.20 cr · aaaaaaaa/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Booking charge/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: /No-show penalty/ }));
+
     await toCheck();
     // The three figures, before the press. This is the whole of what D3-B08 was missing.
-    expect(screen.getByText("Balance after")).toBeInTheDocument();
+    expect(screen.getByText(TOP_UP_SHEET.balanceAfter)).toBeInTheDocument();
     await apply();
 
     await waitFor(() => {
       const post = stub.calls.find((c) => c.method === "POST");
       expect(post?.path).toBe(`/api/v1/admin/credit/${USER}/adjust`);
-      // objectContaining, plus the key checked by name: every adjustment now also carries
-      // an idempotencyKey naming the movement, so a retry cannot become a second one — and
-      // a reasonCode, without which a cash top-up is invisible to the revenue report.
       expect(post?.body).toEqual(expect.objectContaining({
         amountCredits: 24, reason: "Box was offline; no-show was wrong",
         relatedBookingId: BOOKING, reasonCode: "goodwill",
       }));
       expect(typeof (post?.body as Record<string, unknown>).idempotencyKey).toBe("string");
     });
-    // The receipt STAYS on screen — money deserves more than four seconds — and the row's
-    // balance follows the API's answer.
+    // The receipt STAYS on screen — money deserves more than four seconds — and the row's balance
+    // follows the API's answer.
     expect(await screen.findByText(/Done\. Ada Lovelace now has 144\.00 cr\./)).toBeInTheDocument();
     expect(screen.getByText("144.00 cr")).toBeInTheDocument();
   });
@@ -196,16 +164,15 @@ describe("AdminMembers — adjust credit", () => {
     const stub = stubFetch(routes());
     renderPage(<AdminMembersPage />);
 
-    // Taking credit back is its own path, reached by name. The amount field is positive on
-    // BOTH paths — the direction carries the sign, which is the whole of D3-B08 — so what
-    // goes on the wire is still the negative number the server expects.
+    // The amount is positive on BOTH paths — the direction carries the sign — so what goes on the
+    // wire is still the negative number the server expects.
     await openAdjustAndFill("10", "Bar tab", { takeBack: true });
     await toCheck();
     await apply();
 
     await waitFor(() => {
       const post = stub.calls.find((c) => c.method === "POST");
-      expect(post?.body).toEqual(expect.objectContaining({ amountCredits: -10, reason: "Bar tab" }));
+      expect(post?.body).toEqual(expect.objectContaining({ amountCredits: -10, reason: "Bar tab", reasonCode: "correction" }));
       // Absent, not null: plain money, invisible to the no-show reversal by design.
       expect(post?.raw).not.toContain("relatedBookingId");
     });
@@ -216,21 +183,19 @@ describe("AdminMembers — adjust credit", () => {
     renderPage(<AdminMembersPage />);
 
     await openAdjustAndFill("24", "Goodwill");
-    await screen.findByRole("option", { name: /No-show penalty/ });
+    // P5 moved the rule one tap away (floating guidance, not a paragraph under the field); it is
+    // the same sentence, and it is still pinned whole.
+    fireEvent.click(screen.getByRole("button", { name: `More about ${RELATED_BOOKING.moreLabel}` }));
+    const guidance = await screen.findByRole("dialog", { name: RELATED_BOOKING.moreLabel });
 
-    // What the field is for, and what it is not for.
-    expect(screen.getByText(/genuinely compensates this member/)).toBeInTheDocument();
-    expect(screen.getByText(/does not stand in for/)).toBeInTheDocument();
-    expect(screen.getByText(/reversed on their own/)).toBeInTheDocument();
-
-    // I3, both directions and the cap. The direction is not a detail: the reversal has
-    // exactly one leg that gives money back and one that takes it, and the desk needs to
-    // know which of the two their sign lands on before they post it.
-    expect(screen.getByText(/netted against that reversal one leg at a time/)).toBeInTheDocument();
-    expect(screen.getByText(/positive adjustment reduces the penalty the reversal gives back/)).toBeInTheDocument();
-    expect(screen.getByText(/negative one reduces the refund it takes away/)).toBeInTheDocument();
-    expect(screen.getByText(/Netting stops at zero per leg/)).toBeInTheDocument();
-
+    expect(guidance).toHaveTextContent(/genuinely compensates this member/);
+    expect(guidance).toHaveTextContent(/does not stand in for/);
+    expect(guidance).toHaveTextContent(/reversed on their own/);
+    // I3, both directions and the cap.
+    expect(guidance).toHaveTextContent(/netted against that reversal one leg at a time/);
+    expect(guidance).toHaveTextContent(/positive adjustment reduces the penalty the reversal gives back/);
+    expect(guidance).toHaveTextContent(/negative one reduces the refund it takes away/);
+    expect(guidance).toHaveTextContent(/Netting stops at zero per leg/);
     // The two claims this copy has already been wrong with, in order.
     expect(screen.queryByText(/makes up for a wrongly-recorded no-show/)).not.toBeInTheDocument();
     expect(screen.queryByText(/leaves them holding both/)).not.toBeInTheDocument();
@@ -243,7 +208,8 @@ describe("AdminMembers — adjust credit", () => {
   ];
 
   async function applyForBooking() {
-    await openAdjustAndFill("24", "Compensation", { booking: BOOKING });
+    await openAdjustAndFill("24", "Compensation");
+    await choose(RELATED_BOOKING.label, /No-show penalty/);
     await toCheck();
     await apply();
   }
@@ -253,21 +219,18 @@ describe("AdminMembers — adjust credit", () => {
     renderPage(<AdminMembersPage />);
     await applyForBooking();
 
-    // At the field, not as a toast: the booking is the one input the admin has to change,
-    // and the message names what to do instead of saying the adjustment failed.
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/No booking with that ID exists at this club/);
     expect(alert).toHaveTextContent(/pick one from the list/);
     expect(screen.queryByText("Credit adjustment failed.")).not.toBeInTheDocument();
 
-    // The sheet stays where it was, on the check step, with the figures intact — nothing to
-    // re-type, and no second POST.
-    expect(screen.getByText("Balance after")).toBeInTheDocument();
+    // The sheet stays on the check step with the figures intact — nothing to re-type, no second POST.
+    expect(screen.getByText(TOP_UP_SHEET.balanceAfter)).toBeInTheDocument();
     expect(stub.calls.filter((c) => c.method === "POST")).toHaveLength(1);
 
     // Choosing a different booking clears the verdict; it was about the old one.
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    fireEvent.change(await screen.findByLabelText("For booking (optional)"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.back }));
+    await choose(RELATED_BOOKING.label, RELATED_BOOKING.none);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -276,9 +239,7 @@ describe("AdminMembers — adjust credit", () => {
     renderPage(<AdminMembersPage />);
     await applyForBooking();
 
-    // The dangerous one (I4): a real booking, the wrong member. Before the server checked
-    // this, it silently netted against a third party's settlement with nothing on their
-    // ledger to explain it — so the message says whose money it would have moved.
+    // The dangerous one (I4): a real booking, the wrong member.
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/belongs to another member/);
     expect(alert).toHaveTextContent(/change what they are owed/);
@@ -290,13 +251,7 @@ describe("AdminMembers — adjust credit", () => {
     renderPage(<AdminMembersPage />);
 
     await openAdjustAndFill("24", "Goodwill");
-    await screen.findByRole("option", { name: /No-show penalty/ });
-
-    // The picker only ever offers this member's bookings; the free-text escape hatch is
-    // the only way to name somebody else's, and naming somebody else's suppresses THEIR
-    // reversal. The option itself says whose it must be.
-    expect(screen.getByRole("option", { name: /Another booking of this member's/ })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("For booking (optional)"), { target: { value: "other" } });
+    await choose(RELATED_BOOKING.label, /Another booking of this member's/);
     expect(screen.getByText(/The server refuses another member's/)).toBeInTheDocument();
   });
 
@@ -305,24 +260,19 @@ describe("AdminMembers — adjust credit", () => {
     renderPage(<AdminMembersPage />);
 
     await openAdjustAndFill("24", "Compensation");
-    await screen.findByRole("option", { name: /No-show penalty/ });
-    fireEvent.change(screen.getByLabelText("For booking (optional)"), { target: { value: "other" } });
-
-    // The API binds it as a Guid? and answers a bare 400 otherwise; the check is here,
-    // where the admin can fix it.
-    fireEvent.change(screen.getByLabelText("Booking ID"), { target: { value: "last tuesday" } });
+    await choose(RELATED_BOOKING.label, /Another booking of this member's/);
+    fireEvent.change(screen.getByLabelText(RELATED_BOOKING.idLabel), { target: { value: "last tuesday" } });
     await toCheck();
     await apply();
     expect(await screen.findByText(/That booking ID is not one/)).toBeInTheDocument();
     expect(stub.calls.some((c) => c.method === "POST")).toBe(false);
 
     const other = "12345678-1234-4123-8123-123456789abc";
-    // Back to step 2. `RelatedBookingField` is unmounted while the check step is showing, so
-    // it comes back on its own terms and the free-text escape hatch has to be chosen again —
-    // which is what a volunteer correcting a mis-typed id actually does.
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    fireEvent.change(await screen.findByLabelText("For booking (optional)"), { target: { value: "other" } });
-    fireEvent.change(await screen.findByLabelText("Booking ID"), { target: { value: other } });
+    // Back to step 2: P5 keeps the field showing what is about to be sent — the typed id, under
+    // "Another booking" — so correcting a mistyped id is one edit, not a re-choice.
+    fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.back }));
+    expect(await screen.findByLabelText(RELATED_BOOKING.idLabel)).toHaveValue("last tuesday");
+    fireEvent.change(await screen.findByLabelText(RELATED_BOOKING.idLabel), { target: { value: other } });
     await toCheck();
     await apply();
     await waitFor(() => {
@@ -335,20 +285,10 @@ describe("AdminMembers — adjust credit", () => {
  * The double-click on Apply.
  *
  * <p>
- * A normal impatient double-click posted the adjustment twice: two identical
- * <code>AdminAdjustment</code> rows, a member moved 444 → 458 where 7 credits were typed,
- * and on a slow connection four clicks granted 44 credits where 11 were typed. Money is
- * ledger-only, so a duplicated row <b>is</b> the wrong balance and nothing on the ledger
- * says which of two identical rows was the mistake.
- * </p>
- *
- * <p>
- * The screen's half of the fix is two guards. A synchronous ref stops the second click
- * (a <code>disabled</code> driven by React state is read by the second click before the
- * re-render commits), and an idempotency key naming this one movement is what the server
- * uses to answer a retry with the row it already wrote. The key is the load-bearing half,
- * pinned in <code>AdminCreditAdjustHttpTests</code> against real Postgres; this file holds
- * that the screen actually sends one, and sends the same one on a retry.
+ * A normal impatient double-click posted the adjustment twice: two identical rows, a member moved
+ * 444 → 458 where 7 credits were typed, and on a slow connection four clicks granted 44 credits
+ * where 11 were typed. A synchronous ref stops the second click; an idempotency key naming this
+ * one movement is what the server uses to answer a retry with the row it already wrote.
  * </p>
  */
 describe("AdminMembers — an adjustment is not posted twice", () => {
@@ -361,29 +301,19 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
     { path: "/api/v1/admin/members/", body: [memberFixture()] },
     { path: "/api/v1/admin/biometric/enrollments", body: [] },
     { path: "/api/v1/admin/ledger/", body: [] },
-    {
-      method: "POST", path: ADJUST,
-      body: { entry_id: "9", amount_credits: 7, balance_after_credits: 127 },
-      ...adjust,
-    },
+    { method: "POST", path: ADJUST, body: { entry_id: "9", amount_credits: 7, balance_after_credits: 127 }, ...adjust },
   ];
 
   async function fill(amount: string, reason: string) {
-    fireEvent.click(await screen.findByRole("button", { name: /Top up/ }));
-    fireEvent.change(await screen.findByLabelText("Another amount"), { target: { value: amount } });
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    fireEvent.click(await screen.findByLabelText("Goodwill — something went wrong"));
-    fireEvent.change(screen.getByLabelText("And why this one?"), { target: { value: reason } });
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(await screen.findByRole("button", { name: ROW_ACTIONS.topUp }));
+    fireEvent.change(await screen.findByLabelText(TOP_UP_SHEET.amountLabel), { target: { value: amount } });
+    fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.next }));
+    await choose(TOP_UP_SHEET.reasonLabel, "Goodwill — something went wrong");
+    fireEvent.change(screen.getByLabelText(TOP_UP_SHEET.detailLabel), { target: { value: reason } });
+    fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.next }));
   }
 
-  /**
-   * Arm the confirm and return the FIRED control, so a case can press it twice.
-   *
-   * The double-click this whole block exists for is now a double-click on the armed button:
-   * `ConfirmButton` arms on the first press and fires on the second, and the guard being
-   * tested is what happens when the second press lands twice.
-   */
+  /** Arm the confirm and return the FIRED control, so a case can press it twice. */
   async function armed() {
     fireEvent.click(await screen.findByRole("button", { name: /^(Add|Take back) / }));
     return screen.findByRole("button", { name: /choose again to confirm/ });
@@ -399,32 +329,25 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
     fireEvent.click(fire);
 
     await waitFor(() => expect(screen.getByText(/Done\. Ada Lovelace now has 127\.00 cr\./)).toBeInTheDocument());
-
     const posts = stub.calls.filter((c) => c.method === "POST" && c.path === ADJUST);
     expect(posts).toHaveLength(1);
-    // And the one that went carries a key, so a retry the screen cannot see — a browser
-    // replay, a second tab — is still one movement on the ledger.
     const body = posts[0].body as Record<string, unknown>;
     expect(typeof body.idempotencyKey).toBe("string");
     expect((body.idempotencyKey as string).length).toBeGreaterThan(8);
   });
 
   it("retries a failed adjustment under the SAME key, so the retry cannot become a second movement", async () => {
-    // The dangerous shape: the request reached the server and the answer did not come
-    // back. The desk sees a failure, presses Apply again, and without a stable key that
-    // second press is a second movement on a ledger that already has the first.
+    // The request reached the server and the answer did not come back.
     const stub = stubFetch(routes({ status: 500, body: { error: "boom" } }));
     renderPage(<AdminMembersPage />);
 
     await fill("7", "coaching credit");
     fireEvent.click(await armed());
-    // A 500 is NOT a refusal: the request may have been applied and the answer lost coming
-    // back, so the toast says the club could not be reached and does NOT say nothing changed.
+    // A 500 is NOT a refusal: the toast says the club could not be reached, not that nothing changed.
     expect(await screen.findByText("Couldn't reach the club.")).toBeInTheDocument();
 
     fireEvent.click(await armed());
     await waitFor(() => expect(stub.calls.filter((c) => c.method === "POST").length).toBe(2));
-
     const [first, second] = stub.calls.filter((c) => c.method === "POST");
     const key = (b: unknown) => (b as Record<string, unknown>).idempotencyKey;
     expect(key(first.body)).toBe(key(second.body));
@@ -438,17 +361,13 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
     await fill("7", "coaching credit");
     fireEvent.click(await armed());
     await waitFor(() => expect(screen.getByText(/Done\. Ada Lovelace now has 127\.00 cr\./)).toBeInTheDocument());
-    // The receipt stays until it is closed — that is the point of it — so the second pass
-    // starts by closing it, exactly as a volunteer would.
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    // The receipt stays until it is closed — P5 names that button "Done" (every sheet also has
+    // its own close ×, named "Close").
+    fireEvent.click(screen.getByRole("button", { name: TOP_UP_SHEET.done }));
 
-    // Reopened form, same member, same amount, same reason — and a different movement. A
-    // guard keyed on the member or the amount would refuse this, which is the same bug
-    // pointing the other way: money that should have moved and did not.
     await fill("7", "coaching credit");
     fireEvent.click(await armed());
     await waitFor(() => expect(stub.calls.filter((c) => c.method === "POST").length).toBe(2));
-
     const [first, second] = stub.calls.filter((c) => c.method === "POST");
     expect((first.body as Record<string, unknown>).idempotencyKey)
       .not.toBe((second.body as Record<string, unknown>).idempotencyKey);
@@ -456,13 +375,12 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
 });
 
 /**
- * The member's class, on the screen the admin is already looking at.
+ * The member's rate class, on the screen the admin is already looking at.
  *
  * <p>
- * <code>POST /admin/members/{id}/class</code> existed, a typed client for it existed, and
- * nothing called either — one grep hit, the definition, zero call sites. So every member
- * onboarded through the product was permanently <code>Regular</code> while the class
- * decides what R100 buys (160 credits or 240) and whether they may take a peak slot.
+ * `POST /admin/members/{id}/class` once had zero call sites, so every member was permanently
+ * Regular while the class decides what R100 buys. P5 moved the control from a native select in
+ * its own column into the row's ⋯ menu as a radio pair (D2 retires the class for Groups).
  * </p>
  */
 describe("AdminMembers — member class", () => {
@@ -474,47 +392,40 @@ describe("AdminMembers — member class", () => {
   const routes = (member: Record<string, unknown> = {}, classRoute: Partial<StubRoute> = {}): StubRoute[] => [
     { path: "/api/v1/admin/members/", body: [memberFixture(member)] },
     { path: "/api/v1/admin/biometric/enrollments", body: [] },
-    { path: "/api/v1/admin/ledger/", body: [] },
     { method: "POST", path: CLASS_PATH, body: { member_class: "LeagueOrSenior", changed: true }, ...classRoute },
   ];
+
+  async function openMenu() {
+    fireEvent.pointerDown(await screen.findByRole("button", { name: ROW_ACTIONS.more("Ada Lovelace") }), POINTER);
+    return screen.findByRole("menu");
+  }
 
   it("shows the class the API returned and sends a change", async () => {
     const stub = stubFetch(routes({ member_class: "LeagueOrSenior" }));
     renderPage(<AdminMembersPage />);
 
-    const select = await screen.findByLabelText("Member class for Ada Lovelace");
-    expect(select).toHaveValue("LeagueOrSenior");
+    const menu = await openMenu();
+    expect(within(menu).getByRole("menuitemradio", { name: "League or senior" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "Regular" }));
 
-    fireEvent.change(select, { target: { value: "Regular" } });
-    await waitFor(() => {
-      const post = stub.calls.find((c) => c.path === CLASS_PATH);
-      expect(post?.body).toEqual({ memberClass: "Regular" });
-    });
-    expect(await screen.findByText(/Ada Lovelace is now regular\./)).toBeInTheDocument();
+    await waitFor(() => expect(stub.calls.find((c) => c.path === CLASS_PATH)?.body).toEqual({ memberClass: "Regular" }));
+    expect(await screen.findByText(OUTCOMES.classChanged("Ada Lovelace", "Regular"))).toBeInTheDocument();
   });
 
   it("puts the old class back when the server refuses, rather than showing a rate that is not real", async () => {
     stubFetch(routes({}, { status: 400, body: { error: "invalid_member_class" } }));
     renderPage(<AdminMembersPage />);
 
-    const select = await screen.findByLabelText("Member class for Ada Lovelace");
-    fireEvent.change(select, { target: { value: "LeagueOrSenior" } });
+    fireEvent.click(within(await openMenu()).getByRole("menuitemradio", { name: "League or senior" }));
+    expect(await screen.findByText(OUTCOMES.classFailed("Ada Lovelace"))).toBeInTheDocument();
 
-    expect(await screen.findByText(/Couldn't change Ada Lovelace's class\./)).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByLabelText("Member class for Ada Lovelace")).toHaveValue("Regular"));
+    const menu = await openMenu();
+    await waitFor(() => expect(within(menu).getByRole("menuitemradio", { name: "Regular" })).toHaveAttribute("aria-checked", "true"));
   });
 });
 
 /**
  * Suspension, and the verification state that decides whether a member can sign in at all.
- *
- * <p>
- * The Status filter offered <b>Suspended</b> and no member could ever be in it: the enum
- * value was the only thing that existed. And an approved, active member who never clicked
- * their verification link is refused at sign-in with "your account isn't approved yet" —
- * a sentence that is not true and points at nothing they or the admin can act on. The
- * console now shows the state and offers the one action that fixes it.
- * </p>
  */
 describe("AdminMembers — suspend, reactivate and verification", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -524,56 +435,40 @@ describe("AdminMembers — suspend, reactivate and verification", () => {
   const routes = (member: Record<string, unknown> = {}, extra: StubRoute[] = []): StubRoute[] => [
     { path: "/api/v1/admin/members/", body: [memberFixture(member)] },
     { path: "/api/v1/admin/biometric/enrollments", body: [] },
-    { path: "/api/v1/admin/ledger/", body: [] },
     ...extra,
   ];
 
   it("suspends with a reason, and says the member's money and bookings are untouched", async () => {
     const stub = stubFetch(routes({}, [
-      // `member_notified` is part of the wire shape of all four lifecycle transitions; a stub
-      // that omits it exercises the "we could not tell the member" copy by accident.
       { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/suspend`, body: { suspended: true, member_notified: true } },
     ]));
     renderPage(<AdminMembersPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Suspend member" }));
+    await fromMenu(ROW_ACTIONS.suspend);
+    const dialog = await screen.findByRole("dialog", { name: SUSPEND_DIALOG.title("Ada Lovelace") });
 
-    // The reason is not optional: the member is emailed it, and "you are suspended" with
-    // no reason is the worst version of this message a club can send.
-    const confirm = screen.getByRole("button", { name: "Suspend" });
+    // The reason is not optional: the member is emailed it.
+    const confirm = within(dialog).getByRole("button", { name: SUSPEND_DIALOG.confirm });
     expect(confirm).toBeDisabled();
-    expect(screen.getByText(/credit balance/)).toBeInTheDocument();
-    expect(screen.getByText(/reactivating restores/)).toBeInTheDocument();
+    expect(dialog).toHaveTextContent(/credit balance/);
+    expect(dialog).toHaveTextContent(/reactivating restores/);
 
-    fireEvent.change(screen.getByPlaceholderText(/Membership dues unpaid/), { target: { value: "Dues unpaid since March." } });
-    fireEvent.click(screen.getByRole("button", { name: "Suspend" }));
+    fireEvent.change(within(dialog).getByPlaceholderText(/Membership dues unpaid/), { target: { value: "Dues unpaid since March." } });
+    fireEvent.click(within(dialog).getByRole("button", { name: SUSPEND_DIALOG.confirm }));
 
-    await waitFor(() => {
-      const post = stub.calls.find((c) => c.path.endsWith("/suspend"));
-      expect(post?.body).toEqual({ reason: "Dues unpaid since March." });
-    });
+    await waitFor(() => expect(stub.calls.find((c) => c.path.endsWith("/suspend"))?.body).toEqual({ reason: "Dues unpaid since March." }));
   });
 
   /**
-   * The two reason fields a screen reader could not name.
-   *
-   * <p>
-   * Suspend and Reject each carried a <code>&lt;label&gt;</code> with no
-   * <code>htmlFor</code> beside an <code>&lt;input&gt;</code> with no <code>id</code>, so
-   * <code>el.labels.length</code> was 0 and the field announced as an unlabelled edit box —
-   * for the one input on each dialog whose text is emailed verbatim to the person it is
-   * about. The adjust-credit modal a few lines further down the same file had done it
-   * correctly all along, so this was an inconsistency inside one screen rather than a
-   * house style.
-   * </p>
+   * The two reason fields a screen reader could not name: each was a label with no `htmlFor`
+   * beside an input with no `id` — for the one field whose text is emailed verbatim.
    */
   it("names the suspend reason field to a screen reader, not just to a sighted reader", async () => {
     stubFetch(routes());
     renderPage(<AdminMembersPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Suspend member" }));
-
-    const field = screen.getByLabelText("Reason (visible to the member)");
+    await fromMenu(ROW_ACTIONS.suspend);
+    const field = await screen.findByLabelText(SUSPEND_DIALOG.reasonLabel);
     expect(field).toBe(screen.getByPlaceholderText(/Membership dues unpaid/));
     expect((field as HTMLInputElement).labels).toHaveLength(1);
   });
@@ -582,9 +477,8 @@ describe("AdminMembers — suspend, reactivate and verification", () => {
     stubFetch(routes({ status: "PendingApproval", email_verified: true }));
     renderPage(<AdminMembersPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Reject" }));
-
-    const field = screen.getByLabelText("Reason (visible to applicant)");
+    fireEvent.click(await screen.findByRole("button", { name: ROW_ACTIONS.reject }));
+    const field = await screen.findByLabelText(REJECT_DIALOG.reasonLabel);
     expect(field).toBe(screen.getByPlaceholderText(/Membership number not on file/));
     expect((field as HTMLInputElement).labels).toHaveLength(1);
   });
@@ -595,13 +489,19 @@ describe("AdminMembers — suspend, reactivate and verification", () => {
     ]));
     renderPage(<AdminMembersPage />);
 
-    expect(await screen.findByRole("button", { name: "Reactivate member" })).toBeInTheDocument();
-    // A suspended member is not bookable, so offering to adjust their credit or enrol a
-    // finger would be offering an action the box will refuse.
-    expect(screen.queryByRole("button", { name: "Adjust credit" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Suspend member" })).not.toBeInTheDocument();
+    // A suspended member is not bookable, so offering to top up or enrol a finger would be
+    // offering an action the box will refuse.
+    await screen.findByText("Ada Lovelace");
+    expect(screen.queryByRole("button", { name: ROW_ACTIONS.topUp })).not.toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByRole("button", { name: ROW_ACTIONS.more("Ada Lovelace") }), POINTER);
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).queryByRole("menuitem", { name: ROW_ACTIONS.suspend })).not.toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: /fingerprint/i })).not.toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: ROW_ACTIONS.book })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Reactivate member" }));
+    fireEvent.click(within(menu).getByRole("menuitem", { name: ROW_ACTIONS.reactivate }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: ROW_ACTIONS.reactivate }));
     await waitFor(() => expect(stub.calls.some((c) => c.path.endsWith("/reactivate"))).toBe(true));
   });
 
@@ -611,16 +511,13 @@ describe("AdminMembers — suspend, reactivate and verification", () => {
     ]));
     renderPage(<AdminMembersPage />);
 
-    // The badge is the answer to "the app won't let me in" from a member whose row says
-    // Active — which is exactly the case that used to have no answer on this screen.
-    expect(await screen.findByText("Unverified")).toBeInTheDocument();
+    // The answer to "the app won't let me in" from a member whose row says Active.
+    expect(await screen.findByText(UNVERIFIED.label)).toBeInTheDocument();
+    expect(screen.getByTitle(UNVERIFIED.title)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Resend verification email" }));
-    await waitFor(() => {
-      const post = stub.calls.find((c) => c.path === "/api/v1/auth/resend-verification");
-      expect(post?.body).toEqual({ email: "ada@example.com" });
-    });
-    expect(await screen.findByText(/Verification email sent to ada@example\.com/)).toBeInTheDocument();
+    await fromMenu(ROW_ACTIONS.resend);
+    await waitFor(() => expect(stub.calls.find((c) => c.path === "/api/v1/auth/resend-verification")?.body).toEqual({ email: "ada@example.com" }));
+    expect(await screen.findByText(OUTCOMES.resendSent("ada@example.com"))).toBeInTheDocument();
   });
 
   it("says nothing about verification for a member who has verified", async () => {
@@ -628,22 +525,17 @@ describe("AdminMembers — suspend, reactivate and verification", () => {
     renderPage(<AdminMembersPage />);
 
     await screen.findByText("Ada Lovelace");
-    expect(screen.queryByText("Unverified")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Resend verification email" })).not.toBeInTheDocument();
+    expect(screen.queryByText(UNVERIFIED.label)).not.toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByRole("button", { name: ROW_ACTIONS.more("Ada Lovelace") }), POINTER);
+    await screen.findByRole("menu");
+    expect(screen.queryByRole("menuitem", { name: ROW_ACTIONS.resend })).not.toBeInTheDocument();
   });
 });
 
 /**
- * R2 I-F2. The row icon-actions took no `disabled` and read no `busyId`, so an ordinary
- * impatient double-click fired two requests.
- *
- * <p>
- * On Reactivate that is a 200 followed by a 409, two toasts stacked on screen at once —
- * "Aisha Patel is active again." in green above "Couldn't reactivate this member." in red —
- * and nothing saying which is true. On Resend it is two verification emails, and because a
- * resend spends any earlier unused link (§2), the first of the two the member receives
- * contains a dead one. The guarded Approve button beside them had read `busyId` all along.
- * </p>
+ * One click, one request (R2 I-F2). On Reactivate a double-click was a 200 then a 409 and two
+ * contradictory toasts; on Resend it was two emails, and because a resend spends the earlier link
+ * the first mail the member read held a dead one.
  */
 describe("AdminMembers — one click, one request", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -653,201 +545,52 @@ describe("AdminMembers — one click, one request", () => {
   const routes = (member: Record<string, unknown> = {}, extra: StubRoute[] = []): StubRoute[] => [
     { path: "/api/v1/admin/members/", body: [memberFixture(member)] },
     { path: "/api/v1/admin/biometric/enrollments", body: [] },
-    { path: "/api/v1/admin/ledger/", body: [] },
     ...extra,
   ];
 
   it("reactivates once on a double-click, so no 409 lands on top of the 200", async () => {
     const stub = stubFetch(routes({ status: "Suspended" }, [
-      // What the API actually answers a repeat with: the second call is a conflict, which
-      // is why the admin saw a red failure for an action that had worked.
       { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/reactivate`, status: [200, 409], body: { reactivated: true, member_notified: true } },
     ]));
     renderPage(<AdminMembersPage />);
 
-    const button = await screen.findByRole("button", { name: "Reactivate member" });
+    await fromMenu(ROW_ACTIONS.reactivate);
+    const button = within(await screen.findByRole("dialog")).getByRole("button", { name: ROW_ACTIONS.reactivate });
     fireEvent.click(button);
     fireEvent.click(button);
 
     await waitFor(() => expect(stub.calls.some((c) => c.path.endsWith("/reactivate"))).toBe(true));
     expect(stub.calls.filter((c) => c.path.endsWith("/reactivate"))).toHaveLength(1);
-    // And the admin is told one thing, not two contradictory things.
-    expect(await screen.findByText("Ada Lovelace is active again.")).toBeInTheDocument();
+    expect(await screen.findByText(OUTCOMES.reactivated("Ada Lovelace"))).toBeInTheDocument();
     expect(screen.queryByText(/Couldn't reactivate/)).not.toBeInTheDocument();
   });
 
-  it("sends one verification email on a double-click, so the first link is not killed by the second", async () => {
+  it("sends one verification email while one is already on its way", async () => {
     const stub = stubFetch(routes({ email_verified: false }, [
       { method: "POST", path: "/api/v1/auth/resend-verification", body: { ok: true } },
     ]));
+    // Hold the send open, so the second press lands while the first is genuinely in flight — the
+    // menu closes on select, so this is the double press a person can actually make.
+    const answered = globalThis.fetch;
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) =>
+      (String(input).includes("resend-verification") ? gate.then(() => answered(input, init)) : answered(input, init)));
     renderPage(<AdminMembersPage />);
 
-    const button = await screen.findByRole("button", { name: "Resend verification email" });
-    fireEvent.click(button);
-    fireEvent.click(button);
+    await fromMenu(ROW_ACTIONS.resend);
+    await fromMenu(ROW_ACTIONS.resend);
+    release();
 
-    await waitFor(() => expect(stub.calls.some((c) => c.path === "/api/v1/auth/resend-verification")).toBe(true));
+    expect(await screen.findByText(OUTCOMES.resendSent("ada@example.com"))).toBeInTheDocument();
     expect(stub.calls.filter((c) => c.path === "/api/v1/auth/resend-verification")).toHaveLength(1);
   });
 });
 
 /**
- * R2 I-F6/I-F7/I-F8, F-F6, J-F6 — the members table at every width.
- *
- * <p>
- * jsdom has no layout, so these hold the three structural decisions the measurements
- * demanded rather than the pixel counts themselves (those were re-measured in a real
- * browser at 375, 768 and 1440): the table lives in a `ScrollArea` that announces itself,
- * every column carries the label its card form prints below `sm`, and the identity cell is
- * sticky so the name cannot scroll away from the Suspend button.
- * </p>
- */
-describe("AdminMembers — the table fits the screen it is on", () => {
-  afterEach(() => vi.unstubAllGlobals());
-
-  const routes = (): StubRoute[] => [
-    { path: "/api/v1/admin/members/", body: [memberFixture()] },
-    { path: "/api/v1/admin/biometric/enrollments", body: [] },
-    { path: "/api/v1/admin/ledger/", body: [] },
-  ];
-
-  it("puts the table in a scroll region that says it is one", async () => {
-    stubFetch(routes());
-    renderPage(<AdminMembersPage />);
-
-    await screen.findByText("Ada Lovelace");
-    // The component built in round 1 for exactly this problem, and applied only to the
-    // ledger: a gradient, a keyboard tab stop, and a name a screen reader can read.
-    const region = screen.getByRole("region", { name: "Members table" });
-    expect(region).toContainElement(screen.getByRole("table"));
-    expect(region).toHaveAttribute("tabindex", "0");
-  });
-
-  it("labels every column, so the phone card shows what the header row would have said", async () => {
-    stubFetch(routes());
-    renderPage(<AdminMembersPage />);
-
-    await screen.findByText("Ada Lovelace");
-    const labelled = Array.from(document.querySelectorAll("tbody td[data-label]")).map((td) => td.getAttribute("data-label"));
-    // Not one of these is dropped at 375 px — they stack instead.
-    expect(labelled).toEqual(["Email", "Member #", "Status", "Class", "Joined", "Balance", "Actions"]);
-  });
-
-  it("keeps the member's name in place while the rest of the row scrolls", async () => {
-    stubFetch(routes());
-    renderPage(<AdminMembersPage />);
-
-    await screen.findByText("Ada Lovelace");
-    const identity = document.querySelector("tbody tr > td:first-child")!;
-    // Scrolled right to reach Suspend, the admin could no longer see whom they were
-    // suspending. The cell needs an opaque background as well, or the columns underneath
-    // read straight through it.
-    expect(identity.className).toMatch(/sm:sticky/);
-    expect(identity.className).toMatch(/sm:left-0/);
-    expect(identity.className).toMatch(/bg-bg-surface/);
-  });
-
-  it("lays the row's actions out in a row, not a 165px-tall column", async () => {
-    stubFetch(routes());
-    renderPage(<AdminMembersPage />);
-
-    await screen.findByText("Ada Lovelace");
-    const actions = screen.getByRole("button", { name: "Top up" }).parentElement!;
-    // `flex-row`, and NOT `flex-wrap` either — the two are what the round-3 and round-4
-    // lanes asserted against each other, and Chromium settled it: allowing the buttons to
-    // wrap lets the table squeeze this column from 197px to 96px, and the row grows from
-    // 60.5-69px to 92.5-136.5px. Wrapping is the cause of the tall row, not the cure.
-    expect(actions.className).toContain("flex-row");
-    expect(actions.className).not.toContain("flex-col");
-    expect(actions.className).not.toContain("flex-wrap");
-  });
-
-  it("pins the actions column to the right edge, so the buttons are on screen on arrival", async () => {
-    stubFetch(routes());
-    renderPage(<AdminMembersPage />);
-
-    await screen.findByText("Ada Lovelace");
-    const cell = screen.getByRole("button", { name: "Top up" }).closest("td")!;
-    // Measured in Chromium: without this, all 27 action controls of a seven-member club sat
-    // outside the scroller's box at both 768px and 1440px until the admin found the sideways
-    // scroll. With it, 27 of 27 are visible before anything is scrolled. Opaque background
-    // for the same reason the identity cell has one — the columns pass underneath it.
-    expect(cell.className).toMatch(/sm:sticky/);
-    expect(cell.className).toMatch(/sm:right-0/);
-    expect(cell.className).toMatch(/bg-bg-surface/);
-  });
-
-  it("pins the balance column beside the actions, so a balance is never half-covered", async () => {
-    stubFetch(routes());
-    renderPage(<AdminMembersPage />);
-
-    await screen.findByText("Ada Lovelace");
-    const balance = document.querySelector<HTMLElement>('tbody tr:first-child td[data-label="Balance"]')!;
-    const actions = document.querySelector<HTMLElement>('tbody tr:first-child td[data-label="Actions"]')!;
-
-    // Round 4 asserted the OPPOSITE of this test's own name: it required Balance to sit
-    // immediately before Actions while its comment called that arrangement the dangerous one,
-    // and it was green only because Joined happened to sit between them in the DOM. Both
-    // halves were wrong. Measured in Chromium at every pixel of scroll, the shipped order put
-    // `1500.00 cr` on screen as `150` at scrollLeft 96 of 151 at 1440px, and `123456.78 cr`
-    // as `12345` at scrollLeft 0 — a 10x money misread with no ellipsis and no cue, on the
-    // screen where an admin adjusts credit. Reordering cannot fix it either: at 768px the
-    // left and right pins between them sweep the entire 1144px table, so no column position
-    // is safe from both.
-    //
-    // The money column is therefore pinned as well. What jsdom can hold is the coupling that
-    // makes the pin correct, and it is a coupling rather than two independent facts: the
-    // balance's sticky offset must equal the width the actions column is held to, or the
-    // balance slides straight back under the actions.
-    expect(balance.className).toMatch(/sm:sticky/);
-    expect(balance.className).toMatch(/bg-bg-surface/);
-    const offset = /sm:right-\[(\d+)px\]/.exec(balance.className)?.[1];
-    const width = /sm:min-w-\[(\d+)px\]/.exec(actions.className)?.[1];
-    expect(offset, "balance cell needs an explicit sm:right-[Npx] pin offset").toBeDefined();
-    expect(width, "actions cell needs an explicit sm:min-w-[Npx] so the offset above clears it").toBeDefined();
-    expect(offset).toBe(width);
-
-    // And the two pinned cells must be adjacent, or a scrolling column shows through the seam
-    // between them.
-    const labels = Array.from(document.querySelectorAll("tbody tr:first-child td[data-label]"))
-      .map((td) => td.getAttribute("data-label"));
-    expect(labels.indexOf("Balance")).toBe(labels.indexOf("Actions") - 1);
-  });
-});
-
-/**
- * The four sentences an admin reads when the club's mail server is down.
- *
- * <p>
- * Round 8 gave suspend, reactivate and reset-password a "we could not tell the member"
- * branch off <code>member_notified</code>, and gave the temporary-password dialog a
- * "Not emailed" branch off a null <code>email_sent_to</code>. Round 8's verifier then forced
- * each of those four to its wrong branch, one at a time, and the whole frontend suite stayed
- * green every time: <code>grep -rn</code> found each string in <code>AdminMembers.tsx</code>
- * and in no test at all. Four promises guarding nothing, any of which a merge could drop in
- * silence — which is the exact failure mode this programme keeps rediscovering, so each one
- * is pinned here.
- * </p>
- *
- * <p>
- * Each test asserts the sentence on the failing branch <b>and</b> its absence on the
- * succeeding one. Only the pair discriminates: a mutant that collapses the ternary to one
- * arm survives either assertion alone, and both of the round-8 branches were written as
- * ternaries.
- * </p>
- *
- * <p>
- * The sentences are also checked against what the backend does, because a pinned falsehood is
- * worse than an unpinned promise. A suspended membership is refused at the court —
- * <code>BookingMembershipGate</code> answers <code>member_suspended</code> and
- * <code>CourtActivationService</code> tests <code>!= Active</code> — so "they will find out at
- * the door" is what actually happens to a member nobody could email. The temporary password
- * really is on the screen below the toast, in the dialog these tests read. And the dialog no
- * longer says the mail server "refused" the message: <code>/reset-password</code> sets
- * <code>member_notified</code> false on <em>any</em> exception out of
- * <code>IEmailService.SendAsync</code> — a refused connection, a DNS failure and a timeout all
- * land there — so the honest sentence is that the send failed.
- * </p>
+ * The four sentences an admin reads when the club's mail server is down — each asserted on its
+ * failing branch AND absent on the succeeding one, because only the pair discriminates a mutant
+ * that collapses the ternary to one arm.
  */
 describe("AdminMembers — what the admin is told when the member could not be emailed", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -857,7 +600,6 @@ describe("AdminMembers — what the admin is told when the member could not be e
   const routes = (member: Record<string, unknown>, extra: StubRoute[]): StubRoute[] => [
     { path: "/api/v1/admin/members/", body: [memberFixture(member)] },
     { path: "/api/v1/admin/biometric/enrollments", body: [] },
-    { path: "/api/v1/admin/ledger/", body: [] },
     ...extra,
   ];
 
@@ -866,9 +608,10 @@ describe("AdminMembers — what the admin is told when the member could not be e
       { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/suspend`, body: { suspended: true, member_notified: notified } },
     ]));
     renderPage(<AdminMembersPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Suspend member" }));
-    fireEvent.change(screen.getByPlaceholderText(/Membership dues unpaid/), { target: { value: "Dues unpaid since March." } });
-    fireEvent.click(screen.getByRole("button", { name: "Suspend" }));
+    await fromMenu(ROW_ACTIONS.suspend);
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByPlaceholderText(/Membership dues unpaid/), { target: { value: "Dues unpaid since March." } });
+    fireEvent.click(within(dialog).getByRole("button", { name: SUSPEND_DIALOG.confirm }));
   }
 
   it("tells the admin a suspended member will find out at the door, when the email did not go", async () => {
@@ -890,14 +633,13 @@ describe("AdminMembers — what the admin is told when the member could not be e
       { method: "POST", path: `/api/v1/admin/members/${MEMBERSHIP}/reactivate`, body: { reactivated: true, member_notified: notified } },
     ]));
     renderPage(<AdminMembersPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Reactivate member" }));
+    await fromMenu(ROW_ACTIONS.reactivate);
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: ROW_ACTIONS.reactivate }));
   }
 
   it("tells the admin to say so themselves when a reactivation email did not go", async () => {
     await reactivateWith(false);
-    expect(await screen.findByText(
-      "Ada Lovelace is active again, but the email couldn't be sent. Tell them directly.",
-    )).toBeInTheDocument();
+    expect(await screen.findByText("Ada Lovelace is active again, but the email couldn't be sent. Tell them directly.")).toBeInTheDocument();
   });
 
   it("says none of that when the reactivation email did go", async () => {
@@ -915,9 +657,9 @@ describe("AdminMembers — what the admin is told when the member could not be e
       },
     ]));
     renderPage(<AdminMembersPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Reset password" }));
-    const confirm = await screen.findByRole("dialog", { name: /Reset password for Ada Lovelace/ });
-    fireEvent.click(within(confirm).getByRole("button", { name: "Reset password" }));
+    await fromMenu(ROW_ACTIONS.reset);
+    const confirm = await screen.findByRole("dialog", { name: RESET_DIALOG.title("Ada Lovelace") });
+    fireEvent.click(within(confirm).getByRole("button", { name: RESET_DIALOG.confirm }));
   }
 
   it("sends the admin to the password on the screen when the reset email did not go", async () => {
@@ -926,7 +668,7 @@ describe("AdminMembers — what the admin is told when the member could not be e
       "Password reset for Ada Lovelace, but the email couldn't be sent. Read them the password below.",
     )).toBeInTheDocument();
     // "below" has to be true: the password the toast points at is on the same screen.
-    const dialog = await screen.findByRole("dialog", { name: "Temporary password generated" });
+    const dialog = await screen.findByRole("dialog", { name: PASSWORD_DIALOG.title });
     expect(dialog).toHaveTextContent("Xk7-tempo-92");
   });
 
@@ -938,7 +680,7 @@ describe("AdminMembers — what the admin is told when the member could not be e
 
   it("says the temporary password was not emailed, rather than naming an address it never reached", async () => {
     await resetWith(false);
-    const dialog = await screen.findByRole("dialog", { name: "Temporary password generated" });
+    const dialog = await screen.findByRole("dialog", { name: PASSWORD_DIALOG.title });
     expect(dialog).toHaveTextContent("Not emailed");
     expect(dialog).toHaveTextContent("the send failed, so this password only reaches the member if you pass it on");
     // The bug this branch exists for: the dialog used to print "Emailed to null".
@@ -948,7 +690,7 @@ describe("AdminMembers — what the admin is told when the member could not be e
 
   it("names the address when the temporary password really was emailed", async () => {
     await resetWith(true);
-    const dialog = await screen.findByRole("dialog", { name: "Temporary password generated" });
+    const dialog = await screen.findByRole("dialog", { name: PASSWORD_DIALOG.title });
     expect(dialog).toHaveTextContent("Emailed to ada@example.com");
     expect(dialog).not.toHaveTextContent(/Not emailed/);
   });

@@ -44,6 +44,8 @@ function routes(extra: ApiRoute[] = []): ApiRoute[] {
     { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@sample.local", photo_url: null, membership_number: "ADMIN-0001", member_class: "Regular" } },
     { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     { path: "/api/v1/admin/settings/", body: SETTINGS },
+    // B13's toast is the settings page's own "Settings saved." — a save needs somewhere to land.
+    { method: "PUT", path: "/api/v1/admin/settings/", body: { saved: true } },
     { path: "/api/v1/admin/courts/", body: [] },
     { path: "/api/v1/admin/members", body: [] },
     { path: "/api/v1/admin/doors", body: { doors: [], shut_together: [], shut_individually: [], timezone: "Africa/Johannesburg" } },
@@ -132,7 +134,7 @@ test.describe("C6 — what a navigation does", () => {
    */
   test("retitles the document, announces the page and lands focus on its heading", async ({ page }) => {
     await openAdmin(page, "/admin/settings");
-    await expect(page).toHaveTitle("Admin settings — Crusaders Mainframe");
+    await expect(page).toHaveTitle("Settings — Crusaders Mainframe");
 
     // The primary nav is ONE list in both layouts (the phone's bottom bar, the desktop's top
     // bar), so the same locator works on both projects.
@@ -145,7 +147,7 @@ test.describe("C6 — what a navigation does", () => {
 
     // Back, and the title follows: a browser-history entry is named after the title it had.
     await page.goBack();
-    await expect(page).toHaveTitle("Admin settings — Crusaders Mainframe");
+    await expect(page).toHaveTitle("Settings — Crusaders Mainframe");
   });
 
   /**
@@ -153,15 +155,20 @@ test.describe("C6 — what a navigation does", () => {
    * document, and the heading landed underneath the sticky header. The `scroll-margin-top` is
    * what clears the header; the focus is what makes the jump mean anything.
    */
+  /*
+   * R13 retired the settings page's "Jump to section" nav — the sections are an accordion now,
+   * and `#settings-<section>` is how a link reaches one. The invariant is unchanged: a fragment
+   * lands focus on the section it names (its header button, which is the section's <h2>), and
+   * that header is clear of the sticky top bar.
+   */
   test("focuses a fragment's heading and keeps it clear of the sticky header", async ({ page }) => {
-    await openAdmin(page, "/admin/settings");
+    await openAdmin(page, "/admin/settings#settings-doors");
 
-    await page.getByRole("link", { name: "Door gates" }).click();
-
-    const heading = page.getByRole("heading", { name: "Door gates" });
-    await expect(heading).toBeFocused();
+    const trigger = page.getByRole("button", { name: "Door gates" });
+    await expect(trigger).toBeFocused();
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
     const geometry = await page.evaluate(() => {
-      const h = [...document.querySelectorAll("h2")].find((n) => n.textContent === "Door gates")!;
+      const h = document.querySelector("#settings-doors h2")!;
       const header = document.querySelector("header[data-app-header]")!;
       return { headingTop: h.getBoundingClientRect().top, headerBottom: header.getBoundingClientRect().bottom };
     });
@@ -402,9 +409,13 @@ test.describe("B13 — where a toast lands", () => {
       await page.setViewportSize({ width: 320, height: 568 });
       await openAdmin(page, "/admin/settings", rootPx === 16 ? 0 : rootPx);
 
-      // The one toast on this page that needs no network: adding a court with no name.
-      await page.getByRole("button", { name: "Add court" }).click();
-      const toast = page.getByRole("status").filter({ hasText: "Court name is required." });
+      // P6 moved the courts (and the "Court name is required." toast this used to raise) to their
+      // own page, where a bad name is caught inside the sheet. The settings page's own toast now:
+      // change one door setting and save it.
+      await page.getByRole("button", { name: "Door gates" }).click();
+      await page.getByRole("spinbutton", { name: "Unlock time (seconds)" }).fill("5");
+      await page.getByRole("region", { name: "Unsaved settings" }).getByRole("button", { name: "Save changes" }).click();
+      const toast = page.getByRole("status").filter({ hasText: "Settings saved." });
       await expect(toast).toBeVisible();
       // Measured once it has ARRIVED: it animates in from 12 px below its resting place.
       await expect(toast).toHaveCSS("opacity", "1");
@@ -424,12 +435,13 @@ test.describe("B13 — where a toast lands", () => {
 /**
  * C14 — reviewer C counted seventy-six tab stops from the top of the document to the first door
  * setting. The skip link lands on the page's heading — past the top bar AND the admin console's
- * rail — and the settings jump nav takes it from there.
+ * rail — and the settings sections' own headers take it from there. (R13 replaced the jump nav
+ * with an accordion: the door section's header button is what is reached, and Enter opens it.)
  */
 test("reaches the door settings within twelve tab stops of the skip link", async ({ page }) => {
   await openAdmin(page, "/admin/settings");
-  // Wait for the thing being counted TO EXIST: the jump nav renders only once settings load.
-  await expect(page.getByRole("link", { name: "Door gates" })).toBeVisible();
+  // Wait for the thing being counted TO EXIST: the sections render only once settings load.
+  await expect(page.getByRole("button", { name: "Door gates" })).toBeVisible();
 
   await page.keyboard.press("Tab");
   await expect(page.getByRole("link", { name: "Skip to main content" })).toBeFocused();
@@ -439,14 +451,15 @@ test("reaches the door settings within twelve tab stops of the skip link", async
   let stops = 0;
   for (; stops < 12; stops += 1) {
     await page.keyboard.press("Tab");
-    const name = await page.evaluate(() => document.activeElement?.textContent?.trim() ?? "");
-    if (name === "Door gates") break;
+    // The header button's text carries its live summary too, so it is matched by what names it.
+    const labelledBy = await page.evaluate(() => document.activeElement?.getAttribute("aria-labelledby") ?? "");
+    if (labelledBy === "settings-doors-title") break;
   }
   console.log(`[C14] door settings reached in ${stops + 1} tab stops from the skip link`);
   expect(stops).toBeLessThan(12);
 
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "Door gates" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Door gates" })).toHaveAttribute("aria-expanded", "true");
 });
 
 /**

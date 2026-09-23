@@ -420,7 +420,7 @@ describe("AdminDevices", () => {
     fireEvent.click(screen.getByRole("button", { name: /Save box/ }));
 
     // Not "court number not found" with the underscores swapped for spaces.
-    expect(await screen.findByText(/not a court at this club/)).toHaveTextContent(/add it under Admin settings/);
+    expect(await screen.findByText(/not a court at this club/)).toHaveTextContent(/add it under Courts/);
     // And the editor stays open, since the save did not go through.
     expect(screen.getByRole("button", { name: /Save box/ })).toBeInTheDocument();
   });
