@@ -4,9 +4,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Services;
 
-/// <summary>One group as the tariff needs it: its top-up rate, its peak priority, its handle.</summary>
+/// <summary>
+/// One group as the tariff needs it: its top-up rate, its peak say (true grants, false withholds,
+/// null has no say), its handle.
+/// </summary>
 public sealed record TariffGroup(
-    Guid Id, string Name, string? SystemKey, decimal? CreditsPerZar, bool PeakPriority, int SortOrder);
+    Guid Id, string Name, string? SystemKey, decimal? CreditsPerZar, bool? PeakPriority, int SortOrder);
 
 /// <summary>
 /// What a member's groups add up to for money and for the peak window.
@@ -19,12 +22,13 @@ public sealed record MemberTariff(
     decimal TopUpRate, TariffGroup? RateGroup, bool PeakPriority, IReadOnlyList<TariffGroup> Groups)
 {
     /// <summary>
-    /// The groups that are withholding peak priority — every active group that does not grant
-    /// it. Empty for a member in no group at all, whose lack of priority is the club default
-    /// rather than any group's doing, so a refusal can name the group that actually stopped them.
+    /// The groups that are withholding peak priority — every active group that explicitly says
+    /// no. Empty when nothing withholds it and nothing grants it either, whose lack of priority
+    /// is the club default rather than any group's doing, so a refusal names only a group that
+    /// actually stopped them.
     /// </summary>
     public IReadOnlyList<string> PeakWithheldBy
-        => PeakPriority ? [] : Groups.Where(g => !g.PeakPriority).Select(g => g.Name).ToList();
+        => PeakPriority ? [] : Groups.Where(g => g.PeakPriority == false).Select(g => g.Name).ToList();
 
     /// <summary>
     /// The deprecated <c>member_class</c> wire value, derived for ONE release: a member of the
@@ -67,14 +71,17 @@ public sealed record MemberTariff(
 /// </para>
 ///
 /// <para>
-/// <b>Peak: granted only when the member is in at least one active group and EVERY active group
-/// they are in grants it.</b> "All groups grant" is vacuously true of no groups, and reading it
-/// that way would hand peak priority to every member nobody has classified — the opposite of the
-/// blueprint A.12 rule, under which a member was Regular until an admin said otherwise. So the
-/// empty set is "no", stated here because it is the one case the plan's phrase does not decide.
-/// The cost is known and accepted: a league member an admin adds to a pricing-only group that
-/// does not grant peak loses the priority. The refusal names that group (<see
-/// cref="MemberTariff.PeakWithheldBy"/>) so the member and the desk can see why.
+/// <b>Peak: granted when at least one active group GRANTS it and no active group WITHHOLDS it.</b>
+/// A group's <see cref="MemberGroup.PeakPriority"/> is tri-state exactly like its rate: true
+/// grants, false withholds, null has no say. "All groups grant" is read over the groups that
+/// have a say — a window-only or pricing-only group has none, so it can no more take a league
+/// member's priority away than a rate-less group can take their league rate (review D2-P1: with a
+/// two-state flag every group that predated D2 was born "withholding", and the migration took
+/// the priority from every league member who was also in any other group). An explicit false
+/// still wins over any number of grants — most restrictive — and the refusal names the group
+/// that said it (<see cref="MemberTariff.PeakWithheldBy"/>). No grant at all is "no": a member
+/// nobody has classified has no priority, as under blueprint A.12, where a member was Regular
+/// until an admin said otherwise.
 /// </para>
 ///
 /// <para>
@@ -147,7 +154,7 @@ public static class MemberTariffs
             if (rateGroup is null || rate < rateGroup.CreditsPerZar!.Value) rateGroup = group;
         }
 
-        var peak = ordered.Count > 0 && ordered.All(g => g.PeakPriority);
+        var peak = ordered.Any(g => g.PeakPriority == true) && ordered.All(g => g.PeakPriority != false);
         return new MemberTariff(rateGroup?.CreditsPerZar ?? tenantDefaultRate, rateGroup, peak, ordered);
     }
 }

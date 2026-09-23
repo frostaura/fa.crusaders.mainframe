@@ -38,8 +38,22 @@ public static class MemberGroupValidation
             return Bad("group_status_invalid", new { valid = new[] { "active", "archived" } });
         }
 
-        return RefusePricing(req.Pricing) ?? RefuseCaps(req.Caps) ?? RefuseWindows(req.Windows)
-            ?? RefuseRate(req.RateElement);
+        return RefusePricing(req.Pricing) ?? RefuseCaps(req.Caps) ?? RefuseWindows(req.Windows) ?? RefuseTariff(req);
+    }
+
+    /// <summary>D2's two tariff fields — split out so <see cref="Refuse"/> stays under the complexity gate.</summary>
+    private static IResult? RefuseTariff(MemberGroupRequest req)
+        => RefuseRate(req.RateElement) ?? RefusePeak(req.PeakElement);
+
+    /// <summary>
+    /// A group's peak say: absent, <c>true</c>, <c>false</c> or JSON <c>null</c> (no say). A string
+    /// "true" is refused rather than coerced — a console that sends one has a bug worth hearing.
+    /// </summary>
+    private static IResult? RefusePeak(System.Text.Json.JsonElement peak)
+    {
+        if (peak.ValueKind is System.Text.Json.JsonValueKind.Undefined or System.Text.Json.JsonValueKind.Null
+            or System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False) return null;
+        return Bad("group_peak_priority_invalid", new { valid = new object?[] { true, false, null } });
     }
 
     /// <summary>The top-up rate a group may carry — D2, the same bounds the old league setting had.</summary>

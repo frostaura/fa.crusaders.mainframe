@@ -1007,7 +1007,7 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
-                    b.Property<bool>("PeakPriority")
+                    b.Property<bool?>("PeakPriority")
                         .HasColumnType("boolean");
 
                     b.Property<int>("PriceMultiplierBps")

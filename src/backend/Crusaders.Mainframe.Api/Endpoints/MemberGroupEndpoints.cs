@@ -200,6 +200,7 @@ public static class MemberGroupEndpoints
 
         var group = await db.MemberGroups.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (group is null) return Results.NotFound();
+        if (RefuseArchivingSystemGroup(group, req) is { } refused) return refused;
 
         // Read BEFORE anything is applied, windows only when this PATCH names them — a PATCH
         // that leaves the windows alone must not record them as changed or unchanged.
@@ -250,6 +251,21 @@ public static class MemberGroupEndpoints
     }
 
     /// <summary>
+    /// The league group cannot be archived, as it cannot be deleted (review D2-P2). Since D2 it
+    /// carries the league top-up rate and peak priority, and an archived group contributes
+    /// nothing — so one bare <c>{"status":"archived"}</c> would move every league member to the
+    /// regular rate and out of the peak window, club-wide, with no reason asked for, while DELETE
+    /// of the same group is refused. Same refusal as the delete. The seeded non-league group has
+    /// no system key, carries no tariff, and stays archivable as it always was.
+    /// </summary>
+    private static IResult? RefuseArchivingSystemGroup(MemberGroup group, MemberGroupRequest req)
+    {
+        if (group.SystemKey is null || req.Status is null) return null;
+        if (!req.Status.Trim().Equals("archived", StringComparison.OrdinalIgnoreCase)) return null;
+        return Results.Json(new { error = "group_is_system_default" }, statusCode: StatusCodes.Status409Conflict);
+    }
+
+    /// <summary>
     /// One change-record row for one PATCH: <c>group.archived</c> when this edit archived the
     /// group, <c>group.updated</c> otherwise, and nothing at all when nothing changed.
     ///
@@ -284,10 +300,11 @@ public static class MemberGroupEndpoints
 
     private static void Apply(MemberGroup group, MemberGroupRequest req)
     {
-        // D2's two tariff fields. The rate distinguishes ABSENT (unchanged) from an explicit
-        // JSON null (back to the club's default rate), because both are things an admin means.
+        // D2's two tariff fields. Both distinguish ABSENT (unchanged) from an explicit JSON null
+        // (the rate: back to the club's default; peak: no say), because both are things an
+        // admin means.
         if (req.EffectiveCreditsPerZar is { } rate) group.CreditsPerZar = rate.Value;
-        if (req.EffectivePeakPriority is { } peak) group.PeakPriority = peak;
+        if (req.EffectivePeakPriority is { } peak) group.PeakPriority = peak.Value;
         if (req.Pricing is { } pricing)
         {
             group.PricingMode = pricing.Mode switch
@@ -379,7 +396,8 @@ public static class MemberGroupEndpoints
     }
 
     private static async Task<IResult> AddMembersAsync(
-        Guid id, GroupMembersRequest req, [AsParameters] GroupDeps deps, HttpContext ctx, CancellationToken ct)
+        Guid id, GroupMembersRequest req, [AsParameters] GroupDeps deps, TenantSettingsAccessor settings,
+        HttpContext ctx, CancellationToken ct)
     {
         var (db, tenant) = (deps.Db, deps.Tenant);
         var group = await db.MemberGroups.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
@@ -420,6 +438,7 @@ public static class MemberGroupEndpoints
         if (added.Count > 0)
         {
             await StageMembersChangedAsync(deps, ctx, group, added, removed: [], ct);
+            await StageMemberSideAsync(deps, ctx, settings, new GroupMoveSide(group, added, Joined: true), ct);
         }
 
         await db.SaveChangesAsync(ct);
@@ -427,7 +446,8 @@ public static class MemberGroupEndpoints
     }
 
     private static async Task<IResult> RemoveMemberAsync(
-        Guid id, Guid userId, [AsParameters] GroupDeps deps, HttpContext ctx, CancellationToken ct)
+        Guid id, Guid userId, [AsParameters] GroupDeps deps, TenantSettingsAccessor settings,
+        HttpContext ctx, CancellationToken ct)
     {
         var db = deps.Db;
         var row = await db.MemberGroupMembers.FirstOrDefaultAsync(m => m.GroupId == id && m.UserId == userId, ct);
@@ -435,10 +455,39 @@ public static class MemberGroupEndpoints
 
         var group = await db.MemberGroups.AsNoTracking().FirstAsync(x => x.Id == id, ct);
         await StageMembersChangedAsync(deps, ctx, group, added: [], removed: [userId], ct);
+        await StageMemberSideAsync(deps, ctx, settings, new GroupMoveSide(group, [userId], Joined: false), ct);
 
         db.MemberGroupMembers.Remove(row);
         await db.SaveChangesAsync(ct);
         return Results.NoContent();
+    }
+
+    /// <summary>
+    /// The member-side <c>member.groups_changed</c> row for each member this call moved into or
+    /// out of one group (review D2-P2): the group surface moves tariffs too, so it records under
+    /// the member exactly as <c>PUT /admin/members/{userId}/groups</c> does. Read BEFORE the
+    /// save, so "before" is the membership as it stood; "after" is the same set plus or minus
+    /// this group, resolved by the one tariff rule.
+    /// </summary>
+    private static async Task StageMemberSideAsync(
+        GroupDeps deps, HttpContext ctx, TenantSettingsAccessor settings, GroupMoveSide move, CancellationToken ct)
+    {
+        var s = await settings.GetAsync(ct);
+        var current = await MemberTariffs.GroupsOfManyAsync(deps.Db, move.UserIds, ct);
+        var counts = move.Group.Status == MemberGroupStatus.Active;
+        foreach (var userId in move.UserIds)
+        {
+            var had = current.TryGetValue(userId, out var list) ? list : [];
+            var will = move.Joined
+                ? (counts ? had.Append(MemberTariffs.From(move.Group)).ToList() : had)
+                : had.Where(g => g.Id != move.Group.Id).ToList();
+            MemberGroupAudit.Stage(deps.Db, new MemberGroupMove(
+                deps.Tenant.TenantId, ctx.User.Id() ?? Guid.Empty, userId,
+                Added: move.Joined ? [move.Group] : [], Removed: move.Joined ? [] : [move.Group],
+                Before: MemberTariffs.Resolve(had, s.CreditsPerZarRegular),
+                After: MemberTariffs.Resolve(will, s.CreditsPerZarRegular),
+                Reason: null));
+        }
     }
 
     /// <summary>
@@ -565,7 +614,11 @@ public static class MemberGroupEndpoints
 /// rather than a <c>decimal?</c> because the PATCH has to tell three things apart: ABSENT
 /// (unchanged), <c>null</c> (inherit the club's default rate again) and a number.
 /// </param>
-/// <param name="PeakPriority">D2's peak priority, <c>peakPriority</c> or <c>peak_priority</c>. Absent is unchanged.</param>
+/// <param name="PeakPriority">
+/// D2's peak say, <c>peakPriority</c> or <c>peak_priority</c>: <c>true</c> grants, <c>false</c>
+/// withholds, <c>null</c> has no say, ABSENT is unchanged — a <see cref="JsonElement"/> for the
+/// same three-way reason as the rate.
+/// </param>
 public sealed record MemberGroupRequest(
     string? Name = null,
     string? Description = null,
@@ -576,8 +629,8 @@ public sealed record MemberGroupRequest(
     string? Reason = null,
     JsonElement CreditsPerZar = default,
     [property: JsonPropertyName("credits_per_zar")] JsonElement CreditsPerZarSnake = default,
-    bool? PeakPriority = null,
-    [property: JsonPropertyName("peak_priority")] bool? PeakPrioritySnake = null)
+    JsonElement PeakPriority = default,
+    [property: JsonPropertyName("peak_priority")] JsonElement PeakPrioritySnake = default)
 {
     /// <summary>The rate element under either spelling; <see cref="JsonValueKind.Undefined"/> when neither was sent.</summary>
     public JsonElement RateElement
@@ -598,12 +651,31 @@ public sealed record MemberGroupRequest(
         }
     }
 
-    /// <summary>Peak priority under either spelling.</summary>
-    public bool? EffectivePeakPriority => PeakPriority ?? PeakPrioritySnake;
+    /// <summary>The peak element under either spelling; <see cref="JsonValueKind.Undefined"/> when neither was sent.</summary>
+    public JsonElement PeakElement
+        => PeakPriority.ValueKind != JsonValueKind.Undefined ? PeakPriority : PeakPrioritySnake;
+
+    /// <summary>
+    /// The peak say to write, or null when the body did not name one; a change whose
+    /// <see cref="PeakChange.Value"/> is null means "no say". Only called after
+    /// <see cref="MemberGroupValidation.Refuse"/> has accepted the element.
+    /// </summary>
+    // Block body: the lizard switch-expression trap in memory/gotchas.md.
+    public PeakChange? EffectivePeakPriority
+    {
+        get
+        {
+            if (PeakElement.ValueKind == JsonValueKind.Undefined) return null;
+            return PeakElement.ValueKind == JsonValueKind.Null ? new PeakChange(null) : new PeakChange(PeakElement.GetBoolean());
+        }
+    }
 }
 
 /// <summary>A top-up rate the request names: a number, or null for "inherit the club's default".</summary>
 public readonly record struct RateChange(decimal? Value);
+
+/// <summary>A peak say the request names: true grants, false withholds, null has no say.</summary>
+public readonly record struct PeakChange(bool? Value);
 
 /// <summary>
 /// What the group writes resolve from the container, bound as one parameter — the complexity
@@ -618,5 +690,8 @@ public sealed record GroupCapsRequest(int? MaxSlotsPerDay = null, int? MaxMinute
 public sealed record GroupWindowRequest(string Day, string Start, string End);
 
 public sealed record GroupMembersRequest(IReadOnlyList<Guid>? UserIds);
+
+/// <summary>Members moved into (<paramref name="Joined"/>) or out of one group, for the member-side audit row.</summary>
+internal sealed record GroupMoveSide(MemberGroup Group, IReadOnlyList<Guid> UserIds, bool Joined);
 
 public sealed record PreviewRequest(Guid UserId, DateOnly? Day, IReadOnlyList<Guid>? ProposedGroupIds);

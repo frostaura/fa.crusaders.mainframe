@@ -101,11 +101,14 @@ public sealed class MemberGroup : ITenantScoped
     public decimal? CreditsPerZar { get; set; }
 
     /// <summary>
-    /// Whether members of this group may book inside the club's peak window at any time
-    /// (blueprint A.12). A member has the priority only when EVERY active group they are in grants
-    /// it — see <see cref="Services.MemberTariffs"/>.
+    /// What this group says about booking inside the club's peak window at any time (blueprint
+    /// A.12): <c>true</c> grants it, <c>false</c> withholds it, <c>null</c> has no say — the same
+    /// "no opinion" state <see cref="CreditsPerZar"/> has. A member has the priority when at
+    /// least one of their active groups grants it and none withholds it — see
+    /// <see cref="Services.MemberTariffs"/>. Null is what every group that existed before D2
+    /// carries, because none of them had any say in peak priority then.
     /// </summary>
-    public bool PeakPriority { get; set; }
+    public bool? PeakPriority { get; set; }
 
     /// <summary>
     /// A stable handle for a group the system itself relies on, unique per tenant when set. Only

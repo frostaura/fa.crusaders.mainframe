@@ -102,7 +102,9 @@ public static class MemberGroupSeeder
             IsSystemDefault = true,
             SystemKey = league ? MemberGroupSystemKeys.League : null,
             CreditsPerZar = league ? DefaultLeagueCreditsPerZar : null,
-            PeakPriority = league,
+            // The non-league group has no say (null), not "withholds" — a league member who is
+            // also put in it must keep the priority the league group grants.
+            PeakPriority = league ? true : null,
         };
     }
 }

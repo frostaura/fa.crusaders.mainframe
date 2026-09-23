@@ -16,9 +16,14 @@ namespace Crusaders.Mainframe.Api.Migrations
     /// <b>This migration moves live economics, so it moves them to exactly where they were.</b>
     /// Every <c>LeagueOrSenior</c> member joins the club's league group, which carries the rate the
     /// club's <c>credits_per_zar_league</c> setting held and peak priority; everybody else is in no
-    /// new group and keeps the regular rate and no priority. The top-up rate and the peak answer
-    /// for every member are therefore the same the moment after this runs as the moment before —
-    /// <c>GroupsReplaceClassMigrationTests</c> pins that per member, on both branches below.
+    /// new group and keeps the regular rate and no priority. Every group that already existed
+    /// gets <c>PeakPriority = NULL</c> — no say — because before D2 no group had any say in peak
+    /// priority; a NOT NULL <c>false</c> would have made each of them WITHHOLD it, and every league
+    /// member who was also in an admin's "Coaches" group, or in a customised league group left
+    /// beside the new one, would have lost the priority on deploy. The top-up rate and the peak
+    /// answer for every member are therefore the same the moment after this runs as the moment
+    /// before — <c>GroupsReplaceClassMigrationTests</c> pins that per member, on every branch
+    /// below, including members in more than one group.
     /// </para>
     ///
     /// <para>
@@ -56,7 +61,10 @@ namespace Crusaders.Mainframe.Api.Migrations
     /// rate or a peak priority on any OTHER group has no class to go back to, and a pre-D2
     /// top-up row whose class was NULL comes back as 0 when it carries a quoted rate. The league
     /// group and its memberships are left in place, as an unrestricted inheriting group — which is
-    /// all a group was before this migration.
+    /// all a group was before this migration — and its <c>IsSystemDefault</c> goes back to what it
+    /// was: false on a group Up CREATED, and on an adopted group whose adoption row records it was
+    /// false. Otherwise the old schema, which has no other way to delete a system group, would
+    /// hold an admin's own "League" and every "League (migrated)" undeletable for ever.
     /// </para>
     /// </summary>
     public partial class GroupsReplaceClass : Migration
@@ -76,12 +84,12 @@ namespace Crusaders.Mainframe.Api.Migrations
                 type: "numeric(8,4)",
                 nullable: true);
 
+            // Nullable, no default: NULL is "no say", and it is what every existing group gets.
             migrationBuilder.AddColumn<bool>(
                 name: "PeakPriority",
                 table: "member_groups",
                 type: "boolean",
-                nullable: false,
-                defaultValue: false);
+                nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "SystemKey",
@@ -233,8 +241,10 @@ namespace Crusaders.Mainframe.Api.Migrations
                     "Area", "Action", "SubjectKind", "SubjectId", "SubjectLabel", "Reason", "BeforeJson", "AfterJson", "RequestId")
                   VALUES (gen_random_uuid(), t."Id", now(), system_actor, actor_name,
                     'group', 'group.updated', 'group', league_id, league_name, why,
-                    jsonb_build_object('credits_per_zar', NULL, 'peak_priority', false),
-                    jsonb_build_object('credits_per_zar', rate, 'peak_priority', true),
+                    jsonb_build_object('credits_per_zar', NULL, 'peak_priority', NULL,
+                      'is_system_default', cand."IsSystemDefault"),
+                    jsonb_build_object('credits_per_zar', rate, 'peak_priority', true,
+                      'is_system_default', true),
                     'migration:GroupsReplaceClass');
                 ELSE
                   -- No league group, or a customised one that is left exactly as it is.
@@ -265,7 +275,8 @@ namespace Crusaders.Mainframe.Api.Migrations
                   VALUES (gen_random_uuid(), t."Id", now(), system_actor, actor_name,
                     'group', 'group.created', 'group', league_id, league_name, why,
                     jsonb_build_object('name', league_name, 'status', 'active', 'pricing_mode', 'InheritCourt',
-                      'multiplier_bps', 10000, 'credits_per_zar', rate, 'peak_priority', true),
+                      'multiplier_bps', 10000, 'credits_per_zar', rate, 'peak_priority', true,
+                      'is_system_default', true),
                     'migration:GroupsReplaceClass');
                 END IF;
 
@@ -303,7 +314,9 @@ namespace Crusaders.Mainframe.Api.Migrations
 
         /// <summary>
         /// The Down back-fill: the class from ACTIVE league-group membership, a top-up row's class
-        /// from its locked group, and <c>credits_per_zar_league</c> from the league group's rate.
+        /// from its locked group, <c>credits_per_zar_league</c> from the league group's rate, and
+        /// <c>IsSystemDefault</c> back to false on every group Up created or adopted from a
+        /// non-system group — read off Up's own change-log rows, the only record of what it was.
         /// </summary>
         internal const string RebuildClassFromGroupsSql = """
             UPDATE memberships ms SET "MemberClass" = 1
@@ -326,6 +339,16 @@ namespace Crusaders.Mainframe.Api.Migrations
                SET "SettingsJson" = s."SettingsJson" || jsonb_build_object('credits_per_zar_league', g."CreditsPerZar")
               FROM member_groups g
              WHERE g."TenantId" = s."TenantId" AND g."SystemKey" = 'league' AND g."CreditsPerZar" IS NOT NULL;
+
+            UPDATE member_groups g SET "IsSystemDefault" = false
+             WHERE g."SystemKey" = 'league' AND g."IsSystemDefault"
+               AND EXISTS (
+                   SELECT 1 FROM admin_change_log c
+                    WHERE c."TenantId" = g."TenantId" AND c."SubjectId" = g."Id"
+                      AND c."RequestId" = 'migration:GroupsReplaceClass'
+                      AND (c."Action" = 'group.created'
+                           OR (c."Action" = 'group.updated'
+                               AND c."BeforeJson" ->> 'is_system_default' = 'false')));
             """;
     }
 }

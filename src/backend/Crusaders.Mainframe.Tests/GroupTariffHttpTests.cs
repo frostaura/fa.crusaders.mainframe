@@ -191,6 +191,164 @@ public sealed class GroupTariffHttpTests
     }
 
     /// <summary>
+    /// Review D2-P1: a group's peak say is tri-state like its rate — true grants, false withholds,
+    /// null (the default, and every pre-D2 group) has no say. A league member put into a group
+    /// with no say keeps the priority; an explicit false still wins and is named; null restores
+    /// it. Nothing but a JSON boolean or null is accepted.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_group_with_no_say_on_peak_never_withholds_it_and_an_explicit_no_still_wins()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, "d2tri");
+        var admin = club.AdminClient(factory);
+        var leagueId = await AddLeagueGroupAsync(factory, club, club.MemberUserId);
+        var juniorsId = await CreateAsync(admin, new { name = "Juniors" });
+        Assert.Equal(JsonValueKind.Null, (await GroupAsync(admin, juniorsId)).GetProperty("peak_priority").ValueKind);
+
+        var put = await admin.PutAsJsonAsync(MemberGroupsPath(club.MemberUserId), new { groupIds = new[] { leagueId, juniorsId } });
+        var tariff = (await put.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("tariff");
+        Assert.True(tariff.GetProperty("peak_priority").GetBoolean());
+        Assert.Equal(0, tariff.GetProperty("peak_withheld_by").GetArrayLength());
+
+        await admin.PatchAsJsonAsync($"{Groups}/{juniorsId}", new { peakPriority = false });
+        var rules = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{club.MemberUserId}/booking-rules");
+        Assert.False(rules.GetProperty("tariff").GetProperty("peak_priority").GetBoolean());
+        Assert.Equal("Juniors", rules.GetProperty("tariff").GetProperty("peak_withheld_by")[0].GetString());
+
+        var back = await admin.PatchAsJsonAsync($"{Groups}/{juniorsId}", new Dictionary<string, object?> { ["peak_priority"] = null });
+        Assert.Equal(HttpStatusCode.OK, back.StatusCode);
+        Assert.Equal(JsonValueKind.Null, (await GroupAsync(admin, juniorsId)).GetProperty("peak_priority").ValueKind);
+        rules = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{club.MemberUserId}/booking-rules");
+        Assert.True(rules.GetProperty("tariff").GetProperty("peak_priority").GetBoolean());
+
+        var update = (await ChangesAsync(factory, club.TenantId, juniorsId)).Last(r => r.Action == AdminChangeActions.GroupUpdated);
+        using (var before = JsonDocument.Parse(update.BeforeJson!))
+        using (var after = JsonDocument.Parse(update.AfterJson!))
+        {
+            Assert.False(before.RootElement.GetProperty("peak_priority").GetBoolean());
+            Assert.Equal(JsonValueKind.Null, after.RootElement.GetProperty("peak_priority").ValueKind);
+        }
+
+        foreach (var bad in new[] { "\"true\"", "1", "{}" })
+        {
+            var res = await admin.PatchAsync($"{Groups}/{juniorsId}",
+                new StringContent($"{{\"peak_priority\":{bad}}}", System.Text.Encoding.UTF8, "application/json"));
+            Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+            Assert.Equal("group_peak_priority_invalid", (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+        }
+    }
+
+    /// <summary>
+    /// Review D2-P2: archiving the league group would move every league member to the regular
+    /// rate and out of the peak window at a click. It is refused exactly as its delete is; the
+    /// group, its members' tariff and the change record are untouched. Other edits still work.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_league_group_cannot_be_archived()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, "d2arc");
+        var admin = club.AdminClient(factory);
+        var leagueId = await AddLeagueGroupAsync(factory, club, club.MemberUserId);
+
+        foreach (var status in new[] { "archived", " Archived " })
+        {
+            var res = await admin.PatchAsJsonAsync($"{Groups}/{leagueId}", new { status, reason = "Season over" });
+            Assert.Equal(HttpStatusCode.Conflict, res.StatusCode);
+            Assert.Equal("group_is_system_default", (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+        }
+
+        Assert.Equal("active", (await GroupAsync(admin, leagueId)).GetProperty("status").GetString());
+        var rules = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{club.MemberUserId}/booking-rules");
+        Assert.Equal(TestHost.LeagueCreditsPerZar, rules.GetProperty("tariff").GetProperty("top_up_credits_per_zar").GetDecimal());
+        Assert.True(rules.GetProperty("tariff").GetProperty("peak_priority").GetBoolean());
+        Assert.Empty(await ChangesAsync(factory, club.TenantId, leagueId));
+
+        // Renaming it is still an ordinary edit.
+        var rename = await admin.PatchAsJsonAsync($"{Groups}/{leagueId}", new { name = "League & seniors", status = "active" });
+        Assert.Equal(HttpStatusCode.OK, rename.StatusCode);
+    }
+
+    /// <summary>
+    /// Review D2-P2 (second reviewer): a tariff move is recorded UNDER THE MEMBER, as the deleted
+    /// class endpoint's <c>member.class_changed</c> was — one <c>member.groups_changed</c> audit
+    /// row per member moved, from the PUT and from the group surface alike, carrying the tariff
+    /// before and after, in this club only, and on the member's trace.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_group_move_is_recorded_under_the_member_with_the_tariff_it_moved()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, "d2aud");
+        var admin = club.AdminClient(factory);
+        var leagueId = await AddLeagueGroupAsync(factory, club);
+        var coachingId = await CreateAsync(admin, new { name = "Coaching", creditsPerZar = 2.0m });
+
+        var put = await admin.PutAsJsonAsync(MemberGroupsPath(club.MemberUserId),
+            new { groupIds = new[] { leagueId }, reason = "Registered for league" });
+        Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+        var add = await admin.PostAsJsonAsync($"{Groups}/{coachingId}/members", new { userIds = new[] { club.MemberUserId } });
+        Assert.Equal(HttpStatusCode.OK, add.StatusCode);
+        var remove = await admin.DeleteAsync($"{Groups}/{leagueId}/members/{club.MemberUserId}");
+        Assert.Equal(HttpStatusCode.NoContent, remove.StatusCode);
+        // The same set again moves nobody and records nothing.
+        await admin.PutAsJsonAsync(MemberGroupsPath(club.MemberUserId), new { groupIds = new[] { coachingId } });
+
+        List<AuditLog> rows;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+            rows = await db.AuditLogs.IgnoreQueryFilters()
+                .Where(a => a.SubjectUserId == club.MemberUserId && a.Action == "member.groups_changed")
+                .OrderBy(a => a.CreatedAt).ToListAsync();
+        }
+        Assert.Equal(3, rows.Count);
+        Assert.All(rows, r => Assert.Equal(club.TenantId, r.TenantId));
+        Assert.All(rows, r => Assert.Equal(club.AdminUserId, r.ActorUserId));
+
+        // (rate before, rate after, peak before, peak after, group added, group removed)
+        var expected = new (decimal? RateBefore, decimal RateAfter, bool PeakBefore, bool PeakAfter, Guid? Added, Guid? Removed)[]
+        {
+            (null, TestHost.LeagueCreditsPerZar, false, true, leagueId, null),
+            (TestHost.LeagueCreditsPerZar, 2.0m, true, true, coachingId, null),
+            (2.0m, 2.0m, true, false, null, leagueId),
+        };
+        for (var i = 0; i < expected.Length; i++)
+        {
+            using var d = JsonDocument.Parse(rows[i].DetailsJson!);
+            var (rateBefore, rateAfter, peakBefore, peakAfter, added, removed) = expected[i];
+            var tb = d.RootElement.GetProperty("tariff_before");
+            var ta = d.RootElement.GetProperty("tariff_after");
+            if (rateBefore is { } rb) Assert.Equal(rb, tb.GetProperty("top_up_credits_per_zar").GetDecimal());
+            Assert.Equal(rateAfter, ta.GetProperty("top_up_credits_per_zar").GetDecimal());
+            Assert.Equal(peakBefore, tb.GetProperty("peak_priority").GetBoolean());
+            Assert.Equal(peakAfter, ta.GetProperty("peak_priority").GetBoolean());
+            Assert.Equal(added is null ? 0 : 1, d.RootElement.GetProperty("added").GetArrayLength());
+            Assert.Equal(removed is null ? 0 : 1, d.RootElement.GetProperty("removed").GetArrayLength());
+            if (added is { } a) Assert.Equal(a, d.RootElement.GetProperty("added")[0].GetProperty("id").GetGuid());
+            if (removed is { } r) Assert.Equal(r, d.RootElement.GetProperty("removed")[0].GetProperty("id").GetGuid());
+        }
+        using (var first = JsonDocument.Parse(rows[0].DetailsJson!))
+        {
+            Assert.Equal("Registered for league", first.RootElement.GetProperty("reason").GetString());
+            Assert.NotEqual(TestHost.LeagueCreditsPerZar,
+                first.RootElement.GetProperty("tariff_before").GetProperty("top_up_credits_per_zar").GetDecimal());
+        }
+
+        // Answerable from the member's side: the trace carries the rows, naming the action.
+        var trace = await admin.GetFromJsonAsync<JsonElement>($"/api/v1/admin/members/{club.MemberUserId}/trace");
+        Assert.Equal(3, trace.GetProperty("events").EnumerateArray()
+            .Count(e => e.GetProperty("headline").GetString()!.Contains("member.groups_changed", StringComparison.Ordinal)));
+    }
+
+    /// <summary>
     /// The class endpoint's replacement: the WHOLE set in one PUT, recorded one row per group it
     /// changed, answering with the tariff the member now has. An archived group may be kept but
     /// not joined; an unknown one is refused; the old class route is gone.

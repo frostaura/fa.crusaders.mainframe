@@ -22,7 +22,10 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// <b>Recorded per group, in the vocabulary the groups surface already writes.</b> One
 /// <c>group.members_changed</c> row for every group whose membership this call changed, shaped
 /// exactly like the one <c>MemberGroupEndpoints</c> stages, so the change record reads the same
-/// whichever screen moved the person. The rows flush with the membership rows they describe.
+/// whichever screen moved the person. <b>And once under the member</b>: one
+/// <c>member.groups_changed</c> audit row (<see cref="MemberGroupAudit"/>) with the tariff before
+/// and after, so the member's trace answers who moved them and what it did to their rate. All of
+/// it flushes with the membership rows it describes.
 /// </para>
 ///
 /// <para>
@@ -67,6 +70,8 @@ public static class AdminMemberGroupsEndpoint
 
         if (Refuse(wanted, current, groups) is { } refusal) return refusal;
 
+        var s = await settings.GetAsync(ct);
+        var before = await MemberTariffs.ForAsync(db, userId, s, ct);
         var added = wanted.Where(id => current.All(c => c.GroupId != id)).ToList();
         var removed = current.Where(c => !wanted.Contains(c.GroupId)).ToList();
 
@@ -83,9 +88,22 @@ public static class AdminMemberGroupsEndpoint
         db.MemberGroupMembers.RemoveRange(removed);
 
         await StageAsync(deps, ctx, new MembershipMove(userId, added, removed.Select(r => r.GroupId).ToList(), groups, req.Reason), ct);
+        if (added.Count > 0 || removed.Count > 0)
+        {
+            // The member-side row (review D2-P2), with the tariff the new set resolves to by the
+            // same rule every reader uses — computed, not re-read, so it flushes with the move.
+            var after = MemberTariffs.Resolve(
+                wanted.Select(id => groups[id]).Where(g => g.Status == MemberGroupStatus.Active)
+                    .Select(MemberTariffs.From).ToList(),
+                s.CreditsPerZarRegular);
+            MemberGroupAudit.Stage(db, new MemberGroupMove(
+                deps.Tenant.TenantId, ctx.User.Id() ?? Guid.Empty, userId,
+                added.Select(id => groups[id]).ToList(), removed.Select(r => groups[r.GroupId]).ToList(),
+                before, after, req.Reason));
+        }
         await db.SaveChangesAsync(ct);
 
-        var tariff = await MemberTariffs.ForAsync(db, userId, await settings.GetAsync(ct), ct);
+        var tariff = await MemberTariffs.ForAsync(db, userId, s, ct);
         return Results.Ok(new
         {
             user_id = userId,

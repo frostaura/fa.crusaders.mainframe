@@ -13,7 +13,7 @@ namespace Crusaders.Mainframe.Tests;
 /// </summary>
 public class MemberTariffsTests
 {
-    private static TariffGroup G(string name, decimal? rate, bool peak, int sort = 0, string? key = null)
+    private static TariffGroup G(string name, decimal? rate, bool? peak, int sort = 0, string? key = null)
         => new(Guid.NewGuid(), name, key, rate, peak, sort);
 
     [Fact]
@@ -60,6 +60,32 @@ public class MemberTariffsTests
         Assert.Equal(first, MemberTariffs.Resolve([second, first], 1.6m).RateGroup);
     }
 
+    /// <summary>
+    /// Review D2-P1: a group with no say (null) neither grants nor withholds. A league member in a
+    /// window-only group keeps the priority; a member whose groups ALL have no say has none; a
+    /// single explicit false beats any number of grants and is the only group named.
+    /// </summary>
+    [Fact]
+    public void A_group_with_no_say_neither_grants_nor_withholds_peak()
+    {
+        var league = G("League", 2.4m, peak: true, key: MemberGroupSystemKeys.League);
+        var juniors = G("Juniors", null, peak: null, sort: 1);
+        var coaching = G("Coaching", null, peak: false, sort: 2);
+        var seniors = G("Seniors", null, peak: true, sort: 3);
+
+        var withNoSay = MemberTariffs.Resolve([league, juniors], 1.6m);
+        Assert.True(withNoSay.PeakPriority);
+        Assert.Empty(withNoSay.PeakWithheldBy);
+
+        var onlyNoSay = MemberTariffs.Resolve([juniors], 1.6m);
+        Assert.False(onlyNoSay.PeakPriority);
+        Assert.Empty(onlyNoSay.PeakWithheldBy); // nobody withheld it; nobody granted it
+
+        var oneNo = MemberTariffs.Resolve([league, seniors, juniors, coaching], 1.6m);
+        Assert.False(oneNo.PeakPriority);
+        Assert.Equal(["Coaching"], oneNo.PeakWithheldBy);
+    }
+
     [Fact]
     public void Peak_priority_needs_every_group_and_the_refusal_names_the_ones_withholding_it()
     {
@@ -90,6 +116,29 @@ public class MemberTariffsTests
         Assert.Equal(2.8m, t.TopUpRate);
         Assert.True(t.PeakPriority);
         Assert.Equal("Regular", t.LegacyMemberClass);
+    }
+
+    /// <summary>
+    /// A NEW club's seeded pair: the league group grants peak at the league rate; the non-league
+    /// group has NO SAY (null) — so a league member an admin also drops into it keeps the priority.
+    /// </summary>
+    [Fact]
+    public async Task The_seeded_non_league_group_has_no_say_on_peak()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var tenantId = Guid.NewGuid();
+
+        await MemberGroupSeeder.EnsureAsync(db, tenantId);
+
+        var seeded = await db.MemberGroups.IgnoreQueryFilters().Where(g => g.TenantId == tenantId).ToListAsync();
+        var league = Assert.Single(seeded, g => g.SystemKey == MemberGroupSystemKeys.League);
+        var other = Assert.Single(seeded, g => g.SystemKey is null);
+        Assert.True(league.PeakPriority);
+        Assert.Equal(MemberGroupSeeder.DefaultLeagueCreditsPerZar, league.CreditsPerZar);
+        Assert.Null(other.PeakPriority);
+        Assert.True(MemberTariffs.Resolve([MemberTariffs.From(league), MemberTariffs.From(other)], 1.6m).PeakPriority);
     }
 
     // ---- the two readers, on the in-memory host -------------------------------------------
