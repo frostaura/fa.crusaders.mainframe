@@ -571,6 +571,7 @@ app.MapAdminDoorEndpoints();
 app.MapAdminLedgerEndpoints();
 app.MapAdminChangeEndpoints();
 app.MapAdminMemberTraceEndpoints();
+app.MapAdminMemberDetailEndpoints();
 app.MapAdminBulkBookingEndpoints();
 app.MapAdminScheduleEndpoints();
 app.MapMeProfileEndpoints();
