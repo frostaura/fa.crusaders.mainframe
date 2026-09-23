@@ -176,6 +176,10 @@ internal sealed class PreferencesPatch
             {
                 return (null, Results.BadRequest(new { error, max = UserPreferencesRules.MaxOptouts }));
             }
+            if (kinds!.FirstOrDefault(AdminEventCatalogue.IsSecurity) is { } locked)
+            {
+                return (null, Results.BadRequest(new { error = UserPreferencesRules.NotificationKindNotOptional, kind = locked }));
+            }
             patch._optoutsJson = JsonSerializer.Serialize(kinds);
         }
 

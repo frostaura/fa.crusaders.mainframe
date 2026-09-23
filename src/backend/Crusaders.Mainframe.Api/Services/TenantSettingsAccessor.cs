@@ -131,6 +131,15 @@ public sealed class TenantSettingsAccessor
             DeviceErrorMaxOpenRows = TryInt(root, "device_error_max_open_rows", MonitoringSettings.DefaultMaxOpenRows),
             DeviceErrorIngestPerMinute = TryInt(root, "device_error_ingest_per_minute", MonitoringSettings.DefaultIngestPerMinute),
 
+            // The admin notifier's four (R23). Raw here, bounded by AdminNotificationSettings at
+            // each reader, on the split every block above keeps.
+            FaultSpikeCount = TryInt(root, "fault_spike_count", AdminNotificationSettings.DefaultFaultSpikeCount),
+            FaultSpikeMinutes = TryInt(root, "fault_spike_minutes", AdminNotificationSettings.DefaultFaultSpikeMinutes),
+            ApplicationReminderHours = TryInt(
+                root, "application_reminder_hours", AdminNotificationSettings.DefaultApplicationReminderHours),
+            AdminNotificationRetentionDays = TryInt(
+                root, "admin_notification_retention_days", AdminNotificationSettings.DefaultRetentionDays),
+
             SseKeepaliveSeconds = TryInt(root, "sse_keepalive_seconds", RealtimeSettings.DefaultKeepaliveSeconds),
             ControlBoardResyncSeconds = TryInt(root, "control_board_resync_seconds", RealtimeSettings.DefaultResyncSeconds),
             ControlBoardStaleMultiplier = TryInt(root, "control_board_stale_multiplier", RealtimeSettings.DefaultStaleMultiplier),
@@ -521,6 +530,20 @@ public sealed record TenantSettingsView(
 
     /// <summary>Reports one board may record per minute. Read via <see cref="MonitoringSettings.IngestPerMinute"/>.</summary>
     public int DeviceErrorIngestPerMinute { get; init; } = MonitoringSettings.DefaultIngestPerMinute;
+
+    // ---- The admin notifier's four (R23) ----
+
+    /// <summary>Open faults inside the window that make a spike. Read via <see cref="AdminNotificationSettings.FaultSpikeCount"/>.</summary>
+    public int FaultSpikeCount { get; init; } = AdminNotificationSettings.DefaultFaultSpikeCount;
+
+    /// <summary>The fault-spike window, minutes. Read via <see cref="AdminNotificationSettings.FaultSpikeMinutes"/>.</summary>
+    public int FaultSpikeMinutes { get; init; } = AdminNotificationSettings.DefaultFaultSpikeMinutes;
+
+    /// <summary>Hours an application may wait before the admins are reminded. Read via <see cref="AdminNotificationSettings.ApplicationReminderHours"/>.</summary>
+    public int ApplicationReminderHours { get; init; } = AdminNotificationSettings.DefaultApplicationReminderHours;
+
+    /// <summary>Days a finished admin notice stays on the feed. Read via <see cref="AdminNotificationSettings.RetentionDays"/>.</summary>
+    public int AdminNotificationRetentionDays { get; init; } = AdminNotificationSettings.DefaultRetentionDays;
 
     // ---- The live streams' seven numbers ----
 

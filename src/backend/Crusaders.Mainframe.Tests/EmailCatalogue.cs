@@ -132,6 +132,20 @@ internal static class EmailCatalogue
             ("AdminRoleRevokedNoReason", EmailTemplates.AdminRoleRevoked(club, to, adminRevoked with { Reason = null })),
             ("AdminRoleChangedNotice", EmailTemplates.AdminRoleChangedNotice(club, to, adminGranted)),
             ("AdminRoleChangedNoticeRevoked", EmailTemplates.AdminRoleChangedNotice(club, to, adminRevoked)),
+
+            // R23's admin notices — everything the notifier sends that nothing sent before it.
+            ("AdminApplicationsWaiting", EmailTemplates.AdminApplicationsWaiting(club, to, new ApplicationsWaiting(3, "Jason Fourie", 31, ConsoleUrl))),
+            ("AdminApplicationsWaitingOne", EmailTemplates.AdminApplicationsWaiting(club, to, new ApplicationsWaiting(1, "Jason Fourie", 26, ConsoleUrl))),
+            ("AdminFaultSpike", EmailTemplates.AdminFaultSpike(club, to, new FaultSpike(6, 15, ["box-2ad001", "gate-44c101"], ConsoleUrl))),
+            ("AdminDoorRefusalSpike", EmailTemplates.AdminDoorRefusalSpike(club, to, new DoorRefusalSpike("Front door", "gate-44c101", "front-door", 9, 20, ConsoleUrl))),
+            ("AdminTopUpFailed", EmailTemplates.AdminTopUpFailed(club, to, new TopUpFailure("amount_mismatch", 100m, "Thandi Mokoena", "pf-2026-09-22-0045", symbol, ConsoleUrl))),
+            ("AdminTopUpFailedUnsigned", EmailTemplates.AdminTopUpFailed(club, to, new TopUpFailure("signature_invalid", null, null, null, symbol, ConsoleUrl))),
+            ("AdminWebhookDisabled", EmailTemplates.AdminWebhookDisabled(club, to, new WebhookDisabled("https://hooks.riverside.review.test", "Results board", 6, false, ConsoleUrl))),
+            ("AdminWebhookDisabledBlocked", EmailTemplates.AdminWebhookDisabled(club, to, new WebhookDisabled("http://10.0.0.4", null, 1, true, ConsoleUrl))),
+            ("AdminScheduleConflict", EmailTemplates.AdminScheduleConflict(club, to, new ScheduleConflictNotice("Tuesday league", "2026-10-06", 2, ["2026-10-06", "2026-10-13"], ConsoleUrl))),
+            ("AdminOverdraftAuthorised", EmailTemplates.AdminOverdraftAuthorised(club, to, new OverdraftNotice("Jason Fourie", "Thandi Mokoena", false, "Court 3", "Tue 29 Sep, 18:00", 24m, -16m, ConsoleUrl))),
+            ("AdminOverdraftAuthorisedSelf", EmailTemplates.AdminOverdraftAuthorised(club, to, new OverdraftNotice("Jason Fourie", "Jason Fourie", true, "Court 3", "Tue 29 Sep, 18:00", 24m, -16m, ConsoleUrl))),
+            ("AdminCodeForgerySuspected", EmailTemplates.AdminCodeForgerySuspected(club, to, new ForgeryNotice("box-2ad001", "Thandi Mokoena", "offline half verified, online half did not", ConsoleUrl))),
         ];
     }
 

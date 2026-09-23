@@ -1025,6 +1025,7 @@ public sealed class BookingService
 
         if (overdrawn)
         {
+            await StageOverdraftNoticeAsync(spec, openingBalance, label, ct);
             await _changes.StageAsync(new AdminChange(
                 Action: AdminChangeActions.BookingOverdraftAuthorised,
                 ActorUserId: actorId,
@@ -1042,6 +1043,32 @@ public sealed class BookingService
                     self = actorId == booking.UserId,
                 }), ct);
         }
+    }
+
+    /// <summary>
+    /// Every other admin is told when an admin takes a balance below zero (R23) — staged here,
+    /// beside the change-log row, after the slot race has already been decided, so it flushes in
+    /// the same save as the booking and the debit and commits with them in the payer-lock
+    /// transaction; a save that is refused takes it down with them. The acting admin is not mailed;
+    /// they are looking at the result. The figures are credits and the balance after is the one
+    /// the change record states.
+    /// </summary>
+    private async Task StageOverdraftNoticeAsync(NewBooking spec, decimal openingBalance, string? memberName, CancellationToken ct)
+    {
+        var booking = spec.Row;
+        var actorId = booking.ActorUserId;
+        var actorName = PersonNames.Of(actorId, await PersonNames.ForAsync(_db, [actorId], ct)) ?? "An administrator";
+        var payload = new OverdraftPayload(
+            BookingId: booking.Id,
+            ActorName: actorName,
+            MemberName: memberName ?? "a member",
+            Self: actorId == booking.UserId,
+            CourtName: spec.Court.Name,
+            StartsAtLocal: await StartsAtLocalAsync(booking.StartsAt, ct),
+            AmountCredits: spec.TotalCost,
+            BalanceAfterCredits: openingBalance - spec.TotalCost);
+        AdminNotices.Stage(_db, _tenant.TenantId,
+            AdminNotices.OverdraftAuthorised(booking.Id, actorId, booking.UserId ?? actorId, payload));
     }
 
     /// <summary>

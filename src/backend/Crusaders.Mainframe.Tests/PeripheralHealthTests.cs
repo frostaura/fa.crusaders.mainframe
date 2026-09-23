@@ -30,8 +30,30 @@ namespace Crusaders.Mainframe.Tests;
 /// </summary>
 public class PeripheralHealthTests
 {
-    private static PeripheralHealthWorker CreateWorker(TestHost host) =>
-        new(host.Services, host.Services.GetRequiredService<IEventBus>(), NullLogger<PeripheralHealthWorker>.Instance);
+    private static SweepThenDeliver CreateWorker(TestHost host) =>
+        new(host, new(host.Services, host.Services.GetRequiredService<IEventBus>(), NullLogger<PeripheralHealthWorker>.Instance));
+
+    /// <summary>
+    /// The real worker, followed by one pass of the admin notice outbox at the same instant.
+    ///
+    /// <para>
+    /// The admin alert is no longer sent BY the sweep: it is staged beside the outage row and
+    /// mailed by the outbox (R23). Every assertion in this file about what the club's admins
+    /// were mailed is therefore an assertion about the pair, and delivering at the tick's own
+    /// instant is what lets a test that drives the clock hours ahead still see its mail — a
+    /// notice stamped three hours from now is not due at the wall clock.
+    /// </para>
+    /// </summary>
+    private sealed class SweepThenDeliver(TestHost host, PeripheralHealthWorker worker)
+    {
+        public Task TickAsync(CancellationToken ct) => TickAsync(DateTimeOffset.UtcNow, ct);
+
+        public async Task TickAsync(DateTimeOffset now, CancellationToken ct)
+        {
+            await worker.TickAsync(now, ct);
+            await host.DeliverAdminNoticesAsync(now);
+        }
+    }
 
     private static NoShowWorker CreateNoShowWorker(TestHost host) =>
         new(host.Services, host.Services.GetRequiredService<IEventBus>(), NullLogger<NoShowWorker>.Instance);
@@ -119,6 +141,31 @@ public class PeripheralHealthTests
         Assert.Equal(host.Tenant.Id, evt.TenantId);
         Assert.Equal(HeartbeatCadence.OfflineAfterSeconds(TenantSettingsView.DefaultHeartbeatSeconds),
             evt.Data["offline_after_seconds"]);
+    }
+
+    /// <summary>
+    /// R23: the alert is an outbox row staged beside the outage row, keyed on that row — so each
+    /// edge of each outage is one notice, and a second tick has nothing to add.
+    /// </summary>
+    [Fact]
+    public async Task The_alert_is_an_admin_notice_keyed_on_the_outage_row()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var box = await AddBoxAsync(host, db, DateTimeOffset.UtcNow.AddMinutes(-20));
+
+        var worker = new PeripheralHealthWorker(host.Services, host.Services.GetRequiredService<IEventBus>(), NullLogger<PeripheralHealthWorker>.Instance);
+        await worker.TickAsync(default);
+        await worker.TickAsync(default);
+
+        var outage = await db.DeviceOutages.AsNoTracking().SingleAsync(o => o.DeviceId == box.Id);
+        var notice = await db.AdminNotifications.AsNoTracking().SingleAsync();
+        Assert.Equal(AdminEventCatalogue.DeviceOffline, notice.Kind);
+        Assert.Equal($"device.offline:{outage.Id:N}", notice.DedupeKey);
+        Assert.Equal(AdminNotificationState.Pending, notice.State);
+        // Nothing is mailed by the sweep itself any more — only by the outbox.
+        Assert.Empty(host.EmailService.Sent);
     }
 
     /// <summary>

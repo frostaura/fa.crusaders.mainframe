@@ -46,6 +46,11 @@ public sealed class DoorAuditActionsTests
         // A court box's unrecognised scan, filed apart from a door's so it can never be
         // counted as a refused door scan. See DeviceEventEndpoints.CourtUnknownScanKind.
         "device.court_unknown_scan",
+
+        // Not audit actions at all: three ADMIN NOTICE kinds (R23), which share the dotted
+        // namespace because they are about boards. They are written to admin_notifications and
+        // never to audit_log, so no door surface reads them. See AdminEventCatalogue.
+        "device.offline", "device.recovered", "device.fault_spike",
     ];
 
     private static string ApiSourceRoot()

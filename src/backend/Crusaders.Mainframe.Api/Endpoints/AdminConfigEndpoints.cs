@@ -130,6 +130,12 @@ public static class AdminConfigEndpoints
                 device_error_max_open_rows = MonitoringSettings.MaxOpenRows(defaults),
                 device_error_ingest_per_minute = MonitoringSettings.IngestPerMinute(defaults),
 
+                // The admin notifier's four (R23), from the clamped readers for the same reason.
+                fault_spike_count = AdminNotificationSettings.FaultSpikeCount(defaults),
+                fault_spike_minutes = AdminNotificationSettings.FaultSpikeMinutes(defaults),
+                application_reminder_hours = AdminNotificationSettings.ApplicationReminderHours(defaults),
+                admin_notification_retention_days = AdminNotificationSettings.RetentionDays(defaults),
+
                 sse_keepalive_seconds = (int)RealtimeSettings.KeepAlive(defaults).TotalSeconds,
                 control_board_resync_seconds = RealtimeSettings.ResyncSeconds(defaults),
                 control_board_stale_multiplier = RealtimeSettings.StaleMultiplier(defaults),
@@ -261,7 +267,7 @@ public static class AdminConfigEndpoints
             var realtimeError = ValidateRealtime(req);
             if (realtimeError is not null) return Results.BadRequest(realtimeError);
 
-            var liveError = ValidateLiveSettings(req);
+            var liveError = ValidateLiveSettings(req) ?? ValidateNotifierSettings(req);
             if (liveError is not null) return Results.BadRequest(new { error = liveError });
             var adminError = ValidateAdminSettings(req);
             if (adminError is not null) return Results.BadRequest(new { error = adminError });
@@ -364,6 +370,7 @@ public static class AdminConfigEndpoints
             WriteOptionalDoorSettings(doc, req);
             WriteOptionalBoxSettings(doc, req);
             WriteOptionalLiveSettings(doc, req);
+            WriteOptionalNotifierSettings(doc, req);
             WriteOptionalAdminSettings(doc, req);
             WriteOptionalMemberLimits(doc, req);
             WriteOptionalRealtime(doc, req);
@@ -765,6 +772,33 @@ public static class AdminConfigEndpoints
         if (OutOfRange(req.RealtimePollSecondsControlBoard, RealtimeSettings.MinPollSecondsControlBoard, RealtimeSettings.MaxPollSecondsControlBoard))
             return "realtime_poll_control_board_out_of_range";
         return null;
+    }
+
+    /// <summary>
+    /// Bounds on the admin notifier's four (R23), from <see cref="AdminNotificationSettings"/>'
+    /// own constants so the number an admin is refused at and the number the notifier clamps to
+    /// cannot drift apart.
+    /// </summary>
+    private static string? ValidateNotifierSettings(UpdateSettingsRequest req)
+    {
+        if (OutOfRange(req.FaultSpikeCount, AdminNotificationSettings.MinFaultSpikeCount, AdminNotificationSettings.MaxFaultSpikeCount))
+            return "fault_spike_count_out_of_range";
+        if (OutOfRange(req.FaultSpikeMinutes, AdminNotificationSettings.MinFaultSpikeMinutes, AdminNotificationSettings.MaxFaultSpikeMinutes))
+            return "fault_spike_minutes_out_of_range";
+        if (OutOfRange(req.ApplicationReminderHours, AdminNotificationSettings.MinApplicationReminderHours, AdminNotificationSettings.MaxApplicationReminderHours))
+            return "application_reminder_hours_out_of_range";
+        if (OutOfRange(req.AdminNotificationRetentionDays, AdminNotificationSettings.MinRetentionDays, AdminNotificationSettings.MaxRetentionDays))
+            return "admin_notification_retention_days_out_of_range";
+        return null;
+    }
+
+    /// <summary>Same omitted-means-unchanged rule as the economics keys, for the notifier's four.</summary>
+    private static void WriteOptionalNotifierSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
+    {
+        if (req.FaultSpikeCount is { } count) doc["fault_spike_count"] = ToElement(count);
+        if (req.FaultSpikeMinutes is { } minutes) doc["fault_spike_minutes"] = ToElement(minutes);
+        if (req.ApplicationReminderHours is { } hours) doc["application_reminder_hours"] = ToElement(hours);
+        if (req.AdminNotificationRetentionDays is { } days) doc["admin_notification_retention_days"] = ToElement(days);
     }
 
     /// <summary>
@@ -1254,6 +1288,13 @@ public sealed record UpdateSettingsRequest(
     [property: JsonPropertyName("device_error_retention_days")] int? DeviceErrorRetentionDays = null,
     [property: JsonPropertyName("device_error_max_open_rows")] int? DeviceErrorMaxOpenRows = null,
     [property: JsonPropertyName("device_error_ingest_per_minute")] int? DeviceErrorIngestPerMinute = null,
+
+    // The admin notifier's four (R23). Snake-case only, for the reason the block above gives:
+    // nothing has ever sent them under another spelling.
+    [property: JsonPropertyName("fault_spike_count")] int? FaultSpikeCount = null,
+    [property: JsonPropertyName("fault_spike_minutes")] int? FaultSpikeMinutes = null,
+    [property: JsonPropertyName("application_reminder_hours")] int? ApplicationReminderHours = null,
+    [property: JsonPropertyName("admin_notification_retention_days")] int? AdminNotificationRetentionDays = null,
 
     [property: JsonPropertyName("control_board_resync_seconds")] int? ControlBoardResyncSeconds = null,
     [property: JsonPropertyName("control_board_stale_multiplier")] int? ControlBoardStaleMultiplier = null,

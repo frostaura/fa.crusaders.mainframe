@@ -179,6 +179,13 @@ public sealed class AuthService
             Action = "member.registered",
         });
 
+        // The club's admins are told through the outbox, staged in THIS save (R23). It used to
+        // be a loop of background sends after the commit, and a process that died in between —
+        // or a mail server that refused one address — lost the only cue the desk gets that
+        // somebody is waiting. Rolled back with everything else on the duplicate paths below.
+        AdminNotices.Stage(_db, _tenant.TenantId,
+            AdminNotices.MemberRegistered(user.Id, fullName, email, membershipNumber));
+
         // The pre-checks above close the ordinary case; this closes the race between two
         // applicants claiming the same number in the same second. Same answer either way, so
         // the caller never has to know which one it was.

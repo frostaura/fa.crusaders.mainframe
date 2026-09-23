@@ -117,6 +117,32 @@ public static partial class EmailChrome
         """;
 
     /// <summary>
+    /// A subject as one header line: every control character — CR and LF above all — becomes a
+    /// space, collapsed into any space beside it. A subject with no control character is
+    /// returned untouched.
+    ///
+    /// <para>
+    /// Subjects carry names people type: an applicant's full name, a member's, a schedule's. The
+    /// name rules check length only, so a name holding a line break reached
+    /// <c>MailMessage.Subject</c>, which refuses CR/LF with an exception — that message could
+    /// never be sent, and the admin outbox retried it for hours before giving up. Applied here
+    /// for every templated message and again by the SMTP transport for anything that is not.
+    /// </para>
+    /// </summary>
+    public static string SubjectLine(string subject)
+    {
+        if (string.IsNullOrEmpty(subject) || !subject.Any(char.IsControl)) return subject;
+        var sb = new StringBuilder(subject.Length);
+        foreach (var c in subject)
+        {
+            var blank = char.IsControl(c) || c == ' ';
+            if (blank && (sb.Length == 0 || sb[^1] == ' ')) continue;
+            sb.Append(blank ? ' ' : c);
+        }
+        return sb.ToString().TrimEnd(' ');
+    }
+
+    /// <summary>
     /// A club's message, as a message — both bodies, from one set of blocks.
     /// </summary>
     /// <param name="club">
@@ -134,7 +160,7 @@ public static partial class EmailChrome
         EmailAttachment? attachment = null,
         bool highPriority = false) => new(
             To: to,
-            Subject: content.Subject,
+            Subject: SubjectLine(content.Subject),
             HtmlBody: Html(club, content),
             PlainBody: Text(club, content),
             Attachments: attachment is null ? null : [attachment],
