@@ -226,7 +226,7 @@ public static class WalletEndpoints
         [AsParameters] AdjustServices services,
         CancellationToken ct)
     {
-        var (ledger, db, tenant, email, loggerFactory, _) = services;
+        var (ledger, db, tenant, email, loggerFactory, _, _) = services;
         var logger = loggerFactory.CreateLogger("CreditAdjustment");
 
         var (refusal, kind) = RefuseRequest(req, logger);
@@ -310,6 +310,32 @@ public static class WalletEndpoints
                 idempotency_key = req.IdempotencyKey,
             }),
         });
+
+        // The club's undeletable record, in the same SaveChanges as the audit row. The
+        // vocabulary has carried credit.adjusted and credit.topped_up since the change record
+        // was built, and nothing wrote either — so the one by-hand money movement in the
+        // product was the one admin action the change record could not show. audit_log has a
+        // delete path; this table does not. A top-up code files as credit.topped_up because it
+        // counts as revenue and a club reads the two differently; every other code is an
+        // adjustment. Both require a reason, which RefuseRequest already demands.
+        await services.Changes.StageAsync(new AdminChange(
+            Action: kind!.Value.Type == LedgerEntryType.AdminTopUp
+                ? AdminChangeActions.CreditToppedUp
+                : AdminChangeActions.CreditAdjusted,
+            ActorUserId: ctx.User.Id() ?? Guid.Empty,
+            SubjectKind: AdminChangeSubjects.User,
+            SubjectId: userId,
+            SubjectLabel: PersonNames.Of(userId, await PersonNames.ForAsync(db, [userId], ct)),
+            Reason: req.Reason,
+            Before: new { balance_credits = balanceBefore },
+            After: new
+            {
+                balance_credits = balanceAfter,
+                amount_credits = req.AmountCredits,
+                reason_code = kind.Value.Code,
+                entry_id = entry.Id,
+                related_booking_id = req.RelatedBookingId,
+            }), ct);
         await db.SaveChangesAsync(ct);
 
         // "Every player-affecting event sends an email" — and an admin moving a member's balance
@@ -559,7 +585,8 @@ public sealed record AdjustServices(
     Crusaders.Mainframe.Api.Multitenancy.ITenantContext Tenant,
     Crusaders.Mainframe.Api.Email.IEmailService Email,
     ILoggerFactory LoggerFactory,
-    Crusaders.Mainframe.Api.Email.ClubIdentityResolver Club);
+    Crusaders.Mainframe.Api.Email.ClubIdentityResolver Club,
+    AdminChangeRecorder Changes);
 
 /// <summary>
 /// <paramref name="RelatedBookingId"/> is optional: set it when the adjustment compensates
