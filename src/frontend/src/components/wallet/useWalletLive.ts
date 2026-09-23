@@ -137,7 +137,8 @@ export function useCountUp(target: number | null): number | null {
     const duration = Math.min(900, Math.max(350, 18 * distance));
     const began = performance.now();
     const step = (now: number) => {
-      const t = Math.min(1, (now - began) / duration);
+      // Clamped at 0 too: a frame can be stamped a hair before `began`, and a negative t undershoots.
+      const t = Math.min(1, Math.max(0, (now - began) / duration));
       // easeOutCubic on the value.
       const eased = 1 - Math.pow(1 - t, 3);
       const value = start + (target - start) * eased;

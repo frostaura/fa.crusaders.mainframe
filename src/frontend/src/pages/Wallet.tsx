@@ -6,7 +6,7 @@ import { Card } from "../components/Card";
 import { Button } from "../components/Button";
 import { LedgerTable } from "../components/LedgerTable";
 import { useToast } from "../components/Toast";
-import { walletTone } from "../lib/balance";
+import { useBalance, walletTone } from "../lib/balance";
 import { useBalanceMovement, useCountUp, useWalletLive } from "../components/wallet/useWalletLive";
 import {
   BALANCE_SENTENCE, BALANCE_TONE, LEDGER_CLOCK_NOTE, TOP_UP_LABEL,
@@ -63,14 +63,34 @@ function useWalletLedger() {
   */
   const live = useWalletLive();
 
+  /*
+    ...and "live wins" is only true while the live figure is the NEWER one. It is not always:
+    a stream that has gone quiet (degraded, parked, or one frame lost) leaves the provider on a
+    figure it confirmed earlier, and the member presses Refresh precisely because the list looks
+    wrong. The page then held 517.01 and the +7.00 row, and painted 510.01 above them — the
+    two-numbers defect, on the one button that exists to end it. So a page read issued AFTER the
+    provider last confirmed its figure is handed to the provider (`apply`: the server's own
+    figure, marked as this tab's doing so the chip does not announce what this page will). A read
+    issued BEFORE that confirmation may be the older of the two and is left alone — the frame
+    that overtook it has already asked for a fresh read below.
+  */
+  const { apply, lastConfirmedAt } = useBalance();
+  const confirmedAt = useRef(lastConfirmedAt);
+  useEffect(() => { confirmedAt.current = lastConfirmedAt; }, [lastConfirmedAt]);
+  /** The figure this page last read, so the provider taking it does not trigger a re-read of it. */
+  const lastRead = useRef<number | null>(null);
+
   const load = useCallback(async (limit: number) => {
     setBusy(true);
+    const issuedAt = Date.now();
     try {
       const data = await endpoints.wallet(limit, 0);
       setRows(data.entries);
       setCardBalance(data.balance_credits);
       setTotal(data.total_entries);
       setError(null);
+      lastRead.current = data.balance_credits;
+      if ((confirmedAt.current ?? -Infinity) < issuedAt) apply(data.balance_credits);
       return data.entries;
     } catch {
       setError("Couldn't load wallet.");
@@ -78,10 +98,15 @@ function useWalletLedger() {
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [apply]);
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount + refetch when the live balance moves; the loader sets its flag synchronously
-  useEffect(() => { load(PAGE_SIZE); }, [load, live.balance]);
+  useEffect(() => {
+    // A live figure this page has just read (and handed over) is not news; re-reading it would
+    // be a second identical round trip after every Refresh that moved the balance.
+    if (live.balance !== null && lastRead.current !== null && Math.abs(live.balance - lastRead.current) < 0.005) return;
+    // Fetch on mount, and re-read when the live balance moves.
+    void load(PAGE_SIZE);
+  }, [load, live.balance]);
 
   /*
     The figure the CARD is painting is what movement is measured against, not the stream's
