@@ -44,6 +44,9 @@ function backendActions(): string[] {
       const path = join(dir, entry);
       if (statSync(path).isDirectory()) { walk(path); continue; }
       if (!path.endsWith(".cs")) continue;
+      // The admin notifier's kinds (R23) share the dotted spelling but are admin_notifications
+      // rows, never audit_log actions, so no door feed can ever render one.
+      if (path.endsWith("AdminEventCatalogue.cs")) continue;
       for (const match of readFileSync(path, "utf8").matchAll(/"((?:gate|device|doors)\.[a-zA-Z_]+)"/g)) {
         found.add(match[1]);
       }
