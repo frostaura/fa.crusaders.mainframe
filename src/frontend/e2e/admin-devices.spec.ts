@@ -135,6 +135,15 @@ function routes(devices: unknown[], extra: ApiRoute[] = []): ApiRoute[] {
   ];
 }
 
+/**
+ * The selects on this page are design-system Selects (P3, R7 — they were native selects): open
+ * the trigger by its name and choose the option by the words on it.
+ */
+async function choose(page: Page, label: string, option: string | RegExp) {
+  await page.getByRole("combobox", { name: label }).click();
+  await page.getByRole("option", { name: option }).click();
+}
+
 async function openDevices(page: Page, devices: unknown[], extra: ApiRoute[] = []) {
   await signIn(page);
   await serveApi(page, routes(devices, extra));
@@ -157,8 +166,8 @@ test.describe("A box that registered itself", () => {
     await page.getByRole("button", { name: "Edit name and courts" }).click();
     await page.getByLabel("Name", { exact: true }).fill("Cupboard box");
     // Courts are assigned per relay, A first, in the order they are wired.
-    await page.getByLabel("box-a1b2c3 relay A court").selectOption("1");
-    await page.getByLabel("box-a1b2c3 relay B court").selectOption("2");
+    await choose(page, "box-a1b2c3 relay A court", /^Court 1 —/);
+    await choose(page, "box-a1b2c3 relay B court", /^Court 2 —/);
 
     // The name and the courts are one save because they are one job — a second panel
     // would be a second chance to clear the badge with half the work done.
@@ -190,12 +199,12 @@ test.describe("A box that registered itself", () => {
     // And with no court on any relay there is nothing to save.
     await expect(page.getByRole("button", { name: "Save box" })).toBeDisabled();
 
-    await page.getByLabel("box-a1b2c3 relay A court").selectOption("2");
+    await choose(page, "box-a1b2c3 relay A court", /^Court 2 —/);
     await expect(page.getByLabel("box-a1b2c3 relay B court")).toBeEnabled();
     await expect(page.getByRole("button", { name: "Save box" })).toBeEnabled();
 
     // Clearing A clears everything after it, so the list stays contiguous.
-    await page.getByLabel("box-a1b2c3 relay A court").selectOption("");
+    await choose(page, "box-a1b2c3 relay A court", "Choose a court");
     await expect(page.getByLabel("box-a1b2c3 relay B court")).toBeDisabled();
   });
 
@@ -281,9 +290,9 @@ test.describe("The button map", () => {
     // The wiring never changes, so button 1 is always the same physical button.
     await expect(page.getByLabel("Button 1 action")).toBeVisible();
     await expect(page.getByLabel("Button 8 action")).toBeVisible();
-    await expect(page.getByLabel("Button 8 action")).toHaveValue("off");
+    await expect(page.getByLabel("Button 8 action")).toHaveText("Turn off");
 
-    await page.getByLabel("Button 1 court").selectOption("D");
+    await choose(page, "Button 1 court", "Court D");
 
     const put = page.waitForRequest((r) => r.method() === "PUT" && r.url().includes("/admin/settings/"));
     await page.getByRole("button", { name: "Save button map" }).click();
@@ -351,14 +360,17 @@ test.describe("Deleting a box", () => {
       { method: "DELETE", path: "/api/v1/admin/devices/", body: { deleted: true } },
     ]);
 
-    await page.getByRole("button", { name: "Delete", exact: true }).click();
-    // "Really delete?" would let an admin think they had taken a box off the network.
-    // It still holds the club's key, so the next heartbeat makes a new row.
-    await expect(page.getByRole("button", { name: /The box re-registers on its next heartbeat/ })).toBeVisible();
+    // Behind the row's ⋯ menu and a confirm dialog (P3). "Really delete?" would let an admin
+    // think they had taken a box off the network; it still holds the club's key, so the next
+    // heartbeat makes a new row, and the dialog says so.
+    await page.getByRole("button", { name: "More actions for Cupboard box" }).click();
+    await page.getByRole("menuitem", { name: "Delete board" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("The box re-registers on its next heartbeat");
 
     // The list the reload reads: the box is back, unnamed and flagged again.
     await serveApi(page, routes([FRESH], [{ method: "DELETE", path: "/api/v1/admin/devices/", body: { deleted: true } }]));
-    await page.getByRole("button", { name: /The box re-registers on its next heartbeat/ }).click();
+    await dialog.getByRole("button", { name: "Delete board" }).click();
 
     await expect(page.getByRole("status")).toContainText("it re-registers on its next heartbeat as a new box");
     await expect(page.getByText("New — check court numbers")).toBeVisible();
@@ -394,11 +406,13 @@ test.describe("Taking a box out of service", () => {
     // click the API takes nothing from it and courts 1 and 2 stop being penalised. It read the
     // plain "the box stops switching lights on" until round 8 made the label per-court; this
     // file was not updated with it and had been red at HEAD ever since.
-    const confirm = page.getByRole("button", {
-      name: "Out of service? Nothing else drives courts 1 and 2 — the API stops taking anything from that box,"
+    // P3: the confirm is a dialog; the consequence is its description, word for word.
+    const dialog = page.getByRole("dialog", { name: "Take Cupboard box out of service?" });
+    await expect(dialog).toContainText(
+      "Nothing else drives courts 1 and 2 — the API stops taking anything from that box,"
         + " and from that instant their no-shows stop being penalised.",
-    });
-    await expect(confirm).toBeVisible();
+    );
+    const confirm = dialog.getByRole("button", { name: "Take out of service" });
 
     await serveApi(page, routes([{ ...box, enabled: false }], [
       { method: "PATCH", path: "/api/v1/admin/devices/", body: { ...box, enabled: false } },
@@ -653,8 +667,8 @@ test.describe("A door gate", () => {
     // One control, because only the box has one now.
     await expect(page.getByRole("button", { name: "Take out of service" })).toHaveCount(1);
     await page.getByRole("button", { name: "Take out of service" }).click();
-    await expect(page.getByRole("button", { name: /Nothing else drives court 1/ })).toBeVisible();
-    await expect(page.getByRole("button", { name: /The box stops switching lights on/ })).toHaveCount(0);
+    await expect(page.getByRole("dialog")).toContainText(/Nothing else drives court 1/);
+    await expect(page.getByRole("dialog")).not.toContainText(/The box stops switching lights on/);
   });
 });
 
@@ -836,6 +850,12 @@ test.describe("Devices at 320 px with a 32 px root font", () => {
   test("has nothing on it that refuses to hold its own content", async ({ page }) => {
     await openDevices(page, [FRESH, GATE]);
     await large(page);
+    // Every design-system Button carries its pending spinner in an invisible layer, and that
+    // spinner SPINS while invisible: a rotating square's bounding box is wider than the square,
+    // so each icon button reported 5–8 px of "overflow" that nobody can see. Stilled here so the
+    // sweep measures layout, not an animation frame (reported against ui/button: the hidden
+    // spinner should not animate at rest).
+    await page.addStyleTag({ content: "[data-slot=button-pending] svg { animation: none !important; }" });
 
     const stuck = await page.evaluate(() => [...document.querySelectorAll("main *")]
       .filter((el) => {
@@ -915,5 +935,33 @@ test.describe("Devices at 320 px with a 32 px root font", () => {
     expect(heights.length).toBeGreaterThan(0);
     const short = heights.filter((h) => h.height < 43.5);
     expect(short, `controls under 44 px: ${JSON.stringify(short)}`).toEqual([]);
+  });
+});
+
+/**
+ * The admin rail names each destination by its label and its count as ONE phrase: "Members, 1
+ * membership application awaiting review". Chromium puts a space between block-level children
+ * when it computes a name, and the count used to be a sibling flex item — so the rail read
+ * "Members , 1 …". jsdom's name computation does not do that, which is why this is a browser
+ * test, and why it asks Chromium itself (the CDP accessibility tree), not Playwright's own
+ * name computation.
+ */
+test.describe("The admin rail", () => {
+  test("names a destination and its count without a stray space", async ({ page }, info) => {
+    test.skip(info.project.name !== "desktop", "the rail is the xl layout; the phone has the section bar");
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openDevices(page, [FRESH], [
+      { path: "/api/v1/admin/members", body: [{ user_id: "u1", full_name: "Pending Person", status: "PendingApproval" }] },
+    ]);
+    const rail = page.getByRole("navigation", { name: "Admin" }).first();
+    await expect(rail.locator('[data-admin-badge="pending"]')).toBeVisible();
+
+    const cdp = await page.context().newCDPSession(page);
+    const { nodes } = await cdp.send("Accessibility.getFullAXTree") as { nodes: Array<{ role?: { value: string }; name?: { value: string } }> };
+    const names = nodes
+      .filter((n) => n.role?.value === "link" && (n.name?.value ?? "").startsWith("Members"))
+      .map((n) => n.name!.value);
+    expect(names).toContain("Members, 1 membership application awaiting review");
+    expect(names.filter((n) => n.includes(" ,"))).toEqual([]);
   });
 });

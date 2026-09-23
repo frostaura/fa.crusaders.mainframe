@@ -1,116 +1,149 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent, type Ref, type RefObject } from "react";
 import { useNavigate } from "react-router-dom";
-import { endpoints } from "../lib/api";
+import { endpoints, errorCode } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { useToast } from "../components/Toast";
+import { useAsyncAction } from "../lib/useAsyncAction";
+import { describeFailure } from "../lib/errors";
+import { CHANGE_PASSWORD, CHANGE_PASSWORD_MESSAGES, checkFields } from "../lib/authCopy";
 import { Alert } from "../components/Alert";
+import { PasswordInput } from "../components/PasswordInput";
 import { Button } from "../components/ui/button";
-import { Card } from "../components/ui/card";
-import { Field, FieldDescription, FieldLabel } from "../components/ui/field";
-import { Input } from "../components/ui/input";
+import { Card, CardContent } from "../components/ui/card";
+import { Field, FieldDescription, FieldError, FieldLabel } from "../components/ui/field";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { TextLink } from "../components/ui/text-link";
-import { describeFailure } from "../lib/errors";
 import { LANDING_PATH } from "../components/shell/nav";
 
-/**
- * The API's refusal codes, as sentences. A member never sees a code, and never sees the same
- * sentence for two different mistakes — which is the failure this whole round is about.
- */
-const MESSAGES: Record<string, string> = {
-  current_password_incorrect: "That's not your current password. Try again.",
-  password_unchanged: "Your new password has to be different from your current one.",
-  password_too_short: "Your new password must be at least 8 characters.",
-  missing_fields: "Fill in both your current and your new password.",
-  no_password_set: "This account signs in with a passkey and has no password to change. Use “Forgot password?” on the sign-in screen to set one.",
+type Key = "current" | "next" | "confirm";
+type Values = Record<Key, string>;
+type Errors = Partial<Record<Key, string>>;
+
+const ORDER: Key[] = ["current", "next", "confirm"];
+
+/** The API's refusals that are about one field; the rest are about the change as a whole. */
+const FIELD_OF_CODE: Record<string, Key> = {
+  current_password_incorrect: "current",
+  password_unchanged: "next",
+  password_too_short: "next",
 };
+
+function validate({ current, next, confirm }: Values): Errors {
+  const errors: Errors = {};
+  if (!current) errors.current = CHANGE_PASSWORD.enterCurrent;
+  if (!next) errors.next = CHANGE_PASSWORD.enterNew;
+  else if (next.length < 8) errors.next = CHANGE_PASSWORD_MESSAGES.password_too_short;
+  else if (next === current) errors.next = CHANGE_PASSWORD_MESSAGES.password_unchanged;
+  if (next && !errors.next && next !== confirm) errors.confirm = CHANGE_PASSWORD.mismatch;
+  return errors;
+}
+
+type PasswordFieldProps = {
+  label: string;
+  hint?: string;
+  error?: string;
+  value: string;
+  autoComplete: string;
+  onChange: (value: string) => void;
+  ref: Ref<HTMLInputElement>;
+};
+
+function PasswordField(props: PasswordFieldProps) {
+  const { label, hint, error, value, autoComplete, onChange, ref } = props;
+  return (
+    <Field>
+      <FieldLabel>{label}</FieldLabel>
+      <PasswordInput ref={ref} required autoComplete={autoComplete} value={value} onChange={(e) => onChange(e.target.value)} />
+      {hint ? <FieldDescription>{hint}</FieldDescription> : null}
+      <FieldError>{error}</FieldError>
+    </Field>
+  );
+}
+
+type Refs = Record<Key, RefObject<HTMLInputElement | null>>;
+
+/** Values, per-field complaints, and the keyboard taken to the first field that is wrong. */
+function usePasswordForm(refs: () => Refs) {
+  const [values, setValues] = useState<Values>({ current: "", next: "", confirm: "" });
+  const [errors, setErrors] = useState<Errors>({});
+  const refuse = (found: Errors) => {
+    setErrors(found);
+    const first = ORDER.find((key) => found[key]);
+    if (first) refs()[first].current?.focus();
+  };
+  const set = (key: Key) => (value: string) => {
+    setValues((v) => ({ ...v, [key]: value }));
+    setErrors((was) => (was[key] ? { ...was, [key]: undefined } : was));
+  };
+  const clear = () => setValues({ current: "", next: "", confirm: "" });
+  return { values, errors, refuse, set, clear };
+}
+
+type FormProps = { onDone?: () => void; onCancel?: () => void; forced?: boolean };
 
 /**
  * The form a member uses to replace their own password. Shared, because it is reached two ways:
- * from Profile by choice, and — when an admin has issued a temporary password — as the only
- * screen the session can reach at all.
+ * from Profile by choice, and — when a temporary password is in force — as the only screen the
+ * session can reach at all.
  */
-export function ChangePasswordForm({ onDone, onCancel, forced }: { onDone?: () => void; onCancel?: () => void; forced?: boolean }) {
+export function ChangePasswordForm({ onDone, onCancel, forced }: FormProps) {
   const auth = useAuth();
-  const toast = useToast();
-  const [current, setCurrent] = useState("");
-  const [next, setNext] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  // Separate refs, read only inside the handler that focuses one (react-hooks/refs).
+  const currentRef = useRef<HTMLInputElement>(null);
+  const nextRef = useRef<HTMLInputElement>(null);
+  const confirmRef = useRef<HTMLInputElement>(null);
+  const form = usePasswordForm(() => ({ current: currentRef, next: nextRef, confirm: confirmRef }));
+  const [failure, setFailure] = useState<string | null>(null);
 
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (saving) return;
-    setError(null);
-    if (next !== confirm) { setError(MISMATCH); return; }
-    if (next.length < 8) { setError(MESSAGES.password_too_short); return; }
-    if (next === current) { setError(MESSAGES.password_unchanged); return; }
-
-    setSaving(true);
-    try {
-      await endpoints.changePassword(current, next);
+  const change = useAsyncAction((current: string, next: string) => endpoints.changePassword(current, next), {
+    success: () => {
       auth.passwordChanged();
-      setCurrent(""); setNext(""); setConfirm("");
-      toast.push({ tone: "success", text: "Password changed." });
+      form.clear();
       onDone?.();
-    } catch (err) {
-      setError(describeFailure(err, { codes: MESSAGES, action: "change your password" }));
-    } finally {
-      setSaving(false);
-    }
+    },
+    failure: (err) => {
+      const field = FIELD_OF_CODE[errorCode(err) ?? ""];
+      const message = describeFailure(err, { codes: CHANGE_PASSWORD_MESSAGES, action: "change your password" });
+      if (field) form.refuse({ [field]: message });
+      else setFailure(message);
+    },
+    toast: { success: CHANGE_PASSWORD.changed },
+  });
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    setFailure(null);
+    const found = validate(form.values);
+    form.refuse(found);
+    if (Object.keys(found).length === 0) void change.run(form.values.current, form.values.next);
   };
 
+  const problems = Object.values(form.errors).filter(Boolean).length;
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4">
-      <Field controlId="currentPassword">
-        <FieldLabel>{forced ? "Temporary password" : "Current password"}</FieldLabel>
-        <Input
-          type="password" required value={current}
-          onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password"
-        />
-      </Field>
-      <Field controlId="newPassword">
-        <FieldLabel>New password</FieldLabel>
-        <Input
-          type="password" required minLength={8} value={next}
-          onChange={(e) => setNext(e.target.value)} autoComplete="new-password"
-        />
-        <FieldDescription>At least 8 characters, and different from your current one.</FieldDescription>
-      </Field>
-      <Field controlId="confirmPassword">
-        <FieldLabel>Confirm new password</FieldLabel>
-        <Input
-          type="password" required minLength={8} value={confirm}
-          onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password"
-        />
-      </Field>
-      {error && <Alert tone="danger">{error}</Alert>}
+    <form onSubmit={submit} noValidate className="flex flex-col gap-5">
+      <PasswordField label={forced ? CHANGE_PASSWORD.temporary : CHANGE_PASSWORD.current} error={form.errors.current}
+        value={form.values.current} onChange={form.set("current")} autoComplete="current-password" ref={currentRef} />
+      <PasswordField label={CHANGE_PASSWORD.newPassword} hint={CHANGE_PASSWORD.newHint} error={form.errors.next}
+        value={form.values.next} onChange={form.set("next")} autoComplete="new-password" ref={nextRef} />
+      <PasswordField label={CHANGE_PASSWORD.confirm} error={form.errors.confirm}
+        value={form.values.confirm} onChange={form.set("confirm")} autoComplete="new-password" ref={confirmRef} />
+      {problems > 0 ? <Alert>{checkFields(problems)}</Alert> : null}
+      {failure ? <Alert>{failure}</Alert> : null}
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        {onCancel ? <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button> : null}
-        <Button type="submit" pending={saving} block={!onCancel}>Change password</Button>
+        {onCancel ? <Button type="button" variant="ghost" onClick={onCancel}>{CHANGE_PASSWORD.cancel}</Button> : null}
+        <Button type="submit" pending={change.pending} block={!onCancel}>{CHANGE_PASSWORD.submit}</Button>
       </div>
     </form>
   );
 }
 
-const MISMATCH = "The two new passwords don't match.";
-const FORCED_LEAD = "Your account is on a temporary password. Choose your own to carry on — the temporary one stops working the moment you do.";
-const CHOSEN_LEAD = "You'll need your current password to set a new one.";
-
 /**
- * `/change-password` — the forced-change destination.
+ * `/change-password` — the forced-change destination, and reachable by choice from Profile.
  *
  * <p>
  * An admin-issued temporary password is emailed in plaintext and shown on an admin's screen, and
- * the spec has always called it single-use and forced-reset. Nothing enforced either: it simply
- * became the account's password. `PasswordChangeGate` on the API is the enforcement; this screen
- * is what makes that enforcement navigable rather than a 403 on every page.
- * </p>
- *
- * <p>
- * Reachable deliberately as well, from Profile — a member who just wants to change their password
- * gets the same form without the banner.
+ * the spec has always called it single-use and forced-reset. `PasswordChangeGate` on the API is
+ * the enforcement; this screen is what makes that enforcement navigable rather than a 403 on
+ * every page.
  * </p>
  */
 export default function ChangePasswordPage() {
@@ -120,32 +153,28 @@ export default function ChangePasswordPage() {
 
   return (
     <PageShell width="narrow">
-      {/*
-        N-F10: the forced lead deliberately does NOT say "an admin has reset your password" — the
-        first person ever to sign in to a club was created by ProductionBootstrap with
-        must-change-password set, and nobody reset anything. The one meaning the screen can rely
-        on is that the current password is temporary.
-      */}
       <PageHeader
-        back={forced ? undefined : { to: "/profile", label: "Profile" }}
-        title={forced ? "Choose your own password" : "Change your password"}
-        description={forced ? FORCED_LEAD : CHOSEN_LEAD}
+        back={forced ? undefined : { to: "/profile", label: CHANGE_PASSWORD.back }}
+        title={forced ? CHANGE_PASSWORD.forcedTitle : CHANGE_PASSWORD.chosenTitle}
+        description={forced ? CHANGE_PASSWORD.forcedLead : CHANGE_PASSWORD.chosenLead}
       />
-      <Card className="px-4 sm:px-6">
-        <ChangePasswordForm forced={forced} onDone={() => nav(forced ? LANDING_PATH : "/profile")} />
+      <Card>
+        <CardContent>
+          <ChangePasswordForm forced={forced} onDone={() => nav(forced ? LANDING_PATH : "/profile")} />
+        </CardContent>
       </Card>
       {/*
-        This screen has three arrivals and only one of them typed a password: a member who
-        clicked the welcome magic link, or whose password an admin reset mid-session (L-F4),
-        has none to type. The way out for them is a reset link.
+        Three arrivals and only one of them typed a password: a member who clicked the welcome
+        magic link, or whose password an admin reset mid-session (L-F4), has none to type. The way
+        out for them is a reset link.
       */}
-      {forced && (
+      {forced ? (
         <p className="text-sm text-text-secondary">
-          {"Haven't got the temporary password? "}
-          <TextLink to="/forgot-password">Email yourself a reset link</TextLink>
-          {" instead."}
+          {CHANGE_PASSWORD.noTemporary}{" "}
+          <TextLink to="/forgot-password">{CHANGE_PASSWORD.resetLink}</TextLink>
+          {" "}{CHANGE_PASSWORD.instead}
         </p>
-      )}
+      ) : null}
     </PageShell>
   );
 }

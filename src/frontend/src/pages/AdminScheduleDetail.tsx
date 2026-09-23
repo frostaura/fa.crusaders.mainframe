@@ -2,14 +2,16 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useRead } from "../lib/useRead";
 import { Alert } from "../components/Alert";
-import { Button, Input, Label } from "../components/Button";
-import { Card } from "../components/Card";
-import { ConfirmButton } from "../components/ConfirmButton";
+import { ConfirmDialog } from "../components/admin/ConfirmDialog";
+import { Button } from "../components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Field, FieldLabel } from "../components/ui/field";
+import { Input } from "../components/ui/input";
 import { StateBlock } from "../components/ui/state-block";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { Skeleton } from "../components/ui/skeleton";
 import { Badge } from "../components/ui/badge";
-import { CalendarDots } from "../components/ui/icons";
+import { ArrowCounterClockwise, CalendarDots, PencilSimple } from "../components/ui/icons";
 import { OccurrenceChange, type EditScope } from "../components/schedules/OccurrenceChange";
 import { ScheduleChangeList } from "../components/schedules/ScheduleChangeList";
 import {
@@ -57,7 +59,7 @@ function courtsHeldBy(occurrence: ScheduleOccurrence, fallback: number): number 
  * </p>
  *
  * <p>
- * The skip control is a `ConfirmButton` and the restore is a chip ABOVE the list, never a
+ * The skip control opens a confirm dialog and the restore is a chip ABOVE the list, never a
  * second control here: two controls for one action are two names for it (D3 §5.5).
  * </p>
  */
@@ -78,10 +80,10 @@ function OccurrenceRow({
   notice: React.ReactNode;
 }) {
   return (
-          <li className="space-y-2 py-3">
+          <li className="flex flex-col gap-3 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <p className="text-sm font-medium text-text-primary">{clubDateShort(occurrence.date)}</p>
+                <p className="text-sm font-semibold text-text-primary">{clubDateShort(occurrence.date)}</p>
                 <p className="text-sm text-text-secondary">
                   {`${occurrenceStatusWord(occurrence.status)} · ${courtsHeldBy(occurrence, courtCount)} court${courtsHeldBy(occurrence, courtCount) === 1 ? "" : "s"}`}
                 </p>
@@ -90,18 +92,19 @@ function OccurrenceRow({
                 <div className="flex flex-wrap gap-2">
                   <Button
                     variant="outline"
-                    className="min-h-11"
+                    size="sm"
+                    aria-expanded={changing}
                     onClick={onToggleChange}
+                    icon={<PencilSimple aria-hidden="true" />}
                   >
                     {`Change the hours of ${clubDateShort(occurrence.date)}`}
                   </Button>
-                  <ConfirmButton
-                    idleLabel={`Skip ${clubDateShort(occurrence.date)}`}
-                    tone="danger"
-                    disabled={busy}
-                    subject={clubDateShort(occurrence.date)}
+                  <ConfirmDialog
+                    trigger={<Button variant="danger-soft" size="sm" disabled={busy}>{`Skip ${clubDateShort(occurrence.date)}`}</Button>}
+                    title={`Skip ${clubDateShort(occurrence.date)}?`}
+                    description={skipConsequence(courtsHeldBy(occurrence, courtCount), occurrence.date)}
+                    confirmLabel={`Skip ${clubDateShort(occurrence.date)}`}
                     cancelLabel="Keep it"
-                    confirmLabel={skipConsequence(courtsHeldBy(occurrence, courtCount), occurrence.date)}
                     focusAfter={focusAfter}
                     onConfirm={onSkip}
                   />
@@ -148,32 +151,30 @@ function EndScheduleCard({ row, busy, endReason, onEndReason, consequence, focus
   onEnd: () => string | void | Promise<string | void>;
 }) {
   return (
-          <Card className="space-y-3">
-            <h2 className="text-lg font-semibold text-text-primary">End this repeating booking</h2>
-            <p className="text-sm text-text-secondary">
-              {"There is no delete. A repeating booking that has run is part of the club's "}
-              {"history: ending it releases the dates still ahead and leaves the ones that "}
-              {"already happened exactly as they are."}
-            </p>
-            <div className="space-y-1">
-              <Label htmlFor="end-reason">Reason for ending (kept in the change record)</Label>
-              <Input
-                id="end-reason"
-                value={endReason}
-                maxLength={512}
-                onChange={(e) => onEndReason(e.target.value)}
+          <Card>
+            <CardHeader>
+              <CardTitle asChild><h2>End this repeating booking</h2></CardTitle>
+              <CardDescription>
+                {"There is no delete. A repeating booking that has run is part of the club's "}
+                {"history: ending it releases the dates still ahead and leaves the ones that "}
+                {"already happened exactly as they are."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <Field>
+                <FieldLabel>Reason for ending (kept in the change record)</FieldLabel>
+                <Input value={endReason} maxLength={512} onChange={(e) => onEndReason(e.target.value)} />
+              </Field>
+              <ConfirmDialog
+                trigger={<Button variant="danger" className="self-start" disabled={busy}>{`End ${row.name}`}</Button>}
+                title={`End ${row.name}?`}
+                description={consequence}
+                confirmLabel={`End ${row.name}`}
+                cancelLabel="Keep it running"
+                focusAfter={focusAfter}
+                onConfirm={onEnd}
               />
-            </div>
-            <ConfirmButton
-              idleLabel={`End ${row.name}`}
-              tone="danger"
-              disabled={busy}
-              subject={row.name}
-              cancelLabel="Keep it running"
-              confirmLabel={consequence}
-              focusAfter={focusAfter}
-              onConfirm={onEnd}
-            />
+            </CardContent>
           </Card>
   );
 }
@@ -251,16 +252,17 @@ function SkippedDateChips({ skipped, busy, onRestore }: {
 }) {
   if (skipped.length === 0) return null;
   return (
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <h2 className="text-sm font-semibold text-text-primary">Skipped dates</h2>
             <ul className="flex flex-wrap gap-2">
               {skipped.map((o) => (
                 <li key={o.date}>
                   <Button
-                    variant="outline"
-                    className="min-h-11"
+                    variant="secondary"
+                    size="sm"
                     disabled={busy}
                     onClick={() => onRestore(o.date)}
+                    icon={<ArrowCounterClockwise aria-hidden="true" />}
                   >
                     {skipChipLabel(o.date)}
                   </Button>
@@ -411,8 +413,9 @@ export function AdminScheduleDetailPage() {
         onRestore={(date) => { void runWrite(() => adminEndpoints.scheduleOccurrenceUpdate(id, date, { skip: false })); }}
       />
 
-      <Card className="space-y-4">
-        <h2 className="text-lg font-semibold text-text-primary">The dates it holds</h2>
+      <Card>
+        <CardHeader><CardTitle asChild><h2>The dates it holds</h2></CardTitle></CardHeader>
+        <CardContent>
         <StateBlock
           loading={occurrencesRead.loading}
           error={occurrencesRead.error}
@@ -447,6 +450,7 @@ export function AdminScheduleDetailPage() {
             ))}
           </ul>
         </StateBlock>
+        </CardContent>
       </Card>
 
       {row.status !== "ended" && (
@@ -469,12 +473,14 @@ export function AdminScheduleDetailPage() {
       )}
 
       <Card>
-        <ScheduleChangeList
-          page={changesRead.data}
-          loading={changesRead.loading}
-          error={changesRead.error}
-          onRetry={reloadChanges}
-        />
+        <CardContent>
+          <ScheduleChangeList
+            page={changesRead.data}
+            loading={changesRead.loading}
+            error={changesRead.error}
+            onRetry={reloadChanges}
+          />
+        </CardContent>
       </Card>
     </PageShell>
   );

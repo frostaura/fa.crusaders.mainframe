@@ -1,5 +1,7 @@
 import { SESSION_ADMIN, SESSION_ANON, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
 import type { Page } from "@playwright/test";
+import { BOOK_SHEET, CANCEL_SHEET } from "../src/lib/bookingsCopy";
+import { cancellationOutcome } from "../src/lib/bookingErrors";
 
 /**
  * Item 12 where a member meets it, in an engine that has a layout.
@@ -17,8 +19,11 @@ import type { Page } from "@playwright/test";
  *       character that fell back to a missing font;</li>
  *   <li>no glyph at rest — the thumbs of ruling 4 are retired by the facelift (R8/D5): a
  *       button's word is its meaning, and a mark appears only as an OUTCOME (check / alert);</li>
- *   <li>pressing moves the button, and pressing a destructive one does not;</li>
- *   <li>under <code>prefers-reduced-motion</code> the motion goes and the colour and the word
+ *   <li>working is a spinner INSIDE the button, which keeps its width and its focus — never a
+ *       frozen, disabled control (R12; the press-compression phase of the old `data-fb` theme
+ *       went with the thumbs, R8/D5);</li>
+ *   <li>a destructive confirm never celebrates: no tick after a cancellation;</li>
+ *   <li>under <code>prefers-reduced-motion</code> the motion goes and the mark and the word
  *       stay — which is the half of a reduced-motion implementation that is
  *       usually thrown out with the animation.</li>
  * </ul>
@@ -59,16 +64,9 @@ function day() {
 }
 
 /**
- * A MEMBER, not an admin — and it is load-bearing rather than tidy.
- *
- * <p>
- * `SESSION_ADMIN` opens the booking dialog on "on behalf of a member" with nobody chosen, so
- * its confirm is `disabled`; `index.css`'s `button:disabled { transform: none }` is (0,1,1)
- * and beats the `scale-[0.97]` utility's (0,1,0), so the press compression genuinely does not
- * render — correctly, on a button that cannot be pressed. Walking item 12 through that session
- * measures a disabled control and reports it as a missing theme. These screens are the
- * member's; the walk is the member's.
- * </p>
+ * A MEMBER, not an admin: a member's booking sheet is one step (no "Book as", no quote), so the
+ * walk reaches the confirm directly. The admin's stepper and god mode have their own spec,
+ * `admin-self-booking.spec.ts`.
  */
 const SESSION_MEMBER = {
   ...SESSION_ADMIN,
@@ -84,114 +82,87 @@ async function onPhone(page: Page) {
   await page.setViewportSize(PHONE);
 }
 
-/**
- * What a press looks like, sampled while it is happening.
- *
- * <p>
- * <b>Both obvious ways of asking this return "nothing happened", for different reasons.</b>
- * Reading `getComputedStyle` at the instant the class lands gives the value the transition is
- * moving AWAY from — `none` — because the transition has not produced a frame yet. Waiting for
- * it to finish and then reading gives `none` as well, because the press RELEASES ITSELF after
- * `duration.press` whether or not a pointerup ever arrives (`useActionFeedback` records why:
- * arming a `ConfirmButton` unmounts the trigger under the finger). The window in which a press
- * is visible is 90 ms wide and both reads sit outside it.
- * </p>
- *
- * <p>
- * So the press is dispatched and sampled inside ONE page-side task: no protocol round trip can
- * land in the middle of the window, and what comes back is every frame of it rather than one
- * guessed instant.
- * </p>
- */
-async function samplePress(page: Page, name: string | RegExp) {
-  return page.getByRole("button", { name }).evaluate(async (el: Element) => {
-    const frames: { fb: string | null; transform: string; animation: string }[] = [];
-    el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1 }));
-    // Every ~8 ms across the 90 ms compression, plus a little past it.
-    for (let i = 0; i < 14; i++) {
-      await new Promise(requestAnimationFrame);
-      const style = getComputedStyle(el);
-      frames.push({
-        fb: el.getAttribute("data-fb"),
-        transform: style.transform,
-        animation: style.animationName,
-      });
-    }
-    el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1 }));
-    return frames;
-  });
-}
-
-/** A transform that actually shrinks the button, as opposed to `none` or the identity. */
-function compressed(transform: string): boolean {
-  const m = /matrix\(([^)]+)\)/.exec(transform);
-  if (!m) return false;
-  const [a, , , d] = m[1].split(",").map((n) => Number.parseFloat(n));
-  return a < 0.999 && d < 0.999;
-}
-
 /** Outcome marks (`data-glyph`) inside a button. At rest there are none (R8/D5). */
 async function restingMarks(page: Page, name: string | RegExp) {
   return page.getByRole("button", { name }).locator("[data-glyph]").count();
 }
 
-async function openBookingDialog(page: Page) {
+async function openBookingSheet(page: Page) {
   await signIn(page);
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_MEMBER },
     { path: "/api/v1/schedule", body: day() },
-    { path: "/api/v1/admin/members/", body: [] },
     { path: "/api/v1/me/profile", body: PROFILE },
     { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+    { method: "POST", path: "/api/v1/bookings/", body: { booking_id: "bk-9", balance_after_credits: 450 } },
   ]);
-  await page.goto("/schedule");
-  await page.waitForSelector('[role="grid"]');
-  await page.getByRole("gridcell").locator("button", { hasText: "Available" }).first().click();
-  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.goto("/bookings");
+  await page.getByRole("button", { name: /^Book Court 1 .* for 50\.00 cr/ }).first().click();
+  await expect(page.getByRole("dialog", { name: BOOK_SHEET.title(1) })).toBeVisible();
 }
 
-test.describe("the booking dialog", () => {
-  test("wears no glyph at rest on the yes or the way out", async ({ page }) => {
+/** Holds the booking POST until `release` is called, so the working state can be looked at. */
+async function holdBooking(page: Page) {
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  // Registered after serveApi, so it wins for this one route.
+  await page.route("**/api/v1/bookings/", async (route) => {
+    await gate;
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ booking_id: "bk-9", balance_after_credits: 450 }) });
+  });
+  return () => release();
+}
+
+const PRIMARY = BOOK_SHEET.primary(1, 50, null);
+
+test.describe("the booking sheet", () => {
+  test("wears no glyph at rest on the book or the way out", async ({ page }) => {
     await onPhone(page);
-    await openBookingDialog(page);
+    await openBookingSheet(page);
 
     // R8/D5 retired ruling 4's thumbs: the founder called them crude. Nothing is drawn at rest;
     // a check or an alert appears only once the action has an outcome.
-    expect(await restingMarks(page, /Book for/)).toBe(0);
-    const wayOut = page.getByRole("dialog").getByRole("button").filter({ hasNotText: /Book for/ }).first();
-    expect(await wayOut.locator("[data-glyph]").count()).toBe(0);
-
-    // And the word is the name. NN/g: a glyph without a label is ambiguous, and this
-    // audience is the one that pays for ambiguity.
-    await expect(page.getByRole("button", { name: /Book for 50\.00/ })).toBeVisible();
+    expect(await restingMarks(page, PRIMARY)).toBe(0);
+    expect(await restingMarks(page, BOOK_SHEET.cancel)).toBe(0);
+    // And the word is the name. NN/g: a glyph without a label is ambiguous.
+    await expect(page.getByRole("button", { name: PRIMARY })).toBeVisible();
   });
 
-  test("moves under a press, and says it is working", async ({ page }) => {
+  test("works inside the button — a spinner, the same width, focus kept — then draws the tick", async ({ page }) => {
     await onPhone(page);
-    await openBookingDialog(page);
+    await openBookingSheet(page);
+    const release = await holdBooking(page);
 
-    const confirm = page.getByRole("button", { name: /Book for/ });
-    expect(await confirm.evaluate((el) => getComputedStyle(el).transform)).toBe("none");
+    const book = page.getByRole("button", { name: PRIMARY });
+    const before = (await book.boundingBox())!;
+    await book.click();
 
-    const frames = await samplePress(page, /Book for/);
+    await expect(book).toHaveAttribute("aria-busy", "true");
+    // Not `toBeEnabled`: Playwright reads `aria-disabled` as disabled. The point is that the
+    // DOM `disabled` attribute is absent, so focus is not dropped to <body>.
+    expect(await book.getAttribute("disabled")).toBeNull();
+    await expect(book).toBeFocused();
+    const spinner = book.locator('[data-slot="button-pending"]');
+    expect(await spinner.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
+    const during = (await book.boundingBox())!;
+    expect(Math.abs(during.width - before.width)).toBeLessThan(1);
 
-    // The phase is reached, and it ends by itself — 90 ms of compression, not a button left
-    // squashed until a pointerup that may never arrive.
-    expect(frames.some((f) => f.fb === "press")).toBe(true);
-    expect(frames[frames.length - 1].fb).toBe("rest");
-
-    // The compression is what makes a tap feel LANDED on a phone, and it is the assertion a
-    // class-name check cannot make: `scale-[0.97]` means nothing until something computes it.
-    expect(frames.some((f) => compressed(f.transform))).toBe(true);
+    release();
+    const dialog = page.getByRole("dialog", { name: BOOK_SHEET.title(1) });
+    await expect(dialog.getByText(BOOK_SHEET.bookedTitle(1, 1))).toBeVisible();
+    const check = dialog.locator('[data-glyph="check"]').first();
+    const size = (await check.boundingBox())!;
+    expect(size.width).toBeGreaterThan(0);
   });
 });
 
 test.describe("a destructive confirm", () => {
   /**
-   * The carve-out, measured. Ruling 4 in one sentence: a thumbs-up on "Cancel the booking" is
-   * the software claiming it approves of a member losing a 15.00 penalty.
+   * The carve-out, measured. A tick after "Cancel booking" is the software congratulating a
+   * member on losing a penalty — so the danger button wears nothing at rest, and success is the
+   * sheet closing with a sentence that says what moved, never a mark.
    */
-  test("wears no mark and does not snap", async ({ page }) => {
+  test("wears no mark, is the danger button, and never ticks", async ({ page }) => {
     await onPhone(page);
     await signIn(page);
     const d = tomorrow();
@@ -199,7 +170,6 @@ test.describe("a destructive confirm", () => {
       { path: "/api/v1/whoami", body: SESSION_MEMBER },
       { path: "/api/v1/me/profile", body: PROFILE },
       { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 10 } },
-      { path: "/api/v1/admin/members/", body: [] },
       {
         path: "/api/v1/schedule",
         body: {
@@ -215,53 +185,48 @@ test.describe("a destructive confirm", () => {
       },
       {
         path: "/api/v1/bookings/bk-1/cancellation-quote",
-        body: { refundCredits: 35, penaltyCredits: 15, checkedIn: false },
+        body: {
+          bookingId: "bk-1", amountChargedCredits: 50, refundCredits: 35, penaltyCredits: 15, penaltyPct: 30,
+          penaltyWindowMinutes: 15, insidePenaltyWindow: true, checkedIn: false, alreadyStarted: false,
+        },
       },
+      { method: "POST", path: "/api/v1/bookings/bk-1/cancel", body: { refunded_credits: 50, penalty_credits: 15 } },
     ]);
-    await page.goto("/schedule");
-    await page.waitForSelector('[role="grid"]');
-    await page.getByRole("gridcell").locator("button", { hasText: "Mine" }).first().click();
-    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.goto("/bookings");
+    await page.getByRole("button", { name: /^Cancel your booking on Court 1/ }).first().click();
+    const dialog = page.getByRole("dialog", { name: CANCEL_SHEET.title(1) });
+    await expect(dialog.getByText(CANCEL_SHEET.late(30))).toBeVisible();
 
-    const confirm = page.getByRole("button", { name: "Cancel the booking" });
-    await expect(confirm).toHaveAttribute("data-intent", "destructive");
-    // No glyph at all — not a different one. `glyphKindFor` returns null for destructive at
-    // every phase but failure, which is the whole of the carve-out.
-    // (`[data-glyph]`, not any svg: the hidden working layer always holds the spinner.)
+    const confirm = dialog.getByRole("button", { name: CANCEL_SHEET.confirm(1) });
+    // `[data-glyph]`, not any svg: the hidden working layer always holds the spinner.
     await expect(confirm.locator("[data-glyph]")).toHaveCount(0);
+    expect(await restingMarks(page, CANCEL_SHEET.keep(1))).toBe(0);
+    const fill = await confirm.evaluate((el) => getComputedStyle(el).backgroundColor);
+    const keepFill = await dialog.getByRole("button", { name: CANCEL_SHEET.keep(1) }).evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(fill).not.toBe(keepFill);
 
-    // The way out wears nothing at rest either (R8/D5).
-    expect(await restingMarks(page, "Keep the booking")).toBe(0);
-
-    const frames = await samplePress(page, "Cancel the booking");
-    expect(frames.some((f) => f.fb === "press")).toBe(true);
-    // It settles rather than snapping: not one frame of the whole press window shrinks it. A
-    // button that shuts a door should not feel eager.
-    expect(frames.some((f) => compressed(f.transform))).toBe(false);
+    await confirm.click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByText(cancellationOutcome(50, 15, null))).toBeVisible();
+    await expect(page.locator('[data-glyph="check"]')).toHaveCount(0);
   });
 });
 
 test.describe("reduced motion keeps everything that is not motion", () => {
   /**
-   * The half that usually gets thrown out with the animation. `prefers-reduced-motion` is a
-   * request for less MOVEMENT, not for less information — a member who has asked for it still
-   * needs to know which button is the yes.
+   * `prefers-reduced-motion` is a request for less MOVEMENT, not for less information — the
+   * outcome mark is still drawn, finished, rather than animated in.
    */
-  test("drops the transform and keeps the colour and the word", async ({ page }) => {
+  test("draws the success tick finished, without animating it", async ({ page }) => {
     await onPhone(page);
     await page.emulateMedia({ reducedMotion: "reduce" });
-    await openBookingDialog(page);
-
-    const frames = await samplePress(page, /Book for/);
-
-    // The phase still HAPPENS — it is what the outcome hangs off — and it is simply not drawn
-    // as movement. `index.css` stands `[data-fb]` down to `transform: none !important`.
-    expect(frames.some((f) => f.fb === "press")).toBe(true);
-    for (const f of frames) {
-      expect(f.transform).toBe("none");
-      expect(f.animation).toBe("none");
-    }
-    await expect(page.getByRole("button", { name: /Book for 50\.00/ })).toBeVisible();
+    await openBookingSheet(page);
+    await page.getByRole("button", { name: PRIMARY }).click();
+    const check = page.getByRole("dialog").locator('[data-glyph="check"]').first();
+    await expect(check).toBeVisible();
+    const animations = await check.evaluate((svg) =>
+      [svg, ...Array.from(svg.querySelectorAll("path, circle"))].map((el) => getComputedStyle(el).animationName));
+    for (const name of animations) expect(name).toBe("none");
   });
 });
 

@@ -54,7 +54,6 @@ export default function AdminReportsPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        eyebrow="Admin · Money"
         title="Reports"
         description="The club's money, courts and attendance, for any period."
         actions={<RefreshButton onRefresh={report.refresh} loading={report.loading && data !== null} />}

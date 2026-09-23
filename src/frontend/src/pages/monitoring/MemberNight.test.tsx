@@ -54,12 +54,10 @@ const nightRoutes = (view: TraceView | null, extra: StubRoute[] = []): StubRoute
   ...extra,
 ];
 
-/** Pick Thandi out of the combobox, which is how every case below starts. */
+/** Pick Thandi out of the MemberCombobox (P3 — it replaced the hand-built MemberPicker). */
 async function pickThandi() {
-  const box = await screen.findByRole("combobox", { name: /Which member/ });
-  fireEvent.focus(box);
-  fireEvent.change(box, { target: { value: "tha" } });
-  fireEvent.mouseDown(await screen.findByRole("button", { name: /Thandi Mokoena/ }));
+  fireEvent.click(await screen.findByRole("combobox", { name: /Which member/ }));
+  fireEvent.click(await screen.findByRole("option", { name: /Thandi Mokoena/ }));
 }
 
 describe("a person's night", () => {
@@ -84,7 +82,7 @@ describe("a person's night", () => {
 
     expect(await screen.findByText(/Pick a member first/)).toBeInTheDocument();
     // A greyed control with no explanation is a dead end somebody stares at.
-    expect(screen.getByLabelText("Which night?")).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Which night\?/ })).toBeDisabled();
   });
 
   it("reads the night once a member is named, through a path segment and never a filter", async () => {
@@ -203,7 +201,7 @@ describe("a person's night", () => {
     ]);
     renderPage(<MemberNightPage />);
 
-    fireEvent.focus(await screen.findByRole("combobox", { name: /Which member/ }));
+    // Said under the field, not inside a list that has to be opened to find it (MemberCombobox).
     expect(await screen.findByText(/not the same as the club having none/)).toBeInTheDocument();
     expect(screen.queryByText("No members yet.")).not.toBeInTheDocument();
   });

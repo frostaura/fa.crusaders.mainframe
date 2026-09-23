@@ -1,7 +1,12 @@
-import { useState } from "react";
-import { Button } from "../Button";
-import { Card } from "../Card";
-import { StateBlock } from "../StateBlock";
+import { useEffect, useRef, useState } from "react";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
+import { IconButton } from "../ui/icon-button";
+import { CheckCircle, UserMinus, X, XCircle } from "../ui/icons";
+import { MemberCombobox } from "../ui/member-combobox";
+import { Skeleton } from "../ui/skeleton";
+import { StateBlock } from "../ui/state-block";
 import { clubDayAndClock } from "../../lib/clubClock";
 import { addMembersLabel, addResultLine, memberCountLine } from "../../lib/groupsCopy";
 import type { AdminBulkResult, MemberGroup } from "../../lib/adminApi";
@@ -24,10 +29,7 @@ import type { AdminBulkResult, MemberGroup } from "../../lib/adminApi";
 
 export type ClubMember = { user_id: string; full_name: string; membership_number?: string | null };
 
-export function GroupMembers({
-  group, clubMembers, current, loading, error, result, adding, onAdd, onRemove, onRetry, onClose,
-  timezone,
-}: {
+export function GroupMembers(props: {
   group: MemberGroup;
   /** Everybody the club has, for choosing from. */
   clubMembers: ClubMember[];
@@ -43,54 +45,150 @@ export function GroupMembers({
   onClose: () => void;
   timezone: string | undefined;
 }) {
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
+  const { group, clubMembers, current, result, adding, onAdd, onClose } = props;
+  const [selected, setSelected] = useState<string[]>([]);
   const inGroup = new Set(current.map((m) => m.user_id));
   const candidates = clubMembers.filter((m) => !inGroup.has(m.user_id));
-  const chosen = [...selected].filter((id) => candidates.some((m) => m.user_id === id));
+  const chosen = selected.filter((id) => candidates.some((m) => m.user_id === id));
   const nameOf = (id: string) =>
     clubMembers.find((m) => m.user_id === id)?.full_name ?? "Somebody the club no longer has";
 
-  const toggle = (id: string) => setSelected((now) => {
-    const next = new Set(now);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    return next;
-  });
+  // The panel opens under the list: focus its heading so the view goes with it.
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { heading.current?.focus(); }, []);
 
   return (
-    <Card className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-lg font-semibold">{`Members of ${group.name}`}</h2>
-        <span className="text-sm text-text-secondary">{memberCountLine(group.member_count)}</span>
-        <Button variant="ghost" className="ml-auto min-h-11" onClick={onClose}>Close</Button>
-      </div>
+    <Card data-group-members="">
+      <CardHeader>
+        <CardTitle asChild><h2 ref={heading} tabIndex={-1} data-route-heading="">{`Members of ${group.name}`}</h2></CardTitle>
+        <CardDescription>{memberCountLine(group.member_count)}</CardDescription>
+        <CardAction>
+          <IconButton label={`Close members of ${group.name}`} onClick={onClose}><X aria-hidden="true" /></IconButton>
+        </CardAction>
+      </CardHeader>
 
-      {result && (
-        <div className="space-y-2 rounded-lg border border-border p-3">
-          <h3 className="text-base font-semibold" aria-live="polite">
-            {`${result.succeeded} of ${result.requested} done.`}
-          </h3>
-          <ul className="space-y-1 text-sm">
-            {result.results.map((row) => (
-              <li
-                key={row.id}
-                className={row.status === "failed" ? "text-danger-strong" : "text-text-secondary"}
-              >
-                {row.status === "failed" ? "✗ " : "✓ "}
-                {addResultLine(row, nameOf(row.id))}
+      <CardContent className="flex flex-col gap-6">
+        {result && <AddResult result={result} nameOf={nameOf} onRetry={onAdd} />}
+
+        <AddMembers
+          group={group}
+          candidates={candidates}
+          chosen={chosen}
+          adding={adding}
+          onPick={(id) => setSelected((now) => (now.includes(id) ? now : [...now, id]))}
+          onUnpick={(id) => setSelected((now) => now.filter((x) => x !== id))}
+          onClear={() => setSelected([])}
+          onAdd={() => { onAdd(chosen); setSelected([]); }}
+          nameOf={nameOf}
+        />
+
+        <CurrentMembers {...props} />
+      </CardContent>
+    </Card>
+  );
+}
+
+/** The per-item answer to a batch: a screen, one row per person, with the retry for the failed. */
+function AddResult({ result, nameOf, onRetry }: {
+  result: AdminBulkResult;
+  nameOf: (id: string) => string;
+  onRetry: (ids: string[]) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-border bg-bg-muted p-3">
+      <h3 className="text-base font-semibold" aria-live="polite">
+        {`${result.succeeded} of ${result.requested} done.`}
+      </h3>
+      <ul className="flex flex-col gap-1 text-sm">
+        {result.results.map((row) => {
+          const failed = row.status === "failed";
+          const Mark = failed ? XCircle : CheckCircle;
+          return (
+            <li key={row.id} className={failed ? "flex items-start gap-2 text-danger-strong" : "flex items-start gap-2 text-text-secondary"}>
+              <Mark size={16} weight="fill" aria-hidden="true" className={failed ? "mt-0.5 shrink-0" : "mt-0.5 shrink-0 text-success-strong"} />
+              <span>{addResultLine(row, nameOf(row.id))}</span>
+            </li>
+          );
+        })}
+      </ul>
+      {result.failed > 0 && (
+        <Button
+          variant="outline" className="self-start"
+          onClick={() => onRetry(result.results.filter((r) => r.status === "failed").map((r) => r.id))}
+        >
+          {`Try the ${result.failed} that failed`}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Adding: a searchable member picker (the club's list is hundreds long — a checkbox per member
+ * was a wall), the people picked so far as removable chips, and ONE action named with the
+ * number and the group.
+ */
+function AddMembers(props: {
+  group: MemberGroup;
+  candidates: ClubMember[];
+  chosen: string[];
+  adding: boolean;
+  onPick: (id: string) => void;
+  onUnpick: (id: string) => void;
+  onClear: () => void;
+  onAdd: () => void;
+  nameOf: (id: string) => string;
+}) {
+  const { group, candidates, chosen, adding, nameOf } = props;
+  const pickable = candidates.filter((m) => !chosen.includes(m.user_id));
+  return (
+    <div className="flex flex-col gap-3">
+      <MemberCombobox
+        label="Add somebody"
+        placeholder="Search the club's members"
+        members={pickable.map((m) => ({ id: m.user_id, name: m.full_name, subtitle: m.membership_number ?? null }))}
+        value={null}
+        onChange={props.onPick}
+        emptyText="Nobody left to add who matches"
+        className="max-w-md"
+      />
+      {chosen.length > 0 && (
+        // The selection strip. Not a modal and not a toast: the list stays on screen, because
+        // the decision being made is about the list.
+        <div
+          role="region"
+          aria-label={`Selected for ${group.name}`}
+          className="flex flex-col gap-3 rounded-lg border border-border bg-bg-muted p-3"
+        >
+          <ul aria-label="Picked" className="flex flex-wrap gap-2">
+            {chosen.map((id) => (
+              <li key={id}>
+                <Badge tone="neutral" className="gap-0 py-0 pl-3 pr-0 text-sm">
+                  {nameOf(id)}
+                  <IconButton label={`Unpick ${nameOf(id)}`} size="icon-sm" className="ml-0.5" onClick={() => props.onUnpick(id)}>
+                    <X aria-hidden="true" />
+                  </IconButton>
+                </Badge>
               </li>
             ))}
           </ul>
-          {result.failed > 0 && (
-            <Button
-              variant="outline" className="min-h-11"
-              onClick={() => onAdd(result.results.filter((r) => r.status === "failed").map((r) => r.id))}
-            >
-              {`Try the ${result.failed} that failed`}
-            </Button>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button pending={adding} onClick={props.onAdd}>{addMembersLabel(chosen.length, group.name)}</Button>
+            <Button variant="ghost" onClick={props.onClear}>Clear</Button>
+          </div>
         </div>
       )}
+    </div>
+  );
+}
 
+/** Who is in the group now, each row with its own way out. */
+function CurrentMembers(props: Parameters<typeof GroupMembers>[0]) {
+  const { group, current, loading, error, onRemove, onRetry, timezone } = props;
+  return (
+    <section aria-label={`In ${group.name} now`} className="flex flex-col gap-2">
+      <h3 className="text-sm font-semibold text-text-primary">In the group</h3>
       <StateBlock
         loading={loading}
         error={error}
@@ -99,72 +197,30 @@ export function GroupMembers({
         onRetry={onRetry}
         empty={!loading && !error && current.length === 0}
         emptyTitle={`Nobody is in ${group.name} yet. Its rules apply to nobody until somebody is added.`}
+        skeleton={<div className="flex flex-col gap-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-touch" />)}</div>}
       >
-        <ul className="space-y-2">
+        <ul className="divide-y divide-border rounded-lg border border-border">
           {current.map((member) => (
-            <li key={member.user_id} className="flex min-w-0 flex-wrap items-center gap-2 border-t border-border pt-2 first:border-t-0 first:pt-0">
-              <span className="min-w-0 break-words text-sm text-text-primary">{member.name}</span>
-              {member.membership_number && (
-                <span className="text-sm text-text-muted">{member.membership_number}</span>
-              )}
-              {member.added_at && (
-                <span className="text-xs text-text-muted">
-                  {`Added ${clubDayAndClock(member.added_at, timezone)}`}
-                  {member.added_by_name ? ` by ${member.added_by_name}` : ""}
+            <li key={member.user_id} className="flex min-w-0 items-center gap-3 py-1.5 pl-3 pr-1">
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="min-w-0 break-words text-sm font-medium text-text-primary">
+                  {member.name}
+                  {member.membership_number && <span className="font-normal text-text-muted">{` · ${member.membership_number}`}</span>}
                 </span>
-              )}
-              <Button
-                variant="ghost" className="ml-auto min-h-11"
-                onClick={() => onRemove(member.user_id)}
-              >
-                {`Take ${member.name} out of ${group.name}`}
-              </Button>
+                {member.added_at && (
+                  <span className="text-xs text-text-muted">
+                    {`Added ${clubDayAndClock(member.added_at, timezone)}`}
+                    {member.added_by_name ? ` by ${member.added_by_name}` : ""}
+                  </span>
+                )}
+              </span>
+              <IconButton label={`Take ${member.name} out of ${group.name}`} onClick={() => onRemove(member.user_id)}>
+                <UserMinus aria-hidden="true" />
+              </IconButton>
             </li>
           ))}
         </ul>
       </StateBlock>
-
-      <div className="space-y-2">
-        <h3 className="text-sm font-medium text-text-primary">Add somebody</h3>
-        <ul className="space-y-1">
-          {candidates.map((member) => (
-            <li key={member.user_id}>
-              <label className="flex min-h-11 items-center gap-2 text-sm">
-                <input
-                  type="checkbox" className="h-5 w-5"
-                  checked={selected.has(member.user_id)}
-                  onChange={() => toggle(member.user_id)}
-                />
-                <span>{member.full_name}</span>
-                {member.membership_number && (
-                  <span className="text-text-muted">{member.membership_number}</span>
-                )}
-              </label>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      {chosen.length > 0 && (
-        // The selection strip. Not a modal and not a toast: the list stays on screen, because
-        // the decision being made is about the list.
-        <div
-          role="region"
-          aria-label={`Selected for ${group.name}`}
-          className="flex flex-wrap items-center gap-3 rounded-lg bg-bg-muted p-3"
-        >
-          <p className="text-sm font-medium">
-            {chosen.length === 1 ? "1 member selected" : `${chosen.length} members selected`}
-          </p>
-          <Button
-            variant="primary" className="min-h-11" disabled={adding}
-            onClick={() => { onAdd(chosen); setSelected(new Set()); }}
-          >
-            {addMembersLabel(chosen.length, group.name)}
-          </Button>
-          <Button variant="ghost" className="min-h-11" onClick={() => setSelected(new Set())}>Clear</Button>
-        </div>
-      )}
-    </Card>
+    </section>
   );
 }

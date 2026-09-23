@@ -66,12 +66,23 @@ const NOTHING_KNOWN: ViewerRules = {
   emptyWindow: null, clubDay: null,
 };
 
-export function readViewerRules(day: ScheduleDay | null): ViewerRules {
+/**
+ * <p>
+ * <b>`actorIsAdmin` makes the viewer exempt, whatever the block says.</b> The booking API exempts
+ * an admin ACTOR from every window, cap and peak rule (`BookingPayer.ActorIsAdmin`, decided by the
+ * same role claim that makes this session an admin), so the grid must not paint the admin's own
+ * groups' windows as restrictions it would never enforce. A current server says `adminExempt`
+ * itself; one that does not (an older build, a block without the flag) used to lock an admin out
+ * of cells the API would happily book. Booking AS a member (`?as=`, the sheet's "Book as") is
+ * checked by that member's rules in the quote and the POST — the grid stays the actor's.
+ * </p>
+ */
+export function readViewerRules(day: ScheduleDay | null, actorIsAdmin = false): ViewerRules {
   const raw = day?.rules as (ScheduleRulesWire & Record<string, unknown>) | undefined;
-  if (!raw || typeof raw !== "object") return NOTHING_KNOWN;
+  if (!raw || typeof raw !== "object") return actorIsAdmin ? { ...NOTHING_KNOWN, adminExempt: true } : NOTHING_KNOWN;
   return {
     known: true,
-    adminExempt: pick(raw, "adminExempt", "admin_exempt") === true,
+    adminExempt: actorIsAdmin || pick(raw, "adminExempt", "admin_exempt") === true,
     groups: readGroups(pick(raw, "groups", "groups")),
     allowedWindows: readWindows(pick(raw, "allowedWindows", "allowed_windows")),
     clubHours: readWindow(pick(raw, "clubHours", "club_hours")),

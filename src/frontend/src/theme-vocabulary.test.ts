@@ -93,25 +93,16 @@ function scan(): Record<string, Rule[]> {
  * A phase that rebuilds a screen removes its entry in the same commit.
  */
 const ALLOW: Record<string, Rule[]> = {
-  "components/AuthShell.tsx": ["arbitrary-spacing"],
   "components/Button.tsx": ["arbitrary-spacing"],
   "components/Card.tsx": ["arbitrary-spacing"],
   "components/ConfirmButton.tsx": ["arbitrary-spacing"],
-  "components/LedgerTable.tsx": ["arbitrary-text-px", "arbitrary-spacing"],
-  "components/PhotoPicker.tsx": ["arbitrary-spacing"],
-  "components/ScheduleCells.tsx": ["arbitrary-text-px", "arbitrary-spacing"],
-  "components/SelectionBar.tsx": ["arbitrary-spacing"],
   "components/Toast.tsx": ["arbitrary-spacing"],
-  "components/doors/DoorCardSection.tsx": ["arbitrary-spacing"],
   "components/doors/PrintSheet.tsx": ["arbitrary-spacing"],
-  "components/groups/WeekPainter.tsx": ["arbitrary-spacing"],
   "components/member-door/FullScreenQr.tsx": ["raw-palette", "arbitrary-z"],
   "components/monitoring/CourtTile.tsx": ["arbitrary-spacing"],
   "components/onboarding/Illustrations.tsx": ["arbitrary-spacing"],
-  "components/schedules/ConflictPanel.tsx": ["arbitrary-spacing"],
   "pages/AdminMembers.tsx": ["arbitrary-text-px", "arbitrary-spacing"],
   "pages/AdminSettings.tsx": ["arbitrary-spacing"],
-  "pages/Login.tsx": ["arbitrary-text-px"],
   "pages/MyCode.tsx": ["arbitrary-spacing"],
 };
 

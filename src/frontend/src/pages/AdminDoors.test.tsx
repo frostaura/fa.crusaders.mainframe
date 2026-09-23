@@ -11,6 +11,25 @@ import {
 } from "../test/harness";
 
 /**
+ * Door confirms are dialogs (P3 — they were inline two-tap ConfirmButtons whose armed state
+ * was "choose again to confirm"). The dialog's title asks the question; its description is the
+ * door's own consequence, word for word what the copy layer says after the question.
+ */
+async function confirmDialog(): Promise<HTMLElement> {
+  return screen.findByRole("dialog");
+}
+function consequenceOf(dialog: HTMLElement): string {
+  return dialog.querySelector("[data-slot=dialog-description]")?.textContent ?? "";
+}
+function titleOf(dialog: HTMLElement): string {
+  return dialog.querySelector("[data-slot=dialog-title]")?.textContent ?? "";
+}
+async function confirmIt() {
+  fireEvent.click((await confirmDialog()).querySelector<HTMLElement>("[data-confirm]")!);
+}
+
+
+/**
  * The doors surface.
  *
  * <p>
@@ -900,24 +919,18 @@ describe("the doors surface", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Shut this door — Side door" }));
       expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(0);
 
-      const confirm = await screen.findByRole("button", { name: "Shut this door — Side door — choose again to confirm" });
-      // The consequence is on screen, in the confirm label the button is now showing. It is
-      // not in the accessible NAME because `ConfirmButton`'s aria-label replaces its
-      // contents — which is why the same sentence is also rendered above the control, where
-      // a screen reader reaches it whatever the button is doing.
-      // `getAllByText`: ConfirmButton renders its confirm label twice — once in the visible
-      // layer and once in an aria-hidden width sentinel, which is what stops the button
-      // resizing as it arms. Both carry the same sentence, and it is the sentence that is
-      // being held here.
+      const dialog = await confirmDialog();
       // B3 / B5: the consequence is generated from THIS door's situation — in contact and
       // named — and is ≤25 words. The old confirm described the pair in the abstract, so a
-      // door that is in contact was told about doors that are not.
-      expect(screen.getAllByText("Shut this door? It hears this at once and opens for nobody.")[0])
-        .toBeInTheDocument();
+      // door that is in contact was told about doors that are not. (P3: a dialog whose title
+      // asks the question and whose description is the consequence.)
+      expect(titleOf(dialog)).toBe("Shut this door?");
+      expect(consequenceOf(dialog)).toBe("It hears this at once and opens for nobody.");
+      expect(within(dialog).getByRole("button", { name: "Keep it open" })).toBeInTheDocument();
       // And the long explanation is still on the page, beside the control, as plain text.
       expect(screen.getByText(/refuses every scan at it from the instant the switch is thrown/))
         .toHaveTextContent("a door marks nobody as having arrived");
-      fireEvent.click(confirm);
+      await confirmIt();
 
       await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
       // B13 / R3-34: the write carries what this page last READ, so a door somebody else has
@@ -945,10 +958,10 @@ describe("the doors surface", () => {
       );
 
       fireEvent.click(await screen.findByRole("button", { name: "Reopen this door — Side door" }));
-      const confirm = await screen.findByRole("button", { name: "Reopen this door — Side door — choose again to confirm" });
-      expect(screen.getAllByText("Reopen this door? It opens for members again from the very next scan.")[0])
-        .toBeInTheDocument();
-      fireEvent.click(confirm);
+      const dialog = await confirmDialog();
+      expect(titleOf(dialog)).toBe("Reopen this door?");
+      expect(consequenceOf(dialog)).toBe("It opens for members again from the very next scan.");
+      await confirmIt();
 
       await waitFor(() => expect(stub.calls.find((c) => c.method === "PATCH")?.raw)
         .toBe('{"enabled":true,"expected_enabled":false}'));
@@ -964,11 +977,10 @@ describe("the doors surface", () => {
       openDoor([doorFixture({ gate_key: null, last_seen_at: ago(3600) })]);
 
       fireEvent.click(await screen.findByRole("button", { name: /^Shut this door/ }));
-      // `findAllByText`: ConfirmButton renders its confirm label twice — once visibly and
-      // once in an aria-hidden width sentinel that stops the button resizing as it arms.
-      const armed = (await screen.findAllByText(/^Shut this door\? Nothing can reach it/))[0];
-      expect(armed).toHaveTextContent("with no saved list it already opens for nobody");
-      expect(armed.textContent).not.toContain("admitting booked members");
+      const armed = consequenceOf(await confirmDialog());
+      expect(armed).toMatch(/^Nothing can reach it/);
+      expect(armed).toContain("with no saved list it already opens for nobody");
+      expect(armed).not.toContain("admitting booked members");
     });
 
     /**
@@ -983,7 +995,8 @@ describe("the doors surface", () => {
         out_of_service_since: new Date("2026-09-20T19:40:00Z").toISOString(),
       })]);
 
-      const notice = await screen.findByText(/Front door is shut/);
+      // The notice, and its standing announcement (a separate invisible region).
+      const notice = (await screen.findAllByText(/Front door is shut/))[0];
       expect(notice).toHaveTextContent("The club's server is refusing every scan at this door.");
       expect(notice).toHaveTextContent("Shut by Priya Naidoo on");
       expect(document.body.textContent).not.toContain("opens for nobody that can reach");
@@ -1002,13 +1015,14 @@ describe("the doors surface", () => {
       );
 
       fireEvent.click(await screen.findByRole("button", { name: "Delete this door — Front door" }));
-      const armed = await screen.findByRole("button", { name: "Delete this door — Front door — choose again to confirm" });
+      const dialog = await confirmDialog();
       // A2 / B5: the confirm is ≤25 words and answers the question a reviewer went looking
       // for — what happens to the door's past scans. It is NOT "the whole history goes",
       // which is what the old confirm left an admin to infer by listing three things and
       // stopping.
-      expect(screen.getAllByText(/Delete this door\? Its name, its place and its power answer go/)[0])
-        .toHaveTextContent("Its past scans stay in the club log under its old name");
+      expect(titleOf(dialog)).toBe("Delete this door?");
+      expect(consequenceOf(dialog)).toMatch(/^Its name, its place and its power answer go/);
+      expect(consequenceOf(dialog)).toContain("Its past scans stay in the club log under its old name");
       // C10 / A12: everything that no longer fits is still on the page beside the control.
       expect(screen.getByText(/Deleting Front door throws away/))
         .toHaveTextContent("what the lock does with no power");
@@ -1016,7 +1030,7 @@ describe("the doors surface", () => {
         .toHaveTextContent("Its past scans are NOT deleted");
       expect(screen.queryByText(/The box re-registers/)).toBeNull();
 
-      fireEvent.click(armed);
+      await confirmIt();
       await waitFor(() => {
         expect(stub.calls.find((c) => c.method === "DELETE")?.path).toBe(`/api/v1/admin/devices/${DOOR_ID}`);
       });
@@ -1204,7 +1218,7 @@ describe("the doors surface", () => {
       );
 
       fireEvent.click(await screen.findByRole("button", { name: /^Shut this door/ }));
-      fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
+      await confirmIt();
 
       expect(await screen.findByText(/Side door is shut\./)).toBeInTheDocument();
       expect(screen.queryByText(/Nothing changed/)).toBeNull();
@@ -1287,7 +1301,7 @@ describe("the doors surface", () => {
       );
 
       fireEvent.click(await screen.findByRole("button", { name: /^Shut this door/ }));
-      fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
+      await confirmIt();
 
       // The button returning to its other label is the same thing it does after real work,
       // so what the admin is TOLD is the whole fix.
@@ -1335,9 +1349,10 @@ describe("the doors surface", () => {
       openDoors([doorFixture(), doorFixture({ id: OTHER_ID, name: "Front door", gate_key: "front-door" })]);
 
       fireEvent.click(await screen.findByRole("button", { name: /^Shut all doors — every door the club has open — 2 of 2/ }));
-      const label = screen.getAllByText(/Shut all 2 doors\?/)[0];
-      expect(label).toHaveTextContent("Every one of them opens for nobody from this click.");
-      expect(label.textContent).not.toContain("admitting booked members");
+      const dialog = await confirmDialog();
+      expect(titleOf(dialog)).toMatch(/^Shut all 2 doors\?/);
+      expect(consequenceOf(dialog)).toContain("Every one of them opens for nobody from this click.");
+      expect(consequenceOf(dialog)).not.toContain("admitting booked members");
       // The long version is still on the page, beside the control.
       expect(screen.getByText(/Shutting every door takes effect at the club's server at once/))
         .toHaveTextContent("for up to six hours");
@@ -1353,7 +1368,7 @@ describe("the doors surface", () => {
       ]);
 
       fireEvent.click(await screen.findByRole("button", { name: /^Shut all doors/ }));
-      expect(screen.getAllByText(/Shut all 2 doors\?/)[0]).toHaveTextContent(
+      expect(consequenceOf(await confirmDialog())).toContain(
         "1 cannot be reached and keeps admitting booked members from its saved list for six hours.",
       );
     });
@@ -1369,9 +1384,9 @@ describe("the doors surface", () => {
       ]);
 
       fireEvent.click(await screen.findByRole("button", { name: /^Shut all doors/ }));
-      const label = screen.getAllByText(/Shut all 2 doors\?/)[0];
-      expect(label).toHaveTextContent("with no saved list it opens for nobody anyway");
-      expect(label.textContent).not.toContain("admitting booked members");
+      const armed = consequenceOf(await confirmDialog());
+      expect(armed).toContain("with no saved list it opens for nobody anyway");
+      expect(armed).not.toContain("admitting booked members");
     });
 
     /**
@@ -1386,7 +1401,7 @@ describe("the doors surface", () => {
       ]);
 
       fireEvent.click(await screen.findByRole("button", { name: /^Shut .* — every door the club has open/ }));
-      fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
+      await confirmIt();
 
       const heading = await screen.findByRole("heading", { name: /2 doors shut — 1 confirmed, 1 not/ });
       expect(heading).toHaveFocus();
@@ -1407,7 +1422,7 @@ describe("the doors surface", () => {
       openDoors([doorFixture({ last_seen_at: ago(6 * 3600) })]);
 
       fireEvent.click(await screen.findByRole("button", { name: /^Shut .* — every door the club has open/ }));
-      fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
+      await confirmIt();
 
       expect(await screen.findByText("NOT CONFIRMED")).toBeInTheDocument();
     });
@@ -1422,7 +1437,7 @@ describe("the doors surface", () => {
       renderPage(<AdminDoorsPage />);
 
       fireEvent.click(await screen.findByRole("button", { name: /^Shut .* — every door the club has open/ }));
-      fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
+      await confirmIt();
 
       expect(await screen.findByText(/Nothing was shut/))
         .toHaveTextContent("every door is exactly as it was");
@@ -1489,11 +1504,11 @@ describe("the doors surface", () => {
       });
 
       fireEvent.click(await screen.findByRole("button", { name: /^Shut .* — every door the club has open/ }));
-      fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
+      await confirmIt();
       await screen.findByRole("heading", { name: /doors shut/ });
 
       fireEvent.click(await screen.findByRole("button", { name: /^Reopen the .* — every door the club shut together/ }));
-      fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
+      await confirmIt();
 
       await waitFor(() => {
         const rows = server.current();
@@ -1792,11 +1807,12 @@ describe("the door pages, round 3", () => {
     openDoor([doorFixture()]);
 
     fireEvent.click(await screen.findByRole("button", { name: /Shut this door/ }));
-    fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
+    await confirmIt();
 
     const reopen = await screen.findByRole("button", { name: /Reopen this door/ });
-    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
-    expect(reopen).toHaveFocus();
+    // The dialog closes, then focus moves to the successor through focusAfterAction's retry
+    // schedule (~1s); a loaded runner needs more than waitFor's default second to see it.
+    await waitFor(() => expect(reopen).toHaveFocus(), { timeout: 3000 });
   });
 
   /**
@@ -1892,7 +1908,7 @@ describe("a door page acting on a state that has moved", () => {
     // Somebody else shuts it between the arm and the confirm — the exact window a tab left
     // open overnight is permanently inside.
     server.current()[0].enabled = false;
-    fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
+    await confirmIt();
 
     expect(await screen.findByText(/shut or reopened by somebody else/)).toBeInTheDocument();
     // Nothing was written: the server refused before applying, so the door is as the other
@@ -2032,7 +2048,7 @@ describe("the club's own clock, on every doors face", () => {
     renderPage(<AdminDoorsPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Shut all doors|Shut the/ }));
-    fireEvent.click(await screen.findByRole("button", { name: /again to confirm/ }));
+    await confirmIt();
 
     // 04:09 UTC is 16:09 in Auckland and 06:09 in Johannesburg — the fixture's zone is the
     // one that must win, whatever zone the test runner is pinned to.

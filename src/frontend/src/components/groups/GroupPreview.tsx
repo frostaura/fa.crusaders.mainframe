@@ -1,7 +1,9 @@
 import { Alert } from "../Alert";
-import { Button } from "../Button";
-import { Card } from "../Card";
-import { StateBlock } from "../StateBlock";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Checkbox } from "../ui/checkbox";
+import { IconButton } from "../ui/icon-button";
+import { X } from "../ui/icons";
+import { StateBlock } from "../ui/state-block";
 import {
   UNLIMITED, WEEK_IN_READING_ORDER, allowedWindows, capFor, ceilingSlots, countSlots, formatClock,
   parseClock, type Interval,
@@ -99,11 +101,14 @@ export function GroupWeekPreview({ group, club, sliceMinutes, clubCaps, stale, o
   const minuteCap = capFor([group], "max_minutes_per_day", clubCaps.minuteCap ?? UNLIMITED);
 
   return (
-    <Card className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-lg font-semibold">{`${group.name}, on its own, this week`}</h2>
-        <Button variant="ghost" className="ml-auto min-h-11" onClick={onClose}>Close</Button>
-      </div>
+    <Card data-group-week-preview="">
+      <CardHeader>
+        <CardTitle asChild><h2>{`${group.name}, on its own, this week`}</h2></CardTitle>
+        <CardAction>
+          <IconButton label={`Close ${group.name}'s week`} onClick={onClose}><X aria-hidden="true" /></IconButton>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
       {stale && <Alert tone="warning">{STALE_PREVIEW}</Alert>}
       <p className="text-sm text-text-muted">
         This is this group by itself against the club&rsquo;s hours. A member in two groups gets
@@ -123,6 +128,7 @@ export function GroupWeekPreview({ group, club, sliceMinutes, clubCaps, stale, o
         }).map((line) => <p key={line}>{line}</p>)}
       </div>
       <Legend />
+      </CardContent>
     </Card>
   );
 }
@@ -151,8 +157,10 @@ function wireWindows(windows: Array<{ start: string; end: string }> | undefined)
  */
 export function MemberPreview({
   rules, memberName, day, loading, error, sliceMinutes, onRetry, children,
-  groups = [], proposed = null, onPropose, proposedRules = null, consequence = [],
+  groups = [], proposed = null, onPropose, proposedRules = null, consequence = [], onClose,
 }: {
+  /** Close the panel — the × in its header. */
+  onClose?: () => void;
   rules: MemberBookingRules | null;
   memberName: string | null;
   day: Weekday;
@@ -176,8 +184,16 @@ export function MemberPreview({
   const clubHours = rules?.club_hours ? wireWindows([rules.club_hours]) : [];
 
   return (
-    <Card className="space-y-3">
-      <h2 className="text-lg font-semibold">What one member may actually book</h2>
+    <Card data-member-preview="">
+      <CardHeader>
+        <CardTitle asChild><h2>What one member may actually book</h2></CardTitle>
+        {onClose ? (
+          <CardAction>
+            <IconButton label="Close the member preview" onClick={onClose}><X aria-hidden="true" /></IconButton>
+          </CardAction>
+        ) : null}
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
       {children}
 
       {memberName && (
@@ -244,12 +260,10 @@ export function MemberPreview({
               const on = (proposed ?? (rules.groups ?? []).map((g) => g.id)).includes(group.id);
               return (
                 <li key={group.id}>
-                  <label className="flex min-h-11 items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      className="h-5 w-5"
+                  <label className="flex min-h-touch cursor-pointer items-center gap-3 text-sm">
+                    <Checkbox
                       checked={on}
-                      onChange={() => {
+                      onCheckedChange={() => {
                         const now = proposed ?? (rules.groups ?? []).map((g) => g.id);
                         onPropose(on ? now.filter((id) => id !== group.id) : [...now, group.id]);
                       }}
@@ -277,6 +291,7 @@ export function MemberPreview({
       )}
 
       <Legend />
+      </CardContent>
     </Card>
   );
 }

@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { RefreshCw } from "lucide-react";
 import { endpoints, type AdminSettings } from "../lib/api";
 import { describeDeviceError } from "../lib/deviceErrors";
-import { Card } from "./Card";
-import { Button } from "./Button";
+import { Button } from "./ui/button";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./ui/card";
+import { SquaresFour } from "./ui/icons";
 import { ButtonMapEditor, buttonMapWithinCap } from "./ButtonMapEditor";
 import { useToast } from "./Toast";
 
@@ -77,7 +77,7 @@ export function WalkUpCapNotice({ map, cap }: { map: string[]; cap: number | nul
 
   const one = over.length === 1;
   return (
-    <p className="mt-3 rounded-lg bg-warning-soft p-3 text-xs text-warning-strong">
+    <p className="rounded-lg bg-warning-soft p-3 text-sm text-warning-strong">
       {/* The possessive is an expression, not JSX text: lizard reads a lone apostrophe in JSX
           text as a string opener and swallows the rest of the file, which is why this file's
           previous home reported a 166-NLOC WalkUpCapNotice nobody wrote. Output is identical. */}
@@ -142,27 +142,32 @@ export function ClubButtonMapCard({
   }
 
   return (
-    <Card className="p-5">
-      <div className="mb-1 flex items-center gap-2">
-        <RefreshCw className="h-5 w-5 text-text-muted" />
-        <h2 className="text-lg font-semibold">Button map</h2>
-      </div>
-      <p className="mb-4 text-sm text-text-secondary">
-        What each of the eight buttons on a court box does. The wiring never changes — button 1 is always
-        the same physical button — so you can swap courts around here without anyone touching the hardware.
-        "Court A" means whatever court is on relay A of the box being pressed. Boxes pick up a change on their
-        next heartbeat. A box given its own map above ignores this one.
-      </p>
+    <Card>
+      <CardHeader>
+        <CardTitle asChild>
+          <h2 className="flex items-center gap-2">
+            <SquaresFour size={20} aria-hidden="true" className="shrink-0 text-text-muted" />
+            Button map
+          </h2>
+        </CardTitle>
+        <CardDescription>
+          What each of the eight buttons on a court box does. The wiring never changes — button 1 is always
+          the same physical button — so you can swap courts around here without anyone touching the hardware.
+          &ldquo;Court A&rdquo; means whatever court is on relay A of the box being pressed. Boxes pick up a change on
+          their next heartbeat. A box given its own map above ignores this one.
+        </CardDescription>
+      </CardHeader>
 
-      <ButtonMapEditor value={value} onChange={onChange} disabled={saving || loading} />
+      <CardContent className="flex flex-col gap-3">
+        <ButtonMapEditor value={value} onChange={onChange} disabled={saving || loading} />
+        <WalkUpCapNotice map={value} cap={walkUpCap} />
+      </CardContent>
 
-      <WalkUpCapNotice map={value} cap={walkUpCap} />
-
-      <div className="mt-4">
-        <Button onClick={() => void save()} disabled={saving || loading || !buttonMapWithinCap(value)}>
-          {saving ? "Saving…" : "Save button map"}
+      <CardFooter>
+        <Button pending={saving} className="h-auto max-w-full whitespace-normal py-2" onClick={() => void save()} disabled={loading || !buttonMapWithinCap(value)}>
+          Save button map
         </Button>
-      </div>
+      </CardFooter>
     </Card>
   );
 }

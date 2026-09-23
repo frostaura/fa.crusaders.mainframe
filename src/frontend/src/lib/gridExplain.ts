@@ -3,6 +3,7 @@ import type { ScheduleDay, ScheduleSlot } from "./api";
 import type { GridReason, ViewerRules } from "./gridRules";
 import type { TimeSlice } from "./scheduleGrid";
 import { walletTone } from "./balance";
+import { adminWalletNote } from "./bookingsCopy";
 import {
   closedSentence, earlierSummary, emptyWalletSentence, emptyWindowSentence, groupRateLine,
   quotaBannerBody, quotaBannerTitle, quotaPill, restrictionSentence,
@@ -36,9 +37,22 @@ export type Notice = {
 export type GridExplainer = {
   /** The polite live region's current text. Empty except in the moment after something happened. */
   live: string;
+  /**
+   * The explanation a SIGHTED member reads — set only by `explain`, never by `announce`.
+   *
+   * <p>
+   * The two used to be one string, so "Selection off." and "Selection cleared" were painted as a
+   * banner over the grid. Chatter about the mode belongs to the screen reader alone; the answer a
+   * locked cell gives belongs to everybody (D4 §2.9).
+   * </p>
+   */
+  shown: string;
+  /** Put the visible explanation away — its × button, and a change of day. */
+  dismiss: () => void;
   announce: (text: string) => void;
   explain: (reason: GridReason, where: string) => void;
-  notices: (balanceCredits: number | null, day: ScheduleDay | null) => Notice[];
+  /** `isAdmin` is the ACTOR's role: an admin may book at or below zero (R19), a member may not. */
+  notices: (balanceCredits: number | null, day: ScheduleDay | null, isAdmin?: boolean) => Notice[];
   /** `null` until the member has booked something today — a counter from zero is noise. */
   quotaPill: { text: string; atLimit: boolean } | null;
   rateLine: string | null;
@@ -61,6 +75,7 @@ const HAIR_SPACE = String.fromCharCode(0x200A);
 
 export function useGridExplainer(day: ScheduleDay | null, rules: ViewerRules): GridExplainer {
   const [live, setLive] = useState("");
+  const [shown, setShown] = useState("");
 
   // A live region only announces a change MADE to a node already in the document, and two
   // taps on the same cell must speak twice — a member pressing a locked cell again is asking
@@ -71,11 +86,15 @@ export function useGridExplainer(day: ScheduleDay | null, rules: ViewerRules): G
   }, []);
 
   const explain = useCallback((reason: GridReason, where: string) => {
-    announce(sentenceFor(reason, where, day, rules));
+    const sentence = sentenceFor(reason, where, day, rules);
+    announce(sentence);
+    setShown(sentence);
   }, [announce, day, rules]);
+  const dismiss = useCallback(() => setShown(""), []);
 
   const notices = useCallback(
-    (balanceCredits: number | null, current: ScheduleDay | null) => buildNotices(rules, balanceCredits, current),
+    (balanceCredits: number | null, current: ScheduleDay | null, isAdmin = false) =>
+      buildNotices(rules, balanceCredits, current, isAdmin),
     [rules],
   );
 
@@ -99,7 +118,7 @@ export function useGridExplainer(day: ScheduleDay | null, rules: ViewerRules): G
     [],
   );
 
-  return { live, announce, explain, notices, quotaPill: pill, rateLine, collapsedRows };
+  return { live, shown, dismiss, announce, explain, notices, quotaPill: pill, rateLine, collapsedRows };
 }
 
 /**
@@ -148,19 +167,21 @@ function sentenceFor(reason: GridReason, where: string, day: ScheduleDay | null,
  * gets nothing at all.
  * </p>
  */
-function buildNotices(rules: ViewerRules, balanceCredits: number | null, day: ScheduleDay | null): Notice[] {
+function buildNotices(rules: ViewerRules, balanceCredits: number | null, day: ScheduleDay | null, isAdmin: boolean): Notice[] {
   const clubDay = rules.clubDay ?? day?.date ?? "";
-  return [ruleNotice(rules, clubDay), walletNotice(balanceCredits, day)]
+  return [ruleNotice(rules, clubDay), walletNotice(balanceCredits, day, isAdmin)]
     .filter((n): n is Notice => n !== null);
 }
 
 /** At most one rule notice: the empty intersection outranks the cap, because it outlasts it. */
 function ruleNotice(rules: ViewerRules, clubDay: string): Notice | null {
+  // An exempt viewer has no window and no cap to be told about, whatever else the block carries.
+  if (rules.adminExempt) return null;
   if (rules.emptyWindow) {
     return { id: "empty-window", tone: "warning", title: emptyWindowSentence(rules.emptyWindow.groups, clubDay) };
   }
   const max = rules.maxSlotsPerDay ?? 0;
-  if (rules.adminExempt || rules.remainingToday !== 0 || max <= 0) return null;
+  if (rules.remainingToday !== 0 || max <= 0) return null;
   return {
     id: "quota", tone: "warning",
     title: quotaBannerTitle(max, clubDay),
@@ -174,13 +195,21 @@ function ruleNotice(rules: ViewerRules, clubDay: string): Notice | null {
  * dialog, after picking a court and a time. `null` is UNKNOWN — a wallet read that has not
  * landed — and says nothing, because a grid that shouted "no credits" at a slow network would
  * be wrong more often than right.
+ *
+ * <p>
+ * <b>An admin is not refused.</b> R19: an admin books at or below zero, and the booking API lets
+ * them. "You can't book yet" was false for the desk, so an admin at or below zero gets a calm
+ * `info` note with the figure and what it means — no Top up call to action, because nothing is
+ * blocked.
+ * </p>
  */
-export function walletNotice(balanceCredits: number | null, day: ScheduleDay | null): Notice | null {
+export function walletNotice(balanceCredits: number | null, day: ScheduleDay | null, isAdmin = false): Notice | null {
   // Through `walletTone`, and exported so the one rule can be asserted on all three surfaces
   // at once. This used to ask `balanceCredits > 0`, which let 0.004 through — a balance that
   // renders as "0.00" and buys nothing, on a grid still offering thirty-one green cells while
   // the chip beside it was already red.
   if (walletTone(balanceCredits) !== "zero") return null;
+  if (isAdmin) return { id: "wallet-admin", tone: "info", title: adminWalletNote(balanceCredits ?? 0) };
   return {
     id: "wallet", tone: "warning",
     // The balance, not just the price. A member below zero is told what they owe rather than

@@ -7,6 +7,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { RouteAnnouncer } from "./RouteAnnouncer";
 import { NOT_FOUND_PAGE_NAME, knownRoutePatterns, routePageName, routeTitle } from "../lib/routeAnnouncer";
+import { ADMIN_NAV_ITEMS } from "./admin/adminNav";
 
 const SRC = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -72,11 +73,28 @@ describe("per-route document titles", () => {
   it("names the new map for what each page is", () => {
     expect(routeTitle("/my-code")).toBe("My Code — Crusaders Mainframe");
     expect(routeTitle("/bookings")).toBe("Bookings — Crusaders Mainframe");
-    expect(routeTitle("/admin")).toBe("Admin overview — Crusaders Mainframe");
+    // P3: the rail's label wins — the title an admin hears is the word they just clicked.
+    expect(routeTitle("/admin")).toBe("Overview — Crusaders Mainframe");
     expect(routeTitle("/admin/transactions")).toBe("Transactions — Crusaders Mainframe");
-    expect(routeTitle("/admin/reports")).toBe("Club reports — Crusaders Mainframe");
+    expect(routeTitle("/admin/reports")).toBe("Reports — Crusaders Mainframe");
     expect(routeTitle("/wallet/activity")).toBe("Wallet activity — Crusaders Mainframe");
     expect(routeTitle("/admin/monitoring/devices")).toBe("Boards — Crusaders Mainframe");
+  });
+
+  /**
+   * The rail and the announcer name every admin destination with the SAME word. They disagreed
+   * ("Member groups" under a rail item called "Groups", "Club reports" under "Reports", "Admin
+   * overview" under "Overview"): a screen-reader user clicked one word and heard another.
+   * Settings is the one known exception, owned by the Settings rebuild (P6), and listed so the
+   * exception cannot spread silently.
+   */
+  it("announces every admin destination by its rail label", () => {
+    const KNOWN_EXCEPTIONS = new Set(["settings"]);
+    const mismatched = ADMIN_NAV_ITEMS
+      .filter((item) => !KNOWN_EXCEPTIONS.has(item.id))
+      .filter((item) => routeTitle(item.path) !== `${item.label} — Crusaders Mainframe`)
+      .map((item) => `${item.path}: rail "${item.label}" vs "${routeTitle(item.path)}"`);
+    expect(mismatched).toEqual([]);
   });
 
   it("puts the page first and the product second, and names an unknown path honestly", () => {

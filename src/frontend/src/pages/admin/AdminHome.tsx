@@ -7,7 +7,7 @@ import {
   type AdminAttention, type AttentionSource,
 } from "@/lib/adminAttention";
 import { Alert } from "@/components/Alert";
-import { AttentionCount } from "@/components/admin/AdminRail";
+import { AttentionCount, attentionName } from "@/components/admin/AdminRail";
 import { ADMIN_NAV, ADMIN_NAV_ITEMS, PENDING_APPLICATIONS_HREF, type AdminNavItem } from "@/components/admin/adminNav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -313,6 +313,9 @@ function QuickLink({ item, attention }: { item: AdminNavItem; attention: AdminAt
         <Link
           to={item.path}
           data-quick-link={item.id}
+          // The label and its count as one phrase; the description stays a description.
+          aria-label={attentionName(item, attention)}
+          aria-describedby={`${item.id}-quick-description`}
           className="flex w-full items-start gap-3 rounded-xl border border-border bg-bg-surface p-4 shadow-xs hover:border-control hover:shadow-md"
         >
           <span aria-hidden="true" className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent-strong">
@@ -323,7 +326,7 @@ function QuickLink({ item, attention }: { item: AdminNavItem; attention: AdminAt
               <span className="min-w-0 truncate font-semibold text-text-primary">{item.label}</span>
               <AttentionCount item={item} counts={attention} />
             </span>
-            <span className="text-sm text-text-secondary">{item.description}</span>
+            <span id={`${item.id}-quick-description`} className="text-sm text-text-secondary">{item.description}</span>
           </span>
           <CaretRight size={16} weight="bold" aria-hidden="true" className="mt-1 shrink-0 text-text-muted" />
         </Link>
@@ -360,8 +363,8 @@ export default function AdminHome() {
   const attention = useAdminAttention();
   return (
     <PageShell width="wide">
+      {/* No eyebrow: the rail (desktop) and the section bar (phone) already say "Admin". */}
       <PageHeader
-        eyebrow="Admin"
         title="Overview"
         description="What needs you right now, and every part of the club’s console."
         actions={<RefreshButton label="Refresh overview" onRefresh={() => void attention.refresh()} loading={attention.refreshing} />}

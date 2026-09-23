@@ -1,10 +1,12 @@
 import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
+import { DatePicker } from "../ui/date-picker";
+import { IconButton } from "../ui/icon-button";
 import { Field, FieldLabel } from "../ui/field";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Skeleton } from "../ui/skeleton";
-import { DownloadSimple } from "../ui/icons";
+import { DownloadSimple, X } from "../ui/icons";
 
 /**
  * The pieces every Courts & hardware page (and the admin read screens beside them) is built
@@ -92,6 +94,32 @@ export function FilterSelect({ id, label, value, options, onChange, className }:
         </SelectContent>
       </Select>
     </Field>
+  );
+}
+
+/**
+ * One labelled date filter: the club-day DatePicker (P3, R7 — never a native date input), with a
+ * clear × beside it, because an empty bound is a real state — "unbounded" — and a calendar alone
+ * cannot express it.
+ */
+export function FilterDate({ label, value, onChange, className }: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  className?: string;
+}) {
+  return (
+    <div role="group" aria-label={label} className={cn("flex flex-col gap-1.5", className)}>
+      <span aria-hidden="true" className="text-sm font-medium text-text-primary">{label}</span>
+      <span className="flex items-center gap-1">
+        <DatePicker label={label} value={value || null} onChange={onChange} placeholder="Any date" />
+        {value ? (
+          <IconButton label={`Clear ${label}`} size="icon-sm" onClick={() => onChange("")}>
+            <X aria-hidden="true" />
+          </IconButton>
+        ) : null}
+      </span>
+    </div>
   );
 }
 

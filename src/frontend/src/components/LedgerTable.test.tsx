@@ -95,10 +95,47 @@ describe("LedgerTable — what survives a 375px screen", () => {
       expect(cell.className).toContain("break-words");
       // From `sm` up there is room for a column, so it truncates with the tooltip again.
       expect(cell.className).toContain("sm:truncate");
-      expect(cell.className).toContain("sm:max-w-[280px]");
+      // P3 (theme-vocabulary ratchet): the cap is the named `max-w-xs` (320 px), not the
+      // arbitrary `max-w-[280px]` it replaced — the assertion is on the rule, not the pixel.
+      expect(cell.className).toContain("sm:max-w-xs");
       // The tooltip stays for a mouse, but it is no longer the only way to read the text.
-      expect(cell.getAttribute("title")).toBe(cell.textContent);
+      // P3: on a phone the Time column folds and the time rides under the comment, so the
+      // cell's text is the comment plus its time — the tooltip is the comment alone.
+      expect(cell.textContent!.startsWith(cell.getAttribute("title")!)).toBe(true);
     }
+  });
+
+  /**
+   * P3 — the header says which way a column runs in words (`aria-sort`), not only by caret, and
+   * money reads by sign: a debit is never painted in the warning ink (spending your own credit
+   * on a court is not something to look at), a credit is the success ink.
+   */
+  it("says the sort in aria-sort and colours money by its sign, never debits as a warning", () => {
+    render(<LedgerTable rows={rows} label="Ledger" />);
+    expect(screen.getByRole("columnheader", { name: /Time/ })).toHaveAttribute("aria-sort", "descending");
+    expect(screen.getByRole("columnheader", { name: /Amount/ })).toHaveAttribute("aria-sort", "none");
+    const amounts = cellsOf("Amount");
+    const debit = amounts.find((c) => c.textContent!.startsWith("\u2212"))!;
+    const credit = amounts.find((c) => c.textContent!.startsWith("+"))!;
+    expect(debit.className).not.toContain("warning");
+    expect(credit.className).toContain("text-success-strong");
+    // And nothing in the table is below the 12 px floor (the counterparty line was 10 px).
+    expect(document.body.innerHTML).not.toMatch(/text-\[\d+px\]/);
+  });
+
+  /** P3 — mobile rows: two columns, the movement (time under it) and the money (who under it). */
+  it("folds Time on a phone and carries it under the comment instead", () => {
+    render(<LedgerTable rows={rows} label="Ledger" />);
+    const time = screen.getByRole("columnheader", { name: /Time/ });
+    expect(time.className).toContain("hidden");
+    expect(time.className).toContain("sm:table-cell");
+    for (const cell of cellsOf("Comment")) {
+      const when = cell.querySelector("time")!;
+      expect(when.className).toContain("sm:hidden");
+    }
+    // Money is the last column, where a ledger keeps it.
+    const heads = screen.getAllByRole("columnheader").map((h) => h.textContent);
+    expect(heads[heads.length - 1]).toBe("Amount");
   });
 
   it("carries the counterparty under the amount, so folding From/To loses no information", () => {

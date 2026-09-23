@@ -1,4 +1,5 @@
-import { Badge } from "../Button";
+import { Badge } from "../ui/badge";
+import { chipTone } from "./chipTone";
 import {
   doorSetupChip, doorShutHeard, doorSignalChip, doorStateChip, type DoorChip,
 } from "../../lib/doorsCopy";
@@ -67,7 +68,7 @@ export function DoorChips({ device, online, signals }: {
         teaches somebody to skip the row.
       */}
       <span className="sr-only">Status: </span>
-      {chips.map((chip) => <Badge key={chip.label} tone={chip.tone}>{chip.label}</Badge>)}
+      {chips.map((chip) => <Badge key={chip.label} tone={chipTone(chip.tone)}>{chip.label}</Badge>)}
     </span>
   );
 }

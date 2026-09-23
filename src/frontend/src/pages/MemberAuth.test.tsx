@@ -14,6 +14,8 @@ import { AuthProvider } from "../lib/auth";
 import { BalanceProvider, useBalance } from "../lib/balance";
 import { ProfileProvider, useProfile } from "../lib/profile";
 import { signIn, signOut, stubFetch, type StubRoute } from "../test/harness";
+import { CHANGE_PASSWORD, FIELD_REQUIRED, LOGIN, PASSWORD_TOGGLE, checkFields } from "../lib/authCopy";
+import { PHOTO_PICKER, PHOTO_REQUIRED, REGISTER, REGISTER_MESSAGES } from "../lib/registrationCopy";
 
 /**
  * The member-facing auth screens.
@@ -52,6 +54,9 @@ function renderAt(ui: ReactElement, entries: Parameters<typeof MemoryRouter>[0][
         </ProfileProvider>
       </AuthProvider>
     </MemoryRouter>,
+    // StrictMode's mount → cleanup → mount has produced real defects on these screens (the
+    // single-use links were spent twice); every screen here is rendered under it.
+    { reactStrictMode: true },
   );
 }
 
@@ -59,9 +64,9 @@ const err = (path: string, status: number, body: unknown, method = "POST"): Stub
   ({ method, path, status, body });
 
 async function signInAs(emailValue: string, passwordValue: string) {
-  fireEvent.change(screen.getByLabelText("Email"), { target: { value: emailValue } });
-  fireEvent.change(screen.getByLabelText("Password"), { target: { value: passwordValue } });
-  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  fireEvent.change(screen.getByLabelText(LOGIN.email), { target: { value: emailValue } });
+  fireEvent.change(screen.getByLabelText(LOGIN.password), { target: { value: passwordValue } });
+  fireEvent.click(screen.getByRole("button", { name: LOGIN.submit }));
 }
 
 describe("Login — a 403 is two different problems", () => {
@@ -140,6 +145,10 @@ describe("Login — a 403 is two different problems", () => {
     expect(forgot.className).toContain("text-accent-strong");
     expect(forgot.className).toMatch(/(^|\s)underline(\s|$)/);
     expect(forgot.className).not.toContain("text-text-secondary");
+    expect(forgot).toHaveAttribute("href", "/forgot-password");
+    // R10 — "Register" navigates, so it is a link, never a button dressed as one.
+    expect(screen.getByRole("link", { name: LOGIN.register })).toHaveAttribute("href", "/register");
+    expect(screen.queryByRole("button", { name: LOGIN.register })).not.toBeInTheDocument();
   });
 
   it("says to wait rather than 'sign in failed' when the rate limiter answers", async () => {
@@ -279,6 +288,64 @@ describe("Login — the page you actually asked for", () => {
   });
 });
 
+describe("Login — the form itself", () => {
+  it("says what is missing on each field without asking the server", () => {
+    const stub = stubFetch([]);
+    renderAt(<LoginPage />);
+    fireEvent.click(screen.getByRole("button", { name: LOGIN.submit }));
+
+    const email = screen.getByLabelText(LOGIN.email);
+    expect(email).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText(FIELD_REQUIRED.email)).toBeInTheDocument();
+    expect(screen.getByText(FIELD_REQUIRED.password)).toBeInTheDocument();
+    expect(document.activeElement).toBe(email);
+    expect(stub.calls).toHaveLength(0);
+  });
+
+  it("works while it signs in instead of freezing the button", async () => {
+    // The API never answers, so the button can be looked at while it works.
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+    renderAt(<LoginPage />);
+    await signInAs("member@club.test", "Password123!");
+
+    const button = screen.getByRole("button", { name: LOGIN.submit });
+    // R12 — `aria-busy` with a spinner, never `disabled`: focus stays, a second press is ignored.
+    await waitFor(() => expect(button).toHaveAttribute("aria-busy", "true"));
+    expect(button).not.toBeDisabled();
+  });
+
+  it("shows and hides the password from a named control inside the field", () => {
+    stubFetch([]);
+    renderAt(<LoginPage />);
+    const password = screen.getByLabelText(LOGIN.password);
+    expect(password).toHaveAttribute("type", "password");
+
+    const reveal = screen.getByRole("button", { name: PASSWORD_TOGGLE.show });
+    // 44px icon button, and a `button` so Enter in the field still submits the form.
+    expect(reveal).toHaveAttribute("type", "button");
+    fireEvent.click(reveal);
+    expect(password).toHaveAttribute("type", "text");
+    expect(screen.getByRole("button", { name: PASSWORD_TOGGLE.hide })).toBeInTheDocument();
+  });
+
+  describe("on a device with passkeys", () => {
+    beforeEach(() => {
+      vi.stubGlobal("PublicKeyCredential", class {});
+      vi.stubGlobal("navigator", { ...navigator, credentials: { create: vi.fn(), get: vi.fn() } });
+    });
+
+    /** It was a bare 56px circle with an 11px caption, and the fastest way in read as decoration. */
+    it("offers the passkey as a real, named control above the password form", () => {
+      stubFetch([]);
+      renderAt(<LoginPage />);
+      const passkey = screen.getByRole("button", { name: LOGIN.passkey });
+      const form = screen.getByRole("button", { name: LOGIN.submit }).closest("form")!;
+      expect(passkey.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(passkey.className).toContain("w-full");
+    });
+  });
+});
+
 describe("Register — one message per mistake", () => {
   /**
    * `await`ed, because PhotoPicker prepares the photo when it is PICKED rather than when the
@@ -317,24 +384,31 @@ describe("Register — one message per mistake", () => {
   const submit = () => fireEvent.click(screen.getByRole("button", { name: /Submit application/i }));
 
   /**
-   * Item 12 on the one control that commits anything on this page.
+   * The one commitment on the page, at rest.
    *
    * <p>
-   * The theme defaults to `neutral` so that a hundred call sites could not be restyled
-   * unreviewed — which means every screen it should reach has to say so, and a screen that
-   * forgets looks exactly like a screen that decided against it. This is the assertion that
-   * tells those two apart on registration.
+   * RETIRED by the design system (design-system.md, Icons — "No glyph on buttons at rest"; the
+   * thumbs `ActionGlyph` and item 12's `affirm` intent are gone, D5/R8): this used to assert a
+   * `data-intent="affirm"` glyph on the button. What is kept is the invariant under it — the
+   * words are the accessible name — and the new rule is pinned instead: nothing drawn beside the
+   * label until the button is working, and working is a spinner, not a frozen control.
    * </p>
    */
-  it("wears the affirm glyph on the application it sends", async () => {
+  it("sends the application from a plain, named button that shows progress rather than freezing", async () => {
     stubFetch([]);
     renderAt(<RegisterPage />);
-    const button = await screen.findByRole("button", { name: /Submit application/i });
-    expect(button).toHaveAttribute("data-intent", "affirm");
-    // The glyph, not merely the declaration: `ActionGlyph` draws an aria-hidden <svg>, and
-    // the word beside it is still the accessible name.
-    expect(button.querySelector("svg[aria-hidden]")).not.toBeNull();
-    expect(button).toHaveAccessibleName(/Submit application/i);
+    const button = await screen.findByRole("button", { name: REGISTER.submit });
+    expect(button).not.toHaveAttribute("data-intent");
+    expect(button.querySelector('[data-slot="button-label"] svg'), "a glyph at rest").toBeNull();
+
+    await fill();
+    // The API never answers, so the button can be looked at while it works.
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+    submit();
+    // R12 — busy, not disabled: focus stays on it and a second press is ignored.
+    await waitFor(() => expect(button).toHaveAttribute("aria-busy", "true"));
+    expect(button).not.toBeDisabled();
+    expect(button).toHaveAccessibleName(REGISTER.submit);
   });
 
   /**
@@ -355,19 +429,72 @@ describe("Register — one message per mistake", () => {
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "Password123!" } });
     submit();
 
+    // ONE live region, not two. The picker used to raise its message to the page's own `Alert`
+    // as well as rendering it itself, and both carried role="alert". Now the form's summary is
+    // the one that speaks (design-system.md: errors inline on the field + a summary), and the
+    // sentence itself sits on the field — rewritten from "the alert IS the field message".
     const alerts = await screen.findAllByRole("alert");
-    // ONE region, not two. The picker used to raise its message to the page's own `Alert` as
-    // well as rendering it itself, and both carry role="alert".
     expect(alerts).toHaveLength(1);
-    expect(alerts[0]).toHaveTextContent(/add a photo of yourself/i);
+    expect(alerts[0]).toHaveTextContent(checkFields(1));
     // Described by the message, so a screen reader hears it on the field and not only as it
     // arrives — and the keyboard is put there, because on a phone the field is off-screen.
-    const field = screen.getByLabelText("Photo of yourself");
+    const field = screen.getByLabelText(PHOTO_PICKER.label);
     expect(field).toHaveAttribute("aria-invalid", "true");
-    expect(field.getAttribute("aria-describedby")).toContain(alerts[0].id);
+    const message = screen.getByText(PHOTO_REQUIRED);
+    expect(field.getAttribute("aria-describedby")).toContain(message.closest("p")!.id);
     expect(document.activeElement).toBe(field);
     // Nothing was sent: no photo upload, no registration.
     expect(stub.calls).toHaveLength(0);
+  });
+
+  /**
+   * Every field says what is wrong with it, and the keyboard goes to the first. The browser's
+   * own bubbles are off (`noValidate`) because they cannot be styled, do not survive a theme,
+   * and say "Please fill out this field." about a membership number.
+   */
+  it("marks every empty field at once and takes the keyboard to the first", async () => {
+    const stub = stubFetch([]);
+    renderAt(<RegisterPage />);
+    submit();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(checkFields(5));
+    for (const label of [REGISTER.fullName, REGISTER.email, REGISTER.membershipNumber, REGISTER.password]) {
+      expect(screen.getByLabelText(label)).toHaveAttribute("aria-invalid", "true");
+    }
+    expect(document.activeElement).toBe(screen.getByLabelText(REGISTER.fullName));
+    expect(stub.calls).toHaveLength(0);
+
+    // Typing into a field answers its complaint there and then.
+    fireEvent.change(screen.getByLabelText(REGISTER.fullName), { target: { value: "Ada Lovelace" } });
+    expect(screen.getByLabelText(REGISTER.fullName)).not.toHaveAttribute("aria-invalid");
+  });
+
+  /** A refusal that is about one field lands ON that field, not in a banner at the foot. */
+  it("puts a taken email address on the Email field", async () => {
+    stubFetch([
+      { method: "POST", path: "/api/v1/uploads/photo", body: { url: "/uploads/crusaders/photos/x.png" } },
+      err("/api/v1/auth/register", 409, { error: "email_in_use" }),
+    ]);
+    renderAt(<RegisterPage />);
+    await fill();
+    submit();
+
+    const message = await screen.findByText(REGISTER_MESSAGES.email_in_use);
+    const email = screen.getByLabelText(REGISTER.email);
+    expect(email).toHaveAttribute("aria-invalid", "true");
+    expect(email.getAttribute("aria-describedby")).toContain(message.closest("p")!.id);
+    expect(document.activeElement).toBe(email);
+  });
+
+  it("lets the applicant see the password they typed", async () => {
+    stubFetch([]);
+    renderAt(<RegisterPage />);
+    const password = screen.getByLabelText(REGISTER.password);
+    expect(password).toHaveAttribute("type", "password");
+    fireEvent.click(screen.getByRole("button", { name: PASSWORD_TOGGLE.show }));
+    expect(password).toHaveAttribute("type", "text");
+    fireEvent.click(screen.getByRole("button", { name: PASSWORD_TOGGLE.hide }));
+    expect(password).toHaveAttribute("type", "password");
   });
 
   /**
@@ -522,6 +649,10 @@ describe("Change password", () => {
     fireEvent.click(screen.getByRole("button", { name: /Change password/i }));
 
     expect(await screen.findByText(/not your current password/i)).toBeInTheDocument();
+    // On the field it is about, with the keyboard taken there to fix it.
+    const temporary = screen.getByLabelText(CHANGE_PASSWORD.temporary);
+    expect(temporary).toHaveAttribute("aria-invalid", "true");
+    expect(document.activeElement).toBe(temporary);
   });
 
   it("refuses a 'new' password that is the old one, without asking the server", async () => {

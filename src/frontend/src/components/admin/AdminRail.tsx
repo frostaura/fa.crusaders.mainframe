@@ -22,30 +22,47 @@ type BadgeCounts = Pick<AdminAttention, "pending" | "doors" | "faults">;
 
 /**
  * The count bubble. The digits are decoration (`aria-hidden`); the sentence is in the link's name
- * through a visually hidden span — "Members, 2 membership applications awaiting review". The digits
- * alone beside the word "Doors" mean nothing to a screen reader. Zero renders nothing.
+ * through {@link AttentionSentence} — "Members, 2 membership applications awaiting review". The
+ * digits alone beside the word "Doors" mean nothing to a screen reader. Zero renders nothing.
  */
 export function AttentionCount({ item, counts }: { item: AdminNavItem; counts: BadgeCounts }) {
   if (!item.badge) return null;
   const { count, label } = attentionBadge(item.badge, counts);
   if (count <= 0) return null;
   return (
-    <>
-      <span
-        aria-hidden="true"
-        data-admin-badge={item.badge}
-        title={label}
-        className={cn(
-          "ml-auto inline-flex min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 py-0.5",
-          "text-xs font-semibold tabular-nums leading-none",
-          item.badge === "pending" ? "bg-info-soft text-info-strong" : "bg-warning-soft text-warning-strong",
-        )}
-      >
-        {count > 99 ? "99+" : count}
-      </span>
-      <span className="sr-only">{`, ${label}`}</span>
-    </>
+    <span
+      aria-hidden="true"
+      data-admin-badge={item.badge}
+      title={label}
+      className={cn(
+        "ml-auto inline-flex min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 py-0.5",
+        "text-xs font-semibold tabular-nums leading-none",
+        item.badge === "pending" ? "bg-info-soft text-info-strong" : "bg-warning-soft text-warning-strong",
+      )}
+    >
+      {count > 99 ? "99+" : count}
+    </span>
   );
+}
+
+/**
+ * The link's accessible name: the label, then the count in words — "Members, 2 membership
+ * applications awaiting review" — or the label alone at zero.
+ *
+ * <p>
+ * An `aria-label` rather than a visually hidden span, and that is the fix, not a style. The
+ * count used to be a sibling flex item, then a visually hidden span inside the label; both are
+ * block-level to Chromium's name computation (a flex item is blockified, an absolutely placed
+ * `sr-only` box is block), and Chromium puts a space between block children — so the rail read
+ * "Members , 7 membership applications…". jsdom does not, so no unit test could see it;
+ * `e2e/admin-devices.spec.ts` asks Chromium's own accessibility tree. The name still opens with
+ * the words on screen (WCAG 2.5.3).
+ * </p>
+ */
+export function attentionName(item: AdminNavItem, counts: BadgeCounts): string {
+  if (!item.badge) return item.label;
+  const { count, label } = attentionBadge(item.badge, counts);
+  return count > 0 ? `${item.label}, ${label}` : item.label;
 }
 
 type NavRowProps = {
@@ -65,6 +82,7 @@ function NavRow(props: NavRowProps) {
       <Link
         to={item.path}
         aria-current={active ? "page" : undefined}
+        aria-label={attentionName(item, counts)}
         data-admin-nav={item.id}
         onClick={() => onNavigate?.(item, active)}
         className={cn(

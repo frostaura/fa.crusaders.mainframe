@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { AuthShell } from "./AuthShell";
-import { palette } from "@/lib/tokens";
+import { composite, contrastRatio, palette, themes, type ThemeName } from "@/lib/tokens";
 
 /**
  * <b>The tin rule under the masthead, and why it is worth a test of its own.</b>
@@ -51,5 +51,42 @@ describe("AuthShell", () => {
     render(<AuthShell subline="Apply for a member account. It takes a minute."><p>form</p></AuthShell>);
     expect(screen.getByText("Crusaders Squash Club")).toBeInTheDocument();
     expect(screen.getByText("Apply for a member account. It takes a minute.")).toBeInTheDocument();
+  });
+
+  /**
+   * <b>The subline has to be readable on the band in BOTH themes — measured, not eyeballed.</b>
+   *
+   * <p>
+   * It was `text-brand-soft`, and `brand.soft` is a SURFACE role that flips with the theme
+   * (navy 100 in light, navy 950 in dark) while the band's `brand.strong` deliberately stays
+   * navy at night. In dark it painted "Court bookings, credits and your club account" dark blue
+   * on blue — 1.6:1, unreadable. It is now the band's own ink (`brand.ink`, white in both themes)
+   * at 85%, composited onto the band here the way a browser paints it.
+   * </p>
+   */
+  it.each<ThemeName>(["light", "dark"])("keeps the subline readable on the band in the %s theme", (theme) => {
+    const { container } = render(<AuthShell subline="Court bookings, credits and your club account." />);
+    const subline = container.querySelector("[data-auth-subline]")!;
+    expect(subline.className).toContain("text-brand-ink/85");
+    expect(subline.className).not.toMatch(/text-brand-soft/);
+
+    const { brand } = themes[theme];
+    const painted = composite(brand.ink, brand.strong, 0.85);
+    expect(contrastRatio(painted, brand.strong)).toBeGreaterThanOrEqual(4.5);
+    // And the reason it could not stay: the old ink on the dark band.
+    if (theme === "dark") expect(contrastRatio(brand.soft, brand.strong)).toBeLessThan(3);
+  });
+
+  it("gives the screen one h1, its lead, and the way to the sibling screen under the card", () => {
+    render(
+      <AuthShell subline="Welcome to the club." title="Sign in" lead="Pick up where you left off."
+        footer={<a href="/register">Register</a>}>
+        <p>form</p>
+      </AuthShell>,
+    );
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Sign in");
+    expect(screen.getByText("Pick up where you left off.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Register" })).toBeInTheDocument();
   });
 });

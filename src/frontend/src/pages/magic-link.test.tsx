@@ -6,6 +6,8 @@ import WelcomePage from "./Welcome";
 import VerifyEmailPage from "./VerifyEmail";
 import { AuthProvider } from "../lib/auth";
 import { signIn, signOut, stubFetch } from "../test/harness";
+import { WELCOME } from "../lib/authCopy";
+import { VERIFY_FAIL_HEADING, VERIFY_FAIL_PRIMARY, VERIFY_OK_HEADING } from "../lib/registrationCopy";
 
 /**
  * The two links a member gets by email are single-use, and the screens that open them were
@@ -80,8 +82,27 @@ describe("a single-use link is spent exactly once", () => {
       </StrictMode>,
     );
 
-    expect(await screen.findByRole("heading", { name: /Email confirmed/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: VERIFY_OK_HEADING })).toBeInTheDocument();
     expect(consumed(stub.calls, "/api/v1/auth/verify-email/")).toBe(1);
+    // Never a dead end: the way on is a link to sign in (R10), not a button that navigates.
+    expect(screen.getByRole("link", { name: /Back to sign in/ })).toHaveAttribute("href", "/login");
+  });
+
+  it("offers signing in first on a spent confirmation link, and never 'register again' alone", async () => {
+    stubFetch([{ method: "POST", path: "/api/v1/auth/verify-email/", status: 400, body: { error: "invalid_or_expired" } }]);
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={["/verify-email/tok-spent"]}>
+          <Routes><Route path="/verify-email/:token" element={<VerifyEmailPage />} /></Routes>
+        </MemoryRouter>
+      </StrictMode>,
+    );
+
+    expect(await screen.findByRole("heading", { name: VERIFY_FAIL_HEADING })).toBeInTheDocument();
+    const links = screen.getAllByRole("link");
+    expect(links[0]).toHaveAccessibleName(VERIFY_FAIL_PRIMARY);
+    expect(links[0]).toHaveAttribute("href", "/login");
+    expect(links[1]).toHaveAttribute("href", "/register");
   });
 });
 
@@ -130,9 +151,12 @@ describe("a welcome link that has already been spent", () => {
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     // The two counts the finder took, as assertions.
-    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
-    expect(screen.getByRole("link", { name: "Email me a reset link" })).toHaveAttribute("href", "/forgot-password");
-    expect(screen.getAllByRole("button").length).toBeGreaterThan(0);
+    expect(screen.getByRole("link", { name: WELCOME.signIn })).toHaveAttribute("href", "/login");
+    expect(screen.getByRole("link", { name: WELCOME.resetLink })).toHaveAttribute("href", "/forgot-password");
+    // RETIRED: `getAllByRole("button").length > 0`. Both ways on are navigation, so both are
+    // links (R10 — links navigate, buttons act); "Sign in" is dressed as the call to action
+    // with `<Button asChild><Link/></Button>`. The invariant the count stood for — the member is
+    // never left with nothing to press — is the two link assertions above.
   });
 
   it("does not claim the link expired when the API cannot tell expired from used", async () => {

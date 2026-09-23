@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { Copy, Eye, EyeOff, KeyRound } from "lucide-react";
 import { endpoints, type DeviceApiKey } from "../lib/api";
+import { clubDayAndClock } from "../lib/clubClock";
 import { describeDeviceError } from "../lib/deviceErrors";
-import { Card } from "./Card";
-import { Button } from "./Button";
-import { ConfirmButton } from "./ConfirmButton";
+import { ConfirmDialog } from "./admin/ConfirmDialog";
+import { Button } from "./ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import { IconButton } from "./ui/icon-button";
+import { Check, Copy, Eye, EyeSlash, Key } from "./ui/icons";
 import { useToast } from "./Toast";
 
 /**
@@ -46,7 +48,7 @@ function maskKey(key: string): string {
 function describeRegenerated(iso: string): string {
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return iso;
-  return at.toLocaleString();
+  return clubDayAndClock(at);
 }
 
 /** The key itself: masked, revealable, copyable. */
@@ -62,7 +64,7 @@ const DEVICE_KEY_LINE_ID = "device-api-key-line";
 function KeyLine({ apiKey }: { apiKey: string }) {
   const [revealed, setRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
-  const RevealIcon = revealed ? EyeOff : Eye;
+  const RevealIcon = revealed ? EyeSlash : Eye;
 
   async function copy() {
     try {
@@ -87,18 +89,28 @@ function KeyLine({ apiKey }: { apiKey: string }) {
     // `min-h-11` rather than `h-9`: 36 px against the 44 px the doors pages are built to,
     // for the same volunteer in the same club — and a fixed height clips its own words once
     // they wrap, which at this text size they do.
-    <div className="flex min-w-0 flex-wrap items-start gap-2">
-      {/* The id is what `focusAfter` on the regenerate confirm lands on (R3 adoption): the
-          key itself is the only thing on this panel that changed, and it carries its own
-          accessible name, so focusing it reads the new key out. */}
-      <code id={DEVICE_KEY_LINE_ID} className="block min-w-0 flex-1 break-all rounded-lg bg-bg-muted p-2 font-mono text-xs" aria-label="Device API key">
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      {/* The id is where focus lands after a regenerate: the key itself is the only thing
+          on this panel that changed, and it carries its own accessible name, so focusing it
+          reads the new key out. */}
+      <code
+        id={DEVICE_KEY_LINE_ID}
+        tabIndex={-1}
+        className="block min-w-0 flex-1 break-all rounded-lg border border-border bg-bg-muted px-3 py-2.5 font-mono text-sm text-text-primary"
+        aria-label="Device API key"
+      >
         {revealed ? apiKey : maskKey(apiKey)}
       </code>
-      <Button variant="outline" className="min-h-11 px-2 text-xs" onClick={() => setRevealed((r) => !r)} aria-label={revealed ? "Hide device API key" : "Reveal device API key"}>
-        <RevealIcon className="h-3.5 w-3.5" />
-      </Button>
-      <Button variant="outline" className="min-h-11 px-2 text-xs" onClick={() => void copy()} aria-label="Copy device API key">
-        <Copy className="mr-1 h-3.5 w-3.5" /> {copied ? "Copied" : "Copy"}
+      <IconButton variant="outline" label={revealed ? "Hide device API key" : "Reveal device API key"} onClick={() => setRevealed((r) => !r)}>
+        <RevealIcon aria-hidden="true" />
+      </IconButton>
+      <Button
+        variant="outline"
+        aria-label="Copy device API key"
+        onClick={() => void copy()}
+        icon={copied ? <Check aria-hidden="true" className="text-success-strong" /> : <Copy aria-hidden="true" />}
+      >
+        {copied ? "Copied" : "Copy"}
       </Button>
     </div>
   );
@@ -117,7 +129,7 @@ function KeyLine({ apiKey }: { apiKey: string }) {
  */
 function PairingNote() {
   return (
-    <div className="mt-4 rounded-lg bg-bg-muted p-3 text-sm text-text-secondary">
+    <div className="rounded-lg border border-border bg-bg-muted p-4 text-sm text-text-secondary">
       <h3 className="mb-2 font-semibold text-text-primary">How to pair a board</h3>
       {/* `break-words`: the steps name files and make targets — `secrets.h`, `door_gate`,
           `box-xxxxxx` — and an identifier has no space to wrap at. At a 32 px root font the
@@ -169,51 +181,60 @@ export function DeviceApiKeyPanel() {
   }
 
   return (
-    <Card className="p-5">
-      <div className="mb-3 flex items-center gap-2">
-        <KeyRound className="h-5 w-5 text-text-muted" />
-        <h2 className="text-lg font-semibold">Device API key</h2>
-      </div>
+    <Card>
+      <CardHeader>
+        <CardTitle asChild>
+          <h2 className="flex items-center gap-2">
+            <Key size={20} aria-hidden="true" className="shrink-0 text-text-muted" />
+            Device API key
+          </h2>
+        </CardTitle>
+        <CardDescription>
+          One key for the whole club. Every court box and door gate carries it, and a board that presents it with a device code this club has
+          not seen registers itself on its first heartbeat.
+        </CardDescription>
+      </CardHeader>
 
-      <p className="mb-3 text-sm text-text-secondary">
-        One key for the whole club. Every court box and door gate carries it, and a board that presents it with a device code this club has
-        not seen registers itself on its first heartbeat.
-      </p>
+      <CardContent className="flex flex-col gap-4">
+        {failed && (
+          <p className="rounded-lg bg-warning-soft p-3 text-sm text-warning-strong">
+            Could not read the club&apos;s device key. Reload the page; if it keeps failing, the API is not serving it yet.
+          </p>
+        )}
 
-      {failed && (
-        <p className="rounded-lg bg-warning-soft p-3 text-sm text-warning-strong">
-          Could not read the club's device key. Reload the page; if it keeps failing, the API is not serving it yet.
-        </p>
-      )}
+        {key && (
+          <>
+            <div className="flex flex-col gap-2">
+              <KeyLine apiKey={key.api_key} />
+              <p className="text-xs text-text-muted">Last regenerated {describeRegenerated(key.regenerated_at)}.</p>
+            </div>
 
-      {key && (
-        <>
-          <KeyLine apiKey={key.api_key} />
-          <p className="mt-2 text-xs text-text-muted">Last regenerated {describeRegenerated(key.regenerated_at)}.</p>
+            {/* overflow-wrap:anywhere — at a 32px root on a 320px phone "Regenerate" alone is
+                wider than the card, and a word that cannot break pushes the page sideways. */}
+            <div className="flex flex-col gap-2 rounded-lg border border-danger-soft p-3 [overflow-wrap:anywhere] sm:flex-row sm:items-center sm:gap-4">
+              <ConfirmDialog
+                trigger={<Button variant="danger-soft" className="h-auto max-w-full self-start whitespace-normal py-2">Regenerate key</Button>}
+                title="Regenerate the club's device key?"
+                description={REGENERATE_CONSEQUENCE}
+                confirmLabel="Reflash every board after this"
+                cancelLabel="Keep the current key"
+                onConfirm={regenerate}
+                // The key line is what changed, and the only thing on the panel that can tell a
+                // keyboard user the action landed.
+                focusAfter={() => document.getElementById(DEVICE_KEY_LINE_ID)}
+              />
+              <span className="text-sm text-text-secondary">{REGENERATE_CONSEQUENCE}</span>
+            </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <ConfirmButton
-              idleLabel="Regenerate key"
-              cancelLabel="Keep the current key"
-              confirmLabel="Reflash every board after this — regenerate?"
-              // R3 adoption. There is one club key, so the subject is the club's estate rather
-              // than a row — but the way out was named "Cancel", which on the most expensive
-              // control in the product says nothing about what it preserves. `focusAfter`
-              // lands on the key line, which is what changed and is the only thing on the
-              // panel that can tell a keyboard user the action landed.
-              subject="the key every board is using"
-              focusAfter={() => document.getElementById(DEVICE_KEY_LINE_ID)}
-              onConfirm={regenerate}
-              tone="danger"
-            />
-            <span className="text-xs text-text-secondary">
-              The old key stops working immediately. Every board — court boxes and door gates — has to be reflashed with the new one before it can call in, and until then a door gate opens only for members with a booking on the list it last received, for at most six hours.
-            </span>
-          </div>
-
-          <PairingNote />
-        </>
-      )}
+            <PairingNote />
+          </>
+        )}
+      </CardContent>
     </Card>
   );
 }
+
+const REGENERATE_CONSEQUENCE
+  = "The old key stops working immediately. Every board — court boxes and door gates — has to be reflashed with the new one "
+  + "before it can call in, and until then a door gate opens only for members with a booking on the list it last received, "
+  + "for at most six hours.";

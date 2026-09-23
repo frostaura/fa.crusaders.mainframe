@@ -1,4 +1,5 @@
-import { Badge } from "../Button";
+import { Badge } from "../ui/badge";
+import { chipTone } from "./chipTone";
 import { relative } from "../../lib/deviceLiveness";
 import { clubRowTime } from "../../lib/clubClock";
 import {
@@ -127,7 +128,7 @@ export function DoorFeedRow({ entry, now, doorName, timezone, innerRef }: {
       <div className="flex flex-wrap items-baseline gap-2 sm:grid sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-3">
         <span className="flex flex-wrap items-center gap-1.5">
           {render.chip && (
-            <Badge tone={render.tone}>
+            <Badge tone={chipTone(render.tone)}>
               <span className="sr-only">Outcome: </span>{render.chip}
             </Badge>
           )}

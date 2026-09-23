@@ -6,6 +6,10 @@ import { AuthProvider } from "../lib/auth";
 import { ProfileProvider } from "../lib/profile";
 import { ToastProvider } from "../components/Toast";
 import { refuse, signIn, signOut, stubFetch, type StubRoute } from "../test/harness";
+import {
+  PASSKEY_ADD, PASSKEY_NAME_LABEL, PASSKEY_NAME_MISSING, PHOTO_BAD_TYPE, PHOTO_BUTTON, PHOTO_CHANGE_LABEL,
+  passkeyRemoveConsequence,
+} from "../lib/profileCopy";
 
 /**
  * The profile's read states (R12) and its page anatomy (R11).
@@ -158,5 +162,55 @@ describe("Profile — reading, failing and the page's shape", () => {
     await waitFor(() => expect(answer).not.toBeNull());
     answer!();
     await waitFor(() => expect(screen.getByLabelText("Full name")).toHaveValue("Ada King"));
+  });
+
+  /**
+   * P3 — the photo change is discoverable on a phone. The avatar's scrim appeared on hover only,
+   * and a phone has no hover, so nothing said the photo could be changed. Now there is a visible
+   * button beside it (and a permanent camera badge on it), and a file the club cannot take is
+   * refused ON the page, beside the photo, rather than in a four-second toast.
+   */
+  it("offers a visible way to change the photo, and refuses a wrong file beside it", async () => {
+    renderProfile([
+      { path: "/api/v1/me/profile", body: PROFILE },
+      { path: "/api/v1/me/webauthn/credentials", body: [] },
+    ]);
+    const details = await screen.findByRole("region", { name: "Your details" });
+    expect(within(details).getByRole("button", { name: PHOTO_CHANGE_LABEL })).toBeInTheDocument();
+    expect(within(details).getByRole("button", { name: PHOTO_BUTTON })).toBeInTheDocument();
+
+    const input = details.querySelector("input[type=file]") as HTMLInputElement;
+    const pdf = new File(["x"], "cv.pdf", { type: "application/pdf" });
+    fireEvent.change(input, { target: { files: [pdf] } });
+    expect(await within(details).findByText(PHOTO_BAD_TYPE)).toBeInTheDocument();
+  });
+
+  /** P3 — a passkey with no name is refused on its field, in words, not by a warning toast. */
+  it("asks for a passkey name on the field itself", async () => {
+    renderProfile([
+      { path: "/api/v1/me/profile", body: PROFILE },
+      { path: "/api/v1/me/webauthn/credentials", body: [] },
+    ]);
+    const passkeys = await screen.findByRole("region", { name: "Passkeys" });
+    fireEvent.click(await within(passkeys).findByRole("button", { name: PASSKEY_ADD }));
+    expect(await within(passkeys).findByText(PASSKEY_NAME_MISSING)).toBeInTheDocument();
+    expect(within(passkeys).getByLabelText(PASSKEY_NAME_LABEL)).toHaveAttribute("aria-invalid", "true");
+  });
+
+  /** P3 — Remove says what stops working before the second press, and the way out says "Keep it". */
+  it("says what removing a passkey stops, before it is removed", async () => {
+    renderProfile([
+      { path: "/api/v1/me/profile", body: PROFILE },
+      {
+        path: "/api/v1/me/webauthn/credentials",
+        body: [{ id: "k1", label: "iPhone", created_at: "2026-09-01T08:00:00Z", last_used_at: null, transports: "internal" }],
+      },
+    ]);
+    const passkeys = await screen.findByRole("region", { name: "Passkeys" });
+    fireEvent.click(await within(passkeys).findByRole("button", { name: /Remove/ }));
+    expect(within(passkeys).getByText(passkeyRemoveConsequence("iPhone"))).toBeInTheDocument();
+    expect(within(passkeys).getByRole("button", { name: "Keep it — iPhone" })).toBeInTheDocument();
+    // Dialog copy rules: never "Tap to confirm" — a keyboard user taps nothing.
+    expect(passkeys.textContent).not.toMatch(/Tap to confirm/);
   });
 });

@@ -19,6 +19,34 @@
  * </p>
  */
 
+/** The form itself — headings, labels, help and the form's own refusals. */
+export const REGISTER = {
+  subline: "Apply for a member account. It takes a minute.",
+  title: "Join the club",
+  fullName: "Full name",
+  email: "Email",
+  membershipNumber: "Membership number",
+  membershipHint: "As issued by the club — it's on your membership card.",
+  password: "Password",
+  passwordHint: "At least 8 characters.",
+  submit: "Submit application",
+  haveAccount: "Already have an account?",
+  signIn: "Sign in",
+  submittedSubline: "Your application is in.",
+  startAgain: "Start a new application",
+  verifySubline: "Confirming your email address.",
+} as const;
+
+/** What the form says on a field before it sends anything. The API's own versions are below. */
+export const REGISTER_FIELD = {
+  fullName: "Enter your full name as the club knows it.",
+  email: "Enter your email address.",
+  emailFormat: "Enter an email address like name@example.com.",
+  membershipNumber: "Enter your membership number.",
+  password: "Choose a password.",
+  passwordShort: "Your password must be at least 8 characters.",
+} as const;
+
 /**
  * The API's refusal codes, as sentences.
  *
@@ -142,3 +170,19 @@ export const VERIFY_BACK_TO_SIGN_IN = "Back to sign in";
 export const PENDING_APPROVAL = "Your account is registered and waiting for the club to approve it. "
   + "That is somebody checking your membership number by hand, so it usually takes a day or two. "
   + "You'll get an email the moment it's done.";
+
+// --- the photo field ------------------------------------------------------------------
+
+/** `PhotoPicker`'s own words. The label is what the input is named by, and what tests query. */
+export const PHOTO_PICKER = {
+  label: "Photo of yourself",
+  hint: "So other players can recognise you on court. Your face, clearly lit.",
+  choose: "Take or choose a photo",
+  drop: "or drop an image here",
+  preparing: "Preparing your photo…",
+  ready: "Photo ready",
+  previewAlt: "The photo you chose",
+  replace: "Choose a different photo",
+  remove: "Remove this photo",
+  failed: "We couldn't prepare that photo. Try a different one.",
+} as const;

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, within, waitFor } from "@testing-library/react";
 import { MonitoringFaultsPage, groupByBoard } from "./MonitoringFaults";
 import { renderPage, signIn, stubFetch, unreachable, type StubRoute } from "../../test/harness";
 import { deviceErrorFixture, deviceErrorPageFixture } from "../../test/monitoringFixtures";
@@ -126,14 +126,15 @@ describe("the fault list", () => {
     ]));
     renderPage(<MonitoringFaultsPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /Mark resolved/ }));
-    // The armed control states the consequence in the page, and its NAME carries the fault
-    // it is about plus the "choose again" state — a list of controls all reading "Mark
+    // The trigger's NAME carries the fault it is about — a list of controls all reading "Mark
     // resolved" is nothing at all to somebody tabbing through them.
-    // Twice: the visible consequence and ConfirmButton's own live region.
-    expect((await screen.findAllByText(/comes back if the board reports it again/)).length).toBeGreaterThan(0);
-    const armed = screen.getByRole("button", { name: /The scanner stopped answering — choose again to confirm/ });
-    fireEvent.click(armed);
+    fireEvent.click(await screen.findByRole("button", { name: /Mark resolved — The scanner stopped answering/ }));
+    // P3: confirmed in a dialog that names the fault and states the consequence first.
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent(/The scanner stopped answering/);
+    expect(dialog).toHaveTextContent(/comes back if the board reports it again/);
+    expect(stub.calls.some((c) => c.method === "POST" && c.path.includes("/resolve"))).toBe(false);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Mark resolved" }));
 
     await waitFor(() => expect(stub.calls.some((c) => c.method === "POST" && c.path.includes("/resolve"))).toBe(true));
   });
@@ -150,7 +151,7 @@ describe("the fault list", () => {
     renderPage(<MonitoringFaultsPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Mark resolved/ }));
-    fireEvent.click(await screen.findByRole("button", { name: /choose again to confirm/ }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Mark resolved" }));
 
     expect(await screen.findByText(NOTHING_CHANGED)).toBeInTheDocument();
     expect(stub.calls.some((c) => c.path.includes("/resolve"))).toBe(true);
@@ -170,7 +171,7 @@ describe("the fault list", () => {
     renderPage(<MonitoringFaultsPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Mark resolved/ }));
-    fireEvent.click(await screen.findByRole("button", { name: /choose again to confirm/ }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Mark resolved" }));
 
     expect(await screen.findByText(/Couldn't reach the club/)).toBeInTheDocument();
     expect(screen.queryByText(NOTHING_CHANGED), "a claim about a write nobody saw land")
@@ -198,7 +199,7 @@ describe("the fault list", () => {
     fireEvent.click(boxes[0]);
     fireEvent.click(boxes[1]);
     fireEvent.click(await screen.findByRole("button", { name: /Mark 2 resolved/ }));
-    fireEvent.click(await screen.findByRole("button", { name: /Mark all 2 resolved/ }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Mark all 2 resolved" }));
 
     // Four seconds is not enough to read two outcomes, and the toast viewport carries no
     // live region of its own by design.
@@ -214,7 +215,8 @@ describe("the fault list", () => {
 
     // A feed that silently drops rows is a feed an admin cannot reason about — and losing the
     // raw token would make the humanised row unsearchable for whoever reports it upstream.
-    expect(await screen.findByText(/does not have a name for/)).toBeInTheDocument();
+    // The row's heading, and the resolve control's name, which carries the same title (P3).
+    expect((await screen.findAllByText(/does not have a name for/)).length).toBeGreaterThan(0);
     expect(screen.getByText("flux_capacitor_drift")).toBeInTheDocument();
   });
 

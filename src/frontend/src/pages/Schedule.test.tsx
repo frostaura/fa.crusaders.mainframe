@@ -1,12 +1,16 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import SchedulePage from "./Schedule";
-import { renderPage, signIn, signOut, stubFetch, type StubRoute } from "../test/harness";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { forgetClubZone } from "../lib/clubZone";
+import { BOOKINGS_COPY, CELL_TEXT, PENDING_CELL } from "../lib/bookingsCopy";
+import { HOLD_LIFTED, HOLD_LIFT_FAILED } from "../lib/scheduleEnd";
+import { signOut, refuse } from "../test/harness";
+import { COURT_A, COURT_B, ME, dayFixture, openBookings, resetSheets, sast, scheduleCalls, sheets, slotRow } from "../test/bookingsKit";
+
+vi.mock("../components/bookings/BookSheet", async () => (await import("../test/fakeSheets")).bookSheetModule);
+vi.mock("../components/bookings/CancelSheet", async () => (await import("../test/fakeSheets")).cancelSheetModule);
 
 /**
- * `slotAt` is called once per grid cell per render, so counting it counts renders of the
- * grid — which is what the last block of tests below is measuring. The rest of the module
- * is the real one; only the counter is added.
+ * `slotAt` is called once per cell per render, so counting it counts renders of the grid.
  */
 const cellLookups = { count: 0 };
 vi.mock("../lib/scheduleGrid", async (importOriginal) => {
@@ -21,1248 +25,342 @@ vi.mock("../lib/scheduleGrid", async (importOriginal) => {
 });
 
 /**
- * The schedule, as a member and as an admin.
+ * The Bookings page (P4): its shell, what a tap hands each sheet, and what the page does with
+ * the outcome a sheet reports.
  *
  * <p>
- * Five findings meet on this screen and every one of them was a thing the member was
- * not told: the two headline booking rules refused with "Booking failed."; a
- * cancellation stated no figures before and lied about them afterwards; the booking
- * confirmation was a grid cell that relabelled itself and disarmed after three seconds;
- * a lapsed session was reported as "That slot is in the past."; and an admin's own
- * schedule offered no admin action at all.
- * </p>
- *
- * <p>
- * fireEvent throughout, never user-event: its keyboard and typing paths never settle
- * under jsdom 28 + vitest 4 here and the failure reads as a component ignoring input.
- * </p>
- */
-/**
- * <b>Why this file buys itself more time than the 5 s default.</b>
- *
- * <p>
- * Every test here passes alone in under a second; four or five of the fifty-one cross the
- * default budget when the whole file runs, and WHICH four varies between runs — the signature
- * of an accumulated per-test cost, not of a hang. The cost is real and it is the price of the
- * D3-B04 fix: the grid is now a `role="grid"` of ~300 named `gridcell`s, and every
- * `getByRole(..., {name})` in this file computes an accessible name for each of them, on a
- * retry loop. Raising the budget is the honest answer; making the cells anonymous again to
- * make the suite faster would be trading a member's screen reader for a test runner.
- * </p>
- *
- * <p>
- * `memory/gotchas.md` already records the sibling trap on `AdminSettings` — re-run a suspect
- * file in ISOLATION before blaming a change for a timeout.
+ * <b>Retired from this file, with the reason.</b> Every assertion about the confirmation dialog
+ * itself — the figures before and after, the admin override and its second press, the refusal
+ * sentences, the penalty waiver and its reason, "names the member" — tested
+ * `BookingConfirmModal` / `CancelBookingModal`, which P4 deleted. They are the sheets' job now
+ * (R7, R19: the 402 refuse-then-retry dance is replaced by god-mode quotes) and live in the
+ * sheets' own tests. What stays here is the grid's half of each: which slot, which booking, as
+ * whom, and one clock (D4 §2.4).
  * </p>
  */
 vi.setConfig({ testTimeout: 20_000 });
 
-describe("Schedule", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    signOut();
+beforeEach(() => { forgetClubZone(); resetSheets(); });
+
+/** From here on the schedule read never answers — a slow network — while every other route still does. */
+function hangScheduleReads() {
+  const answered = globalThis.fetch;
+  vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) =>
+    (String(input).startsWith("/api/v1/schedule") ? new Promise(() => {}) : answered(input, init)));
+}
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); signOut(); forgetClubZone(); });
+
+const MY_SLOT = slotRow({
+  courtId: COURT_A, startsAtUtc: sast(17), endsAtUtc: sast(17, 30),
+  ownerUserId: ME, ownerFirstName: "Naledi", isMine: true, bookingId: "mine-1",
+});
+const THEIRS = slotRow({
+  courtId: COURT_B, courtNumber: 2, startsAtUtc: sast(16, 30), endsAtUtc: sast(16, 45),
+  ownerUserId: "55555555-5555-5555-5555-555555555555", ownerFirstName: "Thandi", bookingId: "theirs-1",
+  checkedIn: null, amountChargedCredits: null,
+});
+
+describe("the page shell — R3, R11", () => {
+  it("has one h1 to navigate by, and an sr-only h2 naming the grid", async () => {
+    openBookings();
+    expect(await screen.findByRole("heading", { level: 1, name: BOOKINGS_COPY.title })).toBeInTheDocument();
+    const h2 = screen.getByRole("heading", { level: 2, name: BOOKINGS_COPY.gridHeading });
+    expect(h2.className).toContain("sr-only");
+    expect(await screen.findByRole("grid", { name: BOOKINGS_COPY.gridHeading })).toBeInTheDocument();
   });
 
-  const COURT = "11111111-1111-1111-1111-111111111111";
-  const BOOKING_ID = "99999999-9999-9999-9999-999999999999";
-  const ME = "44444444-4444-4444-4444-444444444444";
+  it("puts refresh in the header as a named icon button, beside how fresh the day is (R3)", async () => {
+    const stub = openBookings();
+    await screen.findByRole("grid");
+    const header = document.querySelector("[data-page-actions]")!;
+    const refresh = within(header as HTMLElement).getByRole("button", { name: BOOKINGS_COPY.refresh });
+    // An icon button: no visible word, a 44px square, never a text link in the body.
+    expect(refresh.textContent).toBe("");
+    expect(refresh.className).toContain("size-touch");
+    expect(document.querySelector("[data-page-header] time")).toHaveTextContent(/Updated/);
 
-  /**
-   * A fixed day, far enough ahead that every slot on it is in the future.
-   *
-   * <p>
-   * Fixed so the labels below are identical on every machine; FUTURE because the grid
-   * greys a slot whose start has passed, and a fixture set to "today" would turn its own
-   * cells into "Past" as the suite ran later in the day — passing all morning and failing
-   * after lunch, which is the exact trap the backend fixtures carry a comment about.
-   * </p>
-   */
-  const DATE = "2030-09-07";
-  const sast = (hh: number, mm = 0) => new Date(Date.UTC(2030, 8, 7, hh - 2, mm, 0)).toISOString();
-
-  const DAY = {
-    date: DATE,
-    timezone: "Africa/Johannesburg",
-    sliceMinutes: 15,
-    dayStartMinute: 7 * 60,
-    dayEndMinute: 20 * 60,
-    advanceBookingDays: 14,
-    penaltyPct: 30,
-    penaltyWindowMinutes: 15,
-    courts: [{ id: COURT, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 }],
-    slots: [] as unknown[],
-  };
-
-  const MY_SLOT = {
-    courtId: COURT,
-    courtNumber: 1,
-    startsAtUtc: sast(19),
-    endsAtUtc: sast(19, 30),
-    status: "booked",
-    ownerUserId: ME,
-    ownerFirstName: "Naledi",
-    ownerPhotoUrl: null,
-    isMine: true,
-    bookingId: BOOKING_ID,
-    blockLabel: null,
-    checkedIn: false,
-    amountChargedCredits: 50,
-  };
-
-  const WALLET = { balance_credits: 1635, entries: [] };
-
-  function stub(routes: StubRoute[], opts: { isAdmin?: boolean } = {}) {
-    const whoami = signIn({ isAdmin: opts.isAdmin ?? false });
-    return stubFetch([
-      { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: WALLET },
-      { path: "/api/v1/schedule", body: DAY },
-      ...routes,
-    ]);
-  }
-
-  /** Opens the confirmation for the first free slot on the grid — a whole day of them is free. */
-  async function openBookingModal() {
-    const cells = await screen.findAllByRole("button", { name: /^Book Court .* for 50\.00 cr/ });
-    fireEvent.click(cells[0]);
-    return await screen.findByRole("dialog", { name: "Confirm booking" });
-  }
-
-  /**
-   * C-M8 / R3-35 — this page had no heading of any kind.
-   *
-   * <p>
-   * Reviewer C walked it with a screen reader and found nothing to navigate by: no h1, no h2,
-   * nothing, on the screen a member opens most often and whose content is a grid of two
-   * hundred cells. It is also what the route announcer lands focus on — `#main-content h1` —
-   * so arriving here from anywhere else dropped the keyboard on the body as well. Every other
-   * route in the product has one.
-   * </p>
-   */
-  it("has a heading to navigate by, and one for the grid under it", async () => {
-    stub([]);
-    renderPage(<SchedulePage />);
-
-    expect(await screen.findByRole("heading", { level: 1, name: "Bookings" })).toBeInTheDocument();
-    // The grid's own level-2 heading: what a reader jumps to, and a name for the region. It is
-    // sr-only because the court names are already the visible column headers.
-    const grid = await screen.findByRole("heading", { level: 2, name: "Courts and times" });
-    expect(grid.className).toContain("sr-only");
+    const before = scheduleCalls(stub).length;
+    await act(async () => { fireEvent.click(refresh); });
+    await waitFor(() => expect(scheduleCalls(stub).length).toBe(before + 1));
   });
 
-  // ---- F6: the confirmation is the specified modal, and it has no stopwatch ----
-
-  it("shows court, time, duration, cost and the balance before and after", async () => {
-    stub([]);
-    renderPage(<SchedulePage />);
-
-    const modal = await openBookingModal();
-
-    // §5 names all six. The old confirmation was the grid cell turning orange and
-    // reading "Reserve for 50.00 cr?" — no court, no time, no duration, no balance.
-    expect(modal).toHaveTextContent("Court 1");
-    expect(modal).toHaveTextContent("15 min");
-    expect(modal).toHaveTextContent("50.00 cr");
-    expect(modal).toHaveTextContent("1635.00 cr");
-    expect(modal).toHaveTextContent("1585.00 cr");
+  it("shows a grid-shaped skeleton while the day is read, never 'Loading…' (R12)", async () => {
+    openBookings();
+    hangScheduleReads();
+    // The first paint, before the read lands.
+    expect(document.querySelector('[data-state-block="loading"]')).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/Loading…/);
   });
 
-  it("stays open however long the member takes to read it", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
-    try {
-      stub([]);
-      renderPage(<SchedulePage />);
-      const modal = await vi.waitFor(async () => {
-        const cells = screen.getAllByRole("button", { name: /^Book Court .* for 50\.00 cr/ });
-        fireEvent.click(cells[0]);
-        return screen.getByRole("dialog", { name: "Confirm booking" });
-      });
+  it("names a failed read and offers a retry, instead of an empty grid", async () => {
+    openBookings({ routes: [{ path: "/api/v1/schedule", status: 503, body: { error: "unavailable" } }] });
+    expect(await screen.findByText(/Couldn't load the schedule/)).toBeInTheDocument();
+    expect(document.querySelector('[data-state-block="error"]')).toBeTruthy();
+    expect(screen.queryByRole("grid")).toBeNull();
+  });
+});
 
-      // The old inline confirmation disarmed after 3000 ms and the second tap re-armed
-      // rather than confirming, so a member who paused to read the price could tap for
-      // ever and never book. Twelve seconds is the gap finder B measured.
-      await vi.advanceTimersByTimeAsync(12_000);
-
-      expect(modal).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Book for 50.00 cr" })).toBeEnabled();
-    } finally {
-      vi.useRealTimers();
-    }
+describe("the day — R5", () => {
+  it("opens on the club's today with the week strip, today selected", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2030-09-09T10:00:00.000Z"));
+    openBookings({ at: "/bookings" });
+    await screen.findByRole("grid");
+    const today = screen.getByRole("radio", { name: /Monday 9 September, today/ });
+    expect(today).toHaveAttribute("aria-checked", "true");
+    // Today is the default, so the address carries no date.
+    expect(screen.getByTestId("location")).toHaveTextContent(/^\/bookings$/);
   });
 
-  it("books only when the member confirms in the modal", async () => {
-    const fetchStub = stub([
-      { method: "POST", path: "/api/v1/bookings/", body: { booking_id: BOOKING_ID, balance_after_credits: 1585 } },
-    ]);
-    renderPage(<SchedulePage />);
-    await openBookingModal();
+  it("greys out and disables the past for a member", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2030-09-11T10:00:00.000Z"));
+    openBookings({ at: "/bookings", day: dayFixture({ date: "2030-09-11" }) });
+    await screen.findByRole("grid");
+    const monday = document.querySelector<HTMLElement>('[data-date="2030-09-09"]')!;
+    expect(monday).toBeDisabled();
+    expect(monday.className).toContain("text-text-muted");
+  });
 
-    // Opening the modal must not have booked anything.
-    expect(fetchStub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/bookings/")).toHaveLength(0);
+  it("lets an admin go back into the past — the desk reconciles it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2030-09-11T10:00:00.000Z"));
+    openBookings({ isAdmin: true, at: "/bookings", day: dayFixture({ date: "2030-09-11" }) });
+    await screen.findByRole("grid");
+    expect(document.querySelector<HTMLElement>('[data-date="2030-09-09"]')).not.toBeDisabled();
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-
-    await waitFor(() => {
-      const posts = fetchStub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/bookings/");
-      expect(posts).toHaveLength(1);
-      expect(posts[0].body).toMatchObject({ courtId: COURT, sliceCount: 1 });
+  it("reads another day when a chip is picked, and writes it into the address", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2030-09-09T10:00:00.000Z"));
+    // The server answers for the day it is asked about.
+    const stub = openBookings({
+      at: "/bookings",
+      routes: [{ path: "/api/v1/schedule", respond: ({ path }) => dayFixture({ date: new URL(path, "http://x").searchParams.get("date") }) }],
     });
+    await screen.findByRole("grid");
+    await act(async () => { fireEvent.click(document.querySelector('[data-date="2030-09-10"]')!); });
+    await waitFor(() => expect(scheduleCalls(stub).at(-1)).toContain("date=2030-09-10"));
+    expect(screen.getByTestId("location")).toHaveTextContent("/bookings?date=2030-09-10");
   });
 
-  // ---- F1 / F10: refusals say which rule, and a lost session says so ----
-
-  it("names the peak-hours rule and the window instead of 'Booking failed'", async () => {
-    stub([{
-      method: "POST", path: "/api/v1/bookings/", status: 409,
-      body: { error: "peak_hours_league_only", peak_start: "16:00", peak_end: "19:00", regular_advance_hours: 1 },
-    }]);
-    renderPage(<SchedulePage />);
-    await openBookingModal();
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-
-    expect(await screen.findByText(/16:00–19:00 is reserved for league and senior members until an hour before the slot/))
-      .toBeInTheDocument();
+  it("opens the day a link names — `?date=` survives a redirect from /schedule", async () => {
+    const stub = openBookings({ at: "/bookings?date=2030-09-09" });
+    await screen.findByRole("grid");
+    expect(scheduleCalls(stub)[0]).toContain("date=2030-09-09");
   });
 
-  it("tells a capped member how many of their own minutes are already booked", async () => {
-    stub([{
-      method: "POST", path: "/api/v1/bookings/", status: 409,
-      body: { error: "per_day_cap_exceeded", cap_minutes: 60, already_booked_minutes: 60, attempted_minutes: 15 },
-    }]);
-    renderPage(<SchedulePage />);
-    await openBookingModal();
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-
-    expect(await screen.findByText(/You already have 60 of your 60 minutes booked for that day/)).toBeInTheDocument();
+  it("offers a date picker beside the week to jump further ahead", async () => {
+    openBookings();
+    await screen.findByRole("grid");
+    expect(screen.getByRole("button", { name: `${BOOKINGS_COPY.jumpToDate}: Mon 9 Sep` })).toBeInTheDocument();
   });
-
-  it("says the club is closed, with that day's hours", async () => {
-    stub([{
-      method: "POST", path: "/api/v1/bookings/", status: 409,
-      body: { error: "out_of_hours", opens_at: "07:00", closes_at: "20:00" },
-    }]);
-    renderPage(<SchedulePage />);
-    await openBookingModal();
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-
-    expect(await screen.findByText(/The club is open 07:00–20:00 that day/)).toBeInTheDocument();
-  });
-
-  it("says the session expired rather than claiming an evening slot is in the past", async () => {
-    // The tenancy middleware answers 400 tenant_unresolved for a lapsed bearer on a
-    // deployment whose hostname carries no tenant subdomain. The page used to map EVERY
-    // 400 to "That slot is in the past.", so a member with a dead session tapped a free
-    // 8 p.m. slot and was told it had already happened.
-    stub([{
-      method: "POST", path: "/api/v1/bookings/", status: 400,
-      body: { error: "tenant_unresolved", message: "No tenant could be resolved from this request." },
-    }]);
-    renderPage(<SchedulePage />);
-    await openBookingModal();
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-
-    expect(await screen.findByText(/Your session has expired/)).toBeInTheDocument();
-    expect(screen.queryByText(/in the past/)).not.toBeInTheDocument();
-  });
-
-  it("still says 'in the past' when the slot genuinely is", async () => {
-    stub([{ method: "POST", path: "/api/v1/bookings/", status: 400, body: { error: "past_time" } }]);
-    renderPage(<SchedulePage />);
-    await openBookingModal();
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-
-    expect(await screen.findByText(/That slot has already started/)).toBeInTheDocument();
-  });
-
-  // ---- F4 / F5 / F8: the cancellation states its price first ----
-
-  const QUOTE = {
-    bookingId: BOOKING_ID,
-    amountChargedCredits: 50,
-    refundCredits: 50,
-    penaltyCredits: 0,
-    penaltyPct: 30,
-    penaltyWindowMinutes: 15,
-    insidePenaltyWindow: false,
-    checkedIn: false,
-    alreadyStarted: false,
-  };
-
-  function stubWithMyBooking(
-    quote: Partial<typeof QUOTE>, extra: StubRoute[] = [], slotOverrides: Partial<typeof MY_SLOT> = {},
-  ) {
-    const whoami = signIn({ isAdmin: false });
-    return stubFetch([
-      { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: WALLET },
-      { path: "/api/v1/admin/members/", body: [] },
-      { path: "/api/v1/schedule", body: { ...DAY, slots: [{ ...MY_SLOT, ...slotOverrides }] } },
-      { path: `/api/v1/bookings/${BOOKING_ID}/cancellation-quote`, body: { ...QUOTE, ...quote } },
-      ...extra,
-    ]);
-  }
-
-  it("states the exact penalty and the net refund before the member commits", async () => {
-    stubWithMyBooking({ insidePenaltyWindow: true, penaltyCredits: 15, refundCredits: 35 });
-    renderPage(<SchedulePage />);
-
-    fireEvent.click(await screen.findByRole("button", { name: /^Cancel your booking on Court / }));
-
-    const modal = await screen.findByRole("dialog", { name: "Cancel this booking?" });
-    // §7 asks for both figures, and 15.00 credits used to be taken with nothing on
-    // screen about it before or after.
-    await waitFor(() => expect(modal).toHaveTextContent(/A 30% penalty of 15\.00 cr is deducted/));
-    expect(modal).toHaveTextContent("35.00 cr");
-  });
-
-  it("warns that nothing comes back once the member has checked in", async () => {
-    stubWithMyBooking({ checkedIn: true, refundCredits: 0, penaltyCredits: 0 }, [], { checkedIn: true });
-    renderPage(<SchedulePage />);
-
-    // The grid says it too — the schedule projection did not carry attendance at all, so
-    // no screen in the product could tell a member their court was lit.
-    const cell = await screen.findByRole("button", { name: /^Cancel your booking on Court .* — checked in$/ });
-    fireEvent.click(cell);
-
-    const modal = await screen.findByRole("dialog", { name: "Cancel this booking?" });
-    await waitFor(() => expect(modal).toHaveTextContent(/nothing is refunded/i));
-    expect(modal).toHaveTextContent("50.00 cr");
-  });
-
-  it("says a free cancellation is free", async () => {
-    stubWithMyBooking({});
-    renderPage(<SchedulePage />);
-    fireEvent.click(await screen.findByRole("button", { name: /^Cancel your booking on Court / }));
-
-    const modal = await screen.findByRole("dialog", { name: "Cancel this booking?" });
-    await waitFor(() => expect(modal).toHaveTextContent(/Cancelling now is free/));
-  });
-
-  it("reports what actually moved, not 'refund pending'", async () => {
-    stubWithMyBooking({ insidePenaltyWindow: true, penaltyCredits: 15, refundCredits: 35 }, [
-      { method: "POST", path: `/api/v1/bookings/${BOOKING_ID}/cancel`, body: { refunded_credits: 50, penalty_credits: 15 } },
-    ]);
-    renderPage(<SchedulePage />);
-    fireEvent.click(await screen.findByRole("button", { name: /^Cancel your booking on Court / }));
-    await screen.findByRole("dialog", { name: "Cancel this booking?" });
-
-    fireEvent.click(screen.getByRole("button", { name: "Cancel the booking" }));
-
-    expect(await screen.findByText(/35\.00 cr back to your credit, 15\.00 cr kept as the late-cancellation penalty/))
-      .toBeInTheDocument();
-    expect(screen.queryByText(/refund pending/i)).not.toBeInTheDocument();
-  });
-
-  // ---- F11: the admin can act on the grid ----
-
-  it("lets an admin cancel another member's booking and waive the penalty", async () => {
-    const theirs = { ...MY_SLOT, isMine: false, ownerUserId: "55555555-5555-5555-5555-555555555555" };
-    const whoami = signIn({ isAdmin: true });
-    const fetchStub = stubFetch([
-      { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: WALLET },
-      { path: "/api/v1/admin/members/", body: [] },
-      { path: "/api/v1/schedule", body: { ...DAY, slots: [theirs] } },
-      { path: `/api/v1/bookings/${BOOKING_ID}/cancellation-quote`, body: { ...QUOTE, insidePenaltyWindow: true, penaltyCredits: 15, refundCredits: 35 } },
-      { method: "POST", path: `/api/v1/admin/bookings/${BOOKING_ID}/cancel`, body: { refunded_credits: 50, penalty_credits: 0 } },
-    ]);
-    renderPage(<SchedulePage />);
-
-    // Another member's slot used to be inert text — a photo and a first name, no control —
-    // while POST /api/v1/admin/bookings/{id}/cancel existed and was simply unreachable.
-    fireEvent.click(await screen.findByRole("button", { name: /cancel on their behalf/ }));
-    await screen.findByRole("dialog", { name: "Cancel this booking?" });
-
-    fireEvent.click(await screen.findByLabelText(/Waive the 15\.00 cr penalty/));
-    // §7's "logged with reason" — the waiver does not go without one.
-    fireEvent.change(screen.getByLabelText("Why the penalty is being waived"), {
-      target: { value: "Club closed the court" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Cancel the booking" }));
-
-    await waitFor(() => {
-      const post = fetchStub.calls.find((c) => c.method === "POST" && c.path.endsWith(`/admin/bookings/${BOOKING_ID}/cancel`));
-      expect(post?.body).toMatchObject({ waivePenalty: true, waiveReason: "Club closed the court" });
-    });
-  });
-
-  it("books on a member's behalf out of the MEMBER's wallet, not the admin's", async () => {
-    const THEM = "55555555-5555-5555-5555-555555555555";
-    const whoami = signIn({ isAdmin: true });
-    const fetchStub = stubFetch([
-      { path: "/api/v1/whoami", body: whoami },
-      // The seeded admin's own balance is zero, which is the ordinary state of a desk
-      // account: nobody tops up the club's admin login, because it never plays.
-      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
-      { path: "/api/v1/admin/members/", body: [{ user_id: THEM, full_name: "Naledi Khumalo" }] },
-      { path: "/api/v1/schedule", body: DAY },
-      { method: "POST", path: "/api/v1/admin/bookings/", body: { booking_id: "88888888-8888-8888-8888-888888888888", balance_after_credits: 0 } },
-    ]);
-    renderPage(<SchedulePage />);
-    await openBookingModal();
-
-    // Booking it for THEMSELVES they genuinely cannot afford, and the modal says so.
-    // This also proves the wallet answer has landed, so the assertions below are not
-    // passing on a balance that is merely still null. The dialog no longer OPENS here —
-    // N-F11: a desk account's balance is zero permanently, so opening on "My own booking"
-    // made every slot's first state a refusal — so this selects it deliberately.
-    fireEvent.change(screen.getByLabelText("Book this as"), { target: { value: "self" } });
-    await screen.findByText(/more than you have/);
-
-    fireEvent.change(screen.getByLabelText("Book this as"), { target: { value: "member" } });
-    fireEvent.change(screen.getByLabelText("Member"), { target: { value: THEM } });
-
-    // The third admin action was unreachable: affordability was computed from the
-    // SIGNED-IN user's balance whatever the mode, so the desk could cancel for a member
-    // and block a court but could never book for one — the modal read "charged to the
-    // member" and "that's more than you have" at the same time and disabled the button.
-    // The money here is Naledi's; §8 lets an admin override even an insufficient member
-    // balance, so the admin's own wallet has no say in it at all.
-    expect(screen.queryByText(/more than you have/)).not.toBeInTheDocument();
-    const confirm = screen.getByRole("button", { name: "Book for 50.00 cr" });
-    expect(confirm).toBeEnabled();
-    fireEvent.click(confirm);
-
-    await waitFor(() => {
-      const post = fetchStub.calls.find((c) => c.method === "POST" && c.path === "/api/v1/admin/bookings/");
-      expect(post?.body).toMatchObject({ courtId: COURT, userId: THEM, sliceCount: 1 });
-    });
-  });
-
-  it("lets an admin block a slot for an event", async () => {
-    const whoami = signIn({ isAdmin: true });
-    const fetchStub = stubFetch([
-      { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: WALLET },
-      { path: "/api/v1/admin/members/", body: [] },
-      { path: "/api/v1/schedule", body: DAY },
-      { method: "POST", path: "/api/v1/admin/blocks/", body: { booking_id: "77777777-7777-7777-7777-777777777777" } },
-    ]);
-    renderPage(<SchedulePage />);
-    await openBookingModal();
-
-    // §8 has promised admin blocks since the first spec and SlotCell could already
-    // RENDER one; nothing in the product could create one.
-    fireEvent.change(screen.getByLabelText("Book this as"), { target: { value: "block" } });
-    fireEvent.click(screen.getByRole("button", { name: "Block the court" }));
-
-    await waitFor(() => {
-      const post = fetchStub.calls.find((c) => c.method === "POST" && c.path === "/api/v1/admin/blocks/");
-      expect(post?.body).toMatchObject({ courtId: COURT, sliceCount: 1, label: "Tournament" });
-    });
-  });
-
-  // ---- F3 / F15: the grid's shape ----
 
   it("draws the day to the club's own hours for that weekday", async () => {
-    stub([]);
-    renderPage(<SchedulePage />);
-    await screen.findByText("07:00");
-
-    // Saturday closes at 20:00. 21:45 — the slot finder B was sold and charged for — is
-    // not on the grid, because the day now carries its own hours rather than a flat pair.
-    expect(screen.getByText("19:45")).toBeInTheDocument();
-    expect(screen.queryByText("21:45")).not.toBeInTheDocument();
+    openBookings({ day: dayFixture({ dayStartMinute: 7 * 60, dayEndMinute: 9 * 60 }) });
+    const grid = await screen.findByRole("grid");
+    const times = within(grid).getAllByRole("rowheader").map((r) => r.textContent);
+    expect(times[0]).toBe("07:00");
+    expect(times.at(-1)).toBe("08:45");
   });
+});
 
-  it("lets a member look back as far as they can look forward", async () => {
-    stub([]);
-    renderPage(<SchedulePage />);
-
-    const picker = await screen.findByLabelText("Schedule date");
-    const min = picker.getAttribute("min");
-    const max = picker.getAttribute("max");
-    // `min` used to be pinned to today for everyone but an admin, so a member could only
-    // ever move forward — and with no bookings list anywhere else in the product, there
-    // was no way to review a booking they had already played.
-    expect(min).not.toBeNull();
-    expect(max).not.toBeNull();
-    expect(Date.parse(min!)).toBeLessThan(Date.now());
-  });
-
-  // ---- "Booking is slow" — the founder's own report, measured then fixed ----
-
-  it("shows the new booking without waiting for the schedule to be fetched again", async () => {
-    // The second /schedule answer is deliberately still EMPTY — the server "has not caught
-    // up". The page used to await that refetch before anything changed on screen, so the
-    // member's cell stayed "Available" for a whole extra round trip after their money had
-    // moved. It now paints from the POST's own response and reconciles behind them.
-    const fetchStub = stubFetch([
-      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-      { path: "/api/v1/wallet", body: WALLET },
-      // The confirming refetch is made to FAIL, so what is on screen can only have come
-      // from the POST's own response.
-      { path: "/api/v1/schedule", sequence: [DAY, "the network went away"], body: DAY },
-      { path: `/api/v1/bookings/${BOOKING_ID}/cancellation-quote`, body: QUOTE },
-      { method: "POST", path: "/api/v1/bookings/", body: { booking_id: BOOKING_ID, balance_after_credits: 1585 } },
+describe("a tap hands the right thing to the right sheet", () => {
+  it("books one slot: the court, the instant, one slice, this viewer's price", async () => {
+    openBookings();
+    fireEvent.click(await screen.findByRole("button", { name: /^Book Court 2 at 16:15 for 50\.00 cr/ }));
+    await screen.findByRole("dialog", { name: "Book sheet" });
+    expect(sheets.book?.slots).toEqual([
+      { courtId: COURT_B, courtName: "Court 2", startsAt: sast(16, 15), sliceCount: 1, priceCredits: 50 },
     ]);
-    renderPage(<SchedulePage />);
-    await openBookingModal();
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-
-    expect(await screen.findByRole("button", { name: /^Cancel your booking on Court / })).toBeInTheDocument();
-    // And the balance came off the booking response rather than a second wallet read.
-    const walletReads = fetchStub.calls.filter((c) => c.method === "GET" && c.path.startsWith("/api/v1/wallet"));
-    expect(walletReads).toHaveLength(1);
+    expect(sheets.book?.isAdmin).toBe(false);
+    expect(sheets.book?.balanceCredits).toBe(900);
+    expect(sheets.book?.timezone).toBe("Africa/Johannesburg");
   });
 
-  it("does not rebuild the grid when a modal opens", async () => {
-    stub([]);
-    renderPage(<SchedulePage />);
-    await screen.findAllByRole("button", { name: /^Book Court .* for 50\.00 cr/ });
-
-    // A club day is a couple of hundred cells. Every one of them re-rendered whenever any
-    // state on the page moved — opening the confirmation, closing it, arming a cancel —
-    // for a dialog that touches no cell at all. Measured at 28 ms in jsdom to open a
-    // dialog, 8 ms after. The memo only bites while the grid's callbacks stay stable,
-    // which is what this actually pins.
-    await openBookingModal();
-    const before = cellLookups.count;
-    fireEvent.click(screen.getByRole("button", { name: "Keep looking" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-
-    expect(cellLookups.count).toBe(before);
+  it("opens the cancel sheet on the member's own booking, in the grid's own clock (D4 §2.4)", async () => {
+    openBookings({ day: dayFixture({ slots: [MY_SLOT] }) });
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel your booking on Court 1 at 17:00" }));
+    await screen.findByRole("dialog", { name: "Cancel sheet" });
+    const [booking] = sheets.cancel!.bookings;
+    expect(booking).toMatchObject({ bookingId: "mine-1", courtName: "Court 1", mine: true, memberFirstName: null });
+    // One clock across the journey: "Mon 9 Sept, 17:00", never "5:00 PM".
+    expect(booking.whenLabel).toMatch(/Mon 9 Sept?,? 17:00/);
+    expect(booking.whenLabel).not.toMatch(/AM|PM/);
   });
 
-  it("names a suspended membership instead of telling the member to refresh and try again", async () => {
-    // The desk suspended her while her tab was open, so the refusal arrives on a screen that
-    // still looks perfectly bookable, with the confirmation open and the button back at rest.
-    stub([{ method: "POST", path: "/api/v1/bookings/", status: 403, body: { error: "member_suspended" } }]);
-    renderPage(<SchedulePage />);
-    await openBookingModal();
-
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-
-    expect(await screen.findByText(/membership is suspended/i)).toBeInTheDocument();
-    // The fallback — "Couldn't make that booking. Refresh the schedule and try again." — was
-    // advice that could never work: refreshing changes nothing, so the member's obvious next
-    // move is to press Book again and be refused identically.
-    expect(screen.queryByText(/Refresh the schedule and try again/i)).not.toBeInTheDocument();
+  it("lets an admin open another member's booking — first name and photo only", async () => {
+    openBookings({ isAdmin: true, day: dayFixture({ slots: [THEIRS] }) });
+    fireEvent.click(await screen.findByRole("button", { name: "Thandi — cancel on their behalf, Court 2 at 16:30" }));
+    const [booking] = sheets.cancel!.bookings;
+    expect(booking).toMatchObject({ mine: false, memberFirstName: "Thandi", memberPhotoUrl: null });
+    expect(Object.keys(booking)).not.toContain("email");
+    expect(sheets.cancel?.isAdmin).toBe(true);
   });
 
-  // ---- §8: "if insufficient, admin can override and create a negative balance, logged" ----
-
-  const THEM = "55555555-5555-5555-5555-555555555555";
-  const OTHER = "66666666-6666-6666-6666-666666666666";
-  /** The signed-in admin's own id — `signIn` mints this one. The member picker lists them too. */
-  const SELF = "44444444-4444-4444-4444-444444444444";
-
-  /**
-   * A desk signed in as admin, looking at a free day, with one member on file who is
-   * short. `postStatus` and `postBody` drive what the admin booking endpoint answers,
-   * per attempt — the whole interaction is refuse-then-override, so a stub with one
-   * answer cannot express it.
-   */
-  function adminAtTheDesk(postStatus: number | number[], postBody: unknown, postSequence?: unknown[]) {
-    const whoami = signIn({ isAdmin: true });
-    return stubFetch([
-      { path: "/api/v1/whoami", body: whoami },
-      // Zero, which is the ordinary state of a club desk account: it never plays.
-      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
-      { path: "/api/v1/admin/members/", body: [
-        { user_id: THEM, full_name: "Naledi Khumalo", balance_credits: 10 },
-        { user_id: OTHER, full_name: "Liam O'Connor", balance_credits: 500 },
-      ] },
-      { path: "/api/v1/schedule", body: DAY },
-      { method: "POST", path: "/api/v1/admin/bookings/", status: postStatus, body: postBody, sequence: postSequence },
-    ]);
-  }
-
-  const SHORT = { error: "insufficient_balance", current_credits: 10, required_credits: 50 };
-
-  /** Opens the confirmation and switches it to "on behalf of Naledi". */
-  async function chooseMember() {
-    await openBookingModal();
-    fireEvent.change(screen.getByLabelText("Book this as"), { target: { value: "member" } });
-    fireEvent.change(screen.getByLabelText("Member"), { target: { value: THEM } });
-  }
-
-  it("tells the admin what the member is short by, instead of a toast about the admin's own wallet", async () => {
-    adminAtTheDesk(402, SHORT);
-    renderPage(<SchedulePage />);
-    await chooseMember();
-
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-
-    // The refusal used to leave as "Not enough credits — top up your wallet and try
-    // again.", shown to a desk account whose wallet has nothing to do with it, and the
-    // modal closed on the member's name. Now the modal stays open and states the case.
-    const dialog = await screen.findByRole("dialog", { name: "Confirm booking" });
-    expect(dialog).toHaveTextContent("Naledi Khumalo doesn't have enough credit");
-    expect(dialog).toHaveTextContent("10.00 cr");
-    expect(dialog).toHaveTextContent("50.00 cr");
-    expect(dialog).toHaveTextContent("-40.00 cr");
-    expect(screen.queryByText(/top up your wallet/i)).not.toBeInTheDocument();
+  it("gives a member nothing to press on somebody else's booking", async () => {
+    openBookings({ day: dayFixture({ slots: [THEIRS] }) });
+    const cell = await screen.findByRole("gridcell", { name: "Court 2 at 16:30 — booked by Thandi" });
+    expect(within(cell).queryByRole("button")).toBeNull();
+    expect(cell.textContent).toContain("Thandi");
   });
 
-  it("does not overdraw anybody until the admin asks for it a second time", async () => {
-    const fetchStub = adminAtTheDesk(402, SHORT);
-    renderPage(<SchedulePage />);
-    await chooseMember();
-
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-    await screen.findByRole("button", { name: "Book anyway — leaves -40.00 cr" });
-
-    // The first attempt is an ORDINARY booking. An override that rode along with it
-    // would make §8's "admin can override" mean "admins are never refused", which is a
-    // different and much worse promise.
-    const posts = fetchStub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/admin/bookings/");
-    expect(posts).toHaveLength(1);
-    expect(posts[0].body).toMatchObject({ allowNegativeBalance: false });
+  it("passes `?as=` through to the sheet for an admin, and never for a member", async () => {
+    openBookings({ isAdmin: true, at: "/bookings?date=2030-09-09&as=55555555-5555-5555-5555-555555555555" });
+    await screen.findByRole("grid");
+    expect(sheets.book?.bookAsUserId).toBe("55555555-5555-5555-5555-555555555555");
   });
 
-  it("sends the override on the second press, and says what it left the member owing", async () => {
-    // `sequence` and `status` are indexed together: the refusal, then the booking, with
-    // the MEMBER's balance in the answer.
-    const fetchStub = adminAtTheDesk([402, 200], SHORT, [
-      SHORT,
-      { booking_id: "88888888-8888-8888-8888-888888888888", balance_after_credits: -40 },
-    ]);
-    renderPage(<SchedulePage />);
-    await chooseMember();
+  it("ignores `?as=` for a member", async () => {
+    openBookings({ at: "/bookings?date=2030-09-09&as=55555555-5555-5555-5555-555555555555" });
+    await screen.findByRole("grid");
+    expect(sheets.book?.bookAsUserId).toBeNull();
+  });
+});
 
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Book anyway — leaves -40.00 cr" }));
-
-    await waitFor(() => {
-      const posts = fetchStub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/admin/bookings/");
-      expect(posts).toHaveLength(2);
-      expect(posts[1].body).toMatchObject({ courtId: COURT, userId: THEM, allowNegativeBalance: true });
+describe("what the page does with a sheet's outcome — R12", () => {
+  it("paints a booking the moment the sheet reports it, before the day is read again", async () => {
+    openBookings();
+    fireEvent.click(await screen.findByRole("button", { name: /^Book Court 1 at 16:00/ }));
+    hangScheduleReads();
+    await act(async () => {
+      sheets.book!.onBooked!({
+        booked: [{ courtId: COURT_A, courtName: "Court 1", startsAt: sast(16), sliceCount: 2, priceCredits: 100 }],
+        ownBalanceAfter: 800, forMemberId: null, hold: false,
+      });
     });
-
-    // The admin who has just put somebody in the red is told by how much, there and then,
-    // and told WHOSE red it is — the confirmation used to say "that member" throughout.
-    expect(await screen.findByText(/Naledi Khumalo's balance is now -40\.00 cr/)).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // Mine, at once — and one block over both rows. Pending until the read gives it its real id
+    // (P4 walk): a tap on it would send a cancel for an id the server has never heard of.
+    const painted = screen.getByRole("button", { name: PENDING_CELL.label("Court 1 at 16:00") });
+    expect(painted).toHaveAttribute("aria-disabled", "true");
+    expect(painted.className).toContain("bg-slot-mine-fill");
+    expect(screen.queryByRole("button", { name: "Cancel your booking on Court 1 at 16:00" })).toBeNull();
+    expect(screen.getByRole("gridcell", { name: "Court 1 at 16:15 — continues, your booking" })).toBeInTheDocument();
+    expect(document.querySelector('[data-block-rows="2"]')).toBeTruthy();
   });
 
-  /** Drives the modal to the point where the override is on offer against Naledi. */
-  async function offerOnScreen() {
-    renderPage(<SchedulePage />);
-    await chooseMember();
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-    await screen.findByRole("button", { name: "Book anyway — leaves -40.00 cr" });
-  }
-
-  function offerIsGone() {
-    expect(screen.queryByRole("button", { name: /Book anyway/ })).not.toBeInTheDocument();
-    expect(screen.queryByText(/doesn't have enough credit/)).not.toBeInTheDocument();
-  }
-
-  it("drops the offer when the admin picks a different member", async () => {
-    adminAtTheDesk(402, SHORT);
-    await offerOnScreen();
-
-    // Naledi's figures must never stand over somebody else's name. Switching the member
-    // is the dangerous one: the panel names a person and a shortfall, and the button
-    // states a balance — all three would be about the wrong member.
-    fireEvent.change(screen.getByLabelText("Member"), { target: { value: OTHER } });
-    offerIsGone();
-  });
-
-  it("drops the offer when the admin stops booking on a member's behalf", async () => {
-    adminAtTheDesk(402, SHORT);
-    await offerOnScreen();
-
-    fireEvent.change(screen.getByLabelText("Book this as"), { target: { value: "block" } });
-    offerIsGone();
-  });
-
-  it("never tells a desk to top up its own wallet about a member's shortfall", async () => {
-    // The degenerate path: `insufficient_balance` with no figures on it, so there is
-    // nothing to offer an override against. The shared sentence for this code is "top up
-    // YOUR wallet", which is right for a member and wrong for a club desk — the short
-    // wallet is not theirs, and a desk account's balance is zero permanently.
-    adminAtTheDesk(402, { error: "insufficient_balance" });
-    renderPage(<SchedulePage />);
-    await chooseMember();
-
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-
-    expect(await screen.findByText(/That member doesn't have enough credit/)).toBeInTheDocument();
-    expect(screen.queryByText(/top up your wallet/i)).not.toBeInTheDocument();
-  });
-
-  it("does not offer the override to an admin who picked themselves out of the member list", async () => {
-    // The picker is populated from /admin/members and lists the signed-in admin along with
-    // everybody else — in the running club it is the first name in the dropdown. The server's
-    // override is `payer.AllowNegativeBalance && actorId != userId`, so it can never be
-    // granted here, and offering it produced a loop with no exit: the modal showed the full §8
-    // offer, the second press was refused, `shortfallFrom` returned null so the figures were
-    // discarded, and the toast said "try again to see what they're short by" — which led back
-    // to the same offer. No money moved and no audit row was written; the defect was that the
-    // screen could not be got out of.
-    const fetchStub = stubFetch([
-      { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
-      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
-      { path: "/api/v1/admin/members/", body: [
-        { user_id: SELF, full_name: "Crusaders Admin" },
-        { user_id: THEM, full_name: "Naledi Khumalo" },
-      ] },
-      { path: "/api/v1/schedule", body: DAY },
-      { method: "POST", path: "/api/v1/admin/bookings/", status: 402, body: SHORT },
-    ]);
-    renderPage(<SchedulePage />);
-    await openBookingModal();
-    fireEvent.change(screen.getByLabelText("Book this as"), { target: { value: "member" } });
-    fireEvent.change(screen.getByLabelText("Member"), { target: { value: SELF } });
-
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-
-    // No offer, and a sentence that says why rather than sending them round again.
-    expect(await screen.findByText(/only works on another member's wallet/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Book anyway/ })).not.toBeInTheDocument();
-    expect(screen.queryByText(/Try again to see what they're short by/)).not.toBeInTheDocument();
-
-    // And exactly one attempt: the refusal is final, not the first half of a loop.
-    expect(fetchStub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/admin/bookings/")).toHaveLength(1);
-  });
-
-  it("still refuses a MEMBER booking their own slot, with no override on offer", async () => {
-    const whoami = signIn({ isAdmin: false });
-    const fetchStub = stubFetch([
-      { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: { balance_credits: 10, entries: [] } },
-      { path: "/api/v1/schedule", body: DAY },
-      { method: "POST", path: "/api/v1/bookings/", status: 402, body: SHORT },
-    ]);
-    renderPage(<SchedulePage />);
-    await openBookingModal();
-
-    // The client refuses it before the request, and the sentence is the member's own —
-    // this is the wallet that really is short.
-    expect(await screen.findByText(/That's more than you have/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Book for 50.00 cr" })).toBeDisabled();
-    expect(screen.queryByRole("button", { name: /Book anyway/ })).not.toBeInTheDocument();
-    expect(fetchStub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/bookings/")).toHaveLength(0);
-  });
-
-  // ---- J-F3: a refusal is answered IN the dialog that caused it ----
-
-  it("puts the refusal inside the confirmation dialog, not only in a toast behind it", async () => {
-    stub([{
-      method: "POST", path: "/api/v1/bookings/", status: 409,
-      body: { error: "per_day_cap_exceeded", cap_minutes: 60, already_booked_minutes: 60, attempted_minutes: 15 },
-    }]);
-    renderPage(<SchedulePage />);
-    const modal = await openBookingModal();
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-
-    // The modal stayed open with NOTHING in it and its button back at rest, while the only
-    // explanation painted under the modal's own 30% scrim and cleared itself after four
-    // seconds. A member watching the dialog — where their attention is — saw a control
-    // that did nothing and was never told why.
-    await waitFor(() => expect(modal).toHaveTextContent(/You already have 60 of your 60 minutes booked/));
-    expect(within(modal).getByRole("alert")).toBeInTheDocument();
-  });
-
-  it("does not tell a member to refresh the schedule when the club's own system is down", async () => {
-    // An HTML body, because that is what a wedged gateway actually answers with — and
-    // because the client used to JSON.parse it BEFORE constructing the ApiError, so a real
-    // 502 reached the screen as a bare SyntaxError and no status-based branch could fire.
-    // A stub returning JSON with a 502 status passes either way and proves nothing; this
-    // one was found in a browser.
-    stub([{ method: "POST", path: "/api/v1/bookings/", status: 502, body: "<html><body>502 Bad Gateway</body></html>" }]);
-    renderPage(<SchedulePage />);
-    const modal = await openBookingModal();
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-
-    // Every 5xx used to come out as "Refresh the schedule and try again" — advice for a
-    // stale grid, and simply wrong for a gateway that is down: refreshing fails too.
-    await waitFor(() => expect(modal).toHaveTextContent(/isn't answering right now/));
-    expect(modal).toHaveTextContent(/no credit was taken/);
-    expect(screen.queryByText(/Refresh the schedule and try again/)).not.toBeInTheDocument();
-  });
-
-  it("clears the refusal when the admin changes who is being booked for", async () => {
-    adminAtTheDesk(409, { error: "slot_taken" });
-    renderPage(<SchedulePage />);
-    await chooseMember();
-    const modal = screen.getByRole("dialog", { name: "Confirm booking" });
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-    await waitFor(() => expect(modal).toHaveTextContent(/Someone just took that slot/));
-
-    // A refusal belongs to one attempt against one payer, exactly as the shortfall does.
-    fireEvent.change(screen.getByLabelText("Member"), { target: { value: OTHER } });
-    expect(modal).not.toHaveTextContent(/Someone just took that slot/);
-  });
-
-  // ---- I-F13 / G-F10: the desk sees whose credit, how much, and what is left ----
-
-  it("shows the member's balance and the balance the booking leaves, before any refusal", async () => {
-    adminAtTheDesk(200, { booking_id: "88888888-8888-8888-8888-888888888888", balance_after_credits: 450 });
-    renderPage(<SchedulePage />);
-    const modal = await openBookingModal();
-    fireEvent.change(screen.getByLabelText("Book this as"), { target: { value: "member" } });
-    fireEvent.change(screen.getByLabelText("Member"), { target: { value: OTHER } });
-
-    // "Their balance: charged to the member" — a phrase where a number belongs — and no
-    // "balance after" row at all. §8 asks for the member's name, their balance, the price
-    // and the balance it will leave, and a member who could afford it produced none of it.
-    await waitFor(() => expect(modal).toHaveTextContent("Their balance"));
-    expect(modal).toHaveTextContent("500.00 cr");
-    expect(modal).toHaveTextContent("Their balance after");
-    expect(modal).toHaveTextContent("450.00 cr");
-    expect(modal).not.toHaveTextContent("charged to the member");
-  });
-
-  it("names the member in the on-behalf confirmation", async () => {
-    adminAtTheDesk(200, { booking_id: "88888888-8888-8888-8888-888888888888", balance_after_credits: 450 });
-    renderPage(<SchedulePage />);
-    await chooseMember();
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-
-    // "…for that member." The admin has just picked a name from a dropdown, and repeating
-    // it back is the one check that catches a mis-click.
-    expect(await screen.findByText(/Booked Court 1 at .* for Naledi Khumalo\./)).toBeInTheDocument();
-    expect(screen.queryByText(/for that member/)).not.toBeInTheDocument();
-  });
-
-  // ---- G-F5 / G-F6: an admin is not the member, and a waiver carries its reason ----
-
-  const THEIRS = { ...MY_SLOT, isMine: false, ownerUserId: THEM, ownerFirstName: "Naledi" };
-
-  function adminCancelling(quote: Partial<typeof QUOTE>, slotOverrides: Partial<typeof MY_SLOT> = {}) {
-    const whoami = signIn({ isAdmin: true });
-    return stubFetch([
-      { path: "/api/v1/whoami", body: whoami },
-      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
-      { path: "/api/v1/admin/members/", body: [] },
-      { path: "/api/v1/schedule", body: { ...DAY, slots: [{ ...THEIRS, ...slotOverrides }] } },
-      { path: `/api/v1/bookings/${BOOKING_ID}/cancellation-quote`, body: { ...QUOTE, ...quote } },
-      { method: "POST", path: `/api/v1/admin/bookings/${BOOKING_ID}/cancel`, body: { refunded_credits: 50, penalty_credits: 0 } },
-    ]);
-  }
-
-  async function openAdminCancel() {
-    fireEvent.click(await screen.findByRole("button", { name: /cancel on their behalf/ }));
-    return await screen.findByRole("dialog", { name: "Cancel this booking?" });
-  }
-
-  it("tells an admin the refund goes to the member, by name, not to 'your credit'", async () => {
-    adminCancelling({});
-    renderPage(<SchedulePage />);
-    const modal = await openAdminCancel();
-
-    // §7: "refunds always go to the booking's player". The dialog was written in the first
-    // person throughout and never named the member, so a desk account whose own balance is
-    // zero permanently was told the money was coming back to it.
-    await waitFor(() => expect(modal).toHaveTextContent(/goes back to Naledi's credit/));
-    expect(modal).toHaveTextContent("Naledi");
-    expect(modal).not.toHaveTextContent(/back to your credit/);
-  });
-
-  it("does not tell an admin that they themselves checked in", async () => {
-    adminCancelling({ checkedIn: true, refundCredits: 0, penaltyCredits: 0 }, { checkedIn: true });
-    renderPage(<SchedulePage />);
-    const modal = await openAdminCancel();
-
-    await waitFor(() => expect(modal).toHaveTextContent(/Naledi has already checked in/));
-    expect(modal).not.toHaveTextContent(/You've already checked in/);
-  });
-
-  it("names the member's credit in the confirmation after an admin cancellation", async () => {
-    adminCancelling({});
-    renderPage(<SchedulePage />);
-    await openAdminCancel();
-    await screen.findByText(/goes back to Naledi's credit/);
-
-    fireEvent.click(screen.getByRole("button", { name: "Cancel the booking" }));
-
-    expect(await screen.findByText(/50\.00 cr back to Naledi's credit/)).toBeInTheDocument();
-  });
-
-  it("refuses to waive a penalty until the admin says why, and sends the reason", async () => {
-    const fetchStub = adminCancelling({ insidePenaltyWindow: true, penaltyCredits: 15, refundCredits: 35 });
-    renderPage(<SchedulePage />);
-    await openAdminCancel();
-
-    fireEvent.click(await screen.findByLabelText(/Waive the 15\.00 cr penalty/));
-
-    // §7 and §8 both say "with reason". There was no field, nothing on the wire, and the
-    // audit row carried a bare `waived: true` — so a club reviewing waived penalties at
-    // month end could not tell a club decision from a quiet favour.
-    const confirm = screen.getByRole("button", { name: "Cancel the booking" });
-    expect(confirm).toBeDisabled();
-
-    fireEvent.change(screen.getByLabelText("Why the penalty is being waived"), {
-      target: { value: "Court flooded — club's fault" },
+  it("paints an on-behalf booking as somebody else's, never as the admin's own", async () => {
+    openBookings({ isAdmin: true });
+    fireEvent.click(await screen.findByRole("button", { name: /^Book Court 1 at 16:00/ }));
+    hangScheduleReads();
+    await act(async () => {
+      sheets.book!.onBooked!({
+        booked: [{ courtId: COURT_A, courtName: "Court 1", startsAt: sast(16), sliceCount: 1, priceCredits: 50 }],
+        ownBalanceAfter: null, forMemberId: "55555555-5555-5555-5555-555555555555", hold: false,
+      });
     });
-    expect(confirm).toBeEnabled();
-    fireEvent.click(confirm);
+    expect(screen.queryByRole("button", { name: "Cancel your booking on Court 1 at 16:00" })).toBeNull();
+    // Somebody else's fill, never the admin's own — and pending, so not yet cancellable on their behalf.
+    const painted = screen.getByRole("button", { name: PENDING_CELL.label("Court 1 at 16:00") });
+    expect(painted.className).toContain("bg-slot-booked-fill");
+    expect(painted.className).not.toContain("bg-slot-mine-fill");
+    expect(screen.queryByRole("button", { name: /cancel on their behalf, Court 1 at 16:00/ })).toBeNull();
+  });
 
-    await waitFor(() => {
-      const post = fetchStub.calls.find((c) => c.method === "POST" && c.path.endsWith(`/admin/bookings/${BOOKING_ID}/cancel`));
-      expect(post?.body).toMatchObject({ waivePenalty: true, waiveReason: "Court flooded — club's fault" });
+  it("takes a cancelled booking off the grid at once", async () => {
+    openBookings({ day: dayFixture({ slots: [MY_SLOT] }) });
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel your booking on Court 1 at 17:00" }));
+    hangScheduleReads();
+    await act(async () => { sheets.cancel!.onCancelled!({ cancelledIds: ["mine-1"], ownMoneyMoved: true }); });
+    expect(screen.queryByRole("button", { name: "Cancel your booking on Court 1 at 17:00" })).toBeNull();
+    expect(screen.getByRole("button", { name: /^Book Court 1 at 17:00/ })).toBeInTheDocument();
+  });
+
+  it("reads the day again when a sheet proves the grid stale", async () => {
+    const stub = openBookings();
+    fireEvent.click(await screen.findByRole("button", { name: /^Book Court 1 at 16:00/ }));
+    const before = scheduleCalls(stub).length;
+    await act(async () => { sheets.book!.onStale!(); });
+    await waitFor(() => expect(scheduleCalls(stub).length).toBe(before + 1));
+  });
+
+  it("does not rebuild the grid when a sheet opens", async () => {
+    openBookings();
+    const cell = await screen.findByRole("button", { name: /^Book Court 1 at 16:00/ });
+    cellLookups.count = 0;
+    await act(async () => { fireEvent.click(cell); });
+    await screen.findByRole("dialog", { name: "Book sheet" });
+    // Opening a sheet touches no cell; the grid's rows are memoised against it.
+    expect(cellLookups.count).toBe(0);
+  });
+});
+
+describe("a club hold, lifted from the grid", () => {
+  const HELD = dayFixture({
+    slots: [slotRow({ courtId: COURT_A, startsAtUtc: sast(17), endsAtUtc: sast(17, 30), status: "adminblock",
+      bookingId: "hold-1", blockLabel: "League night", checkedIn: null, amountChargedCredits: null })],
+  });
+
+  it("goes at once and says so", async () => {
+    let lifted = false;
+    openBookings({
+      isAdmin: true,
+      routes: [
+        { path: "/api/v1/schedule", respond: () => (lifted ? dayFixture() : HELD) },
+        { method: "DELETE", path: "/api/v1/admin/blocks/hold-1", respond: () => { lifted = true; return {}; } },
+      ],
     });
+    fireEvent.click(await screen.findByRole("button", { name: "Lift the League night hold on Court 1 at 17:00" }));
+    expect(await screen.findByText(HOLD_LIFTED)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Book Court 1 at 17:00/ })).toBeInTheDocument();
+  });
+
+  it("comes back when the server refuses, with the reason", async () => {
+    openBookings({
+      isAdmin: true, day: HELD,
+      routes: [{ method: "DELETE", path: "/api/v1/admin/blocks/hold-1", respond: () => refuse(409, { error: "conflict" }) }],
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Lift the League night hold on Court 1 at 17:00" }));
+    await waitFor(() => expect(document.body.textContent).toMatch(new RegExp(HOLD_LIFT_FAILED.slice(0, 20))));
+    expect(screen.getByRole("gridcell", { name: "Court 1 at 17:00 — held by the club for League night" })).toBeInTheDocument();
   });
 });
 
 /**
- * L-F2 — after a refusal that proves the grid is wrong, the grid is still wrong.
- *
- * <p>
- * A finder opened the confirmation on Court 3 at 12:00, had an admin book that slot from
- * another browser, and pressed Book. The refusal was right — <em>"Someone just took that
- * slot. Refresh the schedule to see what's left."</em> — and nothing else happened: no
- * refetch went out, the grid behind the modal still said <em>12:00 Court 3 · Available</em>
- * thirty seconds later (there is no polling), and the page's only Refresh control sits behind
- * the dialog's own <code>aria-modal</code> overlay, which intercepts a real click. The
- * sentence asked for the one thing the member could not do.
- * </p>
- *
- * <p>
- * The <code>out_of_hours</code> half is the same hole through a different door and is worse:
- * an admin moving Monday's closing time to 09:00 left every slot from 09:00 to 19:15 still
- * drawn as bookable, one modal at a time, until something reloaded the day.
- * </p>
- *
- * <p>
- * These assert the REFETCH and the redrawn grid, not the sentence: a screen can apologise
- * perfectly while still offering the slot it has just refused.
- * </p>
+ * N-F6 — peak slots a Regular member cannot book are not offered as if they could be.
  */
-describe("Schedule — a refusal that proves the grid is stale refetches it", () => {
-  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
-
-  const COURT = "11111111-1111-1111-1111-111111111111";
-  const DATE = "2030-09-07";
-  const sast = (hh: number, mm = 0) => new Date(Date.UTC(2030, 8, 7, hh - 2, mm, 0)).toISOString();
-
-  const OPEN_DAY = {
-    date: DATE, timezone: "Africa/Johannesburg", sliceMinutes: 15,
-    dayStartMinute: 7 * 60, dayEndMinute: 20 * 60, advanceBookingDays: 14,
-    penaltyPct: 30, penaltyWindowMinutes: 15,
-    courts: [{ id: COURT, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 }],
-    slots: [] as unknown[],
-  };
-
-  /** The same day as the club now has it: somebody else owns 07:00. */
-  const TAKEN_DAY = {
-    ...OPEN_DAY,
-    slots: [{
-      courtId: COURT, courtNumber: 1, startsAtUtc: sast(7), endsAtUtc: sast(7, 15),
-      status: "booked", ownerUserId: "77777777-7777-7777-7777-777777777777",
-      ownerFirstName: "Sipho", ownerPhotoUrl: null, isMine: false,
-      bookingId: "88888888-8888-8888-8888-888888888888", blockLabel: null,
-      checkedIn: null, amountChargedCredits: null,
-    }],
-  };
-
-  /**
-   * The same day after an admin moved closing time to 09:00 on the Settings page.
-   *
-   * It keeps one 19:00 booking, exactly as the finder's club did: the grid is drawn to the
-   * club's hours UNION whatever range the day's bookings occupy, so the rows between 09:00
-   * and 19:15 still exist — which is what makes "still offered as Available" a thing that can
-   * be observed at all, rather than rows that simply vanish.
-   */
-  const SHORT_DAY = {
-    ...OPEN_DAY,
-    dayEndMinute: 9 * 60,
-    slots: [{
-      courtId: COURT, courtNumber: 1, startsAtUtc: sast(19), endsAtUtc: sast(19, 15),
-      status: "booked", ownerUserId: "77777777-7777-7777-7777-777777777777",
-      ownerFirstName: "Sipho", ownerPhotoUrl: null, isMine: false,
-      bookingId: "88888888-8888-8888-8888-888888888888", blockLabel: null,
-      checkedIn: null, amountChargedCredits: null,
-    }],
-  };
-
-  function drive(days: unknown[], refusal: unknown) {
-    const stub = stubFetch([
-      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-      { path: "/api/v1/wallet", body: { balance_credits: 1635, entries: [] } },
-      { path: "/api/v1/schedule", body: null, sequence: days },
-      { method: "POST", path: "/api/v1/bookings/", status: 409, body: refusal },
-    ]);
-    renderPage(<SchedulePage />);
-    return stub;
-  }
-
-  const scheduleReads = (stub: { calls: { method: string; path: string }[] }) =>
-    stub.calls.filter((c) => c.method === "GET" && c.path.startsWith("/api/v1/schedule")).length;
-
-  it("refetches the day when the slot was taken, and stops offering it", async () => {
-    const stub = drive([OPEN_DAY, TAKEN_DAY], { error: "slot_taken" });
-
-    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
-    fireEvent.click(cells[0]);
-    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
-    expect(scheduleReads(stub)).toBe(1);
-
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-    await waitFor(() => expect(modal).toHaveTextContent(/Someone just took that slot/));
-
-    // The refetch the page never issued.
-    expect(scheduleReads(stub)).toBe(2);
-    // And the grid behind the modal, which used to go on offering it for ever.
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ })).not.toBeInTheDocument());
-    expect(screen.getByLabelText(/Court 1 at 07:00 — booked by Sipho/)).toBeInTheDocument();
+describe("peak hours on a member's grid", () => {
+  const PEAK = dayFixture({
+    peakStartMinute: 17 * 60, peakEndMinute: 18 * 60, peakAdvanceHoursForRegular: 1, viewerMayBookPeak: false,
   });
 
-  it("redraws the day as closed when the club's hours moved under an open modal", async () => {
-    const stub = drive([OPEN_DAY, SHORT_DAY], { error: "out_of_hours", opens_at: "07:00", closes_at: "09:00" });
-
-    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 11:00 for 50\.00 cr/ });
-    fireEvent.click(cells[0]);
-    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
-
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-    await waitFor(() => expect(modal).toHaveTextContent(/The club is open 07:00–09:00 that day/));
-
-    expect(scheduleReads(stub)).toBe(2);
-    // The finder counted every slot from 09:00 to 19:15 still drawn as bookable after this
-    // refusal; a press of the header Refresh redrew them all as Closed, so the API was right
-    // and only the un-refetched client was wrong.
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: /^Book Court 1 at 11:00/, hidden: true })).not.toBeInTheDocument());
-    expect(screen.getByLabelText("Court 1 at 11:00 — the club is closed")).toBeInTheDocument();
-    // 07:00–09:00 is still open, so this is a redraw and not a blanked grid.
-    // `hidden: true` on both: the modal is still open, and a Radix dialog hides everything
-    // outside it from the accessibility tree — without it the absence above passes vacuously.
-    expect(screen.getByRole("button", { name: /^Book Court 1 at 08:45/, hidden: true })).toBeInTheDocument();
+  it("draws a peak cell as reserved, with a word and a glyph, not as an offer", async () => {
+    openBookings({ day: PEAK });
+    const cell = await screen.findByRole("button", { name: /Court 1 at 17:00 — reserved for league and senior members/ });
+    expect(cell.textContent).toContain("League only");
+    expect(cell.querySelector("svg")).toBeTruthy();
+    expect(cell.className).toContain("border-dashed");
   });
 
-  /**
-   * The fixture, varied. Every assertion above passes just as well if the page refetches on
-   * EVERY refusal — which would be a day-sized read on each press of a button a capped member
-   * cannot use, on a phone. A refusal about the member is not evidence about the day.
-   */
-  it("does not refetch on a refusal that says nothing about the day", async () => {
-    const stub = drive([OPEN_DAY, TAKEN_DAY], {
-      error: "per_day_cap_exceeded", cap_minutes: 60, already_booked_minutes: 60, attempted_minutes: 15,
-    });
-
-    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
-    fireEvent.click(cells[0]);
-    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
-
-    fireEvent.click(screen.getByRole("button", { name: "Book for 50.00 cr" }));
-    await waitFor(() => expect(modal).toHaveTextContent(/You already have 60 of your 60 minutes booked/));
-
-    expect(scheduleReads(stub)).toBe(1);
-  });
-});
-
-/**
- * N-F7 and N-F11 — the confirmation dialog's two dead first states.
- *
- * <p>
- * N-F7: feature-spec §5 says "On confirm: balance must cover cost. If not, <b>prompt to top
- * up</b>." What a short member got was the sentence "Top up your wallet, then book." on a
- * dialog with zero links and zero controls but Keep looking and a disabled Book — so the
- * prompt was a sentence, and the member had to dismiss it, find the balance chip in the
- * header, open the wallet and press Top up there. Beside it sat "Balance after -30.00 cr", a
- * figure for a booking the dialog had already decided would not happen, with nothing to say
- * it was hypothetical.
- * </p>
- *
- * <p>
- * N-F11: the admin's dialog defaulted to "My own booking" against a desk account whose
- * balance is zero permanently by design (§8, "because it never plays"), so the first state
- * of the modal on every slot, every time, was a refusal of the person who had just opened it.
- * </p>
- */
-describe("Schedule — the confirmation dialog opens on something useful", () => {
-  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
-
-  const COURT = "11111111-1111-1111-1111-111111111111";
-  const THEM = "55555555-5555-5555-5555-555555555555";
-  const DATE = "2030-09-07";
-
-  const DAY = {
-    date: DATE, timezone: "Africa/Johannesburg", sliceMinutes: 15,
-    dayStartMinute: 7 * 60, dayEndMinute: 20 * 60, advanceBookingDays: 14,
-    penaltyPct: 30, penaltyWindowMinutes: 15,
-    courts: [{ id: COURT, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 }],
-    slots: [] as unknown[],
-  };
-
-  function open(opts: { isAdmin: boolean; balance: number }) {
-    stubFetch([
-      { path: "/api/v1/whoami", body: signIn({ isAdmin: opts.isAdmin }) },
-      { path: "/api/v1/wallet", body: { balance_credits: opts.balance, entries: [] } },
-      { path: "/api/v1/admin/members/", body: [{ user_id: THEM, full_name: "Naledi Khumalo", balance_credits: 500 }] },
-      { path: "/api/v1/schedule", body: DAY },
-    ]);
-    renderPage(<SchedulePage />);
-  }
-
-  it("gives a short member a control to top up, not only advice to", async () => {
-    open({ isAdmin: false, balance: 20 });
-    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
-    fireEvent.click(cells[0]);
-    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
-
-    await waitFor(() => expect(modal).toHaveTextContent(/That's more than you have/));
-    // The finding, measured: "Links inside the modal: zero."
-    expect(within(modal).getByRole("button", { name: "Top up" })).toBeInTheDocument();
-    expect(within(modal).getByRole("link", { name: "Top up" })).toHaveAttribute("href", "/wallet/topup");
+  it("answers when that cell is pressed — D4 §2.9", async () => {
+    openBookings({ day: PEAK });
+    fireEvent.click(await screen.findByRole("button", { name: /Court 1 at 17:00 — reserved/ }));
+    await waitFor(() => expect(screen.getAllByText(/becomes yours to book if it is still free then/).length).toBeGreaterThan(0));
   });
 
-  it("tells a short member how far short they are, not what a refused booking would have left", async () => {
-    open({ isAdmin: false, balance: 20 });
-    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
-    fireEvent.click(cells[0]);
-    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
-
-    await waitFor(() => expect(modal).toHaveTextContent(/That's more than you have/));
-    expect(modal).toHaveTextContent("Balance now");
-    expect(modal).toHaveTextContent("20.00 cr");
-    expect(modal).toHaveTextContent("Short by");
-    expect(modal).toHaveTextContent("30.00 cr");
-    // The hypothetical the member had no way to recognise as one.
-    expect(modal).not.toHaveTextContent("Balance after");
-    expect(modal).not.toHaveTextContent("-30.00 cr");
+  it("leaves every cell outside the window bookable", async () => {
+    openBookings({ day: PEAK });
+    expect(await screen.findByRole("button", { name: /^Book Court 1 at 16:45/ })).toBeInTheDocument();
   });
 
-  /** The fixture, varied: a member who CAN afford it still gets §5's six figures. */
-  it("still shows the balance a booking will leave when the booking can happen", async () => {
-    open({ isAdmin: false, balance: 200 });
-    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
-    fireEvent.click(cells[0]);
-    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
-
-    await waitFor(() => expect(modal).toHaveTextContent("Balance after"));
-    expect(modal).toHaveTextContent("150.00 cr");
-    expect(modal).not.toHaveTextContent("Short by");
-    expect(within(modal).queryByRole("button", { name: "Top up" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Book for 50.00 cr" })).toBeEnabled();
-  });
-
-  it("opens an admin on the member they are booking for, not on the desk's empty wallet", async () => {
-    open({ isAdmin: true, balance: 0 });
-    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
-    fireEvent.click(cells[0]);
-    const modal = await screen.findByRole("dialog", { name: "Confirm booking" });
-
-    // Every slot used to open on "Balance now 0.00 cr · Balance after -50.00 cr" and
-    // "That's more than you have", with the Book button disabled, before the admin had done
-    // anything at all.
-    expect(screen.getByLabelText("Book this as")).toHaveValue("member");
-    expect(modal).not.toHaveTextContent(/That's more than you have/);
-    expect(within(modal).queryByRole("button", { name: "Top up" })).not.toBeInTheDocument();
-    // The member picker is there and nothing is chosen, so Book waits rather than refuses.
-    expect(screen.getByLabelText("Member")).toHaveValue("");
-    expect(screen.getByRole("button", { name: "Book for 50.00 cr" })).toBeDisabled();
-
-    // …and "My own booking" is still reachable for an admin who does play.
-    fireEvent.change(screen.getByLabelText("Book this as"), { target: { value: "self" } });
-    await waitFor(() => expect(modal).toHaveTextContent(/That's more than you have/));
-  });
-
-  it("opens a member on their own booking — the default only moves for an admin", async () => {
-    open({ isAdmin: false, balance: 200 });
-    const cells = await screen.findAllByRole("button", { name: /^Book Court 1 at 07:00 for 50\.00 cr/ });
-    fireEvent.click(cells[0]);
-    await screen.findByRole("dialog", { name: "Confirm booking" });
-
-    expect(screen.queryByLabelText("Book this as")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Book for 50.00 cr" })).toBeEnabled();
-  });
-});
-
-/**
- * N-F6 — 44 green, clickable "Available" cells a day that a Regular member could not book.
- *
- * <p>
- * The finder counted them on 2026-09-10: every cell between 16:00 and 19:00 rendered with text
- * "Available", background `rgb(220, 252, 231)` — the same green as a bookable slot — `cursor:
- * pointer`, `disabled = false`, and `aria-label="Book Court 2 at 17:00 for 50.00 cr"`. Clicking
- * one opened the confirmation, which quoted court, time, cost, balance now and balance after,
- * as if the booking were going to happen; the refusal came only after Confirm. feature-spec §5
- * defines `available` as "green, clickable", so roughly a quarter of the club's day was
- * advertised in the one colour the grid uses for "you can have this" and then taken away one
- * modal at a time.
- * </p>
- *
- * <p>
- * Driven through the page rather than through `peakRestricted` alone, because the arithmetic
- * being right is not the same as the cell being drawn — and the assertions are on the aria
- * labels, which are what a member tabbing the grid actually gets.
- * </p>
- */
-describe("Schedule — peak-hour slots a member cannot book are not offered as if they could", () => {
-  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
-
-  const COURT = "11111111-1111-1111-1111-111111111111";
-  const DATE = "2030-09-09";
-
-  const PEAK_DAY = {
-    date: DATE, timezone: "Africa/Johannesburg", sliceMinutes: 15,
-    dayStartMinute: 7 * 60, dayEndMinute: 20 * 60, advanceBookingDays: 14,
-    penaltyPct: 30, penaltyWindowMinutes: 15,
-    peakStartMinute: 16 * 60, peakEndMinute: 19 * 60,
-    peakAdvanceHoursForRegular: 1,
-    viewerMayBookPeak: false,
-    courts: [{ id: COURT, courtNumber: 1, name: "Court 1", slicePriceCredits: 50 }],
-    slots: [] as unknown[],
-  };
-
-  function openDay(day: unknown) {
-    stubFetch([
-      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
-      { path: "/api/v1/wallet", body: { balance_credits: 1635, entries: [] } },
-      { path: "/api/v1/schedule", body: day },
-    ]);
-    renderPage(<SchedulePage />);
-  }
-
-  it("draws a peak cell as reserved rather than as an offer a click would withdraw", async () => {
-    openDay(PEAK_DAY);
-    await screen.findByRole("button", { name: /^Book Court 1 at 07:00/ });
-
-    // The cell that used to carry "Book Court 1 at 17:00 for 50.00 cr" and open a priced modal.
-    expect(screen.queryByRole("button", { name: /^Book Court 1 at 17:00 for/ })).not.toBeInTheDocument();
-    const cell = screen.getByLabelText(/Court 1 at 17:00 — reserved for league and senior members/);
-    expect(cell).toBeInTheDocument();
-    // It IS a button now — D4 §2.9. It was an inert `div` with an `aria-label` no sighted
-    // member ever hears: a member tapped it and NOTHING happened, with no explanation and no
-    // route to one. And it is an ORDINARY button: neither `disabled` (a hole in the tab order
-    // that explains nothing) nor `aria-disabled` (a claim that it cannot be operated, when
-    // operating it is the whole point).
-    expect(cell.tagName).toBe("BUTTON");
-    expect(cell).not.toBeDisabled();
-    expect(cell).not.toHaveAttribute("aria-disabled");
-  });
-
-  it("answers when that reserved cell is pressed, instead of doing nothing — D4 §2.9", async () => {
-    openDay(PEAK_DAY);
-    const cell = await screen.findByLabelText(/Court 1 at 17:00 — reserved for league and senior members/);
-    fireEvent.click(cell);
-    await waitFor(() => expect(document.body.textContent)
-      .toMatch(/reserved for league and senior members until closer to the time/));
-  });
-
-  it("leaves every cell outside the window bookable, so it is a rule and not a blanked grid", async () => {
-    openDay(PEAK_DAY);
-
-    // [16:00, 19:00) on the slot's start — the same half-open window CheckPeakHoursRule uses.
-    expect(await screen.findByRole("button", { name: /^Book Court 1 at 15:45 for 50\.00 cr/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Book Court 1 at 19:00 for 50\.00 cr/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Book Court 1 at 18:45/ })).not.toBeInTheDocument();
-  });
-
-  /**
-   * The fixture, varied on the one field that decides it. Everything above would pass just as
-   * well if the grid greyed peak cells out for everybody — which would stop the club booking
-   * its own league night (A.6/A.11: "admin always bypasses caps and peak-hour rules").
-   */
   it("offers the same cells to a viewer the rule never refuses", async () => {
-    openDay({ ...PEAK_DAY, viewerMayBookPeak: true });
+    openBookings({ day: { ...PEAK, viewerMayBookPeak: true } });
+    expect(await screen.findByRole("button", { name: /^Book Court 1 at 17:00/ })).toBeInTheDocument();
+  });
+});
 
-    expect(await screen.findByRole("button", { name: /^Book Court 1 at 17:00 for 50\.00 cr/ })).toBeInTheDocument();
-    expect(screen.queryByLabelText(/reserved for league and senior members/)).not.toBeInTheDocument();
+describe("the cells wear the slot tokens — R6", () => {
+  it("draws a free slot in the available state, with the fingerprint, and says 'Book'", async () => {
+    openBookings();
+    const book = await screen.findByRole("button", { name: /^Book Court 1 at 16:00/ });
+    expect(book.className).toContain("bg-slot-available-fill");
+    expect(book.getAttribute("data-watermark")).toBe("cell");
+    expect(book.textContent).toContain(CELL_TEXT.available);
   });
 
-  /** And an older payload that carries none of it must offer everything, not hide everything. */
-  it("offers the whole day when the payload says nothing about the rule", async () => {
-    const { peakStartMinute, peakEndMinute, peakAdvanceHoursForRegular, viewerMayBookPeak, ...bare } = PEAK_DAY;
-    void peakStartMinute; void peakEndMinute; void peakAdvanceHoursForRegular; void viewerMayBookPeak;
-    openDay(bare);
-
-    expect(await screen.findByRole("button", { name: /^Book Court 1 at 17:00 for 50\.00 cr/ })).toBeInTheDocument();
+  it("gives no fingerprint to a cell that does not respond", async () => {
+    openBookings({ day: dayFixture({ slots: [THEIRS] }) });
+    const cell = await screen.findByRole("gridcell", { name: "Court 2 at 16:30 — booked by Thandi" });
+    expect(cell.querySelector("[data-watermark]")).toBeNull();
   });
 });

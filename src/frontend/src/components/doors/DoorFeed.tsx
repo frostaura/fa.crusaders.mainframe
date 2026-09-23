@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Card } from "../Card";
+import { Panel as Card } from "./Panel";
+import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
 import { DoorFeedRow } from "./DoorFeedRow";
 import { ACTIVITY_READ_FAILED, activityEmptyNotice, isDoorScan } from "../../lib/deviceActivity";
@@ -137,8 +138,10 @@ function FeedBody({ read, clock, expanded, onExpand, firstMoreRef, onAnnounce }:
       {/* B6: the controls used to be BELOW all of this — 5 231 px down on a phone. Ten rows
           answers "what just happened at this door" and the rest is one press away. */}
       {!expanded && scans.length > FEED_FIRST_PAGE && (
-        <button
-          type="button"
+        <Button
+          variant="outline"
+          block
+          className="h-auto min-h-touch whitespace-normal py-2"
           // C-L3 / R3-26: it announced nothing at all. Focus moves to the first revealed
           // row (C4), which tells a screen-reader user where they are and not what
           // happened — so the count is said as well.
@@ -146,10 +149,9 @@ function FeedBody({ read, clock, expanded, onExpand, firstMoreRef, onAnnounce }:
             onExpand();
             onAnnounce(`Showing all ${scans.length} scans at this door.`);
           }}
-          className="min-h-11 w-full rounded-lg border border-control px-5 text-sm font-medium"
         >
           {`Show the other ${scans.length - FEED_FIRST_PAGE} scans`}
-        </button>
+        </Button>
       )}
       {/* Only when the read came back FULL. "Showing the 50 most recent" over four rows is
           a sentence that is not true, and the one it is standing in for — "there may be more
@@ -268,12 +270,12 @@ export function DoorFeed({ door, today, read, clock }: {
           {/* C-L3 / R3-26: one polite region for this section, written by a press and
               nothing else. Standing text on this page carries no live role at all. */}
           <p aria-live="polite" className="sr-only">{announcement}</p>
-          <Link
-            to={`/admin/monitoring/doors/log?door=${encodeURIComponent(door.id)}`}
-            className="inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-control px-5 text-sm font-medium"
-          >
-            All scans at this door
-          </Link>
+          {/* It navigates, so it is a link — dressed as a button only as a CTA (R10). */}
+          <Button asChild variant="outline" block className="h-auto min-h-touch whitespace-normal py-2">
+            <Link to={`/admin/monitoring/doors/log?door=${encodeURIComponent(door.id)}`}>
+              All scans at this door
+            </Link>
+          </Button>
         </Card>
       </section>
       <DoorEvents read={read} timezone={clock.timezone} />

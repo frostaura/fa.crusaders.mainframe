@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { RefreshCw } from "lucide-react";
-import { Card } from "../Card";
-import { Button, Badge } from "../Button";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/card";
+import { RefreshButton } from "../ui/refresh-button";
+import { Skeleton } from "../ui/skeleton";
+import { Info, WarningCircle } from "../ui/icons";
 import { endpoints, type MemberDoorHistoryRow } from "../../lib/api";
 import { clubClock, clubDayAndClock } from "../../lib/clubClock";
-import { cn } from "../../lib/utils";
 import {
   CLUB_TIME_NOTE,
   HISTORY_ANCHOR,
@@ -143,17 +145,17 @@ function HistoryRow({ group, timezone }: { group: HistoryGroup; timezone: string
   // reconcile two numbers that cannot both be right.
   const uncertain = timeIsUncertain(row);
   return (
-    <li className="py-3 md:grid md:grid-cols-[auto_1fr_auto] md:items-baseline md:gap-3">
+    <li className="flex flex-col gap-1 py-3 md:grid md:grid-cols-[auto_1fr_auto] md:items-baseline md:gap-x-4">
       {/* The club's day, not the viewer's. O1 — and stated once under the list, not here. */}
-      <p className="text-sm tabular-nums">
+      <p className="text-sm font-medium tabular-nums text-text-primary">
         {uncertain && <span aria-hidden="true">~</span>}
         {clubDayAndClock(row.at, timezone)}
         {/* R3-31 — a de-duplication marker, never a total. See `historyGroupLabel`. */}
-        {count > 1 && <span className="ml-1.5 text-text-muted">{historyGroupLabel(count, spanSeconds)}</span>}
+        {count > 1 && <span className="ml-1.5 font-normal text-text-muted">{historyGroupLabel(count, spanSeconds)}</span>}
       </p>
       <div className="flex items-center justify-between gap-2 md:contents">
         <p className="text-sm text-text-secondary">{row.door_name ?? UNNAMED_DOOR}</p>
-        <Badge tone={chip.tone}>{chip.label}</Badge>
+        <Badge tone={chip.tone === "muted" ? "neutral" : chip.tone} className="shrink-0">{chip.label}</Badge>
       </div>
       {line && <p className="text-xs text-text-muted md:col-start-2 md:col-span-2">{line}</p>}
       {uncertain && (
@@ -241,99 +243,114 @@ export function DoorHistoryCard(props: { onlyWithRows?: boolean } = {}) {
   // no door history.
   if (onlyWithRows && !(phase === "ready" && rows.length > 0)) return null;
 
+  const ready = phase === "ready";
   return (
     // C15 — a NAMED REGION, so a screen-reader user can find it in the landmark list and
-    // knows what they have landed in when the link from `/my-code` drops them here. `role`
-    // on the Card rather than a `<section>` wrapper around it: `Card` spreads
-    // HTMLAttributes, and a second box inside the first is a border nobody asked for.
-    //
+    // knows what they have landed in when the link from `/my-code` drops them here.
     // `scroll-mt-20` is D9's other half — the app header is sticky, so an anchor jump that
     // lands the heading at the top of the VIEWPORT lands it underneath the header.
     <Card
       id={HISTORY_ANCHOR}
       role="region"
       aria-labelledby={`${HISTORY_ANCHOR}-heading`}
-      className="space-y-4 scroll-mt-20"
+      aria-busy={busy || undefined}
+      className="scroll-mt-20"
     >
-      <>
-        <div>
-          {/* `tabindex=-1` so the hash link can focus it; it is not in the tab order. */}
-          <h2 id={`${HISTORY_ANCHOR}-heading`} ref={heading} tabIndex={-1} className="text-base font-semibold">
-            {HISTORY_TITLE}
-          </h2>
-          <p className="text-sm text-text-secondary">{HISTORY_INTRO}</p>
-        </div>
+      <CardHeader>
+        {/* `tabindex=-1` so the hash link can focus it; it is not in the tab order. An h2:
+            on Profile this card is a top-level section of the page. */}
+        <CardTitle asChild>
+          <h2 id={`${HISTORY_ANCHOR}-heading`} ref={heading} tabIndex={-1}>{HISTORY_TITLE}</h2>
+        </CardTitle>
+        <CardDescription>{HISTORY_INTRO}</CardDescription>
+        {/* R3 — refresh is the right-aligned icon button, beside the title, never a text
+            button in the footer. It spins while the read is in flight. */}
+        {phase !== "loading" && (
+          <CardAction>
+            <RefreshButton label={HISTORY_REFRESH} loading={busy} onRefresh={() => void load(null)} />
+          </CardAction>
+        )}
+      </CardHeader>
 
+      <CardContent className="flex flex-col gap-4">
         {/*
           P2, stated rather than implied by the chips. Not optional: without it "Lock
           released" is read as "the door opened and somebody went through it".
 
-          C15 — PLAIN TEXT, not `Alert`. `Alert`'s info tone carries `role="status"`, which
-          is a live region: this permanent explanatory paragraph was therefore announced as
-          an update every single time the section rendered, including on arrival from the
-          `/my-code` link. A live region is for something that has just changed; a sentence
-          that has been true since the card was written is not that.
+          C15 — PLAIN TEXT, not `Alert`: `Alert`'s info tone is a live region, and this
+          permanent explanatory paragraph was announced as an update on every render.
         */}
-        <p className="rounded-lg border-l-4 border-info-strong bg-info-soft px-3 py-2.5 text-sm text-info-strong">
-          {HISTORY_P2_NOTICE}
+        <p className="flex items-start gap-2 rounded-lg bg-info-soft px-3 py-2.5 text-sm text-info-strong">
+          <Info size={16} weight="bold" aria-hidden="true" className="mt-0.5 shrink-0" />
+          <span>{HISTORY_P2_NOTICE}</span>
         </p>
 
-        {phase === "loading" && <p className="text-sm text-text-secondary">{HISTORY_LOADING}</p>}
+        {phase === "loading" && <HistorySkeleton />}
 
         {phase === "failed" && (
-          <div className="space-y-3">
-            <p className="text-sm text-danger-strong">{HISTORY_FAILED}</p>
-            <Button variant="outline" onClick={() => void load(null)} disabled={busy}>{HISTORY_RETRY}</Button>
+          <div className="flex flex-col items-start gap-3">
+            <p className="flex items-start gap-2 text-sm font-medium text-danger-strong">
+              <WarningCircle size={16} weight="bold" aria-hidden="true" className="mt-0.5 shrink-0" />
+              <span>{HISTORY_FAILED}</span>
+            </p>
+            <Button variant="outline" pending={busy} onClick={() => void load(null)}>{HISTORY_RETRY}</Button>
           </div>
         )}
 
-        {phase === "ready" && rows.length === 0 && (
+        {ready && rows.length === 0 && (
           <p className="text-sm text-text-secondary">{HISTORY_EMPTY}</p>
         )}
 
-        {phase === "ready" && rows.length > 0 && (
-          <>
-            <ul className="divide-y divide-border">
-              {groupHistoryRows(rows, timezone).map((group, i) => (
-                <HistoryRow key={`${group.row.at}-${i}`} group={group} timezone={timezone} />
-              ))}
-            </ul>
-            {/* Once per list. Every face in it is the club's day, which is the right choice
-                and an invisible one for a member reading it from anywhere else. */}
-            <p className="text-xs text-text-muted">{CLUB_TIME_NOTE}</p>
-            {/* Only when a row on screen was actually decided offline, because only then is
-                it true — and only then does a member have a row whose own time runs
-                backwards against its neighbours to be confused by. See the constant. */}
-            {rows.some((row) => !!row.delivered_at) && (
-              <p className="text-xs text-text-muted">{HISTORY_DELIVERY_ORDER}</p>
-            )}
-          </>
+        {ready && rows.length > 0 && (
+          <ul className="divide-y divide-border">
+            {groupHistoryRows(rows, timezone).map((group, i) => (
+              <HistoryRow key={`${group.row.at}-${i}`} group={group} timezone={timezone} />
+            ))}
+          </ul>
         )}
 
-        {moreFailed && (
-          <div className="space-y-3">
-            <p className="text-sm text-danger-strong">{HISTORY_MORE_FAILED}</p>
-          </div>
-        )}
+        {moreFailed && <p className="text-sm font-medium text-danger-strong">{HISTORY_MORE_FAILED}</p>}
 
-        {phase === "ready" && cursor && (
-          <Button variant="outline" className="w-full" onClick={() => void load(cursor)} disabled={busy}>
+        {ready && cursor && (
+          <Button variant="outline" block pending={busy} onClick={() => void load(cursor)}>
             {HISTORY_SHOW_MORE}
           </Button>
         )}
+      </CardContent>
 
-        {phase === "ready" && (
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-            <p className="text-xs text-text-muted">
-              {readAt && `${historyAsOf(clubClock(readAt, timezone))} `}{historyRetention(retention)}
-            </p>
-            <Button variant="outline" className="px-3 text-xs" onClick={() => void load(null)} disabled={busy}>
-              <RefreshCw size={14} className={cn("mr-1", busy && "animate-spin motion-reduce:animate-none")} />
-              {HISTORY_REFRESH}
-            </Button>
-          </div>
-        )}
-      </>
+      {ready && (
+        <CardFooter className="flex-col items-start gap-1 border-t border-border pt-4 sm:pt-6">
+          {/* Once per list. Every face in it is the club's day, which is the right choice
+              and an invisible one for a member reading it from anywhere else. */}
+          {rows.length > 0 && <p className="text-xs text-text-muted">{CLUB_TIME_NOTE}</p>}
+          {/* Only when a row on screen was actually decided offline, because only then is
+              it true. See the constant. */}
+          {rows.some((row) => !!row.delivered_at) && (
+            <p className="text-xs text-text-muted">{HISTORY_DELIVERY_ORDER}</p>
+          )}
+          <p className="text-xs text-text-muted">
+            {readAt && `${historyAsOf(clubClock(readAt, timezone))} `}{historyRetention(retention)}
+          </p>
+        </CardFooter>
+      )}
     </Card>
+  );
+}
+
+/** The list's shape while the first read is in flight — never "Loading…" on its own (R12). */
+function HistorySkeleton() {
+  return (
+    <div aria-busy="true" className="flex flex-col gap-3">
+      <p role="status" className="sr-only">{HISTORY_LOADING}</p>
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="flex items-center justify-between gap-3">
+          <div className="flex flex-1 flex-col gap-1.5">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+          <Skeleton className="h-5 w-24 rounded-full" />
+        </div>
+      ))}
+    </div>
   );
 }

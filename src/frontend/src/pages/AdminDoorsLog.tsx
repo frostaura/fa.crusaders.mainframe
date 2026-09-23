@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Card } from "../components/Card";
+import { Panel as Card } from "../components/doors/Panel";
 import { Alert } from "../components/Alert";
-import { Label, Select } from "../components/Button";
 import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
+import { DatePicker } from "../components/ui/date-picker";
+import { Field, FieldDescription, FieldLabel } from "../components/ui/field";
+import {
+  Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
+} from "../components/ui/select";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { RefreshButton } from "../components/ui/refresh-button";
 import { TextLink } from "../components/ui/text-link";
@@ -215,6 +218,9 @@ function doorOptions(view: DoorsView | null, rows: DoorLogEntry[] | null): Picke
  * thing to call from a second handler, which is what it is for.
  * </p>
  */
+/** "Every door" / "every outcome" inside a Radix Select, which has no empty value. Never on the wire. */
+const ALL = "__all__";
+
 function keepFocus() {
   const active = document.activeElement as HTMLElement | null;
   if (!active || active === document.body) return;
@@ -291,14 +297,6 @@ function AdminDoorsLogPageBody() {
    * there, so the row that got the focus ref could be a row from the previous page.
    */
   const [appendedFrom, setAppendedFrom] = useState(0);
-  /**
-   * The date field's own value while it is being typed (C-H2 / R3-12).
-   *
-   * Seeded from the URL so a shared `?day=` link fills the control, and thereafter the
-   * field's, because a controlled input whose value round-trips through the query string
-   * cannot hold a half-typed date without publishing it.
-   */
-  const [dayDraft, setDayDraft] = useState(params.get("day") ?? "");
   const base = useId();
 
   const query = params.toString();
@@ -590,15 +588,14 @@ function AdminDoorsLogPageBody() {
           fix and the same measurement as the door page — see the note there. */}
       <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0 space-y-4 lg:order-1">
-          <fieldset className="grid gap-3 sm:grid-cols-3">
+          <fieldset className="grid gap-3 rounded-xl border border-border bg-bg-surface p-4 shadow-xs sm:grid-cols-3">
             <legend className="sr-only">Filter these scans</legend>
-            <div>
-              <Label htmlFor={`${base}-door`}>Door</Label>
+            <Field controlId={`${base}-door`}>
+              <FieldLabel>Door</FieldLabel>
               <Select
-                id={`${base}-door`}
-                value={removedDoorKey ? `removed:${removedDoorKey}` : doorId}
-                onChange={(e) => {
-                  const value = e.target.value;
+                value={(removedDoorKey ? `removed:${removedDoorKey}` : doorId) || ALL}
+                onValueChange={(picked) => {
+                  const value = picked === ALL ? "" : picked;
                   const next = new URLSearchParams(params);
                   next.delete("door");
                   next.delete("removed_door");
@@ -610,106 +607,74 @@ function AdminDoorsLogPageBody() {
                   setParams(next);
                 }}
               >
-                <option value="">All doors</option>
-                {/* A5: the DISPLAY name first, always. A door with a name and no slug was
-                    labelled "gate-44c103 — no door name yet", which is a MAC fragment where
-                    the admin's own word for it was sitting in `name` the whole time.
-                    A6: when the doors read fails the options collapse to "All doors" alone,
-                    which silently looked like a club with one door — so the chosen door keeps
-                    its own option, and the picker says why it is short. */}
-                {pickerDoors.map((device) => (
-                  <option key={device.id} value={device.id}>{doorPickerLabel(device)}</option>
-                ))}
-                {/*
-                  A2 — the doors that are GONE, and the reason this group exists.
-
-                  Deleting a door made its whole history unreachable from this page: the
-                  door's own page 404s, it was not in this picker, and a reviewer concluded
-                  the records had been destroyed. They had not. The rows stay until the club's
-                  retention rule takes them, and this is how somebody gets to them.
-                */}
-                {page.removedDoors.length > 0 && (
-                  <optgroup label="Removed doors">
-                    {page.removedDoors.map((door) => (
-                      <option key={door.key} value={`removed:${door.key}`}>{removedDoorName(door)}</option>
-                    ))}
-                  </optgroup>
-                )}
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL}>All doors</SelectItem>
+                  {/* A5: the DISPLAY name first, always. A6: when the doors read fails the
+                      options collapse to "All doors" alone, which silently looked like a club
+                      with one door — so the chosen door keeps its own option, and the picker
+                      says why it is short. */}
+                  {pickerDoors.map((device) => (
+                    <SelectItem key={device.id} value={device.id}>{doorPickerLabel(device)}</SelectItem>
+                  ))}
+                  {/* A2 — the doors that are GONE. Their rows stay until the club's retention
+                      rule takes them, and this group is how somebody gets to them. */}
+                  {page.removedDoors.length > 0 && (
+                    <SelectGroup>
+                      <SelectLabel>Removed doors</SelectLabel>
+                      {page.removedDoors.map((door) => (
+                        <SelectItem key={door.key} value={`removed:${door.key}`}>{removedDoorName(door)}</SelectItem>
+                      ))}
+                    </SelectGroup>
+                  )}
+                </SelectContent>
               </Select>
-              {/* The server caps this list, and a full one is not a complete one: fifty
-                  removed doors and a full stop looks exactly like a club that removed
-                  fifty. The one an admin is hunting for after an incident is the one that
-                  is not in the list. */}
+              {/* The server caps this list, and a full one is not a complete one. */}
               {removedDoorsCapNotice(page.removedDoors.length) && (
-                <p className="mt-1 text-xs text-text-muted">
-                  {removedDoorsCapNotice(page.removedDoors.length)}
-                </p>
+                <FieldDescription className="text-xs">{removedDoorsCapNotice(page.removedDoors.length)}</FieldDescription>
               )}
               {doors === null && (
-                <p className="mt-1 text-xs text-warning-strong">
+                <p className="text-xs text-warning-strong">
                   The club's doors could not be read, so this list may be short. The scans below are
                   unaffected.
                 </p>
               )}
-            </div>
-            <div>
-              <Label htmlFor={`${base}-range`}>When</Label>
-              <Select
-                id={`${base}-range`}
-                value={params.get("range") ?? DEFAULT_RANGE}
-                onChange={(e) => setFilter("range", e.target.value)}
-              >
-                {RANGES.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
-              </Select>
-              {/* A4: the sixth choice is a calendar question, so it takes a date. The input
-                  appears only when it is the answer being given — a date field standing beside
-                  a rolling window reads as a second, contradictory filter. */}
+            </Field>
+            <div className="flex flex-col gap-3">
+              <Field controlId={`${base}-range`}>
+                <FieldLabel>When</FieldLabel>
+                <Select value={params.get("range") ?? DEFAULT_RANGE} onValueChange={(value) => setFilter("range", value)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {RANGES.map(({ value, label }) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Field>
+              {/* A4: the sixth choice is a calendar question, so it takes a date — shown only
+                  when it is the answer being given. It is the club-day DatePicker (P3, R7): a
+                  picked day is always a whole club day, so the half-typed dates C-H2 / R3-12
+                  had to hold back from the URL cannot be produced at all. */}
               {(params.get("range") ?? DEFAULT_RANGE) === "day" && (
-                <>
-                  <Label htmlFor={`${base}-day`} className="mt-2 block">Which day</Label>
-                  {/*
-                    <b>C-H2 / R3-12 — this field could not be typed into.</b>
-
-                    Every keystroke went straight to the query string, so typing a date by
-                    keyboard wrote `day=2` then `day=20` then `day=200920-02-06`: half-typed
-                    values committed to a shared, bookmarkable URL, a request per character,
-                    and the reader's place thrown away in between. A date input is the one
-                    control in this product whose value is INCOMPLETE for most of the time a
-                    person is entering it — a select is valid at every keystroke and a text
-                    filter is meaningful part-typed, and this is neither.
-
-                    So the field holds its own draft and the URL takes only a complete club
-                    day. `onBlur` commits as well, for a picker that fires no change this
-                    side of closing, and an emptied field clears the filter rather than
-                    leaving the log narrowed to a day the control no longer shows.
-                  */}
-                  <Input
-                    id={`${base}-day`}
-                    type="date"
-                    value={dayDraft}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setDayDraft(value);
-                      if (isClubDay(value) || value === "") setFilter("day", value);
-                    }}
-                    onBlur={(e) => {
-                      const value = e.target.value;
-                      if (isClubDay(value) || value === "") setFilter("day", value);
-                    }}
+                <div className="flex flex-col gap-1.5">
+                  <span aria-hidden="true" className="text-sm font-medium text-text-primary">Which day</span>
+                  <DatePicker
+                    label="Which day"
+                    value={isClubDay(params.get("day") ?? "") ? params.get("day") : null}
+                    onChange={(value) => setFilter("day", value)}
+                    placeholder="Pick a day"
                   />
                   {!isClubDay(params.get("day") ?? "") && (
-                    <p className="mt-1 text-xs text-text-muted">Pick a day to narrow the log to it.</p>
+                    <p className="text-xs text-text-muted">Pick a day to narrow the log to it.</p>
                   )}
-                </>
+                </div>
               )}
             </div>
-            <div>
-              <Label htmlFor={`${base}-outcome`}>Outcome</Label>
+            <Field controlId={`${base}-outcome`}>
+              <FieldLabel>Outcome</FieldLabel>
               <Select
-                id={`${base}-outcome`}
-                value={params.get("reason") ?? params.get("outcome") ?? ""}
-                onChange={(e) => {
-                  const value = e.target.value;
+                value={params.get("reason") ?? params.get("outcome") ?? ALL}
+                onValueChange={(picked) => {
+                  const value = picked === ALL ? "" : picked;
                   const next = new URLSearchParams(params);
                   next.delete("outcome");
                   next.delete("reason");
@@ -719,19 +684,22 @@ function AdminDoorsLogPageBody() {
                   setParams(next);
                 }}
               >
-                <option value="">All outcomes</option>
-                <option value="released">Lock released</option>
-                <option value="refused">Refused (any)</option>
-                {/* `ok` is deliberately absent: it is the same set of rows as "Lock
-                    released" above, and two options with one label is a picker an admin
-                    cannot choose between. */}
-                {Object.entries(DOOR_OUTCOME_CHIPS)
-                  .filter(([reason]) => reason !== "ok")
-                  .map(([reason, label]) => (
-                    <option key={reason} value={reason}>{label}</option>
-                  ))}
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL}>All outcomes</SelectItem>
+                  <SelectItem value="released">Lock released</SelectItem>
+                  <SelectItem value="refused">Refused (any)</SelectItem>
+                  {/* `ok` is deliberately absent: it is the same set of rows as "Lock
+                      released" above, and two options with one label is a picker an admin
+                      cannot choose between. */}
+                  {Object.entries(DOOR_OUTCOME_CHIPS)
+                    .filter(([reason]) => reason !== "ok")
+                    .map(([reason, label]) => (
+                      <SelectItem key={reason} value={reason}>{label}</SelectItem>
+                    ))}
+                </SelectContent>
               </Select>
-            </div>
+            </Field>
           </fieldset>
 
           <p className="text-xs text-text-muted">

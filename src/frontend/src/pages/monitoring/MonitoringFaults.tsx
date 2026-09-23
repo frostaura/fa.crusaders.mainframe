@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert } from "../../components/Alert";
-import { ConfirmButton } from "../../components/ConfirmButton";
+import { ConfirmDialog } from "../../components/admin/ConfirmDialog";
 import { useToast } from "../../components/Toast";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -374,6 +374,11 @@ function FaultFilters({ filters, onFilters, boards }: {
   );
 }
 
+/** The consequence, without the question the dialog's title now asks. */
+function resolveBody(count: number): string {
+  return resolveConfirm(count).replace(/^[^?]*\? /, "");
+}
+
 /**
  * The selection strip. It is not a toast and it is not a modal: the rows stay on screen,
  * because the decision an admin is making is about the rows.
@@ -394,11 +399,13 @@ function SelectionStrip({ ids, onClear, onResolve }: {
         {one ? "1 fault selected" : `${ids.length} faults selected`}
       </p>
       <Button variant="ghost" onClick={onClear}>Clear</Button>
-      <ConfirmButton
-        idleLabel={one ? "Mark it resolved" : `Mark ${ids.length} resolved`}
-        cancelLabel="Leave them open"
-        confirmLabel={resolveConfirm(ids.length)}
-        subject={one ? "this fault" : `these ${ids.length} faults`}
+      <ConfirmDialog
+        trigger={<Button icon={<Check aria-hidden="true" />}>{one ? "Mark it resolved" : `Mark ${ids.length} resolved`}</Button>}
+        tone="primary"
+        title={one ? "Mark this fault resolved?" : `Mark these ${ids.length} faults resolved?`}
+        description={resolveBody(ids.length)}
+        confirmLabel={one ? "Mark it resolved" : `Mark all ${ids.length} resolved`}
+        cancelLabel={one ? "Leave it open" : "Leave them open"}
         onConfirm={onResolve}
       />
     </div>
@@ -537,12 +544,17 @@ function FaultRow({ row, now, timezone, selected, onToggle, onResolve }: {
           )}
         </div>
         {!resolved && (
-          <ConfirmButton
-            idleLabel="Mark resolved"
+          <ConfirmDialog
+            trigger={(
+              <Button variant="outline" size="sm" className="shrink-0">
+                Mark resolved{" "}<span className="sr-only">{`— ${said.title}`}</span>
+              </Button>
+            )}
+            tone="primary"
+            title={`Mark “${said.title}” resolved?`}
+            description={resolveBody(1)}
+            confirmLabel="Mark resolved"
             cancelLabel="Leave it open"
-            confirmLabel={resolveConfirm(1)}
-            ariaLabel={said.title}
-            subject={said.title}
             onConfirm={() => onResolve("")}
           />
         )}

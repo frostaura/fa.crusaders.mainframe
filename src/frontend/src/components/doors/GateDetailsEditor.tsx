@@ -1,5 +1,7 @@
 import { useId, useState } from "react";
-import { Button, Input, Label } from "../Button";
+import { Button } from "../ui/button";
+import { FieldLabel as Label } from "../ui/field";
+import { Input } from "../ui/input";
 import { PowerLossChoice, LOCATION_HINT, LOCATION_NOTE_MAX_LENGTH } from "./DoorCardFields";
 import {
   DEVICE_NAME_MAX_LENGTH, GATE_KEY_MAX_LENGTH, unnamedGateOfflineNotice,
@@ -81,7 +83,7 @@ export function GateDetailsEditor({ device, onSave, onClose }: {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-5">
       {/*
         <b>A-M3 / B12 / R3-21 — two name-shaped boxes, and the dangerous one had the
         friendlier label.</b>
@@ -93,7 +95,7 @@ export function GateDetailsEditor({ device, onSave, onClose }: {
         FOR rather than what it is called, and the cosmetic one is first: an admin who stops
         reading after the first box has changed the harmless thing.
       */}
-      <div>
+      <div className="flex flex-col gap-1.5">
         <Label htmlFor={nameId}>What the club calls it</Label>
         {/* C4: focus the FIRST field when the editor opens. The trigger that opened it is
             hidden rather than unmounted (see `DoorCardSection`), so without this a keyboard
@@ -101,7 +103,7 @@ export function GateDetailsEditor({ device, onSave, onClose }: {
             nothing at all about a form that has just appeared. */}
         {/* autoFocus is deliberate: the editor is opened by an explicit press, which is
             exactly the case it is correct for. */}
-        <p id={nameHintId} className="mb-2 text-xs text-text-muted">
+        <p id={nameHintId} className="text-sm text-text-secondary">
           {`The name on this screen, on the door's card and in the club's own conversation —`
             + ` "Front door", "Side gate". At most ${DEVICE_NAME_MAX_LENGTH} characters. Leave it`
             + " empty and the door shows as an unnamed scanner with its board code, which is"
@@ -121,14 +123,14 @@ export function GateDetailsEditor({ device, onSave, onClose }: {
           disabled={saving}
         />
       </div>
-      <div>
+      <div className="flex flex-col gap-1.5">
         <Label htmlFor={keyId}>Name the board uses offline — change only with the board</Label>
         {/* NOT "the only thing that tells one door from another": a gate decision is audited
             with the board's device code as well as its gate key, and the code is per board.
             What is true, and what an admin needs, is that the code is a fragment of a MAC
             address — so without a name here the record identifies the door by something
             nobody can match to a corridor without walking to it. */}
-        <p id={keyHintId} className="mb-2 text-xs text-text-muted">
+        <p id={keyHintId} className="text-sm text-text-secondary">
           Which door this board is on. Every door runs the same firmware and nothing is
           compiled in per door, so this is how the record names the door. Without it a
           scan is recorded against the board code alone. Leave it empty to take the name away
@@ -146,7 +148,7 @@ export function GateDetailsEditor({ device, onSave, onClose }: {
           disabled={saving}
         />
       </div>
-      <div>
+      <div className="flex flex-col gap-1.5">
         <Label htmlFor={noteId}>Where this board is</Label>
         <Input
           id={noteId}
@@ -157,12 +159,12 @@ export function GateDetailsEditor({ device, onSave, onClose }: {
           placeholder="In the cupboard above the fuse board"
           disabled={saving}
         />
-        <p id={noteHintId} className="mt-1 text-xs text-text-muted">{LOCATION_HINT}</p>
+        <p id={noteHintId} className="text-sm text-text-secondary">{LOCATION_HINT}</p>
       </div>
       <PowerLossChoice value={behaviour} onChange={setBehaviour} disabled={saving} idBase={base} />
       <div className="flex flex-wrap gap-2">
-        <Button onClick={() => void save()} disabled={saving}>{saving ? "Saving…" : "Save this door"}</Button>
-        <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
+        <Button onClick={() => void save()} pending={saving}>Save this door</Button>
+        <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
       </div>
     </div>
   );

@@ -27,15 +27,6 @@ import { formatCredits } from "./utils";
  * </p>
  */
 
-/** The word a cell wears. Short enough for a 120 px column at a 32 px root font. */
-export const CELL_WORD = {
-  available: "Available",
-  past: "PAST",
-  closed: "Closed",
-  full: "Full",
-  hold: "Club hold",
-} as const;
-
 /** "Monday" from a `YYYY-MM-DD`, in the club's own spelling, never the reader's locale. */
 export function weekdayName(day: string): string {
   const [y, m, d] = day.split("-").map(Number);
@@ -195,7 +186,7 @@ export function emptyWindowSentence(groups: readonly string[], day: string): str
   return `${who}, so there is nothing you can book on ${weekdayName(day)}. Please ask the club.`;
 }
 
-/** The DayBar's quiet line when the viewer's price is their group's rather than the court's. */
+/** The day picker's quiet line when the viewer's price is their group's rather than the court's. */
 export function groupRateLine(groups: readonly { name: string }[]): string | null {
   const first = groups[0]?.name;
   return first ? `You're booking as a ${withoutTrailingPlural(first).toLowerCase()}.` : null;

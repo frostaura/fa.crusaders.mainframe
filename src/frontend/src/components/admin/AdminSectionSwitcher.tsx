@@ -37,6 +37,14 @@ function currentItem(pathname: string): AdminNavItem {
   return activeAdminItem(pathname) ?? ADMIN_NAV_ITEMS[0];
 }
 
+/** "People Members, 2 membership applications awaiting review, change section". */
+function switcherName(item: AdminNavItem, attention: AdminSectionSwitcherProps["attention"]): string {
+  const group = adminGroupOf(item);
+  const eyebrow = group && group.label !== item.label ? group.label : "Admin";
+  const count = attention.total > 0 ? `, ${attention.label}` : "";
+  return `${eyebrow} ${item.label}${count}, change section`;
+}
+
 function TriggerContent({ item, attention }: { item: AdminNavItem; attention: AdminSectionSwitcherProps["attention"] }) {
   const ItemIcon = item.icon;
   const group = adminGroupOf(item);
@@ -54,18 +62,14 @@ function TriggerContent({ item, attention }: { item: AdminNavItem; attention: Ad
         <span className="w-full break-words text-base font-semibold text-text-primary">{item.label}</span>
       </span>
       {attention.total > 0 ? (
-        <>
-          <span
-            aria-hidden="true"
-            data-admin-badge="total"
-            className="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-warning-soft px-1.5 py-0.5 text-xs font-semibold leading-none tabular-nums text-warning-strong"
-          >
-            {attention.total > 99 ? "99+" : attention.total}
-          </span>
-          <span className="sr-only">{`, ${attention.label}`}</span>
-        </>
+        <span
+          aria-hidden="true"
+          data-admin-badge="total"
+          className="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-warning-soft px-1.5 py-0.5 text-xs font-semibold leading-none tabular-nums text-warning-strong"
+        >
+          {attention.total > 99 ? "99+" : attention.total}
+        </span>
       ) : null}
-      <span className="sr-only">, change section</span>
       <CaretUpDown size={20} aria-hidden="true" className="shrink-0 text-text-secondary" />
     </>
   );
@@ -87,6 +91,9 @@ export function AdminSectionSwitcher({ pathname, attention, className }: AdminSe
         <SheetTrigger asChild>
           <button
             type="button"
+            // One phrase, as an aria-label: hidden spans beside flex items read "Members , 2 …"
+            // in Chromium (see `attentionName` in AdminRail). Opens with the words on screen.
+            aria-label={switcherName(item, attention)}
             className={cn(
               // px-2 inside the bar's own px-2 (sm: px-4, lg: px-6) puts the icon on the page gutter (16 / 24 / 32px).
               "no-lift flex min-h-appbar w-full items-center gap-3 rounded-lg border border-transparent px-2",

@@ -1,3 +1,4 @@
+import { RadioCard, RadioGroup } from "../ui/radio-group";
 import { describePowerLoss } from "../../lib/doorsCopy";
 import { POWER_LOSS_BEHAVIOURS, type AdminDoorDevice, type PowerLossBehaviour } from "../../lib/api";
 
@@ -63,27 +64,20 @@ export function PowerLossChoice({ value, onChange, disabled, idBase }: {
 }) {
   const groupId = `${idBase}-power-hint`;
   return (
-    <fieldset aria-describedby={groupId}>
-      <legend className="mb-1 block text-sm font-medium text-text-secondary">With no power, this door is</legend>
-      <div className="space-y-2">
+    <fieldset aria-describedby={groupId} className="flex flex-col gap-2">
+      <legend className="mb-1 block text-sm font-medium text-text-primary">With no power, this door is</legend>
+      <RadioGroup
+        name={`${idBase}-power-loss`}
+        value={value}
+        disabled={disabled}
+        onValueChange={(next) => onChange(next as PowerLossBehaviour)}
+        className="gap-2"
+      >
         {POWER_LOSS_BEHAVIOURS.map((option) => (
-          <label key={option} className="flex min-h-11 items-start gap-2 text-sm">
-            <input
-              type="radio"
-              name={`${idBase}-power-loss`}
-              className="mt-1 h-5 w-5"
-              checked={value === option}
-              disabled={disabled}
-              onChange={() => onChange(option)}
-            />
-            <span>
-              <span className="block font-medium">{describePowerLoss(option)}</span>
-              <span className="block text-text-secondary">{POWER_LOSS_MEANINGS[option]}</span>
-            </span>
-          </label>
+          <RadioCard key={option} value={option} title={describePowerLoss(option)} description={POWER_LOSS_MEANINGS[option]} />
         ))}
-      </div>
-      <p id={groupId} className="mt-1 text-xs text-text-muted">{POWER_LOSS_HINT}</p>
+      </RadioGroup>
+      <p id={groupId} className="text-xs text-text-muted">{POWER_LOSS_HINT}</p>
     </fieldset>
   );
 }

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, endpoints, type PayFastFormField, type TopUpOptions } from "../lib/api";
-import { formatCredits, describeTopUpRate, formatMoney } from "../lib/utils";
+import { cn, formatCredits, describeTopUpRate, formatMoney } from "../lib/utils";
+import { clubCurrencySymbol } from "../lib/currency";
 import { useBalance, walletTone } from "../lib/balance";
 import { BALANCE_SENTENCE } from "../lib/walletCopy";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
@@ -12,6 +13,7 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "../components/u
 import { Input } from "../components/ui/input";
 import { Skeleton } from "../components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
+import { ArrowDown, Coins } from "../components/ui/icons";
 import { Alert } from "../components/Alert";
 
 /**
@@ -294,22 +296,35 @@ function AmountFields({ options, amount, onChoose, problem }: AmountProps) {
           aria-labelledby="topup-presets"
           value={selected}
           onValueChange={(next) => { if (next) onChoose(next); }}
+          size="lg"
           className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4"
         >
           {options.presets_zar.map((p) => (
-            <ToggleGroupItem key={p} value={String(p)} className="tabular-nums">{`R${p}`}</ToggleGroupItem>
+            <ToggleGroupItem key={p} value={String(p)} className="text-base tabular-nums">{`R${p}`}</ToggleGroupItem>
           ))}
         </ToggleGroup>
       </div>
       <Field>
         <FieldLabel>Or enter an amount (ZAR)</FieldLabel>
-        <Input
-          value={amount}
-          onChange={(e) => onChoose(e.target.value)}
-          inputMode="decimal"
-          autoComplete="off"
-          placeholder={`Custom amount (multiple of ${formatMoney(options.block_zar)})`}
-        />
+        {/* The currency sits INSIDE the field, so the number typed is plainly money and not
+            credits — the one confusion this screen exists to prevent. aria-hidden: the label
+            already says "(ZAR)", and a screen reader reading "R" before every value is noise. */}
+        <div className="relative">
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-base font-semibold text-text-secondary sm:text-sm"
+          >
+            {clubCurrencySymbol()}
+          </span>
+          <Input
+            value={amount}
+            onChange={(e) => onChoose(e.target.value)}
+            inputMode="decimal"
+            autoComplete="off"
+            placeholder={`Custom amount (multiple of ${formatMoney(options.block_zar)})`}
+            className="pl-8 font-semibold tabular-nums"
+          />
+        </div>
         <FieldDescription>{limits}</FieldDescription>
         <FieldError>{problem}</FieldError>
       </Field>
@@ -333,18 +348,26 @@ function AmountFields({ options, amount, onChoose, problem }: AmountProps) {
 function Summary({ options, pay, receive }: { options: TopUpOptions; pay: number | null; receive: number | null }) {
   const rateClass = options.member_class === "LeagueOrSenior" ? "league / senior rate" : "regular rate";
   return (
-    <div className="flex flex-col gap-3 rounded-lg bg-bg-muted p-4">
-      <dl className="flex flex-col gap-2 text-sm">
+    // The receipt the member reads before they leave for PayFast: rand in, credits out, and the
+    // arrow between them is the conversion. Live — it moves as they type or pick a chip.
+    <div className="flex flex-col gap-3 rounded-xl border border-border bg-bg-muted p-4">
+      <dl className="flex flex-col gap-1 text-sm">
         <div className="flex items-baseline justify-between gap-4">
           <dt className="text-text-secondary">You pay</dt>
-          <dd className="font-semibold tabular-nums text-text-primary">{pay === null ? "—" : formatMoney(pay)}</dd>
+          <dd className="text-base font-semibold tabular-nums text-text-primary">{pay === null ? "—" : formatMoney(pay)}</dd>
         </div>
+        <ArrowDown size={16} weight="bold" aria-hidden="true" className="ml-auto mr-6 text-text-muted" />
         <div className="flex items-baseline justify-between gap-4">
-          <dt className="text-text-secondary">You receive</dt>
-          <dd className="text-lg font-semibold tabular-nums text-accent-strong">{receive === null ? "—" : formatCredits(receive, { long: true })}</dd>
+          <dt className="inline-flex items-center gap-1.5 text-text-secondary">
+            <Coins size={16} aria-hidden="true" className="text-accent-strong" />
+            You receive
+          </dt>
+          <dd className={cn("text-xl font-bold tabular-nums", receive === null ? "text-text-muted" : "text-accent-strong")}>
+            {receive === null ? "—" : formatCredits(receive, { long: true })}
+          </dd>
         </div>
       </dl>
-      <p className="text-xs text-text-secondary">
+      <p className="border-t border-border pt-3 text-xs text-text-secondary">
         {`${describeTopUpRate(options.conversion_rate)} (${rateClass}). `}
         {RATE_PROMISE}
       </p>

@@ -1,93 +1,66 @@
-import { useState } from "react";
-import { Fingerprint } from "lucide-react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useRef, useState, type FormEvent } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { ApiError, endpoints, errorCode } from "../lib/api";
 import { isPasskeySupported } from "../lib/webauthn";
-import { AuthShell } from "../components/AuthShell";
+import { useAsyncAction } from "../lib/useAsyncAction";
+import { AuthDivider, AuthShell } from "../components/AuthShell";
 import { Alert } from "../components/Alert";
-import { Button, Input, Label } from "../components/Button";
-import { PENDING_APPROVAL } from "../lib/registrationCopy";
+import { PasswordInput } from "../components/PasswordInput";
+import { Button } from "../components/ui/button";
+import { Field, FieldError, FieldLabel } from "../components/ui/field";
+import { Input } from "../components/ui/input";
+import { TextLink } from "../components/ui/text-link";
+import { Envelope, Fingerprint, Phone } from "../components/ui/icons";
+import { AUTH_SUBLINE, FIELD_REQUIRED, LOGIN, LOGIN_REFUSAL } from "../lib/authCopy";
 import { LANDING_PATH } from "../components/shell/nav";
 
 // Seeded by Seeder.cs in Development. Hidden behind import.meta.env.DEV so it disappears in prod builds.
 const DEV_ADMIN_EMAIL = "any@frostaura.net";
 const DEV_ADMIN_PASSWORD = "ChangeMeOnFirstLogin!";
 
-/** Where a signed-in member goes when they did not ask for anywhere in particular (R15: My Code). */
-const DEFAULT_LANDING = LANDING_PATH;
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * A refused sign-in, told apart by the membership status the API sends with it.
  *
  * <p>
- * All three used to share one sentence — "Your account isn't approved yet. An admin will email
- * you once they've reviewed it." — and for two of the three both halves of it were false. A
- * suspended member HAD been approved and had already been emailed the reason; a rejected
- * applicant had already been reviewed, and the review was a refusal. Neither was waiting for
- * anything, so the one instruction the screen gave them was to wait.
- * </p>
- *
- * <p>
  * `status` is on the refusal body (`{"error":"not_approved","status":"Suspended"}`) and the
- * screen simply threw it away. Each sentence now names what happened and who can undo it;
- * only the genuinely pending case is asked to wait.
+ * screen used to throw it away, answering all three with "isn't approved yet — an admin will
+ * email you", which was false for a suspended member and for a rejected applicant. Each sentence
+ * now names what happened and who can undo it; only the genuinely pending case is asked to wait.
  * </p>
  */
 function describeNotApproved(status: string | number | null): string {
-  if (status === "Suspended") {
-    // "The club emailed you the reason" was asserted as fact, and this screen has no way to
-    // know it. Every player-affecting event does send an email — that is an invariant of the
-    // product — but a member reading this is being told to go and look for a message that
-    // may have bounced, been filtered, or gone to an address they no longer read. A member
-    // who does not find it concludes the screen is lying about something else too. "May"
-    // costs one word and is true either way.
-    return "Your membership is suspended, so you can't sign in. The club may have emailed you the reason — speak to them to have it restored.";
-  }
-  if (status === "Rejected") {
-    // "may have emailed", not "emailed". This screen knows the review happened and what the
-    // answer was, because both are on the 403 in front of it; whether anybody wrote to the
-    // applicant is a thing that happened somewhere else. A member who never got one — wrong
-    // address, spam folder, an admin who refused an application and wrote nothing — is told
-    // the club has already explained itself, and reads the silence that follows as being
-    // ignored. The contact block below is what this screen can actually offer them.
-    return "Your application wasn't approved, so this account can't be used. The club may have emailed you the reason — contact them if you think it's a mistake.";
-  }
-  // The genuinely pending case, and the one fact it was missing: how long. "An admin will email
-  // you once they've reviewed it" is true and leaves an applicant with no idea whether to wait
-  // an hour or a fortnight — which is how somebody decides their application was lost, registers
-  // again with a second address, and arrives at the desk with two accounts. See PENDING_APPROVAL.
-  return PENDING_APPROVAL;
+  if (status === "Suspended") return LOGIN_REFUSAL.suspended;
+  if (status === "Rejected") return LOGIN_REFUSAL.rejected;
+  return LOGIN_REFUSAL.pending;
 }
 
+function describeFailure(err: unknown): string {
+  if (!(err instanceof ApiError)) return LOGIN_REFUSAL.network;
+  if (err.status === 401) return LOGIN_REFUSAL.credentials;
+  if (err.status === 429) return LOGIN_REFUSAL.rateLimited;
+  if (err.status === 403 && errorCode(err) === "email_not_verified") return LOGIN_REFUSAL.unverified;
+  if (err.status === 403) return describeNotApproved(err.detail("status"));
+  return LOGIN_REFUSAL.generic;
+}
+
+type Contact = { phone: string | null; email: string | null };
+
 /**
- * The club's public contact, off the `not_approved` refusal body.
+ * The club's public contact, off the `not_approved` refusal body — and nowhere else.
  *
  * <p>
- * <b>Every one of those three sentences ends by telling the member to talk to the club,
- * and the screen gave them no way to.</b> A suspended or turned-down member is stopped at
- * the sign-in screen — before any API that knows a club's phone number is reachable to
- * them — so "speak to them" was an instruction with nothing behind it, on the one screen
- * where the member has nothing else to try.
- * </p>
- *
- * <p>
- * <b>It is read off the refusal and nowhere else, and that boundary is deliberate.</b>
- * The API attaches the club's PUBLIC contact to this one 403 and to no other response,
- * so a signed-out caller cannot use the login endpoint to harvest anything: the body is
- * returned only to somebody who has already proved they hold a real account's credentials
- * at this club. Nothing here reads a stored value, and nothing is cached.
- * </p>
- *
- * <p>
- * <b>Absent, null, or the wrong type renders nothing at all.</b> A screen that printed
- * "Call the club on null" — or an empty link a member presses in the dark — is worse than
- * a screen that stays quiet, and the backend lane's field is new enough that a client
- * talking to an older API is the ordinary case rather than the exotic one.
+ * Every not-approved sentence ends by telling the member to talk to the club, and a member
+ * stopped at sign-in can reach no API that knows a club's number. The API attaches the PUBLIC
+ * contact to this one 403 only, returned to somebody who has already proved they hold a real
+ * account's credentials, so the login endpoint is no harvesting oracle. Absent, null, blank or
+ * the wrong type renders nothing: "Call the club on null" is worse than silence.
  * </p>
  */
-function refusalContact(err: unknown): { phone: string | null; email: string | null } | null {
-  if (!(err instanceof ApiError)) return null;
+function refusalContact(err: unknown): Contact | null {
+  if (!(err instanceof ApiError) || errorCode(err) !== "not_approved") return null;
   const payload = err.payload;
   if (!payload || typeof payload !== "object") return null;
   const raw = (payload as { contact?: unknown }).contact;
@@ -101,252 +74,234 @@ function refusalContact(err: unknown): { phone: string | null; email: string | n
   return phone || email ? { phone, email } : null;
 }
 
-/** The two links, or nothing. Spaces in a number are for reading, not for dialling. */
-function RefusalContact({ contact }: { contact: { phone: string | null; email: string | null } }) {
+/**
+ * The two ways to reach the club, or nothing. BESIDE the refusal, not inside it: the refusal is
+ * `role="alert"` and announces over everything the instant it appears, which is right for the
+ * refusal and wrong for two links the member has not reached yet.
+ */
+function RefusalContact({ contact }: { contact: Contact }) {
   return (
-    <div className="flex flex-col gap-1 text-sm">
-      {contact.phone && (
-        <a
-          href={`tel:${contact.phone.replace(/\s+/g, "")}`}
-          className="inline-flex items-center min-h-11 text-accent-strong underline underline-offset-2 hover:no-underline"
-        >
-          {contact.phone}
-        </a>
-      )}
-      {contact.email && (
-        <a
-          href={`mailto:${contact.email}`}
-          className="inline-flex items-center min-h-11 break-all text-accent-strong underline underline-offset-2 hover:no-underline"
-        >
-          {contact.email}
-        </a>
-      )}
+    <div className="rounded-lg border border-border bg-bg-muted px-4 py-3">
+      <p className="text-xs font-semibold uppercase tracking-overline text-text-secondary">{LOGIN.contactHeading}</p>
+      <ul className="mt-1 flex flex-col">
+        {contact.phone ? (
+          <li className="flex min-h-touch items-center gap-2">
+            <Phone size={16} aria-hidden="true" className="shrink-0 text-text-muted" />
+            {/* Spaces in a number are for reading, not for dialling. */}
+            <TextLink href={`tel:${contact.phone.replace(/\s+/g, "")}`}>{contact.phone}</TextLink>
+          </li>
+        ) : null}
+        {contact.email ? (
+          <li className="flex min-h-touch items-center gap-2">
+            <Envelope size={16} aria-hidden="true" className="shrink-0 text-text-muted" />
+            <TextLink href={`mailto:${contact.email}`} className="break-all">{contact.email}</TextLink>
+          </li>
+        ) : null}
+      </ul>
     </div>
   );
 }
 
-export default function LoginPage() {
+/**
+ * The page the member actually asked for, captured by `RequireAuth` when it turned them away.
+ * Only ever an in-app path: a `from` carrying an absolute URL would make this an open redirect.
+ */
+function useReturnPath(): string {
+  const location = useLocation();
+  const state = location.state as { from?: { pathname?: string; search?: string } } | null;
+  const path = state?.from?.pathname;
+  if (!path || !path.startsWith("/") || path.startsWith("//") || path === "/login") return LANDING_PATH;
+  return `${path}${state?.from?.search ?? ""}`;
+}
+
+type FieldErrors = { email?: string; password?: string };
+
+function validate(email: string, password: string): FieldErrors {
+  const errors: FieldErrors = {};
+  if (!email.trim()) errors.email = FIELD_REQUIRED.email;
+  else if (!EMAIL_SHAPE.test(email.trim())) errors.email = FIELD_REQUIRED.emailFormat;
+  if (!password) errors.password = FIELD_REQUIRED.password;
+  return errors;
+}
+
+/**
+ * `email_not_verified` is the one refusal the member can repair from here: offer the resend,
+ * then say what it did. Reported as sent either way, deliberately — the endpoint answers the same
+ * for an address it has never seen, and a screen that distinguished them would put the
+ * enumeration oracle back.
+ */
+function ResendConfirmation({ email, onNeedEmail }: { email: string; onNeedEmail: () => void }) {
+  const [sent, setSent] = useState(false);
+  const resend = useAsyncAction(async () => {
+    try { await endpoints.resendVerification(email.trim()); } catch { /* neutral — see above */ }
+  }, { success: () => setSent(true) });
+  if (sent) return <Alert tone="info" live="polite">{LOGIN.resent}</Alert>;
+  // The address was cleared after the refusal: say where the link would go, never "Sent" to nobody.
+  const press = () => (email.trim() ? void resend.run() : onNeedEmail());
+  return (
+    <Button type="button" variant="outline" block pending={resend.pending} onClick={press}>
+      {LOGIN.resend}
+    </Button>
+  );
+}
+
+type Refusal = { message: string; contact: Contact | null; offerResend: boolean };
+
+function refusalOf(err: unknown): Refusal {
+  return {
+    message: describeFailure(err),
+    contact: refusalContact(err),
+    offerResend: err instanceof ApiError && err.status === 403 && errorCode(err) === "email_not_verified",
+  };
+}
+
+function passkeyRefusal(err: unknown): Refusal | null {
+  if (err instanceof Error && err.message === "passkey_cancelled") return null; // the member dismissed it
+  const message = err instanceof ApiError && err.status === 401 ? LOGIN_REFUSAL.passkeyUnknown : LOGIN_REFUSAL.passkeyFailed;
+  return { message, contact: null, offerResend: false };
+}
+
+/**
+ * Development only, and it must stay that way: `production-posture.test` builds the release
+ * bundle and fails if either string or the seeded password reaches it. Everything that names
+ * them lives inside this component, which is referenced only behind `import.meta.env.DEV`, so
+ * the minifier drops it whole — a string hoisted into `authCopy` would ship.
+ */
+function DevShortcut({ onLanded, onRefused }: { onLanded: () => void; onRefused: (refusal: Refusal) => void }) {
+  const auth = useAuth();
+  const dev = useAsyncAction(async () => {
+    try {
+      await auth.loginAsSeededAdmin();
+    } catch {
+      // The dev endpoint is off (a non-Development API): fall back to the seeded credentials.
+      await auth.login(DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD);
+    }
+  }, { success: onLanded, failure: (err) => onRefused(refusalOf(err)) });
+  return (
+    <div className="mt-6 border-t border-dashed border-border pt-4">
+      <p className="mb-2 text-xs font-medium text-text-muted">Dev shortcuts</p>
+      <Button variant="outline" type="button" block pending={dev.pending} onClick={() => void dev.run()}>
+        Sign in as seeded admin
+      </Button>
+      <p className="mt-2 break-all font-mono text-xs text-text-muted">{DEV_ADMIN_EMAIL} · {DEV_ADMIN_PASSWORD}</p>
+    </div>
+  );
+}
+
+/** Two ways in, one at a time. Re-entry from any of them is ignored while another runs. */
+function useSignIn(onRefused: (refusal: Refusal | null) => void) {
   const auth = useAuth();
   const nav = useNavigate();
-  const location = useLocation();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  // Set only for `email_not_verified`, which is the one sign-in refusal the member can repair
-  // from this screen. It offers the resend, and then reports what the resend did.
-  const [offerResend, setOfferResend] = useState(false);
-  const [resendState, setResendState] = useState<"idle" | "sending" | "sent">("idle");
-  /**
-   * The club's public contact, when the refusal carried one. D8.
-   *
-   * <p>
-   * Held only for the life of the refusal on screen — cleared at the top of every attempt
-   * — because it belongs to the answer the API just gave, not to this browser.
-   * </p>
-   */
-  const [contact, setContact] = useState<{ phone: string | null; email: string | null } | null>(null);
-
-  /**
-   * The page the member actually asked for, captured by `RequireAuth` when it turned them away.
-   * Only ever an in-app path: a `from` carrying an absolute URL would make this an open redirect.
-   */
-  const from = (() => {
-    const state = location.state as { from?: { pathname?: string; search?: string } } | null;
-    const path = state?.from?.pathname;
-    if (!path || !path.startsWith("/") || path.startsWith("//")) return DEFAULT_LANDING;
-    if (path === "/login") return DEFAULT_LANDING;
-    return `${path}${state?.from?.search ?? ""}`;
-  })();
-
+  const from = useReturnPath();
   const land = () => {
     auth.clearSessionExpired();
     nav(from, { replace: true });
   };
+  const password = useAsyncAction((e: string, p: string) => auth.login(e, p), {
+    success: land,
+    failure: (err) => onRefused(refusalOf(err)),
+  });
+  const passkey = useAsyncAction(() => auth.loginWithPasskey(), {
+    success: land,
+    failure: (err) => onRefused(passkeyRefusal(err)),
+  });
+  return { password, passkey, land, busy: password.pending || passkey.pending };
+}
 
-  const describeFailure = (err: unknown) => {
-    if (!(err instanceof ApiError)) return "Couldn't reach the club. Check your connection and try again.";
-    const code = errorCode(err);
-    if (err.status === 401) return "Email or password is incorrect.";
-    if (err.status === 429) return "Too many sign-in attempts. Wait a minute, then try again.";
-    if (err.status === 403 && code === "email_not_verified") {
-      // Was a bare 403 mapped to "Your account isn't approved yet." — which told approved members
-      // the wrong thing about the wrong thing, and left them nothing to do.
-      return "You haven't confirmed your email address yet. Check your inbox for the link we sent when you registered.";
-    }
-    if (err.status === 403) return describeNotApproved(err.detail("status"));
-    return "Sign in failed. Try again in a moment.";
-  };
+export default function LoginPage() {
+  const auth = useAuth();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [errors, setErrors] = useState<FieldErrors>({});
+  /** The API's answer, held only for the life of the refusal on screen — never this browser's. */
+  const [refusal, setRefusal] = useState<Refusal | null>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const signIn = useSignIn(setRefusal);
 
-  const doLogin = async (e: string, p: string) => {
-    setError(null);
-    setOfferResend(false);
-    setResendState("idle");
-    setLoading(true);
-    try {
-      await auth.login(e, p);
-      land();
-    } catch (err) {
-      setError(describeFailure(err));
-      setOfferResend(err instanceof ApiError && err.status === 403 && errorCode(err) === "email_not_verified");
-      // Only on the refusal that tells the member to talk to the club, and only from that
-      // refusal's own body. See `refusalContact`.
-      //
-      // Assigned unconditionally, so there is no second `setContact(null)` at the top of
-      // this function to keep in step: every path out of here that renders anything comes
-      // through this line, and a reset above it is a spelling of the same rule that a
-      // mutation pass proved inert. The success path navigates away.
-      setContact(errorCode(err) === "not_approved" ? refusalContact(err) : null);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const resendVerification = async () => {
-    setResendState("sending");
-    try { await endpoints.resendVerification(email.trim()); } catch { /* see below */ }
-    // Reported as sent either way, deliberately: the endpoint answers the same for an address it
-    // has never seen, and a screen that distinguished them would put the enumeration oracle back.
-    setResendState("sent");
-  };
-
-  const submit = async (e: React.FormEvent) => {
+  const submit = (e: FormEvent) => {
     e.preventDefault();
-    await doLogin(email, password);
+    if (signIn.busy) return;
+    const found = validate(email, password);
+    setErrors(found);
+    if (found.email || found.password) {
+      setRefusal(null);
+      (found.email ? emailRef : passwordRef).current?.focus();
+      return;
+    }
+    setRefusal(null);
+    void signIn.password.run(email, password);
   };
 
-  const devAdminLogin = async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      await auth.loginAsSeededAdmin();
-      land();
-    } catch {
-      // Fall back to plain credential login if the dev endpoint is disabled (e.g. non-Dev build).
-      await doLogin(DEV_ADMIN_EMAIL, DEV_ADMIN_PASSWORD);
-    } finally {
-      setLoading(false);
-    }
+  const needEmail = () => {
+    setErrors({ email: LOGIN.resendNeedsEmail });
+    emailRef.current?.focus();
   };
 
-  const passkeyLogin = async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      await auth.loginWithPasskey();
-      land();
-    } catch (err) {
-      if (err instanceof Error && err.message === "passkey_cancelled") return; // user dismissed
-      if (err instanceof ApiError && err.status === 401) setError("That passkey isn't recognised. Sign in with email and password, then add a passkey from settings.");
-      else setError("Passkey sign-in failed. Try email and password.");
-    } finally {
-      setLoading(false);
-    }
+  const start = (action: { run: () => Promise<unknown> }) => {
+    if (signIn.busy) return;
+    setRefusal(null);
+    void action.run();
   };
 
   return (
-    // `my-auto` centres the card inside Layout's headerless flex column. Sign-in is short
-    // enough to centre; register is not — see the note in that file.
-    <AuthShell className="my-auto" subline="Court bookings, credits and your club account.">
-      <>
-        <h1 className="text-lg font-semibold mb-4">Sign in</h1>
-        {auth.sessionExpired && !error && (
-          <p role="status" className="text-sm text-warning-strong bg-warning-soft border border-warning-soft rounded-lg px-3 py-2 mb-4">
-            Your session ended, so we've signed you out. Sign in again to pick up where you left off.
-          </p>
-        )}
-        <form onSubmit={submit} className="space-y-4">
-          <div>
-            <Label htmlFor="email">Email</Label>
-            <Input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
-          </div>
-          <div>
-            <Label htmlFor="password">Password</Label>
-            <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
-          </div>
-          {/*
-            role="alert", and a left rule rather than a bare red sentence. A refusal that looks
-            like body copy is one a member skims past and then presses the button again.
-          */}
-          {error && (
-            <div className="space-y-2">
-              <Alert>{error}</Alert>
-              {/* D8. Each of the not_approved sentences ends by telling the member to
-                  speak to the club, on the one screen that used to give them no way to.
-                  Absent or null renders nothing — never a claim, never a dead link.
-
-                  BESIDE the alert rather than inside it, and both halves of that matter.
-                  `Alert` renders a `<p>`, so a `<div>` of links inside it is markup the
-                  parser hoists back out — which is a DOM nobody wrote and a link a member
-                  may or may not be able to press. And the alert is `role="alert"`: a
-                  screen reader announces its contents the instant they appear, over
-                  whatever it was saying, which is right for the refusal and wrong for two
-                  links the member has not got to yet. */}
-              {contact && <RefusalContact contact={contact} />}
-            </div>
-          )}
-          {offerResend && (
-            resendState === "sent" ? (
-              <p className="text-sm text-text-secondary">
-                Sent. If that address is registered and still unconfirmed, a fresh link is on its way — it replaces any earlier one.
-              </p>
-            ) : (
-              <Button
-                type="button" variant="outline" className="w-full"
-                onClick={resendVerification}
-                disabled={resendState === "sending" || !email.trim()}
-              >
-                {resendState === "sending" ? "Sending…" : "Resend the confirmation email"}
-              </Button>
-            )
-          )}
-          <Button type="submit" variant="primary" loading={loading} className="w-full">
-            {loading ? "Signing in…" : "Sign in"}
-          </Button>
-        </form>
-        <div className="mt-4 flex justify-between text-sm">
-          <Link to="/register" className="text-accent-strong hover:underline">Register</Link>
-          {/*
-            Reads as a link at rest, not on hover. It was body-slate with no underline — the
-            caption colour — sitting beside an accent-blue "Register", so the one control that
-            helps a member who cannot get in was the one that did not look clickable.
-          */}
-          <Link to="/forgot-password" className="text-accent-strong underline underline-offset-2 hover:no-underline">Forgot password?</Link>
-        </div>
-
-        {isPasskeySupported() && (
+    // `my-auto` centres the card inside the headerless frame — sign-in is short enough to centre.
+    <AuthShell
+      className="my-auto"
+      subline={AUTH_SUBLINE.signIn}
+      title={LOGIN.title}
+      footer={<>{LOGIN.newHere}{" "}<TextLink to="/register" className="py-3">{LOGIN.register}</TextLink></>}
+    >
+      <div className="flex flex-col gap-5">
+        {auth.sessionExpired && !refusal ? <Alert tone="warning" live="polite">{LOGIN.sessionEnded}</Alert> : null}
+        {isPasskeySupported() ? (
           <>
-            {/*
-              A labelled full-width button, not a bare circular icon with a caption under it.
-              The circle was a 56px target with its name rendered as separate 11px grey text —
-              it read as decoration, and the fastest way to sign in was the thing that looked
-              least like a control.
-            */}
-            <div className="relative my-5">
-              <hr className="border-border" />
-              <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-bg-surface px-2 text-xs text-text-muted">
-                or
-              </span>
-            </div>
-            <Button type="button" variant="outline" onClick={passkeyLogin} disabled={loading} className="w-full">
-              <Fingerprint size={18} aria-hidden="true" />
-              Sign in with a passkey
+            {/* The fastest way in, so it is drawn as a real control at the top — it used to be
+                a bare 56px circle with an 11px caption, and read as decoration. */}
+            <Button
+              type="button" variant="secondary" block pending={signIn.passkey.pending}
+              onClick={() => start(signIn.passkey)} icon={<Fingerprint weight="bold" />}
+            >
+              {LOGIN.passkey}
             </Button>
+            <AuthDivider>{LOGIN.or}</AuthDivider>
           </>
-        )}
-
-        {import.meta.env.DEV && (
-          <div className="mt-6 pt-4 border-t border-border">
-            <p className="text-xs text-text-muted mb-2">Dev shortcuts</p>
-            <Button variant="outline" type="button" onClick={devAdminLogin} disabled={loading} className="w-full">
-              Sign in as seeded admin
-            </Button>
-            <p className="text-[11px] text-text-muted mt-2 font-mono">
-              {DEV_ADMIN_EMAIL} · {DEV_ADMIN_PASSWORD}
-            </p>
-          </div>
-        )}
-      </>
+        ) : null}
+        <form onSubmit={submit} noValidate className="flex flex-col gap-4">
+          <Field>
+            <FieldLabel>{LOGIN.email}</FieldLabel>
+            <Input
+              ref={emailRef} type="email" required autoComplete="email" inputMode="email"
+              value={email} onChange={(e) => setEmail(e.target.value)}
+            />
+            <FieldError>{errors.email}</FieldError>
+          </Field>
+          <Field>
+            <div className="flex items-baseline justify-between gap-3">
+              <FieldLabel>{LOGIN.password}</FieldLabel>
+              {/* A link at rest, not only on hover: it was caption-slate once, and the control
+                  that helps a member who cannot get in was the one that did not look like one. */}
+              <TextLink to="/forgot-password" className="-my-3 inline-flex min-h-touch items-center text-sm">{LOGIN.forgot}</TextLink>
+            </div>
+            <PasswordInput
+              ref={passwordRef} required autoComplete="current-password"
+              value={password} onChange={(e) => setPassword(e.target.value)}
+            />
+            <FieldError>{errors.password}</FieldError>
+          </Field>
+          {refusal ? (
+            <div className="flex flex-col gap-3">
+              {/* A left rule and a mark rather than a bare red sentence: a refusal that looks like
+                  body copy is one a member skims past and then presses the button again. */}
+              <Alert>{refusal.message}</Alert>
+              {refusal.contact ? <RefusalContact contact={refusal.contact} /> : null}
+              {refusal.offerResend ? <ResendConfirmation email={email} onNeedEmail={needEmail} /> : null}
+            </div>
+          ) : null}
+          <Button type="submit" block pending={signIn.password.pending}>{LOGIN.submit}</Button>
+        </form>
+        {import.meta.env.DEV ? <DevShortcut onLanded={signIn.land} onRefused={setRefusal} /> : null}
+      </div>
     </AuthShell>
   );
 }

@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { Button } from "../ui/button";
 import { Alert } from "../Alert";
 
 /**
@@ -77,19 +78,12 @@ class DoorsErrorBoundaryInner extends Component<BoundaryProps, BoundaryState> {
           or reload this one.
         </Alert>
         <div className="flex flex-wrap gap-2">
-          <Link
-            to="/admin/monitoring/doors"
-            className="inline-flex min-h-11 items-center rounded-lg border border-control bg-bg-surface px-5 text-sm font-medium"
-          >
-            Back to Doors
-          </Link>
-          <button
-            type="button"
-            onClick={() => window.location.reload()}
-            className="inline-flex min-h-11 items-center rounded-lg border border-control bg-bg-surface px-5 text-sm font-medium"
-          >
+          <Button asChild variant="outline">
+            <Link to="/admin/monitoring/doors">Back to Doors</Link>
+          </Button>
+          <Button variant="outline" onClick={() => window.location.reload()}>
             Reload this page
-          </button>
+          </Button>
         </div>
       </div>
     );

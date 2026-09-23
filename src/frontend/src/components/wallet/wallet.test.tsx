@@ -158,7 +158,9 @@ describe("the ledger's clock", () => {
     renderPage(<WalletPage />);
 
     // 18:31Z on 21 September 2026 is 20:31 in Johannesburg, which the suite pins as the club.
-    expect(await screen.findByText(/20:31/)).toBeInTheDocument();
+    // P3: twice in the DOM — the Time column (from `sm`) and under the comment (on a phone);
+    // CSS shows exactly one of them. Both must be the club's clock.
+    expect((await screen.findAllByText(/20:31/)).length).toBeGreaterThanOrEqual(1);
     // Never the reader-locale form this column used to print.
     expect(screen.queryByText(/8:31 PM/)).toBeNull();
     expect(screen.queryByText(/9\/21\/26/)).toBeNull();

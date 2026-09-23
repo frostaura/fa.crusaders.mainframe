@@ -1,7 +1,9 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { Card } from "../Card";
-import { Button } from "../Button";
+import { Panel as Card } from "./Panel";
+import { Button } from "../ui/button";
+import { PencilSimple, Printer } from "../ui/icons";
+import { TextLink } from "../ui/text-link";
 import { DoorCardRead } from "./DoorCardFields";
 import { GateDetailsEditor } from "./GateDetailsEditor";
 import { UNNAMED_GATE } from "../../lib/gateCopy";
@@ -57,7 +59,7 @@ export function DoorCardSection({ door, displayName, settings, editing, onEdit, 
         {!editing && (
           <>
             <DoorCardRead door={door} />
-            <dl className="space-y-1 text-sm">
+            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
               <Fact label="Board" value={door.device_code} />
               <Fact label="MAC" value={door.mac_address ?? "not reported"} />
               <Fact label="Firmware" value={door.running_version ?? "not reported"} />
@@ -76,15 +78,16 @@ export function DoorCardSection({ door, displayName, settings, editing, onEdit, 
           {/* The door's NAME in the accessible name: three "Manage"-shaped controls on
               one admin's screen all reading "Edit" is reviewer B's repeated-link
               finding one control along. */}
-          <Button variant="outline" onClick={onEdit} aria-label={`Edit ${displayName}`}>
+          <Button variant="outline" className="h-auto min-h-touch whitespace-normal py-2" onClick={onEdit} aria-label={`Edit ${displayName}`} icon={<PencilSimple aria-hidden="true" />}>
             Edit this door
           </Button>
-          <Link
-            to={`/admin/monitoring/doors/${door.id}/card`}
-            className="inline-flex min-h-11 items-center rounded-lg border border-control px-5 text-sm font-medium"
-          >
-            Print this door card
-          </Link>
+          {/* It navigates, so it is a link — dressed as a button only because it is a CTA. */}
+          <Button asChild variant="outline" className="h-auto min-h-touch whitespace-normal py-2">
+            <Link to={`/admin/monitoring/doors/${door.id}/card`}>
+              <Printer size={16} aria-hidden="true" />
+              Print this door card
+            </Link>
+          </Button>
         </div>
       </Card>
     </section>
@@ -93,14 +96,12 @@ export function DoorCardSection({ door, displayName, settings, editing, onEdit, 
 
 function Fact({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex flex-wrap gap-2">
-      {/* B8 / R3-27: a PIXEL width. `w-24` is 6 rem, which at the 32 px root font an older
-          volunteer uses is 192 px — wider than the card's whole content box on a 320 px
-          phone, so the label alone pushed the row out. What this width protects is a column
-          of labels lining up, which does not need to grow with the text — and it is a
-          MINIMUM, because at a 32 px root "Firmware" is itself wider than 96 px and a fixed
-          width would clip the word to keep the column. */}
-      <dt className="min-w-[96px] shrink-0 text-text-muted">{label}</dt>
+    // `contents`: the row's two cells sit in the list's own two-column grid, so the labels
+    // line up by the widest label rather than by a fixed width. B8 / R3-27 measured a `w-24`
+    // (6rem) label column at 192px under a 32px root font — wider than the card at 320px; an
+    // `auto` column is only ever as wide as the words, at any root size.
+    <div className="contents">
+      <dt className="text-text-muted">{label}</dt>
       <dd className="min-w-0 break-words">{value}</dd>
     </div>
   );
@@ -132,7 +133,7 @@ function ClubContact({ settings }: { settings: AdminSettings | null }) {
   return (
     <p className="text-sm text-text-secondary">
       No club contact is set. Add one under{" "}
-      <Link to="/admin/settings" className="text-accent-strong underline">Admin settings</Link>
+      <TextLink to="/admin/settings">Admin settings</TextLink>
       {" "}— it is what a member sees when a door turns them away.
     </p>
   );

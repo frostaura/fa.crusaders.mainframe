@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert } from "../../components/Alert";
-import { Input, Label } from "../../components/Button";
-import { MemberPicker, type PickableMember } from "../../components/MemberPicker";
-import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
+import { DatePicker } from "../../components/ui/date-picker";
+import { MemberCombobox } from "../../components/ui/member-combobox";
+import { ToggleGroup, ToggleGroupItem } from "../../components/ui/toggle-group";
 import { PageHeader, PageShell } from "../../components/ui/page-shell";
 import { StateBlock } from "../../components/ui/state-block";
 import { CardListSkeleton, DownloadCsvLink } from "../../components/monitoring/parts";
 import { clubClock, clubDate } from "../../lib/clubClock";
 import { endpoints, type AdminMember } from "../../lib/api";
+
+/** A member as this page holds one: the id it reads by, the name it shows. */
+type PickableMember = { user_id: string; full_name: string; membership_number?: string | null };
+
+const MEMBERS_FAILED = "Couldn't read the club's members. That is not the same as the club having none — try again.";
 import { adminEndpoints, type TraceView } from "../../lib/adminApi";
 import { buildTimeline, burstOutcomes, durationInWords, hasApproximateTimes } from "../../lib/nightTimeline";
 import {
@@ -124,44 +129,43 @@ function NightChooser({
 }) {
   return (
     <Card>
-      <CardContent className="flex flex-col gap-4">
-        <MemberPicker
-          label="Which member?"
-          hint="There is nothing to trace for a visitor booked in under a written-in name, so only members appear here."
-          members={pickable}
-          value={member}
-          onChange={onMember}
-          loading={membersLoading}
-          failed={membersFailed}
-        />
+      <CardContent className="grid gap-6 md:grid-cols-2">
+        <div className="flex flex-col gap-1.5">
+          <MemberCombobox
+            label="Which member?"
+            placeholder="Search the club's members"
+            members={pickable.map((m) => ({ id: m.user_id, name: m.full_name, subtitle: m.membership_number ?? null }))}
+            value={member?.user_id ?? null}
+            onChange={(id) => onMember(pickable.find((m) => m.user_id === id) ?? null)}
+            loading={membersLoading}
+            error={membersFailed ? MEMBERS_FAILED : null}
+          />
+          <p className="text-sm text-text-muted">
+            There is nothing to trace for a visitor booked in under a written-in name, so only members appear here.
+          </p>
+        </div>
 
-        <div>
-          <Label htmlFor="night-day">Which night?</Label>
+        <div role="group" aria-labelledby="night-day-label" className="flex flex-col gap-1.5">
+          <span id="night-day-label" className="text-sm font-medium text-text-primary">Which night?</span>
           {/* Disabled until the first half is answered, and the disabled half SAYS WHY —
               a greyed-out control with no explanation is a dead end somebody stares at. */}
-          {!member && <p className="text-sm text-text-muted">{NIGHT_NO_MEMBER_YET}</p>}
-          <Input
-            id="night-day"
-            type="date"
-            className="mt-1 min-h-11"
-            value={day}
-            disabled={!member}
-            onChange={(e) => onDay(e.target.value)}
-          />
-          <div className="mt-2 flex flex-wrap gap-2">
-            {recentNights(new Date()).map((night) => (
-              <Button
-                key={night.iso}
-                variant={night.iso === day ? "secondary" : "outline"}
-                aria-pressed={night.iso === day}
-                disabled={!member}
-                onClick={() => onDay(night.iso)}
-              >
-                {night.label}
-              </Button>
-            ))}
+          {!member && <p className="text-sm text-text-secondary">{NIGHT_NO_MEMBER_YET}</p>}
+          <div className="flex flex-wrap items-center gap-2">
+            <DatePicker label="Which night?" value={day} onChange={onDay} disabled={!member} />
+            <ToggleGroup
+              type="single"
+              aria-label="Recent nights"
+              value={day}
+              disabled={!member}
+              onValueChange={(next) => { if (next) onDay(next); }}
+              className="rounded-lg bg-bg-muted p-1"
+            >
+              {recentNights(new Date()).map((night) => (
+                <ToggleGroupItem key={night.iso} value={night.iso}>{night.label}</ToggleGroupItem>
+              ))}
+            </ToggleGroup>
           </div>
-          <p className="mt-2 text-sm text-text-muted">{rangeHint}</p>
+          <p className="text-sm text-text-muted">{rangeHint}</p>
         </div>
       </CardContent>
     </Card>

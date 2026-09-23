@@ -464,11 +464,9 @@ export type ScheduleDay = {
  * One row of a bulk outcome, as it comes off the wire.
  *
  * <p>
- * Deliberately loose: every field is optional and both spellings of each are tolerated by
- * `lib/bulkResults`. The backend for these two routes is being built alongside this screen, and
- * a result row that renders as a blank because one key was `booking_id` where this client
- * expected `bookingId` is a batch an admin cannot audit — on the one screen that moves other
- * people's money in bulk.
+ * Deliberately loose: every field is optional and is read by `components/bookings/bookFlow.ts`
+ * and `cancelFlow.ts`, which check each key's type and count an unrecognised status as a
+ * failure — a cancellation this client cannot describe is not one it should report as done.
  * </p>
  */
 export type BulkResultRow = Record<string, unknown>;
@@ -487,6 +485,87 @@ export type BulkBookResponse = {
   /** D2 §5.3 — the batch stopped here because the payer ran out of credit. */
   halted_at?: number; halted_reason?: string;
 } & Record<string, unknown>;
+
+/**
+ * R19 — what an admin booking would cost its payer and where it leaves them, BEFORE anything is
+ * booked (`GET /api/v1/admin/bookings/quote`). `overdraws` is exactly the guard the POST applies
+ * (`balance < price`), so it is true precisely when a booking sent without
+ * `allowNegativeBalance` would be refused — which is what lets the sheet send the flag
+ * deliberately instead of learning about a short wallet from a 402 and trying again.
+ * A refusal the booking would meet (slot taken, past time…) comes back as the SAME error the
+ * POST would give, so one decoder serves both.
+ */
+export type AdminBookingQuote = {
+  user_id: string;
+  court_id: string;
+  court_name: string | null;
+  starts_at: string;
+  ends_at: string | null;
+  slices: number;
+  price_credits: number;
+  balance_credits: number;
+  balance_after_credits: number;
+  overdraws: boolean;
+};
+
+/** One line of a bulk quote. `reason` is a booking refusal code when `bookable` is false. */
+export type AdminBulkQuoteItem = {
+  index: number;
+  court_id: string;
+  court_name: string | null;
+  starts_at: string;
+  slices: number;
+  price_credits: number | null;
+  bookable: boolean;
+  reason: string | null;
+};
+
+/** `POST /api/v1/admin/bookings/bulk/quote` — the batch version of {@link AdminBookingQuote}. */
+export type AdminBulkQuote = {
+  user_id: string;
+  total_credits: number;
+  balance_credits: number;
+  balance_after_credits: number;
+  overdraws: boolean;
+  items: AdminBulkQuoteItem[];
+};
+
+/** One item of a member bulk booking's answer (D8). `reason` is a refusal code when refused. */
+export type MemberBulkResultRow = {
+  index: number;
+  court_id: string;
+  court_name: string | null;
+  starts_at: string;
+  ends_at: string | null;
+  status: "booked" | "refused";
+  reason: string | null;
+  booking_id: string | null;
+  amount_credits: number | null;
+  /** True when this item landed under the same idempotency key on an earlier try. */
+  replayed: boolean;
+};
+
+/**
+ * D8 — `POST /api/v1/bookings/bulk`, the member's multiselect. `total_charged_credits` counts
+ * every booked item including replays; `charged_now_credits` is what THIS request debited, which
+ * is what the balance pair moved by. `halted_reason: "insufficient_balance"` means the member ran
+ * out part-way: the rest are `not_attempted`, and a retry under the SAME key books only those.
+ */
+export type MemberBulkBookResponse = {
+  requested: number;
+  booked: number;
+  refused: number;
+  total_charged_credits: number;
+  charged_now_credits: number;
+  balance_before_credits: number;
+  balance_after_credits: number;
+  halted_at: number | null;
+  halted_reason: string | null;
+  results: MemberBulkResultRow[];
+};
+
+/** The item shape both bulk book routes share (camelCase, as every POST body here). */
+export type BulkBookItemBody = { courtId: string; startsAt: string; sliceCount: number };
 
 /** What cancelling a booking would cost right now — server-computed, read when the modal opens. */
 export type CancellationQuote = {
@@ -1750,14 +1829,13 @@ export const endpoints = {
   cancellationQuote: (bookingId: string) => api.get<CancellationQuote>(`/api/v1/bookings/${bookingId}/cancellation-quote`),
 
   /**
-   * Admin: book on behalf of a member. The member is charged; the admin is the actor on the
-   * audit row, and `balance_after_credits` in the answer is the MEMBER's balance, not the
-   * caller's.
+   * Admin: book for a member — or, since R19, for themselves (`userId` = the admin). The payer
+   * is charged; the admin is the actor on the audit row, and `balance_after_credits` in the
+   * answer is the PAYER's balance.
    *
-   * `allowNegativeBalance` is spec §8's override — send it only after the server has
-   * refused with `insufficient_balance` and the admin has read the figures. The API
-   * honours it only when the payer differs from the actor, so it can never overdraw the
-   * caller's own wallet.
+   * `allowNegativeBalance` is god mode (R19): sent when {@link endpoints.adminBookingQuote} said
+   * `overdraws`, after the sheet has shown the admin where it leaves the payer. Never the
+   * refuse-then-retry 402 dance — the quote is asked first.
    */
   adminBook: (courtId: string, userId: string, startsAt: string, sliceCount: number, allowNegativeBalance = false) =>
     api.post<{ booking_id: string; balance_after_credits: number }>(
@@ -1796,8 +1874,8 @@ export const endpoints = {
    *
    * <p>
    * <b>Request bodies are camelCase</b>, per D2 §13's stated convention and every existing POST
-   * in this client; responses are read through `lib/bulkResults`, which accepts both spellings
-   * because a mismatch there is a batch whose outcomes render as blanks.
+   * in this client; responses are snake_case like every other response, and are read by the
+   * booking sheets' flow modules (`components/bookings/bookFlow.ts`, `cancelFlow.ts`).
    * </p>
    */
   adminBulkCancel: (body: {
@@ -1813,6 +1891,30 @@ export const endpoints = {
     note?: string;
     items: { courtId: string; startsAt: string; sliceCount: number }[];
   }) => api.post<BulkBookResponse>("/api/v1/admin/bookings/bulk", body),
+
+  /**
+   * R19 — the consequence before the booking. `userId` omitted quotes the admin's own wallet.
+   * A refusal the booking would meet is thrown as the same `ApiError` the POST would give.
+   */
+  adminBookingQuote: (q: { userId?: string; courtId: string; startsAt: string; slices: number }) =>
+    api.get<AdminBookingQuote>(`/api/v1/admin/bookings/quote${qs({
+      userId: q.userId, courtId: q.courtId, startsAt: q.startsAt, slices: q.slices,
+    })}`),
+
+  /** R19 — the batch quote. Per-item refusals are `bookable: false` + `reason`, never a failed call. */
+  adminBulkBookingQuote: (body: { userId?: string; items: BulkBookItemBody[] }) =>
+    api.post<AdminBulkQuote>("/api/v1/admin/bookings/bulk/quote", {
+      user_id: body.userId,
+      items: body.items.map((i) => ({ court_id: i.courtId, starts_at: i.startsAt, slices: i.sliceCount })),
+    }),
+
+  /**
+   * D8 — a member books several slots at once under every member rule, never overdrawn. Mint a
+   * new `idempotencyKey` per selection; reuse it ONLY to retry that selection, so items that
+   * already landed replay instead of charging twice.
+   */
+  memberBulkBook: (body: { idempotencyKey: string; items: BulkBookItemBody[] }) =>
+    api.post<MemberBulkBookResponse>("/api/v1/bookings/bulk", body),
 
   adminMembers: (status?: string) => api.get<AdminMember[]>(`/api/v1/admin/members/${status ? `?status=${status}` : ""}`),
   /**

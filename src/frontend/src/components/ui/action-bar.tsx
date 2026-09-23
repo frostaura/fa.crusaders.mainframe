@@ -88,7 +88,9 @@ export function ActionBar(props: ActionBarProps) {
         </Toolbar.Button>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold tabular-nums">{headline}</p>
-          {detail ? <p className="truncate text-xs text-text-secondary">{detail}</p> : null}
+          {/* Two lines, not one: on a phone the span line's last part is the time, and a bar that
+              cut "08:00–08:45" to an ellipsis hid the one fact worth checking before Book. */}
+          {detail ? <p className="line-clamp-2 text-xs text-text-secondary">{detail}</p> : null}
         </div>
         {children ? <div className="flex shrink-0 items-center gap-2">{children}</div> : null}
       </Toolbar.Root>

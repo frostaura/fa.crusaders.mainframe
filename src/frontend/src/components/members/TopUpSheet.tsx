@@ -252,13 +252,13 @@ export function TopUpSheet({
             <Button variant="ghost" className="min-h-11" onClick={() => setStep(2)}>Back</Button>
             <ConfirmButton
               idleLabel={direction === "add" ? `Add ${formatCredits(valid)}` : `Take back ${formatCredits(valid)}`}
-              cancelLabel="Don't move any credit"
+              cancelLabel="Cancel"
               confirmLabel={confirmConsequence(name, balance, valid, direction)}
               // Both, and they answer different questions: `ariaLabel` is what the ACTION is
               // about ("Add 24.00 cr — Thandi Mokoena — choose again to confirm") and
-              // `subject` is what the way OUT keeps ("Don't move any credit — Thandi
-              // Mokoena"). Without the first, the armed control's name is the whole
-              // consequence sentence and label-in-name holds only by accident.
+              // `subject` is what the way OUT names ("Cancel — Thandi Mokoena"). Without the
+              // first, the armed control's name is the whole consequence sentence and
+              // label-in-name holds only by accident.
               ariaLabel={name}
               subject={name}
               tone={direction === "add" ? "info" : "danger"}

@@ -111,27 +111,41 @@ describe("creating one", () => {
   }
 
   /**
-   * `fireEvent.change` for the date and time fields, `userEvent` for everything else.
-   *
-   * Not a shortcut: `userEvent.type` sends one keystroke at a time, and a CONTROLLED
-   * `<input type="date">` in jsdom rejects every intermediate value ("2", "20", "202"…) as
-   * invalid, so the field keeps whatever it started with and the test asserts against a
-   * sentence nobody typed. It cost a probe to find, and it is the reason this helper exists
-   * rather than the three lines being inlined per case.
+   * The sentence's date fields are the club-day DatePicker (P3, R7): open it, walk forward a
+   * month at a time until the day is on screen, tap it. The picker closes itself on a pick.
    */
-  function setDateOrTime(label: string, value: string) {
-    fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  async function pickDay(name: RegExp, day: string) {
+    await userEvent.click(screen.getByRole("button", { name }));
+    for (let month = 0; month < 36; month++) {
+      const button = document.querySelector<HTMLButtonElement>(`button[data-day="${day}"]`);
+      if (button) {
+        await userEvent.click(button);
+        return;
+      }
+      await userEvent.click(screen.getByRole("button", { name: /next month/i }));
+    }
+    throw new Error(`no ${day} within three years of the picker's month`);
+  }
+
+  /** A TimeSelect: open the Radix list, choose the option. Only slice-aligned times exist. */
+  async function pickTime(name: string, time: string) {
+    fireEvent.pointerDown(screen.getByRole("combobox", { name }), { button: 0, ctrlKey: false, pointerType: "mouse" });
+    fireEvent.click(await screen.findByRole("option", { name: time }));
+  }
+
+  /** One of the two set-valued fields: open its popover, toggle the options, close it. */
+  async function toggleChoices(trigger: RegExp, options: string[]) {
+    await userEvent.click(screen.getByRole("button", { name: trigger }));
+    for (const option of options) await userEvent.click(await screen.findByRole("checkbox", { name: option }));
+    await userEvent.keyboard("{Escape}");
   }
 
   async function fillTheSentence() {
-    await userEvent.click(screen.getByRole("button", { name: /^Courts: / }));
-    await userEvent.click(screen.getByRole("checkbox", { name: "Court 1" }));
-    await userEvent.click(screen.getByRole("checkbox", { name: "Court 2" }));
-    await userEvent.click(screen.getByRole("checkbox", { name: "Court 3" }));
+    await toggleChoices(/^Courts: /, ["Court 1", "Court 2", "Court 3"]);
     await userEvent.type(screen.getByLabelText("What members see on the grid"), "League night");
     await userEvent.type(screen.getByLabelText("A name for this repeating booking, for admins"), "Tuesday league");
-    setDateOrTime("First date", "2026-10-06");
-    setDateOrTime("Last date (leave empty for no end)", "2026-12-15");
+    await pickDay(/^First date/, "2026-10-06");
+    await pickDay(/^Last date/, "2026-12-15");
   }
 
   it("says what the sentence would do, in slots, as it is typed", async () => {
@@ -211,7 +225,7 @@ describe("creating one", () => {
     await screen.findByRole("button", { name: "Create the hold" });
 
     // One court fewer. The check that came back clear was about a different sentence.
-    await userEvent.click(screen.getByRole("checkbox", { name: "Court 3" }));
+    await toggleChoices(/^Courts: /, ["Court 3"]);
 
     expect(await screen.findByText(
       "The sentence changed after that check, so it no longer says what would happen. Check again.",
@@ -331,13 +345,12 @@ describe("creating one", () => {
     expect(clear).toBeDisabled();
     await userEvent.type(screen.getByLabelText(/Reason/), "Courts held for league");
     await userEvent.click(clear);
-    // Armed: the consequence is a block of page text ABOVE the pair of buttons, so it is read
-    // before the second press rather than being the label of the control that acts.
-    expect((await screen.findAllByText(/36\.00 cr goes back in full/)).length).toBeGreaterThan(0);
-    // The way out is named for what it KEEPS, never for the destructive verb: "Keep them —
-    // 1 member booking", not "Keep them — Cancel 1 booking".
-    expect(screen.getByRole("button", { name: "Keep them — 1 member booking" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: /^Cancel 1 booking and refund 36\.00 cr in full — / }));
+    // Confirmed in a dialog (P3): the consequence is its description, read before the press.
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent(/36\.00 cr goes back in full/);
+    // The way out is named for what it KEEPS, never for the destructive verb.
+    expect(within(dialog).getByRole("button", { name: "Keep them" })).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: /^Cancel 1 booking and refund 36\.00 cr in full/ }));
 
     const results = await screen.findByRole("region", { name: "What was cancelled" });
     expect(within(results).getByRole("status")).toHaveTextContent("1 of 1 done");
@@ -382,6 +395,9 @@ describe("creating one", () => {
   });
 
   it("refuses to check a sentence the server would certainly refuse, and says why", async () => {
+    // The misaligned-time case this used to pin ("18:05" on a 15-minute club) cannot be entered
+    // any more: the time fields offer slice-aligned options only (P3, R7 — never free-typed).
+    // An end before the start is still choosable, and still refused before the server sees it.
     stubFetch([
       ...sessionRoutes(),
       { path: SCHEDULES, body: { schedules: [] } },
@@ -393,20 +409,34 @@ describe("creating one", () => {
     await screen.findByRole("heading", { name: "A new repeating booking" });
     await fillTheSentence();
 
-    setDateOrTime("Start time", "18:05");
+    await pickTime("End time", "17:00");
 
-    expect(await screen.findByText(
-      "This club books in 15-minute slots, so the start and the end both have to land on a 15-minute mark.",
-    )).toBeInTheDocument();
+    expect(await screen.findByText("The end time has to be after the start time, on the same day.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Check / })).toBeDisabled();
   });
 
+  it("offers only the times the club can book", async () => {
+    stubFetch([
+      ...sessionRoutes(),
+      { path: SCHEDULES, body: { schedules: [] } },
+      ...editorPrerequisiteRoutes({ slice_minutes: 30 }),
+    ]);
+    renderPage(<AdminSchedulesPage />);
+    await screen.findByText("No repeating bookings yet.");
+    await openEditor();
+    await screen.findByRole("heading", { name: "A new repeating booking" });
+
+    fireEvent.pointerDown(screen.getByRole("combobox", { name: "Start time" }), { button: 0, ctrlKey: false, pointerType: "mouse" });
+    const options = (await screen.findAllByRole("option")).map((o) => o.textContent);
+    // 06:00 → 21:30 in half hours: the club's day (fixture 360 → 1320) less one slice.
+    expect(options[0]).toBe("06:00");
+    expect(options.at(-1)).toBe("21:30");
+    expect(options.every((t) => /:(00|30)$/.test(t ?? ""))).toBe(true);
+  });
+
   it("is operable by keyboard alone, every field of it (D3 §12, story P6)", async () => {
-    // Native controls throughout, which is why this passes with no key handlers of our own.
-    // The assertion is the whole point of that decision: a popover-based sentence needs a
-    // focus trap, an escape handler and a restore path, and `Modal` in this repo has none of
-    // the three (D3-B05). Tab order here IS document order, so the sentence reads in the
-    // order it is spoken.
+    // Every field is a design-system control (P3, R7) with its own name, and tab order IS
+    // document order, so the sentence reads in the order it is spoken.
     stubFetch([
       ...sessionRoutes(),
       { path: SCHEDULES, body: { schedules: [] } },
@@ -420,12 +450,12 @@ describe("creating one", () => {
     const order = [
       screen.getByRole("button", { name: /^Courts: / }),
       screen.getByRole("button", { name: /^Days of the week: / }),
-      screen.getByLabelText("Start time"),
-      screen.getByLabelText("End time"),
+      screen.getByRole("combobox", { name: "Start time" }),
+      screen.getByRole("combobox", { name: "End time" }),
       screen.getByLabelText("What members see on the grid"),
-      screen.getByLabelText("First date"),
-      screen.getByLabelText("Last date (leave empty for no end)"),
-      screen.getByLabelText("Repeat every how many weeks"),
+      screen.getByRole("button", { name: /^First date/ }),
+      screen.getByRole("button", { name: /^Last date/ }),
+      screen.getByRole("combobox", { name: "Repeat every how many weeks" }),
       screen.getByLabelText("A name for this repeating booking, for admins"),
     ];
     for (const field of order) {
@@ -433,20 +463,22 @@ describe("creating one", () => {
       expect(document.activeElement).toBe(field);
     }
 
-    // And the one field that is not a native input opens from the keyboard and reports its
-    // state through `aria-expanded`, which is what a screen reader reads.
+    // A set-valued field opens from the keyboard, reports its state through `aria-expanded`,
+    // and puts focus on its first checkbox (it is a popover now — P3 — so focus moves INTO it
+    // rather than the reader tabbing forward to reach it). Escape returns focus to the trigger.
     const courts = screen.getByRole("button", { name: /^Courts: / });
     courts.focus();
     expect(courts).toHaveAttribute("aria-expanded", "false");
     await userEvent.keyboard("{Enter}");
     expect(screen.getByRole("button", { name: /^Courts: / })).toHaveAttribute("aria-expanded", "true");
-    await userEvent.tab();
-    expect(document.activeElement).toBe(screen.getByRole("checkbox", { name: "Court 1" }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("checkbox", { name: "Court 1" })));
     await userEvent.keyboard(" ");
     expect(screen.getByRole("checkbox", { name: "Court 1" })).toBeChecked();
     // The inactive court is not offered: a court nobody may book one slot on is not a court
     // that may be held every Tuesday for a season.
     expect(screen.queryByRole("checkbox", { name: "Court 9" })).not.toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Courts: / })));
   });
 
   it("does not let the sentence be typed at all until the courts are known", async () => {
@@ -463,6 +495,6 @@ describe("creating one", () => {
     await openEditor();
 
     expect(await screen.findByText(/Nothing can be held until they can be read\./)).toBeInTheDocument();
-    expect(screen.queryByLabelText("Start time")).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Start time" })).not.toBeInTheDocument();
   });
 });

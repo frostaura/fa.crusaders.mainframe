@@ -111,3 +111,13 @@ export { InstagramLogoIcon, InstagramLogoIcon as InstagramLogo } from "@phosphor
 export { CompassIcon, CompassIcon as Compass } from "@phosphor-icons/react/dist/csr/Compass";
 export { CameraIcon, CameraIcon as Camera } from "@phosphor-icons/react/dist/csr/Camera";
 export { BookOpenIcon, BookOpenIcon as BookOpen } from "@phosphor-icons/react/dist/csr/BookOpen";
+export { PhoneIcon, PhoneIcon as Phone } from "@phosphor-icons/react/dist/csr/Phone";
+export { UserFocusIcon, UserFocusIcon as UserFocus } from "@phosphor-icons/react/dist/csr/UserFocus";
+export { TrayIcon, TrayIcon as Tray } from "@phosphor-icons/react/dist/csr/Tray";
+export { CoinsIcon, CoinsIcon as Coins } from "@phosphor-icons/react/dist/csr/Coins";
+export { XCircleIcon, XCircleIcon as XCircle } from "@phosphor-icons/react/dist/csr/XCircle";
+export { ArchiveIcon, ArchiveIcon as Archive } from "@phosphor-icons/react/dist/csr/Archive";
+export { LinkBreakIcon, LinkBreakIcon as LinkBreak } from "@phosphor-icons/react/dist/csr/LinkBreak";
+export { UserMinusIcon, UserMinusIcon as UserMinus } from "@phosphor-icons/react/dist/csr/UserMinus";
+export { UserPlusIcon, UserPlusIcon as UserPlus } from "@phosphor-icons/react/dist/csr/UserPlus";
+export { ArrowDownIcon, ArrowDownIcon as ArrowDown } from "@phosphor-icons/react/dist/csr/ArrowDown";

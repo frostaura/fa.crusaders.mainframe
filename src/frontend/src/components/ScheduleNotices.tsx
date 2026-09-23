@@ -1,82 +1,91 @@
 import { Link } from "react-router-dom";
-import { Button, BUTTON_VARIANT_CLASS } from "./Button";
+import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import { Info, WarningCircle, X } from "@/components/ui/icons";
 import { cn } from "../lib/utils";
+import { BOOKINGS_COPY } from "../lib/bookingsCopy";
 import type { Notice } from "../lib/gridExplain";
 
 /**
- * The `Button` shell as a router link.
+ * The standing conditions above the grid, the explanation a locked cell gave, and the one live
+ * region the grid speaks through.
  *
  * <p>
- * `Button` renders a `<button>` and has no polymorphic `as` — adding one is the shared-primitive
- * lane's call, not this one's — so the shell is composed from the same exported variant map the
- * primitive itself uses. One class string, one source: a sixth variant is picked up here the day
- * it is added, and the hover lift and focus ring come from `index.css`'s element-level layer.
+ * <b>`role="status"`, never `role="alert"`.</b> Every notice here is a condition the member
+ * ARRIVED into — their quota is used up, their groups' windows do not overlap, their wallet is
+ * empty. None of it is an event, and a screen that shouts a standing fact is the defect
+ * `lib/announce` was written to close. <b>`warning`, never `danger`:</b> reaching the club's
+ * daily cap is the rule working, not a mistake.
+ * </p>
+ *
+ * <p>
+ * <b>The live region is separate and always mounted.</b> A region rendered conditionally
+ * announces on mount, which is how a screen ends up re-reading a banner every time a poll swaps a
+ * payload. The visible explanation beside it is `aria-hidden` text, because one press must
+ * produce exactly one announcement; its × is outside the hidden text so it stays reachable.
+ * </p>
+ *
+ * <p>
+ * <b>Links navigate, buttons act.</b> "Top up" goes somewhere, so it is a router link wearing the
+ * button's look (`<Button asChild><Link/></Button>`); "Try tomorrow" changes the page, so it is a
+ * button.
  * </p>
  */
-const ACTION_SHELL = "inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg text-sm font-medium";
-
-/**
- * The standing conditions above the grid, and the one live region the grid speaks through.
- *
- * <p>
- * <b>`role="status"`, never `role="alert"`.</b> An alert interrupts whatever the member is
- * doing; every notice here is a condition they ARRIVED into — their quota is used up, their
- * groups' windows do not overlap, their wallet is empty. None of it is an event, and a screen
- * that shouts a standing fact is the defect `lib/announce` was written to close.
- * </p>
- *
- * <p>
- * <b>`warning`, never `danger`.</b> Red says the member did something wrong. Reaching the
- * club's daily cap is the rule working, not a mistake, and the copy in `lib/gridCopy` says the
- * rule rather than the person for the same reason.
- * </p>
- *
- * <p>
- * <b>The live region is separate from the notices and is always mounted.</b> A region that is
- * conditionally rendered announces on mount — which is how a screen ends up reading a standing
- * banner again every time a poll swaps a payload — so it is one node that is empty most of the
- * time and carries a sentence for the moment after a member pressed a locked cell.
- * </p>
- */
-export function ScheduleNotices({ notices, live, onNextDay }: {
+export function ScheduleNotices(props: {
   notices: Notice[];
   live: string;
+  shown: string;
+  onDismiss: () => void;
   onNextDay?: () => void;
 }) {
+  const { notices, live, shown, onDismiss, onNextDay } = props;
   return (
     <>
-      {/* The live region itself, and the thing a SIGHTED member reads.
-          They are two nodes on purpose. The region must be `sr-only` and must stay mounted —
-          a conditionally-rendered region announces on mount, which is how a screen ends up
-          re-reading a standing banner every time a poll swaps a payload. The visible half is
-          `aria-hidden`, because one press must produce exactly one announcement.
-          Both halves matter: D4 §2.9's finding was that a member tapped a restricted cell and
-          NOTHING happened, and an explanation only a screen reader hears leaves that defect
-          in place for everyone who can see. */}
       <div role="status" aria-live="polite" className="sr-only">{live}</div>
-      {live.trim() && (
-        <div aria-hidden="true"
-          className="rounded-lg border border-info-soft bg-info-soft text-info-strong p-3 sm:p-4 text-sm">
-          {live}
+      {shown.trim() ? (
+        <div data-grid-explanation="" className="flex items-start gap-3 rounded-xl border border-info-strong/20 bg-info-soft py-1 pl-3 pr-1 text-info-strong">
+          <Info size={20} aria-hidden="true" className="mt-2.5 shrink-0" />
+          <p aria-hidden="true" className="min-w-0 flex-1 py-2.5 text-sm">{shown}</p>
+          <IconButton label={BOOKINGS_COPY.dismissExplanation} onClick={onDismiss} className="shrink-0 text-info-strong hover:bg-bg-surface/60">
+            <X aria-hidden="true" />
+          </IconButton>
         </div>
-      )}
+      ) : null}
       {notices.map((n) => (
-        <div key={n.id} role="status"
-          className="rounded-lg border border-warning-strong/30 bg-warning-soft text-warning-strong p-3 sm:p-4 flex flex-wrap items-start gap-3">
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium">{n.title}</p>
-            {n.body && <p className="text-sm mt-1">{n.body}</p>}
+        <div
+          key={n.id}
+          role="status"
+          className={cn(
+            "flex flex-wrap items-start gap-x-3 gap-y-2 rounded-xl border p-3 sm:items-center sm:p-4",
+            n.tone === "warning" ? "border-warning-strong/30 bg-warning-soft text-warning-strong" : "border-info-strong/20 bg-info-soft text-info-strong",
+          )}
+        >
+          {/* The shape differs with the tone, so a calm note never wears a warning's mark. */}
+          {n.tone === "warning"
+            ? <WarningCircle size={20} weight="bold" aria-hidden="true" className="mt-0.5 shrink-0 sm:mt-0" />
+            : <Info size={20} weight="bold" aria-hidden="true" className="mt-0.5 shrink-0 sm:mt-0" />}
+          <div className="min-w-0 flex-1 basis-48">
+            <p className="text-sm font-semibold">{n.title}</p>
+            {n.body ? <p className="mt-1 text-sm">{n.body}</p> : null}
           </div>
-          {n.action?.to && (
-            <Link to={n.action.to} className={cn(ACTION_SHELL, BUTTON_VARIANT_CLASS.outline, "shrink-0")}>
-              {n.action.label}
-            </Link>
-          )}
-          {n.action?.nextDay && onNextDay && (
-            <Button variant="outline" onClick={onNextDay} className="shrink-0">{n.action.label}</Button>
-          )}
+          <NoticeAction notice={n} onNextDay={onNextDay} />
         </div>
       ))}
     </>
   );
+}
+
+function NoticeAction({ notice, onNextDay }: { notice: Notice; onNextDay?: () => void }) {
+  const action = notice.action;
+  if (action?.to) {
+    return (
+      <Button asChild variant="outline" size="sm" className="ml-auto shrink-0">
+        <Link to={action.to}>{action.label}</Link>
+      </Button>
+    );
+  }
+  if (action?.nextDay && onNextDay) {
+    return <Button variant="outline" size="sm" onClick={onNextDay} className="ml-auto shrink-0">{action.label}</Button>;
+  }
+  return null;
 }

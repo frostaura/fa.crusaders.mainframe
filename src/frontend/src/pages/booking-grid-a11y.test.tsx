@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import SchedulePage from "./Schedule";
 import { BalanceProvider } from "../lib/balance";
 import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
+import { sheets } from "../test/fakeSheets";
+
+vi.mock("../components/bookings/BookSheet", async () => (await import("../test/fakeSheets")).bookSheetModule);
+vi.mock("../components/bookings/CancelSheet", async () => (await import("../test/fakeSheets")).cancelSheetModule);
 
 /**
  * The booking grid, as somebody who cannot see it experiences it.
@@ -97,7 +101,7 @@ describe("every slot in the booking grid says what it is", () => {
     expect(await screen.findByRole("button", { name: "Cancel your booking on Court 2 at 06:00" })).toBeInTheDocument();
   });
 
-  it("announces the confirmation step as a dialog naming the court, the time and the cost", async () => {
+  it("hands the confirmation step the court, the time and the price the cell named", async () => {
     signIn({ isAdmin: false });
     stubFetch(routes());
     renderPage(<BalanceProvider><SchedulePage /></BalanceProvider>);
@@ -105,16 +109,12 @@ describe("every slot in the booking grid says what it is", () => {
     const slot = await screen.findByRole("button", { name: /^Book Court 1 at 06:00 for 50\.00/ });
     fireEvent.click(slot);
 
-    // The grid button no longer arms itself — B-F6 replaced the two-tap stopwatch with the
-    // spec's modal — so the thing that must be announced is the dialog. It has to carry the
-    // court, the time and what the member is about to spend, because a screen reader user
-    // reaching the confirm button hears only the dialog's own contents, not the cell they
-    // came from.
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveAttribute("aria-modal", "true");
-    expect(within(dialog).getByText("Court 1")).toBeInTheDocument();
-    expect(within(dialog).getByText(/06:00/)).toBeInTheDocument();
-    expect(within(dialog).getAllByText(/50\.00 cr/).length).toBeGreaterThan(0);
-    expect(within(dialog).getByRole("button", { name: "Book for 50.00 cr" })).toBeEnabled();
+    // The dialog itself — `aria-modal`, its title, its figures and the Book button's name — is
+    // BookSheet's, tested with it (P4 replaced BookingConfirmModal). What the grid owes it is the
+    // same court, instant and price the cell's own name announced.
+    expect(await screen.findByRole("dialog", { name: "Book sheet" })).toBeInTheDocument();
+    expect(sheets.book?.slots).toEqual([
+      { courtId: "court-1", courtName: "Court 1", startsAt: at("06:00"), sliceCount: 1, priceCredits: 50 },
+    ]);
   });
 });

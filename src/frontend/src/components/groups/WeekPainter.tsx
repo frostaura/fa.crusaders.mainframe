@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { Button } from "../Button";
+import { Button } from "../ui/button";
 import { ScrollArea } from "../ScrollArea";
 import { cn } from "../../lib/utils";
 import { WEEK_IN_READING_ORDER, formatClock, normalise } from "../../lib/groupRules";
@@ -227,19 +227,19 @@ export function WeekPainter({ club, value, onChange, sliceMinutes, disabled = fa
 
       <div className="flex flex-wrap gap-2">
         <Button
-          type="button" variant="outline" className="min-h-11" disabled={disabled}
+          type="button" variant="outline" size="sm" disabled={disabled}
           onClick={() => setMany(everyCell(rows), true)}
         >
           All week
         </Button>
         <Button
-          type="button" variant="outline" className="min-h-11" disabled={disabled}
+          type="button" variant="outline" size="sm" disabled={disabled}
           onClick={() => setMany(everyCell(rows).filter((c) => c.day !== "sat" && c.day !== "sun"), true)}
         >
           Weekdays only
         </Button>
         <Button
-          type="button" variant="outline" className="min-h-11" disabled={disabled}
+          type="button" variant="outline" size="sm" disabled={disabled}
           onClick={() => { commit({}); onChange({}); }}
         >
           Clear
@@ -251,7 +251,7 @@ export function WeekPainter({ club, value, onChange, sliceMinutes, disabled = fa
           role="grid"
           aria-label="When may this group book?"
           aria-describedby={summaryId}
-          className="min-w-[23rem]"
+          className="min-w-96"
           onKeyDown={onKeyDown}
           onKeyUp={(e) => { if (e.key === "Shift") endGesture(); }}
         >
@@ -264,7 +264,7 @@ export function WeekPainter({ club, value, onChange, sliceMinutes, disabled = fa
                   disabled={disabled}
                   aria-label={`${dayIsFull(day) ? "Clear" : "Paint"} all of ${dayName(day)}`}
                   onClick={() => setMany(rows.map((_, index) => ({ day, index })), !dayIsFull(day))}
-                  className="w-full min-h-11 rounded-lg border border-control text-sm font-medium"
+                  className="w-full min-h-touch rounded-lg border border-control bg-bg-surface text-sm font-semibold text-text-primary hover:bg-bg-muted"
                 >
                   {dayName(day).slice(0, 3)}
                 </button>
@@ -283,7 +283,7 @@ export function WeekPainter({ club, value, onChange, sliceMinutes, disabled = fa
                     WEEK_IN_READING_ORDER.map((day) => ({ day, index: row })),
                     !rowIsFull(cells, row, rows, isOpen),
                   )}
-                  className="w-full min-h-11 rounded-lg text-xs tabular-nums text-text-secondary"
+                  className="w-full min-h-touch rounded-lg text-xs tabular-nums text-text-secondary hover:bg-bg-muted"
                 >
                   {formatClock(start)}
                 </button>
@@ -309,7 +309,7 @@ export function WeekPainter({ club, value, onChange, sliceMinutes, disabled = fa
                       if (gestureRef.current) apply(day, row, gestureRef.current.allowed);
                     }}
                     className={cn(
-                      "min-h-11 flex-1 mx-0.5 my-0.5 rounded",
+                      "min-h-touch flex-1 mx-0.5 my-0.5 rounded-md",
                       !open && "border border-dashed border-border bg-bg-muted/50",
                       open && !on && "border border-dashed border-control bg-bg-muted",
                       open && on && "bg-accent-soft ring-2 ring-inset ring-accent-strong",
@@ -340,15 +340,15 @@ export function WeekPainter({ club, value, onChange, sliceMinutes, disabled = fa
 
       <ul aria-label="What the colours mean" className="flex flex-wrap gap-4 text-xs text-text-secondary">
         <li className="flex items-center gap-2">
-          <span aria-hidden className="inline-block h-4 w-4 rounded bg-accent-soft ring-2 ring-inset ring-accent-strong" />
+          <span aria-hidden className="inline-block size-4 rounded-sm bg-accent-soft ring-2 ring-inset ring-accent-strong" />
           <span>Allowed</span>
         </li>
         <li className="flex items-center gap-2">
-          <span aria-hidden className="inline-block h-4 w-4 rounded border border-dashed border-control bg-bg-muted" />
+          <span aria-hidden className="inline-block size-4 rounded-sm border border-dashed border-control bg-bg-muted" />
           <span>Not allowed</span>
         </li>
         <li className="flex items-center gap-2">
-          <span aria-hidden className="inline-block h-4 w-4 rounded border border-dashed border-border bg-bg-muted/50" />
+          <span aria-hidden className="inline-block size-4 rounded-sm border border-dashed border-border bg-bg-muted/50" />
           <span>Club closed</span>
         </li>
       </ul>

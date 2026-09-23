@@ -1,16 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, endpoints, type WebhookEndpointDto, type WebhookDeliveryDto } from "../lib/api";
 import { describeFailure } from "../lib/errors";
-import { Card } from "../components/Card";
-import { Badge, Input, Label, fieldClassName } from "../components/Button";
+import { ActionsMenu } from "../components/admin/ActionsMenu";
+import { Alert } from "../components/Alert";
+import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import {
+  Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "../components/ui/dialog";
+import { Field, FieldDescription, FieldLabel } from "../components/ui/field";
 import { IconButton } from "../components/ui/icon-button";
+import { Input } from "../components/ui/input";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { RefreshButton } from "../components/ui/refresh-button";
 import { Skeleton } from "../components/ui/skeleton";
-import { Check, Copy, Plus, WebhooksLogo, X } from "../components/ui/icons";
-import { ConfirmButton } from "../components/ConfirmButton";
+import { StateBlock } from "../components/ui/state-block";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
+import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
+import { Check, Copy, Plus, Trash, WebhooksLogo, X } from "../components/ui/icons";
 import { DataTable, type DataColumn } from "../components/DataTable";
+import { clubDayAndClock } from "../lib/clubClock";
 import { useToast } from "../components/Toast";
 import { cn } from "../lib/utils";
 import { useAsyncAction } from "../lib/useAsyncAction";
@@ -249,7 +259,7 @@ export default function AdminWebhooksPage() {
    * value, not an answer from the server, and the screen has to be able to tell them apart.
    * </p>
    */
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
@@ -258,7 +268,7 @@ export default function AdminWebhooksPage() {
       setList(await endpoints.adminWebhooksList());
       setLoadError(null);
     } catch (err) {
-      setLoadError(describeFailure(err, { action: "load the webhook endpoints" }));
+      setLoadError(err);
       throw err;
     } finally {
       setLoading(false);
@@ -291,12 +301,11 @@ export default function AdminWebhooksPage() {
   // Create shows its own pending state and ignores a second press while it works (R12).
   const createAction = useAsyncAction(create);
 
+  // Thrown, not swallowed: the confirm dialog keeps itself open and says what went wrong.
   const remove = async (id: string) => {
-    try {
-      await endpoints.adminWebhooksDelete(id);
-      await load();
-      toast.push({ tone: "success", text: "Endpoint removed." });
-    } catch { toast.push({ tone: "danger", text: "Delete failed." }); }
+    await endpoints.adminWebhooksDelete(id);
+    await load();
+    toast.push({ tone: "success", text: "Endpoint removed." });
   };
 
   const openDeliveries = async (id: string) => {
@@ -308,78 +317,27 @@ export default function AdminWebhooksPage() {
     } catch { toast.push({ tone: "danger", text: "Couldn't load deliveries." }); }
   };
 
+  const retry = () => { load().catch(() => {}); };
+
   return (
     <PageShell width="wide">
       <PageHeader
         title="Webhooks"
         description={"Outbound HTTP cues — lights, downstream integrations, audit pipes. URL templates "
-          + "substitute event variables; the catalogue below is searchable."}
-        actions={<RefreshButton onRefresh={() => { load().catch(() => {}); }} loading={loading} />}
+          + "substitute event variables; the catalogue below lists them."}
+        actions={<RefreshButton onRefresh={retry} loading={loading} />}
       />
 
-      {createdSecret && (
-        <Card className="border-warning-strong/40 bg-warning-soft">
-          <p className="text-sm font-medium text-warning-strong">
-            Endpoint created — save this signing secret. It won't be shown again.
-          </p>
-          <SecretBlock secret={createdSecret} onDismiss={() => setCreatedSecret(null)} />
-        </Card>
-      )}
-
-      {creating && (
-        <Card className="space-y-5">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold">New webhook endpoint</h2>
-            <IconButton label="Close" onClick={() => setCreating(false)}>
-              <X aria-hidden="true" />
-            </IconButton>
-          </div>
-
-          <div>
-            <Label>Events</Label>
-            <EventFilterPicker tokens={filterTokens} onChange={setFilterTokens} />
-            <p className="text-xs text-text-muted mt-2">
-              Pick one or more. Choose <strong>Any (*)</strong> to fire for everything.
-            </p>
-          </div>
-
-          <div>
-            <Label>URL template</Label>
-            <TemplateInput
-              value={url}
-              onChange={setUrl}
-              variables={variablesForEvents(filterTokens)}
-              placeholder="https://example.com/webhook?court={court_number}"
-            />
-          </div>
-
-          <div>
-            <Label>Description</Label>
-            {/* Not "Lights on (Arduino)". docs/specs/webhooks.md is explicit that the court
-                box is pull-only, has no inbound HTTP listener and no arduino.local name —
-                so the placeholder cannot describe the one destination a webhook can never
-                have. */}
-            <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Scoreboard — court lit" />
-          </div>
-
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button variant="ghost" onClick={() => setCreating(false)}>Cancel</Button>
-            <Button onClick={() => void createAction.run()} pending={createAction.pending}>
-              Create endpoint
-            </Button>
-          </div>
-        </Card>
-      )}
+      {createdSecret && <SecretBlock secret={createdSecret} onDismiss={() => setCreatedSecret(null)} />}
 
       <Card>
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">Endpoints</h2>
-          {!creating && (
+        <CardHeader>
+          <CardTitle asChild><h2>Endpoints</h2></CardTitle>
+          <CardDescription>Where the club&apos;s events are sent, and whether each one is answering.</CardDescription>
+          <CardAction>
             <Button
-              variant="secondary"
               onClick={() => { setCreating(true); setCreatedSecret(null); }}
               icon={<Plus aria-hidden="true" />}
-              className="shrink-0"
               /*
                * Not offered while the list is unknown. Leaving it live directly above a panel
                * that says "do not create one until this list loads" is an instruction and its
@@ -390,81 +348,187 @@ export default function AdminWebhooksPage() {
             >
               New endpoint
             </Button>
-          )}
-        </div>
-        {loadError ? (
-          /*
-            Not "no endpoints". An admin told there are none, on a club that has one, creates a
-            second — and the lights cue then fires twice for every booking.
-          */
-          <div className="border border-dashed border-danger-strong/40 rounded-lg py-10 px-4 text-center flex flex-col items-center gap-3">
-            <p role="alert" className="text-sm font-medium text-danger-strong">{loadError}</p>
-            <p className="text-xs text-text-muted max-w-md">
-              Existing endpoints are not shown below because they could not be read — this club may already
-              have some. Do not create one until this list loads, or you may end up firing every event twice.
-            </p>
-            <Button type="button" variant="outline" onClick={() => { load().catch(() => {}); }} pending={loading}>
-              Try again
-            </Button>
-          </div>
-        ) : loading && list.length === 0 ? (
-          // A skeleton the shape of the rows (R12), never "Loading endpoints…".
-          <div aria-busy="true" className="flex flex-col gap-3">
-            <p className="sr-only">Reading the webhook endpoints…</p>
-            {[0, 1].map((i) => <Skeleton key={i} className="h-20 w-full" />)}
-          </div>
-        ) : list.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border px-4 py-10 text-center">
-            <WebhooksLogo size={40} weight="duotone" aria-hidden="true" className="text-text-muted" />
-            <p className="text-sm text-text-secondary">No webhook endpoints yet. Create one above to start firing events.</p>
-          </div>
-        ) : (
-          <ul className="divide-y divide-border -mx-4 sm:-mx-6">
-            {list.map((w) => {
-              const tokens = parseFilter(w.event_filter);
-              const isOpen = openDeliveriesId === w.id;
-              return (
-                <li key={w.id} className="px-4 sm:px-6 py-4">
-                  <div className="flex items-start gap-3">
-                    <div className="flex-1 min-w-0 space-y-1.5">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="font-medium">{w.description ?? "(no description)"}</p>
-                        <Badge tone={w.enabled ? "success" : "muted"}>{w.enabled ? "enabled" : "disabled"}</Badge>
-                        {w.failure_count > 0 && <Badge tone="warning">failures: {w.failure_count}</Badge>}
-                      </div>
-                      <p className="text-xs font-mono break-all text-text-secondary">{w.url_template}</p>
-                      <div className="flex gap-1.5 flex-wrap pt-0.5">
-                        {tokens.length === 0 || tokens.includes("*") ? (
-                          <Badge tone="info">any event</Badge>
-                        ) : (
-                          tokens.map((t) => <Badge key={t} tone="info">{t}</Badge>)
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-2 shrink-0">
-                      {/* The name does not flip with the state — `aria-expanded` carries it, so a
-                          screen-reader user is not left re-finding a control after every press. */}
-                      <Button variant="outline" aria-expanded={isOpen} onClick={() => openDeliveries(w.id)}>
-                        Deliveries
-                      </Button>
-                      <ConfirmButton
-                        idleLabel="Delete"
-                        confirmLabel="Tap again to delete"
-                        onConfirm={() => remove(w.id)}
-                        tone="danger"
-                      />
-                    </div>
-                  </div>
-                  {isOpen && <DeliveriesTable rows={deliveries} />}
-                </li>
-              );
-            })}
-          </ul>
-        )}
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          {loadError ? <ListFailed error={loadError} retrying={loading} onRetry={retry} /> : null}
+          <StateBlock
+            action="the webhook endpoints"
+            loading={!loadError && loading && list.length === 0}
+            skeleton={<div className="flex flex-col gap-3">{[0, 1].map((i) => <Skeleton key={i} className="h-20 w-full" />)}</div>}
+            empty={!loadError && list.length === 0}
+            emptyIcon={WebhooksLogo}
+            emptyTitle="No webhook endpoints yet."
+            emptyHint="Create one to start sending the club's events to another system."
+          >
+            <ul hidden={loadError !== null} className="divide-y divide-border rounded-lg border border-border">
+              {list.map((w) => (
+                <EndpointRow
+                  key={w.id}
+                  endpoint={w}
+                  open={openDeliveriesId === w.id}
+                  deliveries={deliveries}
+                  onDeliveries={() => void openDeliveries(w.id)}
+                  onRemove={() => remove(w.id)}
+                />
+              ))}
+            </ul>
+          </StateBlock>
+        </CardContent>
       </Card>
+
+      <NewEndpointDialog
+        open={creating}
+        onOpenChange={setCreating}
+        form={{ url, setUrl, filterTokens, setFilterTokens, description, setDescription }}
+        pending={createAction.pending}
+        onCreate={() => void createAction.run()}
+      />
 
       <VariableCatalogCard />
     </PageShell>
+  );
+}
+
+/**
+ * The list could not be read. Not "no endpoints": an admin told there are none, on a club that
+ * has one, creates a second — and the lights cue then fires twice for every booking. Always
+ * with a retry, including for a 5xx: a webhook list read is idempotent and a gateway blip is
+ * the commonest reason it fails.
+ */
+function ListFailed({ error, retrying, onRetry }: { error: unknown; retrying: boolean; onRetry: () => void }) {
+  return (
+    <div className="flex flex-col items-start gap-3">
+      <Alert tone="danger" className="w-full">
+        {describeFailure(error, { action: "load the webhook endpoints" })}
+      </Alert>
+      <p className="max-w-prose text-sm text-text-secondary">
+        Existing endpoints are not shown below because they could not be read — this club may already
+        have some. Do not create one until this list loads, or you may end up firing every event twice.
+      </p>
+      <Button variant="outline" pending={retrying} onClick={onRetry}>Try again</Button>
+    </div>
+  );
+}
+
+/** One endpoint: what it is, where it sends, what it sends — and its deliveries under it. */
+function EndpointRow(props: {
+  endpoint: WebhookEndpointDto;
+  open: boolean;
+  deliveries: WebhookDeliveryDto[];
+  onDeliveries: () => void;
+  onRemove: () => Promise<void>;
+}) {
+  const { endpoint: w, open, deliveries } = props;
+  const tokens = parseFilter(w.event_filter);
+  const name = w.description ?? "(no description)";
+  return (
+    <li className="flex flex-col gap-3 p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-semibold text-text-primary">{name}</p>
+            <Badge tone={w.enabled ? "success" : "neutral"}>{w.enabled ? "enabled" : "disabled"}</Badge>
+            {w.failure_count > 0 && <Badge tone="warning">{`failures: ${w.failure_count}`}</Badge>}
+          </div>
+          <p className="break-all font-mono text-xs text-text-secondary">{w.url_template}</p>
+          <div className="flex flex-wrap gap-1.5 pt-0.5">
+            {tokens.length === 0 || tokens.includes("*") ? (
+              <Badge tone="info">any event</Badge>
+            ) : (
+              tokens.map((t) => <Badge key={t} tone="info">{t}</Badge>)
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {/* The name does not flip with the state — `aria-expanded` carries it, so a
+              screen-reader user is not left re-finding a control after every press. */}
+          <Button variant="outline" size="sm" aria-expanded={open} onClick={props.onDeliveries}>
+            Deliveries
+          </Button>
+          <ActionsMenu
+            label={`More actions for ${name}`}
+            items={[{
+              label: "Delete endpoint",
+              icon: <Trash size={16} aria-hidden="true" />,
+              danger: true,
+              confirm: {
+                title: "Delete this endpoint?",
+                description: `${name} stops receiving the club's events at once. Its delivery history goes with it, and this cannot be undone.`,
+                confirmLabel: "Delete endpoint",
+                action: "delete the endpoint",
+                onConfirm: props.onRemove,
+                focusAfter: () => document.querySelector<HTMLElement>("#main-content h1"),
+              },
+            }]}
+          />
+        </div>
+      </div>
+      {open && <DeliveriesTable rows={deliveries} />}
+    </li>
+  );
+}
+
+type EndpointForm = {
+  url: string;
+  setUrl: (next: string) => void;
+  filterTokens: string[];
+  setFilterTokens: (next: string[]) => void;
+  description: string;
+  setDescription: (next: string) => void;
+};
+
+/** The create form, as a dialog: events, the URL template, a description, and Create. */
+function NewEndpointDialog(props: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  form: EndpointForm;
+  pending: boolean;
+  onCreate: () => void;
+}) {
+  const { open, onOpenChange, form, pending, onCreate } = props;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>New webhook endpoint</DialogTitle>
+          <DialogDescription>Choose what to send, and where. The signing secret is shown once, after it is created.</DialogDescription>
+        </DialogHeader>
+        <DialogBody className="flex flex-col gap-6">
+          <div role="group" aria-labelledby="webhook-events-label" className="flex flex-col gap-2">
+            <span id="webhook-events-label" className="text-sm font-medium text-text-primary">Events</span>
+            <EventFilterPicker tokens={form.filterTokens} onChange={form.setFilterTokens} />
+            <p className="text-sm text-text-secondary">
+              Pick one or more. Choose <strong>Any event (*)</strong> to fire for everything.
+            </p>
+          </div>
+
+          <Field>
+            <FieldLabel>URL template</FieldLabel>
+            <TemplateInput
+              value={form.url}
+              onChange={form.setUrl}
+              variables={variablesForEvents(form.filterTokens)}
+              placeholder="https://example.com/webhook?court={court_number}"
+            />
+          </Field>
+
+          <Field>
+            <FieldLabel>Description</FieldLabel>
+            {/* Not "Lights on (Arduino)". docs/specs/webhooks.md is explicit that the court
+                box is pull-only, has no inbound HTTP listener and no arduino.local name —
+                so the placeholder cannot describe the one destination a webhook can never
+                have. */}
+            <Input value={form.description} onChange={(e) => form.setDescription(e.target.value)} placeholder="Scoreboard — court lit" />
+            <FieldDescription>What the endpoint is for, so the list says it in words.</FieldDescription>
+          </Field>
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={onCreate} pending={pending}>Create endpoint</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -482,79 +546,57 @@ function SecretBlock({ secret, onDismiss }: { secret: string; onDismiss: () => v
     }
   };
   return (
-    <div className="mt-2 flex items-stretch gap-2">
-      <code className="flex-1 font-mono text-xs break-all bg-bg-surface border border-border rounded px-2 py-2 select-all">
-        {secret}
-      </code>
-      <Button
-        type="button"
-        variant="outline"
-        onClick={copy}
-        icon={copied ? <Check aria-hidden="true" className="text-success-strong" /> : <Copy aria-hidden="true" />}
-      >
-        {copied ? "Copied" : "Copy"}
-      </Button>
-      <IconButton label="Dismiss" variant="outline" onClick={onDismiss}>
-        <X aria-hidden="true" />
-      </IconButton>
+    <div className="flex flex-col gap-3 rounded-xl border border-warning-strong bg-warning-soft p-4 sm:p-6">
+      <p className="text-sm font-semibold text-warning-strong">
+        Endpoint created — save this signing secret. It won&apos;t be shown again.
+      </p>
+      <div className="flex items-stretch gap-2">
+        <code className="flex-1 select-all break-all rounded-lg border border-border bg-bg-surface px-3 py-2.5 font-mono text-xs text-text-primary">
+          {secret}
+        </code>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={copy}
+          icon={copied ? <Check aria-hidden="true" className="text-success-strong" /> : <Copy aria-hidden="true" />}
+        >
+          {copied ? "Copied" : "Copy"}
+        </Button>
+        <IconButton label="Dismiss" variant="outline" onClick={onDismiss}>
+          <X aria-hidden="true" />
+        </IconButton>
+      </div>
     </div>
   );
 }
 
 /* ============================================================================
-   Event filter — chip multi-select with "Any (*)" toggle.
+   Event filter — a multi-select toggle group with an "Any (*)" toggle.
    ============================================================================ */
 
 function EventFilterPicker({ tokens, onChange }: { tokens: string[]; onChange: (next: string[]) => void }) {
   const isAny = tokens.length === 0 || tokens.includes("*");
+  const chosen = isAny ? ["*"] : tokens;
 
-  const toggle = (name: string) => {
-    if (tokens.includes(name)) onChange(tokens.filter((t) => t !== name));
-    else onChange([...tokens.filter((t) => t !== "*"), name]);
+  const change = (next: string[]) => {
+    const added = next.filter((t) => !chosen.includes(t));
+    if (added.includes("*")) { onChange(["*"]); return; }
+    onChange(next.filter((t) => t !== "*"));
   };
 
-  const setAny = () => onChange(["*"]);
-
   return (
-    <div className="flex flex-wrap gap-2">
-      <Chip active={isAny} onClick={setAny} tone="info">
-        {isAny && <Check size={12} className="mr-1" />} Any event (*)
-      </Chip>
-      {EVENTS.map((e) => {
-        const active = !isAny && tokens.includes(e.name);
-        return (
-          <Chip key={e.name} active={active} onClick={() => toggle(e.name)} title={e.description}>
-            {active && <Check size={12} className="mr-1" />} {e.name}
-          </Chip>
-        );
-      })}
-    </div>
-  );
-}
-
-function Chip({
-  active, onClick, children, title,
-}: {
-  active: boolean;
-  onClick?: () => void;
-  children: React.ReactNode;
-  title?: string;
-  tone?: "default" | "info";
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      className={cn(
-        "inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium border transition",
-        active
-          ? "bg-info-soft text-info-strong border-info-soft"
-          : "bg-bg-surface border-border text-text-secondary hover:bg-bg-muted",
-      )}
-    >
-      {children}
-    </button>
+    <ToggleGroup type="multiple" variant="outline" size="sm" value={chosen} onValueChange={change} aria-label="Events" className="gap-2">
+      <ToggleGroupItem value="*" className="rounded-full px-3">
+        {isAny && <Check size={14} weight="bold" aria-hidden="true" />}
+        Any event (*)
+      </ToggleGroupItem>
+      {EVENTS.map((e) => (
+        <ToggleGroupItem key={e.name} value={e.name} title={e.description} className="rounded-full px-3 font-mono text-xs">
+          {!isAny && tokens.includes(e.name) && <Check size={14} weight="bold" aria-hidden="true" />}
+          {e.name}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
   );
 }
 
@@ -626,16 +668,14 @@ function TemplateInput({
 
   return (
     <div className="relative">
-      <input
+      <Input
         ref={inputRef}
         value={value}
         placeholder={placeholder}
-        className={cn(
-          fieldClassName,
-          "placeholder:text-text-muted",
-          "focus:outline-none focus:ring-2 focus:ring-accent-strong focus:border-accent-strong",
-          "font-mono text-sm",
-        )}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={showPopover}
+        className="font-mono"
         onChange={(e) => { onChange(e.target.value); setCaret(e.target.selectionStart ?? e.target.value.length); setActiveIdx(0); setOpen(true); }}
         onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? value.length)}
         onFocus={(e) => { setCaret(e.currentTarget.selectionStart ?? value.length); setOpen(true); }}
@@ -654,7 +694,8 @@ function TemplateInput({
       {showPopover && (
         <ul
           role="listbox"
-          className="absolute z-popover left-0 right-0 mt-1 max-h-60 overflow-auto rounded-md border border-border bg-bg-surface shadow-lg"
+          aria-label="Variables"
+          className="absolute inset-x-0 z-popover mt-1 max-h-60 overflow-auto rounded-xl border border-border bg-bg-raised p-1 shadow-md"
         >
           {suggestions.map((s, i) => (
             <li
@@ -664,32 +705,32 @@ function TemplateInput({
               onMouseDown={(e) => { e.preventDefault(); insertAtCaret(s); }}
               onMouseEnter={() => setActiveIdx(i)}
               className={cn(
-                "px-3 py-2 text-sm font-mono cursor-pointer flex items-center justify-between",
-                i === activeIdx ? "bg-info-soft text-info-strong" : "text-text-primary hover:bg-bg-muted",
+                "flex min-h-touch cursor-pointer items-center justify-between rounded-lg px-3 font-mono text-sm",
+                i === activeIdx ? "bg-accent-soft text-accent-strong" : "text-text-primary hover:bg-bg-muted",
               )}
             >
               <span>{s}</span>
-              <span className="text-xs uppercase tracking-wide text-text-muted">insert</span>
+              <span className="text-xs uppercase tracking-overline text-text-muted">insert</span>
             </li>
           ))}
         </ul>
       )}
 
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        <span className="text-xs text-text-muted self-center mr-1">Insert:</span>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <span className="mr-1 text-xs text-text-muted">Insert:</span>
         {variables.slice(0, 16).map((v) => (
           <button
             key={v}
             type="button"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => insertAtCaret(v)}
-            className="font-mono text-xs px-2 py-0.5 rounded border border-border bg-bg-muted/40 text-text-secondary hover:bg-info-soft hover:text-info-strong hover:border-info-soft transition"
+            className="no-lift rounded-md border border-border bg-bg-muted px-2 py-1 font-mono text-xs text-text-secondary transition-colors duration-fast ease-standard hover:border-accent-strong hover:bg-accent-soft hover:text-accent-strong motion-reduce:transition-none"
           >
             {`{${v}}`}
           </button>
         ))}
       </div>
-      <p className="text-xs text-text-muted mt-2">
+      <p className="mt-2 text-xs text-text-muted">
         Type <code className="font-mono">{"{"}</code> for inline autocomplete. Values are URL-encoded on send.
       </p>
     </div>
@@ -759,7 +800,7 @@ function DeliveriesTable({ rows }: { rows: WebhookDeliveryDto[] }) {
   const cols: DataColumn<WebhookDeliveryDto>[] = [
     {
       key: "when", header: "When", width: 170,
-      cell: (r) => new Date(r.created_at).toLocaleString(),
+      cell: (r) => clubDayAndClock(r.created_at),
       sortValue: (r) => new Date(r.created_at).getTime(),
     },
     { key: "event", header: "Event", cell: (r) => <span className="font-mono text-xs">{r.event_type}</span>, sortValue: (r) => r.event_type },
@@ -767,7 +808,7 @@ function DeliveriesTable({ rows }: { rows: WebhookDeliveryDto[] }) {
       key: "status", header: "Status", width: 130,
       cell: (r) => {
         const s = r.response_status;
-        const tone = s == null ? (r.final_state === "delivered" ? "success" : r.final_state === "failed" || r.final_state === "abandoned" ? "danger" : "muted") : s >= 200 && s < 300 ? "success" : "danger";
+        const tone = s == null ? (r.final_state === "delivered" ? "success" : r.final_state === "failed" || r.final_state === "abandoned" ? "danger" : "neutral") : s >= 200 && s < 300 ? "success" : "danger";
         return <Badge tone={tone}>{s ?? r.final_state}</Badge>;
       },
       sortValue: (r) => r.response_status ?? -1,
@@ -795,54 +836,54 @@ function DeliveriesTable({ rows }: { rows: WebhookDeliveryDto[] }) {
 
 function VariableCatalogCard() {
   return (
-    <Card className="space-y-4">
-      <div>
-        <h3 className="text-base font-semibold">Variable catalog</h3>
-        <p className="text-sm text-text-secondary">
-          Available <code className="font-mono text-xs">{"{placeholders}"}</code> per event. Envelope variables
-          below are present on every event.
-        </p>
-      </div>
-
-      <div>
-        <p className="text-xs font-medium uppercase tracking-wide text-text-muted mb-2">Envelope (every event)</p>
-        <div className="flex flex-wrap gap-1.5">
-          {ENVELOPE_VARS.map((v) => (
-            <span key={v} className="font-mono text-xs px-2 py-0.5 rounded border border-border bg-bg-muted/40 text-text-secondary">
-              {`{${v}}`}
-            </span>
-          ))}
+    <Card>
+      <CardHeader>
+        <CardTitle asChild><h2>Variable catalogue</h2></CardTitle>
+        <CardDescription>
+          The <code className="font-mono text-xs">{"{placeholders}"}</code> each event carries. The envelope
+          variables are on every event.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-overline text-text-secondary">Envelope (every event)</p>
+          <div className="flex flex-wrap gap-1.5">
+            {ENVELOPE_VARS.map((v) => <VarChip key={v} name={v} />)}
+          </div>
         </div>
-      </div>
-
-      <div className="overflow-x-auto rounded-md border border-border">
-        <table className="w-full text-sm">
-          <thead className="bg-bg-muted/40 text-xs uppercase tracking-wide text-text-muted">
-            <tr>
-              <th className="text-left px-4 py-2 font-medium">Event</th>
-              <th className="text-left px-4 py-2 font-medium">What it means</th>
-              <th className="text-left px-4 py-2 font-medium">Extra variables</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border bg-bg-surface">
-            {EVENTS.map((e) => (
-              <tr key={e.name}>
-                <td className="px-4 py-2 align-top"><span className="font-mono text-xs">{e.name}</span></td>
-                <td className="px-4 py-2 align-top text-text-secondary">{e.description}</td>
-                <td className="px-4 py-2 align-top">
-                  <div className="flex flex-wrap gap-1.5">
-                    {e.vars.map((v) => (
-                      <span key={v} className="font-mono text-xs px-2 py-0.5 rounded border border-border bg-bg-muted/40 text-text-secondary">
-                        {`{${v}}`}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+        <div className="rounded-lg border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Event</TableHead>
+                <TableHead>What it means</TableHead>
+                <TableHead>Extra variables</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {EVENTS.map((e) => (
+                <TableRow key={e.name}>
+                  <TableCell className="align-top"><span className="font-mono text-xs">{e.name}</span></TableCell>
+                  <TableCell className="min-w-64 align-top text-text-secondary">{e.description}</TableCell>
+                  <TableCell className="align-top">
+                    <div className="flex min-w-48 flex-wrap gap-1.5">
+                      {e.vars.map((v) => <VarChip key={v} name={v} />)}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
     </Card>
+  );
+}
+
+function VarChip({ name }: { name: string }) {
+  return (
+    <span className="rounded-md border border-border bg-bg-muted px-2 py-0.5 font-mono text-xs text-text-secondary">
+      {`{${name}}`}
+    </span>
   );
 }

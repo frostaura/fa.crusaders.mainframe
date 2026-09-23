@@ -83,12 +83,15 @@ const MARGIN = { top: TOP_MARGIN, right: 8, bottom: 0, left: LEFT_MARGIN } as co
  */
 function tooltipProps(c: ChartPalette) {
   return {
+    // Radius xl and elevation 3 — the popover recipe (design-system.md, Elevation) — read from
+    // the live theme's own shadow variable, so the dark theme's hairline highlight comes with it.
     contentStyle: {
-      borderRadius: 10, border: `1px solid ${c.grid}`, background: c.tooltip,
-      color: c.legend, fontSize: AXIS_FONT_PX, padding: "6px 10px",
+      borderRadius: 14, border: `1px solid ${c.grid}`, background: c.tooltip,
+      color: c.legend, fontSize: AXIS_FONT_PX, padding: "8px 12px", boxShadow: "var(--shadow-md)",
+      fontVariantNumeric: "tabular-nums",
     },
-    labelStyle: { color: c.muted, fontWeight: 500, marginBottom: 2 },
-    itemStyle: { color: c.legend },
+    labelStyle: { color: c.muted, fontWeight: 600, marginBottom: 4 },
+    itemStyle: { color: c.legend, padding: "1px 0" },
     // A bar chart's hover band and a line chart's hover rule: the hairline role, not recharts'
     // #ccc — which is a bright slab behind the bars on the dark theme.
     cursor: { fill: c.grid, fillOpacity: 0.5, stroke: c.grid },
@@ -104,7 +107,9 @@ function tooltipProps(c: ChartPalette) {
  */
 function legendProps(c: ChartPalette) {
   return {
-    wrapperStyle: { fontSize: AXIS_FONT_PX },
+    wrapperStyle: { fontSize: AXIS_FONT_PX, paddingTop: 8 },
+    iconType: "circle" as const,
+    iconSize: 8,
     formatter: (value: string) => createElement("span", { style: { color: c.legend } }, value),
   } as const;
 }

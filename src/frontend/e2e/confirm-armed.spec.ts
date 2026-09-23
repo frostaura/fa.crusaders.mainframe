@@ -70,6 +70,9 @@ const BOX = {
   effective_heartbeat_seconds: 60,
 };
 
+/** One passkey, so /profile renders its Remove confirm. */
+const PASSKEY = { id: "k1", label: "iPhone 15", created_at: "2026-09-01T08:00:00Z", last_used_at: null, transports: "internal" };
+
 function base(extra: ApiRoute[] = []): ApiRoute[] {
   return [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
@@ -81,14 +84,20 @@ function base(extra: ApiRoute[] = []): ApiRoute[] {
     // Longest prefix wins in the fixture, so the api-key route is not swallowed by the list.
     { path: "/api/v1/admin/devices/api-key", body: { api_key: "cmk_9F2Kq7Xd4bTn6Ls0", regenerated_at: "2026-09-01T08:30:00Z" } },
     { path: "/api/v1/admin/devices/", body: [BOX] },
+    // P3: /profile's passkey list carries a destructive two-step confirm ("Remove").
+    { path: "/api/v1/me/webauthn/credentials", body: [PASSKEY] },
     ...extra,
   ];
 }
 
-/** The two admin screens outside the doors surface that carry a destructive confirm. */
+/**
+ * Two screens outside the doors surface that carry a destructive confirm. P3: /admin/devices
+ * no longer does (the devices lane moved its deletes into dialogs), so the second screen is
+ * the member's own passkey list on /profile — a phone-first page, which is the harder test.
+ */
 const PAGES = [
   { label: "admin settings", path: "/admin/settings", ready: /Unlock time/ },
-  { label: "admin devices", path: "/admin/devices", ready: /Cupboard box/ },
+  { label: "profile passkeys", path: "/profile", ready: /iPhone 15/ },
 ];
 
 const SIZES = [
@@ -407,8 +416,8 @@ test("keeps the frame round its words in pixels, whatever the root font size", a
  */
 test("brings the armed block into view when the trigger was at the bottom edge", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await open(page, "/admin/devices", 0);
-  await expect(page.getByText("Cupboard box").first()).toBeVisible();
+  await open(page, "/profile", 0);
+  await expect(page.getByText("iPhone 15").first()).toBeVisible();
 
   const wrapper = page.locator(CONFIRMS).last();
   const trigger = wrapper.locator("> button").first();
@@ -497,8 +506,8 @@ test("brings the armed block into view when the trigger was at the bottom edge",
  * </p>
  */
 test("Tab from the armed way out reaches the confirm instead of leaving the control", async ({ page }) => {
-  await open(page, "/admin/devices", 0);
-  await expect(page.getByText("Cupboard box").first()).toBeVisible();
+  await open(page, "/profile", 0);
+  await expect(page.getByText("iPhone 15").first()).toBeVisible();
 
   const wrapper = page.locator(CONFIRMS).first();
   const confirm = wrapper.locator('> button[data-confirm="go"]');
@@ -694,8 +703,8 @@ test.describe("under forced colours", () => {
   /** And the armed pair specifically, which is the control the finding was raised on. */
   test("an armed confirm keeps both of its buttons bounded", async ({ page }) => {
     await page.emulateMedia({ forcedColors: "active" });
-    await open(page, "/admin/devices", 0);
-    await expect(page.getByText("Cupboard box").first()).toBeVisible();
+    await open(page, "/profile", 0);
+    await expect(page.getByText("iPhone 15").first()).toBeVisible();
 
     const wrapper = page.locator(CONFIRMS).first();
     await wrapper.locator("> button").first().click();
@@ -726,8 +735,8 @@ test.describe("under forced colours", () => {
    * </p>
    */
   test("tells the destructive half from the safe half without using colour", async ({ page }) => {
-    await open(page, "/admin/devices", 0);
-    await expect(page.getByText("Cupboard box").first()).toBeVisible();
+    await open(page, "/profile", 0);
+    await expect(page.getByText("iPhone 15").first()).toBeVisible();
 
     const wrapper = page.locator(CONFIRMS).first();
     await wrapper.locator("> button").first().click();

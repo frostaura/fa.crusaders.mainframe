@@ -2,6 +2,7 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 import AdminLedgerPage from "./AdminLedger";
+import { formatClubDayLabel } from "../components/ui/date-picker";
 import { LEDGER_TYPE_LABEL } from "../lib/creditAdjustment";
 import { ledgerRowFixture, renderPage, signIn, signOut, stubFetch } from "../test/harness";
 
@@ -32,15 +33,14 @@ describe("Admin ledger — an empty date is unbounded, not malformed", () => {
     { path: "/api/v1/admin/ledger", body: ROWS },
   ];
 
-  /** The From/To date inputs, in document order. */
-  const dateInputs = () => [...document.querySelectorAll<HTMLInputElement>('input[type="date"]')];
 
   it("omits a cleared bound rather than sending \"T00:00:00Z\"", async () => {
     const stub = stubFetch(routes());
     renderPage(<AdminLedgerPage />);
 
     await screen.findByText("Desk credit");
-    fireEvent.change(dateInputs()[0], { target: { value: "" } });
+    // The date filters are club-day DatePickers (P3, R7); "unbounded" is their clear ×.
+    fireEvent.click(screen.getByRole("button", { name: "Clear From" }));
 
     await vi.waitFor(() => {
       const last = stub.calls.filter((c) => c.path.startsWith("/api/v1/admin/ledger")).at(-1)!;
@@ -63,7 +63,8 @@ describe("Admin ledger — an empty date is unbounded, not malformed", () => {
       { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
       { path: "/api/v1/admin/ledger", status: 400, body: { error: "bad_range" } },
     ]);
-    fireEvent.change(dateInputs()[1], { target: { value: "2020-01-01" } });
+    // Any change of filter re-reads; clearing a bound is the one a DatePicker offers in one press.
+    fireEvent.click(screen.getByRole("button", { name: "Clear To" }));
 
     // Nothing stale survives: not the rows, and not the totals computed from them.
     await vi.waitFor(() => expect(screen.queryByText("Desk credit")).not.toBeInTheDocument());
@@ -131,10 +132,9 @@ describe("Admin ledger — the filters are the URL", () => {
     expect(call.path).toContain("from=2026-01-01T00%3A00%3A00Z");
     expect(call.path).toContain("to=2026-01-31T23%3A59%3A59Z");
 
-    // The dates the link named, on the inputs — not today's default window.
-    const dates = [...document.querySelectorAll<HTMLInputElement>('input[type="date"]')];
-    expect(dates[0].value).toBe("2026-01-01");
-    expect(dates[1].value).toBe("2026-01-31");
+    // The dates the link named, on the pickers — not today's default window.
+    expect(screen.getByRole("button", { name: /^From: / })).toHaveAccessibleName(`From: ${formatClubDayLabel("2026-01-01")}`);
+    expect(screen.getByRole("button", { name: /^To: / })).toHaveAccessibleName(`To: ${formatClubDayLabel("2026-01-31")}`);
     expect(screen.getByLabelText("Search (name)")).toHaveValue("Naledi");
 
     // ...and the member filter is said out loud, because an unexplained short list is the
@@ -164,9 +164,10 @@ describe("Admin ledger — the filters are the URL", () => {
 
     // "The last 30 days" resolves to a different period every day. What the admin copies
     // has to be the dates on screen.
-    const dates = [...document.querySelectorAll<HTMLInputElement>('input[type="date"]')];
-    await vi.waitFor(() => expect(search()).toContain(`from=${dates[0].value}`));
-    expect(search()).toContain(`to=${dates[1].value}`);
+    await vi.waitFor(() => expect(search()).toContain("from="));
+    const pinned = new URLSearchParams(search());
+    expect(screen.getByRole("button", { name: /^From: / })).toHaveAccessibleName(`From: ${formatClubDayLabel(pinned.get("from"))}`);
+    expect(screen.getByRole("button", { name: /^To: / })).toHaveAccessibleName(`To: ${formatClubDayLabel(pinned.get("to"))}`);
   });
 });
 
@@ -200,11 +201,15 @@ describe("Admin ledger — the totals are signed by their value, not by their la
     { path: "/api/v1/admin/ledger", body: rows },
   ];
 
-  /** The four figures above the table, in document order: movements, credits, debits, net. */
-  const totals = () => [...document.querySelectorAll("p.font-mono")].map((p) => p.textContent ?? "");
+  /**
+   * The four figures above the table, in document order: movements, credits, debits, net.
+   * Found by their data attribute (P3 set them in tabular Figtree rather than the monospace
+   * face this selected on).
+   */
+  const totals = () => [...document.querySelectorAll("[data-ledger-total]")].map((p) => p.textContent ?? "");
 
   /** The same four, as `{ text, className }` — because the colour is the sign said again. */
-  const tiles = () => [...document.querySelectorAll("p.font-mono")]
+  const tiles = () => [...document.querySelectorAll("[data-ledger-total]")]
     .map((p) => ({ text: p.textContent ?? "", cls: p.className }));
 
   it("puts no sign on a total of nothing", async () => {

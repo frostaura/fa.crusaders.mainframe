@@ -1,7 +1,10 @@
 import { useState } from "react";
-import { Card } from "../Card";
 import { Alert } from "../Alert";
-import { ConfirmButton } from "../ConfirmButton";
+import { ConfirmDialog } from "../admin/ConfirmDialog";
+import { splitQuestion } from "../../lib/confirmCopy";
+import { Button } from "../ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
+import { Skeleton } from "../ui/skeleton";
 import { FleetResultPanel, type FleetResultState } from "./FleetResultPanel";
 import {
   doorFleetReopenConfirm, doorFleetReopenLabel, doorFleetShutConfirm, doorsStayShutNotice,
@@ -140,18 +143,24 @@ export function FleetShutPanel({ chrome, loading, failed, reload, onRetry, timez
 
   return (
     <section aria-labelledby="fleet-shut-heading">
-      <Card className="space-y-3">
-        <h2 id="fleet-shut-heading" className="text-base font-semibold">All doors</h2>
+      <Card>
+        <CardHeader>
+          <CardTitle asChild><h2 id="fleet-shut-heading">All doors</h2></CardTitle>
+          {!failed && (
+            <CardDescription>
+              {loading ? <Skeleton className="h-4 w-40" /> : tally(chrome.total, open)}
+              {loading ? <span className="sr-only">Loading the club&apos;s doors…</span> : null}
+            </CardDescription>
+          )}
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
         {failed ? (
           <>
             <Alert tone="danger">Couldn't load the club's doors, so nothing can be shut from here.</Alert>
-            <button type="button" onClick={onRetry} className="min-h-11 rounded-lg border border-control px-5 text-sm font-medium">
-              Try again
-            </button>
+            <Button variant="outline" className="self-start" onClick={onRetry}>Try again</Button>
           </>
         ) : (
           <>
-            <p className="text-xs text-text-muted">{loading ? "Loading the club's doors…" : tally(chrome.total, open)}</p>
             <p className="text-sm text-text-secondary">
               Shutting every door takes effect at the club's server at once. Each door finds out the next
               time it reaches the server; a door that has lost the network never finds out, and keeps
@@ -159,32 +168,31 @@ export function FleetShutPanel({ chrome, loading, failed, reload, onRetry, timez
               out of the building is mechanical and none of this touches it.
             </p>
             {error && <Alert tone="danger">{error}</Alert>}
-            <div className="space-y-2">
+            <div className="flex flex-col gap-2">
               {open > 0 && (
-                <ConfirmButton
-                  idleLabel={open === chrome.total ? "Shut all doors" : `Shut the ${open} ${open === 1 ? "door" : "doors"} still open`}
+                <FleetConfirm
+                  label={open === chrome.total ? "Shut all doors" : `Shut the ${open} ${open === 1 ? "door" : "doors"} still open`}
+                  context={`every door the club has open — ${open} of ${chrome.total}`}
                   cancelLabel="Keep them open"
                   // B6 / C-L2 / R3-23: the club's TOTAL as well as the count this will shut.
                   // "Shut all 2 doors?" over a club of three is false twice — it is not all
                   // of them, and it tells a reader the control reaches every door there is.
-                  confirmLabel={doorFleetShutConfirm(open, shutUnreachable, chrome.total)}
-                  ariaLabel={`every door the club has open — ${open} of ${chrome.total}`}
-                  onConfirm={() => run("shut")}
+                  sentence={doorFleetShutConfirm(open, shutUnreachable, chrome.total)}
                   tone="danger"
                   disabled={loading}
-                  className="min-h-11 w-full"
+                  onConfirm={() => run("shut")}
                 />
               )}
               {shutTogether.length > 0 && (
                 <>
-                  <ConfirmButton
-                    idleLabel={doorFleetReopenLabel(shutTogether.length)}
+                  <FleetConfirm
+                    label={doorFleetReopenLabel(shutTogether.length)}
+                    context={`every door the club shut together — ${shutTogether.length}`}
                     cancelLabel="Leave them shut"
-                    confirmLabel={doorFleetReopenConfirm(shutTogether.length, reopenUnreachable)}
-                    ariaLabel={`every door the club shut together — ${shutTogether.length}`}
-                    onConfirm={() => run("reopen")}
+                    sentence={doorFleetReopenConfirm(shutTogether.length, reopenUnreachable)}
+                    tone="primary"
                     disabled={loading}
-                    className="min-h-11 w-full"
+                    onConfirm={() => run("reopen")}
                   />
                   {/* Beside the control, at rest, not hidden until armed (A12). A consequence
                       an admin only meets after committing to the first tap is a consequence
@@ -204,8 +212,45 @@ export function FleetShutPanel({ chrome, loading, failed, reload, onRetry, timez
             </div>
           </>
         )}
+        </CardContent>
       </Card>
       {result && <FleetResultPanel state={result} />}
     </section>
+  );
+}
+
+/**
+ * A fleet-wide shut or reopen, confirmed in a dialog (P3). The trigger's name says what it
+ * reaches ("Shut all doors — every door the club has open — 2 of 3"); the dialog asks the
+ * question and states the club's own consequence, counted from its doors (B3 at fleet scale).
+ */
+function FleetConfirm(props: {
+  label: string;
+  context: string;
+  cancelLabel: string;
+  sentence: string;
+  tone: "danger" | "primary";
+  disabled: boolean;
+  onConfirm: () => Promise<void>;
+}) {
+  const { label, context, sentence, tone } = props;
+  const { question, consequence } = splitQuestion(sentence);
+  return (
+    <ConfirmDialog
+      trigger={(
+        <Button variant={tone === "danger" ? "danger" : "secondary"} block className="h-auto min-h-touch whitespace-normal py-2" disabled={props.disabled}>
+          {label}{" "}<span className="sr-only">{`— ${context}`}</span>
+        </Button>
+      )}
+      title={question ?? `${label}?`}
+      description={consequence}
+      confirmLabel={label}
+      cancelLabel={props.cancelLabel}
+      tone={tone}
+      // The per-door receipt is what the admin is looking for next; the dialog must not hand
+      // focus back to its trigger over the top of it.
+      focusAfter={() => document.querySelector<HTMLElement>("[data-fleet-result-heading]")}
+      onConfirm={props.onConfirm}
+    />
   );
 }

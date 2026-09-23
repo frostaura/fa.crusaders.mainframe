@@ -1,5 +1,7 @@
 import { Alert } from "../Alert";
-import { ConfirmButton } from "../ConfirmButton";
+import { ConfirmDialog } from "../admin/ConfirmDialog";
+import { splitQuestion } from "../../lib/confirmCopy";
+import { Button } from "../ui/button";
 import {
   DOOR_REOPEN_LABEL, DOOR_SHUT_LABEL, doorReopenConfirm, doorShutConfirm, doorShutNotice,
   doorShutOfflineNotice, doorShutStandingNotice, type DoorSituation,
@@ -146,19 +148,15 @@ export function DoorShutControl({ door, onDone, shutAt, online, timezone }: {
             {doorShutOfflineNotice(door.name, situation.named, heardShut)}
           </p>
         )}
-        <ConfirmButton
-          idleLabel={DOOR_REOPEN_LABEL}
+        <DoorConfirm
+          label={DOOR_REOPEN_LABEL}
+          doorName={door.name}
+          sentence={doorReopenConfirm(situation)}
           cancelLabel="Leave it shut"
-          confirmLabel={doorReopenConfirm(situation)}
-          ariaLabel={door.name}
-          // R3 adoption. `subject` names what the way OUT keeps — "Leave it shut — Front
-          // door" — so the cancel does not carry the door's name only by way of the verb it
-          // is refusing. `focusAfter` replaces the effect above: the Shut control that takes
-          // this one's place is where the person was standing.
-          subject={door.name}
+          tone="primary"
+          // The Shut control that takes this one's place is where the person was standing.
           focusAfter={successor}
           onConfirm={() => onDone(true)}
-          className="min-h-11 w-full"
         />
       </div>
     );
@@ -171,19 +169,50 @@ export function DoorShutControl({ door, onDone, shutAt, online, timezone }: {
           B5: this is the LONG explanation, as plain page text beside the control. The armed
           consequence is ≤25 words and is generated from this door's own situation. */}
       <p className="text-sm text-text-secondary">{doorShutNotice()}</p>
-      <ConfirmButton
-        idleLabel={DOOR_SHUT_LABEL}
+      <DoorConfirm
+        label={DOOR_SHUT_LABEL}
+        doorName={door.name}
+        sentence={doorShutConfirm(situation)}
         cancelLabel="Keep it open"
-        confirmLabel={doorShutConfirm(situation)}
-        ariaLabel={door.name}
-        // "Keep it open — Front door": the way out, named after what it keeps. Without the
-        // subject it is one of a column of identical "Keep it open" controls.
-        subject={door.name}
+        tone="danger"
         focusAfter={successor}
         onConfirm={() => onDone(false)}
-        tone="danger"
-        className="min-h-11 w-full"
       />
     </div>
+  );
+}
+
+/**
+ * Shut or reopen, confirmed in a dialog (P3 — it was the inline two-tap ConfirmButton). The
+ * trigger's name carries the door ("Shut this door — Side door"), so a column of them is not a
+ * column of identical controls; the dialog's title asks the question and its description is the
+ * door's own consequence, generated from its situation (B3). The way out names what it keeps.
+ */
+function DoorConfirm(props: {
+  label: string;
+  doorName: string;
+  sentence: string;
+  cancelLabel: string;
+  tone: "danger" | "primary";
+  focusAfter: () => HTMLElement | null;
+  onConfirm: () => Promise<void>;
+}) {
+  const { label, doorName, sentence, cancelLabel, tone } = props;
+  const { question, consequence } = splitQuestion(sentence);
+  return (
+    <ConfirmDialog
+      trigger={(
+        <Button variant={tone === "danger" ? "danger-soft" : "secondary"} block className="h-auto min-h-touch whitespace-normal py-2">
+          {label}{" "}<span className="sr-only">{`— ${doorName}`}</span>
+        </Button>
+      )}
+      title={question ?? `${label}?`}
+      description={consequence}
+      confirmLabel={label}
+      cancelLabel={cancelLabel}
+      tone={tone}
+      focusAfter={props.focusAfter}
+      onConfirm={props.onConfirm}
+    />
   );
 }

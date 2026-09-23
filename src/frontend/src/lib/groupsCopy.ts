@@ -590,3 +590,25 @@ export function previewSummary(input: {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------------------
+// The card's actions and their confirm dialogs (P3 — row actions behind ⋯, destructive work
+// behind a dialog with an outcome-named primary). Tests query by these.
+// ---------------------------------------------------------------------------------------
+
+export const GROUP_ACTIONS = {
+  edit: "Edit",
+  members: "Members",
+  preview: "Preview week",
+  more: (name: string) => `More actions for ${name}`,
+  archive: "Archive group",
+  archiveTitle: (name: string) => `Archive ${name}?`,
+  archiveBody: (name: string) =>
+    `${name} stops applying to anybody. Nothing is deleted and it can be brought back.`,
+  remove: "Delete group",
+  removeTitle: (name: string) => `Delete ${name}?`,
+  removeBody: (name: string) =>
+    `${name} is removed for good. The club refuses this while anybody is still in it — archive it instead to keep its history.`,
+  standing: (name: string) =>
+    `${name} is one of the club's two standing groups. It can be renamed and edited, and it cannot be deleted.`,
+} as const;

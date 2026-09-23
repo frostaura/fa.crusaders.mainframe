@@ -52,7 +52,14 @@ const SELF_FRAMED = [
   "has-[>[data-admin-layout]]:max-w-none has-[>[data-admin-layout]]:p-0",
 ].join(" ");
 
-const FRAME = "mx-auto flex w-full min-h-0 flex-1 flex-col px-4 pb-10 pt-6 sm:px-6 lg:px-8 lg:pt-8";
+/**
+ * `grow shrink-0`, never `flex-1 min-h-0`: a frame allowed to shrink is squeezed to the scroller's
+ * height and its page overflows it, and overflow from a squeezed child does not carry `<main>`'s
+ * padding-bottom — so on a phone the last 65px of every long page (the bookings grid's last rows
+ * included) sat under the tab bar at the end of the scroll (measured at the P3/P4 integration).
+ * It still grows, so a short page fills the height.
+ */
+const FRAME = "mx-auto flex w-full grow shrink-0 flex-col px-4 pb-10 pt-6 sm:px-6 lg:px-8 lg:pt-8";
 
 export default function AppShell() {
   const auth = useAuth();

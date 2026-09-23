@@ -1,41 +1,72 @@
 import { useCallback, useMemo, useRef, useState } from "react";
+import type { ScheduleDay } from "./api";
+import type { GridBooking, SelectedSlot } from "../components/bookings/types";
+import { clubDayAndClock } from "./clubClock";
 
 /**
- * Multi-select on the booking grid — items 5 and 13.
+ * Multi-select on the booking grid — R4, and D8: members get it too.
  *
  * <p>
- * The state machine lives here rather than in the page for the reason `lib/scheduleEnd` does:
- * the schedule page already carries two modals, four mutations and an optimistic grid, and the
- * complexity gate is what stops that growing without anybody deciding to let it. It is also
- * the only way the selection rules get tested without rendering two hundred cells.
+ * <b>Only a cell the viewer could act on is ever selectable</b> (design-system.md's slot-state
+ * table): a free slot they could book, their own future booking, and — for an admin — anybody's
+ * future booking. The cell decides that (`cellVerdict` — past, taken, closed, group window,
+ * peak, quota) and publishes the answer as `data-select-key`; this module never re-derives it.
+ * What the grid cannot pre-filter — balance, a race with another member — the server refuses
+ * per item, and the sheet shows it.
  * </p>
  *
  * <p>
- * <b>A selection is a set of KEYS, and the keys are stable identities</b> — a booking's id, or
- * a court-and-instant for a free slot. Not indices, and not DOM order: the grid repaints when
- * the clock crosses a slice boundary, and a selection addressed by position would silently
- * move under an admin who was reading it.
+ * <b>A selection is a set of KEYS, and the keys are stable identities</b> — a court and an
+ * instant. Not indices and not DOM order: the grid repaints when the clock crosses a slice, and
+ * a selection addressed by position would move under a member who was reading it.
  * </p>
  *
  * <p>
- * <b>Changing the day clears the selection and says so.</b> A selection that survived a date
- * change would act on slots the admin is no longer looking at, which on a bulk cancel is other
- * people's money.
+ * <b>The member's daily cap is honoured here</b> (`cap`, the server's `remainingToday`). A
+ * member four slots from their limit cannot tick a fifth; they are told why, once, in the live
+ * region. An admin has no cap (`null`).
  * </p>
  */
+
+export type SelectionKey = string;
+
+/** Where a cell is in the grid. Row is the time slice, column is the court. */
+export type GridCoord = { row: number; col: number };
 
 export type SelectionTarget =
   | { kind: "free"; courtId: string; startsAtUtc: string }
   | { kind: "booked"; bookingId: string };
 
-export type SelectionKey = string;
-
-/** The one encoding, so a key made in a cell and a key read in the action bar are the same string. */
-export function selectionKey(t: SelectionTarget): SelectionKey {
-  return t.kind === "free" ? `free:${t.courtId}:${t.startsAtUtc}` : `booked:${t.bookingId}`;
+/** The key for a free slice. One encoding, so a cell's key and the page's reading agree. */
+export function selectionKey(courtId: string, startsAtUtc: string): SelectionKey {
+  return `free:${courtId}:${startsAtUtc}`;
 }
 
-/** The key back to what it names — the action bar has keys and needs court ids and booking ids. */
+/** The key for a booking — its id, which is stable however many rows it spans. */
+export function bookedKey(bookingId: string): SelectionKey {
+  return `booked:${bookingId}`;
+}
+
+/**
+ * The provisional id a just-made booking wears until the confirming read replaces it.
+ *
+ * <p>
+ * One spelling, written and recognised here, because the grid must be able to tell such a cell
+ * apart: it is not actionable, and it is never selectable. A cancel sent for this id is a cancel
+ * for a booking the server has never heard of.
+ * </p>
+ */
+const PENDING_PREFIX = "pending:";
+
+export function pendingBookingId(courtId: string, startsAtUtc: string): string {
+  return `${PENDING_PREFIX}${courtId}:${startsAtUtc}`;
+}
+
+export function isPendingBooking(bookingId: string | null | undefined): boolean {
+  return typeof bookingId === "string" && bookingId.startsWith(PENDING_PREFIX);
+}
+
+/** The key back to what it names, or null for anything this module did not write. */
 export function parseSelectionKey(key: SelectionKey): SelectionTarget | null {
   if (key.startsWith("booked:")) return { kind: "booked", bookingId: key.slice("booked:".length) };
   if (!key.startsWith("free:")) return null;
@@ -45,110 +76,19 @@ export function parseSelectionKey(key: SelectionKey): SelectionTarget | null {
   return { kind: "free", courtId: rest.slice(0, split), startsAtUtc: rest.slice(split + 1) };
 }
 
-export type SelectionApi = {
-  /** Whether the grid is IN selection mode. Cells behave normally when it is not. */
-  active: boolean;
-  count: number;
-  isSelected(key: SelectionKey): boolean;
-  toggle(key: SelectionKey, at?: GridCoord): void;
-  /**
-   * Long-press to enter selection mode and take this cell with you (D3 §4.1, door 2).
-   *
-   * <p>
-   * 500 ms, and cancelled by any movement or release before then — a press that becomes a
-   * scroll must not select anything, which on a phone grid is most presses.
-   * </p>
-   */
-  armLongPress(key: SelectionKey, at?: GridCoord): (e: React.PointerEvent) => void;
-  /**
-   * Drop the choices but stay in the mode — the first Escape.
-   *
-   * <p>
-   * Two steps rather than one, because an admin who has ticked twelve cells by mistake should
-   * not also lose the mode they were working in. D3 §4.7.
-   * </p>
-   */
-  clearAll(): void;
-  /** Leave the mode — the second Escape, and the day strip's Done. */
-  leave(): void;
-  /**
-   * The corner a Shift extension or a marquee measures from, or null when there is none.
-   *
-   * <p>
-   * Set by an ordinary choice — a click, a Space, a long press, the start of a drag — so that
-   * "extend from the last one I picked" means what an admin expects it to mean.
-   * </p>
-   */
-  anchor: GridCoord | null;
-  /**
-   * Start a range at this cell: it becomes the anchor, and everything chosen so far is kept.
-   *
-   * <p>
-   * The kept set is what makes an extension REPLACEABLE rather than merely additive. Dragging
-   * out a rectangle and then dragging a smaller one from the same corner shrinks it, because
-   * the second extension is applied to the set as it was before the first — which is the
-   * behaviour of every grid anybody has used, and the reason a mis-drag is not a mistake you
-   * have to undo cell by cell.
-   * </p>
-   */
-  beginRange(at: GridCoord): void;
-  /**
-   * Replace the current extension with these keys, and turn the mode on.
-   *
-   * The caller supplies the keys because the geometry is the GRID's: which cells lie in the
-   * rectangle, and which of those may be chosen at all, are questions this module would have
-   * to answer with a second copy of the day's rules. See `candidateAs`.
-   */
-  extendRange(keys: readonly SelectionKey[]): void;
-};
-
-/** The key for this cell when it can be chosen right now, else null. */
-export function selectableAs(
-  selection: SelectionApi | null, target: SelectionTarget, allowed: boolean,
-): SelectionKey | null {
-  if (!selection?.active || !allowed) return null;
-  return selectionKey(target);
+/** How many of these keys are free slices — the only kind the member's daily cap counts. */
+export function freeCount(keys: readonly SelectionKey[]): number {
+  return keys.filter((k) => k.startsWith("free:")).length;
 }
-
-/**
- * The key for this cell if it could EVER be chosen — whether or not the mode is on.
- *
- * <p>
- * The marquee needs this and `selectableAs` cannot give it: a drag is one of the three ways
- * INTO selection mode (D3 §4.1), so at the moment the pointer goes down no cell is selectable
- * yet. Written onto the cell as `data-select-key`, it is also what stops the range machinery
- * keeping a second copy of "which cells may be chosen" — the cell decides, once, and the
- * marquee and the Shift extension read the cell's own answer instead of re-deriving it from
- * the day's rules and drifting from it.
- * </p>
- */
-export function candidateAs(
-  selection: SelectionApi | null, target: SelectionTarget, allowed: boolean,
-): SelectionKey | null {
-  if (!selection || !allowed) return null;
-  return selectionKey(target);
-}
-
-/** Where a cell is in the grid. Row is the time slice, column is the court. */
-export type GridCoord = { row: number; col: number };
 
 /**
  * Is `c` inside the rectangle the two corners span?
  *
  * <p>
- * <b>A rectangle, and D3 §4.1 says "reading order" for Shift+click.</b> This deviates, with a
- * reason: reading order is the right model for a LIST and the wrong one for a grid. An admin
- * shift-clicking from Court 2 at 18:00 to Court 2 at 20:00 means that court for those two
- * hours — which is the commonest thing anybody does on this screen, a league night on one
- * court. In reading order that same pair also takes courts 3 and 4 at 18:00, every court of
- * every row between, and courts 1 and 2 at 20:00: eighteen slots where two hours of one court
- * were asked for, on a control that ends in a bulk charge.
- * </p>
- *
- * <p>
- * It also makes the keyboard and the pointer agree. A drag paints the rectangle the pointer
- * sweeps because that is the shape a pointer draws; a Shift+Arrow that grew a different shape
- * from the same corners would be two selection models in one grid.
+ * A rectangle, not a reading-order run: Shift+click from Court 2 at 18:00 to Court 2 at 20:00
+ * means that court for those two hours — the commonest thing anybody does here — where reading
+ * order would also sweep every court of every row between. It also makes the keyboard and the
+ * pointer agree: Shift+Arrow grows the same shape a drag paints.
  * </p>
  */
 export function withinRectangle(a: GridCoord, b: GridCoord, c: GridCoord): boolean {
@@ -156,143 +96,241 @@ export function withinRectangle(a: GridCoord, b: GridCoord, c: GridCoord): boole
     && c.col >= Math.min(a.col, b.col) && c.col <= Math.max(a.col, b.col);
 }
 
-/** The key for this cell when a long press on it would TURN selection mode on, else null. */
-export function pressableAs(
-  selection: SelectionApi | null, target: SelectionTarget, allowed: boolean,
-): SelectionKey | null {
-  if (!selection || selection.active || !allowed) return null;
-  return selectionKey(target);
-}
+/** How long a touch must rest on a free cell before it becomes a selection (design-system.md). */
+export const LONG_PRESS_MS = 450;
 
-export const LONG_PRESS_MS = 500;
+export type SelectionApi = {
+  /** Whether the grid is IN selection mode. A tap books one slot when it is not. */
+  active: boolean;
+  count: number;
+  isSelected(key: SelectionKey): boolean;
+  /** Tick or untick one cell, re-anchoring there. Refused (and said) at the member's cap. */
+  toggle(key: SelectionKey, at?: GridCoord): void;
+  /** Enter the mode holding this one cell — the hover checkbox and the long press. */
+  enterWith(key: SelectionKey, at?: GridCoord): void;
+  /** A touch resting on a free cell (coarse pointers only; a mouse drags instead). */
+  armLongPress(key: SelectionKey, at?: GridCoord): (e: React.PointerEvent) => void;
+  /** Drop the choices, keep the mode — the first Escape. */
+  clearAll(): void;
+  /** Leave the mode — the second Escape, the × on the bar, the toolbar toggle. */
+  leave(): void;
+  /** The corner a Shift extension or a drag measures from. */
+  anchor: GridCoord | null;
+  /** Start a range here, keeping what is already chosen so the range can be pulled back. */
+  beginRange(at: GridCoord): void;
+  /** Replace the current extension with these keys (cells in the rectangle that may be chosen). */
+  extendRange(keys: readonly SelectionKey[]): void;
+};
 
 export type Selection = {
   api: SelectionApi;
   keys: SelectionKey[];
-  enter(): void;
-  /** Leave selection mode entirely. */
-  exit(): void;
-  /** What the day strip's one button does. In here so the page carries no branch for it. */
+  /** The toolbar toggle. */
   toggleMode(): void;
-  /** Keep the mode, drop the choices — what a date change does, and what Clear does. */
+  /** Keep the mode, drop the choices — a date change, and a finished booking. */
   clear(): void;
-  /** Drop specific keys, for the cells a batch has just acted on. */
-  drop(keys: readonly SelectionKey[]): void;
 };
 
-/**
- * Selection state for one grid.
- *
- * @param enabled false for a member — there is no selection mode at all on a member's grid,
- *   and `null` rather than a disabled API is what keeps the cells free of a role check.
- * @param onAnnounce a sentence for the polite live region the action bar owns.
- */
-export function useGridSelection(enabled: boolean, onAnnounce: (text: string) => void): Selection | null {
+type Options = {
+  /** At most this many may be chosen (the member's remaining slots today); `null` = no limit. */
+  cap: number | null;
+  /** A sentence for the page's polite live region. */
+  announce: (text: string) => void;
+  /** What to say when the cap refuses a choice. */
+  capSentence: (cap: number) => string;
+  onSentence: string;
+  offSentence: string;
+};
+
+/** Keep at most `cap` FREE keys, oldest first — the ones already chosen win over a new sweep. */
+function capped(keys: SelectionKey[], cap: number | null): SelectionKey[] {
+  if (cap === null) return keys;
+  const out: SelectionKey[] = [];
+  let free = 0;
+  for (const k of keys) {
+    const isFree = k.startsWith("free:");
+    if (isFree && free >= cap) continue;
+    if (isFree) free += 1;
+    out.push(k);
+  }
+  return out;
+}
+
+/** A slightly longer vibration than a tap, where the platform has one. Never required. */
+function hapticTick() {
+  try { navigator.vibrate?.(10); } catch { /* a platform without haptics is not an error */ }
+}
+
+export function useGridSelection(options: Options): Selection {
+  const { cap, announce, capSentence, onSentence, offSentence } = options;
   const [active, setActive] = useState(false);
   const [keys, setKeys] = useState<SelectionKey[]>([]);
+  const [anchor, setAnchor] = useState<GridCoord | null>(null);
+  /** The set an extension is measured against, so a second drag from one corner REPLACES the first. */
+  const base = useRef<SelectionKey[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /** The corner an extension measures from, and the set to measure it against. */
-  const [anchor, setAnchor] = useState<GridCoord | null>(null);
-  const base = useRef<SelectionKey[]>([]);
+  const refuse = useCallback(() => announce(capSentence(cap ?? 0)), [announce, capSentence, cap]);
 
   const toggle = useCallback((key: SelectionKey, at?: GridCoord) => {
-    // An ordinary choice re-anchors. "Extend from the last one I picked" is only true if
-    // picking one moves the corner.
-    if (at) { setAnchor(at); }
-    setKeys((prev) => {
-      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
-      if (at) base.current = next;
-      return next;
-    });
-  }, []);
+    if (at) setAnchor(at);
+    if (keys.includes(key)) {
+      const next = keys.filter((k) => k !== key);
+      base.current = next;
+      setKeys(next);
+      return;
+    }
+    if (cap !== null && key.startsWith("free:") && freeCount(keys) >= cap) { refuse(); return; }
+    const next = [...keys, key];
+    base.current = next;
+    setKeys(next);
+  }, [keys, cap, refuse]);
+
+  const enterWith = useCallback((key: SelectionKey, at?: GridCoord) => {
+    setActive(true);
+    announce(onSentence);
+    if (cap !== null && cap <= 0 && key.startsWith("free:")) { refuse(); return; }
+    base.current = [key];
+    if (at) setAnchor(at);
+    setKeys([key]);
+  }, [announce, onSentence, refuse, cap]);
 
   const beginRange = useCallback((at: GridCoord) => {
     setAnchor(at);
-    setKeys((prev) => { base.current = prev; return prev; });
-  }, []);
+    base.current = keys;
+  }, [keys]);
 
   const extendRange = useCallback((range: readonly SelectionKey[]) => {
     setActive(true);
-    setKeys(() => {
-      const out = [...base.current];
-      for (const k of range) if (!out.includes(k)) out.push(k);
-      return out;
-    });
-  }, []);
+    const out = [...base.current];
+    for (const k of range) if (!out.includes(k)) out.push(k);
+    const kept = capped(out, cap);
+    if (kept.length < out.length) refuse();
+    setKeys(kept);
+  }, [cap, refuse]);
 
   const armLongPress = useCallback((key: SelectionKey, at?: GridCoord) => (e: React.PointerEvent) => {
-    // Coarse pointers only. On a mouse the marquee drag is the route in, and a 500 ms
-    // hold-and-click on a desktop would fire on every slow click.
     if (e.pointerType === "mouse") return;
+    const target = e.currentTarget as HTMLElement;
     const cancel = () => {
       if (timer.current) clearTimeout(timer.current);
       timer.current = null;
-      e.currentTarget.removeEventListener("pointerup", cancel);
-      e.currentTarget.removeEventListener("pointercancel", cancel);
-      e.currentTarget.removeEventListener("pointermove", cancel);
+      target.removeEventListener("pointerup", cancel);
+      target.removeEventListener("pointercancel", cancel);
+      target.removeEventListener("pointermove", onMove);
     };
-    e.currentTarget.addEventListener("pointerup", cancel);
-    e.currentTarget.addEventListener("pointercancel", cancel);
-    e.currentTarget.addEventListener("pointermove", cancel);
+    // A finger always drifts a pixel or two; only a real move (a scroll) cancels.
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const onMove = (m: Event) => {
+      const p = m as PointerEvent;
+      if (Math.abs(p.clientX - startX) > 8 || Math.abs(p.clientY - startY) > 8) cancel();
+    };
+    target.addEventListener("pointerup", cancel);
+    target.addEventListener("pointercancel", cancel);
+    target.addEventListener("pointermove", onMove);
     timer.current = setTimeout(() => {
       cancel();
-      setActive(true);
-      base.current = [key];
-      if (at) setAnchor(at);
-      setKeys([key]);
-      onAnnounce("Selection on. Use the arrow keys to move and space to choose.");
+      hapticTick();
+      // The click the browser fires on release must not then book the one slot.
+      target.dataset.longPressed = "true";
+      enterWith(key, at);
     }, LONG_PRESS_MS);
-  }, [onAnnounce]);
+  }, [enterWith]);
 
-  const enter = useCallback(() => {
-    setActive(true);
-    onAnnounce("Selection on. Use the arrow keys to move and space to choose.");
-  }, [onAnnounce]);
-  const exit = useCallback(() => {
-    setActive(false);
+  const clearAll = useCallback(() => { base.current = []; setAnchor(null); setKeys([]); }, []);
+  const leave = useCallback(() => {
     base.current = [];
     setAnchor(null);
     setKeys([]);
-    onAnnounce("Selection off.");
-  }, [onAnnounce]);
+    setActive(false);
+    announce(offSentence);
+  }, [announce, offSentence]);
 
   const api = useMemo<SelectionApi>(() => ({
     active, count: keys.length,
     isSelected: (key) => keys.includes(key),
-    toggle, armLongPress,
-    clearAll: () => { base.current = []; setAnchor(null); setKeys([]); },
-    leave: exit,
-    anchor, beginRange, extendRange,
-  }), [active, keys, toggle, armLongPress, exit, anchor, beginRange, extendRange]);
+    toggle, enterWith, armLongPress, clearAll, leave, anchor, beginRange, extendRange,
+  }), [active, keys, toggle, enterWith, armLongPress, clearAll, leave, anchor, beginRange, extendRange]);
 
-  return useMemo<Selection | null>(() => {
-    if (!enabled) return null;
-    return {
-      api, keys,
-      enter,
-      exit,
-      toggleMode: () => (active ? exit() : enter()),
-      clear: () => { base.current = []; setAnchor(null); setKeys([]); },
-      drop: (done) => setKeys((prev) => {
-        const next = prev.filter((k) => !done.includes(k));
-        base.current = next;
-        return next;
-      }),
-    };
-  }, [enabled, api, keys, active, enter, exit]);
+  return useMemo<Selection>(() => ({
+    api, keys,
+    toggleMode: () => {
+      if (active) { leave(); return; }
+      setActive(true);
+      announce(onSentence);
+    },
+    clear: clearAll,
+  }), [api, keys, active, leave, announce, onSentence, clearAll]);
 }
 
-/** How a selection splits: free slots get booked, booked rows get cancelled. */
-export function splitSelection(keys: readonly SelectionKey[]): {
-  free: { courtId: string; startsAtUtc: string }[]; booked: string[];
-} {
-  const free: { courtId: string; startsAtUtc: string }[] = [];
-  const booked: string[] = [];
-  for (const key of keys) {
-    const t = parseSelectionKey(key);
-    if (t?.kind === "free") free.push({ courtId: t.courtId, startsAtUtc: t.startsAtUtc });
-    else if (t?.kind === "booked") booked.push(t.bookingId);
+/**
+ * The selection as the BookSheet takes it: one item per run of adjacent slices on one court.
+ *
+ * <p>
+ * A member who ticks 18:00, 18:15, 18:30 and 18:45 on Court 2 wants one hour on Court 2 — one
+ * booking, one line on the receipt, one code — not four fifteen-minute bookings. A gap breaks
+ * the run, and so does a court change. Items come back court by court in grid order, then by
+ * time, so the sheet lists them the way the grid shows them.
+ * </p>
+ */
+export function toSelectedSlots(keys: readonly SelectionKey[], day: ScheduleDay | null): SelectedSlot[] {
+  if (!day) return [];
+  const sliceMs = (day.sliceMinutes > 0 ? day.sliceMinutes : 15) * 60_000;
+  const out: SelectedSlot[] = [];
+  for (const court of day.courts) {
+    const starts = keys
+      .map(parseSelectionKey)
+      .filter((k): k is Extract<SelectionTarget, { kind: "free" }> => k?.kind === "free" && k.courtId === court.id)
+      .map((k) => Date.parse(k.startsAtUtc))
+      .filter((ms) => Number.isFinite(ms))
+      .sort((a, b) => a - b);
+    let run: { from: number; count: number } | null = null;
+    const flush = () => {
+      if (!run) return;
+      out.push({
+        courtId: court.id, courtName: court.name, startsAt: new Date(run.from).toISOString(),
+        sliceCount: run.count, priceCredits: court.slicePriceCredits * run.count,
+      });
+    };
+    for (const ms of starts) {
+      if (run && ms === run.from + run.count * sliceMs) { run.count += 1; continue; }
+      flush();
+      run = { from: ms, count: 1 };
+    }
+    flush();
   }
-  return { free, booked };
+  return out;
+}
+
+/** The bookings in a selection, as the CancelSheet takes them — resolved against the day shown. */
+export function toGridBookings(keys: readonly SelectionKey[], day: ScheduleDay | null): GridBooking[] {
+  if (!day) return [];
+  const out: GridBooking[] = [];
+  for (const key of keys) {
+    const target = parseSelectionKey(key);
+    if (target?.kind !== "booked") continue;
+    const slot = day.slots.find((s) => s.bookingId === target.bookingId);
+    if (slot) out.push(gridBookingOf(slot, day));
+  }
+  return out;
+}
+
+/** One booking the grid shows, as the sheets take it. Photo and first name only. */
+export function gridBookingOf(slot: ScheduleDay["slots"][number], day: ScheduleDay): GridBooking {
+  const court = day.courts.find((c) => c.id === slot.courtId);
+  return {
+    bookingId: slot.bookingId ?? "",
+    courtId: slot.courtId,
+    courtName: court?.name ?? "that court",
+    startsAt: slot.startsAtUtc,
+    endsAt: slot.endsAtUtc,
+    whenLabel: clubDayAndClock(slot.startsAtUtc, day.timezone),
+    mine: slot.isMine,
+    memberFirstName: slot.isMine ? null : slot.ownerFirstName,
+    memberPhotoUrl: slot.isMine ? null : slot.ownerPhotoUrl,
+    checkedIn: slot.checkedIn,
+    amountChargedCredits: slot.amountChargedCredits,
+    timezone: day.timezone,
+  };
 }

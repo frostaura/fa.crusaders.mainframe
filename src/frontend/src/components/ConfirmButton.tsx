@@ -1,7 +1,8 @@
 import { Children, isValidElement, useContext, useEffect, useRef, useState } from "react";
 import { UNSAFE_LocationContext } from "react-router-dom";
-import { Loader2 } from "lucide-react";
 import { cn } from "../lib/utils";
+import { buttonVariants } from "./ui/button";
+import { Spinner } from "./ui/spinner";
 import { focusAfterAction, pageHeading } from "../lib/focusAfterAction";
 import { useActionFeedback, type ActionIntent } from "./useActionFeedback";
 
@@ -204,6 +205,25 @@ export function confirmSubject(subject: string | undefined, ariaLabel: string | 
 }
 
 /**
+ * The primitive button's LOOK — its variant fill, ink, hover, radius, weight and forced-colours
+ * edge — without its fixed height. (P3: restyled on `ui/button`.)
+ *
+ * <p>
+ * Derived from `buttonVariants`, never copied, so a change to what "danger-soft" means reaches
+ * this control too. The height is refused for the same reason a caller's is
+ * ({@link withoutFixedHeight}): this control must grow round a word that wraps at a 32 px root
+ * font, and `h-touch` would clip it. `min-h-11` in {@link CONTROL_CLASS} is the floor instead,
+ * and the padding stays in pixels (B12) — the variant's `px-4` is overridden below it.
+ * </p>
+ */
+function look(variant: "secondary" | "danger-soft" | "outline"): string {
+  return withoutFixedHeight(buttonVariants({ variant, size: "md" })) ?? "";
+}
+
+/** The armed half: the `armed` role, filled, with the primitive's shadow — "about to", not "danger". */
+const ARMED_LOOK = "bg-armed-strong text-armed-ink shadow-xs hover:bg-armed-strong/90";
+
+/**
  * What the button looks like before it is armed, by what it is about to do.
  *
  * <p>
@@ -215,8 +235,8 @@ export function confirmSubject(subject: string | undefined, ariaLabel: string | 
  * </p>
  */
 const IDLE_BY_TONE: Record<ConfirmTone, string> = {
-  info: "bg-info-soft text-info-strong hover:bg-info-soft/80",
-  danger: "bg-danger-soft text-danger-strong hover:bg-danger-soft/70",
+  info: look("secondary"),
+  danger: look("danger-soft"),
 };
 
 /** What the live region says when the control goes back to rest without acting. (C3) */
@@ -420,11 +440,13 @@ const CONTROL_CLASS = cn(
    * padding inside a 128 px column, which left 80 px for a word that needs 95 and broke
    * "Cancel" into "Cance / l". The text scales; the padding around it does not need to.
    */
-  "flex flex-col items-stretch justify-center rounded-md px-[12px] py-[8px] text-center text-sm font-medium",
+  "flex flex-col items-stretch justify-center rounded-lg px-[12px] py-[8px] text-center text-sm font-semibold",
+  // The primitive's `whitespace-nowrap` would undo `break-words` below; a confirm wraps.
+  "whitespace-normal",
   // `duration-base`, not `duration-200` — the same number, from the motion block in
   // `lib/tokens.ts`, so that this control's colour cross-fade and the feedback theme's
   // phases are timed by one source rather than by a literal that happens to agree.
-  "transition-colors duration-base ease-out",
+  "transition-colors duration-base ease-standard motion-reduce:transition-none",
   /**
    * `min-h-11`, and no `overflow-hidden`.
    *
@@ -544,7 +566,7 @@ export function ConfirmButton({
   className,
   tone = "info",
   idleClassName = IDLE_BY_TONE[tone],
-  armedClassName = "bg-armed-strong text-armed-ink",
+  armedClassName = ARMED_LOOK,
   disabled = false,
   ariaLabel,
   subject,
@@ -870,13 +892,15 @@ export function ConfirmButton({
             data-confirm="stop"
             aria-label={`${cancelLabel} — ${confirmSubject(subject, ariaLabel, idleText)}`}
             onClick={(e) => { e.stopPropagation(); cancel(); }}
-            className={cn(CONTROL_CLASS, "border-control bg-bg-surface text-text-secondary")}
+            // The outline look AFTER the control's own transparent edge would lose to it (both are
+            // border colours, and tailwind-merge keeps the later), so the edge is restated last.
+            className={cn(look("outline"), CONTROL_CLASS, "border-control")}
           >
             {cancelLabel}
           </button>
           <button
             type="button"
-            disabled={disabled || pending}
+            disabled={disabled}
             /**
              * B5, forced colours — the two buttons were identical without it.
              *
@@ -890,6 +914,12 @@ export function ConfirmButton({
              */
             data-confirm="go"
             aria-label={confirmName(idleText, ariaLabel, consequence)}
+            /*
+              Pending is `aria-disabled`, never `disabled` (design-system.md, Async actions): a
+              disabled button drops focus to <body> the instant the work starts. `confirm()`
+              already ignores a second press while it is in flight.
+            */
+            aria-disabled={pending || undefined}
             // No `aria-pressed`. It was set to the armed flag, so a screen reader said
             // "pressed" on a control that had done nothing yet — the word for "done" used for
             // "about to". This is not a toggle either: the confirm is a different button, not
@@ -904,20 +934,14 @@ export function ConfirmButton({
             */
             {...feedback.props}
             className={cn(
-              CONTROL_CLASS, armedClassName, pending && "cursor-wait",
+              look("secondary"), CONTROL_CLASS, armedClassName, pending && "cursor-progress",
               withoutFixedHeight(className), feedback.className,
             )}
           >
-            {pending ? (
-              <span className="flex items-center justify-center gap-2">
-                {/* `motion-reduce:animate-none`: there is no global rule that stands Tailwind's
-                    animations down, only the lift and the transition durations in index.css. */}
-                <Loader2 className="animate-spin motion-reduce:animate-none" size={16} strokeWidth={2.5} />
-                <span>Working…</span>
-              </span>
-            ) : (
-              <GlyphLabel glyph={outcomeGlyph}>{idleLabel}</GlyphLabel>
-            )}
+            {/* Working: the spinner beside the SAME words, so the button neither changes its
+                name nor its width. It said "Working…", which is the one label on the control
+                that says nothing about what it is doing. */}
+            <GlyphLabel glyph={pending ? <Spinner /> : outcomeGlyph}>{idleLabel}</GlyphLabel>
           </button>
         </>
       ) : (
@@ -936,7 +960,7 @@ export function ConfirmButton({
             at the thing that changed.
           */
           {...feedback.props}
-          className={cn(CONTROL_CLASS, idleClassName, withoutFixedHeight(className), feedback.className)}
+          className={cn(look("secondary"), CONTROL_CLASS, idleClassName, withoutFixedHeight(className), feedback.className)}
         >
           <GlyphLabel glyph={outcomeGlyph}>{idleLabel}</GlyphLabel>
         </button>

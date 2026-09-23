@@ -4,6 +4,9 @@ import SchedulePage from "./Schedule";
 import { forgetClubZone } from "../lib/clubZone";
 import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
 
+vi.mock("../components/bookings/BookSheet", async () => (await import("../test/fakeSheets")).bookSheetModule);
+vi.mock("../components/bookings/CancelSheet", async () => (await import("../test/fakeSheets")).cancelSheetModule);
+
 /**
  * Items 3 and 19 on the member's grid — the daily maximum, and the group's window.
  *
@@ -64,10 +67,12 @@ describe("item 19 — the daily maximum, on the grid", () => {
     expect(cell).not.toBeDisabled();
     expect(cell).not.toHaveAttribute("aria-disabled");
     expect(cell).toHaveTextContent("Full");
-    // Colour is never the only carrier (SC 1.4.1). The dashed `control` border is what tells a
-    // quota cell from a Taken one, which is the same grey with no border at all.
+    // Colour is never the only carrier (SC 1.4.1): a dashed edge, a lock and a word. The fill is
+    // the spec's `restricted` slot state (design-system.md: peak/group/quota) — it used to be
+    // the Taken grey with a dashed `control` edge; P4 moved every rule-locked cell onto one state.
     expect(cell.className).toMatch(/border-dashed/);
-    expect(cell.className).toMatch(/border-control/);
+    expect(cell.className).toMatch(/bg-slot-restricted-fill/);
+    expect(cell.querySelector("svg")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Book Court 1 at 17:00/ })).toBeNull();
   });
 
@@ -144,7 +149,7 @@ describe("item 3 — the group's window, on the member's grid", () => {
 
     const restricted = await screen.findByRole("button", { name: /Court 1 at 17:00 — outside the times you can book/ });
     expect(restricted).toHaveTextContent("From 16:00");
-    expect(restricted.className).toMatch(/warning-soft/);
+    expect(restricted.className).toMatch(/bg-slot-restricted-fill/);
     expect(restricted.className).toMatch(/border-dashed/);
     // And the cell INSIDE the window is an ordinary offer — a rule, not a blanked grid.
     expect(screen.getByRole("button", { name: /^Book Court 1 at 16:45 for 50\.00 cr/ })).toBeInTheDocument();
@@ -284,9 +289,11 @@ describe("item 14 — a club hold on the members' grid", () => {
     open(HELD, 500, true);
     const lift = await screen.findByRole("button", { name: "Lift the League night hold on Court 1 at 17:00" });
     // D3-B11: it was a 10 px underlined word inside a 48 px cell — the smallest destructive
-    // target in the product. 44 px is a fingertip, whatever the root font size is.
-    expect(lift.className).toMatch(/h-11/);
-    expect(lift.className).toMatch(/w-11/);
+    // target in the product. Now the house icon button (P4): 36 px drawn with a 5 px extended
+    // hit area all round — 46 px under a fingertip — and named, with the name as its tooltip.
+    expect(lift.className).toMatch(/size-9/);
+    expect(lift.className).toMatch(/after:-inset-\[5px\]/);
+    expect(lift.textContent).toBe("");
   });
 
   it("draws the hold's later cells as one block, not as four things to ask about", async () => {

@@ -1,7 +1,10 @@
 import { useRef, useState } from "react";
 import { Alert } from "../Alert";
-import { Button, Input, Label } from "../Button";
-import { ConfirmButton } from "../ConfirmButton";
+import { ConfirmDialog } from "../admin/ConfirmDialog";
+import { Button } from "../ui/button";
+import { Field, FieldDescription, FieldLabel } from "../ui/field";
+import { Input } from "../ui/input";
+import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { BatchResultList, type BatchResultRow } from "./BatchResultList";
 import { clubDayAndClock } from "../../lib/clubClock";
 import {
@@ -118,7 +121,7 @@ export function ConflictPanel({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <Alert tone="warning" live="polite">
         <strong>{conflictsHeadline(conflicts.length)}</strong>{" "}
         <strong>{NOTHING_CHANGED_YET}</strong>{" "}
@@ -126,32 +129,30 @@ export function ConflictPanel({
         {"there is no way to create a hold over a booking somebody paid for."}
       </Alert>
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[34rem] border-collapse text-sm">
-          <caption className="sr-only">
+      <div className="rounded-lg border border-border">
+        <Table className="min-w-max">
+          <TableCaption className="sr-only">
             {`The ${conflicts.length} bookings that stand in the way of this hold`}
-          </caption>
-          <thead>
-            <tr className="border-b border-border text-left text-text-secondary">
-              <th scope="col" className="py-2 pr-3 font-medium">When</th>
-              <th scope="col" className="py-2 pr-3 font-medium">Court</th>
-              <th scope="col" className="py-2 pr-3 font-medium">Whose</th>
-              <th scope="col" className="py-2 pr-3 font-medium">What would go back</th>
-            </tr>
-          </thead>
-          <tbody>
+          </TableCaption>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">When</TableHead>
+              <TableHead scope="col">Court</TableHead>
+              <TableHead scope="col">Whose</TableHead>
+              <TableHead scope="col">What would go back</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {conflicts.map((conflict, index) => (
-              <tr key={conflict.booking_id ?? `${conflict.occurrence_date}-${conflict.court_id}-${index}`} className="border-b border-border align-top">
-                <td className="py-2 pr-3 text-text-primary">{clubDayAndClock(conflict.starts_at, timezone)}</td>
-                <td className="py-2 pr-3 text-text-primary">{conflict.court_name ?? "—"}</td>
-                <td className="py-2 pr-3 text-text-primary">
-                  {conflict.member_name ?? conflict.label ?? "A club hold"}
-                </td>
-                <td className="py-2 pr-3 text-text-secondary">{conflictRefundPhrase(conflict)}</td>
-              </tr>
+              <TableRow key={conflict.booking_id ?? `${conflict.occurrence_date}-${conflict.court_id}-${index}`} className="align-top">
+                <TableCell>{clubDayAndClock(conflict.starts_at, timezone)}</TableCell>
+                <TableCell>{conflict.court_name ?? "—"}</TableCell>
+                <TableCell>{conflict.member_name ?? conflict.label ?? "A club hold"}</TableCell>
+                <TableCell className="text-text-secondary">{conflictRefundPhrase(conflict)}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
 
       {others > 0 && (
@@ -163,44 +164,44 @@ export function ConflictPanel({
       )}
 
       {cancellable.length > 0 && (
-        <div className="space-y-3 rounded-lg border border-border bg-bg-muted p-4">
+        <div className="flex flex-col gap-4 rounded-lg border border-border bg-bg-muted p-4">
           <p className="text-sm text-text-secondary">
             {"Cancelling from here refunds each member in full — the late-cancellation penalty is "}
             {"waived, because the club moved, not them. Each member is emailed the reason you type."}
           </p>
-          <div className="space-y-1">
-            <Label htmlFor="conflict-reason">Reason (the members will read this)</Label>
+          <Field>
+            <FieldLabel>Reason (the members will read this)</FieldLabel>
             <Input
-              id="conflict-reason"
               value={reason}
               maxLength={512}
               onChange={(e) => setReason(e.target.value)}
               placeholder="Court 1–3 are held for league from 6 October"
             />
             {!reasonGiven && (
-              <p className="text-sm text-text-muted">
+              <FieldDescription>
                 A reason is required — it is what the member is told, and it is what the change
                 record keeps.
-              </p>
+              </FieldDescription>
             )}
-          </div>
+          </Field>
 
-          <div className="flex flex-wrap gap-2">
-            <ConfirmButton
-              idleLabel={clearAllLabel(cancellable.length, total)}
-              tone="danger"
-              disabled={!reasonGiven || busy}
-              subject={`${cancellable.length} member booking${cancellable.length === 1 ? "" : "s"}`}
-              cancelLabel="Keep them"
-              confirmLabel={
-                total === null
-                  ? `${cancellable.length} member booking${cancellable.length === 1 ? "" : "s"} will be cancelled and refunded in full, and each member emailed. This cannot be undone from here — a cancelled slot goes back on the grid for anyone to book.`
-                  : `${cancellable.length} member booking${cancellable.length === 1 ? "" : "s"} will be cancelled, ${total.toFixed(2)} cr goes back in full, and each member is emailed. This cannot be undone from here — a cancelled slot goes back on the grid for anyone to book.`
-              }
-              focusAfter={() => resultsRef.current?.querySelector("h3")}
-              onConfirm={() => cancelThese(cancellable)}
-            />
-          </div>
+          <ConfirmDialog
+            trigger={(
+              <Button variant="danger" className="self-start" disabled={!reasonGiven || busy}>
+                {clearAllLabel(cancellable.length, total)}
+              </Button>
+            )}
+            title={`Cancel ${cancellable.length} member booking${cancellable.length === 1 ? "" : "s"}?`}
+            description={
+              total === null
+                ? `${cancellable.length} member booking${cancellable.length === 1 ? "" : "s"} will be cancelled and refunded in full, and each member emailed. This cannot be undone from here — a cancelled slot goes back on the grid for anyone to book.`
+                : `${cancellable.length} member booking${cancellable.length === 1 ? "" : "s"} will be cancelled, ${total.toFixed(2)} cr goes back in full, and each member is emailed. This cannot be undone from here — a cancelled slot goes back on the grid for anyone to book.`
+            }
+            confirmLabel={clearAllLabel(cancellable.length, total)}
+            cancelLabel="Keep them"
+            focusAfter={() => resultsRef.current?.querySelector("h3")}
+            onConfirm={() => cancelThese(cancellable)}
+          />
         </div>
       )}
 
@@ -211,7 +212,7 @@ export function ConflictPanel({
               {"The check above no longer describes the club, because the club has just changed. "}
               {"Check the sentence again before creating anything."}
             </p>
-            <Button variant="outline" className="min-h-11" onClick={() => setResults(null)}>
+            <Button variant="outline" className="self-start" onClick={() => setResults(null)}>
               Hide this list
             </Button>
           </BatchResultList>

@@ -282,4 +282,31 @@ describe("DataTable", () => {
     expect(screen.getByText("Alice")).toBeInTheDocument();
     expect(screen.queryByText("Bob")).not.toBeInTheDocument();
   });
+
+  /**
+   * P3 — on `ui/table`: the search box is a NAMED field (a placeholder alone is no label), each
+   * sortable header says its direction in `aria-sort` rather than by caret alone, and a filter
+   * that matches nothing is not confused with an empty table.
+   */
+  it("names its search, says its sort, and tells a filtered-out table from an empty one", () => {
+    render(
+      <DataTable
+        rows={rows}
+        columns={columns}
+        rowKey={(r) => r.id}
+        defaultSort={{ key: "credits", dir: "desc" }}
+        emptyTitle="No members yet"
+        search={{ placeholder: "Search members", fields: (r) => r.name }}
+      />,
+    );
+    expect(screen.getByRole("searchbox", { name: "Search members" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /Credits/ })).toHaveAttribute("aria-sort", "descending");
+    expect(screen.getByRole("columnheader", { name: /Name/ })).toHaveAttribute("aria-sort", "none");
+    fireEvent.click(screen.getByRole("button", { name: /Name/ }));
+    expect(screen.getByRole("columnheader", { name: /Name/ })).toHaveAttribute("aria-sort", "ascending");
+
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "zzz" } });
+    expect(screen.getByText("No matches for that search.")).toBeInTheDocument();
+    expect(screen.queryByText("No members yet")).not.toBeInTheDocument();
+  });
 });

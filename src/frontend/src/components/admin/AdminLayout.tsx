@@ -46,7 +46,11 @@ export default function AdminLayout() {
   const { pathname } = useLocation();
   const attention = useAdminAttention();
   return (
-    <div data-admin-layout="" className="flex min-h-full w-full flex-1">
+    // `grow shrink-0`, not `flex-1`: the app shell's frame is a column that may not grow
+    // (min-h-0), and `min-h-full` replaces a flex item's content-height floor — so with
+    // `flex-1` this box stayed one screen tall while the page overflowed it, and the rail's
+    // surface and edge stopped a screen down a long admin page.
+    <div data-admin-layout="" className="flex min-h-full w-full shrink-0 grow">
       <AdminRail pathname={pathname} counts={attention} />
       <div className="flex min-w-0 flex-1 flex-col">
         <AdminSectionSwitcher pathname={pathname} attention={attention} />

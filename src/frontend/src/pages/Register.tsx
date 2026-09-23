@@ -1,164 +1,217 @@
-import { useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { endpoints, uploadPhoto } from "../lib/api";
+import { useRef, useState, type FormEvent, type Ref, type RefObject } from "react";
+import { Link } from "react-router-dom";
+import { endpoints, errorCode, uploadPhoto } from "../lib/api";
 import { describeFailure, isDeploymentFault } from "../lib/errors";
-import { AuthShell } from "../components/AuthShell";
+import { useAsyncAction } from "../lib/useAsyncAction";
+import { checkFields } from "../lib/authCopy";
+import { AuthMark, AuthShell } from "../components/AuthShell";
 import { Alert } from "../components/Alert";
-import { Button, Input, Label } from "../components/Button";
+import { PasswordInput } from "../components/PasswordInput";
 import { PhotoPicker, type PhotoPickerHandle } from "../components/PhotoPicker";
+import { Button } from "../components/ui/button";
+import { Field, FieldDescription, FieldError, FieldLabel } from "../components/ui/field";
+import { Input } from "../components/ui/input";
+import { TextLink } from "../components/ui/text-link";
+import { Envelope } from "../components/ui/icons";
 import {
-  INBOX_HEADING, INBOX_PATIENCE, INBOX_STEPS,
-  PHOTO_PREPARING, PHOTO_REQUIRED, REGISTER_MESSAGES, VERIFY_BACK_TO_SIGN_IN,
+  INBOX_HEADING, INBOX_PATIENCE, INBOX_STEPS, PHOTO_PREPARING, PHOTO_REQUIRED, REGISTER, REGISTER_FIELD,
+  REGISTER_MESSAGES, VERIFY_BACK_TO_SIGN_IN,
 } from "../lib/registrationCopy";
 
-export default function RegisterPage() {
-  const nav = useNavigate();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [fullName, setFullName] = useState("");
-  const [membershipNumber, setMembershipNumber] = useState("");
-  // Already prepared by PhotoPicker at the moment it was chosen — a small, correctly-rotated
-  // JPEG inside the upload cap. Nothing further to do to it here.
-  const [photo, setPhoto] = useState<File | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  /** Set when the failure is the club's to fix, so retrying is pointless — see isDeploymentFault. */
-  const [blocked, setBlocked] = useState(false);
-  /** True while PhotoPicker is decoding and re-encoding — see its onBusyChange. */
-  const [preparingPhoto, setPreparingPhoto] = useState(false);
-  /**
-   * The form's complaint about the photo field, shown ON the field.
-   *
-   * <p>
-   * Held apart from `error` — the page-level alert — because they are about different things
-   * and, until this change, one of them could not be reached at all. `error` is what the club's
-   * system said about an application that was actually sent; this is what this form noticed
-   * before sending one. Putting the second in the first's banner also announced it twice, since
-   * `Alert` and the picker's own message are both `role="alert"`.
-   * </p>
-   */
-  const [photoProblem, setPhotoProblem] = useState<string | null>(null);
-  /** So a refusal can put the keyboard on the field it is about. See PhotoPickerHandle. */
-  const photoField = useRef<PhotoPickerHandle>(null);
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-  /** Refuse, say why on the field, and take the member to it. Never silently. */
-  const refusePhoto = (message: string) => {
-    setPhotoProblem(message);
-    photoField.current?.focus();
-  };
+type Values = { fullName: string; email: string; membershipNumber: string; password: string };
+type Key = keyof Values | "photo";
+type Errors = Partial<Record<Key, string>>;
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setPhotoProblem(null);
-    if (preparingPhoto) {
-      refusePhoto(PHOTO_PREPARING);
-      return;
-    }
-    if (!photo) {
-      refusePhoto(PHOTO_REQUIRED);
-      return;
-    }
-    setLoading(true);
-    try {
-      const upload = await uploadPhoto(photo);
-      await endpoints.register({ email, password, fullName, membershipNumber, photoUrl: upload.url });
-      setSubmitted(true);
-    } catch (err) {
-      setError(describeFailure(err, { codes: REGISTER_MESSAGES, action: "submit your application" }));
-      // A missing tenant or a 5xx is not something resubmitting can cure. Hiding the submit
-      // button is the honest response: the previous screen invited the member to keep
-      // pressing it against a fault only the club's operator could clear.
-      setBlocked(isDeploymentFault(err));
-    } finally {
-      setLoading(false);
-    }
-  };
+/** The order the fields appear in — the first one wrong is where the keyboard goes. */
+const ORDER: Key[] = ["fullName", "email", "membershipNumber", "password", "photo"];
 
-  if (submitted) {
-    return (
-      <AuthShell className="my-auto" subline="Your application is in.">
-        <>
-          <h1 className="text-lg font-semibold mb-2">{INBOX_HEADING}</h1>
-          <ol className="mb-3 space-y-2 text-sm text-text-secondary">
-            {/*
-              The three steps, because "an admin reviews your application" left an applicant with
-              no idea whether anything more was required of them, or how long to wait before
-              assuming it had failed.
-            */}
-            {INBOX_STEPS.map((step, i) => (
-              <li key={step} className="flex gap-2"><span aria-hidden="true">{i + 1}.</span><span>{step}</span></li>
-            ))}
-          </ol>
-          {/* How long, before anybody has to ask. See INBOX_PATIENCE. */}
-          <p className="mb-5 text-sm text-text-muted">{INBOX_PATIENCE}</p>
-          <Button variant="outline" onClick={() => nav("/login")} className="w-full">{VERIFY_BACK_TO_SIGN_IN}</Button>
-        </>
-      </AuthShell>
-    );
-  }
+/** Which field an API refusal is about. Anything not listed is about the application as a whole. */
+const FIELD_OF_CODE: Record<string, Key> = {
+  email_in_use: "email",
+  membership_number_in_use: "membershipNumber",
+  password_too_short: "password",
+  unsupported_content_type: "photo",
+  file_too_large: "photo",
+  file_missing: "photo",
+  expected_multipart: "photo",
+};
 
+function validate(values: Values, photo: File | null, preparing: boolean): Errors {
+  const errors: Errors = {};
+  if (values.fullName.trim().length < 2) errors.fullName = REGISTER_FIELD.fullName;
+  if (!values.email.trim()) errors.email = REGISTER_FIELD.email;
+  else if (!EMAIL_SHAPE.test(values.email.trim())) errors.email = REGISTER_FIELD.emailFormat;
+  if (!values.membershipNumber.trim()) errors.membershipNumber = REGISTER_FIELD.membershipNumber;
+  if (!values.password) errors.password = REGISTER_FIELD.password;
+  else if (values.password.length < 8) errors.password = REGISTER_FIELD.passwordShort;
+  // Distinct from having no photo: telling somebody watching their photo being prepared that
+  // they have not chosen one is simply false.
+  if (preparing) errors.photo = PHOTO_PREPARING;
+  else if (!photo) errors.photo = PHOTO_REQUIRED;
+  return errors;
+}
+
+/** The three steps and the wait, on the screen an applicant lands on the moment it is sent. */
+function Submitted() {
   return (
-    // Top-aligned, NOT centred. This card is tall, and centring it pushes the club band off the
-    // top of a 360x640 viewport on load — throwing away the one thing that tells an applicant
-    // whose page they are about to hand a photograph of their face to.
-    <AuthShell subline="Apply for a member account. It takes a minute.">
-      <>
-        <h1 className="text-lg font-semibold mb-4">Join the club</h1>
-        <form onSubmit={submit} className="space-y-4">
-          <div>
-            <Label htmlFor="fullName">Full name</Label>
-            <Input id="fullName" required value={fullName} onChange={(e) => setFullName(e.target.value)} autoComplete="name" />
-          </div>
-          <div>
-            <Label htmlFor="email">Email</Label>
-            <Input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
-          </div>
-          <div>
-            <Label htmlFor="membershipNumber">Membership number</Label>
-            <Input id="membershipNumber" required value={membershipNumber} onChange={(e) => setMembershipNumber(e.target.value)} placeholder="As issued by the club" />
-          </div>
-          <div>
-            <Label htmlFor="password">Password</Label>
-            <Input id="password" type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
-            <p className="text-xs text-text-muted mt-1">At least 8 characters.</p>
-          </div>
-          <PhotoPicker
-            ref={photoField}
-            value={photo}
-            /* Choosing one answers the complaint, so the complaint goes at that moment rather
-               than surviving until the next submit. */
-            onChange={(file) => { setPhoto(file); setPhotoProblem(null); }}
-            error={photoProblem}
-            onBusyChange={setPreparingPhoto}
-            required
-          />
-          {error && (
-            <Alert>
-              {error}
-            </Alert>
-          )}
-          {/* The one commitment on the page, and item 12's `affirm`. No `onAction`: the form's
-              own handler already owns the redirect-or-explain, and its failure is the `Alert`
-              above rather than a shake on the button. */}
-          {!blocked && (
-            <Button
-              intent="affirm"
-              type="submit"
-              variant="primary"
-              loading={loading || preparingPhoto}
-              className="w-full"
-            >
-              {loading ? "Submitting…" : preparingPhoto ? "Preparing your photo…" : "Submit application"}
-            </Button>
-          )}
-        </form>
-        <p className="mt-4 text-sm text-text-secondary">
-          Already have an account?{" "}
-          <Link to="/login" className="font-medium text-accent-strong underline underline-offset-2 hover:no-underline">Sign in</Link>
-        </p>
-      </>
+    <AuthShell
+      className="my-auto"
+      subline={REGISTER.submittedSubline}
+      mark={<AuthMark icon={Envelope} tone="success" />}
+      title={INBOX_HEADING}
+    >
+      <ol className="flex flex-col gap-3">
+        {/* The steps, because "an admin reviews your application" left an applicant with no idea
+            whether anything more was needed of them, or how long to wait before assuming it failed. */}
+        {INBOX_STEPS.map((step, i) => (
+          <li key={step} className="flex gap-3 text-sm text-text-primary">
+            <span aria-hidden="true" className="flex size-6 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xs font-bold tabular-nums text-accent-strong">
+              {i + 1}
+            </span>
+            <span className="pt-0.5">{step}</span>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-5 rounded-lg bg-bg-muted px-4 py-3 text-sm text-text-secondary">{INBOX_PATIENCE}</p>
+      {/* R10 — somewhere else to go is a link, dressed as the one call to action on the screen. */}
+      <Button asChild variant="outline" block className="mt-6">
+        <Link to="/login">{VERIFY_BACK_TO_SIGN_IN}</Link>
+      </Button>
+    </AuthShell>
+  );
+}
+
+type TextFieldProps = {
+  id: keyof Values;
+  label: string;
+  hint?: string;
+  error?: string;
+  ref: Ref<HTMLInputElement>;
+  input: Omit<React.ComponentProps<"input">, "id" | "ref">;
+};
+
+function TextField(props: TextFieldProps) {
+  const { id, label, hint, error, ref, input } = props;
+  return (
+    <Field controlId={id}>
+      <FieldLabel>{label}</FieldLabel>
+      {id === "password" ? <PasswordInput ref={ref} required {...input} /> : <Input ref={ref} required {...input} />}
+      {hint ? <FieldDescription>{hint}</FieldDescription> : null}
+      <FieldError>{error}</FieldError>
+    </Field>
+  );
+}
+
+type FieldRefs = {
+  fullName: RefObject<HTMLInputElement | null>;
+  email: RefObject<HTMLInputElement | null>;
+  membershipNumber: RefObject<HTMLInputElement | null>;
+  password: RefObject<HTMLInputElement | null>;
+  photo: RefObject<PhotoPickerHandle | null>;
+};
+
+function useRegisterForm(refs: () => FieldRefs) {
+  const [values, setValues] = useState<Values>({ fullName: "", email: "", membershipNumber: "", password: "" });
+  // Already prepared by PhotoPicker at the moment it was chosen — a small, correctly-rotated JPEG.
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [preparing, setPreparing] = useState(false);
+  const [errors, setErrors] = useState<Errors>({});
+  /** Refuse, say why on each field, and take the member to the first one. Never silently. */
+  const refuse = (found: Errors) => {
+    setErrors(found);
+    const first = ORDER.find((key) => found[key]);
+    if (first) refs()[first].current?.focus();
+  };
+  // Editing a field answers its complaint; the rest stay until the next submit re-checks them.
+  const set = (key: keyof Values) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    setValues((v) => ({ ...v, [key]: e.target.value }));
+    setErrors((was) => (was[key] ? { ...was, [key]: undefined } : was));
+  };
+  return { values, photo, setPhoto, preparing, setPreparing, errors, setErrors, refuse, set };
+}
+
+export default function RegisterPage() {
+  // Separate refs, read only inside the handler that focuses one (react-hooks/refs).
+  const fullNameRef = useRef<HTMLInputElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const membershipRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const photoRef = useRef<PhotoPickerHandle>(null);
+  const form = useRegisterForm(() => ({
+    fullName: fullNameRef, email: emailRef, membershipNumber: membershipRef, password: passwordRef, photo: photoRef,
+  }));
+  const { values, errors } = form;
+  const [submitted, setSubmitted] = useState(false);
+  /** The application as a whole was refused — what the club's system said, not what the form noticed. */
+  const [failure, setFailure] = useState<string | null>(null);
+  /** The failure is the club's to fix (a missing tenant, a 5xx), so resubmitting cannot cure it. */
+  const [blocked, setBlocked] = useState(false);
+
+  const send = useAsyncAction(async (photo: File) => {
+    const upload = await uploadPhoto(photo);
+    await endpoints.register({ ...values, photoUrl: upload.url });
+  }, {
+    success: () => setSubmitted(true),
+    failure: (err) => {
+      const field = FIELD_OF_CODE[errorCode(err) ?? ""];
+      const message = describeFailure(err, { codes: REGISTER_MESSAGES, action: "submit your application" });
+      if (field) form.refuse({ [field]: message });
+      else setFailure(message);
+      setBlocked(isDeploymentFault(err));
+    },
+  });
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (send.pending) return;
+    setFailure(null);
+    const found = validate(values, form.photo, form.preparing);
+    form.refuse(found);
+    if (Object.keys(found).length === 0 && form.photo) void send.run(form.photo);
+  };
+
+  if (submitted) return <Submitted />;
+
+  const problems = Object.values(errors).filter(Boolean).length;
+  return (
+    // Top-aligned, NOT centred: this card is tall, and centring it pushes the club band off the top
+    // of a 360x640 viewport — the one thing that tells an applicant whose page they are handing a
+    // photograph of their face to.
+    <AuthShell
+      subline={REGISTER.subline}
+      title={REGISTER.title}
+      footer={<>{REGISTER.haveAccount}{" "}<TextLink to="/login" className="py-3">{REGISTER.signIn}</TextLink></>}
+    >
+      <form onSubmit={submit} noValidate className="flex flex-col gap-5">
+        <TextField id="fullName" label={REGISTER.fullName} error={errors.fullName} ref={fullNameRef}
+          input={{ value: values.fullName, onChange: form.set("fullName"), autoComplete: "name" }} />
+        <TextField id="email" label={REGISTER.email} error={errors.email} ref={emailRef}
+          input={{ type: "email", inputMode: "email", value: values.email, onChange: form.set("email"), autoComplete: "email" }} />
+        <TextField id="membershipNumber" label={REGISTER.membershipNumber} hint={REGISTER.membershipHint}
+          error={errors.membershipNumber} ref={membershipRef}
+          input={{ value: values.membershipNumber, onChange: form.set("membershipNumber"), autoComplete: "off" }} />
+        <TextField id="password" label={REGISTER.password} hint={REGISTER.passwordHint} error={errors.password}
+          ref={passwordRef}
+          input={{ value: values.password, onChange: form.set("password"), autoComplete: "new-password" }} />
+        <PhotoPicker
+          ref={photoRef}
+          value={form.photo}
+          // Choosing one answers the complaint, so it goes at that moment, not at the next submit.
+          onChange={(file) => { form.setPhoto(file); form.setErrors((was) => ({ ...was, photo: undefined })); }}
+          error={errors.photo}
+          onBusyChange={form.setPreparing}
+          required
+        />
+        {/* ONE live region per refusal: this summary speaks; the fields carry the detail and the
+            keyboard has already been taken to the first of them. */}
+        {problems > 0 ? <Alert>{checkFields(problems)}</Alert> : null}
+        {failure ? <Alert>{failure}</Alert> : null}
+        {/* Hidden, not disabled, when only the club can fix what went wrong: a button that invites
+            pressing against a fault resubmitting cannot clear is a lie. */}
+        {!blocked ? <Button type="submit" size="lg" block pending={send.pending}>{REGISTER.submit}</Button> : null}
+      </form>
     </AuthShell>
   );
 }

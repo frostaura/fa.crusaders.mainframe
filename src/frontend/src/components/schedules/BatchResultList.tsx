@@ -1,8 +1,4 @@
-// `Check` and `X` rather than the circled pair: `src/types/lucide-react.d.ts` is a hand-kept
-// ambient declaration (the package's CJS bundle ships no types) and does not declare
-// `CheckCircle2`/`XCircle`. That file is outside this lane's scope, so the two icons it
-// already declares are used instead and the addition is reported rather than made.
-import { Check, X } from "lucide-react";
+import { CheckCircle, XCircle } from "../ui/icons";
 
 /**
  * What a batch actually did, per item, as a region of the page.
@@ -38,7 +34,7 @@ export function BatchResultList({
   return (
     <section
       aria-label={heading}
-      className="space-y-3 rounded-lg border border-border bg-bg-surface p-4"
+      className="flex flex-col gap-3 rounded-lg border border-border bg-bg-surface p-4"
     >
       {/*
         `role="status"` rather than an alert: the batch has finished and this is the record of
@@ -48,13 +44,13 @@ export function BatchResultList({
       <h3 role="status" className="text-sm font-semibold text-text-primary">
         {`${done} of ${rows.length} done`}
       </h3>
-      <ul className="space-y-2">
+      <ul className="flex flex-col gap-2">
         {rows.map((row) => (
           <li key={row.id} className="flex gap-2 text-sm">
             {/* A word and an icon, never colour alone. */}
             {row.ok
-              ? <Check aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-success-strong" />
-              : <X aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-danger-strong" />}
+              ? <CheckCircle size={16} weight="fill" aria-hidden="true" className="mt-0.5 shrink-0 text-success-strong" />
+              : <XCircle size={16} weight="fill" aria-hidden="true" className="mt-0.5 shrink-0 text-danger-strong" />}
             <span className="text-text-primary">
               <span className={row.ok ? "text-success-strong" : "text-danger-strong"}>
                 {row.ok ? "Done" : "Not done"}

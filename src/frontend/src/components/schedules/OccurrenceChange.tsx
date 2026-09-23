@@ -1,6 +1,11 @@
 import { useId, useState } from "react";
 import { Alert } from "../Alert";
-import { Button, Input, Label } from "../Button";
+import { Button } from "../ui/button";
+import { Field, FieldLabel } from "../ui/field";
+import { Input } from "../ui/input";
+import { RadioCard, RadioGroup } from "../ui/radio-group";
+import { TimeSelect } from "../ui/time-select";
+import { TIME_TRIGGER_FIX } from "./SentenceParts";
 import {
   clubDateShort, editScopeOptions, editScopeQuestion, pastNeverChanges,
 } from "../../lib/scheduleCopy";
@@ -65,49 +70,36 @@ export function OccurrenceChange({
   const submitLabel = `Change ${scope === "only" ? `just ${clubDateShort(date)}` : chosen} to ${newStart}–${newEnd}`;
 
   return (
-    <div className="space-y-4 rounded-lg border border-border bg-bg-muted p-4">
+    <div className="flex flex-col gap-4 rounded-lg border border-border bg-bg-muted p-4">
       {error}
 
-      <div role="radiogroup" aria-labelledby={`${groupId}-question`} className="space-y-2">
+      <div className="flex flex-col gap-2">
         <p id={`${groupId}-question`} className="text-sm font-semibold text-text-primary">
           {editScopeQuestion(date)}
         </p>
-        {(["only", "future"] as const).map((value) => (
-          <label key={value} className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-text-primary">
-            <input
-              type="radio"
-              name={`${groupId}-scope`}
-              value={value}
-              checked={scope === value}
-              onChange={() => setScope(value)}
-              className="h-5 w-5 accent-accent-strong"
-            />
-            {value === "only" ? options.only : options.future}
-          </label>
-        ))}
-        {/* Said in the radiogroup, not below the fold: it is the fact the choice is about. */}
+        <RadioGroup
+          aria-labelledby={`${groupId}-question`}
+          value={scope}
+          onValueChange={(next) => setScope(next as EditScope)}
+          className="grid gap-2 sm:grid-cols-2"
+        >
+          <RadioCard value="only" title={options.only} />
+          <RadioCard value="future" title={options.future} />
+        </RadioGroup>
+        {/* Said with the choice, not below the fold: it is the fact the choice is about. */}
         <p className="text-sm text-text-secondary">{pastNeverChanges(date)}</p>
       </div>
 
+      {/* Slice-aligned times only (P3, R7 — never free-typed). */}
       <div className="flex flex-wrap gap-4">
-        <div className="space-y-1">
-          <Label htmlFor={`${groupId}-start`}>New start time</Label>
-          <Input
-            id={`${groupId}-start`}
-            type="time"
-            value={newStart}
-            onChange={(e) => setNewStart(e.target.value)}
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor={`${groupId}-end`}>New end time</Label>
-          <Input
-            id={`${groupId}-end`}
-            type="time"
-            value={newEnd}
-            onChange={(e) => setNewEnd(e.target.value)}
-          />
-        </div>
+        <Field className="w-40">
+          <FieldLabel>New start time</FieldLabel>
+          <TimeSelect start={DAY_START} end={DAY_END} stepMinutes={STEP} value={newStart} onChange={setNewStart} className={TIME_TRIGGER_FIX} />
+        </Field>
+        <Field className="w-40">
+          <FieldLabel>New end time</FieldLabel>
+          <TimeSelect start={DAY_START} end={DAY_END} stepMinutes={STEP} includeEnd value={newEnd} onChange={setNewEnd} className={TIME_TRIGGER_FIX} />
+        </Field>
       </div>
 
       {!rangeValid && (
@@ -116,22 +108,16 @@ export function OccurrenceChange({
         </Alert>
       )}
 
-      <div className="space-y-1">
-        <Label htmlFor={`${groupId}-reason`}>Reason (kept in the change record)</Label>
-        <Input
-          id={`${groupId}-reason`}
-          value={reason}
-          maxLength={512}
-          onChange={(e) => setReason(e.target.value)}
-        />
-      </div>
+      <Field>
+        <FieldLabel>Reason (kept in the change record)</FieldLabel>
+        <Input value={reason} maxLength={512} onChange={(e) => setReason(e.target.value)} />
+      </Field>
 
       <div className="flex flex-wrap gap-2">
-        <Button variant="outline" className="min-h-11" onClick={onCancel}>Keep it as it is</Button>
+        <Button variant="outline" onClick={onCancel}>Cancel</Button>
         <Button
-          className="min-h-11"
-          disabled={!rangeValid || busy}
-          loading={busy}
+          disabled={!rangeValid && !busy}
+          pending={busy}
           onClick={() => onSubmit({ scope, start: newStart, end: newEnd, reason: reason.trim() })}
         >
           {submitLabel}
@@ -140,3 +126,12 @@ export function OccurrenceChange({
     </div>
   );
 }
+
+/**
+ * The times a date can be moved to. This page reads no club settings, and its own slot count
+ * already assumes the 15-minute slice (`slotsPerOccurrence(…, 15)` in the detail page); the
+ * server is what refuses a time the club's own slice cannot book.
+ */
+const DAY_START = "05:00";
+const DAY_END = "24:00";
+const STEP = 15;

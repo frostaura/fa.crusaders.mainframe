@@ -92,6 +92,14 @@ type Overlay = {
   open: (page: Page) => Promise<void>;
   /** What axe audits once it is open. */
   target: string;
+  /**
+   * Re-open and re-audit as one unit when the overlay can close by itself between the open and
+   * the audit. A tooltip does: Radix closes it on any scroll of its trigger's scroller, and a
+   * late layout scroll lands after `open` has returned about once in 40 phone runs — measured
+   * at the P3/P4 integration on this tree AND on the P2 commit, so it is the harness, not the
+   * product. The audit itself is never skipped: a violation fails every attempt.
+   */
+  retryAsUnit?: boolean;
 };
 
 const clickButton = (name: string | RegExp) => async (page: Page) => {
@@ -125,6 +133,7 @@ const OVERLAYS: Overlay[] = [
       }).toPass({ timeout: 10_000 });
     },
     target: "[data-slot=tooltip-content]",
+    retryAsUnit: true,
   },
   {
     name: "select list",
@@ -152,9 +161,13 @@ test.describe("every overlay passes axe once open", () => {
     for (const overlay of OVERLAYS) {
       test(`${overlay.name}, page ${theme}`, async ({ page }) => {
         await openGallery(page, overlay.section, theme);
-        await overlay.open(page);
-        await expect(page.locator(overlay.target).first()).toBeVisible();
-        await audit(page, overlay.target);
+        const openAndAudit = async (timeout?: number) => {
+          await overlay.open(page);
+          await expect(page.locator(overlay.target).first()).toBeVisible({ timeout });
+          await audit(page, overlay.target);
+        };
+        if (overlay.retryAsUnit) await expect(() => openAndAudit(1_500)).toPass({ timeout: 20_000 });
+        else await openAndAudit();
       });
     }
   }

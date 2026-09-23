@@ -119,6 +119,11 @@ export function AdminSchedulesPage() {
   const header = (
     <PageHeader
       title="Repeating bookings"
+      actions={creating ? null : (
+        <Button onClick={() => setCreating(true)} icon={<Plus aria-hidden="true" />}>
+          Create a repeating booking
+        </Button>
+      )}
       description={"A repeating booking holds the same courts at the same time, week after week — "
         + "league nights, coaching, court maintenance. Members see its name on the grid and "
         + "cannot book those slots."}
@@ -151,7 +156,7 @@ export function AdminSchedulesPage() {
       )}
 
       <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {/* Three choices, always visible: a segmented control, not a select that hides two. */}
           <ToggleGroup
             type="single"
@@ -164,9 +169,6 @@ export function AdminSchedulesPage() {
               <ToggleGroupItem key={s.value} value={s.value}>{s.label}</ToggleGroupItem>
             ))}
           </ToggleGroup>
-          <Button onClick={() => setCreating(true)} icon={<Plus aria-hidden="true" />}>
-            Create a repeating booking
-          </Button>
         </div>
 
         <StateBlock

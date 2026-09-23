@@ -21,8 +21,15 @@ import {
   coverageWithout, outOfServiceConfirm, outOfServiceConsequences, type CourtCoverage,
 } from "../lib/deviceCoverage";
 import { UNNAMED_GATE, describeGate } from "../lib/gateCopy";
-import { Badge, Button, Input, Label } from "../components/Button";
-import { ConfirmButton } from "../components/ConfirmButton";
+import { ActionsMenu } from "../components/admin/ActionsMenu";
+import { ConfirmDialog } from "../components/admin/ConfirmDialog";
+import { chipTone } from "../components/doors/chipTone";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Field, FieldDescription, FieldLabel } from "../components/ui/field";
+import { Input } from "../components/ui/input";
+import { RadioCard, RadioGroup } from "../components/ui/radio-group";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { ButtonMapEditor, buttonMapWithinCap, MAX_GRANT_MINUTES, RELAYS } from "../components/ButtonMapEditor";
 import { ClubButtonMapCard, WalkUpCapNotice } from "../components/ClubButtonMapCard";
 import { DeviceApiKeyPanel } from "../components/DeviceApiKeyPanel";
@@ -32,7 +39,7 @@ import { Freshness, RefreshButton } from "../components/ui/refresh-button";
 import { StateBlock } from "../components/ui/state-block";
 import { Skeleton } from "../components/ui/skeleton";
 import { TextLink } from "../components/ui/text-link";
-import { Cpu, Door, WifiHigh, WifiSlash } from "../components/ui/icons";
+import { CaretDown, Cpu, Door, Trash, WifiHigh, WifiSlash } from "../components/ui/icons";
 import { CardListSkeleton } from "../components/monitoring/parts";
 
 /**
@@ -152,41 +159,56 @@ function CourtListEditor({
   }
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       {RELAYS.map((relay, index) => {
         const current = value[index];
         const reachable = !disabled && index <= value.length;
         const label = `${labelPrefix ? `${labelPrefix} relay` : "Relay"} ${relay} court`;
         return (
-          <div key={relay} className="flex items-center gap-2">
-            <span className="w-16 shrink-0 text-sm text-text-secondary">Relay {relay}</span>
-            <select
-              aria-label={label}
-              className="min-h-11 rounded-lg border border-control bg-bg-surface px-2 text-sm disabled:opacity-50"
-              value={current ?? ""}
+          <div key={relay} className="flex items-center gap-3">
+            <span className="w-16 shrink-0 text-sm font-medium text-text-secondary">Relay {relay}</span>
+            {/* Radix Select has no empty value, so "no court" is the NONE sentinel here and
+                nowhere else — it never reaches the wire. */}
+            <Select
+              value={current === undefined ? NONE : String(current)}
               disabled={!reachable}
-              onChange={(e) => {
-                if (e.target.value === "") onChange(value.slice(0, index));
-                else onChange([...value.slice(0, index), Number(e.target.value), ...value.slice(index + 1)]);
+              onValueChange={(next) => {
+                if (next === NONE) onChange(value.slice(0, index));
+                else onChange([...value.slice(0, index), Number(next), ...value.slice(index + 1)]);
               }}
             >
-              <option value="">{index === 0 ? "Choose a court" : "— none —"}</option>
-              {courts.map((court) => (
-                <option
-                  key={court.id}
-                  value={court.court_number}
-                  disabled={value.includes(court.court_number) && current !== court.court_number}
-                >
-                  Court {court.court_number} — {court.name}{court.is_active ? "" : " (inactive)"}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger aria-label={label} className="min-w-0 max-w-xs flex-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE}>{index === 0 ? "Choose a court" : "— none —"}</SelectItem>
+                {courts.map((court) => (
+                  <SelectItem
+                    key={court.id}
+                    value={String(court.court_number)}
+                    disabled={value.includes(court.court_number) && current !== court.court_number}
+                  >
+                    {`Court ${court.court_number} — ${court.name}${court.is_active ? "" : " (inactive)"}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         );
       })}
     </div>
   );
 }
+
+/**
+ * Worded buttons on this page wrap rather than overflow: at a 32 px root font on a 320 px
+ * phone "Edit name and courts" is wider than the card, and the design-system Button is
+ * `whitespace-nowrap` by default (e2e/admin-devices "refuses to hold its own content").
+ */
+const WRAPS = "h-auto min-h-9 max-w-full whitespace-normal py-1.5 text-center";
+
+/** "No court on this relay" inside the Select — see CourtListEditor. */
+const NONE = "none";
 
 // --- one board's own button map ------------------------------------------------
 
@@ -222,24 +244,25 @@ function DeviceButtonMapPanel({
   }
 
   return (
-    <div className="mt-3 space-y-3 rounded-lg bg-bg-muted p-3">
-      <div className="flex flex-wrap gap-4 text-sm">
-        <label className="flex items-center gap-2">
-          <input type="radio" name={group} checked={!own} onChange={() => setOwn(false)} disabled={saving} />
-          Use the club's button map
-        </label>
-        <label className="flex items-center gap-2">
-          <input type="radio" name={group} checked={own} onChange={() => setOwn(true)} disabled={saving} />
-          Own map for this box
-        </label>
-      </div>
+    <div className="flex flex-col gap-4 rounded-lg border border-border bg-bg-muted p-4">
+      <RadioGroup
+        value={own ? "own" : "club"}
+        onValueChange={(next) => setOwn(next === "own")}
+        disabled={saving}
+        aria-label={`${device.name} buttons`}
+        className="grid gap-2 sm:grid-cols-2"
+        name={group}
+      >
+        <RadioCard value="club" title="Use the club's button map" />
+        <RadioCard value="own" title="Own map for this box" />
+      </RadioGroup>
       {own && <ButtonMapEditor value={draft} onChange={setDraft} disabled={saving} labelPrefix={device.name} />}
       <WalkUpCapNotice map={own ? draft : clubMap} cap={walkUpMax} />
-      <div className="flex gap-2">
-        <Button className="min-h-11 px-3 text-sm" onClick={() => void save()} disabled={saving || (own && !buttonMapWithinCap(draft))}>
-          {saving ? "Saving…" : "Save buttons"}
+      <div className="flex flex-wrap gap-2">
+        <Button pending={saving} onClick={() => void save()} disabled={own && !buttonMapWithinCap(draft)}>
+          Save buttons
         </Button>
-        <Button variant="ghost" className="min-h-11 px-3 text-sm" onClick={onClose} disabled={saving}>Cancel</Button>
+        <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
       </div>
     </div>
   );
@@ -289,23 +312,21 @@ function DeviceDetailsEditor({
   }
 
   return (
-    <div className="mt-3 space-y-3 rounded-lg bg-bg-muted p-3">
-      <div>
-        <Label htmlFor={nameId}>Name</Label>
-        <Input id={nameId} value={name} onChange={(e) => setName(e.target.value)} placeholder="Court 1 box" disabled={saving} />
-      </div>
-      <div>
-        <Label>Courts, by relay</Label>
-        <p className="mb-2 text-xs text-text-secondary">
+    <div className="flex flex-col gap-4 rounded-lg border border-border bg-bg-muted p-4">
+      <Field controlId={nameId} className="max-w-sm">
+        <FieldLabel>Name</FieldLabel>
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Court 1 box" disabled={saving} />
+      </Field>
+      <div role="group" aria-labelledby={`${nameId}-courts`} className="flex flex-col gap-2">
+        <span id={`${nameId}-courts`} className="text-sm font-medium text-text-primary">Courts, by relay</span>
+        <FieldDescription>
           Relay A is the first output on the box. Assign the courts in the order they are wired.
-        </p>
+        </FieldDescription>
         <CourtListEditor value={draft} onChange={setDraft} courts={courts} disabled={saving} labelPrefix={device.name} />
       </div>
-      <div className="flex gap-2">
-        <Button className="min-h-11 px-3 text-sm" onClick={() => void save()} disabled={saving || draft.length === 0}>
-          {saving ? "Saving…" : "Save box"}
-        </Button>
-        <Button variant="ghost" className="min-h-11 px-3 text-sm" onClick={onClose} disabled={saving}>Cancel</Button>
+      <div className="flex flex-wrap gap-2">
+        <Button pending={saving} onClick={() => void save()} disabled={draft.length === 0}>Save box</Button>
+        <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
       </div>
     </div>
   );
@@ -330,7 +351,7 @@ function DeviceRowHeader({ device, online, now }: { device: AdminDevice; online:
             has gone quiet on its own gets the danger tone, not the neutral grey it had
             while a louder amber "New" badge sat next to it (M-F2, secondary). */}
         {!device.enabled
-          ? <Badge tone="muted">out of service</Badge>
+          ? <Badge tone="neutral">out of service</Badge>
           : (
             <Badge tone={online ? "success" : "danger"}>
               {online ? "online" : `not reporting — last seen ${relative(device.last_seen_at, now)}`}
@@ -401,7 +422,7 @@ function DeviceRowHeader({ device, online, now }: { device: AdminDevice; online:
  */
 function OutOfServiceNotice({ device, coverage }: { device: AdminDevice; coverage: CourtCoverage }) {
   return (
-    <p className="mt-2 rounded-lg bg-bg-muted p-3 text-xs text-text-secondary">
+    <p className="rounded-lg bg-bg-muted p-3 text-sm text-text-secondary">
       {`Out of service. The API refuses this box, so it switches nothing on, and the club is not`
         + ` alerted about its silence. ${outOfServiceConsequences(coverage).join(" ")}`}
       <span className="sr-only">{device.name}</span>
@@ -477,8 +498,8 @@ function ActivityBody({ entries, loading, error, gate, now }: {
   // Before empty, deliberately. A failed read that rendered "nothing recorded yet" would
   // be making a claim about the DOOR ("nobody has been through it") out of a claim about
   // the request, which is how an admin concludes a working door is dead.
-  if (error) return <p className="text-xs text-danger-strong">{error}</p>;
-  if (!entries || entries.length === 0) return <p className="text-xs text-text-muted">{activityEmptyNotice(gate)}</p>;
+  if (error) return <p className="text-sm text-danger-strong">{error}</p>;
+  if (!entries || entries.length === 0) return <p className="text-sm text-text-muted">{activityEmptyNotice(gate)}</p>;
   return (
     <>
       {/* A3, on the panel it was missed on. A reviewer read nine offline rows — some naming
@@ -489,9 +510,9 @@ function ActivityBody({ entries, loading, error, gate, now }: {
           inferred; the doors surface has carried this since the finding landed and this
           panel serves the same rows for a court box. */}
       {entries.some((entry) => entry.offline) && (
-        <p className="mb-1 text-xs text-text-secondary">{OFFLINE_WHO_NOTE}</p>
+        <p className="mb-1 text-sm text-text-secondary">{OFFLINE_WHO_NOTE}</p>
       )}
-      <ul className="text-xs">
+      <ul className="text-sm">
         {entries.map((entry, i) => <ActivityRow key={`${entry.at}-${entry.action}-${i}`} entry={entry} now={now} />)}
       </ul>
     </>
@@ -552,17 +573,19 @@ function DeviceActivityPanel({ device, now }: { device: AdminDevice; now: number
   }
 
   return (
-    <div className="mt-2">
+    <div className="flex flex-col gap-2">
       <Button
-        variant="outline"
-        className="min-h-11 px-3 text-sm"
+        variant="ghost"
+        size="sm"
+        className={`-ml-2 self-start ${WRAPS}`}
         aria-expanded={open}
         onClick={() => void toggle()}
+        icon={<CaretDown aria-hidden="true" className={open ? "rotate-180" : undefined} />}
       >
         {activityPanelTitle(gate)}
       </Button>
       {open && (
-        <div className="mt-2 rounded-lg bg-bg-muted p-3">
+        <div className="rounded-lg border border-border bg-bg-muted p-3">
           <ActivityBody entries={entries} loading={loading} error={error} gate={gate} now={now} />
         </div>
       )}
@@ -628,8 +651,30 @@ function DeviceRow({
   const hasOwnMapField = device.button_map !== undefined;
 
   return (
-    <div className="rounded-xl border border-border bg-bg-surface p-4 shadow-xs">
-      <DeviceRowHeader device={device} online={online} now={now} />
+    <div className="flex flex-col gap-3 rounded-xl border border-border bg-bg-surface p-4 shadow-xs sm:p-5">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1"><DeviceRowHeader device={device} online={online} now={now} /></div>
+        {/* Deleting is not a revocation and locks nothing out — the box still holds the
+            club's key. It forgets the row, and the box makes a new one on its next call.
+            The dialog says exactly that, because "Really delete?" would let an admin think
+            they had just taken a box off the network. It lives behind ⋯ (P3): it is the rare
+            action, and it must not sit beside Edit at thumb distance. */}
+        <ActionsMenu
+          label={`More actions for ${device.name}`}
+          items={[{
+            label: "Delete board",
+            icon: <Trash size={16} aria-hidden="true" />,
+            danger: true,
+            confirm: {
+              title: `Delete ${device.name}?`,
+              description: "The box re-registers on its next heartbeat — deleting forgets this row, it does not take the box off the network. Unplug it if you mean to retire it.",
+              confirmLabel: "Delete board",
+              cancelLabel: "Keep this box",
+              onConfirm: actions.remove,
+            },
+          }]}
+        />
+      </div>
 
       {editing === "details" && (
         <DeviceDetailsEditor device={device} courts={boxEditing.courts} onSave={actions.details} onClose={() => setEditing(null)} />
@@ -647,30 +692,14 @@ function DeviceRow({
 
       {!device.enabled && <OutOfServiceNotice device={device} coverage={coverage} />}
 
-      {/* Above the action strip, because it is the one control on this row that reads
-          rather than writes — and an admin usually opens it to decide whether to press
-          one of the others. */}
-      <DeviceActivityPanel device={device} now={now} />
-
-      {/*
-        <b>B11 / R3-27 — every control on this strip measured 32–36 px.</b>
-        The doors surface is built to 44 px because it is used standing up in a club, and
-        this page is used in exactly the same circumstances by exactly the same volunteer.
-        The two sat one gear-menu item apart with a 12 px difference in target size.
-        `min-h-11` rather than `h-11`, so a control whose words wrap grows instead of
-        clipping them — which is what `h-*` did at a 32 px root font.
-      */}
-      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
+      {/* The action strip: 44px targets, sm buttons with the extended hit area. */}
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         {editing === null && (
-          <Button variant="outline" className="min-h-11 px-3 text-sm" onClick={() => setEditing("details")}>
-            Edit name and courts
-          </Button>
+          <Button variant="outline" size="sm" className={WRAPS} onClick={() => setEditing("details")}>Edit name and courts</Button>
         )}
 
         {hasOwnMapField && editing === null && (
-          <Button variant="outline" className="min-h-11 px-3 text-sm" onClick={() => setEditing("buttons")}>
-            Edit buttons
-          </Button>
+          <Button variant="outline" size="sm" className={WRAPS} onClick={() => setEditing("buttons")}>Edit buttons</Button>
         )}
 
         {/* Out of service — the control the API, the health sweep and the settlement model
@@ -678,67 +707,36 @@ function DeviceRow({
             box that is broken or has been unplugged for good stays enabled for ever, so the
             club is alerted about a silence it created, and — because a court is "dark" only
             when every ENABLED box driving it is dark — every no-show on that box's courts is
-            refunded with no penalty, indefinitely. The only lever the page had was Delete,
-            which the page itself describes as a reset: the box re-registers on its next
-            heartbeat, so it is useless for a box that is still powered.
+            refunded with no penalty, indefinitely.
 
-            Confirmed on the way out, because a live box stops working; plain on the way
-            back, because restoring a box is not a decision anyone regrets.
+            Confirmed on the way out (a dialog naming the consequence per court, from
+            outOfServiceConfirm in lib/deviceCoverage), because a live box stops working;
+            plain on the way back, because restoring a box is not a decision anyone regrets.
+            Focus lands on the control that replaces this one, which is the only thing on the
+            row that can tell the reader the action landed.
 
-            A DOOR is not offered this control at all any more (A2.5): its own vocabulary is
-            "Shut" and "Reopen", the consequence is the opposite one, and two call sites for
-            one 403 path is the failure lib/gateCopy's header documents. Doors are shut on
+            A DOOR is not offered this control at all (A2.5): doors are shut on
             /admin/monitoring/doors. */}
         {device.enabled ? (
-          <ConfirmButton
-            idleLabel="Take out of service"
+          <ConfirmDialog
+            trigger={<Button variant="outline" size="sm" className={WRAPS}>Take out of service</Button>}
+            title={`Take ${device.name} out of service?`}
+            // The title asks the question, so the sentence drops its own "Out of service?" lead-in.
+            description={outOfServiceConfirm(coverage).replace(/^Out of service\? /, "")}
+            confirmLabel="Take out of service"
             cancelLabel="Leave it in service"
-            // The confirm names the consequence that is hardest to undo knowing about, per
-            // court and only where it is true — see outOfServiceConfirm in lib/deviceCoverage.
-            // An admin taking a spare out of service beside a box that is reporting gets the
-            // plain sentence.
-            confirmLabel={outOfServiceConfirm(coverage)}
-            // R3 adoption. `subject` names what is being KEPT, so the way out reads
-            // "Leave it in service — Court box 1-4" rather than carrying the destructive
-            // verb in its own accessible name; `focusAfter` lands on the control that
-            // replaces this one, which is the only thing on the row that can tell the
-            // reader the action landed. Both are additive props the R3 chrome lane added
-            // to ConfirmButton and that no call site on this page had taken up.
-            subject={device.name}
-            focusAfter={() => document.getElementById(backInServiceId(device.id))}
             onConfirm={() => actions.setEnabled(false)}
+            focusAfter={() => document.getElementById(backInServiceId(device.id))}
           />
         ) : (
-          <Button
-            id={backInServiceId(device.id)}
-            variant="outline"
-            className="min-h-11 px-3 text-sm"
-            onClick={() => void actions.setEnabled(true)}
-          >
+          <Button id={backInServiceId(device.id)} variant="secondary" size="sm" className={WRAPS} onClick={() => void actions.setEnabled(true)}>
             Put back in service
           </Button>
         )}
-
-        {/* Deleting is not a revocation and locks nothing out — the box still holds the
-            club's key. It forgets the row, and the box makes a new one on its next call.
-            The confirm label says exactly that, because "Really delete?" would let an
-            admin think they had just taken a box off the network. */}
-        <ConfirmButton
-          idleLabel="Delete"
-          cancelLabel="Keep this box"
-          confirmLabel="Delete? The box re-registers on its next heartbeat."
-          // R3 adoption, and deliberately only the one prop. `subject` makes the way out
-          // read "Keep this box — Court box 1-4" in a column of identical controls. There
-          // is no `focusAfter`: the row this button lives in is gone the moment the action
-          // settles, so the only honest destination is the page's own heading, which is
-          // exactly what ConfirmButton does when the prop is absent. Naming a successor
-          // that will never exist would hold focus on `<body>` for the full second the
-          // retry loop runs.
-          subject={device.name}
-          onConfirm={actions.remove}
-          tone="danger"
-        />
       </div>
+
+      {/* Below the strip: the one control on this row that reads rather than writes. */}
+      <DeviceActivityPanel device={device} now={now} />
     </div>
   );
 }
@@ -768,7 +766,7 @@ function GateRows({ gates, tenantHeartbeat, now }: {
 }) {
   if (gates.length === 0) return null;
   return (
-    <div className="mt-2">
+    <div className="mt-4">
       <div className="mb-2 flex items-center gap-2">
         <Door size={16} className="text-text-muted" aria-hidden="true" />
         <h3 className="text-sm font-semibold">Doors</h3>
@@ -783,12 +781,12 @@ function GateRows({ gates, tenantHeartbeat, now }: {
           // that surface, so it cannot call the same board something else.
           const name = doorDisplayName(gate);
           return (
-            <li key={gate.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-bg-surface px-4 py-2 shadow-xs">
+            <li key={gate.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-bg-surface px-4 py-2.5 shadow-xs">
               {/* A8: `doorStateChip` answers null where the caller cannot say whether a
                   door is reporting. This page always can — it resolves `online` from a read
                   it has just made — so the chip is always here; the guard is the type
                   saying so rather than a claim this call site is allowed to make. */}
-              {chip && <Badge tone={chip.tone}>{chip.label}</Badge>}
+              {chip && <Badge tone={chipTone(chip.tone)}>{chip.label}</Badge>}
               <span className="min-w-0 break-words text-sm font-medium">{name}</span>
               <span className="min-w-0 break-words text-xs text-text-muted">
                 {`${gate.gate_key ?? UNNAMED_GATE} · ${gate.device_code}`}
@@ -889,7 +887,7 @@ function deletedToast(device: AdminDevice): string {
 function UnacknowledgedBoardsNotice({ devices }: { devices: AdminDevice[] }) {
   const notice = unacknowledgedBoardsNotice(devices.filter((d) => d.auto_registered).length);
   if (notice === null) return null;
-  return <p role="status" className="mb-3 rounded-lg bg-warning-soft p-3 text-xs text-warning-strong">{notice}</p>;
+  return <p role="status" className="rounded-lg bg-warning-soft p-3 text-sm text-warning-strong">{notice}</p>;
 }
 
 /**
@@ -1095,9 +1093,7 @@ export function AdminDevicesPage() {
   const gates = devices.filter((d) => isGate(d));
 
   return (
-    // R11: the shell owns width, gutters and rhythm. The page's own `p-[16px]` wrapper (B7) and
-    // its `w-full` fix for the Monitoring strip went with the strip: nothing on this page is
-    // wider than the screen any more, and no page sets its own root spacing.
+    // R11: the shell owns width, gutters and rhythm; no page sets its own root spacing.
     <PageShell width="wide">
       <PageHeader
         title="Boards"
@@ -1114,8 +1110,7 @@ export function AdminDevicesPage() {
         title={(
           <span className="inline-flex items-center gap-2">
             <Cpu size={20} aria-hidden="true" className="shrink-0 text-text-muted" />
-            {/* `min-w-0 break-words`: a flex item's automatic minimum size is its longest
-                word, and at a 32 px root "Connected" alone wants more than the row has. */}
+            {/* min-w-0 break-words: at a 32 px root "Connected" alone outgrows the row. */}
             <span className="min-w-0 break-words">Connected boards</span>
           </span>
         )}

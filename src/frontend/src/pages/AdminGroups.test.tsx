@@ -6,6 +6,24 @@ import {
   bookingRulesFixture, groupFixture, groupMemberFixture, restrictedGroupFixture, weekdayWindows,
 } from "../test/groupFixtures";
 import type { MemberGroup } from "../lib/adminApi";
+import { GROUP_ACTIONS } from "../lib/groupsCopy";
+
+/**
+ * A card's consequential actions live behind its ⋯ menu and a confirm dialog (P3 — they were
+ * inline two-tap ConfirmButtons, which is what the old "choose again to confirm" steps drove).
+ */
+async function fromMenu(group: string, item: string) {
+  fireEvent.pointerDown(await screen.findByRole("button", { name: GROUP_ACTIONS.more(group) }), { button: 0, ctrlKey: false, pointerType: "mouse" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: item }));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: item }));
+}
+
+/** MemberCombobox (P3 replaced the hand-built MemberPicker): open it, choose by name. */
+async function pickMember(label: RegExp, name: RegExp) {
+  fireEvent.click(await screen.findByRole("combobox", { name: label }));
+  fireEvent.click(await screen.findByRole("option", { name }));
+}
 
 /**
  * Member groups — GOAL items 3 and 19, the admin half.
@@ -104,10 +122,10 @@ describe("the standing statement and the three honest reads", () => {
     renderPage(<AdminGroupsPage />);
     await screen.findByRole("heading", { name: "Off-peak" });
 
-    fireEvent.click(screen.getByRole("button", { name: /Archive this group — Off-peak/ }));
-    fireEvent.click(await screen.findByRole("button", { name: /choose again to confirm/ }));
+    await fromMenu("Off-peak", GROUP_ACTIONS.archive);
 
-    expect(await screen.findByText(/Couldn't read the club's groups\. Nothing has changed\./)).toBeInTheDocument();
+    // The band, and its standing announcement (a separate invisible region) — both say it.
+    expect((await screen.findAllByText(/Couldn't read the club's groups\. Nothing has changed\./)).length).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { name: "Off-peak" }), "the rows the club last gave us")
       .toBeInTheDocument();
   });
@@ -151,7 +169,8 @@ describe("the editor", () => {
 
   it("keeps each cap behind “use the club's limit”, and says what the club's is", async () => {
     await edit([OFF_PEAK]);
-    const box = await screen.findByRole("checkbox", { name: /Use the club's limit for slots a day/ });
+    // A switch now (P3, R7 — Switch for booleans); the rule it carries is unchanged.
+    const box = await screen.findByRole("switch", { name: /Use the club's limit for slots a day/ });
     expect(box).toBeChecked();
     expect(screen.getByText(/Off-peak members get the club's limit of 4 slots a day/)).toBeInTheDocument();
     expect(screen.getByText(/Admins are never limited/)).toBeInTheDocument();
@@ -164,7 +183,7 @@ describe("the editor", () => {
    */
   it("refuses to let an override that cannot bite look like it saved", async () => {
     await edit([OFF_PEAK]);
-    fireEvent.click(await screen.findByRole("checkbox", { name: /Use the club's limit for slots a day/ }));
+    fireEvent.click(await screen.findByRole("switch", { name: /Use the club's limit for slots a day/ }));
     fireEvent.change(screen.getByLabelText(/Slots a day for this group/), { target: { value: "8" } });
     expect(await screen.findByText(/A group can lower that and never raise it, so 8 would change nothing/))
       .toBeInTheDocument();
@@ -222,8 +241,7 @@ describe("deleting, which is refused rather than cascaded", () => {
       status: 409,
       body: { error: "group_has_members", member_count: 37 },
     }]);
-    fireEvent.click(await screen.findByRole("button", { name: /Delete this group — Off-peak/ }));
-    fireEvent.click(await screen.findByRole("button", { name: /choose again to confirm/ }));
+    await fromMenu("Off-peak", GROUP_ACTIONS.remove);
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/37 members/);
@@ -239,7 +257,9 @@ describe("deleting, which is refused rather than cascaded", () => {
   it("offers no delete at all on one of the club's two standing groups", async () => {
     open([groupFixture({ name: "Regular", is_system_default: true })]);
     await screen.findByRole("heading", { name: "Regular" });
-    expect(screen.queryByRole("button", { name: /Delete this group/ })).not.toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByRole("button", { name: GROUP_ACTIONS.more("Regular") }), { button: 0, ctrlKey: false, pointerType: "mouse" });
+    expect(await screen.findByRole("menuitem", { name: GROUP_ACTIONS.archive })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: GROUP_ACTIONS.remove })).not.toBeInTheDocument();
     expect(screen.getByText(/one of the club's two standing groups/)).toBeInTheDocument();
   });
 
@@ -249,8 +269,7 @@ describe("deleting, which is refused rather than cascaded", () => {
       path: "/api/v1/admin/member-groups/g-offpeak",
       body: { ...OFF_PEAK, status: "archived" },
     }]);
-    fireEvent.click(await screen.findByRole("button", { name: /Archive this group — Off-peak/ }));
-    fireEvent.click(await screen.findByRole("button", { name: /choose again to confirm/ }));
+    await fromMenu("Off-peak", GROUP_ACTIONS.archive);
     await waitFor(() => expect(stub.calls.some((c) => c.method === "PATCH")).toBe(true));
     expect(stub.calls.find((c) => c.method === "PATCH")!.body).toEqual({ status: "archived" });
   });
@@ -273,7 +292,7 @@ describe("assigning members from the group", () => {
   it("labels the action with the number and the group, never “Add selected”", async () => {
     open([OFF_PEAK], [membersRoute]);
     fireEvent.click(await screen.findByRole("button", { name: /Members of Off-peak/ }));
-    fireEvent.click(await screen.findByRole("checkbox", { name: /Thandi Nkosi/ }));
+    await pickMember(/^Add somebody/, /Thandi Nkosi/);
     expect(await screen.findByRole("button", { name: "Add 1 member to Off-peak" })).toBeInTheDocument();
   });
 
@@ -295,8 +314,8 @@ describe("assigning members from the group", () => {
       },
     }]);
     fireEvent.click(await screen.findByRole("button", { name: /Members of Off-peak/ }));
-    fireEvent.click(await screen.findByRole("checkbox", { name: /Ada Lovelace/ }));
-    fireEvent.click(await screen.findByRole("checkbox", { name: /Thandi Nkosi/ }));
+    await pickMember(/^Add somebody/, /Ada Lovelace/);
+    await pickMember(/^Add somebody/, /Thandi Nkosi/);
     fireEvent.click(await screen.findByRole("button", { name: "Add 2 members to Off-peak" }));
 
     expect(await screen.findByText("1 of 2 done.")).toBeInTheDocument();
@@ -311,7 +330,7 @@ describe("the previews, which are the answer to “most restrictive” being an 
 
   it("works this group's own week out locally and states every rule that bit", async () => {
     open([OFF_PEAK]);
-    fireEvent.click(await screen.findByRole("button", { name: /Preview Off-peak's week/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Preview week for Off-peak/ }));
     expect(await screen.findByText(/Can book 200 of the 436 slots the club is open/)).toBeInTheDocument();
     expect(screen.getByText(/236 slots are blocked by this group's own times/)).toBeInTheDocument();
     // A legend with a word on every swatch — never colour alone.
@@ -325,8 +344,7 @@ describe("the previews, which are the answer to “most restrictive” being an 
       body: bookingRulesFixture(),
     }]);
     fireEvent.click(await screen.findByRole("button", { name: /Preview for one member/ }));
-    fireEvent.change(await screen.findByRole("combobox"), { target: { value: "Ada" } });
-    fireEvent.mouseDown(await screen.findByRole("button", { name: /Ada Lovelace/ }));
+    await pickMember(/^Which member/, /Ada Lovelace/);
     await waitFor(() => expect(stub.calls.some((c) => c.path.includes("/booking-rules"))).toBe(true));
     // The member's OWN hours, said as the member's — not the club's line under it, which says
     // a different thing with the same figures in it.
@@ -356,8 +374,7 @@ describe("the previews, which are the answer to “most restrictive” being an 
       },
     ]);
     fireEvent.click(await screen.findByRole("button", { name: /Preview for one member/ }));
-    fireEvent.change(await screen.findByRole("combobox"), { target: { value: "Ada" } });
-    fireEvent.mouseDown(await screen.findByRole("button", { name: /Ada Lovelace/ }));
+    await pickMember(/^Which member/, /Ada Lovelace/);
     await screen.findByText(/Ada Lovelace is in Regular\./);
 
     fireEvent.click(screen.getByRole("checkbox", { name: /Off-peak/ }));
@@ -391,8 +408,7 @@ describe("the previews, which are the answer to “most restrictive” being an 
       }),
     }]);
     fireEvent.click(await screen.findByRole("button", { name: /Preview for one member/ }));
-    fireEvent.change(await screen.findByRole("combobox"), { target: { value: "Ada" } });
-    fireEvent.mouseDown(await screen.findByRole("button", { name: /Ada Lovelace/ }));
+    await pickMember(/^Which member/, /Ada Lovelace/);
 
     expect(await screen.findByText(/their times do not overlap/)).toBeInTheDocument();
     expect(screen.getByText(/nothing she can book on a Tuesday/)).toBeInTheDocument();
@@ -415,7 +431,7 @@ describe("the previews, which are the answer to “most restrictive” being an 
         sequence: [CLUB, { ...CLUB, operating_hours: { ...CLUB.operating_hours, sat: "09:00-12:00" } }],
       },
     );
-    fireEvent.click(await screen.findByRole("button", { name: /Preview Off-peak's week/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Preview week for Off-peak/ }));
     await screen.findByText(/Can book 200 of the 436 slots/);
 
     fireEvent.click(screen.getByRole("button", { name: /Edit Off-peak/ }));

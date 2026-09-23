@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { Card } from "../Card";
+import { Panel as Card } from "./Panel";
 import { DoorAge } from "./DoorAge";
 import { DoorChips } from "./DoorChips";
 import {

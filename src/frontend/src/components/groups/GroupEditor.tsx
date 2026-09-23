@@ -1,7 +1,12 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert } from "../Alert";
-import { Button, Input, Label } from "../Button";
-import { Card } from "../Card";
+import { Button } from "../ui/button";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "../ui/card";
+import { Field, FieldDescription, FieldLabel } from "../ui/field";
+import { Input } from "../ui/input";
+import { RadioCard, RadioGroup } from "../ui/radio-group";
+import { Switch } from "../ui/switch";
+import { typography } from "../../lib/typography";
 import { WeekPainter } from "./WeekPainter";
 import { paintedToWindows, windowsToPainted } from "./weekGrid";
 import { GROUP_PRICING_MODES, type GroupPricingMode, type MemberGroup, type MemberGroupBody } from "../../lib/adminApi";
@@ -130,60 +135,108 @@ export function GroupEditor({
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
 
+  // The editor opens under the list: move focus (and so the view) to its heading, or an admin
+  // presses Edit and sees nothing change.
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { heading.current?.focus(); }, []);
+
   return (
-    <Card className="space-y-5">
-      <h2 className="text-lg font-semibold">{`Editing ${group.name}`}</h2>
+    <Card data-group-editor="">
+      <CardHeader>
+        <CardTitle asChild>
+          <h2 ref={heading} tabIndex={-1} data-route-heading="">{group.id === "" ? "A new group" : `Editing ${group.name}`}</h2>
+        </CardTitle>
+      </CardHeader>
 
-      {error != null && <Alert tone="danger">{explainGroupRefusal(error)}</Alert>}
+      <CardContent className="flex flex-col gap-6">
+        {error != null && <Alert tone="danger">{explainGroupRefusal(error)}</Alert>}
 
-      <div className="space-y-1">
-        <Label htmlFor="group-name">Name</Label>
-        <Input
-          id="group-name" className="min-h-11" value={draft.name}
-          onChange={(e) => set("name", e.target.value)}
-        />
-      </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field>
+            <FieldLabel>Name</FieldLabel>
+            <Input value={draft.name} onChange={(e) => set("name", e.target.value)} />
+          </Field>
+          <Field>
+            <FieldLabel>Description</FieldLabel>
+            <Input value={draft.description} onChange={(e) => set("description", e.target.value)} />
+            <FieldDescription>Members see this on the booking grid, so keep it short.</FieldDescription>
+          </Field>
+        </div>
 
-      <div className="space-y-1">
-        <Label htmlFor="group-description">Description</Label>
-        <p className="text-sm text-text-muted">Members see this on the booking grid, so keep it short.</p>
-        <Input
-          id="group-description" className="min-h-11" value={draft.description}
-          onChange={(e) => set("description", e.target.value)}
-        />
-      </div>
+        <PricingChoice draft={draft} set={set} courtPrice={courtPrice} price={price} creditsPerZar={creditsPerZar} blockZar={blockZar} />
 
-      <fieldset className="space-y-2">
-        <legend className="text-sm font-medium text-text-primary">What does a slot cost this group?</legend>
-        {GROUP_PRICING_MODES.map((mode) => (
-          <label key={mode} className="flex min-h-11 items-center gap-2 text-sm">
-            <input
-              type="radio" name="group-pricing" className="h-5 w-5" value={mode}
-              checked={draft.mode === mode}
-              onChange={() => set("mode", mode)}
+        <fieldset className="flex flex-col gap-4">
+          <legend className={typography({ variant: "h3" })}>Limits for this group</legend>
+          {CAPS.map((cap) => (
+            <CapField
+              key={cap.key}
+              noun={cap.noun}
+              groupName={draft.name}
+              clubValue={clubCaps[cap.club]}
+              value={draft.caps[cap.key]}
+              onChange={(next) => set("caps", { ...draft.caps, [cap.key]: next })}
             />
-            <span>{MODE_LABEL[mode]}</span>
-          </label>
-        ))}
-        {draft.mode === "multiplier" && (
-          <div className="space-y-1">
-            <Label htmlFor="group-multiplier">Multiplier (× the court's price)</Label>
-            <Input
-              id="group-multiplier" className="min-h-11" inputMode="decimal" value={draft.multiplier}
-              onChange={(e) => set("multiplier", e.target.value)}
-            />
-          </div>
-        )}
-        {draft.mode === "flat_per_slice" && (
-          <div className="space-y-1">
-            <Label htmlFor="group-flat">Credits per slot</Label>
-            <Input
-              id="group-flat" className="min-h-11" inputMode="decimal" value={draft.flatPrice}
-              onChange={(e) => set("flatPrice", e.target.value)}
-            />
-          </div>
-        )}
-        <p className="text-sm font-medium text-text-primary">
+          ))}
+        </fieldset>
+
+        <div className="flex flex-col gap-2">
+          <h3 className={typography({ variant: "h3" })}>When may this group book?</h3>
+          <WeekPainter
+            club={club}
+            value={draft.windows}
+            onChange={(next) => set("windows", next)}
+            sliceMinutes={sliceMinutes}
+          />
+        </div>
+      </CardContent>
+
+      <CardFooter className="justify-end">
+        <Button variant="outline" onClick={onCancel}>
+          Cancel{" "}<span className="sr-only">{`editing ${group.name}`}</span>
+        </Button>
+        <Button pending={saving} onClick={() => onSave(bodyFrom(draft))}>
+          Save{" "}<span className="sr-only">{`${group.name}`}</span>
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
+
+/** What a slot costs: three cards, the figure for the choice on screen stated under them. */
+function PricingChoice(props: {
+  draft: Draft;
+  set: <K extends keyof Draft>(key: K, value: Draft[K]) => void;
+  courtPrice: number;
+  price: { credits: number; unknown: boolean };
+  creditsPerZar: number | null | undefined;
+  blockZar: number | null | undefined;
+}) {
+  const { draft, set, courtPrice, price, creditsPerZar, blockZar } = props;
+  return (
+    <fieldset className="flex flex-col gap-3">
+      <legend className={typography({ variant: "h3" })}>What does a slot cost this group?</legend>
+      <RadioGroup
+        value={draft.mode}
+        onValueChange={(mode) => set("mode", mode as GroupPricingMode)}
+        className="grid gap-2 sm:grid-cols-3"
+        aria-label="What does a slot cost this group?"
+      >
+        {GROUP_PRICING_MODES.map((mode) => <RadioCard key={mode} value={mode} title={MODE_LABEL[mode]} />)}
+      </RadioGroup>
+      {draft.mode === "multiplier" && (
+        <Field className="max-w-xs">
+          <FieldLabel>Multiplier (× the court&apos;s price)</FieldLabel>
+          <Input inputMode="decimal" value={draft.multiplier} onChange={(e) => set("multiplier", e.target.value)} />
+        </Field>
+      )}
+      {draft.mode === "flat_per_slice" && (
+        <Field className="max-w-xs">
+          <FieldLabel>Credits per slot</FieldLabel>
+          <Input inputMode="decimal" value={draft.flatPrice} onChange={(e) => set("flatPrice", e.target.value)} />
+        </Field>
+      )}
+      <div className="rounded-lg bg-bg-muted px-3 py-2.5 text-sm">
+        <p className="font-medium text-text-primary">
           {slicePriceLine({
             mode: draft.mode,
             credits: price.credits,
@@ -192,47 +245,11 @@ export function GroupEditor({
             unknown: price.unknown,
           })}
         </p>
-        <p className="text-sm text-text-secondary">
+        <p className="text-text-secondary">
           {ratePerBlockSentence({ creditsPerZar, blockZar, slicePrice: price.credits })}
         </p>
-      </fieldset>
-
-      <fieldset className="space-y-4">
-        <legend className="text-sm font-medium text-text-primary">Limits for this group</legend>
-        {CAPS.map((cap) => (
-          <CapField
-            key={cap.key}
-            noun={cap.noun}
-            groupName={draft.name}
-            clubValue={clubCaps[cap.club]}
-            value={draft.caps[cap.key]}
-            onChange={(next) => set("caps", { ...draft.caps, [cap.key]: next })}
-          />
-        ))}
-      </fieldset>
-
-      <div className="space-y-2">
-        <h3 className="text-sm font-medium text-text-primary">When may this group book?</h3>
-        <WeekPainter
-          club={club}
-          value={draft.windows}
-          onChange={(next) => set("windows", next)}
-          sliceMinutes={sliceMinutes}
-        />
       </div>
-
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant="primary" className="min-h-11" disabled={saving}
-          onClick={() => onSave(bodyFrom(draft))}
-        >
-          {`Save ${group.name}`}
-        </Button>
-        <Button variant="ghost" className="min-h-11" onClick={onCancel}>
-          {`Stop editing ${group.name}`}
-        </Button>
-      </div>
-    </Card>
+    </fieldset>
   );
 }
 
@@ -250,25 +267,18 @@ function CapField({ noun, groupName, clubValue, value, onChange }: {
   value: string | null;
   onChange: (next: string | null) => void;
 }) {
-  const id = `cap-${noun.replace(/\s+/g, "-")}`;
   const inherits = value === null;
   return (
-    <div className="space-y-1">
-      <label className="flex min-h-11 items-center gap-2 text-sm">
-        <input
-          type="checkbox" className="h-5 w-5" checked={inherits}
-          onChange={() => onChange(inherits ? String(clubValue ?? 0) : null)}
-        />
-        <span>{`Use the club's limit for ${noun}`}</span>
-      </label>
+    <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
+      <Field className="flex items-center justify-between gap-3">
+        <FieldLabel className="font-normal">{`Use the club's limit for ${noun}`}</FieldLabel>
+        <Switch checked={inherits} onCheckedChange={() => onChange(inherits ? String(clubValue ?? 0) : null)} />
+      </Field>
       {!inherits && (
-        <>
-          <Label htmlFor={id}>{`${noun[0].toUpperCase()}${noun.slice(1)} for this group`}</Label>
-          <Input
-            id={id} className="min-h-11" inputMode="numeric" value={value}
-            onChange={(e) => onChange(e.target.value)}
-          />
-        </>
+        <Field className="max-w-xs">
+          <FieldLabel>{`${noun[0].toUpperCase()}${noun.slice(1)} for this group`}</FieldLabel>
+          <Input inputMode="numeric" value={value} onChange={(e) => onChange(e.target.value)} />
+        </Field>
       )}
       <p className="text-sm text-text-secondary">
         {noun === "slots a day"

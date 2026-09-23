@@ -287,7 +287,8 @@ test.describe("Shutting every door", () => {
     ]);
 
     await page.getByRole("button", { name: /— every door the club has open/ }).click();
-    await page.getByRole("button", { name: /again to confirm/ }).click();
+    // P3: confirmed in a dialog (it was an inline two-tap control).
+    await page.getByRole("dialog").locator("[data-confirm]").click();
 
     const heading = page.getByRole("heading", { name: /2 doors shut — 1 confirmed, 1 not/ });
     await expect(heading).toBeVisible();
@@ -321,7 +322,8 @@ test.describe("Shutting every door", () => {
     ]);
 
     await page.getByRole("button", { name: /— every door the club has open/ }).click();
-    await page.getByRole("button", { name: /again to confirm/ }).click();
+    // P3: confirmed in a dialog (it was an inline two-tap control).
+    await page.getByRole("dialog").locator("[data-confirm]").click();
 
     const line = page.getByText(/confirmed — heard from/);
     await expect(line).toBeVisible();
@@ -505,7 +507,7 @@ test.describe("One door's page", () => {
 
     const patch = page.waitForRequest((r) => r.method() === "PATCH" && r.url().includes("/admin/devices/"));
     await page.getByRole("button", { name: "Shut this door — Front door" }).click();
-    await page.getByRole("button", { name: "Shut this door — Front door — choose again to confirm" }).click();
+    await page.getByRole("dialog").locator("[data-confirm]").click();
 
     expect((await patch).postData()).toBe('{"enabled":false,"expected_enabled":true}');
   });
@@ -533,19 +535,14 @@ test.describe("One door's page", () => {
     await openDoor(page, [door({ name: "Front door" })]);
 
     await page.getByRole("button", { name: "Delete this door — Front door" }).click();
-    await expect(page.getByRole("button", { name: "Delete this door — Front door — choose again to confirm" })).toBeVisible();
-    // The armed button IS the confirm sentence — asserted on the control rather than on a
-    // text node, because the width sentinel carries the same words invisibly.
-    const armed = page.getByRole("button", { name: "Delete this door — Front door — choose again to confirm" });
-    await expect(armed).toBeVisible();
-    // C10's two facts, in the words A2 gave them this round: the armed confirm was a
-    // paragraph, and what it listed it destroyed while saying nothing about the door's
-    // history — so a reviewer concluded, reasonably, that the scans went too.
-    // B5 (round 2): the consequence is the paragraph above the two buttons, not the button.
-    const told = armed.locator("xpath=..").locator("> p");
-    await expect(told).toContainText("its place and its power answer go");
-    // A2: the question a reviewer went looking for and could not find an answer to.
-    await expect(told).toContainText("Its past scans stay in the club log");
+    // P3: the confirm is a dialog — the question in its title, the consequence in its
+    // description. C10's two facts, in the words A2 gave them: what goes, and that the door's
+    // past scans do NOT.
+    const dialog = page.getByRole("dialog", { name: "Delete this door?" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText("its place and its power answer go");
+    await expect(dialog).toContainText("Its past scans stay in the club log");
+    await expect(dialog.getByRole("button", { name: "Keep this door" })).toBeVisible();
   });
 
   /** Fifty rows of decisions, each carrying a member name of a length nobody controls. */
@@ -642,7 +639,9 @@ test.describe("The club door log", () => {
   test("reads a pre-filtered door out of the query string", async ({ page }) => {
     await openLog(page, [logRow()], [], `/admin/doors/log?door=${DOOR_ID}`);
 
-    await expect(page.getByLabel("Door")).toHaveValue(DOOR_ID);
+    // A design-system Select now (P3): its trigger shows the chosen door, not "All doors".
+    await expect(page.getByRole("combobox", { name: "Door" })).not.toHaveText("All doors");
+    await expect(page.getByRole("combobox", { name: "Door" })).toContainText("Side door");
   });
 
   /**
@@ -780,119 +779,71 @@ test.describe("The printable door card", () => {
  * each control narrow again on a screen nobody thinks of as small.
  * </p>
  */
-test.describe("An armed doors confirm fits the words it is showing", () => {
+test.describe("A doors confirm fits the words it is showing", () => {
   const WIDTHS = [
     { label: "360 px", width: 360, height: 740 },
     { label: "768 px", width: 768, height: 1024 },
   ];
 
   /**
-   * The control is armed; measure it rather than look at it.
-   *
-   * `scrollHeight <= clientHeight + 1` is the whole finding — a control whose content is taller
-   * than its box is a control hiding part of what it is about to do. The 1 px allowance is for
-   * sub-pixel rounding of a fractional line height, nothing more; the failure this catches was
-   * 52 to 62 px over.
-   *
-   * 14 px is the other half: the type was `text-xs`, and a 12 px consequence on a phone is the
-   * reason it needed four lines in the first place.
-   */
-  /**
-   * <b>Found by shape, not by wording.</b> Every `ConfirmButton` marks its own group, so this
-   * selector is every two-step confirm on the page and nothing else.
-   *
-   * <p>
-   * An earlier draft of this sweep named each control by its label, and the labels changed
-   * under it inside one afternoon — "Delete Front door" became "Delete this door — Front door"
-   * while this was being written. A layout guarantee that only holds for the wording it was
-   * written against is not a guarantee; a control that arrives on this screen next month gets
-   * measured by this test without anybody remembering to add it.
-   * </p>
-   *
-   * <p>
-   * It used to select the shape directly — a div with a direct `span[aria-live="polite"]` —
-   * and that shape stopped belonging to `ConfirmButton` alone. `Alert` renders its standing
-   * live region as a fragment sibling, so every container holding one answered too: on a shut
-   * door's page the sweep counted three confirms and the first had no way out, because it was
-   * the "this door is shut" banner. The marking is on the group itself, so the property that
-   * mattered survives — a new confirm is swept without anybody adding it here.
-   * </p>
-   */
-  const CONFIRMS = "[data-confirm-group]";
-
-  /**
-   * Arm every confirm on the page in turn, measure it, and put it back.
-   *
-   * `scrollHeight <= clientHeight + 1` is the whole finding — a control whose content is taller
-   * than its box is a control hiding part of what it is about to do. The 1 px allowance is for
-   * sub-pixel rounding of a fractional line height, nothing more; the failure this catches was
-   * 52 to 62 px over. 14 px is the other half: the type was `text-xs`, and a 12 px consequence
-   * on a phone is the reason it needed four lines in the first place.
+   * P3 made every doors confirm a dialog (it was an inline two-tap control, and this suite
+   * measured that control's armed state). The findings it held are kept, measured on the
+   * dialog: nothing clips its own words (`scrollHeight <= clientHeight + 1`), the consequence
+   * is ≥14 px and ≤25 words (B5), every way out and in is a real touch target (C10), the
+   * dialog fits the screen, and the trigger's name opens with the words on it (B16).
+   * Triggers are found by shape — every dialog trigger on the page — not by wording.
    */
   async function everyConfirmFits(page: Page, expected: number) {
-    const wrappers = page.locator(CONFIRMS);
-    await expect(wrappers).toHaveCount(expected);
+    // Inside the page shell: the admin section bar above it opens a sheet too.
+    const triggers = page.locator('main [data-page-shell] button[aria-haspopup="dialog"]');
+    await expect(triggers).toHaveCount(expected);
+    const viewport = page.viewportSize()!;
 
     for (let i = 0; i < expected; i += 1) {
-      const wrapper = wrappers.nth(i);
-      const trigger = wrapper.locator("> button").first();
-      // `innerText`, not `textContent`: the width sentinel inside the control is
-      // visibility-hidden and carries a copy of BOTH labels, which textContent would hand back.
-      const idleText = (await trigger.evaluate((el) => (el as HTMLElement).innerText)).trim();
+      const trigger = triggers.nth(i);
+      // The words on the control, and its name: the button's resting layer read with and
+      // without its visually hidden context (the working layer is aria-hidden and never read).
+      const { idleText, name } = await trigger.evaluate((el) => {
+        const label = el.querySelector("[data-slot=button-label]") ?? el;
+        const visible = label.cloneNode(true) as HTMLElement;
+        visible.querySelectorAll(".sr-only").forEach((n) => n.remove());
+        return {
+          idleText: (visible.textContent ?? "").replace(/\s+/g, " ").trim(),
+          name: (el.getAttribute("aria-label") ?? label.textContent ?? "").replace(/\s+/g, " ").trim(),
+        };
+      });
+      expect(name.startsWith(idleText), `"${name}" does not open with "${idleText}"`).toBe(true);
 
       await trigger.click();
-      // Armed: the wrapper now holds the control and its way out.
-      await expect(wrapper.locator("> button")).toHaveCount(2);
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
 
-      // By ROLE in the armed pair, not by position: C-H1 put the way out FIRST, so that the
-      // natural Tab out of the auto-focused safe button reaches the other option instead of
-      // leaving the control. An index here measures whichever button happens to be there.
-      const control = wrapper.locator('> button[data-confirm="go"]');
-      const measured = await control.evaluate((el) => ({
-        scrollHeight: el.scrollHeight,
-        clientHeight: el.clientHeight,
-        fontSize: Number.parseFloat(getComputedStyle(el).fontSize),
-        shown: (el as HTMLElement).innerText.trim(),
-        pressed: el.getAttribute("aria-pressed"),
-        name: el.getAttribute("aria-label"),
-      }));
+      const box = (await dialog.boundingBox())!;
+      expect(box.x, `confirm ${i} ("${idleText}") starts off-screen`).toBeGreaterThanOrEqual(-1);
+      expect(box.x + box.width, `confirm ${i} ("${idleText}") runs off the right edge`).toBeLessThanOrEqual(viewport.width + 1);
 
-      // B5 (round 2): the consequence is a paragraph ABOVE the two buttons, not the armed
-      // button's own words — the button says what pressing it does, in a word or two.
-      const consequence = wrapper.locator("> p");
-      await expect(consequence, `confirm ${i} ("${idleText}") shows no consequence`).toBeVisible();
-      const told = (await consequence.innerText()).trim();
-      expect(told.length, `confirm ${i} ("${idleText}") shows no consequence`).toBeGreaterThan(0);
+      const told = (await dialog.locator("[data-slot=dialog-description]").innerText()).trim();
+      expect(told.length, `confirm ${i} ("${idleText}") states no consequence`).toBeGreaterThan(0);
       expect(told.split(/\s+/).length, `confirm ${i} ("${idleText}") runs past 25 words: "${told}"`)
         .toBeLessThanOrEqual(25);
-      expect(measured.shown.length, `confirm ${i} ("${idleText}") armed with an empty control`)
-        .toBeGreaterThan(0);
-      expect(
-        measured.scrollHeight,
-        `confirm ${i} ("${idleText}") clips its own words: scrollHeight ${measured.scrollHeight}`
-        + ` > clientHeight ${measured.clientHeight}`,
-      ).toBeLessThanOrEqual(measured.clientHeight + 1);
-      expect(measured.fontSize, `confirm ${i} ("${idleText}") is smaller than 14 px`)
-        .toBeGreaterThanOrEqual(14);
-      // B6: "pressed" is the word for done, and nothing has been done yet.
-      expect(measured.pressed, `confirm ${i} ("${idleText}") claims a pressed state`).toBeNull();
-      // B16: whatever the call site adds, the words on the control come first.
-      if (measured.name !== null) {
-        expect(measured.name.startsWith(idleText), `"${measured.name}" does not open with "${idleText}"`)
-          .toBe(true);
+      const fontSize = await dialog.locator("[data-slot=dialog-description]")
+        .evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize));
+      expect(fontSize, `confirm ${i} ("${idleText}") is smaller than 14 px`).toBeGreaterThanOrEqual(14);
+
+      for (const control of [dialog.locator("[data-confirm]"), dialog.getByRole("button", { name: "Close" })]) {
+        // `offsetHeight`, not the bounding box: the dialog pops in with a scale, and a box measured
+        // mid-animation is the transform's size, not the control's.
+        const measured = await control.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight, h: (el as HTMLElement).offsetHeight }));
+        expect(measured.scroll, `confirm ${i} ("${idleText}") clips its own words`).toBeLessThanOrEqual(measured.client + 1);
+        expect(measured.h, `confirm ${i} ("${idleText}") has a control under 44 px`).toBeGreaterThanOrEqual(44);
       }
-      // B6 again: the consequence is announced, not left to the visual alone.
-      expect((await wrapper.locator('span[aria-live="polite"]').innerText()).trim().length)
-        .toBeGreaterThan(0);
 
-      // C10: a visible way out, at a real touch size.
-      const cancel = wrapper.locator('> button[data-confirm="stop"]');
-      await expect(cancel).toBeVisible();
-      expect((await cancel.boundingBox())!.height, `confirm ${i}'s Cancel is under 44 px`)
+      // C10: a visible way out, at a real touch size, that changes nothing.
+      const cancel = dialog.locator("[data-slot=dialog-footer] button").first();
+      expect(await cancel.evaluate((el) => (el as HTMLElement).offsetHeight), `confirm ${i}'s way out is under 44 px`)
         .toBeGreaterThanOrEqual(44);
-
       await cancel.click();
-      await expect(wrapper.locator("> button")).toHaveCount(1);
+      await expect(dialog).toBeHidden();
     }
   }
 
@@ -900,8 +851,7 @@ test.describe("An armed doors confirm fits the words it is showing", () => {
     test(`every confirm on the doors overview does at ${size.label}`, async ({ page }) => {
       await page.setViewportSize({ width: size.width, height: size.height });
       // One door open and one shut BY A SHUT-ALL, so the fleet panel renders both halves at
-      // once. `shut_by_shut_all_at` is what makes the Reopen exist — C1: a door shut on its
-      // own is not something `reopen-all` touches, so no control for it is offered.
+      // once. `shut_by_shut_all_at` is what makes the Reopen exist — C1.
       await openDoors(page, [
         door(),
         door({
@@ -1023,7 +973,8 @@ test.describe("A door that has been deleted", () => {
     });
     await expect(page.getByRole("heading", { name: "All scans, all doors" })).toBeVisible();
 
-    await page.getByLabel("Door").selectOption(`removed:${REMOVED_KEY}`);
+    await page.getByRole("combobox", { name: "Door" }).click();
+    await page.getByRole("group", { name: "Removed doors" }).getByRole("option", { name: "Side door" }).click();
 
     await expect.poll(() => asked.some((u) => u.includes(`removed_door=${REMOVED_KEY}`))).toBe(true);
     // Never both parameters: the API answers 400 for the pair.
@@ -1102,7 +1053,8 @@ test.describe("The log a committee reads", () => {
   test("asks the server for a named period and states the range it resolved", async ({ page }) => {
     const asked = await openLog(page);
 
-    await page.getByLabel("When", { exact: true }).selectOption("yesterday");
+    await page.getByRole("combobox", { name: "When" }).click();
+    await page.getByRole("option", { name: "Yesterday" }).click();
 
     await expect.poll(() => asked.some((u) => u.includes("period=yesterday"))).toBe(true);
     // In words, above the rows, from the server's own resolved range — and rendered in the
@@ -1118,8 +1070,15 @@ test.describe("The log a committee reads", () => {
   test("asks for one club-local day when that is the question", async ({ page }) => {
     const asked = await openLog(page);
 
-    await page.getByLabel("When", { exact: true }).selectOption("day");
-    await page.getByLabel("Which day").fill("2026-09-19");
+    await page.getByRole("combobox", { name: "When" }).click();
+    await page.getByRole("option", { name: "A specific day" }).click();
+    // The club-day DatePicker (P3, R7): walk the calendar to the day and tap it.
+    await page.getByRole("button", { name: /^Which day/ }).click();
+    for (let step = 0; step < 36 && (await page.locator('button[data-day="2026-09-19"]').count()) === 0; step++) {
+      const back = new Date().toISOString().slice(0, 7) > "2026-09";
+      await page.getByRole("button", { name: back ? /previous month/i : /next month/i }).click();
+    }
+    await page.locator('button[data-day="2026-09-19"]').click();
 
     await expect.poll(() => asked.some((u) => u.includes("day=2026-09-19"))).toBe(true);
     expect(asked.filter((u) => u.includes("day=") && u.includes("period="))).toHaveLength(0);
@@ -1484,6 +1443,10 @@ test.describe("The doors pages at 320 px with a 32 px root font", () => {
     await large(page);
 
     await expect(page.getByText(/treasurer@crusaderssquashclub/)).toBeVisible();
+    // The design-system Button's hidden pending spinner spins while invisible, and a rotating
+    // square's bounding box is wider than the square — stilled so this measures layout (see
+    // the same line in admin-devices.spec.ts).
+    await page.addStyleTag({ content: "[data-slot=button-pending] svg { animation: none !important; }" });
     const stuck = await page.evaluate(() => [...document.querySelectorAll("main *")]
       .filter((el) => {
         const e = el as HTMLElement;

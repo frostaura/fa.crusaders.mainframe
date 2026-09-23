@@ -29,7 +29,6 @@ const SURFACES = [
   "pages/monitoring",
   "components/monitoring",
   "components/members",
-  "components/MemberPicker.tsx",
   "components/StateBlock.tsx",
   "lib/monitoringCopy.ts",
   "lib/deviceFaultCopy.ts",

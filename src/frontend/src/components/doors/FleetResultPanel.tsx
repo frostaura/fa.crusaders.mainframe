@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { Card } from "../Card";
-import { Badge } from "../Button";
+import { Panel as Card } from "./Panel";
+import { Badge } from "../ui/badge";
 import { relative } from "../../lib/deviceLiveness";
 import {
   UNNAMED_GATE, doorConfirmedLine, doorExitIsMechanical, doorFleetNoChangeNotice,
@@ -107,7 +107,7 @@ export function FleetResultPanel({ state }: { state: FleetResultState }) {
   const staying = doorsStayShutNotice(state.leftShut.map((d) => d.name));
   return (
     <Card className="mt-4 space-y-3">
-      <h3 ref={headingRef} tabIndex={-1} className="text-base font-semibold">{heading(state)}</h3>
+      <h3 ref={headingRef} tabIndex={-1} data-fleet-result-heading="" className="text-base font-semibold">{heading(state)}</h3>
       <p className="text-xs text-text-muted">{taken}</p>
       {/* C1. A result that changed nothing used to print "0 doors reopened" and stop, which
           is the sentence that sent a reviewer looking for a broken endpoint. A zero-change

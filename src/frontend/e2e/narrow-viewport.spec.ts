@@ -66,11 +66,13 @@ test("every wallet ledger column a member needs is on screen at 375px", async ({
   await page.goto("/wallet");
   await expect(page.getByRole("region", { name: "Wallet ledger" })).toBeVisible();
 
-  // The three columns that survive the sm breakpoint. From and To are deliberately dropped on a
-  // phone (the counterparty rides under the amount instead), so they are not expected here.
-  for (const header of ["Time", "Amount", "Comment"]) {
+  // The two columns that survive the sm breakpoint (P3 mobile rows): the movement and the money.
+  // From and To fold away (the counterparty rides under the amount), and so does Time — it rides
+  // under the comment — so neither is lost, only moved.
+  for (const header of ["Comment", "Amount"]) {
     await expect(page.getByRole("button", { name: header, exact: true })).toBeVisible();
   }
+  await expect(page.locator("table tbody tr").first().locator("td time")).toBeVisible();
 
   // The measurement, not an impression: every rendered amount cell must end inside the viewport.
   const overflowing = await page.evaluate(() => {

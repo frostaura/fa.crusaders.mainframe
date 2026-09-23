@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Card } from "../components/Card";
+import { Panel as Card } from "../components/doors/Panel";
 import { Alert } from "../components/Alert";
 import { Button } from "../components/ui/button";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
@@ -10,7 +10,8 @@ import { StateBlock } from "../components/ui/state-block";
 import { TextLink } from "../components/ui/text-link";
 import { Door } from "../components/ui/icons";
 import { useAsyncAction } from "../lib/useAsyncAction";
-import { ConfirmButton } from "../components/ConfirmButton";
+import { ConfirmDialog } from "../components/admin/ConfirmDialog";
+import { splitQuestion } from "../lib/confirmCopy";
 import { DoorAge } from "../components/doors/DoorAge";
 import { DoorChips } from "../components/doors/DoorChips";
 import { DoorFeed } from "../components/doors/DoorFeed";
@@ -214,20 +215,19 @@ function DoorControls({ door, displayName, actions, online, shutAt, timezone }: 
               `ConfirmButton`'s aria-label replaces its contents: without this sentence a
               screen-reader user arming the control hears only "choose again to confirm". */}
           <p className="text-sm text-text-secondary">{gateDeleteStandingNotice(displayName)}</p>
-          <ConfirmButton
-            idleLabel="Delete this door"
+          {/* Confirmed in a dialog (P3). No `focusAfter`: a successful delete navigates to the
+              doors list, and the page it lands on moves focus itself. */}
+          <ConfirmDialog
+            trigger={(
+              <Button variant="danger-soft" block className="h-auto min-h-touch whitespace-normal py-2">
+                Delete this door{" "}<span className="sr-only">{`— ${displayName}`}</span>
+              </Button>
+            )}
+            title={splitQuestion(gateDeleteConfirm()).question ?? "Delete this door?"}
+            description={splitQuestion(gateDeleteConfirm()).consequence}
+            confirmLabel="Delete this door"
             cancelLabel="Keep this door"
-            confirmLabel={gateDeleteConfirm()}
-            ariaLabel={displayName}
-            // R3 adoption: "Keep this door — Side door". The way out is named after what it
-            // keeps rather than after the verb it is declining. No `focusAfter`: a successful
-            // delete navigates to the doors list, and the page it lands on moves focus itself
-            // — naming a target here would be a second claim on the keyboard during the same
-            // transition, and `focusAfterAction` deliberately declines one it would lose.
-            subject={displayName}
             onConfirm={actions.remove}
-            tone="danger"
-            className="min-h-11 w-full"
           />
         </div>
       </Card>

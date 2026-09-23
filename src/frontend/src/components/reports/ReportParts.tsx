@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { cn, formatCredits } from "@/lib/utils";
 import { typography } from "@/lib/typography";
-import { Button } from "@/components/ui/button";
+import { Toggle } from "@/components/ui/toggle";
 import { Card } from "@/components/ui/card";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -30,7 +30,7 @@ export function RangeToolbar({ range, onChange, children }: {
   const today = clubToday();
   const active = matchingPreset(range, today);
   return (
-    <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+    <div className="flex flex-wrap items-end gap-x-4 gap-y-3 rounded-xl border border-border bg-bg-surface p-3 shadow-xs sm:p-4">
       <div className="flex flex-wrap items-end gap-3">
         <DayField label="From">
           <DatePicker label="From" value={range.from} max={range.to} onChange={(from) => onChange({ ...range, from })} />
@@ -39,17 +39,18 @@ export function RangeToolbar({ range, onChange, children }: {
           <DatePicker label="To" value={range.to} min={range.from} max={today} onChange={(to) => onChange({ ...range, to })} />
         </DayField>
       </div>
+      {/* Toggles (`aria-pressed`), not a radio group: a custom range presses none of them, and
+          pressing the one already on simply sets it again. */}
       <div role="group" aria-label="Quick ranges" className="flex flex-wrap gap-2">
         {RANGE_PRESETS.map((preset) => (
-          <Button
+          <Toggle
             key={preset.id}
-            type="button"
-            variant={active === preset.id ? "secondary" : "outline"}
-            aria-pressed={active === preset.id}
-            onClick={() => onChange(presetRange(preset.id, today))}
+            variant="outline"
+            pressed={active === preset.id}
+            onPressedChange={() => onChange(presetRange(preset.id, today))}
           >
             {preset.label}
-          </Button>
+          </Toggle>
         ))}
       </div>
       {children ? <div className="flex flex-wrap gap-2 sm:ml-auto">{children}</div> : null}

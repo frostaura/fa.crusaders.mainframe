@@ -7,6 +7,21 @@ import {
 } from "../test/harness";
 
 /**
+ * The three filters are design-system Selects (P3, R7 — they were native selects), so a
+ * choice is made the way a pointer makes it and the options exist only while the list is open.
+ */
+function openPicker(label: string) {
+  fireEvent.pointerDown(screen.getByRole("combobox", { name: label }), { button: 0, ctrlKey: false, pointerType: "mouse" });
+}
+async function choose(label: string, option: string | RegExp) {
+  openPicker(label);
+  fireEvent.click(await screen.findByRole("option", { name: option }));
+}
+/** The picker, found by its label once the page has it. */
+const picker = (label: string) => screen.findByRole("combobox", { name: label });
+
+
+/**
  * The club door log — W1.3.
  *
  * <p>
@@ -87,7 +102,7 @@ describe("the club door log", () => {
   it("offers exactly three filters and nothing that narrows by a person", async () => {
     open([doorLogFixture()]);
 
-    await screen.findByLabelText("Door");
+    await picker("Door");
     expect(screen.getAllByRole("combobox")).toHaveLength(3);
     expect(screen.getByLabelText("When")).toBeInTheDocument();
     expect(screen.getByLabelText("Outcome")).toBeInTheDocument();
@@ -125,7 +140,7 @@ describe("the club door log", () => {
     const { stub } = open([doorLogFixture()]);
 
     await screen.findByText(/newest first/);
-    expect(screen.getByLabelText("When")).toHaveValue("24h");
+    expect(await picker("When")).toHaveTextContent("Last 24 hours");
     const read = new URL(`http://x${stub.calls.find((c) => c.path.includes("/doors/activity"))!.path}`);
     expect(read.searchParams.get("period")).toBe("last_24h");
     expect(read.searchParams.get("from")).toBeNull();
@@ -140,7 +155,8 @@ describe("the club door log", () => {
   it("offers Today, Yesterday and a specific day as well as the rolling windows", async () => {
     open([doorLogFixture()]);
 
-    await screen.findByLabelText("When");
+    await picker("When");
+    openPicker("When");
     for (const label of ["Today", "Yesterday", "Last 24 hours", "Last 7 days", "Last 30 days", "A specific day"]) {
       expect(screen.getByRole("option", { name: label })).toBeInTheDocument();
     }
@@ -162,7 +178,7 @@ describe("the club door log", () => {
   it("asks for one club-local day, by day, once a day is chosen", async () => {
     const { stub } = open([doorLogFixture()], {}, ["/admin/monitoring/doors/log?range=day&day=2026-09-20"]);
 
-    await screen.findByLabelText("Which day");
+    await screen.findByRole("button", { name: /^Which day/ });
     const read = new URL(`http://x${stub.calls.filter((c) => c.path.includes("/doors/activity")).at(-1)!.path}`);
     expect(read.searchParams.get("day")).toBe("2026-09-20");
     expect(read.searchParams.get("period")).toBeNull();
@@ -181,7 +197,7 @@ describe("the club door log", () => {
   it("does not send a malformed day, and does not quietly list something else", async () => {
     const { stub } = open([doorLogFixture()], {}, ["/admin/monitoring/doors/log?range=day&day=20-09-2026"]);
 
-    await screen.findByLabelText("Which day");
+    await screen.findByRole("button", { name: /^Which day/ });
     expect(stub.calls.find((c) => c.path.includes("/doors/activity"))).toBeUndefined();
     expect(screen.getByRole("status")).toHaveTextContent("Pick a day to see its scans");
     expect(document.body.textContent).not.toContain("Showing 1 scan");
@@ -191,20 +207,28 @@ describe("the club door log", () => {
    * <b>C-H2 / R3-12 — the date field could not be typed into.</b>
    *
    * Every keystroke went to the query string, so a typed date published `day=2`, `day=20`,
-   * `day=200920-02-06` … to a bookmarkable URL, one request each, losing the reader's place
-   * in between. The field holds its own draft and only a complete club day is committed.
+   * `day=200920-02-06` … to a bookmarkable URL. P3 retires the typing half outright: the
+   * field is the club-day DatePicker, which can only produce a whole club day. The invariant
+   * kept is the one that mattered — exactly ONE complete day reaches the wire.
    */
-  it("does not commit a half-typed day to the URL", async () => {
+  it("commits only a whole picked day to the URL", async () => {
     const { stub } = open([doorLogFixture()], {}, ["/admin/monitoring/doors/log?range=day"]);
 
-    const field = await screen.findByLabelText("Which day");
-    fireEvent.change(field, { target: { value: "200920-02-06" } });
-    fireEvent.change(field, { target: { value: "2026-09-20" } });
+    fireEvent.click(await screen.findByRole("button", { name: /^Which day/ }));
+    const target = "2026-09-20";
+    for (let step = 0; step < 60 && !document.querySelector(`button[data-day="${target}"]`); step++) {
+      // The calendar opens on today's month; walk to the fixture's day in whichever direction it lies.
+      const back = new Date().toISOString().slice(0, 7) > target.slice(0, 7);
+      fireEvent.click(screen.getByRole("button", { name: back ? /previous month/i : /next month/i }));
+    }
+    fireEvent.click(document.querySelector<HTMLElement>(`button[data-day="${target}"]`)!);
 
-    const days = stub.calls
-      .filter((c) => c.path.includes("/doors/activity"))
-      .map((c) => new URL(`http://x${c.path}`).searchParams.get("day"));
-    expect(days).toEqual(["2026-09-20"]);
+    await waitFor(() => {
+      const days = stub.calls
+        .filter((c) => c.path.includes("/doors/activity"))
+        .map((c) => new URL(`http://x${c.path}`).searchParams.get("day"));
+      expect(days).toEqual([target]);
+    });
   });
 
   /**
@@ -256,7 +280,7 @@ describe("the club door log", () => {
     const { stub } = open([doorLogFixture()], {}, [`/admin/monitoring/doors/log?door=${DOOR_ID}`]);
 
     await screen.findByText(/newest first/);
-    expect(screen.getByLabelText("Door")).toHaveValue(DOOR_ID);
+    expect(await picker("Door")).not.toHaveTextContent("All doors");
     expect(stub.calls.find((c) => c.path.includes("/doors/activity"))!.path).toContain(`door=${DOOR_ID}`);
   });
 
@@ -265,7 +289,7 @@ describe("the club door log", () => {
 
     await screen.findByText(/newest first/);
     const before = stub.calls.filter((c) => c.path.includes("/doors/activity")).length;
-    fireEvent.change(screen.getByLabelText("When"), { target: { value: "7d" } });
+    await choose("When", "Last 7 days");
 
     await waitFor(() => {
       expect(stub.calls.filter((c) => c.path.includes("/doors/activity")).length).toBeGreaterThan(before);
@@ -280,7 +304,8 @@ describe("the club door log", () => {
   it("offers the outcome values the rows are chipped with", async () => {
     open([doorLogFixture()]);
 
-    await screen.findByLabelText("Outcome");
+    await picker("Outcome");
+    openPicker("Outcome");
     for (const label of ["All outcomes", "Lock released", "Refused (any)", "No booking", "Too early"]) {
       expect(screen.getByRole("option", { name: label })).toBeInTheDocument();
     }
@@ -319,7 +344,7 @@ describe("the club door log", () => {
     expect(screen.getAllByRole("status")).toHaveLength(1);
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/newest first/));
 
-    fireEvent.change(screen.getByLabelText("Outcome"), { target: { value: "too_early" } });
+    await choose("Outcome", "Too early");
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("No scans match those filters."));
     expect(screen.getAllByRole("status")).toHaveLength(1);
   });
@@ -566,16 +591,20 @@ describe("the club door log", () => {
   it("labels an unnamed door as an unnamed scanner with its board code", async () => {
     open([], { doors: [doorFixture({ name: "Door gate", gate_key: null })] });
 
-    const picker = await screen.findByLabelText("Door");
-    expect(picker).toHaveTextContent("Unnamed scanner (gate-0a1b2c)");
-    expect(picker.textContent).not.toContain("Door gate");
+    await picker("Door");
+    openPicker("Door");
+    const list = await screen.findByRole("listbox");
+    expect(list).toHaveTextContent("Unnamed scanner (gate-0a1b2c)");
+    expect(list.textContent).not.toContain("Door gate");
   });
 
   /** A door the club HAS named keeps its name, whether or not it has a key. */
   it("keeps a named door's own name in the picker", async () => {
     open([], { doors: [doorFixture({ name: "Front door", gate_key: null })] });
 
-    expect(await screen.findByLabelText("Door")).toHaveTextContent("Front door — no door name yet");
+    await picker("Door");
+    openPicker("Door");
+    expect(await screen.findByRole("option", { name: "Front door — no door name yet" })).toBeInTheDocument();
   });
 
   /**
@@ -596,8 +625,9 @@ describe("the club door log", () => {
     ]);
     renderPage(<AdminDoorsLogPage />, { initialEntries: ["/admin/monitoring/doors/log"] });
 
-    const picker = await screen.findByLabelText("Door");
-    expect(picker).toHaveTextContent("Side door");
+    await picker("Door");
+    openPicker("Door");
+    expect(await screen.findByRole("listbox")).toHaveTextContent("Side door");
     expect(screen.getByText(/this list may be short/))
       .toHaveTextContent("The scans below are unaffected");
   });
@@ -678,6 +708,8 @@ describe("the club door log", () => {
   it("offers the doors that are gone, in their own group, by the name their rows stored", async () => {
     open([doorLogFixture()], { removedDoors: [{ key: "side-door", name: "Side door", gate_key: "side-door" }] });
 
+    await picker("Door");
+    openPicker("Door");
     const group = await screen.findByRole("group", { name: "Removed doors" });
     expect(group).toHaveTextContent("Side door");
   });
@@ -687,8 +719,8 @@ describe("the club door log", () => {
       removedDoors: [{ key: "side-door", name: "Side door", gate_key: "side-door" }],
     });
 
-    await screen.findByRole("group", { name: "Removed doors" });
-    fireEvent.change(screen.getByLabelText("Door"), { target: { value: "removed:side-door" } });
+    await picker("Door");
+    await choose("Door", "Side door");
 
     await waitFor(() => {
       const read = new URL(`http://x${stub.calls.filter((c) => c.path.includes("/doors/activity")).at(-1)!.path}`);
@@ -711,8 +743,8 @@ describe("the club door log", () => {
       removedDoors: [{ key: "side-door", name: "Side door", gate_key: "side-door" }],
     }, [`/admin/monitoring/doors/log?door=${DOOR_ID}`]);
 
-    await screen.findByRole("group", { name: "Removed doors" });
-    fireEvent.change(screen.getByLabelText("Door"), { target: { value: "removed:side-door" } });
+    await picker("Door");
+    await choose("Door", "Side door");
 
     await waitFor(() => {
       const read = new URL(`http://x${stub.calls.filter((c) => c.path.includes("/doors/activity")).at(-1)!.path}`);
@@ -726,8 +758,10 @@ describe("the club door log", () => {
       removedDoors: [{ key: "side-door", name: "Side door", gate_key: "side-door" }],
     }, ["/admin/monitoring/doors/log?removed_door=side-door"]);
 
-    await screen.findByRole("group", { name: "Removed doors" });
-    fireEvent.change(screen.getByLabelText("Door"), { target: { value: DOOR_ID } });
+    await picker("Door");
+    openPicker("Door");
+    const live = (await screen.findAllByRole("option")).find((o) => !o.closest("[role=group]") && o.textContent !== "All doors")!;
+    fireEvent.click(live);
 
     await waitFor(() => {
       const read = new URL(`http://x${stub.calls.filter((c) => c.path.includes("/doors/activity")).at(-1)!.path}`);
@@ -751,8 +785,8 @@ describe("the club door log", () => {
       })),
     });
 
-    await screen.findByRole("group", { name: "Removed doors" });
-    expect(screen.getByText(/50 most recently removed doors. There may be more/))
+    await picker("Door");
+    expect(await screen.findByText(/50 most recently removed doors. There may be more/))
       .toBeInTheDocument();
   });
 
@@ -763,6 +797,8 @@ describe("the club door log", () => {
       })),
     });
 
+    await picker("Door");
+    openPicker("Door");
     await screen.findByRole("group", { name: "Removed doors" });
     expect(screen.queryByText(/There may be more/)).toBeNull();
   });

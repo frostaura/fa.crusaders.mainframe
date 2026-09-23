@@ -80,42 +80,6 @@ const SERVER_DOWN_TEXT = "The club's system isn't answering right now. Nothing w
 /** The sign-out sentence. The 401 handler in `lib/api.ts` does the actual redirect. */
 export const SESSION_LOST_TEXT = "Your session has expired — sign in again to book.";
 
-/**
- * `insufficient_balance` as an ADMIN booking on somebody else's behalf sees it.
- *
- * <p>
- * The shared sentence above says "top up your wallet", which is right for a member and
- * wrong for a club desk: the short wallet is not theirs, and a desk account's balance is
- * zero permanently because it never plays. Two audiences, one error code — which is why
- * the code, not the status, is what the client branches on.
- * </p>
- *
- * <p>
- * This is the degenerate path. Ordinarily the refusal carries `current_credits` and
- * `required_credits` and the schedule turns it into §8's override offer with the figures
- * in it; this sentence is what is left when those are missing.
- * </p>
- */
-export const MEMBER_SHORT_TEXT =
-  "That member doesn't have enough credit for this court. Try again to see what they're short by.";
-
-/**
- * The same refusal when the short wallet is the signed-in admin's own.
- *
- * <p>
- * §8's override is `payer.AllowNegativeBalance && actorId != userId` on the server
- * (`BookingService`), so an admin cannot authorise an overdraft on themselves — an actor
- * approving their own negative balance is not an override, it is an unlimited credit line.
- * The picker lists the admin along with every other active member, so this refusal is
- * reachable; before this sentence existed the screen offered the override anyway, refused
- * it on the second press, discarded the figures and told the admin to "try again to see
- * what they're short by", which returned them to the start with nothing new to see.
- * </p>
- */
-export const ADMIN_SELF_SHORT_TEXT =
-  "You don't have enough credit for this court. The admin override only works on another member's " +
-  "wallet, not your own — top up and book it again.";
-
 function describePeakHours(err: ApiError): string {
   const start = err.detail("peak_start");
   const end = err.detail("peak_end");
@@ -224,7 +188,7 @@ export function provesStaleGrid(e: unknown): boolean {
  *
  * <p>
  * Its own sentences rather than {@link describeBookingError}'s, for the reason that file
- * already carries twice (see {@link MEMBER_SHORT_TEXT}): one code, two audiences. The
+ * already carries: one code, two audiences. The
  * schedule's version says "you can't book", which is the wrong half of the truth here —
  * nothing on this screen books anything — and `member_not_active`'s says "approve it on the
  * Members page", which is an instruction to a desk, on a screen only the member sees.

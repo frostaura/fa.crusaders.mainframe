@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { AdminDevicesPage } from "./AdminDevices";
 import {
   COURTS_FIXTURE,
@@ -13,6 +13,46 @@ import {
   stubFetch,
 } from "../test/harness";
 import { clubInstant } from "../lib/clubClock";
+
+/**
+ * A Radix Select, found by its name (P3 replaced the native selects — R7). Opened the way a
+ * pointer opens it; the option chosen by the words on it, which is what an admin reads.
+ */
+async function choose(label: string, option: string | RegExp) {
+  fireEvent.pointerDown(await screen.findByRole("combobox", { name: label }), { button: 0, ctrlKey: false, pointerType: "mouse" });
+  fireEvent.click(await screen.findByRole("option", { name: option }));
+}
+
+/**
+ * Out of service is confirmed in a dialog now (P3 — it was an inline two-tap ConfirmButton
+ * whose armed control was NAMED by the consequence). The consequence is the dialog's
+ * description, word for word what `outOfServiceConfirm` says after its old "Out of service?"
+ * lead-in, which the dialog's title now asks.
+ */
+async function openOutOfService(index = 0) {
+  const triggers = await screen.findAllByRole("button", { name: "Take out of service" });
+  fireEvent.click(triggers[index]);
+  return screen.findByRole("dialog");
+}
+
+/** The consequence the open confirm states — its description, exactly. */
+function consequenceOf(dialog: HTMLElement): string {
+  return dialog.querySelector("[data-slot=dialog-description]")?.textContent ?? "";
+}
+
+function confirmIn(dialog: HTMLElement) {
+  fireEvent.click(within(dialog).getByRole("button", { name: "Take out of service" }));
+}
+
+/** Delete is behind the row's ⋯ menu and a confirm dialog (P3). */
+async function deleteBoard(name = "Court 1 box") {
+  fireEvent.pointerDown(await screen.findByRole("button", { name: `More actions for ${name}` }), { button: 0, ctrlKey: false, pointerType: "mouse" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Delete board" }));
+  return screen.findByRole("dialog");
+}
+
+/** The select's current choice, as its trigger shows it. */
+const select = (label: string) => screen.getByRole("combobox", { name: label });
 
 /**
  * The Devices screen, under the hobby-grade device contract.
@@ -336,8 +376,8 @@ describe("AdminDevices", () => {
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Court 1 box" } });
     // The row's editor is labelled by the box, so two editors on one screen cannot be
     // confused for each other.
-    expect(screen.getByLabelText("box-a1b2c3 relay A court")).toHaveValue("1");
-    fireEvent.change(screen.getByLabelText("box-a1b2c3 relay B court"), { target: { value: "2" } });
+    expect(select("box-a1b2c3 relay A court")).toHaveTextContent(/^Court 1 —/);
+    await choose("box-a1b2c3 relay B court", /^Court 2 —/);
     fireEvent.click(screen.getByRole("button", { name: /Save box/ }));
 
     await waitFor(() => {
@@ -356,11 +396,11 @@ describe("AdminDevices", () => {
     renderPage(<AdminDevicesPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Edit name and courts/ }));
-    expect(screen.getByLabelText("Court 1 box relay B court")).toHaveValue("2");
+    expect(select("Court 1 box relay B court")).toHaveTextContent(/^Court 2 —/);
     // A gap would be a relay index `court_numbers` cannot represent — it is positional
     // — so the editor makes one impossible rather than validating it away.
-    fireEvent.change(screen.getByLabelText("Court 1 box relay A court"), { target: { value: "" } });
-    expect(screen.getByLabelText("Court 1 box relay B court")).toHaveValue("");
+    await choose("Court 1 box relay A court", "Choose a court");
+    expect(select("Court 1 box relay B court")).toHaveTextContent("— none —");
     expect(screen.getByRole("button", { name: /Save box/ })).toBeDisabled();
   });
 
@@ -376,7 +416,7 @@ describe("AdminDevices", () => {
     renderPage(<AdminDevicesPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Edit name and courts/ }));
-    fireEvent.change(screen.getByLabelText("Court 1 box relay B court"), { target: { value: "3" } });
+    await choose("Court 1 box relay B court", /^Court 3 —/);
     fireEvent.click(screen.getByRole("button", { name: /Save box/ }));
 
     // Not "court number not found" with the underscores swapped for spaces.
@@ -396,13 +436,13 @@ describe("AdminDevices", () => {
 
     renderPage(<AdminDevicesPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
-    // Deleting is not a revocation — the box still holds the club's key. Saying so on
-    // the armed button is what stops an admin believing they took a box off the network.
-    const armed = await screen.findByRole("button", { name: /re-registers on its next heartbeat/ });
+    // Deleting is not a revocation — the box still holds the club's key. Saying so in the
+    // confirm is what stops an admin believing they took a box off the network.
+    const dialog = await deleteBoard();
+    expect(dialog).toHaveTextContent(/re-registers on its next heartbeat/);
     expect(stub.calls.some((c) => c.method === "DELETE")).toBe(false);
 
-    fireEvent.click(armed);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete board" }));
 
     await waitFor(() => {
       const del = stub.calls.find((c) => c.method === "DELETE");
@@ -420,8 +460,7 @@ describe("AdminDevices", () => {
 
     renderPage(<AdminDevicesPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
-    fireEvent.click(await screen.findByRole("button", { name: /re-registers on its next heartbeat/ }));
+    fireEvent.click(within(await deleteBoard()).getByRole("button", { name: "Delete board" }));
 
     expect(await screen.findByText("That box has activations today.")).toBeInTheDocument();
     expect(screen.getByText("Court 1 box")).toBeInTheDocument();
@@ -444,7 +483,7 @@ describe("AdminDevices", () => {
 
     renderPage(<AdminDevicesPage />);
 
-    fireEvent.change(await screen.findByLabelText("Button 1 court"), { target: { value: "D" } });
+    await choose("Button 1 court", "Court D");
     fireEvent.click(screen.getByRole("button", { name: /Save button map/ }));
 
     // The fix is on one of two screens, and the message says which box and which relay
@@ -462,7 +501,7 @@ describe("AdminDevices", () => {
     expect(screen.getByLabelText("Button 8 action")).toBeInTheDocument();
     expect(screen.queryByLabelText("Button 9 action")).not.toBeInTheDocument();
 
-    expect(screen.getByLabelText("Button 1 court")).toHaveValue("A");
+    expect(select("Button 1 court")).toHaveTextContent("Court A");
     expect(screen.getByLabelText("Button 5 minutes")).toHaveValue(15);
   });
 
@@ -484,7 +523,7 @@ describe("AdminDevices", () => {
 
     renderPage(<AdminDevicesPage />);
 
-    fireEvent.change(await screen.findByLabelText("Button 1 court"), { target: { value: "D" } });
+    await choose("Button 1 court", "Court D");
     fireEvent.click(screen.getByRole("button", { name: /Save button map/ }));
 
     await waitFor(() => {
@@ -577,8 +616,8 @@ describe("AdminDevices", () => {
     fireEvent.click(screen.getByLabelText(/Own map for this box/));
     // The override starts from the club's map, labelled by the box so the two editors
     // on this screen cannot be confused.
-    expect(screen.getByLabelText("Court 1 box button 1 court")).toHaveValue("A");
-    fireEvent.change(screen.getByLabelText("Court 1 box button 1 court"), { target: { value: "B" } });
+    expect(select("Court 1 box button 1 court")).toHaveTextContent("Court A");
+    await choose("Court 1 box button 1 court", "Court B");
     fireEvent.click(screen.getByRole("button", { name: /Save buttons/ }));
 
     await waitFor(() => {
@@ -601,7 +640,7 @@ describe("AdminDevices", () => {
     expect(await screen.findByText("own button map")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Edit buttons/ }));
     expect(screen.getByLabelText(/Own map for this box/)).toBeChecked();
-    expect(screen.getByLabelText("Court 1 box button 2 action")).toHaveValue("off");
+    expect(select("Court 1 box button 2 action")).toHaveTextContent("Turn off");
 
     fireEvent.click(screen.getByLabelText(/Use the club's button map/));
     fireEvent.click(screen.getByRole("button", { name: /Save buttons/ }));
@@ -626,7 +665,7 @@ describe("AdminDevices", () => {
 
     // A name-and-courts change.
     fireEvent.click(await screen.findByRole("button", { name: /Edit name and courts/ }));
-    fireEvent.change(screen.getByLabelText("Court 1 box relay B court"), { target: { value: "2" } });
+    await choose("Court 1 box relay B court", /^Court 2 —/);
     fireEvent.click(screen.getByRole("button", { name: /Save box/ }));
     await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
 
@@ -777,9 +816,8 @@ describe("AdminDevices", () => {
 
     renderPage(<AdminDevicesPage />);
 
-    // Arms first: a live box stops switching lights on the moment this lands.
-    const take = await screen.findByRole("button", { name: "Take out of service" });
-    fireEvent.click(take);
+    // Confirmed first: a live box stops switching lights on the moment this lands.
+    const dialog = await openOutOfService();
     expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(0);
 
     // And the confirm names the consequence an admin cannot see from the row: this is the
@@ -787,9 +825,9 @@ describe("AdminDevices", () => {
     // charging the no-show penalty on that court from the instant of the click
     // (settlement-model.md S5a). The confirm used to say only "the box stops switching
     // lights on", which is the half that costs the CLUB nothing.
-    const confirm = await screen.findByRole("button", { name: /Nothing else drives court 1/ });
-    expect(confirm).toHaveAccessibleName(/no-shows stop being penalised/);
-    fireEvent.click(confirm);
+    expect(consequenceOf(dialog)).toMatch(/Nothing else drives court 1/);
+    expect(consequenceOf(dialog)).toMatch(/no-shows stop being penalised/);
+    confirmIn(dialog);
 
     await waitFor(() => expect(stub.calls.filter((c) => c.method === "PATCH")).toHaveLength(1));
     // Exactly the one field. Sending the name and courts alongside would rewrite whatever
@@ -888,8 +926,7 @@ describe("AdminDevices", () => {
     // service and covers nothing — so its own confirm warns about court 2 and about
     // nothing else. (The out-of-service row offers "Put back in service", not a confirm,
     // so this is unambiguous.)
-    fireEvent.click(screen.getByRole("button", { name: "Take out of service" }));
-    expect(await screen.findByRole("button", { name: /Nothing else drives court 2/ })).toBeInTheDocument();
+    expect(consequenceOf(await openOutOfService())).toMatch(/Nothing else drives court 2/);
   });
 
   /**
@@ -914,12 +951,14 @@ describe("AdminDevices", () => {
 
     renderPage(<AdminDevicesPage />);
 
-    const confirms = await screen.findAllByRole("button", { name: "Take out of service" });
-    expect(confirms).toHaveLength(2);
-    for (const button of confirms) fireEvent.click(button);
-
-    expect(screen.queryByRole("button", { name: /Nothing else drives/ })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /The box stops switching lights on/ })).toHaveLength(2);
+    expect(await screen.findAllByRole("button", { name: "Take out of service" })).toHaveLength(2);
+    for (const index of [0, 1]) {
+      const dialog = await openOutOfService(index);
+      expect(consequenceOf(dialog)).not.toMatch(/Nothing else drives/);
+      expect(consequenceOf(dialog)).toBe("The box stops switching lights on.");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Leave it in service" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    }
   });
 
   /**
@@ -939,8 +978,7 @@ describe("AdminDevices", () => {
 
     renderPage(<AdminDevicesPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Take out of service" }));
-    fireEvent.click(await screen.findByRole("button", { name: /Nothing else drives court 1/ }));
+    confirmIn(await openOutOfService());
 
     expect(await screen.findByText(
       "Court 1 box is out of service. It switches nothing on, and the club is not alerted about its silence."
@@ -971,18 +1009,12 @@ describe("AdminDevices", () => {
 
     renderPage(<AdminDevicesPage />);
 
-    const confirms = await screen.findAllByRole("button", { name: "Take out of service" });
-    fireEvent.click(confirms[0]);
-    expect(await screen.findByRole("button", {
-      // B5 — the armed control is no longer LABELLED by its consequence: the consequence is a
-      // block of page text above two side-by-side buttons, and the confirm button shows the
-      // words the trigger showed. WCAG 2.5.3 then makes its accessible name open with those
-      // words, so the sentence this test is about is a SUFFIX of the name rather than the
-      // whole of it. The sentence itself is unchanged and is still what is being held here.
-      name: "Take out of service — Out of service? Nothing else drives court 1 — the API stops taking"
+    const dialog = await openOutOfService(0);
+    // P3: the consequence is the confirm dialog's description, exactly (it was the armed
+    // button's accessible name — see B5 in the history of this file).
+    expect(consequenceOf(dialog)).toBe("Nothing else drives court 1 — the API stops taking"
         + " anything from that box, and from that instant its no-shows stop being penalised. No other box"
-        + " on court 2 is reporting, so its no-shows stop being penalised too.",
-    })).toBeInTheDocument();
+        + " on court 2 is reporting, so its no-shows stop being penalised too.");
   });
 
   /**
@@ -1026,21 +1058,15 @@ describe("AdminDevices", () => {
 
     // Taking the one reporting box on court 2 out of service is what stops court 2's
     // no-shows being penalised, and the confirm now says so instead of the plain sentence.
-    const confirms = screen.getAllByRole("button", { name: "Take out of service" });
-    fireEvent.click(confirms[0]);
-    expect(await screen.findByRole("button", {
-      // B5 — the armed control is no longer LABELLED by its consequence: the consequence is a
-      // block of page text above two side-by-side buttons, and the confirm button shows the
-      // words the trigger showed. WCAG 2.5.3 then makes its accessible name open with those
-      // words, so the sentence this test is about is a SUFFIX of the name rather than the
-      // whole of it. The sentence itself is unchanged and is still what is being held here.
-      name: "Take out of service — Out of service? No other box on court 2 is reporting, so its no-shows"
-        + " stop being penalised.",
-    })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /The box stops switching lights on/ })).not.toBeInTheDocument();
+    const dialog = await openOutOfService(0);
+    // P3: the consequence is the confirm dialog's description, exactly (it was the armed
+    // button's accessible name — see B5 in the history of this file).
+    expect(consequenceOf(dialog)).toBe("No other box on court 2 is reporting, so its no-shows"
+        + " stop being penalised.");
+    expect(consequenceOf(dialog)).not.toMatch(/The box stops switching lights on/);
     // And not the stronger claim, which this page cannot support: a silent box may still be
     // answering the door. What is measurable is that nothing is reporting.
-    expect(screen.queryByRole("button", { name: /nobody can check in/ })).not.toBeInTheDocument();
+    expect(consequenceOf(dialog)).not.toMatch(/nobody can check in/);
   });
 
   it("says on the row, too, that nothing in service is reporting on the court", async () => {
@@ -1163,16 +1189,11 @@ describe("AdminDevices", () => {
 
     renderPage(<AdminDevicesPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Take out of service" }));
-    expect(await screen.findByRole("button", {
-      // B5 — the armed control is no longer LABELLED by its consequence: the consequence is a
-      // block of page text above two side-by-side buttons, and the confirm button shows the
-      // words the trigger showed. WCAG 2.5.3 then makes its accessible name open with those
-      // words, so the sentence this test is about is a SUFFIX of the name rather than the
-      // whole of it. The sentence itself is unchanged and is still what is being held here.
-      name: "Take out of service — Out of service? Nothing else drives courts 1 and 2 — the API stops"
-        + " taking anything from that box, and from that instant their no-shows stop being penalised.",
-    })).toBeInTheDocument();
+    const dialog = await openOutOfService();
+    // P3: the consequence is the confirm dialog's description, exactly (it was the armed
+    // button's accessible name — see B5 in the history of this file).
+    expect(consequenceOf(dialog)).toBe("Nothing else drives courts 1 and 2 — the API stops"
+        + " taking anything from that box, and from that instant their no-shows stop being penalised.");
   });
 
   /**
@@ -1189,8 +1210,7 @@ describe("AdminDevices", () => {
 
     renderPage(<AdminDevicesPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Take out of service" }));
-    fireEvent.click(await screen.findByRole("button", { name: /Nothing else drives courts 1 and 2/ }));
+    confirmIn(await openOutOfService());
 
     expect(await screen.findByText(
       "Court 1 box is out of service. It switches nothing on, and the club is not alerted about its silence."
@@ -1561,10 +1581,10 @@ describe("AdminDevices", () => {
       const controls = await screen.findAllByRole("button", { name: "Take out of service" });
       // One control, because only the box has one now.
       expect(controls).toHaveLength(1);
-      fireEvent.click(controls[0]);
+      const dialog = await openOutOfService();
 
-      expect(await screen.findByRole("button", { name: /Nothing else drives court 1/ })).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /The box stops switching lights on/ })).not.toBeInTheDocument();
+      expect(consequenceOf(dialog)).toMatch(/Nothing else drives court 1/);
+      expect(consequenceOf(dialog)).not.toMatch(/The box stops switching lights on/);
     });
   });
 

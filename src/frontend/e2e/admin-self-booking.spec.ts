@@ -1,29 +1,24 @@
-import { SESSION_ADMIN, serveApi, signIn, test, expect } from "./fixtures";
+import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { BOOK_SHEET, GOD_MODE } from "../src/lib/bookingsCopy";
 
 /**
- * §8's override, offered to the one wallet it can never be applied to.
+ * R19 — admin god mode, in a real browser: an admin books themselves or a member even at or below
+ * zero, is TOLD where it leaves the payer before pressing anything, and the booking goes out once
+ * with `allowNegativeBalance` sent on purpose.
  *
  * <p>
- * <b>Why this is a browser spec and not another vitest case.</b> It was found in a headed
- * browser, twice, from a clean modal each time, and the defect is a sequence of screen states
- * rather than a return value: the modal renders the full offer, the second press is refused,
- * the figures are discarded, the button reverts, and the toast sends the admin back to look at
- * figures that are no longer there. A component test can assert the first frame of that; only a
- * real render loop can show that pressing the button leads back to where it started.
+ * <b>What this replaced.</b> The old dialog learned about a short wallet by being refused: POST,
+ * read the 402, offer "Book anyway — leaves −40.00 cr", POST again — and refused the override
+ * outright for an admin's own wallet, which sent the desk round a loop with no exit (the defect
+ * this file was first written about). R19 made self-overdraft legal and moved the figures in
+ * front of the button: the sheet asks `GET /admin/bookings/quote` first. The 402 routes are gone
+ * from these stubs on purpose — a sheet that still fell back to the dance would hit an unstubbed
+ * route and fail loudly.
  * </p>
  *
  * <p>
- * The member picker is populated from <code>/api/v1/admin/members</code> and lists the
- * signed-in admin along with everybody else — in the running club "Crusaders Admin" is the
- * first name in the dropdown. The server's override is
- * <code>payer.AllowNegativeBalance &amp;&amp; actorId != userId</code>
- * (<code>BookingService</code>), so choosing yourself can only ever be refused. That guard is
- * right and stays; what was wrong was offering the override in front of it.
- * </p>
- *
- * <p>
- * No money moves in either version — this is a copy and affordance defect, not a settlement
- * one. The spec asserts exactly one POST for exactly that reason.
+ * Browser, not vitest, because the defect class is a sequence of screen states (quote → notice →
+ * one POST) across a real render loop and a real bottom sheet on the phone project.
  * </p>
  */
 
@@ -51,73 +46,112 @@ const day = () => ({
   slots: [],
 });
 
-const SHORT = { error: "insufficient_balance", current_credits: 10, required_credits: 50 };
+function quote(userId: string, balance: number) {
+  return {
+    user_id: userId, court_id: COURT, court_name: "Court 1", starts_at: `${tomorrow()}T07:00:00Z`, ends_at: null,
+    slices: 1, price_credits: 50, balance_credits: balance, balance_after_credits: balance - 50, overdraws: balance < 50,
+  };
+}
 
-test("the admin override is not offered when the admin picks their own name", async ({ page }) => {
-  await signIn(page);
-  const posts: string[] = [];
-  page.on("request", (r) => {
-    if (r.method() === "POST" && r.url().includes("/api/v1/admin/bookings")) posts.push(r.url());
-  });
-
-  await serveApi(page, [
+function routes(extra: ApiRoute[]): ApiRoute[] {
+  return [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
-    { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
+    { path: "/api/v1/wallet", body: { balance_credits: 10, entries: [], total_entries: 0, offset: 0, limit: 10 } },
     { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@test.local", photo_url: null, membership_number: "A-1", member_class: "Regular" } },
     { path: "/api/v1/admin/members", body: [
-      { user_id: ADMIN_ID, full_name: "Crusaders Admin" },
-      { user_id: MEMBER_ID, full_name: "Naledi Khumalo" },
+      { user_id: ADMIN_ID, full_name: "Crusaders Admin", photo_url: null, balance_credits: 10 },
+      { user_id: MEMBER_ID, full_name: "Naledi Khumalo", photo_url: null, balance_credits: 34 },
     ] },
     { path: "/api/v1/schedule", body: day() },
-    { method: "POST", path: "/api/v1/admin/bookings", status: 402, body: SHORT },
-  ]);
-
-  await page.goto("/schedule");
-
-  await page.getByRole("button", { name: /^Book Court 1 .* for 50\.00 cr/ }).first().click();
-  const modal = page.getByRole("dialog", { name: "Confirm booking" });
-  await expect(modal).toBeVisible();
-
-  await modal.getByLabel("Book this as").selectOption("member");
-  await modal.getByLabel("Member").selectOption(ADMIN_ID);
-  await modal.getByRole("button", { name: "Book for 50.00 cr" }).click();
-
-  // The sentence that ends the interaction, rather than the offer that restarts it.
-  await expect(page.getByText(/only works on another member's wallet/)).toBeVisible();
-  await expect(page.getByRole("button", { name: /Book anyway/ })).toHaveCount(0);
-  await expect(page.getByText(/Try again to see what they're short by/)).toHaveCount(0);
-
-  // One attempt. The old screen's loop had no exit and every lap was another POST.
-  expect(posts).toHaveLength(1);
-});
+    ...extra,
+  ];
+}
 
 /**
- * The control: the same screen, the same refusal, a DIFFERENT member. §8's override must still
- * be offered here with the figures on it, or this fix would have closed the feature instead of
- * the dead end.
+ * The sheet ignores a press on its confirm for 300 ms after a step change, so the second half of
+ * a double tap on Continue cannot land on the Book button that replaces it. A person reads the
+ * notice for longer than that; a test has to wait it out on purpose.
  */
-test("the override is still offered when the payer is somebody else", async ({ page }) => {
-  await signIn(page);
-  await serveApi(page, [
-    { path: "/api/v1/whoami", body: SESSION_ADMIN },
-    { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
-    { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@test.local", photo_url: null, membership_number: "A-1", member_class: "Regular" } },
-    { path: "/api/v1/admin/members", body: [
-      { user_id: ADMIN_ID, full_name: "Crusaders Admin" },
-      { user_id: MEMBER_ID, full_name: "Naledi Khumalo" },
-    ] },
-    { path: "/api/v1/schedule", body: day() },
-    { method: "POST", path: "/api/v1/admin/bookings", status: 402, body: SHORT },
-  ]);
+async function pastTheStepGuard(page: import("@playwright/test").Page) {
+  await page.waitForTimeout(350);
+}
 
-  await page.goto("/schedule");
-
+async function openFirstFreeSlot(page: import("@playwright/test").Page) {
+  await page.goto("/bookings");
   await page.getByRole("button", { name: /^Book Court 1 .* for 50\.00 cr/ }).first().click();
-  const modal = page.getByRole("dialog", { name: "Confirm booking" });
-  await modal.getByLabel("Book this as").selectOption("member");
-  await modal.getByLabel("Member").selectOption(MEMBER_ID);
-  await modal.getByRole("button", { name: "Book for 50.00 cr" }).click();
+  const sheet = page.getByRole("dialog", { name: BOOK_SHEET.title(1) });
+  await expect(sheet).toBeVisible();
+  return sheet;
+}
 
-  await expect(modal).toContainText("Naledi Khumalo doesn't have enough credit");
-  await expect(page.getByRole("button", { name: "Book anyway — leaves -40.00 cr" })).toBeVisible();
+test("an admin books their own court below zero — told first, sent once, with the flag", async ({ page }) => {
+  await signIn(page);
+  const posts: unknown[] = [];
+  await serveApi(page, routes([
+    { path: "/api/v1/admin/bookings/quote", body: quote(ADMIN_ID, 10) },
+    {
+      method: "POST", path: "/api/v1/admin/bookings",
+      respond: ({ body }) => { posts.push(body); return { booking_id: "bk-1", balance_after_credits: -40 }; },
+    },
+  ]));
+
+  const sheet = await openFirstFreeSlot(page);
+  await expect(sheet.getByRole("radio", { name: BOOK_SHEET.asSelf })).toHaveAttribute("aria-checked", "true");
+  await sheet.getByRole("button", { name: BOOK_SHEET.next }).click();
+
+  await expect(sheet.getByText(GOD_MODE.body(null, -40))).toBeVisible();
+  await pastTheStepGuard(page);
+  await sheet.getByRole("button", { name: BOOK_SHEET.primary(1, 50, null) }).click();
+  await expect(sheet.getByText(BOOK_SHEET.bookedTitle(1, 1))).toBeVisible();
+
+  expect(posts).toHaveLength(1);
+  expect(posts[0]).toMatchObject({ userId: ADMIN_ID, allowNegativeBalance: true });
+});
+
+test("an admin books a member below zero — the member is named and the notice says by how much", async ({ page }) => {
+  await signIn(page);
+  const posts: unknown[] = [];
+  await serveApi(page, routes([
+    { path: "/api/v1/admin/bookings/quote", body: quote(MEMBER_ID, 34) },
+    {
+      method: "POST", path: "/api/v1/admin/bookings",
+      respond: ({ body }) => { posts.push(body); return { booking_id: "bk-2", balance_after_credits: -16 }; },
+    },
+  ]));
+
+  const sheet = await openFirstFreeSlot(page);
+  await sheet.getByRole("radio", { name: BOOK_SHEET.asMember }).click();
+  await sheet.getByRole("combobox", { name: new RegExp(`^${BOOK_SHEET.memberLabel}`) }).click();
+  await page.getByRole("option", { name: /Naledi Khumalo/ }).click();
+  await sheet.getByRole("button", { name: BOOK_SHEET.next }).click();
+
+  await expect(sheet.getByText(GOD_MODE.body("Naledi Khumalo", -16))).toBeVisible();
+  await pastTheStepGuard(page);
+  await sheet.getByRole("button", { name: BOOK_SHEET.primary(1, 50, "Naledi") }).click();
+  await expect(sheet.getByText(BOOK_SHEET.balanceLine(-16, "Naledi Khumalo"))).toBeVisible();
+
+  expect(posts).toHaveLength(1);
+  expect(posts[0]).toMatchObject({ userId: MEMBER_ID, allowNegativeBalance: true });
+});
+
+test("no notice and no flag when the quote says the payer can cover it", async ({ page }) => {
+  await signIn(page);
+  const posts: unknown[] = [];
+  await serveApi(page, routes([
+    { path: "/api/v1/admin/bookings/quote", body: quote(ADMIN_ID, 500) },
+    {
+      method: "POST", path: "/api/v1/admin/bookings",
+      respond: ({ body }) => { posts.push(body); return { booking_id: "bk-3", balance_after_credits: 450 }; },
+    },
+  ]));
+
+  const sheet = await openFirstFreeSlot(page);
+  await sheet.getByRole("button", { name: BOOK_SHEET.next }).click();
+  const book = sheet.getByRole("button", { name: BOOK_SHEET.primary(1, 50, null) });
+  await expect(book).toBeVisible();
+  await expect(sheet.getByText(GOD_MODE.title)).toHaveCount(0);
+  await pastTheStepGuard(page);
+  await book.click();
+  await expect(sheet.getByText(BOOK_SHEET.bookedTitle(1, 1))).toBeVisible();
+  expect(posts[0]).toMatchObject({ allowNegativeBalance: false });
 });

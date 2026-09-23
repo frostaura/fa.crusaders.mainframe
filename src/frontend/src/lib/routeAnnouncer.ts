@@ -58,11 +58,11 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   // item 16 — the always-reachable guide.
   ["/how-it-works", "How it works"],
   // R16 — the Admin tab and everything under it. The index is the Overview ("Needs attention").
-  ["/admin", "Admin overview"],
+  ["/admin", "Overview"],
   ["/admin/members", "Members"],
-  ["/admin/groups", "Member groups"],
+  ["/admin/groups", "Groups"],
   ["/admin/transactions", "Transactions"],
-  ["/admin/reports", "Club reports"],
+  ["/admin/reports", "Reports"],
   // Monitoring (R17: courts, hardware and control). The section index is the control board, so
   // it is named for what an admin opens it to look at rather than for the section.
   ["/admin/monitoring", "Control board"],

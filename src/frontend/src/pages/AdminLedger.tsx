@@ -2,17 +2,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { endpoints, LEDGER_ENTRY_TYPES, type LedgerRow } from "../lib/api";
 import { formatSignedCredits } from "../lib/utils";
-import { Card } from "../components/Card";
 import { LedgerTable } from "../components/LedgerTable";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
+import { Card, CardContent } from "../components/ui/card";
 import { Field, FieldLabel } from "../components/ui/field";
 import { Input } from "../components/ui/input";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { Freshness, RefreshButton } from "../components/ui/refresh-button";
 import { StateBlock } from "../components/ui/state-block";
 import { MagnifyingGlass } from "../components/ui/icons";
-import { FilterBar, FilterSelect, TableSkeleton, type FilterOption } from "../components/monitoring/parts";
+import { FilterBar, FilterDate, FilterSelect, TableSkeleton, type FilterOption } from "../components/monitoring/parts";
 import { LEDGER_TYPE_LABEL } from "../lib/creditAdjustment";
 
 // Derived from the union in api.ts rather than hand-maintained here. This was a
@@ -154,14 +154,8 @@ export default function AdminLedgerPage() {
 
       <div className="flex flex-col gap-3">
         <FilterBar>
-          <Field controlId="ledger-from" className="flex-[1_1_9rem] sm:flex-none">
-            <FieldLabel>From</FieldLabel>
-            <Input type="date" value={from} onChange={(e) => setFilter("from", e.target.value)} />
-          </Field>
-          <Field controlId="ledger-to" className="flex-[1_1_9rem] sm:flex-none">
-            <FieldLabel>To</FieldLabel>
-            <Input type="date" value={to} onChange={(e) => setFilter("to", e.target.value)} />
-          </Field>
+          <FilterDate label="From" value={from} onChange={(next) => setFilter("from", next)} />
+          <FilterDate label="To" value={to} onChange={(next) => setFilter("to", next)} />
           <FilterSelect
             id="ledger-type"
             label="Type"
@@ -204,8 +198,8 @@ export default function AdminLedgerPage() {
         onRetry={() => void load()}
         skeleton={<TableSkeleton rows={6} />}
       >
-        <Card className="!p-0 flex flex-col" aria-busy={loading || undefined}>
-          <div className="grid shrink-0 grid-cols-2 gap-3 px-4 pb-2 pt-4 text-sm sm:grid-cols-4 sm:px-6">
+        <Card className="gap-0 pb-0 sm:gap-0 sm:pb-0" aria-busy={loading || undefined}>
+          <CardContent className="grid shrink-0 grid-cols-2 gap-3 pb-4 text-sm sm:grid-cols-4">
             {/*
               Every signed figure through `formatSignedCredits`, never a sign composed around
               `formatCredits`.
@@ -229,7 +223,7 @@ export default function AdminLedgerPage() {
             <Stat label="Credits" value={formatSignedCredits(totals.credits)} tone={toneOf(totals.credits)} />
             <Stat label="Debits" value={formatSignedCredits(-totals.debits)} tone={toneOf(-totals.debits)} />
             <Stat label="Net" value={formatSignedCredits(totals.net)} tone={toneOf(totals.net)} />
-          </div>
+          </CardContent>
           <LedgerTable rows={filtered} emptyText="No movements match these filters." label="Club ledger" />
         </Card>
       </StateBlock>
@@ -262,8 +256,8 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: "su
   const toneClass = tone === "success" ? "text-success-strong" : tone === "warning" ? "text-warning-strong" : "text-text-primary";
   return (
     <div>
-      <p className="text-xs uppercase tracking-wide text-text-muted">{label}</p>
-      <p className={`font-mono text-base ${toneClass}`}>{value}</p>
+      <p className="text-xs font-semibold uppercase tracking-overline text-text-secondary">{label}</p>
+      <p data-ledger-total="" className={`text-lg font-semibold tabular-nums ${toneClass}`}>{value}</p>
     </div>
   );
 }

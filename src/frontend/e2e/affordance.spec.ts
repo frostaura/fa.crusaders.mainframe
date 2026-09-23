@@ -90,7 +90,9 @@ test("a control marked .no-lift really does not lift, and one that is not marked
   // The control, first, and it is not optional: "no transform" is also what a page whose
   // stylesheet never loaded reports, so without a surface that DOES lift under the same
   // measurement this test would pass on a broken build.
-  const plain = page.getByRole("button", { name: "Last 30 days" });
+  // P3: the range presets became `ui/toggle`s, which are `no-lift` (a toggle is set, not
+  // pressed), so the lifting control is the page's CSV download — an ordinary button.
+  const plain = page.getByRole("button", { name: "Download CSV" });
   await expect(plain).toBeVisible();
   const control = await hovered(plain);
   expect(control.transform, "the base lift rule is not reaching this page, so the reading below would be vacuous")

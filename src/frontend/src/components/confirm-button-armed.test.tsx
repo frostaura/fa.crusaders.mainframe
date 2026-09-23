@@ -652,4 +652,44 @@ describe("ConfirmButton — the armed state", () => {
 
     await act(async () => { release(); });
   });
+
+  /**
+   * P3 (R12) — "freezing and disabling buttons like mere mortals" retired. While the action is
+   * in flight the confirm is `aria-busy` + `aria-disabled`, NOT `disabled`: a disabled button
+   * drops focus to <body> the instant the work starts. The label stays (a spinner joins it) so
+   * the control neither changes its name nor its width; it used to swap to "Working…".
+   */
+  it("keeps focus and its words on the confirm while the action is in flight", async () => {
+    let release: () => void = () => {};
+    const onConfirm = vi.fn(() => new Promise<void>((resolve) => { release = resolve; }));
+    render(<ConfirmButton idleLabel="Revoke" confirmLabel="Really revoke?" onConfirm={onConfirm} />);
+
+    armByPressing(screen.getByRole("button", { name: "Revoke" }));
+    const confirm = screen.getByRole("button", { name: "Revoke — Really revoke?" });
+    act(() => { confirm.focus(); fireEvent.click(confirm); });
+
+    expect(confirm).toHaveAttribute("aria-busy", "true");
+    expect(confirm).toHaveAttribute("aria-disabled", "true");
+    expect(confirm).not.toBeDisabled();
+    expect(confirm).toHaveFocus();
+    expect(confirm).toHaveTextContent("Revoke");
+    expect(confirm.textContent).not.toMatch(/Working/);
+    // A second press while it works does nothing.
+    fireEvent.click(confirm);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+
+    await act(async () => { release(); });
+  });
+
+  /** P3 — restyled on `ui/button`: the primitive's radius and weight, and its variant looks. */
+  it("wears the design-system button look in both halves", () => {
+    render(<ConfirmButton tone="danger" idleLabel="Delete" confirmLabel="Really delete?" onConfirm={() => {}} />);
+    const trigger = screen.getByRole("button", { name: "Delete" });
+    expect(trigger.className).toContain("bg-danger-soft");
+    expect(trigger.className).toContain("rounded-lg");
+    expect(trigger.className).toContain("font-semibold");
+    armByPressing(trigger);
+    expect(screen.getByRole("button", { name: /^Cancel/ }).className).toContain("border-control");
+    expect(screen.getByRole("button", { name: "Delete — Really delete?" }).className).toContain("bg-armed-strong");
+  });
 });

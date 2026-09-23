@@ -111,7 +111,8 @@ describe("skipping a date", () => {
     expect(screen.getAllByText(
       /3 courts open back up on 13 October 2026\. Members will be able to book them\./,
     ).length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "Keep it — Tue 13 Oct" })).toBeInTheDocument();
+    // P3: the confirm is a dialog; its way out names the outcome.
+    expect(within(await screen.findByRole("dialog")).getByRole("button", { name: "Keep it" })).toBeInTheDocument();
   });
 
   it("refuses a date that has already happened, as a sentence and not as a code", async () => {
@@ -127,13 +128,19 @@ describe("skipping a date", () => {
     renderDetail();
 
     await userEvent.click(await screen.findByRole("button", { name: "Skip Tue 13 Oct" }));
-    await userEvent.click(screen.getByRole("button", { name: /^Skip Tue 13 Oct — / }));
+    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Skip Tue 13 Oct" }));
 
     expect(await screen.findByText(
       /That date has already happened, so it cannot be changed\./,
     )).toBeInTheDocument();
   });
 });
+
+/** The hours are TimeSelects now (P3, R7 — slice-aligned, never free-typed). */
+function pickTime(label: string, time: string) {
+  fireEvent.pointerDown(screen.getByRole("combobox", { name: label }), { button: 0, ctrlKey: false, pointerType: "mouse" });
+  fireEvent.click(screen.getByRole("option", { name: time }));
+}
 
 describe("changing the hours", () => {
   async function openTheChange() {
@@ -166,8 +173,8 @@ describe("changing the hours", () => {
     await openTheChange();
 
     await userEvent.click(screen.getByRole("radio", { name: "Just Tue 13 Oct" }));
-    fireEvent.change(screen.getByLabelText("New start time"), { target: { value: "19:00" } });
-    fireEvent.change(screen.getByLabelText("New end time"), { target: { value: "21:30" } });
+    pickTime("New start time", "19:00");
+    pickTime("New end time", "21:30");
     await userEvent.type(screen.getByLabelText("Reason (kept in the change record)"), "League starts later");
     // The primary button restates the option chosen — the last thing read before the press.
     await userEvent.click(screen.getByRole("button", { name: "Change just Tue 13 Oct to 19:00–21:30" }));
@@ -185,8 +192,8 @@ describe("changing the hours", () => {
     await openTheChange();
 
     await userEvent.click(screen.getByRole("radio", { name: "Tue 13 Oct and every Tuesday after it" }));
-    fireEvent.change(screen.getByLabelText("New start time"), { target: { value: "19:00" } });
-    fireEvent.change(screen.getByLabelText("New end time"), { target: { value: "21:30" } });
+    pickTime("New start time", "19:00");
+    pickTime("New end time", "21:30");
     await userEvent.type(screen.getByLabelText("Reason (kept in the change record)"), "League starts later");
     await userEvent.click(screen.getByRole("button", {
       name: "Change Tue 13 Oct and every Tuesday after it to 19:00–21:30",
@@ -209,8 +216,8 @@ describe("changing the hours", () => {
     await openTheChange();
 
     await userEvent.click(screen.getByRole("radio", { name: "Tue 13 Oct and every Tuesday after it" }));
-    fireEvent.change(screen.getByLabelText("New start time"), { target: { value: "19:00" } });
-    fireEvent.change(screen.getByLabelText("New end time"), { target: { value: "21:30" } });
+    pickTime("New start time", "19:00");
+    pickTime("New end time", "21:30");
     await userEvent.type(screen.getByLabelText("Reason (kept in the change record)"), "League starts later");
     await userEvent.click(screen.getByRole("button", {
       name: "Change Tue 13 Oct and every Tuesday after it to 19:00–21:30",
@@ -226,8 +233,8 @@ describe("changing the hours", () => {
     renderDetail();
     await openTheChange();
 
-    fireEvent.change(screen.getByLabelText("New start time"), { target: { value: "21:00" } });
-    fireEvent.change(screen.getByLabelText("New end time"), { target: { value: "19:00" } });
+    pickTime("New start time", "21:00");
+    pickTime("New end time", "19:00");
 
     expect(await screen.findByText(
       "The end time has to be after the start time, on the same day.",
@@ -283,7 +290,7 @@ describe("there is no delete", () => {
 
     await userEvent.type(screen.getByLabelText(/Reason for ending/), "League season finished");
     await userEvent.click(screen.getByRole("button", { name: "End Tuesday league" }));
-    await userEvent.click(screen.getByRole("button", { name: /^End Tuesday league — / }));
+    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "End Tuesday league" }));
 
     const call = stub.calls.find((c) => c.path.endsWith("/end"));
     expect(call?.body).toMatchObject({ reason: "League season finished" });

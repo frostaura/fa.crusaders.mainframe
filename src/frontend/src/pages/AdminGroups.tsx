@@ -5,7 +5,7 @@ import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { StateBlock } from "../components/ui/state-block";
 import { Plus, UsersThree } from "../components/ui/icons";
 import { CardListSkeleton } from "../components/monitoring/parts";
-import { MemberPicker, type PickableMember } from "../components/MemberPicker";
+import { MemberCombobox } from "../components/ui/member-combobox";
 import { useToast } from "../components/Toast";
 import { GroupCard } from "../components/groups/GroupCard";
 import { clubWeek } from "../components/groups/weekGrid";
@@ -450,7 +450,7 @@ export function AdminGroupsPage() {
   return (
     <PageShell width="wide">
       <PageHeader
-        title="Member groups"
+        title="Groups"
         description={"What each kind of member pays for a slot, when they may book, and how many slots a day "
           + "they may hold. The club-wide limits live under Booking on the settings page."}
       />
@@ -618,7 +618,7 @@ function MemberPreviewPanel({ clubMembers, groups, sliceMinutes, onClose }: {
   sliceMinutes: number;
   onClose: () => void;
 }) {
-  const [member, setMember] = useState<PickableMember | null>(null);
+  const [member, setMember] = useState<ClubMember | null>(null);
   const [rules, setRules] = useState<MemberBookingRules | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -652,45 +652,46 @@ function MemberPreviewPanel({ clubMembers, groups, sliceMinutes, onClose }: {
   const day = todayInClub();
 
   return (
-    <div className="space-y-2">
-      <MemberPreview
-        rules={rules}
-        memberName={member?.full_name ?? null}
-        day={day}
-        loading={loading}
-        error={error}
-        sliceMinutes={sliceMinutes}
-        onRetry={() => { if (member) void ask(member.user_id); }}
-        groups={groups}
-        proposed={proposed}
-        proposedRules={proposedRules}
-        onPropose={(ids) => { if (member) void propose(member.user_id, ids); }}
-        consequence={member && proposedRules
-          ? groupChangeConsequence({
-            name: member.full_name,
-            sliceBefore: rules?.slice_price_credits,
-            sliceAfter: proposedRules.slice_price_credits,
-          })
-          : []}
-      >
-        <MemberPicker
-          members={clubMembers.map((m) => ({
-            user_id: m.user_id, full_name: m.full_name, membership_number: m.membership_number,
-          }))}
-          value={member}
-          onChange={(next) => {
+    <MemberPreview
+      rules={rules}
+      memberName={member?.full_name ?? null}
+      day={day}
+      loading={loading}
+      error={error}
+      sliceMinutes={sliceMinutes}
+      onRetry={() => { if (member) void ask(member.user_id); }}
+      groups={groups}
+      proposed={proposed}
+      proposedRules={proposedRules}
+      onPropose={(ids) => { if (member) void propose(member.user_id, ids); }}
+      onClose={onClose}
+      consequence={member && proposedRules
+        ? groupChangeConsequence({
+          name: member.full_name,
+          sliceBefore: rules?.slice_price_credits,
+          sliceAfter: proposedRules.slice_price_credits,
+        })
+        : []}
+    >
+      <div className="flex flex-col gap-1.5">
+        <MemberCombobox
+          label="Which member?"
+          placeholder="Search the club's members"
+          members={clubMembers.map((m) => ({ id: m.user_id, name: m.full_name, subtitle: m.membership_number ?? null }))}
+          value={member?.user_id ?? null}
+          onChange={(id) => {
+            const next = clubMembers.find((m) => m.user_id === id) ?? null;
             setMember(next);
             setRules(null);
             setProposed(null);
             setProposedRules(null);
             if (next) void ask(next.user_id);
           }}
-          label="Which member?"
-          hint="Their rules are read from the club's own system, not worked out here."
+          className="max-w-md"
         />
-      </MemberPreview>
-      <Button variant="ghost" className="min-h-11" onClick={onClose}>Close</Button>
-    </div>
+        <p className="text-sm text-text-muted">Their rules are read from the club&apos;s own system, not worked out here.</p>
+      </div>
+    </MemberPreview>
   );
 }
 

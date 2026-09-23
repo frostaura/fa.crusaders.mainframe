@@ -1,3 +1,6 @@
+import { buttonVariants } from "../ui/button";
+import { cn } from "../../lib/utils";
+
 /**
  * The three ways a member's door surface may render something to press, and nothing else.
  * R3-36 (D-L3).
@@ -51,13 +54,18 @@ export const MEMBER_DOOR_LINK_TAPPABLE =
  * they need one.
  *
  * <p>
- * It looks like `Button variant="primary"` because it is doing that job; it is an anchor
- * rather than a button because it navigates, and a member should be able to open it in
- * another tab. The one rule this constant enforces is that the SAME action is never a filled
+ * It looks like `Button variant="primary"` because it is doing that job — and since P3 it IS
+ * that look, derived from `buttonVariants` rather than a hand-copied class string that had
+ * drifted to the brand fill — the `<Button asChild><Link/></Button>` navigation-CTA shape
+ * (design-system.md, Buttons vs links). It is an anchor rather than a button because it
+ * navigates, and a member should be able to open it in another tab. The one rule this constant enforces is that the SAME action is never a filled
  * button in one block and underlined text in another, which is what the self-check and the
  * standing line were doing to "Book a court".
  * </p>
  */
-export const MEMBER_DOOR_ACTION_LINK = "inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg"
-  + " text-sm font-medium bg-brand-strong text-brand-ink border border-brand-strong hover:bg-brand-strong/90"
-  + " w-full sm:w-auto";
+// `!h-auto whitespace-normal`: the primitive is a fixed-height, no-wrap control, and this page is
+// measured at a 32 px root font on a 360 px phone (e2e/my-code) — the label must wrap, not push.
+export const MEMBER_DOOR_ACTION_LINK = cn(
+  buttonVariants({ variant: "primary" }),
+  "!h-auto min-h-touch whitespace-normal py-2 text-center w-full sm:w-auto",
+);

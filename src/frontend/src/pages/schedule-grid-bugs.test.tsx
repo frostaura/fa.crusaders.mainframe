@@ -4,6 +4,9 @@ import SchedulePage from "./Schedule";
 import { forgetClubZone } from "../lib/clubZone";
 import { renderPage, signIn, signOut, stubFetch, type FetchStub } from "../test/harness";
 
+vi.mock("../components/bookings/BookSheet", async () => (await import("../test/fakeSheets")).bookSheetModule);
+vi.mock("../components/bookings/CancelSheet", async () => (await import("../test/fakeSheets")).cancelSheetModule);
+
 /**
  * The four things the booking grid got wrong about time, position and its own cells.
  *
@@ -84,8 +87,10 @@ describe("the grid's clock", () => {
     const stub = stubDay(dayFixture("2026-09-19", "America/Denver"));
     renderPage(<SchedulePage />);
 
-    const picker = await screen.findByLabelText("Schedule date");
-    await waitFor(() => expect((picker as HTMLInputElement).value).toBe("2026-09-19"));
+    // The week strip's selected chip is the day the server answered for (was the native date
+    // input's value — R5 replaced it with the strip).
+    await screen.findByRole("grid");
+    await waitFor(() => expect(document.querySelector('[data-week-strip] [data-state="on"]')).toHaveAttribute("data-date", "2026-09-19"));
     // And it does NOT then re-ask for the day it was just given — an adopt that refetches is
     // a loop, and a loop on a day-sized read is what makes a phone grid feel broken.
     expect(scheduleCalls(stub)).toHaveLength(1);
@@ -161,17 +166,16 @@ describe("the grid's cells", () => {
     stubDay(futureDay());
     const { container } = renderPage(<SchedulePage />);
     await screen.findByRole("grid");
-    const scroller = container.querySelector('[role="grid"]')?.parentElement;
-    // Measured at 320×568 with a 32 px root font, where the reserve was written as `9rem`: the
-    // scroller computed to 74 px of visible grid, with the sticky court header intercepting the
-    // click on the one row inside it. A `rem` reserve scales with the TEXT while the viewport
-    // does not, so the bigger the type the less grid there is. The reserve is pixels of chrome
-    // and is written in pixels; the floor is what makes the page scroll rather than the grid
-    // vanish, and the two measured variables are what keep it from being a guess (D3-B10).
-    expect(scroller?.className).toMatch(/max-h-\[max\(280px,/);
-    expect(scroller?.className).toContain("--app-chrome-height");
-    expect(scroller?.className).toContain("--selection-bar-height");
-    expect(scroller?.className).not.toMatch(/-\d+rem\)/);
+    const scroller = container.querySelector<HTMLElement>("[data-grid-scroller]");
+    // Measured at 320×568 with a 32 px root font, where the reserve was written as `9rem`: 74 px
+    // of visible grid. The reserve is pixels of chrome, written in pixels, with a pixel floor, and
+    // the chrome it subtracts is MEASURED (D3-B10) — the top bar and, on a phone, the tab bar.
+    // Now an inline style rather than an arbitrary class (theme-vocabulary bans those outside ui/).
+    const max = scroller?.style.maxHeight ?? "";
+    expect(max).toMatch(/^max\(280px,/);
+    expect(max).toContain("--app-chrome-height");
+    expect(max).toContain("--app-bottom-bar-height");
+    expect(max).not.toMatch(/\d+rem\)/);
   });
 
   it("names the closed cell as a button that answers, not as a dead surface — D4 §2.9", async () => {
@@ -184,36 +188,10 @@ describe("the grid's cells", () => {
   });
 });
 
-describe("one clock across the booking journey — D4 §2.4", () => {
-  beforeEach(() => { forgetClubZone(); signIn({ isAdmin: false }); });
-  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); signOut(); forgetClubZone(); });
-
-  it("writes the same 24-hour club face on the grid, in the dialog and in the toast", async () => {
-    const day = dayFixture("2030-09-07", "Africa/Johannesburg");
-    const stub = stubFetch([
-      { method: "POST", path: "/api/v1/bookings/", body: { booking_id: "b-1", balance_after_credits: 450 } },
-      { path: "/api/v1/schedule", body: day },
-      { path: "/api/v1/admin/members/", body: [] },
-      { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total: 0 } },
-    ]);
-    renderPage(<SchedulePage />);
-
-    // 06:30 club time on Saturday 7 September 2030.
-    const cell = await screen.findByRole("button", { name: /Book Court 1 at 06:30/ });
-    await act(async () => { cell.click(); });
-
-    const dialog = await screen.findByRole("dialog");
-    // "Sat 7 Sept, 06:30" — never "Sat, Sep 07, 6:30 AM", and never a bare 12-hour clock. The
-    // month abbreviation is whatever this engine's CLDR spells it, which is the point of going
-    // through `clubClock` rather than hand-formatting: one formatter, one answer, everywhere.
-    expect(within(dialog).getByText(/Sat 7 Sept?,? 06:30/)).toBeTruthy();
-    expect(dialog.textContent).not.toMatch(/AM|PM/);
-
-    const confirm = within(dialog).getByRole("button", { name: /^Book for/ });
-    await act(async () => { confirm.click(); });
-
-    await waitFor(() => expect(document.body.textContent).toMatch(/Booked Court 1 at Sat 7 Sept?,? 06:30/));
-    expect(document.body.textContent).not.toMatch(/\d:\d\d\s?(AM|PM)/);
-    expect(stub.calls.some((c) => c.method === "POST" && c.path === "/api/v1/bookings/")).toBe(true);
-  });
-});
+/*
+ * "One clock across the booking journey — D4 §2.4" (grid → dialog → toast) moved with P4: the
+ * dialog and its toast are the sheets' (`BookSheet`/`CancelSheet`, their own tests), and the
+ * grid's half — the label it hands a sheet is the same 24-hour club face the grid wears — is
+ * asserted in `Schedule.test.tsx` ("opens the cancel sheet on the member's own booking, in the
+ * grid's own clock").
+ */

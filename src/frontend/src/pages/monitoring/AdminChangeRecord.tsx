@@ -53,7 +53,7 @@ const AREA_LABEL: Record<string, string> = {
   schedule: "Repeating bookings",
   booking: "Bookings",
   credit: "Money",
-  group: "Member groups",
+  group: "Groups",
   member: "Members",
   setting: "Club settings",
   device: "Boards and doors",

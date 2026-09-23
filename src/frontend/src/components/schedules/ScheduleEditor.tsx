@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert } from "../Alert";
-import { Button } from "../Button";
-import { StateBlock } from "../StateBlock";
+import { Button } from "../ui/button";
+import { Skeleton } from "../ui/skeleton";
+import { StateBlock } from "../ui/state-block";
+import { typography } from "../../lib/typography";
 import { ConflictPanel } from "./ConflictPanel";
 import {
-  SentenceCheckbox, SentenceDisclosure, SentenceInput, SentenceSelect, SentenceText,
+  SentenceChoices, SentenceDate, SentenceInput, SentenceSelect, SentenceText, SentenceTime,
 } from "./SentenceParts";
 import { adminEndpoints, WEEKDAYS, type ScheduleBody, type ScheduleConflict, type SchedulePreview, type ScheduleRow, type Weekday } from "../../lib/adminApi";
 import { ApiError, endpoints, type AdminCourt, type AdminSettings } from "../../lib/api";
@@ -50,6 +52,26 @@ const DEFAULT_START = "18:00";
 const DEFAULT_END = "21:00";
 const INTERVAL_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8];
 
+/** Minutes after midnight → `HH:mm` (`24:00` for the end of the day). */
+function minuteLabel(minutes: number): string {
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
+/** The sentence's shape while the club's courts and settings are read. */
+function EditorSkeleton() {
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        {["w-24", "w-32", "w-20", "w-28", "w-24", "w-40", "w-28", "w-32"].map((width, i) => (
+          <Skeleton key={i} className={`h-touch ${width}`} />
+        ))}
+      </div>
+      <Skeleton className="h-10 w-full" />
+      <Skeleton className="h-touch w-44" />
+    </div>
+  );
+}
+
 type Check =
   | { kind: "idle" }
   | { kind: "checking" }
@@ -79,8 +101,6 @@ export function ScheduleEditor({
   const [endDate, setEndDate] = useState("");
   const [intervalWeeks, setIntervalWeeks] = useState(1);
   const [courtIds, setCourtIds] = useState<string[]>([]);
-  const [daysOpen, setDaysOpen] = useState(false);
-  const [courtsOpen, setCourtsOpen] = useState(false);
 
   // --- Prerequisites: which courts exist, and how this club's grid is cut up -------------
   //
@@ -120,6 +140,7 @@ export function ScheduleEditor({
   const timezone = settings?.timezone;
   const sliceMinutes = settings?.slice_minutes ?? 15;
   const dayStartMinute = settings?.day_start_minute ?? 0;
+  const dayEndMinute = settings?.day_end_minute ?? 24 * 60;
   const activeCourts = useMemo(() => (courts ?? []).filter((c) => c.is_active), [courts]);
 
   const body: ScheduleBody = useMemo(() => ({
@@ -203,16 +224,17 @@ export function ScheduleEditor({
     }
   }
 
+  const clubDay = { dayStart: minuteLabel(dayStartMinute), dayEnd: minuteLabel(dayEndMinute), stepMinutes: sliceMinutes };
   const canCheck = refusals.length === 0 && enumeration.dates.length > 0 && check.kind !== "checking";
   const showCreate = check.kind === "checked" && !stale && conflicts.length === 0;
 
   return (
-    <section aria-labelledby="schedule-editor-heading" className="space-y-5">
+    <section aria-labelledby="schedule-editor-heading" className="flex flex-col gap-5 rounded-xl border border-border bg-bg-surface p-4 shadow-xs sm:p-6">
       <h2
         id="schedule-editor-heading"
         ref={headingRef}
         tabIndex={-1}
-        className="text-xl font-bold tracking-tight text-text-primary focus:outline-none"
+        className={typography({ variant: "h2" })}
       >
         A new repeating booking
       </h2>
@@ -223,56 +245,35 @@ export function ScheduleEditor({
         action="the club's courts and settings"
         failedCaveat="Nothing can be held until they can be read."
         onRetry={() => setSetupNonce((n) => n + 1)}
+        skeleton={<EditorSkeleton />}
       >
         <div className="space-y-5">
-          {/* The sentence. Each field is a native control with a real, visually hidden
-              label — a reader tabbing through them hears "Start time, 18:00", which the
-              sentence around it cannot convey out of context. */}
-          <p className="text-lg leading-loose">
+          {/* The sentence. Each field is a design-system control with its own name — a reader
+              tabbing through them hears "Start time, 18:00", which the sentence around it
+              cannot convey out of context. */}
+          <p className="text-lg leading-[3.25rem]">
             <SentenceText>Hold </SentenceText>
-            <SentenceDisclosure
+            <SentenceChoices
               label="Courts"
               summary={courtsPhrase(courtNames)}
-              open={courtsOpen}
-              onToggle={() => setCourtsOpen((o) => !o)}
-              invalid={courtIds.length === 0}
-            >
-              {activeCourts.map((court) => (
-                  <SentenceCheckbox
-                    key={court.id}
-                    checked={courtIds.includes(court.id)}
-                    onChange={(next) => setCourtIds((ids) => (
-                      next ? [...ids, court.id] : ids.filter((id) => id !== court.id)
-                    ))}
-                >
-                  {court.name}
-                </SentenceCheckbox>
-              ))}
-            </SentenceDisclosure>
+              options={activeCourts.map((court) => ({ value: court.id, label: court.name }))}
+              selected={courtIds}
+              onChange={(id, next) => setCourtIds((ids) => (next ? [...ids, id] : ids.filter((x) => x !== id)))}
+            />
             <SentenceText> on </SentenceText>
-            <SentenceDisclosure
+            <SentenceChoices
               label="Days of the week"
               summary={daysPhrase(days)}
-              open={daysOpen}
-              onToggle={() => setDaysOpen((o) => !o)}
-              invalid={days.length === 0}
-            >
-              {WEEKDAYS.map((day) => (
-                  <SentenceCheckbox
-                    key={day}
-                    checked={days.includes(day)}
-                    onChange={(next) => setDays((current) => (
-                      next ? [...current, day] : current.filter((d) => d !== day)
-                    ))}
-                >
-                  {weekdayPlural(day)}
-                </SentenceCheckbox>
+              options={WEEKDAYS.map((day) => ({ value: day, label: weekdayPlural(day) }))}
+              selected={days}
+              onChange={(day, next) => setDays((current) => (
+                next ? [...current, day as Weekday] : current.filter((d) => d !== day)
               ))}
-            </SentenceDisclosure>
+            />
             <SentenceText> from </SentenceText>
-            <SentenceInput label="Start time" type="time" value={start} onChange={setStart} />
+            <SentenceTime label="Start time" value={start} onChange={setStart} {...clubDay} />
             <SentenceText> to </SentenceText>
-            <SentenceInput label="End time" type="time" value={end} onChange={setEnd} />
+            <SentenceTime label="End time" value={end} onChange={setEnd} {...clubDay} isEnd />
             <SentenceText>, called </SentenceText>
             <SentenceInput
               label="What members see on the grid"
@@ -280,12 +281,18 @@ export function ScheduleEditor({
               maxLength={128}
               placeholder="League night"
               onChange={setLabel}
-              invalid={label.trim().length === 0}
             />
             <SentenceText>, from </SentenceText>
-            <SentenceInput label="First date" type="date" value={startDate} onChange={setStartDate} />
+            <SentenceDate label="First date" value={startDate} onChange={setStartDate} />
             <SentenceText> until </SentenceText>
-            <SentenceInput label="Last date (leave empty for no end)" type="date" value={endDate} min={startDate} onChange={setEndDate} />
+            <SentenceDate
+              label="Last date"
+              value={endDate}
+              min={startDate || undefined}
+              placeholder="further notice"
+              clearLabel="No end date"
+              onChange={setEndDate}
+            />
             <SentenceText>, repeating every </SentenceText>
             <SentenceSelect
               label="Repeat every how many weeks"
@@ -300,7 +307,9 @@ export function ScheduleEditor({
               maxLength={128}
               placeholder="Tuesday league"
               onChange={setName}
-              invalid={name.trim().length < 2}
+              // Not red while it is simply unfilled — the refusal below already says what is
+              // missing. Red only for a name that has been started and is still too short.
+              invalid={name.trim().length === 1}
             />
             <SentenceText> in this list.</SentenceText>
           </p>
@@ -328,11 +337,10 @@ export function ScheduleEditor({
           )}
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" className="min-h-11" onClick={onCancel}>Cancel</Button>
+            <Button variant="outline" onClick={onCancel}>Cancel</Button>
             <Button
-              className="min-h-11"
-              disabled={!canCheck}
-              loading={check.kind === "checking"}
+              disabled={!canCheck && check.kind !== "checking"}
+              pending={check.kind === "checking"}
               onClick={runCheck}
             >
               {check.kind === "checking"
@@ -378,7 +386,7 @@ export function ScheduleEditor({
 
             {showCreate && (
               <div className="flex flex-wrap gap-2">
-                <Button className="min-h-11" loading={creating} onClick={create}>{CREATE_LABEL}</Button>
+                <Button pending={creating} onClick={create}>{CREATE_LABEL}</Button>
               </div>
             )}
           </div>

@@ -1,4 +1,6 @@
 import { SESSION_ANON, serveApi, test, expect } from "./fixtures";
+import { checkFields } from "../src/lib/authCopy";
+import { PHOTO_REQUIRED } from "../src/lib/registrationCopy";
 
 /**
  * Joining the club: register → confirm the address → wait → sign in.
@@ -62,7 +64,8 @@ async function fillTheForm(page: import("@playwright/test").Page) {
   await page.getByLabel("Full name").fill("Thandi Probe");
   await page.getByLabel("Email").fill("thandi.probe@review.test");
   await page.getByLabel("Membership number").fill("MEM-9001");
-  await page.getByLabel("Password").fill("Review!2345");
+  // `exact`: the field's own show/hide control is named "Show password".
+  await page.getByLabel("Password", { exact: true }).fill("Review!2345");
 }
 
 test.describe("Register — the application actually goes somewhere", () => {
@@ -79,10 +82,13 @@ test.describe("Register — the application actually goes somewhere", () => {
     */
     const alert = page.getByRole("alert");
     await expect(alert).toBeVisible({ timeout: 2_000 });
-    await expect(alert).toContainText(/add a photo of yourself/i);
-    // Exactly one live region. The picker used to raise its message to the page's own Alert
-    // as well as rendering it, and both are role="alert".
+    // Exactly one live region: the form's summary speaks, the sentence sits on the field. (The
+    // picker once raised its message to the page's own Alert as well as rendering it, and both
+    // were role="alert"; the alert used to BE the field message — rewritten for the P3 form
+    // anatomy, errors inline on the field plus one summary.)
+    await expect(alert).toContainText(checkFields(1));
     await expect(page.getByRole("alert")).toHaveCount(1);
+    await expect(page.getByText(PHOTO_REQUIRED)).toBeVisible();
 
     // The form itself is submittable — the file input no longer blocks it.
     await expect.poll(() => page.evaluate(() => document.querySelector("form")?.checkValidity())).toBe(true);
@@ -120,8 +126,9 @@ test.describe("Register — the application actually goes somewhere", () => {
     // Three steps, and the one fact that stops somebody registering twice: how long it takes.
     await expect(page.getByRole("listitem")).toHaveCount(3);
     await expect(page.getByText(/day or two/i)).toBeVisible();
-    // Never a dead end: there is a way back to the screen they will next need.
-    await expect(page.getByRole("button", { name: /Back to sign in/i })).toBeVisible();
+    // Never a dead end: there is a way back to the screen they will next need — a link, because
+    // it navigates (R10; it was a button that called navigate()).
+    await expect(page.getByRole("link", { name: /Back to sign in/i })).toHaveAttribute("href", "/login");
     expect(posted.join("")).toContain("thandi.probe@review.test");
   });
 
@@ -133,12 +140,13 @@ test.describe("Register — the application actually goes somewhere", () => {
     // Focus the file input the way a Tab from the password field does, then check the VISIBLE
     // control shows it. The tile used to carry `focus-within:ring-2`, which can never fire —
     // the input is the label's sibling, not its child — so the one control on the screen that
-    // is not self-evidently a control had no focus indicator at all.
+    // is not self-evidently a control had no focus indicator at all. It now draws the house
+    // focus OUTLINE (not a box-shadow ring), through `peer-focus-visible`.
     await page.getByLabel("Photo of yourself").focus();
     const ring = await page.evaluate(() => {
       const input = document.querySelector<HTMLInputElement>('input[type="file"]');
       const tile = input?.parentElement?.querySelector("label");
-      return tile ? getComputedStyle(tile).boxShadow : "none";
+      return tile ? getComputedStyle(tile).outlineStyle : "none";
     });
     expect(ring).not.toBe("none");
 
@@ -176,7 +184,8 @@ test.describe("Confirming the address — neither settled state is a dead end", 
 
     await expect(page.getByRole("heading", { name: "Email confirmed" })).toBeVisible();
     await expect(page.getByText(/checks your membership number/i)).toBeVisible();
-    await page.getByRole("button", { name: /Back to sign in/i }).click();
+    // A link now (R10): it navigates.
+    await page.getByRole("link", { name: /Back to sign in/i }).click();
     await expect(page).toHaveURL(/\/login$/);
   });
 
@@ -194,7 +203,7 @@ test.describe("Confirming the address — neither settled state is a dead end", 
       confirmed and registering again is answered `email_in_use`. The primary control is now
       the one that works.
     */
-    await expect(page.getByRole("button", { name: "Go to sign in" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Go to sign in" })).toHaveAttribute("href", "/login");
     await expect(page.getByText(/already opened this one/i)).toBeVisible();
   });
 });
@@ -216,7 +225,7 @@ test.describe("Waiting, and then getting in", () => {
     await serveApi(page, [{ path: "/api/v1/session", body: SESSION_ANON }, pendingRefusal]);
     await page.goto("/login");
     await page.getByLabel("Email").fill("thandi.probe@review.test");
-    await page.getByLabel("Password").fill("Review!2345");
+    await page.getByLabel("Password", { exact: true }).fill("Review!2345");
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
 
     await expect(page.getByRole("alert")).toContainText(/waiting for the club to approve/i);
@@ -261,7 +270,7 @@ test.describe("Waiting, and then getting in", () => {
     await page.getByLabel("Email").fill("thandi.probe@review.test");
     // Typed into rather than filled, and Enter pressed from there, so the whole thing is the
     // key sequence a person produces — not a value assignment followed by a synthetic event.
-    await page.getByLabel("Password").click();
+    await page.getByLabel("Password", { exact: true }).click();
     await page.keyboard.type("Review!2345");
     await page.keyboard.press("Enter");
 
@@ -280,7 +289,7 @@ test.describe("Waiting, and then getting in", () => {
     ]);
     await page.goto("/login");
     await page.getByLabel("Email").fill("thandi.probe@review.test");
-    await page.getByLabel("Password").fill("Review!2345");
+    await page.getByLabel("Password", { exact: true }).fill("Review!2345");
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
 
     // R15 — the signed-in landing moved from /schedule to My Code.
