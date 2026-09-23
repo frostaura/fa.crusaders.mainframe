@@ -227,8 +227,11 @@ public class AdminOverdraftBookingTests
         // The member's own booking, funded: nothing new in the change record.
         await host.NewScope().ServiceProvider.GetRequiredService<LedgerService>().PostAsync(
             new LedgerPosting(host.PlayerUser.Id, LedgerEntryType.TopUp, 100m, host.PlayerUser.Id), default);
+        // The OTHER court: BookableSlot(2) and BookableSlot(3) both step out of peak to the
+        // same 19:xx when the suite runs between 13:00 and 16:00 UTC, and on one court the
+        // second booking was then refused slot_taken — red every afternoon, green otherwise.
         Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
-            host.Courts[0].Id, new BookingPayer(host.PlayerUser.Id, host.PlayerUser.Id),
+            host.Courts[1].Id, new BookingPayer(host.PlayerUser.Id, host.PlayerUser.Id),
             TestHost.BookableSlot(3), sliceCount: 1, default));
         Assert.Equal(2, await db.AdminChangeLogs.IgnoreQueryFilters().CountAsync());
     }

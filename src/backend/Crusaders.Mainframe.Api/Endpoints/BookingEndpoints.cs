@@ -242,17 +242,20 @@ public static class BookingEndpoints
     // whitelizard.txt's header.
     internal static IResult ToHttpResult(BookingResult result, HttpContext ctx)
     {
+        // The wire word is BookingRefusals' — the one mapping every booking path reads — and
+        // this switch adds only the status and the figures each refusal's sentence needs.
+        var error = BookingRefusals.CodeOf(result);
         return result switch
         {
         BookingResult.Ok ok => Results.Ok(new { booking_id = ok.Booking.Id, balance_after_credits = ok.BalanceAfterCredits }),
-        BookingResult.NotFound => Results.NotFound(new { error = "court_not_found" }),
-        BookingResult.PastTime => Results.BadRequest(new { error = "past_time" }),
-        BookingResult.TooFarAhead => Results.BadRequest(new { error = "too_far_ahead" }),
-        BookingResult.SlotTaken => Results.Conflict(new { error = "slot_taken" }),
+        BookingResult.NotFound => Results.NotFound(new { error }),
+        BookingResult.PastTime => Results.BadRequest(new { error }),
+        BookingResult.TooFarAhead => Results.BadRequest(new { error }),
+        BookingResult.SlotTaken => Results.Conflict(new { error }),
         BookingResult.InsufficientBalance ib => Results.Json(
-            new { error = "insufficient_balance", current_credits = ib.CurrentCredits, required_credits = ib.RequiredCredits }, statusCode: 402),
+            new { error, current_credits = ib.CurrentCredits, required_credits = ib.RequiredCredits }, statusCode: 402),
         BookingResult.PeakHoursLeagueOnly p => Results.Conflict(
-            new { error = "peak_hours_league_only", peak_start = p.PeakStart, peak_end = p.PeakEnd, regular_advance_hours = p.RegularAdvanceHours }),
+            new { error, peak_start = p.PeakStart, peak_end = p.PeakEnd, regular_advance_hours = p.RegularAdvanceHours }),
         // The minutes cap — blueprint A.4's. The three original figures are unchanged so no
         // existing client breaks; the three new ones are what the member's sentence needs, and
         // resets_at is here so a browser never has to compute a club midnight (which is D2-B33
@@ -260,7 +263,7 @@ public static class BookingEndpoints
         BookingResult.PerDayCapExceeded c => Results.Conflict(
             new
             {
-                error = "per_day_cap_exceeded",
+                error,
                 cap_minutes = c.CapMinutes,
                 already_booked_minutes = c.AlreadyBookedMinutes,
                 attempted_minutes = c.AttemptedMinutes,
@@ -276,7 +279,7 @@ public static class BookingEndpoints
         BookingResult.PerDaySlotCapExceeded c => Results.Conflict(
             new
             {
-                error = "per_day_slot_cap_exceeded",
+                error,
                 cap_slots = c.CapSlots,
                 booked_slots = c.BookedSlots,
                 attempted_slots = c.AttemptedSlots,
@@ -292,7 +295,7 @@ public static class BookingEndpoints
         BookingResult.GroupWindow w => Results.Conflict(
             new
             {
-                error = "group_window",
+                error,
                 groups = w.GroupNames,
                 day = w.Day,
                 allowed_windows = w.AllowedWindows.Select(x => new { start = x.Start, end = x.End }).ToList(),
@@ -302,7 +305,7 @@ public static class BookingEndpoints
         BookingResult.CrossesMidnight m => Results.Conflict(
             new
             {
-                error = "crosses_midnight",
+                error,
                 starts_at = m.StartsAt,
                 ends_at = m.EndsAt,
                 minutes_past_midnight = m.MinutesPastMidnight,
@@ -311,14 +314,14 @@ public static class BookingEndpoints
         // so there is nothing they can book. Its own code, because the honest sentence is
         // completely different and because an empty grid reads as "the club is shut".
         BookingResult.NoBookableWindow n => Results.Conflict(
-            new { error = "no_bookable_window", groups = n.GroupNames, day = n.Day }),
+            new { error, groups = n.GroupNames, day = n.Day }),
         BookingResult.OutOfHours h => Results.Conflict(
-            new { error = "out_of_hours", opens_at = h.OpensAt, closes_at = h.ClosesAt }),
+            new { error, opens_at = h.OpensAt, closes_at = h.ClosesAt }),
         BookingResult.NoTimeAvailable n => Results.Conflict(
-            new { error = "no_time_available", requested_minutes = n.RequestedMinutes, available_minutes = n.AvailableMinutes }),
+            new { error, requested_minutes = n.RequestedMinutes, available_minutes = n.AvailableMinutes }),
         BookingResult.InvalidDuration id => Results.BadRequest(
-            new { error = "invalid_duration", requested_slices = id.RequestedSlices, max_slices = id.MaxSlices }),
-        BookingResult.DuplicateRequest => Results.Conflict(new { error = "duplicate_request" }),
+            new { error, requested_slices = id.RequestedSlices, max_slices = id.MaxSlices }),
+        BookingResult.DuplicateRequest => Results.Conflict(new { error }),
             _ => Unmapped(result, ctx),
         };
     }

@@ -200,10 +200,10 @@ public sealed class AdminBulkBookingService
             results.Add(result);
             charged += result.AmountCredits;
 
-            if (result.Error == "insufficient_balance")
+            if (result.Error == BookingRefusals.InsufficientBalance)
             {
                 haltedAt = index;
-                haltedReason = "insufficient_balance";
+                haltedReason = BookingRefusals.InsufficientBalance;
                 break;
             }
         }
@@ -257,7 +257,7 @@ public sealed class AdminBulkBookingService
             return BulkBookResult.Booked(index, ok.Booking, courtName, ok.Booking.AmountChargedCredits);
         }
 
-        return BulkBookResult.Failure(index, RefusalCodeOf(outcome), courtName, item.StartsAt);
+        return BulkBookResult.Failure(index, BookingRefusals.CodeOf(outcome), courtName, item.StartsAt);
     }
 
     private async Task<BulkBookResult> BlockForGuestAsync(
@@ -288,7 +288,7 @@ public sealed class AdminBulkBookingService
 
         return outcome is BookingResult.Ok ok
             ? BulkBookResult.Blocked(index, ok.Booking, courtName)
-            : BulkBookResult.Failure(index, RefusalCodeOf(outcome), courtName, item.StartsAt);
+            : BulkBookResult.Failure(index, BookingRefusals.CodeOf(outcome), courtName, item.StartsAt);
     }
 
     /// <summary>
@@ -320,7 +320,7 @@ public sealed class AdminBulkBookingService
             var quote = await _bookings.QuoteAsync(item.CourtId, payer, item.StartsAt, item.SliceCount, ct);
             if (quote.PriceCredits is not { } price)
             {
-                lines.Add(new BulkQuoteLine(item, quote.CourtName, 0m, false, RefusalCodeOf(quote.Refusal!)));
+                lines.Add(new BulkQuoteLine(item, quote.CourtName, 0m, false, BookingRefusals.CodeOf(quote.Refusal!)));
                 continue;
             }
 
@@ -329,7 +329,7 @@ public sealed class AdminBulkBookingService
                 a.CourtId == item.CourtId && a.StartsAt < endsAt && a.EndsAt > item.StartsAt);
             if (clashes)
             {
-                lines.Add(new BulkQuoteLine(item, quote.CourtName, 0m, false, "slot_taken"));
+                lines.Add(new BulkQuoteLine(item, quote.CourtName, 0m, false, BookingRefusals.SlotTaken));
                 continue;
             }
 
@@ -362,45 +362,6 @@ public sealed class AdminBulkBookingService
         return bookingId is null
             ? null
             : await _db.Bookings.AsNoTracking().FirstOrDefaultAsync(b => b.Id == bookingId, ct);
-    }
-
-    /// <summary>
-    /// The single-booking refusal vocabulary, verbatim. A batch does not invent codes — the
-    /// console already maps these to sentences, and a second spelling of "slot taken" would be
-    /// a sentence it has never heard of.
-    ///
-    /// <para>
-    /// <b>Every arm <c>BookingEndpoints.ToHttpResult</c> names, and no fewer.</b> Four of them
-    /// — the group window, the slot cap, crossing midnight and no bookable window — used to fall
-    /// through to <c>booking_failed</c>, a code no screen has a sentence for. The quote endpoint
-    /// (R19) reads this too, and a quote that says "booking_failed" tells an admin nothing.
-    /// </para>
-    /// </summary>
-    internal static string RefusalCodeOf(BookingResult result)
-    {
-        // Block body rather than an expression body, for the lizard reason in
-        // memory/gotchas.md. lizard's C# parser cannot follow `=> x switch { … }`: it loses
-        // scope and emits a *global* pseudo-function spanning the whole FILE, which then trips
-        // the 200-line function gate on any file long enough to matter.
-        return result switch
-        {
-            BookingResult.NotFound => "court_not_found",
-            BookingResult.PastTime => "past_time",
-            BookingResult.TooFarAhead => "too_far_ahead",
-            BookingResult.SlotTaken => "slot_taken",
-            BookingResult.InsufficientBalance => "insufficient_balance",
-            BookingResult.PeakHoursLeagueOnly => "peak_hours_league_only",
-            BookingResult.PerDayCapExceeded => "per_day_cap_exceeded",
-            BookingResult.PerDaySlotCapExceeded => "per_day_slot_cap_exceeded",
-            BookingResult.GroupWindow => "group_window",
-            BookingResult.CrossesMidnight => "crosses_midnight",
-            BookingResult.NoBookableWindow => "no_bookable_window",
-            BookingResult.OutOfHours => "out_of_hours",
-            BookingResult.NoTimeAvailable => "no_time_available",
-            BookingResult.InvalidDuration => "invalid_duration",
-            BookingResult.DuplicateRequest => "duplicate_request",
-            _ => "booking_failed",
-        };
     }
 
     /// <summary>Every name and court title one batch's result rows need, in two reads rather than 2n.</summary>

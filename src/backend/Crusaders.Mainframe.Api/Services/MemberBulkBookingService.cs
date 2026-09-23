@@ -34,10 +34,10 @@ namespace Crusaders.Mainframe.Api.Services;
 /// by everybody in the club, so two members whose phones minted the same key would collide on the
 /// global unique index — and the second member's replay lookup would hand back the FIRST
 /// member's booking as their own. This reference carries the payer.</item>
-/// <item><b>Its refusal vocabulary stops at the admin-exempt rules.</b> Group windows, the slot
-/// cap, crossing midnight and "no bookable window" never reach an admin, so they fall to
-/// <c>booking_failed</c> there. They are exactly the refusals a member meets; see
-/// <see cref="BookingRefusals"/>.</item>
+/// <item><b>The refusals a member meets are not the ones an admin meets.</b> Group windows, the
+/// slot cap, crossing midnight and "no bookable window" never reach an admin. Every path names
+/// them through the one mapping, <see cref="BookingRefusals.CodeOf"/>, so none of them can fall
+/// to <c>booking_failed</c> on one route while it has a word on another.</item>
 /// <item><b>A replay is checked, not trusted.</b> The reference is keyed on the item's index, so
 /// a key reused for a DIFFERENT list would answer item 0 with whatever item 0 was last time. A
 /// replayed booking must be the payer's, on the same court at the same start, or the item is
@@ -180,54 +180,6 @@ public sealed class MemberBulkBookingService
         return bookingId is null
             ? null
             : await _db.Bookings.AsNoTracking().FirstOrDefaultAsync(b => b.Id == bookingId, ct);
-    }
-}
-
-/// <summary>
-/// The single-booking refusal vocabulary as one word per <see cref="BookingResult"/> — every
-/// member, not just the ones an admin can meet.
-///
-/// <para>
-/// The codes are the <c>error</c> values <c>BookingEndpoints</c> already answers, verbatim, so a
-/// console that maps them to sentences for the single route maps a batch's too. Two are the
-/// batch's own: <see cref="NotAttempted"/> and <see cref="IdempotencyKeyReused"/>.
-/// </para>
-/// </summary>
-public static class BookingRefusals
-{
-    public const string InsufficientBalance = "insufficient_balance";
-
-    /// <summary>An item after the batch halted. Nothing was tried; retry the same key after a top-up.</summary>
-    public const string NotAttempted = "not_attempted";
-
-    /// <summary>This key already booked a DIFFERENT item at this position. Use a fresh key for a new list.</summary>
-    public const string IdempotencyKeyReused = "idempotency_key_reused";
-
-    /// <summary>
-    /// The code for one refusal. Block body for the lizard reason in
-    /// <c>memory/gotchas-gates.md</c> — an expression-bodied switch costs the file its scope.
-    /// </summary>
-    public static string CodeOf(BookingResult result)
-    {
-        return result switch
-        {
-            BookingResult.NotFound => "court_not_found",
-            BookingResult.PastTime => "past_time",
-            BookingResult.TooFarAhead => "too_far_ahead",
-            BookingResult.SlotTaken => "slot_taken",
-            BookingResult.InsufficientBalance => InsufficientBalance,
-            BookingResult.PeakHoursLeagueOnly => "peak_hours_league_only",
-            BookingResult.PerDayCapExceeded => "per_day_cap_exceeded",
-            BookingResult.PerDaySlotCapExceeded => "per_day_slot_cap_exceeded",
-            BookingResult.GroupWindow => "group_window",
-            BookingResult.CrossesMidnight => "crosses_midnight",
-            BookingResult.NoBookableWindow => "no_bookable_window",
-            BookingResult.OutOfHours => "out_of_hours",
-            BookingResult.NoTimeAvailable => "no_time_available",
-            BookingResult.InvalidDuration => "invalid_duration",
-            BookingResult.DuplicateRequest => "duplicate_request",
-            _ => "booking_failed",
-        };
     }
 }
 

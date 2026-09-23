@@ -112,6 +112,17 @@ public static class AdminChangeActions
     /// </summary>
     public const string MemberTraceViewed = "member.trace_viewed";
 
+    /// <summary>
+    /// An admin looked at, or exported, one member's door history (decision D9).
+    ///
+    /// <para>
+    /// <b>In THIS table as well as <c>audit_log</c></b>, for the trace's reason: D9 reversed a
+    /// privacy rule, and the reversal is only defensible if who looked cannot be quietly
+    /// removed. <c>audit_log</c> has a delete path; this table does not.
+    /// </para>
+    /// </summary>
+    public const string MemberDoorHistoryViewed = "member.door_history_viewed";
+
     // ---- setting ----
     public const string SettingsUpdated = "settings.updated";
     public const string CourtCreated = "court.created";
@@ -156,7 +167,7 @@ public static class AdminChangeActions
         CreditAdjusted, CreditToppedUp,
         GroupCreated, GroupUpdated, GroupArchived, GroupMembersChanged, GroupDeleted,
         MemberClassChanged, MemberApproved, MemberRejected, MemberSuspended, MemberReactivated,
-        MemberPasswordReset, MemberTraceViewed, MemberAdminGranted, MemberAdminRevoked,
+        MemberPasswordReset, MemberTraceViewed, MemberDoorHistoryViewed, MemberAdminGranted, MemberAdminRevoked,
         SettingsUpdated, CourtCreated, CourtUpdated, CourtDeactivated, ChangesExported,
         DeviceUpdated, DeviceDeleted, DeviceApiKeyRegenerated, DoorsShutAll, DoorsReopenedAll, MonitoringErrorResolved,
     ];
@@ -193,7 +204,7 @@ public static class AdminChangeActions
                 or GroupDeleted => AdminChangeAreas.Group,
             MemberClassChanged or MemberApproved or MemberRejected or MemberSuspended
                 or MemberReactivated or MemberPasswordReset or MemberTraceViewed
-                or MemberAdminGranted or MemberAdminRevoked => AdminChangeAreas.Member,
+                or MemberDoorHistoryViewed or MemberAdminGranted or MemberAdminRevoked => AdminChangeAreas.Member,
             SettingsUpdated or CourtCreated or CourtUpdated or CourtDeactivated
                 or ChangesExported => AdminChangeAreas.Setting,
             DeviceUpdated or DeviceDeleted or DeviceApiKeyRegenerated or DoorsShutAll
@@ -248,6 +259,7 @@ public static class AdminChangeActions
             MemberReactivated => $"Reactivated a member{of}",
             MemberPasswordReset => $"Reset a member's password{of}",
             MemberTraceViewed => $"Looked at one member's activity{of}",
+            MemberDoorHistoryViewed => $"Looked at one member's door history{of}",
             MemberAdminGranted => $"Made a member an administrator{of}",
             MemberAdminRevoked => $"Removed a member's administrator rights{of}",
 

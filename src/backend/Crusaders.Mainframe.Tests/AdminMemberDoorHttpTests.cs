@@ -2,8 +2,12 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Endpoints;
+using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Crusaders.Mainframe.Tests;
 
@@ -37,6 +41,17 @@ public sealed class AdminMemberDoorHttpTests
     private static string CsvPath(Guid userId, string query = "") => $"/api/v1/admin/members/{userId}/doors.csv{query}";
 
     private static List<JsonElement> Items(JsonElement body) => body.GetProperty("items").EnumerateArray().ToList();
+
+    /// <summary>This club's <c>member.door_history_viewed</c> rows in the undeletable change record.</summary>
+    private static async Task<List<AdminChangeLog>> ChangeRowsAsync(TestWebAppFactory factory, DoorClub club)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        return await db.AdminChangeLogs.IgnoreQueryFilters()
+            .Where(a => a.TenantId == club.TenantId && a.Action == AdminChangeActions.MemberDoorHistoryViewed)
+            .OrderBy(a => a.OccurredAt)
+            .ToListAsync();
+    }
 
     /// <summary>
     /// The member's rows and nobody else's — and the whole of the club's retention by default,
@@ -114,6 +129,47 @@ public sealed class AdminMemberDoorHttpTests
         Assert.True(page.GetProperty("range").TryGetProperty("from", out _));
         Assert.True(page.GetProperty("range").TryGetProperty("to", out _));
         Assert.True(JsonDocument.Parse(rows[1].DetailsJson!).RootElement.GetProperty("exported").GetBoolean());
+
+        // The same two reads, and only those, in the change record that has no delete path —
+        // the refused 400 wrote neither record.
+        var changes = await ChangeRowsAsync(factory, club);
+        Assert.Equal(2, changes.Count);
+        Assert.All(changes, c =>
+        {
+            Assert.Equal(club.AdminUserId, c.ActorUserId);
+            Assert.Equal(AdminChangeSubjects.User, c.SubjectKind);
+            Assert.Equal(club.MemberUserId, c.SubjectId);
+            Assert.Equal("Door Member", c.SubjectLabel);
+            Assert.Equal(AdminChangeAreas.Member, c.Area);
+        });
+        var pageAfter = JsonDocument.Parse(changes[0].AfterJson!).RootElement;
+        Assert.False(pageAfter.GetProperty("exported").GetBoolean());
+        Assert.Equal(1, pageAfter.GetProperty("rows").GetInt32());
+        Assert.True(pageAfter.GetProperty("range").TryGetProperty("from", out _));
+        Assert.True(JsonDocument.Parse(changes[1].AfterJson!).RootElement.GetProperty("exported").GetBoolean());
+    }
+
+    /// <summary>
+    /// The access record reads back through the club's change record as a sentence composed like
+    /// its neighbours — the member area, the member named — not as a raw action string.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_read_appears_in_the_club_change_record_as_a_member_sentence()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await DoorClub.SeedAsync(factory, "mdoorchg");
+        var admin = club.AdminClient(factory);
+        Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync(CsvPath(club.MemberUserId))).StatusCode);
+
+        var body = await admin.GetFromJsonAsync<JsonElement>("/api/v1/admin/changes?area=member");
+        var row = Assert.Single(body.GetProperty("rows").EnumerateArray(),
+            r => r.GetProperty("action").GetString() == AdminChangeActions.MemberDoorHistoryViewed);
+
+        Assert.Equal(AdminChangeAreas.Member, row.GetProperty("area").GetString());
+        Assert.Equal("Looked at one member's door history — Door Member", row.GetProperty("headline").GetString());
+        Assert.Equal(club.MemberUserId, row.GetProperty("subject").GetProperty("id").GetGuid());
     }
 
     /// <summary>
@@ -146,10 +202,16 @@ public sealed class AdminMemberDoorHttpTests
         }
         Assert.Empty(await theirs.AuditRowsAsync(factory, AdminMemberDoorEndpoints.ViewedAction));
         Assert.Empty(await mine.AuditRowsAsync(factory, AdminMemberDoorEndpoints.ViewedAction));
+        Assert.Empty(await ChangeRowsAsync(factory, theirs));
+        Assert.Empty(await ChangeRowsAsync(factory, mine));
 
         var body = await mine.AdminClient(factory).GetFromJsonAsync<JsonElement>(DoorsPath(mine.MemberUserId));
         Assert.Single(Items(body));
         Assert.Equal(1, body.GetProperty("total").GetInt32());
+
+        // The legitimate read is recorded in its OWN club's change record and never in the other's.
+        Assert.Single(await ChangeRowsAsync(factory, mine));
+        Assert.Empty(await ChangeRowsAsync(factory, theirs));
     }
 
     [SkippableFact]
@@ -164,6 +226,7 @@ public sealed class AdminMemberDoorHttpTests
         Assert.Equal(HttpStatusCode.Forbidden, (await member.GetAsync(DoorsPath(club.MemberUserId))).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await member.GetAsync(CsvPath(club.MemberUserId))).StatusCode);
         Assert.Empty(await club.AuditRowsAsync(factory, AdminMemberDoorEndpoints.ViewedAction));
+        Assert.Empty(await ChangeRowsAsync(factory, club));
     }
 
     /// <summary>

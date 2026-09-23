@@ -32,10 +32,11 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 /// </para>
 ///
 /// <para>
-/// <b>Every read is audited</b> — the page AND the export — as one <c>audit_log</c> row
-/// <c>member.door_history_viewed</c> naming the admin as actor, the member as subject, and the
-/// range and filters asked for. Written on the way OUT, so the row can say how many rows were
-/// actually looked at. See <see cref="RecordAsync"/> for which table and why.
+/// <b>Every read is audited</b> — the page AND the export — as <c>member.door_history_viewed</c>
+/// in BOTH <c>audit_log</c> and the undeletable <c>admin_change_log</c>, in one save, naming the
+/// admin as actor, the member as subject, and the range and filters asked for. Written on the way
+/// OUT, so the row can say how many rows were actually looked at; a refused read writes neither.
+/// See <see cref="RecordAsync"/> for why both tables.
 /// </para>
 ///
 /// <para>
@@ -49,7 +50,7 @@ namespace Crusaders.Mainframe.Api.Endpoints;
 public static class AdminMemberDoorEndpoints
 {
     /// <summary>The audit action every read of this surface writes.</summary>
-    public const string ViewedAction = "member.door_history_viewed";
+    public const string ViewedAction = AdminChangeActions.MemberDoorHistoryViewed;
 
     /// <summary>The refusal for a user id this club does not hold.</summary>
     public const string MemberNotFound = AdminMemberDetailEndpoints.MemberNotFound;
@@ -85,7 +86,7 @@ public static class AdminMemberDoorEndpoints
 
     /// <summary>The services every read resolves, bound as one parameter for the complexity gate.</summary>
     public sealed record DoorHistoryDeps(
-        MainframeDbContext Db, TenantSettingsAccessor Settings, ITenantContext Tenant);
+        MainframeDbContext Db, TenantSettingsAccessor Settings, ITenantContext Tenant, AdminChangeRecorder Recorder);
 
     /// <summary><c>GET /api/v1/admin/members/{userId}/doors</c> — one page of one person's doors.</summary>
     public static async Task<IResult> HandleAsync(
@@ -249,10 +250,11 @@ public static class AdminMemberDoorEndpoints
     /// </para>
     ///
     /// <para>
-    /// The trace writes its equivalent to the trigger-protected <c>admin_change_log</c> instead.
-    /// That table's vocabulary is a closed set owned by <see cref="AdminChangeActions"/>, and a
-    /// second record there needs a new action added to it — owed, and noted in the lane report,
-    /// rather than smuggled in under the trace's name.
+    /// <b>And into the trigger-protected <c>admin_change_log</c></b>, as
+    /// <see cref="AdminChangeActions.MemberDoorHistoryViewed"/> — the trace's reason: D9 reversed
+    /// a privacy rule, and <c>audit_log</c> has a delete path. The two rows are staged on the one
+    /// context and flushed by ONE <c>SaveChangesAsync</c>, so a read can never leave one record
+    /// without the other.
     /// </para>
     /// </summary>
     private static async Task RecordAsync(
@@ -277,6 +279,24 @@ public static class AdminMemberDoorEndpoints
                 exported = viewed.Exported,
             }),
         });
+
+        await deps.Recorder.StageAsync(new AdminChange(
+            Action: AdminChangeActions.MemberDoorHistoryViewed,
+            ActorUserId: ctx.User.Id() ?? Guid.Empty,
+            SubjectKind: AdminChangeSubjects.User,
+            SubjectId: member.UserId,
+            SubjectLabel: member.Name,
+            After: new
+            {
+                range = new { from = query.From, to = query.To },
+                door = query.Door,
+                outcome = query.Outcome,
+                reason = query.Reason,
+                rows = viewed.Rows,
+                total = viewed.Total,
+                exported = viewed.Exported,
+            }), ct);
+
         await deps.Db.SaveChangesAsync(ct);
     }
 
