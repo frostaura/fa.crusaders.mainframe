@@ -44,7 +44,7 @@ public sealed class AdminDoorsOverviewHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, "ovkind");
+        var club = await DoorClub.SeedAsync(factory, "ovkind", DoorClub.DaytimeSettings());
         await club.AddDoorAsync(factory, "gate-ov0001", "front-door");
         await club.AddCourtBoxAsync(factory, "box-ov0001");
 
@@ -65,7 +65,7 @@ public sealed class AdminDoorsOverviewHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, "ovorder");
+        var club = await DoorClub.SeedAsync(factory, "ovorder", DoorClub.DaytimeSettings());
         await club.AddDoorAsync(factory, "gate-ov0013", "z", name: "Side door");
         await club.AddDoorAsync(factory, "gate-ov0011", "x", name: "Back door");
         await club.AddDoorAsync(factory, "gate-ov0012", "y", name: "Back door");
@@ -132,7 +132,7 @@ public sealed class AdminDoorsOverviewHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, "ovhalves");
+        var club = await DoorClub.SeedAsync(factory, "ovhalves", DoorClub.DaytimeSettings());
         var doorId = await club.AddDoorAsync(factory, "gate-ov0003", "front-door");
         var now = DateTimeOffset.UtcNow;
 
@@ -162,7 +162,7 @@ public sealed class AdminDoorsOverviewHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, "ovscope");
+        var club = await DoorClub.SeedAsync(factory, "ovscope", DoorClub.DaytimeSettings());
         var front = await club.AddDoorAsync(factory, "gate-ov0004", "front-door", name: "A front");
         await club.AddDoorAsync(factory, "gate-ov0005", "side-door", name: "B side");
         var now = DateTimeOffset.UtcNow;
@@ -204,7 +204,7 @@ public sealed class AdminDoorsOverviewHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, "ovquiet");
+        var club = await DoorClub.SeedAsync(factory, "ovquiet", DoorClub.DaytimeSettings());
         await club.AddDoorAsync(factory, "gate-ov0007", "front-door");
 
         var body = await club.AdminClient(factory).GetFromJsonAsync<JsonElement>(DoorsPath);
@@ -220,7 +220,7 @@ public sealed class AdminDoorsOverviewHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, "ovspike");
+        var club = await DoorClub.SeedAsync(factory, "ovspike", DoorClub.DaytimeSettings());
         var doorId = await club.AddDoorAsync(factory, "gate-ov0008", "side-door");
         var now = DateTimeOffset.UtcNow;
 
@@ -275,7 +275,7 @@ public sealed class AdminDoorsOverviewHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, "ovoldspike");
+        var club = await DoorClub.SeedAsync(factory, "ovoldspike", DoorClub.DaytimeSettings());
         var doorId = await club.AddDoorAsync(factory, "gate-ov0010", "side-door");
         var now = DateTimeOffset.UtcNow;
 
@@ -300,7 +300,7 @@ public sealed class AdminDoorsOverviewHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, "ovrelease");
+        var club = await DoorClub.SeedAsync(factory, "ovrelease", DoorClub.DaytimeSettings());
         var doorId = await club.AddDoorAsync(factory, "gate-ov0014", "front-door");
         var now = DateTimeOffset.UtcNow;
 
@@ -325,7 +325,7 @@ public sealed class AdminDoorsOverviewHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, "ovcrowd");
+        var club = await DoorClub.SeedAsync(factory, "ovcrowd", DoorClub.DaytimeSettings());
         var doorId = await club.AddDoorAsync(factory, "gate-ov0015", "front-door");
         var now = DateTimeOffset.UtcNow;
 
@@ -348,7 +348,7 @@ public sealed class AdminDoorsOverviewHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, "ovprivacy");
+        var club = await DoorClub.SeedAsync(factory, "ovprivacy", DoorClub.DaytimeSettings());
         var doorId = await club.AddDoorAsync(factory, "gate-ov0016", "front-door");
         var now = DateTimeOffset.UtcNow;
 
@@ -387,7 +387,7 @@ public sealed class AdminDoorsOverviewHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, "ovbanner");
+        var club = await DoorClub.SeedAsync(factory, "ovbanner", DoorClub.DaytimeSettings());
         await club.AddDoorAsync(factory, "gate-ov0017", "front-door");
         var client = club.AdminClient(factory);
 
@@ -407,7 +407,7 @@ public sealed class AdminDoorsOverviewHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, "ovonedoor");
+        var club = await DoorClub.SeedAsync(factory, "ovonedoor", DoorClub.DaytimeSettings());
         var doorId = await club.AddDoorAsync(factory, "gate-ov0018", "front-door");
         var client = club.AdminClient(factory);
 
@@ -426,8 +426,8 @@ public sealed class AdminDoorsOverviewHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var mine = await DoorClub.SeedAsync(factory, "ovmine");
-        var theirs = await DoorClub.SeedAsync(factory, "ovtheirs");
+        var mine = await DoorClub.SeedAsync(factory, "ovmine", DoorClub.DaytimeSettings());
+        var theirs = await DoorClub.SeedAsync(factory, "ovtheirs", DoorClub.DaytimeSettings());
         var myDoor = await mine.AddDoorAsync(factory, "gate-ov0019", "mine");
         var theirDoor = await theirs.AddDoorAsync(factory, "gate-ov0020", "theirs");
         var now = DateTimeOffset.UtcNow;
@@ -453,7 +453,7 @@ public sealed class AdminDoorsOverviewHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, "ovmember");
+        var club = await DoorClub.SeedAsync(factory, "ovmember", DoorClub.DaytimeSettings());
         await club.AddDoorAsync(factory, "gate-ov0021", "front-door");
 
         var res = await club.MemberClient(factory).GetAsync(DoorsPath);

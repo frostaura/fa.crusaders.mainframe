@@ -48,7 +48,7 @@ public sealed class DoorScanSetHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, "scanset1");
+        var club = await DoorClub.SeedAsync(factory, "scanset1", DoorClub.DaytimeSettings());
         var doorId = await club.AddDoorAsync(factory, "gate-ss0001", "front-door");
         var now = DateTimeOffset.UtcNow;
 
@@ -91,7 +91,7 @@ public sealed class DoorScanSetHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, "scanset2");
+        var club = await DoorClub.SeedAsync(factory, "scanset2", DoorClub.DaytimeSettings());
         var doorId = await club.AddDoorAsync(factory, "gate-ss0002", gateKey: null, name: "North gate");
         var now = DateTimeOffset.UtcNow;
 
@@ -154,7 +154,7 @@ public sealed class DoorScanSetHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, "scanset3");
+        var club = await DoorClub.SeedAsync(factory, "scanset3", DoorClub.DaytimeSettings());
         var doorId = await club.AddDoorAsync(factory, "gate-ss0003", "back-door");
 
         await club.WriteRowAsync(factory, doorId, "device.something_new", DateTimeOffset.UtcNow.AddMinutes(-1));
@@ -178,7 +178,7 @@ public sealed class DoorScanSetHttpTests
         Skip.IfNot(_pg.Available, Skipped);
 
         await using var factory = CreateFactory();
-        var club = await DoorClub.SeedAsync(factory, "scanset4");
+        var club = await DoorClub.SeedAsync(factory, "scanset4", DoorClub.DaytimeSettings());
         var doorId = await club.AddDoorAsync(factory, "gate-ss0004", "every-door");
         var now = DateTimeOffset.UtcNow;
 

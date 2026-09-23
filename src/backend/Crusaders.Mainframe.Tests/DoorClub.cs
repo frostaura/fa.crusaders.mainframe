@@ -38,6 +38,57 @@ public sealed record DoorClub(
     public const string DefaultSettings =
         """{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"grace_window_minutes":5,"timezone":"UTC","heartbeat_seconds":45}""";
 
+    /// <summary>
+    /// The same defaults, in a club where it is the middle of the afternoon right now.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>For any test that writes a row "a few minutes ago" and asserts it counts toward
+    /// TODAY.</b> On a UTC club that sentence is false for the first few minutes of every day:
+    /// at 00:02 UTC, <c>now.AddMinutes(-5)</c> is 23:57 YESTERDAY, the row falls outside the
+    /// day window the endpoint correctly computes, and the count comes back short. Nothing is
+    /// wrong with the product — the fixture is asserting something that is only true for
+    /// 99.7% of the day.
+    /// </para>
+    /// <para>
+    /// It cost a red CI run at 00:02 on 2026-09-23 after the identical commit had passed at
+    /// 23:42, which is the worst way to learn it: two failures that look like a regression in
+    /// code nobody touched. The same shape is recorded for the booking caps in
+    /// <c>memory/gotchas-clock.md</c>.
+    /// </para>
+    /// <para>
+    /// Choosing a zone rather than freezing a clock keeps the test honest — it still runs
+    /// against a real day window computed by real code — and it has a second benefit this
+    /// repository has already paid for once: the club is no longer UTC, and
+    /// <c>memory/gotchas-postgres-offsets.md</c> records that every real club is outside UTC
+    /// and that UTC fixtures hide an entire class of offset defect.
+    /// </para>
+    /// </remarks>
+    /// <param name="now">
+    /// The instant to choose for. Defaults to now; a test passes one so the choice can be
+    /// checked at every hour of the day rather than only at the hour the suite happens to run.
+    /// </param>
+    public static string DaytimeSettings(DateTimeOffset? now = null)
+        => $$"""{"slice_minutes":15,"day_start_minute":0,"day_end_minute":1440,"grace_window_minutes":5,"timezone":"{{DaytimeZone(now ?? DateTimeOffset.UtcNow)}}","heartbeat_seconds":45}""";
+
+    /// <summary>A real zone in which <paramref name="now"/> reads as mid-afternoon.</summary>
+    /// <remarks>
+    /// The spread covers every hour: the zones below run from UTC-7 to UTC+13, so for any
+    /// instant at least one of them is between noon and 20:00 local. `DaytimeZoneTests` pins
+    /// that for all 24 hours rather than trusting the arithmetic.
+    /// </remarks>
+    public static string DaytimeZone(DateTimeOffset now)
+    {
+        string[] zones =
+        [
+            "Africa/Johannesburg", "Europe/London", "America/Sao_Paulo", "America/Los_Angeles",
+            "Asia/Kolkata", "Asia/Tokyo", "Pacific/Auckland", "UTC",
+        ];
+        return zones.FirstOrDefault(
+            z => TimeZoneInfo.ConvertTime(now, TimeZoneInfo.FindSystemTimeZoneById(z)).Hour is >= 12 and < 20)
+            ?? "UTC";
+    }
+
     public static async Task<DoorClub> SeedAsync(
         TestWebAppFactory factory, string slugPrefix, string settingsJson = DefaultSettings)
     {
