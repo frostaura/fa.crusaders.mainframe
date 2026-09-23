@@ -309,7 +309,7 @@ public static class TraceKinds
             LightsOffAction => LightsOff,
             ActivationRefusedAction => CourtRefused,
 
-            "booking.created" => BookingMade,
+            "booking.created" or "booking.created_overdrawn" => BookingMade,
             "booking.created_on_behalf" or "booking.created_on_behalf_overdrawn" => BookingMadeForThem,
             "booking.walk_up_created" => WalkUpBought,
             "booking.walk_up_voided" => WalkUpRefunded,

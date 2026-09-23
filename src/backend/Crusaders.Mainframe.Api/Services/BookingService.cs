@@ -223,10 +223,13 @@ public sealed class BookingService
             ExternalReference: externalReference,
             AllowNegativeBalance: overdraftAuthorised,
             Rules: rules,
-            // One admin_change_log row per SINGLE on-behalf booking. A batch writes its own one
-            // row for the whole list (bookings.bulk_booked) — the intent — and recording every
-            // item again here would say the same decision forty times.
-            RecordOnBehalf: payer.ActorIsAdmin && actorId != userId && !payer.PartOfBatch), ct);
+            // One admin_change_log row per on-behalf booking, in the booking's own unit of work —
+            // including each item of a batch. The batch's bookings.bulk_booked row is only its
+            // summary, written after the loop in a save of its own: were it the only record, a
+            // request that died mid-batch would leave members charged for bookings the club's
+            // undeletable record said nothing about.
+            RecordOnBehalf: payer.ActorIsAdmin && actorId != userId,
+            PartOfBatch: payer.PartOfBatch), ct);
     }
 
     /// <summary>
@@ -671,9 +674,11 @@ public sealed class BookingService
         // is about.
         (RuleSubject Subject, RuleSlot Slot)? Rules = null,
         // Write booking.booked_on_behalf to admin_change_log in the same unit of work as the
-        // booking. Decided by CreateAsync, which is the only caller that knows whether this row
-        // is a single desk booking or one item of a batch.
-        bool RecordOnBehalf = false);
+        // booking. Decided by CreateAsync, which is the only caller that knows who is booking.
+        bool RecordOnBehalf = false,
+        // One item of an admin bulk book: the on-behalf row says so, so a reader can tie it to
+        // the batch's bookings.bulk_booked summary.
+        bool PartOfBatch = false);
 
     /// <summary>
     /// A slot that passed every rule, at its price — what <c>PriceAsync</c> hands both
@@ -779,7 +784,13 @@ public sealed class BookingService
             // Nothing else is ever posted under that reference, so I10's "burns its
             // idempotency ExternalReference" — the harm the invariant is named for — does
             // not arise. Written into I10 rather than left as a local exception.
-            if (spec.TotalCost == 0m && spec.ExternalReference is null)
+            //
+            // A bulk item's reference is NOT that exception, though it arrives the same way:
+            // keying the skip on "has a reference" wrote a 0.00 BookingCharge for every free
+            // court a member or admin bulk-booked, a phantom line on the statement that the
+            // single booking of the same court never shows. A bulk replay finds a free court
+            // through the booking row instead (BulkReplay.FindAsync).
+            if (spec.TotalCost == 0m && !(spec.IsWalkUp && spec.ExternalReference is not null))
             {
                 await _db.SaveChangesAsync(ct);
             }
@@ -968,13 +979,21 @@ public sealed class BookingService
     /// <para>
     /// <c>booking.overdraft_authorised</c> is written for EVERY booking that overdrew — self,
     /// on behalf, or one item of a batch — because each is its own money decision with its own
-    /// balances. <c>booking.booked_on_behalf</c> is written only for a single desk booking;
-    /// a batch has its own one row.
+    /// balances. <c>booking.booked_on_behalf</c> is written for every on-behalf booking, a
+    /// batch's items included (marked <c>part_of_batch</c>): the batch's own
+    /// <c>bookings.bulk_booked</c> row is a summary saved after the loop, and a record that
+    /// only exists once the whole batch finishes is no record of the items a dead request
+    /// already charged.
     /// </para>
     /// </summary>
     private async Task StageAdminChangesAsync(
         NewBooking spec, decimal openingBalance, bool overdrawn, CancellationToken ct)
     {
+        // Nothing to record — every member self-booking and every walk-up. Returned before the
+        // name lookup below, which would otherwise be a read under the payer's lock on the
+        // hottest path in the product, for a row that is never written.
+        if (!spec.RecordOnBehalf && !overdrawn) return;
+
         var booking = spec.Row;
         var actorId = booking.ActorUserId;
         var label = PersonNames.Of(booking.UserId, await PersonNames.ForAsync(_db, [booking.UserId], ct));
@@ -995,7 +1014,15 @@ public sealed class BookingService
                 SubjectKind: AdminChangeSubjects.User,
                 SubjectId: booking.UserId,
                 SubjectLabel: label,
-                After: what), ct);
+                After: new
+                {
+                    what.booking_id,
+                    what.court,
+                    what.starts_at,
+                    what.minutes,
+                    what.amount_credits,
+                    part_of_batch = spec.PartOfBatch,
+                }), ct);
         }
 
         if (overdrawn)
@@ -1028,7 +1055,10 @@ public sealed class BookingService
     private static string AuditActionFor(NewBooking spec, Guid actorId, Guid userId, bool overdrawn)
     {
         if (spec.IsWalkUp) return "booking.walk_up_created";
-        if (actorId == userId) return "booking.created";
+        // R19 lets an admin overdraw their OWN wallet, and that was filed as an ordinary
+        // "booking.created" — the one overdraft an admin would most want to hide was the one
+        // the audit trail's action names could not show.
+        if (actorId == userId) return overdrawn ? "booking.created_overdrawn" : "booking.created";
         return overdrawn ? "booking.created_on_behalf_overdrawn" : "booking.created_on_behalf";
     }
 
@@ -2712,9 +2742,9 @@ public sealed class BookingService
 /// </para>
 /// </param>
 /// <param name="PartOfBatch">
-/// This booking is one item of an admin bulk book, which records its intent as ONE
-/// <c>bookings.bulk_booked</c> row. Suppresses the per-booking <c>booking.booked_on_behalf</c>
-/// row only; an overdraft is still recorded per booking.
+/// This booking is one item of an admin bulk book. Its <c>booking.booked_on_behalf</c> row is
+/// still written, in its own unit of work, and carries <c>part_of_batch: true</c> so it reads
+/// beside the batch's <c>bookings.bulk_booked</c> summary rather than as a separate decision.
 /// </param>
 public readonly record struct BookingPayer(
     Guid UserId, Guid ActorId, bool AllowNegativeBalance = false, bool ActorIsAdmin = false,

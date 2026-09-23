@@ -262,6 +262,27 @@ public sealed class AdminRoleHttpTests
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/admin/members")).StatusCode);
     }
 
+    /// <summary>
+    /// The console's client sends camelCase, and <c>confirmSelf: true</c> bound to nothing: an
+    /// admin who had ticked "yes, remove my own rights" was answered
+    /// <c>confirm_self_required</c> however often they confirmed (review finding P2-2).
+    /// </summary>
+    [SkippableFact]
+    public async Task Removing_yourself_accepts_the_confirmation_in_camel_case()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+        await using var factory = CreateFactory();
+        var club = await PeopleClub.SeedAsync(factory, "roleselfcc");
+        var me = await club.AddAsync(factory, "Camel Self", isAdmin: true);
+        await club.AddAsync(factory, "Other Admin", isAdmin: true);
+        var client = club.Client(factory, me, adminRole: true);
+
+        var confirmed = await client.PostAsJsonAsync(RolePath(me), new { grant = false, reason = "Handing over", confirmSelf = true });
+
+        Assert.Equal(HttpStatusCode.OK, confirmed.StatusCode);
+        Assert.False(await IsAdminAsync(factory, me));
+    }
+
     [SkippableFact]
     public async Task An_address_in_the_server_configuration_cannot_be_removed_here_and_the_list_says_why()
     {

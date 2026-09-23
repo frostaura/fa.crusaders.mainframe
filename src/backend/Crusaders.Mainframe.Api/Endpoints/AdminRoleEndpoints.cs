@@ -39,7 +39,7 @@ public static class AdminRoleEndpoints
                 TargetUserId = userId,
                 Grant = grant,
                 Reason = body.Reason,
-                ConfirmSelf = body.ConfirmSelf == true,
+                ConfirmSelf = (body.ConfirmSelf ?? body.ConfirmSelfCamel) == true,
             }, ct);
             return Answer(userId, result);
         });
@@ -85,10 +85,18 @@ public static class AdminRoleEndpoints
 /// <summary>
 /// The request body. <c>grant</c> is nullable so its absence is a 400 rather than a silent
 /// revoke — a bool defaulting to false would turn a malformed request into a demotion.
+///
+/// <para>
+/// <b>Both spellings of <c>confirm_self</c> bind</b>, for the reason <c>AdjustRequest</c>
+/// documents: the console's client sends camelCase, and <c>confirmSelf: true</c> bound to
+/// nothing, so an admin who had ticked "yes, remove my own rights" was answered
+/// <c>confirm_self_required</c> forever.
+/// </para>
 /// </summary>
 public sealed class AdminRoleBody
 {
     [JsonPropertyName("grant")] public bool? Grant { get; init; }
     [JsonPropertyName("reason")] public string? Reason { get; init; }
     [JsonPropertyName("confirm_self")] public bool? ConfirmSelf { get; init; }
+    [JsonPropertyName("confirmSelf")] public bool? ConfirmSelfCamel { get; init; }
 }

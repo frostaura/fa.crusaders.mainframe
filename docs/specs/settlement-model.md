@@ -574,7 +574,12 @@ into, which is the H3 defect the nonce exists to prevent. Pinned in both directi
 `A_free_court_charges_nothing_and_still_leaves_a_record_of_the_purchase`.
 
 Everywhere else the invariant is absolute, and that includes the ordinary booking charge: a
-court priced at zero posts no `BookingCharge` row at all.
+court priced at zero posts no `BookingCharge` row at all. **A bulk book's per-item reference is
+not the walk-up's exception**, although it arrives on the same parameter: the member and admin
+bulk routes find an earlier item by its reference only when it was charged, and find a free
+court's item by the payer's live uncharged booking on that court at that start
+(`BulkReplay.FindAsync`). The booking row is the record there, so a 0.00 row would be the
+phantom statement line this invariant forbids.
 
 ### I11 — Two rows, never a netted one, and never an edit
 
@@ -691,7 +696,7 @@ Recorded here rather than left for the next reviewer to rediscover.
 | Walk-up purchase, and its undo | `Services/BookingService.cs` — `CreateWalkUpAsync`, `VoidUnstartedWalkUpAsync`; `Endpoints/DeviceEventEndpoints.cs` — `WalkUpForDeviceAsync`, which decides between them and owns the ordering of the confirmation |
 | S5a | `Webhooks/NoShowWorker.cs` — `SweepOneAsync` (`courtWasDark`); `Services/DeviceOutageIndex.cs`; `Webhooks/PeripheralHealthWorker.cs` writes the evidence |
 | S6, I3, I8, I9, I10, I12 | `Services/BookingService.cs` — `ReverseNoShowAsync`, `SettledLegsAsync`, `DisplacementAsync`, `RestoreEnd`, `ReinstateDisplacedAsync` |
-| I10, the booking-charge half and its one exception | `Services/BookingService.cs` — `CommitAsync`, which posts nothing for a zero charge unless an `ExternalReference` makes the row the purchase's only record |
+| I10, the booking-charge half and its one exception | `Services/BookingService.cs` — `CommitAsync`, which posts nothing for a zero charge unless it is a walk-up whose `ExternalReference` makes the row the purchase's only record; `Services/BulkReplay.cs` for the bulk routes |
 | S7, I1, I6 | `Services/BookingService.cs` — `ChargeLitCancelledBookingAsync`, `SettleReleaseAsync`; `Endpoints/DeviceEventEndpoints.cs` — `LitWindow` |
 | S8, I5 | `Services/BookingService.cs` — `ChargeLitCancelledBookingAsync` guard, `ExpireCodes`; `Endpoints/DeviceEventEndpoints.cs` — displaced-collision audit |
 | §6 overdraft override | `Services/BookingService.cs` — `CreateAsync` (`BookingPayer.AllowNegativeBalance`) and `CommitAsync`, which must lift the same guard under the payer's lock; `Endpoints/BookingEndpoints.cs` — the admin booking route |

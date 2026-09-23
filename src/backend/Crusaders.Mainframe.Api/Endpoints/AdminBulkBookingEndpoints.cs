@@ -47,7 +47,14 @@ public static class AdminBulkBookingEndpoints
 
         g.MapPost("/bulk-cancel", CancelAsync);
         g.MapPost("/bulk", BookAsync);
-        g.MapPost("/bulk/quote", QuoteAsync);
+
+        // Not under `auth`: that bucket is ten a minute per user and shared with the batch this
+        // prices, so a console re-quoting as the admin edits the list starved the real booking
+        // into a 429. A quote writes nothing and takes no lock; the global per-IP bucket bounds it
+        // as it bounds every other read. See BookingEndpoints' single quote for the same move.
+        app.MapGroup("/api/v1/admin/bookings")
+            .RequireAuthorization(p => p.RequireRole("admin"))
+            .MapPost("/bulk/quote", QuoteAsync);
 
         return app;
     }

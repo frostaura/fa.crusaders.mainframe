@@ -237,23 +237,38 @@ public class AdminOverdraftBookingTests
     }
 
     /// <summary>
-    /// An item of a batch does not write its own <c>booking.booked_on_behalf</c> — the batch
-    /// writes one <c>bookings.bulk_booked</c> for its whole list — and an item that did not
-    /// overdraw writes nothing at all.
+    /// An item of a batch writes its own <c>booking.booked_on_behalf</c>, marked
+    /// <c>part_of_batch</c>, in the booking's own unit of work — and nothing else when it did not
+    /// overdraw.
+    ///
+    /// <para>
+    /// <b>Flipped deliberately (review finding F2, 2026-09-23).</b> This test used to pin the
+    /// opposite: the item wrote nothing, because the batch's one <c>bookings.bulk_booked</c> row
+    /// was meant to carry the decision. That row is saved after the whole loop, so a request that
+    /// died mid-batch left members charged for bookings the undeletable record said nothing
+    /// about. <c>AdminGodModeHttpTests.A_bulk_book_that_dies_mid_batch_still_records_every_booking_it_charged</c>
+    /// is the proof over HTTP.
+    /// </para>
     /// </summary>
     [Fact]
-    public async Task A_batch_item_that_did_not_overdraw_writes_no_change_record_row_of_its_own()
+    public async Task A_batch_item_on_behalf_writes_its_own_row_marked_as_part_of_the_batch()
     {
         await using var host = await TestHost.CreateAsync();
         using var scope = host.NewScope();
         var (bookings, _, db) = await ArrangeAsync(host, scope, seedCredits: 200m);
 
-        Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
+        var ok = Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
             host.Courts[0].Id,
             new BookingPayer(host.PlayerUser.Id, host.AdminUser.Id, ActorIsAdmin: true, PartOfBatch: true),
             TestHost.BookableSlot(2), sliceCount: 1, default));
 
-        Assert.Empty(await db.AdminChangeLogs.IgnoreQueryFilters().ToListAsync());
+        var row = Assert.Single(await db.AdminChangeLogs.IgnoreQueryFilters().ToListAsync());
+        Assert.Equal(AdminChangeActions.BookingBookedOnBehalf, row.Action);
+        Assert.Equal(host.AdminUser.Id, row.ActorUserId);
+        Assert.Equal(host.PlayerUser.Id, row.SubjectId);
+        using var after = System.Text.Json.JsonDocument.Parse(row.AfterJson!);
+        Assert.Equal(ok.Booking.Id, after.RootElement.GetProperty("booking_id").GetGuid());
+        Assert.True(after.RootElement.GetProperty("part_of_batch").GetBoolean());
     }
 
     /// <summary>
@@ -397,5 +412,30 @@ public class AdminOverdraftBookingTests
             Assert.Contains("This booking takes your balance to", body);
             Assert.Contains("Top up to clear it", body);
         }
+    }
+
+    /// <summary>
+    /// An admin overdrawing their OWN wallet (R19) is named for what it is in <c>audit_log</c>,
+    /// and the night trace reads it as a booking. It was filed as an ordinary
+    /// <c>booking.created</c> — the one overdraft an admin would most want to hide was the one
+    /// the trail's action names could not show (review finding P3-3). A self-booking that did not
+    /// overdraw keeps the ordinary name.
+    /// </summary>
+    [Fact]
+    public async Task An_admins_own_overdraft_is_named_as_one_in_the_audit_trail()
+    {
+        await using var host = await TestHost.CreateAsync();
+        using var scope = host.NewScope();
+        var (bookings, _, db) = await ArrangeAsync(host, scope, seedCredits: 0m);
+
+        Assert.IsType<BookingResult.Ok>(await bookings.CreateAsync(
+            host.Courts[0].Id,
+            new BookingPayer(host.AdminUser.Id, host.AdminUser.Id, AllowNegativeBalance: true, ActorIsAdmin: true),
+            TestHost.BookableSlot(2), sliceCount: 1, default));
+
+        var audit = Assert.Single(await db.AuditLogs.IgnoreQueryFilters()
+            .Where(a => a.Action.StartsWith("booking.created")).ToListAsync());
+        Assert.Equal("booking.created_overdrawn", audit.Action);
+        Assert.Equal(TraceKinds.BookingMade, TraceKinds.OfAudit(audit.Action, actorIsSubject: true));
     }
 }

@@ -38,9 +38,11 @@ public static class AdminChangeActions
     /// An admin booked one court for a member, on that member's wallet (decision R19).
     ///
     /// <para>
-    /// <b>One row per SINGLE desk booking.</b> A bulk book already writes its own one
-    /// <see cref="BookingsBulkBooked"/> row for the whole list, and a row per item as well would
-    /// state one decision forty times. The per-booking effects stay in <c>audit_log</c>.
+    /// <b>One row per on-behalf booking, a batch's items included</b> — written in the booking's
+    /// own unit of work and marked <c>part_of_batch</c> when it is one. It used to be suppressed
+    /// for a batch in favour of the one <see cref="BookingsBulkBooked"/> row, but that row is
+    /// saved after the whole loop: a request that died mid-batch left members charged for
+    /// bookings this table said nothing about. The batch row is now the summary, not the record.
     /// </para>
     /// </summary>
     public const string BookingBookedOnBehalf = "booking.booked_on_behalf";

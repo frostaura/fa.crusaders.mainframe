@@ -115,7 +115,7 @@ public sealed class MemberBulkBookingService
         BulkBookItem item, int index, string? courtName, MemberBulkRequest request, CancellationToken ct)
     {
         var reference = Reference(request.UserId, request.IdempotencyKey, index);
-        if (await ReplayedAsync(reference, ct) is { } earlier)
+        if (await BulkReplay.FindAsync(_db, reference, request.UserId, item, ct) is { } earlier)
         {
             return Replay(index, item, courtName, earlier, request.UserId);
         }
@@ -133,8 +133,11 @@ public sealed class MemberBulkBookingService
         }
 
         // The same item in flight twice — a double-tapped button. The unique index refused the
-        // second debit; the first one's booking is the answer, if it is this item's.
-        if (outcome is BookingResult.DuplicateRequest && await ReplayedAsync(reference, ct) is { } twin)
+        // second debit; the first one's booking is the answer, if it is this item's. On a free
+        // court there is no debit to collide on (I10), so the twin loses the slot race instead —
+        // and the first one's booking is the answer to that as well.
+        if (outcome is BookingResult.DuplicateRequest or BookingResult.SlotTaken
+            && await BulkReplay.FindAsync(_db, reference, request.UserId, item, ct) is { } twin)
         {
             return Replay(index, item, courtName, twin, request.UserId);
         }
@@ -144,42 +147,15 @@ public sealed class MemberBulkBookingService
 
     /// <summary>
     /// A booking an earlier attempt under this reference produced, answered as that attempt
-    /// answered it — or refused, when the key has been reused for a different list.
+    /// answered it — or refused, when the key has been reused for a different list or the
+    /// booking has since been cancelled (<see cref="BulkReplay.RefusalFor"/>).
     /// </summary>
     private static MemberBulkResult Replay(
         int index, BulkBookItem item, string? courtName, Booking earlier, Guid userId)
     {
-        var sameItem = earlier.UserId == userId
-                       && earlier.CourtId == item.CourtId
-                       && Microseconds(earlier.StartsAt) == Microseconds(item.StartsAt);
-        return sameItem
-            ? MemberBulkResult.Booked(index, earlier, courtName, replayed: true)
-            : MemberBulkResult.Refused(index, item, courtName, BookingRefusals.IdempotencyKeyReused);
-    }
-
-    /// <summary>
-    /// An instant at the database's precision, so a client that sent ticks the column dropped
-    /// still matches its own booking (<c>memory/gotchas-postgres-offsets.md</c>).
-    /// </summary>
-    private static long Microseconds(DateTimeOffset at)
-    {
-        return at.UtcTicks / 10;
-    }
-
-    /// <summary>
-    /// The booking a previous attempt under this reference produced, or null. Read-then-write, as
-    /// the admin bulk does; the unique index is the backstop for two attempts in flight at once.
-    /// </summary>
-    private async Task<Booking?> ReplayedAsync(string reference, CancellationToken ct)
-    {
-        var bookingId = await _db.LedgerEntries.AsNoTracking()
-            .Where(l => l.ExternalReference == reference)
-            .Select(l => l.RelatedBookingId)
-            .FirstOrDefaultAsync(ct);
-
-        return bookingId is null
-            ? null
-            : await _db.Bookings.AsNoTracking().FirstOrDefaultAsync(b => b.Id == bookingId, ct);
+        return BulkReplay.RefusalFor(earlier, userId, item) is { } refusal
+            ? MemberBulkResult.Refused(index, item, courtName, refusal)
+            : MemberBulkResult.Booked(index, earlier, courtName, replayed: true);
     }
 }
 

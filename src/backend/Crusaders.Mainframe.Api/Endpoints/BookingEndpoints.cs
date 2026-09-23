@@ -90,7 +90,15 @@ public static class BookingEndpoints
         admin.MapPost("/{bookingId:guid}/cancel", AdminCancelAsync);
 
         // R19: the consequence, before the booking. See AdminQuoteAsync.
-        admin.MapGet("/quote", AdminQuoteAsync);
+        //
+        // In a group of its own WITHOUT the `auth` limiter. That bucket is ten a minute per
+        // user and is shared with the booking it quotes: the console re-quotes as the admin
+        // changes the member, the length or the slot, so ten quotes in a minute made the
+        // booking they were for answer 429. A quote writes nothing and takes no lock — it is a
+        // read, bounded by the global per-IP bucket like every other read.
+        app.MapGroup("/api/v1/admin/bookings")
+            .RequireAuthorization(p => p.RequireRole("admin"))
+            .MapGet("/quote", AdminQuoteAsync);
 
         // Admin: block a slot for an event.
         //
@@ -182,9 +190,11 @@ public static class BookingEndpoints
     /// </para>
     /// </summary>
     private static async Task<IResult> AdminQuoteAsync(
-        [AsParameters] AdminQuoteQuery query, HttpContext ctx, BookingService svc,
+        [AsParameters] AdminQuoteQuery raw, HttpContext ctx, BookingService svc,
         MainframeDbContext db, LedgerService ledger, CancellationToken ct)
     {
+        if (raw.Parse() is not { } query) return Results.BadRequest(new { error = "quote_query_invalid" });
+
         var actorId = ctx.User.Id() ?? Guid.Empty;
         var payerId = query.UserId ?? actorId;
         if (await BookingMembershipGate.RefuseIfBarredAsync(db, payerId, ct) is { } refused) return refused;
@@ -374,7 +384,47 @@ public sealed record AdminBookingRequest(
 public sealed record AdminCancelRequest(bool WaivePenalty, string? WaiveReason = null);
 
 /// <summary>
-/// The query of <c>GET /api/v1/admin/bookings/quote</c>. <paramref name="UserId"/> is the payer
-/// and defaults to the calling admin; <paramref name="Slices"/> is the booking's slice count.
+/// The query of <c>GET /api/v1/admin/bookings/quote</c>, as sent. <c>userId</c> is the payer and
+/// defaults to the calling admin; the slice count is <c>slices</c> or — the booking POST's own
+/// word — <c>sliceCount</c>.
+///
+/// <para>
+/// <b>Strings, parsed by hand, under both spellings.</b> Typed parameters answered a 400 with an
+/// EMPTY body for <c>?sliceCount=1</c> (the POST's name for the same number) and for snake_case
+/// <c>court_id</c>, where every other refusal in this API is an <c>{error}</c> the console maps to
+/// a sentence. The bulk quote already binds both spellings for the reason <c>AdjustRequest</c>
+/// documents; this is the same promise for the single quote.
+/// </para>
 /// </summary>
-public sealed record AdminQuoteQuery(Guid? UserId, Guid CourtId, DateTimeOffset StartsAt, int Slices);
+public sealed record AdminQuoteQuery(
+    string? UserId = null, string? CourtId = null, string? StartsAt = null,
+    string? Slices = null, string? SliceCount = null,
+    [Microsoft.AspNetCore.Mvc.FromQuery(Name = "user_id")] string? UserIdSnake = null,
+    [Microsoft.AspNetCore.Mvc.FromQuery(Name = "court_id")] string? CourtIdSnake = null,
+    [Microsoft.AspNetCore.Mvc.FromQuery(Name = "starts_at")] string? StartsAtSnake = null,
+    [Microsoft.AspNetCore.Mvc.FromQuery(Name = "slice_count")] string? SliceCountSnake = null)
+{
+    /// <summary>The query, parsed — or null when anything required is missing or malformed.</summary>
+    public ParsedAdminQuote? Parse()
+    {
+        var user = UserId ?? UserIdSnake;
+        Guid? userId = null;
+        if (user is not null)
+        {
+            if (!Guid.TryParse(user, out var parsedUser)) return null;
+            userId = parsedUser;
+        }
+
+        var ok = Guid.TryParse(CourtId ?? CourtIdSnake, out var courtId)
+                 & DateTimeOffset.TryParse(StartsAt ?? StartsAtSnake,
+                     System.Globalization.CultureInfo.InvariantCulture,
+                     System.Globalization.DateTimeStyles.None, out var startsAt)
+                 & int.TryParse(Slices ?? SliceCount ?? SliceCountSnake,
+                     System.Globalization.NumberStyles.Integer,
+                     System.Globalization.CultureInfo.InvariantCulture, out var slices);
+        return ok ? new ParsedAdminQuote(userId, courtId, startsAt, slices) : null;
+    }
+}
+
+/// <summary>A well-formed <see cref="AdminQuoteQuery"/>.</summary>
+public sealed record ParsedAdminQuote(Guid? UserId, Guid CourtId, DateTimeOffset StartsAt, int Slices);

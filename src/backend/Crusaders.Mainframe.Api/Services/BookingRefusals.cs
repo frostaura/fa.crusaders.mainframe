@@ -15,7 +15,8 @@ namespace Crusaders.Mainframe.Api.Services;
 /// </para>
 ///
 /// <para>
-/// Two codes are a batch's own: <see cref="NotAttempted"/> and <see cref="IdempotencyKeyReused"/>.
+/// Three codes are a batch's own: <see cref="NotAttempted"/>, <see cref="IdempotencyKeyReused"/>
+/// and <see cref="AlreadyCancelled"/>.
 /// </para>
 /// </summary>
 public static class BookingRefusals
@@ -33,6 +34,12 @@ public static class BookingRefusals
 
     /// <summary>This key already booked a DIFFERENT item at this position. Use a fresh key for a new list.</summary>
     public const string IdempotencyKeyReused = "idempotency_key_reused";
+
+    /// <summary>
+    /// This key already booked THIS item, and that booking has since been cancelled. A replay
+    /// must not answer "booked" about a court the payer no longer holds; see <c>BulkReplay</c>.
+    /// </summary>
+    public const string AlreadyCancelled = "already_cancelled";
 
     /// <summary>
     /// The code for one refusal. Block body for the lizard reason in

@@ -419,7 +419,11 @@ public sealed class AdminGodModeHttpTests
         var actions = (await ChangesAsync(factory, club.TenantId)).Select(c => c.Action).ToList();
         Assert.Equal(1, actions.Count(a => a == AdminChangeActions.BookingsBulkBooked));
         Assert.Equal(1, actions.Count(a => a == AdminChangeActions.BookingOverdraftAuthorised));
-        Assert.DoesNotContain(AdminChangeActions.BookingBookedOnBehalf, actions);
+        // One per item that booked, in that booking's own unit of work (review finding F2): the
+        // bulk_booked row is the summary, saved after the loop, and cannot be the only record.
+        Assert.Equal(
+            results.Count(r => r.GetProperty("status").GetString() == "booked"),
+            actions.Count(a => a == AdminChangeActions.BookingBookedOnBehalf));
     }
 
     /// <summary>
@@ -491,5 +495,81 @@ public sealed class AdminGodModeHttpTests
         Assert.Equal(club.AdminUserId, overdraft.SubjectId);
         using var after = JsonDocument.Parse(overdraft.AfterJson!);
         Assert.True(after.RootElement.GetProperty("self").GetBoolean());
+    }
+
+    /// <summary>
+    /// A quote is a read, and it does not spend the booking's budget. Both quote routes sat under
+    /// the <c>auth</c> limiter — ten a minute per user, shared with the booking they quote — so
+    /// an admin who re-quoted ten times while changing the member, the length and the slot was
+    /// answered 429 on the booking they had been quoting for (review finding P2-1). Run at the
+    /// production ceiling, not the suite's raised one.
+    /// </summary>
+    [SkippableFact]
+    public async Task Quoting_does_not_spend_the_bookings_rate_limit()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = new TestWebAppFactory
+        {
+            ConnectionString = _pg.ConnectionString,
+            RateLimits = new Dictionary<string, int> { ["AuthPerMinute"] = 10 },
+        };
+        var club = await SeedAsync(factory, "gmquotelim", memberCredits: 500m);
+        var admin = club.AdminClient(factory);
+
+        for (var i = 0; i < 6; i++)
+        {
+            var (single, _) = await QuoteAsync(admin, club.CourtId, Slot(9), 4, club.MemberUserId);
+            Assert.Equal(HttpStatusCode.OK, single);
+            var bulk = await admin.PostAsJsonAsync(BulkQuotePath, new
+            {
+                userId = club.MemberUserId,
+                items = new object[] { new { courtId = club.CourtId, startsAt = Slot(9), sliceCount = 4 } },
+            });
+            Assert.Equal(HttpStatusCode.OK, bulk.StatusCode);
+        }
+
+        var booked = await admin.PostAsJsonAsync(BookPath, new
+        {
+            courtId = club.CourtId,
+            userId = club.MemberUserId,
+            startsAt = Slot(9),
+            sliceCount = 4,
+        });
+        Assert.Equal(HttpStatusCode.OK, booked.StatusCode);
+    }
+
+    /// <summary>
+    /// The single quote reads the booking POST's own word for the length, <c>sliceCount</c>, and
+    /// the snake_case spelling, and refuses a malformed query with an <c>{error}</c> like every
+    /// other refusal in the API — it answered an empty-bodied 400 to both (review finding P3-1).
+    /// </summary>
+    [SkippableFact]
+    public async Task The_single_quote_reads_every_spelling_and_refuses_in_words()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+
+        await using var factory = CreateFactory();
+        var club = await SeedAsync(factory, "gmquotesp", memberCredits: 500m);
+        var admin = club.AdminClient(factory);
+        var at = Iso(Slot(9));
+
+        var (plain, expected) = await ReadAsync(admin.GetAsync(
+            $"{QuotePath}?userId={club.MemberUserId}&courtId={club.CourtId}&startsAt={at}&slices=4"));
+        var (camel, viaSliceCount) = await ReadAsync(admin.GetAsync(
+            $"{QuotePath}?userId={club.MemberUserId}&courtId={club.CourtId}&startsAt={at}&sliceCount=4"));
+        var (snake, viaSnake) = await ReadAsync(admin.GetAsync(
+            $"{QuotePath}?user_id={club.MemberUserId}&court_id={club.CourtId}&starts_at={at}&slice_count=4"));
+
+        Assert.Equal(HttpStatusCode.OK, plain);
+        Assert.Equal(HttpStatusCode.OK, camel);
+        Assert.Equal(HttpStatusCode.OK, snake);
+        Assert.Equal(expected.GetProperty("price_credits").GetDecimal(), viaSliceCount.GetProperty("price_credits").GetDecimal());
+        Assert.Equal(expected.GetProperty("price_credits").GetDecimal(), viaSnake.GetProperty("price_credits").GetDecimal());
+        Assert.Equal(club.MemberUserId, viaSnake.GetProperty("user_id").GetGuid());
+
+        var (bad, refusal) = await ReadAsync(admin.GetAsync($"{QuotePath}?courtId=not-a-guid&startsAt={at}&slices=4"));
+        Assert.Equal(HttpStatusCode.BadRequest, bad);
+        Assert.Equal("quote_query_invalid", refusal.GetProperty("error").GetString());
     }
 }

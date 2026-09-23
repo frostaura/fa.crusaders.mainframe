@@ -101,6 +101,14 @@ public static class MePreferencesEndpoints
 /// <summary>
 /// A partial update: every field is optional, and an absent or null field is left alone.
 /// Onboarding stamps are not here on purpose — see <see cref="MePreferencesEndpoints"/>.
+///
+/// <para>
+/// <b>Every multi-word field binds under both spellings</b>, for the reason <c>AdjustRequest</c>
+/// documents. The console's client sends camelCase, and a snake-only body bound
+/// <c>{showInLeaderboards: true, weeklyRecap: true}</c> to nothing: 200, a row created, every
+/// flag still false — a settings screen that says "saved" and saved nothing. The snake_case
+/// spelling wins when a body carries both.
+/// </para>
 /// </summary>
 public sealed class UpdatePreferencesRequest
 {
@@ -110,6 +118,25 @@ public sealed class UpdatePreferencesRequest
     [JsonPropertyName("rating_opt_in")] public bool? RatingOptIn { get; init; }
     [JsonPropertyName("weekly_recap")] public bool? WeeklyRecap { get; init; }
     [JsonPropertyName("admin_notification_optouts")] public List<string?>? AdminNotificationOptouts { get; init; }
+
+    [JsonPropertyName("showInLeaderboards")] public bool? ShowInLeaderboardsCamel { get; init; }
+    [JsonPropertyName("ratingOptIn")] public bool? RatingOptInCamel { get; init; }
+    [JsonPropertyName("weeklyRecap")] public bool? WeeklyRecapCamel { get; init; }
+    [JsonPropertyName("adminNotificationOptouts")] public List<string?>? AdminNotificationOptoutsCamel { get; init; }
+
+    /// <summary>This request with each camelCase field folded onto its snake_case twin.</summary>
+    public UpdatePreferencesRequest Canonical()
+    {
+        return new UpdatePreferencesRequest
+        {
+            Theme = Theme,
+            Findable = Findable,
+            ShowInLeaderboards = ShowInLeaderboards ?? ShowInLeaderboardsCamel,
+            RatingOptIn = RatingOptIn ?? RatingOptInCamel,
+            WeeklyRecap = WeeklyRecap ?? WeeklyRecapCamel,
+            AdminNotificationOptouts = AdminNotificationOptouts ?? AdminNotificationOptoutsCamel,
+        };
+    }
 }
 
 public sealed class OnboardingStepRequest
@@ -128,8 +155,9 @@ internal sealed class PreferencesPatch
     private string? _theme;
     private string? _optoutsJson;
 
-    public static (PreferencesPatch? Patch, IResult? Error) From(UpdatePreferencesRequest req)
+    public static (PreferencesPatch? Patch, IResult? Error) From(UpdatePreferencesRequest raw)
     {
+        var req = raw.Canonical();
         var patch = new PreferencesPatch { _req = req };
 
         if (req.Theme is not null)

@@ -60,6 +60,41 @@ public sealed class UserPreferencesHttpTests
         Assert.Equal(0, await RowCountAsync(factory, member));
     }
 
+    /// <summary>
+    /// The console's client sends camelCase. A snake-only body bound
+    /// <c>{showInLeaderboards, ratingOptIn, weeklyRecap}</c> to nothing and answered 200 with every
+    /// flag still false — a settings screen that says "saved" and saved nothing (review finding
+    /// P2-2, 2026-09-23). Both spellings bind; snake_case wins when a body carries both.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_camel_case_put_changes_what_it_names()
+    {
+        Skip.IfNot(_pg.Available, Skipped);
+        await using var factory = CreateFactory();
+        var club = await PeopleClub.SeedAsync(factory, "prefcamel");
+        var member = await club.AddAsync(factory, "Camel Case", isAdmin: false);
+        var client = club.Client(factory, member, adminRole: false);
+
+        var put = await client.PutAsJsonAsync(Path, new
+        {
+            showInLeaderboards = true,
+            ratingOptIn = true,
+            weeklyRecap = true,
+            adminNotificationOptouts = new[] { "member.registered" },
+        });
+        Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+
+        var body = await client.GetFromJsonAsync<JsonElement>(Path);
+        Assert.True(body.GetProperty("show_in_leaderboards").GetBoolean());
+        Assert.True(body.GetProperty("rating_opt_in").GetBoolean());
+        Assert.True(body.GetProperty("weekly_recap").GetBoolean());
+        Assert.Equal("member.registered", Assert.Single(body.GetProperty("admin_notification_optouts").EnumerateArray()).GetString());
+
+        var both = await client.PutAsJsonAsync(Path, new { weekly_recap = false, weeklyRecap = true });
+        Assert.Equal(HttpStatusCode.OK, both.StatusCode);
+        Assert.False((await client.GetFromJsonAsync<JsonElement>(Path)).GetProperty("weekly_recap").GetBoolean());
+    }
+
     [SkippableFact]
     public async Task A_partial_put_changes_only_the_fields_it_names()
     {
