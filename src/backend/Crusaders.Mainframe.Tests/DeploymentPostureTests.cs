@@ -376,7 +376,9 @@ public sealed class DeploymentPostureTests
 
         var login = Read("src", "frontend", "src", "pages", "Login.tsx");
         Assert.DoesNotContain(DevLoginFlag, login, StringComparison.Ordinal);
-        Assert.Contains("import.meta.env.DEV && (", login, StringComparison.Ordinal);
+        // The dev block renders only behind the compile-time DEV constant, as `DEV && (…)` or
+        // `DEV ? … : null` — Vite folds either to nothing in a production build.
+        Assert.Matches(@"import\.meta\.env\.DEV\s*(&&\s*\(|\?)", login);
 
         // The CI workflow is the other half: it must not pass the arg at all. A default of
         // false that every real build overrides would be a default in name only.
