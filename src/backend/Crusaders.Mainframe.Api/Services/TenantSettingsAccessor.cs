@@ -131,7 +131,7 @@ public sealed class TenantSettingsAccessor
             DeviceErrorMaxOpenRows = TryInt(root, "device_error_max_open_rows", MonitoringSettings.DefaultMaxOpenRows),
             DeviceErrorIngestPerMinute = TryInt(root, "device_error_ingest_per_minute", MonitoringSettings.DefaultIngestPerMinute),
 
-            // The admin notifier's four (R23). Raw here, bounded by AdminNotificationSettings at
+            // The admin notifier's six (R23). Raw here, bounded by AdminNotificationSettings at
             // each reader, on the split every block above keeps.
             FaultSpikeCount = TryInt(root, "fault_spike_count", AdminNotificationSettings.DefaultFaultSpikeCount),
             FaultSpikeMinutes = TryInt(root, "fault_spike_minutes", AdminNotificationSettings.DefaultFaultSpikeMinutes),
@@ -139,6 +139,10 @@ public sealed class TenantSettingsAccessor
                 root, "application_reminder_hours", AdminNotificationSettings.DefaultApplicationReminderHours),
             AdminNotificationRetentionDays = TryInt(
                 root, "admin_notification_retention_days", AdminNotificationSettings.DefaultRetentionDays),
+            TopUpFailureCooldownMinutes = TryInt(
+                root, "topup_failure_cooldown_minutes", AdminNotificationSettings.DefaultTopUpFailureCooldownMinutes),
+            OverdraftCooldownMinutes = TryInt(
+                root, "overdraft_cooldown_minutes", AdminNotificationSettings.DefaultOverdraftCooldownMinutes),
 
             SseKeepaliveSeconds = TryInt(root, "sse_keepalive_seconds", RealtimeSettings.DefaultKeepaliveSeconds),
             ControlBoardResyncSeconds = TryInt(root, "control_board_resync_seconds", RealtimeSettings.DefaultResyncSeconds),
@@ -531,7 +535,7 @@ public sealed record TenantSettingsView(
     /// <summary>Reports one board may record per minute. Read via <see cref="MonitoringSettings.IngestPerMinute"/>.</summary>
     public int DeviceErrorIngestPerMinute { get; init; } = MonitoringSettings.DefaultIngestPerMinute;
 
-    // ---- The admin notifier's four (R23) ----
+    // ---- The admin notifier's six (R23) ----
 
     /// <summary>Open faults inside the window that make a spike. Read via <see cref="AdminNotificationSettings.FaultSpikeCount"/>.</summary>
     public int FaultSpikeCount { get; init; } = AdminNotificationSettings.DefaultFaultSpikeCount;
@@ -544,6 +548,12 @@ public sealed record TenantSettingsView(
 
     /// <summary>Days a finished admin notice stays on the feed. Read via <see cref="AdminNotificationSettings.RetentionDays"/>.</summary>
     public int AdminNotificationRetentionDays { get; init; } = AdminNotificationSettings.DefaultRetentionDays;
+
+    /// <summary>Minutes inside which top-up failures of one reason are one mail. Read via <see cref="AdminNotificationSettings.TopUpFailureCooldown"/>.</summary>
+    public int TopUpFailureCooldownMinutes { get; init; } = AdminNotificationSettings.DefaultTopUpFailureCooldownMinutes;
+
+    /// <summary>Minutes inside which one admin overdrawing one member is one mail. Read via <see cref="AdminNotificationSettings.OverdraftCooldown"/>.</summary>
+    public int OverdraftCooldownMinutes { get; init; } = AdminNotificationSettings.DefaultOverdraftCooldownMinutes;
 
     // ---- The live streams' seven numbers ----
 

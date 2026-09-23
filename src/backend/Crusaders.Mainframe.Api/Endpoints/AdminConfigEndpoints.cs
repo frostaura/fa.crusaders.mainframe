@@ -130,11 +130,13 @@ public static class AdminConfigEndpoints
                 device_error_max_open_rows = MonitoringSettings.MaxOpenRows(defaults),
                 device_error_ingest_per_minute = MonitoringSettings.IngestPerMinute(defaults),
 
-                // The admin notifier's four (R23), from the clamped readers for the same reason.
+                // The admin notifier's six (R23), from the clamped readers for the same reason.
                 fault_spike_count = AdminNotificationSettings.FaultSpikeCount(defaults),
                 fault_spike_minutes = AdminNotificationSettings.FaultSpikeMinutes(defaults),
                 application_reminder_hours = AdminNotificationSettings.ApplicationReminderHours(defaults),
                 admin_notification_retention_days = AdminNotificationSettings.RetentionDays(defaults),
+                topup_failure_cooldown_minutes = AdminNotificationSettings.TopUpFailureCooldownMinutes(defaults),
+                overdraft_cooldown_minutes = AdminNotificationSettings.OverdraftCooldownMinutes(defaults),
 
                 sse_keepalive_seconds = (int)RealtimeSettings.KeepAlive(defaults).TotalSeconds,
                 control_board_resync_seconds = RealtimeSettings.ResyncSeconds(defaults),
@@ -775,7 +777,7 @@ public static class AdminConfigEndpoints
     }
 
     /// <summary>
-    /// Bounds on the admin notifier's four (R23), from <see cref="AdminNotificationSettings"/>'
+    /// Bounds on the admin notifier's six (R23), from <see cref="AdminNotificationSettings"/>'
     /// own constants so the number an admin is refused at and the number the notifier clamps to
     /// cannot drift apart.
     /// </summary>
@@ -789,16 +791,22 @@ public static class AdminConfigEndpoints
             return "application_reminder_hours_out_of_range";
         if (OutOfRange(req.AdminNotificationRetentionDays, AdminNotificationSettings.MinRetentionDays, AdminNotificationSettings.MaxRetentionDays))
             return "admin_notification_retention_days_out_of_range";
+        if (OutOfRange(req.TopUpFailureCooldownMinutes, AdminNotificationSettings.MinTopUpFailureCooldownMinutes, AdminNotificationSettings.MaxTopUpFailureCooldownMinutes))
+            return "topup_failure_cooldown_minutes_out_of_range";
+        if (OutOfRange(req.OverdraftCooldownMinutes, AdminNotificationSettings.MinOverdraftCooldownMinutes, AdminNotificationSettings.MaxOverdraftCooldownMinutes))
+            return "overdraft_cooldown_minutes_out_of_range";
         return null;
     }
 
-    /// <summary>Same omitted-means-unchanged rule as the economics keys, for the notifier's four.</summary>
+    /// <summary>Same omitted-means-unchanged rule as the economics keys, for the notifier's six.</summary>
     private static void WriteOptionalNotifierSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
     {
         if (req.FaultSpikeCount is { } count) doc["fault_spike_count"] = ToElement(count);
         if (req.FaultSpikeMinutes is { } minutes) doc["fault_spike_minutes"] = ToElement(minutes);
         if (req.ApplicationReminderHours is { } hours) doc["application_reminder_hours"] = ToElement(hours);
         if (req.AdminNotificationRetentionDays is { } days) doc["admin_notification_retention_days"] = ToElement(days);
+        if (req.TopUpFailureCooldownMinutes is { } topUp) doc["topup_failure_cooldown_minutes"] = ToElement(topUp);
+        if (req.OverdraftCooldownMinutes is { } overdraft) doc["overdraft_cooldown_minutes"] = ToElement(overdraft);
     }
 
     /// <summary>
@@ -1289,12 +1297,14 @@ public sealed record UpdateSettingsRequest(
     [property: JsonPropertyName("device_error_max_open_rows")] int? DeviceErrorMaxOpenRows = null,
     [property: JsonPropertyName("device_error_ingest_per_minute")] int? DeviceErrorIngestPerMinute = null,
 
-    // The admin notifier's four (R23). Snake-case only, for the reason the block above gives:
+    // The admin notifier's six (R23). Snake-case only, for the reason the block above gives:
     // nothing has ever sent them under another spelling.
     [property: JsonPropertyName("fault_spike_count")] int? FaultSpikeCount = null,
     [property: JsonPropertyName("fault_spike_minutes")] int? FaultSpikeMinutes = null,
     [property: JsonPropertyName("application_reminder_hours")] int? ApplicationReminderHours = null,
     [property: JsonPropertyName("admin_notification_retention_days")] int? AdminNotificationRetentionDays = null,
+    [property: JsonPropertyName("topup_failure_cooldown_minutes")] int? TopUpFailureCooldownMinutes = null,
+    [property: JsonPropertyName("overdraft_cooldown_minutes")] int? OverdraftCooldownMinutes = null,
 
     [property: JsonPropertyName("control_board_resync_seconds")] int? ControlBoardResyncSeconds = null,
     [property: JsonPropertyName("control_board_stale_multiplier")] int? ControlBoardStaleMultiplier = null,

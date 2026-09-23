@@ -341,7 +341,7 @@ public class AdminNotificationTests
         var second = await StageAsync(host, Overdraft(host.AdminUser.Id, host.PlayerUser.Id, "Court 2"), T0.AddMinutes(5));
         var otherMember = await StageAsync(host, Overdraft(host.AdminUser.Id, host.LeaguePlayerUser.Id), T0.AddMinutes(6));
         var later = await StageAsync(host,
-            Overdraft(host.AdminUser.Id, host.PlayerUser.Id, "Court 3"), T0 + AdminNotificationDispatcher.OverdraftCooldown + TimeSpan.FromMinutes(1));
+            Overdraft(host.AdminUser.Id, host.PlayerUser.Id, "Court 3"), T0.AddMinutes(AdminNotificationSettings.DefaultOverdraftCooldownMinutes + 1));
 
         await host.DeliverAdminNoticesAsync(T0.AddHours(1));
 
@@ -351,6 +351,76 @@ public class AdminNotificationTests
         Assert.Equal(AdminNotificationState.Sent, (await RowAsync(host, later)).State);
         Assert.Equal(3, host.EmailService.Sent.Count(m => m.To == colleague.Email));
         Assert.DoesNotContain(host.EmailService.Sent, m => m.HtmlBody.Contains("Court 2", StringComparison.Ordinal));
+    }
+
+    private static AdminNotice GatewayError(string identity) =>
+        AdminNotices.TopUpFailed("gateway_error", identity, 100m, "Mo Member", identity);
+
+    /// <summary>
+    /// The top-up and overdraft windows are the club's own numbers
+    /// (<c>topup_failure_cooldown_minutes</c>, <c>overdraft_cooldown_minutes</c>), not constants: a
+    /// club that widens one withholds what the default would have let through, and a club that
+    /// narrows one hears what the default would have withheld.
+    /// </summary>
+    [Fact]
+    public async Task The_top_up_and_overdraft_cooldowns_are_the_clubs_own_settings()
+    {
+        await using var host = await TestHost.CreateAsync();
+        var colleague = await AddPersonAsync(host, "colleague.admin", isAdmin: true);
+        await PatchSettingsAsync(host, ("overdraft_cooldown_minutes", 60), ("topup_failure_cooldown_minutes", 5));
+
+        // Overdraft: 20 minutes apart is past the default 15, inside the club's 60.
+        var firstOverdraft = await StageAsync(host, Overdraft(host.AdminUser.Id, host.PlayerUser.Id), T0);
+        var widened = await StageAsync(host, Overdraft(host.AdminUser.Id, host.PlayerUser.Id, "Court 2"), T0.AddMinutes(20));
+        var pastWidened = await StageAsync(host, Overdraft(host.AdminUser.Id, host.PlayerUser.Id, "Court 3"), T0.AddMinutes(61));
+
+        // Top-up: 10 minutes apart is inside the default 30, past the club's 5.
+        var firstTopUp = await StageAsync(host, GatewayError("PF-1"), T0);
+        var narrowed = await StageAsync(host, GatewayError("PF-2"), T0.AddMinutes(10));
+        var insideNarrowed = await StageAsync(host, GatewayError("PF-3"), T0.AddMinutes(12));
+
+        await host.DeliverAdminNoticesAsync(T0.AddHours(2));
+
+        Assert.Equal(AdminNotificationState.Sent, (await RowAsync(host, firstOverdraft)).State);
+        Assert.Equal(AdminNotificationState.Suppressed, (await RowAsync(host, widened)).State);
+        Assert.Equal(AdminNotificationState.Sent, (await RowAsync(host, pastWidened)).State);
+        Assert.Equal(AdminNotificationState.Sent, (await RowAsync(host, firstTopUp)).State);
+        Assert.Equal(AdminNotificationState.Sent, (await RowAsync(host, narrowed)).State);
+        Assert.Equal(AdminNotificationState.Suppressed, (await RowAsync(host, insideNarrowed)).State);
+        Assert.Equal(4, host.EmailService.Sent.Count(m => m.To == colleague.Email));
+    }
+
+    /// <summary>
+    /// With nothing stored the windows are the old constants, 30 and 15 minutes; and a stored
+    /// value outside the bounds is clamped on read, so a zero written round the PUT cannot turn
+    /// either kind into a mail per event.
+    /// </summary>
+    [Fact]
+    public async Task The_notifier_cooldowns_default_to_the_old_windows_and_are_clamped_on_read()
+    {
+        var defaults = new TenantSettingsView(15, 8m, 30m, 5, 15, 14, "UTC", 1.6m, 100m, 1000m, 60, "16:00-19:00", 1, 2, 0, 1440, 7, ButtonMap.Default());
+        Assert.Equal(TimeSpan.FromMinutes(30), AdminNotificationDispatcher.Cooldown(AdminEventCatalogue.TopUpFailed, defaults));
+        Assert.Equal(TimeSpan.FromMinutes(15), AdminNotificationDispatcher.Cooldown(AdminEventCatalogue.OverdraftAuthorised, defaults));
+
+        var zero = defaults with { TopUpFailureCooldownMinutes = 0, OverdraftCooldownMinutes = 0 };
+        Assert.Equal(TimeSpan.FromMinutes(AdminNotificationSettings.MinTopUpFailureCooldownMinutes),
+            AdminNotificationDispatcher.Cooldown(AdminEventCatalogue.TopUpFailed, zero));
+        Assert.Equal(TimeSpan.FromMinutes(AdminNotificationSettings.MinOverdraftCooldownMinutes),
+            AdminNotificationDispatcher.Cooldown(AdminEventCatalogue.OverdraftAuthorised, zero));
+
+        var huge = defaults with { TopUpFailureCooldownMinutes = 1_000_000, OverdraftCooldownMinutes = 1_000_000 };
+        Assert.Equal(TimeSpan.FromMinutes(AdminNotificationSettings.MaxTopUpFailureCooldownMinutes),
+            AdminNotificationDispatcher.Cooldown(AdminEventCatalogue.TopUpFailed, huge));
+        Assert.Equal(TimeSpan.FromMinutes(AdminNotificationSettings.MaxOverdraftCooldownMinutes),
+            AdminNotificationDispatcher.Cooldown(AdminEventCatalogue.OverdraftAuthorised, huge));
+
+        // And the accessor reads the stored keys, not only the initialisers.
+        await using var host = await TestHost.CreateAsync();
+        await PatchSettingsAsync(host, ("topup_failure_cooldown_minutes", 45), ("overdraft_cooldown_minutes", 3));
+        using var scope = host.NewScope();
+        var read = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(default);
+        Assert.Equal(TimeSpan.FromMinutes(45), AdminNotificationDispatcher.Cooldown(AdminEventCatalogue.TopUpFailed, read));
+        Assert.Equal(TimeSpan.FromMinutes(3), AdminNotificationDispatcher.Cooldown(AdminEventCatalogue.OverdraftAuthorised, read));
     }
 
     [Fact]

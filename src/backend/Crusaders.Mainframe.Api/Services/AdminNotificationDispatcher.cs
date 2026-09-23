@@ -55,19 +55,6 @@ public sealed class AdminNotificationDispatcher
     /// <summary>Claims a row may have before it is given up on.</summary>
     public static int MaxAttempts => Backoffs.Length + 1;
 
-    /// <summary>
-    /// Top-up failures of one reason inside this window are one mail. A gateway having a bad
-    /// quarter of an hour fails every member who tries; the club needs to hear it once.
-    /// </summary>
-    public static readonly TimeSpan TopUpFailureCooldown = TimeSpan.FromMinutes(30);
-
-    /// <summary>
-    /// One admin overdrawing one member inside this window is one mail. A bulk booking of twenty
-    /// courts below zero is one decision, and twenty mails to every colleague would teach them to
-    /// ignore the kind that exists so they will not.
-    /// </summary>
-    public static readonly TimeSpan OverdraftCooldown = TimeSpan.FromMinutes(15);
-
     private readonly IServiceScopeFactory _scopes;
     private readonly ILogger<AdminNotificationDispatcher> _logger;
 
@@ -314,9 +301,9 @@ public sealed class AdminNotificationDispatcher
             case AdminEventCatalogue.RefusalSpike:
                 return AdminNotificationSettings.SpikeCooldown(settings);
             case AdminEventCatalogue.TopUpFailed:
-                return TopUpFailureCooldown;
+                return AdminNotificationSettings.TopUpFailureCooldown(settings);
             case AdminEventCatalogue.OverdraftAuthorised:
-                return OverdraftCooldown;
+                return AdminNotificationSettings.OverdraftCooldown(settings);
             default:
                 return TimeSpan.Zero;
         }

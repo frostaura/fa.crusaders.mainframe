@@ -34,7 +34,8 @@ shown on the feed: `decisions-admin-notices-delivery.md`.
   a missing payment id is a member who HAS PAID, is still `Pending` and has not been told.
 - **Webhook disable reaches admins for CLUB endpoints only**; the destination is scheme+host.
 - **Settings**: `fault_spike_count` (5, 2–100), `fault_spike_minutes` (15, 5–240),
-  `application_reminder_hours` (24, 1–168), `admin_notification_retention_days` (90, 7–730).
+  `application_reminder_hours` (24, 1–168), `admin_notification_retention_days` (90, 7–730),
+  `topup_failure_cooldown_minutes` (30, 5–1440), `overdraft_cooldown_minutes` (15, 1–240).
 
 ## Owed
 

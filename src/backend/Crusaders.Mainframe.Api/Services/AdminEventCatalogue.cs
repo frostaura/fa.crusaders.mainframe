@@ -80,9 +80,9 @@ public sealed record AdminMailContext(
 /// <para>
 /// <b>Cooldowns are not here.</b> A cooldown is a number and every configurable number is a
 /// tenant setting, so the kinds that have one read it at delivery — see
-/// <see cref="AdminNotificationDispatcher"/>. The two constant windows it uses are contract
-/// constants in the sense <c>DoorSignals.MayNotBeReleasingGrants</c> is: they bound how often
-/// one admin's own action can mail every colleague, not how a club runs.
+/// <see cref="AdminNotificationDispatcher.Cooldown"/> and <see cref="AdminNotificationSettings"/>:
+/// the spikes reuse <c>device_alert_cooldown_minutes</c>, a top-up failure reads
+/// <c>topup_failure_cooldown_minutes</c> and an overdraft <c>overdraft_cooldown_minutes</c>.
 /// </para>
 /// </summary>
 public static class AdminEventCatalogue

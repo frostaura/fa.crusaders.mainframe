@@ -598,7 +598,7 @@ public sealed class AdminNotificationHttpTests
     // ------------------------------------------------------------------ the settings
 
     [SkippableFact]
-    public async Task The_notifiers_four_settings_are_read_bounded_and_written()
+    public async Task The_notifiers_six_settings_are_read_bounded_and_written()
     {
         Skip.IfNot(_pg.Available, Skipped);
         await using var factory = CreateFactory();
@@ -610,8 +610,10 @@ public sealed class AdminNotificationHttpTests
         Assert.Equal(AdminNotificationSettings.DefaultFaultSpikeMinutes, before.GetProperty("fault_spike_minutes").GetInt32());
         Assert.Equal(AdminNotificationSettings.DefaultApplicationReminderHours, before.GetProperty("application_reminder_hours").GetInt32());
         Assert.Equal(AdminNotificationSettings.DefaultRetentionDays, before.GetProperty("admin_notification_retention_days").GetInt32());
+        Assert.Equal(AdminNotificationSettings.DefaultTopUpFailureCooldownMinutes, before.GetProperty("topup_failure_cooldown_minutes").GetInt32());
+        Assert.Equal(AdminNotificationSettings.DefaultOverdraftCooldownMinutes, before.GetProperty("overdraft_cooldown_minutes").GetInt32());
 
-        // The PUT carries the booking basics every save carries; the four ride along on it.
+        // The PUT carries the booking basics every save carries; the six ride along on it.
         Dictionary<string, object> Body() => new()
         {
             ["sliceMinutes"] = 15, ["slicePriceCredits"] = 8m, ["advanceBookingDays"] = 14, ["dayStartMinute"] = 360,
@@ -623,7 +625,26 @@ public sealed class AdminNotificationHttpTests
         Assert.Equal(HttpStatusCode.BadRequest, tooMany.StatusCode);
         Assert.Contains("fault_spike_count_out_of_range", await tooMany.Content.ReadAsStringAsync(), StringComparison.Ordinal);
 
+        // The cooldowns' floors are the reason they were constants: neither can be zeroed into a
+        // mail per event, and neither can be stretched past its ceiling.
+        foreach (var (key, value) in new (string, int)[]
+                 {
+                     ("topup_failure_cooldown_minutes", AdminNotificationSettings.MinTopUpFailureCooldownMinutes - 1),
+                     ("topup_failure_cooldown_minutes", AdminNotificationSettings.MaxTopUpFailureCooldownMinutes + 1),
+                     ("overdraft_cooldown_minutes", 0),
+                     ("overdraft_cooldown_minutes", AdminNotificationSettings.MaxOverdraftCooldownMinutes + 1),
+                 })
+        {
+            var bad = Body();
+            bad[key] = value;
+            var refused = await admin.PutAsJsonAsync("/api/v1/admin/settings", bad);
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+            Assert.Contains($"{key}_out_of_range", await refused.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        }
+
         var valid = Body();
+        valid["topup_failure_cooldown_minutes"] = 60;
+        valid["overdraft_cooldown_minutes"] = 5;
         valid["fault_spike_count"] = 9;
         valid["fault_spike_minutes"] = 30;
         valid["application_reminder_hours"] = 48;
@@ -635,5 +656,14 @@ public sealed class AdminNotificationHttpTests
         Assert.Equal(30, after.GetProperty("fault_spike_minutes").GetInt32());
         Assert.Equal(48, after.GetProperty("application_reminder_hours").GetInt32());
         Assert.Equal(30, after.GetProperty("admin_notification_retention_days").GetInt32());
+        Assert.Equal(60, after.GetProperty("topup_failure_cooldown_minutes").GetInt32());
+        Assert.Equal(5, after.GetProperty("overdraft_cooldown_minutes").GetInt32());
+
+        // Omitted means unchanged: a save that does not carry them leaves them where they were.
+        var untouched = await admin.PutAsJsonAsync("/api/v1/admin/settings", Body());
+        Assert.True(untouched.StatusCode == HttpStatusCode.OK, await untouched.Content.ReadAsStringAsync());
+        var kept = JsonDocument.Parse(await admin.GetStringAsync("/api/v1/admin/settings")).RootElement;
+        Assert.Equal(60, kept.GetProperty("topup_failure_cooldown_minutes").GetInt32());
+        Assert.Equal(5, kept.GetProperty("overdraft_cooldown_minutes").GetInt32());
     }
 }

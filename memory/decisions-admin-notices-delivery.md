@@ -18,9 +18,11 @@ Who is told what, and why, is `decisions-admin-notices.md`; this is how a row ge
   mailed when `RecipientCount > 0`, whatever its state, on BOTH sides of the row (± the cooldown),
   and only while the row itself has reached nobody. *Why:* counting only `Sent` let every sibling
   through while a partly-failed notice retried (3 mails in one window, review 2026-09-23). Spikes
-  reuse `device_alert_cooldown_minutes`; top-up failures 30 min per reason; overdrafts 15 min per
-  actor+member — the last two are contract constants, **awaiting Dean's ruling** against the
-  "every configurable number is a tenant setting" invariant.
+  reuse `device_alert_cooldown_minutes`; top-up failures per reason read
+  `topup_failure_cooldown_minutes`; overdrafts per actor+member read `overdraft_cooldown_minutes`.
+  *Why settings, not constants:* the invariant "every configurable number is a tenant setting"
+  won (P6/P9 integration); the floors (5 and 1 min) keep the old reason for a constant — neither
+  can be zeroed into a mail per event.
 - **Pruning**: finished rows past `admin_notification_retention_days`, capped by the club's
   `retention_years` (notices hold personal data); a `schedule.conflict` row is kept until
   horizon + 1 day, because it is the only dedupe for a clash that still stands.
