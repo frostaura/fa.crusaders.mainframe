@@ -1,0 +1,365 @@
+{
+  "description": "The whole chain: master key -> member secret (HKDF) -> ON (TOTP-8 under the secret) and K_day (HMAC of the day label, first 12 bytes) -> OFF (TOTP-6 under K_day) -> token. Generation 2 is the same member after a rotation: a different secret, the same REF.",
+  "fixture_master_key_hex": "37ca19aed84cf9a6d932662805392b786b94110ed6324c676deb3f2e619baceb",
+  "hkdf_salt_ascii": "crusaders/member-code/v1",
+  "kday_label_prefix_ascii": "crusaders/kday/v1|",
+  "cases": [
+    {
+      "id": "dean-gen1",
+      "tenant_id": "7b0c7a52-3f1e-4c7e-9a51-0c2d6e4b8f10",
+      "user_id": "5f4317f6-e996-4413-ae1b-b4e21436c628",
+      "generation": 1,
+      "hkdf_info_ascii": "member-secret|7b0c7a52-3f1e-4c7e-9a51-0c2d6e4b8f10|5f4317f6-e996-4413-ae1b-b4e21436c628|1",
+      "member_secret_hex": "aca5e9d6718ee21c343dee909e9037ff98d47dbf053dffa57b9b24d9c99b5387",
+      "ref": "18Y9",
+      "ref_value": 41929,
+      "tz": "Africa/Johannesburg",
+      "steps": [
+        {
+          "label": "anchor",
+          "unix": 1790179217,
+          "step": 59672640,
+          "club_day": "2026-09-23",
+          "kday_hex": "1e4139587bd643439ef51765",
+          "kday_b64url": "HkE5WHvWQ0Oe9Rdl",
+          "on": "56008441",
+          "off": "714835",
+          "token": "118Y956008441714835"
+        },
+        {
+          "label": "anchor+30s",
+          "unix": 1790179247,
+          "step": 59672641,
+          "club_day": "2026-09-23",
+          "kday_hex": "1e4139587bd643439ef51765",
+          "kday_b64url": "HkE5WHvWQ0Oe9Rdl",
+          "on": "25437688",
+          "off": "407038",
+          "token": "118Y925437688407038"
+        },
+        {
+          "label": "anchor+90s",
+          "unix": 1790179307,
+          "step": 59672643,
+          "club_day": "2026-09-23",
+          "kday_hex": "1e4139587bd643439ef51765",
+          "kday_b64url": "HkE5WHvWQ0Oe9Rdl",
+          "on": "48672719",
+          "off": "120450",
+          "token": "118Y948672719120450"
+        }
+      ]
+    },
+    {
+      "id": "sam-gen1",
+      "tenant_id": "7b0c7a52-3f1e-4c7e-9a51-0c2d6e4b8f10",
+      "user_id": "96dcf0cc-33e0-4960-afd0-bff61ad55988",
+      "generation": 1,
+      "hkdf_info_ascii": "member-secret|7b0c7a52-3f1e-4c7e-9a51-0c2d6e4b8f10|96dcf0cc-33e0-4960-afd0-bff61ad55988|1",
+      "member_secret_hex": "6aa4aeba6aaa7fe07cbe7744110d82d42084805789eaef80cfe5dc16700cd1d7",
+      "ref": "BWDJ",
+      "ref_value": 389554,
+      "tz": "Africa/Johannesburg",
+      "steps": [
+        {
+          "label": "anchor",
+          "unix": 1790179217,
+          "step": 59672640,
+          "club_day": "2026-09-23",
+          "kday_hex": "224b2ba57f00ab9e4d17a761",
+          "kday_b64url": "IksrpX8Aq55NF6dh",
+          "on": "22225228",
+          "off": "938905",
+          "token": "1BWDJ22225228938905"
+        },
+        {
+          "label": "anchor+30s",
+          "unix": 1790179247,
+          "step": 59672641,
+          "club_day": "2026-09-23",
+          "kday_hex": "224b2ba57f00ab9e4d17a761",
+          "kday_b64url": "IksrpX8Aq55NF6dh",
+          "on": "22942171",
+          "off": "044533",
+          "token": "1BWDJ22942171044533"
+        },
+        {
+          "label": "anchor+90s",
+          "unix": 1790179307,
+          "step": 59672643,
+          "club_day": "2026-09-23",
+          "kday_hex": "224b2ba57f00ab9e4d17a761",
+          "kday_b64url": "IksrpX8Aq55NF6dh",
+          "on": "98277095",
+          "off": "520409",
+          "token": "1BWDJ98277095520409"
+        }
+      ]
+    },
+    {
+      "id": "alex-gen1",
+      "tenant_id": "7b0c7a52-3f1e-4c7e-9a51-0c2d6e4b8f10",
+      "user_id": "556e1a10-4694-4605-ad6a-038303da1c69",
+      "generation": 1,
+      "hkdf_info_ascii": "member-secret|7b0c7a52-3f1e-4c7e-9a51-0c2d6e4b8f10|556e1a10-4694-4605-ad6a-038303da1c69|1",
+      "member_secret_hex": "e1121a9ad371172adfb6ab1f3aa4d680d2759d96a87a4bef96a9bc79519dd16d",
+      "ref": "HN77",
+      "ref_value": 578791,
+      "tz": "Africa/Johannesburg",
+      "steps": [
+        {
+          "label": "anchor",
+          "unix": 1790179217,
+          "step": 59672640,
+          "club_day": "2026-09-23",
+          "kday_hex": "a2bc6fdd4a126ca64f2c0f0d",
+          "kday_b64url": "orxv3UoSbKZPLA8N",
+          "on": "95625333",
+          "off": "089989",
+          "token": "1HN7795625333089989"
+        },
+        {
+          "label": "anchor+30s",
+          "unix": 1790179247,
+          "step": 59672641,
+          "club_day": "2026-09-23",
+          "kday_hex": "a2bc6fdd4a126ca64f2c0f0d",
+          "kday_b64url": "orxv3UoSbKZPLA8N",
+          "on": "27537818",
+          "off": "605384",
+          "token": "1HN7727537818605384"
+        },
+        {
+          "label": "anchor+90s",
+          "unix": 1790179307,
+          "step": 59672643,
+          "club_day": "2026-09-23",
+          "kday_hex": "a2bc6fdd4a126ca64f2c0f0d",
+          "kday_b64url": "orxv3UoSbKZPLA8N",
+          "on": "73146224",
+          "off": "661965",
+          "token": "1HN7773146224661965"
+        }
+      ]
+    },
+    {
+      "id": "jo-gen1",
+      "tenant_id": "7b0c7a52-3f1e-4c7e-9a51-0c2d6e4b8f10",
+      "user_id": "acede8f9-5269-49b2-a700-5d0d63b8a941",
+      "generation": 1,
+      "hkdf_info_ascii": "member-secret|7b0c7a52-3f1e-4c7e-9a51-0c2d6e4b8f10|acede8f9-5269-49b2-a700-5d0d63b8a941|1",
+      "member_secret_hex": "58a39bf1f5e449d9af9a4c5dffb709fb7fda736bd50eec24d346b5b76ad93827",
+      "ref": "R8GQ",
+      "ref_value": 795159,
+      "tz": "Africa/Johannesburg",
+      "steps": [
+        {
+          "label": "anchor",
+          "unix": 1790179217,
+          "step": 59672640,
+          "club_day": "2026-09-23",
+          "kday_hex": "e5a874935bd4cb12a8bec04e",
+          "kday_b64url": "5ah0k1vUyxKovsBO",
+          "on": "88241015",
+          "off": "887083",
+          "token": "1R8GQ88241015887083"
+        },
+        {
+          "label": "anchor+30s",
+          "unix": 1790179247,
+          "step": 59672641,
+          "club_day": "2026-09-23",
+          "kday_hex": "e5a874935bd4cb12a8bec04e",
+          "kday_b64url": "5ah0k1vUyxKovsBO",
+          "on": "46351923",
+          "off": "638366",
+          "token": "1R8GQ46351923638366"
+        },
+        {
+          "label": "anchor+90s",
+          "unix": 1790179307,
+          "step": 59672643,
+          "club_day": "2026-09-23",
+          "kday_hex": "e5a874935bd4cb12a8bec04e",
+          "kday_b64url": "5ah0k1vUyxKovsBO",
+          "on": "93911701",
+          "off": "606378",
+          "token": "1R8GQ93911701606378"
+        }
+      ]
+    },
+    {
+      "id": "kim-gen1",
+      "tenant_id": "7b0c7a52-3f1e-4c7e-9a51-0c2d6e4b8f10",
+      "user_id": "571b4acc-b591-416f-a136-85f9f5231041",
+      "generation": 1,
+      "hkdf_info_ascii": "member-secret|7b0c7a52-3f1e-4c7e-9a51-0c2d6e4b8f10|571b4acc-b591-416f-a136-85f9f5231041|1",
+      "member_secret_hex": "2e204dbb3ef50e85e4c34f0d8536677918ccf1c9eeeefc218ec9751c33bb8cac",
+      "ref": "67RA",
+      "ref_value": 204554,
+      "tz": "Africa/Johannesburg",
+      "steps": [
+        {
+          "label": "anchor",
+          "unix": 1790179217,
+          "step": 59672640,
+          "club_day": "2026-09-23",
+          "kday_hex": "62468dec1172299e09eecc52",
+          "kday_b64url": "YkaN7BFyKZ4J7sxS",
+          "on": "71281511",
+          "off": "546268",
+          "token": "167RA71281511546268"
+        },
+        {
+          "label": "anchor+30s",
+          "unix": 1790179247,
+          "step": 59672641,
+          "club_day": "2026-09-23",
+          "kday_hex": "62468dec1172299e09eecc52",
+          "kday_b64url": "YkaN7BFyKZ4J7sxS",
+          "on": "37827760",
+          "off": "097099",
+          "token": "167RA37827760097099"
+        },
+        {
+          "label": "anchor+90s",
+          "unix": 1790179307,
+          "step": 59672643,
+          "club_day": "2026-09-23",
+          "kday_hex": "62468dec1172299e09eecc52",
+          "kday_b64url": "YkaN7BFyKZ4J7sxS",
+          "on": "86006825",
+          "off": "670699",
+          "token": "167RA86006825670699"
+        }
+      ]
+    },
+    {
+      "id": "pat-gen1",
+      "tenant_id": "7b0c7a52-3f1e-4c7e-9a51-0c2d6e4b8f10",
+      "user_id": "241e62e4-34dc-4908-ac4d-b542acc5b5df",
+      "generation": 1,
+      "hkdf_info_ascii": "member-secret|7b0c7a52-3f1e-4c7e-9a51-0c2d6e4b8f10|241e62e4-34dc-4908-ac4d-b542acc5b5df|1",
+      "member_secret_hex": "1b4b2950f8b5aab4c1d7e64253b5927059f84915d0c006311a6be9aa1c20a8f7",
+      "ref": "DCPM",
+      "ref_value": 438996,
+      "tz": "Africa/Johannesburg",
+      "steps": [
+        {
+          "label": "anchor",
+          "unix": 1790179217,
+          "step": 59672640,
+          "club_day": "2026-09-23",
+          "kday_hex": "82c875468007bf2949c58c58",
+          "kday_b64url": "gsh1RoAHvylJxYxY",
+          "on": "31188907",
+          "off": "058467",
+          "token": "1DCPM31188907058467"
+        },
+        {
+          "label": "anchor+30s",
+          "unix": 1790179247,
+          "step": 59672641,
+          "club_day": "2026-09-23",
+          "kday_hex": "82c875468007bf2949c58c58",
+          "kday_b64url": "gsh1RoAHvylJxYxY",
+          "on": "72439438",
+          "off": "820990",
+          "token": "1DCPM72439438820990"
+        },
+        {
+          "label": "anchor+90s",
+          "unix": 1790179307,
+          "step": 59672643,
+          "club_day": "2026-09-23",
+          "kday_hex": "82c875468007bf2949c58c58",
+          "kday_b64url": "gsh1RoAHvylJxYxY",
+          "on": "77217102",
+          "off": "122569",
+          "token": "1DCPM77217102122569"
+        }
+      ]
+    },
+    {
+      "id": "dean-gen2",
+      "tenant_id": "7b0c7a52-3f1e-4c7e-9a51-0c2d6e4b8f10",
+      "user_id": "5f4317f6-e996-4413-ae1b-b4e21436c628",
+      "generation": 2,
+      "hkdf_info_ascii": "member-secret|7b0c7a52-3f1e-4c7e-9a51-0c2d6e4b8f10|5f4317f6-e996-4413-ae1b-b4e21436c628|2",
+      "member_secret_hex": "c254c12a9e85d60f4e4758e5b4e239ee58f0e1e624300515a80fb36c854d785a",
+      "ref": "18Y9",
+      "ref_value": 41929,
+      "tz": "Africa/Johannesburg",
+      "steps": [
+        {
+          "label": "anchor",
+          "unix": 1790179217,
+          "step": 59672640,
+          "club_day": "2026-09-23",
+          "kday_hex": "a48e58569a980ca1ed0d4fc1",
+          "kday_b64url": "pI5YVpqYDKHtDU_B",
+          "on": "68834975",
+          "off": "156610",
+          "token": "118Y968834975156610"
+        },
+        {
+          "label": "anchor+30s",
+          "unix": 1790179247,
+          "step": 59672641,
+          "club_day": "2026-09-23",
+          "kday_hex": "a48e58569a980ca1ed0d4fc1",
+          "kday_b64url": "pI5YVpqYDKHtDU_B",
+          "on": "11505219",
+          "off": "242632",
+          "token": "118Y911505219242632"
+        },
+        {
+          "label": "anchor+90s",
+          "unix": 1790179307,
+          "step": 59672643,
+          "club_day": "2026-09-23",
+          "kday_hex": "a48e58569a980ca1ed0d4fc1",
+          "kday_b64url": "pI5YVpqYDKHtDU_B",
+          "on": "07083011",
+          "off": "292199",
+          "token": "118Y907083011292199"
+        }
+      ]
+    },
+    {
+      "id": "dean-gen1-across-midnight",
+      "tenant_id": "7b0c7a52-3f1e-4c7e-9a51-0c2d6e4b8f10",
+      "user_id": "5f4317f6-e996-4413-ae1b-b4e21436c628",
+      "generation": 1,
+      "hkdf_info_ascii": "member-secret|7b0c7a52-3f1e-4c7e-9a51-0c2d6e4b8f10|5f4317f6-e996-4413-ae1b-b4e21436c628|1",
+      "member_secret_hex": "aca5e9d6718ee21c343dee909e9037ff98d47dbf053dffa57b9b24d9c99b5387",
+      "ref": "18Y9",
+      "ref_value": 41929,
+      "tz": "Africa/Johannesburg",
+      "steps": [
+        {
+          "label": "last step of the day",
+          "unix": 1790200770,
+          "step": 59673359,
+          "club_day": "2026-09-23",
+          "kday_hex": "1e4139587bd643439ef51765",
+          "kday_b64url": "HkE5WHvWQ0Oe9Rdl",
+          "on": "21271486",
+          "off": "158301",
+          "token": "118Y921271486158301"
+        },
+        {
+          "label": "first step of the next day",
+          "unix": 1790200800,
+          "step": 59673360,
+          "club_day": "2026-09-24",
+          "kday_hex": "6cd0a68a9b1ea285d865a283",
+          "kday_b64url": "bNCmipseooXYZaKD",
+          "on": "56017484",
+          "off": "596336",
+          "token": "118Y956017484596336"
+        }
+      ]
+    }
+  ]
+}

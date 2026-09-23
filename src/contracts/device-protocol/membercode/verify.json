@@ -1,0 +1,534 @@
+{
+  "description": "Offline verification as a device performs it: StepClock from the sync, the day slots and keys as a heartbeat delivered them, then scans in order. `commit` says whether the caller then acted (lit a court, released a door) and recorded the use in the replay ring.",
+  "step_ms": 30000,
+  "window": 1,
+  "default_max_age_ms": 21600000,
+  "scenarios": [
+    {
+      "id": "accept-then-replay",
+      "note": "a code is accepted once; a second presentation of the same step, or of an earlier one, is a replay — the ring keeps the highest step per REF",
+      "sync": {
+        "step": 59672640,
+        "step_ms": 17000,
+        "at_ms": 1000000
+      },
+      "days": [
+        "59670480|59673360"
+      ],
+      "keys": [
+        "18Y90HkE5WHvWQ0Oe9Rdl",
+        "BWDJ0IksrpX8Aq55NF6dh"
+      ],
+      "replay_capacity": 4,
+      "scans": [
+        {
+          "at_ms": 1005000,
+          "token": "118Y956008441714835",
+          "expect": "ok",
+          "ref": "18Y9",
+          "step": 59672640,
+          "commit": true
+        },
+        {
+          "at_ms": 1010000,
+          "token": "118Y956008441714835",
+          "expect": "replayed",
+          "ref": "18Y9",
+          "step": 59672640,
+          "commit": false
+        },
+        {
+          "at_ms": 1010000,
+          "token": "118Y950663370515394",
+          "expect": "replayed",
+          "ref": "18Y9",
+          "step": 59672639,
+          "commit": false
+        },
+        {
+          "at_ms": 1010000,
+          "token": "118Y925437688407038",
+          "expect": "ok",
+          "ref": "18Y9",
+          "step": 59672641,
+          "commit": true,
+          "note": "a phone one step fast, inside the window"
+        },
+        {
+          "at_ms": 1011000,
+          "token": "1BWDJ22225228938905",
+          "expect": "ok",
+          "ref": "BWDJ",
+          "step": 59672640,
+          "commit": true,
+          "note": "another member's use is independent"
+        }
+      ]
+    },
+    {
+      "id": "window-edges",
+      "note": "±1 step around the device's step; nothing is committed, so every scan is judged on its own",
+      "sync": {
+        "step": 59672640,
+        "step_ms": 17000,
+        "at_ms": 1000000
+      },
+      "days": [
+        "59670480|59673360"
+      ],
+      "keys": [
+        "18Y90HkE5WHvWQ0Oe9Rdl",
+        "BWDJ0IksrpX8Aq55NF6dh"
+      ],
+      "replay_capacity": 4,
+      "scans": [
+        {
+          "at_ms": 1005000,
+          "token": "118Y950663370515394",
+          "expect": "ok",
+          "ref": "18Y9",
+          "step": 59672639,
+          "commit": false
+        },
+        {
+          "at_ms": 1005000,
+          "token": "118Y956008441714835",
+          "expect": "ok",
+          "ref": "18Y9",
+          "step": 59672640,
+          "commit": false
+        },
+        {
+          "at_ms": 1005000,
+          "token": "118Y925437688407038",
+          "expect": "ok",
+          "ref": "18Y9",
+          "step": 59672641,
+          "commit": false
+        },
+        {
+          "at_ms": 1005000,
+          "token": "118Y973696018077490",
+          "expect": "wrong_code",
+          "ref": "18Y9",
+          "commit": false
+        },
+        {
+          "at_ms": 1005000,
+          "token": "118Y973565516731701",
+          "expect": "wrong_code",
+          "ref": "18Y9",
+          "commit": false
+        },
+        {
+          "at_ms": 1013000,
+          "token": "118Y956008441714835",
+          "expect": "ok",
+          "ref": "18Y9",
+          "step": 59672640,
+          "commit": false,
+          "note": "the first millisecond of step t+1: t is one behind"
+        },
+        {
+          "at_ms": 1012999,
+          "token": "118Y973565516731701",
+          "expect": "wrong_code",
+          "ref": "18Y9",
+          "commit": false,
+          "note": "the last millisecond of step t: t+2 is two ahead"
+        },
+        {
+          "at_ms": 1013000,
+          "token": "118Y973565516731701",
+          "expect": "ok",
+          "ref": "18Y9",
+          "step": 59672642,
+          "commit": false,
+          "note": "one millisecond later t+2 is one ahead"
+        }
+      ]
+    },
+    {
+      "id": "wrong-ref-and-no-key",
+      "note": "Dean's digits under Sam's REF are Sam's key's problem; a REF the ring has no key for cannot be verified offline at all",
+      "sync": {
+        "step": 59672640,
+        "step_ms": 17000,
+        "at_ms": 1000000
+      },
+      "days": [
+        "59670480|59673360"
+      ],
+      "keys": [
+        "18Y90HkE5WHvWQ0Oe9Rdl",
+        "BWDJ0IksrpX8Aq55NF6dh"
+      ],
+      "replay_capacity": 4,
+      "scans": [
+        {
+          "at_ms": 1005000,
+          "token": "1BWDJ56008441714835",
+          "expect": "wrong_code",
+          "ref": "BWDJ",
+          "commit": false
+        },
+        {
+          "at_ms": 1005000,
+          "token": "167RA71281511546268",
+          "expect": "no_key",
+          "ref": "67RA",
+          "commit": false
+        }
+      ]
+    },
+    {
+      "id": "wrong-day",
+      "note": "OFF computed under YESTERDAY's K_day at today's step: a stolen roster's key forges nothing the day after",
+      "sync": {
+        "step": 59672640,
+        "step_ms": 17000,
+        "at_ms": 1000000
+      },
+      "days": [
+        "59667600|59670480",
+        "59670480|59673360"
+      ],
+      "keys": [
+        "18Y90MQsrOitz87bB65_f",
+        "18Y91HkE5WHvWQ0Oe9Rdl"
+      ],
+      "replay_capacity": 4,
+      "scans": [
+        {
+          "at_ms": 1005000,
+          "token": "118Y956008441538783",
+          "expect": "wrong_code",
+          "ref": "18Y9",
+          "commit": false
+        },
+        {
+          "at_ms": 1005000,
+          "token": "118Y956008441714835",
+          "expect": "ok",
+          "ref": "18Y9",
+          "step": 59672640,
+          "commit": false
+        }
+      ]
+    },
+    {
+      "id": "step-outside-every-day",
+      "note": "the ring holds only yesterday's key; today's step falls in no day it holds, so there is no key to try",
+      "sync": {
+        "step": 59672640,
+        "step_ms": 17000,
+        "at_ms": 1000000
+      },
+      "days": [
+        "59667600|59670480"
+      ],
+      "keys": [
+        "18Y90MQsrOitz87bB65_f"
+      ],
+      "replay_capacity": 4,
+      "scans": [
+        {
+          "at_ms": 1005000,
+          "token": "118Y956008441714835",
+          "expect": "no_key",
+          "ref": "18Y9",
+          "commit": false
+        }
+      ]
+    },
+    {
+      "id": "across-midnight",
+      "note": "the code from the last step of the day, verified in the first step of the next, is checked under the OLD day's key; the new day's code under the new",
+      "sync": {
+        "step": 59673356,
+        "step_ms": 0,
+        "at_ms": 2000000
+      },
+      "days": [
+        "59670480|59673360",
+        "59673360|59676240"
+      ],
+      "keys": [
+        "18Y90HkE5WHvWQ0Oe9Rdl",
+        "18Y91bNCmipseooXYZaKD"
+      ],
+      "replay_capacity": 4,
+      "scans": [
+        {
+          "at_ms": 2121000,
+          "token": "118Y921271486158301",
+          "expect": "ok",
+          "ref": "18Y9",
+          "step": 59673359,
+          "commit": true
+        },
+        {
+          "at_ms": 2121000,
+          "token": "118Y956017484596336",
+          "expect": "ok",
+          "ref": "18Y9",
+          "step": 59673360,
+          "commit": true
+        }
+      ]
+    },
+    {
+      "id": "no-clock",
+      "note": "before any sync, and once the sync is older than max_age_ms, the device has no step to verify against and admits nobody offline",
+      "sync": {
+        "step": 59672640,
+        "step_ms": 17000,
+        "at_ms": 1000000
+      },
+      "days": [
+        "59670480|59673360",
+        "59673360|59676240"
+      ],
+      "keys": [
+        "18Y90HkE5WHvWQ0Oe9Rdl",
+        "18Y91bNCmipseooXYZaKD"
+      ],
+      "replay_capacity": 4,
+      "max_age_ms": 21600000,
+      "unsynced_scans": [
+        {
+          "at_ms": 1000000,
+          "token": "118Y956008441714835",
+          "expect": "no_clock",
+          "ref": "18Y9",
+          "commit": false
+        }
+      ],
+      "scans": [
+        {
+          "at_ms": 22600000,
+          "token": "118Y956017484596336",
+          "expect": "ok",
+          "ref": "18Y9",
+          "step": 59673360,
+          "commit": false,
+          "note": "exactly max age"
+        },
+        {
+          "at_ms": 22600001,
+          "token": "118Y956017484596336",
+          "expect": "no_clock",
+          "ref": "18Y9",
+          "commit": false,
+          "note": "one millisecond past it"
+        }
+      ]
+    },
+    {
+      "id": "off-right-on-garbage",
+      "note": "a device checks OFF only: this is ACCEPTED offline, and it is exactly the evidence the server rejects when the upload is re-checked with ON (code.forgery_suspected)",
+      "sync": {
+        "step": 59672640,
+        "step_ms": 17000,
+        "at_ms": 1000000
+      },
+      "days": [
+        "59670480|59673360"
+      ],
+      "keys": [
+        "18Y90HkE5WHvWQ0Oe9Rdl",
+        "BWDJ0IksrpX8Aq55NF6dh"
+      ],
+      "replay_capacity": 4,
+      "scans": [
+        {
+          "at_ms": 1005000,
+          "token": "118Y900000000714835",
+          "expect": "ok",
+          "ref": "18Y9",
+          "step": 59672640,
+          "commit": false
+        }
+      ]
+    },
+    {
+      "id": "malformed",
+      "note": "nothing that is not a well-formed v1 token reaches a key",
+      "sync": {
+        "step": 59672640,
+        "step_ms": 17000,
+        "at_ms": 1000000
+      },
+      "days": [
+        "59670480|59673360"
+      ],
+      "keys": [
+        "18Y90HkE5WHvWQ0Oe9Rdl",
+        "BWDJ0IksrpX8Aq55NF6dh"
+      ],
+      "replay_capacity": 4,
+      "scans": [
+        {
+          "at_ms": 1005000,
+          "token": "118Y95600844171483",
+          "expect": "malformed",
+          "commit": false
+        },
+        {
+          "at_ms": 1005000,
+          "token": "7Q3F9KM2XZ8B",
+          "expect": "malformed",
+          "commit": false
+        },
+        {
+          "at_ms": 1005000,
+          "token": "218Y956008441714835",
+          "expect": "malformed",
+          "commit": false
+        },
+        {
+          "at_ms": 1005000,
+          "token": "118Y9X6008441714835",
+          "expect": "malformed",
+          "commit": false
+        },
+        {
+          "at_ms": 1005000,
+          "token": "",
+          "expect": "malformed",
+          "commit": false
+        }
+      ]
+    },
+    {
+      "id": "across-the-millis-wrap",
+      "note": "a sync 7.3 s before millis() wraps; the scan after the wrap must still read the right step (tb::since, never subtraction of raw readings)",
+      "sync": {
+        "step": 59672640,
+        "step_ms": 17000,
+        "at_ms": 4294960000
+      },
+      "days": [
+        "59670480|59673360"
+      ],
+      "keys": [
+        "18Y90HkE5WHvWQ0Oe9Rdl",
+        "BWDJ0IksrpX8Aq55NF6dh"
+      ],
+      "replay_capacity": 4,
+      "scans": [
+        {
+          "at_ms": 27704,
+          "token": "118Y925437688407038",
+          "expect": "ok",
+          "ref": "18Y9",
+          "step": 59672641,
+          "commit": true
+        },
+        {
+          "at_ms": 57704,
+          "token": "118Y973565516731701",
+          "expect": "ok",
+          "ref": "18Y9",
+          "step": 59672642,
+          "commit": true
+        }
+      ]
+    },
+    {
+      "id": "replay-ring-eviction",
+      "note": "a ring of two: committing a third REF evicts the OLDEST, after which that REF's used code is accepted again. The stated residual — the firmware sizes the ring so eviction inside a ±1 window needs more distinct members than a door or a box sees in ninety seconds",
+      "sync": {
+        "step": 59672640,
+        "step_ms": 17000,
+        "at_ms": 1000000
+      },
+      "days": [
+        "59670480|59673360"
+      ],
+      "keys": [
+        "18Y90HkE5WHvWQ0Oe9Rdl",
+        "BWDJ0IksrpX8Aq55NF6dh",
+        "HN770orxv3UoSbKZPLA8N"
+      ],
+      "replay_capacity": 2,
+      "scans": [
+        {
+          "at_ms": 1005000,
+          "token": "118Y956008441714835",
+          "expect": "ok",
+          "ref": "18Y9",
+          "step": 59672640,
+          "commit": true
+        },
+        {
+          "at_ms": 1005000,
+          "token": "1BWDJ22225228938905",
+          "expect": "ok",
+          "ref": "BWDJ",
+          "step": 59672640,
+          "commit": true
+        },
+        {
+          "at_ms": 1005000,
+          "token": "118Y956008441714835",
+          "expect": "replayed",
+          "ref": "18Y9",
+          "step": 59672640,
+          "commit": false
+        },
+        {
+          "at_ms": 1005000,
+          "token": "1HN7795625333089989",
+          "expect": "ok",
+          "ref": "HN77",
+          "step": 59672640,
+          "commit": true
+        },
+        {
+          "at_ms": 1005000,
+          "token": "118Y956008441714835",
+          "expect": "ok",
+          "ref": "18Y9",
+          "step": 59672640,
+          "commit": false,
+          "note": "evicted: accepted again"
+        }
+      ]
+    },
+    {
+      "id": "rotated-secret",
+      "note": "after a rotation the phone's new secret derives a new K_day; a box still holding the old key refuses it until its next heartbeat",
+      "sync": {
+        "step": 59672640,
+        "step_ms": 17000,
+        "at_ms": 1000000
+      },
+      "days": [
+        "59670480|59673360"
+      ],
+      "keys": [
+        "18Y90HkE5WHvWQ0Oe9Rdl",
+        "BWDJ0IksrpX8Aq55NF6dh"
+      ],
+      "replay_capacity": 4,
+      "scans": [
+        {
+          "at_ms": 1005000,
+          "token": "118Y968834975156610",
+          "expect": "wrong_code",
+          "ref": "18Y9",
+          "commit": false
+        }
+      ]
+    }
+  ],
+  "status_order": [
+    "malformed",
+    "no_clock",
+    "no_key",
+    "wrong_code",
+    "replayed",
+    "ok"
+  ]
+}

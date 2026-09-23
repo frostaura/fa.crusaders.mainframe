@@ -1,0 +1,404 @@
+{
+  "description": "The court box's HTTP bodies for member codes: the capability on the heartbeat, the code sync in its answer, scan_age_ms on the three paths that carry a scan, and the two-step D10 pay-for.",
+  "device_mac": "5ccf7f0a1b2c",
+  "requests": [
+    {
+      "id": "heartbeat-request-caps",
+      "note": "an m1 court box names its capability on EVERY heartbeat; the server keys the rollout on the latest one it saw. `caps` is last, after the diagnostics",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/heartbeat",
+      "render": {
+        "mac": "5ccf7f0a1b2c",
+        "firmware_version": "2.1.0",
+        "uptime_ms": 86400000,
+        "caps": [
+          "codes:m1"
+        ]
+      },
+      "body_hex": "7b226d6163223a22356363663766306131623263222c226669726d776172655f76657273696f6e223a22322e312e30222c22757074696d655f6d73223a38363430303030302c2263617073223a5b22636f6465733a6d31225d7d"
+    },
+    {
+      "id": "heartbeat-request-caps-with-diagnostics",
+      "note": "the same capability behind restored_relays and relay_state",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/heartbeat",
+      "render": {
+        "mac": "5ccf7f0a1b2c",
+        "firmware_version": "2.1.0",
+        "uptime_ms": 86400000,
+        "restored_relays": 2,
+        "relay_state": [
+          [
+            0,
+            1834
+          ],
+          [
+            2,
+            600
+          ]
+        ],
+        "caps": [
+          "codes:m1"
+        ]
+      },
+      "body_hex": "7b226d6163223a22356363663766306131623263222c226669726d776172655f76657273696f6e223a22322e312e30222c22757074696d655f6d73223a38363430303030302c22726573746f7265645f72656c617973223a322c2272656c61795f7374617465223a5b22307c31383334222c22327c363030225d2c2263617073223a5b22636f6465733a6d31225d7d"
+    },
+    {
+      "id": "activate-request-v1",
+      "note": "a v1 token carries scan_age_ms: how long ago the scanner read it. The server verifies ON at (now - scan_age_ms), ±1 step. A legacy token's body is unchanged, byte for byte",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/activate",
+      "render": {
+        "mac": "5ccf7f0a1b2c",
+        "token": "118Y956008441714835",
+        "scan_age_ms": 350
+      },
+      "body_hex": "7b226d6163223a22356363663766306131623263222c226d6574686f64223a227172222c22746f6b656e223a2231313859393536303038343431373134383335222c227363616e5f6167655f6d73223a3335307d"
+    },
+    {
+      "id": "walkup-request-v1",
+      "note": "the walk-up body plus scan_age_ms — the member pressed two buttons after scanning, so the code on the wire can be several steps old by now",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/walkup",
+      "render": {
+        "mac": "5ccf7f0a1b2c",
+        "minutes": 60,
+        "token": "118Y956008441714835",
+        "court": 3,
+        "nonce": "9f2a4c6e8b0d1f3a",
+        "scan_age_ms": 21400
+      },
+      "body_hex": "7b226d6163223a22356363663766306131623263222c226d696e75746573223a36302c226d6574686f64223a227172222c22746f6b656e223a2231313859393536303038343431373134383335222c22636f757274223a332c226e6f6e6365223a2239663261346336653862306431663361222c227363616e5f6167655f6d73223a32313430307d"
+    },
+    {
+      "id": "payfor-quote-request",
+      "note": "D10 step one: the member pressed a BOOKED court. confirm:false moves no money; the answer is what the glass will ask them to agree to",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/pay-for",
+      "render": {
+        "mac": "5ccf7f0a1b2c",
+        "token": "118Y956008441714835",
+        "court": 2,
+        "nonce": "9f2a4c6e8b0d1f3a",
+        "confirm": false,
+        "scan_age_ms": 4200
+      },
+      "body_hex": "7b226d6163223a22356363663766306131623263222c226d6574686f64223a227172222c22746f6b656e223a2231313859393536303038343431373134383335222c22636f757274223a322c226e6f6e6365223a2239663261346336653862306431663361222c22636f6e6669726d223a66616c73652c227363616e5f6167655f6d73223a343230307d"
+    },
+    {
+      "id": "payfor-confirm-request",
+      "note": "D10 step two: pressed again. amount_label echoes EXACTLY what the glass showed, so the member paid what they agreed to or nothing (price_changed). Same nonce as the quote: a retry of an undecided confirm is answered with the first payment",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/pay-for",
+      "render": {
+        "mac": "5ccf7f0a1b2c",
+        "token": "118Y956008441714835",
+        "court": 2,
+        "nonce": "9f2a4c6e8b0d1f3a",
+        "confirm": true,
+        "amount_label": "50",
+        "scan_age_ms": 9100
+      },
+      "body_hex": "7b226d6163223a22356363663766306131623263222c226d6574686f64223a227172222c22746f6b656e223a2231313859393536303038343431373134383335222c22636f757274223a322c226e6f6e6365223a2239663261346336653862306431663361222c22636f6e6669726d223a747275652c22616d6f756e745f6c6162656c223a223530222c227363616e5f6167655f6d73223a393130307d"
+    },
+    {
+      "id": "payfor-quote-request-legacy",
+      "note": "a legacy code carries no scan_age_ms, exactly as on every other path",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/pay-for",
+      "render": {
+        "mac": "5ccf7f0a1b2c",
+        "token": "7Q3F9KM2XZ8B",
+        "court": 2,
+        "nonce": "9f2a4c6e8b0d1f3a",
+        "confirm": false
+      },
+      "body_hex": "7b226d6163223a22356363663766306131623263222c226d6574686f64223a227172222c22746f6b656e223a2237513346394b4d32585a3842222c22636f757274223a322c226e6f6e6365223a2239663261346336653862306431663361222c22636f6e6669726d223a66616c73657d"
+    },
+    {
+      "id": "events-request-v1-activation",
+      "note": "an OFFLINE activation decided on a v1 code: the subject is the SCANNED token — the evidence the server re-checks with ON — never the roster's REF list",
+      "method": "POST",
+      "path_and_query": "/api/v1/device/events",
+      "render": {
+        "mac": "5ccf7f0a1b2c",
+        "boot_id": 2596069104,
+        "uptime_ms": 86400000,
+        "seq": 42,
+        "event_uptime_ms": 86390000,
+        "kind": "activation",
+        "court": 1,
+        "subject": "118Y956008441714835",
+        "duration_ms": 2340000
+      },
+      "body_hex": "7b226d6163223a22356363663766306131623263222c22626f6f745f6964223a323539363036393130342c22757074696d655f6d73223a38363430303030302c226576656e7473223a5b7b22736571223a34322c22757074696d655f6d73223a38363339303030302c226b696e64223a2261637469766174696f6e222c22636f757274223a312c226d6574686f64223a227172222c227375626a656374223a2231313859393536303038343431373134383335222c226475726174696f6e5f6d73223a323334303030307d5d7d"
+    }
+  ],
+  "responses": [
+    {
+      "id": "heartbeat-response-codes",
+      "kind": "heartbeat",
+      "note": "an m1 box after cut-over: a v1 roster entry for a booking with a partner, a legacy entry beside it, the step clock, one day and both players' keys",
+      "body_hex": "7b227365727665725f74696d65223a22323032362d30392d32335431363a30303a31372b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22636f7572742d626f782d31222c22636f7572745f6e756d62657273223a5b312c322c332c345d2c226865617274626561745f7365636f6e6473223a36302c22636f6e666967223a7b22736c6963655f6d696e75746573223a31352c2267726163655f77696e646f775f6d696e75746573223a352c2277616c6b5f75705f6d61785f6d696e75746573223a36302c22627574746f6e5f6d6170223a5b22636f7572743a41222c22636f7572743a42222c22636f7572743a43222c22636f7572743a44222c226d696e757465733a3135222c226d696e757465733a3330222c226d696e757465733a3435222c226d696e757465733a3630225d7d2c22726f73746572223a5b226d313859394257444a7c317c2d3330307c32343030222c2237513346394b4d32585a38427c307c2d36307c31323030225d2c22636f64655f73746570223a35393637323634302c22636f64655f737465705f6d73223a31373030302c22636f64655f64617973223a5b2235393637303438307c3539363733333630225d2c22636f64655f6b657973223a5b223138593930486b45355748765751304f653952646c222c224257444a30496b7372705838417135354e46366468225d7d",
+      "expect": {
+        "roster": [
+          "m18Y9BWDJ|1|-300|2400",
+          "7Q3F9KM2XZ8B|0|-60|1200"
+        ],
+        "code_step": 59672640,
+        "code_step_ms": 17000,
+        "code_days": [
+          "59670480|59673360"
+        ],
+        "keys_accepted": 2
+      }
+    },
+    {
+      "id": "heartbeat-response-codes-full",
+      "kind": "heartbeat",
+      "note": "THE BUDGET: sixteen four-player v1 entries at six-digit seconds, twenty-four keys over two day slots, a 64-character slug, all four restores and every LCD setting — 1984 bytes against the 2048-byte contract",
+      "body_hex": "7b227365727665725f74696d65223a22323032362d30392d32335431363a30303a31372b30303a3030222c2274656e616e745f736c7567223a2277777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777222c226465766963655f636f6465223a22626f782d356363663766306131623263222c22636f7572745f6e756d62657273223a5b312c322c332c345d2c226865617274626561745f7365636f6e6473223a36302c22636f6e666967223a7b22736c6963655f6d696e75746573223a31352c2267726163655f77696e646f775f6d696e75746573223a352c2277616c6b5f75705f6d61785f6d696e75746573223a36302c226c63645f7265766572745f7365636f6e6473223a31302c226c63645f63686f6963655f7365636f6e6473223a32302c226c63645f636172645f7365636f6e6473223a322c226c63645f68696e745f7365636f6e6473223a342c227363616e5f6d656d6f72795f7365636f6e6473223a3330302c22636c6f636b5f74727573745f6d696e75746573223a313434302c2272656c61795f726573746f72655f656e61626c6564223a747275652c226465766963655f6661756c745f7265706f7274696e67223a747275652c226465766963655f6661756c745f6d61785f7065725f686f7572223a313030302c22627574746f6e5f6d6170223a5b22636f7572743a41222c22636f7572743a42222c22636f7572743a43222c22636f7572743a44222c226d696e757465733a3135222c226d696e757465733a3330222c226d696e757465733a3435222c226d696e757465733a3630225d7d2c2272656c617973223a5b22307c353430307c3366613835663634222c22317c353430307c3963316430653232222c22327c353430307c3062316332643365222c22337c353430307c3466356136623763225d2c22726f73746572223a5b226d323030303234303332383036324330397c307c2d38363430307c383939303030222c226d32473043324d30463252304a3257304e7c317c2d38363236337c383939313337222c226d333030523334305633383059334331317c327c2d38363132367c383939323734222c226d33473134334d313733523141335731447c337c2d38353938397c383939343131222c226d343031473434314b34383150344331537c307c2d38353835327c383939353438222c226d34473157344d315a34523232345732357c317c2d38353731357c383939363835222c226d353032383534324235383245354332487c327c2d38353537387c383939383232222c226d3547324d354d325135523254355732587c337c2d38353434317c383939393539222c226d363033303634333336383336364333397c307c2d38353330347c393030303936222c226d36473343364d33463652334a3657334e7c317c2d38353136377c393030323333222c226d373033523734335637383359374334317c327c2d38353033307c393030333730222c226d37473434374d343737523441375734447c337c2d38343839337c393030353037222c226d383034473834344b38383450384334537c307c2d38343735367c393030363434222c226d38473457384d345a38523532385735357c317c2d38343631397c393030373831222c226d393035383934354239383545394335487c327c2d38343438327c393030393138222c226d3947354d394d355139523554395735587c337c2d38343334357c393031303535225d2c22636f64655f73746570223a35393637323634302c22636f64655f737465705f6d73223a31373030302c22636f64655f64617973223a5b2235393637303438307c3539363733333630222c2235393637333336307c3539363736323430225d2c22636f64655f6b657973223a5b22323030303078466654576262655651526a62594672222c22323430333142647071344c42796253393653506a68222c22323830363034654e614b5a6d3963536f4767777562222c2232433039314c694248326949395f49705f52745854222c2232473043303838585933716c7972624f4e454f6c6f222c22324d3046314b417a44442d3370374e78487234524f222c223252304a3056373255312d64536b6c597464616b72222c223257304e315836716d614161765f6a664d707a5165222c22333030523074776f6248564734366b585f6375624f222c2233343056317a33674576472d75625f4f4d6f47626b222c223338305930764f7932484755357273792d2d4d5265222c2233433131314d36346b64776365686d326e65367168222c2233473134304a55744f5454455f6859594843574a46222c22334d3137316c3236506c317671706c2d7564674a6a222c22335231413074797a58715f7854524a464859716e32222c2233573144314a4439626143657649783741687a324e222c2234303147307569544a6c325935352d396a3955714c222c223434314b317957596d3237552d7962665931655544222c223438315030506235722d366b5551687a5956526568222c22344331533139395841786b37755659575645493970222c2234473157305f6f414e5f7a746241335f794f65516a222c22344d315a316d74303768696f6d64466f45646f716a222c22345232323043736148524f3862614e3770414b4a4e222c2234573235314465734c736373473436724c75776862225d7d",
+      "expect": {
+        "roster_count": 16,
+        "keys_accepted": 24,
+        "max_bytes": 2048,
+        "bytes": 1984
+      }
+    },
+    {
+      "id": "heartbeat-response-no-codes",
+      "kind": "heartbeat",
+      "note": "a server that has not shipped member codes: no code_* keys, so an m1 box keeps whatever clock and ring it had (none, after a boot) and decides legacy codes exactly as before",
+      "body_hex": "7b227365727665725f74696d65223a22323032362d30392d32335431363a30303a31372b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22636f7572742d626f782d31222c22636f7572745f6e756d62657273223a5b312c322c332c345d2c226865617274626561745f7365636f6e6473223a36302c22636f6e666967223a7b22736c6963655f6d696e75746573223a31352c2267726163655f77696e646f775f6d696e75746573223a352c2277616c6b5f75705f6d61785f6d696e75746573223a36302c22627574746f6e5f6d6170223a5b22636f7572743a41222c22636f7572743a42222c22636f7572743a43222c22636f7572743a44222c226d696e757465733a3135222c226d696e757465733a3330222c226d696e757465733a3435222c226d696e757465733a3630225d7d2c22726f73746572223a5b5d7d",
+      "expect": {
+        "code_step": null,
+        "keys_accepted": null
+      }
+    },
+    {
+      "id": "payfor-quote-ok",
+      "kind": "payfor_quote",
+      "note": "payable: the glass asks CT2 BOOKED / PAY 50cr? / PRESS CT2 TO PAY",
+      "body_hex": "7b2270617961626c65223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a322c22616d6f756e745f63726564697473223a35302e302c22616d6f756e745f6c6162656c223a223530227d",
+      "expect": {
+        "outcome": "quote",
+        "court_number": 2,
+        "amount_label": "50",
+        "screen": "PayForQuote",
+        "rows": [
+          "CT2 BOOKED",
+          "PAY 50cr?",
+          "PRESS CT2 TO PAY",
+          "A   B   C   D"
+        ]
+      }
+    },
+    {
+      "id": "payfor-quote-ok-fractional",
+      "kind": "payfor_quote",
+      "note": "amount_label is the SERVER's rendering — the box has no decimal arithmetic and must not invent one",
+      "body_hex": "7b2270617961626c65223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a342c22616d6f756e745f63726564697473223a33322e352c22616d6f756e745f6c6162656c223a2233322e35227d",
+      "expect": {
+        "outcome": "quote",
+        "court_number": 4,
+        "amount_label": "32.5",
+        "screen": "PayForQuote",
+        "rows": [
+          "CT4 BOOKED",
+          "PAY 32.5cr?",
+          "PRESS CT4 TO PAY",
+          "A   B   C   D"
+        ]
+      }
+    },
+    {
+      "id": "payfor-quote-widest",
+      "kind": "payfor_quote",
+      "note": "the widest quote the contract allows: a four-digit court and a six-character label",
+      "body_hex": "7b2270617961626c65223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a393939392c22616d6f756e745f63726564697473223a393939392e352c22616d6f756e745f6c6162656c223a22393939392e35227d",
+      "expect": {
+        "outcome": "quote",
+        "court_number": 9999,
+        "amount_label": "9999.5",
+        "screen": "PayForQuote",
+        "rows": [
+          "CT9999 BOOKED",
+          "PAY 9999.5cr?",
+          "PRESS CT9999 TO PAY",
+          "A   B   C   D"
+        ]
+      }
+    },
+    {
+      "id": "payfor-quote-split",
+      "kind": "payfor_quote",
+      "note": "a split booking is refused at the box: each player's share is theirs to pay in the app",
+      "body_hex": "7b2270617961626c65223a66616c73652c22726561736f6e223a2273706c69745f626f6f6b696e67222c22636f7572745f6e756d626572223a327d",
+      "expect": {
+        "outcome": "refused",
+        "screen": "PayForSplit",
+        "rows": [
+          "SPLIT BOOKING",
+          "PAY IN APP"
+        ]
+      }
+    },
+    {
+      "id": "payfor-quote-not-booked",
+      "kind": "payfor_quote",
+      "note": "the court is free after all: the press is an ordinary walk-up court choice",
+      "body_hex": "7b2270617961626c65223a66616c73652c22726561736f6e223a226e6f745f626f6f6b6564222c22636f7572745f6e756d626572223a327d",
+      "expect": {
+        "outcome": "walkup"
+      }
+    },
+    {
+      "id": "payfor-quote-own-booking",
+      "kind": "payfor_quote",
+      "note": "their own booking: nothing to pay",
+      "body_hex": "7b2270617961626c65223a66616c73652c22726561736f6e223a226f776e5f626f6f6b696e67222c22636f7572745f6e756d626572223a327d",
+      "expect": {
+        "outcome": "refused",
+        "screen": "PayForNothingToPay",
+        "rows": [
+          "NOTHING TO PAY",
+          "Already paid for"
+        ]
+      }
+    },
+    {
+      "id": "payfor-quote-already-paid",
+      "kind": "payfor_quote",
+      "note": "somebody paid for it already",
+      "body_hex": "7b2270617961626c65223a66616c73652c22726561736f6e223a22616c72656164795f70616964222c22636f7572745f6e756d626572223a327d",
+      "expect": {
+        "outcome": "refused",
+        "screen": "PayForNothingToPay",
+        "rows": [
+          "NOTHING TO PAY",
+          "Already paid for"
+        ]
+      }
+    },
+    {
+      "id": "payfor-quote-insufficient",
+      "kind": "payfor_quote",
+      "note": "the payer cannot cover it",
+      "body_hex": "7b2270617961626c65223a66616c73652c22726561736f6e223a22696e73756666696369656e745f62616c616e6365222c22636f7572745f6e756d626572223a327d",
+      "expect": {
+        "outcome": "refused",
+        "screen": "InsufficientBalance"
+      }
+    },
+    {
+      "id": "payfor-quote-not-recognised",
+      "kind": "payfor_quote",
+      "note": "the code is not a member's",
+      "body_hex": "7b2270617961626c65223a66616c73652c22726561736f6e223a226e6f745f7265636f676e69736564222c22636f7572745f6e756d626572223a327d",
+      "expect": {
+        "outcome": "refused",
+        "screen": "NotRecognised"
+      }
+    },
+    {
+      "id": "payfor-quote-ended",
+      "kind": "payfor_quote",
+      "note": "the booking is over",
+      "body_hex": "7b2270617961626c65223a66616c73652c22726561736f6e223a22656e646564222c22636f7572745f6e756d626572223a327d",
+      "expect": {
+        "outcome": "refused",
+        "screen": "SlotEnded"
+      }
+    },
+    {
+      "id": "payfor-quote-unknown-reason",
+      "kind": "payfor_quote",
+      "note": "a reason this build does not know is still a refusal",
+      "body_hex": "7b2270617961626c65223a66616c73652c22726561736f6e223a22736f6d655f6675747572655f726561736f6e222c22636f7572745f6e756d626572223a327d",
+      "expect": {
+        "outcome": "refused",
+        "screen": "SeeTheDesk"
+      }
+    },
+    {
+      "id": "payfor-quote-bad-label",
+      "kind": "payfor_quote",
+      "note": "a label the glass cannot show honestly (seven characters) is no decision: the box falls back to the walk-up choice rather than asking a member to agree to a number it cut",
+      "body_hex": "7b2270617961626c65223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a322c22616d6f756e745f63726564697473223a31323334352e352c22616d6f756e745f6c6162656c223a2231323334352e35227d",
+      "expect": {
+        "outcome": "walkup"
+      }
+    },
+    {
+      "id": "payfor-confirm-paid",
+      "kind": "payfor_confirm",
+      "note": "paid: the booker is refunded and both are emailed server-side; the court is already lit, so granted_seconds is 0 and nothing is switched",
+      "body_hex": "7b2270616964223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a322c22616d6f756e745f63726564697473223a35302e302c22616d6f756e745f6c6162656c223a223530222c2262616c616e63655f61667465725f63726564697473223a3131382e302c227265706c61796564223a66616c73652c226772616e7465645f7365636f6e6473223a307d",
+      "expect": {
+        "outcome": "paid",
+        "granted_seconds": 0,
+        "screen": "PayForPaid",
+        "rows": [
+          "PAID FOR CT2",
+          "50cr CHARGED"
+        ]
+      }
+    },
+    {
+      "id": "payfor-confirm-paid-lights",
+      "kind": "payfor_confirm",
+      "note": "paid for a booking nobody has started: the server grants the remainder and the box lights the court as it would for an activation",
+      "body_hex": "7b2270616964223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a322c22616d6f756e745f63726564697473223a35302e302c22616d6f756e745f6c6162656c223a223530222c2262616c616e63655f61667465725f63726564697473223a3131382e302c227265706c61796564223a66616c73652c226772616e7465645f7365636f6e6473223a323730307d",
+      "expect": {
+        "outcome": "paid",
+        "granted_seconds": 2700,
+        "screen": "PayForPaid"
+      }
+    },
+    {
+      "id": "payfor-confirm-replayed",
+      "kind": "payfor_confirm",
+      "note": "the same nonce again after a lost answer: the FIRST payment, never a second",
+      "body_hex": "7b2270616964223a747275652c22726561736f6e223a226f6b222c22636f7572745f6e756d626572223a322c22616d6f756e745f63726564697473223a35302e302c22616d6f756e745f6c6162656c223a223530222c2262616c616e63655f61667465725f63726564697473223a3131382e302c227265706c61796564223a747275652c226772616e7465645f7365636f6e6473223a307d",
+      "expect": {
+        "outcome": "paid",
+        "granted_seconds": 0,
+        "screen": "PayForPaid"
+      }
+    },
+    {
+      "id": "payfor-confirm-price-changed",
+      "kind": "payfor_confirm",
+      "note": "the price moved between the two presses: nothing is charged and the next press asks again",
+      "body_hex": "7b2270616964223a66616c73652c22726561736f6e223a2270726963655f6368616e676564222c22636f7572745f6e756d626572223a322c22616d6f756e745f6c6162656c223a223535227d",
+      "expect": {
+        "outcome": "refused",
+        "screen": "PayForPriceChanged",
+        "rows": [
+          "PRICE CHANGED",
+          "Nothing charged"
+        ]
+      }
+    },
+    {
+      "id": "payfor-confirm-split",
+      "kind": "payfor_confirm",
+      "note": "split since the quote",
+      "body_hex": "7b2270616964223a66616c73652c22726561736f6e223a2273706c69745f626f6f6b696e67222c22636f7572745f6e756d626572223a327d",
+      "expect": {
+        "outcome": "refused",
+        "screen": "PayForSplit"
+      }
+    },
+    {
+      "id": "payfor-confirm-insufficient",
+      "kind": "payfor_confirm",
+      "note": "the balance moved since the quote",
+      "body_hex": "7b2270616964223a66616c73652c22726561736f6e223a22696e73756666696369656e745f62616c616e6365222c22636f7572745f6e756d626572223a327d",
+      "expect": {
+        "outcome": "refused",
+        "screen": "InsufficientBalance"
+      }
+    }
+  ]
+}

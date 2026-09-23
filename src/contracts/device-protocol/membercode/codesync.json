@@ -1,0 +1,403 @@
+{
+  "description": "What a heartbeat response carries for the code (top-level `code_step`, `code_step_ms`, `code_days`, `code_keys`), the grammar of one key and one day element, and what a device does with a whole body.",
+  "key_len": 21,
+  "key_elements": [
+    {
+      "id": "slot-0",
+      "note": "REF + slot + 16 base64url characters",
+      "element": "18Y90HkE5WHvWQ0Oe9Rdl",
+      "ok": true,
+      "ref": "18Y9",
+      "slot": 0,
+      "key_hex": "1e4139587bd643439ef51765"
+    },
+    {
+      "id": "slot-1",
+      "note": "the second day slot",
+      "element": "18Y91HkE5WHvWQ0Oe9Rdl",
+      "ok": true,
+      "ref": "18Y9",
+      "slot": 1,
+      "key_hex": "1e4139587bd643439ef51765"
+    },
+    {
+      "id": "url-alphabet",
+      "note": "the base64url '-' and '_' characters",
+      "element": "BWDJ0-_-_-_-_-_-_-_-_",
+      "ok": true,
+      "ref": "BWDJ",
+      "slot": 0,
+      "key_hex": "fbffbffbffbffbffbffbffbf"
+    },
+    {
+      "id": "slot-2",
+      "note": "at most two day slots",
+      "element": "18Y92HkE5WHvWQ0Oe9Rdl",
+      "ok": false
+    },
+    {
+      "id": "short-key",
+      "note": "15 key characters",
+      "element": "18Y90HkE5WHvWQ0Oe9Rd",
+      "ok": false
+    },
+    {
+      "id": "long-key",
+      "note": "17 key characters",
+      "element": "18Y90HkE5WHvWQ0Oe9RdlA",
+      "ok": false
+    },
+    {
+      "id": "plus-sign",
+      "note": "standard base64's '+' is not base64url",
+      "element": "18Y90HkE5WHvWQ0Oe9Rd+",
+      "ok": false
+    },
+    {
+      "id": "padding",
+      "note": "no padding",
+      "element": "18Y90HkE5WHvWQ0Oe9Rd=",
+      "ok": false
+    },
+    {
+      "id": "lowercase-ref",
+      "note": "server data is canonical",
+      "element": "18y90HkE5WHvWQ0Oe9Rdl",
+      "ok": false
+    },
+    {
+      "id": "reserved-ref",
+      "note": "REF 0000 is reserved",
+      "element": "00000HkE5WHvWQ0Oe9Rdl",
+      "ok": false
+    }
+  ],
+  "day_elements": [
+    {
+      "id": "today",
+      "note": "a 24-hour day is 2880 steps",
+      "element": "59670480|59673360",
+      "ok": true,
+      "first_step": 59670480,
+      "end_step": 59673360
+    },
+    {
+      "id": "25-hour-day",
+      "note": "3000 steps is the longest a day slot may be",
+      "element": "59762760|59765760",
+      "ok": true,
+      "first_step": 59762760,
+      "end_step": 59765760
+    },
+    {
+      "id": "26-hour-day",
+      "note": "past the longest real day",
+      "element": "59670480|59673481",
+      "ok": false
+    },
+    {
+      "id": "empty",
+      "note": "a day of no steps",
+      "element": "59670480|59670480",
+      "ok": false
+    },
+    {
+      "id": "backwards",
+      "note": "ends before it starts",
+      "element": "59673360|59670480",
+      "ok": false
+    },
+    {
+      "id": "negative",
+      "note": "steps are unsigned",
+      "element": "-1|59670480",
+      "ok": false
+    },
+    {
+      "id": "three-fields",
+      "note": "exactly two fields",
+      "element": "59670480|59673360|0",
+      "ok": false
+    },
+    {
+      "id": "not-numbers",
+      "note": "digits only",
+      "element": "today|tomorrow",
+      "ok": false
+    }
+  ],
+  "apply": [
+    {
+      "id": "full",
+      "note": "a clock, one day and two keys",
+      "body_hex": "7b227365727665725f74696d65223a22323032362d30392d32335431363a30303a31372b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22636f7572742d626f782d31222c22636f7572745f6e756d62657273223a5b312c322c332c345d2c226865617274626561745f7365636f6e6473223a36302c22726f73746572223a5b5d2c22636f64655f73746570223a35393637323634302c22636f64655f737465705f6d73223a31373030302c22636f64655f64617973223a5b2235393637303438307c3539363733333630225d2c22636f64655f6b657973223a5b223138593930486b45355748765751304f653952646c222c224257444a30496b7372705838417135354e46366468225d7d",
+      "received_at_ms": 5000,
+      "key_capacity": 24,
+      "expect": {
+        "clock": {
+          "synced": true,
+          "step": 59672640,
+          "step_ms": 17000
+        },
+        "keys": {
+          "replaced": true,
+          "accepted": 2,
+          "rejected": 0,
+          "dropped": 0,
+          "entries": [
+            {
+              "ref": "18Y9",
+              "slot": 0,
+              "key_hex": "1e4139587bd643439ef51765"
+            },
+            {
+              "ref": "BWDJ",
+              "slot": 0,
+              "key_hex": "224b2ba57f00ab9e4d17a761"
+            }
+          ],
+          "days": [
+            {
+              "first_step": 59670480,
+              "end_step": 59673360
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "absent",
+      "note": "an API that sends no code_* key at all leaves both the clock and the ring exactly as they were",
+      "body_hex": "7b227365727665725f74696d65223a22323032362d30392d32335431363a30303a31372b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22636f7572742d626f782d31222c22636f7572745f6e756d62657273223a5b312c322c332c345d2c226865617274626561745f7365636f6e6473223a36302c22726f73746572223a5b5d7d",
+      "received_at_ms": 5000,
+      "key_capacity": 24,
+      "expect": {
+        "clock": {
+          "synced": false
+        },
+        "keys": {
+          "replaced": false
+        }
+      }
+    },
+    {
+      "id": "clock-only",
+      "note": "the clock without keys: synced, ring untouched",
+      "body_hex": "7b227365727665725f74696d65223a22323032362d30392d32335431363a30303a31372b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22636f7572742d626f782d31222c22636f7572745f6e756d62657273223a5b312c322c332c345d2c226865617274626561745f7365636f6e6473223a36302c22726f73746572223a5b5d2c22636f64655f73746570223a35393637323634302c22636f64655f737465705f6d73223a307d",
+      "received_at_ms": 5000,
+      "key_capacity": 24,
+      "expect": {
+        "clock": {
+          "synced": true,
+          "step": 59672640,
+          "step_ms": 0
+        },
+        "keys": {
+          "replaced": false
+        }
+      }
+    },
+    {
+      "id": "empty-keys",
+      "note": "an empty array commits an EMPTY ring: 'nobody can be verified offline' has to be sayable",
+      "body_hex": "7b227365727665725f74696d65223a22323032362d30392d32335431363a30303a31372b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22636f7572742d626f782d31222c22636f7572745f6e756d62657273223a5b312c322c332c345d2c226865617274626561745f7365636f6e6473223a36302c22726f73746572223a5b5d2c22636f64655f73746570223a35393637323634302c22636f64655f737465705f6d73223a302c22636f64655f64617973223a5b2235393637303438307c3539363733333630225d2c22636f64655f6b657973223a5b5d7d",
+      "received_at_ms": 5000,
+      "key_capacity": 24,
+      "expect": {
+        "clock": {
+          "synced": true,
+          "step": 59672640,
+          "step_ms": 0
+        },
+        "keys": {
+          "replaced": true,
+          "accepted": 0,
+          "rejected": 0,
+          "dropped": 0,
+          "entries": [],
+          "days": [
+            {
+              "first_step": 59670480,
+              "end_step": 59673360
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "step-ms-out-of-range",
+      "note": "a phase of 30000 ms is not inside a 30 s step: the clock is not synced",
+      "body_hex": "7b227365727665725f74696d65223a22323032362d30392d32335431363a30303a31372b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22636f7572742d626f782d31222c22636f7572745f6e756d62657273223a5b312c322c332c345d2c226865617274626561745f7365636f6e6473223a36302c22726f73746572223a5b5d2c22636f64655f73746570223a35393637323634302c22636f64655f737465705f6d73223a33303030307d",
+      "received_at_ms": 5000,
+      "key_capacity": 24,
+      "expect": {
+        "clock": {
+          "synced": false
+        },
+        "keys": {
+          "replaced": false
+        }
+      }
+    },
+    {
+      "id": "step-without-phase",
+      "note": "code_step without code_step_ms syncs nothing — both or neither",
+      "body_hex": "7b227365727665725f74696d65223a22323032362d30392d32335431363a30303a31372b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22636f7572742d626f782d31222c22636f7572745f6e756d62657273223a5b312c322c332c345d2c226865617274626561745f7365636f6e6473223a36302c22726f73746572223a5b5d2c22636f64655f73746570223a35393637323634307d",
+      "received_at_ms": 5000,
+      "key_capacity": 24,
+      "expect": {
+        "clock": {
+          "synced": false
+        },
+        "keys": {
+          "replaced": false
+        }
+      }
+    },
+    {
+      "id": "bad-elements-counted",
+      "note": "a key naming a slot the day list does not have, and one that is not a key at all, are refused and counted; the good ones are still committed",
+      "body_hex": "7b227365727665725f74696d65223a22323032362d30392d32335431363a30303a31372b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22636f7572742d626f782d31222c22636f7572745f6e756d62657273223a5b312c322c332c345d2c226865617274626561745f7365636f6e6473223a36302c22726f73746572223a5b5d2c22636f64655f73746570223a35393637323634302c22636f64655f737465705f6d73223a302c22636f64655f64617973223a5b2235393637303438307c3539363733333630225d2c22636f64655f6b657973223a5b223138593930486b45355748765751304f653952646c222c224257444a30496b7372705838417135354e46366468222c225238475131356168306b31765579784b6f7673424f222c2267617262616765225d7d",
+      "received_at_ms": 5000,
+      "key_capacity": 24,
+      "expect": {
+        "clock": {
+          "synced": true,
+          "step": 59672640,
+          "step_ms": 0
+        },
+        "keys": {
+          "replaced": true,
+          "accepted": 2,
+          "rejected": 2,
+          "dropped": 0,
+          "entries": [
+            {
+              "ref": "18Y9",
+              "slot": 0,
+              "key_hex": "1e4139587bd643439ef51765"
+            },
+            {
+              "ref": "BWDJ",
+              "slot": 0,
+              "key_hex": "224b2ba57f00ab9e4d17a761"
+            }
+          ],
+          "days": [
+            {
+              "first_step": 59670480,
+              "end_step": 59673360
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "over-capacity",
+      "note": "five keys into a ring of three: three kept in order, two dropped and counted",
+      "body_hex": "7b227365727665725f74696d65223a22323032362d30392d32335431363a30303a31372b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22636f7572742d626f782d31222c22636f7572745f6e756d62657273223a5b312c322c332c345d2c226865617274626561745f7365636f6e6473223a36302c22726f73746572223a5b5d2c22636f64655f73746570223a35393637323634302c22636f64655f737465705f6d73223a302c22636f64655f64617973223a5b2235393637303438307c3539363733333630225d2c22636f64655f6b657973223a5b223138593930486b45355748765751304f653952646c222c224257444a30496b7372705838417135354e46366468222c22484e3737306f72787633556f53624b5a504c41384e222c225238475130356168306b31765579784b6f7673424f222c223637524130596b614e374246794b5a344a37737853225d7d",
+      "received_at_ms": 5000,
+      "key_capacity": 3,
+      "expect": {
+        "clock": {
+          "synced": true,
+          "step": 59672640,
+          "step_ms": 0
+        },
+        "keys": {
+          "replaced": true,
+          "accepted": 3,
+          "rejected": 0,
+          "dropped": 2,
+          "entries": [
+            {
+              "ref": "18Y9",
+              "slot": 0,
+              "key_hex": "1e4139587bd643439ef51765"
+            },
+            {
+              "ref": "BWDJ",
+              "slot": 0,
+              "key_hex": "224b2ba57f00ab9e4d17a761"
+            },
+            {
+              "ref": "HN77",
+              "slot": 0,
+              "key_hex": "a2bc6fdd4a126ca64f2c0f0d"
+            }
+          ],
+          "days": [
+            {
+              "first_step": 59670480,
+              "end_step": 59673360
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "nested-decoy",
+      "note": "a code_keys array nested inside another object is not the ring: top level only",
+      "body_hex": "7b227365727665725f74696d65223a22323032362d30392d32335431363a30303a31372b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22636f7572742d626f782d31222c22636f7572745f6e756d62657273223a5b312c322c332c345d2c226865617274626561745f7365636f6e6473223a36302c22726f73746572223a5b5d2c22636f6e666967223a7b22636f64655f6b657973223a5b223637524130596b614e374246794b5a344a37737853225d7d7d",
+      "received_at_ms": 5000,
+      "key_capacity": 24,
+      "expect": {
+        "clock": {
+          "synced": false
+        },
+        "keys": {
+          "replaced": false
+        }
+      }
+    },
+    {
+      "id": "truncated",
+      "note": "a body cut short is not a document: nothing is adopted, not even the clock",
+      "body_hex": "7b227365727665725f74696d65223a22323032362d30392d32335431363a30303a31372b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22636f7572742d626f782d31222c22636f7572745f6e756d62657273223a5b312c322c332c345d2c226865617274626561745f7365636f6e6473223a36302c22726f73746572223a5b5d2c22636f64655f73746570223a35393637323634302c22636f64655f737465705f6d73223a31373030302c22636f64655f64617973223a5b2235393637303438307c3539363733333630225d2c22636f64655f6b657973223a5b223138593930486b45",
+      "received_at_ms": 5000,
+      "key_capacity": 24,
+      "expect": {
+        "clock": {
+          "synced": false
+        },
+        "keys": {
+          "replaced": false
+        }
+      }
+    },
+    {
+      "id": "bad-day-slot",
+      "note": "a malformed day element leaves that slot empty; keys naming it are refused",
+      "body_hex": "7b227365727665725f74696d65223a22323032362d30392d32335431363a30303a31372b30303a3030222c2274656e616e745f736c7567223a22637275736164657273222c226465766963655f636f6465223a22636f7572742d626f782d31222c22636f7572745f6e756d62657273223a5b312c322c332c345d2c226865617274626561745f7365636f6e6473223a36302c22726f73746572223a5b5d2c22636f64655f73746570223a35393637323634302c22636f64655f737465705f6d73223a302c22636f64655f64617973223a5b22626164222c2235393637303438307c3539363733333630225d2c22636f64655f6b657973223a5b223138593930486b45355748765751304f653952646c222c223138593931486b45355748765751304f653952646c225d7d",
+      "received_at_ms": 5000,
+      "key_capacity": 24,
+      "expect": {
+        "clock": {
+          "synced": true,
+          "step": 59672640,
+          "step_ms": 0
+        },
+        "keys": {
+          "replaced": true,
+          "accepted": 1,
+          "rejected": 1,
+          "dropped": 0,
+          "entries": [
+            {
+              "ref": "18Y9",
+              "slot": 1,
+              "key_hex": "1e4139587bd643439ef51765"
+            }
+          ],
+          "days": [
+            null,
+            {
+              "first_step": 59670480,
+              "end_step": 59673360
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
