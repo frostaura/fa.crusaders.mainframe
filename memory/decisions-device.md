@@ -16,8 +16,10 @@ that needs a wire moved is the wrong fix.
   per-tenant API key in `secrets.h`, and a box auto-registers on its first heartbeat. *Why:* box and
   backend share a LAN and only the frontend is public — one club, one box, and that machinery
   defended a threat model that does not exist here while being the largest single source of
-  firmware complexity and flashing ceremony. **`devcrypto` survives as a hex codec only** (confirmed
-  2026-09-16); the name is residual, so a grep for "crypto" here means nothing.
+  firmware complexity and flashing ceremony. Requests are still unsigned. **`devcrypto` regained
+  SHA-256, HMAC, HKDF and base64url on 2026-09-23** for one narrower job — verifying the member
+  code's OFF half offline ([`decisions-member-code.md`](decisions-member-code.md)) — not for
+  device auth, which stays one bearer key.
 - **The firmware tree is one PlatformIO project per device plus `shared/`** (2026-09-19).
   `timebase hal hal_fakes devcrypto fwversion devapi eventq roster` and the new `devlink` (heartbeat
   body + adopted interval, event-upload body, roster push, API breaker — lifted out of
