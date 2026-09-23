@@ -318,7 +318,6 @@ export const SETTINGS_FIXTURE = {
   // the only way the flat pair means anything.
   operating_hours: { mon: "06:00-22:00", tue: "06:00-22:00", wed: "06:00-22:00", thu: "06:00-22:00", fri: "06:00-22:00", sat: "07:00-20:00" },
   credits_per_zar_regular: 1.6,
-  credits_per_zar_league: 2.4,
   topup_block_zar: 100,
   topup_max_zar_per_member: 1000,
   member_per_day_max_minutes: 60,
@@ -639,7 +638,6 @@ export function memberFixture(overrides: Record<string, unknown> = {}) {
     membership_number: "CR-0001",
     photo_url: null,
     status: "Active",
-    member_class: "Regular",
     // True by default: the unverified case is the interesting one, so a test that wants
     // the badge and the resend action asks for it.
     email_verified: true,

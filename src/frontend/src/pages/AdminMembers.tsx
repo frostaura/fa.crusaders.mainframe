@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { GroupAssign } from "../components/members/GroupAssign";
 import { MemberDialogs, type MemberDialogState } from "../components/members/MemberDialogs";
 import { MembersTable, MembersTableSkeleton } from "../components/members/MembersTable";
 import { MembersToolbar } from "../components/members/MembersToolbar";
@@ -7,7 +8,7 @@ import { RelatedBookingField } from "../components/members/RelatedBookingField";
 import type { RowActionHandlers } from "../components/members/RowActions";
 import { TopUpSheet } from "../components/members/TopUpSheet";
 import {
-  DEFAULT_SORT, listSends, nextSort, statusCounts, visibleRows, type MemberRow, type Sort, type SortKey,
+  DEFAULT_SORT, listSends, nextSort, patchRow, statusCounts, visibleRows, type MemberRow, type Sort, type SortKey,
 } from "../components/members/membersModel";
 import { useCreditAdjust } from "../components/members/useCreditAdjust";
 import { useMemberLifecycle } from "../components/members/useMemberLifecycle";
@@ -52,6 +53,7 @@ export default function AdminMembersPage() {
   const query = params.get("q") ?? "";
   const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
   const [dialog, setDialog] = useState<MemberDialogState>(null);
+  const [assigning, setAssigning] = useState<MemberRow | null>(null);
   const groups = useGroupMemberships(listSends(list.members, "groups"));
   const prints = useFingerprints();
   const lifecycle = useMemberLifecycle({ load: list.load, setMembers: list.setMembers });
@@ -75,7 +77,7 @@ export default function AdminMembersPage() {
     fingerprints: (member) => setDialog({ kind: "fingerprints", member }),
     reset: (member) => setDialog({ kind: "reset", member }),
     resend: lifecycle.resend,
-    setClass: lifecycle.setClass,
+    changeGroups: setAssigning,
     suspend: (member) => setDialog({ kind: "suspend", member }),
     reactivate: (member) => setDialog({ kind: "reactivate", member }),
     fingerprintCount: (member) => prints.byUser[member.user_id]?.templates.length ?? 0,
@@ -115,6 +117,19 @@ export default function AdminMembersPage() {
         fingerprints={prints.byUser}
         readFingerprints={prints.read}
       />
+      {assigning ? (
+        <GroupAssign
+          userId={assigning.user_id}
+          name={assigning.full_name}
+          // What the row shows, when the row knows; otherwise the dialog reads the member's own.
+          current={groupsKnown(groups.state, assigning)}
+          onClose={() => setAssigning(null)}
+          onSaved={(result) => {
+            list.setMembers((rows) => patchRow(rows, result.user_id, { groups: result.groups }));
+            if (groups.state.status !== "inline") void groups.retry();
+          }}
+        />
+      ) : null}
       {credit.target ? (
         <TopUpSheet
           name={credit.target.full_name}
@@ -190,6 +205,13 @@ function MembersBody(props: BodyProps) {
       </StateBlock>
     </>
   );
+}
+
+/** The member's groups as the list knows them, or null when it does not (the dialog then reads them). */
+function groupsKnown(state: GroupsState, row: MemberRow): NonNullable<MemberRow["groups"]> | null {
+  if (state.status === "inline") return row.groups ?? [];
+  if (state.status === "ready") return state.byUser.get(row.user_id) ?? [];
+  return null;
 }
 
 /** How a row's groups are found — or null, and no column, when they could not be read. */

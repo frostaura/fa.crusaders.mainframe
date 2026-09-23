@@ -1,12 +1,13 @@
-import type { AdminSettings } from "@/lib/api";
+import { ApiError, type AdminSettings } from "@/lib/api";
+import { describeDeviceError } from "@/lib/deviceErrors";
 import { ecoSettingComplaints } from "@/lib/ecoSettings";
 import {
   DAY_KEYS, DAY_NAMES, deviceNumbersComplaint, doorSettingComplaints, gateSettingComplaints, operatingHoursComplaint,
   type SettingComplaint,
 } from "@/lib/tenantSettings";
 import {
-  type SettingDef, NUMERIC_KEYS, SETTINGS, SETTINGS_SECTIONS, defaultDayComplaint, peakHoursComplaint, rangeComplaints, sectionOfKey,
-  settingLabel, type SettingsSectionId,
+  type SettingDef, SETTINGS, SETTINGS_SECTIONS, defaultDayComplaint, numericKeysOf, peakHoursComplaint, rangeComplaints,
+  sectionOfKey, settingDef, settingLabel, settingsFor, type SettingsSectionId,
 } from "@/lib/settingsSchema";
 import { SETTINGS_COPY } from "@/lib/settingsCopy";
 
@@ -33,7 +34,7 @@ type Held = Record<string, unknown>;
 
 function emptyNumberComplaints(settings: AdminSettings, currency: string): SettingComplaint[] {
   const held = settings as unknown as Held;
-  return NUMERIC_KEYS
+  return numericKeysOf(settings)
     .filter((key) => typeof held[key] === "number" && !Number.isFinite(held[key]))
     .map((key) => ({
       key,
@@ -97,7 +98,7 @@ const same = (a: unknown, b: unknown) => Object.is(a, b);
 export function changedKeys(original: AdminSettings, draft: AdminSettings): string[] {
   const before = original as unknown as Held;
   const after = draft as unknown as Held;
-  const keys = SETTINGS.map((def) => def.key).filter((key) => !same(before[key], after[key]));
+  const keys = settingsFor(draft).map((def) => def.key).filter((key) => !same(before[key], after[key]));
   const days = DAY_KEYS
     .filter((day) => original.operating_hours?.[day] !== draft.operating_hours?.[day])
     .map((day) => `operating_hours_${day}`);
@@ -115,13 +116,66 @@ export function dirtySections(changed: readonly string[]): Set<SettingsSectionId
 }
 
 /**
- * What a save sends: the whole working copy EXCEPT the button map, which the Boards screen owns.
- * The API reads an absent key as unchanged, so leaving it out is what stops this page reverting a
- * remap somebody made there.
+ * What a save sends: the whole working copy EXCEPT the button map, which the Boards screen owns,
+ * and the league rate, which is the League group's now (D2). The API reads an absent key as
+ * unchanged, so leaving the map out is what stops this page reverting a remap somebody made
+ * there; and it REFUSES the league rate (400 `credits_per_zar_league_moved_to_groups`), so an API
+ * still serving it on the read must not have it echoed back on the save.
  */
-export function savePayload(settings: AdminSettings) {
-  const { button_map: _buttonMap, ...withoutButtonMap } = settings;
-  return withoutButtonMap;
+export function savePayload(settings: AdminSettings): AdminSettings {
+  const copy = { ...(settings as unknown as Held) };
+  delete copy.button_map;
+  delete copy.credits_per_zar_league;
+  return copy as unknown as AdminSettings;
+}
+
+/** Sent back as read, camelCase: the tenant's default court price, which the PUT requires. */
+const ROUND_TRIP = ["slice_price_credits", "operating_hours"] as const;
+
+const camel = (key: string) => key.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());
+
+/**
+ * The PUT body: every row this page shows, under the spelling(s) the API binds for it (the
+ * registry's `wire`), plus the two keys the API needs back as read. Nothing the page does not show
+ * is sent, so a save from here cannot revert a key another screen owns.
+ *
+ * <p>
+ * <b>Why the page builds its own body</b> rather than `endpoints.adminSettingsSave`'s: that mapper
+ * names each key by hand and camelCases all of them, so a key it has not heard of — every alert
+ * number R23 adds, and every per-kind cooldown the server serves — never reached the wire, and the
+ * five snake-only box and monitoring keys it did send were bound by nothing. The registry already
+ * knows every row; this is it, spelled the way the server listens. `settings-wire.test.ts` holds
+ * it equal to the mapper for every key the two share.
+ * </p>
+ */
+export function wireBody(settings: AdminSettings): Record<string, unknown> {
+  const held = settings as unknown as Held;
+  const body: Record<string, unknown> = {};
+  const put = (key: string, wire: SettingDef["wire"] = "camel") => {
+    const value = held[key];
+    if (value === undefined) return;
+    if (wire !== "snake") body[camel(key)] = value;
+    if (wire !== "camel") body[key] = value;
+  };
+  for (const key of ROUND_TRIP) put(key);
+  for (const def of settingsFor(settings)) put(def.key, def.wire);
+  return body;
+}
+
+/**
+ * A refused save, in words. The shared device-error dictionary first (a code that HAS a sentence
+ * gets it); then the two refusals this page can name better than a token read aloud: a value
+ * outside the server's bound, named by the field's own caption — the only bound the page knows
+ * for a cooldown the server added — and the league rate that moved to Groups.
+ */
+export function describeSaveFailure(err: unknown, currency: string): string {
+  const said = describeDeviceError(err, SETTINGS_COPY.saveFailed);
+  const code = err instanceof ApiError ? err.code : null;
+  if (!code || said !== code.replace(/_/g, " ")) return said;
+  if (code === "credits_per_zar_league_moved_to_groups") return SETTINGS_COPY.leagueRateMoved;
+  const key = /^(.+)_out_of_range$/.exec(code)?.[1];
+  if (key && settingDef(key)) return `${settingLabel(key, currency)} is outside what the club’s system accepts. Nothing was saved.`;
+  return said;
 }
 
 /** Club times are chosen, never typed. Quarter-hours, or 5 minutes where a stored time is not one. */

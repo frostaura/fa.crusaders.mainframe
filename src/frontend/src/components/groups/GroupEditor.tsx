@@ -1,30 +1,40 @@
-import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Alert } from "../Alert";
-import { Button } from "../ui/button";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "../ui/card";
-import { Field, FieldDescription, FieldLabel } from "../ui/field";
+import { Field, FieldDescription, FieldError, FieldLabel } from "../ui/field";
 import { Input } from "../ui/input";
 import { RadioCard, RadioGroup } from "../ui/radio-group";
+import { Separator } from "../ui/separator";
 import { Switch } from "../ui/switch";
+import { Textarea } from "../ui/textarea";
 import { typography } from "../../lib/typography";
+import { cn } from "../../lib/utils";
 import { WeekPainter } from "./WeekPainter";
-import { paintedToWindows, windowsToPainted } from "./weekGrid";
-import { GROUP_PRICING_MODES, type GroupPricingMode, type MemberGroup, type MemberGroupBody } from "../../lib/adminApi";
-import { round2AwayFromZero } from "../../lib/groupRules";
+import { CAPS, draftProblems, priceOf, type ClubContext, type Draft, type SetDraft } from "./groupDraft";
+import { GROUP_PRICING_MODES, type GroupPricingMode } from "../../lib/adminApi";
+import { rateProblem } from "../../lib/groupRules";
 import {
-  capResolutionSentence, explainGroupRefusal, ratePerBlockSentence, slicePriceLine,
-  type PaintedWeek,
+  GROUP_SECTIONS, GROUP_SHEET, PEAK_COMBINE, PEAK_OPTIONS, RATE_COPY, capResolutionSentence,
+  explainGroupRefusal, peakWindowLine, ratePerBlockSentence, ratePreviewLine, slicePriceLine,
+  type PeakChoice,
 } from "../../lib/groupsCopy";
 
 /**
- * The group editor — name, what a slot costs, the three caps, and the weekly painter.
+ * The group editor's sections — Basics, Court price, Top-up rate, Peak hours, Booking times,
+ * Limits (D2: "the one place for pricing, times, caps, peak and the top-up rate").
  *
  * <p>
  * <b>Every choice states its consequence beside itself.</b> Three radio buttons with no figure
- * next to them are three buttons a volunteer admin guesses at; a cap stepper with no sentence
- * under it is a number whose effect is invisible until a member complains. The consequence
+ * next to them are three buttons a volunteer admin guesses at; a rate field with no "R100 → 240 cr"
+ * under it is a number whose effect is invisible until a member tops up. The consequence
  * sentences all come from `groupsCopy`, so the editor and the card cannot describe one rule two
  * ways.
+ * </p>
+ *
+ * <p>
+ * <b>Both D2 fields are tri-state on the wire, and the draft keeps them so.</b> A rate is
+ * "inherit the club's" (null) or a figure; a peak say is grants / withholds / no say. The body
+ * always sends both — the PATCH distinguishes absent from null, and a draft that dropped an
+ * unchanged field would be indistinguishable from one that meant "unchanged" by accident.
  * </p>
  *
  * <p>
@@ -40,185 +50,96 @@ const MODE_LABEL: Record<GroupPricingMode, string> = {
   flat_per_slice: "A flat price per slot",
 };
 
-/** Which caps exist, how they are labelled, and what the club's own value for each is called. */
-const CAPS = [
-  { key: "maxSlotsPerDay", wire: "max_slots_per_day", noun: "slots a day", club: "slotCap" },
-  { key: "maxMinutesPerDay", wire: "max_minutes_per_day", noun: "minutes a day", club: "minuteCap" },
-  { key: "advanceBookingDays", wire: "advance_booking_days", noun: "days ahead", club: "advanceDays" },
-] as const;
-
-type Draft = {
-  name: string;
-  description: string;
-  mode: GroupPricingMode;
-  /** Typed as a decimal multiple — 0.75, not 7500. Converted to basis points on the way out. */
-  multiplier: string;
-  flatPrice: string;
-  caps: Record<string, string | null>;
-  windows: PaintedWeek;
-};
-
-function draftFrom(group: MemberGroup): Draft {
-  const caps: Record<string, string | null> = {};
-  for (const cap of CAPS) {
-    const own = group.caps?.[cap.wire];
-    caps[cap.key] = typeof own === "number" ? String(own) : null;
-  }
-  return {
-    name: group.name,
-    description: group.description ?? "",
-    mode: group.pricing?.mode ?? "inherit_court",
-    multiplier: String(Number(((group.pricing?.multiplier_bps ?? 10_000) / 10_000).toFixed(4))),
-    flatPrice: group.pricing?.flat_slice_price_credits == null
-      ? "" : String(group.pricing.flat_slice_price_credits),
-    caps,
-    windows: windowsToPainted(group.windows),
-  };
-}
-
-/** What one slot costs under the choice currently on screen — the figure beside the choice. */
-function priceOf(draft: Draft, courtPrice: number): { credits: number; unknown: boolean } {
-  if (draft.mode === "inherit_court") return { credits: courtPrice, unknown: false };
-  if (draft.mode === "multiplier") {
-    const multiple = Number(draft.multiplier);
-    if (!Number.isFinite(multiple)) return { credits: 0, unknown: true };
-    return { credits: Math.max(0, round2AwayFromZero(courtPrice * multiple)), unknown: false };
-  }
-  const flat = Number(draft.flatPrice);
-  if (draft.flatPrice.trim() === "" || !Number.isFinite(flat)) return { credits: 0, unknown: true };
-  return { credits: Math.max(0, flat), unknown: false };
-}
-
-function bodyFrom(draft: Draft): MemberGroupBody {
-  const numberOrNull = (value: string | null) =>
-    value === null || value.trim() === "" ? null : Number(value);
-  return {
-    name: draft.name.trim(),
-    description: draft.description.trim() === "" ? null : draft.description.trim(),
-    pricing: {
-      mode: draft.mode,
-      ...(draft.mode === "multiplier"
-        ? { multiplierBps: Math.round(Number(draft.multiplier) * 10_000) }
-        : {}),
-      ...(draft.mode === "flat_per_slice" ? { flatSlicePriceCredits: Number(draft.flatPrice) } : {}),
-    },
-    caps: {
-      maxSlotsPerDay: numberOrNull(draft.caps.maxSlotsPerDay),
-      maxMinutesPerDay: numberOrNull(draft.caps.maxMinutesPerDay),
-      advanceBookingDays: numberOrNull(draft.caps.advanceBookingDays),
-    },
-    // Wholesale, because the API replaces them wholesale. A PATCH carrying a subset would
-    // silently drop every day it left out.
-    windows: paintedToWindows(draft.windows),
-  };
-}
-
-export function GroupEditor({
-  group, club, sliceMinutes, courtPrice, clubCaps, creditsPerZar, blockZar, saving, error,
-  onSave, onCancel,
-}: {
-  group: MemberGroup;
-  club: PaintedWeek;
-  sliceMinutes: number;
-  courtPrice: number;
-  clubCaps: { slotCap: number | null; minuteCap: number | null; advanceDays: number | null };
-  creditsPerZar: number | null | undefined;
-  blockZar: number | null | undefined;
-  saving: boolean;
-  error: unknown;
-  onSave: (body: MemberGroupBody) => void;
-  onCancel: () => void;
-}) {
-  const [draft, setDraft] = useState<Draft>(() => draftFrom(group));
-  const price = priceOf(draft, courtPrice);
-
-  const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
-    setDraft((current) => ({ ...current, [key]: value }));
-
-  // The editor opens under the list: move focus (and so the view) to its heading, or an admin
-  // presses Edit and sees nothing change.
-  const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => { heading.current?.focus(); }, []);
-
+/** One titled part of the sheet: an h3, a line saying what it decides, then its controls. */
+function Section({ id, title, lead, children }: { id: string; title: string; lead?: ReactNode; children: ReactNode }) {
   return (
-    <Card data-group-editor="">
-      <CardHeader>
-        <CardTitle asChild>
-          <h2 ref={heading} tabIndex={-1} data-route-heading="">{group.id === "" ? "A new group" : `Editing ${group.name}`}</h2>
-        </CardTitle>
-      </CardHeader>
+    <section aria-labelledby={id} className="flex flex-col gap-3">
+      <div className="flex flex-col gap-1">
+        <h3 id={id} className={typography({ variant: "h3" })}>{title}</h3>
+        {lead ? <p className="text-sm text-text-secondary">{lead}</p> : null}
+      </div>
+      {children}
+    </section>
+  );
+}
 
-      <CardContent className="flex flex-col gap-6">
-        {error != null && <Alert tone="danger">{explainGroupRefusal(error)}</Alert>}
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field>
-            <FieldLabel>Name</FieldLabel>
-            <Input value={draft.name} onChange={(e) => set("name", e.target.value)} />
-          </Field>
-          <Field>
-            <FieldLabel>Description</FieldLabel>
-            <Input value={draft.description} onChange={(e) => set("description", e.target.value)} />
-            <FieldDescription>Members see this on the booking grid, so keep it short.</FieldDescription>
-          </Field>
-        </div>
-
-        <PricingChoice draft={draft} set={set} courtPrice={courtPrice} price={price} creditsPerZar={creditsPerZar} blockZar={blockZar} />
-
-        <fieldset className="flex flex-col gap-4">
-          <legend className={typography({ variant: "h3" })}>Limits for this group</legend>
+export function GroupEditorSections(props: {
+  draft: Draft;
+  set: SetDraft;
+  context: ClubContext;
+  error: unknown;
+  /** Show field problems — after the first Save press, never while the admin is still typing. */
+  showProblems: boolean;
+}) {
+  const { draft, set, context, error, showProblems } = props;
+  const problems = showProblems ? draftProblems(draft) : {};
+  return (
+    <div className="flex flex-col gap-6 pb-2" data-group-editor="">
+      {error != null && <Alert tone="danger" live="assertive">{explainGroupRefusal(error)}</Alert>}
+      <Basics draft={draft} set={set} problem={problems.name} />
+      <Separator />
+      <Section id="group-price" title={GROUP_SECTIONS.price}>
+        <PricingChoice draft={draft} set={set} context={context} />
+      </Section>
+      <Separator />
+      <Section id="group-rate" title={GROUP_SECTIONS.rate} lead={RATE_COPY.combine}>
+        <RateChoice draft={draft} set={set} context={context} problem={problems.rate} />
+      </Section>
+      <Separator />
+      <Section id="group-peak" title={GROUP_SECTIONS.peak} lead={peakWindowLine(context.peakHours, context.peakAdvanceHours)}>
+        <PeakChoiceCards draft={draft} set={set} />
+      </Section>
+      <Separator />
+      <Section id="group-times" title={GROUP_SECTIONS.times}>
+        <WeekPainter club={context.club} value={draft.windows} onChange={(next) => set("windows", next)} sliceMinutes={context.sliceMinutes} />
+      </Section>
+      <Separator />
+      <Section id="group-limits" title={GROUP_SECTIONS.limits}>
+        <div className="grid gap-3 lg:grid-cols-3">
           {CAPS.map((cap) => (
             <CapField
               key={cap.key}
               noun={cap.noun}
-              groupName={draft.name}
-              clubValue={clubCaps[cap.club]}
+              groupName={draft.name || "This group"}
+              clubValue={context.clubCaps[cap.club]}
               value={draft.caps[cap.key]}
               onChange={(next) => set("caps", { ...draft.caps, [cap.key]: next })}
             />
           ))}
-        </fieldset>
-
-        <div className="flex flex-col gap-2">
-          <h3 className={typography({ variant: "h3" })}>When may this group book?</h3>
-          <WeekPainter
-            club={club}
-            value={draft.windows}
-            onChange={(next) => set("windows", next)}
-            sliceMinutes={sliceMinutes}
-          />
         </div>
-      </CardContent>
+      </Section>
+    </div>
+  );
+}
 
-      <CardFooter className="justify-end">
-        <Button variant="outline" onClick={onCancel}>
-          Cancel{" "}<span className="sr-only">{`editing ${group.name}`}</span>
-        </Button>
-        <Button pending={saving} onClick={() => onSave(bodyFrom(draft))}>
-          Save{" "}<span className="sr-only">{`${group.name}`}</span>
-        </Button>
-      </CardFooter>
-    </Card>
+function Basics({ draft, set, problem }: { draft: Draft; set: SetDraft; problem?: string }) {
+  return (
+    <Section id="group-basics" title={GROUP_SECTIONS.basics}>
+      <div className="grid items-start gap-4 sm:grid-cols-2">
+        <Field invalid={Boolean(problem)}>
+          <FieldLabel>{GROUP_SHEET.nameLabel}</FieldLabel>
+          <Input value={draft.name} autoComplete="off" onChange={(e) => set("name", e.target.value)} />
+          <FieldError>{problem}</FieldError>
+        </Field>
+        <Field>
+          <FieldLabel>{GROUP_SHEET.descriptionLabel}</FieldLabel>
+          <Textarea rows={2} value={draft.description} onChange={(e) => set("description", e.target.value)} />
+          <FieldDescription>{GROUP_SHEET.descriptionHelp}</FieldDescription>
+        </Field>
+      </div>
+    </Section>
   );
 }
 
 /** What a slot costs: three cards, the figure for the choice on screen stated under them. */
-function PricingChoice(props: {
-  draft: Draft;
-  set: <K extends keyof Draft>(key: K, value: Draft[K]) => void;
-  courtPrice: number;
-  price: { credits: number; unknown: boolean };
-  creditsPerZar: number | null | undefined;
-  blockZar: number | null | undefined;
-}) {
-  const { draft, set, courtPrice, price, creditsPerZar, blockZar } = props;
+function PricingChoice({ draft, set, context }: { draft: Draft; set: SetDraft; context: ClubContext }) {
+  const price = priceOf(draft, context.courtPrice);
   return (
-    <fieldset className="flex flex-col gap-3">
-      <legend className={typography({ variant: "h3" })}>What does a slot cost this group?</legend>
+    <div className="flex flex-col gap-3">
       <RadioGroup
         value={draft.mode}
         onValueChange={(mode) => set("mode", mode as GroupPricingMode)}
-        className="grid gap-2 sm:grid-cols-3"
+        className="grid gap-2 md:grid-cols-3"
         aria-label="What does a slot cost this group?"
       >
         {GROUP_PRICING_MODES.map((mode) => <RadioCard key={mode} value={mode} title={MODE_LABEL[mode]} />)}
@@ -235,28 +156,98 @@ function PricingChoice(props: {
           <Input inputMode="decimal" value={draft.flatPrice} onChange={(e) => set("flatPrice", e.target.value)} />
         </Field>
       )}
-      <div className="rounded-lg bg-bg-muted px-3 py-2.5 text-sm">
+      <Consequence>
         <p className="font-medium text-text-primary">
           {slicePriceLine({
             mode: draft.mode,
             credits: price.credits,
-            courtPrice,
+            courtPrice: context.courtPrice,
             multiplierBps: Math.round(Number(draft.multiplier) * 10_000),
             unknown: price.unknown,
           })}
         </p>
-        <p className="text-text-secondary">
-          {ratePerBlockSentence({ creditsPerZar, blockZar, slicePrice: price.credits })}
-        </p>
-      </div>
-    </fieldset>
+      </Consequence>
+    </div>
+  );
+}
+
+/** The shaded "what this means" panel under a choice. */
+function Consequence({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn("flex flex-col gap-1 rounded-lg bg-bg-muted px-3 py-2.5 text-sm", className)}>{children}</div>;
+}
+
+/**
+ * The top-up rate: inherit the club's (the switch), or a figure — with what one block buys at it,
+ * live, as the figure is typed. The switch is the control and the number is what it reveals,
+ * because inheriting is what nearly every group should do.
+ */
+function RateChoice(props: { draft: Draft; set: SetDraft; context: ClubContext; problem?: string }) {
+  const { draft, set, context, problem } = props;
+  const inherits = draft.rate === null;
+  const typed = draft.rate === null ? null : rateProblem(draft.rate) === null ? Number(draft.rate.trim()) : null;
+  const effective = inherits ? context.clubRate : typed;
+  return (
+    <div className="flex flex-col gap-3">
+      <Field className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <FieldLabel>{RATE_COPY.inherit}</FieldLabel>
+          <FieldDescription>{RATE_COPY.inheritHelp(context.clubRate)}</FieldDescription>
+        </div>
+        <Switch
+          checked={inherits}
+          onCheckedChange={(on) => set("rate", on ? null : String(context.clubRate ?? ""))}
+        />
+      </Field>
+      {!inherits && (
+        <Field invalid={Boolean(problem)} className="max-w-xs">
+          <FieldLabel>{RATE_COPY.field()}</FieldLabel>
+          <Input
+            inputMode="decimal"
+            autoComplete="off"
+            value={draft.rate ?? ""}
+            onChange={(e) => set("rate", e.target.value)}
+            className="font-semibold tabular-nums"
+          />
+          <FieldError>{problem}</FieldError>
+        </Field>
+      )}
+      {typeof effective === "number" ? (
+        <Consequence>
+          <p className="text-lg font-semibold tabular-nums text-accent-strong" data-rate-preview="">
+            {ratePreviewLine(effective, context.blockZar)}
+          </p>
+          <p className="text-text-secondary">
+            {ratePerBlockSentence({ creditsPerZar: effective, blockZar: context.blockZar ?? 100, slicePrice: priceOf(draft, context.courtPrice).credits })}
+          </p>
+        </Consequence>
+      ) : null}
+    </div>
+  );
+}
+
+/** Grants / Withholds / No say — three cards, and how several groups combine, said once. */
+function PeakChoiceCards({ draft, set }: { draft: Draft; set: SetDraft }) {
+  return (
+    <div className="flex flex-col gap-3">
+      <RadioGroup
+        value={draft.peak}
+        onValueChange={(next) => set("peak", next as PeakChoice)}
+        className="grid gap-2 md:grid-cols-3"
+        aria-label={GROUP_SECTIONS.peak}
+      >
+        {PEAK_OPTIONS.map((option) => (
+          <RadioCard key={option.value} value={option.value} title={option.title} description={option.description} />
+        ))}
+      </RadioGroup>
+      <Consequence><p className="text-text-secondary">{PEAK_COMBINE}</p></Consequence>
+    </div>
   );
 }
 
 /**
- * One cap, behind a "use the club's limit" checkbox, with the resolution stated under it.
+ * One cap, behind a "use the club's limit" switch, with the resolution stated under it.
  *
- * The checkbox is the control and the number is what it reveals, rather than the other way
+ * The switch is the control and the number is what it reveals, rather than the other way
  * round, because inheriting is what nearly every group should do and a blank number field reads
  * as a field somebody forgot to fill in.
  */
@@ -275,7 +266,7 @@ function CapField({ noun, groupName, clubValue, value, onChange }: {
         <Switch checked={inherits} onCheckedChange={() => onChange(inherits ? String(clubValue ?? 0) : null)} />
       </Field>
       {!inherits && (
-        <Field className="max-w-xs">
+        <Field>
           <FieldLabel>{`${noun[0].toUpperCase()}${noun.slice(1)} for this group`}</FieldLabel>
           <Input inputMode="numeric" value={value} onChange={(e) => onChange(e.target.value)} />
         </Field>

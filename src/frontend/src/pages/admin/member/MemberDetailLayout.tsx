@@ -1,17 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useParams } from "react-router-dom";
 import { Alert } from "@/components/Alert";
+import { GroupAssign } from "@/components/members/GroupAssign";
 import { RelatedBookingField } from "@/components/members/RelatedBookingField";
 import { TopUpSheet } from "@/components/members/TopUpSheet";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CalendarBlank, Lock, Plus, ShieldCheck, UserFocus, UsersThree } from "@/components/ui/icons";
+import { CalendarBlank, Lock, PencilSimple, Plus, ShieldCheck, UserFocus, UsersThree } from "@/components/ui/icons";
 import { PageHeader, PageShell } from "@/components/ui/page-shell";
 import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StateBlock } from "@/components/ui/state-block";
+import type { MemberGroupChip } from "@/lib/adminApi";
 import { errorCode } from "@/lib/api";
+import { ASSIGN_COPY, tariffLine } from "@/lib/groupsCopy";
 import type { MemberDetail } from "@/lib/memberDetailApi";
 import { MEMBER_COPY, MEMBER_TABS, STATUS_WORD, statusTone } from "@/lib/memberDetailCopy";
 import { typography } from "@/lib/typography";
@@ -154,14 +157,14 @@ function MemberHeader(props: HeaderProps) {
         aria-label={`${name} — summary`}
         className="flex flex-col gap-5 rounded-xl border border-border bg-bg-surface p-4 shadow-xs sm:p-6 md:flex-row md:items-center md:justify-between"
       >
-        <Identity detail={detail} name={name} />
+        <Identity detail={detail} name={name} state={state} />
         <BalancePanel detail={detail} name={name} onTopUp={onTopUp} />
       </section>
     </>
   );
 }
 
-function Identity({ detail, name }: { detail: MemberDetail; name: string }) {
+function Identity({ detail, name, state }: { detail: MemberDetail; name: string; state: MemberDetailState }) {
   return (
     <div className="flex min-w-0 items-center gap-4">
       <Avatar size={56}>
@@ -182,20 +185,59 @@ function Identity({ detail, name }: { detail: MemberDetail; name: string }) {
             </Badge>
           ) : null}
         </div>
-        <GroupChips groups={detail.groups} />
+        <MemberGroups detail={detail} name={name} state={state} />
       </div>
     </div>
   );
 }
 
-/** Read-only for now; P6's GroupAssign replaces this list with the editor. */
-function GroupChips({ groups }: { groups: MemberDetail["groups"] }) {
+/**
+ * The member's groups, editable in place (P6, D2): chips, the rate and peak standing they add up
+ * to, and "Change groups", which opens GroupAssign — the change's effect on their money is shown
+ * before it is saved, and the header takes the saved set straight away, then re-reads.
+ */
+function MemberGroups({ detail, name, state }: { detail: MemberDetail; name: string; state: MemberDetailState }) {
+  const [open, setOpen] = useState(false);
+  const rateGroup = detail.tariff ? detail.groups.find((g) => g.id === detail.tariff?.rate_group_id)?.name ?? null : null;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <GroupChips groups={detail.groups} />
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => setOpen(true)}
+          title={ASSIGN_COPY.changeFor(name)}
+          icon={<PencilSimple aria-hidden="true" />}
+        >
+          {ASSIGN_COPY.change}{" "}
+          <span className="sr-only">{`for ${name}`}</span>
+        </Button>
+      </div>
+      {detail.tariff ? <p className="text-xs text-text-secondary" data-testid="member-tariff">{tariffLine(detail.tariff, rateGroup)}</p> : null}
+      {open ? (
+        <GroupAssign
+          userId={detail.user_id}
+          name={name}
+          current={detail.groups}
+          onClose={() => setOpen(false)}
+          onSaved={(result) => {
+            state.patch({ groups: result.groups, tariff: result.tariff });
+            void state.reload();
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function GroupChips({ groups }: { groups: MemberGroupChip[] }) {
   if (groups.length === 0) return <p className="text-sm text-text-muted">{MEMBER_COPY.noGroups}</p>;
   return (
     <ul aria-label={MEMBER_COPY.groupsLabel} className="flex flex-wrap gap-1.5">
       {groups.map((g) => (
         <li key={g.id}>
-          <Badge tone="info" icon={<UsersThree size={14} weight="bold" aria-hidden="true" />}>{g.name}</Badge>
+          <Badge tone="info" icon={(g.system_key ? <Lock size={14} weight="bold" aria-hidden="true" /> : <UsersThree size={14} weight="bold" aria-hidden="true" />)}>{g.name}</Badge>
         </li>
       ))}
     </ul>

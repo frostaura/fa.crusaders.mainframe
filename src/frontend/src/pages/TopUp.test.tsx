@@ -30,7 +30,7 @@ describe("Top-up — what the checkout actually sends", () => {
     max_zar: 1000,
     presets_zar: [100, 200, 500, 1000],
     conversion_rate: 1.6,
-    member_class: "Regular" as const,
+    rate_group: null,
   };
 
   /** The signed field list PayFast's own process endpoint requires, in signature order. */
@@ -132,7 +132,7 @@ describe("Top-up — what the checkout actually sends", () => {
       { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
       {
         path: "/api/v1/credit/topup/options",
-        body: { block_zar: 50, min_zar: 50, max_zar: 5000, presets_zar: [50, 500, 2500, 5000], conversion_rate: 2.4, member_class: "LeagueOrSenior" },
+        body: { block_zar: 50, min_zar: 50, max_zar: 5000, presets_zar: [50, 500, 2500, 5000], conversion_rate: 2.4, rate_group: { id: "g-league", name: "League", system_key: "league" } },
       },
       { method: "POST", path: "/api/v1/credit/topup", body: START },
     ]);
@@ -143,7 +143,9 @@ describe("Top-up — what the checkout actually sends", () => {
     expect(screen.queryByText(/R1000\.00 only/)).not.toBeInTheDocument();
 
     // The rate the member is quoted is the club's, and the preview is that rate applied.
-    expect(screen.getByText(/Every R1\.00 you pay adds 2\.40 cr to your wallet \(league \/ senior rate\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Every R1\.00 you pay adds 2\.40 cr to your wallet\./)).toBeInTheDocument();
+    // D2: the rate's source is the member's GROUP, in the club's own words.
+    expect(screen.getByTestId("your-rate")).toHaveTextContent("Your rate: League — 2.4 cr per R1");
     fireEvent.click(screen.getByRole("radio", { name: "R500" }));
     expect(screen.getByText("1200.00 credits")).toBeInTheDocument();
 
@@ -285,7 +287,7 @@ describe("Top-up — what the checkout actually sends", () => {
 describe("Top-up — the quoted rate against the registered one", () => {
   const LEAGUE = {
     block_zar: 100, min_zar: 100, max_zar: 1000, presets_zar: [100, 200, 500, 1000],
-    conversion_rate: 2.4, member_class: "LeagueOrSenior" as const,
+    conversion_rate: 2.4, rate_group: { id: "g-league", name: "League", system_key: "league" },
   };
 
   /** What the server answers once the club has demoted the member behind their back. */
@@ -293,7 +295,7 @@ describe("Top-up — the quoted rate against the registered one", () => {
     error: "topup_rate_changed",
     conversion_rate: 1.6,
     quoted_credits: 320,
-    member_class: "Regular",
+    rate_group: null,
   };
 
   /** …and what it answers on the second press, at the figure the member has now seen. */
@@ -342,13 +344,14 @@ describe("Top-up — the quoted rate against the registered one", () => {
     // The preview moves with it, so nothing on screen still says 480.
     expect(screen.queryByText("480.00 credits")).not.toBeInTheDocument();
     expect(screen.getByText("320.00 credits")).toBeInTheDocument();
-    // …and the class label moves with it too, rather than being dropped. A headed run against
-    // the client-side version of this fix showed the new rate beside the old class label — the new
+    // …and the rate's source moves with it too, rather than being dropped. A headed run against
+    // the client-side version of this fix showed the new rate beside the old label — the new
     // number beside the old reason for it, a second small untruth arriving with the fix for the
     // first. That lane dropped the label. It does not have to be dropped: the refusal carries
-    // `member_class`, so the line can name the RIGHT class, which is what is asserted here.
-    expect(screen.getByText(/Every R1\.00 you pay adds 1\.60 cr to your wallet \(regular rate\)/)).toBeInTheDocument();
-    expect(screen.queryByText(/league \/ senior rate/)).not.toBeInTheDocument();
+    // `rate_group` (D2; it was `member_class`), so the line names the RIGHT source, asserted here.
+    expect(screen.getAllByText(/Every R1\.00 you pay adds 1\.60 cr to your wallet\./).length).toBeGreaterThan(1);
+    expect(screen.getByTestId("your-rate")).toHaveTextContent("Your rate: the club's standard rate — 1.6 cr per R1");
+    expect(screen.queryByText(/Your rate: League/)).not.toBeInTheDocument();
   });
 
   it("goes through on the second press, now that the member has seen the real figure", async () => {

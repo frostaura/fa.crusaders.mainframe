@@ -21,6 +21,10 @@ import { cn } from "../lib/utils";
 // as their record. Gated on the club having a door at all; see MemberDoorHistory below.
 import { DoorHistoryCard } from "../components/member-door/DoorHistoryCard";
 import { useDoorsFlag } from "../components/member-door/useMemberDoor";
+// R23 — an admin's own email alerts: the same switches Settings shows, on the page people look
+// for "my emails" first.
+import { EmailAlertSwitches } from "../components/notifications/EmailAlertSwitches";
+import { EMAIL_ALERTS_COPY } from "../lib/notificationsCopy";
 // item 16 — the guide's third recall point. See the note beside the link.
 import { GUIDE_LINK_LABEL, GUIDE_PATH, GUIDE_TILE_HINT } from "../lib/onboardingCopy";
 import {
@@ -131,6 +135,12 @@ function ProfileSections({ profile }: { profile: MyProfile }) {
       <PasswordCard />
       <MemberDoorHistory />
       <PasskeysCard />
+      {profile.is_admin ? (
+        <ProfileCard title={EMAIL_ALERTS_COPY.profileTitle} description={EMAIL_ALERTS_COPY.description}>
+          <EmailAlertSwitches />
+          <p className="text-sm text-text-secondary">{EMAIL_ALERTS_COPY.feedNote}</p>
+        </ProfileCard>
+      ) : null}
       <div className="flex items-start gap-3 rounded-xl border border-dashed border-border px-4 py-3 sm:px-6">
         <BookOpen aria-hidden="true" size={20} className="mt-3 shrink-0 text-text-muted" />
         <div className="flex min-w-0 flex-col items-start">

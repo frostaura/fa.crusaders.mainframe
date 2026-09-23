@@ -84,12 +84,32 @@ function describePeakHours(err: ApiError): string {
   const start = err.detail("peak_start");
   const end = err.detail("peak_end");
   const hours = err.detail("regular_advance_hours");
+  const withheld = withheldBy(err);
   if (start === null || end === null || hours === null) {
-    return "Peak-hour slots are reserved for league and senior members until closer to the time.";
+    return withheld ?? "Peak-hour slots are reserved for league and senior members until closer to the time.";
   }
   const window = hours === 1 ? "an hour" : `${hours} hours`;
+  if (withheld) {
+    return `${start}–${end} is peak time. ${withheld} You can take it if it's still free ${window} before it starts.`;
+  }
   return `${start}–${end} is reserved for league and senior members until ${window} before the slot. `
     + `You can take it if it's still free ${window} before it starts.`;
+}
+
+/**
+ * D2: the groups that withheld peak priority, named — `withheld_by_groups: [names]` on the refusal.
+ * A member told "reserved for league members" who IS a league member, and is also in a group that
+ * withholds it, needs the group's name to know what to ask the club about.
+ */
+function withheldBy(err: ApiError): string | null {
+  const payload = err.payload as Record<string, unknown> | null | undefined;
+  const raw = payload && typeof payload === "object" ? payload.withheld_by_groups : undefined;
+  const names = Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string" && x.trim() !== "") : [];
+  if (names.length === 0) return null;
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return names.length === 1
+    ? `Your group ${list} doesn't get early peak booking, so you book peak hours like everyone else.`
+    : `Your groups ${list} don't get early peak booking, so you book peak hours like everyone else.`;
 }
 
 function describePerDayCap(err: ApiError): string {

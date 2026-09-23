@@ -6,7 +6,7 @@ import {
   bookingRulesFixture, groupFixture, groupMemberFixture, restrictedGroupFixture, weekdayWindows,
 } from "../test/groupFixtures";
 import type { MemberGroup } from "../lib/adminApi";
-import { GROUP_ACTIONS } from "../lib/groupsCopy";
+import { ARCHIVED_HEADING, ARCHIVE_COPY, ASSIGN_COPY, GROUP_ACTIONS, GROUP_SHEET, RATE_COPY } from "../lib/groupsCopy";
 
 /**
  * A card's consequential actions live behind its ⋯ menu and a confirm dialog (P3 — they were
@@ -18,6 +18,23 @@ async function fromMenu(group: string, item: string) {
   const dialog = await screen.findByRole("dialog");
   fireEvent.click(within(dialog).getByRole("button", { name: item }));
 }
+
+/**
+ * Archive asks WHY (D2 — an archive changes what every member of the group pays): open it from the
+ * menu, give the reason the change record needs, confirm.
+ */
+async function archiveFromMenu(group: string, reason = "Season over") {
+  fireEvent.pointerDown(await screen.findByRole("button", { name: GROUP_ACTIONS.more(group) }), { button: 0, ctrlKey: false, pointerType: "mouse" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: GROUP_ACTIONS.archive }));
+  const dialog = await screen.findByRole("dialog");
+  const confirm = within(dialog).getByRole("button", { name: ARCHIVE_COPY.confirm });
+  expect(confirm, "no archive without a reason").toBeDisabled();
+  fireEvent.change(within(dialog).getByLabelText(ARCHIVE_COPY.reasonLabel), { target: { value: reason } });
+  fireEvent.click(confirm);
+}
+
+/** The editor's primary, named with the group ("Save changes to Off-peak"). */
+const SAVE = (group: string) => ({ name: `${GROUP_SHEET.save} to ${group}` });
 
 /** MemberCombobox (P3 replaced the hand-built MemberPicker): open it, choose by name. */
 async function pickMember(label: RegExp, name: RegExp) {
@@ -122,7 +139,7 @@ describe("the standing statement and the three honest reads", () => {
     renderPage(<AdminGroupsPage />);
     await screen.findByRole("heading", { name: "Off-peak" });
 
-    await fromMenu("Off-peak", GROUP_ACTIONS.archive);
+    await archiveFromMenu("Off-peak");
 
     // The band, and its standing announcement (a separate invisible region) — both say it.
     expect((await screen.findAllByText(/Couldn't read the club's groups\. Nothing has changed\./)).length).toBeGreaterThan(0);
@@ -146,7 +163,8 @@ describe("the standing statement and the three honest reads", () => {
 
   it("says what a top-up block buys, because “1.6” means nothing to a volunteer", async () => {
     open([groupFixture()]);
-    expect(await screen.findByText(/R100\.00 buys 160 credits/)).toBeInTheDocument();
+    // A group that inherits is quoted at the club's rate: one R100 block, 160 credits.
+    expect(await screen.findByText(/R100 → 160 cr/)).toBeInTheDocument();
   });
 });
 
@@ -207,7 +225,7 @@ describe("the editor", () => {
     const stub = await edit([OFF_PEAK], [
       { method: "PATCH", path: "/api/v1/admin/member-groups/g-offpeak", body: OFF_PEAK },
     ]);
-    fireEvent.click(await screen.findByRole("button", { name: /Save Off-peak/ }));
+    fireEvent.click(await screen.findByRole("button", SAVE("Off-peak")));
     await waitFor(() => expect(stub.calls.some((c) => c.method === "PATCH")).toBe(true));
     const sent = stub.calls.find((c) => c.method === "PATCH")!.body as Record<string, unknown>;
     // Windows replace wholesale on the wire, so a PATCH that sent a subset would silently drop
@@ -223,7 +241,7 @@ describe("the editor", () => {
       status: 400,
       body: { error: "group_windows_overlap", day: "sat" },
     }]);
-    fireEvent.click(await screen.findByRole("button", { name: /Save Off-peak/ }));
+    fireEvent.click(await screen.findByRole("button", SAVE("Off-peak")));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/Saturday/);
     expect(alert).not.toHaveTextContent(/group_windows_overlap/);
@@ -269,9 +287,11 @@ describe("deleting, which is refused rather than cascaded", () => {
       path: "/api/v1/admin/member-groups/g-offpeak",
       body: { ...OFF_PEAK, status: "archived" },
     }]);
-    await fromMenu("Off-peak", GROUP_ACTIONS.archive);
+    await archiveFromMenu("Off-peak", "Nobody plays off-peak any more");
     await waitFor(() => expect(stub.calls.some((c) => c.method === "PATCH")).toBe(true));
-    expect(stub.calls.find((c) => c.method === "PATCH")!.body).toEqual({ status: "archived" });
+    // The reason travels with it: the change record's words for why every member's rules moved.
+    expect(stub.calls.find((c) => c.method === "PATCH")!.body)
+      .toEqual({ status: "archived", reason: "Nobody plays off-peak any more" });
   });
 });
 
@@ -435,8 +455,131 @@ describe("the previews, which are the answer to “most restrictive” being an 
     await screen.findByText(/Can book 200 of the 436 slots/);
 
     fireEvent.click(screen.getByRole("button", { name: /Edit Off-peak/ }));
-    fireEvent.click(await screen.findByRole("button", { name: /Save Off-peak/ }));
+    fireEvent.click(await screen.findByRole("button", SAVE("Off-peak")));
     expect(await screen.findByText(/Someone changed the club's opening hours while this was open/))
       .toBeInTheDocument();
+  });
+});
+
+/**
+ * D2 — the group carries the top-up rate and the peak say the member class used to, so this page
+ * is the one place both are set. Both are tri-state on the wire and the page has to keep them so:
+ * a rate is inherited (null) or a figure; a peak say grants, withholds, or has none.
+ */
+describe("the top-up rate and peak hours (D2: groups replaced the class)", () => {
+  beforeEach(() => { signIn({ isAdmin: true }); });
+
+  const LEAGUE = groupFixture({
+    id: "g-league", name: "League", is_system_default: false, system_key: "league",
+    credits_per_zar: 2.4, peak_priority: true, member_count: 12,
+  });
+  const JUNIORS = restrictedGroupFixture({ id: "g-juniors", name: "Juniors", credits_per_zar: null, peak_priority: false });
+
+  it("says each group's rate and peak say on its card, in words beside an icon", async () => {
+    open([LEAGUE, JUNIORS]);
+    const league = await screen.findByRole("list", { name: "League at a glance" });
+    expect(within(league).getByText("2.4 cr per R1")).toBeInTheDocument();
+    expect(within(league).getByText("Grants peak")).toBeInTheDocument();
+    const juniors = screen.getByRole("list", { name: "Juniors at a glance" });
+    expect(within(juniors).getByText("Club rate")).toBeInTheDocument();
+    expect(within(juniors).getByText("Withholds peak")).toBeInTheDocument();
+    // What a block buys at the group's OWN rate, not the club's.
+    expect(screen.getByText(/R100 → 240 cr/)).toBeInTheDocument();
+  });
+
+  /**
+   * The league group carries the club's rates, and the server refuses both archive and delete
+   * (409 group_is_system_default) — so neither is offered, and the card says why.
+   */
+  it("offers the built-in league group neither archive nor delete, and says why", async () => {
+    open([LEAGUE]);
+    await screen.findByRole("heading", { name: "League" });
+    expect(screen.getByText("Built in")).toBeInTheDocument();
+    expect(screen.getByText(/replaced the league \/ over-65 member class/)).toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByRole("button", { name: GROUP_ACTIONS.more("League") }), { button: 0, ctrlKey: false, pointerType: "mouse" });
+    // Nothing safe or destructive to offer: the menu has no archive and no delete.
+    await waitFor(() => expect(screen.queryByRole("menuitem", { name: GROUP_ACTIONS.archive })).not.toBeInTheDocument());
+    expect(screen.queryByRole("menuitem", { name: GROUP_ACTIONS.remove })).not.toBeInTheDocument();
+  });
+
+  it("previews what a block buys at the rate being typed, and sends the rate and the peak say", async () => {
+    const stub = open([JUNIORS], [{ method: "PATCH", path: "/api/v1/admin/member-groups/g-juniors", body: JUNIORS }]);
+    fireEvent.click(await screen.findByRole("button", { name: /Edit Juniors/ }));
+
+    const inherit = await screen.findByRole("switch", { name: RATE_COPY.inherit });
+    expect(inherit, "a group with no rate of its own inherits the club's").toBeChecked();
+    fireEvent.click(inherit);
+    fireEvent.change(screen.getByLabelText(RATE_COPY.field()), { target: { value: "2.4" } });
+    expect(await screen.findByText("R100 → 240 cr")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Grants peak priority" }));
+    fireEvent.click(screen.getByRole("button", SAVE("Juniors")));
+    await waitFor(() => expect(stub.calls.some((c) => c.method === "PATCH")).toBe(true));
+    const sent = stub.calls.find((c) => c.method === "PATCH")!.body as Record<string, unknown>;
+    expect(sent.creditsPerZar).toBe(2.4);
+    expect(sent.peakPriority).toBe(true);
+  });
+
+  it("sends null for an inherited rate and for “no say”, never an absent field", async () => {
+    const stub = open([LEAGUE], [{ method: "PATCH", path: "/api/v1/admin/member-groups/g-league", body: LEAGUE }]);
+    fireEvent.click(await screen.findByRole("button", { name: /Edit League/ }));
+    fireEvent.click(await screen.findByRole("switch", { name: RATE_COPY.inherit }));
+    fireEvent.click(screen.getByRole("radio", { name: "No say" }));
+    fireEvent.click(screen.getByRole("button", SAVE("League")));
+    await waitFor(() => expect(stub.calls.some((c) => c.method === "PATCH")).toBe(true));
+    const sent = stub.calls.find((c) => c.method === "PATCH")!.body as Record<string, unknown>;
+    expect(sent).toHaveProperty("creditsPerZar", null);
+    expect(sent).toHaveProperty("peakPriority", null);
+  });
+
+  /** The server's own bounds, said at the field — never a save that the club then refuses. */
+  it("refuses a rate the club would refuse, at the field, and sends nothing", async () => {
+    const stub = open([JUNIORS]);
+    fireEvent.click(await screen.findByRole("button", { name: /Edit Juniors/ }));
+    fireEvent.click(await screen.findByRole("switch", { name: RATE_COPY.inherit }));
+    fireEvent.change(screen.getByLabelText(RATE_COPY.field()), { target: { value: "2.12345" } });
+    fireEvent.click(screen.getByRole("button", SAVE("Juniors")));
+    expect(await screen.findByText("Use at most 4 decimal places.")).toBeInTheDocument();
+    expect(stub.calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
+
+  it("explains how several groups combine for peak hours, beside the choice", async () => {
+    open([JUNIORS]);
+    fireEvent.click(await screen.findByRole("button", { name: /Edit Juniors/ }));
+    expect(await screen.findByText(/at least one of their groups grants it and none of them withholds it/)).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Withholds it" })).toBeChecked();
+    // The club's own window, so the choice is about a real stretch of the day.
+    expect(screen.getByText(/The club's peak hours are 16:00–19:00/)).toBeInTheDocument();
+  });
+
+  it("files archived groups under their own heading, and brings one back", async () => {
+    const ARCHIVED = restrictedGroupFixture({ status: "archived" });
+    const stub = open([LEAGUE, ARCHIVED], [{ method: "PATCH", path: "/api/v1/admin/member-groups/g-offpeak", body: { ...ARCHIVED, status: "active" } }]);
+    expect(await screen.findByRole("heading", { name: `${ARCHIVED_HEADING} (1)` })).toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByRole("button", { name: GROUP_ACTIONS.more("Off-peak") }), { button: 0, ctrlKey: false, pointerType: "mouse" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: ARCHIVE_COPY.restore }));
+    await waitFor(() => expect(stub.calls.find((c) => c.method === "PATCH")?.body).toEqual({ status: "active" }));
+  });
+});
+
+describe("moving somebody between groups from the group's own members tab", () => {
+  beforeEach(() => { signIn({ isAdmin: true }); });
+
+  it("opens GroupAssign on the member's saved groups, read from the member", async () => {
+    const stub = open([OFF_PEAK], [
+      {
+        path: "/api/v1/admin/member-groups/g-offpeak/members",
+        body: { members: [groupMemberFixture({ user_id: "u9", name: "Sipho Dlamini", membership_number: "CR-0009" })], total: 1, cursor: null },
+      },
+      { path: "/api/v1/admin/members/u9", body: { user_id: "u9", full_name: "Sipho Dlamini", groups: [{ id: "g-offpeak", name: "Off-peak" }] } },
+    ]);
+    fireEvent.click(await screen.findByRole("button", { name: /Members of Off-peak/ }));
+    fireEvent.click(await screen.findByRole("button", { name: ASSIGN_COPY.changeFor("Sipho Dlamini") }));
+    const dialog = await screen.findByRole("dialog", { name: ASSIGN_COPY.title("Sipho Dlamini") });
+    const chips = await within(dialog).findByRole("list", { name: "Chosen groups" });
+    expect(within(chips).getByText("Off-peak")).toBeInTheDocument();
+    expect(stub.calls.some((c) => c.path === "/api/v1/admin/members/u9")).toBe(true);
+    // Nothing changed yet, so there is nothing to save — and the button says so.
+    expect(within(dialog).getByRole("button", { name: ASSIGN_COPY.unchanged })).toBeDisabled();
   });
 });

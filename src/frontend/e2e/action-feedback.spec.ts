@@ -75,7 +75,7 @@ const SESSION_MEMBER = {
 
 const PROFILE = {
   full_name: "Test Member", email: "m@test.local", photo_url: null,
-  membership_number: "P-1", member_class: "Regular",
+  membership_number: "P-1",
 };
 
 async function onPhone(page: Page) {
@@ -255,7 +255,7 @@ test.describe("the money pages a member reaches alone", () => {
       // The endpoint the page actually reads. This stubbed `/payments/topup-options`, which
       // nothing calls: the old page drew its form anyway on a FAILED options read, and R12's
       // top-up shows that failure (with a retry) instead of a form with no rules behind it.
-      { path: "/api/v1/credit/topup/options", body: { min_zar: 50, max_zar: 5000, block_zar: 50, presets_zar: [100, 500], conversion_rate: 2, member_class: "Regular" } },
+      { path: "/api/v1/credit/topup/options", body: { min_zar: 50, max_zar: 5000, block_zar: 50, presets_zar: [100, 500], conversion_rate: 2 } },
     ]);
     await page.goto("/wallet/topup");
 

@@ -31,6 +31,10 @@ export function groupFixture(overrides: Partial<MemberGroup> = {}): MemberGroup 
     caps: { max_slots_per_day: null, max_minutes_per_day: null, advance_booking_days: null },
     windows: [],
     member_count: 0,
+    // D2, as the seed writes the Regular group: no system key, the club's rate, no peak say.
+    system_key: null,
+    credits_per_zar: null,
+    peak_priority: null,
     ...overrides,
   };
 }

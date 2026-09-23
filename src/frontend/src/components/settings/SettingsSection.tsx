@@ -41,6 +41,13 @@ export type SettingsSectionProps = {
   before?: ReactNode;
   /** Content below the fields — a derived sentence, a weekly table. */
   after?: ReactNode;
+  /**
+   * Content below EVERYTHING, the advanced settings included — for what is not a club setting at
+   * all (an admin's own email alerts), so the club's rows stay together above it. Mounted only
+   * while the section is OPEN: it is not a field (no deep link or error summary points into it),
+   * and what it reads is read when somebody looks, not on every visit to Settings.
+   */
+  footer?: ReactNode;
   advancedOpen: boolean;
   onAdvancedChange: (open: boolean) => void;
 };
@@ -94,7 +101,7 @@ function SectionHeader(props: Pick<SettingsSectionProps, "section" | "summary" |
 /** The fields a section shows, split into the everyday and the advanced. */
 function useSectionFields(section: SettingsSectionDef) {
   const { settings, visible } = useSettingsForm();
-  const served = settingsIn(section.id).filter((def) => isServed(def, settings));
+  const served = settingsIn(section.id, settings).filter((def) => isServed(def, settings));
   return {
     served,
     main: served.filter((def) => !def.advanced),
@@ -159,6 +166,7 @@ export function SettingsSection(props: SettingsSectionProps) {
             {fields.advanced.map((def) => <SettingField key={def.key} def={def} />)}
           </AdvancedFields>
         ) : null}
+        {open ? props.footer : null}
       </div>
     </AccordionItem>
   );

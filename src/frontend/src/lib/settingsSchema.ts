@@ -48,7 +48,7 @@ import {
 
 export type SettingsSectionId =
   | "bookings" | "hours" | "cancellations" | "credits" | "schedules"
-  | "boxes" | "screens" | "doors" | "records" | "monitoring";
+  | "boxes" | "screens" | "doors" | "records" | "monitoring" | "alerts";
 
 /** What a help, a bound or a lede may depend on: the working copy and the club's money symbol. */
 export type SettingContext = { settings: AdminSettings; currency: string };
@@ -92,6 +92,13 @@ export type SettingDef = {
   options?: readonly SettingOption[];
   maxLength?: number;
   placeholder?: string;
+  /**
+   * The spelling(s) the save sends this key under. The settings PUT binds the older keys
+   * camelCase only, the newest snake_case only, and the ones in between under both — and a key
+   * sent under a spelling the server does not bind is not refused, it is IGNORED: `{"saved":
+   * true}` and no change. So each row says which it needs. Default `camel`.
+   */
+  wire?: "camel" | "snake" | "both";
 };
 
 export type SettingsSectionDef = {
@@ -106,7 +113,7 @@ export type SettingsSectionDef = {
   searchTerms?: readonly string[];
 };
 
-/** The ten sections, in page order. Court boxes before Door gates: the door copy says "above". */
+/** The sections, in page order. Court boxes before Door gates: the door copy says "above". */
 export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
   {
     id: "bookings",
@@ -130,9 +137,11 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
   {
     id: "credits",
     title: "Credits & top-ups",
+    // D2: the league rate moved to the League group. The club rate below is what a member gets
+    // unless one of their groups carries a rate of its own.
     lede: ({ currency }) => `Credits are the unit of account. A member pays in ${currency} and receives credits at the`
-      + " rate for their class — so the two are different sizes, and the currency symbol below never appears on a"
-      + " credit figure.",
+      + " club’s rate below, unless one of their groups has a rate of its own — so the two are different sizes, and the"
+      + " currency symbol never appears on a credit figure.",
   },
   {
     id: "schedules",
@@ -167,6 +176,15 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
     id: "monitoring",
     title: "Monitoring & live updates",
     lede: "How long the club keeps what its boards report, and how screens that show it stay current.",
+  },
+  {
+    // R23. The club's thresholds ride the save bar like every other setting; which alerts reach
+    // ONE admin's inbox is that admin's own preference and saves on the switch (below the rows).
+    id: "alerts",
+    title: "Admin alerts",
+    lede: "When every admin is emailed, and how long alerts stay on the Overview. Which of them reach your own"
+      + " inbox is your choice, below — it saves as you switch and changes nothing for other admins.",
+    searchTerms: ["email", "alert", "notification", "inbox", "remind", "application", "cooldown", "quiet"],
   },
 ];
 
@@ -216,9 +234,9 @@ const BOOKINGS: SettingDef[] = [
     "The most slots one member can hold on a day. 0 means no limit.", { unit: "slots" }),
   {
     key: "peak_hours", section: "bookings", label: "Peak hours", kind: "peakHours",
-    description: "The busy stretch of the day kept for league and over-65 members.",
-    help: "Reserved for league and over-65 members. An empty peak slot opens to everyone a set number of hours"
-      + " before it starts — the next setting.",
+    description: "The busy stretch of the day kept for groups with peak priority.",
+    help: "Reserved for members of a group with peak priority (set on Groups). An empty peak slot opens to everyone"
+      + " a set number of hours before it starts — the next setting.",
     defaultValue: "16:00-19:00",
   },
   {
@@ -305,16 +323,13 @@ const CREDITS: SettingDef[] = [
   },
   {
     ...RATE, key: "credits_per_zar_regular", section: "credits", label: "Credits per {currency}1 — members",
-    description: "Credits a member receives for every {currency}1 they top up.",
-    help: ({ currency }) => `More than 0, at most 1000. ${currency}100 at 1.6 gives 160 credits.`,
+    description: "Credits a member receives for every {currency}1 they top up, unless a group of theirs has its own rate.",
+    help: ({ currency }) => `More than 0, at most 1000. ${currency}100 at 1.6 gives 160 credits. A group with a rate of`
+      + " its own (League, say) overrides this for its members; where a member is in several, the lowest rate applies.",
     defaultValue: 1.6,
   },
-  {
-    ...RATE, key: "credits_per_zar_league", section: "credits", label: "Credits per {currency}1 — league / over-65",
-    description: "The same, for league and over-65 members.",
-    help: ({ currency }) => `More than 0, at most 1000. ${currency}100 at 2.4 gives 240 credits.`,
-    defaultValue: 2.4,
-  },
+  // `credits_per_zar_league` is gone (D2): the league rate is the League group's own rate, and the
+  // API refuses a save that still carries it (400 credits_per_zar_league_moved_to_groups).
   {
     key: "topup_block_zar", section: "credits", label: "Top-up block ({currency})", kind: "number",
     unit: "{currency}", unitBefore: true,
@@ -397,7 +412,8 @@ const BOXES: SettingDef[] = [
     advanced: true,
     description: "The least time between two “not reporting” emails about one board.",
     help: `${DEVICE_ALERT_COOLDOWN_MIN_MINUTES}–${DEVICE_ALERT_COOLDOWN_MAX_MINUTES}. At most one “not reporting” email`
-      + " per board in this many minutes; a door nobody has named never alerts.",
+      + " per board in this many minutes; a door nobody has named never alerts. The same quiet time spaces out the"
+      + " “many device faults at once” emails (Admin alerts).",
     min: DEVICE_ALERT_COOLDOWN_MIN_MINUTES, max: DEVICE_ALERT_COOLDOWN_MAX_MINUTES, integer: true, range: false,
     defaultValue: 60,
   },
@@ -405,7 +421,7 @@ const BOXES: SettingDef[] = [
 
 const SCREENS: SettingDef[] = [
   fromRule(rule(DEVICE_TIMING_RULES, "lcd_revert_seconds"), "screens",
-    "How long the box's screen shows a result before going back to the start.", { unit: "s" }),
+    "How long the box's screen shows a result before going back to the start.", { unit: "s", wire: "both" }),
   fromRule(rule(DEVICE_TIMING_RULES, "rapid_scan_window_seconds"), "screens",
     "How long the box stays ready for the next person. 0 turns it off.", { unit: "s" }),
 ];
@@ -491,38 +507,138 @@ const RECORDS: SettingDef[] = [
 ];
 
 const MONITORING: SettingDef[] = [
+  // wire "both": the settings PUT binds these four snake_case only, and a camelCase-only save
+  // of them was answered {"saved": true} and changed nothing.
   fromRule(rule(MONITORING_RULES, "device_error_retention_days"), "monitoring",
-    "How long a resolved board fault is kept.", { unit: "days" }),
+    "How long a resolved board fault is kept.", { unit: "days", wire: "both" }),
   fromRule(rule(REALTIME_RULES, "realtime_fallback_after_failures"), "monitoring",
     "Failures in a row before a screen re-reads on a timer instead of live.", { unit: "tries" }),
   fromRule(rule(MONITORING_RULES, "device_error_max_open_rows"), "monitoring",
-    "Past this, one board's new faults are counted rather than kept.", { advanced: true, unit: "faults" }),
+    "Past this, one board's new faults are counted rather than kept.", { advanced: true, unit: "faults", wire: "both" }),
   fromRule(rule(REALTIME_RULES, "sse_keepalive_seconds"), "monitoring",
     "How often a live connection is proven alive. Keep it under 60.", { advanced: true, unit: "s" }),
   fromRule(rule(REALTIME_RULES, "realtime_poll_seconds_control_board"), "monitoring",
-    "The control board's timer once live updates are given up on.", { advanced: true, unit: "s" }),
+    "The control board's timer once live updates are given up on.", { advanced: true, unit: "s", wire: "both" }),
   fromRule(rule(REALTIME_RULES, "control_board_resync_seconds"), "monitoring",
-    "A full re-read, so a wall screen that missed an update catches up.", { advanced: true, unit: "s" }),
+    "A full re-read, so a wall screen that missed an update catches up.", { advanced: true, unit: "s", wire: "both" }),
+];
+
+// The admin notifier's numbers (R23). Snake_case on the wire: nothing ever sent them any other way,
+// so the API binds that one spelling. Bounds are `AdminNotificationSettings`' own constants.
+const SNAKE = { kind: "number", integer: true, range: true, optional: true, wire: "snake" } as const;
+
+const ALERTS: SettingDef[] = [
+  {
+    ...SNAKE, key: "application_reminder_hours", section: "alerts", label: "Remind about waiting applications after (hours)",
+    unit: "h",
+    description: "Once an application has waited this long, every admin is reminded daily until it is dealt with.",
+    help: "1–168. A day is what an applicant is told to expect. The reminder repeats once a day while any application"
+      + " has waited longer than this, and stops the moment none has.",
+    min: 1, max: 168, defaultValue: 24,
+  },
+  {
+    ...SNAKE, key: "fault_spike_count", section: "alerts", label: "Fault spike (faults)", unit: "faults",
+    description: "Different faults open at once across the club’s boards before every admin is emailed.",
+    help: "2–100. Counts DIFFERENT open faults of error or worse inside the window beside this — one board repeating the"
+      + " same fault is one. The quiet time between two spike emails is the Alert cooldown under Court boxes.",
+    min: 2, max: 100, defaultValue: 5,
+  },
+  {
+    ...SNAKE, key: "fault_spike_minutes", section: "alerts", label: "Fault spike window (minutes)", unit: "min",
+    description: "The window those faults have to fall inside.",
+    help: "5–240. The faults above count only if they all opened inside this many minutes.",
+    min: 5, max: 240, defaultValue: 15,
+  },
+  {
+    ...SNAKE, key: "topup_failure_cooldown_minutes", section: "alerts", label: "Top-up failure emails — quiet time (minutes)",
+    unit: "min",
+    description: "Top-up failures for the same reason inside this time are one email, not one per member.",
+    help: "5–1440. A payment gateway having a bad quarter of an hour fails every member who tries; the club hears it"
+      + " once per reason inside this window. It cannot go below 5, so a failing gateway never becomes an email per member.",
+    min: 5, max: 1440, defaultValue: 30,
+  },
+  {
+    ...SNAKE, key: "overdraft_cooldown_minutes", section: "alerts", label: "Below-zero booking emails — quiet time (minutes)",
+    unit: "min",
+    description: "One admin booking the same member below zero inside this time is one email.",
+    help: "1–240. A bulk booking of twenty courts below zero is one decision, so it is one email to the other admins"
+      + " rather than twenty. It cannot go below 1.",
+    min: 1, max: 240, defaultValue: 15,
+  },
+  {
+    ...SNAKE, key: "admin_notification_retention_days", section: "alerts", label: "Keep alerts on the Overview for (days)",
+    unit: "days", advanced: true,
+    description: "Finished alerts older than this are deleted from Recent alerts.",
+    help: "7–730. Past this an alert that was emailed, held back or given up on is DELETED from the Overview’s Recent"
+      + " alerts. One still waiting to be sent is never deleted by age.",
+    min: 7, max: 730, defaultValue: 90,
+  },
 ];
 
 /** Every setting on the page, in page order. */
 export const SETTINGS: readonly SettingDef[] = [
   ...BOOKINGS, ...HOURS, ...CANCELLATIONS, ...CREDITS, ...SCHEDULES, ...BOXES, ...SCREENS, ...DOORS, ...RECORDS,
-  ...MONITORING,
+  ...MONITORING, ...ALERTS,
 ];
 
 const BY_KEY = new Map(SETTINGS.map((def) => [def.key, def]));
 
+// ---------------------------------------------------------------------------------------
+// Alert cooldowns the API serves that this registry has no row for
+// ---------------------------------------------------------------------------------------
+
+/**
+ * The notifier's per-kind quiet times. The two the API serves today (`topup_failure_cooldown_minutes`,
+ * `overdraft_cooldown_minutes`) are rows above with the server's own bounds. Any OTHER
+ * `*_cooldown_minutes` key the API serves and this table does not name still becomes a row in
+ * Admin alerts, so a kind added on the server is editable the day it ships. Its bound is the
+ * SERVER's: the page does not invent one, and a value outside it comes back as
+ * `<key>_out_of_range`, which the save names by this label.
+ */
+const COOLDOWN_KEY = /^([a-z][a-z0-9_]*)_cooldown_minutes$/;
+
+const COOLDOWN_HELP = "The club’s system sets the range it accepts. A value outside it is refused when you save, and"
+  + " the refusal names this field.";
+
+// One object per key for the life of the page, so a memoised row is not re-rendered by a new def.
+const cooldownDefs = new Map<string, SettingDef>();
+
+function cooldownDef(key: string): SettingDef | undefined {
+  if (BY_KEY.has(key)) return undefined;
+  const match = COOLDOWN_KEY.exec(key);
+  if (!match) return undefined;
+  const cached = cooldownDefs.get(key);
+  if (cached) return cached;
+  const words = match[1].replaceAll("_", " ");
+  const def: SettingDef = {
+    key, section: "alerts", kind: "number", unit: "min", integer: true, range: false, optional: true, wire: "snake",
+    label: `Quiet time between “${words}” emails (minutes)`,
+    description: `The least time between two “${words}” emails.`,
+    help: COOLDOWN_HELP,
+  };
+  cooldownDefs.set(key, def);
+  return def;
+}
+
+/** The registry, plus a row for every alert cooldown the API serves that the registry does not name. */
+export function settingsFor(settings: AdminSettings): readonly SettingDef[] {
+  const extra = Object.keys(settings).sort()
+    .map((key) => ((settings as unknown as Record<string, unknown>)[key] === undefined ? undefined : cooldownDef(key)))
+    .filter((def): def is SettingDef => def !== undefined);
+  return extra.length === 0 ? SETTINGS : [...SETTINGS, ...extra];
+}
+
 export function settingDef(key: string): SettingDef | undefined {
-  return BY_KEY.get(key);
+  return BY_KEY.get(key) ?? cooldownDef(key);
 }
 
 export function sectionDef(id: SettingsSectionId): SettingsSectionDef {
   return SETTINGS_SECTIONS.find((section) => section.id === id)!;
 }
 
-export function settingsIn(section: SettingsSectionId): SettingDef[] {
-  return SETTINGS.filter((def) => def.section === section);
+/** A section's rows — with the served cooldowns, when handed the document that serves them. */
+export function settingsIn(section: SettingsSectionId, settings?: AdminSettings): SettingDef[] {
+  return (settings ? settingsFor(settings) : SETTINGS).filter((def) => def.section === section);
 }
 
 /**
@@ -530,12 +646,12 @@ export function settingsIn(section: SettingsSectionId): SettingDef[] {
  */
 export function sectionOfKey(key: string): SettingsSectionId | undefined {
   if (key.startsWith("operating_hours")) return "hours";
-  return BY_KEY.get(key)?.section;
+  return settingDef(key)?.section;
 }
 
 /** A field's caption in the club's own currency — the one reader, so a jump link and a label agree. */
 export function settingLabel(key: string, currency: string): string {
-  return (BY_KEY.get(key)?.label ?? key).replaceAll("{currency}", currency);
+  return (settingDef(key)?.label ?? key).replaceAll("{currency}", currency);
 }
 
 /** Every key's raw caption — for the sentences that quote a field by the words it wears. */
@@ -560,6 +676,12 @@ export function isServed(def: SettingDef, settings: AdminSettings): boolean {
 
 /** The numeric keys — the ones an emptied box (NaN) is a complaint about. */
 export const NUMERIC_KEYS: readonly string[] = SETTINGS.filter((def) => def.kind === "number").map((def) => def.key);
+
+/** The same, with the served cooldowns. */
+export function numericKeysOf(settings: AdminSettings): readonly string[] {
+  const all = settingsFor(settings);
+  return all === SETTINGS ? NUMERIC_KEYS : all.filter((def) => def.kind === "number").map((def) => def.key);
+}
 
 // ---------------------------------------------------------------------------------------
 // Search

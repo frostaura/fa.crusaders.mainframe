@@ -5,6 +5,8 @@ import { ADMIN_NAV_ITEMS, PENDING_APPLICATIONS_HREF } from "@/components/admin/a
 import {
   doorFixture, doorsServer, memberFixture, refuse, renderPage, signIn, signOut, stubFetch, type StubRoute,
 } from "@/test/harness";
+import { noticeFixture } from "@/components/notifications/fixtures";
+import { RECENT_ALERTS_COPY } from "@/lib/notificationsCopy";
 
 /**
  * The console's Overview: "Needs attention", then every section.
@@ -24,6 +26,8 @@ type Setup = {
   members?: Partial<StubRoute>;
   summary?: Partial<StubRoute>;
   doors?: StubRoute[];
+  /** The Recent alerts feed (R23). Default: answered, empty. */
+  notices?: Partial<StubRoute>;
 };
 
 function setup(options: Setup = {}) {
@@ -41,6 +45,7 @@ function setup(options: Setup = {}) {
       ...options.members,
     },
     { path: "/api/v1/admin/monitoring/summary", body: { open: faults }, ...options.summary },
+    { path: "/api/v1/admin/notifications", body: { items: [], next_cursor: null }, ...options.notices },
     ...(options.doors ?? doorsServer(doors).routes),
   ]);
 }
@@ -212,5 +217,115 @@ describe("the admin Overview", () => {
     for (const link of links) expect(link).toHaveAttribute("data-watermark", "card");
     expect(await within(console).findByRole("link", { name: /Members, 3 membership applications awaiting review/ }))
       .toBeInTheDocument();
+  });
+});
+
+describe("the Overview's Recent alerts (R23)", () => {
+  const alerts = () => screen.getByRole("region", { name: RECENT_ALERTS_COPY.title });
+  const feedCalls = (stub: ReturnType<typeof setup>) => stub.calls.filter((c) => c.path.startsWith("/api/v1/admin/notifications"));
+
+  it("lists what every admin was told, newest first: the headline names each row, which links to where it is dealt with", async () => {
+    setup({
+      notices: {
+        body: {
+          items: [
+            noticeFixture({ headline: "Thandi Mokoena applied to join", link: "/admin/members" }),
+            noticeFixture({
+              kind: "device.offline", title: "Court box or door stopped reporting", headline: "Court 2 box stopped reporting",
+              link: "/admin/monitoring/devices", created_at: new Date(Date.now() - 3 * 3600_000).toISOString(),
+              delivery: { state: "failed", sent_at: null, finished_at: new Date().toISOString(), recipients: 0 },
+            }),
+          ],
+          next_cursor: null,
+        },
+      },
+    });
+    renderHome();
+
+    const first = await within(alerts()).findByRole("link", { name: "Thandi Mokoena applied to join" });
+    expect(first).toHaveAttribute("href", "/admin/members");
+    expect(first).toHaveAccessibleDescription("New membership applications, 5 min ago. Emailed 3 admins.");
+    const second = within(alerts()).getByRole("link", { name: "Court 2 box stopped reporting" });
+    expect(second).toHaveAccessibleDescription(/3 h ago\. Email failed\./);
+    expect(second.querySelector("[data-delivery='failed']")).toHaveTextContent("Email failed");
+    // No older page: nothing to load.
+    expect(within(alerts()).queryByRole("button", { name: RECENT_ALERTS_COPY.loadMore })).toBeNull();
+  });
+
+  it("a notice with nowhere to go is plain text, not a link", async () => {
+    setup({ notices: { body: { items: [noticeFixture({ headline: "A thing happened", link: null })], next_cursor: null } } });
+    renderHome();
+
+    expect(await within(alerts()).findByText("A thing happened")).toBeInTheDocument();
+    expect(within(alerts()).queryAllByRole("link")).toHaveLength(0);
+  });
+
+  it("says there are none only when the read answered with none", async () => {
+    setup();
+    renderHome();
+    expect(await within(alerts()).findByText(RECENT_ALERTS_COPY.emptyTitle)).toBeInTheDocument();
+  });
+
+  it("shows a skeleton while reading, and a failed read with a retry — never 'No alerts yet'", async () => {
+    let down = true;
+    const stub = setup({
+      notices: { respond: () => (down ? refuse(429, { error: "rate_limited" }) : { items: [noticeFixture({ headline: "Back again" })], next_cursor: null }) },
+    });
+    renderHome();
+
+    expect(alerts().querySelector("[aria-busy='true']")).not.toBeNull();
+    const retry = await within(alerts()).findByRole("button", { name: "Try again" });
+    expect(within(alerts()).getByText(/That doesn’t mean nothing happened/)).toBeInTheDocument();
+    expect(within(alerts()).queryByText(RECENT_ALERTS_COPY.emptyTitle)).toBeNull();
+
+    down = false;
+    fireEvent.click(retry);
+    expect(await within(alerts()).findByRole("link", { name: "Back again" })).toBeInTheDocument();
+    expect(feedCalls(stub).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("loads older alerts beneath the ones shown, with the cursor the server gave", async () => {
+    const stub = setup({
+      notices: {
+        respond: ({ path }) => (path.includes("cursor=c1")
+          ? { items: [noticeFixture({ headline: "Older one" })], next_cursor: null }
+          : { items: [noticeFixture({ headline: "Newest one" })], next_cursor: "c1" }),
+      },
+    });
+    renderHome();
+
+    fireEvent.click(await within(alerts()).findByRole("button", { name: RECENT_ALERTS_COPY.loadMore }));
+    expect(await within(alerts()).findByRole("link", { name: "Older one" })).toBeInTheDocument();
+    const names = within(alerts()).getAllByRole("link").map((a) => a.getAttribute("aria-labelledby") && a.textContent);
+    expect(names[0]).toMatch(/Newest one/);
+    expect(names[1]).toMatch(/Older one/);
+    expect(feedCalls(stub).some((c) => c.path.includes("cursor=c1") && c.path.includes("limit=20"))).toBe(true);
+    // The server said there is nothing older: the button goes.
+    expect(within(alerts()).queryByRole("button", { name: RECENT_ALERTS_COPY.loadMore })).toBeNull();
+  });
+
+  it("an older page that fails leaves the rows standing and says so", async () => {
+    setup({
+      notices: {
+        respond: ({ path }) => (path.includes("cursor=")
+          ? refuse(400, { error: "cursor_invalid" })
+          : { items: [noticeFixture({ headline: "Newest one" })], next_cursor: "stale" }),
+      },
+    });
+    renderHome();
+
+    fireEvent.click(await within(alerts()).findByRole("button", { name: RECENT_ALERTS_COPY.loadMore }));
+    expect(await within(alerts()).findByText(RECENT_ALERTS_COPY.cursorExpired)).toBeInTheDocument();
+    expect(within(alerts()).getByRole("link", { name: "Newest one" })).toBeInTheDocument();
+  });
+
+  it("is re-read by the Overview's own refresh", async () => {
+    const stub = setup();
+    renderHome();
+    await within(alerts()).findByText(RECENT_ALERTS_COPY.emptyTitle);
+    const before = feedCalls(stub).length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh overview" }));
+    await waitFor(() => expect(feedCalls(stub).length).toBeGreaterThan(before));
   });
 });

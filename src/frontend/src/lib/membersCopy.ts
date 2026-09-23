@@ -144,8 +144,6 @@ export const GROUPS_COPY = {
   none: "No groups",
   more: (n: number) => `+${n}`,
   moreTitle: (names: string[]) => names.join(", "),
-  /** The class that sets the top-up rate until Groups replace it (D2). */
-  leagueClass: "League or senior",
   /**
    * The groups read failed: the column is not drawn rather than drawn blank, because a blank
    * Groups cell reads as "in no group" — a claim the screen cannot make.
@@ -200,7 +198,6 @@ export const ROW_ACTIONS = {
   fingerprints: (count: number) => (count > 0 ? "Manage fingerprints" : "Enrol a fingerprint"),
   reset: "Reset password",
   resend: "Resend verification email",
-  classGroup: "Rate class",
   suspend: "Suspend member",
   reactivate: "Reactivate member",
 } as const;
@@ -209,12 +206,6 @@ export const ROW_ACTIONS = {
 export const memberHref = (userId: string) => `/admin/members/${userId}`;
 export const bookForHref = (userId: string) => `/bookings?as=${encodeURIComponent(userId)}`;
 export const nightHref = (userId: string) => `/admin/members/${userId}/night`;
-
-export const MEMBER_CLASSES = ["Regular", "LeagueOrSenior"] as const;
-
-export function classLabel(c: string | undefined): string {
-  return c === "LeagueOrSenior" ? "League or senior" : "Regular";
-}
 
 // ---------------------------------------------------------------------------------------
 // Outcomes — toasts
@@ -239,8 +230,6 @@ export const OUTCOMES = {
     `Password reset for ${name}, but the email couldn't be sent. Read them the password below.`,
   resendSent: (email: string) => `Verification email sent to ${email}.`,
   resendFailed: "Couldn't send the verification email. Check the mail settings and try again.",
-  classChanged: (name: string, c: string) => `${name} is now ${classLabel(c).toLowerCase()}.`,
-  classFailed: (name: string) => `Couldn't change ${name}'s class. Their rate is unchanged.`,
   copied: "Copied to clipboard.",
 } as const;
 

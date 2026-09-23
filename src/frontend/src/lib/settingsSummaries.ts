@@ -68,12 +68,12 @@ function cancellations(settings: AdminSettings): string {
 }
 
 function credits(settings: AdminSettings, currency: string): string {
+  // D2: the league rate is the League group's now; this line quotes the club's own rate only.
   const regular = num(settings, "credits_per_zar_regular");
-  const league = num(settings, "credits_per_zar_league");
   const block = num(settings, "topup_block_zar");
   const cap = num(settings, "topup_max_zar_per_member");
   return join([
-    regular !== null && `${currency}1 buys ${regular} cr${league !== null ? ` (${league} league)` : ""}`,
+    regular !== null && `${currency}1 buys ${regular} cr unless a group says otherwise`,
     block !== null && `top up in ${currency}${block}s`,
     cap !== null && `up to ${currency}${cap}`,
   ]);
@@ -128,8 +128,23 @@ function monitoring(settings: AdminSettings): string {
   ]);
 }
 
+function alerts(settings: AdminSettings): string {
+  const reminder = num(settings, "application_reminder_hours");
+  const count = num(settings, "fault_spike_count");
+  const minutes = num(settings, "fault_spike_minutes");
+  const kept = num(settings, "admin_notification_retention_days");
+  const line = join([
+    reminder !== null && `applications chased after ${plural(reminder, "hour")}`,
+    count !== null && minutes !== null && `${count} faults in ${minutes} min is a spike`,
+    kept !== null && `alerts kept ${plural(kept, "day")}`,
+  ]);
+  // An API without the club's thresholds still has each admin's own switches in this section, so
+  // "not available" would be false of it.
+  return line || "Which alerts reach your inbox";
+}
+
 const SUMMARY: Record<SettingsSectionId, (settings: AdminSettings, currency: string) => string> = {
-  bookings, hours, cancellations, credits, schedules, boxes, screens, doors, records, monitoring,
+  bookings, hours, cancellations, credits, schedules, boxes, screens, doors, records, monitoring, alerts,
 };
 
 /** What a collapsed section says about itself. Never empty: an unserved section says so. */

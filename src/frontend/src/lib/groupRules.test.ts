@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  CREDITS_PER_ZAR_DECIMALS, MAX_CREDITS_PER_ZAR, MIN_CREDITS_PER_ZAR_EXCLUSIVE, creditsFor, rateProblem,
+  resolveTariff, type TariffInput,
+} from "./groupRules";
+import {
   UNLIMITED, allowedWindows, allowFor, capFor, capOverrideIsInert, ceilingSlots, clubHoursFor,
   countSlots, emptyIntersection, fitsInOneWindow, formatClock, intersect, memberSlicePrice,
   normalise, parseClock, priceForGroup, resolveDay, round2AwayFromZero, totalMinutes,
@@ -378,5 +382,83 @@ describe("one day, resolved — what the page actually renders from", () => {
     const here = resolveDay([group], "tue", { settings: club, ...options });
     expect(resolveDay([group], "tue", { settings: chicago, ...options }).allowed).toEqual(here.allowed);
     expect(resolveDay([group], "tue", { settings: london, ...options }).allowed).toEqual(here.allowed);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// D2 — the tariff (top-up rate and peak priority), the server's MemberTariffs.Resolve rule
+// ---------------------------------------------------------------------------------------
+
+describe("resolveTariff — the rule the top-up and the booking path both read", () => {
+  const g = (id: string, rate: number | null | undefined, peak: boolean | null | undefined, extra: Partial<TariffInput> = {}): TariffInput =>
+    ({ id, name: id, credits_per_zar: rate, peak_priority: peak, ...extra });
+
+  it("gives a member in no group the club's rate and no peak priority", () => {
+    expect(resolveTariff([], 1.6)).toEqual({ rate: 1.6, rateGroup: null, peak: false, withheldBy: [] });
+  });
+
+  it("takes the LOWEST rate a group sets, and never folds the club's default into it", () => {
+    const t = resolveTariff([g("League", 2.4, null), g("Seniors", 2.0, null)], 1.6);
+    expect(t.rate).toBe(2.0);
+    expect(t.rateGroup?.id).toBe("Seniors");
+    // 2.0 is above the club's 1.6 and still wins: a group that sets a rate REPLACES the default.
+    expect(resolveTariff([g("League", 2.4, null)], 1.6).rate).toBe(2.4);
+  });
+
+  it("skips a group that inherits, rather than reading it as the default", () => {
+    // A window-only "Juniors" group must not drag a league member back to the regular rate.
+    const t = resolveTariff([g("League", 2.4, true), g("Juniors", null, null)], 1.6);
+    expect(t.rate).toBe(2.4);
+    expect(t.rateGroup?.id).toBe("League");
+  });
+
+  it("ignores archived groups entirely", () => {
+    const t = resolveTariff([g("League", 2.4, true, { status: "archived" })], 1.6);
+    expect(t).toEqual({ rate: 1.6, rateGroup: null, peak: false, withheldBy: [] });
+  });
+
+  it("breaks a rate tie by the club's own order, so the group named is the one the top-up row names", () => {
+    const t = resolveTariff([g("B", 2, null, { sort_order: 2 }), g("A", 2, null, { sort_order: 1 })], 1.6);
+    expect(t.rateGroup?.id).toBe("A");
+  });
+
+  it("grants peak when one group grants and none withholds — a group with no say takes nothing away", () => {
+    expect(resolveTariff([g("League", null, true), g("Juniors", null, null)], 1.6).peak).toBe(true);
+    expect(resolveTariff([g("Juniors", null, null)], 1.6).peak, "nobody granting is no").toBe(false);
+  });
+
+  it("lets a withhold win over any number of grants, and names who withheld", () => {
+    const t = resolveTariff([g("League", null, true), g("Seniors", null, true), g("Probation", null, false)], 1.6);
+    expect(t.peak).toBe(false);
+    expect(t.withheldBy).toEqual(["Probation"]);
+  });
+
+  it("treats a field an older API never sent as no say, not as a withhold", () => {
+    expect(resolveTariff([g("League", undefined, true), g("Old", undefined, undefined)], 1.6).peak).toBe(true);
+  });
+});
+
+describe("rateProblem — the server's group_credits_per_zar_invalid, as it is typed", () => {
+  it.each([
+    ["", "empty"], ["  ", "empty"], ["abc", "not_a_number"], ["1e3", "not_a_number"], ["0x10", "not_a_number"],
+    ["0", "not_positive"], ["-1", "not_positive"], ["1000.0001", "too_high"], ["2.12345", "too_precise"],
+  ])("refuses %j as %s", (text, problem) => {
+    expect(rateProblem(text)).toBe(problem);
+  });
+
+  it.each(["2.4", "1000", "0.0001", " 1.6667 "])("accepts %j", (text) => {
+    expect(rateProblem(text)).toBeNull();
+  });
+
+  it("names its bounds as the API does", () => {
+    expect([MIN_CREDITS_PER_ZAR_EXCLUSIVE, MAX_CREDITS_PER_ZAR, CREDITS_PER_ZAR_DECIMALS]).toEqual([0, 1000, 4]);
+  });
+});
+
+describe("creditsFor — a block at a rate, rounded as the ledger column is", () => {
+  it("rounds to two places, away from zero", () => {
+    expect(creditsFor(100, 2.4)).toBe(240);
+    expect(creditsFor(50, 1.6667)).toBe(83.34);
+    expect(creditsFor(100, 1.00005)).toBe(100.01);
   });
 });

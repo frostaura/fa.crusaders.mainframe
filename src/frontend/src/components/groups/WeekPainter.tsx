@@ -246,7 +246,7 @@ export function WeekPainter({ club, value, onChange, sliceMinutes, disabled = fa
         </Button>
       </div>
 
-      <ScrollArea label="Weekly times" tabbable={false}>
+      <ScrollArea label="Weekly times" tabbable={false} className="rounded-xl border border-border bg-bg-surface p-2">
         <div
           role="grid"
           aria-label="When may this group book?"
@@ -258,16 +258,18 @@ export function WeekPainter({ club, value, onChange, sliceMinutes, disabled = fa
           <div role="row" className="flex">
             <span role="columnheader" className="w-16 shrink-0" />
             {WEEK_IN_READING_ORDER.map((day) => (
-              <div role="columnheader" key={day} className="flex-1 px-0.5">
-                <button
+              <div role="columnheader" key={day} className="flex-1 px-0.5 pb-1">
+                <Button
                   type="button"
+                  variant={dayIsFull(day) ? "secondary" : "ghost"}
+                  size="sm"
+                  block
                   disabled={disabled}
                   aria-label={`${dayIsFull(day) ? "Clear" : "Paint"} all of ${dayName(day)}`}
                   onClick={() => setMany(rows.map((_, index) => ({ day, index })), !dayIsFull(day))}
-                  className="w-full min-h-touch rounded-lg border border-control bg-bg-surface text-sm font-semibold text-text-primary hover:bg-bg-muted"
                 >
                   {dayName(day).slice(0, 3)}
-                </button>
+                </Button>
               </div>
             ))}
           </div>
@@ -275,18 +277,21 @@ export function WeekPainter({ club, value, onChange, sliceMinutes, disabled = fa
           {rows.map((start, row) => (
             <div role="row" key={start} className="flex">
               <div role="rowheader" className="w-16 shrink-0 px-0.5">
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
+                  block
                   disabled={disabled}
                   aria-label={`${rowIsFull(cells, row, rows, isOpen) ? "Clear" : "Paint"} ${formatClock(start)} on every day`}
                   onClick={() => setMany(
                     WEEK_IN_READING_ORDER.map((day) => ({ day, index: row })),
                     !rowIsFull(cells, row, rows, isOpen),
                   )}
-                  className="w-full min-h-touch rounded-lg text-xs tabular-nums text-text-secondary hover:bg-bg-muted"
+                  className="min-h-touch text-xs font-normal tabular-nums text-text-secondary [@media(pointer:fine)]:min-h-6 [@media(pointer:fine)]:py-0"
                 >
                   {formatClock(start)}
-                </button>
+                </Button>
               </div>
               {WEEK_IN_READING_ORDER.map((day, dayIndex) => {
                 const open = isOpen(day, start);
@@ -309,10 +314,10 @@ export function WeekPainter({ club, value, onChange, sliceMinutes, disabled = fa
                       if (gestureRef.current) apply(day, row, gestureRef.current.allowed);
                     }}
                     className={cn(
-                      "min-h-touch flex-1 mx-0.5 my-0.5 rounded-md",
+                      "min-h-touch [@media(pointer:fine)]:min-h-6 flex-1 m-0.5 rounded-md transition-colors duration-fast ease-standard motion-reduce:transition-none",
                       !open && "border border-dashed border-border bg-bg-muted/50",
-                      open && !on && "border border-dashed border-control bg-bg-muted",
-                      open && on && "bg-accent-soft ring-2 ring-inset ring-accent-strong",
+                      open && !on && "cursor-pointer border border-border bg-bg-surface hover:bg-bg-muted",
+                      open && on && "cursor-pointer bg-accent-soft ring-2 ring-inset ring-accent-strong",
                       focused && "outline outline-2 outline-offset-1 outline-accent-strong",
                     )}
                   />
@@ -344,7 +349,7 @@ export function WeekPainter({ club, value, onChange, sliceMinutes, disabled = fa
           <span>Allowed</span>
         </li>
         <li className="flex items-center gap-2">
-          <span aria-hidden className="inline-block size-4 rounded-sm border border-dashed border-control bg-bg-muted" />
+          <span aria-hidden className="inline-block size-4 rounded-sm border border-border bg-bg-surface" />
           <span>Not allowed</span>
         </li>
         <li className="flex items-center gap-2">

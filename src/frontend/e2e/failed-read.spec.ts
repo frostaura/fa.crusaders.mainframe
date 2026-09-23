@@ -31,7 +31,7 @@ import { SESSION_ADMIN, serveApi, signIn, test, expect } from "./fixtures";
 
 const PROFILE = {
   full_name: "Nomsa Khumalo", email: "n@test.local", photo_url: null,
-  membership_number: "P-1", member_class: "Regular",
+  membership_number: "P-1",
 };
 const COMMON = [
   { path: "/api/v1/whoami", body: SESSION_ADMIN },

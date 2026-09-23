@@ -10,7 +10,7 @@ import { renderPage, signIn, signOut, stubFetch } from "../test/harness";
  * The screen said, in as many words, <i>"This rate is locked in when you continue, so it
  * can't change while you're paying"</i> — and Continue registered the LIVE rate. Two
  * finders reproduced the same thing independently on the same day, from opposite
- * directions: an admin moving one member's class, and an admin editing the club's
+ * directions: an admin moving one member between groups, and an admin editing the club's
  * <code>credits_per_zar_regular</code>, which reaches every member with this screen open.
  * A member was shown 240.00 credits for R100, pressed Continue, and was given 160.
  * </p>
@@ -35,7 +35,8 @@ describe("Top-up — the quoted rate is the registered rate", () => {
     max_zar: 1000,
     presets_zar: [100, 200, 500, 1000],
     conversion_rate: 2.4,
-    member_class: "LeagueOrSenior" as const,
+    // D2: the group the rate comes from, named — the class is gone.
+    rate_group: { id: "g-league", name: "League", system_key: "league" },
   };
 
   const START = {
@@ -52,7 +53,8 @@ describe("Top-up — the quoted rate is the registered rate", () => {
     error: "topup_rate_changed",
     conversion_rate: 1.6,
     quoted_credits: 160,
-    member_class: "Regular",
+    // D2: the refusal names the group the NEW rate comes from — null is the club's standard rate.
+    rate_group: null,
   };
 
   const submitted: HTMLFormElement[] = [];
@@ -110,7 +112,10 @@ describe("Top-up — the quoted rate is the registered rate", () => {
     // The preview is re-quoted rather than left lying: the stale 240.00 is gone.
     expect(screen.getByText("160.00 credits")).toBeInTheDocument();
     expect(screen.queryByText("240.00 credits")).not.toBeInTheDocument();
-    expect(screen.getByText(/Every R1\.00 you pay adds 1\.60 cr to your wallet \(regular rate\)/)).toBeInTheDocument();
+    // The summary under the figure says the new rate as well as the notice above it.
+    expect(screen.getAllByText(/Every R1\.00 you pay adds 1\.60 cr to your wallet\./).length).toBeGreaterThan(1);
+    // …and the line naming where the rate comes from moves with it (D2 — a group, not a class).
+    expect(screen.getByTestId("your-rate")).toHaveTextContent("Your rate: the club's standard rate — 1.6 cr per R1");
 
     // And nothing was handed to PayFast — the defect's whole shape was a card form
     // appearing as the next thing the member saw.

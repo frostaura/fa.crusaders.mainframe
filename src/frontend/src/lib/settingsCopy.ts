@@ -26,9 +26,11 @@ export const SETTINGS_COPY = {
   advancedShow: (n: number) => (n === 1 ? "Show 1 advanced setting" : `Show ${n} advanced settings`),
   advancedHide: "Hide advanced settings",
   notServed: "The club’s system is not serving these settings yet, so there is nothing to change here.",
-  movingToGroups: "Moving to Groups",
-  movingToGroupsNote: "Member-class rates are moving to Groups, where each group will carry its own rate. They keep"
-    + " working here until then.",
+  // D2: a group's top-up rate is set on that group. The Credits section points there, and a save
+  // the API refuses because it still carries the old league rate says where the rate went.
+  groupRatesNote: "Group rates are set on each group.",
+  groupRatesLink: "Set group rates on Groups",
+  leagueRateMoved: "The league rate lives on the League group now — set it on Groups. Nothing was saved.",
   groupsLink: "Member groups can lower these for their own members",
 
   changes: (n: number) => (n === 1 ? "1 unsaved change" : `${n} unsaved changes`),

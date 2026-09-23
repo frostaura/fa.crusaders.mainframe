@@ -557,7 +557,26 @@ export type MemberGroup = {
   };
   windows?: GroupWindow[];
   member_count?: number;
+  /**
+   * D2: `"league"` on the group that replaced the league / over-65 class, null on every group an
+   * admin made. A group with a key is one the product relies on, so it can be renamed and edited
+   * and never archived or deleted (409 `group_is_system_default`) — the screen hides both.
+   */
+  system_key?: string | null;
+  /**
+   * D2: the top-up rate this group carries, credits per one unit of the club's money — or null,
+   * which INHERITS the club's `credits_per_zar_regular` and has no say in a member's rate.
+   */
+  credits_per_zar?: number | null;
+  /**
+   * D2, tri-state: `true` grants peak priority, `false` withholds it (and wins over any grant),
+   * `null` has no say. Absent (an API that predates it) is none of the three.
+   */
+  peak_priority?: boolean | null;
 };
+
+/** A group's say on the peak window: grants, withholds, or none. */
+export type PeakSay = boolean | null;
 
 export type MemberGroupBody = {
   name: string;
@@ -565,6 +584,47 @@ export type MemberGroupBody = {
   pricing: { mode: GroupPricingMode; multiplierBps?: number; flatSlicePriceCredits?: number };
   caps: { maxSlotsPerDay?: number | null; maxMinutesPerDay?: number | null; advanceBookingDays?: number | null };
   windows: GroupWindow[];
+  /** Absent = unchanged; null = inherit the club's rate; else (0, 1000], at most 4 decimals. */
+  creditsPerZar?: number | null;
+  /** Absent = unchanged; true grants, false withholds, null has no say. */
+  peakPriority?: PeakSay;
+};
+
+/**
+ * What a member's groups add up to for money and the peak window — the server's resolution
+ * (`MemberTariffs.Resolve`), never re-derived on a screen that then disagrees with the top-up.
+ */
+export type MemberTariff = {
+  top_up_credits_per_zar: number;
+  /** The group the rate comes from; null when it is the club's default rate. */
+  rate_group_id: string | null;
+  peak_priority: boolean;
+  /** The groups explicitly withholding peak priority, by name. Empty when nothing withholds it. */
+  peak_withheld_by: string[];
+};
+
+/** A group as a member row or the member detail names it (D2). */
+export type MemberGroupChip = {
+  id: string;
+  name: string;
+  system_key?: string | null;
+  credits_per_zar?: number | null;
+  peak_priority?: boolean | null;
+};
+
+/** `PUT /admin/members/{userId}/groups` — the WHOLE set, replaced, and what it resolved to. */
+export type MemberGroupsSetResult = {
+  user_id: string;
+  groups: MemberGroupChip[];
+  added: string[];
+  removed: string[];
+  tariff: MemberTariff;
+};
+
+/** `POST /admin/member-groups/preview` — nothing saved; what applies now, and what would. */
+export type MemberGroupPreview = {
+  current: MemberBookingRules;
+  would_be: MemberBookingRules;
 };
 
 /**
@@ -586,7 +646,11 @@ export type MemberBookingRules = {
   max_minutes_per_day?: number | null;
   advance_booking_days?: number | null;
   empty_window_reason?: { groups?: string[]; day?: string } | null;
+  /** The server's spelling of the same fact: the groups whose times leave nothing, or null. */
+  empty_window_groups?: string[] | null;
   changes_from_current?: Record<string, unknown> | null;
+  /** D2: the top-up rate and peak standing these groups add up to. */
+  tariff?: MemberTariff;
 };
 
 // ---------------------------------------------------------------------------------------
@@ -728,8 +792,14 @@ export const adminEndpoints = {
   memberGroups: () => api.get<{ groups: MemberGroup[] }>("/api/v1/admin/member-groups"),
   memberGroupCreate: (body: MemberGroupBody) =>
     api.post<MemberGroup>("/api/v1/admin/member-groups", body),
-  memberGroupUpdate: (id: string, body: Partial<MemberGroupBody> & { status?: "active" | "archived" }) =>
-    api.patch<MemberGroup>(`/api/v1/admin/member-groups/${id}`, body),
+  /**
+   * `reason` is the admin's own words for the change record — the screen requires one to archive
+   * (D2: an archive changes what every member of the group pays and may book).
+   */
+  memberGroupUpdate: (
+    id: string,
+    body: Partial<MemberGroupBody> & { status?: "active" | "archived"; reason?: string },
+  ) => api.patch<MemberGroup>(`/api/v1/admin/member-groups/${id}`, body),
   /** Refused, never cascaded, while the group has members — archiving is the escape. */
   memberGroupDelete: (id: string) => api.del<void>(`/api/v1/admin/member-groups/${id}`),
   memberGroupMembers: (id: string, page: { cursor?: string; limit?: number } = {}) =>
@@ -744,7 +814,17 @@ export const adminEndpoints = {
     api.del<void>(`/api/v1/admin/member-groups/${id}/members/${userId}`),
   /** What WOULD apply, nothing saved — so a membership change states its consequence first. */
   memberGroupPreview: (body: { userId: string; day?: string; proposedGroupIds: string[] }) =>
-    api.post<MemberBookingRules>("/api/v1/admin/member-groups/preview", body),
+    api.post<MemberGroupPreview>("/api/v1/admin/member-groups/preview", body),
+  /**
+   * One member's groups, set whole (D2 — replaces the deleted `POST /admin/members/{id}/class`).
+   * Replace, not patch: "which groups is this person in" is the question the screen answers, and
+   * N add/remove calls would be N chances to leave them half-moved.
+   */
+  memberGroupsSet: (userId: string, body: { groupIds: string[]; reason?: string }) =>
+    api.put<MemberGroupsSetResult>(`/api/v1/admin/members/${userId}/groups`, {
+      groupIds: body.groupIds,
+      ...(body.reason && body.reason.trim() ? { reason: body.reason.trim() } : {}),
+    }),
   memberBookingRules: (userId: string, day?: string) =>
     api.get<MemberBookingRules>(`/api/v1/admin/members/${userId}/booking-rules${qs({ day })}`),
 

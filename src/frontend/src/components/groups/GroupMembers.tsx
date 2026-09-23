@@ -1,18 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { IconButton } from "../ui/icon-button";
-import { CheckCircle, UserMinus, X, XCircle } from "../ui/icons";
+import { CheckCircle, UserMinus, UsersThree, X, XCircle } from "../ui/icons";
 import { MemberCombobox } from "../ui/member-combobox";
 import { Skeleton } from "../ui/skeleton";
 import { StateBlock } from "../ui/state-block";
 import { clubDayAndClock } from "../../lib/clubClock";
-import { addMembersLabel, addResultLine, memberCountLine } from "../../lib/groupsCopy";
+import { ASSIGN_COPY, addMembersLabel, addResultLine, memberCountLine } from "../../lib/groupsCopy";
+import { useAsyncAction } from "../../lib/useAsyncAction";
 import type { AdminBulkResult, MemberGroup } from "../../lib/adminApi";
 
 /**
- * Who is in this group, and the two ways somebody gets in or out — D3 §6.5, route 1.
+ * Who is in this group, and the two ways somebody gets in or out — the group sheet's Members tab.
  *
  * <p>
  * <b>The result of a batch is a SCREEN, not a toast.</b> `POST /member-groups/{id}/members`
@@ -23,30 +24,41 @@ import type { AdminBulkResult, MemberGroup } from "../../lib/adminApi";
  *
  * <p>
  * <b>The action is named with the number and the group.</b> "Add selected" on a page with four
- * groups on it is a control an admin presses to find out what it does.
+ * groups on it is a control an admin presses to find out what it does. Each person in the group
+ * links to their own page, and "Change groups" opens the same GroupAssign the member's page uses,
+ * so a move between groups states its effect on their rate before it is saved.
  * </p>
  */
 
 export type ClubMember = { user_id: string; full_name: string; membership_number?: string | null };
+
+export type GroupMemberRow = {
+  user_id: string;
+  name: string;
+  membership_number?: string | null;
+  added_at?: string;
+  added_by_name?: string | null;
+};
 
 export function GroupMembers(props: {
   group: MemberGroup;
   /** Everybody the club has, for choosing from. */
   clubMembers: ClubMember[];
   /** Who is in the group now, as the API answers it. */
-  current: Array<{ user_id: string; name: string; membership_number?: string | null; added_at?: string; added_by_name?: string | null }>;
+  current: GroupMemberRow[];
   loading: boolean;
   error: unknown;
   result: AdminBulkResult | null;
   adding: boolean;
   onAdd: (userIds: string[]) => void;
-  onRemove: (userId: string) => void;
+  onRemove: (userId: string) => Promise<unknown>;
   onRetry: () => void;
-  onClose: () => void;
+  /** Opens GroupAssign for one person in the group. */
+  onChangeGroups?: (member: GroupMemberRow) => void;
   timezone: string | undefined;
 }) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
-  const { group, clubMembers, current, result, adding, onAdd, onClose } = props;
+  const { group, clubMembers, current, result, adding, onAdd } = props;
   const [selected, setSelected] = useState<string[]>([]);
   const inGroup = new Set(current.map((m) => m.user_id));
   const candidates = clubMembers.filter((m) => !inGroup.has(m.user_id));
@@ -54,38 +66,25 @@ export function GroupMembers(props: {
   const nameOf = (id: string) =>
     clubMembers.find((m) => m.user_id === id)?.full_name ?? "Somebody the club no longer has";
 
-  // The panel opens under the list: focus its heading so the view goes with it.
-  const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => { heading.current?.focus(); }, []);
-
   return (
-    <Card data-group-members="">
-      <CardHeader>
-        <CardTitle asChild><h2 ref={heading} tabIndex={-1} data-route-heading="">{`Members of ${group.name}`}</h2></CardTitle>
-        <CardDescription>{memberCountLine(group.member_count)}</CardDescription>
-        <CardAction>
-          <IconButton label={`Close members of ${group.name}`} onClick={onClose}><X aria-hidden="true" /></IconButton>
-        </CardAction>
-      </CardHeader>
+    <div data-group-members="" className="flex flex-col gap-6">
+      <p className="text-sm text-text-secondary">{memberCountLine(group.member_count)}</p>
+      {result && <AddResult result={result} nameOf={nameOf} onRetry={onAdd} />}
 
-      <CardContent className="flex flex-col gap-6">
-        {result && <AddResult result={result} nameOf={nameOf} onRetry={onAdd} />}
+      <AddMembers
+        group={group}
+        candidates={candidates}
+        chosen={chosen}
+        adding={adding}
+        onPick={(id) => setSelected((now) => (now.includes(id) ? now : [...now, id]))}
+        onUnpick={(id) => setSelected((now) => now.filter((x) => x !== id))}
+        onClear={() => setSelected([])}
+        onAdd={() => { onAdd(chosen); setSelected([]); }}
+        nameOf={nameOf}
+      />
 
-        <AddMembers
-          group={group}
-          candidates={candidates}
-          chosen={chosen}
-          adding={adding}
-          onPick={(id) => setSelected((now) => (now.includes(id) ? now : [...now, id]))}
-          onUnpick={(id) => setSelected((now) => now.filter((x) => x !== id))}
-          onClear={() => setSelected([])}
-          onAdd={() => { onAdd(chosen); setSelected([]); }}
-          nameOf={nameOf}
-        />
-
-        <CurrentMembers {...props} />
-      </CardContent>
-    </Card>
+      <CurrentMembers {...props} />
+    </div>
   );
 }
 
@@ -186,6 +185,7 @@ function AddMembers(props: {
 /** Who is in the group now, each row with its own way out. */
 function CurrentMembers(props: Parameters<typeof GroupMembers>[0]) {
   const { group, current, loading, error, onRemove, onRetry, timezone } = props;
+  // (onChangeGroups is read off props below: seven destructured names would trip lizard's gate.)
   return (
     <section aria-label={`In ${group.name} now`} className="flex flex-col gap-2">
       <h3 className="text-sm font-semibold text-text-primary">In the group</h3>
@@ -201,26 +201,59 @@ function CurrentMembers(props: Parameters<typeof GroupMembers>[0]) {
       >
         <ul className="divide-y divide-border rounded-lg border border-border">
           {current.map((member) => (
-            <li key={member.user_id} className="flex min-w-0 items-center gap-3 py-1.5 pl-3 pr-1">
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="min-w-0 break-words text-sm font-medium text-text-primary">
-                  {member.name}
-                  {member.membership_number && <span className="font-normal text-text-muted">{` · ${member.membership_number}`}</span>}
-                </span>
-                {member.added_at && (
-                  <span className="text-xs text-text-muted">
-                    {`Added ${clubDayAndClock(member.added_at, timezone)}`}
-                    {member.added_by_name ? ` by ${member.added_by_name}` : ""}
-                  </span>
-                )}
-              </span>
-              <IconButton label={`Take ${member.name} out of ${group.name}`} onClick={() => onRemove(member.user_id)}>
-                <UserMinus aria-hidden="true" />
-              </IconButton>
-            </li>
+            <MemberLine
+              key={member.user_id}
+              member={member}
+              group={group}
+              timezone={timezone}
+              onRemove={onRemove}
+              onChangeGroups={props.onChangeGroups}
+            />
           ))}
         </ul>
       </StateBlock>
     </section>
+  );
+}
+
+/** One person in the group: who, since when, and their two ways out — each showing it is working. */
+function MemberLine(props: {
+  member: GroupMemberRow;
+  group: MemberGroup;
+  timezone: string | undefined;
+  onRemove: (userId: string) => Promise<unknown>;
+  onChangeGroups?: (member: GroupMemberRow) => void;
+}) {
+  const { member, group, timezone, onRemove, onChangeGroups } = props;
+  const remove = useAsyncAction(() => onRemove(member.user_id), {
+    toast: { action: `take ${member.name} out of ${group.name}` },
+  });
+  return (
+    <li className="flex min-w-0 items-center gap-2 py-1.5 pl-3 pr-1">
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="min-w-0 break-words text-sm font-medium text-text-primary">
+          <Link to={`/admin/members/${member.user_id}`} className="no-lift underline-offset-2 hover:underline">{member.name}</Link>
+          {member.membership_number && <span className="font-normal text-text-muted">{` · ${member.membership_number}`}</span>}
+        </span>
+        {member.added_at && (
+          <span className="text-xs text-text-muted">
+            {`Added ${clubDayAndClock(member.added_at, timezone)}`}
+            {member.added_by_name ? ` by ${member.added_by_name}` : ""}
+          </span>
+        )}
+      </span>
+      {onChangeGroups ? (
+        <IconButton label={ASSIGN_COPY.changeFor(member.name)} onClick={() => onChangeGroups(member)}>
+          <UsersThree aria-hidden="true" />
+        </IconButton>
+      ) : null}
+      <IconButton
+        label={`Take ${member.name} out of ${group.name}`}
+        pending={remove.pending}
+        onClick={() => void remove.run()}
+      >
+        <UserMinus aria-hidden="true" />
+      </IconButton>
+    </li>
   );
 }

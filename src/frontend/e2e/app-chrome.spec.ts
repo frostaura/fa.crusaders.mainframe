@@ -21,7 +21,7 @@ const SETTINGS = {
   grace_window_minutes: 5, penalty_window_minutes: 15, timezone: "Africa/Johannesburg",
   button_map: ["court:A", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "off"],
   operating_hours: { mon: "06:00-22:00" },
-  credits_per_zar_regular: 1.6, credits_per_zar_league: 2.4,
+  credits_per_zar_regular: 1.6,
   topup_block_zar: 100, topup_max_zar_per_member: 1000,
   member_per_day_max_minutes: 60, peak_hours: "16:00-19:00",
   peak_advance_hours_for_regular: 1, retention_years: 2, no_show_lookback_days: 7,
@@ -41,7 +41,7 @@ const SETTINGS = {
 function routes(extra: ApiRoute[] = []): ApiRoute[] {
   return [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
-    { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@sample.local", photo_url: null, membership_number: "ADMIN-0001", member_class: "Regular" } },
+    { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@sample.local", photo_url: null, membership_number: "ADMIN-0001" } },
     { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     { path: "/api/v1/admin/settings/", body: SETTINGS },
     // B13's toast is the settings page's own "Settings saved." — a save needs somewhere to land.
@@ -61,7 +61,7 @@ function routes(extra: ApiRoute[] = []): ApiRoute[] {
 function memberRoutes(): ApiRoute[] {
   return [
     { path: "/api/v1/whoami", body: { ...SESSION_ADMIN, is_admin: false } },
-    { path: "/api/v1/me/profile", body: { full_name: "Lerato Mokoena", email: "lerato@sample.local", photo_url: null, membership_number: "M-0001", member_class: "Regular" } },
+    { path: "/api/v1/me/profile", body: { full_name: "Lerato Mokoena", email: "lerato@sample.local", photo_url: null, membership_number: "M-0001" } },
     { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     {
       path: "/api/v1/me/qr/generate",

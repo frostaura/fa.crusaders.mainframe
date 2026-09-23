@@ -6,8 +6,14 @@ import type { StatusFilter } from "@/lib/membersCopy";
  * kept out of the components so they are tested as rules rather than through a render.
  */
 
-/** A group, as a row names one. */
-export type GroupChip = { id: string; name: string };
+/** A group, as a row names one — with D2's tariff fields when the list sends them. */
+export type GroupChip = {
+  id: string;
+  name: string;
+  system_key?: string | null;
+  credits_per_zar?: number | null;
+  peak_priority?: boolean | null;
+};
 
 /**
  * One row of `GET /admin/members`, with the fields the API has added since `AdminMember` was

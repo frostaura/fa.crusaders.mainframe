@@ -2,10 +2,11 @@ import { ApiError } from "./api";
 import { describeFailure } from "./errors";
 import type { AdminItemResult, GroupPricingMode, Weekday } from "./adminApi";
 import {
-  UNLIMITED, WEEK_IN_READING_ORDER, capOverrideIsInert, countSlots, formatClock, intersect,
-  type Interval,
+  CREDITS_PER_ZAR_DECIMALS, MAX_CREDITS_PER_ZAR, UNLIMITED, WEEK_IN_READING_ORDER, capOverrideIsInert,
+  countSlots, creditsFor, formatClock, intersect, type Interval, type RateProblem,
 } from "./groupRules";
-import { formatMoney } from "./utils";
+import { clubCurrencySymbol } from "./currency";
+import { formatRate, formatMoney } from "./utils";
 
 /**
  * Every sentence the groups surface says — GOAL items 3 + 19.
@@ -58,8 +59,9 @@ export const STALE_PREVIEW
   + "from the old ones. Close and reopen it.";
 
 export const PAINTER_INSTRUCTIONS
-  = "Paint the times this group is allowed to book. Anything you leave unpainted, they cannot "
-  + "book. Drag to paint, hold Alt and drag to erase, or use the arrow keys and Space.";
+  = "Paint the times this group may book. Paint nothing and they book any time the club is "
+  + "open; paint anything and they book only the painted times. Drag to paint, hold Alt and "
+  + "drag to erase, or use the arrow keys and Space.";
 
 // ---------------------------------------------------------------------------------------
 // Weekdays
@@ -150,8 +152,19 @@ export function paintedWeekSentence(
     paintedSlots += countSlots(intersect(painted[day] ?? [], clubDay), sliceMinutes);
   }
   if (paintedSlots === 0) {
-    return "Nothing painted. Members of this group cannot book at any time — paint the hours "
-      + "they are allowed.";
+    /*
+     * Two different facts. A group with NO window rows anywhere is unrestricted — the server's
+     * `HasAnyWindows` rule and `groupRules.allowFor` — so a cleared painter saves a group whose
+     * members book any time the club is open, and saying "cannot book" about it was the one
+     * sentence on this screen that was false. Windows that exist but all fall outside the club's
+     * hours really do leave nothing, and keep the loud sentence.
+     */
+    const anyPainted = WEEK_IN_READING_ORDER.some((day) => (painted[day] ?? []).length > 0);
+    return anyPainted
+      ? "Nothing bookable. Every painted time is outside the club's hours, so members of this group "
+        + "cannot book at any time."
+      : "No times of its own — members of this group book any time the club is open. Paint hours "
+        + "to restrict them.";
   }
   if (paintedSlots === openSlots) return `Every hour the club is open. All ${openSlots} slots.`;
   const phrases = weekPhrases(painted);
@@ -438,9 +451,13 @@ export const GROUP_REFUSAL_CODES: Record<string, string> = {
   group_limit_reached: "The club already has the most groups it can have — 32. Archive one you no "
     + "longer use.",
   group_has_members: "This group still has members, so it cannot be deleted. Archive it instead.",
-  group_is_system_default: "This is one of the club's two standing groups. It can be renamed and "
-    + "edited, and it cannot be deleted. Archive it instead.",
+  group_is_system_default: "This is one of the club's built-in groups. It can be renamed and edited, "
+    + "and it cannot be deleted — and the league group, which carries the club's rates, cannot be "
+    + "archived either.",
   too_many_members: "That is more than 500 members in one go. Do it in smaller batches.",
+  group_credits_per_zar_invalid: "A top-up rate has to be more than 0 and at most 1000, with at most "
+    + "4 decimal places.",
+  group_peak_priority_invalid: "Peak hours has to be one of the three choices: grants, withholds or no say.",
 };
 
 /** The figure one of these refusals carried, as a string, or null. */
@@ -471,6 +488,14 @@ export function explainGroupRefusal(err: unknown, action = "save this group"): s
       if (day && DAY_NAME[day]) {
         const base = GROUP_REFUSAL_CODES[code];
         return `${base.replace(/^One of the painted|^Two painted/, (m) => m)} The day is ${DAY_NAME[day]}.`;
+      }
+    }
+    if (code === "group_credits_per_zar_invalid") {
+      const max = figure(err, "max");
+      const decimals = figure(err, "decimals");
+      if (max && decimals) {
+        return `A top-up rate has to be more than 0 and at most ${max}, with at most ${decimals} `
+          + "decimal places.";
       }
     }
     if (code === "group_pricing_field_not_for_mode") {
@@ -612,3 +637,293 @@ export const GROUP_ACTIONS = {
   standing: (name: string) =>
     `${name} is one of the club's two standing groups. It can be renamed and edited, and it cannot be deleted.`,
 } as const;
+
+// ---------------------------------------------------------------------------------------
+// D2 — groups carry the top-up rate and the peak say (the member class is gone)
+// ---------------------------------------------------------------------------------------
+
+/** "R1" — one unit of the club's money, as a rate is quoted against it. */
+function oneUnit(): string {
+  return `${clubCurrencySymbol()}1`;
+}
+
+/** "R100", not "R100.00", where the amount is whole — a block is always whole in practice. */
+export function wholeMoney(amount: number): string {
+  return Number.isInteger(amount) ? `${clubCurrencySymbol()}${amount}` : formatMoney(amount);
+}
+
+/** "2.4 cr per R1" — a rate, in the unit it is typed in. */
+export function rateFace(rate: number): string {
+  return `${formatRate(rate)} cr per ${oneUnit()}`;
+}
+
+/**
+ * A group's top-up rate as its card's chip says it. Absent (an API that predates D2) is not
+ * "the club's rate" — that is the claim a volunteer would act on — so it has its own words.
+ */
+export function rateChip(rate: number | null | undefined): string {
+  if (rate === undefined) return "Top-up rate not sent";
+  return rate === null ? "Club rate" : rateFace(rate);
+}
+
+/** A group's say on the peak window, as its card's chip says it. */
+export function peakChip(say: boolean | null | undefined): string {
+  if (say === undefined) return "Peak say not sent";
+  if (say === null) return "No say on peak";
+  return say ? "Grants peak" : "Withholds peak";
+}
+
+/** The three caps in one line for the card — each either the group's own figure or the club's. */
+export function capsSummary(caps: {
+  max_slots_per_day?: number | null;
+  max_minutes_per_day?: number | null;
+  advance_booking_days?: number | null;
+} | undefined): string {
+  const part = (value: number | null | undefined, noun: string) => {
+    if (typeof value !== "number") return null;
+    return value === UNLIMITED ? `no limit on ${noun}` : `${value} ${noun}`;
+  };
+  const own = [
+    part(caps?.max_slots_per_day, "slots a day"),
+    part(caps?.max_minutes_per_day, "minutes a day"),
+    part(caps?.advance_booking_days, "days ahead"),
+  ].filter((x): x is string => x !== null);
+  if (own.length === 0) return "The club's limits apply.";
+  const joined = listOf(own);
+  return `${joined[0].toUpperCase()}${joined.slice(1)}. The club's limits cover the rest.`;
+}
+
+export const SYSTEM_GROUP = {
+  badge: "Built in",
+  note: (name: string) =>
+    `${name} replaced the league / over-65 member class. It can be renamed and edited, and it can't `
+    + "be archived or deleted — the club's rates rely on it.",
+} as const;
+
+/** The editor's sections, in the order the sheet lays them out. */
+export const GROUP_SECTIONS = {
+  basics: "Basics",
+  price: "Court price",
+  rate: "Top-up rate",
+  peak: "Peak hours",
+  times: "Booking times",
+  limits: "Limits",
+} as const;
+
+export const GROUP_SHEET = {
+  newTitle: "New group",
+  editTitle: (name: string) => `Edit ${name}`,
+  description: "What this group pays, when it may book and how much. Members in several groups get the strictest rule.",
+  settingsTab: "Settings",
+  membersTab: "Members",
+  membersAfterCreate: "Save the group first, then add its members.",
+  create: "Create group",
+  save: "Save changes",
+  saved: (name: string) => `${name} saved.`,
+  created: (name: string) => `${name} created.`,
+  nameLabel: "Name",
+  descriptionLabel: "Description",
+  descriptionHelp: "Members see this on the booking grid, so keep it short.",
+  nameRequired: "Give the group a name.",
+} as const;
+
+// --- Top-up rate -------------------------------------------------------------------------
+
+export const RATE_COPY = {
+  inherit: "Use the club's rate",
+  inheritHelp: (clubRate: number | null | undefined) => (typeof clubRate === "number"
+    ? `The club's rate is ${rateFace(clubRate)}, set under Settings → Credits. A group that uses it has no say in anybody's rate.`
+    : "The club's rate is set under Settings → Credits. A group that uses it has no say in anybody's rate."),
+  field: () => `Credits per ${oneUnit()}`,
+  combine: "A member in several groups tops up at the lowest rate any of their groups sets. Credit a member already has never changes.",
+} as const;
+
+/** What a typed rate would be refused for, in the admin's words — the server's figures, not ours. */
+export function rateProblemSentence(problem: RateProblem): string {
+  switch (problem) {
+    case "empty": return `Enter a rate, or switch on "${RATE_COPY.inherit}".`;
+    case "not_a_number": return "That isn't a number — enter a rate like 2.4.";
+    case "not_positive": return "A rate has to be more than 0.";
+    case "too_high": return `A rate can be at most ${MAX_CREDITS_PER_ZAR}.`;
+    case "too_precise": return `Use at most ${CREDITS_PER_ZAR_DECIMALS} decimal places.`;
+  }
+}
+
+/**
+ * "R100 → 240 cr" — what one top-up block buys at the rate on screen, as it is typed.
+ * The block is the club's `topup_block_zar`; without it, R100 is said as an example, and says so.
+ */
+export function ratePreviewLine(rate: number, blockZar: number | null | undefined): string {
+  const block = typeof blockZar === "number" && blockZar > 0 ? blockZar : 100;
+  const credits = creditsFor(block, rate);
+  return `${wholeMoney(block)} → ${Number(credits.toFixed(2))} cr`;
+}
+
+// --- Peak hours --------------------------------------------------------------------------
+
+export const PEAK_OPTIONS = [
+  {
+    value: "grants",
+    title: "Grants peak priority",
+    description: "Members may book peak hours as far ahead as anyone else.",
+  },
+  {
+    value: "withholds",
+    title: "Withholds it",
+    description: "Members wait for the late window, even if another of their groups grants priority.",
+  },
+  {
+    value: "none",
+    title: "No say",
+    description: "Leaves it to the member's other groups.",
+  },
+] as const;
+
+export type PeakChoice = typeof PEAK_OPTIONS[number]["value"];
+
+export function peakChoiceOf(say: boolean | null | undefined): PeakChoice {
+  if (say === true) return "grants";
+  if (say === false) return "withholds";
+  return "none";
+}
+
+export function peakSayOf(choice: PeakChoice): boolean | null {
+  if (choice === "grants") return true;
+  if (choice === "withholds") return false;
+  return null;
+}
+
+export const PEAK_COMBINE
+  = "A member has peak priority when at least one of their groups grants it and none of them "
+  + "withholds it. A withhold always wins.";
+
+/** The club's own peak window, from settings, so the choice above it is about a real stretch. */
+export function peakWindowLine(peakHours: unknown, advanceHours: unknown): string {
+  const hours = typeof peakHours === "string" && /^\d{2}:\d{2}-\d{2}:\d{2}$/.test(peakHours)
+    ? peakHours.replace("-", "–")
+    : null;
+  const lead = typeof advanceHours === "number"
+    ? (advanceHours === 1 ? "1 hour" : `${advanceHours} hours`)
+    : null;
+  if (!hours) return "The club's peak hours are set under Settings → Booking.";
+  if (!lead) return `The club's peak hours are ${hours}.`;
+  return `The club's peak hours are ${hours}. Without priority, a member can take a free peak slot from ${lead} before it starts.`;
+}
+
+// --- Archive / restore ---------------------------------------------------------------------
+
+export const ARCHIVE_COPY = {
+  title: (name: string) => `Archive ${name}?`,
+  body: (name: string, members: number | null | undefined) => {
+    const who = typeof members === "number" && members > 0
+      ? `its ${members === 1 ? "member" : `${members} members`} go back to their other groups' rules and the club's rate`
+      : "nobody is in it, so nothing changes for anybody today";
+    return `${name} stops applying — ${who}. Nothing is deleted, and it can be brought back.`;
+  },
+  reasonLabel: "Why are you archiving it?",
+  reasonHelp: "Goes on the change record, so the next admin knows.",
+  confirm: "Archive group",
+  restore: "Bring back",
+  restored: (name: string) => `${name} is back.`,
+  archived: (name: string) => `${name} is archived.`,
+} as const;
+
+export const ARCHIVED_HEADING = "Archived";
+
+// ---------------------------------------------------------------------------------------
+// GroupAssign — one member's groups, set whole
+// ---------------------------------------------------------------------------------------
+
+export const ASSIGN_COPY = {
+  title: (name: string) => `Groups for ${name}`,
+  description: "Their groups decide what a slot costs them, when they may book, their top-up rate and peak hours.",
+  label: "Groups",
+  add: "Add a group",
+  search: "Search groups",
+  empty: "No groups match",
+  none: "In no group — the club's standard rules and rate apply.",
+  remove: (group: string) => `Take out of ${group}`,
+  archived: "Archived",
+  archivedHint: "Archived — can be kept, not joined",
+  loadAction: "read the club's groups",
+  whatChanges: "What changes",
+  previewing: "Working out what changes…",
+  previewFailed: "Couldn't work out what this changes. Saving still works, and the result will say.",
+  nothingChanges: "Nothing about their rate or peak hours changes.",
+  reasonLabel: "Why? (optional)",
+  reasonHelp: "Goes on the change record.",
+  change: "Change groups",
+  changeFor: (name: string) => `Change groups for ${name}`,
+  saveLabel: (name: string, count: number) => (count === 0
+    ? `Take ${name} out of every group`
+    : `Put ${name} in ${count === 1 ? "1 group" : `${count} groups`}`),
+  saved: (name: string, count: number) => (count === 0
+    ? `${name} is in no group now.`
+    : `${name} is in ${count === 1 ? "1 group" : `${count} groups`} now.`),
+  unchanged: "Nothing to change.",
+} as const;
+
+/** "1.6 → 2.4 cr per R1, from League" — a rate before and after, with where the new one comes from. */
+export function rateChangeLine(
+  before: number, after: number, afterGroup: string | null, clubWord = "the club's rate",
+): string {
+  const source = afterGroup ? `from ${afterGroup}` : clubWord;
+  if (before === after) return `Top-up rate stays ${rateFace(after)} (${source}).`;
+  return `Top-up rate ${formatRate(before)} → ${rateFace(after)} (${source}). Credit they already have doesn't change.`;
+}
+
+/** Peak before and after, naming the group that withholds it when one does. */
+export function peakChangeLine(before: boolean, after: boolean, withheldBy: string[]): string {
+  const by = withheldBy.length > 0 ? ` — ${listOf(withheldBy)} withholds it` : "";
+  if (before === after) return after ? "Keeps peak priority." : `Still no peak priority${by}.`;
+  return after ? "Gains peak priority." : `Loses peak priority${by}.`;
+}
+
+/** The member's standing, in one line under their groups: rate and peak. */
+export function tariffLine(tariff: {
+  top_up_credits_per_zar: number;
+  peak_priority: boolean;
+  peak_withheld_by?: string[];
+}, rateGroupName: string | null): string {
+  const rate = `Tops up at ${rateFace(tariff.top_up_credits_per_zar)}${rateGroupName ? ` (${rateGroupName})` : " (club rate)"}`;
+  if (tariff.peak_priority) return `${rate} · peak priority`;
+  const by = tariff.peak_withheld_by && tariff.peak_withheld_by.length > 0
+    ? ` (withheld by ${listOf(tariff.peak_withheld_by)})`
+    : "";
+  return `${rate} · no peak priority${by}`;
+}
+
+/** PUT `/admin/members/{id}/groups` refusals, as sentences. */
+export const ASSIGN_REFUSAL_CODES: Record<string, string> = {
+  group_ids_required: "The club's system didn't receive the list of groups. Try again.",
+  group_not_found: "One of those groups no longer exists — somebody deleted it. Reopen this and choose again.",
+  group_archived: "One of those groups has been archived, so nobody can join it. Take it off and save again.",
+  too_many_groups: "That's more groups than the club can hold.",
+  member_not_found: "The club's system doesn't have this member any more.",
+};
+
+/** A refusal with the group it names, where the server named one. */
+export function explainAssignRefusal(err: unknown): string {
+  if (err instanceof ApiError && err.code === "group_archived") {
+    const name = err.detail("name");
+    if (typeof name === "string" && name) {
+      return `${name} has been archived, so nobody can join it. Take it off and save again.`;
+    }
+  }
+  return describeFailure(err, { action: "change their groups", codes: ASSIGN_REFUSAL_CODES });
+}
+
+// ---------------------------------------------------------------------------------------
+// The member's top-up screen
+// ---------------------------------------------------------------------------------------
+
+/**
+ * "Your rate: League — 2.4 cr per R1" — the rate the member is quoted, and the group it comes
+ * from in the club's own words. No group is the club's standard rate, said as such; an API that
+ * predates D2 sends no `rate_group` at all, and then the line names only the rate.
+ */
+export function yourRateLine(rate: number, rateGroup: { name: string } | null | undefined): string {
+  if (rateGroup === undefined) return `Your rate: ${rateFace(rate)}`;
+  if (rateGroup === null) return `Your rate: the club's standard rate — ${rateFace(rate)}`;
+  return `Your rate: ${rateGroup.name} — ${rateFace(rate)}`;
+}

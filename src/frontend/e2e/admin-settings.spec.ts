@@ -19,7 +19,7 @@ const SETTINGS = {
   penalty_pct: 30, grace_window_minutes: 5, penalty_window_minutes: 15, timezone: "Africa/Johannesburg",
   button_map: ["court:A", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "off"],
   operating_hours: { mon: "06:00-22:00", sat: "07:00-20:00" },
-  credits_per_zar_regular: 1.6, credits_per_zar_league: 2.4, topup_block_zar: 100, topup_max_zar_per_member: 1000,
+  credits_per_zar_regular: 1.6, topup_block_zar: 100, topup_max_zar_per_member: 1000,
   member_per_day_max_minutes: 60, peak_hours: "16:00-19:00", peak_advance_hours_for_regular: 1,
   retention_years: 2, no_show_lookback_days: 7, walk_up_max_minutes: 90, heartbeat_seconds: 60,
   activation_forward_window_minutes: 120, activation_cue_window_minutes: 10, qr_lifetime_seconds: 60,
@@ -34,7 +34,7 @@ const SETTINGS = {
 function routes(extra: ApiRoute[] = []): ApiRoute[] {
   return [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
-    { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@sample.local", photo_url: null, membership_number: "ADMIN-0001", member_class: "Regular" } },
+    { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@sample.local", photo_url: null, membership_number: "ADMIN-0001" } },
     { path: "/api/v1/admin/settings/", body: SETTINGS },
     ...extra,
   ];

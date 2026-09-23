@@ -51,7 +51,7 @@ async function openReports(page: Parameters<typeof serveApi>[0]) {
   await signIn(page);
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
-    { path: "/api/v1/me/profile", body: { full_name: "Club Admin", email: "a@test.local", photo_url: null, membership_number: "A-1", member_class: "Regular" } },
+    { path: "/api/v1/me/profile", body: { full_name: "Club Admin", email: "a@test.local", photo_url: null, membership_number: "A-1" } },
     { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
     { path: "/api/v1/reports/me/wallet", body: { from: "", to: "", top_ups_credits: 0, spent_credits: 0, refunds_credits: 0, penalty_count: 0, count: 0, minutes_on_court: 0 } },
     { path: "/api/v1/reports/me/daily", body: [] },

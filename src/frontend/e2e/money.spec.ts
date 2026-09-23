@@ -23,7 +23,7 @@ test("a credit balance is never shown with a rand sign", async ({ page }) => {
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
     { path: "/api/v1/wallet", body: { balance_credits: 240, entries: [] } },
-    { path: "/api/v1/me/profile", body: { full_name: "Test Member", email: "m@test.local", photo_url: null, membership_number: "P-1", member_class: "Regular" } },
+    { path: "/api/v1/me/profile", body: { full_name: "Test Member", email: "m@test.local", photo_url: null, membership_number: "P-1" } },
   ]);
 
   await page.goto("/wallet");
@@ -55,7 +55,7 @@ test("club revenue reports rand as rand and credits as credits", async ({ page }
   await signIn(page);
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
-    { path: "/api/v1/me/profile", body: { full_name: "Club Admin", email: "a@test.local", photo_url: null, membership_number: "A-1", member_class: "Regular" } },
+    { path: "/api/v1/me/profile", body: { full_name: "Club Admin", email: "a@test.local", photo_url: null, membership_number: "A-1" } },
     { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
     { path: "/api/v1/reports/me/wallet", body: { from: "", to: "", top_ups_credits: 0, spent_credits: 0, refunds_credits: 0, penalty_count: 0, count: 0 } },
     { path: "/api/v1/reports/me/daily", body: [] },
@@ -103,7 +103,7 @@ test("the admin ledger totals credits and debits apart", async ({ page }) => {
 
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
-    { path: "/api/v1/me/profile", body: { full_name: "Club Admin", email: "a@test.local", photo_url: null, membership_number: "A-1", member_class: "Regular" } },
+    { path: "/api/v1/me/profile", body: { full_name: "Club Admin", email: "a@test.local", photo_url: null, membership_number: "A-1" } },
     { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [] } },
     { path: "/api/v1/admin/ledger/", body: [row("1", 160, "TopUp"), row("2", -50, "BookingCharge")] },
   ]);
@@ -147,7 +147,7 @@ test("the club's currency symbol reaches money and never a credit figure", async
       path: "/api/v1/me/profile",
       body: {
         full_name: "Club Admin", email: "a@test.local", photo_url: null,
-        membership_number: "A-1", member_class: "Regular",
+        membership_number: "A-1",
         currency_symbol: "CHF",
       },
     },
@@ -199,7 +199,7 @@ test("the wallet chip still speaks a word when the club has a symbol", async ({ 
       path: "/api/v1/me/profile",
       body: {
         full_name: "Test Member", email: "m@test.local", photo_url: null,
-        membership_number: "P-1", member_class: "Regular",
+        membership_number: "P-1",
         currency_symbol: "CHF",
       },
     },

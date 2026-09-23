@@ -218,7 +218,7 @@ function MemberTableRow(props: MembersTableProps & { row: MemberRow; onOpen: () 
       <td data-label={COLUMNS.status} className={COL.status}><StatusCell row={row} /></td>
       {groupsOf ? (
         <td data-label={COLUMNS.groups} className={cn(COL.groups, groupsHiddenOnCard(row, groupsOf))}>
-          <GroupChips row={row} groups={groupsOf(row)} />
+          <GroupChips groups={groupsOf(row)} />
         </td>
       ) : null}
       <DateCell row={row} dateColumn={dateColumn} now={now} />
@@ -240,8 +240,7 @@ function MemberTableRow(props: MembersTableProps & { row: MemberRow; onOpen: () 
 /** A card with no groups says nothing about groups; the table says "No groups" in its column. */
 function groupsHiddenOnCard(row: MemberRow, groupsOf: (row: MemberRow) => GroupChip[] | undefined): string | undefined {
   const groups = groupsOf(row);
-  const league = row.member_class === "LeagueOrSenior";
-  return (groups && groups.length > 0) || league ? undefined : "hidden";
+  return groups && groups.length > 0 ? undefined : "hidden";
 }
 
 function Identity({ row }: { row: MemberRow }) {
@@ -308,16 +307,15 @@ function StatusCell({ row }: { row: MemberRow }) {
   );
 }
 
-function GroupChips({ row, groups }: { row: MemberRow; groups: GroupChip[] | undefined }) {
+function GroupChips({ groups }: { groups: GroupChip[] | undefined }) {
   if (groups === undefined) return <Skeleton className="h-5 w-24 rounded-full" />;
-  // The rate class rides with the groups until Groups replace it (D2); it counts toward the two
-  // chips a row shows, so a busy member is two chips and "+N", never three lines.
-  const all = row.member_class === "LeagueOrSenior" ? [{ id: "class", name: GROUPS_COPY.leagueClass }, ...groups] : groups;
-  if (all.length === 0) return <span className="text-xs text-text-muted">{GROUPS_COPY.none}</span>;
-  const rest = all.slice(2).map((g) => g.name);
+  // Two chips and "+N", never three lines. A built-in group (the league group, which carries the
+  // club's rates since D2 replaced the class) wears the info tone, so the rate-bearing chip stands out.
+  if (groups.length === 0) return <span className="text-xs text-text-muted">{GROUPS_COPY.none}</span>;
+  const rest = groups.slice(2).map((g) => g.name);
   return (
     <div className="flex flex-wrap gap-1">
-      {all.slice(0, 2).map((g) => <Badge key={g.id} tone={g.id === "class" ? "info" : "neutral"}>{g.name}</Badge>)}
+      {groups.slice(0, 2).map((g) => <Badge key={g.id} tone={g.system_key ? "info" : "neutral"}>{g.name}</Badge>)}
       {rest.length > 0 ? (
         <Badge title={GROUPS_COPY.moreTitle(rest)}>
           {GROUPS_COPY.more(rest.length)}

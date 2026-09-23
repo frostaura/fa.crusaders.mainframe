@@ -442,14 +442,14 @@ export type ScheduleDay = {
   dayStartMinute: number; dayEndMinute: number; advanceBookingDays: number;
   penaltyPct: number; penaltyWindowMinutes: number;
   /**
-   * The peak-hours league/senior rule (A.12), as it applies to THIS viewer.
+   * The peak-hours priority rule (A.12, D2: granted by a group with peak priority), as it applies to THIS viewer.
    *
    * <p>
    * Optional because the client must degrade towards showing a slot rather than hiding one: a
    * payload without these fields is an older API, and a grid that greyed cells out on a missing
    * field would refuse bookings the club would happily take. `peakStartMinute` / `peakEndMinute`
    * are minutes past local midnight and are null when `peak_hours` is unset or malformed;
-   * `viewerMayBookPeak` is true for an admin and for a league/senior member — the two the rule
+   * `viewerMayBookPeak` is true for an admin and for a member whose groups grant peak priority — the two the rule
    * never refuses.
    * </p>
    */
@@ -612,7 +612,6 @@ export type AdminSettings = {
   // were surfaced the only way to change one was to hand-edit a JSON column on a
   // live money system.
   credits_per_zar_regular: number;
-  credits_per_zar_league: number;
   topup_block_zar: number;
   topup_max_zar_per_member: number;
   member_per_day_max_minutes: number;
@@ -1170,6 +1169,12 @@ export type MyProfile = {
   photo_url: string | null;
   status: string | null;
   must_change_password?: boolean;
+  /** D2: the member's active groups. Absent from an API that predates it. */
+  groups?: MemberRowGroup[];
+  /** D2: what their groups resolve to — the rate a top-up converts at. */
+  top_up_credits_per_zar?: number;
+  /** D2: whether their groups give them the peak window at any time. */
+  peak_priority?: boolean;
   /**
    * The club's glyph set for confirm/decline buttons — `"thumbs"` or `"marks"`.
    *
@@ -1200,15 +1205,41 @@ export type MyProfile = {
    * </p>
    */
   currency_symbol?: string;
+
+  // The admin notifier's six (R23), snake_case both ways — the API binds no other spelling. The
+  // Settings page sends them from its own registry (`draft.wireBody`); bounds live there.
+  /** 1–168, default 24. */
+  application_reminder_hours?: number;
+  /** 2–100, default 5. */
+  fault_spike_count?: number;
+  /** 5–240, default 15. */
+  fault_spike_minutes?: number;
+  /** 7–730, default 90. */
+  admin_notification_retention_days?: number;
+  /** 5–1440, default 30. Top-up failures of one reason inside this window are one email. */
+  topup_failure_cooldown_minutes?: number;
+  /** 1–240, default 15. One admin overdrawing one member inside this window is one email. */
+  overdraft_cooldown_minutes?: number;
 };
 
-export type MemberClass = "Regular" | "LeagueOrSenior";
+/** A group as a member row names it (D2) — the same shape `adminApi.MemberGroupChip` types. */
+export type MemberRowGroup = {
+  id: string;
+  name: string;
+  system_key?: string | null;
+  credits_per_zar?: number | null;
+  peak_priority?: boolean | null;
+};
+
+/** The group a member's top-up rate comes from, as `/credit/topup/options` names it (D2). */
+export type RateGroup = { id: string; name: string; system_key?: string | null };
 
 export type AdminMember = {
   membership_id: string; user_id: string; email: string;
   full_name: string; membership_number: string; photo_url: string | null;
   status: string; created_at: string; rejection_reason: string | null;
-  member_class?: MemberClass;   // Phase 8.1
+  /** D2: the member's ACTIVE groups, in the club's order. Absent from an API that predates it. */
+  groups?: MemberRowGroup[];
   /**
    * Whether the applicant ever clicked the link in their verification email. An
    * unverified member cannot sign in with a password no matter what their status says,
@@ -1233,7 +1264,10 @@ export type MemberSpendMonth = {
 };
 export type MemberSpendReport = {
   from: string; to: string;
-  member: { membership_id: string; user_id: string; full_name: string; membership_number: string; member_class: "Regular" | "LeagueOrSenior" };
+  member: {
+    membership_id: string; user_id: string; full_name: string; membership_number: string;
+    groups?: MemberRowGroup[];
+  };
   totals: { top_ups_credits: number; top_ups_zar: number; spent_credits: number; refunds_credits: number; penalties_credits: number; net_credits: number; movement_count: number };
   monthly: MemberSpendMonth[];
 };
@@ -1309,7 +1343,11 @@ export type TopUpOptions = {
   max_zar: number;
   presets_zar: number[];
   conversion_rate: number;
-  member_class: "Regular" | "LeagueOrSenior";
+  /**
+   * D2: the group the member's rate comes from, or null for the club's default rate — so the
+   * screen can say "League" in the club's own words. Absent from an API that predates it.
+   */
+  rate_group?: RateGroup | null;
 };
 
 /**
@@ -1961,10 +1999,8 @@ export const endpoints = {
   adminResetMemberPassword: (memberId: string) =>
     api.post<{ temp_password: string; email_sent_to: string | null; member_notified: boolean; advice: string }>(`/api/v1/admin/members/${memberId}/reset-password`),
 
-  // Phase 8.1 — class assignment (Regular / LeagueOrSenior). Drives the credits-per-rand top-up rate
-  // and the peak-hours league exclusivity rule.
-  adminSetMemberClass: (memberId: string, memberClass: "Regular" | "LeagueOrSenior") =>
-    api.post<{ member_class: string; changed: boolean; previous?: string }>(`/api/v1/admin/members/${memberId}/class`, { memberClass }),
+  // D2 deleted `POST /admin/members/{id}/class` with the member class. A member's groups — which
+  // now carry the top-up rate and the peak say — are set with `adminEndpoints.memberGroupsSet`.
 
   // Phase 8 — per-member spend drill-down (blueprint C.3).
   adminMemberSpend: (memberId: string, from?: string, to?: string) =>
@@ -2094,7 +2130,6 @@ export const endpoints = {
     ...(req.operating_hours !== undefined ? { operatingHours: req.operating_hours } : {}),
     ...(req.button_map !== undefined ? { buttonMap: req.button_map } : {}),
     ...(req.credits_per_zar_regular !== undefined ? { creditsPerZarRegular: req.credits_per_zar_regular } : {}),
-    ...(req.credits_per_zar_league !== undefined ? { creditsPerZarLeague: req.credits_per_zar_league } : {}),
     ...(req.topup_block_zar !== undefined ? { topupBlockZar: req.topup_block_zar } : {}),
     ...(req.topup_max_zar_per_member !== undefined ? { topupMaxZarPerMember: req.topup_max_zar_per_member } : {}),
     ...(req.member_per_day_max_minutes !== undefined ? { memberPerDayMaxMinutes: req.member_per_day_max_minutes } : {}),
@@ -2128,18 +2163,21 @@ export const endpoints = {
     ...(req.club_contact_email !== undefined ? { clubContactEmail: req.club_contact_email } : {}),
     // eco — ruling 13's keys, on the same omitted-means-unchanged terms as everything above,
     // which is what lets one Save button carry them against an API that serves only some.
-    ...(req.lcd_revert_seconds !== undefined ? { lcdRevertSeconds: req.lcd_revert_seconds } : {}),
+    // lcd_revert_seconds and the four monitoring keys below it that are spelled snake_case are
+    // bound ONLY under that spelling (AdminConfigEndpoints' snake-only block): sent camelCase they
+    // were a silent no-op answered `{"saved": true}`.
+    ...(req.lcd_revert_seconds !== undefined ? { lcd_revert_seconds: req.lcd_revert_seconds } : {}),
     ...(req.rapid_scan_window_seconds !== undefined ? { rapidScanWindowSeconds: req.rapid_scan_window_seconds } : {}),
     ...(req.member_max_slots_per_day !== undefined ? { memberMaxSlotsPerDay: req.member_max_slots_per_day } : {}),
     ...(req.admin_bulk_max_items !== undefined ? { adminBulkMaxItems: req.admin_bulk_max_items } : {}),
     ...(req.schedule_materialisation_days !== undefined ? { scheduleMaterialisationDays: req.schedule_materialisation_days } : {}),
     ...(req.schedule_max_rows_per_change !== undefined ? { scheduleMaxRowsPerChange: req.schedule_max_rows_per_change } : {}),
-    ...(req.device_error_retention_days !== undefined ? { deviceErrorRetentionDays: req.device_error_retention_days } : {}),
-    ...(req.device_error_max_open_rows !== undefined ? { deviceErrorMaxOpenRows: req.device_error_max_open_rows } : {}),
+    ...(req.device_error_retention_days !== undefined ? { device_error_retention_days: req.device_error_retention_days } : {}),
+    ...(req.device_error_max_open_rows !== undefined ? { device_error_max_open_rows: req.device_error_max_open_rows } : {}),
     ...(req.sse_keepalive_seconds !== undefined ? { sseKeepaliveSeconds: req.sse_keepalive_seconds } : {}),
     ...(req.realtime_fallback_after_failures !== undefined ? { realtimeFallbackAfterFailures: req.realtime_fallback_after_failures } : {}),
-    ...(req.realtime_poll_seconds_control_board !== undefined ? { realtimePollSecondsControlBoard: req.realtime_poll_seconds_control_board } : {}),
-    ...(req.control_board_resync_seconds !== undefined ? { controlBoardResyncSeconds: req.control_board_resync_seconds } : {}),
+    ...(req.realtime_poll_seconds_control_board !== undefined ? { realtime_poll_seconds_control_board: req.realtime_poll_seconds_control_board } : {}),
+    ...(req.control_board_resync_seconds !== undefined ? { control_board_resync_seconds: req.control_board_resync_seconds } : {}),
     ...(req.action_glyphs !== undefined ? { actionGlyphs: req.action_glyphs } : {}),
     // The club's money symbol, on the same omitted-means-unchanged terms. Sent RAW, not
     // sanitised: the page refuses to save an unacceptable one, and quietly turning a typo

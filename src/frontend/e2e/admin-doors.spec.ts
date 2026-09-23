@@ -36,7 +36,7 @@ const SETTINGS = {
   button_map: ["court:A", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "off"],
   operating_hours: { mon: "06:00-22:00" },
   credits_per_zar_regular: 1.6,
-  credits_per_zar_league: 2.4,
+ 
   topup_block_zar: 100,
   topup_max_zar_per_member: 1000,
   member_per_day_max_minutes: 60,
@@ -122,7 +122,7 @@ function doorsView(doors: Record<string, unknown>[], options: DoorsOptions = {})
 function routes(doors: Record<string, unknown>[], extra: ApiRoute[] = [], options: DoorsOptions = {}): ApiRoute[] {
   return [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
-    { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@sample.local", photo_url: null, membership_number: "ADMIN-0001", member_class: "Regular" } },
+    { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@sample.local", photo_url: null, membership_number: "ADMIN-0001" } },
     { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], count: 0 } },
     { path: "/api/v1/admin/members", body: [] },
     { path: "/api/v1/admin/settings/", body: SETTINGS },

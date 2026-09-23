@@ -1,16 +1,16 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup,
-  DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
   ArrowCounterClockwise, CalendarBlank, ClockCounterClockwise, DotsThree, Envelope, Fingerprint, Key, Prohibit, UserCircle,
+  UsersThree,
 } from "@/components/ui/icons";
 import { IconButton } from "@/components/ui/icon-button";
-import type { MemberClass } from "@/lib/api";
+import { ASSIGN_COPY } from "@/lib/groupsCopy";
 import {
-  MEMBER_CLASSES, ROW_ACTIONS as COPY, SUSPENDED_NOTE, bookForHref, classLabel, memberHref, nightHref,
+  ROW_ACTIONS as COPY, SUSPENDED_NOTE, bookForHref, memberHref, nightHref,
 } from "@/lib/membersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import type { MemberRow } from "./membersModel";
@@ -35,7 +35,8 @@ export type RowActionHandlers = {
   fingerprints: (m: MemberRow) => void;
   reset: (m: MemberRow) => void;
   resend: (m: MemberRow) => Promise<unknown>;
-  setClass: (m: MemberRow, next: MemberClass) => Promise<unknown>;
+  /** Opens GroupAssign — the member's groups carry their rate and peak say now (D2). */
+  changeGroups: (m: MemberRow) => void;
   suspend: (m: MemberRow) => void;
   reactivate: (m: MemberRow) => void;
   /** How many fingerprints the member has, for the menu's wording. */
@@ -89,7 +90,11 @@ function MemberMenu({ row, handlers }: { row: MemberRow; handlers: RowActionHand
             <Envelope size={16} aria-hidden="true" />{COPY.resend}
           </DropdownMenuItem>
         ) : null}
-        {row.status === "Rejected" ? null : <ClassItems row={row} handlers={handlers} />}
+        {row.status === "Rejected" ? null : (
+          <DropdownMenuItem onSelect={() => handlers.changeGroups(row)}>
+            <UsersThree size={16} aria-hidden="true" />{ASSIGN_COPY.change}
+          </DropdownMenuItem>
+        )}
         <StandingItems row={row} handlers={handlers} />
       </DropdownMenuContent>
     </DropdownMenu>
@@ -113,26 +118,6 @@ function NavigationItems({ row }: { row: MemberRow }) {
           <Link to={nightHref(row.user_id)}><ClockCounterClockwise size={16} aria-hidden="true" />{COPY.night}</Link>
         </DropdownMenuItem>
       ) : null}
-    </>
-  );
-}
-
-/**
- * The rate class, until Groups replace it (D2). A two-value field an admin changes while reading
- * down a list, so a radio pair in the menu rather than a dialog — and not offered on a rejected
- * application, where setting a rate invites the question of whether that revives the account.
- */
-function ClassItems({ row, handlers }: { row: MemberRow; handlers: RowActionHandlers }) {
-  return (
-    <>
-      <DropdownMenuSeparator />
-      <DropdownMenuLabel>{COPY.classGroup}</DropdownMenuLabel>
-      <DropdownMenuRadioGroup
-        value={row.member_class ?? "Regular"}
-        onValueChange={(next) => void handlers.setClass(row, next as MemberClass)}
-      >
-        {MEMBER_CLASSES.map((c) => <DropdownMenuRadioItem key={c} value={c}>{classLabel(c)}</DropdownMenuRadioItem>)}
-      </DropdownMenuRadioGroup>
     </>
   );
 }

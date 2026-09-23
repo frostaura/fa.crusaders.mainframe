@@ -11,7 +11,7 @@ export function cn(...inputs: ClassValue[]) {
  * Credits, formatted for display.
  *
  * The unit of account is credits, not rand. A member tops up R100 and receives 160
- * credits at the Regular rate or 240 at the League/senior rate, and court prices are
+ * credits at the Regular rate or 240 at the League group's rate, and court prices are
  * quoted in credits — so rendering a credit balance with a rand sign is not a cosmetic
  * slip. At 1.6–2.4 credits per rand it overstates what a member has by 60% to 140%,
  * on the wallet header, the booking grid, the reports and the admin member list at once.

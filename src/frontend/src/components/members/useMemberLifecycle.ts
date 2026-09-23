@@ -1,14 +1,15 @@
 import { useCallback, useRef, type Dispatch, type SetStateAction } from "react";
 import { useToast } from "@/components/Toast";
-import { endpoints, type MemberClass } from "@/lib/api";
+import { endpoints } from "@/lib/api";
 import { OUTCOMES } from "@/lib/membersCopy";
-import { patchRow, type MemberRow } from "./membersModel";
+import type { MemberRow } from "./membersModel";
 
 export type ResetResult = { tempPassword: string; emailSentTo: string | null };
 
 type Deps = {
   load: () => Promise<void>;
-  setMembers: Dispatch<SetStateAction<MemberRow[] | null>>;
+  /** Unused since D2 removed the in-place class change; kept so callers need not change. */
+  setMembers?: Dispatch<SetStateAction<MemberRow[] | null>>;
 };
 
 /**
@@ -35,7 +36,7 @@ type Deps = {
  * and a 409, and the admin saw "active again" in green above "couldn't reactivate" in red.
  * </p>
  */
-export function useMemberLifecycle({ load, setMembers }: Deps) {
+export function useMemberLifecycle({ load }: Deps) {
   const toast = useToast();
   const inFlight = useRef(new Set<string>());
 
@@ -115,24 +116,7 @@ export function useMemberLifecycle({ load, setMembers }: Deps) {
     }
   }), [once, toast]);
 
-  /**
-   * The member's rate class, corrected in place and put back if the server refuses: a class the
-   * server did not accept is a lie about what the member's money buys.
-   */
-  const setClass = useCallback((m: MemberRow, next: MemberClass) => once(`class:${m.user_id}`, async () => {
-    const previous = m.member_class;
-    if (next === (previous ?? "Regular")) return;
-    setMembers((rows) => patchRow(rows, m.user_id, { member_class: next }));
-    try {
-      await endpoints.adminSetMemberClass(m.membership_id, next);
-      toast.push({ tone: "success", text: OUTCOMES.classChanged(m.full_name, next) });
-    } catch {
-      setMembers((rows) => patchRow(rows, m.user_id, { member_class: previous }));
-      toast.push({ tone: "danger", text: OUTCOMES.classFailed(m.full_name) });
-    }
-  }), [once, setMembers, toast]);
-
-  return { approve, reject, suspend, reactivate, resetPassword, resend, setClass };
+  return { approve, reject, suspend, reactivate, resetPassword, resend };
 }
 
 export type MemberLifecycle = ReturnType<typeof useMemberLifecycle>;

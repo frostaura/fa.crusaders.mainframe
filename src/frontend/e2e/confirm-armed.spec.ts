@@ -35,7 +35,7 @@ const SETTINGS = {
   grace_window_minutes: 5, penalty_window_minutes: 15, timezone: "Africa/Johannesburg",
   button_map: ["court:A", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "off"],
   operating_hours: { mon: "06:00-22:00" },
-  credits_per_zar_regular: 1.6, credits_per_zar_league: 2.4,
+  credits_per_zar_regular: 1.6,
   topup_block_zar: 100, topup_max_zar_per_member: 1000,
   member_per_day_max_minutes: 60, peak_hours: "16:00-19:00",
   peak_advance_hours_for_regular: 1, retention_years: 2, no_show_lookback_days: 7,
@@ -76,7 +76,7 @@ const PASSKEY = { id: "k1", label: "iPhone 15", created_at: "2026-09-01T08:00:00
 function base(extra: ApiRoute[] = []): ApiRoute[] {
   return [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
-    { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@sample.local", photo_url: null, membership_number: "ADMIN-0001", member_class: "Regular" } },
+    { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@sample.local", photo_url: null, membership_number: "ADMIN-0001" } },
     { path: "/api/v1/admin/settings/", body: SETTINGS },
     { path: "/api/v1/admin/courts/", body: [COURT, { id: "22222222-2222-2222-2222-222222222221", court_number: 1, name: "Show court", court_type: "Squash", slice_price_credits: 8, is_active: true }] },
     { path: "/api/v1/admin/members", body: [] },

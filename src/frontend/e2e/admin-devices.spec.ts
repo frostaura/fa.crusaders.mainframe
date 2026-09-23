@@ -38,7 +38,7 @@ const SETTINGS = {
   button_map: ["court:A", "court:B", "court:C", "court:D", "minutes:15", "minutes:30", "minutes:45", "off"],
   operating_hours: { mon: "06:00-22:00", sat: "07:00-20:00" },
   credits_per_zar_regular: 1.6,
-  credits_per_zar_league: 2.4,
+ 
   topup_block_zar: 100,
   topup_max_zar_per_member: 1000,
   member_per_day_max_minutes: 60,
@@ -124,7 +124,7 @@ const API_KEY = { api_key: "cmk_9F2Kq7Xd4bTn6Ls0", regenerated_at: "2026-09-01T0
 function routes(devices: unknown[], extra: ApiRoute[] = []): ApiRoute[] {
   return [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
-    { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@sample.local", photo_url: null, membership_number: "ADMIN-0001", member_class: "Regular" } },
+    { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@sample.local", photo_url: null, membership_number: "ADMIN-0001" } },
     // Longest prefix wins in the fixture, so the api-key routes are not swallowed by the
     // list route they sit under.
     { path: "/api/v1/admin/devices/api-key", body: API_KEY },

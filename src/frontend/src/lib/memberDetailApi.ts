@@ -1,4 +1,5 @@
 import { ApiError, api, fetchWithTimeout, tokenStore } from "./api";
+import type { MemberGroupChip, MemberTariff } from "./adminApi";
 
 /**
  * The member-detail wire (R17, R20, D9) — one person, as the admin console reads them.
@@ -73,7 +74,10 @@ export type MemberDetail = {
   photo_url: string | null;
   is_admin: boolean;
   admin_source: AdminSource | null;
-  groups: Array<{ id: string; name: string }>;
+  /** D2: the member's active groups, in the club's order. */
+  groups: MemberGroupChip[];
+  /** D2: the top-up rate and peak standing those groups resolve to. Absent from an API that predates it. */
+  tariff?: MemberTariff;
   balance_credits: number;
   passkey_count: number;
   fingerprints: { count: number; enrolments: FingerprintEnrolment[] };

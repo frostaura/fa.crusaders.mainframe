@@ -122,3 +122,7 @@ export { UserMinusIcon, UserMinusIcon as UserMinus } from "@phosphor-icons/react
 export { UserPlusIcon, UserPlusIcon as UserPlus } from "@phosphor-icons/react/dist/csr/UserPlus";
 export { ArrowDownIcon, ArrowDownIcon as ArrowDown } from "@phosphor-icons/react/dist/csr/ArrowDown";
 export { PasswordIcon, PasswordIcon as Password } from "@phosphor-icons/react/dist/csr/Password";
+export { LightningIcon, LightningIcon as Lightning } from "@phosphor-icons/react/dist/csr/Lightning";
+export { TagIcon, TagIcon as Tag } from "@phosphor-icons/react/dist/csr/Tag";
+export { ShieldWarningIcon, ShieldWarningIcon as ShieldWarning } from "@phosphor-icons/react/dist/csr/ShieldWarning";
+export { SlidersHorizontalIcon, SlidersHorizontalIcon as SlidersHorizontal } from "@phosphor-icons/react/dist/csr/SlidersHorizontal";

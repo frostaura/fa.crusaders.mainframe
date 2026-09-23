@@ -4,6 +4,8 @@ import {
   capResolutionSentence, deleteRefusalSentence, emptyIntersectionSentence, explainGroupRefusal,
   groupChangeConsequence, memberCountLine, paintedRunAnnouncement, paintedWeekSentence,
   misalignedWindowNote, previewSummary, ratePerBlockSentence, slicePriceLine,
+  ASSIGN_COPY, capsSummary, explainAssignRefusal, peakChangeLine, peakChip, peakChoiceOf, peakSayOf,
+  rateChangeLine, rateChip, ratePreviewLine, rateProblemSentence, tariffLine, yourRateLine,
 } from "./groupsCopy";
 import { UNLIMITED, capOverrideIsInert } from "./groupRules";
 import { ApiError } from "./api";
@@ -81,13 +83,20 @@ describe("the sentence the painter means — the accessible summary, not a decor
   });
 
   /**
-   * <b>Nothing painted is the dangerous state and it gets the loudest sentence.</b> An empty
-   * painter over a group that HAS windows elsewhere means those members cannot book, and the
-   * summary is the only thing on the screen that would ever say so.
+   * <b>Nothing painted is NOT "cannot book" (P6 correction).</b> A group with no window rows at all
+   * is unrestricted — the server's `HasAnyWindows` rule and `groupRules.allowFor` both say so — so a
+   * cleared painter saves a group whose members book any time the club is open. This case used to
+   * pin "cannot book at any time", which was false about every seeded group. The loud sentence is
+   * kept for the state that really leaves nothing: windows that all fall outside the club's hours.
    */
-  it("says what nothing painted actually means, rather than leaving a blank", () => {
+  it("says nothing painted means no times of its own, not a group that cannot book", () => {
     expect(paintedWeekSentence({}, CLUB_WEEK, 15))
-      .toBe("Nothing painted. Members of this group cannot book at any time — paint the hours they are allowed.");
+      .toBe("No times of its own — members of this group book any time the club is open. Paint hours to restrict them.");
+  });
+
+  it("keeps the loud sentence for windows that all fall outside the club's hours", () => {
+    expect(paintedWeekSentence({ mon: [{ start: 0, end: 60 }] }, CLUB_WEEK, 15))
+      .toMatch(/^Nothing bookable\. Every painted time is outside the club's hours/);
   });
 
   it("says the whole week plainly when every open hour is painted", () => {
@@ -401,5 +410,110 @@ describe("the preview summary — every rule that bit, with its count", () => {
       blockedByGroup: 118, ceilingPerDay: 4, daysCounted: 7,
     }).join(" ");
     expect(said).toContain("Can book none of the 118 slots the club is open.");
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// D2 — the rate, the peak say, GroupAssign and the member's top-up line
+// ---------------------------------------------------------------------------------------
+
+describe("the rate and peak chips — absent is never the club's rate", () => {
+  it("says a rate in the unit it is typed in, and inheriting as the club's", () => {
+    expect(rateChip(2.4)).toBe("2.4 cr per R1");
+    expect(rateChip(1.6667)).toBe("1.6667 cr per R1");
+    expect(rateChip(null)).toBe("Club rate");
+    expect(rateChip(undefined)).toBe("Top-up rate not sent");
+  });
+
+  it("says all three peak says, and a missing one as missing", () => {
+    expect(peakChip(true)).toBe("Grants peak");
+    expect(peakChip(false)).toBe("Withholds peak");
+    expect(peakChip(null)).toBe("No say on peak");
+    expect(peakChip(undefined)).toBe("Peak say not sent");
+  });
+
+  it("round-trips the peak say through the editor's choice", () => {
+    for (const say of [true, false, null] as const) expect(peakSayOf(peakChoiceOf(say))).toBe(say);
+    expect(peakChoiceOf(undefined)).toBe("none");
+  });
+});
+
+describe("ratePreviewLine — what one block buys, as the figure is typed", () => {
+  it("uses the club's block, whole money without trailing zeros", () => {
+    expect(ratePreviewLine(2.4, 100)).toBe("R100 → 240 cr");
+    expect(ratePreviewLine(1.6667, 50)).toBe("R50 → 83.34 cr");
+  });
+
+  it("falls back to R100 as the example when the block is unknown", () => {
+    expect(ratePreviewLine(2.4, undefined)).toBe("R100 → 240 cr");
+  });
+});
+
+describe("capsSummary", () => {
+  it("names the group's own caps and hands the rest to the club", () => {
+    expect(capsSummary({ max_slots_per_day: 2, max_minutes_per_day: null, advance_booking_days: 7 }))
+      .toBe("2 slots a day and 7 days ahead. The club's limits cover the rest.");
+    expect(capsSummary({ max_slots_per_day: null, max_minutes_per_day: null, advance_booking_days: null }))
+      .toBe("The club's limits apply.");
+    expect(capsSummary({ max_slots_per_day: UNLIMITED })).toBe("No limit on slots a day. The club's limits cover the rest.");
+  });
+});
+
+describe("rateProblemSentence", () => {
+  it("says every refusal in the admin's words", () => {
+    expect(rateProblemSentence("too_precise")).toBe("Use at most 4 decimal places.");
+    expect(rateProblemSentence("too_high")).toBe("A rate can be at most 1000.");
+    expect(rateProblemSentence("empty")).toMatch(/Use the club's rate/);
+  });
+});
+
+describe("GroupAssign's preview lines", () => {
+  it("says a rate move with where the new rate comes from, and that bought credit stays", () => {
+    expect(rateChangeLine(1.6, 2.4, "League")).toBe("Top-up rate 1.6 → 2.4 cr per R1 (from League). Credit they already have doesn't change.");
+    expect(rateChangeLine(2.4, 2.4, "League")).toBe("Top-up rate stays 2.4 cr per R1 (from League).");
+    expect(rateChangeLine(2.4, 1.6, null)).toMatch(/\(the club's rate\)/);
+  });
+
+  it("names the group that withholds peak priority", () => {
+    expect(peakChangeLine(false, true, [])).toBe("Gains peak priority.");
+    expect(peakChangeLine(true, false, ["Probation"])).toBe("Loses peak priority — Probation withholds it.");
+    expect(peakChangeLine(true, true, [])).toBe("Keeps peak priority.");
+  });
+
+  it("says the member's standing in one line", () => {
+    expect(tariffLine({ top_up_credits_per_zar: 2.4, peak_priority: true }, "League"))
+      .toBe("Tops up at 2.4 cr per R1 (League) · peak priority");
+    expect(tariffLine({ top_up_credits_per_zar: 1.6, peak_priority: false, peak_withheld_by: ["Probation"] }, null))
+      .toBe("Tops up at 1.6 cr per R1 (club rate) · no peak priority (withheld by Probation)");
+  });
+
+  it("names the save by its outcome", () => {
+    expect(ASSIGN_COPY.saveLabel("Ada", 2)).toBe("Put Ada in 2 groups");
+    expect(ASSIGN_COPY.saveLabel("Ada", 0)).toBe("Take Ada out of every group");
+  });
+
+  it("renders PUT refusals as sentences, with the group the server named", () => {
+    expect(explainAssignRefusal(new ApiError(400, { error: "group_archived", name: "Juniors" })))
+      .toBe("Juniors has been archived, so nobody can join it. Take it off and save again.");
+    expect(explainAssignRefusal(new ApiError(400, { error: "too_many_groups", max: 32 })))
+      .toMatch(/more groups than the club can hold/);
+  });
+});
+
+describe("yourRateLine — the member's top-up screen", () => {
+  it("names the group the rate comes from, in the club's words", () => {
+    expect(yourRateLine(2.4, { name: "League" })).toBe("Your rate: League — 2.4 cr per R1");
+    expect(yourRateLine(1.6, null)).toBe("Your rate: the club's standard rate — 1.6 cr per R1");
+    // An API that predates D2 sends no rate_group at all: say only what is known.
+    expect(yourRateLine(1.6, undefined)).toBe("Your rate: 1.6 cr per R1");
+  });
+});
+
+describe("the D2 refusals the group endpoints add", () => {
+  it("says the rate's bounds with the server's own figures", () => {
+    expect(explainGroupRefusal(new ApiError(400, { error: "group_credits_per_zar_invalid", min_exclusive: 0, max: 1000, decimals: 4 })))
+      .toBe("A top-up rate has to be more than 0 and at most 1000, with at most 4 decimal places.");
+    expect(explainGroupRefusal(new ApiError(400, { error: "group_peak_priority_invalid" })))
+      .toMatch(/grants, withholds or no say/);
   });
 });

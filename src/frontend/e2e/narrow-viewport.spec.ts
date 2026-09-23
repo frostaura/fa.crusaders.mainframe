@@ -58,7 +58,7 @@ test("every wallet ledger column a member needs is on screen at 375px", async ({
       path: "/api/v1/me/profile",
       body: {
         full_name: "Nomsa Khumalo", email: "n@test.local", photo_url: null,
-        membership_number: "P-1", member_class: "Regular",
+        membership_number: "P-1",
       },
     },
   ]);
@@ -110,7 +110,7 @@ test("the page itself never scrolls sideways at 375px", async ({ page }) => {
       path: "/api/v1/me/profile",
       body: {
         full_name: "Nomsa Khumalo", email: "n@test.local", photo_url: null,
-        membership_number: "P-1", member_class: "Regular",
+        membership_number: "P-1",
       },
     },
   ]);
@@ -193,7 +193,7 @@ async function serveAdminChrome(page: Page) {
       path: "/api/v1/me/profile",
       body: {
         full_name: "Nomsa Khumalo", email: "n@test.local", photo_url: null,
-        membership_number: "P-1", member_class: "Regular",
+        membership_number: "P-1",
       },
     },
   ]);

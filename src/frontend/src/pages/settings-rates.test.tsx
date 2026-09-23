@@ -29,10 +29,13 @@ describe("the credit-conversion rate fields", () => {
     { path: "/api/v1/admin/courts/", body: [] },
   ];
 
-  /** The two shipped rates, straight off the fixture the API answers with. */
+  /**
+   * The club's shipped rate, straight off the fixture the API answers with. The league rate (2.4)
+   * was the second row here until D2 moved it onto the League group; `GroupEditor`'s rate field
+   * holds the same step rule there.
+   */
   const RATES: [RegExp, number][] = [
     [/Credits per R1 — members/, SETTINGS_FIXTURE.credits_per_zar_regular],
-    [/Credits per R1 — league/, SETTINGS_FIXTURE.credits_per_zar_league],
   ];
 
   it("accept the rates the club actually uses", async () => {

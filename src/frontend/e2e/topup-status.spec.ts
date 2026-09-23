@@ -49,7 +49,7 @@ test("pressing Check again against a club that stops answering is not a dead end
     if (path.startsWith("/api/v1/whoami")) return json(SESSION_MEMBER);
     if (path.startsWith("/api/v1/wallet")) return json({ balance_credits: 18, entries: [], total_entries: 0, offset: 0, limit: 50 });
     if (path.startsWith("/api/v1/me/profile")) {
-      return json({ full_name: "Nomsa Khumalo", email: "n@test.local", photo_url: null, membership_number: "P-1", member_class: "Regular" });
+      return json({ full_name: "Nomsa Khumalo", email: "n@test.local", photo_url: null, membership_number: "P-1" });
     }
     return route.fulfill({ status: 501, contentType: "application/json", body: "{}" });
   });

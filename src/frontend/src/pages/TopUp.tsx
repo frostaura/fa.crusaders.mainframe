@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { ApiError, endpoints, type PayFastFormField, type TopUpOptions } from "../lib/api";
+import { ApiError, endpoints, type PayFastFormField, type RateGroup, type TopUpOptions } from "../lib/api";
+import { yourRateLine } from "../lib/groupsCopy";
 import { cn, formatCredits, describeTopUpRate, formatMoney } from "../lib/utils";
 import { clubCurrencySymbol } from "../lib/currency";
 import { useBalance, walletTone } from "../lib/balance";
@@ -75,7 +76,7 @@ const START_ERRORS: Record<string, string> = {
  * <p>
  * `/credit/topup/options` is fetched once on mount and never revalidated, and this screen
  * promises beside the figure that the rate is locked in when you continue. It was locked
- * from the POST onward and not before it, so an admin changing the member's class — or
+ * from the POST onward and not before it, so an admin changing the member's groups — or
  * editing the club's `credits_per_zar_*`, which reaches EVERY member with this screen open
  * — moved the price under the tab. The screen went on saying 240.00 credits, Continue
  * registered 160, and the next thing the member saw was a card form. Two testers
@@ -106,16 +107,25 @@ function reQuote(
 ): void {
   const rate = Number(payload.conversion_rate);
   const credits = Number(payload.quoted_credits);
-  const memberClass = payload.member_class === "LeagueOrSenior" || payload.member_class === "Regular"
-    ? payload.member_class
-    : null;
+  // D2: the group the NEW rate comes from travels with the refusal, so the line under the figure
+  // never names the new number beside the old reason for it. Absent (an older API) keeps the old.
+  const rateGroup = "rate_group" in payload ? rateGroupFrom(payload.rate_group) : undefined;
   // A refusal that carries no readable rate is not a re-quote — moving the screen to NaN
   // would be worse than leaving it on a figure the member can still press Continue against
   // and be refused again. The caller's `START_ERRORS` fallback is not reachable from here,
   // so this returns having changed nothing and the member sees the old, honest offer.
   if (!Number.isFinite(rate)) return;
-  setOptions((o) => (o ? { ...o, conversion_rate: rate, member_class: memberClass ?? o.member_class } : o));
+  setOptions((o) => (o ? { ...o, conversion_rate: rate, ...(rateGroup === undefined ? {} : { rate_group: rateGroup }) } : o));
   setRestated({ rate, credits: Number.isFinite(credits) ? credits : Number.NaN });
+}
+
+/** `rate_group` off the wire: `{id, name}` or null (the club's standard rate); anything else is unknown. */
+function rateGroupFrom(raw: unknown): RateGroup | null | undefined {
+  if (raw === null) return null;
+  if (isRecord(raw) && typeof raw.name === "string" && typeof raw.id === "string") {
+    return { id: raw.id, name: raw.name, system_key: typeof raw.system_key === "string" ? raw.system_key : null };
+  }
+  return undefined;
 }
 
 /** The club's top-up rules, read on mount and again whenever the tab regains focus. */
@@ -135,7 +145,7 @@ function useTopUpOptions(setAmount: (update: (current: string) => string) => voi
 
   useEffect(() => { loadOptions(); }, [loadOptions]);
 
-  // A tab left open across a class change or a settings edit quotes a price the club will
+  // A tab left open across a group change or a settings edit quotes a price the club will
   // not honour, and a member who switches away and back is the commonest way that happens.
   // Re-reading on focus narrows the window; the check at Continue below is what closes it.
   useEffect(() => {
@@ -341,12 +351,12 @@ function AmountFields({ options, amount, onChoose, problem }: AmountProps) {
  * on 480 credits and the server registered 320. The rate IS frozen from the moment the pending
  * row is written; what was never true is that the figure ON SCREEN is the one that gets frozen.
  * So the promise names the moment, and `submit` stops rather than pays when the two disagree.
- * The class label moves with a restated rate (`reQuote`), so the line never names the new
+ * "Your rate: League — 2.4 cr per R1" names the GROUP the rate comes from (D2 — groups replaced the
+ * member class), and moves with a restated rate (`reQuote`), so the line never names the new
  * number beside the old reason for it.
  * </p>
  */
 function Summary({ options, pay, receive }: { options: TopUpOptions; pay: number | null; receive: number | null }) {
-  const rateClass = options.member_class === "LeagueOrSenior" ? "league / senior rate" : "regular rate";
   return (
     // The receipt the member reads before they leave for PayFast: rand in, credits out, and the
     // arrow between them is the conversion. Live — it moves as they type or pick a chip.
@@ -368,7 +378,8 @@ function Summary({ options, pay, receive }: { options: TopUpOptions; pay: number
         </div>
       </dl>
       <p className="border-t border-border pt-3 text-xs text-text-secondary">
-        {`${describeTopUpRate(options.conversion_rate)} (${rateClass}). `}
+        <span className="block font-medium text-text-primary" data-testid="your-rate">{yourRateLine(options.conversion_rate, options.rate_group)}</span>
+        {`${describeTopUpRate(options.conversion_rate)}. `}
         {RATE_PROMISE}
       </p>
     </div>

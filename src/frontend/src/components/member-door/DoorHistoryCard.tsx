@@ -194,6 +194,9 @@ export function DoorHistoryCard(props: { onlyWithRows?: boolean } = {}) {
     setMoreFailed(false);
     try {
       const page = await endpoints.meDoorHistory(from ? { cursor: from } : {});
+      // A reply with no list is a failed read, not an empty history: reading it as [] would tell
+      // the member they have never used a door, and dereferencing it took the whole Profile down.
+      if (!Array.isArray(page?.items)) throw new Error("door history reply carried no items");
       // Appended, never replaced: a Show more that fails must leave what is on screen.
       setRows((current) => (from ? [...current, ...page.items] : page.items));
       setCursor(page.next_cursor);

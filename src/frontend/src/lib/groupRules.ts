@@ -482,3 +482,108 @@ export function resolveDay(groups: MemberGroup[], day: Weekday, options: DayOpti
 
 /** The week, in the order a club reads it — Monday first, Sunday last. */
 export const WEEK_IN_READING_ORDER: readonly Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+// ---------------------------------------------------------------------------------------
+// The tariff — top-up rate and peak priority (D2: groups replace the member class)
+// ---------------------------------------------------------------------------------------
+
+/** The API's bounds on a group's top-up rate: more than 0, at most 1000, at most 4 decimals. */
+export const MIN_CREDITS_PER_ZAR_EXCLUSIVE = 0;
+export const MAX_CREDITS_PER_ZAR = 1000;
+export const CREDITS_PER_ZAR_DECIMALS = 4;
+
+/** Why a typed rate would be refused, as a machine-readable reason, or null when it is fine. */
+export type RateProblem = "empty" | "not_a_number" | "not_positive" | "too_high" | "too_precise";
+
+/**
+ * The server's own `group_credits_per_zar_invalid` test, run as it is typed.
+ *
+ * <p>
+ * The shape is checked before the value, for the reason `TopUp.tsx` gives: `Number` reads
+ * "1e3" as 1000 and "0x10" as 16, and a rate field that accepts programmer notation quotes a
+ * member eighty times what the admin meant with nothing on screen to say so.
+ * </p>
+ */
+export function rateProblem(text: string): RateProblem | null {
+  const trimmed = text.trim();
+  if (trimmed === "") return "empty";
+  if (!/^-?\d+(\.\d+)?$/.test(trimmed)) return "not_a_number";
+  const value = Number(trimmed);
+  if (!Number.isFinite(value)) return "not_a_number";
+  if (value <= MIN_CREDITS_PER_ZAR_EXCLUSIVE) return "not_positive";
+  if (value > MAX_CREDITS_PER_ZAR) return "too_high";
+  const decimals = trimmed.includes(".") ? trimmed.split(".")[1].length : 0;
+  if (decimals > CREDITS_PER_ZAR_DECIMALS) return "too_precise";
+  return null;
+}
+
+/** One group as the tariff reads it. `undefined` (an API that predates D2) counts as no say. */
+export type TariffInput = Pick<MemberGroup, "id" | "name"> & {
+  status?: MemberGroup["status"];
+  sort_order?: number;
+  credits_per_zar?: number | null;
+  peak_priority?: boolean | null;
+};
+
+export type ResolvedTariff = {
+  rate: number;
+  /** The group the rate comes from, or null when it is the club's default. */
+  rateGroup: TariffInput | null;
+  peak: boolean;
+  /** The groups explicitly withholding peak priority, by name. */
+  withheldBy: string[];
+};
+
+/**
+ * What a member's groups add up to — the SAME rule as the server's `MemberTariffs.Resolve`.
+ *
+ * <p>
+ * <b>Rate: the lowest rate any active group SETS; the club's default when none sets one.</b>
+ * A group that inherits has no opinion about money and is skipped, rather than read as the
+ * default — a "Juniors" group made only to hold a booking window must not drag a league member
+ * back to the regular rate. And the default is not folded into the minimum: a group that sets a
+ * rate replaces the default for its members, which is what "this group tops up at 2.4" means.
+ * </p>
+ *
+ * <p>
+ * <b>Peak: granted when at least one active group grants it and none withholds it.</b> A group
+ * with no say cannot take a league member's priority away; an explicit "withholds" wins over any
+ * number of grants, and is named, so a refusal can say which group stopped them. Nobody granting
+ * at all is "no", as it was for a member nobody had classified.
+ * </p>
+ *
+ * <p>
+ * Ties on the rate go to the club's own order (sort order, then name, then id) — the server's
+ * tie-break, so the group this names is the group the top-up row will name.
+ * </p>
+ */
+export function resolveTariff(groups: TariffInput[], clubDefaultRate: number): ResolvedTariff {
+  const ordered = groups
+    .filter((g) => (g.status ?? "active") === "active")
+    .slice()
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+      || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
+      || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  let rateGroup: TariffInput | null = null;
+  for (const group of ordered) {
+    const rate = group.credits_per_zar;
+    if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) continue;
+    if (rateGroup === null || rate < (rateGroup.credits_per_zar as number)) rateGroup = group;
+  }
+  const withheldBy = ordered.filter((g) => g.peak_priority === false).map((g) => g.name);
+  const peak = ordered.some((g) => g.peak_priority === true) && withheldBy.length === 0;
+  return {
+    rate: rateGroup ? (rateGroup.credits_per_zar as number) : clubDefaultRate,
+    rateGroup,
+    peak,
+    withheldBy: peak ? [] : withheldBy,
+  };
+}
+
+/**
+ * Credits a top-up of `amount` buys at `rate`, rounded the way the ledger column stores it —
+ * two places, away from zero (`TopUpEndpoints.Convert`).
+ */
+export function creditsFor(amount: number, rate: number): number {
+  return round2AwayFromZero(amount * rate);
+}

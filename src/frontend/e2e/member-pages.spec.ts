@@ -13,7 +13,7 @@ import { expect, serveApi, SESSION_ADMIN, signIn, test } from "./fixtures";
  */
 
 const MEMBER = { ...SESSION_ADMIN, is_admin: false };
-const PROFILE = { full_name: "Nomsa Khumalo", email: "n@club.review.test", photo_url: null, membership_number: "P-1", member_class: "Regular" };
+const PROFILE = { full_name: "Nomsa Khumalo", email: "n@club.review.test", photo_url: null, membership_number: "P-1" };
 const DAYS_ME = [
   { date: "2026-09-01", top_ups_credits: 160, spent_credits: 24, refunds_credits: 8, bookings: 1, attended: 1, minutes_on_court: 45, balance_credits: 136 },
   { date: "2026-09-02", top_ups_credits: 0, spent_credits: 24, refunds_credits: -8, bookings: 1, attended: 0, minutes_on_court: 0, balance_credits: 104 },
@@ -31,7 +31,7 @@ function memberRoutes() {
     { path: "/api/v1/me/door", body: { doors: true, doors_shut: "none" } },
     { path: "/api/v1/me/door/history", body: { items: [], has_more: false, retention_days: 45 } },
     { path: "/api/v1/me/webauthn/credentials", body: [] },
-    { path: "/api/v1/credit/topup/options", body: { min_zar: 100, max_zar: 1000, block_zar: 100, presets_zar: [100, 200, 500, 1000], conversion_rate: 1.6, member_class: "Regular" } },
+    { path: "/api/v1/credit/topup/options", body: { min_zar: 100, max_zar: 1000, block_zar: 100, presets_zar: [100, 200, 500, 1000], conversion_rate: 1.6 } },
     { path: "/api/v1/reports/me/wallet", body: WALLET_REPORT },
     { path: "/api/v1/reports/me/daily", body: DAYS_ME },
   ];

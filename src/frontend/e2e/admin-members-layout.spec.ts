@@ -66,7 +66,6 @@ function membersOf(club: Club) {
     membership_number: m.n,
     photo_url: null,
     status: m.status,
-    member_class: i % 2 === 0 ? "Regular" : "LeagueOrSenior",
     email_verified: m.verified,
     is_admin: i === 6,
     admin_source: i === 6 ? "config" : null,
@@ -88,7 +87,7 @@ async function openMembers(page: import("@playwright/test").Page, club: Club = C
     { path: "/api/v1/admin/member-groups/g3/members", body: { members: [{ user_id: uid(1) }], cursor: null } },
     {
       path: "/api/v1/me/profile",
-      body: { full_name: "Crusaders Admin", email: "any@frostaura.net", photo_url: null, membership_number: "ADMIN-0001", member_class: "Regular" },
+      body: { full_name: "Crusaders Admin", email: "any@frostaura.net", photo_url: null, membership_number: "ADMIN-0001" },
     },
   ]);
   await page.goto("/admin/members");

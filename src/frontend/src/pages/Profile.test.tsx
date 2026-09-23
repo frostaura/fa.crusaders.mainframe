@@ -6,6 +6,8 @@ import { AuthProvider } from "../lib/auth";
 import { ProfileProvider } from "../lib/profile";
 import { ToastProvider } from "../components/Toast";
 import { refuse, signIn, signOut, stubFetch, type StubRoute } from "../test/harness";
+import { KINDS_ROUTE } from "../components/notifications/fixtures";
+import { EMAIL_ALERTS_COPY } from "../lib/notificationsCopy";
 import {
   PASSKEY_ADD, PASSKEY_NAME_LABEL, PASSKEY_NAME_MISSING, PHOTO_BAD_TYPE, PHOTO_BUTTON, PHOTO_CHANGE_LABEL,
   passkeyRemoveConsequence,
@@ -212,5 +214,47 @@ describe("Profile — reading, failing and the page's shape", () => {
     expect(within(passkeys).getByRole("button", { name: "Keep it — iPhone" })).toBeInTheDocument();
     // Dialog copy rules: never "Tap to confirm" — a keyboard user taps nothing.
     expect(passkeys.textContent).not.toMatch(/Tap to confirm/);
+  });
+});
+
+describe("Profile — an admin's email alerts (R23)", () => {
+  beforeEach(() => withPasskeys());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    Reflect.deleteProperty(navigator, "credentials");
+    signOut();
+  });
+
+  it("gives an admin the same switches Settings has, in a card of their own", async () => {
+    const stub = renderProfile([
+      { path: "/api/v1/me/profile", body: { ...PROFILE, is_admin: true } },
+      { path: "/api/v1/me/webauthn/credentials", body: [] },
+      KINDS_ROUTE,
+      { method: "PUT", path: "/api/v1/me/preferences", body: { admin_notification_optouts: [] } },
+    ]);
+
+    const card = await screen.findByRole("region", { name: EMAIL_ALERTS_COPY.profileTitle });
+    expect(within(card).getByText(EMAIL_ALERTS_COPY.description)).toBeInTheDocument();
+    const toggle = await within(card).findByRole("switch", { name: "Court box or door stopped reporting" });
+    expect(toggle).not.toBeChecked();
+    expect(within(card).getByRole("switch", { name: "Suspected forged codes" })).toHaveAttribute("aria-disabled", "true");
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(stub.calls.find((c) => c.method === "PUT" && c.path === "/api/v1/me/preferences")?.body)
+      .toEqual({ admin_notification_optouts: [] }));
+    expect(within(card).getByRole("switch", { name: "Court box or door stopped reporting" })).toBeChecked();
+  });
+
+  it("shows a member no such card — and never asks for the admin catalogue", async () => {
+    const stub = renderProfile([
+      { path: "/api/v1/me/profile", body: PROFILE },
+      { path: "/api/v1/me/webauthn/credentials", body: [] },
+      KINDS_ROUTE,
+    ]);
+
+    await screen.findByRole("heading", { level: 1 });
+    await screen.findByText(PROFILE.full_name);
+    expect(screen.queryByRole("region", { name: EMAIL_ALERTS_COPY.profileTitle })).toBeNull();
+    expect(stub.calls.some((c) => c.path.startsWith("/api/v1/admin/notifications"))).toBe(false);
   });
 });

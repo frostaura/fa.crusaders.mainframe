@@ -1,7 +1,5 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { Alert } from "../components/Alert";
 import { Accordion } from "../components/ui/accordion";
-import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
 import { Skeleton } from "../components/ui/skeleton";
@@ -13,8 +11,8 @@ import { doorRetentionNotice } from "../lib/doorsCopy";
 import { describeDoorBookingHorizon } from "../lib/gateCopy";
 import { doorBookingHorizonMinutes } from "../lib/tenantSettings";
 import {
-  SETTINGS, SETTINGS_SECTIONS, isServed, normaliseQuery, sectionDef, sectionMatches, sectionOfKey, settingDef,
-  settingMatches, type SettingContext, type SettingsSectionId,
+  SETTINGS_SECTIONS, isServed, normaliseQuery, sectionDef, sectionMatches,
+  sectionOfKey, settingDef, settingMatches, settingsFor, type SettingContext, type SettingsSectionId,
 } from "../lib/settingsSchema";
 import { sectionSummary } from "../lib/settingsSummaries";
 import { SETTINGS_COPY } from "../lib/settingsCopy";
@@ -29,13 +27,14 @@ import { SettingsToolbar } from "../components/settings/SettingsToolbar";
 import { capsSentence, doorHorizonBasis } from "../components/settings/sentences";
 import { useSettingFocus } from "../components/settings/useSettingFocus";
 import { useSettingsDocument } from "../components/settings/useSettingsDocument";
+import { YourEmailAlerts } from "../components/settings/YourEmailAlerts";
 
 /**
  * Admin · Settings — ~70 settings made navigable (plan R13: "admin settings overwhelming —
  * expand/collapse sections, onboarding, floating tooltips, decent descriptions").
  *
  * <p>
- * <b>The shape.</b> A search box; ten sections in one accordion, each header carrying a live
+ * <b>The shape.</b> A search box; the sections in one accordion, each header carrying a live
  * one-line summary and an "unsaved" mark; inside, one row per setting — caption, (i) for the full
  * story, the right control, one line of description — with rarely-touched settings behind an
  * "advanced" disclosure. A save bar floats up the moment there is something to save, and a leave
@@ -143,14 +142,15 @@ function useOpenSections(clearQuery: () => void) {
 function useSearch(query: string, context: SettingContext) {
   return useMemo(() => {
     if (!query) return null;
+    const all = settingsFor(context.settings);
     const keys = new Set(
-      SETTINGS
+      all
         .filter((def) => isServed(def, context.settings))
         .filter((def) => sectionMatches(sectionDef(def.section), query) || settingMatches(def, query, context))
         .map((def) => def.key),
     );
     const sections = SETTINGS_SECTIONS
-      .filter((section) => sectionMatches(section, query) || SETTINGS.some((def) => def.section === section.id && keys.has(def.key)))
+      .filter((section) => sectionMatches(section, query) || all.some((def) => def.section === section.id && keys.has(def.key)))
       .map((section) => section.id);
     return { keys, sections };
   }, [query, context]);
@@ -256,7 +256,7 @@ function NoMatches({ query, onClear }: { query: string; onClear: () => void }) {
  * What a section carries besides its fields: the sentences the page derives, and the notes a
  * section is read under.
  */
-function sectionExtras(id: SettingsSectionId, settings: AdminSettings): { before?: ReactNode; after?: ReactNode; badge?: ReactNode } {
+function sectionExtras(id: SettingsSectionId, settings: AdminSettings): { before?: ReactNode; after?: ReactNode; footer?: ReactNode } {
   switch (id) {
     case "bookings":
       return {
@@ -272,10 +272,17 @@ function sectionExtras(id: SettingsSectionId, settings: AdminSettings): { before
     case "hours":
       return { after: <OperatingHours /> };
     case "credits":
+      // D2: the league rate is the League group's own rate now, set where the group is.
       return {
-        badge: <Badge tone="info">{SETTINGS_COPY.movingToGroups}</Badge>,
-        before: <Alert tone="info" live="off">{SETTINGS_COPY.movingToGroupsNote}</Alert>,
+        after: (
+          <div className="flex flex-col gap-1">
+            <p className="max-w-prose text-sm text-text-secondary">{SETTINGS_COPY.groupRatesNote}</p>
+            <TextLink variant="standalone" to="/admin/groups" className="self-start text-sm">{SETTINGS_COPY.groupRatesLink}</TextLink>
+          </div>
+        ),
       };
+    case "alerts":
+      return { footer: <YourEmailAlerts /> };
     case "doors":
       return { after: <DoorHorizon settings={settings} /> };
     case "records":

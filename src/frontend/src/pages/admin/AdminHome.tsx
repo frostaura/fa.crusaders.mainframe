@@ -16,10 +16,14 @@ import { Interactable } from "@/components/ui/interactable";
 import { PageHeader, PageShell, Section } from "@/components/ui/page-shell";
 import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { RecentAlerts } from "@/components/notifications/RecentAlerts";
+import { useRecentAlerts } from "@/components/notifications/useRecentAlerts";
+import { RECENT_ALERTS_COPY } from "@/lib/notificationsCopy";
 
 /**
- * `/admin` — the console's Overview: what needs an admin right now, then every section of the
- * console with a line on what it is for (plan: Target IA → Admin, "Needs attention").
+ * `/admin` — the console's Overview: what needs an admin right now, what every admin was recently
+ * emailed about (R23, "Recent alerts"), then every section of the console with a line on what it
+ * is for (plan: Target IA → Admin, "Needs attention").
  *
  * <p>
  * <b>Four honest states, in this order</b> (the StateBlock precedence): still reading → a skeleton
@@ -361,17 +365,28 @@ function QuickLinkGroup({ label, children }: { label: string; children: ReactNod
 
 export default function AdminHome() {
   const attention = useAdminAttention();
+  // R23: what every admin was emailed about. Refreshed with the rest of the page, never polled.
+  const alerts = useRecentAlerts();
   return (
     <PageShell width="wide">
       {/* No eyebrow: the rail (desktop) and the section bar (phone) already say "Admin". */}
       <PageHeader
         title="Overview"
         description="What needs you right now, and every part of the club’s console."
-        actions={<RefreshButton label="Refresh overview" onRefresh={() => void attention.refresh()} loading={attention.refreshing} />}
+        actions={(
+          <RefreshButton
+            label="Refresh overview"
+            onRefresh={() => { void attention.refresh(); alerts.retry(); }}
+            loading={attention.refreshing}
+          />
+        )}
         freshness={<Freshness at={attention.checkedAt} />}
       />
       <Section title="Needs attention">
         <NeedsAttention attention={attention} />
+      </Section>
+      <Section title={RECENT_ALERTS_COPY.title} description={RECENT_ALERTS_COPY.description}>
+        <RecentAlerts feed={alerts} />
       </Section>
       <Section title="Console" description="Every section, and what it is for.">
         <QuickLinks attention={attention} />

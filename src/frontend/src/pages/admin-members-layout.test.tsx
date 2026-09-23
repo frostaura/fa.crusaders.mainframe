@@ -162,7 +162,7 @@ describe("the members table's own controls", () => {
     { path: "/api/v1/admin/members/", body: [
       memberFixture({ status: "PendingApproval" }),
       memberFixture({ membership_id: "m2", user_id: "u2", full_name: "Grace Hopper", status: "Suspended" }),
-      memberFixture({ membership_id: "m3", user_id: "u3", full_name: "Alan Turing", member_class: "LeagueOrSenior" }),
+      memberFixture({ membership_id: "m3", user_id: "u3", full_name: "Alan Turing" }),
     ] },
     { path: "/api/v1/admin/biometric/enrollments", body: [] },
   ];

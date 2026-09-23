@@ -35,7 +35,8 @@ describe("AdminSettings", () => {
     renderPage(<AdminSettingsPage />);
 
     expect(await findControl(/Credits per R1 — members/)).toHaveValue(1.6);
-    expect(control(/Credits per R1 — league/)).toHaveValue(2.4);
+    // D2: the league rate is the League group's now — no field for it here, whatever the API serves.
+    expect(queryControl(/Credits per R1 — league/)).toBeNull();
     expect(control(/Top-up block/)).toHaveValue(100);
     expect(control(/Top-up cap per member/)).toHaveValue(1000);
     expect(control(/Court time per member per day/)).toHaveValue(60);
@@ -47,15 +48,17 @@ describe("AdminSettings", () => {
     expect(control(/No-show sweep looks back/)).toHaveValue(7);
   });
 
-  it("sends an edited economics value and leaves the button map alone", async () => {
+  it("sends an edited economics value and leaves the button map and the moved league rate alone", async () => {
+    // An API mid-migration may still SERVE the league rate; this read does, on purpose.
     const stub = stubFetch([
-      ...routes(),
+      { path: "/api/v1/admin/settings/", body: { ...SETTINGS_FIXTURE, credits_per_zar_league: 2.4 } },
+      { path: "/api/v1/admin/courts/", body: [] },
       { method: "PUT", path: "/api/v1/admin/settings/", body: { saved: true } },
     ]);
 
     renderPage(<AdminSettingsPage />);
 
-    fireEvent.change(await findControl(/Credits per R1 — league/), { target: { value: "2.8" } });
+    fireEvent.change(await findControl(/Credits per R1 — members/), { target: { value: "1.8" } });
     fireEvent.click(saveButton());
 
     await waitFor(() => {
@@ -63,7 +66,12 @@ describe("AdminSettings", () => {
       expect(save).toBeTruthy();
       const body = save!.body as Record<string, unknown>;
 
-      expect(body.creditsPerZarLeague).toBe(2.8);
+      expect(body.creditsPerZarRegular).toBe(1.8);
+
+      // The read above SERVES credits_per_zar_league, and the
+      // API now refuses any save carrying it (400 credits_per_zar_league_moved_to_groups). Echoing
+      // the read back would make every save from this page fail.
+      expect(save!.raw).not.toMatch(/credits_?per_?zar_?league/i);
 
       // The button map is the devices page's business. Sending a stale copy from here
       // would silently undo a remap somebody made there — and the API cannot tell the

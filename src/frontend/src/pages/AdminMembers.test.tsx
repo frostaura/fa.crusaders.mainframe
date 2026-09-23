@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import AdminMembersPage from "./AdminMembers";
+import { ASSIGN_COPY } from "../lib/groupsCopy";
 import { ledgerRowFixture, memberFixture, renderPage, stubFetch, type StubRoute } from "../test/harness";
 import {
   OUTCOMES, PASSWORD_DIALOG, RELATED_BOOKING, REJECT_DIALOG, RESET_DIALOG, ROW_ACTIONS, SUSPEND_DIALOG,
@@ -375,52 +376,102 @@ describe("AdminMembers — an adjustment is not posted twice", () => {
 });
 
 /**
- * The member's rate class, on the screen the admin is already looking at.
- *
- * <p>
- * `POST /admin/members/{id}/class` once had zero call sites, so every member was permanently
- * Regular while the class decides what R100 buys. P5 moved the control from a native select in
- * its own column into the row's ⋯ menu as a radio pair (D2 retires the class for Groups).
- * </p>
+ * The member's groups — D2 deleted the rate class (`POST /admin/members/{id}/class` is gone) and
+ * groups carry the top-up rate and the peak say now. "Change groups" in the row's ⋯ menu opens
+ * GroupAssign: chips, a preview of what the move does to their money BEFORE it is saved, and one
+ * `PUT /admin/members/{userId}/groups` with the whole set.
  */
-describe("AdminMembers — member class", () => {
+/**
+ * GroupAssign's picker: open it, tick one, close it. The list stays open while several are ticked
+ * (a multi-select), so the test closes it the way a person does — Escape — before saving.
+ */
+async function pickGroup(dialog: HTMLElement, name: RegExp) {
+  fireEvent.click(await within(dialog).findByRole("combobox", { name: /Add a group/ }));
+  const option = await screen.findByRole("option", { name });
+  fireEvent.click(option);
+  fireEvent.keyDown(option, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("option", { name })).not.toBeInTheDocument());
+}
+
+describe("AdminMembers — groups (D2 retired the class)", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  const MEMBERSHIP = "33333333-3333-3333-3333-333333333333";
-  const CLASS_PATH = `/api/v1/admin/members/${MEMBERSHIP}/class`;
+  const USER = "44444444-4444-4444-4444-444444444444";
+  const LEAGUE = { id: "g-league", name: "League", status: "active", system_key: "league", credits_per_zar: 2.4, peak_priority: true, member_count: 3 };
+  const JUNIORS = { id: "g-juniors", name: "Juniors", status: "active", system_key: null, credits_per_zar: null, peak_priority: false, member_count: 5 };
+  const TARIFF_NOW = { top_up_credits_per_zar: 1.6, rate_group_id: null, peak_priority: false, peak_withheld_by: [] };
+  const TARIFF_LEAGUE = { top_up_credits_per_zar: 2.4, rate_group_id: "g-league", peak_priority: true, peak_withheld_by: [] };
 
-  const routes = (member: Record<string, unknown> = {}, classRoute: Partial<StubRoute> = {}): StubRoute[] => [
-    { path: "/api/v1/admin/members/", body: [memberFixture(member)] },
+  const routes = (extra: StubRoute[] = []): StubRoute[] => [
+    { path: "/api/v1/admin/members/", body: [memberFixture({ member_class: undefined, groups: [] })] },
     { path: "/api/v1/admin/biometric/enrollments", body: [] },
-    { method: "POST", path: CLASS_PATH, body: { member_class: "LeagueOrSenior", changed: true }, ...classRoute },
+    { path: "/api/v1/admin/member-groups", body: { groups: [LEAGUE, JUNIORS] } },
+    {
+      method: "POST",
+      path: "/api/v1/admin/member-groups/preview",
+      body: { current: { tariff: TARIFF_NOW, slice_price_credits: 8 }, would_be: { tariff: TARIFF_LEAGUE, slice_price_credits: 8 } },
+    },
+    ...extra,
   ];
 
-  async function openMenu() {
-    fireEvent.pointerDown(await screen.findByRole("button", { name: ROW_ACTIONS.more("Ada Lovelace") }), POINTER);
-    return screen.findByRole("menu");
-  }
-
-  it("shows the class the API returned and sends a change", async () => {
-    const stub = stubFetch(routes({ member_class: "LeagueOrSenior" }));
+  it("shows what the move does to their rate before saving, then saves the whole set", async () => {
+    const stub = stubFetch(routes([{
+      method: "PUT",
+      path: `/api/v1/admin/members/${USER}/groups`,
+      body: { user_id: USER, groups: [LEAGUE], added: ["g-league"], removed: [], tariff: TARIFF_LEAGUE },
+    }]));
     renderPage(<AdminMembersPage />);
 
-    const menu = await openMenu();
-    expect(within(menu).getByRole("menuitemradio", { name: "League or senior" })).toHaveAttribute("aria-checked", "true");
-    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "Regular" }));
+    await fromMenu(ASSIGN_COPY.change);
+    const dialog = await screen.findByRole("dialog", { name: ASSIGN_COPY.title("Ada Lovelace") });
+    expect(within(dialog).getByText(ASSIGN_COPY.none)).toBeInTheDocument();
 
-    await waitFor(() => expect(stub.calls.find((c) => c.path === CLASS_PATH)?.body).toEqual({ memberClass: "Regular" }));
-    expect(await screen.findByText(OUTCOMES.classChanged("Ada Lovelace", "Regular"))).toBeInTheDocument();
+    await pickGroup(dialog, /League/);
+
+    // Before anything is saved: the club's own answer to "what would this do", in words.
+    expect(await within(dialog).findByText(/Top-up rate 1\.6 → 2\.4 cr per R1 \(from League\)/)).toBeInTheDocument();
+    expect(within(dialog).getByText("Gains peak priority.")).toBeInTheDocument();
+    const preview = stub.calls.find((c) => c.path.endsWith("/member-groups/preview"));
+    expect(preview?.body).toEqual({ userId: USER, proposedGroupIds: ["g-league"] });
+    expect(stub.calls.some((c) => c.method === "PUT"), "the preview wrote nothing").toBe(false);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: ASSIGN_COPY.saveLabel("Ada", 1) }));
+    await waitFor(() => expect(stub.calls.find((c) => c.method === "PUT")?.body).toEqual({ groupIds: ["g-league"] }));
+    expect(await screen.findByText(/Ada Lovelace is in 1 group now\. Tops up at 2\.4 cr per R1 \(League\) · peak priority\./)).toBeInTheDocument();
+    // The row takes the saved set at once.
+    const row = document.querySelector(`[data-member-row="${USER}"]`) as HTMLElement;
+    await waitFor(() => expect(within(row).getByText("League")).toBeInTheDocument());
+    // The class endpoint D2 deleted is never called again.
+    expect(stub.calls.some((c) => c.path.endsWith("/class"))).toBe(false);
   });
 
-  it("puts the old class back when the server refuses, rather than showing a rate that is not real", async () => {
-    stubFetch(routes({}, { status: 400, body: { error: "invalid_member_class" } }));
+  it("keeps the dialog open and says a refusal in words, naming the group", async () => {
+    stubFetch(routes([{
+      method: "PUT",
+      path: `/api/v1/admin/members/${USER}/groups`,
+      status: 400,
+      body: { error: "group_archived", group_id: "g-juniors", name: "Juniors" },
+    }]));
     renderPage(<AdminMembersPage />);
 
-    fireEvent.click(within(await openMenu()).getByRole("menuitemradio", { name: "League or senior" }));
-    expect(await screen.findByText(OUTCOMES.classFailed("Ada Lovelace"))).toBeInTheDocument();
+    await fromMenu(ASSIGN_COPY.change);
+    const dialog = await screen.findByRole("dialog", { name: ASSIGN_COPY.title("Ada Lovelace") });
+    await pickGroup(dialog, /Juniors/);
+    fireEvent.click(within(dialog).getByRole("button", { name: ASSIGN_COPY.saveLabel("Ada", 1) }));
 
-    const menu = await openMenu();
-    await waitFor(() => expect(within(menu).getByRole("menuitemradio", { name: "Regular" })).toHaveAttribute("aria-checked", "true"));
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert).toHaveTextContent("Juniors has been archived, so nobody can join it.");
+    expect(alert).not.toHaveTextContent("group_archived");
+    expect(screen.getByRole("dialog", { name: ASSIGN_COPY.title("Ada Lovelace") })).toBeInTheDocument();
+  });
+
+  it("offers no rate-class control any more", async () => {
+    stubFetch(routes());
+    renderPage(<AdminMembersPage />);
+    fireEvent.pointerDown(await screen.findByRole("button", { name: ROW_ACTIONS.more("Ada Lovelace") }), POINTER);
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).queryByRole("menuitemradio")).not.toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: ASSIGN_COPY.change })).toBeInTheDocument();
   });
 });
 

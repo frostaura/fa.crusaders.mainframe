@@ -57,7 +57,7 @@ function routes(extra: ApiRoute[]): ApiRoute[] {
   return [
     { path: "/api/v1/whoami", body: SESSION_ADMIN },
     { path: "/api/v1/wallet", body: { balance_credits: 10, entries: [], total_entries: 0, offset: 0, limit: 10 } },
-    { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@test.local", photo_url: null, membership_number: "A-1", member_class: "Regular" } },
+    { path: "/api/v1/me/profile", body: { full_name: "Crusaders Admin", email: "admin@test.local", photo_url: null, membership_number: "A-1" } },
     { path: "/api/v1/admin/members", body: [
       { user_id: ADMIN_ID, full_name: "Crusaders Admin", photo_url: null, balance_credits: 10 },
       { user_id: MEMBER_ID, full_name: "Naledi Khumalo", photo_url: null, balance_credits: 34 },

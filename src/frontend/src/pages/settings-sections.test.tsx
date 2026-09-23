@@ -298,12 +298,17 @@ describe("R13 — guidance and the first visit", () => {
     expect(screen.queryByText(SETTINGS_COPY.introTitle)).toBeNull();
   });
 
-  it("names the credit rates as moving to Groups", async () => {
+  it("says group rates are set on each group, and links there (D2)", async () => {
     stubFetch(routes());
     renderPage(<AdminSettingsPage />);
 
-    expect(await screen.findByRole("button", { name: "Credits & top-ups" })).toHaveTextContent(SETTINGS_COPY.movingToGroups);
-    expect(screen.getByText(SETTINGS_COPY.movingToGroupsNote)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Credits & top-ups" }));
+    const credits = screen.getByRole("region", { name: "Credits & top-ups" });
+    expect(within(credits).getByText(SETTINGS_COPY.groupRatesNote)).toBeInTheDocument();
+    expect(within(credits).getByRole("link", { name: SETTINGS_COPY.groupRatesLink })).toHaveAttribute("href", "/admin/groups");
+    // The "moving to Groups" interim notice is gone: the move happened.
+    expect(within(credits).queryByText(/moving to Groups/i)).toBeNull();
+    expect(screen.getByRole("button", { name: "Credits & top-ups" })).not.toHaveTextContent(/league/i);
   });
 });
 

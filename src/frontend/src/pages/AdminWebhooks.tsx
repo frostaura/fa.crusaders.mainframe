@@ -39,8 +39,12 @@ const ENVELOPE_VARS = [
 /**
  * Every `member.*` event carries the same payload, so a URL template written against one
  * works against the others. `reason` is the only addition, on the two that have one.
+ *
+ * `member_class` is not offered (D2): the payload still carries it for one release so an old
+ * template keeps working, but a new one should not be written against a field on its way out.
+ * `groups` is an array, which a URL template cannot name (docs/specs/webhooks.md).
  */
-const MEMBER_VARS = ["membership_id", "user_id", "full_name", "membership_number", "status", "member_class"];
+const MEMBER_VARS = ["membership_id", "user_id", "full_name", "membership_number", "status"];
 
 /**
  * Both `peripheral.*` events carry the same box, so one URL template works for either. The
@@ -136,7 +140,7 @@ const EVENTS: EventDef[] = [
     name: "credit.topped_up",
     label: "Credit topped up",
     description: "A successful PayFast top-up cleared.",
-    vars: ["topup_id", "zar_paid", "credits", "conversion_rate", "member_class", "external_reference"],
+    vars: ["topup_id", "zar_paid", "credits", "conversion_rate", "rate_group_id", "external_reference"],
   },
   {
     name: "credit.refunded",

@@ -179,7 +179,7 @@ export function MemberPreview({
   /** What the change would do to this member's money, in words. */
   consequence?: string[];
 }) {
-  const empty = rules?.empty_window_reason;
+  const empty = emptyReason(rules);
   const allowed = wireWindows(rules?.allowed_windows);
   const clubHours = rules?.club_hours ? wireWindows([rules.club_hours]) : [];
 
@@ -277,12 +277,11 @@ export function MemberPreview({
           {consequence.map((line) => (
             <p key={line} className="text-sm font-medium text-text-primary">{line}</p>
           ))}
-          {proposedRules?.empty_window_reason && (
+          {emptyReason(proposedRules) && (
             <Alert tone="warning">
               {emptyIntersectionSentence(
-                proposedRules.empty_window_reason.groups
-                  ?? (proposedRules.groups ?? []).map((g) => g.name),
-                (proposedRules.empty_window_reason.day as Weekday) ?? day,
+                emptyReason(proposedRules)?.groups ?? (proposedRules?.groups ?? []).map((g) => g.name),
+                (emptyReason(proposedRules)?.day as Weekday) ?? day,
                 memberName,
               )}
             </Alert>
@@ -294,4 +293,14 @@ export function MemberPreview({
       </CardContent>
     </Card>
   );
+}
+
+/**
+ * Why nothing is bookable, under either spelling: `empty_window_reason` ({groups, day}) or the
+ * server's `empty_window_groups` (names only — the day is the one asked about).
+ */
+function emptyReason(rules: MemberBookingRules | null | undefined): { groups?: string[]; day?: string } | null {
+  if (rules?.empty_window_reason) return rules.empty_window_reason;
+  if (rules?.empty_window_groups && rules.empty_window_groups.length > 0) return { groups: rules.empty_window_groups };
+  return null;
 }
