@@ -91,7 +91,8 @@ and everything reads the stamp: whether the game is open, the hold, the lapse, r
 minute sweep's window. Changing `share_lapse_hours` later affects only bookings not yet stamped, so
 raising it can never reopen a game whose held shares were released and spent. (Migration
 `AddBookingShareDeadline` backfilled every booking that already had players from its club's
-setting, clamped as on read.)
+setting read exactly as `TenantSettingsAccessor` reads it — a JSON number that is an integer in
+Int32 range, else 48 — then clamped 1–168; `Persistence/ShareDeadlineBackfill.cs`.)
 
 **Never a debt.** A collection the partner cannot cover is not posted; the share stays unpaid and
 payable by the partner until the **share deadline** after which it lapses and the organiser's
@@ -102,13 +103,25 @@ booking for a week (returns still flow). Only an admin's explicit collect
 take a partner below zero. A collection checks the partner's **spendable** credits (§3a), not
 their balance.
 
-**Nor a debt the other way.** Before the deadline every return is covered by the organiser's hold
-(§3a). After it the hold has been released, so a return posts only when the organiser's spendable
-credits cover it; otherwise it **waits**, unpaid, and the next reconcile (the sweep, the settlement
-hook, a desk adjustment naming the booking) posts it once they do. Nothing overdraws the organiser
-silently: only the desk's named overdraft — an admin remove or settle-outside sent with
-`allowNegativeBalance` (§7) — posts it regardless. In practice a late return follows a fall in what
-the organiser owes, which credits them first, so it rarely waits.
+**Nor a debt the other way — a return must be COVERED.** A return posts only when the organiser's
+**coverage** pays for it: their balance less what they hold for their OTHER bookings
+(`LedgerService.GetCoverageAsync`). What they hold for this booking is what may go back from it, so
+an ordinary return is always covered. The rule is keyed on coverage, never on the deadline: a hold
+released at the deadline and spent, or a share a cancellation after check-in (S4) released at
+once and the organiser spent, is not covered, before the deadline or after. An uncovered return
+**waits**:
+
+- the seat is stamped `ReturnPendingSince` (indexed) and **both sides are told once**, under
+  `players.return_waiting` — never again while it keeps waiting;
+- it is retried by the minute sweep, which selects every seat carrying the stamp **however old
+  the booking**, and at once by **any credit the organiser receives** — a top-up, a desk
+  adjustment, a refund, anything but a share moving between players (`ShareHook.AfterCreditAsync`,
+  after the commit);
+- the stamp clears when the return posts or is no longer due.
+
+Nothing overdraws the organiser silently: only the desk's named overdraft — an admin remove or
+settle-outside sent with `allowNegativeBalance` (§7) — posts it regardless. In practice most late
+returns follow a fall in what the organiser owes, which credits them first.
 
 **When it runs**: after every participant action (after its own commit); after each existing
 settlement path commits — `POST /bookings/{id}/cancel`, `POST /admin/bookings/{id}/cancel`, the
@@ -141,6 +154,10 @@ organiser receives as shares are **held**:
   admin's explicit `allowNegativeBalance` looks past it.
 - **Consistent under the lock**: a collection raises the organiser's balance and hold in one save,
   so spendable does not move; a return locks the organiser, the lock every spend check holds.
+- **A cancelled booking holds only its pending returns.** After a cancellation BEFORE check-in the
+  refund covers every return; after check-in (S4) every share stays owed in full, so nothing is
+  held and the organiser may spend it. Anything that later hands such a share back is a return
+  that must be covered (§3) — the desk's overdraft is the only way past that.
 - **One meaning for `balance_credits`: the raw balance, everywhere.** Wherever a balance is shown
   beside a spend — `GET /wallet`, the wallet SSE stream's opening frame and named `balance` frame,
   the invite view, the accept's answer, the admin booking quote and the admin bulk quote —
@@ -235,6 +252,7 @@ organiser receives as shares are **held**:
 | `players.game_cancelled` | every live partner | yes | yes |
 | `players.game_changed` | a removed partner, or one whose share moved | yes | no |
 | `players.response` | the organiser (accepted / declined / withdrew) | inbox only | — |
+| `players.return_waiting` | the partner and the organiser, once, when a return starts waiting (§3) | yes | no |
 
 ## 7. Endpoints
 
@@ -279,9 +297,9 @@ their `balance_credits` is raw and their `overdraws` is on spendable.
 | Route | Body → answer |
 | --- | --- |
 | `POST /api/v1/admin/bookings/{id}/players` | `{userId? \| guestName?, accepted?, reason?}` — neither: an open link seat. `accepted` places a member without their consent (collects nothing). → as the organiser's add |
-| `POST /api/v1/admin/bookings/{id}/players/{pid}/remove` | `{reason, allowNegativeBalance?}` → `{participant_id, status}`. After the share deadline `allowNegativeBalance: true` is required (`400 overdraft_not_authorised`): the hand-back is no longer covered by the organiser's hold |
+| `POST /api/v1/admin/bookings/{id}/players/{pid}/remove` | `{reason, allowNegativeBalance?}` → `{participant_id, status}`. `allowNegativeBalance: true` is required whenever the hand-back is not covered by the organiser's coverage (§3), whatever the deadline: `400 overdraft_not_authorised {return_credits, covered_credits}` |
 | `POST …/{pid}/accept` | `{reason}` — accept on behalf; records no consent |
-| `POST …/{pid}/settle-outside` | `{reason, allowNegativeBalance?}` — paid by hand; anything collected in-app goes back. Accepted seats only: `409 player_not_accepted`. After the share deadline `allowNegativeBalance: true` is required, as for remove |
+| `POST …/{pid}/settle-outside` | `{reason, allowNegativeBalance?}` — paid by hand; anything collected in-app goes back. Accepted seats only: `409 player_not_accepted`. `allowNegativeBalance: true` is required whenever the hand-back is not covered, as for remove |
 | `POST …/{pid}/collect` | `{reason, allowNegativeBalance: true}` — the only path that may take a partner below zero, or collect from a lapsed seat → `{participant_id, collected_credits, balance_after_credits}`; `400 overdraft_not_authorised`, `409 nothing_to_collect`, `409 conflict_retry`. The consent, the change-log line (the figure actually posted) and the pair are one transaction under the partner's lock |
 
 Change-log actions: `booking.player_added`, `booking.player_removed`,
