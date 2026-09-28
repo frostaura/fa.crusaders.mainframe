@@ -1,0 +1,241 @@
+using Crusaders.Mainframe.Api.Domain;
+using Microsoft.EntityFrameworkCore;
+
+namespace Crusaders.Mainframe.Api.Services;
+
+/// <summary>A partner's own answers: accept (and pay), decline, withdraw — by seat or by link.</summary>
+public sealed partial class PlayersService
+{
+    /// <summary>The seat a link names, or null. A malformed token never reaches the database.</summary>
+    public async Task<BookingParticipant?> SeatForTokenAsync(string? token, CancellationToken ct)
+    {
+        if (!InviteTokens.LooksValid(token)) return null;
+        var hash = InviteTokens.Hash(token!);
+        return await _db.BookingParticipants.AsNoTracking().FirstOrDefaultAsync(p => p.InviteTokenHash == hash, ct);
+    }
+
+    /// <summary>Accepts through a shared link — claiming an open seat, or answering one addressed to the caller.</summary>
+    public async Task<PlayerOutcome> AcceptByTokenAsync(string? token, Guid me, CancellationToken ct)
+    {
+        var seat = await SeatForTokenAsync(token, ct);
+        if (seat is null || (seat.UserId is { } owner && owner != me)) return PlayerOutcome.InviteNotFound;
+        return await AcceptAsync(seat.Id, me, ct);
+    }
+
+    /// <summary>
+    /// Accept — and pay — a seat. The partner's own consent, to the share as it stands now.
+    ///
+    /// <para>
+    /// <b>Under the partner's lock, in one save.</b> The seat's new state and the first payment
+    /// commit together or not at all: an accept the partner cannot afford changes nothing and
+    /// answers 402 with the figures a top-up needs. The daily cap (D12) is asked under the same
+    /// lock, which is the cap's own unit, so two accepts cannot both squeeze under it.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Idempotent.</b> A second tap finds the seat accepted and fully paid and answers the same
+    /// 200 — one pair on the ledger, however many times the button was pressed. Accepting an
+    /// already-accepted seat whose share went UP is how a partner consents to the new figure.
+    /// </para>
+    /// </summary>
+    public async Task<PlayerOutcome> AcceptAsync(Guid seatId, Guid me, CancellationToken ct)
+    {
+        PlayerOutcome outcome;
+        try
+        {
+            outcome = await AcceptUnderLockAsync(seatId, me, ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            _db.ChangeTracker.Clear();
+            return await AlreadyAnsweredAsync(seatId, me, ct);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException { SqlState: "23505" })
+        {
+            _db.ChangeTracker.Clear();
+            return await AlreadyAnsweredAsync(seatId, me, ct);
+        }
+
+        if (outcome.IsOk && outcome.Body is AcceptBody body)
+        {
+            await AfterAsync(body.BookingId, [body.OrganiserId], ct);
+            return PlayerOutcome.Ok(body.Answer);
+        }
+        return outcome;
+    }
+
+    private sealed record AcceptBody(Guid BookingId, Guid OrganiserId, object Answer);
+
+    /// <summary>After a lost race: the winner's accept is this caller's answer too, if it was theirs.</summary>
+    private async Task<PlayerOutcome> AlreadyAnsweredAsync(Guid seatId, Guid me, CancellationToken ct)
+    {
+        var seat = await _db.BookingParticipants.AsNoTracking().FirstOrDefaultAsync(p => p.Id == seatId, ct);
+        if (seat?.UserId == me && seat.Status == ParticipantStatus.Accepted) return PlayerOutcome.Ok(await AnswerAsync(seat, ct));
+        return PlayerOutcome.Refuse(409, PlayerErrors.InviteClosed);
+    }
+
+    private async Task<PlayerOutcome> AcceptUnderLockAsync(Guid seatId, Guid me, CancellationToken ct)
+    {
+        await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, me, _p.Outbox, ct);
+        await LockSeatAsync(seatId, ct);
+        var now = DateTimeOffset.UtcNow;
+
+        var seat = await _db.BookingParticipants.FirstOrDefaultAsync(p => p.Id == seatId, ct);
+        if (seat is null || seat.Seat == 1 || seat.GuestName is not null) return PlayerOutcome.InviteNotFound;
+        if (seat.UserId is { } owner && owner != me) return PlayerOutcome.InviteNotFound;
+        var game = await LoadAsync(seat.BookingId, ct);
+        if (game is null) return PlayerOutcome.InviteNotFound;
+        seat = game.Seats.First(s => s.Id == seatId);
+
+        if (await AcceptRefusalAsync(game, seat, me, now, ct) is { } refused) return refused;
+
+        var fresh = seat.Status == ParticipantStatus.Invited;
+        seat.UserId = me;
+        seat.Status = ParticipantStatus.Accepted;
+        seat.ConsentedCredits = Math.Max(seat.ConsentedCredits, seat.ShareCredits);
+        seat.RespondedAt ??= now.Storable();
+        seat.UpdatedAt = now.Storable();
+
+        var delta = ShareLedger.TargetFor(game.Booking, seat, await _p.Shares.OwedAsync(game.Booking, ct))
+                    - await _p.Shares.PaidAsync(seat, ct);
+        IReadOnlyList<LedgerPosting> postings = [];
+        if (delta > 0)
+        {
+            var balance = await _p.Ledger.GetBalanceAsync(me, ct);
+            if (balance < delta)
+            {
+                _db.ChangeTracker.Clear();
+                return PlayerOutcome.Refuse(402, PlayerErrors.InsufficientBalance, new { current_credits = balance, required_credits = delta });
+            }
+            postings = await _p.Shares.StageCollectionAsync(game.Booking, seat, delta, me, ct);
+        }
+        if (fresh) MemberNotices.Stage(_db, _tenant.TenantId, await PlayerNotices.ResponseAsync(_db, game.Booking, seat, game.Settings, "accepted", ct), game.Settings);
+
+        // One save: the seat, the pair, the receipts. An empty posting list still saves the seat.
+        await _p.Ledger.PostManyAsync(postings, ct);
+        await payerLock.CommitAsync(ct);
+        return PlayerOutcome.Ok(new AcceptBody(game.Booking.Id, game.Booking.UserId!.Value, await AnswerAsync(seat, ct)));
+    }
+
+    /// <summary>
+    /// The seat's own lock, taken AFTER the member's, inside the same transaction. Two members
+    /// claiming one open link seat hold different member locks, so without this they both staged
+    /// the seat's update and the first pair's references and deadlocked on each other's rows
+    /// (40P01, seen under the racing-claim test). Always member-then-seat, so no cycle is possible.
+    /// </summary>
+    private async Task LockSeatAsync(Guid seatId, CancellationToken ct)
+    {
+        if (!_db.Database.IsNpgsql()) return;
+        await _db.Database.ExecuteSqlRawAsync(
+            "SELECT pg_advisory_xact_lock({0})", [PayerLock.KeyFor(_tenant.TenantId, seatId)], ct);
+    }
+
+    /// <summary>Every reason an accept is refused, in the order a partner would want to hear them.</summary>
+    private async Task<PlayerOutcome?> AcceptRefusalAsync(Game game, BookingParticipant seat, Guid me, DateTimeOffset now, CancellationToken ct)
+    {
+        if (!seat.IsLive || !IsOpen(game, now) || seat.SettledOutsideAt is not null || seat.LapsedAt is not null)
+        {
+            return PlayerOutcome.Refuse(409, PlayerErrors.InviteClosed);
+        }
+        if (game.Booking.UserId == me || game.Live.Any(s => s.Id != seat.Id && s.UserId == me))
+        {
+            return PlayerOutcome.Refuse(409, PlayerErrors.AlreadyInBooking);
+        }
+        if (!await IsActiveMemberAsync(me, ct)) return PlayerOutcome.Refuse(403, PlayerErrors.MembershipInactive);
+
+        // D12, asked only for a game still ahead and only on the first yes: a partner paying
+        // after the game has been played is settling up, not taking court time.
+        if (seat.Status == ParticipantStatus.Invited && game.Booking.StartsAt > now
+            && await _p.Rules.PartnerCapRefusalAsync(me, game.Booking, game.Settings, ct) is { } cap)
+        {
+            return PlayerOutcome.Refuse(409, PlayerErrors.PartnerCapExceeded, CapFigures(cap));
+        }
+
+        // A seat already accepted and fully paid at its current share: nothing to do.
+        if (seat.Status == ParticipantStatus.Accepted && seat.ConsentedCredits >= seat.ShareCredits
+            && await _p.Shares.UnpaidAsync(game.Booking, seat, ct) <= 0m)
+        {
+            return PlayerOutcome.Ok(await AnswerAsync(seat, ct));
+        }
+        return null;
+    }
+
+    /// <summary>The cap refusal's own figures, under the partner-cap code.</summary>
+    internal static object CapFigures(BookingResult cap)
+    {
+        switch (cap)
+        {
+            case BookingResult.PerDaySlotCapExceeded s:
+                return new { cap = "slots", cap_slots = s.CapSlots, booked_slots = s.BookedSlots, attempted_slots = s.AttemptedSlots, club_day = s.ClubDay };
+            case BookingResult.PerDayCapExceeded m:
+                return new { cap = "minutes", cap_minutes = m.CapMinutes, already_booked_minutes = m.AlreadyBookedMinutes, attempted_minutes = m.AttemptedMinutes, club_day = m.ClubDay };
+            default:
+                return new { cap = BookingRefusals.CodeOf(cap) };
+        }
+    }
+
+    private async Task<object> AnswerAsync(BookingParticipant seat, CancellationToken ct)
+    {
+        var balance = seat.UserId is { } u ? await _p.Ledger.GetBalanceAsync(u, ct) : 0m;
+        return new
+        {
+            participant_id = seat.Id,
+            booking_id = seat.BookingId,
+            status = PlayerViews.StatusName(seat.Status),
+            share_credits = seat.ShareCredits,
+            consented_credits = seat.ConsentedCredits,
+            paid_credits = await _p.Shares.PaidAsync(seat, ct),
+            balance_credits = balance,
+        };
+    }
+
+    /// <summary>Declines an invite addressed to the caller. The seat goes back to the organiser.</summary>
+    public async Task<PlayerOutcome> DeclineAsync(Guid seatId, Guid me, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var seat = await _db.BookingParticipants.AsNoTracking().FirstOrDefaultAsync(p => p.Id == seatId, ct);
+        if (seat is null || seat.UserId != me) return PlayerOutcome.InviteNotFound;
+        var game = await LoadAsync(seat.BookingId, ct);
+        if (game is null) return PlayerOutcome.InviteNotFound;
+        seat = game.Seats.First(s => s.Id == seatId);
+        if (seat.Status != ParticipantStatus.Invited) return PlayerOutcome.Refuse(409, PlayerErrors.NotInvited);
+
+        seat.Status = ParticipantStatus.Declined;
+        seat.RespondedAt = now.Storable();
+        seat.UpdatedAt = now.Storable();
+        MemberNotices.Stage(_db, _tenant.TenantId, await PlayerNotices.ResponseAsync(_db, game.Booking, seat, game.Settings, "declined", ct), game.Settings);
+        if (await SaveAsync(ct) is { } conflict) return conflict;
+        await AfterAsync(game.Booking.Id, [game.Booking.UserId!.Value], ct);
+        return PlayerOutcome.Ok(new { participant_id = seat.Id, status = PlayerViews.StatusName(seat.Status) });
+    }
+
+    /// <summary>
+    /// An accepted partner pulling out — allowed only outside the club's late-cancel window, the
+    /// same line the organiser's own cancellation is held to. Inside it the seat stands and so
+    /// does the share: the organiser can no longer resell the court either.
+    /// </summary>
+    public async Task<PlayerOutcome> WithdrawAsync(Guid seatId, Guid me, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var seat = await _db.BookingParticipants.AsNoTracking().FirstOrDefaultAsync(p => p.Id == seatId, ct);
+        if (seat is null || seat.UserId != me || seat.Seat == 1) return PlayerOutcome.PlayerNotFound;
+        var game = await LoadAsync(seat.BookingId, ct);
+        if (game is null) return PlayerOutcome.PlayerNotFound;
+        seat = game.Seats.First(s => s.Id == seatId);
+        if (seat.Status != ParticipantStatus.Accepted) return PlayerOutcome.Refuse(409, PlayerErrors.NotInvited);
+
+        var closesAt = game.Booking.StartsAt.AddMinutes(-game.Settings.PenaltyWindowMinutes);
+        if (now >= closesAt || game.Booking.Status != BookingStatus.Booked)
+        {
+            return PlayerOutcome.Refuse(409, PlayerErrors.WithdrawWindowClosed, new { closed_at = closesAt });
+        }
+
+        seat.Status = ParticipantStatus.Withdrawn;
+        seat.RespondedAt = now.Storable();
+        seat.UpdatedAt = now.Storable();
+        MemberNotices.Stage(_db, _tenant.TenantId, await PlayerNotices.ResponseAsync(_db, game.Booking, seat, game.Settings, "withdrew", ct), game.Settings);
+        if (await SaveAsync(ct) is { } conflict) return conflict;
+        await AfterAsync(game.Booking.Id, [game.Booking.UserId!.Value], ct);
+        return PlayerOutcome.Ok(new { participant_id = seat.Id, status = PlayerViews.StatusName(seat.Status) });
+    }
+}

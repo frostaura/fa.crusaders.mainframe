@@ -113,4 +113,24 @@ public sealed class AdminNotification : ITenantScoped
 
     /// <summary>How many people were mailed in the end. Zero is a real answer: everyone had opted out.</summary>
     public int RecipientCount { get; set; }
+
+    /// <summary>
+    /// Who the row is for (D11 generalised the outbox): the club's administrators, resolved at
+    /// delivery exactly as before, or ONE member, named by <see cref="RecipientUserId"/>. The
+    /// admin feed reads <see cref="NotificationAudience.Admins"/> rows only.
+    /// </summary>
+    public NotificationAudience Audience { get; set; } = NotificationAudience.Admins;
+
+    /// <summary>The member a <see cref="NotificationAudience.Member"/> row is mailed to. Null on every admin row.</summary>
+    public Guid? RecipientUserId { get; set; }
+}
+
+/// <summary>Who an outbox row is addressed to. Stored as an integer; the database CHECK names the same two.</summary>
+public enum NotificationAudience
+{
+    /// <summary>Every active, confirmed administrator, minus the actor and the opted-out (R23).</summary>
+    Admins = 0,
+
+    /// <summary>One member — <see cref="AdminNotification.RecipientUserId"/>. Never an administrator's feed row.</summary>
+    Member = 1,
 }

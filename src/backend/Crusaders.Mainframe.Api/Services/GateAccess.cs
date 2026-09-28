@@ -396,8 +396,12 @@ public static class GateAccess
         var latestStart = BookingCodeWindow.LatestStart(context.Now, horizonMinutes);
         var tail = context.Settings.GraceWindowMinutes;
 
+        // D11: an ACCEPTED player on somebody else's booking is due on that court exactly as the
+        // organiser is. Invited is not enough — a seat nobody said yes to admits nobody — and the
+        // member's own membership was already asked one step earlier, as it is for the organiser.
+        var partnerOn = BookingPlayerQueries.PartnerBookingIds(db, userId);
         return await db.Bookings.AnyAsync(
-            b => b.UserId == userId
+            b => (b.UserId == userId || partnerOn.Contains(b.Id))
                  && (b.Status == BookingStatus.Booked
                      || b.Status == BookingStatus.NoShow
                      || b.Status == BookingStatus.Completed)

@@ -97,6 +97,7 @@ public class LedgerEntryTypeCoverageTests
     [InlineData(LedgerEntryType.PaymentReversal, 6)]
     [InlineData(LedgerEntryType.LightsPurchase, 7)]
     [InlineData(LedgerEntryType.AdminTopUp, 8)]
+    [InlineData(LedgerEntryType.ShareTransfer, 9)]
     public void Ledger_type_values_are_stable(LedgerEntryType type, int expected)
     {
         Assert.Equal(expected, (int)type);
@@ -110,6 +111,8 @@ public class LedgerEntryTypeCoverageTests
     [Fact]
     public void The_number_of_ledger_types_is_pinned()
     {
-        Assert.Equal(9, AllMembers.Length);
+        // 10 since D11's ShareTransfer. The frontend's ledger-type filter list is the other place
+        // that must learn it (the players frontend lane).
+        Assert.Equal(10, AllMembers.Length);
     }
 }

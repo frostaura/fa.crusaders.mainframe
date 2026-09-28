@@ -119,6 +119,16 @@ public sealed class UpdatePreferencesRequest
     [JsonPropertyName("weekly_recap")] public bool? WeeklyRecap { get; init; }
     [JsonPropertyName("admin_notification_optouts")] public List<string?>? AdminNotificationOptouts { get; init; }
 
+    /// <summary>D13: may this member's results be shown beyond the players in them. Stored only for now.</summary>
+    [JsonPropertyName("share_results")] public bool? ShareResults { get; init; }
+    [JsonPropertyName("shareResults")] public bool? ShareResultsCamel { get; init; }
+
+    // D13's names for the two flags P2 had already shipped as `findable` and
+    // `show_in_leaderboards`. Accepted as aliases so the players lane's spelling and the shipped
+    // one both land; the canonical name wins when a body carries both.
+    [JsonPropertyName("findable_in_directory")] public bool? FindableInDirectory { get; init; }
+    [JsonPropertyName("show_on_leaderboards")] public bool? ShowOnLeaderboards { get; init; }
+
     [JsonPropertyName("showInLeaderboards")] public bool? ShowInLeaderboardsCamel { get; init; }
     [JsonPropertyName("ratingOptIn")] public bool? RatingOptInCamel { get; init; }
     [JsonPropertyName("weeklyRecap")] public bool? WeeklyRecapCamel { get; init; }
@@ -130,8 +140,9 @@ public sealed class UpdatePreferencesRequest
         return new UpdatePreferencesRequest
         {
             Theme = Theme,
-            Findable = Findable,
-            ShowInLeaderboards = ShowInLeaderboards ?? ShowInLeaderboardsCamel,
+            Findable = Findable ?? FindableInDirectory,
+            ShowInLeaderboards = ShowInLeaderboards ?? ShowInLeaderboardsCamel ?? ShowOnLeaderboards,
+            ShareResults = ShareResults ?? ShareResultsCamel,
             RatingOptIn = RatingOptIn ?? RatingOptInCamel,
             WeeklyRecap = WeeklyRecap ?? WeeklyRecapCamel,
             AdminNotificationOptouts = AdminNotificationOptouts ?? AdminNotificationOptoutsCamel,
@@ -193,6 +204,7 @@ internal sealed class PreferencesPatch
         if (_req.ShowInLeaderboards is { } leaderboards) p.ShowInLeaderboards = leaderboards;
         if (_req.RatingOptIn is { } rating) p.RatingOptIn = rating;
         if (_req.WeeklyRecap is { } recap) p.WeeklyRecap = recap;
+        if (_req.ShareResults is { } share) p.ShareResults = share;
         if (_optoutsJson is not null) p.AdminNotificationOptoutsJson = _optoutsJson;
     }
 }

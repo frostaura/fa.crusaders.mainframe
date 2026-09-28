@@ -137,6 +137,7 @@ public sealed class UserPreferencesView
     [JsonPropertyName("show_in_leaderboards")] public bool ShowInLeaderboards { get; init; }
     [JsonPropertyName("rating_opt_in")] public bool RatingOptIn { get; init; }
     [JsonPropertyName("weekly_recap")] public bool WeeklyRecap { get; init; }
+    [JsonPropertyName("share_results")] public bool ShareResults { get; init; }
     [JsonPropertyName("admin_notification_optouts")] public IReadOnlyList<string> AdminNotificationOptouts { get; init; } = [];
 
     /// <summary>Null until the person has changed something — the honest answer for a row that does not exist.</summary>
@@ -158,6 +159,7 @@ public sealed class UserPreferencesView
             ShowInLeaderboards = row.ShowInLeaderboards,
             RatingOptIn = row.RatingOptIn,
             WeeklyRecap = row.WeeklyRecap,
+            ShareResults = row.ShareResults,
             // A stored opt-out of a kind nobody may opt out of is not an opt-out, and is not
             // returned as one: the PUT refuses such a list, so a settings screen that saved back
             // what it read — a theme change carries the whole list — was refused for every

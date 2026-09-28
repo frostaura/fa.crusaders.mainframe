@@ -35,8 +35,11 @@ public static class BookingEndpoints
             // an admin — GOAL item 19's "with the exception of admins", and the half D2-B13's
             // actorId != userId inference got exactly backwards.
             var payer = new BookingPayer(userId, userId, ActorIsAdmin: ctx.User.IsInRole("admin"));
-            var result = await svc.CreateAsync(req.CourtId, payer, req.StartsAt, req.SliceCount, ct);
-            return ToHttpResult(result, ctx);
+            if (req.Players is not { Count: > 0 })
+            {
+                return ToHttpResult(await svc.CreateAsync(req.CourtId, payer, req.StartsAt, req.SliceCount, ct), ctx);
+            }
+            return await CreateWithPlayersAsync(req, payer, ctx, svc, ct);
         });
 
         g.MapGet("/{bookingId:guid}/cancellation-quote", async (Guid bookingId, HttpContext ctx, BookingService svc, CancellationToken ct) =>
@@ -50,6 +53,8 @@ public static class BookingEndpoints
         {
             var actorId = ctx.User.Id() ?? Guid.Empty;
             var result = await svc.CancelAsync(bookingId, actorId, actorIsAdmin: false, waivePenalty: false, ct);
+            // D11: the organiser's refund moved Owed; each partner's share follows it.
+            if (result is CancellationResult.Ok) await ctx.AfterSettlementAsync([bookingId], ct);
             return ToHttpResult(result, ctx);
         });
 
@@ -127,6 +132,44 @@ public static class BookingEndpoints
     }
 
     /// <summary>
+    /// D11 — a booking made with its players (the BookSheet's Players and Split steps).
+    ///
+    /// <para>
+    /// <b>Validated in full before anything is booked</b>: the players, the seats and the split,
+    /// against the price the booking would actually charge (<see cref="BookingService.QuoteAsync"/>,
+    /// the same path the booking takes). A request whose split cannot work books nothing. The
+    /// booking is then made exactly as a single-player one is — the organiser pays the whole price
+    /// — and the seats are added beside it. Should adding them fail after all (a member suspended
+    /// in the gap), the booking stands and the answer says so in <c>players_error</c>; the organiser
+    /// can invite again from the booking.
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> CreateWithPlayersAsync(
+        CreateBookingRequest req, BookingPayer payer, HttpContext ctx, BookingService svc, CancellationToken ct)
+    {
+        var players = ctx.RequestServices.GetRequiredService<PlayersService>();
+        var spec = new PlayersRequest(req.Players, req.SplitMode, req.OrganiserWeight);
+
+        var quote = await svc.QuoteAsync(req.CourtId, payer, req.StartsAt, req.SliceCount, ct);
+        if (quote.PriceCredits is { } price && await players.ValidateAsync(payer.UserId, spec, price, ct) is { } bad)
+        {
+            return PlayersEndpoints.ToResult(bad);
+        }
+
+        var result = await svc.CreateAsync(req.CourtId, payer, req.StartsAt, req.SliceCount, ct);
+        if (result is not BookingResult.Ok ok) return ToHttpResult(result, ctx);
+
+        var added = await players.AddAsync(ok.Booking.Id, payer.UserId, spec, ct);
+        return Results.Ok(new
+        {
+            booking_id = ok.Booking.Id,
+            balance_after_credits = ok.BalanceAfterCredits,
+            players = added.IsOk ? added.Body : null,
+            players_error = added.IsOk ? null : added.Error,
+        });
+    }
+
+    /// <summary>
     /// §8's "cancel any booking on behalf of any member (penalty waiveable <b>with
     /// reason</b>)", and §7's "logged with reason".
     ///
@@ -153,6 +196,7 @@ public static class BookingEndpoints
             return Results.BadRequest(new { error = "waive_reason_required" });
 
         var result = await svc.CancelAsync(bookingId, actorId, actorIsAdmin: true, waivePenalty: waive, ct, reason);
+        if (result is CancellationResult.Ok) await ctx.AfterSettlementAsync([bookingId], ct);
         return ToHttpResult(result, ctx);
     }
 
@@ -372,7 +416,14 @@ public static class BookingEndpoints
 }
 
 public sealed record CreateBlockRequest(Guid CourtId, DateTimeOffset StartsAt, int SliceCount, string? Label);
-public sealed record CreateBookingRequest(Guid CourtId, DateTimeOffset StartsAt, int SliceCount);
+/// <summary>
+/// A member's booking. <paramref name="Players"/>, <paramref name="SplitMode"/> and
+/// <paramref name="OrganiserWeight"/> are D11's optional players payload — omitted, the booking is
+/// "just me", exactly as before.
+/// </summary>
+public sealed record CreateBookingRequest(
+    Guid CourtId, DateTimeOffset StartsAt, int SliceCount,
+    IReadOnlyList<PlayerSpec>? Players = null, string? SplitMode = null, int? OrganiserWeight = null);
 /// <summary>
 /// <paramref name="AllowNegativeBalance"/> is §8's admin override, and it is deliberately
 /// absent from <see cref="CreateBookingRequest"/>: a member cannot ask to be overdrawn. An

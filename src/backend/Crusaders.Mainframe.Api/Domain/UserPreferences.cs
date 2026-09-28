@@ -66,6 +66,12 @@ public sealed class UserPreferences : ITenantScoped
     public bool WeeklyRecap { get; set; }
 
     /// <summary>
+    /// May this member's match results be shown to anyone but the players in them (D13). Stored
+    /// only — results are a later phase — so the onboarding prompt can ask once, now.
+    /// </summary>
+    public bool ShareResults { get; set; }
+
+    /// <summary>
     /// The admin notification kinds this person has opted out of, as a jsonb array of strings.
     /// A string column rather than a typed collection for the same reason <c>audit_log</c>'s
     /// details are: the catalogue of kinds belongs to the notifier, and a schema change per new

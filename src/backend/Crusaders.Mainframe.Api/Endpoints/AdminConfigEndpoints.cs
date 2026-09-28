@@ -138,6 +138,17 @@ public static class AdminConfigEndpoints
                 topup_failure_cooldown_minutes = AdminNotificationSettings.TopUpFailureCooldownMinutes(defaults),
                 overdraft_cooldown_minutes = AdminNotificationSettings.OverdraftCooldownMinutes(defaults),
 
+                // Players and splits (D11–D13), from the clamped readers for the same reason.
+                share_lapse_hours = PlayerSettings.ShareLapseHours(defaults),
+                share_reminder_hours = PlayerSettings.ShareReminderHours(defaults),
+                share_reminder_max = PlayerSettings.ShareReminderMax(defaults),
+                player_nudge_limit = PlayerSettings.NudgeLimit(defaults),
+                directory_searches_per_minute = PlayerSettings.DirectorySearchesPerMinute(defaults),
+                member_quiet_start_minute = PlayerSettings.QuietStartMinute(defaults),
+                member_quiet_end_minute = PlayerSettings.QuietEndMinute(defaults),
+                recent_partner_days = PlayerSettings.RecentPartnerDays(defaults),
+                member_notification_retention_days = PlayerSettings.NotificationRetentionDays(defaults),
+
                 sse_keepalive_seconds = (int)RealtimeSettings.KeepAlive(defaults).TotalSeconds,
                 control_board_resync_seconds = RealtimeSettings.ResyncSeconds(defaults),
                 control_board_stale_multiplier = RealtimeSettings.StaleMultiplier(defaults),
@@ -269,7 +280,7 @@ public static class AdminConfigEndpoints
             var realtimeError = ValidateRealtime(req);
             if (realtimeError is not null) return Results.BadRequest(realtimeError);
 
-            var liveError = ValidateLiveSettings(req) ?? ValidateNotifierSettings(req);
+            var liveError = ValidateLiveSettings(req) ?? ValidateNotifierSettings(req) ?? ValidatePlayerSettings(req);
             if (liveError is not null) return Results.BadRequest(new { error = liveError });
             var adminError = ValidateAdminSettings(req);
             if (adminError is not null) return Results.BadRequest(new { error = adminError });
@@ -373,6 +384,7 @@ public static class AdminConfigEndpoints
             WriteOptionalBoxSettings(doc, req);
             WriteOptionalLiveSettings(doc, req);
             WriteOptionalNotifierSettings(doc, req);
+            WriteOptionalPlayerSettings(doc, req);
             WriteOptionalAdminSettings(doc, req);
             WriteOptionalMemberLimits(doc, req);
             WriteOptionalRealtime(doc, req);
@@ -796,6 +808,49 @@ public static class AdminConfigEndpoints
         if (OutOfRange(req.OverdraftCooldownMinutes, AdminNotificationSettings.MinOverdraftCooldownMinutes, AdminNotificationSettings.MaxOverdraftCooldownMinutes))
             return "overdraft_cooldown_minutes_out_of_range";
         return null;
+    }
+
+    /// <summary>
+    /// Bounds on the players-and-splits nine (D11–D13), from <see cref="PlayerSettings"/>' own
+    /// constants so the number refused here and the number clamped on read cannot drift apart.
+    /// </summary>
+    private static string? ValidatePlayerSettings(UpdateSettingsRequest req)
+    {
+        (int? Value, int Min, int Max, string Key)[] bounds =
+        [
+            (req.ShareLapseHours, PlayerSettings.MinShareLapseHours, PlayerSettings.MaxShareLapseHours, PlayerSettings.ShareLapseHoursKey),
+            (req.ShareReminderHours, PlayerSettings.MinShareReminderHours, PlayerSettings.MaxShareReminderHours, PlayerSettings.ShareReminderHoursKey),
+            (req.ShareReminderMax, PlayerSettings.MinShareReminderMax, PlayerSettings.MaxShareReminderMax, PlayerSettings.ShareReminderMaxKey),
+            (req.PlayerNudgeLimit, PlayerSettings.MinNudgeLimit, PlayerSettings.MaxNudgeLimit, PlayerSettings.NudgeLimitKey),
+            (req.DirectorySearchesPerMinute, PlayerSettings.MinDirectorySearchesPerMinute, PlayerSettings.MaxDirectorySearchesPerMinute, PlayerSettings.DirectorySearchesPerMinuteKey),
+            (req.MemberQuietStartMinute, PlayerSettings.MinQuietMinute, PlayerSettings.MaxQuietMinute, PlayerSettings.QuietStartMinuteKey),
+            (req.MemberQuietEndMinute, PlayerSettings.MinQuietMinute, PlayerSettings.MaxQuietMinute, PlayerSettings.QuietEndMinuteKey),
+            (req.RecentPartnerDays, PlayerSettings.MinRecentPartnerDays, PlayerSettings.MaxRecentPartnerDays, PlayerSettings.RecentPartnerDaysKey),
+            (req.MemberNotificationRetentionDays, PlayerSettings.MinNotificationRetentionDays, PlayerSettings.MaxNotificationRetentionDays, PlayerSettings.NotificationRetentionDaysKey),
+        ];
+        var bad = bounds.FirstOrDefault(b => OutOfRange(b.Value, b.Min, b.Max));
+        return bad.Key is null ? null : $"{bad.Key}_out_of_range";
+    }
+
+    /// <summary>Same omitted-means-unchanged rule as the economics keys, for the players nine.</summary>
+    private static void WriteOptionalPlayerSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
+    {
+        (int? Value, string Key)[] values =
+        [
+            (req.ShareLapseHours, PlayerSettings.ShareLapseHoursKey),
+            (req.ShareReminderHours, PlayerSettings.ShareReminderHoursKey),
+            (req.ShareReminderMax, PlayerSettings.ShareReminderMaxKey),
+            (req.PlayerNudgeLimit, PlayerSettings.NudgeLimitKey),
+            (req.DirectorySearchesPerMinute, PlayerSettings.DirectorySearchesPerMinuteKey),
+            (req.MemberQuietStartMinute, PlayerSettings.QuietStartMinuteKey),
+            (req.MemberQuietEndMinute, PlayerSettings.QuietEndMinuteKey),
+            (req.RecentPartnerDays, PlayerSettings.RecentPartnerDaysKey),
+            (req.MemberNotificationRetentionDays, PlayerSettings.NotificationRetentionDaysKey),
+        ];
+        foreach (var (value, key) in values)
+        {
+            if (value is { } v) doc[key] = ToElement(v);
+        }
     }
 
     /// <summary>Same omitted-means-unchanged rule as the economics keys, for the notifier's six.</summary>
@@ -1305,6 +1360,17 @@ public sealed record UpdateSettingsRequest(
     [property: JsonPropertyName("admin_notification_retention_days")] int? AdminNotificationRetentionDays = null,
     [property: JsonPropertyName("topup_failure_cooldown_minutes")] int? TopUpFailureCooldownMinutes = null,
     [property: JsonPropertyName("overdraft_cooldown_minutes")] int? OverdraftCooldownMinutes = null,
+
+    // Players and splits (D11–D13). Snake-case only, for the reason the blocks above give.
+    [property: JsonPropertyName("share_lapse_hours")] int? ShareLapseHours = null,
+    [property: JsonPropertyName("share_reminder_hours")] int? ShareReminderHours = null,
+    [property: JsonPropertyName("share_reminder_max")] int? ShareReminderMax = null,
+    [property: JsonPropertyName("player_nudge_limit")] int? PlayerNudgeLimit = null,
+    [property: JsonPropertyName("directory_searches_per_minute")] int? DirectorySearchesPerMinute = null,
+    [property: JsonPropertyName("member_quiet_start_minute")] int? MemberQuietStartMinute = null,
+    [property: JsonPropertyName("member_quiet_end_minute")] int? MemberQuietEndMinute = null,
+    [property: JsonPropertyName("recent_partner_days")] int? RecentPartnerDays = null,
+    [property: JsonPropertyName("member_notification_retention_days")] int? MemberNotificationRetentionDays = null,
 
     [property: JsonPropertyName("control_board_resync_seconds")] int? ControlBoardResyncSeconds = null,
     [property: JsonPropertyName("control_board_stale_multiplier")] int? ControlBoardStaleMultiplier = null,

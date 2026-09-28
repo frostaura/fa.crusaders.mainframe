@@ -10,7 +10,7 @@ namespace Crusaders.Mainframe.Api.Persistence;
 /// tenant via global query filter; bypass requires <c>IgnoreQueryFilters()</c> and is reserved
 /// for platform-admin operations + onboarding.
 /// </summary>
-public class MainframeDbContext : DbContext
+public partial class MainframeDbContext : DbContext
 {
     private readonly ITenantContext _tenant;
 
@@ -168,6 +168,7 @@ public class MainframeDbContext : DbContext
         ConfigureDeviceErrors(modelBuilder);
         ConfigureUserPreferences(modelBuilder);
         ConfigureAdminNotifications(modelBuilder);
+        ConfigurePlayers(modelBuilder);
 
         modelBuilder.Entity<Court>(e =>
         {
@@ -381,6 +382,7 @@ public class MainframeDbContext : DbContext
             e.Property(p => p.ShowInLeaderboards).HasDefaultValue(false);
             e.Property(p => p.RatingOptIn).HasDefaultValue(false);
             e.Property(p => p.WeeklyRecap).HasDefaultValue(false);
+            e.Property(p => p.ShareResults).HasDefaultValue(false);
             e.Property(p => p.AdminNotificationOptoutsJson)
                 .HasColumnType("jsonb").IsRequired().HasDefaultValueSql("'[]'::jsonb");
             // The database has the last word on a theme, for the D2-B06 reason: a validator in
@@ -410,6 +412,10 @@ public class MainframeDbContext : DbContext
             {
                 t.HasCheckConstraint("ck_admin_notifications_state", "\"State\" BETWEEN 0 AND 3");
                 t.HasCheckConstraint("ck_admin_notifications_attempts", "\"Attempts\" >= 0");
+                // A member row must name its member; an admin row must not name one.
+                t.HasCheckConstraint(
+                    "ck_admin_notifications_audience",
+                    "(\"Audience\" = 0 AND \"RecipientUserId\" IS NULL) OR (\"Audience\" = 1 AND \"RecipientUserId\" IS NOT NULL)");
             });
             e.HasKey(n => n.Id);
             e.Property(n => n.Kind).HasMaxLength(AdminNotification.KindMaxLength).IsRequired();
@@ -421,6 +427,7 @@ public class MainframeDbContext : DbContext
             e.Property(n => n.LastError).HasMaxLength(AdminNotification.LastErrorMaxLength);
             e.Property(n => n.DeliveredToJson).HasColumnType("jsonb").IsRequired().HasDefaultValueSql("'[]'::jsonb");
             e.Property(n => n.State).HasConversion<int>();
+            e.Property(n => n.Audience).HasConversion<int>();
 
             e.HasIndex(n => new { n.TenantId, n.DedupeKey }).IsUnique();
             e.HasIndex(n => new { n.TenantId, n.CreatedAt, n.Id });
@@ -773,6 +780,16 @@ public class MainframeDbContext : DbContext
     private void BumpBookingVersions()
     {
         foreach (var entry in ChangeTracker.Entries<Booking>())
+        {
+            if (entry.State == EntityState.Modified)
+            {
+                entry.Entity.Version++;
+            }
+        }
+
+        // The same guarantee for a booking's seats (D11): an accept, a withdrawal and an
+        // organiser's removal race on one row, and the loser must match nothing.
+        foreach (var entry in ChangeTracker.Entries<BookingParticipant>())
         {
             if (entry.State == EntityState.Modified)
             {

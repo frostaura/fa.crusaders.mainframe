@@ -173,6 +173,7 @@ public sealed class LedgerService
         LedgerEntryType.CancellationRefund => "cancellation_refund",
         LedgerEntryType.NoShowPenalty or LedgerEntryType.LateCancellationPenalty => "penalty",
         LedgerEntryType.LightsPurchase => "lights_purchase",
+        LedgerEntryType.ShareTransfer => "share_transfer",
             LedgerEntryType.PaymentReversal => "correction",
             _ => "unknown",
         };

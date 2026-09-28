@@ -62,6 +62,13 @@ public static class AdminChangeActions
     public const string BookingOverdraftAuthorised = "booking.overdraft_authorised";
 
     // ---- credit ----
+    // Admin god mode on a booking's players (D11). Every one moves who plays or who pays.
+    public const string BookingPlayerAdded = "booking.player_added";
+    public const string BookingPlayerRemoved = "booking.player_removed";
+    public const string BookingPlayerAcceptedOnBehalf = "booking.player_accepted_on_behalf";
+    public const string BookingShareSettledOutside = "booking.share_settled_outside";
+    public const string BookingShareCollected = "booking.share_collected";
+
     public const string CreditAdjusted = "credit.adjusted";
     public const string CreditToppedUp = "credit.topped_up";
 
@@ -165,6 +172,7 @@ public static class AdminChangeActions
         ScheduleCreated, ScheduleUpdatedFuture, ScheduleOccurrenceSkipped, ScheduleOccurrenceOverridden, ScheduleEnded,
         BookingsBulkCancelled, BookingsBulkBooked, BookingCancelledByAdmin, BookingBlocked, BookingBlockLifted,
         BookingBookedOnBehalf, BookingOverdraftAuthorised,
+        BookingPlayerAdded, BookingPlayerRemoved, BookingPlayerAcceptedOnBehalf, BookingShareSettledOutside, BookingShareCollected,
         CreditAdjusted, CreditToppedUp,
         GroupCreated, GroupUpdated, GroupArchived, GroupMembersChanged, GroupDeleted,
         MemberApproved, MemberRejected, MemberSuspended, MemberReactivated,
@@ -183,6 +191,7 @@ public static class AdminChangeActions
         BookingsBulkCancelled, BookingCancelledByAdmin, ScheduleEnded, ScheduleOccurrenceSkipped,
         CreditAdjusted, CreditToppedUp, GroupArchived, MemberSuspended, MemberRejected, CourtDeactivated,
         DeviceDeleted, MemberAdminRevoked,
+        BookingPlayerRemoved, BookingPlayerAcceptedOnBehalf, BookingShareSettledOutside, BookingShareCollected,
     ];
 
     /// <summary>The area an action belongs to, or null when the action is not one of ours.</summary>
@@ -199,7 +208,9 @@ public static class AdminChangeActions
                 or ScheduleOccurrenceOverridden or ScheduleEnded => AdminChangeAreas.Schedule,
             BookingsBulkCancelled or BookingsBulkBooked or BookingCancelledByAdmin
                 or BookingBlocked or BookingBlockLifted
-                or BookingBookedOnBehalf or BookingOverdraftAuthorised => AdminChangeAreas.Booking,
+                or BookingBookedOnBehalf or BookingOverdraftAuthorised
+                or BookingPlayerAdded or BookingPlayerRemoved or BookingPlayerAcceptedOnBehalf
+                or BookingShareSettledOutside or BookingShareCollected => AdminChangeAreas.Booking,
             CreditAdjusted or CreditToppedUp => AdminChangeAreas.Credit,
             GroupCreated or GroupUpdated or GroupArchived or GroupMembersChanged
                 or GroupDeleted => AdminChangeAreas.Group,
@@ -243,6 +254,11 @@ public static class AdminChangeActions
             BookingBlockLifted => $"Lifted a court block{of}",
             BookingBookedOnBehalf => $"Booked a court for a member{of}",
             BookingOverdraftAuthorised => $"Let a booking take a balance below zero{of}",
+            BookingPlayerAdded => $"Added a player to a booking{of}",
+            BookingPlayerRemoved => $"Took a player off a booking{of}",
+            BookingPlayerAcceptedOnBehalf => $"Accepted a game on a member's behalf{of}",
+            BookingShareSettledOutside => $"Recorded a share as paid outside the app{of}",
+            BookingShareCollected => $"Collected a member's share of a booking{of}",
 
             CreditAdjusted => $"Adjusted a member's credits{of}",
             CreditToppedUp => $"Topped up a member's credits{of}",

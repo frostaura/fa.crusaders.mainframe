@@ -419,6 +419,14 @@ public sealed class NoShowWorker : BackgroundService
             // else the loop left tracked — nothing today, but a save that silently does
             // nothing is cheaper than one somebody forgets to add later.
             if (dueNoShow.Count > 0) await db.SaveChangesAsync(ct);
+
+            // D11: a no-show's penalty is shared pro rata by the partners who accepted; the
+            // refund of the rest follows the organiser's. After the sweep's own commits, in a
+            // scope of its own — see ShareHook.
+            if (dueNoShow.Count > 0 && _services.GetService<ShareHook>() is { } shares)
+            {
+                await shares.AfterSettlementAsync(tenant.Id, tenant.Slug, dueNoShow.Select(b => (Guid?)b.Id), ct);
+            }
         }
     }
 }

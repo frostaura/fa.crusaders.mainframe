@@ -1,0 +1,130 @@
+using System.Text.Json;
+using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Email;
+
+namespace Crusaders.Mainframe.Api.Services;
+
+// ---- The facts each member kind freezes onto its outbox row. Snake_case in the jsonb. ----
+
+public sealed record InvitePayload(Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, decimal ShareCredits, string Path);
+
+public sealed record SharePayload(
+    Guid BookingId, ShareDirection Direction, string OtherName, string CourtName, string StartsAtLocal, decimal AmountCredits);
+
+public sealed record ReminderPayload(
+    Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, decimal ShareCredits, string DeadlineLocal,
+    bool FromOrganiser, string Path);
+
+public sealed record LapsedPayload(Guid BookingId, string OtherName, string CourtName, string StartsAtLocal, decimal UnpaidCredits, bool ToOrganiser);
+
+public sealed record GameCancelledPayload(Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal);
+
+public sealed record GameChangedPayload(
+    Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, bool Removed, decimal? NewShareCredits, bool NeedsConsent);
+
+/// <summary>Everything one member mail needs.</summary>
+public sealed record MemberMailContext(ClubIdentity Club, string To, AdminNotification Row, string BaseUrl, TenantSettingsView Settings)
+{
+    public T Payload<T>() => JsonSerializer.Deserialize<T>(Row.PayloadJson, AdminEventCatalogue.Json)
+        ?? throw new InvalidOperationException($"member notice {Row.Id} ({Row.Kind}) carries no payload");
+
+    public string BookingUrl(Guid bookingId) => $"{BaseUrl}/bookings/{bookingId}";
+}
+
+/// <summary>
+/// Every kind of member notice the players feature raises, whether it may wait for the end of
+/// quiet hours, and which message it becomes — the member twin of <see cref="AdminEventCatalogue"/>.
+///
+/// <para>
+/// <b>Urgent means "about tonight, or about the reader's own action".</b> A cancellation of a game
+/// the reader may be driving to, and the receipt for a share they have just paid, go at once;
+/// an invite, a reminder or a lapse can wait until 07:00.
+/// </para>
+/// </summary>
+public static class MemberEventCatalogue
+{
+    public const string Invited = "players.invited";
+    public const string ShareMoved = "players.share_moved";
+    public const string Reminder = "players.reminder";
+    public const string Lapsed = "players.lapsed";
+    public const string GameCancelled = "players.game_cancelled";
+    public const string GameChanged = "players.game_changed";
+
+    /// <summary>
+    /// A partner's answer — accepted, declined, withdrew — told to the organiser on the INBOX only.
+    /// It moves no money (a payment has its own receipt), and a mail per answer is how an organiser
+    /// learns to ignore the club's mail.
+    /// </summary>
+    public const string Response = "players.response";
+
+    /// <summary>The kinds that are mailed. <see cref="Response"/> is inbox-only and never reaches the outbox.</summary>
+    public static readonly IReadOnlyList<string> All = [Invited, ShareMoved, Reminder, Lapsed, GameCancelled, GameChanged];
+
+    private static readonly HashSet<string> Urgent = new(StringComparer.Ordinal) { ShareMoved, GameCancelled };
+
+    public static bool IsKnown(string kind) => All.Contains(kind, StringComparer.Ordinal);
+
+    public static bool IsUrgent(string kind) => Urgent.Contains(kind);
+
+    public static EmailMessage Compose(MemberMailContext c)
+    {
+        switch (c.Row.Kind)
+        {
+            case Invited:
+                return ComposeInvite(c);
+            case ShareMoved:
+                return ComposeShare(c);
+            case Reminder:
+                return ComposeReminder(c);
+            case Lapsed:
+                return ComposeLapsed(c);
+            case GameCancelled:
+                return ComposeCancelled(c);
+            case GameChanged:
+                return ComposeChanged(c);
+            default:
+                throw new InvalidOperationException($"no message for member notice kind '{c.Row.Kind}'");
+        }
+    }
+
+    private static EmailMessage ComposeInvite(MemberMailContext c)
+    {
+        var p = c.Payload<InvitePayload>();
+        return EmailTemplates.PlayerInvite(c.Club, c.To, new PlayerInviteNotice(
+            p.OrganiserName, p.CourtName, p.StartsAtLocal, p.ShareCredits, c.BaseUrl + p.Path));
+    }
+
+    private static EmailMessage ComposeShare(MemberMailContext c)
+    {
+        var p = c.Payload<SharePayload>();
+        return EmailTemplates.ShareMoved(c.Club, c.To, new ShareMovement(
+            p.Direction, p.OtherName, p.CourtName, p.StartsAtLocal, p.AmountCredits, c.BookingUrl(p.BookingId)));
+    }
+
+    private static EmailMessage ComposeReminder(MemberMailContext c)
+    {
+        var p = c.Payload<ReminderPayload>();
+        return EmailTemplates.ShareReminder(c.Club, c.To, new ShareReminderNotice(
+            p.OrganiserName, p.CourtName, p.StartsAtLocal, p.ShareCredits, p.DeadlineLocal, p.FromOrganiser, c.BaseUrl + p.Path));
+    }
+
+    private static EmailMessage ComposeLapsed(MemberMailContext c)
+    {
+        var p = c.Payload<LapsedPayload>();
+        return EmailTemplates.ShareLapsed(c.Club, c.To, new ShareLapsedNotice(
+            p.OtherName, p.CourtName, p.StartsAtLocal, p.UnpaidCredits, p.ToOrganiser, c.BookingUrl(p.BookingId)));
+    }
+
+    private static EmailMessage ComposeCancelled(MemberMailContext c)
+    {
+        var p = c.Payload<GameCancelledPayload>();
+        return EmailTemplates.PlayersBookingCancelled(c.Club, c.To, p.OrganiserName, p.CourtName, p.StartsAtLocal);
+    }
+
+    private static EmailMessage ComposeChanged(MemberMailContext c)
+    {
+        var p = c.Payload<GameChangedPayload>();
+        return EmailTemplates.PlayersChanged(c.Club, c.To, new PlayersChange(
+            p.OrganiserName, p.CourtName, p.StartsAtLocal, p.Removed, p.NewShareCredits, p.NeedsConsent, c.BookingUrl(p.BookingId)));
+    }
+}

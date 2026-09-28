@@ -85,7 +85,9 @@ public sealed class BiometricService
         // 16:58 holding 17:00 and 17:15 could activate the 17:15 slice while the 17:00 one
         // swept as a no-show under their feet.
         var candidates = await _activation.CandidatesAsync(court.Id, now, ct);
-        var candidateUserIds = candidates.Select(b => b.UserId).Distinct().ToList();
+        // The organiser and every accepted partner (D11), earliest booking first.
+        var players = await _activation.PlayersOfAsync(candidates, ct);
+        var candidateUserIds = players.Select(p => p.UserId).Distinct().ToList();
 
         var templates = await _db.EnrolledTemplates
             .Where(t => candidateUserIds.Contains(t.UserId) && t.SupersededAt == null)
@@ -99,7 +101,7 @@ public sealed class BiometricService
         // The FIRST candidate is the earliest booking in the window — the one the player is
         // standing on — because CandidatesAsync orders by StartsAt.
         var booking = match.Matched
-            ? candidates.FirstOrDefault(b => b.UserId == match.MatchedUserId)
+            ? players.Where(p => p.UserId == match.MatchedUserId).Select(p => p.Booking).FirstOrDefault()
             : null;
 
         _db.BiometricMatchEvents.Add(new BiometricMatchEvent

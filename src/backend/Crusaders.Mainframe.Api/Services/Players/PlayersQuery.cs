@@ -1,0 +1,421 @@
+using Crusaders.Mainframe.Api.Domain;
+using Crusaders.Mainframe.Api.Persistence;
+using Microsoft.EntityFrameworkCore;
+
+namespace Crusaders.Mainframe.Api.Services;
+
+/// <summary>Wire words for the players feature. Lower-case, closed sets the frontend switches on.</summary>
+public static class PlayerViews
+{
+    public static string StatusName(ParticipantStatus status)
+    {
+        switch (status)
+        {
+            case ParticipantStatus.Invited: return "invited";
+            case ParticipantStatus.Accepted: return "accepted";
+            case ParticipantStatus.Declined: return "declined";
+            case ParticipantStatus.Withdrawn: return "withdrawn";
+            case ParticipantStatus.Removed: return "removed";
+            default: return "lapsed";
+        }
+    }
+
+    public static string BookingStatusName(BookingStatus status)
+    {
+        switch (status)
+        {
+            case BookingStatus.Booked: return "booked";
+            case BookingStatus.Cancelled: return "cancelled";
+            case BookingStatus.NoShow: return "no_show";
+            case BookingStatus.Completed: return "completed";
+            default: return "blocked";
+        }
+    }
+
+    public static string KindOf(BookingParticipant p)
+    {
+        if (p.Seat == 1) return "organiser";
+        if (p.GuestName is not null) return "guest";
+        return p.UserId is null ? "open_link" : "member";
+    }
+
+    /// <summary>Seats 1–2 are team A, 3–4 team B.</summary>
+    public static string TeamOf(int seat) => seat <= 2 ? "A" : "B";
+}
+
+/// <summary>A member as another member may see them: id, name, photo. Nothing else, ever — the grid's own rule.</summary>
+public sealed record PublicMember(Guid UserId, string Name, string? PhotoUrl);
+
+/// <summary>
+/// Everything the players feature READS: the booking detail, a member's open invites, their
+/// recent partners and favourites, and the club directory (D11–D13).
+///
+/// <para>
+/// <b>Photo and name only, for every other member.</b> The booking grid's invariant — no email,
+/// no phone, no membership number visible to other players — holds on every projection here, and
+/// the directory adds the opt-in on top: a member is findable by name only once they said so.
+/// </para>
+/// </summary>
+public sealed class PlayersQuery
+{
+    private readonly MainframeDbContext _db;
+    private readonly TenantSettingsAccessor _settings;
+    private readonly ShareLedger _shares;
+    private readonly LedgerService _ledger;
+    private readonly BookingRules _rules;
+
+    public PlayersQuery(MainframeDbContext db, TenantSettingsAccessor settings, ShareLedger shares, LedgerService ledger, BookingRules rules)
+    {
+        _db = db; _settings = settings; _shares = shares; _ledger = ledger; _rules = rules;
+    }
+
+    public async Task<Dictionary<Guid, PublicMember>> MembersAsync(IEnumerable<Guid?> ids, CancellationToken ct)
+    {
+        var wanted = ids.Where(i => i is not null).Select(i => i!.Value).Distinct().ToList();
+        if (wanted.Count == 0) return [];
+        return await _db.Memberships.AsNoTracking()
+            .Where(m => wanted.Contains(m.UserId))
+            .Select(m => new PublicMember(m.UserId, m.FullName, m.PhotoUrl))
+            .ToDictionaryAsync(m => m.UserId, ct);
+    }
+
+    // ------------------------------------------------------------------ booking detail
+
+    /// <summary>
+    /// <c>GET /api/v1/bookings/{id}</c>: the booking as its players see it — seats, shares, the
+    /// money panel and attendance. Null (a 404) for anybody who is not the organiser, not on a
+    /// seat of it, and not an admin: a booking id is not proof of anything.
+    /// </summary>
+    public async Task<object?> DetailAsync(Guid bookingId, Guid viewer, bool viewerIsAdmin, CancellationToken ct)
+    {
+        var booking = await _db.Bookings.AsNoTracking().FirstOrDefaultAsync(b => b.Id == bookingId, ct);
+        if (booking?.UserId is null || booking.Status == BookingStatus.AdminBlock) return null;
+
+        var seats = await _db.BookingParticipants.AsNoTracking().Where(p => p.BookingId == bookingId).OrderBy(p => p.Seat).ToListAsync(ct);
+        var mySeat = seats.Where(s => s.UserId == viewer).OrderByDescending(s => s.IsLive).FirstOrDefault();
+        var role = RoleOf(booking, viewer, mySeat, viewerIsAdmin);
+        if (role is null) return null;
+
+        var settings = await _settings.GetAsync(ct);
+        var owed = await _shares.OwedAsync(booking, ct);
+        var people = await MembersAsync(seats.Select(s => s.UserId).Append(booking.UserId), ct);
+        var court = await _db.Courts.AsNoTracking().Where(c => c.Id == booking.CourtId).Select(c => c.Name).FirstOrDefaultAsync(ct);
+        var table = await TableAsync(new DetailContext(booking, seats, people, owed, role, mySeat?.Id), ct);
+
+        return new
+        {
+            booking_id = booking.Id,
+            court_id = booking.CourtId,
+            court_name = court,
+            starts_at = booking.StartsAt,
+            ends_at = booking.EndsAt,
+            sold_ends_at = BookingService.OriginalEndsAt(booking),
+            status = PlayerViews.BookingStatusName(booking.Status),
+            split_mode = seats.FirstOrDefault(s => s.Seat == 1)?.SplitMode ?? SplitModes.Equal,
+            viewer = new { role, participant_id = mySeat?.Id },
+            organiser = Member(booking.UserId, people),
+            players = table.Players,
+            money = new
+            {
+                price_credits = booking.AmountChargedCredits,
+                organiser_owed_credits = owed,
+                shares_received_credits = table.Received,
+                organiser_net_credits = owed - table.Received,
+                unpaid_credits = table.Unpaid,
+                share_deadline = PlayerSettings.ShareDeadline(booking, settings),
+                is_split = seats.Any(s => s.IsPartner && s.IsLive && s.ShareCredits > 0) || table.Received != 0m,
+            },
+            attendance = new
+            {
+                checked_in_at = booking.CheckedInAt,
+                players_checked_in = seats.Count(s => s.CheckedInAt is not null),
+            },
+            permissions = Permissions(booking, settings, role, mySeat),
+        };
+    }
+
+    /// <summary>Who the viewer is to this booking — or null, which is a 404.</summary>
+    private static string? RoleOf(Booking booking, Guid viewer, BookingParticipant? mySeat, bool viewerIsAdmin)
+    {
+        if (booking.UserId == viewer) return "organiser";
+        if (mySeat is not null) return "player";
+        return viewerIsAdmin ? "admin" : null;
+    }
+
+    private sealed record DetailContext(
+        Booking Booking, List<BookingParticipant> Seats, Dictionary<Guid, PublicMember> People, decimal Owed, string Role, Guid? MySeatId);
+
+    private sealed record DetailTable(List<object> Players, decimal Received, decimal Unpaid);
+
+    /// <summary>
+    /// The player table and its two money sums. Dead seats are shown to the organiser and admins
+    /// (the history of who said no); a player sees the live table and their own row.
+    /// </summary>
+    private async Task<DetailTable> TableAsync(DetailContext d, CancellationToken ct)
+    {
+        var players = new List<object>();
+        decimal received = 0m, unpaid = 0m;
+        foreach (var s in d.Seats)
+        {
+            var paid = await _shares.PaidAsync(s, ct);
+            var open = s.IsPartner && s.IsLive ? await _shares.UnpaidAsync(d.Booking, s, ct) : 0m;
+            received += s.IsPartner ? paid : 0m;
+            unpaid += open;
+            if (!s.IsLive && (s.Seat == 1 || (d.Role == "player" && s.Id != d.MySeatId))) continue;
+            players.Add(SeatView(s, d.People, paid, ShareLedger.TargetFor(d.Booking, s, d.Owed), open));
+        }
+        if (d.Seats.Count == 0) players.Add(ImplicitOrganiser(d.Booking, d.People));
+        return new DetailTable(players, received, unpaid);
+    }
+
+    private static object SeatView(BookingParticipant s, Dictionary<Guid, PublicMember> people, decimal paid, decimal target, decimal unpaid)
+    {
+        var member = s.UserId is { } id && people.TryGetValue(id, out var m) ? m : null;
+        return new
+        {
+            participant_id = s.Id,
+            seat = s.Seat,
+            team = PlayerViews.TeamOf(s.Seat),
+            kind = PlayerViews.KindOf(s),
+            user_id = s.UserId,
+            name = member?.Name ?? s.GuestName,
+            photo_url = member?.PhotoUrl,
+            status = PlayerViews.StatusName(s.Status),
+            share_credits = s.ShareCredits,
+            weight = s.ShareWeight,
+            consented_credits = s.ConsentedCredits,
+            paid_credits = paid,
+            target_credits = target,
+            unpaid_credits = unpaid,
+            needs_consent = s.IsPartner && s.Status == ParticipantStatus.Accepted && s.ShareCredits > s.ConsentedCredits,
+            settled_outside = s.SettledOutsideAt is not null,
+            lapsed = s.LapsedAt is not null || s.Status == ParticipantStatus.Lapsed,
+            checked_in_at = s.CheckedInAt,
+            invited_at = s.InvitedAt,
+            responded_at = s.RespondedAt,
+        };
+    }
+
+    /// <summary>A booking nobody added players to is "just the booker": one seat, the whole price.</summary>
+    private static object ImplicitOrganiser(Booking b, Dictionary<Guid, PublicMember> people)
+    {
+        var member = people.TryGetValue(b.UserId!.Value, out var m) ? m : null;
+        return new
+        {
+            participant_id = (Guid?)null,
+            seat = 1,
+            team = "A",
+            kind = "organiser",
+            user_id = b.UserId,
+            name = member?.Name,
+            photo_url = member?.PhotoUrl,
+            status = "accepted",
+            share_credits = b.AmountChargedCredits,
+            weight = 1,
+            consented_credits = 0m,
+            paid_credits = 0m,
+            target_credits = 0m,
+            unpaid_credits = 0m,
+            needs_consent = false,
+            settled_outside = false,
+            lapsed = false,
+            checked_in_at = b.CheckedInAt,
+            invited_at = b.CreatedAt,
+            responded_at = b.CreatedAt,
+        };
+    }
+
+    private static object Member(Guid? id, Dictionary<Guid, PublicMember> people)
+    {
+        var m = id is { } v && people.TryGetValue(v, out var found) ? found : null;
+        return new { user_id = id, name = m?.Name, photo_url = m?.PhotoUrl };
+    }
+
+    private static object Permissions(Booking b, TenantSettingsView settings, string role, BookingParticipant? mine)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var open = b.Status is BookingStatus.Booked or BookingStatus.Completed && now < PlayerSettings.ShareDeadline(b, settings);
+        var organiser = role == "organiser" && open && (b.PaidByUserId is null || b.PaidByUserId == b.UserId);
+        return new
+        {
+            can_invite = organiser,
+            can_change_split = organiser,
+            can_cancel = role == "organiser" && b.Status == BookingStatus.Booked && b.StartsAt > now,
+            can_accept = open && mine is { Status: ParticipantStatus.Invited or ParticipantStatus.Accepted, Seat: > 1 }
+                         && mine.LapsedAt is null && mine.SettledOutsideAt is null,
+            can_decline = mine is { Status: ParticipantStatus.Invited },
+            can_withdraw = mine is { Status: ParticipantStatus.Accepted, Seat: > 1 } && b.Status == BookingStatus.Booked
+                           && now < b.StartsAt.AddMinutes(-settings.PenaltyWindowMinutes),
+            withdraw_closes_at = b.StartsAt.AddMinutes(-settings.PenaltyWindowMinutes),
+        };
+    }
+
+    // ------------------------------------------------------------------ invites
+
+    /// <summary>
+    /// The caller's open invitations — seats addressed to them still waiting for a yes, or accepted
+    /// and short of their share — for the Invites tab and its badge. Each carries what the accept
+    /// sheet needs: the share, the balance after paying it, and whether it would break their cap.
+    /// </summary>
+    public async Task<List<object>> InvitesAsync(Guid me, CancellationToken ct)
+    {
+        var settings = await _settings.GetAsync(ct);
+        var now = DateTimeOffset.UtcNow;
+        var rows = await _db.BookingParticipants.AsNoTracking()
+            .Where(p => p.UserId == me && p.Seat > 1 && p.LapsedAt == null && p.SettledOutsideAt == null
+                        && (p.Status == ParticipantStatus.Invited || p.Status == ParticipantStatus.Accepted))
+            .Join(_db.Bookings.Where(b => b.Status == BookingStatus.Booked || b.Status == BookingStatus.Completed),
+                p => p.BookingId, b => b.Id, (p, b) => new { Seat = p, Booking = b })
+            .ToListAsync(ct);
+
+        var items = new List<object>();
+        foreach (var x in rows.Where(x => now < PlayerSettings.ShareDeadline(x.Booking, settings)).OrderBy(x => x.Booking.StartsAt))
+        {
+            var unpaid = await _shares.UnpaidAsync(x.Booking, x.Seat, ct);
+            if (x.Seat.Status == ParticipantStatus.Accepted && unpaid <= 0m) continue;
+            items.Add(await InviteViewAsync(x.Booking, x.Seat, me, settings, ct));
+        }
+        return items;
+    }
+
+    /// <summary>One invite as the accept sheet reads it. Also the answer to opening a link.</summary>
+    /// <param name="viewer">
+    /// Who is looking. An open link seat is priced and cap-checked as if <paramref name="viewer"/>
+    /// had claimed it, while still reading <c>open_link: true</c>.
+    /// </param>
+    public async Task<object> InviteViewAsync(
+        Booking booking, BookingParticipant seat, Guid viewer, TenantSettingsView settings, CancellationToken ct)
+    {
+        var openLink = seat.UserId is null;
+        if (openLink) seat = AsClaimedBy(seat, viewer);
+        var unpaid = await _shares.UnpaidAsync(booking, seat, ct);
+        var balance = await _ledger.GetBalanceAsync(viewer, ct);
+        var people = await MembersAsync([booking.UserId], ct);
+        var court = await _db.Courts.AsNoTracking().Where(c => c.Id == booking.CourtId).Select(c => c.Name).FirstOrDefaultAsync(ct);
+        var cap = seat.Status == ParticipantStatus.Invited && seat.UserId is { } me && booking.StartsAt > DateTimeOffset.UtcNow
+            ? await _rules.PartnerCapRefusalAsync(me, booking, settings, ct)
+            : null;
+        var players = await _db.BookingParticipants.AsNoTracking()
+            .CountAsync(p => p.BookingId == booking.Id && (p.Status == ParticipantStatus.Invited || p.Status == ParticipantStatus.Accepted), ct);
+
+        return new
+        {
+            participant_id = seat.Id,
+            booking_id = booking.Id,
+            status = PlayerViews.StatusName(seat.Status),
+            seat = seat.Seat,
+            team = PlayerViews.TeamOf(seat.Seat),
+            open_link = openLink,
+            court_name = court,
+            starts_at = booking.StartsAt,
+            ends_at = BookingService.OriginalEndsAt(booking),
+            organiser = Member(booking.UserId, people),
+            players = Math.Max(players, 1),
+            share_credits = seat.ShareCredits,
+            to_pay_credits = unpaid,
+            needs_consent = seat.Status == ParticipantStatus.Accepted && seat.ShareCredits > seat.ConsentedCredits,
+            balance_credits = balance,
+            balance_after_credits = balance - unpaid,
+            short_by_credits = Math.Max(0m, unpaid - balance),
+            share_deadline = PlayerSettings.ShareDeadline(booking, settings),
+            cap = cap is null ? null : PlayersService.CapFigures(cap),
+        };
+    }
+
+    private static BookingParticipant AsClaimedBy(BookingParticipant seat, Guid viewer)
+    {
+        return new BookingParticipant
+        {
+            Id = seat.Id,
+            TenantId = seat.TenantId,
+            BookingId = seat.BookingId,
+            Seat = seat.Seat,
+            UserId = viewer,
+            Status = seat.Status,
+            ShareCredits = seat.ShareCredits,
+            ConsentedCredits = seat.ConsentedCredits,
+        };
+    }
+
+    // ------------------------------------------------------------------ partners
+
+    /// <summary>
+    /// The people the caller actually played with in the last <c>recent_partner_days</c>: members
+    /// on an ACCEPTED seat of a booking the caller was also accepted on (or organised). Derived,
+    /// never stored — there is nothing to keep in step.
+    /// </summary>
+    public async Task<List<object>> RecentAsync(Guid me, CancellationToken ct)
+    {
+        var settings = await _settings.GetAsync(ct);
+        var since = DateTimeOffset.UtcNow.AddDays(-PlayerSettings.RecentPartnerDays(settings));
+        var mine = _db.BookingParticipants
+            .Where(p => p.UserId == me && p.Status == ParticipantStatus.Accepted)
+            .Select(p => p.BookingId);
+
+        var rows = await _db.BookingParticipants.AsNoTracking()
+            .Where(p => mine.Contains(p.BookingId) && p.UserId != null && p.UserId != me && p.Status == ParticipantStatus.Accepted)
+            .Join(_db.Bookings.Where(b => b.StartsAt >= since && b.Status != BookingStatus.Cancelled),
+                p => p.BookingId, b => b.Id, (p, b) => new { UserId = p.UserId!.Value, b.StartsAt })
+            .ToListAsync(ct);
+
+        var grouped = rows.GroupBy(r => r.UserId)
+            .Select(g => new { UserId = g.Key, Last = g.Max(r => r.StartsAt), Games = g.Count() })
+            .OrderByDescending(g => g.Last).Take(20).ToList();
+        var people = await ActiveMembersAsync(grouped.Select(g => g.UserId), ct);
+        return grouped.Where(g => people.ContainsKey(g.UserId))
+            .Select(g => (object)new { user_id = g.UserId, name = people[g.UserId].Name, photo_url = people[g.UserId].PhotoUrl, last_played_at = g.Last, games = g.Games })
+            .ToList();
+    }
+
+    public async Task<List<object>> FavouritesAsync(Guid me, CancellationToken ct)
+    {
+        var ids = await _db.PartnerFavourites.AsNoTracking().Where(f => f.UserId == me)
+            .OrderBy(f => f.CreatedAt).Select(f => f.PartnerUserId).ToListAsync(ct);
+        var people = await ActiveMembersAsync(ids, ct);
+        return ids.Where(people.ContainsKey)
+            .Select(id => (object)new { user_id = id, name = people[id].Name, photo_url = people[id].PhotoUrl })
+            .ToList();
+    }
+
+    /// <summary>Active members only: a suspended or departed member drops out of every picker without anyone deleting anything.</summary>
+    public async Task<Dictionary<Guid, PublicMember>> ActiveMembersAsync(IEnumerable<Guid> ids, CancellationToken ct)
+    {
+        var wanted = ids.Distinct().ToList();
+        if (wanted.Count == 0) return [];
+        return await _db.Memberships.AsNoTracking()
+            .Where(m => wanted.Contains(m.UserId) && m.Status == MembershipStatus.Active
+                        && _db.Users.Any(u => u.Id == m.UserId && u.Status == "active"))
+            .Select(m => new PublicMember(m.UserId, m.FullName, m.PhotoUrl))
+            .ToDictionaryAsync(m => m.UserId, ct);
+    }
+
+    // ------------------------------------------------------------------ directory
+
+    /// <summary>Shortest query the directory answers. One letter is a list of the whole club.</summary>
+    public const int MinQueryLength = 2;
+
+    public const int MaxResults = 20;
+
+    /// <summary>
+    /// D13 — members who opted in to being found, whose name contains <paramref name="q"/>. Active
+    /// members only, never the caller, id + name + photo only. Nobody is findable by default.
+    /// </summary>
+    public async Task<List<PublicMember>> DirectoryAsync(Guid me, string q, CancellationToken ct)
+    {
+        var pattern = $"%{EscapeLike(q.Trim())}%";
+        var query = _db.Memberships.AsNoTracking()
+            .Where(m => m.UserId != me && m.Status == MembershipStatus.Active
+                        && _db.Users.Any(u => u.Id == m.UserId && u.Status == "active")
+                        && _db.UserPreferences.Any(p => p.UserId == m.UserId && p.Findable));
+
+        query = _db.Database.IsNpgsql()
+            ? query.Where(m => EF.Functions.ILike(m.FullName, pattern, "\\"))
+            : query.Where(m => m.FullName.ToLower().Contains(q.Trim().ToLower()));
+
+        return await query.OrderBy(m => m.FullName).Take(MaxResults)
+            .Select(m => new PublicMember(m.UserId, m.FullName, m.PhotoUrl))
+            .ToListAsync(ct);
+    }
+
+    private static string EscapeLike(string s) => s.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+}

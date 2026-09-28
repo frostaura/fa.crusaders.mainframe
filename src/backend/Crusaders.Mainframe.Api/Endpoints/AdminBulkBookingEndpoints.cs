@@ -91,6 +91,9 @@ public static class AdminBulkBookingEndpoints
 
         var succeeded = outcome.Results.Count(r => r.Succeeded);
 
+        // D11: each cancelled booking's partners are refunded their shares.
+        await ctx.AfterSettlementAsync(outcome.Results.Where(r => r.Succeeded).Select(r => (Guid?)r.BookingId), ct);
+
         // ONE row per BATCH, not per item. The batch row is the INTENT — the admin's own words
         // about why a list of courts went away — and CancelAsync's per-booking audit_log rows
         // are the EFFECTS, which the night trace reads. Recording the intent per item would

@@ -278,7 +278,8 @@ public sealed class DailyReportTests
         // penalties are reported as positive magnitudes, hence the subtractions — the same
         // arithmetic the card spells out under the figure.
         var bucketed = Get("top_ups_credits") - Get("booking_charges_credits") + Get("refunds_credits")
-            - Get("penalties_credits") + Get("adjustments_credits") + Get("reversals_credits");
+            - Get("penalties_credits") + Get("adjustments_credits") + Get("reversals_credits")
+            + Get("share_transfers_credits");
         Assert.True(
             bucketed == posted,
             $"The club's daily buckets sum to {bucketed} but {posted} moved. Some member of "

@@ -56,13 +56,35 @@ public static class MemberBulkBookingEndpoints
         // about any slot, so asking it per item would only repeat the answer.
         if (await BookingMembershipGate.RefuseIfBarredAsync(deps.Db, userId, ct) is { } barred) return barred;
 
+        // D11: a players payload is checked in full before anything is booked, against the first
+        // item's price — a batch whose split cannot work books nothing.
+        if (req.Players is { Count: > 0 } && items.Count > 0
+            && await PlayersRefusalAsync(ctx, userId, req, items[0], ct) is { } badPlayers)
+        {
+            return badPlayers;
+        }
+
         var before = await deps.Ledger.GetBalanceAsync(userId, ct);
         var outcome = await deps.Bulk.BookAsync(
             items.Select(i => new BulkBookItem(i.CourtId, i.StartsAt, i.SliceCount)).ToList(),
             new MemberBulkRequest(userId, ctx.User.IsInRole("admin"), req.IdempotencyKey!.Trim()), ct);
         var after = await deps.Ledger.GetBalanceAsync(userId, ct);
 
-        return Results.Ok(Body(outcome, before, after));
+        // D11: the same players on every NEWLY booked item. A replayed item already has its seats
+        // from the first attempt, and adding them again would invite everybody twice.
+        var players = new List<object>();
+        if (req.Players is { Count: > 0 })
+        {
+            var svc = ctx.RequestServices.GetRequiredService<PlayersService>();
+            var spec = new PlayersRequest(req.Players, req.SplitMode, req.OrganiserWeight);
+            foreach (var r in outcome.Results.Where(r => r.Status == MemberBulkStatuses.Booked && !r.Replayed && r.BookingId is not null))
+            {
+                var added = await svc.AddAsync(r.BookingId!.Value, userId, spec, ct);
+                players.Add(new { booking_id = r.BookingId, players = added.IsOk ? added.Body : null, players_error = added.IsOk ? null : added.Error });
+            }
+        }
+
+        return Results.Ok(Body(outcome, before, after, players));
     }
 
     /// <summary>
@@ -70,7 +92,7 @@ public static class MemberBulkBookingEndpoints
     /// a retried batch answers the same total; <c>charged_now_credits</c> is what THIS request
     /// debited, which is what the balance pair beside it moved by. Block body for the lizard reason.
     /// </summary>
-    private static object Body(MemberBulkOutcome outcome, decimal before, decimal after)
+    private static object Body(MemberBulkOutcome outcome, decimal before, decimal after, List<object> players)
     {
         var booked = outcome.Results.Where(r => r.Status == MemberBulkStatuses.Booked).ToList();
         return new
@@ -85,6 +107,7 @@ public static class MemberBulkBookingEndpoints
             halted_at = outcome.HaltedAt,
             halted_reason = outcome.HaltedReason,
             results = outcome.Results.Select(Row).ToList(),
+            players,
         };
     }
 
@@ -104,6 +127,18 @@ public static class MemberBulkBookingEndpoints
             amount_credits = r.AmountCredits,
             replayed = r.Replayed,
         };
+    }
+
+    private static async Task<IResult?> PlayersRefusalAsync(
+        HttpContext ctx, Guid userId, MemberBulkBookRequest req, BulkBookRequestItem first, CancellationToken ct)
+    {
+        var bookings = ctx.RequestServices.GetRequiredService<BookingService>();
+        var payer = new BookingPayer(userId, userId, ActorIsAdmin: ctx.User.IsInRole("admin"));
+        var quote = await bookings.QuoteAsync(first.CourtId, payer, first.StartsAt, first.SliceCount, ct);
+        if (quote.PriceCredits is not { } price) return null;
+        var bad = await ctx.RequestServices.GetRequiredService<PlayersService>()
+            .ValidateAsync(userId, new PlayersRequest(req.Players, req.SplitMode, req.OrganiserWeight), price, ct);
+        return bad is null ? null : PlayersEndpoints.ToResult(bad);
     }
 
     /// <summary>The admin bulk's two request bounds, with the admin bulk's refusal codes.</summary>
@@ -126,4 +161,6 @@ public static class MemberBulkBookingEndpoints
 /// A member's ticked slots. There is no payer, no on-behalf and no overdraft field — the payer is
 /// the caller, and a member has no way to ask to be overdrawn.
 /// </summary>
-public sealed record MemberBulkBookRequest(string? IdempotencyKey, IReadOnlyList<BulkBookRequestItem>? Items = null);
+public sealed record MemberBulkBookRequest(
+    string? IdempotencyKey, IReadOnlyList<BulkBookRequestItem>? Items = null,
+    IReadOnlyList<PlayerSpec>? Players = null, string? SplitMode = null, int? OrganiserWeight = null);
