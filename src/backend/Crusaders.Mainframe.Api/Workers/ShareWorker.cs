@@ -53,6 +53,24 @@ public sealed class ShareWorker : BackgroundService
         }
     }
 
+    /// <summary>One step for one club, in its own scope; a failure is logged and answered false, never thrown.</summary>
+    private async Task<bool> RunForClubAsync(
+        Guid tenantId, string slug, string step, Func<ShareSweep, CancellationToken, Task> work, CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            scope.ServiceProvider.GetRequiredService<ITenantContext>().Set(tenantId, slug);
+            await work(scope.ServiceProvider.GetRequiredService<ShareSweep>(), ct);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Share {Step} failed for tenant {Tenant}", step, tenantId);
+            return false;
+        }
+    }
+
     /// <summary>One pass over every club at <paramref name="now"/>.</summary>
     public async Task TickAsync(DateTimeOffset now, CancellationToken ct)
     {
@@ -66,23 +84,14 @@ public sealed class ShareWorker : BackgroundService
 
         foreach (var (id, slug) in tenants)
         {
-            try
+            // The first pass after a start also looks for returns that fell due while nothing ran —
+            // in its OWN try (review round 5), so a club whose catch-up fails still gets its minute
+            // sweep, and is caught up on a later pass.
+            if (!_caughtUp.Contains(id) && await RunForClubAsync(id, slug, "catch-up", (sweep, token) => sweep.CatchUpAsync(token), ct))
             {
-                using var scope = _scopes.CreateScope();
-                scope.ServiceProvider.GetRequiredService<ITenantContext>().Set(id, slug);
-                var sweep = scope.ServiceProvider.GetRequiredService<ShareSweep>();
-                // The first pass after a start also looks for returns that fell due while nothing ran.
-                if (!_caughtUp.Contains(id))
-                {
-                    await sweep.CatchUpAsync(ct);
-                    _caughtUp.Add(id);
-                }
-                await sweep.SweepAsync(now, ct);
+                _caughtUp.Add(id);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogError(ex, "Share sweep failed for tenant {Tenant}", id);
-            }
+            await RunForClubAsync(id, slug, "sweep", (sweep, token) => sweep.SweepAsync(now, token), ct);
         }
     }
 }

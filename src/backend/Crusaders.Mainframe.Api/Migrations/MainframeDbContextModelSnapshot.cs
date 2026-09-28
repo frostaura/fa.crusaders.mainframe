@@ -441,6 +441,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset?>("ShareDeadlineAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("ShareReconcileDueAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("SliceCount")
                         .HasColumnType("integer");
 
@@ -467,6 +470,9 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.HasIndex("TenantId", "ShareDeadlineAt")
                         .HasFilter("\"ShareDeadlineAt\" IS NOT NULL");
+
+                    b.HasIndex("TenantId", "ShareReconcileDueAt")
+                        .HasFilter("\"ShareReconcileDueAt\" IS NOT NULL");
 
                     b.HasIndex("TenantId", "CourtId", "StartsAt");
 

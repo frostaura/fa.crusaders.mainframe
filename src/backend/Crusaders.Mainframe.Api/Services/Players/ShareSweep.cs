@@ -26,11 +26,52 @@ public sealed class ShareSweep
     private readonly ShareLedger _shares;
     private readonly TenantSettingsAccessor _settings;
     private readonly IRealtimeBus _bus;
+    private readonly ILogger<ShareSweep> _logger;
 
     public ShareSweep(
-        MainframeDbContext db, ITenantContext tenant, ShareLedger shares, TenantSettingsAccessor settings, IRealtimeBus bus)
+        MainframeDbContext db, ITenantContext tenant, ShareLedger shares, TenantSettingsAccessor settings, IRealtimeBus bus,
+        ILogger<ShareSweep> logger)
     {
-        _db = db; _tenant = tenant; _shares = shares; _settings = settings; _bus = bus;
+        _db = db; _tenant = tenant; _shares = shares; _settings = settings; _bus = bus; _logger = logger;
+    }
+
+    /// <summary>
+    /// Marks a booking's shares "reconcile due" (<see cref="Booking.ShareReconcileDueAt"/>) — once,
+    /// keeping the first time — for the next minute sweep, whatever its age.
+    /// </summary>
+    public static Task<int> MarkReconcileDueAsync(MainframeDbContext db, Guid bookingId, CancellationToken ct)
+    {
+        var at = DateTimeOffset.UtcNow.Storable();
+        return db.Bookings.Where(b => b.Id == bookingId && b.ShareReconcileDueAt == null)
+            .ExecuteUpdateAsync(u => u.SetProperty(b => b.ShareReconcileDueAt, at), ct);
+    }
+
+    /// <summary>
+    /// Reconciles one booking and never throws: a failure is logged, the booking is marked due for
+    /// the next sweep, and the caller goes on with the rest (review round 5) — one poisoned booking
+    /// must not stop a club's whole sweep. Answers whether it succeeded.
+    /// </summary>
+    private async Task<bool> TrySettleAsync(Guid bookingId, CancellationToken ct)
+    {
+        try
+        {
+            await SettleBookingAsync(bookingId, ct);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _db.ChangeTracker.Clear();
+            _logger.LogError(ex, "Share reconcile of booking {Booking} failed; marked for the next sweep", bookingId);
+            try
+            {
+                await MarkReconcileDueAsync(_db, bookingId, ct);
+            }
+            catch (Exception mark) when (mark is not OperationCanceledException)
+            {
+                _logger.LogError(mark, "Could not mark booking {Booking} for the next sweep", bookingId);
+            }
+            return false;
+        }
     }
 
     /// <summary>
@@ -44,6 +85,10 @@ public sealed class ShareSweep
 
         var moves = await _shares.ReconcileAsync(bookingId, ct);
         var told = await TellCancelledAsync(bookingId, seats, ct);
+
+        // Reconciled: a "reconcile due" marker a failure left has been made good.
+        await _db.Bookings.Where(b => b.Id == bookingId && b.ShareReconcileDueAt != null)
+            .ExecuteUpdateAsync(u => u.SetProperty(b => b.ShareReconcileDueAt, (DateTimeOffset?)null), ct);
 
         var touched = moves.SelectMany(m => new[] { m.PartnerUserId, m.OrganiserUserId }).Concat(told);
         await MemberNotices.PublishUnreadAsync(_db, _bus, _tenant.TenantId, touched, ct);
@@ -99,7 +144,14 @@ public sealed class ShareSweep
             .Select(x => x.Booking.Id)
             .Distinct()
             .ToListAsync(ct);
-        foreach (var id in due) await SettleBookingAsync(id, ct);
+        // Every due booking is tried; a failure is marked for the sweep and reported after the rest,
+        // so the worker leaves this club not caught up and tries again next pass.
+        var failed = new List<Guid>();
+        foreach (var id in due)
+        {
+            if (!await TrySettleAsync(id, ct)) failed.Add(id);
+        }
+        if (failed.Count > 0) throw new InvalidOperationException($"share catch-up failed for {failed.Count} booking(s): {string.Join(",", failed)}");
         return due;
     }
 
@@ -115,16 +167,25 @@ public sealed class ShareSweep
         var horizon = now.AddHours(-(PlayerSettings.ShareLapseHours(settings) + (7 * 24)));
         var stampedHorizon = now.AddDays(-7);
 
-        // ...and every booking with a seat whose return is WAITING, however old (review round 2):
-        // selected on the seat's own indexed stamp, so a return is never stranded by the window.
-        var bookingIds = await _db.BookingParticipants.AsNoTracking()
-            .Where(p => p.Seat > 1 && (p.ReturnPendingSince != null || _db.Bookings.Any(b => b.Id == p.BookingId
-                && (b.ShareDeadlineAt >= stampedHorizon || (b.ShareDeadlineAt == null && b.EndsAt >= horizon)))))
+        // Every booking with a return WAITING, however old (review round 2), selected on the seat's
+        // own indexed stamp and taken FIRST, oldest stamp first (then participant id): first come,
+        // first served (round 5). Then every booking a failed reconcile marked due, however old
+        // (round 5), and the window's, in a stable order.
+        var waiting = await _db.BookingParticipants.AsNoTracking()
+            .Where(p => p.Seat > 1 && p.ReturnPendingSince != null)
+            .OrderBy(p => p.ReturnPendingSince).ThenBy(p => p.Id)
+            .Select(p => p.BookingId)
+            .ToListAsync(ct);
+        var window = await _db.BookingParticipants.AsNoTracking()
+            .Where(p => p.Seat > 1 && _db.Bookings.Any(b => b.Id == p.BookingId
+                && (b.ShareReconcileDueAt != null || b.ShareDeadlineAt >= stampedHorizon || (b.ShareDeadlineAt == null && b.EndsAt >= horizon))))
             .Select(p => p.BookingId)
             .Distinct()
+            .OrderBy(id => id)
             .ToListAsync(ct);
 
-        foreach (var id in bookingIds) await SettleBookingAsync(id, ct);
+        // One booking's failure is logged and marked, and the rest of the club's sweep goes on.
+        foreach (var id in waiting.Concat(window).Distinct()) await TrySettleAsync(id, ct);
 
         await LapseAsync(now, settings, ct);
         await RemindAsync(now, settings, ct);

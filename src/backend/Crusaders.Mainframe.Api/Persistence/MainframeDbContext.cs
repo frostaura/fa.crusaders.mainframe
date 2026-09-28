@@ -596,6 +596,8 @@ public partial class MainframeDbContext : DbContext
             e.HasIndex(b => new { b.TenantId, b.UserId, b.StartsAt });
             // D11: the players sweeps (holds, lapse, reminders) select bookings by their frozen deadline.
             e.HasIndex(b => new { b.TenantId, b.ShareDeadlineAt }).HasFilter("\"ShareDeadlineAt\" IS NOT NULL");
+            // ...and the bookings a failed reconcile left due: a handful, found without a scan.
+            e.HasIndex(b => new { b.TenantId, b.ShareReconcileDueAt }).HasFilter("\"ShareReconcileDueAt\" IS NOT NULL");
             e.Property(b => b.AmountChargedCredits).HasColumnType("numeric(10,2)");
             e.Property(b => b.Status).HasConversion<int>();
             // How "edit this and future" finds an occurrence's rows, and how the grid learns

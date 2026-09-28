@@ -177,5 +177,13 @@ public sealed class Booking : ITenantScoped
     /// </summary>
     public DateTimeOffset? ShareDeadlineAt { get; set; }
 
+    /// <summary>
+    /// D11 (review round 5): a reconcile of this booking's shares failed — the post-settlement hook
+    /// threw, or the sweep did on this booking — so the next minute sweep must reconcile it,
+    /// however old it is; cleared by a reconcile that succeeds. The durable half of "the hook
+    /// never throws": a swallowed failure is remembered, not lost.
+    /// </summary>
+    public DateTimeOffset? ShareReconcileDueAt { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

@@ -61,7 +61,9 @@ public static class ShareHolds
     /// What may go back from <see cref="CoverageAsk.BookingId"/> to the partner on
     /// <see cref="CoverageAsk.SeatId"/> without overdrawing the organiser (review round 4):
     ///
-    /// <c>min(balance, held(booking) + max(0, balance − held(all) − owed back to returns stamped EARLIER))</c>.
+    /// <c>min(earmark left for this return, money behind the holds not drawn by EARLIER returns)
+    /// + max(0, balance − held(all) − what EARLIER returns need beyond their own earmarks)</c> —
+    /// see <see cref="HoldSnapshot.CoverageFor"/>.
     ///
     /// <para>
     /// <b>Held money is earmarked.</b> What the organiser holds for this booking is its partners'
@@ -86,8 +88,7 @@ public static class ShareHolds
         var snapshot = await SnapshotAsync(db, ask.UserId, settings, now, ct);
         var mine = snapshot.Waiting.FirstOrDefault(w => w.SeatId == ask.SeatId);
         var earlier = snapshot.Waiting.Where(w => w.SeatId != ask.SeatId && IsEarlier(w, mine, ask.SeatId)).ToList();
-        var free = ask.Balance - snapshot.Held.Values.Sum() - snapshot.OwedBack(earlier);
-        return Math.Max(0m, Math.Min(ask.Balance, snapshot.Held.GetValueOrDefault(ask.BookingId) + Math.Max(0m, free)));
+        return snapshot.CoverageFor(ask.BookingId, earlier, ask.Balance);
     }
 
     /// <summary>First come, first served: by stamp, then by participant id. An unstamped return is the newest.</summary>
@@ -107,6 +108,7 @@ public static class ShareHolds
     {
         var nets = await NetsAsync(db, userId, DeadlineAhead(now, UnstampedFrom(now, settings)), ct);
         var (held, releases) = (new Dictionary<Guid, decimal>(), (DateTimeOffset?)null);
+        var afterCheckIn = new HashSet<Guid>();
         if (nets.Count > 0)
         {
             var ids = nets.Keys.ToList();
@@ -118,8 +120,9 @@ public static class ShareHolds
             var pending = (await PendingSeatReturnsAsync(db, cancelled, settings, now, ct))
                 .GroupBy(p => p.BookingId).ToDictionary(g => g.Key, g => g.Sum(p => p.Pending));
             (held, releases) = Sum(nets, bookings, pending, userId, settings, now);
+            afterCheckIn.UnionWith(bookings.Values.Where(b => b.Status == BookingStatus.Cancelled && b.CheckedInAt != null).Select(b => b.Id));
         }
-        return new HoldSnapshot(held, releases, await WaitingAsync(db, userId, settings, now, ct));
+        return new HoldSnapshot(held, releases, await WaitingAsync(db, userId, settings, now, ct)) { NotEarmarked = afterCheckIn };
     }
 
     /// <summary>
@@ -236,6 +239,42 @@ public sealed record CoverageAsk(Guid UserId, Guid BookingId, Guid SeatId, decim
 /// <summary>What a member has set aside: per-booking holds, the earliest release, and the returns waiting on them.</summary>
 public sealed record HoldSnapshot(Dictionary<Guid, decimal> Held, DateTimeOffset? ReleasesAt, List<SeatPending> Waiting)
 {
+    /// <summary>
+    /// Bookings whose hold is NOT an earmark: games cancelled after check-in (S4). Every share on
+    /// one stays owed in full, so it held nothing and the organiser could spend it; its "hold" only
+    /// appears once a return falls due on it — the very return being asked about (review round 5).
+    /// Its returns are payable from free balance only. Its hold is still set aside from spending.
+    /// </summary>
+    public IReadOnlySet<Guid> NotEarmarked { get; init; } = new HashSet<Guid>();
+
+    private decimal EarmarkOf(Guid bookingId) => NotEarmarked.Contains(bookingId) ? 0m : Held.GetValueOrDefault(bookingId);
+
+    /// <summary>
+    /// Coverage for a return from <paramref name="bookingId"/>, behind the <paramref name="earlier"/>
+    /// waiting returns, against <paramref name="balance"/> (review rounds 4 and 5):
+    /// <list type="bullet">
+    ///   <item>an earlier return draws first on its own booking's earmark, and whatever it needs
+    ///   beyond that on the free balance;</item>
+    ///   <item>this return may use its own booking's earmark, less what earlier returns on that
+    ///   booking drew — but only as far as there is money behind the holds (<c>min(balance,
+    ///   held(all))</c>) that earlier returns have not drawn, so when a desk debit leaves the holds
+    ///   underwater the older return is paid first;</item>
+    ///   <item>plus the free balance left after every hold and every earlier return's excess.</item>
+    /// </list>
+    /// Never more than the balance, never below zero.
+    /// </summary>
+    public decimal CoverageFor(Guid bookingId, IReadOnlyCollection<SeatPending> earlier, decimal balance)
+    {
+        var need = earlier.GroupBy(w => w.BookingId).ToDictionary(g => g.Key, g => g.Sum(w => w.Pending));
+        var drawn = need.Sum(kv => Math.Min(kv.Value, EarmarkOf(kv.Key)));
+        var excess = need.Sum(kv => Math.Max(0m, kv.Value - EarmarkOf(kv.Key)));
+        var held = Held.Values.Sum();
+
+        var mine = Math.Max(0m, EarmarkOf(bookingId) - need.GetValueOrDefault(bookingId));
+        var backed = Math.Max(0m, Math.Min(balance, held) - drawn);
+        return Math.Min(mine, backed) + Math.Max(0m, balance - held - excess);
+    }
+
     /// <summary>
     /// What <paramref name="waiting"/> sets aside beyond what their own bookings already hold — a
     /// booking's hold is not counted twice when it also has a waiting return.

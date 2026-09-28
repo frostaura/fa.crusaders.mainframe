@@ -40,11 +40,14 @@ public sealed class ShareHook
             using var scope = _scopes.CreateScope();
             scope.ServiceProvider.GetRequiredService<ITenantContext>().Set(tenantId, tenantSlug ?? "");
             var db = scope.ServiceProvider.GetRequiredService<Persistence.MainframeDbContext>();
-            var waiting = await db.BookingParticipants.AsNoTracking()
+            // Oldest waiting return first (stamp, then participant id): first come, first served.
+            var waiting = (await db.BookingParticipants.AsNoTracking()
                 .Where(p => p.ReturnPendingSince != null)
-                .Join(db.Bookings.AsNoTracking(), p => p.BookingId, b => b.Id, (p, b) => new { b.Id, Payer = b.PaidByUserId ?? b.UserId })
+                .Join(db.Bookings.AsNoTracking(), p => p.BookingId, b => b.Id,
+                    (p, b) => new { b.Id, Payer = b.PaidByUserId ?? b.UserId, p.ReturnPendingSince, Seat = p.Id })
                 .Where(x => x.Payer != null && userIds.Contains(x.Payer.Value))
-                .Select(x => x.Id).Distinct().ToListAsync(ct);
+                .OrderBy(x => x.ReturnPendingSince).ThenBy(x => x.Seat)
+                .Select(x => x.Id).ToListAsync(ct)).Distinct().ToList();
             if (waiting.Count == 0) return;
             var sweep = scope.ServiceProvider.GetRequiredService<ShareSweep>();
             foreach (var id in waiting) await sweep.SettleBookingAsync(id, ct);
@@ -60,16 +63,38 @@ public sealed class ShareHook
         var ids = bookingIds.Where(i => i is not null).Select(i => i!.Value).Distinct().ToList();
         if (ids.Count == 0) return;
 
+        // One booking at a time, each in its own scope: a failure is logged and leaves that booking
+        // marked due (review round 5), so the next minute sweep makes it good however old the
+        // booking is — the catch-up at start does not reach every kind of game, and a swallowed
+        // failure used to be forgotten.
+        foreach (var id in ids)
+        {
+            try
+            {
+                using var scope = _scopes.CreateScope();
+                scope.ServiceProvider.GetRequiredService<ITenantContext>().Set(tenantId, tenantSlug ?? "");
+                await scope.ServiceProvider.GetRequiredService<ShareSweep>().SettleBookingAsync(id, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "Share reconcile after settlement failed for {Booking}; marked for the sweep", id);
+                await MarkDueAsync(tenantId, tenantSlug, id, ct);
+            }
+        }
+    }
+
+    /// <summary>Leaves the durable "reconcile due" marker in a fresh scope. Best effort: logged if even that fails.</summary>
+    private async Task MarkDueAsync(Guid tenantId, string? tenantSlug, Guid bookingId, CancellationToken ct)
+    {
         try
         {
             using var scope = _scopes.CreateScope();
             scope.ServiceProvider.GetRequiredService<ITenantContext>().Set(tenantId, tenantSlug ?? "");
-            var sweep = scope.ServiceProvider.GetRequiredService<ShareSweep>();
-            foreach (var id in ids) await sweep.SettleBookingAsync(id, ct);
+            await ShareSweep.MarkReconcileDueAsync(scope.ServiceProvider.GetRequiredService<Persistence.MainframeDbContext>(), bookingId, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "Share reconcile after settlement failed for {Bookings}; the worker will retry", string.Join(",", ids));
+            _logger.LogError(ex, "Could not mark booking {Booking} for the share sweep", bookingId);
         }
     }
 }

@@ -170,8 +170,11 @@ public sealed class ShareLedger
     /// </summary>
     public async Task<IReadOnlyList<ShareMove>> ReconcileAsync(Guid bookingId, CancellationToken ct, ReconcileOptions? options = null)
     {
+        // Waiting returns first, first come first served (stamp, then participant id), so the
+        // receipts and the log read in the order the coverage rule already pays them (round 5).
         var seats = await _db.BookingParticipants.AsNoTracking()
             .Where(p => p.BookingId == bookingId && p.Seat > 1 && p.UserId != null)
+            .OrderBy(p => p.ReturnPendingSince == null).ThenBy(p => p.ReturnPendingSince).ThenBy(p => p.Id)
             .Select(p => p.Id)
             .ToListAsync(ct);
         if (seats.Count == 0) return [];
