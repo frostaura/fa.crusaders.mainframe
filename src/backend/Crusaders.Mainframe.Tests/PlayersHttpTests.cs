@@ -41,8 +41,12 @@ public sealed class PlayersHttpTests
 
     private static object[] SamAndAlex(PlayersClub club) => [new { userId = club.Sam }, new { userId = club.Alex }];
 
-    private static async Task<HttpResponseMessage> AcceptAsync(PlayersClub club, TestWebAppFactory f, Guid who, Guid bookingId, Guid seat) =>
-        await club.Client(f, who).PostAsync($"/api/v1/bookings/{bookingId}/players/{seat}/accept", null);
+    /// <summary>Accepts as the partner would: naming the share the accept sheet showed them — the seat's share as it stands.</summary>
+    private static async Task<HttpResponseMessage> AcceptAsync(PlayersClub club, TestWebAppFactory f, Guid who, Guid bookingId, Guid seat)
+    {
+        var shown = (await club.SeatsAsync(f, bookingId)).Single(s => s.Id == seat).ShareCredits;
+        return await club.Client(f, who).PostAsJsonAsync($"/api/v1/bookings/{bookingId}/players/{seat}/accept", new { expectedShareCredits = shown });
+    }
 
     private static async Task<JsonElement> JsonAsync(HttpResponseMessage response) =>
         await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -192,8 +196,8 @@ public sealed class PlayersHttpTests
         Assert.Equal(16m, view.GetProperty("to_pay_credits").GetDecimal());
 
         var answers = await Task.WhenAll(
-            club.Client(f, club.Sam).PostAsync($"/api/v1/invites/{token}/accept", null),
-            club.Client(f, club.Jo).PostAsync($"/api/v1/invites/{token}/accept", null));
+            club.Client(f, club.Sam).PostAsJsonAsync($"/api/v1/invites/{token}/accept", new { expectedShareCredits = 16m }),
+            club.Client(f, club.Jo).PostAsJsonAsync($"/api/v1/invites/{token}/accept", new { expectedShareCredits = 16m }));
 
         Assert.Single(answers, a => a.StatusCode == HttpStatusCode.OK);
         var seats = await club.SeatsAsync(f, bookingId);

@@ -12,8 +12,8 @@ public class ShareRulesTests
     private static ShareFacts Facts(
         ParticipantStatus status = ParticipantStatus.Accepted, bool partner = true, bool outside = false,
         decimal share = 10m, decimal consent = 10m, BookingStatus booking = BookingStatus.Booked,
-        bool checkedIn = false, bool displaced = false, decimal owed = 32m) =>
-        new(status, partner, outside, share, consent, booking, checkedIn, displaced, 32m, owed);
+        bool checkedIn = false, bool displaced = false, decimal owed = 32m, decimal paid = 0m, bool closed = false) =>
+        new(status, partner, outside, share, consent, booking, checkedIn, displaced, 32m, owed, paid, closed);
 
     public static TheoryData<string, ShareFacts, decimal> Table => new()
     {
@@ -36,6 +36,11 @@ public class ShareRulesTests
         { "the fraction rounds DOWN to the cent", Facts(owed: 10m, share: 10m), 3.12m },
         { "Owed above the price is clamped (defensive)", Facts(owed: 40m), 10m },
         { "a negative Owed is clamped to nothing", Facts(owed: -5m), 0m },
+        { "an open seat is collected past what it has paid so far", Facts(paid: 4m), 10m },
+        { "a lapsed seat never collects past what it paid", Facts(paid: 4m, closed: true), 4m },
+        { "a lapsed seat that paid nothing collects nothing", Facts(closed: true), 0m },
+        { "a lapsed seat fully paid keeps its share", Facts(paid: 10m, closed: true), 10m },
+        { "a lapsed seat still gets a return when Owed falls", Facts(booking: BookingStatus.NoShow, owed: 9.6m, paid: 10m, closed: true), 3m },
     };
 
     [Theory]

@@ -239,7 +239,8 @@ public sealed class PlayersAccessHttpTests
         var organiser = club.Client(f, club.Organiser);
 
         Assert.Empty((await JsonAsync(await organiser.GetAsync("/api/v1/me/partners/recent"))).GetProperty("items").EnumerateArray());
-        await club.Client(f, club.Sam).PostAsync($"/api/v1/bookings/{bookingId}/players/{PlayersClub.SeatOf(body, 2)}/accept", null);
+        await club.Client(f, club.Sam).PostAsJsonAsync($"/api/v1/bookings/{bookingId}/players/{PlayersClub.SeatOf(body, 2)}/accept",
+            new { expectedShareCredits = 32m });
 
         var recent = (await JsonAsync(await organiser.GetAsync("/api/v1/me/partners/recent"))).GetProperty("items").EnumerateArray().ToList();
         Assert.Equal(club.Sam, Assert.Single(recent).GetProperty("user_id").GetGuid());
