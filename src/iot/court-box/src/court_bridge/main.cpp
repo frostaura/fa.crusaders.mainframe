@@ -811,6 +811,7 @@ void handleScan(const proto::Frame& frame, uint32_t nowMs) {
   link.wifiUp = gWifiUp;
   link.courtCount = gCourtCount;
   link.apiDown = gBreaker.open(nowMs);
+  link.knownReplay = memcode::knownReplay(frame.arg(0), gStepClock, gKeyRing, gReplay, nowMs);
 
   switch (gScanFlow.onScan(link)) {
   case bridgelogic::Attempt::Online:

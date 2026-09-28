@@ -36,6 +36,7 @@
 #include "memcode/StepClock.h"
 #include "memcode/Token.h"
 #include "memcode/Totp.h"
+#include "memcode/Verifier.h"
 #include "roster/Roster.h"
 #include "support/CorpusJson.h"
 
@@ -564,6 +565,37 @@ void test_offline_v1_code_used_once_is_refused_the_second_time_and_says_so(void)
   TEST_ASSERT_FALSE(r.outcome.recognised);
 }
 
+/// Refuted 2026-09-28: a box that lit a court OFFLINE and got its link back
+/// before the activation was uploaded asked the server about a photo of the same
+/// code, and the server — which had not heard of the first use — acted again. A
+/// code this box already acted on is answered locally: the scan goes to the
+/// roster path (which says CODE USED) and never online.
+void test_a_code_this_box_acted_on_offline_is_not_asked_about_online(void) {
+  Offline f;
+  char token[memcode::kTokenLen + 1U] = {};
+  f.token(1000U, token);
+  const bridgelogic::MemberScanResult lit =
+      bridgelogic::decideOfflineMemberCode(token, f.codes(), f.cache, f.session, f.box(), 10000U);
+  TEST_ASSERT_EQUAL(court::Action::TurnOn, lit.outcome.action);
+  f.uses.commit(lit.verdict.token.ref, lit.verdict.step);
+
+  bridgelogic::LinkState link;
+  link.wifiUp = true;
+  link.courtCount = 4U;
+  link.knownReplay = memcode::knownReplay(token, f.clock, f.keys, f.uses, 12000U);
+  TEST_ASSERT_TRUE(link.knownReplay);
+  const bridgelogic::ScanFlow flow;
+  TEST_ASSERT_TRUE(flow.onScan(link) == bridgelogic::Attempt::RosterOnly);
+
+  // The member's NEXT code, and anybody else's, still go online.
+  char next[memcode::kTokenLen + 1U] = {};
+  f.token(1002U, next);
+  link.knownReplay = memcode::knownReplay(next, f.clock, f.keys, f.uses, 12000U + 60000U);
+  TEST_ASSERT_FALSE(link.knownReplay);
+  TEST_ASSERT_TRUE(flow.onScan(link) == bridgelogic::Attempt::Online);
+  TEST_ASSERT_FALSE(memcode::knownReplay("7Q3F9KM2XZ8B", f.clock, f.keys, f.uses, 12000U));
+}
+
 void test_offline_v1_guessing_is_throttled_and_says_so(void) {
   Offline f;
   char wrong[memcode::kTokenLen + 1U] = {};
@@ -740,6 +772,7 @@ int main(int, char**) {
   RUN_TEST(test_every_declared_court_box_case_was_executed);
   RUN_TEST(test_offline_v1_code_lights_the_partners_court_and_records_the_scanned_token);
   RUN_TEST(test_offline_v1_code_used_once_is_refused_the_second_time_and_says_so);
+  RUN_TEST(test_a_code_this_box_acted_on_offline_is_not_asked_about_online);
   RUN_TEST(test_offline_v1_guessing_is_throttled_and_says_so);
   RUN_TEST(test_offline_v1_rescan_on_a_lit_court_is_the_already_on_screen_and_records_nothing);
   RUN_TEST(test_offline_v1_code_with_no_clock_reads_as_the_stale_roster);

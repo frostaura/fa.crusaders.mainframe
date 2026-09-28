@@ -392,6 +392,14 @@ void GateApp::decideScan(const char* token) {
     // refusal's stutter, because this is the lock relatching and not a decision
     // about them — and scans again.
     decision = refuseRelocking(how == Attempt::RosterOnly);
+  } else if (how == Attempt::Online && knownReplay(token, asked)) {
+    // A CODE THIS DOOR HAS ALREADY ACTED ON is not a question for the API
+    // (refuted 2026-09-28). A door that opened OFFLINE for code C and whose link
+    // came back inside C's window has not uploaded that open yet, so the server
+    // has never heard of it and would open again for a photo of C. Decided from
+    // the roster path instead, which refuses it as `replayed` — the same answer,
+    // screen and record the offline path gives, with no call made.
+    decision.fallbackToRoster = true;
   } else if (how == Attempt::Online && scanCallFloorAt_.remaining(asked) > 0U) {
     // THE FLOOR UNDER `/gate` CALLS (round G4, A2). The debounce bounds repeats
     // and cannot bound a stream of tokens it has never seen — a rotating
@@ -462,6 +470,10 @@ ScanDecision GateApp::decideFromRoster(const char* token, uint32_t nowMs, memcod
       decideOfflineMemberCode(token, codes, roster_, unlockMs_, kGateConfig.unlockHardCapMs, nowMs);
   member = offline.verdict;
   return offline.decision;
+}
+
+bool GateApp::knownReplay(const char* token, uint32_t nowMs) const {
+  return memcode::knownReplay(token, stepClock_, codeKeys_, codeUses_, nowMs);
 }
 
 void GateApp::recordCodeUse(const ScanDecision& decision, const memcode::Verdict& member, const char* token,

@@ -135,6 +135,21 @@ Verdict verifyGuarded(const char* text, const OfflineCodes<KeyRingT, ReplayRingT
   return verdict;
 }
 
+/// Whether THIS device can already tell `text` is a replay of a code it acted
+/// on — offline or online — inside the code's window. Asked BEFORE going online:
+/// a board that opened offline and whose link came back before its queued event
+/// was uploaded would otherwise put a photo of the same code to the server, which
+/// has not heard of the first use yet and would act on it again (refuted
+/// 2026-09-28). The device answers it locally as the replay it is. A plain
+/// verify, not the guarded one: a question the device asks itself must not feed
+/// the guess guard. False for anything it cannot tell — no key, no clock, a
+/// legacy code — which then goes to the server as it always did.
+template <class KeyRingT, class ReplayRingT>
+bool knownReplay(const char* text, const StepClock& clock, const KeyRingT& keys, const ReplayRingT& used,
+                 uint32_t nowMs) {
+  return looksLikeV1(text) && verify(text, clock, keys, used, nowMs).status == Status::Replayed;
+}
+
 /// The SERVER just acted on `text` — an online grant, an open, a charge — so
 /// this device records the use too, or a photo of the same code could be used
 /// here offline inside its window the moment the link drops.

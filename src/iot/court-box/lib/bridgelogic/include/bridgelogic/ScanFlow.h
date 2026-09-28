@@ -76,6 +76,13 @@ struct LinkState {
   /// devlink::ApiBreaker says the API is down. Asking costs a 4 s connect
   /// timeout per scan and answers nothing; the roster answers in microseconds.
   bool apiDown = false;
+  /// This box already acted on the scanned v1 code inside its window
+  /// (memcode::knownReplay). Not a question for the API: a box that lit a court
+  /// OFFLINE and whose link came back before its queued activation was uploaded
+  /// would otherwise ask a server that has not heard of the first use, and have
+  /// a photo of the same code acted on again (refuted 2026-09-28). The roster
+  /// path refuses it as the replay it is — CODE USED, arming nothing.
+  bool knownReplay = false;
 };
 
 /// What to do with the API's answer.

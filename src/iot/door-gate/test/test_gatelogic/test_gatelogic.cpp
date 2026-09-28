@@ -2485,6 +2485,57 @@ void test_app_a_v1_member_code_opens_the_door_offline_once_and_is_recorded_as_sc
   }
 }
 
+/// Refuted 2026-09-28: a door that opened OFFLINE for a v1 code and whose link
+/// came back inside that code's window, before the open was uploaded, asked the
+/// server about a photo of the same code — and the server, which had not heard of
+/// the first open, opened again. A code this door has acted on is refused locally
+/// as `replayed`, and the API is never asked: it is primed to OPEN here, so a
+/// call would show as a released lock.
+void test_app_a_code_opened_offline_is_refused_locally_once_the_link_returns() {
+  uint8_t key[memcode::kDayKeyBytes];
+  for (uint8_t i = 0U; i < memcode::kDayKeyBytes; ++i) {
+    key[i] = static_cast<uint8_t>(0x40U + i);
+  }
+  char key64[dc::b64url::encodedLen(memcode::kDayKeyBytes) + 1U] = {};
+  TEST_ASSERT_TRUE(dc::b64url::encode(key, sizeof(key), key64, sizeof(key64)));
+  char body[400] = {};
+  snprintf(body, sizeof(body),
+           "{\"kind\":\"gate\",\"gate\":{\"unlock_seconds\":3},\"roster\":[\"m000118Y9|0|0|86399\"],"
+           "\"code_step\":1000,\"code_step_ms\":0,\"code_days\":[\"900|3900\"],\"code_keys\":[\"18Y90%s\"],"
+           "\"accepted_through\":0}",
+           key64);
+
+  for (size_t b = 0U; b < kBaseCount; ++b) {
+    Rig rig(kBases[b]);
+    rig.boot(true);
+    rig.http.onPath(gatelogic::kPathHeartbeat, 200U, body, 0U);
+    rig.forceHeartbeat();
+
+    rig.link.set(false);
+    rig.tick();
+    const uint32_t step = rig.app.stepClock().stepAt(rig.clock.value());
+    char token[memcode::kTokenLen + 2U] = {};
+    TEST_ASSERT_TRUE(memcode::format(0x0A3C9U, 12345678U, memcode::offCode(key, step), token, sizeof(token)));
+    char line[memcode::kTokenLen + 2U] = {};
+    snprintf(line, sizeof(line), "%s\n", token);
+    rig.scanner.feed(line);
+    rig.tick();
+    TEST_ASSERT_TRUE_MESSAGE(rig.lock.released(), "the code opens the door offline");
+    rig.runUntilLocked(2000U);
+    rig.runFor(2500U);
+
+    // The link is back; the open is still queued; the server would open again.
+    rig.link.set(true);
+    rig.http.onPath(gatelogic::kPathGate, 200U, kOpenThreeSeconds, 0U);
+    rig.scanner.feed(line);
+    rig.tick();
+    TEST_ASSERT_FALSE_MESSAGE(rig.lock.released(), "a photo of a code this door acted on opens nothing");
+    TEST_ASSERT_EQUAL_STRING(gatelogic::kReasonReplayed, rig.log.last().reason);
+    TEST_ASSERT_TRUE_MESSAGE(strcmp(rig.http.lastPath(), gatelogic::kPathGate) != 0,
+                             "and the API was never asked");
+  }
+}
+
 /// (c) AT MOST ONE BLOCKING CALL PER PASS. MUTATION-PROVED.
 ///
 /// The shipped loop could make five in one pass — three scans, an event upload
@@ -6252,6 +6303,7 @@ int main(int, char**) {
   RUN_TEST(test_app_a_release_is_timed_from_after_the_call_that_granted_it);
   RUN_TEST(test_app_the_debounce_window_starts_when_the_decision_was_made);
   RUN_TEST(test_app_a_v1_member_code_opens_the_door_offline_once_and_is_recorded_as_scanned);
+  RUN_TEST(test_app_a_code_opened_offline_is_refused_locally_once_the_link_returns);
   RUN_TEST(test_app_a_pass_makes_at_most_one_blocking_call);
   RUN_TEST(test_app_the_watchdog_is_kicked_around_every_blocking_call);
   RUN_TEST(test_app_a_dead_api_host_never_starves_the_watchdog_or_the_lock);

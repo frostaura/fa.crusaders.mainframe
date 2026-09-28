@@ -183,6 +183,9 @@ size_t renderActivateBody(char* out, size_t cap, const char* mac, const char* to
 }
 
 Attempt ScanFlow::onScan(const LinkState& link) const {
+  if (link.knownReplay) {
+    return Attempt::RosterOnly;
+  }
   const bool canAsk = link.wifiUp && !link.apiDown;
   const bool canAct = link.courtCount > 0U;
   return canAsk && canAct ? Attempt::Online : Attempt::RosterOnly;
