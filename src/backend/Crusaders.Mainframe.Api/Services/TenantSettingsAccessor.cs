@@ -156,6 +156,7 @@ public sealed class TenantSettingsAccessor
             RecentPartnerDays = TryInt(root, PlayerSettings.RecentPartnerDaysKey, PlayerSettings.DefaultRecentPartnerDays),
             MemberNotificationRetentionDays = TryInt(
                 root, PlayerSettings.NotificationRetentionDaysKey, PlayerSettings.DefaultNotificationRetentionDays),
+            PlayerInvitesPerBooking = TryInt(root, PlayerSettings.InvitesPerBookingKey, PlayerSettings.DefaultInvitesPerBooking),
 
             SseKeepaliveSeconds = TryInt(root, "sse_keepalive_seconds", RealtimeSettings.DefaultKeepaliveSeconds),
             ControlBoardResyncSeconds = TryInt(root, "control_board_resync_seconds", RealtimeSettings.DefaultResyncSeconds),
@@ -579,6 +580,7 @@ public sealed record TenantSettingsView(
     public int MemberQuietEndMinute { get; init; } = PlayerSettings.DefaultQuietEndMinute;
     public int RecentPartnerDays { get; init; } = PlayerSettings.DefaultRecentPartnerDays;
     public int MemberNotificationRetentionDays { get; init; } = PlayerSettings.DefaultNotificationRetentionDays;
+    public int PlayerInvitesPerBooking { get; init; } = PlayerSettings.DefaultInvitesPerBooking;
 
     // ---- The live streams' seven numbers ----
 

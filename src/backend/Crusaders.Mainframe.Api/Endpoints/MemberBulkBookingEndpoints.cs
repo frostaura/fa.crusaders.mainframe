@@ -56,10 +56,10 @@ public static class MemberBulkBookingEndpoints
         // about any slot, so asking it per item would only repeat the answer.
         if (await BookingMembershipGate.RefuseIfBarredAsync(deps.Db, userId, ct) is { } barred) return barred;
 
-        // D11: a players payload is checked in full before anything is booked, against the first
-        // item's price — a batch whose split cannot work books nothing.
-        if (req.Players is { Count: > 0 } && items.Count > 0
-            && await PlayersRefusalAsync(ctx, userId, req, items[0], ct) is { } badPlayers)
+        // D11: a players payload is checked in full before anything is booked — its shape on its
+        // own, then the split against EVERY item's own price. A batch whose players or split
+        // cannot work on any one item books nothing; there is no half-split batch.
+        if (req.Players is { Count: > 0 } && await PlayersRefusalAsync(ctx, userId, req, items, ct) is { } badPlayers)
         {
             return badPlayers;
         }
@@ -129,16 +129,29 @@ public static class MemberBulkBookingEndpoints
         };
     }
 
+    /// <summary>
+    /// The players payload against the whole batch: its shape once, price-free, then the split
+    /// against each item the rules will price. An item that cannot be quoted is refused as an item
+    /// by the batch itself and is never split, so only its shape was ever at stake.
+    /// </summary>
     private static async Task<IResult?> PlayersRefusalAsync(
-        HttpContext ctx, Guid userId, MemberBulkBookRequest req, BulkBookRequestItem first, CancellationToken ct)
+        HttpContext ctx, Guid userId, MemberBulkBookRequest req, IReadOnlyList<BulkBookRequestItem> items, CancellationToken ct)
     {
+        var players = ctx.RequestServices.GetRequiredService<PlayersService>();
+        var spec = new PlayersRequest(req.Players, req.SplitMode, req.OrganiserWeight);
+        if (await players.ValidateAsync(userId, spec, null, ct) is { } shape) return PlayersEndpoints.ToResult(shape);
+
         var bookings = ctx.RequestServices.GetRequiredService<BookingService>();
         var payer = new BookingPayer(userId, userId, ActorIsAdmin: ctx.User.IsInRole("admin"));
-        var quote = await bookings.QuoteAsync(first.CourtId, payer, first.StartsAt, first.SliceCount, ct);
-        if (quote.PriceCredits is not { } price) return null;
-        var bad = await ctx.RequestServices.GetRequiredService<PlayersService>()
-            .ValidateAsync(userId, new PlayersRequest(req.Players, req.SplitMode, req.OrganiserWeight), price, ct);
-        return bad is null ? null : PlayersEndpoints.ToResult(bad);
+        // One after another: every quote reads through the request's one DbContext.
+        var checkedPrices = new HashSet<decimal>();
+        foreach (var item in items)
+        {
+            var price = (await bookings.QuoteAsync(item.CourtId, payer, item.StartsAt, item.SliceCount, ct)).PriceCredits;
+            if (price is not { } p || !checkedPrices.Add(p)) continue;
+            if (await players.ValidateAsync(userId, spec, p, ct) is { } bad) return PlayersEndpoints.ToResult(bad);
+        }
+        return null;
     }
 
     /// <summary>The admin bulk's two request bounds, with the admin bulk's refusal codes.</summary>

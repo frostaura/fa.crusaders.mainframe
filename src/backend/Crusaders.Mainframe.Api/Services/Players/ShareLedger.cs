@@ -77,21 +77,27 @@ public sealed class ShareLedger
     /// payer's wallet, negated — share transfers excepted, because they are between the players and
     /// not between a player and the club.
     /// </summary>
-    public async Task<decimal> OwedAsync(Booking booking, CancellationToken ct)
+    public Task<decimal> OwedAsync(Booking booking, CancellationToken ct) => OwedOfAsync(_db, booking, ct);
+
+    /// <summary>What this seat's partner has paid the organiser, net — read off their own share rows.</summary>
+    public Task<decimal> PaidAsync(BookingParticipant seat, CancellationToken ct) => PaidOfAsync(_db, seat, ct);
+
+    /// <summary><see cref="OwedAsync"/> on a given context — for a reader that cannot take this service (the hold).</summary>
+    public static async Task<decimal> OwedOfAsync(MainframeDbContext db, Booking booking, CancellationToken ct)
     {
         var payer = PayerOf(booking);
-        var sum = await _db.LedgerEntries.AsNoTracking()
+        var sum = await db.LedgerEntries.AsNoTracking()
             .Where(l => l.RelatedBookingId == booking.Id && l.UserId == payer && l.Type != LedgerEntryType.ShareTransfer)
             .SumAsync(l => (decimal?)l.AmountCredits, ct) ?? 0m;
         return Math.Max(0m, -sum);
     }
 
-    /// <summary>What this seat's partner has paid the organiser, net — read off their own share rows.</summary>
-    public async Task<decimal> PaidAsync(BookingParticipant seat, CancellationToken ct)
+    /// <summary><see cref="PaidAsync"/> on a given context.</summary>
+    public static async Task<decimal> PaidOfAsync(MainframeDbContext db, BookingParticipant seat, CancellationToken ct)
     {
         if (seat.UserId is not { } partner) return 0m;
         var prefix = Prefix(seat.Id);
-        var sum = await _db.LedgerEntries.AsNoTracking()
+        var sum = await db.LedgerEntries.AsNoTracking()
             .Where(l => l.UserId == partner && l.Type == LedgerEntryType.ShareTransfer
                         && l.ExternalReference != null && l.ExternalReference.StartsWith(prefix))
             .SumAsync(l => (decimal?)l.AmountCredits, ct) ?? 0m;
@@ -99,10 +105,19 @@ public sealed class ShareLedger
     }
 
     /// <summary>
+    /// A seat that can no longer be collected from: it lapsed, or its share deadline has passed
+    /// (the sweep stamps <c>LapsedAt</c> a minute late at worst; the clock is not).
+    /// </summary>
+    public static bool IsClosed(Booking booking, BookingParticipant seat, TenantSettingsView settings, DateTimeOffset now) =>
+        seat.LapsedAt is not null || now >= PlayerSettings.ShareDeadline(booking, settings);
+
+    /// <summary>
     /// What this seat's partner would still pay if they paid now — the full ask, as if they had
     /// consented to all of it, less what they have paid. The "unpaid" of every screen and sweep.
+    /// Nothing, once the seat has closed — unless <paramref name="evenIfClosed"/>: what the seat
+    /// fell short by, for the lapse that records it and the admin collect that may still take it.
     /// </summary>
-    public async Task<decimal> UnpaidAsync(Booking booking, BookingParticipant seat, CancellationToken ct)
+    public async Task<decimal> UnpaidAsync(Booking booking, BookingParticipant seat, CancellationToken ct, bool evenIfClosed = false)
     {
         var asked = new BookingParticipant
         {
@@ -117,17 +132,23 @@ public sealed class ShareLedger
             ConsentedCredits = Math.Max(seat.ConsentedCredits, seat.ShareCredits),
             SettledOutsideAt = seat.SettledOutsideAt,
         };
-        var target = TargetFor(booking, asked, await OwedAsync(booking, ct));
-        return Math.Max(0m, target - await PaidAsync(seat, ct));
+        var paid = await PaidAsync(seat, ct);
+        var closed = !evenIfClosed && IsClosed(booking, seat, await _settings.GetAsync(ct), DateTimeOffset.UtcNow);
+        var target = TargetFor(booking, asked, await OwedAsync(booking, ct), paid, closed);
+        return Math.Max(0m, target - paid);
     }
 
-    /// <summary>The target for one seat against one booking, given the organiser's current <c>Owed</c>.</summary>
-    public static decimal TargetFor(Booking booking, BookingParticipant seat, decimal owed)
+    /// <summary>
+    /// The target for one seat against one booking, given the organiser's current <c>Owed</c>,
+    /// what the partner has paid, and whether the seat has closed (see <see cref="ShareFacts"/>).
+    /// </summary>
+    public static decimal TargetFor(Booking booking, BookingParticipant seat, decimal owed, decimal paid = 0m, bool closed = false)
     {
         return ShareRules.TargetFor(new ShareFacts(
             seat.Status, seat.IsPartner && seat.UserId is not null, seat.SettledOutsideAt is not null,
             seat.ShareCredits, seat.ConsentedCredits, booking.Status, booking.CheckedInAt is not null,
-            booking.CancellationReason == BookingService.ResoldTailRefunded, booking.AmountChargedCredits, owed));
+            booking.CancellationReason == BookingService.ResoldTailRefunded, booking.AmountChargedCredits, owed,
+            paid, closed));
     }
 
     public static Guid PayerOf(Booking booking) => booking.PaidByUserId ?? booking.UserId ?? Guid.Empty;
@@ -174,7 +195,7 @@ public sealed class ShareLedger
     {
         for (var attempt = 0; attempt < 3; attempt++)
         {
-            var estimate = await DeltaAsync(bookingId, seatId, ct);
+            var estimate = await DeltaAsync(bookingId, seatId, options, ct);
             if (estimate is not { } first || first.Delta == 0m) return null;
 
             var debited = first.Delta > 0 ? first.Seat.UserId!.Value : PayerOf(first.Booking);
@@ -196,14 +217,17 @@ public sealed class ShareLedger
         public decimal Delta => Target - Paid;
     }
 
-    private async Task<SeatDelta?> DeltaAsync(Guid bookingId, Guid seatId, CancellationToken ct)
+    private async Task<SeatDelta?> DeltaAsync(Guid bookingId, Guid seatId, ReconcileOptions options, CancellationToken ct)
     {
         var booking = await _db.Bookings.AsNoTracking().FirstOrDefaultAsync(b => b.Id == bookingId, ct);
         var seat = await _db.BookingParticipants.AsNoTracking().FirstOrDefaultAsync(p => p.Id == seatId, ct);
         if (booking?.UserId is null || seat?.UserId is null) return null;
 
-        var target = TargetFor(booking, seat, await OwedAsync(booking, ct));
-        return new SeatDelta(booking, seat, target, await PaidAsync(seat, ct));
+        // Closed means no collection, ever — the admin's explicit collect of THIS seat excepted.
+        var closed = options.OverdraftSeatId != seatId
+                     && IsClosed(booking, seat, await _settings.GetAsync(ct), DateTimeOffset.UtcNow);
+        var paid = await PaidAsync(seat, ct);
+        return new SeatDelta(booking, seat, TargetFor(booking, seat, await OwedAsync(booking, ct), paid, closed), paid);
     }
 
     private async Task<ShareMove?> PostUnderLockAsync(
@@ -212,13 +236,15 @@ public sealed class ShareLedger
         await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, debited, _outbox, ct);
 
         // Decided again under the lock: the unlocked read chose WHOM to lock, this one decides.
-        if (await DeltaAsync(bookingId, seatId, ct) is not { } now || now.Delta == 0m) return null;
+        if (await DeltaAsync(bookingId, seatId, options, ct) is not { } now || now.Delta == 0m) return null;
         var collecting = now.Delta > 0;
         var partner = now.Seat.UserId!.Value;
         if ((collecting ? partner : PayerOf(now.Booking)) != debited) return null;
 
+        // Spendable, not balance: shares the partner has received as an organiser elsewhere are
+        // held for their own partners' returns and are not theirs to pay with.
         if (collecting && options.OverdraftSeatId != seatId
-            && await _ledger.GetBalanceAsync(partner, ct) < now.Delta)
+            && await _ledger.GetSpendableAsync(partner, ct) < now.Delta)
         {
             // Unpaid, not owed. Payable by the partner until the deadline; never a debt.
             return null;
@@ -244,6 +270,56 @@ public sealed class ShareLedger
         var move = new ShareMove(seat.Id, partner, PayerOf(booking), delta, await NextSeqAsync(seat.Id, partner, ct));
         await StageReceiptsAsync(booking, move, ct);
         return Pair(booking, move, actorUserId);
+    }
+
+    /// <summary>What an admin's collect actually moved, and the partner's balance either side of it.</summary>
+    public sealed record Collected(ShareMove Move, decimal BalanceBefore, decimal BalanceAfter);
+
+    /// <summary>
+    /// An admin's explicit collect (R19 posture, applied to shares): the seat's consent raised to
+    /// its share, the rest of the share collected whatever the partner's balance — even past the
+    /// deadline — and the change-log line staged by <paramref name="record"/> with the figure
+    /// actually posted. ONE transaction under the partner's lock, so the record, the consent and
+    /// the money land together or not at all. Null when there is nothing to collect (nothing is
+    /// written); throws <see cref="DbUpdateException"/> when the pair could not post (nothing is
+    /// written either).
+    /// </summary>
+    public async Task<Collected?> CollectAsync(
+        Guid bookingId, Guid seatId, Guid actorUserId, Func<BookingParticipant, decimal, decimal, Task> record, CancellationToken ct)
+    {
+        var partner = await _db.BookingParticipants.AsNoTracking().Where(p => p.Id == seatId).Select(p => p.UserId).FirstOrDefaultAsync(ct);
+        if (partner is not { } partnerId) return null;
+
+        await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, partnerId, _outbox, ct);
+        var booking = await _db.Bookings.AsNoTracking().FirstOrDefaultAsync(b => b.Id == bookingId, ct);
+        var seat = await _db.BookingParticipants.FirstOrDefaultAsync(p => p.Id == seatId && p.BookingId == bookingId, ct);
+        if (booking?.UserId is null || seat is null || seat.UserId != partnerId) return null;
+
+        seat.ConsentedCredits = seat.ShareCredits;
+        seat.UpdatedAt = DateTimeOffset.UtcNow.Storable();
+        var paid = await PaidAsync(seat, ct);
+        var delta = TargetFor(booking, seat, await OwedAsync(booking, ct), paid, closed: false) - paid;
+        if (delta <= 0m)
+        {
+            _db.ChangeTracker.Clear();
+            return null;
+        }
+
+        var before = await _ledger.GetBalanceAsync(partnerId, ct);
+        var move = new ShareMove(seatId, partnerId, PayerOf(booking), delta, await NextSeqAsync(seatId, partnerId, ct));
+        await record(seat, delta, before);
+        await StageReceiptsAsync(booking, move, ct);
+        try
+        {
+            await _ledger.PostManyAsync(Pair(booking, move, actorUserId), ct);
+        }
+        catch (DbUpdateException)
+        {
+            _db.ChangeTracker.Clear();
+            throw;
+        }
+        await payerLock.CommitAsync(ct);
+        return new Collected(move, before, before - delta);
     }
 
     /// <summary>The next pair number for a seat: one past the pairs its partner's rows already carry.</summary>

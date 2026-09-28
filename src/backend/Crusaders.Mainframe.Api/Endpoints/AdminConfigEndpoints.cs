@@ -148,6 +148,7 @@ public static class AdminConfigEndpoints
                 member_quiet_end_minute = PlayerSettings.QuietEndMinute(defaults),
                 recent_partner_days = PlayerSettings.RecentPartnerDays(defaults),
                 member_notification_retention_days = PlayerSettings.NotificationRetentionDays(defaults),
+                player_invites_per_booking = PlayerSettings.InvitesPerBooking(defaults),
 
                 sse_keepalive_seconds = (int)RealtimeSettings.KeepAlive(defaults).TotalSeconds,
                 control_board_resync_seconds = RealtimeSettings.ResyncSeconds(defaults),
@@ -811,7 +812,7 @@ public static class AdminConfigEndpoints
     }
 
     /// <summary>
-    /// Bounds on the players-and-splits nine (D11–D13), from <see cref="PlayerSettings"/>' own
+    /// Bounds on the players-and-splits ten (D11–D13), from <see cref="PlayerSettings"/>' own
     /// constants so the number refused here and the number clamped on read cannot drift apart.
     /// </summary>
     private static string? ValidatePlayerSettings(UpdateSettingsRequest req)
@@ -827,12 +828,13 @@ public static class AdminConfigEndpoints
             (req.MemberQuietEndMinute, PlayerSettings.MinQuietMinute, PlayerSettings.MaxQuietMinute, PlayerSettings.QuietEndMinuteKey),
             (req.RecentPartnerDays, PlayerSettings.MinRecentPartnerDays, PlayerSettings.MaxRecentPartnerDays, PlayerSettings.RecentPartnerDaysKey),
             (req.MemberNotificationRetentionDays, PlayerSettings.MinNotificationRetentionDays, PlayerSettings.MaxNotificationRetentionDays, PlayerSettings.NotificationRetentionDaysKey),
+            (req.PlayerInvitesPerBooking, PlayerSettings.MinInvitesPerBooking, PlayerSettings.MaxInvitesPerBooking, PlayerSettings.InvitesPerBookingKey),
         ];
         var bad = bounds.FirstOrDefault(b => OutOfRange(b.Value, b.Min, b.Max));
         return bad.Key is null ? null : $"{bad.Key}_out_of_range";
     }
 
-    /// <summary>Same omitted-means-unchanged rule as the economics keys, for the players nine.</summary>
+    /// <summary>Same omitted-means-unchanged rule as the economics keys, for the players ten.</summary>
     private static void WriteOptionalPlayerSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
     {
         (int? Value, string Key)[] values =
@@ -846,6 +848,7 @@ public static class AdminConfigEndpoints
             (req.MemberQuietEndMinute, PlayerSettings.QuietEndMinuteKey),
             (req.RecentPartnerDays, PlayerSettings.RecentPartnerDaysKey),
             (req.MemberNotificationRetentionDays, PlayerSettings.NotificationRetentionDaysKey),
+            (req.PlayerInvitesPerBooking, PlayerSettings.InvitesPerBookingKey),
         ];
         foreach (var (value, key) in values)
         {
@@ -1371,6 +1374,7 @@ public sealed record UpdateSettingsRequest(
     [property: JsonPropertyName("member_quiet_end_minute")] int? MemberQuietEndMinute = null,
     [property: JsonPropertyName("recent_partner_days")] int? RecentPartnerDays = null,
     [property: JsonPropertyName("member_notification_retention_days")] int? MemberNotificationRetentionDays = null,
+    [property: JsonPropertyName("player_invites_per_booking")] int? PlayerInvitesPerBooking = null,
 
     [property: JsonPropertyName("control_board_resync_seconds")] int? ControlBoardResyncSeconds = null,
     [property: JsonPropertyName("control_board_stale_multiplier")] int? ControlBoardStaleMultiplier = null,

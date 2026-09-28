@@ -92,7 +92,10 @@ public sealed class PlayersQuery
         if (booking?.UserId is null || booking.Status == BookingStatus.AdminBlock) return null;
 
         var seats = await _db.BookingParticipants.AsNoTracking().Where(p => p.BookingId == bookingId).OrderBy(p => p.Seat).ToListAsync(ct);
-        var mySeat = seats.Where(s => s.UserId == viewer).OrderByDescending(s => s.IsLive).FirstOrDefault();
+
+        // Only a LIVE seat makes the viewer a player. A member who declined, withdrew, lapsed or
+        // was taken off is nobody to this booking any more and reads the same 404 as a stranger.
+        var mySeat = seats.FirstOrDefault(s => s.UserId == viewer && s.IsLive);
         var role = RoleOf(booking, viewer, mySeat, viewerIsAdmin);
         if (role is null) return null;
 
@@ -100,7 +103,7 @@ public sealed class PlayersQuery
         var owed = await _shares.OwedAsync(booking, ct);
         var people = await MembersAsync(seats.Select(s => s.UserId).Append(booking.UserId), ct);
         var court = await _db.Courts.AsNoTracking().Where(c => c.Id == booking.CourtId).Select(c => c.Name).FirstOrDefaultAsync(ct);
-        var table = await TableAsync(new DetailContext(booking, seats, people, owed, role, mySeat?.Id), ct);
+        var table = await TableAsync(new DetailContext(booking, seats, people, owed, role, mySeat?.Id, settings), ct);
 
         return new
         {
@@ -143,7 +146,8 @@ public sealed class PlayersQuery
     }
 
     private sealed record DetailContext(
-        Booking Booking, List<BookingParticipant> Seats, Dictionary<Guid, PublicMember> People, decimal Owed, string Role, Guid? MySeatId);
+        Booking Booking, List<BookingParticipant> Seats, Dictionary<Guid, PublicMember> People, decimal Owed, string Role, Guid? MySeatId,
+        TenantSettingsView Settings);
 
     private sealed record DetailTable(List<object> Players, decimal Received, decimal Unpaid);
 
@@ -162,7 +166,8 @@ public sealed class PlayersQuery
             received += s.IsPartner ? paid : 0m;
             unpaid += open;
             if (!s.IsLive && (s.Seat == 1 || (d.Role == "player" && s.Id != d.MySeatId))) continue;
-            players.Add(SeatView(s, d.People, paid, ShareLedger.TargetFor(d.Booking, s, d.Owed), open));
+            var closed = ShareLedger.IsClosed(d.Booking, s, d.Settings, DateTimeOffset.UtcNow);
+            players.Add(SeatView(s, d.People, paid, ShareLedger.TargetFor(d.Booking, s, d.Owed, paid, closed), open));
         }
         if (d.Seats.Count == 0) players.Add(ImplicitOrganiser(d.Booking, d.People));
         return new DetailTable(players, received, unpaid);
@@ -289,7 +294,10 @@ public sealed class PlayersQuery
         var openLink = seat.UserId is null;
         if (openLink) seat = AsClaimedBy(seat, viewer);
         var unpaid = await _shares.UnpaidAsync(booking, seat, ct);
-        var balance = await _ledger.GetBalanceAsync(viewer, ct);
+        // What the accept will check: the balance less anything this member holds for partners
+        // of their own (D11). Shown beside the total so the sheet can say why.
+        var held = await _ledger.GetHeldAsync(viewer, ct);
+        var balance = await _ledger.GetBalanceAsync(viewer, ct) - held.Held;
         var people = await MembersAsync([booking.UserId], ct);
         var court = await _db.Courts.AsNoTracking().Where(c => c.Id == booking.CourtId).Select(c => c.Name).FirstOrDefaultAsync(ct);
         var cap = seat.Status == ParticipantStatus.Invited && seat.UserId is { } me && booking.StartsAt > DateTimeOffset.UtcNow
@@ -315,6 +323,7 @@ public sealed class PlayersQuery
             to_pay_credits = unpaid,
             needs_consent = seat.Status == ParticipantStatus.Accepted && seat.ShareCredits > seat.ConsentedCredits,
             balance_credits = balance,
+            held_credits = held.Held,
             balance_after_credits = balance - unpaid,
             short_by_credits = Math.Max(0m, unpaid - balance),
             share_deadline = PlayerSettings.ShareDeadline(booking, settings),

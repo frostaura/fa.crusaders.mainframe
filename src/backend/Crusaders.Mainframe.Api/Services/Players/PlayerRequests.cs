@@ -62,6 +62,12 @@ public static class PlayerErrors
     public const string NothingToCollect = "nothing_to_collect";
     public const string SplitNeedsSeats = "split_unknown_seat";
     public const string PayerOverridden = "booking_payer_overridden";
+    public const string ShareChanged = "share_changed";
+    public const string ExpectedShareRequired = "expected_share_required";
+    public const string PreviouslyDeclined = "player_previously_declined";
+    public const string PreviouslyRemoved = "player_previously_removed";
+    public const string InviteLimit = "player_invite_limit";
+    public const string NotAccepted = "player_not_accepted";
 }
 
 /// <summary>

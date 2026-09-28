@@ -15,15 +15,24 @@ public sealed partial class PlayersService
     }
 
     /// <summary>Accepts through a shared link — claiming an open seat, or answering one addressed to the caller.</summary>
-    public async Task<PlayerOutcome> AcceptByTokenAsync(string? token, Guid me, CancellationToken ct)
+    public async Task<PlayerOutcome> AcceptByTokenAsync(string? token, Guid me, decimal? expectedShare, CancellationToken ct)
     {
         var seat = await SeatForTokenAsync(token, ct);
         if (seat is null || (seat.UserId is { } owner && owner != me)) return PlayerOutcome.InviteNotFound;
-        return await AcceptAsync(seat.Id, me, ct);
+        return await AcceptAsync(seat.Id, me, expectedShare, ct, viaToken: true);
     }
 
     /// <summary>
-    /// Accept — and pay — a seat. The partner's own consent, to the share as it stands now.
+    /// Accept — and pay — a seat. The partner's own consent, to the share they were SHOWN:
+    /// <paramref name="expectedShare"/> is the figure on their accept sheet, required, and a share
+    /// that has risen past it since is refused with <c>409 share_changed</c> and the current
+    /// figure — a tap is consent to what the partner read, never to what the organiser typed after.
+    ///
+    /// <para>
+    /// <b>An open link seat is claimed only through its link</b> (<paramref name="viaToken"/>):
+    /// the seat route answers such a seat as a seat that names nothing, so a participant id seen
+    /// in a detail view is no way round a link the organiser rotated.
+    /// </para>
     ///
     /// <para>
     /// <b>Under the partner's lock, in one save.</b> The seat's new state and the first payment
@@ -38,22 +47,22 @@ public sealed partial class PlayersService
     /// already-accepted seat whose share went UP is how a partner consents to the new figure.
     /// </para>
     /// </summary>
-    public async Task<PlayerOutcome> AcceptAsync(Guid seatId, Guid me, CancellationToken ct)
+    public async Task<PlayerOutcome> AcceptAsync(Guid seatId, Guid me, decimal? expectedShare, CancellationToken ct, bool viaToken = false)
     {
         PlayerOutcome outcome;
         try
         {
-            outcome = await AcceptUnderLockAsync(seatId, me, ct);
+            outcome = await AcceptUnderLockAsync(new AcceptAsk(seatId, me, expectedShare, viaToken), ct);
         }
         catch (DbUpdateConcurrencyException)
         {
             _db.ChangeTracker.Clear();
-            return await AlreadyAnsweredAsync(seatId, me, ct);
+            return await AlreadyAnsweredAsync(seatId, me, ct, expectedShare);
         }
         catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException { SqlState: "23505" })
         {
             _db.ChangeTracker.Clear();
-            return await AlreadyAnsweredAsync(seatId, me, ct);
+            return await AlreadyAnsweredAsync(seatId, me, ct, expectedShare);
         }
 
         if (outcome.IsOk && outcome.Body is AcceptBody body)
@@ -66,28 +75,45 @@ public sealed partial class PlayersService
 
     private sealed record AcceptBody(Guid BookingId, Guid OrganiserId, object Answer);
 
-    /// <summary>After a lost race: the winner's accept is this caller's answer too, if it was theirs.</summary>
-    private async Task<PlayerOutcome> AlreadyAnsweredAsync(Guid seatId, Guid me, CancellationToken ct)
+    /// <summary>One accept: whose, of which seat, at which figure, and by which route.</summary>
+    private sealed record AcceptAsk(Guid SeatId, Guid Me, decimal? Expected, bool ViaToken);
+
+    /// <summary>
+    /// After a lost race: the winner's accept is this caller's answer too — but only when it was
+    /// theirs AND the consent on it still covers the share, and the share is still the figure the
+    /// caller agreed to. A share raised between the two taps is a 409 with the current figure,
+    /// never a stale 200 that reads as "you agreed to this".
+    /// </summary>
+    internal async Task<PlayerOutcome> AlreadyAnsweredAsync(Guid seatId, Guid me, CancellationToken ct, decimal? expected = null)
     {
         var seat = await _db.BookingParticipants.AsNoTracking().FirstOrDefaultAsync(p => p.Id == seatId, ct);
-        if (seat?.UserId == me && seat.Status == ParticipantStatus.Accepted) return PlayerOutcome.Ok(await AnswerAsync(seat, ct));
-        return PlayerOutcome.Refuse(409, PlayerErrors.InviteClosed);
+        if (seat?.UserId != me || seat.Status != ParticipantStatus.Accepted) return PlayerOutcome.Refuse(409, PlayerErrors.InviteClosed);
+        if (seat.ConsentedCredits < seat.ShareCredits || (expected is { } e && seat.ShareCredits > e))
+        {
+            return PlayerOutcome.Refuse(409, PlayerErrors.ShareChanged, new { share_credits = seat.ShareCredits });
+        }
+        return PlayerOutcome.Ok(await AnswerAsync(seat, ct));
     }
 
-    private async Task<PlayerOutcome> AcceptUnderLockAsync(Guid seatId, Guid me, CancellationToken ct)
+    private async Task<PlayerOutcome> AcceptUnderLockAsync(AcceptAsk ask, CancellationToken ct)
     {
+        var (seatId, me) = (ask.SeatId, ask.Me);
         await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, me, _p.Outbox, ct);
         await LockSeatAsync(seatId, ct);
         var now = DateTimeOffset.UtcNow;
 
         var seat = await _db.BookingParticipants.FirstOrDefaultAsync(p => p.Id == seatId, ct);
-        if (seat is null || seat.Seat == 1 || seat.GuestName is not null) return PlayerOutcome.InviteNotFound;
-        if (seat.UserId is { } owner && owner != me) return PlayerOutcome.InviteNotFound;
-        var game = await LoadAsync(seat.BookingId, ct);
+        if (SeatRefusal(seat, ask) is { } notYours) return notYours;
+        var expected = ask.Expected!.Value;
+        var game = await LoadAsync(seat!.BookingId, ct);
         if (game is null) return PlayerOutcome.InviteNotFound;
         seat = game.Seats.First(s => s.Id == seatId);
 
         if (await AcceptRefusalAsync(game, seat, me, now, ct) is { } refused) return refused;
+        if (seat.ShareCredits > expected)
+        {
+            return PlayerOutcome.Refuse(409, PlayerErrors.ShareChanged, new { share_credits = seat.ShareCredits });
+        }
 
         var fresh = seat.Status == ParticipantStatus.Invited;
         seat.UserId = me;
@@ -96,12 +122,14 @@ public sealed partial class PlayersService
         seat.RespondedAt ??= now.Storable();
         seat.UpdatedAt = now.Storable();
 
-        var delta = ShareLedger.TargetFor(game.Booking, seat, await _p.Shares.OwedAsync(game.Booking, ct))
-                    - await _p.Shares.PaidAsync(seat, ct);
+        // Open by the refusal above (before the deadline, not lapsed), so never closed here.
+        var paid = await _p.Shares.PaidAsync(seat, ct);
+        var delta = ShareLedger.TargetFor(game.Booking, seat, await _p.Shares.OwedAsync(game.Booking, ct), paid) - paid;
         IReadOnlyList<LedgerPosting> postings = [];
         if (delta > 0)
         {
-            var balance = await _p.Ledger.GetBalanceAsync(me, ct);
+            // Spendable: shares this partner holds as an organiser elsewhere are not theirs to pay with (D11).
+            var balance = await _p.Ledger.GetSpendableAsync(me, ct);
             if (balance < delta)
             {
                 _db.ChangeTracker.Clear();
@@ -130,8 +158,24 @@ public sealed partial class PlayersService
             "SELECT pg_advisory_xact_lock({0})", [PayerLock.KeyFor(_tenant.TenantId, seatId)], ct);
     }
 
-    /// <summary>Every reason an accept is refused, in the order a partner would want to hear them.</summary>
-    private async Task<PlayerOutcome?> AcceptRefusalAsync(Game game, BookingParticipant seat, Guid me, DateTimeOffset now, CancellationToken ct)
+    /// <summary>
+    /// Is this seat the caller's to accept at all? A 404 for anything that is not — the organiser's
+    /// seat, a guest's, somebody else's, and an open link seat reached by its id rather than its
+    /// link. Only then is the figure asked for, so a stranger reads the same uninformative 404.
+    /// </summary>
+    private static PlayerOutcome? SeatRefusal(BookingParticipant? seat, AcceptAsk ask)
+    {
+        if (seat is null || seat.Seat == 1 || seat.GuestName is not null) return PlayerOutcome.InviteNotFound;
+        if (seat.UserId is { } owner && owner != ask.Me) return PlayerOutcome.InviteNotFound;
+        if (seat.UserId is null && !ask.ViaToken) return PlayerOutcome.InviteNotFound;
+        return ask.Expected is null ? PlayerOutcome.Refuse(400, PlayerErrors.ExpectedShareRequired) : null;
+    }
+
+    /// <summary>
+    /// The seat and the game as they stand: closed, the caller already on it, or the caller taken
+    /// off it — no link, open or addressed, puts a removed member back; only an admin's add does.
+    /// </summary>
+    private static PlayerOutcome? StandingRefusal(Game game, BookingParticipant seat, Guid me, DateTimeOffset now)
     {
         if (!seat.IsLive || !IsOpen(game, now) || seat.SettledOutsideAt is not null || seat.LapsedAt is not null)
         {
@@ -141,6 +185,15 @@ public sealed partial class PlayersService
         {
             return PlayerOutcome.Refuse(409, PlayerErrors.AlreadyInBooking);
         }
+        return game.Seats.Any(s => s.Id != seat.Id && s.UserId == me && s.Status == ParticipantStatus.Removed)
+            ? PlayerOutcome.Refuse(409, PlayerErrors.PreviouslyRemoved)
+            : null;
+    }
+
+    /// <summary>Every reason an accept is refused, in the order a partner would want to hear them.</summary>
+    private async Task<PlayerOutcome?> AcceptRefusalAsync(Game game, BookingParticipant seat, Guid me, DateTimeOffset now, CancellationToken ct)
+    {
+        if (StandingRefusal(game, seat, me, now) is { } standing) return standing;
         if (!await IsActiveMemberAsync(me, ct)) return PlayerOutcome.Refuse(403, PlayerErrors.MembershipInactive);
 
         // D12, asked only for a game still ahead and only on the first yes: a partner paying

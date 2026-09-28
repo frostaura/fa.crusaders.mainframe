@@ -377,7 +377,10 @@ public sealed class AdminBulkBookingService
         }
 
         var total = lines.Where(l => l.Bookable).Sum(l => l.PriceCredits);
-        var balance = await _ledger.GetBalanceAsync(payer.UserId, ct);
+        // Spendable, for the reason CommitAsync gives: shares a member holds for their partners
+        // are not the desk's to book against (D11, ShareHolds) — the quote's `overdraws` is the
+        // POST's refusal exactly.
+        var balance = await _ledger.GetSpendableAsync(payer.UserId, ct);
         return new BulkQuote(lines, total, balance);
     }
 

@@ -16,6 +16,7 @@ public static class PlayerSettings
     public const string QuietEndMinuteKey = "member_quiet_end_minute";
     public const string RecentPartnerDaysKey = "recent_partner_days";
     public const string NotificationRetentionDaysKey = "member_notification_retention_days";
+    public const string InvitesPerBookingKey = "player_invites_per_booking";
 
     /// <summary>
     /// Hours after a session's sold end that an unpaid share may still be paid (D11). After it the
@@ -64,6 +65,15 @@ public static class PlayerSettings
     public const int MinNotificationRetentionDays = 7;
     public const int MaxNotificationRetentionDays = 730;
 
+    /// <summary>
+    /// Member invites and link seats one booking may ever be given, removed and declined ones
+    /// included — the bound on how much invite mail one game can generate. Eight: four seats,
+    /// each filled twice over. Guests are not invites and do not count.
+    /// </summary>
+    public const int DefaultInvitesPerBooking = 8;
+    public const int MinInvitesPerBooking = 4;
+    public const int MaxInvitesPerBooking = 20;
+
     public static int ShareLapseHours(TenantSettingsView s) => Math.Clamp(s.ShareLapseHours, MinShareLapseHours, MaxShareLapseHours);
 
     public static int ShareReminderHours(TenantSettingsView s) =>
@@ -83,6 +93,9 @@ public static class PlayerSettings
 
     public static int RecentPartnerDays(TenantSettingsView s) =>
         Math.Clamp(s.RecentPartnerDays, MinRecentPartnerDays, MaxRecentPartnerDays);
+
+    public static int InvitesPerBooking(TenantSettingsView s) =>
+        Math.Clamp(s.PlayerInvitesPerBooking, MinInvitesPerBooking, MaxInvitesPerBooking);
 
     public static int NotificationRetentionDays(TenantSettingsView s) =>
         Math.Clamp(s.MemberNotificationRetentionDays, MinNotificationRetentionDays, MaxNotificationRetentionDays);

@@ -1,5 +1,6 @@
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Services;
 
@@ -21,13 +22,33 @@ public static class PlayerNotices
 {
     public static string InvitePath(Guid participantId) => $"/invites/{participantId}";
 
+    /// <summary>The dedupe-key prefixes of the two notices a re-invite loop repeats.</summary>
+    public const string InvitedKeyPrefix = "invited:";
+    public const string RemovedKeyPrefix = "removed:";
+
+    /// <summary>
+    /// Mail for one (booking, member) is collapsed to the inbox line when the same kind — an
+    /// invite, or a removal (<paramref name="keyPrefix"/>) — was already raised for them on this
+    /// booking inside the club's reminder cadence (<c>share_reminder_hours</c>). A remove-and-invite
+    /// loop therefore mails a member at most once of each per cadence; the inbox keeps every line,
+    /// and a collapsed invite is still mailed by the club's own reminder when the cadence ends.
+    /// </summary>
+    public static async Task<MemberNotice> CollapsedAsync(
+        MainframeDbContext db, MemberNotice notice, string keyPrefix, TenantSettingsView settings, CancellationToken ct)
+    {
+        var since = DateTimeOffset.UtcNow.AddHours(-PlayerSettings.ShareReminderHours(settings));
+        var told = await db.MemberNotifications.AsNoTracking().AnyAsync(n =>
+            n.BookingId == notice.BookingId && n.UserId == notice.UserId && n.CreatedAt > since && n.DedupeKey.StartsWith(keyPrefix), ct);
+        return told ? notice with { Email = false } : notice;
+    }
+
     public static async Task<MemberNotice> InviteAsync(
         MainframeDbContext db, Booking booking, BookingParticipant seat, TenantSettingsView settings, CancellationToken ct)
     {
         var game = await GameText.ForAsync(db, booking, settings, ct);
         var organiser = await NameAsync(db, booking.UserId, "A member", ct);
         return new MemberNotice(
-            seat.UserId!.Value, MemberEventCatalogue.Invited, $"invited:{seat.Id:N}",
+            seat.UserId!.Value, MemberEventCatalogue.Invited, $"{InvitedKeyPrefix}{seat.Id:N}",
             new InvitePayload(booking.Id, organiser, game.CourtName, game.StartsLocal, seat.ShareCredits, InvitePath(seat.Id)),
             $"{organiser} invited you — {game.CourtName}, {game.StartsLocal}", InvitePath(seat.Id), booking.Id);
     }

@@ -92,6 +92,12 @@ public static class PlayersEndpoints
         var booking = await deps.Db.Bookings.AsNoTracking().FirstOrDefaultAsync(b => b.Id == seat.BookingId, ct);
         if (booking?.UserId is null) return Results.NotFound(new { error = "invite_not_found" });
         if (booking.UserId == me) return Results.Conflict(new { error = PlayerErrors.AlreadyInBooking, booking_id = booking.Id });
+        if (await deps.Db.BookingParticipants.AsNoTracking()
+                .AnyAsync(p => p.BookingId == booking.Id && p.UserId == me && p.Status == ParticipantStatus.Removed, ct))
+        {
+            // Taken off this game: the link shows them nothing to accept (the accept refuses too).
+            return Results.Conflict(new { error = PlayerErrors.PreviouslyRemoved, booking_id = booking.Id });
+        }
 
         var settings = await deps.Settings.GetAsync(ct);
         var closed = !seat.IsLive || booking.Status is not (BookingStatus.Booked or BookingStatus.Completed)
@@ -188,13 +194,19 @@ public static class PlayersEndpoints
     private static Task<IResult> SplitAsync(Guid bookingId, SplitRequest req, HttpContext ctx, PlayersService players, CancellationToken ct) =>
         Run(players.ChangeSplitAsync(bookingId, Me(ctx), req, ct));
 
-    /// <summary>The seat must be on the booking in the path — an id from another booking is a 404, not an accept.</summary>
+    /// <summary>
+    /// The seat must be on the booking in the path — an id from another booking is a 404, not an
+    /// accept. The body names the share the partner was shown (<c>expectedShareCredits</c>).
+    /// </summary>
     private static async Task<IResult> AcceptAsync(
-        Guid bookingId, Guid participantId, HttpContext ctx, PlayersService players, MainframeDbContext db, CancellationToken ct)
+        Guid bookingId, Guid participantId, AcceptRequest? req, HttpContext ctx, [AsParameters] SeatDeps deps, CancellationToken ct)
     {
-        if (!await SeatOnAsync(db, bookingId, participantId, ct)) return Results.NotFound(new { error = "invite_not_found" });
-        return ToResult(await players.AcceptAsync(participantId, Me(ctx), ct));
+        if (!await SeatOnAsync(deps.Db, bookingId, participantId, ct)) return Results.NotFound(new { error = "invite_not_found" });
+        return ToResult(await deps.Players.AcceptAsync(participantId, Me(ctx), req?.ExpectedShareCredits, ct));
     }
+
+    /// <summary>The accept route's services, bound as one parameter for the complexity gate.</summary>
+    public sealed record SeatDeps(PlayersService Players, MainframeDbContext Db);
 
     private static async Task<IResult> DeclineAsync(
         Guid bookingId, Guid participantId, HttpContext ctx, PlayersService players, MainframeDbContext db, CancellationToken ct)
@@ -210,8 +222,8 @@ public static class PlayersEndpoints
         return ToResult(await players.WithdrawAsync(participantId, Me(ctx), ct));
     }
 
-    private static Task<IResult> AcceptLinkAsync(string token, HttpContext ctx, PlayersService players, CancellationToken ct) =>
-        Run(players.AcceptByTokenAsync(token, Me(ctx), ct));
+    private static Task<IResult> AcceptLinkAsync(string token, AcceptRequest? req, HttpContext ctx, PlayersService players, CancellationToken ct) =>
+        Run(players.AcceptByTokenAsync(token, Me(ctx), req?.ExpectedShareCredits, ct));
 
     private static async Task<IResult> DeclineLinkAsync(string token, HttpContext ctx, PlayersService players, CancellationToken ct)
     {
@@ -292,6 +304,12 @@ public sealed record SplitPreviewRequest(
 
 /// <summary>An admin adding a player: a member (invited, or placed with <c>accepted</c>), a guest, or an open link seat.</summary>
 public sealed record AdminAddPlayerRequest(Guid? UserId = null, string? GuestName = null, bool Accepted = false, string? Reason = null);
+
+/// <summary>
+/// A partner's accept: the share they were shown on the accept sheet. Required — a share that has
+/// risen past it since is refused with <c>409 share_changed</c> and the current figure.
+/// </summary>
+public sealed record AcceptRequest(decimal? ExpectedShareCredits = null);
 
 /// <summary>An admin acting on one seat. The reason is required; the overdraft flag only means anything on collect.</summary>
 public sealed record AdminPlayerRequest(string? Reason = null, bool AllowNegativeBalance = false);

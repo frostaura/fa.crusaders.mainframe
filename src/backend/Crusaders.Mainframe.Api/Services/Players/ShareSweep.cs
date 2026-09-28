@@ -96,7 +96,10 @@ public sealed class ShareSweep
 
     /// <summary>
     /// Past the deadline: an unanswered invite lapses, and an accepted seat still short of its
-    /// target is marked lapsed — its consent frozen, the organiser's cover standing. Both told once.
+    /// target is marked lapsed — its consent frozen, the organiser's cover standing. Both told once
+    /// — but only about a game that was on (booked, played or a no-show). An invite to a game that
+    /// was cancelled or displaced lapses without a word: its players were already told it was off,
+    /// and "your invite closed" about a game that never happened is noise, not news.
     /// </summary>
     private async Task LapseAsync(DateTimeOffset now, TenantSettingsView settings, CancellationToken ct)
     {
@@ -109,14 +112,17 @@ public sealed class ShareSweep
 
         foreach (var x in candidates.Where(x => PlayerSettings.ShareDeadline(x.Booking, settings) <= now))
         {
-            var unpaid = await _shares.UnpaidAsync(x.Booking, x.Seat, ct);
+            var unpaid = await _shares.UnpaidAsync(x.Booking, x.Seat, ct, evenIfClosed: true);
             if (x.Seat.Status == ParticipantStatus.Accepted && unpaid <= 0m) continue;
 
             var shareForNotice = x.Seat.Status == ParticipantStatus.Invited ? x.Seat.ShareCredits : unpaid;
             if (x.Seat.Status == ParticipantStatus.Invited) x.Seat.Status = ParticipantStatus.Lapsed;
             x.Seat.LapsedAt = now.Storable();
             x.Seat.UpdatedAt = now.Storable();
-            await StageLapseNoticesAsync(x.Booking, x.Seat, shareForNotice, settings, ct);
+            if (x.Booking.Status is BookingStatus.Booked or BookingStatus.Completed or BookingStatus.NoShow)
+            {
+                await StageLapseNoticesAsync(x.Booking, x.Seat, shareForNotice, settings, ct);
+            }
             try
             {
                 await _db.SaveChangesAsync(ct);

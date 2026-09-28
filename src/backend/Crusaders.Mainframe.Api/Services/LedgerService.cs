@@ -24,10 +24,12 @@ public sealed class LedgerService
     private readonly IRealtimeBus _realtime;
     private readonly RealtimeOutbox _outbox;
     private readonly IEventBus _bus;
+    private readonly TenantSettingsAccessor _settings;
 
     public LedgerService(
-        MainframeDbContext db, ITenantContext tenant, IRealtimeBus realtime, RealtimeOutbox outbox, IEventBus bus)
-    { _db = db; _tenant = tenant; _realtime = realtime; _outbox = outbox; _bus = bus; }
+        MainframeDbContext db, ITenantContext tenant, IRealtimeBus realtime, RealtimeOutbox outbox, IEventBus bus,
+        TenantSettingsAccessor settings)
+    { _db = db; _tenant = tenant; _realtime = realtime; _outbox = outbox; _bus = bus; _settings = settings; }
 
     public async Task<decimal> GetBalanceAsync(Guid userId, CancellationToken ct)
     {
@@ -36,6 +38,23 @@ public sealed class LedgerService
             .SumAsync(l => (decimal?)l.AmountCredits, ct);
         return sum ?? 0m;
     }
+
+    /// <summary>
+    /// The credits a member has received as an organiser's shares that are held for their
+    /// partners' possible returns (D11 — <see cref="ShareHolds"/>). Part of the balance, not
+    /// spendable until <see cref="HeldCredits.ReleasesAt"/>.
+    /// </summary>
+    public async Task<HeldCredits> GetHeldAsync(Guid userId, CancellationToken ct) =>
+        await ShareHolds.ForAsync(_db, userId, await _settings.GetAsync(ct), DateTimeOffset.UtcNow, ct);
+
+    /// <summary>
+    /// What a member may spend: the balance less what is held (<see cref="GetHeldAsync"/>). EVERY
+    /// member spend check asks this, never <see cref="GetBalanceAsync"/> — a booking, a walk-up, a
+    /// charge at the box, a volunteer paying for somebody, a partner paying a share. Only an
+    /// admin's explicit overdraft looks past it, as it looks past the balance itself.
+    /// </summary>
+    public async Task<decimal> GetSpendableAsync(Guid userId, CancellationToken ct) =>
+        await GetBalanceAsync(userId, ct) - (await GetHeldAsync(userId, ct)).Held;
 
     /// <summary>
     /// A page of a member's movements, newest first.
@@ -124,16 +143,22 @@ public sealed class LedgerService
         return _outbox.EnqueueAsync(async token =>
         {
             var balance = await GetBalanceAsync(userId, token);
+            var held = await GetHeldAsync(userId, token);
 
             _realtime.Publish(topic, new RealtimeMessage(
                 string.Empty, JsonSerializer.Serialize(new { balance_credits = balance })));
 
+            // D11: the held part rides on the named frame, so the badge can say "12 cr held until
+            // Tue 18:00" beside the total. The legacy unnamed frame above stays verbatim.
             _realtime.Publish(topic, new RealtimeMessage(BalanceEvent, JsonSerializer.Serialize(new
             {
                 balance_credits = balance,
                 delta_credits = deltaCredits,
                 reason,
                 at = DateTimeOffset.UtcNow,
+                held_credits = held.Held,
+                spendable_credits = balance - held.Held,
+                held_until = held.ReleasesAt,
             })));
         }, ct);
     }

@@ -79,10 +79,13 @@ public sealed partial class PlayersService
 
     /// <summary>
     /// Checks a players request against the club before anything is booked or written: the kinds,
-    /// the members, the seats, and the split against <paramref name="price"/>. Null when it is fine.
+    /// the members, the seats, the mode, and the split against <paramref name="price"/>. Null when
+    /// it is fine. A null <paramref name="price"/> is the shape check alone — for a request whose
+    /// price is not known (a slot that cannot be quoted), which must still be refused if malformed
+    /// rather than booked and left with a <c>players_error</c>.
     /// </summary>
     public async Task<PlayerOutcome?> ValidateAsync(
-        Guid organiserId, PlayersRequest req, decimal price, CancellationToken ct, IReadOnlyCollection<int>? takenSeats = null)
+        Guid organiserId, PlayersRequest req, decimal? price, CancellationToken ct, IReadOnlyCollection<int>? takenSeats = null)
     {
         var specs = req.Players ?? [];
         if (specs.Count == 0) return null;
@@ -102,7 +105,8 @@ public sealed partial class PlayersService
 
         var mode = SplitModes.Normalise(req.SplitMode ?? SplitModes.Equal);
         if (mode is null) return PlayerOutcome.Refuse(400, SplitCalculator.InvalidMode, new { allowed = SplitModes.All });
-        var split = SplitCalculator.Split(price, mode, SplitInputs(specs, seats, req.OrganiserWeight));
+        if (price is not { } p) return null;
+        var split = SplitCalculator.Split(p, mode, SplitInputs(specs, seats, req.OrganiserWeight));
         return split.Error is { } error ? PlayerOutcome.Refuse(400, error) : null;
     }
 
@@ -172,8 +176,12 @@ public sealed partial class PlayersService
     /// open link seat gets its own link token, returned here once and never again.
     /// </summary>
     /// <param name="actorId">Who is adding — the organiser, or an admin acting in god mode. Recorded as the inviter.</param>
+    /// <param name="asAdmin">
+    /// The desk's add: may invite again a member who declined or was taken off, and is not held to
+    /// the club's per-booking invite cap. Both are on the admin change record.
+    /// </param>
     public async Task<PlayerOutcome> AddAsync(
-        Guid bookingId, Guid organiserId, PlayersRequest req, CancellationToken ct, Guid? actorId = null)
+        Guid bookingId, Guid organiserId, PlayersRequest req, CancellationToken ct, Guid? actorId = null, bool asAdmin = false)
     {
         var now = DateTimeOffset.UtcNow;
         var game = await LoadAsync(bookingId, ct);
@@ -185,6 +193,7 @@ public sealed partial class PlayersService
         {
             if (game!.Live.Any(s => s.UserId == spec.UserId)) return PlayerOutcome.Refuse(409, PlayerErrors.AlreadyInBooking, new { user_id = spec.UserId });
         }
+        if (!asAdmin && InviteLoopRefusal(game!, specs) is { } loop) return loop;
 
         var taken = game!.Live.Select(s => s.Seat).Append(1).ToList();
         var mode = SplitModes.Normalise(req.SplitMode) ?? game.Organiser?.SplitMode ?? SplitModes.Equal;
@@ -194,6 +203,29 @@ public sealed partial class PlayersService
         }
 
         return await AddSeatsAsync(game, req with { SplitMode = mode }, actorId ?? organiserId, now, ct);
+    }
+
+    /// <summary>
+    /// The organiser's invite loop, closed (review finding 7): a member who said no to this game,
+    /// or whom the organiser took off it, is not asked again — each invite is a mail they did not
+    /// want — and no booking is given more than <c>player_invites_per_booking</c> member invites
+    /// and link seats over its life, dead ones included, whatever the organiser does.
+    /// </summary>
+    private static PlayerOutcome? InviteLoopRefusal(Game game, IReadOnlyList<PlayerSpec> specs)
+    {
+        foreach (var id in specs.Where(s => s.UserId is not null).Select(s => s.UserId!.Value))
+        {
+            var past = game.Seats.Where(s => s.Seat > 1 && s.UserId == id).ToList();
+            if (past.Any(s => s.Status == ParticipantStatus.Removed)) return PlayerOutcome.Refuse(409, PlayerErrors.PreviouslyRemoved, new { user_id = id });
+            if (past.Any(s => s.Status == ParticipantStatus.Declined)) return PlayerOutcome.Refuse(409, PlayerErrors.PreviouslyDeclined, new { user_id = id });
+        }
+
+        var limit = PlayerSettings.InvitesPerBooking(game.Settings);
+        var made = game.Seats.Count(s => s.Seat > 1 && s.GuestName is null);
+        var adding = specs.Count(s => s.GuestName is null);
+        return made + adding > limit
+            ? PlayerOutcome.Refuse(409, PlayerErrors.InviteLimit, new { limit, invites_made = made })
+            : null;
     }
 
     /// <param name="req">The players, with <see cref="PlayersRequest.SplitMode"/> already resolved.</param>
@@ -211,7 +243,9 @@ public sealed partial class PlayersService
 
         foreach (var (seat, _) in added.Where(a => a.Seat.UserId is not null))
         {
-            MemberNotices.Stage(_db, _tenant.TenantId, await PlayerNotices.InviteAsync(_db, game.Booking, seat, game.Settings, ct), game.Settings);
+            var invite = await PlayerNotices.InviteAsync(_db, game.Booking, seat, game.Settings, ct);
+            MemberNotices.Stage(_db, _tenant.TenantId,
+                await PlayerNotices.CollapsedAsync(_db, invite, PlayerNotices.InvitedKeyPrefix, game.Settings, ct), game.Settings);
         }
 
         if (await SaveAsync(ct) is { } conflict) return conflict;
@@ -331,8 +365,10 @@ public sealed partial class PlayersService
         seat.UpdatedAt = now.Storable();
         if (seat.UserId is not null)
         {
+            var removal = await PlayerNotices.ChangedAsync(
+                _db, game.Booking, seat, game.Settings, $"{PlayerNotices.RemovedKeyPrefix}{seat.Id:N}", ct);
             MemberNotices.Stage(_db, _tenant.TenantId,
-                await PlayerNotices.ChangedAsync(_db, game.Booking, seat, game.Settings, $"removed:{seat.Id:N}", ct), game.Settings);
+                await PlayerNotices.CollapsedAsync(_db, removal, PlayerNotices.RemovedKeyPrefix, game.Settings, ct), game.Settings);
         }
 
         if (await SaveAsync(ct) is { } conflict) return conflict;

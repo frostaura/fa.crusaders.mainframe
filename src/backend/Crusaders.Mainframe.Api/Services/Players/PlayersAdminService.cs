@@ -26,13 +26,12 @@ public sealed class PlayersAdminService
     private readonly PlayersService _players;
     private readonly ShareLedger _shares;
     private readonly AdminChangeRecorder _changes;
-    private readonly LedgerService _ledger;
 
     public PlayersAdminService(
         MainframeDbContext db, ITenantContext tenant, PlayersService players, ShareLedger shares,
-        AdminChangeRecorder changes, LedgerService ledger)
+        AdminChangeRecorder changes)
     {
-        _db = db; _tenant = tenant; _players = players; _shares = shares; _changes = changes; _ledger = ledger;
+        _db = db; _tenant = tenant; _players = players; _shares = shares; _changes = changes;
     }
 
     /// <summary>What one admin action is about: which booking, which seat, who, why.</summary>
@@ -46,7 +45,7 @@ public sealed class PlayersAdminService
         if (game.Booking.Status is not (BookingStatus.Booked or BookingStatus.Completed)) return PlayerOutcome.Refuse(409, PlayerErrors.BookingNotOpen);
 
         // The organiser's own path, acting as the organiser: the same seats, split and invites.
-        var added = await _players.AddAsync(act.BookingId, game.Booking.UserId!.Value, new PlayersRequest([spec]), ct, act.ActorId);
+        var added = await _players.AddAsync(act.BookingId, game.Booking.UserId!.Value, new PlayersRequest([spec]), ct, act.ActorId, asAdmin: true);
         if (!added.IsOk) return added;
 
         var seat = await _db.BookingParticipants
@@ -94,15 +93,17 @@ public sealed class PlayersAdminService
     /// <summary>
     /// The share was paid by hand — cash at the desk, a transfer between friends. Nothing is
     /// collected in the app after this, and anything already collected goes back to the partner.
+    /// Only for a seat the member took: settling an invite nobody answered would put them on
+    /// the game without their yes — that is what accept-on-behalf is for, on its own record.
     /// </summary>
     public async Task<PlayerOutcome> SettleOutsideAsync(AdminAct act, CancellationToken ct)
     {
         if (Reason(act) is { } missing) return missing;
         var (game, seat) = await SeatAsync(act, ct);
         if (seat is null || seat.UserId is null) return PlayerOutcome.PlayerNotFound;
+        if (seat.Status != ParticipantStatus.Accepted) return PlayerOutcome.Refuse(409, PlayerErrors.NotAccepted);
 
         var paid = await _shares.PaidAsync(seat, ct);
-        seat.Status = ParticipantStatus.Accepted;
         seat.SettledOutsideAt = StorableTime.UtcNow;
         seat.RespondedAt ??= StorableTime.UtcNow;
         seat.UpdatedAt = StorableTime.UtcNow;
@@ -113,32 +114,45 @@ public sealed class PlayersAdminService
 
     /// <summary>
     /// Collects the rest of a partner's share whatever their balance — the one path that may take a
-    /// partner below zero, and only when <paramref name="allowNegativeBalance"/> says so by name.
+    /// partner below zero, and only when <paramref name="allowNegativeBalance"/> says so by name. It
+    /// may collect after the share lapsed, which nothing else can.
+    ///
+    /// <para>
+    /// <b>One transaction under the partner's lock</b> (<see cref="ShareLedger.CollectAsync"/>):
+    /// the consent, the change-log line and the pair commit together, and the line records the
+    /// figure actually posted — never a figure computed before the money moved, which is what a
+    /// record written first and a reconcile run second used to leave when the reconcile posted
+    /// less, or nothing.
+    /// </para>
     /// </summary>
     public async Task<PlayerOutcome> CollectAsync(AdminAct act, bool allowNegativeBalance, CancellationToken ct)
     {
         if (Reason(act) is { } missing) return missing;
         if (!allowNegativeBalance) return PlayerOutcome.Refuse(400, PlayerErrors.OverdraftNotAuthorised);
         var (game, seat) = await SeatAsync(act, ct);
-        if (seat is null || seat.UserId is not { } partner) return PlayerOutcome.PlayerNotFound;
+        if (seat is null || seat.UserId is null) return PlayerOutcome.PlayerNotFound;
         if (seat.Status != ParticipantStatus.Accepted || seat.SettledOutsideAt is not null) return PlayerOutcome.Refuse(409, PlayerErrors.NotInvited);
+        _db.ChangeTracker.Clear();
 
-        var unpaid = await _shares.UnpaidAsync(game!.Booking, seat, ct);
-        if (unpaid <= 0m) return PlayerOutcome.Refuse(409, PlayerErrors.NothingToCollect);
+        ShareLedger.Collected? collected;
+        try
+        {
+            collected = await _shares.CollectAsync(game!.Booking.Id, seat.Id, act.ActorId, (tracked, delta, before) =>
+                RecordAsync(AdminChangeActions.BookingShareCollected, act, tracked,
+                    new { collected_credits = delta, balance_before_credits = before, balance_after_credits = before - delta }, ct), ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Nothing was written — not the money, not the consent, not the record.
+            return PlayerOutcome.Refuse(409, PlayerErrors.Conflict);
+        }
+        if (collected is null) return PlayerOutcome.Refuse(409, PlayerErrors.NothingToCollect);
 
-        var before = await _ledger.GetBalanceAsync(partner, ct);
-        seat.ConsentedCredits = seat.ShareCredits;
-        seat.UpdatedAt = StorableTime.UtcNow;
-        await RecordAsync(AdminChangeActions.BookingShareCollected, act, seat,
-            new { collected_credits = unpaid, balance_before_credits = before, balance_after_credits = before - unpaid }, ct);
-        await _db.SaveChangesAsync(ct);
-
-        var moves = await _shares.ReconcileAsync(game.Booking.Id, ct, new ReconcileOptions(act.ActorId, seat.Id));
         return PlayerOutcome.Ok(new
         {
             participant_id = seat.Id,
-            collected_credits = moves.Where(m => m.ParticipantId == seat.Id).Sum(m => m.Delta),
-            balance_after_credits = await _ledger.GetBalanceAsync(partner, ct),
+            collected_credits = collected.Move.Delta,
+            balance_after_credits = collected.BalanceAfter,
         });
     }
 

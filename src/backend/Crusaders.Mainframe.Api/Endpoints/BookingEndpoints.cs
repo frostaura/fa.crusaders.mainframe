@@ -150,8 +150,10 @@ public static class BookingEndpoints
         var players = ctx.RequestServices.GetRequiredService<PlayersService>();
         var spec = new PlayersRequest(req.Players, req.SplitMode, req.OrganiserWeight);
 
+        // The shape first, price-free, so a malformed players payload is refused even when the
+        // slot itself cannot be quoted; then the split against the price the booking will charge.
         var quote = await svc.QuoteAsync(req.CourtId, payer, req.StartsAt, req.SliceCount, ct);
-        if (quote.PriceCredits is { } price && await players.ValidateAsync(payer.UserId, spec, price, ct) is { } bad)
+        if (await players.ValidateAsync(payer.UserId, spec, quote.PriceCredits, ct) is { } bad)
         {
             return PlayersEndpoints.ToResult(bad);
         }
@@ -250,7 +252,9 @@ public static class BookingEndpoints
         var quote = await svc.QuoteAsync(query.CourtId, payer, query.StartsAt, query.Slices, ct);
         if (quote.PriceCredits is not { } price) return ToHttpResult(quote.Refusal!, ctx);
 
-        var balance = await ledger.GetBalanceAsync(payerId, ct);
+        // Spendable: shares the member holds for their partners are not the desk's to book against (D11).
+        var held = await ledger.GetHeldAsync(payerId, ct);
+        var balance = await ledger.GetBalanceAsync(payerId, ct) - held.Held;
         return Results.Ok(new
         {
             user_id = payerId,
@@ -262,6 +266,7 @@ public static class BookingEndpoints
             price_credits = price,
             balance_credits = balance,
             balance_after_credits = balance - price,
+            held_credits = held.Held,
             // Exactly the guard CreateAsync applies, `balance < totalCost`, so "overdraws" is
             // true precisely when the POST without the flag would answer 402.
             overdraws = balance < price,

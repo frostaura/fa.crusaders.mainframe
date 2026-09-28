@@ -190,7 +190,8 @@ public sealed class BookingService
         // been constrained to be non-negative.
         var overdraftAuthorised = payer.AllowNegativeBalance && payer.ActorIsAdmin;
 
-        var balance = await _ledger.GetBalanceAsync(userId, ct);
+        // Spendable, not balance: shares received as an organiser are held (D11, ShareHolds).
+        var balance = await _ledger.GetSpendableAsync(userId, ct);
         if (!overdraftAuthorised && balance < totalCost) return new BookingResult.InsufficientBalance(balance, totalCost);
 
         var booking = new Booking
@@ -393,7 +394,7 @@ public sealed class BookingService
             ((RuleVerdict.Allowed)walkUpVerdict).SlicePriceCredits * grantedMinutes / settings.SliceMinutes,
             2, MidpointRounding.AwayFromZero);
 
-        var balance = await _ledger.GetBalanceAsync(userId, ct);
+        var balance = await _ledger.GetSpendableAsync(userId, ct);
         if (balance < totalCost) return new BookingResult.InsufficientBalance(balance, totalCost);
 
         var booking = new Booking
@@ -733,14 +734,19 @@ public sealed class BookingService
         // `openingBalance − TotalCost` exactly the balance the booking leaves behind. It is
         // negative precisely when the payer could not cover the court, which is what "the
         // desk overdrew this member" means and what the audit row records.
-        var overdrawn = openingBalance < spec.TotalCost;
+        //
+        // D11: what the member may SPEND is the balance less the shares they hold for their own
+        // partners (ShareHolds) — read under the same lock, which is the lock a share return
+        // takes. The admin's explicit overdraft looks past both, as it always has.
+        var spendable = openingBalance - (await _ledger.GetHeldAsync(userId, ct)).Held;
+        var overdrawn = spendable < spec.TotalCost;
         if (overdrawn && !spec.AllowNegativeBalance)
         {
             // Detached, not left tracked: the row was built optimistically and this request
             // is over. Leaving it attached would have the next SaveChanges on this context
             // insert a booking nobody paid for.
             _db.Entry(booking).State = EntityState.Detached;
-            return new BookingResult.InsufficientBalance(openingBalance, spec.TotalCost);
+            return new BookingResult.InsufficientBalance(spendable, spec.TotalCost);
         }
 
         // The code the member's phone will show at the box, staged on the context now so
@@ -2441,7 +2447,7 @@ public sealed class BookingService
             // caller that does not would simply nest — cannot deadlock against itself.
             await using var volunteerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, reassignTo.Value, _outbox, ct);
 
-            var volunteerBalance = await _ledger.GetBalanceAsync(reassignTo.Value, ct);
+            var volunteerBalance = await _ledger.GetSpendableAsync(reassignTo.Value, ct);
             if (volunteerBalance < booking.AmountChargedCredits)
             {
                 // Refuse rather than half-apply. Refunding the booker first and then
@@ -2528,7 +2534,7 @@ public sealed class BookingService
         // returns without committing, which rolls back — nothing to unwind.
         await using var payerLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, payerUserId, _outbox, ct);
 
-        var balance = await _ledger.GetBalanceAsync(payerUserId, ct);
+        var balance = await _ledger.GetSpendableAsync(payerUserId, ct);
         if (balance < booking.AmountChargedCredits)
             return new ChargeResult.InsufficientBalance(payerUserId, balance, booking.AmountChargedCredits);
 
