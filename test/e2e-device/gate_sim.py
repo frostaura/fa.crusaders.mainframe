@@ -1289,10 +1289,16 @@ def dsim_firmware(door: Any) -> None:
         chk("DSIM", "  ...proved from the other side: offline, with the door shut, the same code "
                     "that opened it a minute ago opens nothing",
             not after.flag("released") and not sim.relay_moved(offline_shut), after.raw)
-        sim.wifi(True)
 
+        # Reopened BEFORE the radio returns. The link-up edge arms a heartbeat for "now", and
+        # when the last attempt was more than kMinHeartbeatSpacingMs ago it fires at once —
+        # racing the PATCH below. Answered 403 by a door not yet reopened, it commits an empty
+        # roster and prints the `[hb]` line force_heartbeat then took for the reopened door's
+        # answer: a harness race whose outcome depended only on where the board's heartbeat
+        # phase happened to fall (seen 2026-09-28, two runs in a row, never in the product).
         sc.expect_status(door.w.http.patch(f"/api/v1/admin/devices/{sim_id}", {"enabled": True},
                                            token=door.w.admin_token), 200, "reopen the door")
+        sim.wifi(True)
         back = sim.force_heartbeat()
         chk("DSIM", "re-enabling the door puts the board straight back in service and its roster "
                     "comes back with it",
