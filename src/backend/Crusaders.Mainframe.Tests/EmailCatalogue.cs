@@ -162,6 +162,8 @@ internal static class EmailCatalogue
             ("PlayersBookingCancelled", EmailTemplates.PlayersBookingCancelled(club, to, "Jason Fourie", "Court 3", "Tue 29 Sep, 18:00")),
             ("PlayersChanged", EmailTemplates.PlayersChanged(club, to, new PlayersChange("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", true, null, false, GameUrl))),
             ("PlayersChangedShare", EmailTemplates.PlayersChanged(club, to, new PlayersChange("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", false, 16m, true, GameUrl))),
+            ("ShareReturnWaiting", EmailTemplates.ShareReturnWaiting(club, to, new ShareReturnWaitingNotice("Thandi Mokoena", "Court 3", "Tue 29 Sep, 18:00", 12m, false, GameUrl))),
+            ("ShareReturnWaitingOrganiser", EmailTemplates.ShareReturnWaiting(club, to, new ShareReturnWaitingNotice("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12m, true, GameUrl))),
         ];
     }
 
