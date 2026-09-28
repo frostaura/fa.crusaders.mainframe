@@ -62,7 +62,8 @@ public static class WalletEndpoints
                 // until the earliest share deadline among them (ShareHolds). Part of the balance,
                 // not spendable — every booking and payment checks spendable_credits.
                 held_credits = held.Held,
-                spendable_credits = balance - held.Held,
+                owed_back_credits = held.OwedBack,
+                spendable_credits = balance - held.Reserved,
                 held_until = held.ReleasesAt,
                 entries = rows,
                 total_entries = total,
@@ -137,7 +138,8 @@ public static class WalletEndpoints
         {
             balance_credits = balance,
             held_credits = held.Held,
-            spendable_credits = balance - held.Held,
+            owed_back_credits = held.OwedBack,
+            spendable_credits = balance - held.Reserved,
             held_until = held.ReleasesAt,
         });
     }

@@ -300,7 +300,7 @@ public sealed class PlayersQuery
         // The raw balance, and what the accept will check: that less anything this member holds
         // for partners of their own (D11) — both shown, so the sheet can say why.
         var (balance, held) = wallet ?? await WalletAsync(viewer, ct);
-        var spendable = balance - held.Held;
+        var spendable = balance - held.Reserved;
         var people = await MembersAsync([booking.UserId], ct);
         var court = await _db.Courts.AsNoTracking().Where(c => c.Id == booking.CourtId).Select(c => c.Name).FirstOrDefaultAsync(ct);
         var cap = seat.Status == ParticipantStatus.Invited && seat.UserId is { } me && booking.StartsAt > DateTimeOffset.UtcNow
@@ -328,6 +328,7 @@ public sealed class PlayersQuery
             balance_credits = balance,
             spendable_credits = spendable,
             held_credits = held.Held,
+            owed_back_credits = held.OwedBack,
             balance_after_credits = balance - unpaid,
             short_by_credits = Math.Max(0m, unpaid - spendable),
             share_deadline = PlayerSettings.ShareDeadline(booking, settings),

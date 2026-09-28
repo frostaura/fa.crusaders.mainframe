@@ -568,6 +568,10 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .IsUnique()
                         .HasFilter("\"InviteTokenHash\" IS NOT NULL");
 
+                    b.HasIndex("TenantId", "BookingId")
+                        .HasDatabaseName("IX_booking_participants_open_invites")
+                        .HasFilter("\"Status\" = 0 AND \"LapsedAt\" IS NULL");
+
                     b.HasIndex("TenantId", "ReturnPendingSince")
                         .HasFilter("\"ReturnPendingSince\" IS NOT NULL");
 

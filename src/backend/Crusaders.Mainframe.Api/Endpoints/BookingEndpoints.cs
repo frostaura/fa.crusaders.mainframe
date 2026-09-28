@@ -256,7 +256,7 @@ public static class BookingEndpoints
         // member holds for their partners are not the desk's to book against (D11).
         var held = await ledger.GetHeldAsync(payerId, ct);
         var balance = await ledger.GetBalanceAsync(payerId, ct);
-        var spendable = balance - held.Held;
+        var spendable = balance - held.Reserved;
         return Results.Ok(new
         {
             user_id = payerId,
@@ -270,6 +270,7 @@ public static class BookingEndpoints
             balance_after_credits = balance - price,
             spendable_credits = spendable,
             held_credits = held.Held,
+            owed_back_credits = held.OwedBack,
             // Exactly the guard CreateAsync applies, `spendable < totalCost`, so "overdraws" is
             // true precisely when the POST without the flag would answer 402.
             overdraws = spendable < price,

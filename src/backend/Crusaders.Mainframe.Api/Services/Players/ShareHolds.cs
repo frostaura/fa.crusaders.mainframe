@@ -5,10 +5,19 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Services;
 
-/// <summary>What a member holds for their partners right now, and when the earliest of it is freed.</summary>
-public sealed record HeldCredits(decimal Held, DateTimeOffset? ReleasesAt)
+/// <summary>
+/// What a member has set aside for their partners right now: <see cref="Held"/>, shares received
+/// that may still have to go back (released at the deadline, <see cref="ReleasesAt"/> the earliest),
+/// and <see cref="OwedBack"/>, returns already due that are WAITING for their credits to cover them
+/// (review round 3). Neither is spendable: <see cref="Reserved"/> is what every spend check takes
+/// off the balance. The balance itself is untouched — both are derived, neither is a ledger row.
+/// </summary>
+public sealed record HeldCredits(decimal Held, DateTimeOffset? ReleasesAt, decimal OwedBack = 0m)
 {
     public static readonly HeldCredits None = new(0m, null);
+
+    /// <summary>Held plus owed back: the part of the balance that is not the member's to spend.</summary>
+    public decimal Reserved => Held + OwedBack;
 }
 
 /// <summary>
@@ -51,16 +60,45 @@ public static class ShareHolds
     {
         var nets = await NetsAsync(db, userId, DeadlineAhead(now, UnstampedFrom(now, settings)), ct);
         nets.Remove(excludingBookingId ?? Guid.Empty);
-        if (nets.Count == 0) return HeldCredits.None;
+        var (perBooking, releases) = (new Dictionary<Guid, decimal>(), (DateTimeOffset?)null);
+        if (nets.Count > 0)
+        {
+            var ids = nets.Keys.ToList();
+            var bookings = await db.Bookings.AsNoTracking().Where(b => ids.Contains(b.Id)).ToDictionaryAsync(b => b.Id, ct);
 
-        var ids = nets.Keys.ToList();
-        var bookings = await db.Bookings.AsNoTracking().Where(b => ids.Contains(b.Id)).ToDictionaryAsync(b => b.Id, ct);
+            // Cancelled bookings hold only what they will still hand back — read for all of them
+            // at once, not booking by booking (review (b)).
+            var pending = await PendingReturnsAsync(
+                db, bookings.Values.Where(b => b.Status == BookingStatus.Cancelled && ShareLedger.PayerOf(b) == userId).ToList(), settings, now, ct);
+            (perBooking, releases) = Sum(nets, bookings, pending, userId, settings, now);
+        }
 
-        // Cancelled bookings hold only what they will still hand back — read for all of them at
-        // once, not booking by booking (review (b)).
-        var pending = await PendingReturnsAsync(
-            db, bookings.Values.Where(b => b.Status == BookingStatus.Cancelled && ShareLedger.PayerOf(b) == userId).ToList(), settings, now, ct);
-        return Sum(nets, bookings, pending, userId, settings, now);
+        var owedBack = await OwedBackAsync(db, userId, perBooking, settings, now, ct);
+        owedBack.Remove(excludingBookingId ?? Guid.Empty);
+        return new HeldCredits(perBooking.Values.Sum(), releases, owedBack.Values.Sum());
+    }
+
+    /// <summary>
+    /// Returns WAITING on this member (a seat of a booking they pay for, stamped
+    /// <c>ReturnPendingSince</c>): set aside from what they may spend exactly like a hold, whatever
+    /// the booking's age (review round 3). Without it a top-up short of the whole return was
+    /// spendable on a new court, the next one too, and the partner waited for ever. What a
+    /// booking already holds is not counted twice. Per booking, so the caller can leave one out
+    /// (a return's own coverage), as for the hold.
+    /// </summary>
+    private static async Task<Dictionary<Guid, decimal>> OwedBackAsync(
+        MainframeDbContext db, Guid userId, Dictionary<Guid, decimal> held,
+        TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
+    {
+        var waiting = await db.BookingParticipants.AsNoTracking()
+            .Where(p => p.ReturnPendingSince != null)
+            .Join(db.Bookings.AsNoTracking(), p => p.BookingId, b => b.Id, (p, b) => b)
+            .Where(b => (b.PaidByUserId ?? b.UserId) == userId)
+            .Distinct()
+            .ToListAsync(ct);
+        if (waiting.Count == 0) return [];
+        var pending = await PendingReturnsAsync(db, waiting, settings, now, ct);
+        return pending.ToDictionary(kv => kv.Key, kv => Math.Max(0m, kv.Value - held.GetValueOrDefault(kv.Key)));
     }
 
     /// <summary>
@@ -88,11 +126,11 @@ public static class ShareHolds
         return rows.Where(r => r.Net > 0m).ToDictionary(r => r.BookingId, r => r.Net);
     }
 
-    private static HeldCredits Sum(
+    private static (Dictionary<Guid, decimal> PerBooking, DateTimeOffset? ReleasesAt) Sum(
         Dictionary<Guid, decimal> nets, Dictionary<Guid, Booking> bookings, Dictionary<Guid, decimal> pending, Guid userId,
         TenantSettingsView settings, DateTimeOffset now)
     {
-        decimal held = 0m;
+        var held = new Dictionary<Guid, decimal>();
         DateTimeOffset? releases = null;
         foreach (var n in nets.Select(kv => new { BookingId = kv.Key, Net = kv.Value }))
         {
@@ -103,23 +141,23 @@ public static class ShareHolds
 
             var amount = booking.Status == BookingStatus.Cancelled ? pending.GetValueOrDefault(booking.Id) : n.Net;
             if (amount <= 0m) continue;
-            held += Math.Min(amount, n.Net);
+            held[n.BookingId] = Math.Min(amount, n.Net);
             releases = releases is { } r && r <= deadline ? r : deadline;
         }
-        return new HeldCredits(held, releases);
+        return (held, releases);
     }
 
     /// <summary>
-    /// What each cancelled booking will still hand back to its partners at the next reconcile —
-    /// three reads for all of them together: their partner seats, what their payers owe, and every
+    /// What each booking (a cancelled one, or one with a waiting return) will still hand back to
+    /// its partners at the next reconcile — three reads for all of them together: their partner seats, what their payers owe, and every
     /// share row on them. The arithmetic is <see cref="ShareLedger"/>'s own, per seat.
     /// </summary>
     private static async Task<Dictionary<Guid, decimal>> PendingReturnsAsync(
-        MainframeDbContext db, List<Booking> cancelled, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
+        MainframeDbContext db, List<Booking> bookings, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
     {
         var result = new Dictionary<Guid, decimal>();
-        if (cancelled.Count == 0) return result;
-        var ids = cancelled.Select(b => b.Id).ToList();
+        if (bookings.Count == 0) return result;
+        var ids = bookings.Select(b => b.Id).ToList();
 
         var seats = await db.BookingParticipants.AsNoTracking()
             .Where(p => ids.Contains(p.BookingId) && p.Seat > 1 && p.UserId != null)
@@ -135,7 +173,7 @@ public static class ShareHolds
             .Select(l => new { l.UserId, Reference = l.ExternalReference!, l.AmountCredits })
             .ToListAsync(ct);
 
-        foreach (var booking in cancelled)
+        foreach (var booking in bookings)
         {
             var payer = ShareLedger.PayerOf(booking);
             var owed = Math.Max(0m, -sums.Where(x => x.Booking == booking.Id && x.UserId == payer).Sum(x => x.Sum));

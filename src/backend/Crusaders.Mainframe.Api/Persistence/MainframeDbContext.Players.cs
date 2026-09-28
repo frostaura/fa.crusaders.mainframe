@@ -66,6 +66,9 @@ public partial class MainframeDbContext
             e.HasIndex(p => new { p.TenantId, p.UserId, p.Status });
             // The sweep's retry of waiting returns: a handful of rows, found without a scan.
             e.HasIndex(p => new { p.TenantId, p.ReturnPendingSince }).HasFilter("\"ReturnPendingSince\" IS NOT NULL");
+            // The lapse sweep's overdue invites, whatever their age: only unanswered seats are in it.
+            e.HasIndex(p => new { p.TenantId, p.BookingId }).HasFilter("\"Status\" = 0 AND \"LapsedAt\" IS NULL")
+                .HasDatabaseName("IX_booking_participants_open_invites");
             e.HasQueryFilter(p => p.TenantId == _tenant.TenantId);
         });
 

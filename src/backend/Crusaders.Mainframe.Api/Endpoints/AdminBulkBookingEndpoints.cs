@@ -283,6 +283,7 @@ public static class AdminBulkBookingEndpoints
             balance_credits = quote.BalanceCredits,
             spendable_credits = quote.SpendableCredits,
             held_credits = quote.HeldCredits,
+            owed_back_credits = quote.OwedBackCredits,
             balance_after_credits = quote.BalanceCredits - quote.TotalCredits,
             // True exactly when the batch sent WITHOUT the flag would halt on
             // insufficient_balance. Prices are never negative, so the running balance first

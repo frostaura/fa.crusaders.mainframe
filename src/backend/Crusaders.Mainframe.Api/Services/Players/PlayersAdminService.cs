@@ -104,7 +104,27 @@ public sealed class PlayersAdminService
 
         await RecordAsync(AdminChangeActions.BookingPlayerRemoved, act, seat,
             new { status = "removed", overdraft_authorised = act.AllowNegativeBalance }, ct);
-        return await _players.RemoveSeatAsync(game, seat.Id, DateTimeOffset.UtcNow, ct, OptionsFor(act, seat));
+        return await WithReturnStateAsync(await _players.RemoveSeatAsync(game, seat.Id, DateTimeOffset.UtcNow, ct, OptionsFor(act, seat)), seat.Id, ct);
+    }
+
+    /// <summary>
+    /// The hand-back's answer tells the desk whether the money actually went (review round 3): the
+    /// coverage check above is not under the organiser's lock, so a spend in between can leave the
+    /// return waiting even though the action succeeded. <c>return_waiting</c> says so, with
+    /// <c>return_credits</c> — what is due back and waiting — when it does.
+    /// </summary>
+    private async Task<PlayerOutcome> WithReturnStateAsync(PlayerOutcome outcome, Guid seatId, CancellationToken ct)
+    {
+        if (!outcome.IsOk) return outcome;
+        var seat = await _db.BookingParticipants.AsNoTracking().FirstAsync(p => p.Id == seatId, ct);
+        var waiting = seat.ReturnPendingSince is not null;
+        return PlayerOutcome.Ok(new
+        {
+            participant_id = seat.Id,
+            status = PlayerViews.StatusName(seat.Status),
+            return_waiting = waiting,
+            return_credits = waiting ? await _shares.PaidAsync(seat, ct) : (decimal?)null,
+        });
     }
 
     /// <summary>Marks an invited member as playing. Records no consent, so collects nothing.</summary>
@@ -142,7 +162,7 @@ public sealed class PlayersAdminService
         seat.UpdatedAt = StorableTime.UtcNow;
         await RecordAsync(AdminChangeActions.BookingShareSettledOutside, act, seat,
             new { share_credits = seat.ShareCredits, paid_in_app_credits = paid, overdraft_authorised = act.AllowNegativeBalance }, ct);
-        return await SaveAndSettleAsync(game!, seat, ct, OptionsFor(act, seat));
+        return await WithReturnStateAsync(await SaveAndSettleAsync(game!, seat, ct, OptionsFor(act, seat)), seat.Id, ct);
     }
 
     /// <summary>

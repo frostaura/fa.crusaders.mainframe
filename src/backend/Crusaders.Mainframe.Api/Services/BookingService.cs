@@ -738,7 +738,7 @@ public sealed class BookingService
         // D11: what the member may SPEND is the balance less the shares they hold for their own
         // partners (ShareHolds) — read under the same lock, which is the lock a share return
         // takes. The admin's explicit overdraft looks past both, as it always has.
-        var spendable = openingBalance - (await _ledger.GetHeldAsync(userId, ct)).Held;
+        var spendable = openingBalance - (await _ledger.GetHeldAsync(userId, ct)).Reserved;
         var overdrawn = spendable < spec.TotalCost;
         if (overdrawn && !spec.AllowNegativeBalance)
         {

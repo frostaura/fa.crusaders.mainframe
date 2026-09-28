@@ -244,8 +244,9 @@ public sealed partial class PlayersService
             consented_credits = seat.ConsentedCredits,
             paid_credits = await _p.Shares.PaidAsync(seat, ct),
             balance_credits = balance,
-            spendable_credits = balance - held.Held,
+            spendable_credits = balance - held.Reserved,
             held_credits = held.Held,
+            owed_back_credits = held.OwedBack,
         };
     }
 

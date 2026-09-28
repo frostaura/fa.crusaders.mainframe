@@ -60,7 +60,7 @@ public sealed class LedgerService
     /// admin's explicit overdraft looks past it, as it looks past the balance itself.
     /// </summary>
     public async Task<decimal> GetSpendableAsync(Guid userId, CancellationToken ct) =>
-        await GetBalanceAsync(userId, ct) - (await GetHeldAsync(userId, ct)).Held;
+        await GetBalanceAsync(userId, ct) - (await GetHeldAsync(userId, ct)).Reserved;
 
     /// <summary>
     /// What may go back to a partner from <paramref name="bookingId"/> without overdrawing its
@@ -70,7 +70,7 @@ public sealed class LedgerService
     /// </summary>
     public async Task<decimal> GetCoverageAsync(Guid userId, Guid bookingId, CancellationToken ct) =>
         await GetBalanceAsync(userId, ct)
-        - (await ShareHolds.ForAsync(_db, userId, await _settings.GetAsync(ct), DateTimeOffset.UtcNow, ct, bookingId)).Held;
+        - (await ShareHolds.ForAsync(_db, userId, await _settings.GetAsync(ct), DateTimeOffset.UtcNow, ct, bookingId)).Reserved;
 
     /// <summary>
     /// A member who has just RECEIVED credit — a top-up, a desk adjustment, a refund, anything but
@@ -184,7 +184,8 @@ public sealed class LedgerService
                 reason,
                 at = DateTimeOffset.UtcNow,
                 held_credits = held.Held,
-                spendable_credits = balance - held.Held,
+                owed_back_credits = held.OwedBack,
+                spendable_credits = balance - held.Reserved,
                 held_until = held.ReleasesAt,
             })));
 

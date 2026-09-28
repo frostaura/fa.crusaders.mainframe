@@ -67,6 +67,7 @@ public static class MeProfileEndpoints
                 // D11: credits received as an organiser's shares, held for the partners until the
                 // earliest share deadline — so the first paint can say "12 cr held until …".
                 held_credits = held.Held,
+                owed_back_credits = held.OwedBack,
                 held_until = held.ReleasesAt,
             });
         });

@@ -25,6 +25,9 @@ public sealed class ShareWorker : BackgroundService
     private readonly IServiceScopeFactory _scopes;
     private readonly ILogger<ShareWorker> _logger;
 
+    /// <summary>Whether this process has run the once-per-start catch-up (<see cref="ShareSweep.CatchUpAsync"/>).</summary>
+    private bool _caughtUp;
+
     public ShareWorker(IServiceScopeFactory scopes, ILogger<ShareWorker> logger)
     {
         _scopes = scopes; _logger = logger;
@@ -63,12 +66,16 @@ public sealed class ShareWorker : BackgroundService
             {
                 using var scope = _scopes.CreateScope();
                 scope.ServiceProvider.GetRequiredService<ITenantContext>().Set(id, slug);
-                await scope.ServiceProvider.GetRequiredService<ShareSweep>().SweepAsync(now, ct);
+                var sweep = scope.ServiceProvider.GetRequiredService<ShareSweep>();
+                // The first pass after a start also looks for returns that fell due while nothing ran.
+                if (!_caughtUp) await sweep.CatchUpAsync(ct);
+                await sweep.SweepAsync(now, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogError(ex, "Share sweep failed for tenant {Tenant}", id);
             }
         }
+        _caughtUp = true;
     }
 }

@@ -382,7 +382,7 @@ public sealed class AdminBulkBookingService
         // book against (D11, ShareHolds) — so it is the POST's refusal exactly.
         var balance = await _ledger.GetBalanceAsync(payer.UserId, ct);
         var held = await _ledger.GetHeldAsync(payer.UserId, ct);
-        return new BulkQuote(lines, total, balance, held.Held);
+        return new BulkQuote(lines, total, balance, held.Held, held.OwedBack);
     }
 
     /// <summary>Every name and court title one batch's result rows need, in two reads rather than 2n.</summary>
