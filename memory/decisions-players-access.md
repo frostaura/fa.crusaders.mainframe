@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-players-access
-description: "Players access and consent: only a live seat shows a booking, link seats are claimed by link only, accept names the share seen, the invite loop is closed, tokens hashed, member mail rides R23."
+description: "Players access and consent: only a live seat shows a booking, link claims by link only, accept names the share seen, the invite loop is closed, balance_credits always raw, member mail rides R23."
 type: decision
 last_verified: 2026-09-28
 ---
@@ -29,7 +29,15 @@ test in `PlayersReviewHttpTests`.
   invites + link seats per booking ever, admin exempt; an invite or removal repeated for one
   (booking, member) inside `share_reminder_hours` is inbox-only. *Why the reminder cadence as the
   window:* it is already the club's "how often may we mail a partner about a share", and the
-  reminder mails a collapsed invite when the window ends — no new number.
+  reminder mails a collapsed invite when the window ends — no new number. So an invite is collapsed
+  ONLY when that reminder will come (reminders on, first one before the deadline); else mailed.
+  The cap is counted under the booking's advisory lock — two adds could both count under it.
+- **A payer override at the box is ignored on any split booking** — `IsSplitAsync`: a live seat
+  with a share OR any share row. *Why:* a partner who came off with a return pending left no live
+  seat, and the override moved the court and that return onto the volunteer.
+- **`balance_credits` is always the RAW balance**; `spendable_credits` and `held_credits` sit
+  beside it wherever a spend is quoted; a refusal's `current_credits` is spendable. *Why:* one
+  word meaning two figures on two screens is a support call.
 - **Lapse notices only for a game that was on** (booked, completed, no-show); a cancelled or
   displaced game's invites lapse silently — its players were already told it was off.
 - **Admin settle-outside needs an accepted seat** (`409 player_not_accepted`). *Why:* settling an

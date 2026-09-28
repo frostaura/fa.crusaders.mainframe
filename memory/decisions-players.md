@@ -57,4 +57,4 @@ The normative spec is `docs/specs/players-and-splits.md`; this is the why.
 - **Dean's rulings, 2026-09-28 — both intended, keep, no code change.** (1) Co-players see each
   other's paid, consented and unpaid figures on the booking detail. (2) An admin goodwill credit to
   the organiser naming the booking passes a pro-rata refund on to the partners (it lowers `Owed`).
-  Access, consent, invites and mail: `decisions-players-access.md`.
+  Access, consent, invites, mail: `decisions-players-access.md`; the deadline: `…-deadline.md`.
