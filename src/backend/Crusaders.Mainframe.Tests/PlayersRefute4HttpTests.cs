@@ -176,7 +176,9 @@ public sealed class PlayersRefute4HttpTests
         Assert.Null((await club.SeatsAsync(f, bookingId)).Single(s => s.Id == seat).ReturnPendingSince);
 
         await club.WriteAsync(f, db => db.TenantSettings.IgnoreQueryFilters().First(s => s.TenantId == club.TenantId).SettingsJson = PlayersClub.Settings);
-        await worker.TickAsync(DateTimeOffset.UtcNow, default);
+        // Past the marker's first backoff interval (round 6): the failed booking was marked due, so
+        // the marker — drained by the sweep — is what makes it good.
+        await worker.TickAsync(DateTimeOffset.UtcNow.AddMinutes(2), default);
 
         Assert.NotNull((await club.SeatsAsync(f, bookingId)).Single(s => s.Id == seat).ReturnPendingSince);
     }

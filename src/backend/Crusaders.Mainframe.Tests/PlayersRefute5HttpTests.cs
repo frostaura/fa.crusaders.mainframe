@@ -200,9 +200,10 @@ public sealed class PlayersRefute5HttpTests
         await club.WriteAsync(f, db => db.TenantSettings.IgnoreQueryFilters().First(s => s.TenantId == club.TenantId).SettingsJson = PlayersClub.Settings);
         Assert.Equal(0m, await PlayersClub.BalanceAsync(f, club.Sam));
 
+        // The next sweep past the marker's first backoff interval (a minute — round 6).
         await club.InClubAsync(f, async sp =>
         {
-            await sp.GetRequiredService<ShareSweep>().SweepAsync(DateTimeOffset.UtcNow, default);
+            await sp.GetRequiredService<ShareSweep>().SweepAsync(DateTimeOffset.UtcNow.AddMinutes(2), default);
             return 0;
         });
 
