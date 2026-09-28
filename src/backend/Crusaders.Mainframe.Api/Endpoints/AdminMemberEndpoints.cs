@@ -151,6 +151,7 @@ public static class AdminMemberEndpoints
             });
             await memberCodes.StageRotationAsync(user.Id, actor, "password_reset_by_admin", ct);
             await db.SaveChangesAsync(ct);
+            await memberCodes.CompleteRotationsAsync(ct);
 
             // `email_sent_to` used to be printed whether or not the send threw, so the one
             // screen an admin reaches for when "email delivery is uncertain" asserted that
@@ -265,6 +266,7 @@ public static class AdminMemberEndpoints
         var revokePasskeys = req?.RevokePasskeys ?? true;
         var removed = revokePasskeys ? await memberCodes.StagePasskeyRevocationAsync(membership.UserId, actor, "admin_reset", ct) : 0;
         await db.SaveChangesAsync(ct);
+        await memberCodes.CompleteRotationsAsync(ct);
 
         var row = await db.MemberCodes.AsNoTracking().FirstAsync(c => c.UserId == membership.UserId, ct);
         return Results.Ok(new { rotated = true, generation = row.Generation, passkeys_revoked = revokePasskeys, passkeys_removed = removed });

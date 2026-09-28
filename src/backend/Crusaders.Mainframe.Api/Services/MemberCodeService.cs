@@ -155,10 +155,16 @@ public sealed class MemberCodeService
     /// A member who has never had a code row has never been handed a secret, so there is no
     /// generation to move and false is returned — but their sessions are still ended.
     /// </para>
+    ///
+    /// <para>
+    /// <b>Every caller calls <see cref="CompleteRotationsAsync"/> after its own save commits</b> —
+    /// the second raise that ends a session signed in with the old credential in between.
+    /// </para>
     /// </summary>
     public async Task<bool> StageRotationAsync(Guid userId, Guid actorUserId, string reason, CancellationToken ct)
     {
         var epoch = await RaiseSessionEpochAsync(userId, ct);
+        _awaitingSecondRaise.Add(userId);
 
         var row = await _db.MemberCodes.FirstOrDefaultAsync(c => c.UserId == userId, ct);
         if (row is null) return false;
@@ -221,6 +227,27 @@ public sealed class MemberCodeService
     }
 
     private sealed record EpochRow(int SessionEpoch, Guid TenantId);
+
+    private readonly HashSet<Guid> _awaitingSecondRaise = [];
+
+    /// <summary>
+    /// The rotation's SECOND epoch raise, called by every rotating caller once its own save has
+    /// committed. <b>Why twice:</b> the first raise (in <see cref="StageRotationAsync"/>) must come
+    /// before the new generation commits, or a refresh in between keeps an old session alive; but
+    /// until the caller's save commits, the OLD password still verifies and a lost phone's passkey
+    /// still exists — a sign-in landing in that gap is minted under the NEW epoch and survived the
+    /// rotation (refuted 2026-09-28). Raising again after the commit ends it, and nothing can sign
+    /// in with the old credential after this point. A member's own replacement token (a password
+    /// change) is minted after this, from the second value. Evicts the cache each time.
+    /// </summary>
+    public async Task CompleteRotationsAsync(CancellationToken ct)
+    {
+        foreach (var userId in _awaitingSecondRaise.ToList())
+        {
+            await RaiseSessionEpochAsync(userId, ct);
+            _awaitingSecondRaise.Remove(userId);
+        }
+    }
 
     /// <summary>
     /// Deletes every passkey the member has registered (member-code §13): after a lost-phone reset

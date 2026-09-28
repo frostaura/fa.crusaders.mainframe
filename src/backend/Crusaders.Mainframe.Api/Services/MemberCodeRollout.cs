@@ -140,14 +140,17 @@ public sealed class MemberCodeRollout
 
     /// <summary>
     /// Undoes <see cref="ExpireLegacyCodesAsync"/> when an administrator moves the club back out of
-    /// <c>v1_only</c>: every code the cut-off ended whose own expiry is still ahead gets it back;
-    /// the rest stay expired. Every mark is cleared either way, so a later cut-off marks afresh.
+    /// <c>v1_only</c>: every code the cut-off ended whose own expiry is still ahead gets it back —
+    /// and, for a booking code, only while its booking is still LIVE (booked, not ended). A booking
+    /// cancelled, displaced or ended after the cut-off keeps its code dead: reviving it would
+    /// hand a door and a court to a slot nobody holds any more (refuted 2026-09-28). The rest stay
+    /// expired. Every mark is cleared either way, so a later cut-off marks afresh.
     /// </summary>
     public static async Task RestoreLegacyCodesAsync(MainframeDbContext db, DateTimeOffset now, CancellationToken ct)
     {
         if (db.Database.IsRelational())
         {
-            await db.AccessCodes.Where(c => c.CutoffExpiredAt != null && c.ExpiresAtBeforeCutoff > now)
+            await Restorable(db, now)
                 .ExecuteUpdateAsync(u => u.SetProperty(c => c.ExpiresAt, c => c.ExpiresAtBeforeCutoff!.Value), ct);
             await db.AccessCodes.Where(c => c.CutoffExpiredAt != null)
                 .ExecuteUpdateAsync(u => u
@@ -156,13 +159,22 @@ public sealed class MemberCodeRollout
             return;
         }
 
+        var restorable = await Restorable(db, now).Select(c => c.Id).ToListAsync(ct);
         foreach (var code in await db.AccessCodes.Where(c => c.CutoffExpiredAt != null).ToListAsync(ct))
         {
-            if (code.ExpiresAtBeforeCutoff > now) code.ExpiresAt = code.ExpiresAtBeforeCutoff.Value;
+            if (restorable.Contains(code.Id)) code.ExpiresAt = code.ExpiresAtBeforeCutoff!.Value;
             code.CutoffExpiredAt = null;
             code.ExpiresAtBeforeCutoff = null;
         }
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>The cut-off's codes still worth giving back: in date, and — a booking's — for a booking still live.</summary>
+    private static IQueryable<AccessCode> Restorable(MainframeDbContext db, DateTimeOffset now)
+    {
+        return db.AccessCodes.Where(c => c.CutoffExpiredAt != null && c.ExpiresAtBeforeCutoff > now
+            && (c.BookingId == null
+                || db.Bookings.Any(b => b.Id == c.BookingId && b.Status == BookingStatus.Booked && b.EndsAt > now)));
     }
 
     private async Task<bool> MoveAsync(string from, string to, string stampKey, DateTimeOffset now, CancellationToken ct)

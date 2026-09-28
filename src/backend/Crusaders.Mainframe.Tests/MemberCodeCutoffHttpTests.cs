@@ -176,4 +176,44 @@ public sealed class MemberCodeCutoffHttpTests(PostgresFixture pg)
         Assert.All(rows.Values, c => Assert.Null(c.CutoffExpiredAt));
         Assert.True((await MemberCodeClub.JsonAsync(await app.CreateClient().SendAsync(club.Gate(live.Code)))).GetProperty("opened").GetBoolean());
     }
+
+    /// <summary>
+    /// Refute round 2: the rollback gives back a booking's code only while the booking is still
+    /// live — one cancelled (or displaced, or ended) after the cut-off keeps its code dead.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_rollback_never_revives_the_code_of_a_booking_that_is_no_longer_live()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        var club = await MemberCodeClub.SeedAsync(app, "restorebk");
+        var live = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: 30);
+        var gone = await club.BookAsync(app, club.Pam, courtIndex: 2, startsInMinutes: 30);
+        var liveCode = Code(club, club.Olga, AccessCodePurpose.BookingActivation, live.Id);
+        var goneCode = Code(club, club.Pam, AccessCodePurpose.BookingActivation, gone.Id);
+        await club.WriteAsync(app, db => { db.AccessCodes.AddRange(liveCode, goneCode); return Task.CompletedTask; });
+        await club.SetPhaseAsync(app, MemberCodeSettings.V1);
+        var admin = club.Member(app, club.AdminId, "admin");
+
+        async Task Put(string phase)
+        {
+            var body = JsonSerializer.SerializeToNode(new
+            {
+                sliceMinutes = 15, slicePriceCredits = 8, advanceBookingDays = 14, dayStartMinute = 0, dayEndMinute = 1440,
+                penaltyPct = 30, graceWindowMinutes = 5, penaltyWindowMinutes = 15, member_code_phase = phase,
+            });
+            Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync("/api/v1/admin/settings", body)).StatusCode);
+        }
+
+        await Put("v1_only");
+        await club.WriteAsync(app, async db => (await db.Bookings.IgnoreQueryFilters().FirstAsync(b => b.Id == gone.Id)).Status = BookingStatus.Cancelled);
+        await Put("v1");
+
+        var rows = await club.ReadAsync(app, db => db.AccessCodes.IgnoreQueryFilters()
+            .Where(c => c.Id == liveCode.Id || c.Id == goneCode.Id).ToDictionaryAsync(c => c.Id));
+        Assert.True(rows[liveCode.Id].ExpiresAt > DateTimeOffset.UtcNow.AddHours(1));
+        Assert.True(rows[goneCode.Id].ExpiresAt <= DateTimeOffset.UtcNow);
+        Assert.All(rows.Values, c => Assert.Null(c.CutoffExpiredAt));
+    }
 }

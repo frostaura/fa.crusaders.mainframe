@@ -55,6 +55,7 @@ public static class MeCodeEndpoints
         var revokePasskeys = req?.RevokePasskeys ?? false;
         var removed = revokePasskeys ? await codes.StagePasskeyRevocationAsync(userId, userId, "sign_out_everywhere", ct) : 0;
         await db.SaveChangesAsync(ct);
+        await codes.CompleteRotationsAsync(ct);
         return Results.Ok(new { signed_out = true, passkeys_revoked = revokePasskeys, passkeys_removed = removed });
     }
 

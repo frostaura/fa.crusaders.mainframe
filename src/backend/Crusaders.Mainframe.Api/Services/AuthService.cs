@@ -338,6 +338,7 @@ public sealed class AuthService
         // Staged, so both commit together.
         await _memberCodes.StageRotationAsync(user.Id, user.Id, "password_changed", ct);
         await _db.SaveChangesAsync(ct);
+        await _memberCodes.CompleteRotationsAsync(ct);
 
         await SendOrLogAsync(EmailTemplates.PasswordChanged(await _club.GetAsync(ct), user.Email), $"password-changed notice for {user.Email}", ct);
 
@@ -464,6 +465,7 @@ public sealed class AuthService
         record.UsedAt = DateTimeOffset.UtcNow;
         await _memberCodes.StageRotationAsync(user.Id, user.Id, "password_reset", ct);
         await _db.SaveChangesAsync(ct);
+        await _memberCodes.CompleteRotationsAsync(ct);
 
         // Spec §11 and §3: every successful password change emails the member, "the one signal a
         // member has that somebody else changed it". Only the admin-issued and self-service

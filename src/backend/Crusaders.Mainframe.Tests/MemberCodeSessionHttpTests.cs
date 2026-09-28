@@ -313,4 +313,91 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg)
             Crusaders.Mainframe.Api.Endpoints.WalletEndpoints.KeepAliveOverride = null;
         }
     }
+
+    // ---- Refute round 2, M1: a sign-in inside the rotation --------------------------------------
+
+    /// <summary>
+    /// The refuter's scenario: the new password hash and the rotation are STAGED; a sign-in with
+    /// the OLD password lands before the save commits and is minted under the raised epoch; the
+    /// save commits. That token must be dead afterwards — the rotation's second raise ends it.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_sign_in_with_the_old_password_inside_the_rotation_does_not_survive_it()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        var club = await MemberCodeClub.SeedAsync(app, "signinrace");
+
+        using var change = app.Services.CreateScope();
+        change.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Multitenancy.ITenantContext>().Set(club.TenantId, club.Slug);
+        var db = change.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Persistence.MainframeDbContext>();
+        var codes = change.ServiceProvider.GetRequiredService<MemberCodeService>();
+        var user = await db.Users.FirstAsync(u => u.Id == club.Olga);
+        user.PasswordHash = new Crusaders.Mainframe.Api.Security.Pbkdf2PasswordHasher().Hash("NewPass!456");
+        await codes.StageRotationAsync(club.Olga, club.Olga, "password_changed", default);
+
+        var inTheGap = club.Bearer(app, await club.LoginAsync(app, "olga"));   // the OLD password still verifies
+        Assert.Equal(HttpStatusCode.OK, (await inTheGap.GetAsync("/api/v1/me/code")).StatusCode);
+
+        await db.SaveChangesAsync();
+        await codes.CompleteRotationsAsync(default);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await inTheGap.GetAsync("/api/v1/me/code")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await inTheGap.PostAsync("/api/v1/me/code/enrol", null)).StatusCode);
+        var fresh = club.Bearer(app, await club.LoginAsync(app, "olga", "NewPass!456"));
+        Assert.Equal(2, (await MemberCodeClub.JsonAsync(await fresh.PostAsync("/api/v1/me/code/enrol", null))).GetProperty("generation").GetInt32());
+    }
+
+    /// <summary>
+    /// Every rotating route raises the epoch TWICE — once before its save, once after — so the
+    /// gap above is closed on each of them, not only where the scenario was proved.
+    /// </summary>
+    [SkippableFact]
+    public async Task Every_rotation_raises_the_epoch_again_after_its_save()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        var club = await MemberCodeClub.SeedAsync(app, "tworaises");
+        var admin = club.Member(app, club.AdminId, "admin");
+        Task<int> Epoch(Guid user) => club.ReadAsync(app, db => db.Users.IgnoreQueryFilters().Where(u => u.Id == user).Select(u => u.SessionEpoch).FirstAsync());
+
+        // Self password change: the replacement token carries the SECOND value and is live.
+        var changed = await club.Bearer(app, await club.LoginAsync(app, "olga"))
+            .PostAsJsonAsync("/api/v1/me/password", new { currentPassword = "OldPass!123", newPassword = "NewPass!456" });
+        Assert.Equal(2, await Epoch(club.Olga));
+        var kept = club.Bearer(app, (await MemberCodeClub.JsonAsync(changed)).GetProperty("access_token").GetString()!);
+        Assert.Equal(HttpStatusCode.OK, (await kept.GetAsync("/api/v1/me/code")).StatusCode);
+
+        // The desk's code reset (passkeys), then an admin temporary password.
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsync($"/api/v1/admin/members/{club.OlgaMembership}/code/reset", null)).StatusCode);
+        Assert.Equal(4, await Epoch(club.Olga));
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsync($"/api/v1/admin/members/{club.OlgaMembership}/reset-password", null)).StatusCode);
+        Assert.Equal(6, await Epoch(club.Olga));
+
+        // A suspension.
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync($"/api/v1/admin/members/{club.SidMembership}/suspend", new { reason = "dues" })).StatusCode);
+        Assert.Equal(2, await Epoch(club.Sid));
+
+        // Sign out everywhere.
+        await club.Bearer(app, await club.LoginAsync(app, "pam")).PostAsync("/api/v1/me/sessions/revoke-all", null);
+        Assert.Equal(2, await Epoch(club.Pam));
+
+        // The reset link.
+        const string link = "reset-link-token-for-the-epoch-test";
+        await club.WriteAsync(app, db =>
+        {
+            db.AuthTokens.Add(new AuthToken
+            {
+                TenantId = club.TenantId, UserId = club.Pam, Kind = TokenKind.PasswordReset,
+                TokenHash = Crusaders.Mainframe.Api.Security.TokenHashing.Hash(link), ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+            });
+            return Task.CompletedTask;
+        });
+        var anonymous = app.CreateClient();
+        anonymous.DefaultRequestHeaders.Host = $"{club.Slug}.crusaders.test";
+        Assert.Equal(HttpStatusCode.OK, (await anonymous.PostAsJsonAsync("/api/v1/auth/reset-password", new { token = link, newPassword = "Reset!Pass789" })).StatusCode);
+        Assert.Equal(4, await Epoch(club.Pam));
+    }
 }

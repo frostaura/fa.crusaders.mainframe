@@ -140,7 +140,7 @@ public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg)
             db.MemberCodeUses.Add(new MemberCodeUse
             {
                 TenantId = club.TenantId, Ref = club.Refs[club.Olga], Step = MemberCodeMath.StepOf(at), UseClass = MemberCodeUseClass.Court,
-                DeviceId = boxId, Kind = "activation_event",
+                DeviceId = boxId, Kind = "activation_event", ClaimKey = "evt:7:1",   // this very event: boot 7, seq 1
             });
             return Task.CompletedTask;
         });
@@ -274,6 +274,46 @@ public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg)
         await app.CreateClient().SendAsync(club.Events(club.BoxMac, 1, "activation", 1, club.Code(club.Olga), agoMs: -600_000));
 
         Assert.Null((await BookingAsync(club, app, booking.Id)).CheckedInAt);
+        Assert.Empty(await ForgeryNoticesAsync(club, app));
+    }
+
+    /// <summary>
+    /// Refute round 2, M2: a door opened OFFLINE for a code, got its link back, and was shown a
+    /// photo of the same code before the first open was uploaded; the server — not yet told —
+    /// opened again. When the queued event then arrives it is clearly EARLIER than the online
+    /// claim it collides with: a second act at the same door, not the same one, and it pages
+    /// every admin. (The door firmware now refuses such a scan locally too.)
+    /// </summary>
+    [SkippableFact]
+    public async Task An_offline_event_clearly_earlier_than_the_same_boards_online_claim_is_a_reuse()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        var club = await MemberCodeClub.SeedAsync(app, "earlierev");
+        var device = app.CreateClient();
+        var code = club.Code(club.Pam);
+
+        Assert.True((await MemberCodeClub.JsonAsync(await device.SendAsync(club.Gate(code)))).GetProperty("opened").GetBoolean());
+        await device.SendAsync(club.Events(club.DoorMac, 1, "gate_open", -1, code, agoMs: 20_000));
+
+        Assert.Contains("twice", Assert.Single(await ForgeryNoticesAsync(club, app)).PayloadJson);
+    }
+
+    /// <summary>The same board's upload of an event it logged a moment AFTER its online claim is still the same act.</summary>
+    [SkippableFact]
+    public async Task An_offline_event_at_or_after_the_same_boards_online_claim_is_the_same_act()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        var club = await MemberCodeClub.SeedAsync(app, "laterev");
+        var device = app.CreateClient();
+        var code = club.Code(club.Pam);
+
+        Assert.True((await MemberCodeClub.JsonAsync(await device.SendAsync(club.Gate(code)))).GetProperty("opened").GetBoolean());
+        await device.SendAsync(club.Events(club.DoorMac, 1, "gate_open", -1, code, agoMs: 0));
+
         Assert.Empty(await ForgeryNoticesAsync(club, app));
     }
 }

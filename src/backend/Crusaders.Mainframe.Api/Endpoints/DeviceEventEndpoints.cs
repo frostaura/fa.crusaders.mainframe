@@ -970,18 +970,20 @@ public static class DeviceEventEndpoints
 
         if (evidence is MemberCodeEvidence.Genuine genuine)
         {
-            var claim = await services.MemberCodes.TryClaimAsync(genuine.Match, useClass, device.Id, kind, ct);
+            // Keyed by the event itself, so this very upload retried after a failure that left its
+            // claim behind re-enters it rather than reading as a second use.
+            var claim = await services.MemberCodes.TryClaimAsync(
+                genuine.Match, useClass, device.Id, kind, ct, claimKey: EvidenceClaimKey(time.BootId, e.Seq));
 
-            // Taken — but by whom? The SAME board holding this code's use in this class is the
-            // same act, not a second one: a box that got an online grant and also queued its
-            // roster fallback (the answer was lost on the way back), or this very upload retried
-            // after a failure that left its claim behind. Only a DIFFERENT board is one code used
-            // twice. Safe to exempt the same board because every device refuses a code it has
-            // already acted on — online or offline — for the rest of its window
-            // (memcode::ReplayRing, recordOnlineUse), so a board cannot act on one code twice and
-            // its second upload of it is the same act.
+            // Taken by an ONLINE act of this same board is the same act only when this event came
+            // AFTER it: a board whose online answer was lost falls back to its roster and stamps
+            // the event once the call has returned, so the event is at or after the claim. An
+            // event clearly EARLIER than the online claim is a second act — a door that opened
+            // offline, got its link back and was shown a photo of the code before the first open
+            // was uploaded (refuted 2026-09-28) — and is the `reused` forgery. Any other holder,
+            // including this board's own claim for a DIFFERENT event, is a second use too.
             var same = claim is not null
-                       || (await services.MemberCodes.FindUseAsync(genuine.Match, useClass, ct))?.DeviceId == device.Id;
+                       || IsSameOnlineAct(await services.MemberCodes.FindUseAsync(genuine.Match, useClass, ct), device, time.OccurredAt);
             if (same)
             {
                 return clamped
@@ -1003,6 +1005,32 @@ public static class DeviceEventEndpoints
         var notice = AdminNotices.CodeForgerySuspected(device, time.BootId, e.Seq, name, forged.UserId, forged.Why);
         return new V1Evidence(Guid.Empty, new ActivationOutcome(
             ActivationOutcome.ForgerySuspected, null, outcomeKind, SubjectUserId: forged.UserId, Notice: notice));
+    }
+
+    /// <summary>
+    /// How much earlier than the online claim an offline event may be estimated and still be the
+    /// same act. The board stamps its fallback event AFTER the online call returned, so the true
+    /// order is claim-then-event; the slack is the server's own error in placing the event — the
+    /// upload's latency and the millisecond-to-server-clock arithmetic of <see cref="TimeOf"/> —
+    /// which is well under a second on a LAN. Five seconds covers a slow upload several times
+    /// over while leaving no room for a second scan: a person cannot be shown a door's open,
+    /// walk back, and present a photo inside it.
+    /// </summary>
+    public static readonly TimeSpan SameActTolerance = TimeSpan.FromSeconds(5);
+
+    /// <summary>The claim key an uploaded event's use carries: its boot and sequence number.</summary>
+    private static string EvidenceClaimKey(long bootId, long seq)
+    {
+        return string.Create(System.Globalization.CultureInfo.InvariantCulture, $"evt:{bootId}:{seq}");
+    }
+
+    /// <summary>Whether <paramref name="taken"/> is this board's ONLINE act and the event came at or after it (less <see cref="SameActTolerance"/>).</summary>
+    private static bool IsSameOnlineAct(MemberCodeUse? taken, Device device, DateTimeOffset occurredAt)
+    {
+        return taken is not null
+               && taken.DeviceId == device.Id
+               && taken.Kind is "activate" or "gate"
+               && occurredAt >= taken.UsedAt - SameActTolerance;
     }
 
     /// <summary>A v1 event the server can neither verify nor refute: receipted, not attendance, no alarm.</summary>
