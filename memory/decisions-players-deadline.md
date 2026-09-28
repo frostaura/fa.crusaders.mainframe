@@ -2,13 +2,13 @@
 name: crusaders-mainframe-decisions-players-deadline
 description: "The share deadline is frozen per booking; a return posts only when coverage pays for it — its own game's earmark (none for S4) plus free balance, first come first served."
 type: decision
-last_verified: 2026-09-28
+last_verified: 2026-09-29
 ---
 
 # Live decisions — players: the deadline, and when money may go back
 
 Spec: `docs/specs/players-and-splits.md` §3, §3a, §7. From the refuter rounds on the review fixes,
-2026-09-28, pinned in `PlayersRefute{,2,3,4,5}HttpTests`. How a return WAITS: `decisions-players-returns.md`.
+2026-09-28, pinned in `PlayersRefute{,2,…,7}HttpTests`. How a return WAITS: `decisions-players-returns.md`.
 
 - **The deadline is frozen per booking** — `bookings.ShareDeadlineAt`, stamped when a booking
   first gets players from the setting at that moment; everything (open, hold, lapse, reminders,
@@ -41,3 +41,10 @@ Spec: `docs/specs/players-and-splits.md` §3, §3a, §7. From the refuter rounds
   CI, `PLAYERS_PROPERTY_SEEDS` for more; 1,000 run locally before commit). It found the defect's
   mutant at seed 17; the refuter's own seeds 1005/1053/1113 are in the set but their generator was
   not recoverable, so the targeted admin-remove and goodwill tests carry those cases.
+- **A waiting return that grows keeps its original stamp** (round 7, accepted): the extra is served
+  ahead of returns stamped in between. *Why:* simplicity — one stamp per seat — and the amount
+  belongs to the same seat's claim.
+- **The property test must catch the FCFS and S4 double-count mutants on its own** (round 7):
+  partners funded 100, liveness + final top-up, overdraft at every return row, FCFS per step,
+  spend / S4 / lower / concurrent steps, a `debt` bias with a squeeze (two late returns, bigger
+  first, then a top-up of 4). Both mutants fail in the default 150; 2,040 seeds run once locally.

@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-players-returns
 description: "An uncovered return waits: stamped, set aside from spendable, told once, retried on credit, sweep and start-up; a failed reconcile leaves a marker; nothing strands after an outage."
 type: decision
-last_verified: 2026-09-28
+last_verified: 2026-09-29
 ---
 
 # Live decisions — players: a return that waits, and how it is never stranded
@@ -45,4 +45,9 @@ Spec: `docs/specs/players-and-splits.md` §3, §3a. When a return may post at al
   newer than its own start. The catch-up counts a club done once its failures are MARKED — the
   marker covers them — so a poisoned booking no longer reruns the whole catch-up every minute.
   Rolling the marker migrations back forgets outstanding markers.
+- **Every hook reconciles one booking at a time** (round 7): the credit hook, like the settlement
+  hook, gives each waiting booking its own try — a throwing one is marked due and the rest still
+  retried. *Why:* one try around the loop let one poisoned game strand every later return unmarked.
+  A marked booking with NO partner seats is still visited (the sweep reads marked bookings off
+  `bookings`, not off seats) and cleared — else its marker sat there, read every minute, for ever.
 - **Stamping or clearing a wait publishes a wallet frame** (reason `share_set_aside`, delta 0).

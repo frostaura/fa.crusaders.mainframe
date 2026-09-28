@@ -127,6 +127,10 @@ coverage(X, s) = min( max(0, earmark(X) − need(X)) ,  max(0, min(balance, earm
   held(all))` stands behind them) — the older return is paid first, whatever order the reconciles
   run in. Retries run in the same order (seats within a booking, the sweep, the credit hook) so the
   receipts read that way; the arithmetic, not the order, is what guarantees it.
+  A waiting return that grows (a partial refund, then a desk remove on the same seat) **keeps its
+  original stamp**, so the extra is served ahead of returns stamped in between — deliberately: the
+  amount belongs to the same seat's claim, and one stamp per seat keeps the queue simple (review
+  round 7).
 - **A game cancelled after check-in earmarks nothing.** Every share on it stays owed in full, so it
   held nothing and the organiser could spend it; its "hold" appears only once a return falls due on
   it — the very return being asked about. Its returns are payable from the free balance only (and
@@ -141,7 +145,19 @@ coverage(X, s) = min( max(0, earmark(X) − need(X)) ,  max(0, min(balance, earm
   open game's hold is what it received; an S4 game's is not an earmark), so the ledger reaches the
   same answer — only a spend racing in between can differ, and then the answer says
   `return_waiting`. `PlayersPropertyHttpTests` holds this, and every rule in this section, over
-  seeded random scenarios (150 seeds in CI; `PLAYERS_PROPERTY_SEEDS` for more).
+  seeded random scenarios (150 seeds in CI; `PLAYERS_PROPERTY_SEEDS` for more,
+  `PLAYERS_PROPERTY_FIRST_SEED` to move the window, `PLAYERS_PROPERTY_BIAS` = `mixed` | `debt` |
+  `balanced`). Partners are funded 100; the steps are withdraw, organiser and desk remove,
+  settle-outside, cancel, goodwill credit, top-up, correction debit, deadline passing, random-order
+  reconciles, an organiser spend (allowed exactly when the model's spendable covers it), check-in
+  then cancel (S4), lowering a share, a concurrent burst (every reconcile, the sweep, a desk credit
+  and a desk remove together), and — on debt seeds — a squeeze: free balance thinned below zero, the
+  biggest share withdrawn after its deadline, the smallest on another game likewise, then a top-up
+  of 4. After every step it checks the balance never ran negative at any return row, **liveness**
+  (a balance covering every earmark plus every waiting return leaves nothing waiting), and FCFS
+  across the step (a return paid while an earlier-stamped one still waits took no more than its
+  own game's earmark); at the end it tops the organiser up to exactly earmarks plus waiting returns
+  and requires nothing left waiting.
 
 The rule is keyed on coverage, never on the deadline: a hold released at the deadline and spent,
 or a share a cancellation after check-in (S4) released at once and the organiser spent, is not
@@ -173,7 +189,10 @@ covered, before the deadline or after. Spend checks, by contrast, set aside EVER
   costs a retry an hour and one log line per step. A reconcile that succeeds clears the marker —
   but only one recorded before it STARTED, so a failure recorded while it ran survives. One
   booking's failure is logged and the rest of the club's sweep — and every other booking in the
-  hook — goes on. A club's start-up catch-up counts as done once every booking it failed on is
+  hook, the post-settlement and the credit hook alike, each failing booking marked — goes on.
+  A marked booking with no partner seats (its players all came off, or it never had any) is still
+  visited — the sweep reads marked bookings straight off `bookings` — and its marker cleared
+  (review round 7). A club's start-up catch-up counts as done once every booking it failed on is
   marked (the marker makes it good); only a failure it could not even mark is retried next pass.
   Rolling the marker migrations back forgets outstanding markers (their `Down` says so).
 - a return starting or stopping waiting moves the organiser's spendable without a ledger row, so
@@ -413,4 +432,5 @@ Every number is a `tenant_settings` key — clamped on read, bounded on `PUT /ad
 
 Pinning tests: `SplitCalculatorTests`, `ShareRulesTests`, `PlayerSettingsTests`, `PlayersHttpTests`,
 `PlayersAccessHttpTests`, `PlayersReviewHttpTests` (the adversarial review's findings, one test each),
-`PlayersRefuteHttpTests` (the refuter's round on those fixes).
+`PlayersRefuteHttpTests` … `PlayersRefute7HttpTests` (the refuter's rounds on those fixes),
+`PlayersPropertyHttpTests` (the seeded property search).
