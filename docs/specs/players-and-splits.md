@@ -60,6 +60,7 @@ freed share until they re-split themselves.
 ```
 target = min( ConsentedCredits , ⌊ Owed(b) × ShareCredits / P ⌋₂ )    — ShareRules.TargetFor
 paid   = −Σ the partner's rows under share:{participant}:*
+closed → target = min( target , paid )          (lapsed, or past the share deadline)
 post   = the pair for (target − paid)
 ```
 
@@ -77,6 +78,7 @@ rule of its own:
 | no-show (S5) | pro rata of the penalty — `⌊9.60 × 16/32⌋₂ = 4.80` |
 | no-show with no reachable box (S5a) | 0 |
 | no-show reversed (S6), live, played | the full share |
+| **closed** — the seat lapsed, or the share deadline passed | the above, but never more than already paid: a return is still made, a collection never is |
 
 **Idempotent**: it posts only the difference, so running it twice — or from the hook and the worker
 in the same minute — writes nothing the second time. **Locked on the debited member only**: a
@@ -85,22 +87,62 @@ organiser. Two reconciles racing to post one pair lose on the reference's unique
 
 **Never a debt.** A collection the partner cannot cover is not posted; the share stays unpaid and
 payable by the partner until the **share deadline** — the SOLD end plus `share_lapse_hours` (48) —
-after which it lapses and the organiser's cover stands. Only an admin's explicit collect can take a
-partner below zero.
+after which it lapses and the organiser's cover stands. **A closed seat is never collected from**:
+the partner topping up afterwards does not reopen it, although the sweep still reconciles the
+booking for a week (returns still flow). Only an admin's explicit collect
+(`ReconcileOptions.OverdraftSeatId`, `ShareLedger.CollectAsync`) may collect from a closed seat or
+take a partner below zero. A collection checks the partner's **spendable** credits (§3a), not
+their balance.
 
 **When it runs**: after every participant action (after its own commit); after each existing
 settlement path commits — `POST /bookings/{id}/cancel`, `POST /admin/bookings/{id}/cancel`, the
-admin bulk cancel, the no-show sweep, and each court-box event that settles a booking — through
-`ShareHook`, in a fresh scope, never throwing; and in `ShareWorker`'s minute sweep over every split
-booking whose game ended within `share_lapse_hours` + 7 days (which also reaches the bookings a
-reversal displaced or a release reinstated). The settlement code itself is unchanged.
+admin bulk cancel, the no-show sweep, each court-box event that settles a booking, and **a desk
+credit adjustment naming the booking** (`POST /admin/credit/{user}/adjust` with
+`relatedBookingId`, however old the booking) — through `ShareHook`, in a fresh scope, never
+throwing; and in `ShareWorker`'s minute sweep over every split booking whose game ended within
+`share_lapse_hours` + 7 days (which also reaches the bookings a reversal displaced or a release
+reinstated). The settlement code itself is unchanged.
+
+**Lapse notices** go only for a game that was on (booked, completed, no-show). An invite on a
+cancelled or displaced game lapses silently — its players were already told the game was off.
+
+## 3a. Held credits — shares are not spendable until the deadline
+
+Decided 2026-09-28 (reversible; `memory/decisions-players.md`). A share can come back: the partner
+withdraws, the organiser lowers or re-splits (adding a player re-splits an equal booking), removes
+them, the desk settles it outside the app, or the organiser cancels late (the penalty is theirs
+alone, so the refund falls short of the returns). Each return debits the organiser, so credits an
+organiser receives as shares are **held**:
+
+- **What**: per booking the member is the payer of, the net of their `ShareTransfer` rows on it,
+  until that booking's share deadline. A **cancelled** booking holds only the returns still to be
+  posted, so a settled cancellation frees at once.
+- **Derived, never stored** (`Services/Players/ShareHolds.cs`): no ledger row moves. The balance is
+  unchanged; `spendable = balance − held`.
+- **Every member spend check** reads `LedgerService.GetSpendableAsync`: a booking (single, bulk, on
+  behalf), a walk-up, the charge on activation, a volunteer paying at the box, a partner paying a
+  share (accept and reconcile). Refusals report the spendable figure as `current_credits` /
+  `balance_credits`. Only an admin's explicit `allowNegativeBalance` looks past it.
+- **Consistent under the lock**: a collection raises the organiser's balance and hold in one save,
+  so spendable does not move; a return locks the organiser, the lock every spend check holds.
+- **Shown**: `held_credits`, `spendable_credits` and `held_until` (the earliest release) on
+  `GET /wallet`, the wallet SSE stream's opening frame and named `balance` frame, and
+  `held_credits` / `held_until` on `GET /me/profile`; the invite view carries `held_credits`.
 
 ## 4. Consent
 
-- A partner **accepts** a seat: the seat becomes `accepted`, `ConsentedCredits` rises to the share,
-  and the first payment posts in the SAME save, under the partner's lock. A partner who cannot
-  cover it is answered `402 insufficient_balance` with `current_credits` / `required_credits` and
-  nothing changes.
+- A partner **accepts** a seat naming the share they were shown — `expectedShareCredits`, required
+  on both accept routes (`400 expected_share_required`, asked only once the seat is the caller's).
+  A share that has risen past it is refused `409 share_changed {share_credits}` and nothing
+  changes: a tap is consent to the figure the partner read, not the one the organiser typed after.
+  Otherwise the seat becomes `accepted`, `ConsentedCredits` rises to the share, and the first
+  payment posts in the SAME save, under the partner's lock. A partner who cannot cover it from
+  their spendable credits is answered `402 insufficient_balance` with `current_credits` /
+  `required_credits` and nothing changes. The loser of a racing accept is answered from the
+  winner's row: 200 only if the consent on it still covers the share (and the share is still the
+  figure they named), else `409 share_changed`.
+- **An open link seat is claimed only through its link.** The seat route answers an unclaimed seat
+  `404 invite_not_found`, so a participant id seen in a detail view is no way round a rotated link.
 - **Raising a share needs re-consent.** A re-split that raises a partner above their consent
   collects nothing; the seat reads `needs_consent: true`, the partner is mailed, and their next
   accept collects the difference. **Lowering refunds** at once, and lowers the consent with it, so a
@@ -111,6 +153,11 @@ reversal displaced or a release reinstated). The settlement code itself is uncha
   held to); inside it, `409 withdraw_window_closed`.
 
 ## 5. Access, cap and the box (D12)
+
+- **Only a live seat makes a member a player.** A member whose seat was declined, withdrawn,
+  removed or lapsed reads the booking detail as a stranger does (404). A member **removed** from a
+  booking cannot claim any seat of it again — an open link or an addressed one
+  (`409 player_previously_removed`, also on opening the link); only an admin's add puts them back.
 
 - **D12 — the partner's daily cap.** An accepted seat counts against the PARTNER's
   `member_max_slots_per_day` / `member_per_day_max_minutes` (their groups' caps apply), both when
@@ -129,6 +176,13 @@ reversal displaced or a release reinstated). The settlement code itself is uncha
 
 ## 6. Invites, directory, inbox
 
+- **No invite loop.** The organiser cannot invite again a member who declined or was removed from
+  the same booking (`409 player_previously_declined` / `player_previously_removed`, `{user_id}`);
+  an admin can. A booking is given at most `player_invites_per_booking` member invites and link
+  seats over its life, dead ones included (`409 player_invite_limit {limit, invites_made}`; admin
+  adds are exempt). An invite — or a removal — raised for the same (booking, member) inside the
+  reminder cadence (`share_reminder_hours`) reaches the inbox but is not mailed again; a collapsed
+  invite is still mailed by the club's reminder when the cadence ends.
 - **Invite links** — each member or open seat gets 128 random bits, base64url (22 characters),
   shown ONCE in the response and stored only as a SHA-256. The app path is `/j/{token}`. Copying a
   link again rotates it (`POST …/link`); the old one stops working. A link addressed to another
@@ -167,19 +221,19 @@ Requests are camelCase, answers snake_case. Every refusal is `{ "error": "<code>
 | Route | Body → answer |
 | --- | --- |
 | `POST /api/v1/bookings` | + optional `players: [{userId?, guestName?, link?, seat?, weight?, amount?}]`, `splitMode`, `organiserWeight`. Validated in full (against the quoted price) BEFORE booking. → `{booking_id, balance_after_credits, players: {booking_id, participants: [{participant_id, seat, user_id, guest_name, status, share_credits, invite_token, invite_path}]}, players_error}` |
-| `POST /api/v1/bookings/bulk` | + the same `players`/`splitMode`/`organiserWeight`, applied to every newly booked item → adds `players: [{booking_id, players, players_error}]` |
+| `POST /api/v1/bookings/bulk` | + the same `players`/`splitMode`/`organiserWeight`, applied to every newly booked item → adds `players: [{booking_id, players, players_error}]`. The payload's shape is checked price-free, then the split against EVERY item's price, before anything is booked: any failure books nothing |
 | `POST /api/v1/players/split-preview` | `{priceCredits, splitMode, organiserWeight, players}` → `{price_credits, shares: [{seat, team, share_credits, weight}]}` — pure, for the live totals bar |
-| `GET /api/v1/bookings/{id}` | → the detail: `booking_id, court_id, court_name, starts_at, ends_at, sold_ends_at, status, split_mode, viewer {role: organiser\|player\|admin, participant_id}, organiser {user_id, name, photo_url}, players [ {participant_id, seat, team, kind: organiser\|member\|guest\|open_link, user_id, name, photo_url, status, share_credits, weight, consented_credits, paid_credits, target_credits, unpaid_credits, needs_consent, settled_outside, lapsed, checked_in_at, invited_at, responded_at} ], money {price_credits, organiser_owed_credits, shares_received_credits, organiser_net_credits, unpaid_credits, share_deadline, is_split}, attendance {checked_in_at, players_checked_in}, permissions {can_invite, can_change_split, can_cancel, can_accept, can_decline, can_withdraw, withdraw_closes_at}`. 404 for anyone not on it and not an admin. |
-| `POST /api/v1/bookings/{id}/players` | organiser: `{players, splitMode?, organiserWeight?}` → as the create's `players` |
+| `GET /api/v1/bookings/{id}` | → the detail: `booking_id, court_id, court_name, starts_at, ends_at, sold_ends_at, status, split_mode, viewer {role: organiser\|player\|admin, participant_id}, organiser {user_id, name, photo_url}, players [ {participant_id, seat, team, kind: organiser\|member\|guest\|open_link, user_id, name, photo_url, status, share_credits, weight, consented_credits, paid_credits, target_credits, unpaid_credits, needs_consent, settled_outside, lapsed, checked_in_at, invited_at, responded_at} ], money {price_credits, organiser_owed_credits, shares_received_credits, organiser_net_credits, unpaid_credits, share_deadline, is_split}, attendance {checked_in_at, players_checked_in}, permissions {can_invite, can_change_split, can_cancel, can_accept, can_decline, can_withdraw, withdraw_closes_at}`. 404 for anyone not on it and not an admin — a declined, withdrawn, removed or lapsed seat is not "on it". |
+| `POST /api/v1/bookings/{id}/players` | organiser: `{players, splitMode?, organiserWeight?}` → as the create's `players`; `409 player_previously_declined` / `player_previously_removed {user_id}`, `409 player_invite_limit {limit, invites_made}` |
 | `DELETE /api/v1/bookings/{id}/players/{pid}` | organiser → `{participant_id, status}` |
 | `POST /api/v1/bookings/{id}/players/{pid}/nudge` | organiser → `{participant_id, nudges_left}`; `429 nudge_limit {limit, retry_after}`; `409 nothing_to_nudge` |
 | `POST /api/v1/bookings/{id}/players/{pid}/link` | organiser → `{participant_id, invite_token, invite_path}` (rotates) |
 | `PUT /api/v1/bookings/{id}/split` | organiser: `{mode, seats: [{participantId, weight?, amount?}]}` → `{booking_id, split_mode, shares: [{participant_id, seat, share_credits, weight, needs_consent}]}` |
-| `POST /api/v1/bookings/{id}/players/{pid}/accept` | partner → `{participant_id, booking_id, status, share_credits, consented_credits, paid_credits, balance_credits}`; `402 insufficient_balance`, `409 partner_cap_exceeded {cap: slots\|minutes, …}`, `409 invite_closed`, `409 already_in_booking`, `403 membership_inactive` |
+| `POST /api/v1/bookings/{id}/players/{pid}/accept` | partner: `{expectedShareCredits}` → `{participant_id, booking_id, status, share_credits, consented_credits, paid_credits, balance_credits}`; `400 expected_share_required`, `409 share_changed {share_credits}`, `402 insufficient_balance`, `409 partner_cap_exceeded {cap: slots\|minutes, …}`, `409 invite_closed`, `409 already_in_booking`, `409 player_previously_removed`, `403 membership_inactive`; `404 invite_not_found` for an unclaimed link seat (claim it by its link) |
 | `POST …/{pid}/decline` · `POST …/{pid}/withdraw` | partner → `{participant_id, status}`; withdraw `409 withdraw_window_closed {closed_at}` |
 | `GET /api/v1/me/invites` | → `{items: [invite], count}` — the Invites tab and badge |
-| `GET /api/v1/invites/{token}` | → `invite`; 404 `invite_not_found`, 409 `invite_closed`, 409 `already_in_booking` |
-| `POST /api/v1/invites/{token}/accept` · `…/decline` | as the seat routes |
+| `GET /api/v1/invites/{token}` | → `invite`; 404 `invite_not_found`, 409 `invite_closed`, 409 `already_in_booking`, 409 `player_previously_removed` |
+| `POST /api/v1/invites/{token}/accept` · `…/decline` | as the seat routes (accept takes `{expectedShareCredits}`) |
 | `GET /api/v1/me/partners/recent` | → `{items: [{user_id, name, photo_url, last_played_at, games}]}` |
 | `GET /api/v1/me/partners/favourites` · `PUT`/`DELETE /api/v1/me/partners/favourites/{userId}` | → `{items: [{user_id, name, photo_url}]}` / `{user_id, favourite}` |
 | `GET /api/v1/members/directory?q=` | → `{items: [{user_id, name, photo_url}]}`; `400 query_too_short`, `429 directory_rate_limited {retry_after_seconds}` |
@@ -188,7 +242,11 @@ Requests are camelCase, answers snake_case. Every refusal is `{ "error": "<code>
 | `POST /api/v1/me/notifications/{id}/read` · `POST …/read-all` | → `{id, read}` / `{marked}` |
 | `GET/PUT /api/v1/me/preferences` | + `share_results` (D13, stored only); `findable_in_directory` and `show_on_leaderboards` accepted as aliases of `findable` and `show_in_leaderboards` |
 
-`invite` = `{participant_id, booking_id, status, seat, team, open_link, court_name, starts_at, ends_at, organiser {user_id, name, photo_url}, players, share_credits, to_pay_credits, needs_consent, balance_credits, balance_after_credits, short_by_credits, share_deadline, cap}` — `cap` is null, or the partner-cap figures when accepting would break the partner's own daily cap.
+`invite` = `{participant_id, booking_id, status, seat, team, open_link, court_name, starts_at, ends_at, organiser {user_id, name, photo_url}, players, share_credits, to_pay_credits, needs_consent, balance_credits, held_credits, balance_after_credits, short_by_credits, share_deadline, cap}` — `balance_credits` is the viewer's SPENDABLE credits (§3a), `held_credits` what is held beside it; `cap` is null, or the partner-cap figures when accepting would break the partner's own daily cap.
+
+**Wallet and profile (§3a)**: `GET /api/v1/wallet` adds `held_credits`, `spendable_credits`,
+`held_until`; the wallet SSE stream's opening frame and named `balance` frame carry the same three;
+`GET /api/v1/me/profile` adds `held_credits`, `held_until`. `held_until` is null when nothing is held.
 
 ### Admin (god mode — every one in `admin_change_log`)
 
@@ -197,8 +255,8 @@ Requests are camelCase, answers snake_case. Every refusal is `{ "error": "<code>
 | `POST /api/v1/admin/bookings/{id}/players` | `{userId? \| guestName?, accepted?, reason?}` — neither: an open link seat. `accepted` places a member without their consent (collects nothing). → as the organiser's add |
 | `POST /api/v1/admin/bookings/{id}/players/{pid}/remove` | `{reason}` → `{participant_id, status}` |
 | `POST …/{pid}/accept` | `{reason}` — accept on behalf; records no consent |
-| `POST …/{pid}/settle-outside` | `{reason}` — paid by hand; anything collected in-app goes back |
-| `POST …/{pid}/collect` | `{reason, allowNegativeBalance: true}` — the only path that may take a partner below zero → `{participant_id, collected_credits, balance_after_credits}`; `400 overdraft_not_authorised` |
+| `POST …/{pid}/settle-outside` | `{reason}` — paid by hand; anything collected in-app goes back. Accepted seats only: `409 player_not_accepted` |
+| `POST …/{pid}/collect` | `{reason, allowNegativeBalance: true}` — the only path that may take a partner below zero, or collect from a lapsed seat → `{participant_id, collected_credits, balance_after_credits}`; `400 overdraft_not_authorised`, `409 nothing_to_collect`, `409 conflict_retry`. The consent, the change-log line (the figure actually posted) and the pair are one transaction under the partner's lock |
 
 Change-log actions: `booking.player_added`, `booking.player_removed`,
 `booking.player_accepted_on_behalf`, `booking.share_settled_outside`, `booking.share_collected`
@@ -220,6 +278,7 @@ Every number is a `tenant_settings` key — clamped on read, bounded on `PUT /ad
 | `member_quiet_end_minute` | 420 (07:00) | 0–1439 (equal to start = off) |
 | `recent_partner_days` | 90 | 7–365 |
 | `member_notification_retention_days` (read lines) | 180 | 7–730 |
+| `player_invites_per_booking` (member invites + link seats, ever) | 8 | 4–20 |
 
 ## 9. Where this is enforced
 
@@ -227,6 +286,7 @@ Every number is a `tenant_settings` key — clamped on read, bounded on `PUT /ad
 | --- | --- |
 | Seats, split, consent, accept/decline/withdraw | `Services/Players/PlayersService.cs`, `PlayersService.Member.cs`, `SplitCalculator.cs` |
 | The target rule | `Services/Players/ShareRules.cs` |
+| Held credits, spendable | `Services/Players/ShareHolds.cs`, `Services/LedgerService.cs` — `GetHeldAsync`, `GetSpendableAsync` |
 | The one writer of `ShareTransfer` | `Services/Players/ShareLedger.cs` |
 | After settlement / the minute sweep | `Services/Players/ShareHook.cs`, `ShareSweep.cs`, `Workers/ShareWorker.cs` |
 | Partner cap (D12) | `Services/BookingRules.cs` — `PartnerCapRefusalAsync`, `HeldAsync` |
@@ -235,4 +295,4 @@ Every number is a `tenant_settings` key — clamped on read, bounded on `PUT /ad
 | Reads | `Services/Players/PlayersQuery.cs`; routes `Endpoints/PlayersEndpoints.cs`, `Endpoints/MemberNotificationEndpoints.cs` |
 
 Pinning tests: `SplitCalculatorTests`, `ShareRulesTests`, `PlayerSettingsTests`, `PlayersHttpTests`,
-`PlayersAccessHttpTests`.
+`PlayersAccessHttpTests`, `PlayersReviewHttpTests` (the adversarial review's findings, one test each).

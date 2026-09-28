@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-decisions-players
-description: "D11–D13 (2026-09-23): the booking stays single-payer; shares move as ShareTransfer pairs via one idempotent reconcile off the organiser's Owed; consent caps collection; no debts; partner cap on accept."
+description: "D11–D13: single-payer booking; shares move as ShareTransfer pairs via one idempotent reconcile off Owed; consent caps collection; no debts, and shares received are held to the deadline; Dean's two 2026-09-28 rulings."
 type: decision
-last_verified: 2026-09-23
+last_verified: 2026-09-28
 ---
 
 # Live decisions — players and splits (D11–D13)
@@ -30,9 +30,17 @@ The normative spec is `docs/specs/players-and-splits.md`; this is the why.
 - **Consent caps collection; lowering a share lowers consent; raising needs a new accept.** *Why:*
   otherwise a share lowered then raised back would be re-debited without asking.
 - **No debts.** A collection the partner cannot cover is simply not posted; after the deadline
-  (SOLD end + `share_lapse_hours`) it lapses and the organiser's cover stands. *Why:* Playtomic's
+  (SOLD end + `share_lapse_hours`) it lapses and the organiser's cover stands — and a closed seat
+  never collects again (target ≤ paid), however the partner tops up. *Why:* Playtomic's
   worst habit is a ledger of debts between friends. Only an admin collect with
   `allowNegativeBalance` + reason may overdraw a partner; admin accept-on-behalf records NO consent.
+- **Shares an organiser receives are HELD until the share deadline** (2026-09-28, orchestrator
+  decision, REVERSIBLE). *Why:* a return — withdraw, lower, remove, re-split on add, settle-outside,
+  late cancel on an amount split — debits the organiser; a spent share made that an overdraft, i.e.
+  a debt by another name. Derived (`ShareHolds`), never extra ledger rows; a cancelled booking
+  holds only returns still pending; every member spend check reads `GetSpendableAsync`; admin
+  overdraft looks past it. *Rejected:* refusing the return (traps the partner) and hold rows (a
+  second balance). *Cost:* an organiser cannot reuse shares until ~48 h after the game.
 - **Late-cancel penalty is the organiser's alone** (cancelled without check-in → partners 0);
   **no-show penalty is shared pro rata**. Rounding is toward zero per seat so partners never sum past Owed.
 - **Split rounding: partners floor to whole credits, organiser takes the remainder.** Removing/declining
@@ -41,11 +49,12 @@ The normative spec is `docs/specs/players-and-splits.md`; this is the why.
   future game under the partner's lock (the cap's unit). Peak/windows/price bind the organiser only.
 - **A payer override on a split booking is silently ignored** (the scan still checks in); pay-for
   (P7) must refuse with `split_pay_in_app` via `ShareLedger.IsSplitAsync`.
-- **Invite tokens are shown once, hashed at rest; member invite mails link `/invites/{pid}`, never
-  a token** — a token in an outbox payload would be a clear-text credential.
-- **Member mail rides the R23 outbox with `Audience`/`RecipientUserId`** rather than a second
-  outbox; quiet hours re-checked at delivery (a deferral hands back the attempt). Admin feed filters Audience = Admins.
-- **Preferences: `findable` / `show_in_leaderboards` (P2 names) stay canonical**; D13's
-  `findable_in_directory` / `show_on_leaderboards` are accepted aliases; `share_results` stored only.
 - **Migration `AddBookingParticipants` Down refuses once a ShareTransfer exists** (dropping them would
   change balances) and deletes member-audience outbox rows (they would read as admin mail).
+- **Money moves and its record commit together** (review, 2026-09-28): an admin collect is one
+  transaction under the partner's lock and logs the figure posted; a desk adjustment naming a booking
+  reconciles at the call site (the sweep looks back a week only); a bulk with players is all-or-nothing.
+- **Dean's rulings, 2026-09-28 — both intended, keep, no code change.** (1) Co-players see each
+  other's paid, consented and unpaid figures on the booking detail. (2) An admin goodwill credit to
+  the organiser naming the booking passes a pro-rata refund on to the partners (it lowers `Owed`).
+  Access, consent, invites and mail: `decisions-players-access.md`.
