@@ -178,6 +178,13 @@ jobs:
     # CANCELLED rather than failed — so it names no test, points at nothing, and reads like a
     # hang. That is the most expensive kind of red there is, and it is worth paying for
     # headroom to never see it again.
+    #
+    # PARALLEL since 2026-09-28: every Postgres-backed class gets its own database cloned
+    # from one migrated template (PostgresFixture), so xUnit runs the classes at once — one
+    # per runner core — instead of the ~90 of them queueing through one serial collection.
+    # Locally that took the suite from 30 minutes to about 6. The budget is left at 40
+    # until a few runs have measured what this runner actually takes; lower it then, not
+    # before (see memory/gotchas-ci-jobs.md on budgets moved without measurement).
     timeout-minutes: 40
     needs: [backend]
     services:
@@ -214,10 +221,12 @@ jobs:
           API_BOUNDARY_TEST_CONNECTION_STRING: Host=localhost;Port=5432;Database=crusaders_mainframe_test;Username=crusaders;Password=crusaders_test_pw
           # Asserts the boundary tests actually run here rather than skipping quietly.
           REQUIRE_BOUNDARY_TESTS: "true"
-        # No --filter: xUnit collections are not filterable by name, and a
-        # class-name list rots the day a new Postgres-backed class is added —
-        # which is exactly how the postgres-http tier silently ran in CI never.
-        # The in-memory tests re-run here; the `backend` job stays the fast gate.
+        # No --filter: a class-name list rots the day a new Postgres-backed class is
+        # added — which is exactly how the postgres-http tier once silently ran in CI
+        # never. The in-memory tests re-run here; the `backend` job stays the fast gate.
+        #
+        # The database named above is never used: each class creates and drops its own
+        # clone on this server (xunit.runner.json and PostgresFixture carry the rest).
         run: dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q --settings coverlet.runsettings --results-directory ./TestResults
 
       # THE COVERAGE GATE LIVES HERE, not on the fast `backend` job, because this is the only
