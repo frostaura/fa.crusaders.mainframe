@@ -33,3 +33,11 @@ Spec: `docs/specs/players-and-splits.md` §3, §3a, §7. From the refuter rounds
   newest; retries run in that order too (determinism only — the arithmetic is the guarantee, so
   an ordering mutant survives by design). **S4 games earmark nothing**: their "hold" is the return
   asked about, spent before. Spend checks still subtract all owed-back.
+- **An S4 hold is not in the free-balance subtraction either** (round 6, orchestrator decision):
+  it IS the pending returns the formula pays from free balance, so subtracting it too made each S4
+  return need twice its amount (admin remove said covered, then waited). Spend checks still set it
+  aside. *Proof obligation:* `PlayersPropertyHttpTests` — seeded random scenarios through the real
+  endpoints, hook and sweep, checked against an independent model after every step (150 seeds in
+  CI, `PLAYERS_PROPERTY_SEEDS` for more; 1,000 run locally before commit). It found the defect's
+  mutant at seed 17; the refuter's own seeds 1005/1053/1113 are in the set but their generator was
+  not recoverable, so the targeted admin-remove and goodwill tests carry those cases.

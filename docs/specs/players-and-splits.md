@@ -111,9 +111,10 @@ only when the organiser's **coverage** for it pays for it (`LedgerService.GetCov
 earmark(b)  = held(b), or 0 for a game cancelled after check-in (S4)
 need(b)     = what the returns stamped BEFORE s ask of booking b
 drawn       = Σ min(need(b), earmark(b))        excess = Σ max(0, need(b) − earmark(b))
+earmarked   = Σ earmark(b)                      — S4 holds are NOT in it
 
-coverage(X, s) = min( max(0, earmark(X) − need(X)) ,  max(0, min(balance, held(all)) − drawn) )
-               + max(0, balance − held(all) − excess)
+coverage(X, s) = min( max(0, earmark(X) − need(X)) ,  max(0, min(balance, earmarked) − drawn) )
+               + max(0, balance − earmarked − excess)
 ```
 
 - **Held money is earmarked.** What the organiser holds for X is X's partners' money, so a return
@@ -130,8 +131,17 @@ coverage(X, s) = min( max(0, earmark(X) − need(X)) ,  max(0, min(balance, held
   held nothing and the organiser could spend it; its "hold" appears only once a return falls due on
   it — the very return being asked about. Its returns are payable from the free balance only (and
   so is the admin pre-check); the hold is still set aside from spending.
+  An S4 hold is left out of `earmarked` as well: it IS the pending returns this formula pays from
+  the free balance, so subtracting it too charged each such return twice — it posted only once the
+  balance reached twice the return (review round 6). Spend checks still set it aside (§3a).
 - **Never more than the balance.** Coverage cannot exceed the balance, so no return takes an
   organiser below zero without the desk's named overdraft.
+- **The desk's pre-check and the ledger agree.** The pre-check is this same formula on the state
+  before the hand-back, with the seat as the newest return; the hand-back changes no earmark (an
+  open game's hold is what it received; an S4 game's is not an earmark), so the ledger reaches the
+  same answer — only a spend racing in between can differ, and then the answer says
+  `return_waiting`. `PlayersPropertyHttpTests` holds this, and every rule in this section, over
+  seeded random scenarios (150 seeds in CI; `PLAYERS_PROPERTY_SEEDS` for more).
 
 The rule is keyed on coverage, never on the deadline: a hold released at the deadline and spent,
 or a share a cancellation after check-in (S4) released at once and the organiser spent, is not
@@ -157,9 +167,15 @@ covered, before the deadline or after. Spend checks, by contrast, set aside EVER
   pass, and its minute sweep runs anyway. (No-show and cancelled-after-check-in returns follow the
   organiser's `Owed` through the settlement hook and are not re-read on every start.)
 - **a failed reconcile is remembered**: when the post-settlement hook, or the sweep on one booking,
-  throws, the booking is marked `ShareReconcileDueAt` (indexed) and the next minute sweep
-  reconciles it however old it is; a reconcile that succeeds clears it. One booking's failure is
-  logged and the rest of the club's sweep — and every other booking in the hook — goes on.
+  throws, the booking is marked `ShareReconcileDueAt` (indexed) and the sweep reconciles it however
+  old it is. Each failure counts an attempt and stamps `ShareReconcileLastAttemptAt`; the sweep
+  waits a minute after the first, doubling each time up to an hour, so a booking that fails for good
+  costs a retry an hour and one log line per step. A reconcile that succeeds clears the marker —
+  but only one recorded before it STARTED, so a failure recorded while it ran survives. One
+  booking's failure is logged and the rest of the club's sweep — and every other booking in the
+  hook — goes on. A club's start-up catch-up counts as done once every booking it failed on is
+  marked (the marker makes it good); only a failure it could not even mark is retried next pass.
+  Rolling the marker migrations back forgets outstanding markers (their `Down` says so).
 - a return starting or stopping waiting moves the organiser's spendable without a ledger row, so
   their live wallet gets a `balance` frame with `delta_credits` 0 and the reason `share_set_aside`.
 

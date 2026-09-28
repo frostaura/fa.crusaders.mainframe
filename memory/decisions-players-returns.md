@@ -39,4 +39,10 @@ Spec: `docs/specs/players-and-splits.md` §3, §3a. When a return may post at al
 - **A failed reconcile leaves `bookings.ShareReconcileDueAt`** (round 5): the hook or the sweep
   marks it, the minute sweep drains it any age, success clears it. *Why:* the narrowed catch-up
   skips S4/no-show games, so a swallowed hook failure on one would strand its return for good.
+- **The marker backs off and is not erased by an older reconcile** (round 6): attempts and the
+  last attempt are recorded; retry after 1 min, doubling, capped at 1 h (a permanent failure costs
+  one retry and one log line an hour); a reconcile clears only a marker whose last attempt is not
+  newer than its own start. The catch-up counts a club done once its failures are MARKED — the
+  marker covers them — so a poisoned booking no longer reruns the whole catch-up every minute.
+  Rolling the marker migrations back forgets outstanding markers.
 - **Stamping or clearing a wait publishes a wallet frame** (reason `share_set_aside`, delta 0).
