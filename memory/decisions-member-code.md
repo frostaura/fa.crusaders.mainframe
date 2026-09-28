@@ -46,6 +46,10 @@ by `src/iot/tools/membercode_vectors.py` and checked by `make corpus-check`. Lan
 - **Pay-for is online only and any non-decision is the old walk-up choice** (a 404 from a server
   without the endpoint included), so a box flashed ahead of its server behaves exactly as before.
   The confirm echoes the server's `amount_label`; a mismatch is `price_changed`, never a charge.
+- **A code the device already acted on is refused LOCALLY before any online call**
+  (`memcode::knownReplay`, both ESP boards; the Mega is untouched). *Why:* offline open, link
+  back, photo of the code scanned before the open was uploaded — the server had not heard of the
+  first use and acted again (refute round 2, 2026-09-28). The server now also flags that order.
 - **Versions: bridge 2.1.0, Mega stays 2.0.0, door 1.1.0.** The bridge unflags `[common]`'s MINOR
   by `[common]`'s own token and sets its own, so `[common]` stays byte-identical and the Mega
   sketch does not move. The Devices page showing these numbers is how a flash is confirmed.

@@ -23,8 +23,10 @@ hold: `decisions-member-code-rotation.md`.
   retrying its own purchase must get the first answer, never `code_used`.
 - **Evidence: the same board holding the use is the same act** (its fallback of an online grant,
   or its own re-upload after a failure) → a receipt; only another board is `reused`. *Why:* the
-  first shape paged every admin about a member's single scan. Per device, not per event, because
-  both firmwares' replay rings refuse a code they acted on (online grants included) for its window.
+  first shape paged every admin about a member's single scan. Narrowed (refute round 2): an evidence
+  claim is keyed by its own event; the board's ONLINE claim counts only if the event is at or after
+  it less 5 s. *Why:* an offline open, link back, photo scanned online, then the queued event
+  uploaded looked like the same act. The firmware now refuses such a scan locally too.
 - **The previous generation counts as evidence for 6 h after a rotation, only for a member active
   at the scan.** *Why:* an offline board honestly verified old codes across a rotation, but
   unbounded it made a lost phone's or a suspended member's codes genuine for ever.
@@ -48,6 +50,8 @@ hold: `decisions-member-code-rotation.md`.
   match, biometric payer override and legacy evidence (judged at the scan) included — and the
   cut-off expires every access code. *Why:* a code nobody will show is a live credential.
 - **Players come from `IBookingPlayers`** — organiser-only until P11 replaces the registration.
+- **Migration history rewritten on this unpushed branch** (`AddSessionEpochClaimKeysPayForQuotesAndCutoffMarks`
+  replaced the round-0 migration): a dev DB migrated at `0bd49d2` must be reset (`make down-reset`).
 - **Left by decision:** a pay-for replay re-grants the remainder (review L5; bounded by the sold
   end and the relay cap). **Owed:** a door vector for `/gate` `code_used` and a pay-for vector for
   the wrong-booking `price_changed` (contract lane); the kiosk still takes legacy codes only.

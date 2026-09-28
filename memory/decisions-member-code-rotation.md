@@ -17,6 +17,10 @@ Oracle `docs/specs/member-code.md` §10, §13; code decisions beside this are
   secret. *Why an epoch, not a time:* the first cut-off INSTANT let a refresh inside the rotation
   read no cut-off and mint a token dated after it, which survived and enrolled (refuted
   2026-09-28). Refresh refuses a presented epoch below the row and mints with the value it read.
+- **The epoch is raised TWICE: before the caller's save and again after it commits**
+  (`CompleteRotationsAsync`, called by every rotating route). *Why:* until the save commits the
+  old password and the lost phone's passkey still work, and a sign-in in that gap was minted under
+  the first raise and survived (refute round 2). Own new token is minted from the second value.
 - **Checked in the bearer handler, cached 15 s like `LiveAdminRole`, evicted by the increment;
   refresh reads the row; enrolment reads the epoch `FOR SHARE` in the code row's transaction.**
   *Why:* the increment then waits for an enrolment in flight, so an old session gets the old

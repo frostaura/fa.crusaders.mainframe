@@ -587,6 +587,7 @@ keeping the instruction verbatim. Other refusals reuse the existing screens:
 | Code sync grammar and the roster rules | `codesync.json` → `test_key_and_day_elements`, `test_code_sync_applies_a_whole_body_by_the_roster_rules` |
 | Court box bodies, capability, scan age, pay-for answers, the 2048 budget | `http.json` → `court-box/test/test_membercode` |
 | Offline v1 at the box: partner lights, subject = scanned token, CODE USED (arming nothing), throttling, re-scan guard | `court-box/test/test_membercode` (`test_offline_v1_*`) |
+| A code the device already acted on is refused locally, never asked about online | `test_a_code_this_box_acted_on_offline_is_not_asked_about_online`, `test_app_a_code_opened_offline_is_refused_locally_once_the_link_returns` |
 | The guess guard; online uses recorded on the device | `test_guess_guard_locks_after_five_wrong_codes_and_backs_off`, `test_verify_guarded_throttles_guessing_and_a_good_code_resets_it`, `test_an_online_use_is_recorded_so_the_code_cannot_be_used_offline_after`, `test_the_door_throttles_offline_guessing` |
 | `code_used` on activate and walk-up | `http.json` `activate-response-code-used`, `walkup-response-code-used` |
 | Every pay-for screen fits the safe subset at its widest | `test_every_screen_holds_the_layout_contract` |
@@ -634,7 +635,11 @@ Each is a server behaviour; none changes a byte the corpus holds.
   either the old epoch and the old generation or the new epoch and a 401 — never the new secret.
   *Why not a time:* the first version stamped a cut-off instant; a refresh inside the rotation
   read no cut-off and minted a token dated after it, which survived and enrolled (refuted
-  2026-09-28). The member's own password change keeps its session: `POST /me/password` answers
+  2026-09-28). **The epoch is raised twice**: once before the caller's save (above), and again
+  once that save has committed. Between the two, the OLD password still verifies and a lost
+  phone's passkey still exists, so a sign-in in that gap is minted under the first raise; the
+  second ends it (refuted 2026-09-28). A member's own replacement token is minted from the
+  second value. The member's own password change keeps its session: `POST /me/password` answers
   `{"changed":true,"access_token":…}` minted under the new epoch, and the presented token is
   dead. **Open SSE streams** (wallet, control board, monitoring) re-ask the epoch before every
   frame and keep-alive and close when their session is stale.
@@ -681,12 +686,16 @@ Each is a server behaviour; none changes a byte the corpus holds.
 - **A second use of one code is a DIFFERENT board.** The use table's unique index finds the taken
   row; the same device holding it is the same act — its fallback of an online grant whose answer
   was lost, or its own upload retried after a failure — and is a plain receipt (attendance already
-  stamped, no alarm). Only another board's use is the `reused` forgery of §7. The exemption is
-  safe per DEVICE, not per event, because a device cannot act on one code twice: its replay ring
-  (§6.4) holds every step it acted on, online grants included (`recordOnlineUse`), and refuses
-  that step and every earlier one for the rest of the window — so the only way one board uploads
-  one code twice is the same act. The residual is the ring's eviction (§11), which needs more
-  distinct members at one board inside ninety seconds than a club has.
+  stamped, no alarm). Only another board's use is the `reused` forgery of §7. Precisely: an
+  evidence claim is keyed by its own event (`evt:<boot>:<seq>`), so a re-upload re-enters it;
+  the board's ONLINE claim (`activate`, `gate`) is the same act only when the event is at or
+  after it, less `SameActTolerance` (5 s — the server's own error in placing the event; the board
+  stamps its fallback event after the online call returned). An event clearly EARLIER than the
+  board's online claim is a second act: a door that opened offline, got its link back and was
+  shown a photo of the code before the open was uploaded (refuted 2026-09-28). **The devices
+  close that path too**: before asking the server about a v1 code, a door or a court box that can
+  already see it is a replay of a code it acted on (`memcode::knownReplay` against its ring)
+  refuses it locally, as the offline path would — `replayed` / CODE USED, no call.
 - **A clamped event time.** When the server had to clamp an event's time (a future or >30-day
   claim), the step a v1 code was shown at is unknown: the event is never attendance or money, and
   what the step decides is recorded `unverifiable` (audited `device.activation_unverifiable` /
@@ -702,7 +711,9 @@ Each is a server behaviour; none changes a byte the corpus holds.
   evidence is judged at the scan (honoured only before `member_code_cutoff_at`). The cut-off —
   automatic or by hand — sets every live access code's expiry to the cut-off instant and marks it
   (`CutoffExpiredAt`, `ExpiresAtBeforeCutoff`); an administrator's rollback out of `v1_only` gives
-  back every marked code whose own expiry is still ahead and clears the marks. *Why:* a club rolls
+  back every marked code whose own expiry is still ahead — a booking's code only while its booking
+  is still booked and not ended (a booking cancelled or displaced since stays dead) — and clears
+  the marks. *Why:* a club rolls
   back because v1 misbehaved, and the legacy codes are exactly the fallback it rolled back to.
 - **A board losing `codes:m1` after cut-over** raises `device.codes_capability_lost` (non-security,
   once per board per firmware version).
