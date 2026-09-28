@@ -531,7 +531,8 @@ jobs:
           echo "$out"
           echo "$out" | grep -q '^\[relay\] OFF level=LOW (register only, pin not driving) t='
           echo "$out" | grep -q '^\[relay\] driving, level=LOW (OFF) t='
-          echo "$out" | grep -q '^\[sim\] crusaders door-gate simulator 1\.0\.0$'
+          # Any semver: the banner proves it booted; the version lives in the firmware, not here.
+          echo "$out" | grep -Eq '^\[sim\] crusaders door-gate simulator [0-9]+\.[0-9]+\.[0-9]+$'
           # The key must not reach the transcript: CI uploads it as an artifact.
           ! echo "$out" | grep -q 'ci-build-only-not-a-real-key'
 
