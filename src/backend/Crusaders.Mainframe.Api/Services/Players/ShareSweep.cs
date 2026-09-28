@@ -74,36 +74,39 @@ public sealed class ShareSweep
     }
 
     /// <summary>
+    /// Once per club, when the worker starts (review round 3): every booking on which a return
+    /// has fallen due while nothing was running and not been made, reconciled whatever its age, so
+    /// it is found and, if uncovered, stamped and waiting like any other — the minute sweep's week
+    /// would never reach it. Answers the bookings it reconciled. Idempotent.
+    /// </summary>
+    public async Task<IReadOnlyList<Guid>> CatchUpAsync(CancellationToken ct)
+    {
+        // Selected in SQL, and only where a return is due and not yet made or stamped (review
+        // round 4): a seat whose target is certainly NOTHING — the partner is off the game,
+        // settled by hand, or the game was cancelled before anybody checked in — and whose member
+        // has still paid something net on it. A no-show or a game cancelled after check-in owes
+        // its partners a SHARE, not nothing; their returns follow the organiser's Owed through the
+        // settlement hook, and every settled one of them in history would otherwise be
+        // reconciled on every start. Normally the answer is empty.
+        var due = await _db.BookingParticipants.AsNoTracking()
+            .Where(p => p.Seat > 1 && p.UserId != null && p.ReturnPendingSince == null)
+            .Join(_db.Bookings.AsNoTracking(), p => p.BookingId, b => b.Id, (p, b) => new { Seat = p, Booking = b })
+            .Where(x => x.Seat.Status != ParticipantStatus.Accepted || x.Seat.SettledOutsideAt != null
+                        || (x.Booking.Status == BookingStatus.Cancelled && x.Booking.CheckedInAt == null))
+            .Where(x => _db.LedgerEntries.Where(l => l.RelatedBookingId == x.Booking.Id && l.UserId == x.Seat.UserId
+                                                     && l.Type == LedgerEntryType.ShareTransfer)
+                            .Sum(l => l.AmountCredits) < 0m)
+            .Select(x => x.Booking.Id)
+            .Distinct()
+            .ToListAsync(ct);
+        foreach (var id in due) await SettleBookingAsync(id, ct);
+        return due;
+    }
+
+    /// <summary>
     /// The worker's pass over one club at <paramref name="now"/>: lapse what is past its deadline,
     /// remind what is due a reminder, reconcile every recent split booking, prune read inbox lines.
     /// </summary>
-    /// <summary>
-    /// Once, when the worker starts (review round 3): every booking on which a return may have
-    /// fallen due while nothing was running — a partner who paid and is off the game, settled by
-    /// hand, or on a game cancelled or a no-show — reconciled whatever its age, so a return due
-    /// during an outage is found and, if uncovered, stamped and waiting like any other. The
-    /// minute sweep's week would never reach it. Idempotent: a reconcile with nothing due posts
-    /// nothing.
-    /// </summary>
-    public async Task CatchUpAsync(CancellationToken ct)
-    {
-        var seats = await _db.BookingParticipants.AsNoTracking()
-            .Where(p => p.Seat > 1 && p.UserId != null && p.ReturnPendingSince == null)
-            .Where(p => p.Status != ParticipantStatus.Accepted || p.SettledOutsideAt != null
-                        || _db.Bookings.Any(b => b.Id == p.BookingId && (b.Status == BookingStatus.Cancelled || b.Status == BookingStatus.NoShow)))
-            .Select(p => new { p.BookingId, UserId = p.UserId!.Value })
-            .ToListAsync(ct);
-        var ids = seats.Select(s => s.BookingId).Distinct().ToList();
-        var paid = await _db.LedgerEntries.AsNoTracking()
-            .Where(l => l.Type == LedgerEntryType.ShareTransfer && l.RelatedBookingId != null && ids.Contains(l.RelatedBookingId.Value))
-            .GroupBy(l => new { Booking = l.RelatedBookingId!.Value, l.UserId })
-            .Where(g => g.Sum(l => l.AmountCredits) < 0m)
-            .Select(g => new { g.Key.Booking, g.Key.UserId })
-            .ToListAsync(ct);
-        var due = seats.Where(s => paid.Any(p => p.Booking == s.BookingId && p.UserId == s.UserId)).Select(s => s.BookingId).Distinct();
-        foreach (var id in due) await SettleBookingAsync(id, ct);
-    }
-
     public async Task SweepAsync(DateTimeOffset now, CancellationToken ct)
     {
         var settings = await _settings.GetAsync(ct);

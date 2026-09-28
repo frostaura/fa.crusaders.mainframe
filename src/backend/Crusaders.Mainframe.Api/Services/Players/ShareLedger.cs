@@ -196,7 +196,7 @@ public sealed class ShareLedger
         for (var attempt = 0; attempt < 3; attempt++)
         {
             var estimate = await DeltaAsync(bookingId, seatId, options, ct);
-            if (estimate is { Delta: >= 0m, Seat.ReturnPendingSince: not null }) await ClearWaitingAsync(seatId, ct);
+            if (estimate is { Delta: >= 0m, Seat.ReturnPendingSince: not null }) await ClearWaitingAsync(seatId, PayerOf(estimate.Booking), ct);
             if (estimate is not { } first || first.Delta == 0m) return null;
 
             var debited = first.Delta > 0 ? first.Seat.UserId!.Value : PayerOf(first.Booking);
@@ -251,21 +251,21 @@ public sealed class ShareLedger
             return null;
         }
 
-        // A return posts only when it is COVERED: the organiser's balance less what they hold for
-        // their OTHER bookings (review round 2 — keyed on coverage, never on the deadline). What
-        // they hold for this booking is what may go back from it, so an ordinary return always is;
-        // one that is not — a hold released at the deadline and spent, or a share a cancellation
+        // A return posts only when it is COVERED (review rounds 2 and 4 — keyed on coverage, never on
+        // the deadline): this booking's own hold, earmarked for its partners, plus the balance left
+        // free after every hold and every return that started waiting EARLIER. So an ordinary
+        // return always is, and waiting returns are paid first come first served; one that is not — a hold released at the deadline and spent, or a share a cancellation
         // after check-in let them spend — WAITS: stamped, both sides told once, retried by the
         // sweep (however old) and by any credit the organiser receives. Never a silent overdraft:
         // only the desk's named overdraft (OverdraftSeatId) posts it regardless.
         if (!collecting && options.OverdraftSeatId != seatId
-            && await _ledger.GetCoverageAsync(debited, bookingId, ct) < -now.Delta)
+            && await _ledger.GetCoverageAsync(debited, bookingId, seatId, ct) < -now.Delta)
         {
             await MarkWaitingAsync(now.Booking, now.Seat, -now.Delta, ct);
             await payerLock.CommitAsync(ct);
             return null;
         }
-        if (!collecting && now.Seat.ReturnPendingSince is not null) await ClearWaitingAsync(seatId, ct);
+        if (!collecting && now.Seat.ReturnPendingSince is not null) await ClearWaitingAsync(seatId, debited, ct);
 
         var seq = await NextSeqAsync(seatId, partner, ct);
         var move = new ShareMove(seatId, partner, PayerOf(now.Booking), now.Delta, seq);
@@ -306,14 +306,19 @@ public sealed class ShareLedger
                 $"/bookings/{booking.Id}", booking.Id), settings);
         }
         await _db.SaveChangesAsync(ct);
+        await _ledger.PublishSetAsideAsync(organiser, ct);
     }
 
     private static string Cr(decimal amount) => MoneyFormat.Credits(amount);
 
     /// <summary>The seat's return has posted, or is no longer due: it is not waiting any more.</summary>
-    private Task<int> ClearWaitingAsync(Guid seatId, CancellationToken ct) =>
-        _db.BookingParticipants.Where(p => p.Id == seatId && p.ReturnPendingSince != null)
+    /// <remarks>The organiser's owed-back falls with it, so their live wallet is told.</remarks>
+    private async Task ClearWaitingAsync(Guid seatId, Guid organiserId, CancellationToken ct)
+    {
+        var cleared = await _db.BookingParticipants.Where(p => p.Id == seatId && p.ReturnPendingSince != null)
             .ExecuteUpdateAsync(u => u.SetProperty(p => p.ReturnPendingSince, (DateTimeOffset?)null), ct);
+        if (cleared > 0) await _ledger.PublishSetAsideAsync(organiserId, ct);
+    }
 
     /// <summary>
     /// A collection of <paramref name="delta"/> from the seat's partner, built and its receipts

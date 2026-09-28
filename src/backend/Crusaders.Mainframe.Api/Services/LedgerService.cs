@@ -63,14 +63,16 @@ public sealed class LedgerService
         await GetBalanceAsync(userId, ct) - (await GetHeldAsync(userId, ct)).Reserved;
 
     /// <summary>
-    /// What may go back to a partner from <paramref name="bookingId"/> without overdrawing its
-    /// organiser (D11, review round 2): the balance less what they hold for their OTHER bookings.
-    /// A return posts only when this covers it — before the deadline or after, whatever the
-    /// booking's state — unless the desk named the overdraft. Read under the organiser's lock.
+    /// What may go back from <paramref name="bookingId"/> to the partner on <paramref name="seatId"/>
+    /// without overdrawing its organiser (D11, review round 4): that booking's own hold — earmarked
+    /// for its partners — plus the free balance left after every hold and every return that
+    /// started waiting EARLIER (<see cref="ShareHolds.CoverageAsync"/>). A return posts only when
+    /// this covers it, whatever the deadline, unless the desk named the overdraft. Read under the
+    /// organiser's lock.
     /// </summary>
-    public async Task<decimal> GetCoverageAsync(Guid userId, Guid bookingId, CancellationToken ct) =>
-        await GetBalanceAsync(userId, ct)
-        - (await ShareHolds.ForAsync(_db, userId, await _settings.GetAsync(ct), DateTimeOffset.UtcNow, ct, bookingId)).Reserved;
+    public async Task<decimal> GetCoverageAsync(Guid userId, Guid bookingId, Guid seatId, CancellationToken ct) =>
+        await ShareHolds.CoverageAsync(_db, new CoverageAsk(userId, bookingId, seatId, await GetBalanceAsync(userId, ct)),
+            await _settings.GetAsync(ct), DateTimeOffset.UtcNow, ct);
 
     /// <summary>
     /// A member who has just RECEIVED credit — a top-up, a desk adjustment, a refund, anything but
@@ -160,6 +162,17 @@ public sealed class LedgerService
     /// top-up and a cancellation refund are indistinguishable.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// What is set aside for partners moved without a ledger row — a return started or stopped
+    /// waiting (review round 4) — so the member's spendable and <c>owed_back_credits</c> changed
+    /// while their balance did not. Their live wallet is told, after the commit like any movement,
+    /// with <c>delta_credits</c> 0 and the reason <see cref="SetAsideReason"/>.
+    /// </summary>
+    public Task PublishSetAsideAsync(Guid userId, CancellationToken ct) => PublishBalanceAsync(userId, 0m, SetAsideReason, ct);
+
+    /// <summary>The balance frame's reason when only what is set aside moved (see <see cref="PublishSetAsideAsync"/>).</summary>
+    public const string SetAsideReason = "share_set_aside";
+
     private Task PublishBalanceAsync(Guid userId, decimal deltaCredits, string reason, CancellationToken ct, bool credited = false)
     {
         var (tenantId, slug) = (_tenant.TenantId, _tenant.TenantSlug);

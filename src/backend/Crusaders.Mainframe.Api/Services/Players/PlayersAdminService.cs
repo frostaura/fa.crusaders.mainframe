@@ -44,8 +44,8 @@ public sealed class PlayersAdminService
 
     /// <summary>
     /// A remove or a settle-outside hands the seat's paid share back from the organiser. When the
-    /// organiser's COVERAGE — their balance less what they hold for their other bookings — does not
-    /// cover it, the desk must say the overdraft by name, exactly as for a collect, and it is on
+    /// organiser's COVERAGE for this seat (<see cref="ShareHolds.CoverageAsync"/>: the booking's own
+    /// hold plus the balance free of other holds and earlier waiting returns) does not cover it, the desk must say the overdraft by name, exactly as for a collect, and it is on
     /// the change record; without it <c>400 overdraft_not_authorised</c>. Keyed on coverage, not the
     /// deadline (review round 2): a game cancelled after check-in releases its shares before the
     /// deadline. The ledger holds the same line on its own (<c>ShareLedger</c>): a return that
@@ -57,7 +57,7 @@ public sealed class PlayersAdminService
         if (act.AllowNegativeBalance) return null;
         var paid = await _shares.PaidAsync(seat, ct);
         if (paid <= 0m) return null;
-        var coverage = await _ledger.GetCoverageAsync(ShareLedger.PayerOf(game.Booking), game.Booking.Id, ct);
+        var coverage = await _ledger.GetCoverageAsync(ShareLedger.PayerOf(game.Booking), game.Booking.Id, seat.Id, ct);
         return coverage < paid
             ? PlayerOutcome.Refuse(400, PlayerErrors.OverdraftNotAuthorised, new { return_credits = paid, covered_credits = Math.Max(0m, coverage) })
             : null;
