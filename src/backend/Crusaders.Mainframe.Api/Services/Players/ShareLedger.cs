@@ -196,6 +196,7 @@ public sealed class ShareLedger
         for (var attempt = 0; attempt < 3; attempt++)
         {
             var estimate = await DeltaAsync(bookingId, seatId, options, ct);
+            if (estimate is { Delta: >= 0m, Seat.ReturnPendingSince: not null }) await ClearWaitingAsync(seatId, ct);
             if (estimate is not { } first || first.Delta == 0m) return null;
 
             var debited = first.Delta > 0 ? first.Seat.UserId!.Value : PayerOf(first.Booking);
@@ -250,18 +251,21 @@ public sealed class ShareLedger
             return null;
         }
 
-        // A return after the share deadline is no longer covered by the organiser's hold — it was
-        // released, and may be spent (review H1). It posts only if their spendable credits cover
-        // it; otherwise it waits, and the next reconcile (the sweep, the hook, a desk adjustment
-        // naming the booking) makes it once they do. Never a silent overdraft: only the desk's
-        // named overdraft (OverdraftSeatId) posts it regardless. The returns that follow a fall
-        // in what the organiser owes are covered by the credit that caused them.
+        // A return posts only when it is COVERED: the organiser's balance less what they hold for
+        // their OTHER bookings (review round 2 — keyed on coverage, never on the deadline). What
+        // they hold for this booking is what may go back from it, so an ordinary return always is;
+        // one that is not — a hold released at the deadline and spent, or a share a cancellation
+        // after check-in let them spend — WAITS: stamped, both sides told once, retried by the
+        // sweep (however old) and by any credit the organiser receives. Never a silent overdraft:
+        // only the desk's named overdraft (OverdraftSeatId) posts it regardless.
         if (!collecting && options.OverdraftSeatId != seatId
-            && DateTimeOffset.UtcNow >= PlayerSettings.ShareDeadline(now.Booking, await _settings.GetAsync(ct))
-            && await _ledger.GetSpendableAsync(debited, ct) < -now.Delta)
+            && await _ledger.GetCoverageAsync(debited, bookingId, ct) < -now.Delta)
         {
+            await MarkWaitingAsync(now.Booking, now.Seat, -now.Delta, ct);
+            await payerLock.CommitAsync(ct);
             return null;
         }
+        if (!collecting && now.Seat.ReturnPendingSince is not null) await ClearWaitingAsync(seatId, ct);
 
         var seq = await NextSeqAsync(seatId, partner, ct);
         var move = new ShareMove(seatId, partner, PayerOf(now.Booking), now.Delta, seq);
@@ -270,6 +274,46 @@ public sealed class ShareLedger
         await payerLock.CommitAsync(ct);
         return move;
     }
+
+    /// <summary>
+    /// Stamps a seat's return as waiting — the first time only — and, in the same commit, tells
+    /// the partner and the organiser once (<see cref="MemberEventCatalogue.ReturnWaiting"/>). A
+    /// sweep or reconcile that finds it still waiting finds the stamp and says nothing again.
+    /// </summary>
+    private async Task MarkWaitingAsync(Booking booking, BookingParticipant seat, decimal amount, CancellationToken ct)
+    {
+        var at = DateTimeOffset.UtcNow.Storable();
+        var stamped = await _db.BookingParticipants
+            .Where(p => p.Id == seat.Id && p.ReturnPendingSince == null)
+            .ExecuteUpdateAsync(u => u.SetProperty(p => p.ReturnPendingSince, at), ct);
+        if (stamped == 0) return;
+
+        var settings = await _settings.GetAsync(ct);
+        var game = await GameText.ForAsync(_db, booking, settings, ct);
+        var organiser = PayerOf(booking);
+        var names = await PersonNames.ForAsync(_db, [seat.UserId, organiser], ct);
+        var key = $"return-waiting:{seat.Id:N}:{at.UtcTicks}";
+        foreach (var (to, other, toOrganiser) in new[]
+                 {
+                     (seat.UserId!.Value, PersonNames.Of(organiser, names) ?? "The organiser", false),
+                     (organiser, PersonNames.Of(seat.UserId, names) ?? "Your partner", true),
+                 })
+        {
+            MemberNotices.Stage(_db, _tenant.TenantId, new MemberNotice(
+                to, MemberEventCatalogue.ReturnWaiting, $"{key}:{(toOrganiser ? "organiser" : "partner")}",
+                new ReturnWaitingPayload(booking.Id, other, game.CourtName, game.StartsLocal, amount, toOrganiser),
+                toOrganiser ? $"{Cr(amount)} for {other} is waiting on your balance" : $"{Cr(amount)} of your share is on its way back",
+                $"/bookings/{booking.Id}", booking.Id), settings);
+        }
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private static string Cr(decimal amount) => MoneyFormat.Credits(amount);
+
+    /// <summary>The seat's return has posted, or is no longer due: it is not waiting any more.</summary>
+    private Task<int> ClearWaitingAsync(Guid seatId, CancellationToken ct) =>
+        _db.BookingParticipants.Where(p => p.Id == seatId && p.ReturnPendingSince != null)
+            .ExecuteUpdateAsync(u => u.SetProperty(p => p.ReturnPendingSince, (DateTimeOffset?)null), ct);
 
     /// <summary>
     /// A collection of <paramref name="delta"/> from the seat's partner, built and its receipts

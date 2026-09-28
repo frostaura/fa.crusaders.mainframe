@@ -64,6 +64,8 @@ public partial class MainframeDbContext
             // "My invites", "my recent partners", the gate's and the court box's "is this person
             // on a live booking" — every reader asks by member.
             e.HasIndex(p => new { p.TenantId, p.UserId, p.Status });
+            // The sweep's retry of waiting returns: a handful of rows, found without a scan.
+            e.HasIndex(p => new { p.TenantId, p.ReturnPendingSince }).HasFilter("\"ReturnPendingSince\" IS NOT NULL");
             e.HasQueryFilter(p => p.TenantId == _tenant.TenantId);
         });
 

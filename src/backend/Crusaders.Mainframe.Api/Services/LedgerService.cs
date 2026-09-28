@@ -25,11 +25,17 @@ public sealed class LedgerService
     private readonly RealtimeOutbox _outbox;
     private readonly IEventBus _bus;
     private readonly TenantSettingsAccessor _settings;
+    private readonly ShareHook? _shares;
 
+    // The settings reader needs only the context and the tenant this service already holds, so
+    // it is built here rather than injected — the six-parameter complexity gate.
     public LedgerService(
         MainframeDbContext db, ITenantContext tenant, IRealtimeBus realtime, RealtimeOutbox outbox, IEventBus bus,
-        TenantSettingsAccessor settings)
-    { _db = db; _tenant = tenant; _realtime = realtime; _outbox = outbox; _bus = bus; _settings = settings; }
+        ShareHook? shares = null)
+    {
+        _db = db; _tenant = tenant; _realtime = realtime; _outbox = outbox; _bus = bus; _shares = shares;
+        _settings = new TenantSettingsAccessor(db, tenant);
+    }
 
     public async Task<decimal> GetBalanceAsync(Guid userId, CancellationToken ct)
     {
@@ -55,6 +61,25 @@ public sealed class LedgerService
     /// </summary>
     public async Task<decimal> GetSpendableAsync(Guid userId, CancellationToken ct) =>
         await GetBalanceAsync(userId, ct) - (await GetHeldAsync(userId, ct)).Held;
+
+    /// <summary>
+    /// What may go back to a partner from <paramref name="bookingId"/> without overdrawing its
+    /// organiser (D11, review round 2): the balance less what they hold for their OTHER bookings.
+    /// A return posts only when this covers it — before the deadline or after, whatever the
+    /// booking's state — unless the desk named the overdraft. Read under the organiser's lock.
+    /// </summary>
+    public async Task<decimal> GetCoverageAsync(Guid userId, Guid bookingId, CancellationToken ct) =>
+        await GetBalanceAsync(userId, ct)
+        - (await ShareHolds.ForAsync(_db, userId, await _settings.GetAsync(ct), DateTimeOffset.UtcNow, ct, bookingId)).Held;
+
+    /// <summary>
+    /// A member who has just RECEIVED credit — a top-up, a desk adjustment, a refund, anything but
+    /// a share moving between players — may now cover a return that was waiting on them. Retried
+    /// in the same post-commit callback as their balance frame (one deferred item per member, as
+    /// the outbox has always had), rather than at the next sweep (review round 2, M1).
+    /// </summary>
+    private static bool Credits(IEnumerable<LedgerPosting> postings) =>
+        postings.Any(p => p.AmountCredits > 0m && p.Type != LedgerEntryType.ShareTransfer);
 
     /// <summary>
     /// A page of a member's movements, newest first.
@@ -113,7 +138,7 @@ public sealed class LedgerService
         // penalty animate the badge once, by their net.
         foreach (var group in postings.GroupBy(p => p.UserId))
         {
-            await PublishBalanceAsync(group.Key, group.Sum(p => p.AmountCredits), ReasonFor(group), ct);
+            await PublishBalanceAsync(group.Key, group.Sum(p => p.AmountCredits), ReasonFor(group), ct, Credits(group));
         }
 
         foreach (var entry in entries) await MirrorAsync(entry, ct);
@@ -135,10 +160,12 @@ public sealed class LedgerService
     /// top-up and a cancellation refund are indistinguishable.
     /// </para>
     /// </summary>
-    private Task PublishBalanceAsync(Guid userId, decimal deltaCredits, string reason, CancellationToken ct)
+    private Task PublishBalanceAsync(Guid userId, decimal deltaCredits, string reason, CancellationToken ct, bool credited = false)
     {
-        var tenantId = _tenant.TenantId;
+        var (tenantId, slug) = (_tenant.TenantId, _tenant.TenantSlug);
         var topic = RealtimeTopic.Wallet(tenantId, userId);
+        // Optional only for the unit suites' hand-built containers; the app always registers it.
+        var retry = credited ? _shares : null;
 
         return _outbox.EnqueueAsync(async token =>
         {
@@ -160,6 +187,9 @@ public sealed class LedgerService
                 spendable_credits = balance - held.Held,
                 held_until = held.ReleasesAt,
             })));
+
+            // Money arrived: a return waiting on this member may be covered now (see Credits).
+            if (retry is not null) await retry.AfterCreditAsync(tenantId, slug, [userId], token);
         }, ct);
     }
 
@@ -345,7 +375,7 @@ public sealed class LedgerService
         await _db.SaveChangesAsync(ct);
 
         // Queued for after the commit, not published here — D2-B07 and RealtimeOutbox.
-        await PublishBalanceAsync(posting.UserId, posting.AmountCredits, ReasonFor(posting.Type), ct);
+        await PublishBalanceAsync(posting.UserId, posting.AmountCredits, ReasonFor(posting.Type), ct, Credits([posting]));
         await MirrorAsync(entry, ct);
 
         return entry;

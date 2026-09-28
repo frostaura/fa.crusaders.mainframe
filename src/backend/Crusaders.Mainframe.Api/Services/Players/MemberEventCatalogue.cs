@@ -17,6 +17,10 @@ public sealed record ReminderPayload(
 
 public sealed record LapsedPayload(Guid BookingId, string OtherName, string CourtName, string StartsAtLocal, decimal UnpaidCredits, bool ToOrganiser);
 
+/// <summary>A return of a paid share that waits for the organiser's credits to cover it (review round 2).</summary>
+public sealed record ReturnWaitingPayload(
+    Guid BookingId, string OtherName, string CourtName, string StartsAtLocal, decimal AmountCredits, bool ToOrganiser);
+
 public sealed record GameCancelledPayload(Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal);
 
 public sealed record GameChangedPayload(
@@ -51,6 +55,13 @@ public static class MemberEventCatalogue
     public const string GameChanged = "players.game_changed";
 
     /// <summary>
+    /// Money due back to a partner waits because the organiser's credits do not cover it — told
+    /// ONCE to each side when it starts waiting (the seat's <c>ReturnPendingSince</c> stamp), never
+    /// on every sweep that finds it still waiting. Not urgent. The wording owes nobody anything.
+    /// </summary>
+    public const string ReturnWaiting = "players.return_waiting";
+
+    /// <summary>
     /// A partner's answer — accepted, declined, withdrew — told to the organiser on the INBOX only.
     /// It moves no money (a payment has its own receipt), and a mail per answer is how an organiser
     /// learns to ignore the club's mail.
@@ -58,7 +69,7 @@ public static class MemberEventCatalogue
     public const string Response = "players.response";
 
     /// <summary>The kinds that are mailed. <see cref="Response"/> is inbox-only and never reaches the outbox.</summary>
-    public static readonly IReadOnlyList<string> All = [Invited, ShareMoved, Reminder, Lapsed, GameCancelled, GameChanged];
+    public static readonly IReadOnlyList<string> All = [Invited, ShareMoved, Reminder, Lapsed, GameCancelled, GameChanged, ReturnWaiting];
 
     private static readonly HashSet<string> Urgent = new(StringComparer.Ordinal) { ShareMoved, GameCancelled };
 
@@ -82,6 +93,8 @@ public static class MemberEventCatalogue
                 return ComposeCancelled(c);
             case GameChanged:
                 return ComposeChanged(c);
+            case ReturnWaiting:
+                return ComposeReturnWaiting(c);
             default:
                 throw new InvalidOperationException($"no message for member notice kind '{c.Row.Kind}'");
         }
@@ -119,6 +132,13 @@ public static class MemberEventCatalogue
     {
         var p = c.Payload<GameCancelledPayload>();
         return EmailTemplates.PlayersBookingCancelled(c.Club, c.To, p.OrganiserName, p.CourtName, p.StartsAtLocal);
+    }
+
+    private static EmailMessage ComposeReturnWaiting(MemberMailContext c)
+    {
+        var p = c.Payload<ReturnWaitingPayload>();
+        return EmailTemplates.ShareReturnWaiting(c.Club, c.To, new ShareReturnWaitingNotice(
+            p.OtherName, p.CourtName, p.StartsAtLocal, p.AmountCredits, p.ToOrganiser, c.BookingUrl(p.BookingId)));
     }
 
     private static EmailMessage ComposeChanged(MemberMailContext c)

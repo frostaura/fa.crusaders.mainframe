@@ -465,6 +465,9 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("TenantId", "ShareDeadlineAt")
+                        .HasFilter("\"ShareDeadlineAt\" IS NOT NULL");
+
                     b.HasIndex("TenantId", "CourtId", "StartsAt");
 
                     b.HasIndex("TenantId", "ScheduleId", "StartsAt");
@@ -524,6 +527,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset?>("RespondedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("ReturnPendingSince")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("Seat")
                         .HasColumnType("integer");
 
@@ -561,6 +567,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.HasIndex("InviteTokenHash")
                         .IsUnique()
                         .HasFilter("\"InviteTokenHash\" IS NOT NULL");
+
+                    b.HasIndex("TenantId", "ReturnPendingSince")
+                        .HasFilter("\"ReturnPendingSince\" IS NOT NULL");
 
                     b.HasIndex("TenantId", "BookingId", "Seat")
                         .IsUnique()

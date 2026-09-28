@@ -33,6 +33,10 @@ public sealed record ShareReminderNotice(
 public sealed record ShareLapsedNotice(
     string OtherName, string CourtName, string StartsAtLocal, decimal UnpaidCredits, bool ToOrganiser, string BookingUrl);
 
+/// <summary>A paid share on its way back to a partner, waiting until the organiser's credits cover it.</summary>
+public sealed record ShareReturnWaitingNotice(
+    string OtherName, string CourtName, string StartsAtLocal, decimal AmountCredits, bool ToOrganiser, string BookingUrl);
+
 /// <summary>A change to a game the reader is in — they were taken off it, or their share moved.</summary>
 public sealed record PlayersChange(
     string OrganiserName, string CourtName, string StartsAtLocal, bool Removed, decimal? NewShareCredits, bool NeedsConsent,
@@ -133,6 +137,25 @@ public static partial class EmailTemplates
                 new Paragraph(n.ToOrganiser
                     ? $"{n.OtherName} did not pay {Cr(n.UnpaidCredits)} of their share for {n.CourtName} at {n.StartsAtLocal} before it closed. Your booking already covered the court, so nothing else moves."
                     : $"Your share for {n.CourtName} at {n.StartsAtLocal} closed before it was paid. {n.OtherName}'s booking covers it and nothing is owed."),
+                new CallToAction("Open the booking", n.BookingUrl),
+            ],
+            WhyThis: WhyGame));
+
+    /// <summary>
+    /// A return of a paid share is waiting: the organiser's credits do not cover it yet. Told once
+    /// to each side. It moves on its own the moment they do — a top-up is enough — and the
+    /// wording says so, and no more: nobody here is in anybody's debt.
+    /// </summary>
+    public static EmailMessage ShareReturnWaiting(ClubIdentity club, string to, ShareReturnWaitingNotice n) =>
+        EmailChrome.Compose(club, to, new EmailContent(
+            Subject: n.ToOrganiser ? $"{Cr(n.AmountCredits)} for {n.OtherName} is waiting — {n.CourtName}" : $"{Cr(n.AmountCredits)} is on its way back — {n.CourtName}",
+            Preheader: n.ToOrganiser ? "It goes back as soon as your balance covers it." : "It reaches you as soon as it can be sent.",
+            Heading: "A share is on its way back",
+            Blocks:
+            [
+                new Paragraph(n.ToOrganiser
+                    ? $"{Cr(n.AmountCredits)} of {n.OtherName}'s share for {n.CourtName} at {n.StartsAtLocal} is due back to them. Your balance doesn't cover it right now, so it will go back automatically the next time it does."
+                    : $"{Cr(n.AmountCredits)} of your share for {n.CourtName} at {n.StartsAtLocal} is due back to you from {n.OtherName}. It will reach your balance automatically as soon as it can be sent."),
                 new CallToAction("Open the booking", n.BookingUrl),
             ],
             WhyThis: WhyGame));

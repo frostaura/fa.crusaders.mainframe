@@ -110,6 +110,15 @@ public sealed class BookingParticipant : ITenantScoped
     /// <summary>When the share deadline passed with part of the share unpaid; the organiser covers the rest.</summary>
     public DateTimeOffset? LapsedAt { get; set; }
 
+    /// <summary>
+    /// Since when this seat's partner is due money BACK that the organiser's spendable credits do
+    /// not cover, so the return waits (D11, review round 2). Stamped when a reconcile first finds it
+    /// uncovered — the moment both sides are told once — and cleared when it posts or is no longer
+    /// due. The minute sweep selects on it (indexed), however old the booking, so a waiting
+    /// return is never stranded; any credit to the organiser retries it at once.
+    /// </summary>
+    public DateTimeOffset? ReturnPendingSince { get; set; }
+
     public DateTimeOffset? LastNudgedAt { get; set; }
     public int NudgeCount { get; set; }
     public DateTimeOffset? LastReminderAt { get; set; }

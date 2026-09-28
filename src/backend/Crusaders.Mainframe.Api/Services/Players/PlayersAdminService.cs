@@ -26,12 +26,13 @@ public sealed class PlayersAdminService
     private readonly PlayersService _players;
     private readonly ShareLedger _shares;
     private readonly AdminChangeRecorder _changes;
+    private readonly LedgerService _ledger;
 
     public PlayersAdminService(
         MainframeDbContext db, ITenantContext tenant, PlayersService players, ShareLedger shares,
-        AdminChangeRecorder changes)
+        AdminChangeRecorder changes, LedgerService ledger)
     {
-        _db = db; _tenant = tenant; _players = players; _shares = shares; _changes = changes;
+        _db = db; _tenant = tenant; _players = players; _shares = shares; _changes = changes; _ledger = ledger;
     }
 
     /// <summary>
@@ -42,15 +43,25 @@ public sealed class PlayersAdminService
     public sealed record AdminAct(Guid BookingId, Guid? SeatId, Guid ActorId, string? Reason, bool AllowNegativeBalance = false);
 
     /// <summary>
-    /// A remove or a settle-outside hands the seat's paid share back from the organiser. Before
-    /// the share deadline the organiser's hold covers it; after it the hold has been released
-    /// and may be spent, so the desk must say the overdraft by name — exactly as for a collect —
-    /// and it is on the change record. Without it: <c>400 overdraft_not_authorised</c>.
+    /// A remove or a settle-outside hands the seat's paid share back from the organiser. When the
+    /// organiser's COVERAGE — their balance less what they hold for their other bookings — does not
+    /// cover it, the desk must say the overdraft by name, exactly as for a collect, and it is on
+    /// the change record; without it <c>400 overdraft_not_authorised</c>. Keyed on coverage, not the
+    /// deadline (review round 2): a game cancelled after check-in releases its shares before the
+    /// deadline. The ledger holds the same line on its own (<c>ShareLedger</c>): a return that
+    /// slips past this check in a race waits rather than overdrawing.
     /// </summary>
-    private static PlayerOutcome? LateReturnRefusal(PlayersService.Game game, AdminAct act) =>
-        !act.AllowNegativeBalance && DateTimeOffset.UtcNow >= PlayerSettings.ShareDeadline(game.Booking, game.Settings)
-            ? PlayerOutcome.Refuse(400, PlayerErrors.OverdraftNotAuthorised)
+    private async Task<PlayerOutcome?> UncoveredReturnRefusalAsync(
+        PlayersService.Game game, BookingParticipant seat, AdminAct act, CancellationToken ct)
+    {
+        if (act.AllowNegativeBalance) return null;
+        var paid = await _shares.PaidAsync(seat, ct);
+        if (paid <= 0m) return null;
+        var coverage = await _ledger.GetCoverageAsync(ShareLedger.PayerOf(game.Booking), game.Booking.Id, ct);
+        return coverage < paid
+            ? PlayerOutcome.Refuse(400, PlayerErrors.OverdraftNotAuthorised, new { return_credits = paid, covered_credits = Math.Max(0m, coverage) })
             : null;
+    }
 
     /// <summary>The reconcile's authority for this act: the named overdraft lets this seat's return post whatever the organiser holds.</summary>
     private static ReconcileOptions OptionsFor(AdminAct act, BookingParticipant seat) =>
@@ -89,7 +100,7 @@ public sealed class PlayersAdminService
         if (game is null) return PlayerOutcome.BookingNotFound;
         var seat = game.Seats.FirstOrDefault(s => s.Id == act.SeatId && s.Seat > 1 && s.IsLive);
         if (seat is null) return PlayerOutcome.PlayerNotFound;
-        if (LateReturnRefusal(game, act) is { } late) return late;
+        if (await UncoveredReturnRefusalAsync(game, seat, act, ct) is { } uncovered) return uncovered;
 
         await RecordAsync(AdminChangeActions.BookingPlayerRemoved, act, seat,
             new { status = "removed", overdraft_authorised = act.AllowNegativeBalance }, ct);
@@ -123,7 +134,7 @@ public sealed class PlayersAdminService
         var (game, seat) = await SeatAsync(act, ct);
         if (seat is null || seat.UserId is null) return PlayerOutcome.PlayerNotFound;
         if (seat.Status != ParticipantStatus.Accepted) return PlayerOutcome.Refuse(409, PlayerErrors.NotAccepted);
-        if (LateReturnRefusal(game!, act) is { } late) return late;
+        if (await UncoveredReturnRefusalAsync(game!, seat, act, ct) is { } uncovered) return uncovered;
 
         var paid = await _shares.PaidAsync(seat, ct);
         seat.SettledOutsideAt = StorableTime.UtcNow;

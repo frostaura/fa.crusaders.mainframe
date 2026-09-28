@@ -22,18 +22,7 @@ namespace Crusaders.Mainframe.Api.Migrations
             // share_lapse_hours, clamped 1–168 and 48 when unset or unreadable, exactly as
             // PlayerSettings.ShareLapseHours reads it. Bookings with no players stay null and are
             // stamped when they first get some.
-            migrationBuilder.Sql("""
-                UPDATE bookings AS b
-                SET "ShareDeadlineAt" = b."StartsAt"
-                    + make_interval(mins => b."SliceMinutes" * b."SliceCount")
-                    + make_interval(hours => LEAST(168, GREATEST(1, COALESCE(
-                        (SELECT CASE WHEN (ts."SettingsJson" ->> 'share_lapse_hours') ~ '^-?[0-9]{1,9}$'
-                                     THEN (ts."SettingsJson" ->> 'share_lapse_hours')::int END
-                         FROM tenant_settings AS ts WHERE ts."TenantId" = b."TenantId"),
-                        48))))
-                WHERE b."ShareDeadlineAt" IS NULL
-                  AND EXISTS (SELECT 1 FROM booking_participants AS p WHERE p."BookingId" = b."Id");
-                """);
+            migrationBuilder.Sql(Persistence.ShareDeadlineBackfill.Sql());
         }
 
         /// <inheritdoc />

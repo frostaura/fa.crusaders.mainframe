@@ -2,6 +2,7 @@ using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services.Realtime;
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Services;
@@ -84,9 +85,11 @@ public sealed class ShareSweep
         var horizon = now.AddHours(-(PlayerSettings.ShareLapseHours(settings) + (7 * 24)));
         var stampedHorizon = now.AddDays(-7);
 
+        // ...and every booking with a seat whose return is WAITING, however old (review round 2):
+        // selected on the seat's own indexed stamp, so a return is never stranded by the window.
         var bookingIds = await _db.BookingParticipants.AsNoTracking()
-            .Where(p => p.Seat > 1 && _db.Bookings.Any(b => b.Id == p.BookingId
-                && (b.ShareDeadlineAt >= stampedHorizon || (b.ShareDeadlineAt == null && b.EndsAt >= horizon))))
+            .Where(p => p.Seat > 1 && (p.ReturnPendingSince != null || _db.Bookings.Any(b => b.Id == p.BookingId
+                && (b.ShareDeadlineAt >= stampedHorizon || (b.ShareDeadlineAt == null && b.EndsAt >= horizon)))))
             .Select(p => p.BookingId)
             .Distinct()
             .ToListAsync(ct);
@@ -96,6 +99,23 @@ public sealed class ShareSweep
         await LapseAsync(now, settings, ct);
         await RemindAsync(now, settings, ct);
         await PruneAsync(now, settings, ct);
+    }
+
+    /// <summary>A partner seat that can still be asked or lapse: a member's, live, not lapsed, not settled by hand.</summary>
+    private static readonly Expression<Func<BookingParticipant, bool>> OpenPartnerSeat =
+        p => p.Seat > 1 && p.UserId != null && p.LapsedAt == null && p.SettledOutsideAt == null
+             && (p.Status == ParticipantStatus.Invited || p.Status == ParticipantStatus.Accepted);
+
+    /// <summary>
+    /// A booking whose deadline passed within the last week — stamped (indexed), or unstamped and
+    /// started since <paramref name="unstampedFrom"/>. A fully paid seat never lapses, so reading
+    /// every one in the club's history every minute grew without bound (review round 2).
+    /// </summary>
+    private static Expression<Func<Booking, bool>> DeadlinePassedLastWeek(DateTimeOffset now, DateTimeOffset unstampedFrom)
+    {
+        var recent = now.AddDays(-7);
+        return b => (b.ShareDeadlineAt <= now && b.ShareDeadlineAt > recent)
+                    || (b.ShareDeadlineAt == null && b.StartsAt < now && b.StartsAt >= unstampedFrom);
     }
 
     /// <summary>
@@ -108,10 +128,9 @@ public sealed class ShareSweep
     private async Task LapseAsync(DateTimeOffset now, TenantSettingsView settings, CancellationToken ct)
     {
         var candidates = await _db.BookingParticipants
-            .Where(p => p.Seat > 1 && p.UserId != null && p.LapsedAt == null && p.SettledOutsideAt == null
-                        && (p.Status == ParticipantStatus.Invited || p.Status == ParticipantStatus.Accepted))
-            .Join(_db.Bookings, p => p.BookingId, b => b.Id, (p, b) => new { Seat = p, Booking = b })
-            .Where(x => x.Booking.StartsAt < now)
+            .Where(OpenPartnerSeat)
+            .Join(_db.Bookings.Where(DeadlinePassedLastWeek(now, ShareHolds.UnstampedFrom(now, settings).AddDays(-7))),
+                p => p.BookingId, b => b.Id, (p, b) => new { Seat = p, Booking = b })
             .ToListAsync(ct);
 
         foreach (var x in candidates.Where(x => PlayerSettings.ShareDeadline(x.Booking, settings) <= now))
@@ -172,13 +191,13 @@ public sealed class ShareSweep
         var max = PlayerSettings.ShareReminderMax(settings);
         if (max == 0) return;
         var since = now.AddHours(-PlayerSettings.ShareReminderHours(settings));
-
+        // Only games whose deadline is still ahead (stamped, indexed; unstamped by start) — not
+        // every accepted seat in history under the reminder cap (review round 2).
         var due = await _db.BookingParticipants
-            .Where(p => p.Seat > 1 && p.UserId != null && p.LapsedAt == null && p.SettledOutsideAt == null
-                        && p.ReminderCount < max && p.InvitedAt <= since
-                        && (p.LastReminderAt == null || p.LastReminderAt <= since)
-                        && (p.Status == ParticipantStatus.Invited || p.Status == ParticipantStatus.Accepted))
-            .Join(_db.Bookings.Where(b => b.Status == BookingStatus.Booked || b.Status == BookingStatus.Completed),
+            .Where(OpenPartnerSeat)
+            .Where(p => p.ReminderCount < max && p.InvitedAt <= since && (p.LastReminderAt == null || p.LastReminderAt <= since))
+            .Join(_db.Bookings.Where(b => b.Status == BookingStatus.Booked || b.Status == BookingStatus.Completed)
+                    .Where(ShareHolds.DeadlineAhead(now, ShareHolds.UnstampedFrom(now, settings))),
                 p => p.BookingId, b => b.Id, (p, b) => new { Seat = p, Booking = b })
             .ToListAsync(ct);
 

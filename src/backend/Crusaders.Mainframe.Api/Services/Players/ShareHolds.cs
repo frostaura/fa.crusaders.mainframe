@@ -1,5 +1,6 @@
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Services;
@@ -40,35 +41,60 @@ public sealed record HeldCredits(decimal Held, DateTimeOffset? ReleasesAt)
 /// </summary>
 public static class ShareHolds
 {
+    /// <param name="excludingBookingId">
+    /// Leave this booking's hold out — for the COVERAGE of a return from it: what the organiser
+    /// holds for that very booking is exactly what may go back from it, so it covers, not blocks.
+    /// </param>
     public static async Task<HeldCredits> ForAsync(
-        MainframeDbContext db, Guid userId, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
+        MainframeDbContext db, Guid userId, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct,
+        Guid? excludingBookingId = null)
     {
-        // Bookings whose deadline can still be ahead: a stamped one that has not passed (the stamp
-        // is the deadline, whatever the setting says now), or an unstamped one that started
-        // within the current lapse hours plus a day (a sold end is at most a day after its start).
-        var horizon = now.AddHours(-PlayerSettings.ShareLapseHours(settings)).AddDays(-1);
-        var nets = await db.LedgerEntries.AsNoTracking()
-            .Where(l => l.UserId == userId && l.Type == LedgerEntryType.ShareTransfer && l.RelatedBookingId != null)
-            .Join(db.Bookings.AsNoTracking().Where(b => b.ShareDeadlineAt > now || (b.ShareDeadlineAt == null && b.StartsAt >= horizon)),
-                l => l.RelatedBookingId, b => (Guid?)b.Id,
-                (l, b) => new { b.Id, l.AmountCredits })
-            .GroupBy(x => x.Id)
-            .Select(g => new { BookingId = g.Key, Net = g.Sum(x => x.AmountCredits) })
-            .Where(x => x.Net > 0m)
-            .ToListAsync(ct);
+        var nets = await NetsAsync(db, userId, DeadlineAhead(now, UnstampedFrom(now, settings)), ct);
+        nets.Remove(excludingBookingId ?? Guid.Empty);
         if (nets.Count == 0) return HeldCredits.None;
 
-        var ids = nets.Select(n => n.BookingId).ToList();
+        var ids = nets.Keys.ToList();
         var bookings = await db.Bookings.AsNoTracking().Where(b => ids.Contains(b.Id)).ToDictionaryAsync(b => b.Id, ct);
 
         // Cancelled bookings hold only what they will still hand back — read for all of them at
         // once, not booking by booking (review (b)).
         var pending = await PendingReturnsAsync(
             db, bookings.Values.Where(b => b.Status == BookingStatus.Cancelled && ShareLedger.PayerOf(b) == userId).ToList(), settings, now, ct);
+        return Sum(nets, bookings, pending, userId, settings, now);
+    }
 
+    /// <summary>
+    /// A booking whose deadline can still be ahead: stamped and not passed (the stamp IS the
+    /// deadline, whatever the setting says now), or unstamped and started since
+    /// <paramref name="unstampedFrom"/>. Indexed on <c>(TenantId, ShareDeadlineAt)</c>.
+    /// </summary>
+    public static Expression<Func<Booking, bool>> DeadlineAhead(DateTimeOffset now, DateTimeOffset unstampedFrom) =>
+        b => b.ShareDeadlineAt > now || (b.ShareDeadlineAt == null && b.StartsAt >= unstampedFrom);
+
+    /// <summary>The earliest start an UNSTAMPED booking's deadline can still be ahead from: the lapse hours plus a day (a sold end is at most a day after its start).</summary>
+    public static DateTimeOffset UnstampedFrom(DateTimeOffset now, TenantSettingsView settings) =>
+        now.AddHours(-PlayerSettings.ShareLapseHours(settings)).AddDays(-1);
+
+    /// <summary>The member's net share rows per booking in <paramref name="window"/>, positive ones only (what they received).</summary>
+    private static async Task<Dictionary<Guid, decimal>> NetsAsync(
+        MainframeDbContext db, Guid userId, Expression<Func<Booking, bool>> window, CancellationToken ct)
+    {
+        var rows = await db.LedgerEntries.AsNoTracking()
+            .Where(l => l.UserId == userId && l.Type == LedgerEntryType.ShareTransfer && l.RelatedBookingId != null)
+            .Join(db.Bookings.AsNoTracking().Where(window), l => l.RelatedBookingId, b => (Guid?)b.Id, (l, b) => new { b.Id, l.AmountCredits })
+            .GroupBy(x => x.Id)
+            .Select(g => new { BookingId = g.Key, Net = g.Sum(x => x.AmountCredits) })
+            .ToListAsync(ct);
+        return rows.Where(r => r.Net > 0m).ToDictionary(r => r.BookingId, r => r.Net);
+    }
+
+    private static HeldCredits Sum(
+        Dictionary<Guid, decimal> nets, Dictionary<Guid, Booking> bookings, Dictionary<Guid, decimal> pending, Guid userId,
+        TenantSettingsView settings, DateTimeOffset now)
+    {
         decimal held = 0m;
         DateTimeOffset? releases = null;
-        foreach (var n in nets)
+        foreach (var n in nets.Select(kv => new { BookingId = kv.Key, Net = kv.Value }))
         {
             var booking = bookings[n.BookingId];
             if (ShareLedger.PayerOf(booking) != userId) continue;
