@@ -308,7 +308,7 @@ public sealed class AuthService
     ///
     /// <para>
     /// The change is a rotation (member-code §10), and a rotation ends every session minted
-    /// before it — <see cref="User.SessionsValidAfter"/> — including the one making this call.
+    /// before it — <see cref="User.SessionEpoch"/> — including the one making this call.
     /// That is right for every OTHER session (whoever learned the old password may be signed in
     /// somewhere) and wrong for the member at the keyboard, who would be signed out for doing
     /// the responsible thing. So the caller is handed a token minted after the cut-off and
@@ -341,8 +341,8 @@ public sealed class AuthService
 
         await SendOrLogAsync(EmailTemplates.PasswordChanged(await _club.GetAsync(ct), user.Email), $"password-changed notice for {user.Email}", ct);
 
-        // Minted AFTER the cut-off was stamped, so it is the one session that survives it.
-        return (PasswordChangeResult.Ok, _jwt.IssueAccess(user.Id, user.TenantId, _tenant.TenantSlug, RolesOf(user)));
+        // Minted under the epoch the rotation just raised, so it is the one session that survives it.
+        return (PasswordChangeResult.Ok, _jwt.IssueAccess(user.Id, user.TenantId, _tenant.TenantSlug, RolesOf(user), user.SessionEpoch));
     }
 
     private static List<string> RolesOf(User user)
@@ -422,7 +422,7 @@ public sealed class AuthService
         if (user.IsAdmin) roles.Add("admin");
         if (user.IsPlatformAdmin) roles.Add("platform_admin");
 
-        var token = _jwt.IssueAccess(user.Id, _tenant.TenantId, _tenant.TenantSlug, roles);
+        var token = _jwt.IssueAccess(user.Id, _tenant.TenantId, _tenant.TenantSlug, roles, user.SessionEpoch);
         return new LoginResult.Ok(token, user.Id, user.IsAdmin, user.MustChangePassword);
     }
 
@@ -498,7 +498,7 @@ public sealed class AuthService
 
         var roles = new List<string>();
         if (user.IsAdmin) roles.Add("admin");
-        var jwt = _jwt.IssueAccess(user.Id, _tenant.TenantId, _tenant.TenantSlug, roles);
+        var jwt = _jwt.IssueAccess(user.Id, _tenant.TenantId, _tenant.TenantSlug, roles, user.SessionEpoch);
         return new LoginResult.Ok(jwt, user.Id, user.IsAdmin, user.MustChangePassword);
     }
 
@@ -513,15 +513,17 @@ public sealed class AuthService
     /// while the sign-in screen correctly refused them. Suspension has to end the session that
     /// is already open, not only the next one.
     /// </remarks>
-    public async Task<LoginResult> RefreshAsync(Guid userId, DateTimeOffset? issuedAt, CancellationToken ct)
+    public async Task<LoginResult> RefreshAsync(Guid userId, int presentedEpoch, CancellationToken ct)
     {
         var user = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == userId, ct);
         if (user is null) return new LoginResult.InvalidCredentials();
 
-        // Read from the row, never the session cache: a refresh re-mints a token that would pass
-        // every later cut-off check, so a session a rotation ended must not be renewed inside the
-        // cache's fifteen seconds either (member-code §10, SessionCutoff).
-        if (SessionCutoff.Predates(issuedAt, user.SessionsValidAfter)) return new LoginResult.InvalidCredentials();
+        // Read from the row, never the session cache: a refresh re-mints a token, so a session a
+        // rotation ended must not be renewed inside the cache's fifteen seconds either. The new
+        // token carries the epoch READ HERE — so a refresh racing a rotation mints a token that
+        // is either already below the incremented epoch or was never old (member-code §10,
+        // SessionEpochs).
+        if (presentedEpoch < user.SessionEpoch) return new LoginResult.InvalidCredentials();
         if (!_tenant.IsResolved)
         {
             var tenant = await _db.Tenants.IgnoreQueryFilters().FirstAsync(t => t.Id == user.TenantId, ct);
@@ -533,7 +535,7 @@ public sealed class AuthService
         var roles = new List<string>();
         if (user.IsAdmin) roles.Add("admin");
         if (user.IsPlatformAdmin) roles.Add("platform_admin");
-        var token = _jwt.IssueAccess(user.Id, _tenant.TenantId, _tenant.TenantSlug, roles);
+        var token = _jwt.IssueAccess(user.Id, _tenant.TenantId, _tenant.TenantSlug, roles, user.SessionEpoch);
         return new LoginResult.Ok(token, user.Id, user.IsAdmin, user.MustChangePassword);
     }
 
@@ -553,7 +555,7 @@ public sealed class AuthService
         // session behind the forced-change gate a previous admin-side reset may have armed.
         user.MustChangePassword = false;
         await _db.SaveChangesAsync(ct);
-        return await RefreshAsync(user.Id, DateTimeOffset.UtcNow, ct);
+        return await RefreshAsync(user.Id, user.SessionEpoch, ct);
     }
 
     /// <summary>

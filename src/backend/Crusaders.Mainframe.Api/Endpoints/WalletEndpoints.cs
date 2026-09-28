@@ -152,13 +152,28 @@ public static class WalletEndpoints
                         JsonSerializer.Serialize(new { balance_credits = await ledger.GetBalanceAsync(userId, ct) })),
                     ct));
 
+            // The session is re-asked before every frame and keep-alive: a rotation (member-code
+            // §10) ends every session, and a wallet stream opened under one must close with it.
+            var epochs = ctx.RequestServices.GetRequiredService<SessionEpochs>();
+            var principal = ctx.User;
+            var services = ctx.RequestServices;
+            var guard = new SseGuard(keepAlive, token => epochs.StillCurrentAsync(principal, services, token));
             await SseStream.PumpAsync(
                 channel.Reader,
                 keepAlive,
-                (frame, token) => WriteFrameAsync(ctx, frame, token),
-                token => WriteKeepAliveAsync(ctx, token),
+                async (frame, token) =>
+                {
+                    await SseStream.RequireAllowedAsync(guard, token);
+                    await WriteFrameAsync(ctx, frame, token);
+                },
+                async token =>
+                {
+                    await SseStream.RequireAllowedAsync(guard, token);
+                    await WriteKeepAliveAsync(ctx, token);
+                },
                 ct);
         }
+        catch (StreamRevokedException) { /* the session was ended by a rotation */ }
         catch (OperationCanceledException) { /* client disconnect */ }
         finally
         {
@@ -177,7 +192,7 @@ public static class WalletEndpoints
         var userId = ctx.User.Id();
         if (userId is null) return Results.Unauthorized();
         var ticket = jwt.IssueOneTime(userId.Value, tenant.TenantId, tenant.TenantSlug,
-            TokenPurposes.WalletStream, TokenPurposes.WalletStreamTicketTtl);
+            new TicketScope(TokenPurposes.WalletStream, TokenPurposes.WalletStreamTicketTtl), SessionEpochs.EpochOf(ctx.User));
         return Results.Ok(new
         {
             ticket,

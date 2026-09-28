@@ -52,9 +52,9 @@ public sealed class MemberCodeService
     private readonly MainframeDbContext _db;
     private readonly ITenantContext _tenant;
     private readonly MemberCodeMasterKey _master;
-    private readonly SessionCutoff _sessions;
+    private readonly SessionEpochs _sessions;
 
-    public MemberCodeService(MainframeDbContext db, ITenantContext tenant, MemberCodeMasterKey master, SessionCutoff sessions)
+    public MemberCodeService(MainframeDbContext db, ITenantContext tenant, MemberCodeMasterKey master, SessionEpochs sessions)
     {
         _db = db;
         _tenant = tenant;
@@ -132,35 +132,33 @@ public sealed class MemberCodeService
 
     /// <summary>
     /// Moves the member to a new generation — every code their phone can compute stops working,
-    /// and the phone's next status check re-enrols — AND ends every session they had open
-    /// (<see cref="User.SessionsValidAfter"/>). <b>Staged, not saved</b>: the caller's own change
-    /// (a password, a suspension) and the rotation commit together or not at all; the session
-    /// cache is evicted once that save has happened.
+    /// and the phone's next status check re-enrols — AND ends every session they had open, by
+    /// raising <see cref="User.SessionEpoch"/>.
+    ///
+    /// <para>
+    /// <b>The epoch moves NOW, in one SQL statement; the generation is staged.</b> The caller's own
+    /// change (a password, a suspension) and the new generation commit together. The epoch does
+    /// not wait for them: it is incremented atomically and committed first, so there is no instant
+    /// in which the new generation is visible and an old session is still current — which is the
+    /// ordering <c>/me/code/enrol</c>'s row lock relies on. A save that then fails has ended the
+    /// member's sessions without rotating their code: a sign-in, never a hole.
+    /// </para>
     ///
     /// <para>
     /// <b>Why the sessions go with the code.</b> A rotation is the desk's answer to "I lost my
     /// phone". Retiring the codes alone left the phone's signed-in PWA free to call
-    /// <c>/me/code/enrol</c> and be handed the new generation's secret — the rotation changed
-    /// nothing for whoever held the phone. So every rotation cuts every session minted before it;
-    /// a member changing their own password is re-issued a token for the session they are in
-    /// (<see cref="AuthService.ChangePasswordAsync"/>).
+    /// <c>/me/code/enrol</c> and be handed the new generation's secret. A member changing their own
+    /// password is re-issued a token under the new epoch (<see cref="AuthService.ChangePasswordAsync"/>).
     /// </para>
     ///
     /// <para>
     /// A member who has never had a code row has never been handed a secret, so there is no
-    /// generation to move and false is returned — but their sessions are still cut, because a
-    /// password change or a suspension must end them whether or not a phone ever enrolled.
+    /// generation to move and false is returned — but their sessions are still ended.
     /// </para>
     /// </summary>
     public async Task<bool> StageRotationAsync(Guid userId, Guid actorUserId, string reason, CancellationToken ct)
     {
-        var validAfter = SessionCutoff.StampNow();
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
-        if (user is not null)
-        {
-            user.SessionsValidAfter = validAfter;
-            EvictAfterSave(user.TenantId, userId);
-        }
+        var epoch = await RaiseSessionEpochAsync(userId, ct);
 
         var row = await _db.MemberCodes.FirstOrDefaultAsync(c => c.UserId == userId, ct);
         if (row is null) return false;
@@ -173,25 +171,79 @@ public sealed class MemberCodeService
             ActorUserId = actorUserId,
             SubjectUserId = userId,
             Action = RotatedAction,
-            DetailsJson = JsonSerializer.Serialize(new { reason, generation = row.Generation, sessions_valid_after = validAfter }),
+            DetailsJson = JsonSerializer.Serialize(new { reason, generation = row.Generation, session_epoch = epoch }),
         });
         return true;
     }
 
     /// <summary>
-    /// Evicts the account's cached cut-off once the caller's save has written it — never before,
-    /// or a request in between would cache the old instant for another fifteen seconds.
+    /// <c>SessionEpoch = SessionEpoch + 1</c> in one statement, committed at once, and the cache
+    /// evicted after it. A tracked copy of the user is brought up to the new value WITHOUT being
+    /// marked modified, so the caller's save can neither write it back down nor race another
+    /// rotation's increment. Returns the new epoch, or null for an unknown user.
     /// </summary>
-    private void EvictAfterSave(Guid tenantId, Guid userId)
+    private async Task<int?> RaiseSessionEpochAsync(Guid userId, CancellationToken ct)
     {
-        void OnSaved(object? sender, Microsoft.EntityFrameworkCore.SavedChangesEventArgs e)
+        int? epoch;
+        Guid? tenantId;
+        if (_db.Database.IsRelational())
         {
-            _db.SavedChanges -= OnSaved;
-            _sessions.Invalidate(tenantId, userId);
+            var raised = await _db.Database.SqlQuery<EpochRow>($"""
+                UPDATE users SET "SessionEpoch" = "SessionEpoch" + 1
+                 WHERE "Id" = {userId} AND "TenantId" = {_tenant.TenantId}
+                RETURNING "SessionEpoch", "TenantId"
+                """).ToListAsync(ct);
+            epoch = raised.Count == 1 ? raised[0].SessionEpoch : null;
+            tenantId = raised.Count == 1 ? raised[0].TenantId : null;
         }
+        else
+        {
+            var row = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
+            if (row is not null)
+            {
+                row.SessionEpoch += 1;
+                await _db.SaveChangesAsync(ct);
+            }
+            epoch = row?.SessionEpoch;
+            tenantId = row?.TenantId;
+        }
+        if (epoch is not { } value || tenantId is not { } tenant) return null;
 
-        _db.SavedChanges += OnSaved;
+        var tracked = _db.ChangeTracker.Entries<User>().FirstOrDefault(e => e.Entity.Id == userId);
+        if (tracked is not null)
+        {
+            tracked.Property(u => u.SessionEpoch).CurrentValue = value;
+            tracked.Property(u => u.SessionEpoch).OriginalValue = value;
+            tracked.Property(u => u.SessionEpoch).IsModified = false;
+        }
+        _sessions.Invalidate(tenant, userId);
+        return value;
     }
+
+    private sealed record EpochRow(int SessionEpoch, Guid TenantId);
+
+    /// <summary>
+    /// Deletes every passkey the member has registered (member-code §13): after a lost-phone reset
+    /// the phone's passkey still signs in and would mint a session under the NEW epoch — the reset
+    /// then changed nothing for whoever holds the phone. Staged with an audit row naming how many
+    /// went; the caller saves. Returns the count.
+    /// </summary>
+    public async Task<int> StagePasskeyRevocationAsync(Guid userId, Guid actorUserId, string reason, CancellationToken ct)
+    {
+        var passkeys = await _db.WebAuthnCredentials.Where(c => c.UserId == userId).ToListAsync(ct);
+        _db.WebAuthnCredentials.RemoveRange(passkeys);
+        _db.AuditLogs.Add(new AuditLog
+        {
+            TenantId = _tenant.TenantId,
+            ActorUserId = actorUserId,
+            SubjectUserId = userId,
+            Action = PasskeysRevokedAction,
+            DetailsJson = JsonSerializer.Serialize(new { reason, removed = passkeys.Count }),
+        });
+        return passkeys.Count;
+    }
+
+    public const string PasskeysRevokedAction = "member.passkeys_revoked";
 
     public const string RotatedAction = "member_code.rotated";
     public const string EnrolledAction = "member_code.enrolled";

@@ -425,11 +425,7 @@ public static class AdminConfigEndpoints
 
             await db.SaveChangesAsync(ct);
 
-            // The cut-off by hand ends every legacy code, as the automatic one does (§8 step 4).
-            if (phaseBefore != MemberCodeSettings.V1Only && req.MemberCodePhase?.Trim() == MemberCodeSettings.V1Only)
-            {
-                await MemberCodeRollout.ExpireLegacyCodesAsync(db, DateTimeOffset.UtcNow, ct);
-            }
+            await ApplyCutoffToLegacyCodesAsync(db, phaseBefore, req.MemberCodePhase?.Trim(), ct);
             return Results.Ok(new { saved = true, changed_keys = changed.After.Keys.ToList() });
         });
 
@@ -1200,6 +1196,24 @@ public static class AdminConfigEndpoints
 
         if (req.MemberCodeManualHold is true) SetHold(doc, actor, now);
         else if (req.MemberCodeManualHold is false) ClearHold(doc);
+    }
+
+    /// <summary>
+    /// The cut-off by hand ends every legacy code, as the automatic one does (§8 step 4); a
+    /// rollback OUT of <c>v1_only</c> gives back the ones it ended that are still in date.
+    /// </summary>
+    private static async Task ApplyCutoffToLegacyCodesAsync(
+        MainframeDbContext db, string? phaseBefore, string? phaseAfter, CancellationToken ct)
+    {
+        if (phaseAfter is null || phaseAfter == phaseBefore) return;
+        if (phaseAfter == MemberCodeSettings.V1Only)
+        {
+            await MemberCodeRollout.ExpireLegacyCodesAsync(db, DateTimeOffset.UtcNow, ct);
+        }
+        else if (phaseBefore == MemberCodeSettings.V1Only)
+        {
+            await MemberCodeRollout.RestoreLegacyCodesAsync(db, DateTimeOffset.UtcNow, ct);
+        }
     }
 
     private static void SetHold(IDictionary<string, JsonElement> doc, Guid actor, JsonElement now)

@@ -43,13 +43,13 @@ public sealed class User : ITenantScoped
     public DateTimeOffset? LastLoginAt { get; set; }
 
     /// <summary>
-    /// Every token minted before this instant is refused (member-code §10, §13): stamped by each
-    /// rotation — an admin's code reset, a password change or reset, a suspension, sign-out
-    /// everywhere — so a lost phone's open session cannot simply re-enrol and fetch the new
-    /// secret. Null for an account never rotated. Whole milliseconds; see
-    /// <see cref="Security.SessionCutoff"/>.
+    /// The account's session epoch (member-code §10, §13): every token carries the epoch it was
+    /// minted under, and one below this is refused. Incremented — in SQL, atomically — by each
+    /// rotation: an admin's code reset, a password change or reset, an admin temporary password,
+    /// a suspension, sign out everywhere. So a lost phone's open session cannot simply re-enrol
+    /// and fetch the new secret. See <see cref="Security.SessionEpochs"/>.
     /// </summary>
-    public DateTimeOffset? SessionsValidAfter { get; set; }
+    public int SessionEpoch { get; set; }
 
     public Membership? Membership { get; set; }
 }

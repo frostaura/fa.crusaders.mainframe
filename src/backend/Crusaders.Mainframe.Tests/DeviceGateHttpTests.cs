@@ -2782,7 +2782,6 @@ public sealed class DeviceGateHttpTests
             new("tenant_id", club.TenantId.ToString()),
             new("tenant_slug", club.Slug),
             new("purpose", "access"),
-            new(Crusaders.Mainframe.Api.Security.SessionCutoff.IssuedAtMsClaim, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString()),
         ];
         if (role is not null) claims.Add(new(System.Security.Claims.ClaimTypes.Role, role));
 

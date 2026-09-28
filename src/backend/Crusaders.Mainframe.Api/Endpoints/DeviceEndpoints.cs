@@ -638,7 +638,10 @@ public static class DeviceEndpoints
         {
             Audit(services, device, "device.relay_restore_failed", new
             {
-                device_id = device.Id, device_code = device.DeviceCode, served, restored = 0,
+                device_id = device.Id,
+                device_code = device.DeviceCode,
+                served,
+                restored = 0,
             });
             DeviceErrorService.InBackground(
                 services.Scopes, services.Logs.CreateLogger(typeof(DeviceEndpoints)),
@@ -652,7 +655,10 @@ public static class DeviceEndpoints
 
         Audit(services, device, "device.relay_restore_confirmed", new
         {
-            device_id = device.Id, device_code = device.DeviceCode, served, restored,
+            device_id = device.Id,
+            device_code = device.DeviceCode,
+            served,
+            restored,
         });
 
         foreach (var item in plan)

@@ -103,7 +103,6 @@ public sealed class RevenueUnitTests
             new("tenant_id", tenantId.ToString()),
             new("tenant_slug", slug),
             new("purpose", "access"),
-            new(Crusaders.Mainframe.Api.Security.SessionCutoff.IssuedAtMsClaim, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString()),
             new(ClaimTypes.Role, "admin"),
         };
         var jwt = new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(

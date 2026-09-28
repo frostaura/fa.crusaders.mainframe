@@ -205,15 +205,19 @@ public static class SseStream
         }
     }
 
-    private static async Task RequireAllowedAsync(SseGuard guard, CancellationToken ct)
+    /// <summary>
+    /// Throws <see cref="StreamRevokedException"/> when the guard says the reader may no longer
+    /// have the stream. Public for the one stream that pumps without <see cref="RunAsync(HttpContext, IRealtimeBus, RealtimeTopic, SseGuard, Func{Task}, CancellationToken)"/> (the wallet's).
+    /// </summary>
+    public static async Task RequireAllowedAsync(SseGuard guard, CancellationToken ct)
     {
         if (guard.StillAllowed is { } allowed && !await allowed(ct)) throw new StreamRevokedException();
     }
+}
 
-    /// <summary>The stream's reader no longer holds what opened it. Caught in <c>RunAsync</c> only.</summary>
-    private sealed class StreamRevokedException : Exception
-    {
-    }
+/// <summary>The stream's reader no longer holds what opened it. Caught where the stream is run, which then closes it.</summary>
+public sealed class StreamRevokedException : Exception
+{
 }
 
 /// <summary>

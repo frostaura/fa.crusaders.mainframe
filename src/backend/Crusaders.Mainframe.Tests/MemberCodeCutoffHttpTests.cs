@@ -131,4 +131,49 @@ public sealed class MemberCodeCutoffHttpTests(PostgresFixture pg)
 
         Assert.True(await club.ReadAsync(app, db => db.AccessCodes.IgnoreQueryFilters().Where(c => c.Id == mine.Id).Select(c => c.ExpiresAt).FirstAsync()) <= DateTimeOffset.UtcNow);
     }
+
+    /// <summary>
+    /// Refute round 1, #4: a club that rolls back out of <c>v1_only</c> gets its members' legacy
+    /// codes back — the ones the cut-off ended early and whose own expiry is still ahead. One whose
+    /// own expiry has since passed stays expired.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_rollback_out_of_v1_only_gives_back_the_codes_the_cut_off_ended()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        var club = await MemberCodeClub.SeedAsync(app, "restore");
+        var live = Code(club, club.Pam, AccessCodePurpose.MemberIdent);
+        var lapsed = Code(club, club.Olga, AccessCodePurpose.MemberIdent);
+        await club.WriteAsync(app, db => { db.AccessCodes.AddRange(live, lapsed); return Task.CompletedTask; });
+        await club.SetPhaseAsync(app, MemberCodeSettings.V1);
+        var admin = club.Member(app, club.AdminId, "admin");
+
+        async Task Put(string phase)
+        {
+            var body = JsonSerializer.SerializeToNode(new
+            {
+                sliceMinutes = 15, slicePriceCredits = 8, advanceBookingDays = 14, dayStartMinute = 0, dayEndMinute = 1440,
+                penaltyPct = 30, graceWindowMinutes = 5, penaltyWindowMinutes = 15, member_code_phase = phase,
+            });
+            Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync("/api/v1/admin/settings", body)).StatusCode);
+        }
+
+        await Put("v1_only");
+        Assert.Equal("not_recognised", (await MemberCodeClub.JsonAsync(await app.CreateClient().SendAsync(club.Gate(live.Code)))).GetProperty("reason").GetString());
+
+        // The other code's own expiry passes while the club is cut off.
+        await club.WriteAsync(app, async db =>
+            (await db.AccessCodes.IgnoreQueryFilters().FirstAsync(c => c.Id == lapsed.Id)).ExpiresAtBeforeCutoff = DateTimeOffset.UtcNow.AddMinutes(-1));
+
+        await Put("v1");
+
+        var rows = await club.ReadAsync(app, db => db.AccessCodes.IgnoreQueryFilters()
+            .Where(c => c.Id == live.Id || c.Id == lapsed.Id).ToDictionaryAsync(c => c.Id));
+        Assert.Equal(live.ExpiresAt.Storable(), rows[live.Id].ExpiresAt);
+        Assert.True(rows[lapsed.Id].ExpiresAt <= DateTimeOffset.UtcNow);
+        Assert.All(rows.Values, c => Assert.Null(c.CutoffExpiredAt));
+        Assert.True((await MemberCodeClub.JsonAsync(await app.CreateClient().SendAsync(club.Gate(live.Code)))).GetProperty("opened").GetBoolean());
+    }
 }

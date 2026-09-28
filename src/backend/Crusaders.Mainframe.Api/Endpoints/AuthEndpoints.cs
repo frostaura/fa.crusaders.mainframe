@@ -124,7 +124,7 @@ public static class AuthEndpoints
             var sub = ctx.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
                    ?? ctx.User.FindFirst("sub")?.Value;
             if (!Guid.TryParse(sub, out var userId)) return Results.Unauthorized();
-            var result = await auth.RefreshAsync(userId, SessionCutoff.IssuedAt(ctx.User), ct);
+            var result = await auth.RefreshAsync(userId, SessionEpochs.EpochOf(ctx.User), ct);
             return result switch
             {
                 LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin, must_change_password = ok.MustChangePassword }),

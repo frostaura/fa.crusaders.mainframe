@@ -318,4 +318,46 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg)
         Assert.Equal(200m - 8m, await club.BalanceAsync(app, club.Pam));
         Assert.Equal(1, await club.UsesAsync(app, MemberCodeUseClass.Money));
     }
+
+    // ---- Refute round 1, #8: a committed purchase keeps its use -------------------------------
+
+    private sealed class RefuseOnce(
+        MainframeDbContext db, BookingService bookings, TenantSettingsAccessor settings, ITenantContext tenant,
+        IEventBus bus, ActivationPlumbing plumbing) : CourtActivationService(db, bookings, settings, tenant, bus, plumbing)
+    {
+        public static int Remaining;
+
+        public override Task<ActivationResult> ActivateAsync(ActivationRequest request, CancellationToken ct) =>
+            Interlocked.Decrement(ref Remaining) >= 0
+                ? Task.FromResult<ActivationResult>(new ActivationResult.NotChargeable())
+                : base.ActivateAsync(request, ct);
+    }
+
+    /// <summary>
+    /// The purchase committed — the money moved, and moved back when the activation was refused —
+    /// under this code: the use table records acts, so the use is kept and the same code cannot
+    /// buy again inside its step.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_walk_up_voided_after_its_purchase_committed_keeps_its_use()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService()).WithWebHostBuilder(b => b.ConfigureServices(s =>
+        {
+            s.RemoveAll<CourtActivationService>();
+            s.AddScoped<CourtActivationService, RefuseOnce>();
+        }));
+        var club = await MemberCodeClub.SeedAsync(app, "walkvoid");
+        var code = club.Code(club.Pam);
+
+        RefuseOnce.Remaining = 1;
+        var refused = await app.CreateClient().SendAsync(club.WalkUp(code, court: 3, nonce: "f0f0f0f0f0f0f0f0"));
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        Assert.Equal(200m, await club.BalanceAsync(app, club.Pam));
+        Assert.Equal(1, await club.UsesAsync(app, MemberCodeUseClass.Money));
+
+        var again = await app.CreateClient().SendAsync(club.WalkUp(code, court: 4, nonce: "0f0f0f0f0f0f0f0f"));
+        Assert.Equal("""{"error":"code_used"}""", await again.Content.ReadAsStringAsync());
+    }
 }

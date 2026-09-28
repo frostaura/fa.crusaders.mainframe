@@ -349,9 +349,6 @@ public sealed record DoorClub(
             new("tenant_id", TenantId.ToString()),
             new("tenant_slug", Slug),
             new("purpose", "access"),
-            // What every server-minted token carries, so a session minted after a rotation's
-            // cut-off is told apart from one minted in the same second before it.
-            new(Crusaders.Mainframe.Api.Security.SessionCutoff.IssuedAtMsClaim, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString()),
         };
         if (role is not null) claims.Add(new Claim(ClaimTypes.Role, role));
 

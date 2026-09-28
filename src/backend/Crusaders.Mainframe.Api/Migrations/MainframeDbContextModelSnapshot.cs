@@ -40,7 +40,13 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("CutoffExpiredAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("ExpiresAtBeforeCutoff")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("Purpose")
@@ -1601,8 +1607,8 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<string>("PinHash")
                         .HasColumnType("text");
 
-                    b.Property<DateTimeOffset?>("SessionsValidAfter")
-                        .HasColumnType("timestamp with time zone");
+                    b.Property<int>("SessionEpoch")
+                        .HasColumnType("integer");
 
                     b.Property<string>("Status")
                         .IsRequired()

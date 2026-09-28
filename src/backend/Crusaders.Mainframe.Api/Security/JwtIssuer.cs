@@ -8,10 +8,11 @@ namespace Crusaders.Mainframe.Api.Security;
 
 public interface IJwtIssuer
 {
-    string IssueAccess(Guid userId, Guid tenantId, string tenantSlug, IEnumerable<string> roles);
+    /// <param name="sessionEpoch">The account's <c>SessionEpoch</c> the token is minted under — see <see cref="SessionEpochs"/>.</param>
+    string IssueAccess(Guid userId, Guid tenantId, string tenantSlug, IEnumerable<string> roles, int sessionEpoch);
 
     /// <summary>A purpose-scoped ticket carrying no roles — the wallet stream's, where the subject is the holder and there is nothing to be a role about.</summary>
-    string IssueOneTime(Guid userId, Guid tenantId, string tenantSlug, string purpose, TimeSpan ttl);
+    string IssueOneTime(Guid userId, Guid tenantId, string tenantSlug, TicketScope scope, int sessionEpoch);
 
     /// <summary>
     /// A purpose-scoped ticket that still says what the holder IS.
@@ -32,8 +33,11 @@ public interface IJwtIssuer
     /// </para>
     /// </summary>
     string IssueOneTime(
-        Guid userId, Guid tenantId, string tenantSlug, string purpose, TimeSpan ttl, IEnumerable<string> roles);
+        Guid userId, Guid tenantId, string tenantSlug, TicketScope scope, IEnumerable<string> roles, int sessionEpoch);
 }
+
+/// <summary>What a one-time ticket is for, and for how long: its purpose (the one path it opens) and its lifetime.</summary>
+public sealed record TicketScope(string Purpose, TimeSpan Ttl);
 
 public sealed class JwtIssuer : IJwtIssuer
 {
@@ -60,21 +64,25 @@ public sealed class JwtIssuer : IJwtIssuer
     private readonly IConfiguration _config;
     public JwtIssuer(IConfiguration config) => _config = config;
 
-    public string IssueAccess(Guid userId, Guid tenantId, string tenantSlug, IEnumerable<string> roles)
+    public string IssueAccess(Guid userId, Guid tenantId, string tenantSlug, IEnumerable<string> roles, int sessionEpoch)
     {
         var ttl = TimeSpan.FromMinutes(_config.GetValue("Jwt:AccessTokenExpiryMinutes", 15));
-        return Issue(userId, tenantId, tenantSlug, "access", ttl, roles);
+        return Issue(new TokenSubject(userId, tenantId, tenantSlug, sessionEpoch), "access", ttl, roles);
     }
 
-    public string IssueOneTime(Guid userId, Guid tenantId, string tenantSlug, string purpose, TimeSpan ttl)
-        => Issue(userId, tenantId, tenantSlug, purpose, ttl, Array.Empty<string>());
+    public string IssueOneTime(Guid userId, Guid tenantId, string tenantSlug, TicketScope scope, int sessionEpoch)
+        => Issue(new TokenSubject(userId, tenantId, tenantSlug, sessionEpoch), scope.Purpose, scope.Ttl, Array.Empty<string>());
 
     public string IssueOneTime(
-        Guid userId, Guid tenantId, string tenantSlug, string purpose, TimeSpan ttl, IEnumerable<string> roles)
-        => Issue(userId, tenantId, tenantSlug, purpose, ttl, roles);
+        Guid userId, Guid tenantId, string tenantSlug, TicketScope scope, IEnumerable<string> roles, int sessionEpoch)
+        => Issue(new TokenSubject(userId, tenantId, tenantSlug, sessionEpoch), scope.Purpose, scope.Ttl, roles);
 
-    private string Issue(Guid userId, Guid tenantId, string tenantSlug, string purpose, TimeSpan ttl, IEnumerable<string> roles)
+    /// <summary>Whose token it is, where, and under which session epoch.</summary>
+    private sealed record TokenSubject(Guid UserId, Guid TenantId, string TenantSlug, int SessionEpoch);
+
+    private string Issue(TokenSubject subject, string purpose, TimeSpan ttl, IEnumerable<string> roles)
     {
+        var (userId, tenantId, tenantSlug, sessionEpoch) = subject;
         var secret = _config["Jwt:Secret"] ?? throw new InvalidOperationException("Jwt:Secret missing");
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -86,9 +94,9 @@ public sealed class JwtIssuer : IJwtIssuer
             new("tenant_id", tenantId.ToString()),
             new("tenant_slug", tenantSlug),
             new("purpose", purpose),
-            // Milliseconds, so a rotation's cut-off can tell a token re-issued in the same
-            // second from one minted before it — see SessionCutoff.
-            new(SessionCutoff.IssuedAtMsClaim, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            // The session epoch it was minted under: a rotation raises the account's, and
+            // every token below it is refused — see SessionEpochs.
+            new(SessionEpochs.EpochClaim, SessionEpochs.Format(sessionEpoch)),
         };
         foreach (var role in roles) claims.Add(new Claim(ClaimTypes.Role, role));
 

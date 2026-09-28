@@ -74,7 +74,6 @@ public sealed class MemberAuthHttpTests
             new("tenant_id", tenantId.ToString()),
             new("tenant_slug", slug),
             new("purpose", "access"),
-            new(Crusaders.Mainframe.Api.Security.SessionCutoff.IssuedAtMsClaim, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString()),
         };
         if (role is not null) claims.Add(new Claim(ClaimTypes.Role, role));
 
@@ -253,15 +252,20 @@ public sealed class MemberAuthHttpTests
             tempPassword = doc.RootElement.GetProperty("temp_password").GetString()!;
         }
 
+        // The session the member signs in with. A token minted by hand here would carry no session
+        // epoch, and the admin's reset is a rotation that raised it (member-code §10).
+        string session;
         using (var anon = AnonymousClientFor(factory, club))
         {
             var login = await anon.PostAsJsonAsync("/api/v1/auth/login", new { email = club.MemberEmail, password = tempPassword });
             Assert.Equal(HttpStatusCode.OK, login.StatusCode);
             using var doc = JsonDocument.Parse(await login.Content.ReadAsStringAsync());
             Assert.True(doc.RootElement.GetProperty("must_change_password").GetBoolean());
+            session = doc.RootElement.GetProperty("access_token").GetString()!;
         }
 
-        using var member = ClientFor(factory, club, club.MemberId);
+        using var member = AnonymousClientFor(factory, club);
+        member.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", session);
 
         var blocked = await member.GetAsync("/api/v1/me/profile");
         Assert.Equal(HttpStatusCode.Forbidden, blocked.StatusCode);

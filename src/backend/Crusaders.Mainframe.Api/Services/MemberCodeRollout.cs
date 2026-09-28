@@ -122,11 +122,46 @@ public sealed class MemberCodeRollout
         if (db.Database.IsRelational())
         {
             await db.AccessCodes.Where(c => c.ExpiresAt > instant)
-                .ExecuteUpdateAsync(u => u.SetProperty(c => c.ExpiresAt, instant), ct);
+                .ExecuteUpdateAsync(u => u
+                    .SetProperty(c => c.ExpiresAtBeforeCutoff, c => c.ExpiresAt)
+                    .SetProperty(c => c.CutoffExpiredAt, instant)
+                    .SetProperty(c => c.ExpiresAt, instant), ct);
             return;
         }
 
-        foreach (var code in await db.AccessCodes.Where(c => c.ExpiresAt > instant).ToListAsync(ct)) code.ExpiresAt = instant;
+        foreach (var code in await db.AccessCodes.Where(c => c.ExpiresAt > instant).ToListAsync(ct))
+        {
+            code.ExpiresAtBeforeCutoff = code.ExpiresAt;
+            code.CutoffExpiredAt = instant;
+            code.ExpiresAt = instant;
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Undoes <see cref="ExpireLegacyCodesAsync"/> when an administrator moves the club back out of
+    /// <c>v1_only</c>: every code the cut-off ended whose own expiry is still ahead gets it back;
+    /// the rest stay expired. Every mark is cleared either way, so a later cut-off marks afresh.
+    /// </summary>
+    public static async Task RestoreLegacyCodesAsync(MainframeDbContext db, DateTimeOffset now, CancellationToken ct)
+    {
+        if (db.Database.IsRelational())
+        {
+            await db.AccessCodes.Where(c => c.CutoffExpiredAt != null && c.ExpiresAtBeforeCutoff > now)
+                .ExecuteUpdateAsync(u => u.SetProperty(c => c.ExpiresAt, c => c.ExpiresAtBeforeCutoff!.Value), ct);
+            await db.AccessCodes.Where(c => c.CutoffExpiredAt != null)
+                .ExecuteUpdateAsync(u => u
+                    .SetProperty(c => c.CutoffExpiredAt, (DateTimeOffset?)null)
+                    .SetProperty(c => c.ExpiresAtBeforeCutoff, (DateTimeOffset?)null), ct);
+            return;
+        }
+
+        foreach (var code in await db.AccessCodes.Where(c => c.CutoffExpiredAt != null).ToListAsync(ct))
+        {
+            if (code.ExpiresAtBeforeCutoff > now) code.ExpiresAt = code.ExpiresAtBeforeCutoff.Value;
+            code.CutoffExpiredAt = null;
+            code.ExpiresAtBeforeCutoff = null;
+        }
         await db.SaveChangesAsync(ct);
     }
 

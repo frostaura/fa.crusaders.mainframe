@@ -103,7 +103,7 @@ public static class WebAuthnEndpoints
 
             var roles = new List<string> { "user" };
             if (user.IsAdmin) roles.Add("admin");
-            var token = jwt.IssueAccess(user.Id, tenantRow.Id, tenantRow.Slug, roles);
+            var token = jwt.IssueAccess(user.Id, tenantRow.Id, tenantRow.Slug, roles, user.SessionEpoch);
 
             return Results.Ok(new { access_token = token, user_id = user.Id, is_admin = user.IsAdmin });
         });

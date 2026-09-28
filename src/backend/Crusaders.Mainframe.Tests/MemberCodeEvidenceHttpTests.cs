@@ -227,4 +227,53 @@ public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg)
         Assert.Single(await club.ReadAsync(app, db => db.AuditLogs.IgnoreQueryFilters()
             .Where(a => a.TenantId == club.TenantId && a.Action == "device.activation_unverifiable").ToListAsync()));
     }
+
+    /// <summary>
+    /// Refute round 1, #6: a broken counter makes the STEP unknowable, not the facts that need no
+    /// step. Another door holding the code's use is still a reuse, and an OFF that matched with an
+    /// ON that did not is still somebody holding K_day without S — both page every admin.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_clamped_event_still_raises_reuse_and_a_failed_on()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        var club = await MemberCodeClub.SeedAsync(app, "clampalarm");
+        var secondDoor = Guid.NewGuid().ToString("N")[..12];
+        await club.WriteAsync(app, db =>
+        {
+            db.Devices.Add(new Device
+            {
+                TenantId = club.TenantId, DeviceCode = "gate-2", Name = "Side door", Kind = DeviceKind.Gate,
+                Hardware = DeviceHardware.Esp32, MacAddress = secondDoor, GateKey = "side",
+            });
+            return Task.CompletedTask;
+        });
+        var device = app.CreateClient();
+        var code = club.Code(club.Pam);
+
+        await device.SendAsync(club.Events(club.DoorMac, 1, "gate_open", -1, code));
+        await device.SendAsync(club.Events(secondDoor, 1, "gate_open", -1, code, agoMs: -600_000));   // clamped
+        Assert.Contains("twice", Assert.Single(await ForgeryNoticesAsync(club, app)).PayloadJson);
+
+        await device.SendAsync(club.Events(club.DoorMac, 2, "gate_open", -1, club.ForgedOn(club.Olga), agoMs: -600_000));
+        Assert.Equal(2, (await ForgeryNoticesAsync(club, app)).Count);
+    }
+
+    /// <summary>A GENUINE code on a clamped event is still not attendance: the scan's time is unknown.</summary>
+    [SkippableFact]
+    public async Task A_genuine_code_on_a_clamped_event_is_not_attendance()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        var club = await MemberCodeClub.SeedAsync(app, "clampgen");
+        var booking = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: -5);
+
+        await app.CreateClient().SendAsync(club.Events(club.BoxMac, 1, "activation", 1, club.Code(club.Olga), agoMs: -600_000));
+
+        Assert.Null((await BookingAsync(club, app, booking.Id)).CheckedInAt);
+        Assert.Empty(await ForgeryNoticesAsync(club, app));
+    }
 }

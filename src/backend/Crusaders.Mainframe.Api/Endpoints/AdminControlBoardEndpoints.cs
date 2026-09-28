@@ -64,7 +64,7 @@ public static class AdminControlBoardEndpoints
         // able to read the club's whole evening with it.
         var ticket = jwt.IssueOneTime(
             userId.Value, tenant.TenantId, tenant.TenantSlug,
-            TokenPurposes.ControlBoardStream, TokenPurposes.WalletStreamTicketTtl, ["admin"]);
+            new TicketScope(TokenPurposes.ControlBoardStream, TokenPurposes.WalletStreamTicketTtl), ["admin"], SessionEpochs.EpochOf(ctx.User));
 
         return Results.Ok(new
         {

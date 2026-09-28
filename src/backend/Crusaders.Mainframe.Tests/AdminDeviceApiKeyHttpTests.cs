@@ -64,7 +64,6 @@ public sealed class AdminDeviceApiKeyHttpTests
             new("tenant_id", s.TenantId.ToString()),
             new("tenant_slug", s.Slug),
             new("purpose", "access"),
-            new(Crusaders.Mainframe.Api.Security.SessionCutoff.IssuedAtMsClaim, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString()),
         };
         if (admin) claims.Add(new Claim(ClaimTypes.Role, "admin"));
 

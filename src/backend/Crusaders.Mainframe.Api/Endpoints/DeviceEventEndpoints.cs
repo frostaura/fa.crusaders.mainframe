@@ -958,30 +958,42 @@ public static class DeviceEventEndpoints
         var settings = await services.Settings.GetAsync(ct);
         var evidence = await services.MemberCodes.CheckEvidenceAsync(e.Subject!.Trim(), time.OccurredAt, settings, ct);
 
+        var outcomeKind = useClass == MemberCodeUseClass.Door ? GateOpenKind : ActivationKind;
+
+        // A clamped event time is not a time: the box's counter was broken, so the step the code
+        // was shown at is unknown. What that makes UNKNOWABLE is recorded `unverifiable` — never
+        // attendance, never money. What it does not: another board holding this code's use is a
+        // reuse whatever the clock says, and an OFF that matched with an ON that did not is
+        // somebody holding K_day without S. Those still raise the alarm (refuted 2026-09-28:
+        // suppressing them let a copied key or a double use through on a broken counter).
+        var clamped = time.ClampedFrom is not null;
+
         if (evidence is MemberCodeEvidence.Genuine genuine)
         {
             var claim = await services.MemberCodes.TryClaimAsync(genuine.Match, useClass, device.Id, kind, ct);
-            if (claim is not null) return new V1Evidence(genuine.Match.UserId, null);
 
             // Taken — but by whom? The SAME board holding this code's use in this class is the
             // same act, not a second one: a box that got an online grant and also queued its
             // roster fallback (the answer was lost on the way back), or this very upload retried
-            // after a failure that left its claim behind. That is a receipt and nothing else —
-            // the attendance is already stamped, and paging every admin about a member's own
-            // single scan was the defect. Only a DIFFERENT board is one code used twice.
-            var taken = await services.MemberCodes.FindUseAsync(genuine.Match, useClass, ct);
-            if (taken is not null && taken.DeviceId == device.Id) return new V1Evidence(genuine.Match.UserId, null);
+            // after a failure that left its claim behind. Only a DIFFERENT board is one code used
+            // twice. Safe to exempt the same board because every device refuses a code it has
+            // already acted on — online or offline — for the rest of its window
+            // (memcode::ReplayRing, recordOnlineUse), so a board cannot act on one code twice and
+            // its second upload of it is the same act.
+            var same = claim is not null
+                       || (await services.MemberCodes.FindUseAsync(genuine.Match, useClass, ct))?.DeviceId == device.Id;
+            if (same)
+            {
+                return clamped
+                    ? new V1Evidence(Guid.Empty, UnverifiableOutcome(outcomeKind, genuine.Match.UserId))
+                    : new V1Evidence(genuine.Match.UserId, null);
+            }
             evidence = new MemberCodeEvidence.Forged("reused", genuine.Match.UserId, genuine.Match.Ref);
         }
 
-        // A clamped event time is not a time: the box's counter was broken, so the step the code
-        // was shown at is unknown and a check around the upload instant proves nothing either
-        // way. Recorded as unverifiable — not attendance, no forgery alarm on a guess.
-        if (time.ClampedFrom is not null)
+        if (clamped && evidence is MemberCodeEvidence.Forged { Why: "off_mismatch" or "malformed" } unknowable)
         {
-            var who = evidence is MemberCodeEvidence.Forged { UserId: { } u } ? u : (Guid?)null;
-            return new V1Evidence(Guid.Empty, new ActivationOutcome(
-                ActivationOutcome.Unverifiable, null, useClass == MemberCodeUseClass.Door ? GateOpenKind : ActivationKind, SubjectUserId: who));
+            return new V1Evidence(Guid.Empty, UnverifiableOutcome(outcomeKind, unknowable.UserId));
         }
 
         var forged = (MemberCodeEvidence.Forged)evidence;
@@ -989,9 +1001,14 @@ public static class DeviceEventEndpoints
             ? await services.Db.Memberships.AsNoTracking().Where(m => m.UserId == uid).Select(m => m.FullName).FirstOrDefaultAsync(ct)
             : null;
         var notice = AdminNotices.CodeForgerySuspected(device, time.BootId, e.Seq, name, forged.UserId, forged.Why);
-        var outcomeKind = useClass == MemberCodeUseClass.Door ? GateOpenKind : ActivationKind;
         return new V1Evidence(Guid.Empty, new ActivationOutcome(
             ActivationOutcome.ForgerySuspected, null, outcomeKind, SubjectUserId: forged.UserId, Notice: notice));
+    }
+
+    /// <summary>A v1 event the server can neither verify nor refute: receipted, not attendance, no alarm.</summary>
+    private static ActivationOutcome UnverifiableOutcome(string kind, Guid? who)
+    {
+        return new ActivationOutcome(ActivationOutcome.Unverifiable, null, kind, SubjectUserId: who);
     }
 
     /// <summary>
@@ -1604,7 +1621,9 @@ public static class DeviceEventEndpoints
         }
         catch
         {
-            await services.MemberCodes.ReleaseAsync(claim);
+            // Given back only if the purchase did NOT commit: a throw after the charge's save
+            // (a mail, a publish) is a sale made, and the use it stands for stays taken.
+            if (!await PurchaseCommittedAsync(db, reference)) await services.MemberCodes.ReleaseAsync(claim);
             throw;
         }
 
@@ -1643,8 +1662,9 @@ public static class DeviceEventEndpoints
             // court nobody can now buy, it would be settled as a no-show at the grace deadline
             // and carry the club's penalty — for a member the API itself refused. No mail was
             // sent above, so nothing has yet told them a lie about it either.
+            // The use is KEPT: the purchase committed — money moved, and moved back — under this
+            // code, and the use table records acts, not outcomes. Refunded or not, it was one.
             await bookings.VoidUnstartedWalkUpAsync(ok.Booking, VoidReference(reference), ct);
-            await services.MemberCodes.ReleaseAsync(claim);
             return Results.Conflict(new { error = "activation_refused" });
         }
 
@@ -1741,6 +1761,12 @@ public static class DeviceEventEndpoints
     /// member the desk.
     /// </para>
     /// </summary>
+    /// <summary>Whether a walk-up purchase under this reference committed — read fresh, outside the request's token.</summary>
+    private static Task<bool> PurchaseCommittedAsync(MainframeDbContext db, string reference)
+    {
+        return db.LedgerEntries.AsNoTracking().AnyAsync(l => l.ExternalReference == reference);
+    }
+
     private static async Task<IResult?> ReplayAsync(
         string reference, WalkUpRequest req, WalkUpServices services, CancellationToken ct)
     {

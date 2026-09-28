@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using Crusaders.Mainframe.Api.Domain;
-using Crusaders.Mainframe.Api.Security;
 using Crusaders.Mainframe.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -54,10 +53,10 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg)
     /// <summary>
     /// The middleware answers from a fifteen-second cache; enrolment and refresh must not, because
     /// one hands out the secret and the other mints a token that would pass every later check.
-    /// The cut-off is written straight to the row here, so nothing evicted the cache.
+    /// The epoch is raised straight on the row here, so nothing evicted the cache.
     /// </summary>
     [SkippableFact]
-    public async Task Enrolment_and_refresh_read_the_cut_off_from_the_row_not_the_cache()
+    public async Task Enrolment_and_refresh_read_the_epoch_from_the_row_not_the_cache()
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
         await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
@@ -67,8 +66,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg)
         var phone = club.Bearer(app, await club.LoginAsync(app, "olga"));
         Assert.Equal(HttpStatusCode.OK, (await phone.GetAsync("/api/v1/me/code")).StatusCode); // warms the cache
 
-        await club.WriteAsync(app, async db =>
-            (await db.Users.IgnoreQueryFilters().FirstAsync(u => u.Id == club.Olga)).SessionsValidAfter = SessionCutoff.StampNow().AddMilliseconds(1));
+        await club.WriteAsync(app, async db => (await db.Users.IgnoreQueryFilters().FirstAsync(u => u.Id == club.Olga)).SessionEpoch = 1);
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await phone.PostAsync("/api/v1/me/code/enrol", null)).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await phone.PostAsync("/api/v1/auth/refresh", null)).StatusCode);
@@ -77,8 +75,59 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg)
         using var scope = app.Services.CreateScope();
         var auth = scope.ServiceProvider.GetRequiredService<AuthService>();
         scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Multitenancy.ITenantContext>().Set(club.TenantId, club.Slug);
-        Assert.IsType<LoginResult.InvalidCredentials>(await auth.RefreshAsync(club.Olga, DateTimeOffset.UtcNow.AddMinutes(-1), default));
-        Assert.IsType<LoginResult.Ok>(await auth.RefreshAsync(club.Olga, DateTimeOffset.UtcNow.AddSeconds(1), default));
+        Assert.IsType<LoginResult.InvalidCredentials>(await auth.RefreshAsync(club.Olga, 0, default));
+        Assert.IsType<LoginResult.Ok>(await auth.RefreshAsync(club.Olga, 1, default));
+    }
+
+    /// <summary>
+    /// Refuted 2026-09-28 against the time cut-off: a refresh landing inside a rotation — after it
+    /// started, before it committed — read no cut-off and minted a token that survived it, which
+    /// then enrolled for the new secret. The epoch is raised the moment the rotation begins, so a
+    /// refresh or an enrolment inside that window is refused, and a token refreshed just BEFORE it
+    /// dies with the rest.
+    /// </summary>
+    [SkippableFact]
+    public async Task A_refresh_inside_a_rotation_in_flight_mints_nothing_that_survives_it()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        var club = await MemberCodeClub.SeedAsync(app, "refrace");
+
+        var phone = club.Bearer(app, await club.LoginAsync(app, "olga"));
+        var refreshedBefore = club.Bearer(app, (await MemberCodeClub.JsonAsync(await phone.PostAsync("/api/v1/auth/refresh", null)))
+            .GetProperty("access_token").GetString()!);
+
+        // The rotation begins — and has NOT committed its new generation.
+        using var rotation = app.Services.CreateScope();
+        rotation.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Multitenancy.ITenantContext>().Set(club.TenantId, club.Slug);
+        var codes = rotation.ServiceProvider.GetRequiredService<MemberCodeService>();
+        Assert.True(await codes.StageRotationAsync(club.Olga, club.AdminId, "admin_reset", default));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await phone.PostAsync("/api/v1/auth/refresh", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await phone.PostAsync("/api/v1/me/code/enrol", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await refreshedBefore.GetAsync("/api/v1/me/code")).StatusCode);
+
+        // The rotation commits; still nothing of the old session survives, and a new sign-in enrols the new generation.
+        await rotation.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Persistence.MainframeDbContext>().SaveChangesAsync();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await refreshedBefore.PostAsync("/api/v1/me/code/enrol", null)).StatusCode);
+        var fresh = club.Bearer(app, await club.LoginAsync(app, "olga"));
+        Assert.Equal(2, (await MemberCodeClub.JsonAsync(await fresh.PostAsync("/api/v1/me/code/enrol", null))).GetProperty("generation").GetInt32());
+    }
+
+    /// <summary>A token that names no epoch — minted before epochs existed — is epoch 0: good until the first rotation, dead after it.</summary>
+    [SkippableFact]
+    public async Task A_token_with_no_epoch_is_epoch_zero()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        var club = await MemberCodeClub.SeedAsync(app, "epochzero");
+
+        var legacy = club.Member(app, club.Pam);   // hand-minted: no epoch claim
+        Assert.Equal(HttpStatusCode.OK, (await legacy.GetAsync("/api/v1/me/code")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await legacy.PostAsync("/api/v1/me/sessions/revoke-all", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await legacy.GetAsync("/api/v1/me/code")).StatusCode);
     }
 
     [SkippableFact]
@@ -119,7 +168,9 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg)
         var here = club.Bearer(app, await club.LoginAsync(app, "pam"));
         var elsewhere = club.Bearer(app, await club.LoginAsync(app, "pam"));
 
-        Assert.Equal(HttpStatusCode.NoContent, (await here.PostAsync("/api/v1/me/sessions/revoke-all", null)).StatusCode);
+        var revoked = await here.PostAsync("/api/v1/me/sessions/revoke-all", null);
+        Assert.Equal(HttpStatusCode.OK, revoked.StatusCode);
+        Assert.Equal("""{"signed_out":true,"passkeys_revoked":false,"passkeys_removed":0}""", await revoked.Content.ReadAsStringAsync());
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await here.GetAsync("/api/v1/me/code")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await elsewhere.GetAsync("/api/v1/me/code")).StatusCode);
@@ -137,7 +188,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg)
         var anonymous = app.CreateClient();
         anonymous.DefaultRequestHeaders.Host = $"{club.Slug}.crusaders.test";
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsync("/api/v1/me/sessions/revoke-all", null)).StatusCode);
-        Assert.Null(await club.ReadAsync(app, db => db.Users.IgnoreQueryFilters().Where(u => u.Id == club.Olga).Select(u => u.SessionsValidAfter).FirstAsync()));
+        Assert.Equal(0, await club.ReadAsync(app, db => db.Users.IgnoreQueryFilters().Where(u => u.Id == club.Olga).Select(u => u.SessionEpoch).FirstAsync()));
     }
 
     [SkippableFact]
@@ -155,5 +206,111 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg)
         Assert.Equal(HttpStatusCode.OK, suspend.StatusCode);
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await sid.GetAsync("/api/v1/me/code")).StatusCode);
+    }
+
+    // ---- Passkeys (refute round 1, #2) ----------------------------------------------------------
+
+    private static Task AddPasskeyAsync(MemberCodeClub club, Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> app, Guid user) =>
+        club.WriteAsync(app, db =>
+        {
+            db.WebAuthnCredentials.Add(new WebAuthnCredential
+            {
+                TenantId = club.TenantId, UserId = user, CredentialId = Guid.NewGuid().ToByteArray(),
+                PublicKey = [1, 2, 3], UserHandle = user.ToByteArray(),
+            });
+            return Task.CompletedTask;
+        });
+
+    private static Task<int> PasskeysAsync(MemberCodeClub club, Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> app, Guid user) =>
+        club.ReadAsync(app, db => db.WebAuthnCredentials.IgnoreQueryFilters().CountAsync(c => c.UserId == user));
+
+    /// <summary>
+    /// The lost phone's passkey would sign straight back in under the new epoch and enrol for the
+    /// new secret, so the desk's reset removes the member's passkeys unless told not to — and says so.
+    /// </summary>
+    [SkippableFact]
+    public async Task The_desks_reset_removes_passkeys_by_default_and_says_so()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        var club = await MemberCodeClub.SeedAsync(app, "resetpk");
+        await AddPasskeyAsync(club, app, club.Olga);
+        await AddPasskeyAsync(club, app, club.Olga);
+        await AddPasskeyAsync(club, app, club.Pam);
+        var admin = club.Member(app, club.AdminId, "admin");
+
+        var reset = await MemberCodeClub.JsonAsync(await admin.PostAsync($"/api/v1/admin/members/{club.OlgaMembership}/code/reset", null));
+        Assert.True(reset.GetProperty("passkeys_revoked").GetBoolean());
+        Assert.Equal(2, reset.GetProperty("passkeys_removed").GetInt32());
+        Assert.Equal(0, await PasskeysAsync(club, app, club.Olga));
+        Assert.Equal(1, await PasskeysAsync(club, app, club.Pam));
+        var audit = await club.ReadAsync(app, db => db.AuditLogs.IgnoreQueryFilters()
+            .SingleAsync(a => a.TenantId == club.TenantId && a.Action == MemberCodeService.PasskeysRevokedAction));
+        Assert.Equal(club.Olga, audit.SubjectUserId);
+        Assert.Equal(club.AdminId, audit.ActorUserId);
+
+        await AddPasskeyAsync(club, app, club.Olga);
+        var kept = await MemberCodeClub.JsonAsync(await admin.PostAsJsonAsync($"/api/v1/admin/members/{club.OlgaMembership}/code/reset", new { revoke_passkeys = false }));
+        Assert.False(kept.GetProperty("passkeys_revoked").GetBoolean());
+        Assert.Equal(1, await PasskeysAsync(club, app, club.Olga));
+    }
+
+    [SkippableFact]
+    public async Task Sign_out_everywhere_keeps_passkeys_unless_asked()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        var club = await MemberCodeClub.SeedAsync(app, "selfpk");
+        await AddPasskeyAsync(club, app, club.Pam);
+
+        await club.Bearer(app, await club.LoginAsync(app, "pam")).PostAsync("/api/v1/me/sessions/revoke-all", null);
+        Assert.Equal(1, await PasskeysAsync(club, app, club.Pam));
+
+        var asked = await MemberCodeClub.JsonAsync(await club.Bearer(app, await club.LoginAsync(app, "pam"))
+            .PostAsJsonAsync("/api/v1/me/sessions/revoke-all", new { revoke_passkeys = true }));
+        Assert.True(asked.GetProperty("passkeys_revoked").GetBoolean());
+        Assert.Equal(1, asked.GetProperty("passkeys_removed").GetInt32());
+        Assert.Equal(0, await PasskeysAsync(club, app, club.Pam));
+    }
+
+    // ---- Streams (refute round 1, #5) -----------------------------------------------------------
+
+    /// <summary>A wallet stream opened under a session a rotation then ends closes on its next frame.</summary>
+    [SkippableFact]
+    public async Task An_open_wallet_stream_closes_when_a_rotation_ends_its_session()
+    {
+        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
+        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        var club = await MemberCodeClub.SeedAsync(app, "streamcut");
+        var session = club.Bearer(app, await club.LoginAsync(app, "olga"));
+        var ticket = (await MemberCodeClub.JsonAsync(await session.PostAsync("/api/v1/wallet/stream-ticket", null))).GetProperty("ticket").GetString()!;
+
+        Crusaders.Mainframe.Api.Endpoints.WalletEndpoints.KeepAliveOverride = TimeSpan.FromMilliseconds(300);
+        try
+        {
+            var client = app.CreateClient();
+            client.DefaultRequestHeaders.Host = $"{club.Slug}.crusaders.test";
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/wallet/stream?ticket={Uri.EscapeDataString(ticket)}");
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(cts.Token));
+            Assert.StartsWith("data:", await reader.ReadLineAsync(cts.Token));
+
+            var admin = club.Member(app, club.AdminId, "admin");
+            Assert.Equal(HttpStatusCode.OK, (await admin.PostAsync($"/api/v1/admin/members/{club.OlgaMembership}/code/reset", null)).StatusCode);
+
+            // The stream ENDS (null) — it does not ping on for ever.
+            string? line;
+            while ((line = await reader.ReadLineAsync(cts.Token)) is not null) { }
+            Assert.Null(line);
+        }
+        finally
+        {
+            Crusaders.Mainframe.Api.Endpoints.WalletEndpoints.KeepAliveOverride = null;
+        }
     }
 }
