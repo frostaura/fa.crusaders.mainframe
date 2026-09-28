@@ -108,18 +108,30 @@ only when the organiser's **coverage** for it pays for it (`LedgerService.GetCov
 `ShareHolds.CoverageAsync`):
 
 ```
-coverage(X, s) = min( balance ,  held(X) + max(0, balance − held(all) − owed back to returns stamped BEFORE s) )
+earmark(b)  = held(b), or 0 for a game cancelled after check-in (S4)
+need(b)     = what the returns stamped BEFORE s ask of booking b
+drawn       = Σ min(need(b), earmark(b))        excess = Σ max(0, need(b) − earmark(b))
+
+coverage(X, s) = min( max(0, earmark(X) − need(X)) ,  max(0, min(balance, held(all)) − drawn) )
+               + max(0, balance − held(all) − excess)
 ```
 
 - **Held money is earmarked.** What the organiser holds for X is X's partners' money, so a return
-  up to X's own hold always covers: an ordinary return — a withdrawal, a lowered share — never
-  waits behind a return waiting on another game.
+  up to X's own hold covers: an ordinary return — a withdrawal, a lowered share — never waits
+  behind a return waiting on another game.
 - **Waiting returns queue, first come first served** by `ReturnPendingSince`, then participant id;
-  a return not yet stamped counts as the newest. The free balance goes to the oldest first, so two
-  waiting returns no longer block each other when it covers one.
-- **Never more than the balance.** An earmark is only as good as the money behind it: a desk
-  debit can take a balance below its holds, and a game cancelled after check-in "holds" exactly the
-  return being asked about although that share was spendable a moment before.
+  a return not yet stamped counts as the newest. An earlier return draws first on its own game's
+  earmark and then on the free balance; a later one gets only what is left. That holds even when
+  games still hold money and a desk debit has left the holds underwater (only `min(balance,
+  held(all))` stands behind them) — the older return is paid first, whatever order the reconciles
+  run in. Retries run in the same order (seats within a booking, the sweep, the credit hook) so the
+  receipts read that way; the arithmetic, not the order, is what guarantees it.
+- **A game cancelled after check-in earmarks nothing.** Every share on it stays owed in full, so it
+  held nothing and the organiser could spend it; its "hold" appears only once a return falls due on
+  it — the very return being asked about. Its returns are payable from the free balance only (and
+  so is the admin pre-check); the hold is still set aside from spending.
+- **Never more than the balance.** Coverage cannot exceed the balance, so no return takes an
+  organiser below zero without the desk's named overdraft.
 
 The rule is keyed on coverage, never on the deadline: a hold released at the deadline and spent,
 or a share a cancellation after check-in (S4) released at once and the organiser spent, is not
@@ -142,8 +154,12 @@ covered, before the deadline or after. Spend checks, by contrast, set aside EVER
   (`ShareSweep.CatchUpAsync`) — chosen in SQL from seats whose target is certainly nothing (off the
   game, settled by hand, or on a game cancelled before check-in) whose member has still paid
   something net, so it is normally empty. A club whose catch-up fails is tried again on the next
-  pass. (No-show and cancelled-after-check-in returns follow the organiser's `Owed` through the
-  settlement hook and are not re-read on every start.)
+  pass, and its minute sweep runs anyway. (No-show and cancelled-after-check-in returns follow the
+  organiser's `Owed` through the settlement hook and are not re-read on every start.)
+- **a failed reconcile is remembered**: when the post-settlement hook, or the sweep on one booking,
+  throws, the booking is marked `ShareReconcileDueAt` (indexed) and the next minute sweep
+  reconciles it however old it is; a reconcile that succeeds clears it. One booking's failure is
+  logged and the rest of the club's sweep — and every other booking in the hook — goes on.
 - a return starting or stopping waiting moves the organiser's spendable without a ledger row, so
   their live wallet gets a `balance` frame with `delta_credits` 0 and the reason `share_set_aside`.
 

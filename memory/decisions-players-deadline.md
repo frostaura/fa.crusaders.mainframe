@@ -1,14 +1,14 @@
 ---
 name: crusaders-mainframe-decisions-players-deadline
-description: "The share deadline is frozen per booking; a return posts only when the organiser's coverage pays for it — else it waits, set aside from spendable, told once, retried on credit, sweep and start-up."
+description: "The share deadline is frozen per booking; a return posts only when coverage pays for it — its own game's earmark (none for S4) plus free balance, first come first served."
 type: decision
 last_verified: 2026-09-28
 ---
 
 # Live decisions — players: the deadline, and when money may go back
 
-Spec: `docs/specs/players-and-splits.md` §3, §3a, §7. From the three refuter rounds on the review
-fixes, 2026-09-28, pinned in `PlayersRefute{,2,3,4}HttpTests`.
+Spec: `docs/specs/players-and-splits.md` §3, §3a, §7. From the refuter rounds on the review fixes,
+2026-09-28, pinned in `PlayersRefute{,2,3,4,5}HttpTests`. How a return WAITS: `decisions-players-returns.md`.
 
 - **The deadline is frozen per booking** — `bookings.ShareDeadlineAt`, stamped when a booking
   first gets players from the setting at that moment; everything (open, hold, lapse, reminders,
@@ -25,37 +25,11 @@ fixes, 2026-09-28, pinned in `PlayersRefute{,2,3,4}HttpTests`.
 - **Admin remove / settle-outside refuse an uncovered hand-back** without `allowNegativeBalance`
   (`400 overdraft_not_authorised {return_credits, covered_credits}`), whatever the deadline; with
   it, on the change record (`overdraft_authorised`). The ledger holds the same line in a race.
-- **An uncovered return WAITS rather than overdraw** — chosen over refusing so no settlement hook
-  or sweep fails with nobody to answer. It is stamped `ReturnPendingSince` (indexed); both sides
-  are told ONCE (`players.return_waiting`, mailed, not urgent — stamping null→set is the "once");
-  the sweep selects stamped seats however old (the 7-day window stranded them); and any credit to
-  the organiser (not a share transfer) retries at once via `ShareHook.AfterCreditAsync` after the
-  commit — one mechanism covering top-up ITN, desk adjustment and refunds, rather than call sites.
-  *Cost:* a partner's refund can wait on the organiser's next credit. The desk-side admin notice
-  kind was optional and was NOT added: the partner and organiser mails say it; the admin feed does not.
-- **The lapse and reminder reads are bounded** to bookings whose deadline passed within a week /
-  is still ahead (indexed on the stamp); they had read every accepted seat in history every minute.
-- **A waiting return is SET ASIDE from spendable** (round 3, orchestrator decision): spendable =
-  balance − held − owed back, in every spend check; reported as `owed_back_credits`, apart from
-  `held_credits` (going, not might-go; no release date). Posting stays all-or-nothing, so short
-  credit accumulates until it covers the return. *Why:* otherwise each short top-up was spendable
-  on a new court and the partner waited for ever. A booking's own hold is not counted twice.
-- **Nothing strands after an outage** (round 3): the worker's first pass after a start reconciles
-  every booking a return may have fallen due on, any age (`CatchUpAsync`, once — not every minute,
-  so the minute sweep stays bounded); the lapse sweep takes every still-invited overdue seat, any age
-  (partial index `IX_booking_participants_open_invites`). Accepted short seats past the week are
-  closed by the clock anyway; only their lapse notice would be missed.
-- **Return chaining is not recursive — accepted** (round 3): a share-transfer credit does not retry
-  the receiver's own waiting returns; the next sweep does. Bounds retries to one level; costs a minute.
-- **Admin remove / settle-outside answer `return_waiting` + `return_credits`** (round 3): the
-  unlocked pre-check can lose a race to a spend; the desk is told the money did not move.
-- **Coverage earmarks held money and queues waiting returns** (round 4, orchestrator decision):
-  coverage(X, s) = min(balance, held(X) + max(0, balance − held(all) − owed back stamped before s)).
-  *Why:* round 3 subtracted ALL owed-back, so an ordinary withdrawal waited behind an unrelated
-  waiting return and two waiting returns blocked each other. First come first served by stamp,
-  then participant id; unstamped is newest. Spend checks still subtract all of it. *The min(balance)
-  cap* (found fixing it): a desk debit below the holds, or an S4 game whose "hold" is the very
-  return asked about, must never pay out money that is not there.
-- **Catch-up is SQL-bounded and per club** (round 4): only seats whose target is surely 0 with
-  money still net paid; a failed club is retried next pass. No-show / S4 returns follow `Owed`.
-- **Stamping or clearing a wait publishes a wallet frame** (reason `share_set_aside`, delta 0).
+- **Coverage earmarks held money and queues waiting returns** (rounds 4–5, orchestrator): a
+  return may use its own game's earmark (less earlier returns' need there) only as far as money
+  behind the holds is left after earlier returns' draws, plus free balance after earlier excess.
+  *Why:* round 3 made ordinary withdrawals wait; round 4's sum let a later return claim an
+  earmark an earlier one needed when holds were underwater. FCFS by stamp, then id; unstamped is
+  newest; retries run in that order too (determinism only — the arithmetic is the guarantee, so
+  an ordering mutant survives by design). **S4 games earmark nothing**: their "hold" is the return
+  asked about, spent before. Spend checks still subtract all owed-back.
