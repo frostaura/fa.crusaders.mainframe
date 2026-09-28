@@ -1,4 +1,13 @@
 import "@testing-library/jest-dom/vitest";
+import { configure } from "@testing-library/react";
+
+// findBy* and waitFor give up after 3 s rather than Testing Library's 1 s. A passing assertion
+// returns the moment it holds, so a quiet run is no slower; what the margin buys is a run that
+// shares the machine — vitest's own workers, a parallel backend suite, another agent's build —
+// where a page that settles in 200 ms can take over a second, and a 1 s wait fails a test with
+// nothing wrong (settings-door-validation did, 2026-09-28). No test here relies on a wait
+// timing out.
+configure({ asyncUtilTimeout: 3_000 });
 
 // jsdom 28 delegates localStorage to Node's built-in, which is unavailable without
 // --localstorage-file; back it with a plain in-memory store so tests get a working one.

@@ -10,6 +10,15 @@ import {
 import { forgetClubZone } from "../lib/clubZone";
 
 /**
+ * A longer per-test timeout than the 5-second default, for this file only. Each case drives
+ * the schedule editor and its day picker in jsdom — 1-2 s on a quiet machine,
+ * past 5 s when the suite shares the machine with a parallel backend run or another build
+ * (measured 2026-09-28: seven AdminSchedules cases timed out that way with nothing wrong).
+ * The assertions are untouched; only the time allowed to render them is.
+ */
+vi.setConfig({ testTimeout: 20_000 });
+
+/**
  * One repeating booking: what it holds, what has been changed about it, and the two ways to
  * change it.
  *

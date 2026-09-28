@@ -10,6 +10,16 @@ import {
 import { forgetClubZone } from "../lib/clubZone";
 
 /**
+ * A longer per-test timeout than the 5-second default, for this file only. Each case opens
+ * the editor, ticks courts and walks the day picker month by month in jsdom — 1-2 s on a quiet
+ * machine,
+ * past 5 s when the suite shares the machine with a parallel backend run or another build
+ * (measured 2026-09-28: seven AdminSchedules cases timed out that way with nothing wrong).
+ * The assertions are untouched; only the time allowed to render them is.
+ */
+vi.setConfig({ testTimeout: 20_000 });
+
+/**
  * Repeating bookings — the list, and the create flow up to and including the clash check.
  *
  * <p>
@@ -142,8 +152,10 @@ describe("creating one", () => {
 
   async function fillTheSentence() {
     await toggleChoices(/^Courts: /, ["Court 1", "Court 2", "Court 3"]);
-    await userEvent.type(screen.getByLabelText("What members see on the grid"), "League night");
-    await userEvent.type(screen.getByLabelText("A name for this repeating booking, for admins"), "Tuesday league");
+    // Set, not typed: nothing here is about keystrokes, and user-event re-renders this whole
+    // form once per character (see memory/gotchas-frontend.md on its typing path under jsdom).
+    fireEvent.change(screen.getByLabelText("What members see on the grid"), { target: { value: "League night" } });
+    fireEvent.change(screen.getByLabelText("A name for this repeating booking, for admins"), { target: { value: "Tuesday league" } });
     await pickDay(/^First date/, "2026-10-06");
     await pickDay(/^Last date/, "2026-12-15");
   }
