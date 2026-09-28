@@ -265,6 +265,46 @@ public static class AdminNotices
         };
     }
 
+    /// <summary>
+    /// A code a board accepted offline that the server cannot reproduce (member-code §7). One
+    /// notice per event: the dedupe key is the board's boot and sequence, so a re-upload of the same
+    /// batch raises nothing twice.
+    /// </summary>
+    public static AdminNotice CodeForgerySuspected(Device device, long bootId, long seq, string? memberName, Guid? memberId, string why)
+    {
+        var detail = why switch
+        {
+            "on_mismatch" => "the offline half verified and the online half did not — the board's day keys may have been copied",
+            "reused" => "the same code was acted on twice for the same kind of thing",
+            "malformed" => "the board reported a code that is not a member code at all",
+            _ => "the board accepted a code the club cannot reproduce — a firmware fault or tampering",
+        };
+        return new AdminNotice(
+            AdminEventCatalogue.CodeForgerySuspected,
+            $"{AdminEventCatalogue.CodeForgerySuspected}:{device.Id:N}:{bootId.ToString(CultureInfo.InvariantCulture)}:{seq.ToString(CultureInfo.InvariantCulture)}",
+            new ForgeryPayload(device.DeviceCode, memberName, detail),
+            $"Suspected forged code at {device.DeviceCode}",
+            "/admin/devices")
+        {
+            SubjectUserId = memberId,
+            CooldownScope = device.Id.ToString("N"),
+        };
+    }
+
+    /// <summary>A board that reported without <c>codes:m1</c> after the cut-over (member-code §8). Once per board per firmware version.</summary>
+    public static AdminNotice CodesCapabilityLost(Device device, string phase)
+    {
+        return new AdminNotice(
+            AdminEventCatalogue.CodesCapabilityLost,
+            $"{AdminEventCatalogue.CodesCapabilityLost}:{device.Id:N}:{device.RunningVersion ?? "unknown"}",
+            new CodesCapabilityLostPayload(device.Id, device.Name, device.DeviceCode, device.RunningVersion, phase),
+            $"{device.DeviceCode} is running firmware without member codes",
+            "/admin/devices")
+        {
+            CooldownScope = device.Id.ToString("N"),
+        };
+    }
+
     private static string Iso(DateOnly d) => d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
     /// <summary>A reason code as words for a headline: <c>amount_mismatch</c> → "amount mismatch".</summary>

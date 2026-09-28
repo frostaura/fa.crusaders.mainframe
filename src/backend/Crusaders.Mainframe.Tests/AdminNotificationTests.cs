@@ -926,6 +926,7 @@ public class AdminNotificationTests
             [AdminEventCatalogue.OverdraftAuthorised] = new OverdraftPayload(Guid.NewGuid(), "A", "B", false, "Court 1", "Tue", 8m, -8m),
             [AdminEventCatalogue.AdminRoleChanged] = new AdminRolePayload("A", "B", true, null),
             [AdminEventCatalogue.CodeForgerySuspected] = new ForgeryPayload("box-1", null, "detail"),
+            [AdminEventCatalogue.CodesCapabilityLost] = new CodesCapabilityLostPayload(Guid.NewGuid(), "Box", "box-1", "2.0.0", "v1"),
         };
 
         Assert.Equal(AdminEventCatalogue.All.Count, AdminEventCatalogue.All.Select(k => k.Kind).Distinct().Count());

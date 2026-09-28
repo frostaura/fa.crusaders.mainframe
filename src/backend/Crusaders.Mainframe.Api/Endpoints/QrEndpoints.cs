@@ -165,6 +165,13 @@ public static class QrEndpoints
         var settings = await settingsAccessor.GetAsync(ct);
         var now = DateTimeOffset.UtcNow;
 
+        // After the club's cut-off (member-code §8) there is no legacy code to show: every path
+        // refuses one. The phone shows its member code instead (/api/v1/me/code).
+        if (!MemberCodeSettings.LegacyAccepted(settings))
+        {
+            return Results.Json(new { error = "legacy_codes_retired" }, statusCode: StatusCodes.Status410Gone);
+        }
+
         // [StartsAt − cue, EndsAt] intersects [now, now + roster]  ⇔
         // StartsAt ≤ now + roster + cue  ∧  EndsAt ≥ now. Rearranged so the predicate is
         // a comparison against two constants the provider can translate.
@@ -175,7 +182,9 @@ public static class QrEndpoints
         // than this screen refuses a code the product has just handed somebody; a door wider
         // than it is a standing building key. See BookingCodeWindow and GateAccess.
         var latestStart = BookingCodeWindow.LatestStart(now, BookingCodeWindow.DisplayHorizonMinutes(settings));
-        var booking = kind == KindIdent ? null : await db.Bookings
+        // Once the club has cut over, bookings stop minting per-booking codes (member-code §8): the
+        // screen answers with the short-lived ident code, which still works online until cut-off.
+        var booking = kind == KindIdent || !MemberCodeSettings.MintsBookingCodes(settings) ? null : await db.Bookings
             .Where(b => b.UserId == userId
                         && b.Status == BookingStatus.Booked
                         && b.StartsAt <= latestStart

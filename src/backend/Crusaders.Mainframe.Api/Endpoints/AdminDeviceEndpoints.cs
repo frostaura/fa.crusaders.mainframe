@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
+using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
 
@@ -35,6 +36,7 @@ public static class AdminDeviceEndpoints
         g.MapPost("/api-key/regenerate", RegenerateApiKeyAsync);
 
         g.MapGet("/", ListAsync);
+        g.MapGet("/member-codes", MemberCodeRolloutAsync);
         g.MapPatch("/{id:guid}", UpdateAsync);
         g.MapDelete("/{id:guid}", DeleteAsync);
 
@@ -44,6 +46,41 @@ public static class AdminDeviceEndpoints
         g.MapGet("/{id:guid}/activity", AdminDeviceActivityEndpoint.HandleAsync);
 
         return app;
+    }
+
+    /// <summary>
+    /// The club's member-code rollout (member-code §8): the phase, its two instants, when the
+    /// cut-off falls due, and every enabled board that is still blocking the cut-over — a board
+    /// whose latest heartbeat did not name <c>codes:m1</c>. A dead board blocks it until an admin
+    /// disables it, and this is where the admin finds out which one.
+    /// </summary>
+    private static async Task<IResult> MemberCodeRolloutAsync(
+        TenantSettingsAccessor settingsAccessor, MainframeDbContext db, CancellationToken ct)
+    {
+        var s = await settingsAccessor.GetAsync(ct);
+        var boards = await db.Devices.AsNoTracking().Where(d => d.Enabled).OrderBy(d => d.DeviceCode).ToListAsync(ct);
+        var blocking = boards.Where(d => !d.SpeaksMemberCodes).Select(d => new
+        {
+            id = d.Id,
+            device_code = d.DeviceCode,
+            name = DeviceView.Named(d.Name),
+            kind = d.Kind.ToString(),
+            running_version = d.RunningVersion,
+            capabilities = d.Capabilities,
+            last_seen_at = d.LastSeenAt,
+        }).ToList();
+
+        return Results.Ok(new
+        {
+            phase = MemberCodeSettings.Phase(s),
+            cutover_at = s.MemberCodeCutoverAt,
+            cutoff_at = s.MemberCodeCutoffAt,
+            cutoff_days = MemberCodeSettings.CutoffDays(s),
+            cutoff_due_at = s.MemberCodeCutoverAt?.AddDays(MemberCodeSettings.CutoffDays(s)),
+            enabled_boards = boards.Count,
+            ready_boards = boards.Count - blocking.Count,
+            blocking,
+        });
     }
 
     /// <summary>

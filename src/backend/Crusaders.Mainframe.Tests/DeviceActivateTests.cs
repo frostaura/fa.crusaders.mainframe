@@ -42,7 +42,8 @@ public class DeviceActivateTests
             new DeviceActivateServices(db, codes,
                 scope.ServiceProvider.GetRequiredService<CourtActivationService>(),
                 scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>(),
-                scope.ServiceProvider.GetRequiredService<DeviceFaultSink>()));
+                scope.ServiceProvider.GetRequiredService<DeviceFaultSink>(),
+                scope.ServiceProvider.GetRequiredService<MemberCodeService>()));
     }
 
     /// <summary>The MAC every box in this suite announces. One box, so one MAC.</summary>

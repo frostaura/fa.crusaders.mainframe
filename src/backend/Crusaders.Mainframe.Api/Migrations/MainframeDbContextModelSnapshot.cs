@@ -700,6 +700,15 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<string>("ButtonMapJson")
                         .HasColumnType("text");
 
+                    b.PrimitiveCollection<List<string>>("Capabilities")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasDefaultValueSql("'{}'::text[]");
+
+                    b.Property<DateTimeOffset?>("CapabilitiesReportedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.PrimitiveCollection<List<int>>("CourtNumbers")
                         .IsRequired()
                         .HasColumnType("integer[]");
@@ -965,6 +974,63 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.ToTable("device_outages", (string)null);
                 });
 
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.DevicePayFor", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("AmountCredits")
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<string>("AmountLabel")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<decimal>("BalanceAfterCredits")
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<Guid>("BookingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("CourtNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("GrantedSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Nonce")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<bool>("Paid")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("PayerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("RefundedUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "DeviceId", "Nonce")
+                        .IsUnique();
+
+                    b.ToTable("device_pay_fors", (string)null);
+                });
+
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.EnrolledTemplate", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1060,6 +1126,95 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.ToTable("ledger_entries", null, t =>
                         {
                             t.HasCheckConstraint("ck_ledger_entries_type_range", "\"Type\" BETWEEN 0 AND 8");
+                        });
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.MemberCode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("EnrolledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Generation")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
+                    b.Property<int>("Ref")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("RotatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Ref")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("member_codes", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_member_codes_generation", "\"Generation\" >= 1");
+
+                            t.HasCheckConstraint("ck_member_codes_ref", "\"Ref\" BETWEEN 1 AND 1048575");
+                        });
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.MemberCodeUse", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int>("Ref")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("Step")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("UseClass")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<DateTimeOffset>("UsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UsedAt");
+
+                    b.HasIndex("TenantId", "Ref", "Step", "UseClass")
+                        .IsUnique();
+
+                    b.ToTable("member_code_uses", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_member_code_uses_class", "\"UseClass\" IN ('door', 'court', 'money')");
                         });
                 });
 

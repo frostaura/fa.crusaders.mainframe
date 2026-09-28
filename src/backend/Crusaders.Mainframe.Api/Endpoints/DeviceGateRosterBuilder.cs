@@ -126,6 +126,38 @@ public static class DeviceGateRosterBuilder
         MainframeDbContext db, AccessCodeService codes, TenantSettingsView settings,
         DateTimeOffset now, CancellationToken ct)
     {
+        return await BuildAsync(db, codes, settings, now, mint: true, ct);
+    }
+
+    /// <summary>The legacy roster; <paramref name="mint"/> false after the member-code cut-over (§8).</summary>
+    public static async Task<List<string>> BuildAsync(
+        MainframeDbContext db, AccessCodeService codes, TenantSettingsView settings,
+        DateTimeOffset now, bool mint, CancellationToken ct)
+    {
+        var (bookings, earlyEntry) = await BookingsAsync(db, settings, now, ct);
+        if (bookings.Count == 0) return [];
+
+        var tokens = await DeviceRosterBuilder.TokensForAsync(db, codes, bookings, settings, now, ct, mint);
+
+        return Format(bookings.Where(b => tokens.ContainsKey(b.Id)).Select(b => new GateCandidate(b, tokens[b.Id])), now, earlyEntry);
+    }
+
+    /// <summary>The v1 roster (member-code §5.3): the same bookings, named by their players' REFs.</summary>
+    public static async Task<List<MemberCodeEntry>> BuildV1Async(
+        MainframeDbContext db, IBookingPlayers players, MemberCodeService memberCodes,
+        TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
+    {
+        var (bookings, earlyEntry) = await BookingsAsync(db, settings, now, ct);
+        var ordered = bookings.OrderBy(b => b.StartsAt).ThenBy(b => b.Id)
+            .Take(GateRosterMaxEntries)
+            .Select(b => (Booking: b, Relay: GateRelay))
+            .ToList();
+        return await MemberCodeHeartbeat.EntriesAsync(ordered, earlyEntry, now, players, memberCodes, ct);
+    }
+
+    private static async Task<(List<Booking> Bookings, TimeSpan EarlyEntry)> BookingsAsync(
+        MainframeDbContext db, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
+    {
         // Clamped on read, through the one function the online decision reads it with. An
         // unclamped roster is the worse half of an unclamped door: it would admit from the
         // cache what the API refuses online, which is the asymmetry BookingCodeWindow's max
@@ -133,14 +165,8 @@ public static class DeviceGateRosterBuilder
         var earlyEntry = TimeSpan.FromMinutes(BookingCodeWindow.EntryWindowMinutes(settings));
 
         // [StartsAt − early, EndsAt] ∩ [now, now + roster] ≠ ∅  ⇔
-        // StartsAt ≤ now + roster + early  ∧  EndsAt ≥ now — two constants the provider can
-        // translate, the same rearrangement DeviceRosterBuilder and QrEndpoints use.
-        //
-        // The window is clamped on read too, and it was the one number here that was not.
-        // TenantSettingsAccessor bounds nothing on the way in, so roster_window_minutes: -600
-        // put `latestStart` ten hours in the past and matched no booking at all: a clean 200,
-        // a present-and-empty roster key, no error, no log — and every door in the club
-        // admitting nobody the moment its link dropped.
+        // StartsAt ≤ now + roster + early  ∧  EndsAt ≥ now. The window is clamped on read too:
+        // roster_window_minutes: -600 once emptied every door's roster on a clean 200.
         var latestStart = now.AddMinutes(BookingCodeWindow.RosterReachMinutes(settings)).Add(earlyEntry);
 
         var bookings = await db.Bookings
@@ -149,17 +175,12 @@ public static class DeviceGateRosterBuilder
                         && b.StartsAt <= latestStart
                         && b.EndsAt >= now
                         // Ruling 15: an ACTIVE row, not merely the absence of a non-active one.
-                        // The old shape let a booking with NO membership row through, which is
-                        // the same conflation that opened a door — see MembershipAccess.
                         && db.Memberships.Any(m => m.UserId == b.UserId && m.Status == MembershipStatus.Active))
             .OrderBy(b => b.StartsAt)
             .ThenBy(b => b.Id)
             .Take(GateRosterMaxEntries)
             .ToListAsync(ct);
-        if (bookings.Count == 0) return [];
 
-        var tokens = await DeviceRosterBuilder.TokensForAsync(db, codes, bookings, settings, now, ct);
-
-        return Format(bookings.Select(b => new GateCandidate(b, tokens[b.Id])), now, earlyEntry);
+        return (bookings, earlyEntry);
     }
 }

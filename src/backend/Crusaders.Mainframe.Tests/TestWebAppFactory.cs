@@ -86,6 +86,10 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
     /// </summary>
     public string? EnvironmentName { get; init; }
 
+    /// <summary>The member-code master key every factory host runs with — test-only, never deployed.</summary>
+    public static readonly string TestMemberCodeMasterKey =
+        Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes("test-only member-code master key, 48 bytes long!"));
+
     private static readonly Dictionary<string, int> DefaultRateLimits = new()
     {
         ["AuthPerMinute"] = 100_000,
@@ -103,6 +107,10 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
         // because WebApplication.CreateBuilder reads them when it builds.
         Environment.SetEnvironmentVariable("Database__AutoMigrateOnStartup", ConnectionString is null ? "false" : "true");
         Environment.SetEnvironmentVariable("Jwt__Secret", "test-only-signing-key-not-used-in-any-real-environment");
+        // A REAL-shaped member-code master key (member-code §3.1), because a factory built with
+        // EnvironmentName = "Production" must start: Production refuses the development key and
+        // every placeholder. Forty-eight bytes that say what they are, base64.
+        Environment.SetEnvironmentVariable("MemberCodes__MasterKey", TestMemberCodeMasterKey);
         // Set on both branches, not just when present. These variables are process-wide
         // and outlive the factory that set them: leaving a previous factory's value in
         // place gave a deliberately database-free host a live connection string, so a

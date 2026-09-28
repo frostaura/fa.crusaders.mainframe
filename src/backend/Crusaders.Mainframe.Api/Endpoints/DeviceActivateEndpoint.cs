@@ -70,9 +70,12 @@ public static class DeviceActivateEndpoint
         // against the whole roll is an oracle, not an identification.
         if (!IdentificationResolver.CanIdentifyGlobally(req.Method)) return Refused("not_recognised");
 
-        // Tenant-filtered by the context's global query filter, so a code minted at another
-        // club resolves to nothing here — the isolation is structural, not a claim compared.
-        var resolved = await services.Codes.ResolveAsync(req.Token, ct);
+        // A v1 member code (19 characters) is CHECKED — both halves, at the instant the box read
+        // it — and then identifies its member exactly as an ident code does (member-code §4). A
+        // legacy code resolves as it always has, until the club's cut-off refuses it.
+        var settings = await services.Settings.GetAsync(ct);
+        var (resolved, match) = await MemberCodeIdentity.ResolveAsync(
+            services.Codes, services.MemberCodes, req.Token, req.ScanAgeMs, settings, now, ct);
         if (resolved is null) return Refused("not_recognised");
 
         // Resolved ONCE, here, and carried onto every branch below including the refusals.
@@ -105,10 +108,20 @@ public static class DeviceActivateEndpoint
 
         if (found.Reason is not null) return Refused(found.Reason, found.Court, display);
 
+        // One acting use per code per class (§4.4): claimed before the court is lit, given back
+        // below if it is not. A used code is a DECISION — `code_used` — never a second opinion.
+        Guid? claim = null;
+        if (match is not null)
+        {
+            claim = await services.MemberCodes.TryClaimAsync(match, MemberCodeUseClass.Court, device.Id, "activate", ct);
+            if (claim is null) return Refused(MemberCodeIdentity.CodeUsed, found.Court, display);
+        }
+
         var result = await services.Activation.ActivateAsync(
             found.Court!, found.Booking!, resolved.UserId, payerOverrideUserId: null, req.Method!, ct);
 
         var answer = From(result, found.Court!, now, display);
+        if (!answer.Activated) await services.MemberCodes.ReleaseAsync(claim, ct);
 
         // A scan the API would not act on, onto the club's monitoring page. Only from here
         // down: the refusals above this line are a board asking a question it should not have
@@ -270,7 +283,9 @@ public sealed record DeviceActivateServices(
     CourtActivationService Activation,
     TenantSettingsAccessor Settings,
     /// <summary>Where a refused scan is recorded for the club's monitoring page. See <see cref="DeviceFaultSink"/>.</summary>
-    DeviceFaultSink Faults);
+    DeviceFaultSink Faults,
+    /// <summary>The v1 member-code check and its use table (member-code §4).</summary>
+    MemberCodeService MemberCodes);
 
 /// <summary>
 /// What a box sends when a scan needs the server. <c>mac</c> names the board;
@@ -281,7 +296,9 @@ public sealed record DeviceActivateRequest(
     [property: JsonPropertyName("mac")] string? Mac,
     [property: JsonPropertyName("method")] string? Method,
     [property: JsonPropertyName("token")] string? Token,
-    [property: JsonPropertyName("court")] int? Court);
+    [property: JsonPropertyName("court")] int? Court,
+    /// <summary>How long ago the scanner read a v1 token, ms (member-code §4.2). Absent means 0; a legacy body never carries it.</summary>
+    [property: JsonPropertyName("scan_age_ms")] long? ScanAgeMs = null);
 
 /// <summary>
 /// The activation answer. <c>granted_seconds</c> is what goes on the relay timer; zero on

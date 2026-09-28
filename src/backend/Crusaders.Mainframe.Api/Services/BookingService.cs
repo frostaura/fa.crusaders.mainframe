@@ -748,7 +748,10 @@ public sealed class BookingService
         // that exists without its code is a member who paid and cannot get in; a code
         // without its booking is a handle to nothing. One flush, both or neither. A
         // walk-up gets none — the member is already standing at the court, identified.
-        if (!spec.IsWalkUp)
+        // Not once the club has cut over to member codes (§8): the member's own rotating code is
+        // what opens the booking then, and a per-booking code nobody will show is a live
+        // credential with no purpose.
+        if (!spec.IsWalkUp && MemberCodeSettings.MintsBookingCodes(settings))
         {
             await _codes.StageForBookingAsync(booking, TimeSpan.FromMinutes(settings.GraceWindowMinutes), ct);
         }
@@ -2270,7 +2273,10 @@ public sealed class BookingService
         other.CancellationReason = null;
         other.CancellationPenaltyWaived = false;
         other.DisplacedByBookingId = null;
-        await _codes.StageForBookingAsync(other, TimeSpan.FromMinutes(settings.GraceWindowMinutes), ct);
+        if (MemberCodeSettings.MintsBookingCodes(settings))
+        {
+            await _codes.StageForBookingAsync(other, TimeSpan.FromMinutes(settings.GraceWindowMinutes), ct);
+        }
 
         _db.AuditLogs.Add(new AuditLog
         {

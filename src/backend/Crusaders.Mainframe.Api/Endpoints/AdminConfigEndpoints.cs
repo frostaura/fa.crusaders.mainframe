@@ -180,6 +180,12 @@ public static class AdminConfigEndpoints
                 // action_glyphs and gate_access_policy: a settings page that showed a symbol
                 // the product will not print would report a choice that is not in force.
                 currency_symbol = CurrencySymbol.For(defaults),
+
+                // The member-code rollout (§8). The two instants are server-written and read-only.
+                member_code_phase = MemberCodeSettings.Phase(defaults),
+                member_code_cutover_at = defaults.MemberCodeCutoverAt,
+                member_code_cutoff_at = defaults.MemberCodeCutoffAt,
+                member_code_cutoff_days = MemberCodeSettings.CutoffDays(defaults),
             });
         });
 
@@ -276,6 +282,9 @@ public static class AdminConfigEndpoints
 
             var limitsError = ValidateMemberLimits(req);
             if (limitsError is not null) return Results.BadRequest(new { error = limitsError });
+
+            var codesError = ValidateMemberCodeSettings(req);
+            if (codesError is not null) return Results.BadRequest(new { error = codesError });
 
             // Refused rather than coerced, which is what lets the READ side above render the
             // resolved value honestly — the same posture gate_access_policy takes.
@@ -376,6 +385,7 @@ public static class AdminConfigEndpoints
             WriteOptionalAdminSettings(doc, req);
             WriteOptionalMemberLimits(doc, req);
             WriteOptionalRealtime(doc, req);
+            WriteOptionalMemberCodeSettings(doc, req);
 
             // D2-B19 — the diff of CHANGED KEYS ONLY, before the document is replaced.
             //
@@ -1121,6 +1131,32 @@ public static class AdminConfigEndpoints
         if (req.NoShowLookbackDays is not null) doc["no_show_lookback_days"] = ToElement(req.NoShowLookbackDays);
     }
 
+    private static string? ValidateMemberCodeSettings(UpdateSettingsRequest req)
+    {
+        if (req.MemberCodePhase is { } phase && !MemberCodeSettings.IsKnownPhase(phase.Trim()))
+            return "member_code_phase_invalid";
+        if (OutOfRange(req.MemberCodeCutoffDays, MemberCodeSettings.MinCutoffDays, MemberCodeSettings.MaxCutoffDays))
+            return "member_code_cutoff_days_out_of_range";
+        return null;
+    }
+
+    /// <summary>
+    /// The rollout override. A phase moved forward by hand is stamped the way the automatic move
+    /// would have stamped it — without a cut-over instant a club set to <c>v1</c> by hand would
+    /// never reach its cut-off.
+    /// </summary>
+    private static void WriteOptionalMemberCodeSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
+    {
+        if (req.MemberCodeCutoffDays is { } days) doc[MemberCodeSettings.CutoffDaysKey] = ToElement(days);
+        if (req.MemberCodePhase is not { } raw) return;
+
+        var phase = raw.Trim();
+        doc[MemberCodeSettings.PhaseKey] = ToElement(phase);
+        var now = ToElement(DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+        if (phase != MemberCodeSettings.Legacy && !doc.ContainsKey(MemberCodeSettings.CutoverAtKey)) doc[MemberCodeSettings.CutoverAtKey] = now;
+        if (phase == MemberCodeSettings.V1Only && !doc.ContainsKey(MemberCodeSettings.CutoffAtKey)) doc[MemberCodeSettings.CutoffAtKey] = now;
+    }
+
     /// <summary>Same omitted-means-unchanged rule as the economics keys, for the six device numbers.</summary>
     private static void WriteOptionalDeviceNumbers(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
     {
@@ -1363,7 +1399,14 @@ public sealed record UpdateSettingsRequest(
     string? ActionGlyphs = null,
     [property: JsonPropertyName("action_glyphs")] string? ActionGlyphsSnake = null,
     string? CurrencySymbol = null,
-    [property: JsonPropertyName("currency_symbol")] string? CurrencySymbolSnake = null)
+    [property: JsonPropertyName("currency_symbol")] string? CurrencySymbolSnake = null,
+    /// <summary>
+    /// The member-code rollout phase (member-code §8) — how an administrator rolls a club BACK,
+    /// or forward early. The server moves it forward on its own; this is the override.
+    /// </summary>
+    [property: JsonPropertyName("member_code_phase")] string? MemberCodePhase = null,
+    /// <summary>Days from the cut-over to the cut-off, 14 to 365.</summary>
+    [property: JsonPropertyName("member_code_cutoff_days")] int? MemberCodeCutoffDays = null)
 {
     /// <summary>The glyph set the club asked for, under either spelling.</summary>
     public string? EffectiveActionGlyphs => ActionGlyphs ?? ActionGlyphsSnake;

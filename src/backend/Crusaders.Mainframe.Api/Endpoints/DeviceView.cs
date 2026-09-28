@@ -108,6 +108,13 @@ public static class DeviceView
         // lived in a log file nobody at the club can read.
         events_lost = d.EventsLost,
         events_lost_reported_at = d.EventsLostReportedAt,
+
+        // What the board said it speaks on its latest heartbeat, and whether that includes the
+        // member code (member-code §5.1, §8) — the per-board half of the rollout the console
+        // shows. The club's phase is GET /api/v1/admin/devices/member-codes.
+        capabilities = d.Capabilities,
+        capabilities_reported_at = d.CapabilitiesReportedAt,
+        member_codes = d.SpeaksMemberCodes,
     };
 
     /// <summary>

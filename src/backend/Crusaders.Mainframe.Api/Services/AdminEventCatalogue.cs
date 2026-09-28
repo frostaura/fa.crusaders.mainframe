@@ -52,6 +52,8 @@ public sealed record AdminRolePayload(string SubjectName, string ActorName, bool
 
 public sealed record ForgeryPayload(string DeviceCode, string? MemberName, string Detail);
 
+public sealed record CodesCapabilityLostPayload(Guid DeviceId, string DeviceName, string DeviceCode, string? FirmwareVersion, string Phase);
+
 /// <summary>
 /// Everything one message needs: whose club, to whom, which row, and whether the reader is the
 /// row's subject rather than one of its administrators.
@@ -99,6 +101,7 @@ public static class AdminEventCatalogue
     public const string OverdraftAuthorised = "booking.overdraft_authorised";
     public const string AdminRoleChanged = "admin.role_changed";
     public const string CodeForgerySuspected = "code.forgery_suspected";
+    public const string CodesCapabilityLost = "device.codes_capability_lost";
 
     /// <summary>How the payloads are written and read. Snake_case, invariant, no indentation.</summary>
     public static readonly JsonSerializerOptions Json = new()
@@ -136,6 +139,8 @@ public static class AdminEventCatalogue
         new(CodeForgerySuspected, "Suspected forged codes",
             "A board accepted a code this club could not have issued.",
             Security: true),
+        new(CodesCapabilityLost, "A board stopped reading member codes",
+            "After the club switched to member codes, a board reported firmware that does not check them offline."),
     ];
 
     private static readonly Dictionary<string, AdminEventKind> ByKind =
@@ -179,6 +184,7 @@ public static class AdminEventCatalogue
         [OverdraftAuthorised] = ComposeOverdraft,
         [AdminRoleChanged] = ComposeAdminRole,
         [CodeForgerySuspected] = ComposeForgery,
+        [CodesCapabilityLost] = ComposeCodesCapabilityLost,
     };
 
     /// <summary>The baseline wording, unchanged: this is the registration notice that used to be sent directly.</summary>
@@ -280,5 +286,12 @@ public static class AdminEventCatalogue
     {
         var p = c.Payload<ForgeryPayload>();
         return EmailTemplates.AdminCodeForgerySuspected(c.Club, c.To, new ForgeryNotice(p.DeviceCode, p.MemberName, p.Detail, c.ConsoleUrl));
+    }
+
+    private static EmailMessage ComposeCodesCapabilityLost(AdminMailContext c)
+    {
+        var p = c.Payload<CodesCapabilityLostPayload>();
+        return EmailTemplates.AdminBoardLostMemberCodes(
+            c.Club, c.To, new BoardLostMemberCodes(p.DeviceName, p.DeviceCode, p.FirmwareVersion, c.ConsoleUrl));
     }
 }

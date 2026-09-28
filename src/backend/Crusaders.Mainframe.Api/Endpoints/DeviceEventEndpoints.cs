@@ -53,6 +53,10 @@ public static class DeviceEventEndpoints
         // The pre-booked member's path — the mirror of the walk-up, on the same signed
         // device group and the same rate limit. See DeviceActivateEndpoint.
         g.MapPost("/activate", DeviceActivateEndpoint.HandleAsync);
+
+        // D10: paying for somebody else's court at the box (member-code §9). Online only, and
+        // on this group because it moves money exactly as the walk-up does.
+        g.MapPost("/pay-for", DevicePayForEndpoint.HandleAsync);
         return app;
     }
 
@@ -390,9 +394,9 @@ public static class DeviceEventEndpoints
                     GateOpenKind when device!.Kind != DeviceKind.Gate
                         => new ActivationOutcome(GateAccess.NotAGate, null, GateOpenKind),
 
-                    ActivationKind => await ActivationOutcomeAsync(device!, e, time.OccurredAt, services, ct),
+                    ActivationKind => await ActivationOutcomeAsync(device!, e, time, services, ct),
                     ReleaseKind => await ReleaseOutcomeAsync(device!, e, time.OccurredAt, services, ct),
-                    GateOpenKind => await GateOpenOutcomeAsync(e, time.OccurredAt, services, ct),
+                    GateOpenKind => await GateOpenOutcomeAsync(device!, e, time, services, ct),
 
                     // Both of these used to fall through to `_ => null` and land as an audit
                     // row with a null outcome that nothing read. They keep that row — the
@@ -538,8 +542,14 @@ public static class DeviceEventEndpoints
     /// </summary>
     private sealed record ActivationOutcome(
         string Code, Guid? BookingId, string Kind = ActivationKind, Guid? RelatedBookingId = null,
-        Guid? SubjectUserId = null)
+        Guid? SubjectUserId = null, AdminNotice? Notice = null)
     {
+        /// <summary>
+        /// A v1 code the board accepted offline that the server cannot reproduce, or one used
+        /// twice (member-code §7). Receipted — evidence is never refused — and NOT attendance.
+        /// </summary>
+        public const string ForgerySuspected = "forgery_suspected";
+
         public const string Ok = "ok";
 
         /// <summary>
@@ -605,21 +615,44 @@ public static class DeviceEventEndpoints
     /// </para>
     /// </summary>
     private static async Task<ActivationOutcome> ActivationOutcomeAsync(
-        Device device, DeviceEventDto e, DateTimeOffset occurredAt, DeviceEventServices services, CancellationToken ct)
+        Device device, DeviceEventDto e, EventFacts time, DeviceEventServices services, CancellationToken ct)
     {
-        var (db, _, codes, _, _, _, _, _, _, _) = services;
+        var (db, _, codes, _, _, _, _, _, _, _, _, _) = services;
+        var occurredAt = time.OccurredAt;
 
-        // Live at the scan, not at the upload: the roster token expires at the slot's end
-        // plus grace, and a box offline past that is precisely the box whose evidence
-        // matters most.
-        var resolved = await codes.ResolveAsync(e.Subject, occurredAt, ct);
-        if (resolved is null || resolved.Purpose != AccessCodePurpose.BookingActivation || resolved.BookingId is null)
+        // A v1 member code: the subject is the SCANNED token, re-checked with ON before it is
+        // allowed to be anybody's attendance (member-code §7), and the booking is found by
+        // member, relay and time because the token names no booking.
+        Booking? booking;
+        Guid userId;
+        if (MemberCodeMath.IsV1Shaped(e.Subject?.Trim()))
         {
-            return new ActivationOutcome("unresolved", null);
-        }
+            var v1 = await V1EvidenceAsync(device, e, time, MemberCodeUseClass.Court, "activation_event", services, ct);
+            if (v1.Refusal is not null) return v1.Refusal;
+            userId = v1.UserId;
 
-        var booking = await db.Bookings.FirstOrDefaultAsync(b => b.Id == resolved.BookingId, ct);
-        if (booking is null) return new ActivationOutcome("unresolved", null);
+            if (e.Court is not { } r || r < 0 || r >= device.CourtNumbers.Count) return new ActivationOutcome("wrong_court", null);
+            var onCourt = await db.Courts.FirstOrDefaultAsync(c => c.CourtNumber == device.CourtNumbers[r], ct);
+            booking = onCourt is null
+                ? null
+                : await services.Activation.FindForEvidenceAsync(onCourt.Id, userId, occurredAt, services.Players, ct);
+            if (booking is null) return new ActivationOutcome("unresolved", null, SubjectUserId: userId);
+        }
+        else
+        {
+            // Live at the scan, not at the upload: the roster token expires at the slot's end
+            // plus grace, and a box offline past that is precisely the box whose evidence
+            // matters most.
+            var resolved = await codes.ResolveAsync(e.Subject, occurredAt, ct);
+            if (resolved is null || resolved.Purpose != AccessCodePurpose.BookingActivation || resolved.BookingId is null)
+            {
+                return new ActivationOutcome("unresolved", null);
+            }
+
+            booking = await db.Bookings.FirstOrDefaultAsync(b => b.Id == resolved.BookingId, ct);
+            if (booking is null) return new ActivationOutcome("unresolved", null);
+            userId = resolved.UserId;
+        }
 
         var court = await db.Courts.FirstOrDefaultAsync(c => c.Id == booking.CourtId, ct);
         if (court is null) return new ActivationOutcome("unresolved", booking.Id);
@@ -634,7 +667,7 @@ public static class DeviceEventEndpoints
             return new ActivationOutcome("wrong_court", booking.Id);
         }
 
-        var target = new ActivationTarget(court, booking, resolved.UserId, e.Method ?? "offline", occurredAt, e.DurationMs);
+        var target = new ActivationTarget(court, booking, userId, e.Method ?? "offline", occurredAt, e.DurationMs);
         var settled = await SettleAsync(services, target, ct);
 
         // The server's belief about this court's relay.
@@ -652,7 +685,7 @@ public static class DeviceEventEndpoints
             await NoteLightsOnAsync(
                 services,
                 new LightEvidence(court.Id, device.Id, e.Court, e.Seq, BootId: 0, At: occurredAt),
-                booking, court, resolved.UserId, ct);
+                booking, court, userId, ct);
         }
         else if (settled.Code == ActivationOutcome.Ok)
         {
@@ -863,11 +896,57 @@ public static class DeviceEventEndpoints
     /// </para>
     /// </summary>
     private static async Task<ActivationOutcome> GateOpenOutcomeAsync(
-        DeviceEventDto e, DateTimeOffset occurredAt, DeviceEventServices services, CancellationToken ct)
+        Device device, DeviceEventDto e, EventFacts time, DeviceEventServices services, CancellationToken ct)
     {
+        var occurredAt = time.OccurredAt;
+        if (MemberCodeMath.IsV1Shaped(e.Subject?.Trim()))
+        {
+            var v1 = await V1EvidenceAsync(device, e, time, MemberCodeUseClass.Door, "gate_open_event", services, ct);
+            return v1.Refusal ?? new ActivationOutcome(
+                ActivationOutcome.Ok, BookingId: null, Kind: GateOpenKind, SubjectUserId: v1.UserId);
+        }
+
         var resolved = await services.Codes.ResolveAsync(e.Subject, occurredAt, ct);
         return new ActivationOutcome(
             ActivationOutcome.Ok, BookingId: null, Kind: GateOpenKind, SubjectUserId: resolved?.UserId);
+    }
+
+    /// <summary>What a v1 subject on an uploaded event proved: its member, or the outcome that refuses it.</summary>
+    private sealed record V1Evidence(Guid UserId, ActivationOutcome? Refusal);
+
+    /// <summary>
+    /// The member-code evidence re-check (§7), shared by <c>activation</c> and <c>gate_open</c>.
+    ///
+    /// <para>
+    /// A genuine offline use is recorded in the use table under its class — the same row an online
+    /// use writes — and an already-taken row is the third kind of forgery: one code acted on twice
+    /// for the same kind of thing, across devices. Every forgery is RECEIPTED, never refused (the
+    /// board must be able to release its evidence), stages the non-optional
+    /// <c>code.forgery_suspected</c> notice on the receipt's own save, and is not attendance.
+    /// </para>
+    /// </summary>
+    private static async Task<V1Evidence> V1EvidenceAsync(
+        Device device, DeviceEventDto e, EventFacts time, string useClass, string kind,
+        DeviceEventServices services, CancellationToken ct)
+    {
+        var settings = await services.Settings.GetAsync(ct);
+        var evidence = await services.MemberCodes.CheckEvidenceAsync(e.Subject!.Trim(), time.OccurredAt, settings, ct);
+
+        if (evidence is MemberCodeEvidence.Genuine genuine)
+        {
+            var claim = await services.MemberCodes.TryClaimAsync(genuine.Match, useClass, device.Id, kind, ct);
+            if (claim is not null) return new V1Evidence(genuine.Match.UserId, null);
+            evidence = new MemberCodeEvidence.Forged("reused", genuine.Match.UserId, genuine.Match.Ref);
+        }
+
+        var forged = (MemberCodeEvidence.Forged)evidence;
+        var name = forged.UserId is { } uid
+            ? await services.Db.Memberships.AsNoTracking().Where(m => m.UserId == uid).Select(m => m.FullName).FirstOrDefaultAsync(ct)
+            : null;
+        var notice = AdminNotices.CodeForgerySuspected(device, time.BootId, e.Seq, name, forged.UserId, forged.Why);
+        var outcomeKind = useClass == MemberCodeUseClass.Door ? GateOpenKind : ActivationKind;
+        return new V1Evidence(Guid.Empty, new ActivationOutcome(
+            ActivationOutcome.ForgerySuspected, null, outcomeKind, SubjectUserId: forged.UserId, Notice: notice));
     }
 
     /// <summary>
@@ -885,7 +964,7 @@ public static class DeviceEventEndpoints
     private static async Task<ActivationOutcome> ReleaseOutcomeAsync(
         Device device, DeviceEventDto e, DateTimeOffset occurredAt, DeviceEventServices services, CancellationToken ct)
     {
-        var (db, _, _, _, bookings, _, _, _, _, _) = services;
+        var (db, _, _, _, bookings, _, _, _, _, _, _, _) = services;
         if (e.Court is not { } relay || relay < 0) return new ActivationOutcome("unpaired", null, ReleaseKind);
 
         var session = await db.DeviceEventReceipts.AsNoTracking()
@@ -984,7 +1063,7 @@ public static class DeviceEventEndpoints
     /// </summary>
     private static async Task<SettleOutcome> SettleAsync(DeviceEventServices services, ActivationTarget t, CancellationToken ct)
     {
-        var (db, _, _, activation, bookings, settingsAccessor, _, _, _, _) = services;
+        var (db, _, _, activation, bookings, settingsAccessor, _, _, _, _, _, _) = services;
         var settings = await settingsAccessor.GetAsync(ct);
 
         for (var attempt = 0; attempt < 3; attempt++)
@@ -1129,7 +1208,7 @@ public static class DeviceEventEndpoints
         DeviceEventServices services, Device device, DeviceEventDto e, EventFacts time,
         ActivationOutcome? outcome, CancellationToken ct)
     {
-        var (db, tenant, _, _, _, _, _, _, _, _) = services;
+        var (db, tenant, _, _, _, _, _, _, _, _, _, _) = services;
 
         var receipt = new DeviceEventReceipt
         {
@@ -1207,6 +1286,10 @@ public static class DeviceEventEndpoints
         }
         db.AuditLogs.AddRange(rows);
 
+        // A forgery's notice rides the receipt's own save, so a duplicate upload that loses the
+        // receipt index raises nothing — the notice exists if and only if the receipt does.
+        var notice = outcome?.Notice is { } n ? AdminNotices.Stage(db, tenant.TenantId, n) : null;
+
         try
         {
             await db.SaveChangesAsync(ct);
@@ -1218,6 +1301,7 @@ public static class DeviceEventEndpoints
             // again against the same index.
             db.Entry(receipt).State = EntityState.Detached;
             foreach (var row in rows) db.Entry(row).State = EntityState.Detached;
+            if (notice is not null) db.Entry(notice).State = EntityState.Detached;
             return false;
         }
     }
@@ -1354,7 +1438,7 @@ public static class DeviceEventEndpoints
     public static async Task<IResult> WalkUpForDeviceAsync(
         Device device, WalkUpRequest req, WalkUpServices services, CancellationToken ct)
     {
-        var (db, bookings, activation, identities, settingsAccessor, _, _) = services;
+        var (db, bookings, activation, _, settingsAccessor, _, _, _, _) = services;
 
         var settings = await settingsAccessor.GetAsync(ct);
 
@@ -1382,7 +1466,14 @@ public static class DeviceEventEndpoints
         var court = await db.Courts.FirstOrDefaultAsync(c => c.CourtNumber == req.Court && c.IsActive, ct);
         if (court is null) return Results.NotFound(new { error = "court_not_found" });
 
-        var userId = await identities.ResolveAsync(req.Method, req.Token, ct);
+        // Either code family (member-code §4.1). A v1 code is checked at the instant the box
+        // read it — two presses ago, which is what scan_age_ms carries — and identifies its
+        // member; a legacy code must be a member-ident code, as it always had to be.
+        var (resolved, match) = IdentificationResolver.CanIdentifyGlobally(req.Method)
+            ? await MemberCodeIdentity.ResolveAsync(
+                services.Codes, services.MemberCodes, req.Token, req.ScanAgeMs, settings, DateTimeOffset.UtcNow, ct)
+            : (null, null);
+        var userId = resolved?.Purpose == AccessCodePurpose.MemberIdent ? resolved.UserId : (Guid?)null;
         if (userId is null) return Results.BadRequest(new { error = "not_recognised" });
 
         // A member the club has barred cannot buy court time here (finding K-F1). This was
@@ -1422,6 +1513,16 @@ public static class DeviceEventEndpoints
         // booking was still refundable, and there was very much something to cancel. The mail
         // is held and sent after the activation instead, which is the only ordering in which
         // it describes what happened.
+        // One money use per code (§4.4), claimed before anything is charged and given back on
+        // every path below that ends without a sale. AFTER the replay check above, so a box
+        // retrying its own nonce is answered with the first purchase, never `code_used`.
+        Guid? claim = null;
+        if (match is not null)
+        {
+            claim = await services.MemberCodes.TryClaimAsync(match, MemberCodeUseClass.Money, device.Id, "walkup", ct);
+            if (claim is null) return Results.Conflict(new { error = MemberCodeIdentity.CodeUsed });
+        }
+
         var created = await bookings.CreateWalkUpAsync(
             court.Id, userId.Value, userId.Value, req.Minutes, reference, ct);
 
@@ -1432,11 +1533,13 @@ public static class DeviceEventEndpoints
         if (created is BookingResult.DuplicateRequest or BookingResult.SlotTaken
             && await ReplayAsync(reference, req, services, ct) is { } original)
         {
+            await services.MemberCodes.ReleaseAsync(claim, ct);
             return original;
         }
 
         if (created is not BookingResult.Ok ok)
         {
+            await services.MemberCodes.ReleaseAsync(claim, ct);
             // A purchase the club would not sell, onto the monitoring page. The member is at
             // the box with their card out and the court did not come on, and the reason —
             // out of hours, no time available, the court already in use — is a fact about the
@@ -1456,6 +1559,7 @@ public static class DeviceEventEndpoints
             // and carry the club's penalty — for a member the API itself refused. No mail was
             // sent above, so nothing has yet told them a lie about it either.
             await bookings.VoidUnstartedWalkUpAsync(ok.Booking, VoidReference(reference), ct);
+            await services.MemberCodes.ReleaseAsync(claim, ct);
             return Results.Conflict(new { error = "activation_refused" });
         }
 
@@ -1555,7 +1659,7 @@ public static class DeviceEventEndpoints
     private static async Task<IResult?> ReplayAsync(
         string reference, WalkUpRequest req, WalkUpServices services, CancellationToken ct)
     {
-        var (db, bookings, activation, _, _, ledger, _) = services;
+        var (db, bookings, activation, _, _, ledger, _, _, _) = services;
 
         var entry = await db.LedgerEntries.AsNoTracking()
             .FirstOrDefaultAsync(l => l.ExternalReference == reference, ct);
@@ -1719,7 +1823,11 @@ public sealed record WalkUpServices(
     /// answering them.
     /// </para>
     /// </summary>
-    DeviceFaultSink Faults);
+    DeviceFaultSink Faults,
+    /// <summary>Legacy access codes, for the family check (member-code §4.1).</summary>
+    AccessCodeService Codes,
+    /// <summary>The v1 member-code check and its use table (member-code §4).</summary>
+    MemberCodeService MemberCodes);
 
 /// <summary>
 /// One activation as a box reported it, resolved: the court and booking the token named,
@@ -1759,7 +1867,11 @@ public sealed record DeviceEventServices(
     /// <summary>The logger factory those background writes report their own failures to.</summary>
     ILoggerFactory Logs,
     /// <summary>The refusal sites' fault recorder. See <see cref="DeviceFaultSink"/>.</summary>
-    DeviceFaultSink Faults);
+    DeviceFaultSink Faults,
+    /// <summary>The member-code evidence re-check and use table (member-code §7).</summary>
+    MemberCodeService MemberCodes,
+    /// <summary>Who plays on a booking — the seam P11 extends. See <see cref="IBookingPlayers"/>.</summary>
+    IBookingPlayers Players);
 
 /// <summary>
 /// One event as the box queued it. Names mirror <c>lib/eventq</c>'s wire form. <c>court</c> is
@@ -1822,4 +1934,6 @@ public sealed record WalkUpRequest(
     [property: JsonPropertyName("method")] string? Method,
     [property: JsonPropertyName("token")] string? Token,
     [property: JsonPropertyName("court")] int Court,
-    [property: JsonPropertyName("nonce")] string? Nonce);
+    [property: JsonPropertyName("nonce")] string? Nonce,
+    /// <summary>How long ago the scanner read a v1 token, ms (member-code §4.2). Absent means 0.</summary>
+    [property: JsonPropertyName("scan_age_ms")] long? ScanAgeMs = null);

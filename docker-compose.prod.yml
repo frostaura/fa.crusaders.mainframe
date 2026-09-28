@@ -119,6 +119,12 @@ services:
       # holding it to mint a valid administrator token for any tenant. See
       # src/backend/Crusaders.Mainframe.Api/Security/JwtSecretPolicy.cs.
       Jwt__Secret: CHANGE-ME-random-string-of-at-least-32-characters
+      # The member-code master key (docs/specs/member-code.md §3.1). Every member's rotating code is
+      # HKDF of it, so it is worth more than every code in the club. 32-64 random bytes, base64:
+      #     openssl rand -base64 48
+      # The API REFUSES TO START on this placeholder, on anything under 32 bytes, and on anything
+      # that is not base64. Changing it later re-enrols every phone (no dual-key window in v1).
+      MemberCodes__MasterKey: CHANGE-ME-member-code-master-key-openssl-rand-base64-48
       # The address members use. Verification, welcome and password-reset links are built from it,
       # and PayFast is told to return here. Cloudflared points this hostname at the gateway.
       App__PublicBaseUrl: https://crusaders.frostaura.net

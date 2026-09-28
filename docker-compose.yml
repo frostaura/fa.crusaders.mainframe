@@ -64,6 +64,10 @@ services:
       ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB:-crusaders_mainframe};Username=${POSTGRES_USER:-crusaders};Password=${POSTGRES_PASSWORD}
       Database__AutoMigrateOnStartup: ${DATABASE__AUTOMIGRATEONSTARTUP:-true}
       Jwt__Secret: ${JWT_SECRET:?JWT_SECRET is required}
+      # Every member's rotating code is derived from this (docs/specs/member-code.md §3.1): 32-64
+      # random bytes, base64 — `openssl rand -base64 48`. Production refuses to start without a
+      # real one; Development falls back to a published development key when it is empty.
+      MemberCodes__MasterKey: ${MEMBER_CODES_MASTER_KEY:-}
       App__PublicBaseUrl: ${APP_PUBLIC_BASE_URL:-http://localhost:8088}
       Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN:-http://localhost:8088}
       Cors__AllowedOrigins__1: http://localhost:4173

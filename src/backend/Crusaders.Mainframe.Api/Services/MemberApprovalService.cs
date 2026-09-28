@@ -53,10 +53,13 @@ public sealed class MemberApprovalService
     public sealed record MemberNotifier(
         IEmailService Email, ILogger<MemberApprovalService> Logger, ClubIdentityResolver Club);
 
+    private readonly MemberCodeService _memberCodes;
+
     public MemberApprovalService(
         MainframeDbContext db, ITenantContext tenant, IConfiguration config,
-        IEventBus bus, MemberNotifier notifier)
+        IEventBus bus, MemberNotifier notifier, MemberCodeService memberCodes)
     {
+        _memberCodes = memberCodes;
         _db = db; _tenant = tenant; _config = config; _bus = bus;
         _email = notifier.Email; _logger = notifier.Logger; _club = notifier.Club;
     }
@@ -165,6 +168,10 @@ public sealed class MemberApprovalService
             Action = "member.suspended",
             DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason }),
         });
+
+        // A suspension retires the member's code (member-code §10), so a reactivation does not
+        // quietly hand back a code the phone kept through the suspension.
+        await _memberCodes.StageRotationAsync(user.Id, actorId, "suspended", ct);
         await _db.SaveChangesAsync(ct);
 
         var notified = await SendOrLogAsync(

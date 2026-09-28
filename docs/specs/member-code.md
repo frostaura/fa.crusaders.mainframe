@@ -589,3 +589,50 @@ keeping the instruction verbatim. Other refusals reuse the existing screens:
 | Door bodies, the 4096 budget, offline door decisions | `gate.json` → `door-gate/test/test_gate_membercode` |
 | The whole door: sync, offline open, recorded token, replay, capability, a 403 emptying keys and clock | `test_app_a_v1_member_code_opens_the_door_offline_once_and_is_recorded_as_scanned` |
 | The corpus is what this file says | `make corpus-check` regenerates it and fails on any diff |
+
+---
+
+## 13. Backend notes — where the server's reality needs saying
+
+What the backend lane (P7) built that this document does not already pin, or pins differently.
+Each is a server behaviour; none changes a byte the corpus holds.
+
+- **Where it lives.** Arithmetic: `Services/MemberCodeMath.cs`; wire shapes and their validators:
+  `MemberCodeWire.cs`; REFs, the check, the use table, rotation and the evidence re-check:
+  `MemberCodeService.cs`; capabilities and the phase: `MemberCodeRollout.cs`; pay-for:
+  `Endpoints/DevicePayForEndpoint.cs`. `MemberCodeCorpusTests` executes every `csharp` case in the
+  manifest, including the three device-behaviour sections (`roster.decide`, `codesync.apply`,
+  `gate.offline`) through a small test-side device model built on the server's own parsers.
+- **Players are the organiser alone until P11.** Every "organiser first, then accepted partners"
+  above goes through one seam, `IBookingPlayers` (`PlayersOfAsync`, `IsPlayerAsync`,
+  `IsSplitAsync`). Its registration today answers the organiser and never "split"; P11 replaces
+  the registration and nothing else.
+- **Status and enrolment carry one field more than §10**: `phase` (the club's
+  `member_code_phase`: `legacy` | `v1` | `v1_only`), last. A phone shows v1 codes in every phase
+  (they work online throughout) and uses the phase only to say whether boards can check them
+  offline yet. Both routes answer a barred member `403 {"error":"member_suspended" |
+  "member_not_active" | "no_membership", "status":…}` — the booking routes' own refusal.
+- **The door's `code_used` has no door vector.** `/gate` answers `{"opened":false,
+  "reason":"code_used","unlock_seconds":0}`; the door firmware reads any reason off a 200 as a
+  refusal, so no screen is owed, but `gate/` and `membercode/gate.json` hold no
+  `gate-scan-response-code-used` case. `GateAccess.Reasons` (pinned both ways against the door
+  corpus) therefore does not list it; it is `GateAccess.CodeUsed`. Owed to the contract lane.
+- **Pay-for refusals beyond §9.2.** A price whose label would exceed six characters is refused as
+  `amount_unshowable` (the box reads it as SEE THE DESK) rather than sent for the box to discard.
+  `not_chargeable` answers the rare booking the reassignment path will not touch. A confirm whose
+  nonce another request is still paying is `503 {"error":"in_progress"}` — no decision — so the box
+  retries the same payment and is answered with the first.
+- **Evidence is checked under the current AND the previous generation.** A board offline across a
+  rotation verified the old generation's codes honestly; flagging those as forgeries would page
+  every admin for a member whose password change landed during an outage. Online, only the current
+  generation is accepted (§4.3), exactly as written.
+- **A second use of one code across devices is the use table's unique index**, whether the first
+  use was online or uploaded; the second upload is the `reused` forgery of §7.
+- **A board losing `codes:m1` after cut-over** raises `device.codes_capability_lost` (non-security,
+  once per board per firmware version).
+- **The court box's body writes `relays` before `roster`**, matching both corpora; the firmware
+  scans by key and does not care.
+- **`member_code_phase`, `member_code_cutover_at`, `member_code_cutoff_at`,
+  `member_code_cutoff_days`** are tenant settings. The two instants are server-written; the PUT
+  accepts the phase (an administrator's rollback) and the delay (14–365). A phase moved forward by
+  hand is stamped as the automatic move would have been.

@@ -21,11 +21,14 @@ public sealed class AuthService
     private readonly InherentAdminService _inherentAdmins;
     private readonly ClubIdentityResolver _club;
 
+    private readonly MemberCodeService _memberCodes;
+
     public AuthService(MainframeDbContext db, ITenantContext tenant, IPasswordHasher hasher,
         IJwtIssuer jwt, IEmailService email, IConfiguration config, ILogger<AuthService> logger,
         MemberApprovalService memberships, AccessTokenRevocationList revocations,
-        InherentAdminService inherentAdmins, ClubIdentityResolver club)
+        InherentAdminService inherentAdmins, ClubIdentityResolver club, MemberCodeService memberCodes)
     {
+        _memberCodes = memberCodes;
         _db = db; _tenant = tenant; _hasher = hasher; _jwt = jwt;
         _email = email; _config = config; _logger = logger;
         _memberships = memberships; _revocations = revocations;
@@ -313,6 +316,10 @@ public sealed class AuthService
             SubjectUserId = user.Id,
             Action = "user.password_changed",
         });
+
+        // A new password retires the member's code (member-code §10): whoever learned the old
+        // password may have enrolled a phone with it. Staged, so both commit together.
+        await _memberCodes.StageRotationAsync(user.Id, user.Id, "password_changed", ct);
         await _db.SaveChangesAsync(ct);
 
         await SendOrLogAsync(EmailTemplates.PasswordChanged(await _club.GetAsync(ct), user.Email), $"password-changed notice for {user.Email}", ct);
@@ -428,6 +435,7 @@ public sealed class AuthService
         // is retired and the forced-change gate has nothing left to enforce.
         user.MustChangePassword = false;
         record.UsedAt = DateTimeOffset.UtcNow;
+        await _memberCodes.StageRotationAsync(user.Id, user.Id, "password_reset", ct);
         await _db.SaveChangesAsync(ct);
 
         // Spec §11 and §3: every successful password change emails the member, "the one signal a

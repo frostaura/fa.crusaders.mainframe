@@ -50,5 +50,5 @@ by `src/iot/tools/membercode_vectors.py` and checked by `make corpus-check`. Lan
   by `[common]`'s own token and sets its own, so `[common]` stays byte-identical and the Mega
   sketch does not move. The Devices page showing these numbers is how a flash is confirmed.
 - **Owed, and nobody but Dean can do the first:** flash the ESP8266 bridge and each door ESP32
-  (spec §8.1; the Mega is not touched); the backend lane (endpoints, rosters, cut-over, forgery
-  alert) and the PWA lane (enrol, WebCrypto, My Code). Nothing has run on hardware.
+  (spec §8.1; the Mega is not touched); the PWA lane (enrol, WebCrypto, My Code). The backend
+  half landed on `be/p7-code` — see `decisions-member-code-backend.md`. Nothing has run on hardware.

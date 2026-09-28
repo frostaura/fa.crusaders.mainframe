@@ -146,6 +146,9 @@ internal static class EmailCatalogue
             ("AdminOverdraftAuthorised", EmailTemplates.AdminOverdraftAuthorised(club, to, new OverdraftNotice("Jason Fourie", "Thandi Mokoena", false, "Court 3", "Tue 29 Sep, 18:00", 24m, -16m, ConsoleUrl))),
             ("AdminOverdraftAuthorisedSelf", EmailTemplates.AdminOverdraftAuthorised(club, to, new OverdraftNotice("Jason Fourie", "Jason Fourie", true, "Court 3", "Tue 29 Sep, 18:00", 24m, -16m, ConsoleUrl))),
             ("AdminCodeForgerySuspected", EmailTemplates.AdminCodeForgerySuspected(club, to, new ForgeryNotice("box-2ad001", "Thandi Mokoena", "offline half verified, online half did not", ConsoleUrl))),
+            ("YouPaidForACourt", EmailTemplates.YouPaidForACourt(club, to, new PaidForCourt("Court 3", "Tue 29 Sep, 18:00", 24m, "Thandi Mokoena"))),
+            ("YourCourtWasPaidFor", EmailTemplates.YourCourtWasPaidFor(club, to, new PaidForCourt("Court 3", "Tue 29 Sep, 18:00", 24m, "Jason Fourie"))),
+            ("AdminBoardLostMemberCodes", EmailTemplates.AdminBoardLostMemberCodes(club, to, new BoardLostMemberCodes("Court box 1-4", "box-2ad001", "2.0.0", ConsoleUrl))),
         ];
     }
 

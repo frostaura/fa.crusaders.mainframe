@@ -44,6 +44,37 @@ public static class GateHeartbeatView
         Device device, string tenantSlug, int heartbeatSeconds, int unlockSeconds,
         IReadOnlyList<string> roster, DateTimeOffset now)
     {
+        return Legacy(device, tenantSlug, heartbeatSeconds, unlockSeconds, roster, now);
+    }
+
+    /// <summary>
+    /// The same body for a <c>codes:m1</c> door: the envelope above in the same order, then the
+    /// four member-code keys after <c>roster</c> (member-code §5.2). A door that names no
+    /// capability gets <see cref="Of"/>'s body byte for byte.
+    /// </summary>
+    public static Dictionary<string, object?> WithCodes(
+        Device device, string tenantSlug, int heartbeatSeconds, int unlockSeconds,
+        IReadOnlyList<string> roster, DateTimeOffset now, MemberCodeSync? codes)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["server_time"] = now,
+            ["tenant_slug"] = tenantSlug,
+            ["device_code"] = device.DeviceCode,
+            ["kind"] = DeviceKinds.Gate,
+            ["gate_key"] = device.GateKey,
+            ["heartbeat_seconds"] = heartbeatSeconds,
+            ["gate"] = new { unlock_seconds = unlockSeconds },
+            ["roster"] = roster,
+        };
+        codes?.WriteTo(body);
+        return body;
+    }
+
+    private static object Legacy(
+        Device device, string tenantSlug, int heartbeatSeconds, int unlockSeconds,
+        IReadOnlyList<string> roster, DateTimeOffset now)
+    {
         return new
         {
             server_time = now,
