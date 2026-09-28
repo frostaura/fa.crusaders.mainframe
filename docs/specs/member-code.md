@@ -621,19 +621,32 @@ Each is a server behaviour; none changes a byte the corpus holds.
   refusal, so no screen is owed, but `gate/` and `membercode/gate.json` hold no
   `gate-scan-response-code-used` case. `GateAccess.Reasons` (pinned both ways against the door
   corpus) therefore does not list it; it is `GateAccess.CodeUsed`. Owed to the contract lane.
-- **A rotation ends every session open when it happened.** The admin reset exists for "I lost my
-  phone", and retiring the codes alone left the phone's signed-in PWA free to call `/enrol` and be
-  handed the new secret. So every rotation stamps `users.SessionsValidAfter` (whole milliseconds)
-  and every token minted before it is refused with a 401 on every route: checked in the bearer
-  handler beside the revoked-`jti` list, answered from a per-account cache for `LiveAdminRole`'s 15
-  seconds and evicted by the rotation's own save — so on the single backend container it bites on
-  the next request. **Refresh and enrolment read the row directly**, never the cache: one mints a
-  token that would pass every later check, the other hands out the secret. Tokens carry `iat_ms`
-  so a token re-issued in the same second is told apart; one without it is judged by `nbf` (older,
-  the safe direction). The member's own password change keeps its session: `POST /me/password`
-  answers `{"changed":true,"access_token":…}` and the presented token is dead. `POST
-  /api/v1/me/sessions/revoke-all` is sign-out-everywhere: 204, the caller's own session included.
-  A member without a code row still has their sessions cut.
+- **A rotation ends every session open when it happened — by a per-account SESSION EPOCH.** The
+  admin reset exists for "I lost my phone", and retiring the codes alone left the phone's
+  signed-in PWA free to call `/enrol` and be handed the new secret. Every token carries the epoch
+  it was minted under (claim `sep`; a token without one is epoch 0), and every rotation runs
+  `UPDATE users SET "SessionEpoch" = "SessionEpoch" + 1` — one statement, committed at once,
+  before the rotation's new generation commits. A token below its account's epoch is a 401 on
+  every route: checked in the bearer handler, cached per account for `LiveAdminRole`'s 15 s and
+  evicted by the increment. **Refresh** reads the row, refuses a presented epoch below it and
+  mints with the value it read; **enrolment** reads the epoch under `FOR SHARE` in the same
+  transaction as the code row, so a rotation's increment waits for it and an old session sees
+  either the old epoch and the old generation or the new epoch and a 401 — never the new secret.
+  *Why not a time:* the first version stamped a cut-off instant; a refresh inside the rotation
+  read no cut-off and minted a token dated after it, which survived and enrolled (refuted
+  2026-09-28). The member's own password change keeps its session: `POST /me/password` answers
+  `{"changed":true,"access_token":…}` minted under the new epoch, and the presented token is
+  dead. **Open SSE streams** (wallet, control board, monitoring) re-ask the epoch before every
+  frame and keep-alive and close when their session is stale.
+- **Sign out everywhere and the desk's reset, with passkeys.** `POST /api/v1/me/sessions/revoke-all`
+  (optional body `{"revoke_passkeys": bool}`, default **false**) answers
+  `200 {"signed_out":true,"passkeys_revoked":…,"passkeys_removed":N}`. `POST
+  /admin/members/{id}/code/reset` takes the same optional body with the default **true** and adds
+  `passkeys_revoked`, `passkeys_removed` to `{"rotated":true,"generation":N}`. Revoking deletes
+  the member's WebAuthn credentials, audited `member.passkeys_revoked`. *Why true at the desk:* the
+  lost phone's passkey signs straight back in under the new epoch and enrols for the new secret;
+  *why false for oneself:* signing out a forgotten tablet should not cost the passkey on the phone
+  in hand. A member without a code row still has their sessions ended.
 - **Pay-for refusals beyond §9.2.** A price whose label would exceed six characters is refused as
   `amount_unshowable` (the box reads it as SEE THE DESK) rather than sent for the box to discard.
   `not_chargeable` answers a booking the reassignment path will not touch — including one **never
@@ -653,8 +666,10 @@ Each is a server behaviour; none changes a byte the corpus holds.
   flush in the reassignment's one transaction; a payer who loses the race for a booking (the
   booking's concurrency token) is answered `already_paid`, never a 500, and its nonce and use are
   given back so a retry decides again.
-- **A use claimed before an action that throws is given back** (`/activate`, `/walkup` up to the
-  purchase's commit, `/pay-for`); a claim keyed by the box's nonce (`walkup:`/`payfor:` + nonce,
+- **A use claimed before an action that throws is given back** (`/activate`, `/walkup` unless its
+  purchase committed, `/pay-for`); a walk-up whose purchase committed keeps its use even when the
+  activation is then refused and the purchase voided — the use table records acts, and money
+  moved under that code; a claim keyed by the box's nonce (`walkup:`/`payfor:` + nonce,
   `member_code_uses.ClaimKey`) is re-entered by the same device's identical retry, so twin retries
   in flight together are one purchase and neither is `code_used`.
 - **Evidence and the previous generation.** Checked under the current generation, and under the
@@ -666,11 +681,18 @@ Each is a server behaviour; none changes a byte the corpus holds.
 - **A second use of one code is a DIFFERENT board.** The use table's unique index finds the taken
   row; the same device holding it is the same act — its fallback of an online grant whose answer
   was lost, or its own upload retried after a failure — and is a plain receipt (attendance already
-  stamped, no alarm). Only another board's use is the `reused` forgery of §7.
-- **A clamped event time is `unverifiable`, not forged.** When the server had to clamp an event's
-  time (a future or >30-day claim), the step a v1 code was shown at is unknown; the event is
-  receipted and audited `device.activation_unverifiable` / `device.gate_open_unverifiable`, is not
-  attendance, and raises no forgery notice.
+  stamped, no alarm). Only another board's use is the `reused` forgery of §7. The exemption is
+  safe per DEVICE, not per event, because a device cannot act on one code twice: its replay ring
+  (§6.4) holds every step it acted on, online grants included (`recordOnlineUse`), and refuses
+  that step and every earlier one for the rest of the window — so the only way one board uploads
+  one code twice is the same act. The residual is the ring's eviction (§11), which needs more
+  distinct members at one board inside ninety seconds than a club has.
+- **A clamped event time.** When the server had to clamp an event's time (a future or >30-day
+  claim), the step a v1 code was shown at is unknown: the event is never attendance or money, and
+  what the step decides is recorded `unverifiable` (audited `device.activation_unverifiable` /
+  `device.gate_open_unverifiable`, no notice) — an OFF that matched nowhere, or a genuine code.
+  What needs no step still raises `code.forgery_suspected`: another board holding the code's use
+  (`reused`), and an OFF that matched with an ON that did not (`on_mismatch`).
 - **Which booking evidence belongs to.** `FindForEvidenceAsync` prefers a booking whose sold window
   `[StartsAt − cue, EndsAt]` holds the scan — the latest already started, else the earliest in its
   cue window — and falls back to one whose grace tail reaches it only when none does. Before, an
@@ -678,7 +700,10 @@ Each is a server behaviour; none changes a byte the corpus holds.
 - **Legacy codes after the cut-off, everywhere.** `v1_only` refuses them on the device paths, the
   courtside `/court/{n}/qr/match` kiosk and the biometric payer override alike, and uploaded legacy
   evidence is judged at the scan (honoured only before `member_code_cutoff_at`). The cut-off —
-  automatic or by hand — sets every live access code's expiry to the cut-off instant.
+  automatic or by hand — sets every live access code's expiry to the cut-off instant and marks it
+  (`CutoffExpiredAt`, `ExpiresAtBeforeCutoff`); an administrator's rollback out of `v1_only` gives
+  back every marked code whose own expiry is still ahead and clears the marks. *Why:* a club rolls
+  back because v1 misbehaved, and the legacy codes are exactly the fallback it rolled back to.
 - **A board losing `codes:m1` after cut-over** raises `device.codes_capability_lost` (non-security,
   once per board per firmware version).
 - **The court box's body writes `relays` before `roster`**, matching both corpora; the firmware

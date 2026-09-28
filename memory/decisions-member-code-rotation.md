@@ -1,6 +1,6 @@
 ---
 name: crusaders-mainframe-decisions-member-code-rotation
-description: "Every member-code rotation ends every open session (SessionsValidAfter, 15 s cache, refresh/enrol read the row); a manual rollback holds the rollout; only acknowledged boards vote; master key policy."
+description: "Every rotation ends every open session by a per-user epoch (not a time), the desk's reset drops passkeys, streams close; a manual rollback holds the rollout and restores cut-off codes; acknowledged boards vote."
 type: decision
 last_verified: 2026-09-28
 ---
@@ -11,24 +11,29 @@ Oracle `docs/specs/member-code.md` §10, §13; code decisions beside this are
 `decisions-member-code-backend.md`.
 
 - **Any rotation — admin code reset, password change or reset, admin temp password, suspension,
-  sign out everywhere — ends every session minted before it** (`users.SessionsValidAfter`,
-  whole ms; tokens carry `iat_ms`). *Why:* the reset is the desk's "I lost my phone" button, and
-  the phone's open PWA could simply re-enrol and be handed the NEW secret (proved by review
-  2026-09-28). A member without a code row is still cut: a password change must end sessions
-  whether or not a phone ever enrolled.
-- **Checked in the bearer handler, cached 15 s per account like `LiveAdminRole`, evicted by the
-  rotation's own save; refresh and enrolment read the row.** *Why:* every request paying a DB
-  read was rejected, but those two routes outliving a stale cache would mint a token that passes
-  for ever or hand out the secret — the whole point of the rotation.
-- **The member's own password change keeps its session**: the answer carries a fresh
-  `access_token` and the presented one is dead. *Why:* signing a member out for changing their
-  password punishes the responsible act. The PWA must adopt the token or it is signed out.
-- **`POST /api/v1/me/sessions/revoke-all`** is sign-out-everywhere: a rotation, caller included.
+  sign out everywhere — ends every open session by raising `users.SessionEpoch`** (`UPDATE … +1`,
+  committed at once, before the new generation); tokens carry `sep`, none = 0. *Why:* the reset
+  is the desk's "I lost my phone" button, and the phone's open PWA could re-enrol for the NEW
+  secret. *Why an epoch, not a time:* the first cut-off INSTANT let a refresh inside the rotation
+  read no cut-off and mint a token dated after it, which survived and enrolled (refuted
+  2026-09-28). Refresh refuses a presented epoch below the row and mints with the value it read.
+- **Checked in the bearer handler, cached 15 s like `LiveAdminRole`, evicted by the increment;
+  refresh reads the row; enrolment reads the epoch `FOR SHARE` in the code row's transaction.**
+  *Why:* the increment then waits for an enrolment in flight, so an old session gets the old
+  secret or a 401, never the new one. Open SSE streams re-ask per frame and close.
+- **The desk's reset removes passkeys by default; sign-out-everywhere does not** (`revoke_passkeys`
+  overrides both; answers say). *Why:* a lost phone's passkey signs back in under the new epoch;
+  a member signing out a stray tablet should keep the passkey on the phone in hand.
+- **The member's own password change keeps its session**: the answer carries `access_token`
+  minted under the new epoch. *Why:* signing a member out for changing their password punishes
+  the responsible act. The PWA must adopt the token or it is signed out.
 - **A manual BACKWARD phase move sets `member_code_manual_hold` (+ by, at); the heartbeat never
   moves forward while it is set**, and only a forward move by hand (or clearing it) lifts it.
   Back to `v1` restamps the cut-over and clears the cut-off. *Why:* every board still speaks
   `codes:m1` after a rollback, so the next heartbeat undid it within a minute — and an old
   cut-over date re-fired the cut-off at once.
+  A rollback out of `v1_only` gives back the legacy codes the cut-off ended (still in date).
+  *Why:* they are the fallback the club rolled back to.
 - **Only ACKNOWLEDGED enabled boards vote on the cut-over** (court box acknowledged by an admin,
   door with a `gate_key` — the same test that decides who gets keys). *Why:* auto-registration
   admits any MAC holding the club's device key: counted, a bench spare on old firmware blocked

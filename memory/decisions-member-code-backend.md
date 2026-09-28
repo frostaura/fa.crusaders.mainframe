@@ -14,7 +14,8 @@ hold: `decisions-member-code-rotation.md`.
 - **S is derived, never stored**: `member_codes` holds only REF + generation. *Why:* a copy of the
   table forges nothing. **The prod compose carries a CHANGE-ME placeholder — a redeploy without
   `MemberCodes__MasterKey` will not start.**
-- **A use is CLAIMED before the action and released if the server does not act — or throws.**
+- **A use is CLAIMED before the action and released if the server does not act — or throws before
+  money commits (a walk-up voided after its purchase keeps its use).**
   *Why:* two concurrent requests with one code must not both act; a claim a 500 stranded read
   `code_used` to the member's own retry. Claims keyed by the box's nonce (`ClaimKey`) re-enter for
   the same device's identical retry — twin walk-up retries in flight were answered `code_used`.
@@ -22,12 +23,14 @@ hold: `decisions-member-code-rotation.md`.
   retrying its own purchase must get the first answer, never `code_used`.
 - **Evidence: the same board holding the use is the same act** (its fallback of an online grant,
   or its own re-upload after a failure) → a receipt; only another board is `reused`. *Why:* the
-  first shape paged every admin about a member's single scan (review, 2026-09-28).
+  first shape paged every admin about a member's single scan. Per device, not per event, because
+  both firmwares' replay rings refuse a code they acted on (online grants included) for its window.
 - **The previous generation counts as evidence for 6 h after a rotation, only for a member active
   at the scan.** *Why:* an offline board honestly verified old codes across a rotation, but
   unbounded it made a lost phone's or a suspended member's codes genuine for ever.
-- **A clamped event time is `unverifiable`, not forged.** *Why:* the step is unknown; an alarm
-  on a guess is noise that teaches admins to ignore the real one.
+- **A clamped event time is never attendance; what needs the step is `unverifiable`, but a reuse
+  by another board or a failed ON still alarms.** *Why:* an alarm on a guess is noise, yet
+  suppressing step-free proof let a copied key through on a broken counter (refute round 1).
 - **Evidence finds the booking whose SOLD window holds the scan** before any grace tail. *Why:*
   back-to-back 17:00/18:00 slots stamped the 17:00 one and swept the 18:00 player a no-show.
 - **Pay-for pays for the booking its quote named** (`device_pay_for_quotes`; else, or unquoted,
