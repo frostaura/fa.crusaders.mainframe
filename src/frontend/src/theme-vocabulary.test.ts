@@ -101,7 +101,6 @@ const ALLOW: Record<string, Rule[]> = {
   "components/member-door/FullScreenQr.tsx": ["raw-palette", "arbitrary-z"],
   "components/monitoring/CourtTile.tsx": ["arbitrary-spacing"],
   "components/onboarding/Illustrations.tsx": ["arbitrary-spacing"],
-  "pages/MyCode.tsx": ["arbitrary-spacing"],
 };
 
 describe("theme vocabulary (ratchet)", () => {

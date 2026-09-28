@@ -7,7 +7,6 @@ import {
   minutesSince,
   readLastKnown,
   rememberDoor,
-  rememberQr,
 } from "./lastKnown";
 
 /**
@@ -22,26 +21,23 @@ import {
  * </p>
  *
  * <p>
- * So the page keeps its own record. Two rules make it safe rather than dangerous: the
- * code's expiry is stored as an ABSOLUTE instant, so a stored code can never be rendered
- * as live; and the last door DECISION is never stored at all, because a refusal from
- * yesterday shown to somebody standing at a door tonight is worse than an empty screen.
+ * So the page keeps its own record of the DOOR facts. The last door DECISION is never stored,
+ * because a refusal from yesterday shown to somebody standing at a door tonight is worse than
+ * an empty screen.
+ * </p>
+ *
+ * <p>
+ * <b>D1 — the code half, and its tests, are retired.</b> This store used to hold the last booking
+ * or ident code (with an absolute expiry so it could never be drawn as live). The single rotating
+ * code is made on the phone from a non-extractable key in IndexedDB (`lib/memberCode/`), so no
+ * code is stored here at all, and the tests that pinned the stored code's expiry, its round-trip
+ * and its separate timestamp went with it. What is asserted instead: a v3 record's code is
+ * discarded, and nothing this store writes can carry one.
  * </p>
  */
 describe("lastKnown", () => {
   beforeEach(() => forgetLastKnown());
   afterEach(() => vi.restoreAllMocks());
-
-  const QR = {
-    code: "7K3M9XQ2RD5A",
-    kind: "booking" as const,
-    expires_in_seconds: 900,
-    court_number: 3,
-    starts_at: "2026-09-19T17:00:00Z",
-    doors: true,
-    door_opens_at: "2026-09-19T16:30:00Z",
-    door_closes_at: "2026-09-19T18:05:00Z",
-  };
 
   const DOOR = {
     doors: true,
@@ -72,39 +68,7 @@ describe("lastKnown", () => {
   };
 
   it("has nothing to say before anything has been stored", () => {
-    const known = readLastKnown();
-    expect(known.qr).toBeNull();
-    expect(known.door).toBeNull();
-  });
-
-  it("round-trips a code with the fields the offline page renders", () => {
-    rememberQr(QR);
-    const stored = readLastKnown().qr;
-    expect(stored?.value.code).toBe("7K3M9XQ2RD5A");
-    expect(stored?.value.kind).toBe("booking");
-    expect(stored?.value.doors).toBe(true);
-    expect(stored?.value.courtNumber).toBe(3);
-  });
-
-  /**
-   * The rule that stops this store being a trap. `expires_in_seconds` is a DURATION from
-   * the moment of the response; stored as such it would read as a fresh lifetime on every
-   * subsequent load, and the page would draw a live-looking QR over a code that died
-   * overnight.
-   */
-  it("stores the code's expiry as an absolute instant, not as a lifetime", () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-09-19T06:00:00Z"));
-    rememberQr(QR);
-
-    const stored = readLastKnown().qr!;
-    expect(stored.value.expiresAt).toBe("2026-09-19T06:15:00.000Z");
-
-    // An hour later the same record is plainly expired, and stays expired however often
-    // the page is opened.
-    vi.setSystemTime(new Date("2026-09-19T07:00:00Z"));
-    expect(Date.parse(readLastKnown().qr!.value.expiresAt)).toBeLessThan(Date.now());
-    vi.useRealTimers();
+    expect(readLastKnown()).toEqual({ door: null });
   });
 
   it("round-trips the standing door facts", () => {
@@ -159,24 +123,19 @@ describe("lastKnown", () => {
     expect(JSON.stringify(readLastKnown())).not.toContain("too_early");
   });
 
-  it("stamps each half with its own wall time, because they are fetched separately", () => {
+  it("stamps the door facts with the wall time they were saved at", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-09-19T06:00:00Z"));
-    rememberQr(QR);
     vi.setSystemTime(new Date("2026-09-19T06:05:00Z"));
     rememberDoor(DOOR);
-
-    const known = readLastKnown();
-    expect(known.qr!.savedAt).toBe("2026-09-19T06:00:00.000Z");
-    expect(known.door!.savedAt).toBe("2026-09-19T06:05:00.000Z");
+    expect(readLastKnown().door!.savedAt).toBe("2026-09-19T06:05:00.000Z");
     vi.useRealTimers();
   });
 
-  it("keeps one half when only the other is written", () => {
-    rememberQr(QR);
+  /** D1. A member code is a key in IndexedDB now; this store never holds one. */
+  it("writes no code of any kind", () => {
     rememberDoor(DOOR);
-    expect(readLastKnown().qr).not.toBeNull();
-    expect(readLastKnown().door).not.toBeNull();
+    const raw = JSON.parse(window.localStorage.getItem(LAST_KNOWN_KEY)!);
+    expect(Object.keys(raw).sort()).toEqual(["door", "version"]);
   });
 
   // --- storage that is not there, or lies -------------------------------------------
@@ -188,15 +147,14 @@ describe("lastKnown", () => {
    * stored".
    */
   it("says nothing rather than throwing when reading storage is refused", () => {
-    rememberQr(QR);
+    rememberDoor(DOOR);
     vi.spyOn(window.localStorage, "getItem").mockImplementation(() => { throw new Error("denied"); });
     expect(() => readLastKnown()).not.toThrow();
-    expect(readLastKnown().qr).toBeNull();
+    expect(readLastKnown().door).toBeNull();
   });
 
   it("carries on when writing to storage is refused", () => {
     vi.spyOn(window.localStorage, "setItem").mockImplementation(() => { throw new Error("quota"); });
-    expect(() => rememberQr(QR)).not.toThrow();
     expect(() => rememberDoor(DOOR)).not.toThrow();
   });
 
@@ -207,7 +165,6 @@ describe("lastKnown", () => {
 
   it("discards a record it cannot parse rather than crashing the page on it", () => {
     window.localStorage.setItem(LAST_KNOWN_KEY, "{ not json");
-    expect(readLastKnown().qr).toBeNull();
     expect(readLastKnown().door).toBeNull();
   });
 
@@ -216,18 +173,22 @@ describe("lastKnown", () => {
    * being read field-by-field by code that assumes the current one, which surfaces as a
    * blank card rather than as an error anybody can act on.
    */
-  it("discards a record written by an older version of this store", () => {
+  /** D1's bump: a v3 record carries the last legacy code, and none of it is read back. */
+  it("discards a record written by an older version of this store, code and all", () => {
+    rememberDoor(DOOR);
+    const current = JSON.parse(window.localStorage.getItem(LAST_KNOWN_KEY)!);
     window.localStorage.setItem(LAST_KNOWN_KEY, JSON.stringify({
+      ...current,
       version: LAST_KNOWN_VERSION - 1,
       qr: { savedAt: "2026-09-19T06:00:00.000Z", value: { code: "OLDCODE00000" } },
-      door: null,
     }));
-    expect(readLastKnown().qr).toBeNull();
+    expect(readLastKnown()).toEqual({ door: null });
+    expect(JSON.stringify(readLastKnown())).not.toContain("OLDCODE00000");
   });
 
   it("discards a record with no version at all", () => {
-    window.localStorage.setItem(LAST_KNOWN_KEY, JSON.stringify({ qr: { savedAt: "x", value: { code: "OLD" } } }));
-    expect(readLastKnown().qr).toBeNull();
+    window.localStorage.setItem(LAST_KNOWN_KEY, JSON.stringify({ door: { savedAt: "x", value: DOOR } }));
+    expect(readLastKnown().door).toBeNull();
   });
 
   /**
@@ -266,14 +227,12 @@ describe("lastKnown", () => {
     rememberDoor(DOOR);
     const raw = JSON.parse(window.localStorage.getItem(LAST_KNOWN_KEY)!);
     expect(raw.version).toBe(LAST_KNOWN_VERSION);
-    expect(LAST_KNOWN_VERSION).toBe(3);
+    expect(LAST_KNOWN_VERSION).toBe(4);
   });
 
   it("forgets everything on request", () => {
-    rememberQr(QR);
     rememberDoor(DOOR);
     forgetLastKnown();
-    expect(readLastKnown().qr).toBeNull();
     expect(readLastKnown().door).toBeNull();
   });
 

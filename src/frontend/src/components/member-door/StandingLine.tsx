@@ -74,7 +74,7 @@ export function StandingLine(props: {
    */
   hasLiveCode: boolean;
   /** Switches the page to the member's own code. E-H2 (3). */
-  onUseMemberCode: () => void;
+  onUseMemberCode?: () => void;
   /**
    * Something ABOVE this section is already offering the same next act.
    *
@@ -120,7 +120,7 @@ export function StandingLine(props: {
         {line.codeLine && <p className="text-sm text-text-secondary">{line.codeLine}</p>}
         {/* B4 / E-H1: both halves of what a shut door does, and nothing promised. */}
         {line.shutLine && <p className="text-sm text-warning-strong">{line.shutLine}</p>}
-        {line.offerMemberCode && (
+        {line.offerMemberCode && onUseMemberCode && (
           <Button variant="outline" className="w-full sm:w-auto" onClick={onUseMemberCode}>
             {USE_MEMBER_CODE_INSTEAD}
           </Button>

@@ -1,5 +1,5 @@
 import { type Page } from "@playwright/test";
-import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute, memberCodeRoutes } from "./fixtures";
 
 /**
  * The application shell (P2): what a navigation does (C6), what the primary nav does as the
@@ -63,14 +63,7 @@ function memberRoutes(): ApiRoute[] {
     { path: "/api/v1/whoami", body: { ...SESSION_ADMIN, is_admin: false } },
     { path: "/api/v1/me/profile", body: { full_name: "Lerato Mokoena", email: "lerato@sample.local", photo_url: null, membership_number: "M-0001" } },
     { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
-    {
-      path: "/api/v1/me/qr/generate",
-      body: {
-        code: "7K3M9XQ2RD5A", kind: "booking", expires_in_seconds: 900, court_number: 3,
-        starts_at: "2099-01-01T17:00:00Z", doors: true,
-        door_opens_at: "2099-01-01T16:30:00Z", door_closes_at: "2099-01-01T18:05:00Z",
-      },
-    },
+    ...memberCodeRoutes(),
     {
       path: "/api/v1/me/door",
       body: {
@@ -180,7 +173,10 @@ test.describe("R15 — where the old addresses go", () => {
   test("a signed-in member opening the club's address lands on My Code", async ({ page }) => {
     await openMember(page, "/");
     await expect(page).toHaveURL(/\/my-code$/);
-    await expect(page.getByRole("heading", { name: "Your code" })).toBeVisible();
+    // D1/D8: My Code's h1 is visually hidden on a phone (the pass says whose it is), so it is
+    // asserted present, and the pass itself visible.
+    await expect(page.getByRole("heading", { name: "Your code" })).toBeAttached();
+    await expect(page.getByRole("article", { name: "Your member pass" })).toBeVisible();
     await expect(mainNav(page).getByRole("link", { name: "My Code" })).toHaveAttribute("aria-current", "page");
   });
 
@@ -331,7 +327,10 @@ test.describe("B12 — the chrome at a large root font size", () => {
   test("leaves a member enough of the phone to hold a QR up to a scanner", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 568 });
     await openMember(page);
-    await expect(page.getByRole("heading", { name: "Your code" })).toBeVisible();
+    // D1/D8: My Code's h1 is visually hidden on a phone (the pass says whose it is), so it is
+    // asserted present, and the pass itself visible.
+    await expect(page.getByRole("heading", { name: "Your code" })).toBeAttached();
+    await expect(page.getByRole("article", { name: "Your member pass" })).toBeVisible();
     await page.addStyleTag({ content: "html { font-size: 32px !important; }" });
 
     const geo = await chromeGeometry(page);

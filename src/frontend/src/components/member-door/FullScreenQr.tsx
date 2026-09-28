@@ -1,9 +1,6 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "../Button";
-import { formatCountdown } from "../../lib/countdown";
-import type { Sentence } from "../../lib/memberDoorCopy";
-import { CopySentence } from "./CopySentence";
 
 /**
  * The code, full-bleed, at the largest area the screen can give it.
@@ -24,12 +21,22 @@ import { CopySentence } from "./CopySentence";
  * </p>
  *
  * <p>
- * <b>It carries the code's own clock, and it does not close itself. D12.</b> A member
- * holding this up to a scanner had no way to tell a code with ten minutes left from one
- * with four seconds — and when the code did die, the overlay vanished on its own, putting
- * them back on a page led by a stale green banner with nothing to say what had happened.
- * The countdown is here now, and death is a state of this overlay rather than the end of
- * it.
+ * <b>It carries the code's own clock. D12.</b> A member holding this up to a scanner had no
+ * way to tell a code about to rotate from a fresh one. The caller passes the sentence
+ * ("New code in 12 seconds"); the overlay re-renders with the page, so the symbol under the
+ * member's thumb is always the current step's.
+ * </p>
+ *
+ * <p>
+ * <b>D1 removed the dead state.</b> A booking or ident code fetched from the club could run out
+ * with no signal to renew it, and this overlay had a whole arm for saying so. The single
+ * rotating code is made on the phone from a key it holds, every thirty seconds, with or
+ * without signal — there is no code on this screen that can die, so there is no arm for one.
+ * </p>
+ *
+ * <p>
+ * <b>The brightness line.</b> A phone on auto-brightness in a dark doorway can dim the white
+ * this overlay exists to show. The page cannot set the brightness (no web API can), so it asks.
  * </p>
  */
 /**
@@ -57,7 +64,9 @@ const COLUMN_RESERVE = [
   0.5,  // `gap-2` under it
   1.75, // the code line, `text-lg` on a 1.75rem line box
   0.5,  // `gap-2`
-  1.25, // the countdown, `text-sm` on a 1.25rem line box
+  1.25, // the countdown and the brightness hint, `text-sm` on ONE 1.25rem line box where the
+        // screen is short (landscape) — they share a wrapping row, so the line is only a
+        // second one in portrait, where the square is bounded by the width and has height spare
   0.5,  // `gap-2`
   2.75, // Done, `min-h-11`
   0.5,  // `p-2` below it
@@ -111,20 +120,18 @@ const SQUARE_BOX = { "--fsq-square": SQUARE, width: "var(--fsq-square)" } as Rea
 const SQUARE_BOTH = { ...SQUARE_BOX, height: "var(--fsq-square)" } as React.CSSProperties;
 
 export function FullScreenQr(props: {
+  /** The whole code, unbroken — what the scanner reads and what the caption spells. */
   code: string;
-  children: React.ReactNode;
-  /** Seconds left on the code, for the one clock a member at a scanner can see. D12. */
-  secondsLeft: number;
-  /** The code has run out. The symbol is replaced rather than dimmed — see the page's D5. */
-  dead: boolean;
-  /** A replacement is genuinely in flight. "Getting a fresh one" is only true while it is. */
-  renewing: boolean;
-  /** What to say when it is dead and cannot be renewed, with the club's number as a link. */
-  deadSentence: Sentence;
-  onTryAgain: () => void;
+  /** The code as the member reads it (grouped); defaults to {@link code}. */
+  codeText?: ReactNode;
+  children: ReactNode;
+  /** The one clock a member at a scanner can see — "New code in 12 seconds". D12. */
+  countdown: string;
+  /** Under the countdown: ask for a brighter screen. */
+  hint?: string;
   onClose: () => void;
 }) {
-  const { code, children, secondsLeft, dead, renewing, deadSentence, onTryAgain, onClose } = props;
+  const { code, codeText, children, countdown, hint, onClose } = props;
   const dialog = useRef<HTMLDivElement | null>(null);
   /** Our own history entry's marker while it is the current one. See the effect below. */
   const entry = useRef<number | null>(null);
@@ -311,17 +318,34 @@ export function FullScreenQr(props: {
     };
   }, []);
 
+  /**
+   * Screen Wake Lock while the code is up — feature-detected, and silent either way.
+   *
+   * <p>
+   * <b>Re-requested whenever the page comes back into view.</b> A browser releases a screen lock
+   * the moment the page is hidden — a notification pulled down, a glance at another app — and does
+   * not give it back. Without asking again, the second time a member held this up at a door the
+   * phone dimmed halfway through the scan.
+   * </p>
+   */
   useEffect(() => {
     let sentinel: { release: () => Promise<void> } | null = null;
     let live = true;
     const nav = navigator as Navigator & { wakeLock?: { request: (t: string) => Promise<{ release: () => Promise<void> }> } };
-    try {
-      nav.wakeLock?.request("screen")
-        .then((lock) => { if (live) sentinel = lock; else void lock.release(); })
-        .catch(() => { /* denied, or the page was not visible. Nothing visible changes. */ });
-    } catch { /* no such API here */ }
+    const acquire = () => {
+      if (!live || document.visibilityState === "hidden") return;
+      try {
+        nav.wakeLock?.request("screen")
+          .then((lock) => { if (live) sentinel = lock; else void lock.release(); })
+          .catch(() => { /* denied, or the page was not visible. Nothing visible changes. */ });
+      } catch { /* no such API here */ }
+    };
+    const onVisibility = () => { if (document.visibilityState === "visible") acquire(); };
+    acquire();
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       live = false;
+      document.removeEventListener("visibilitychange", onVisibility);
       try { void sentinel?.release(); } catch { /* already gone */ }
     };
   }, []);
@@ -380,58 +404,35 @@ export function FullScreenQr(props: {
         precisely what happened when D12's countdown arrived under a `6.5rem` that predated
         it, and the symbol's top quiet zone went back off the glass in landscape.
       */}
-      {dead ? (
+      <div
+        style={SQUARE_BOTH}
         /*
-          D12 — the dead state lives HERE rather than back on the page. The symbol is
-          replaced rather than dimmed, for the reason the inline card carries in full: forty
-          per cent opacity is still a scannable QR, and a member held one up in the dark
-          repeatedly while the screen promised a refresh that could not happen.
+          It may SHRINK, and that is the safety valve rather than the design. The reserve
+          above is exact for the column as it stands, but a code that wraps to two lines at
+          a large root font, or a button a shared component grows by a pixel, would put the
+          symbol back off the top of the glass. `min-h-0` lets flex take the difference out
+          of the square instead; the SVG's own `preserveAspectRatio` keeps the symbol square
+          and centred inside whatever box is left, so it degrades to smaller rather than to
+          clipped.
         */
-        <div
-          style={SQUARE_BOX}
-          className="max-w-full space-y-3 rounded-lg border border-danger-soft bg-danger-soft p-4 text-center"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {renewing ? (
-            <p className="text-sm text-danger-strong">This code has run out. Getting a fresh one…</p>
-          ) : (
-            <>
-              <CopySentence sentence={deadSentence} className="text-sm text-danger-strong" />
-              <Button variant="outline" className="min-h-11" onClick={(e) => { e.stopPropagation(); onTryAgain(); }}>
-                Try again
-              </Button>
-            </>
-          )}
-        </div>
-      ) : (
-        <div
-          style={SQUARE_BOTH}
-          /*
-            It may SHRINK, and that is the safety valve rather than the design. The reserve
-            above is exact for the column as it stands, but a code that wraps to two lines at
-            a large root font, or a button a shared component grows by a pixel, would put the
-            symbol back off the top of the glass. `min-h-0` lets flex take the difference out
-            of the square instead; the SVG's own `preserveAspectRatio` keeps the symbol square
-            and centred inside whatever box is left, so it degrades to smaller rather than to
-            clipped.
-          */
-          className="min-h-0"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {children}
-        </div>
-      )}
-      {/* `break-all`: twelve monospaced characters at 0.25em tracking are wider than a
-          360px phone once the root font is turned up, and a code that runs off the edge is
-          a code nobody can read back to the desk. */}
-      {!dead && (
-        <p className="max-w-full break-all text-center font-mono text-lg tracking-[0.25em] text-black">{code}</p>
-      )}
+        className="min-h-0"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {children}
+      </div>
+      {/* `break-all`: nineteen monospaced characters are wider than a 360px phone once the
+          root font is turned up, and a code that runs off the edge is a code nobody can read
+          back to the desk. The groups are spans with no spaces between them, so the text is the
+          unbroken code for a screen reader and for copy and paste alike. */}
+      <p className="max-w-full break-all text-center font-mono text-lg tracking-[0.25em] text-black">
+        {codeText ?? code}
+      </p>
       {/* D12. The one clock a member holding this against a scanner can see. Black on white
           like everything else here — a muted grey is light the scanner does not get back. */}
-      {!dead && (
-        <p className="shrink-0 text-center text-sm text-black">Refreshes in {formatCountdown(secondsLeft)}</p>
-      )}
+      <p className="flex max-w-full shrink-0 flex-wrap justify-center gap-x-3 px-4 text-center text-sm text-black">
+        <span>{countdown}</span>
+        {hint ? <span>{hint}</span> : null}
+      </p>
       <Button variant="outline" className="shrink-0 min-h-11" onClick={(e) => { e.stopPropagation(); dismiss(); }}>
         Done
       </Button>

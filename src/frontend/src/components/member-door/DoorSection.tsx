@@ -73,7 +73,7 @@ export function DoorSection(props: {
   /** Fetches a fresh code and resolves when it has settled. */
   onRefreshCode: () => Promise<void>;
   /** Switches the page to the member's own code. E-H2 (3). */
-  onUseMemberCode: () => void;
+  onUseMemberCode?: () => void;
   /** The decision card above is already offering "Book a court". See `StandingLine`. */
   actionOfferedAbove?: boolean;
 }) {

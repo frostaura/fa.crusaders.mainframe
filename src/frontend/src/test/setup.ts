@@ -137,3 +137,10 @@ beforeEach(() => { forgetClubZone(); });
 import { resetStandingAnnouncements } from "../lib/announce";
 
 beforeEach(() => { resetStandingAnnouncements(); });
+
+// D1 — the member code's key store falls back to module memory where there is no IndexedDB
+// (jsdom), so, like the club's zone, it would outlive a test. A key left by one test is a code
+// the next one renders without ever enrolling.
+import { wipeMemberCode } from "../lib/memberCode/keyStore";
+
+beforeEach(async () => { await wipeMemberCode(); });

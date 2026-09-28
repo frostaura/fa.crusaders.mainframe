@@ -5,6 +5,8 @@ import { dirname, extname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
+import { memberCodeSecretB64, MEMBER_CODE } from "./fixtures";
+import { tokensAroundNow } from "./memberCodeOracle";
 
 /**
  * D3 — the member at the door with no signal, on a PRODUCTION build.
@@ -114,16 +116,16 @@ const SESSION_MEMBER = {
   is_admin: false,
 };
 
-const CODE = {
-  code: "7K3M9XQ2RD5A",
-  kind: "booking",
-  expires_in_seconds: 900,
-  court_number: 3,
-  starts_at: "2099-01-01T17:00:00Z",
-  doors: true,
-  door_opens_at: "2099-01-01T16:30:00Z",
-  door_closes_at: "2099-01-01T18:05:00Z",
-};
+/*
+  D1 — there is no fetched code to remember any more. The warm visit ENROLS: the phone imports
+  the member secret as a non-extractable key and keeps it in IndexedDB, and the offline half
+  proves the code is made from that key with no network at all.
+*/
+const ENROL = () => ({
+  v: 1, ref: MEMBER_CODE.ref, generation: 1, secret: memberCodeSecretB64(), tz: MEMBER_CODE.tz,
+  step_seconds: 30, server_time_ms: Date.now(),
+});
+const STATUS = () => ({ v: 1, ref: MEMBER_CODE.ref, generation: 1, tz: MEMBER_CODE.tz, server_time_ms: Date.now() });
 
 const CONTACT = { phone: "021 555 0134", email: "info@crusaders.co.za" };
 
@@ -149,12 +151,16 @@ const DOOR = {
   last_decision: null,
 };
 
+/** What the page must never hold as text. */
+const memberSecretB64ForPage = memberCodeSecretB64();
+
 /** The API, for the warm visit only. Removed before anything is asserted offline. */
 async function warmApi(page: import("@playwright/test").Page) {
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     const body = path.endsWith("/whoami") ? SESSION_MEMBER
-      : path.endsWith("/me/qr/generate") ? CODE
+      : path.endsWith("/me/code/enrol") ? ENROL()
+        : path.endsWith("/me/code") ? STATUS()
         : path.endsWith("/me/door") ? DOOR
           : path.endsWith("/me/door/history")
             ? { items: [], next_cursor: null, retention_days: 90, timezone: "Africa/Johannesburg" }
@@ -185,7 +191,7 @@ async function warmThenGoOffline(page: import("@playwright/test").Page, context:
   });
   await warmApi(page);
   await page.goto(`${origin}/my-code`);
-  await expect(page.getByLabel("Your code", { exact: true })).toHaveText(CODE.code);
+  await expect(page.getByLabel("Your code", { exact: true })).toHaveText(/^118Y9\d{14}$/);
   await takeControl(page);
 
   /*
@@ -201,7 +207,7 @@ async function warmThenGoOffline(page: import("@playwright/test").Page, context:
     offline, which is not true of any service worker and was never the claim.
   */
   await page.reload();
-  await expect(page.getByLabel("Your code", { exact: true })).toHaveText(CODE.code);
+  await expect(page.getByLabel("Your code", { exact: true })).toHaveText(/^118Y9\d{14}$/);
 
   /*
     What the page managed to keep — BOTH halves, and waited for rather than sampled.
@@ -217,10 +223,35 @@ async function warmThenGoOffline(page: import("@playwright/test").Page, context:
   const stored = await page.waitForFunction(() => {
     const raw = window.localStorage.getItem("crusaders.member-door.last-known");
     if (!raw) return null;
-    const record = JSON.parse(raw) as { qr?: unknown; door?: unknown };
-    return record.qr && record.door ? raw : null;
+    const record = JSON.parse(raw) as { door?: unknown };
+    return record.door ? raw : null;
   }, undefined, { timeout: 15_000 }).then((handle) => handle.jsonValue());
-  expect(stored, "the page stored nothing while it had signal").toContain(CODE.code);
+  expect(stored, "the page stored no door facts while it had signal").toContain("021 555 0134");
+  // D1: and the member secret is nowhere a script can read it as text — not in localStorage,
+  // in any form. What IndexedDB holds is a non-extractable key handle.
+  const texts = await page.evaluate(() => Object.keys(localStorage).map((k) => localStorage.getItem(k)).join("|"));
+  expect(texts).not.toContain(memberSecretB64ForPage);
+  const key = await page.evaluate(() => new Promise<{ extractable: boolean; usages: string[] } | null>((resolve) => {
+    const open = indexedDB.open("crusaders-member-code");
+    open.onsuccess = () => {
+      const tx = open.result.transaction("keys", "readonly");
+      const get = tx.objectStore("keys").get("current");
+      get.onsuccess = () => resolve(get.result ? { extractable: get.result.key.extractable, usages: get.result.key.usages } : null);
+      get.onerror = () => resolve(null);
+    };
+    open.onerror = () => resolve(null);
+  }));
+  expect(key, "no key was stored for the offline visit").toEqual({ extractable: false, usages: ["sign"] });
+  // And the worker cached no enrolment: `mayCache()` refuses `/api/`, and a response carrying
+  // the secret is exactly what that rule exists for.
+  const cachedApi = await page.evaluate(async () => {
+    const urls: string[] = [];
+    for (const name of await caches.keys()) {
+      for (const req of await (await caches.open(name)).keys()) urls.push(req.url);
+    }
+    return urls.filter((u) => u.includes("/api/"));
+  });
+  expect(cachedApi).toEqual([]);
 
   // Interception goes FIRST, so that nothing below can be answered by the harness. From
   // here the only things that can answer are the worker's caches and this browser profile.
@@ -270,7 +301,7 @@ test("a production build registers its worker and serves the shell with no signa
  * </p>
  *
  */
-test("a cold offline start shows the last code, says it is a remembered one, and offers a number to press", async ({ page, context }) => {
+test("a cold offline start makes the code from the key on the phone, says it is offline, and offers a number to press", async ({ page, context }) => {
   await warmThenGoOffline(page, context);
 
   await page.goto(`${origin}/my-code`);
@@ -279,14 +310,14 @@ test("a cold offline start shows the last code, says it is a remembered one, and
   // used to be on the screen is the app-wide connection notice, not this page.
   await expect(page.getByRole("heading", { name: /Can't reach the club/i })).toHaveCount(0);
 
-  // The code, and the symbol, from the store rather than from a fetch that cannot happen.
-  await expect(page.getByLabel("Your code", { exact: true })).toHaveText(CODE.code);
-  await expect(page.getByRole("img", { name: new RegExp(`QR code ${CODE.code}`) })).toBeVisible();
-
-  // It says the code is a remembered one rather than a fresh one, which is the difference
-  // between a cache and a lie: a stored code is drawn from an ABSOLUTE expiry, so it can
-  // run out on this screen and must never be presented as freshly minted.
-  await expect(page.getByText(/no signal|can't reach|last (code|one)/i).first()).toBeVisible();
+  // D1 — the code, made on the phone from the key it holds, with no network: it is the token
+  // the club itself would compute for now (an independent Node implementation says so), the
+  // symbol carries it, and the badge says the phone is offline and the code still works.
+  const code = page.getByLabel("Your code", { exact: true });
+  await expect(code).toHaveText(/^118Y9\d{14}$/);
+  expect(tokensAroundNow()).toContain(await code.textContent());
+  await expect(page.getByRole("img", { name: /^QR code 118Y9\d{14}$/ })).toBeVisible();
+  await expect(page.getByText("Offline — your code still works")).toBeVisible();
 
   // And a human, as a link a cold thumb can press in the dark rather than a number to
   // memorise. This is the one that was entirely absent when both reads failed.
@@ -329,8 +360,8 @@ test("a cold offline start also says what the club's doors need", async ({ page,
   await warmThenGoOffline(page, context);
 
   await page.goto(`${origin}/my-code`);
-  // The reduced page first, so a failure reads as "which arm rendered" rather than as a
-  // missing element — this is the arm whose children the finding is about.
-  await expect(page.getByText(/can't reach the club|last managed to get/i).first()).toBeVisible();
+  // D1: there is no reduced page any more — the code is on the pass, and the door section is
+  // under it from the last-known store.
+  await expect(page.getByText("Offline — your code still works")).toBeVisible();
   await expect(page.getByText("What opens the door for you right now")).toBeVisible();
 });

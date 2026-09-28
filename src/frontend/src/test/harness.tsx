@@ -1437,3 +1437,63 @@ export function memberDoorHistoryRowFixture(overrides: Record<string, unknown> =
 }
 
 // --- end doors: member -----------------------------------------------------------
+
+/**
+ * D1 — the member secret of `derivation.json`'s `dean-gen1` case, the corpus's worked example
+ * (docs/specs/member-code.md §3.8): REF `18Y9`, token `118Y956008441714835` at unix 1790179217.
+ * A FIXTURE, derived from a fixture master key that authenticates nothing anywhere.
+ */
+export const MEMBER_CODE_FIXTURE = {
+  secretHex: "aca5e9d6718ee21c343dee909e9037ff98d47dbf053dffa57b9b24d9c99b5387",
+  ref: "18Y9",
+  tz: "Africa/Johannesburg",
+  /** `2026-09-23T18:00:17+02:00` — the corpus anchor. */
+  anchorMs: 1790179217_000,
+  anchorToken: "118Y956008441714835",
+} as const;
+
+function base64Url(hex: string): string {
+  const bytes = hex.match(/../g)!.map((h) => parseInt(h, 16));
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/**
+ * A signed-in member whose phone can enrol for the single rotating code (D1), and every route
+ * that being signed in makes the shell ask for. Calls {@link signIn} — so call it BEFORE
+ * `renderPage`, like `signIn` itself.
+ *
+ * <p>
+ * Enrol and status answer with the server's clock read at the moment of the call, so the
+ * phone's measured offset is ~0 under real and fake timers alike. `generation` and `ref` may be
+ * overridden, and either route replaced by passing `enrol` / `status` routes of your own.
+ * </p>
+ */
+export function memberCodeRoutes(options: {
+  generation?: number;
+  statusGeneration?: number;
+  enrol?: Partial<StubRoute>;
+  status?: Partial<StubRoute>;
+} = {}): StubRoute[] {
+  const whoami = signIn({ isAdmin: false });
+  const generation = options.generation ?? 1;
+  const { ref, tz } = MEMBER_CODE_FIXTURE;
+  return [
+    { path: "/api/v1/whoami", body: whoami },
+    { path: "/api/v1/wallet", body: { balance_credits: 100, entries: [], total_entries: 0, offset: 0, limit: 50 } },
+    { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
+    {
+      method: "POST",
+      path: "/api/v1/me/code/enrol",
+      respond: () => ({
+        v: 1, ref, generation, secret: base64Url(MEMBER_CODE_FIXTURE.secretHex), tz, step_seconds: 30,
+        server_time_ms: Date.now(),
+      }),
+      ...options.enrol,
+    },
+    {
+      path: "/api/v1/me/code",
+      respond: () => ({ v: 1, ref, generation: options.statusGeneration ?? generation, tz, server_time_ms: Date.now() }),
+      ...options.status,
+    },
+  ];
+}

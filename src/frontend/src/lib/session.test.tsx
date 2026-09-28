@@ -3,7 +3,9 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api, ApiError, setUnauthorizedHandler, TOKEN_KEY, tokenStore } from "./api";
 import { AuthProvider, readLastIdentity, useAuth } from "./auth";
-import { forgetLastKnown, readLastKnown, rememberQr } from "./lastKnown";
+import { forgetLastKnown, readLastKnown, rememberDoor } from "./lastKnown";
+import { importHmacKey } from "./memberCode/hotp";
+import { loadMemberCode, saveMemberCode } from "./memberCode/keyStore";
 import { BalanceProvider } from "./balance";
 import { stubFetch, type StubCall } from "../test/harness";
 
@@ -268,16 +270,26 @@ describe("the wallet stream", () => {
  * all.
  * </p>
  */
-describe("a session that ends takes the member's last-known code with it", () => {
-  /** The store, written the way the member page writes it. */
-  function storeACodeFor(code: string) {
-    rememberQr({
-      code, kind: "booking", expires_in_seconds: 900, court_number: 3,
-      starts_at: "2099-01-01T17:00:00Z", doors: true,
-      door_opens_at: "2099-01-01T16:30:00Z", door_closes_at: "2099-01-01T18:05:00Z",
-    } as Parameters<typeof rememberQr>[0]);
-    expect(readLastKnown().qr?.value.code, "the fixture stored nothing").toBe(code);
+describe("a session that ends takes the member's code key and last-known facts with it", () => {
+  /**
+   * What My Code leaves on a phone, written the way it writes it: the member code's key record
+   * (D1 — a non-extractable key; spec §10 "logout wipes the phone's key") and the door facts.
+   * `ref` stands in for "whose code" — a REF is per member.
+   */
+  async function storeACodeFor(ref: string, userId: string = WHOAMI.user_id) {
+    await saveMemberCode({
+      key: await importHmacKey(new Uint8Array(32).fill(7)),
+      ref, generation: 1, tz: "Africa/Johannesburg", offsetMs: 0, userId, enrolledAt: 0,
+    });
+    rememberDoor({
+      doors: true, doors_shut: "none", timezone: "Africa/Johannesburg", policy: "booking_window",
+      membership: "active", membership_detail: "active", is_club_admin: false, next_booking: null,
+      early_entry_minutes: 30, roster_max_entries: 48, contact: { phone: "021 555 0134", email: null },
+      door_log_retention_days: 90, last_decision: null,
+    } as Parameters<typeof rememberDoor>[0]);
+    expect((await loadMemberCode())?.ref, "the fixture stored nothing").toBe(ref);
   }
+  const heldRef = async () => (await loadMemberCode())?.ref ?? null;
 
   it("clears it when the member signs out on purpose", async () => {
     tokenStore.set("member.jwt.value");
@@ -288,12 +300,13 @@ describe("a session that ends takes the member's last-known code with it", () =>
 
     render(<MemoryRouter><AuthProvider><SignOutProbe /></AuthProvider></MemoryRouter>);
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
-    storeACodeFor("AAAA1111BBBB");
+    await storeACodeFor("18Y9");
 
     screen.getByRole("button", { name: "Sign out" }).click();
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"));
 
-    expect(readLastKnown().qr, "the next person on this phone inherits a working code").toBeNull();
+    await waitFor(async () => expect(await heldRef(), "the next person on this phone inherits a working code").toBeNull());
+    expect(readLastKnown().door).toBeNull();
     expect(readLastIdentity()).toBeNull();
   });
 
@@ -305,11 +318,14 @@ describe("a session that ends takes the member's last-known code with it", () =>
     tokenStore.set("member.jwt.value");
     stubFetch([{ method: "GET", path: "/api/v1/whoami", status: 401, body: { error: "expired" } }]);
 
+    // Stored BEFORE the provider mounts: the 401 lands on its first probe, and a fixture
+    // written after it would be racing the very wipe under test.
+    await storeACodeFor("BWDJ");
     render(<MemoryRouter><AuthProvider><SessionProbe /></AuthProvider></MemoryRouter>);
-    storeACodeFor("CCCC2222DDDD");
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"));
 
-    expect(readLastKnown().qr).toBeNull();
+    await waitFor(async () => expect(await heldRef()).toBeNull());
+    expect(readLastKnown().door).toBeNull();
     expect(readLastIdentity()).toBeNull();
   });
 
@@ -330,7 +346,7 @@ describe("a session that ends takes the member's last-known code with it", () =>
     stubFetch([{ method: "GET", path: "/api/v1/whoami", body: WHOAMI }]);
     const { unmount } = render(<MemoryRouter><AuthProvider><SessionProbe /></AuthProvider></MemoryRouter>);
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
-    storeACodeFor("EEEE3333FFFF");
+    await storeACodeFor("18Y9");
     expect(readLastIdentity()).toBe(WHOAMI.user_id);
     // No sign-out: the tab simply goes away, which is what a phone does to a backgrounded PWA.
     unmount();
@@ -344,7 +360,8 @@ describe("a session that ends takes the member's last-known code with it", () =>
     render(<MemoryRouter><AuthProvider><SessionProbe /></AuthProvider></MemoryRouter>);
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
 
-    expect(readLastKnown().qr, "the second member is holding the first member's code").toBeNull();
+    await waitFor(async () => expect(await heldRef(), "the second member is holding the first member's code").toBeNull());
+    expect(readLastKnown().door).toBeNull();
     expect(readLastIdentity()).toBe("55555555-5555-5555-5555-555555555555");
   });
 
@@ -354,7 +371,7 @@ describe("a session that ends takes the member's last-known code with it", () =>
     stubFetch([{ method: "GET", path: "/api/v1/whoami", body: WHOAMI }]);
     const { unmount } = render(<MemoryRouter><AuthProvider><SessionProbe /></AuthProvider></MemoryRouter>);
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
-    storeACodeFor("GGGG4444HHHH");
+    await storeACodeFor("18Y9");
     unmount();
 
     vi.unstubAllGlobals();
@@ -362,6 +379,9 @@ describe("a session that ends takes the member's last-known code with it", () =>
     render(<MemoryRouter><AuthProvider><SessionProbe /></AuthProvider></MemoryRouter>);
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
 
-    expect(readLastKnown().qr?.value.code).toBe("GGGG4444HHHH");
+    // Given a moment in which a wipe would have landed, the key is still there.
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(await heldRef()).toBe("18Y9");
+    expect(readLastKnown().door).not.toBeNull();
   });
 });

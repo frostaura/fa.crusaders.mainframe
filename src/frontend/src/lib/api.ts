@@ -1095,60 +1095,34 @@ export type DeviceApiKey = {
 };
 
 /**
- * The code a member's phone shows the court box.
+ * The single rotating member code (D1) — the enrolment answer. `docs/specs/member-code.md` §10.
  *
- * `code` is the entire QR payload — twelve characters of Crockford base32, and nothing
- * else, because the box's scanner pipeline carries at most 24 bytes and poisons anything
- * longer. It used to be a JWT, which could never cross that pipeline at all.
- *
- * `kind` says what presenting it does: a `booking` code names the member's upcoming
- * booking (and lives until it ends plus the grace window), an `ident` code only says who
- * they are — for a walk-up, or for paying at somebody else's court — and lives for the
- * tenant's `qr_lifetime_seconds`.
+ * <p>
+ * `secret` is the member secret S, 32 bytes as unpadded base64url. It is on the wire exactly
+ * once, is imported on arrival as a non-extractable WebCrypto key, and must never be logged,
+ * stored as text or passed anywhere else (`lib/memberCode/lifecycle.ts`).
+ * </p>
  */
-/** What the member can ask the generate endpoint for. Omitted means "you decide". */
-export type MyQrKind = "ident";
+export type MemberCodeEnrolment = {
+  v: number;
+  ref: string;
+  generation: number;
+  secret: string;
+  tz: string;
+  step_seconds: number;
+  server_time_ms: number;
+};
 
-export type MyQrCode = {
-  code: string;
-  kind: "booking" | "ident";
-  expires_in_seconds: number;
-  /** Booking codes only. */
-  booking_id?: string;
-  /** Booking codes only; null if the court row has since gone. */
-  court_number?: number | null;
-  /** Booking codes only. UTC. */
-  starts_at?: string;
-  /**
-   * Does this club have a door gate at all — at least one enabled `Gate` row?
-   *
-   * <p>
-   * <b>All three door fields are OPTIONAL, and that is load-bearing.</b> An API that
-   * predates them sends none, and the page must then say nothing whatever about doors: a
-   * club with no gate being told its code "also opens the club door" is the same class of
-   * falsehood, inverted, as the one this field exists to fix. `doors !== true` — absent,
-   * false, or anything else — is the silent case.
-   * </p>
-   *
-   * <p>
-   * It is sent rather than derived because the alternative is the member page reading
-   * tenant settings to find out whether the club owns a door, which is both a second
-   * request and a second place for the answer to drift from the door's own.
-   * </p>
-   */
-  doors?: boolean;
-  /**
-   * When this booking's code starts opening a door — `StartsAt − H`, where H is the
-   * horizon the DOOR applies, not the one the phone uses to decide which code to show.
-   * Null for a member/ident code, which is bounded by the club's policy rather than by a
-   * booking. UTC.
-   */
-  door_opens_at?: string | null;
-  /**
-   * When it stops: the code's own expiry, which is the booking's end plus the club's
-   * grace window. Null for a member/ident code. UTC.
-   */
-  door_closes_at?: string | null;
+/**
+ * `GET /me/code` — no secret. `generation` moving is the phone's cue to re-enrol; the server
+ * time is how it measures its own clock. Everything but those two is read as optional.
+ */
+export type MemberCodeStatus = {
+  v?: number;
+  ref?: string;
+  generation: number;
+  tz?: string;
+  server_time_ms: number;
 };
 
 export type AdminCourt = {
@@ -2014,20 +1988,9 @@ export const endpoints = {
   courtPinMatch: (courtNumber: number, pin: string) =>
     api.post<{ matched: boolean; user_id: string | null }>(`/api/v1/court/${courtNumber}/pin/match`, { pin }),
 
-  // Phase 8.6 — QR identification (third leg of the triple-stack). See MyQrCode.
-  /**
-   * The member's court code.
-   *
-   * <p>
-   * With no `kind` the server decides: a booking code when one of the member's bookings
-   * is inside the roster window, an ident code otherwise. That default is right for the
-   * common case and wrong for the one that costs the club money — a member with a
-   * booking two hours out cannot walk up to a free court or pay for a friend, because a
-   * booking code is refused at every court but its own and the resolver takes nothing
-   * else. `kind: "ident"` asks for the walk-up code explicitly, whatever bookings exist.
-   * </p>
-   */
-  meQrGenerate: (kind?: MyQrKind) => api.post<MyQrCode>(`/api/v1/me/qr/generate${qs({ kind })}`),
+  // D1 — the single rotating member code. See MemberCodeEnrolment.
+  meCodeEnrol: () => api.post<MemberCodeEnrolment>("/api/v1/me/code/enrol"),
+  meCodeStatus: () => api.get<MemberCodeStatus>("/api/v1/me/code"),
   courtQrMatch: (courtNumber: number, token: string) =>
     api.post<{ matched: boolean; user_id?: string; reason?: string }>(`/api/v1/court/${courtNumber}/qr/match`, { token }),
 

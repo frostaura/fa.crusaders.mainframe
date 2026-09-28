@@ -57,8 +57,9 @@ describe("the public landing page", () => {
   });
 
   it("says the same thing about the lights as the rest of the product", () => {
-    // /my-code: "what they hold up to the scanner on the court box".
-    const myCode = readFileSync(join(__dirname, "MyCode.tsx"), "utf8");
+    // /my-code: "what they hold up to the scanner on the court box". D1 moved My Code's
+    // sentences into its copy module, which is where they are read from now.
+    const myCode = readFileSync(join(__dirname, "..", "lib", "myCodeCopy.ts"), "utf8");
     expect(myCode).toMatch(/scanner on the court box/i);
     expect(prose).toMatch(/scanner on the court box/i);
   });

@@ -71,9 +71,14 @@ function notchMask(edge: "top" | "bottom"): CSSProperties {
 const BAND_MASK = notchMask("bottom");
 const BODY_MASK = notchMask("top");
 
+/*
+  The band's and the body's padding are PIXELS, like every other length above the symbol: a
+  reader who turns their text up gets bigger words, not a pass whose QR has been pushed below
+  the fold by padding that grew with the font (My Code's D7 / D8).
+*/
 function Band({ crest, overline, clubName, memberName, avatar }: Pick<PassCardProps, "crest" | "overline" | "clubName" | "memberName" | "avatar">) {
   return (
-    <div data-pass-band="" className="flex items-center gap-3 bg-brand-strong px-5 pb-6 pt-5 text-brand-ink" style={BAND_MASK}>
+    <div data-pass-band="" className="flex items-center gap-3 bg-brand-strong px-[20px] pb-[24px] pt-[20px] text-brand-ink" style={BAND_MASK}>
       {crest ? <div className="shrink-0">{crest}</div> : null}
       <div className="min-w-0 flex-1">
         <p className="text-xs font-semibold uppercase tracking-overline">{overline}</p>
@@ -101,10 +106,18 @@ export function PassCard(props: PassCardProps) {
       </div>
       <div className="relative overflow-hidden rounded-b-2xl bg-bg-raised" style={BODY_MASK}>
         <div aria-hidden="true" data-perforation="" className="absolute inset-x-4 top-0 border-t-2 border-dashed border-border" />
-        <div className="flex flex-col items-center gap-4 px-5 pb-5 pt-6">
+        <div data-pass-body="" className="flex flex-col items-center gap-4 px-[20px] pb-5 pt-[24px]">
+          {/*
+            The panel takes the body's width, capped, and centres whatever QR it is given — so a
+            caller's `w-full` symbol is sized by the CARD (whose width is pixels, see above) and
+            never by the root font. Every length between the card's edge and the symbol — the
+            body's side padding, the panel's padding, the cap — is a PIXEL for the same reason
+            (My Code's D7): in rem, a reader who turned their text up got a SMALLER symbol, and a
+            QR sized in rem outright grew past a 320px phone.
+          */}
           <div
             data-qr-panel=""
-            className="rounded-xl p-3 forced-color-adjust-none"
+            className="flex w-full max-w-[304px] justify-center rounded-xl p-[12px] forced-color-adjust-none"
             style={{ backgroundColor: QR_PAPER }}
           >
             {qr}

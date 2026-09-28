@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { serveApi, signIn, SESSION_ADMIN } from "./fixtures";
+import { memberCodeRoutes, serveApi, signIn, SESSION_ADMIN } from "./fixtures";
 
 /**
  * B12, at the size the club actually turns the text up to.
@@ -63,7 +63,7 @@ function routes(isAdmin: boolean) {
         slots: [],
       },
     },
-    { method: "POST", path: "/api/v1/me/qr/generate", body: { code: "ABC123", kind: "ident", expires_in_seconds: 120 } },
+    ...memberCodeRoutes(),
     { path: "/api/v1/me/door", body: { timezone: "Africa/Johannesburg", doors: false } },
     { path: "/api/v1/admin/members", body: [] },
     { path: "/api/v1/admin/doors/activity", body: { items: [], next_cursor: null, retention_days: 90 } },
@@ -150,7 +150,10 @@ for (const [route, heading] of [...MEMBER_ROUTES, ...ADMIN_ROUTES]) {
     await serveApi(page, routes(isAdmin));
 
     await page.goto(route);
-    await expect(page.getByRole("heading", { name: heading, level: 1 })).toBeVisible();
+    // D1/D8: My Code's h1 is visually hidden on a phone — its pass is what renders — so the
+    // page is waited on by the heading being there and, for My Code, the code being on the pass.
+    await expect(page.getByRole("heading", { name: heading, level: 1 })).toBeAttached();
+    if (route === "/my-code") await expect(page.getByLabel("Your code", { exact: true })).toBeVisible();
 
     // The root font size really did apply — a spec that silently measured 16 px would pass
     // for the wrong reason, which is exactly how the `5rem` and `top-[100px]` defects survived.

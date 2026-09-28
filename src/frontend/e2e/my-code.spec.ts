@@ -1,4 +1,5 @@
-import { SESSION_ANON, serveApi, signIn, test, expect } from "./fixtures";
+import { SESSION_ANON, memberCodeRoutes, serveApi, signIn, test, expect } from "./fixtures";
+import { tokensAroundNow } from "./memberCodeOracle";
 
 /**
  * `/my-code` — the member's key to the court and to the building.
@@ -15,16 +16,14 @@ import { SESSION_ANON, serveApi, signIn, test, expect } from "./fixtures";
 
 const SESSION_MEMBER = { ...SESSION_ANON, user_id: "00000000-0000-0000-0000-000000000009", is_authenticated: true };
 
-const CODE = {
-  code: "7K3M9XQ2RD5A",
-  kind: "booking",
-  expires_in_seconds: 900,
-  court_number: 3,
-  starts_at: "2099-01-01T17:00:00Z",
-  doors: true,
-  door_opens_at: "2099-01-01T16:30:00Z",
-  door_closes_at: "2099-01-01T18:05:00Z",
-};
+/*
+  D1 — the legacy code fixture is gone: the page enrols for the single rotating code through
+  `memberCodeRoutes()` (in COMMON). Retired with it, as D1: the full-screen overlay's dead-code
+  state, the booking-code-specific refusals, the code-that-dies-with-no-signal case, the
+  member-code switch and its way back, the code choice at 320x568, the walk-up wording and the
+  item-9 capsule under forced colours / reduced motion / a 32px root. The single code, its
+  offline badge and its full-screen view are held by `my-code-pass.spec.ts`.
+*/
 
 const CONTACT = { phone: "021 555 0134", email: "info@crusaders.co.za" };
 
@@ -98,7 +97,7 @@ const EMPTY_HISTORY = {
 const COMMON = [
   { path: "/api/v1/whoami", body: SESSION_MEMBER },
   { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
-  { method: "POST", path: "/api/v1/me/qr/generate", body: CODE },
+  ...memberCodeRoutes(),
   // E-H2 (2) — the self-check reads the club's own record. Stubbed here rather than per
   // test because `serveApi` is strict and an unstubbed call fails the test it appears in,
   // which for a control every one of these presses would be all of them.
@@ -131,8 +130,13 @@ test("the old court-code link still lands on the page, under its new name", asyn
   await page.goto("/court-code");
 
   await expect(page).toHaveURL(/\/my-code$/);
-  await expect(page.getByRole("heading", { name: "Your code" })).toBeVisible();
-  await expect(page.getByLabel("Your code", { exact: true })).toHaveText("7K3M9XQ2RD5A");
+  // D1/D8: My Code's h1 is visually hidden on a phone (the pass says whose it is), so it is
+  // asserted present, and the pass itself visible.
+  await expect(page.getByRole("heading", { name: "Your code" })).toBeAttached();
+  await expect(page.getByRole("article", { name: "Your member pass" })).toBeVisible();
+  // D1: the member's one code, as the club computes it (an independent Node implementation).
+  const shown = await page.getByLabel("Your code", { exact: true }).textContent();
+  expect(tokensAroundNow()).toContain(shown);
 });
 
 test("the nav calls it My code, and nothing calls it Court code", async ({ page }) => {
@@ -290,7 +294,7 @@ test("a club with no door is told nothing whatever about one", async ({ page }) 
   await serveApi(page, [
     { path: "/api/v1/whoami", body: SESSION_MEMBER },
     { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
-    { method: "POST", path: "/api/v1/me/qr/generate", body: { ...CODE, doors: false, door_opens_at: null, door_closes_at: null } },
+    ...memberCodeRoutes(),
     { path: "/api/v1/me/door", body: door({ doors: false }) },
   ]);
 
@@ -356,7 +360,7 @@ test("nothing scrolls sideways, and every control is big enough to hit in the da
   // found it anyway, one-handed in the dark, which is the answer to the wireframe: the
   // whole argument for 44 px on this page is a person who does not aim, and a control that
   // is the exception is the one they were reaching for.
-  const controls = page.locator(".max-w-xl a, .max-w-xl button");
+  const controls = page.locator("[data-page-shell] a, [data-page-shell] button");
   const count = await controls.count();
   expect(count).toBeGreaterThan(0);
   let checked = 0;
@@ -381,7 +385,8 @@ test("the QR is black on white, quiet-zoned and large at 360", async ({ page }) 
   await page.setViewportSize({ width: 360, height: 640 });
   await page.goto("/my-code");
 
-  const qr = page.getByRole("img", { name: /QR code 7K3M9XQ2RD5A/ });
+  // D1: the bare 19-character token, nothing around it.
+  const qr = page.getByRole("img", { name: /^QR code 1[0-9A-Z]{4}\d{14}$/ });
   await expect(qr).toBeVisible();
   const box = await qr.boundingBox();
   expect(box!.width).toBeGreaterThanOrEqual(240);
@@ -397,8 +402,8 @@ test("the QR is black on white, quiet-zoned and large at 360", async ({ page }) 
   expect(drawn.background).toBe("#ffffff");
   expect(drawn.modules).toBe("#000000");
   expect(drawn.crisp).toBe("crispEdges");
-  // A version-1 symbol is 21 modules; the viewBox carries 4 modules of quiet zone on
-  // each side, so its extent is the symbol plus 8.
+  // A version-2 symbol (19 bytes) is 25 modules; the viewBox carries 4 modules of quiet
+  // zone on each side, so its extent is the symbol plus 8.
   const extent = Number(drawn.viewBox!.split(" ")[2]);
   expect((extent - 21) % 2).toBe(0);
   expect(extent).toBeGreaterThanOrEqual(29);
@@ -452,7 +457,7 @@ test("the code and the QR stay on the glass at a root font of 32px", async ({ pa
   // for their defect and pass for mine — or, worse, tempt this lane into editing a shared
   // component two people are landing on.
   const bodyOverflow = await page.evaluate(() => {
-    const column = document.querySelector(".max-w-xl");
+    const column = document.querySelector("[data-page-shell]");
     if (!column) return Number.NaN;
     const widest = [...column.querySelectorAll("*")]
       .reduce((max, el) => Math.max(max, el.getBoundingClientRect().right), 0);
@@ -650,19 +655,16 @@ test("a member with no membership on file is shown no tick for one", async ({ pa
  * D13/D14, on the assembled page: the escape hatch a member has to be able to find, and
  * the record that was three steps away from the screen where the question gets asked.
  */
-test("the code tabs are a target, and the member's own record is one tap away", async ({ page }) => {
+test("there is one code and no tabs, and the member's own record is one tap away", async ({ page }) => {
   await signIn(page);
   await serveApi(page, [...COMMON, { path: "/api/v1/me/door", body: door() }]);
 
   await page.setViewportSize({ width: 360, height: 780 });
   await page.goto("/my-code");
 
-  // 16px was the finding against the checkbox this replaced — a quarter the height of
-  // everything else on the page, on the one control a member reaches for when the code on
-  // screen is the wrong one. Every segment is a fingertip.
-  for (const tab of await page.getByRole("tab").all()) {
-    expect((await tab.boundingBox())!.height).toBeGreaterThanOrEqual(44);
-  }
+  // D1: one code, so there is no tab control at all any more.
+  await expect(page.getByLabel("Your code", { exact: true })).toBeVisible();
+  await expect(page.getByRole("tab")).toHaveCount(0);
 
   const history = page.getByRole("link", { name: "Your door history" });
   await expect(history).toHaveAttribute("href", "/profile#door-history");
@@ -851,45 +853,6 @@ test("the QR never shrinks when the root font grows", async ({ page }) => {
   expect(box.x + box.width).toBeLessThanOrEqual(321);
 });
 
-/**
- * D12. The overlay was rendered on `qr && !dead`, so the moment the code ran out it
- * unmounted itself: a member holding the phone against a scanner had the screen go back to
- * the page by itself, with no explanation, led by whatever card happened to be at the top.
- */
-test("the full-screen code shows its countdown, and says so rather than closing when it dies", async ({ page }) => {
-  await signIn(page);
-  // Five seconds on the first code and nothing behind it: the member with no signal.
-  let codes = 0;
-  await serveApi(page, [
-    { path: "/api/v1/whoami", body: SESSION_MEMBER },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
-    { path: "/api/v1/me/door", body: door() },
-    { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
-  ]);
-  await page.route("**/api/v1/me/qr/generate", (route) => {
-    codes += 1;
-    return codes > 1
-      ? route.abort("failed")
-      : route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ ...CODE, expires_in_seconds: 5 }),
-      });
-  });
-
-  await page.goto("/my-code");
-  await page.getByRole("button", { name: "Show your code full screen" }).click();
-  const dialog = page.getByRole("dialog", { name: /full screen/i });
-  await expect(dialog).toContainText(/Refreshes in \d/);
-
-  // Past its expiry and past the pacing gap that bounds the one replacement attempt.
-  await expect(dialog).toContainText(/This code has run out/, { timeout: 30_000 });
-  await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText(/nothing on this screen for a door or a court box to read/);
-  await expect(dialog.getByRole("button", { name: "Try again" })).toBeVisible();
-  // And the club's number in it is pressable, not text to memorise in the dark. D13.
-  await expect(dialog.getByRole("link", { name: CONTACT.phone })).toHaveAttribute("href", "tel:0215550134");
-});
 
 /**
  * C9 / D14. `aria-modal="true"` was a claim this overlay did not honour: Tab walked
@@ -960,53 +923,6 @@ for (const shut of ["some", "all"] as const) {
   });
 }
 
-/**
- * E-H2, assembled. Lerato: a club that opens for any active member, a booking for
- * tomorrow, and the BOOKING code for it on screen — which is bounded by its own window
- * under every one of a club's rules. She was told "Your booking — not needed at this club",
- * "The door's window — no window to wait for" and "whatever went wrong is at the door",
- * beside seventeen `too_early` refusals in the club's own record.
- */
-test("a member holding a booking code is answered about that code, not about their membership", async ({ page }) => {
-  await signIn(page);
-  await serveApi(page, [
-    { path: "/api/v1/whoami", body: SESSION_MEMBER },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
-    { method: "POST", path: "/api/v1/me/qr/generate", body: CODE },
-    {
-      path: "/api/v1/me/door",
-      body: door({ policy: "active_member", early_entry_minutes: null, next_booking: null }),
-    },
-    {
-      path: "/api/v1/me/door/history",
-      body: {
-        ...EMPTY_HISTORY,
-        items: [{
-          at: recent(), delivered_at: null, door_name: "front-door",
-          released: false, reason: "too_early", offline: false,
-        }],
-      },
-    },
-  ]);
-
-  await page.goto("/my-code");
-
-  // The standing section says which code each fact is about, rather than leaving a member
-  // to decide the screen has contradicted itself.
-  await expect(page.getByText(/The booking code on screen is bounded by its own window/))
-    .toContainText(/whatever rule a club applies/);
-
-  await page.getByRole("button", { name: "The door didn't open" }).click();
-  const panel = page.getByRole("group", { name: /work out why/i });
-  // The conclusion LEADS with what the club wrote down.
-  await expect(panel).toContainText(/club's own record/);
-  await expect(panel).toContainText(/The booking that code belonged to hadn't opened the door yet/);
-  await expect(panel).not.toContainText(/whatever went wrong is at the door/);
-  // The window row is about the code on screen, not about a rule this club does not apply.
-  await expect(panel).not.toContainText(/no window to wait for/);
-  // And the one thing on this phone that might work is offered where she is looking.
-  await expect(panel.getByRole("button", { name: "Switch to Member code" })).toBeVisible();
-});
 
 /**
  * D1. Each read failing alone was handled well; the two failing together reverted the page
@@ -1020,7 +936,8 @@ test("both reads failing still leaves a door section, a self-check and a way to 
     { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
     { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
   ]);
-  await page.route("**/api/v1/me/qr/generate", (route) => route.abort("failed"));
+  // D1: a phone with no key, and no club to enrol with.
+  await page.route("**/api/v1/me/code/enrol", (route) => route.abort("failed"));
   await page.route("**/api/v1/me/door", (route) => route.abort("failed"));
 
   await page.goto("/my-code");
@@ -1072,108 +989,7 @@ test("a member is told which doors the club has shut", async ({ page }) => {
   await expect(page.getByText(/The club has shut some/)).toContainText("Side door");
 });
 
-/**
- * <b>R3-6, assembled.</b> Lerato, at a club that opens for any active member, holding her
- * WALK-UP code, with a `too_early` refusal on her BOOKING code in the club's record: "Too
- * early — the door opens for you in 9h 30m… hold it up to the scanner again then", directly
- * above "Yours is active. A live member code of yours opens the club door."
- *
- * <p>
- * `too_early` is only ever a booking code's refusal — `GateAccess.OutsideItsOwnWindowAsync`
- * is reached from the `BookingActivation` branch and nothing else — so at this club it says
- * nothing whatever about whether she may come in. The banner has to be about the code that
- * was refused, and the answer is in her hand.
- * </p>
- */
-test("a too-early booking refusal names the code it was about, not the member's night", async ({ page }) => {
-  await signIn(page);
-  await serveApi(page, [
-    { path: "/api/v1/whoami", body: SESSION_MEMBER },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
-    // The WALK-UP code is the one on screen: an ident code, which this club's doors open.
-    {
-      method: "POST", path: "/api/v1/me/qr/generate",
-      body: { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true },
-    },
-    {
-      path: "/api/v1/me/door",
-      body: door({
-        policy: "active_member", early_entry_minutes: null, next_booking: null,
-        last_decision: decision({ at: recent(), reason: "too_early", opens_at: "2099-01-01T16:30:00Z" }),
-      }),
-    },
-    {
-      path: "/api/v1/me/door/history",
-      body: {
-        ...EMPTY_HISTORY,
-        items: [{
-          at: recent(), delivered_at: null, door_name: "front-door",
-          released: false, reason: "too_early", offline: false,
-        }],
-      },
-    },
-  ]);
 
-  await page.goto("/my-code");
-
-  const card = page.getByRole("status").filter({ hasText: "booking code" });
-  await expect(card).toContainText("That was your booking code, which isn't live yet.");
-  await expect(card).toContainText(/code on this screen now is your member code/);
-  // Never the nine-and-a-half-hour wait over a code that works now.
-  await expect(card).not.toContainText(/hold it up to the scanner again then/);
-
-  await page.getByRole("button", { name: "The door didn't open" }).click();
-  const panel = page.getByRole("group", { name: /work out why/i });
-  await expect(panel).toContainText(/club's own record/);
-  // And it does not finish by sending her to the desk over a code she is already holding.
-  await expect(panel).toContainText(/hold that one up/);
-  await expect(panel).not.toContainText(/Phone the club on/);
-});
-
-/**
- * <b>R3-8, as the reviewer's offline run captured it.</b> Sixty seconds without signal and
- * the ident code dies: "This code has run out and can't be renewed without signal… Try
- * again", then "Run out · Refresh", then "Couldn't get a code — the club's system couldn't be
- * reached. Check your connection and try again." Three sentences about one failure and two
- * buttons that do the same thing — and, below them, "A live member code of yours opens the
- * club door."
- */
-test("a code that dies with no signal says so once, offers one retry and promises nothing", async ({ page }) => {
-  await signIn(page);
-  await serveApi(page, [
-    { path: "/api/v1/whoami", body: SESSION_MEMBER },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
-    { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
-    // A code that is already spent, which is what a member holding a sixty-second ident
-    // code through a dead minute is left with.
-    {
-      method: "POST", path: "/api/v1/me/qr/generate",
-      body: { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 0, doors: true },
-    },
-    { path: "/api/v1/me/door", body: door({ policy: "active_member", early_entry_minutes: null, next_booking: null }) },
-  ]);
-  /*
-    And no signal for the renewal. Installed AFTER `serveApi` so it runs first — Playwright
-    handlers are last-in-first-out — and it falls through for the FIRST call so the page has
-    a code to have lost. `serveApi` fixes a route's status for the life of the route, so a
-    call that succeeds and then a call that fails cannot be expressed as one route.
-  */
-  let posts = 0;
-  await page.route("**/api/v1/me/qr/generate", async (route) => {
-    posts += 1;
-    if (posts === 1) { await route.fallback(); return; }
-    await route.abort("failed");
-  });
-
-  await page.goto("/my-code");
-
-  await expect(page.getByText(/This code has run out/)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(1);
-  await expect(page.getByRole("button", { name: "Refresh", exact: true })).toHaveCount(0);
-  await expect(page.getByText("A live member code of yours opens the club door.")).toHaveCount(0);
-  // The club's rule is still stated — only the clause about a code that is not there goes.
-  await expect(page.getByText(/Your club opens its doors for any active member/)).toBeVisible();
-});
 
 /**
  * <b>R3-10, the MEM half.</b> Escape, Done and the hardware back button all left focus on
@@ -1231,171 +1047,6 @@ test("a decision below the fold is still on the glass", async ({ page }) => {
   expect(visible.cardOnGlass || visible.peekOnGlass).toBe(true);
 });
 
-/**
- * <b>R3-30.</b> "Use your member code instead" was a one-way door: three controls offered
- * it, none said what it had done, and the only way back was a checkbox further down the page
- * labelled for a COURT errand.
- */
-test("the member-code switch says what it did and offers the way back", async ({ page }) => {
-  await signIn(page);
-  let asked = 0;
-  await serveApi(page, [
-    { path: "/api/v1/whoami", body: SESSION_MEMBER },
-    { path: "/api/v1/wallet", body: { balance_credits: 500, entries: [], total_entries: 0, offset: 0, limit: 50 } },
-    { path: "/api/v1/me/door/history", body: EMPTY_HISTORY },
-    /*
-      The server picks the code, and it is asked three times: on load (a booking code,
-      because the member has one), when the switch goes on (an ident one), and when it goes
-      off again. Keyed on the CALL rather than on `?kind=ident`, because `serveApi` hands
-      `respond` the pathname alone and the kind travels in the query string.
-    */
-    {
-      method: "POST", path: "/api/v1/me/qr/generate",
-      respond: () => {
-        asked += 1;
-        return asked === 2 ? { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true } : CODE;
-      },
-    },
-    { path: "/api/v1/me/door", body: door({ policy: "active_member", early_entry_minutes: null }) },
-  ]);
 
-  await page.goto("/my-code");
-  await page.getByRole("button", { name: "Switch to Member code" }).first().click();
 
-  await expect(page.getByText(/keep getting your member code for the rest of this visit/)).toBeVisible();
-  // Item 9: the way back is a named tab at the top of the page, which is why R3-30's second
-  // button and its notice card are gone. It is selected-state, not a one-way door.
-  const back = page.getByRole("tab", { name: "Booking code" });
-  await expect(back).toHaveAttribute("aria-selected", "false");
-  // 44px, like everything else a cold thumb has to find on this page.
-  expect((await back.boundingBox())!.height).toBeGreaterThanOrEqual(44);
 
-  await back.click();
-  await expect(back).toHaveAttribute("aria-selected", "true");
-});
-
-/**
- * Item 9, at the width that made the checkbox unfindable: the control that says WHICH code
- * is on the glass was measured at y=1272 inside a 414px scroller at 320x568 — the last
- * interactive thing on the page, two screens below the code it describes.
- */
-test("the code choice is on the glass at 320x568, without scrolling", async ({ page }) => {
-  await signIn(page);
-  await serveApi(page, [...COMMON, { path: "/api/v1/me/door", body: door() }]);
-
-  await page.setViewportSize({ width: 320, height: 568 });
-  await page.goto("/my-code");
-
-  const list = page.getByRole("tablist", { name: "Which code to show" });
-  const box = (await list.boundingBox())!;
-  expect(box.y).toBeGreaterThanOrEqual(0);
-  expect(box.y + box.height).toBeLessThanOrEqual(568);
-  // And nothing runs off the side at the narrowest width the product supports.
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-  expect(overflow).toBeLessThanOrEqual(0);
-});
-
-/**
- * The contradiction D4 reproduced on two accounts: the card said "Walk-up code · any court"
- * while the control that decided it said walk-up was off.
- */
-test("never calls the code a walk-up code while a control says otherwise", async ({ page }) => {
-  await signIn(page);
-  await serveApi(page, [
-    ...COMMON.filter((r) => r.path !== "/api/v1/me/qr/generate"),
-    {
-      method: "POST", path: "/api/v1/me/qr/generate",
-      body: { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true },
-    },
-    { path: "/api/v1/me/door", body: door({ next_booking: null, policy: "active_member" }) },
-  ]);
-
-  await page.goto("/my-code");
-  await expect(page.getByRole("tab", { name: "Member code" })).toHaveAttribute("aria-selected", "true");
-  expect(await page.locator("body").innerText()).not.toMatch(/walk-up code/i);
-});
-
-/**
- * The capsule, under the three conditions that throw a design's carriers away.
- *
- * <p>
- * Emulated with `page.emulateMedia` rather than `test.use`, and deliberately: a describe-level
- * `test.use` on this file's re-exported `test` object was measured NOT applying —
- * `matchMedia("(prefers-reduced-motion: reduce)").matches` came back `false` inside the test
- * while the assertion failed for the right-looking reason. A media emulation nobody verified
- * is a test that passes because the condition never arrived, which is worse than no test.
- * Each case checks that the condition is actually in force before it measures anything.
- * </p>
- */
-test.describe("item 9 under the conditions that throw a design's carriers away", () => {
-  const MEMBER_CODE = { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true };
-
-  const routes = [
-    ...COMMON.filter((r) => r.path !== "/api/v1/me/qr/generate"),
-    { method: "POST" as const, path: "/api/v1/me/qr/generate", body: MEMBER_CODE },
-    { path: "/api/v1/me/door", body: door({ next_booking: null, policy: "active_member" }) },
-  ];
-
-  test("the thumb JUMPS rather than easing, which is not the same as easing quickly", async ({ page }) => {
-    await signIn(page);
-    await serveApi(page, routes);
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.goto("/my-code");
-    await expect(page.getByRole("tablist", { name: "Which code to show" })).toBeVisible();
-
-    const seen = await page.evaluate(() => {
-      const span = document.querySelector('[role="tablist"] span[aria-hidden="true"]');
-      return {
-        inForce: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-        property: span ? getComputedStyle(span).transitionProperty : null,
-      };
-    });
-    expect(seen.inForce, "reduced motion was not actually emulated").toBe(true);
-    /*
-      `transition-property: none`, not a shortened duration. `index.css` records what the
-      shortcut costs: a 1 ms transition made a hovered cell SNAP one pixel instead of easing
-      it, which is worse than the motion it replaced. The duration stays declared and inert.
-    */
-    expect(seen.property).toBe("none");
-  });
-
-  test("keeps a boundary when every author fill is thrown away", async ({ page }) => {
-    await signIn(page);
-    await serveApi(page, [...COMMON, { path: "/api/v1/me/door", body: door() }]);
-    await page.emulateMedia({ forcedColors: "active" });
-    await page.goto("/my-code");
-    await expect(page.getByRole("tablist", { name: "Which code to show" })).toBeVisible();
-
-    const seen = await page.evaluate(() => ({
-      inForce: window.matchMedia("(forced-colors: active)").matches,
-      borders: [
-        getComputedStyle(document.querySelector('[role="tablist"]')!).borderTopColor,
-        getComputedStyle(document.querySelector('[role="tab"]')!).borderTopColor,
-      ],
-    }));
-    expect(seen.inForce, "forced colours were not actually emulated").toBe(true);
-    // A capsule with no edge is two words floating in a paragraph. Every primitive in this
-    // product carries `border border-transparent` so the OS has something to colour.
-    for (const colour of seen.borders) expect(colour).not.toBe("rgba(0, 0, 0, 0)");
-  });
-
-  test("at a 32px root it stacks rather than overflowing, and stays a fingertip", async ({ page }) => {
-    await signIn(page);
-    await serveApi(page, [...COMMON, { path: "/api/v1/me/door", body: door() }]);
-    await page.setViewportSize({ width: 320, height: 568 });
-    await page.goto("/my-code");
-    await expect(page.getByRole("tablist", { name: "Which code to show" })).toBeVisible();
-
-    await page.addStyleTag({ content: "html { font-size: 32px }" });
-    // A vertical tablist is still a tablist and still announces as one; its arrows become
-    // Up/Down per the APG. The flip is read off the laid-out boxes, never off a breakpoint,
-    // because what decides it is the text scale.
-    await expect(page.getByRole("tablist")).toHaveAttribute("aria-orientation", "vertical");
-    for (const tab of await page.getByRole("tab").all()) {
-      // 44px in PIXELS: a touch target is a fingertip and does not scale with the type.
-      expect((await tab.boundingBox())!.height).toBeGreaterThanOrEqual(44);
-    }
-    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth))
-      .toBeLessThanOrEqual(0);
-  });
-});

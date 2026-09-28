@@ -1,4 +1,4 @@
-import { SESSION_ADMIN, SESSION_ANON, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
+import { SESSION_ADMIN, SESSION_ANON, serveApi, signIn, test, expect, type ApiRoute, memberCodeRoutes } from "./fixtures";
 import { ADMIN_TOUR, CHECKLIST, GET_STARTED, REPLAY_ADMIN_TOUR, REPLAY_WELCOME } from "../src/lib/onboardingCopy";
 
 /**
@@ -99,7 +99,7 @@ test.describe("the always-reachable guide", () => {
     await signIn(page);
     await serveApi(page, [
       ...home(door()),
-      { method: "POST", path: "/api/v1/me/qr/generate", body: { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true } },
+      ...memberCodeRoutes(),
       { path: "/api/v1/me/door/history", body: { items: [], has_more: false } },
       /*
        * An ARRAY, because that is what the endpoint returns: `webauthnList` is typed
@@ -225,7 +225,7 @@ function p8Routes(opts: { admin?: boolean; prefs?: Partial<typeof PREFS>; record
     { path: "/api/v1/me/webauthn/credentials", body: [] },
     { path: "/api/v1/me/door", body: door({ next_booking: null }) },
     { path: "/api/v1/me/door/history", body: { items: [], has_more: false } },
-    { method: "POST", path: "/api/v1/me/qr/generate", body: { code: "ZZ9P4T6WQ8HN", kind: "ident", expires_in_seconds: 60, doors: true } },
+    ...memberCodeRoutes(),
     { method: "PUT", path: "/api/v1/me/onboarding/member/step", respond: record((b) => ({ ...prefs, member_onboarding_last_step: (b as { step: string }).step })) },
     { method: "POST", path: "/api/v1/me/onboarding/member/complete", respond: record(() => ({ ...prefs, member_onboarding_completed_at: "2026-09-23T10:00:00Z" })) },
     { method: "POST", path: "/api/v1/me/onboarding/member/dismiss", respond: record(() => ({ ...prefs, member_onboarding_dismissed_at: "2026-09-23T10:00:00Z" })) },
@@ -265,7 +265,10 @@ test.describe("P8: the welcome wizard", () => {
 
     // Once per sign-in: arriving at the landing again does not send the member round again.
     await page.goto("/my-code");
-    await expect(page.getByRole("heading", { level: 1, name: "Your code" })).toBeVisible();
+    // D1/D8: My Code's h1 is visually hidden on a phone (the pass says whose it is), so it is
+    // asserted present, and the pass itself visible.
+    await expect(page.getByRole("heading", { level: 1, name: "Your code" })).toBeAttached();
+    await expect(page.getByRole("article", { name: "Your member pass" })).toBeVisible();
     await expect(page).toHaveURL(/\/my-code$/);
   });
 
@@ -286,7 +289,10 @@ test.describe("P8: the welcome wizard", () => {
     await signIn(page);
     await serveApi(page, p8Routes({ recorder, prefs: { member_onboarding_completed_at: "2026-09-01T10:00:00Z", member_onboarding_last_step: "book" } }));
     await page.goto("/my-code");
-    await expect(page.getByRole("heading", { level: 1, name: "Your code" })).toBeVisible();
+    // D1/D8: My Code's h1 is visually hidden on a phone (the pass says whose it is), so it is
+    // asserted present, and the pass itself visible.
+    await expect(page.getByRole("heading", { level: 1, name: "Your code" })).toBeAttached();
+    await expect(page.getByRole("article", { name: "Your member pass" })).toBeVisible();
     await expect(page).toHaveURL(/\/my-code$/);
 
     await page.getByRole("button", { name: "Account menu" }).click();
@@ -334,7 +340,10 @@ test.describe("P8: the setup checklist on My Code", () => {
     await card.getByRole("button", { name: CHECKLIST.hide }).click();
     await expect(card).toHaveCount(0);
     await page.reload();
-    await expect(page.getByRole("heading", { level: 1, name: "Your code" })).toBeVisible();
+    // D1/D8: My Code's h1 is visually hidden on a phone (the pass says whose it is), so it is
+    // asserted present, and the pass itself visible.
+    await expect(page.getByRole("heading", { level: 1, name: "Your code" })).toBeAttached();
+    await expect(page.getByRole("article", { name: "Your member pass" })).toBeVisible();
     await expect(page.getByRole("region", { name: CHECKLIST.title })).toHaveCount(0);
   });
 });

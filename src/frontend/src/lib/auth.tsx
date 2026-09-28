@@ -4,6 +4,7 @@ import { loginWithPasskey as runPasskeyLogin } from "./webauthn";
 import { clearOfflineCache } from "./pwa";
 import { forgetLastKnown } from "./lastKnown";
 import { forgetClubZone } from "./clubZone";
+import { wipeMemberCode } from "./memberCode/keyStore";
 
 type AuthState =
   | { status: "loading" }
@@ -209,7 +210,12 @@ export function readLastIdentity(): string | null {
  * </p>
  */
 function rememberIdentity(userId: string): void {
-  if (readLastIdentity() !== userId) forgetLastKnown();
+  if (readLastIdentity() !== userId) {
+    forgetLastKnown();
+    // D1 — and the last member's code key. `loadFor` refuses a key stored for somebody else
+    // anyway; wiping it here as well means it does not sit on a shared phone until My Code opens.
+    void wipeMemberCode();
+  }
   try { window.localStorage?.setItem(LAST_IDENTITY_KEY, userId); } catch { /* private mode */ }
 }
 
@@ -232,6 +238,10 @@ function rememberIdentity(userId: string): void {
 function forgetIdentity(): void {
   try { window.localStorage?.removeItem(LAST_IDENTITY_KEY); } catch { /* nothing to do */ }
   forgetLastKnown();
+  // D1 — the member code's key goes with the session (spec §10: "logout wipes the phone's key
+  // and does not rotate"). It is the one thing on this phone that can open a door for this
+  // member with no network, so a club phone handed to the next person must not keep it.
+  void wipeMemberCode();
   // R3-3 — and the club goes too. The remembered zone is the CLUB's, not the member's, and a
   // club-desk tablet is one browser profile shared by whoever holds it; a second club's admin
   // signing in on it must not read the first club's midnight until their own payload lands.

@@ -1,4 +1,4 @@
-import type { MemberDoor, MyQrCode } from "./api";
+import type { MemberDoor } from "./api";
 
 /**
  * The member code page's own last-known-good store.
@@ -14,11 +14,16 @@ import type { MemberDoor, MyQrCode } from "./api";
  * </p>
  *
  * <p>
- * <b>Two rules make it safe rather than dangerous.</b> The code's expiry is stored as an
- * ABSOLUTE instant, never as the lifetime the server expressed, so a stored code can
- * never be re-read as freshly minted and drawn as live. And the last door DECISION is
- * never stored: a refusal from an earlier visit, shown to somebody standing at a door
- * tonight because the network happens to be down, would be the page inventing an event.
+ * <b>The last door DECISION is never stored</b>: a refusal from an earlier visit, shown to
+ * somebody standing at a door tonight because the network happens to be down, would be the
+ * page inventing an event.
+ * </p>
+ *
+ * <p>
+ * <b>No code is stored here any more (D1).</b> The member's code is made on the phone from a
+ * non-extractable key held in IndexedDB (`lib/memberCode/keyStore.ts`) — never in
+ * `localStorage`, which can only hold a secret as readable text. This store keeps the door
+ * facts only.
  * </p>
  *
  * <p>
@@ -53,33 +58,25 @@ export const LAST_KNOWN_KEY = "crusaders.member-door.last-known";
  * member that a shut door opens for them. That is the exact sentence the wire change exists
  * to stop, so the record that predates it is discarded rather than patched.
  * </p>
+ *
+ * <p>
+ * <b>4 — D1: the code half is gone.</b> A v3 record carries the last legacy booking or ident
+ * code the page fetched; bumping discards it rather than leaving a code nothing renders sitting
+ * in `localStorage`.
+ * </p>
  */
-export const LAST_KNOWN_VERSION = 3;
-
-/** The half of a code the offline page renders. No token beyond the code itself. */
-export type LastKnownQr = {
-  code: string;
-  kind: "booking" | "ident";
-  /** ABSOLUTE. See the class comment — this is the field that makes the store honest. */
-  expiresAt: string;
-  courtNumber: number | null;
-  startsAt: string | null;
-  doors: boolean;
-  doorOpensAt: string | null;
-  doorClosesAt: string | null;
-};
+export const LAST_KNOWN_VERSION = 4;
 
 /** The standing door facts, with the decision deliberately absent. */
 export type LastKnownDoor = Omit<MemberDoor, "last_decision">;
 
 export type LastKnown = {
-  qr: { savedAt: string; value: LastKnownQr } | null;
   door: { savedAt: string; value: LastKnownDoor } | null;
 };
 
 type StoredRecord = LastKnown & { version: number };
 
-const EMPTY: LastKnown = { qr: null, door: null };
+const EMPTY: LastKnown = { door: null };
 
 function storage(): Storage | null {
   try { return window.localStorage ?? null; } catch { return null; }
@@ -95,7 +92,6 @@ function readRecord(): StoredRecord {
     if (parsed?.version !== LAST_KNOWN_VERSION) return { ...EMPTY, version: LAST_KNOWN_VERSION };
     return {
       version: LAST_KNOWN_VERSION,
-      qr: parsed.qr ?? null,
       door: parsed.door ?? null,
     };
   } catch {
@@ -110,33 +106,10 @@ function writeRecord(next: StoredRecord): void {
   try { store.setItem(LAST_KNOWN_KEY, JSON.stringify(next)); } catch { /* private mode, or full */ }
 }
 
-/** What the page last managed to get, or two nulls. Never throws. */
+/** What the page last managed to get, or null. Never throws. */
 export function readLastKnown(): LastKnown {
-  const { qr, door } = readRecord();
-  return { qr, door };
-}
-
-/**
- * Remembers a code, with its expiry resolved to a wall-clock instant.
- *
- * <p>
- * The three door fields are optional on the wire — an API that predates them sends none
- * — so they are normalised here rather than at the four places that read them back.
- * </p>
- */
-export function rememberQr(qr: MyQrCode): void {
-  const value: LastKnownQr = {
-    code: qr.code,
-    kind: qr.kind,
-    expiresAt: new Date(Date.now() + qr.expires_in_seconds * 1000).toISOString(),
-    courtNumber: qr.court_number ?? null,
-    startsAt: qr.starts_at ?? null,
-    doors: qr.doors === true,
-    doorOpensAt: qr.door_opens_at ?? null,
-    doorClosesAt: qr.door_closes_at ?? null,
-  };
-  const current = readRecord();
-  writeRecord({ ...current, qr: { savedAt: new Date().toISOString(), value } });
+  const { door } = readRecord();
+  return { door };
 }
 
 /**
@@ -179,55 +152,10 @@ export function rememberDoor(door: MemberDoor): void {
   writeRecord({ ...current, door: { savedAt: new Date().toISOString(), value } });
 }
 
-// --- the walk-up switch's own memory ----------------------------------------------
-
-/**
- * Where the "walk up / pay for someone" choice lives between renders of this page.
- *
- * <p>
- * <b>`sessionStorage`, not the record above, and the difference is the point.</b> Which
- * code a member wants is a decision about the next few minutes — they are at the desk
- * paying for somebody, or starting on a free court — and it should survive a reload, a
- * trip to the schedule and back, and a phone that killed the tab while it was in a pocket.
- * It should NOT survive next week: a member who paid for a friend on Tuesday and opens
- * the page before their own booking on Saturday wants their booking code, and handing
- * them an ident code that every court but the desk refuses is the original defect with a
- * longer fuse. A session is exactly that window.
- * </p>
- *
- * <p>
- * It is also not part of {@link LAST_KNOWN_KEY}'s record, which is a cache of what the
- * SERVER last said. This is what the member last chose, it is versionless, and mixing the
- * two would mean a schema bump silently changing somebody's choice.
- * </p>
- */
-export const WALK_UP_KEY = "crusaders.member-door.walk-up";
-
-function sessionStore(): Storage | null {
-  try { return window.sessionStorage ?? null; } catch { return null; }
-}
-
-/** What the member last chose, or false. Never throws — see the class comment above. */
-export function readWalkUpChoice(): boolean {
-  const store = sessionStore();
-  if (!store) return false;
-  try { return store.getItem(WALK_UP_KEY) === "1"; } catch { return false; }
-}
-
-/** Remembers the choice for the rest of this session. Silent when storage refuses. */
-export function rememberWalkUpChoice(walkUp: boolean): void {
-  const store = sessionStore();
-  if (!store) return;
-  try { store.setItem(WALK_UP_KEY, walkUp ? "1" : "0"); } catch { /* private mode, or full */ }
-}
-
 /** Drops the lot. Used on sign-out and by tests; never by a failed read. */
 export function forgetLastKnown(): void {
   const store = storage();
   try { store?.removeItem(LAST_KNOWN_KEY); } catch { /* nothing to do about it */ }
-  // The member's own choice of code goes with it. Leaving one member's walk-up switch on
-  // for whoever signs in next on the same phone is a small thing that reads as a big one.
-  try { sessionStore()?.removeItem(WALK_UP_KEY); } catch { /* nothing to do about it */ }
 }
 
 /**

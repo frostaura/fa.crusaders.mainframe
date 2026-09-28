@@ -33,15 +33,18 @@ describe("FullScreenQr", () => {
     window.history.replaceState(null, "", "/");
   });
 
-  /** D12's dead-end sentence, with the club's number in it as a pressable link. */
-  const DEAD_SENTENCE = {
-    text: "This code has run out and can't be renewed without signal. Phone the club on ",
-    link: { href: "tel:0215550134", text: "021 555 0134" },
-    tail: ".",
-  };
+  /*
+    D1 retired the dead-code state this overlay used to carry ("This code has run out and can't
+    be renewed without signal…" with a Try again): the single rotating code is made on the phone
+    every thirty seconds from a key it holds, so there is no code on this screen that can die.
+    The fixtures for it went with it.
+  */
+
+  /** A v1 member code — `derivation.json`'s worked example (docs/specs/member-code.md §3.8). */
+  const TOKEN = "118Y956008441714835";
 
   /** The overlay, opened and closed by a control, inside a real router. */
-  function Host(props: { dead?: boolean; renewing?: boolean; onTryAgain?: () => void }) {
+  function Host() {
     const [open, setOpen] = useState(false);
     const location = useLocation();
     return (
@@ -51,27 +54,24 @@ describe("FullScreenQr", () => {
         <Link to="/schedule">Go to the schedule</Link>
         {open && (
           <FullScreenQr
-            code="7K3M9XQ2RD5A"
-            secondsLeft={props.dead ? 0 : 612}
-            dead={props.dead ?? false}
-            renewing={props.renewing ?? false}
-            deadSentence={DEAD_SENTENCE}
-            onTryAgain={props.onTryAgain ?? (() => {})}
+            code={TOKEN}
+            countdown="New code in 12 seconds"
+            hint="Turn your screen brightness up — scanners read a bright screen best."
             onClose={() => setOpen(false)}
           >
-            <svg role="img" aria-label="QR code 7K3M9XQ2RD5A" />
+            <svg role="img" aria-label={`QR code ${TOKEN}`} />
           </FullScreenQr>
         )}
       </div>
     );
   }
 
-  function renderHost(props: { dead?: boolean; renewing?: boolean; onTryAgain?: () => void } = {}) {
+  function renderHost() {
     window.history.replaceState(null, "", "/my-code");
     return render(
       <BrowserRouter>
         <Routes>
-          <Route path="/my-code" element={<Host {...props} />} />
+          <Route path="/my-code" element={<Host />} />
           <Route path="/schedule" element={<p>the schedule</p>} />
         </Routes>
       </BrowserRouter>,
@@ -201,9 +201,10 @@ describe("FullScreenQr", () => {
     expect(square.style.width).toBe("var(--fsq-square)");
     expect(square.className).not.toContain("92vh");
 
-    // The three things under the symbol — the code line, the countdown and Done — plus the
-    // gaps and the padding. Under 6.5rem is the overlay as it was BEFORE the countdown line
-    // existed, which is the state this reserve regressed to once and may not again.
+    // The three rows under the symbol — the code line, the countdown (which the brightness
+    // hint shares, wrapping only where the width binds) and Done — plus the gaps and the
+    // padding. Under 6.5rem is the overlay as it was BEFORE the countdown row existed, which
+    // is the state this reserve regressed to once and may not again.
     const reserve = Number(declared.match(/100vh - ([\d.]+)rem/)![1]);
     expect(reserve).toBeGreaterThan(6.5);
   });
@@ -223,17 +224,54 @@ describe("FullScreenQr", () => {
     expect(dialog.className).not.toMatch(/bg-black|\/\d\d\b|opacity-/);
   });
 
+  /** The countdown and the brightness line, black on the white — the member at a scanner's two facts. */
+  it("carries the step's countdown and asks for a brighter screen", () => {
+    renderHost();
+    open();
+    const dialog = screen.getByRole("dialog", { name: /full screen/i });
+    expect(dialog).toHaveTextContent("New code in 12 seconds");
+    expect(screen.getByText(/Turn your screen brightness up/).closest("p")!.className).toContain("text-black");
+  });
+
+  it("holds a screen wake lock while open, re-takes it when the page comes back, and lets it go on close", async () => {
+    const release = vi.fn(() => Promise.resolve());
+    const request = vi.fn(() => Promise.resolve({ release }));
+    Object.defineProperty(navigator, "wakeLock", { value: { request }, configurable: true });
+    try {
+      renderHost();
+      open();
+      await screen.findByRole("dialog", { name: /full screen/i });
+      await waitFor(() => expect(request).toHaveBeenCalledWith("screen"));
+      await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+      await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+      await act(async () => { fireEvent.keyDown(document, { key: "Escape" }); await new Promise((r) => setTimeout(r, 0)); });
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(release).toHaveBeenCalled();
+    } finally {
+      delete (navigator as { wakeLock?: unknown }).wakeLock;
+    }
+  });
+
+  it("opens and closes on a browser with no wake lock at all", async () => {
+    expect("wakeLock" in navigator).toBe(false);
+    renderHost();
+    open();
+    await screen.findByRole("dialog", { name: /full screen/i });
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
   it("keeps Done at a size a cold thumb can find", () => {
     renderHost();
     open();
     expect(screen.getByRole("button", { name: "Done" }).className).toContain("min-h-11");
   });
 
-  /** Twelve tracked monospace characters are wider than a phone once the root font is up. */
-  it("lets the fallback code wrap rather than run off the glass", () => {
+  /** Nineteen tracked monospace characters are wider than a phone once the root font is up. */
+  it("lets the code wrap rather than run off the glass", () => {
     renderHost();
     open();
-    const code = screen.getByText("7K3M9XQ2RD5A");
+    const code = screen.getByText(TOKEN);
     expect(code.className).toContain("break-all");
     expect(code.className).toContain("max-w-full");
   });

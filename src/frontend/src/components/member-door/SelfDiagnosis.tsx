@@ -87,7 +87,7 @@ export function SelfDiagnosis(props: {
   busy: boolean;
   onHide: () => void;
   /** Switches the page to the member's own code, when the club's rule would admit it. E-H2 (3). */
-  onUseMemberCode: () => void;
+  onUseMemberCode?: () => void;
 }) {
   const { input, busy, onHide, onUseMemberCode } = props;
   const container = useRef<HTMLDivElement | null>(null);
@@ -115,7 +115,7 @@ export function SelfDiagnosis(props: {
             {/* E-H2 (3). The one thing on this phone that might work where the code on
                 screen did not, offered where the member is already looking for an answer
                 rather than behind a checkbox further down the page. */}
-            {input.offerMemberCode && (
+            {input.offerMemberCode && onUseMemberCode && (
               <Button variant="primary" className="w-full sm:w-auto" onClick={onUseMemberCode}>
                 {USE_MEMBER_CODE_INSTEAD}
               </Button>

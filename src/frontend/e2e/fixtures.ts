@@ -115,3 +115,35 @@ export async function signIn(page: Page) {
 
 export const test = base;
 export { expect } from "@playwright/test";
+
+/**
+ * D1 — the single rotating member code. The member secret is `derivation.json`'s `dean-gen1`
+ * (a fixture derived from a fixture master key; it authenticates nothing anywhere).
+ */
+export const MEMBER_CODE = {
+  secretHex: "aca5e9d6718ee21c343dee909e9037ff98d47dbf053dffa57b9b24d9c99b5387",
+  ref: "18Y9",
+  tz: "Africa/Johannesburg",
+} as const;
+
+/** Unpadded base64url of the fixture secret — what `POST /me/code/enrol` carries. */
+export function memberCodeSecretB64(): string {
+  return Buffer.from(MEMBER_CODE.secretHex, "hex").toString("base64url");
+}
+
+/**
+ * `POST /api/v1/me/code/enrol` and `GET /api/v1/me/code`, answering with the harness's clock at
+ * the moment of the call — so the phone measures an offset of about nothing.
+ */
+export function memberCodeRoutes(options: { generation?: number } = {}): ApiRoute[] {
+  const generation = options.generation ?? 1;
+  const { ref, tz } = MEMBER_CODE;
+  return [
+    {
+      method: "POST",
+      path: "/api/v1/me/code/enrol",
+      respond: () => ({ v: 1, ref, generation, secret: memberCodeSecretB64(), tz, step_seconds: 30, server_time_ms: Date.now() }),
+    },
+    { path: "/api/v1/me/code", respond: () => ({ v: 1, ref, generation, tz, server_time_ms: Date.now() }) },
+  ];
+}
