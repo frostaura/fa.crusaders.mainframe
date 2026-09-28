@@ -53,9 +53,10 @@ public static class GateHeartbeatView
     /// capability gets <see cref="Of"/>'s body byte for byte.
     /// </summary>
     public static Dictionary<string, object?> WithCodes(
-        Device device, string tenantSlug, int heartbeatSeconds, int unlockSeconds,
+        Device device, string tenantSlug, GateTiming timing,
         IReadOnlyList<string> roster, DateTimeOffset now, MemberCodeSync? codes)
     {
+        var (heartbeatSeconds, unlockSeconds) = timing;
         var body = new Dictionary<string, object?>
         {
             ["server_time"] = now,
@@ -99,3 +100,6 @@ public static class GateHeartbeatView
         };
     }
 }
+
+/// <summary>A door's two timings — its heartbeat interval and how long it holds the lock open — as <see cref="GateHeartbeatView.WithCodes"/> takes them.</summary>
+public sealed record GateTiming(int HeartbeatSeconds, int UnlockSeconds);

@@ -365,7 +365,7 @@ public partial class MemberCodeCorpusTests
         var sync = WidestSync(MemberCodeWire.CourtBoxKeyCap);
 
         var body = MemberCodeHeartbeat.Fit(
-            codes => DeviceEndpoints.CourtBoxView(device, new string('w', 64), s, roster, relays, DateTimeOffset.UtcNow, codes),
+            codes => DeviceEndpoints.CourtBoxView(device, new string('w', 64), s, new CourtBoxLists(roster, relays, codes), DateTimeOffset.UtcNow),
             sync, MemberCodeWire.CourtBoxMaxBytes);
 
         var bytes = JsonSerializer.SerializeToUtf8Bytes(body).Length;
@@ -387,7 +387,7 @@ public partial class MemberCodeCorpusTests
         var sync = WidestSync(MemberCodeWire.GateKeyCap);
 
         var body = MemberCodeHeartbeat.Fit(
-            codes => GateHeartbeatView.WithCodes(device, new string('w', 64), 300, 30, roster, DateTimeOffset.UtcNow, codes),
+            codes => GateHeartbeatView.WithCodes(device, new string('w', 64), new GateTiming(300, 30), roster, DateTimeOffset.UtcNow, codes),
             sync, MemberCodeWire.GateMaxBytes);
 
         var bytes = JsonSerializer.SerializeToUtf8Bytes(body).Length;

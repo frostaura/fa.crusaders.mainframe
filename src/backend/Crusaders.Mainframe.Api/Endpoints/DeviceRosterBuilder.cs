@@ -140,7 +140,7 @@ public static class DeviceRosterBuilder
         MainframeDbContext db, AccessCodeService codes, Device device, TenantSettingsView settings,
         DateTimeOffset now, CancellationToken ct)
     {
-        return await BuildAsync(db, codes, device, settings, now, mint: true, ct);
+        return await BuildAsync(new LegacyRosterSources(db, codes), device, settings, now, mint: true, ct);
     }
 
     /// <summary>
@@ -149,13 +149,13 @@ public static class DeviceRosterBuilder
     /// still on legacy firmware is sent only the codes that already exist.
     /// </summary>
     public static async Task<List<string>> BuildAsync(
-        MainframeDbContext db, AccessCodeService codes, Device device, TenantSettingsView settings,
+        LegacyRosterSources sources, Device device, TenantSettingsView settings,
         DateTimeOffset now, bool mint, CancellationToken ct)
     {
-        var (bookings, numberOf, cue) = await BookingsAsync(db, device, settings, now, ct);
+        var (bookings, numberOf, cue) = await BookingsAsync(sources.Db, device, settings, now, ct);
         if (bookings.Count == 0) return [];
 
-        var tokens = await TokensForAsync(db, codes, bookings, settings, now, ct, mint);
+        var tokens = await TokensForAsync(sources, bookings, settings, now, ct, mint);
 
         return Format(
             bookings.Where(b => tokens.ContainsKey(b.Id)).Select(b => new Candidate(b, numberOf[b.CourtId], tokens[b.Id])),
@@ -168,17 +168,16 @@ public static class DeviceRosterBuilder
     /// booking, never both.
     /// </summary>
     public static async Task<List<MemberCodeEntry>> BuildV1Async(
-        MainframeDbContext db, IBookingPlayers players, MemberCodeService memberCodes, Device device,
-        TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
+        RosterSources sources, Device device, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
     {
-        var (bookings, numberOf, cue) = await BookingsAsync(db, device, settings, now, ct);
+        var (bookings, numberOf, cue) = await BookingsAsync(sources.Db, device, settings, now, ct);
         var ordered = bookings
             .OrderBy(b => b.StartsAt).ThenBy(b => b.Id)
             .Select(b => (Booking: b, Relay: RelayOf(device.CourtNumbers, numberOf[b.CourtId])))
             .Where(x => x.Relay is >= 0 and <= 3)
             .Take(RosterMaxEntries)
             .ToList();
-        return await MemberCodeHeartbeat.EntriesAsync(ordered, cue, now, players, memberCodes, ct);
+        return await MemberCodeHeartbeat.EntriesAsync(ordered, cue, now, sources.Players, sources.MemberCodes, ct);
     }
 
     private static async Task<(List<Booking> Bookings, Dictionary<Guid, int> NumberOf, TimeSpan Cue)> BookingsAsync(
@@ -238,11 +237,11 @@ public static class DeviceRosterBuilder
     /// </para>
     /// </summary>
     public static async Task<Dictionary<Guid, string>> TokensForAsync(
-        MainframeDbContext db, AccessCodeService codes, List<Booking> bookings, TenantSettingsView settings,
+        LegacyRosterSources sources, List<Booking> bookings, TenantSettingsView settings,
         DateTimeOffset now, CancellationToken ct, bool mint = true)
     {
         var ids = bookings.Select(b => b.Id).ToList();
-        var live = await db.AccessCodes.AsNoTracking()
+        var live = await sources.Db.AccessCodes.AsNoTracking()
             .Where(c => c.BookingId != null && ids.Contains(c.BookingId.Value)
                         && c.Purpose == AccessCodePurpose.BookingActivation
                         && c.ExpiresAt > now)
@@ -256,9 +255,15 @@ public static class DeviceRosterBuilder
         foreach (var booking in bookings)
         {
             if (tokens.ContainsKey(booking.Id) || !mint) continue;
-            tokens[booking.Id] = (await codes.MintForBookingAsync(booking, grace, ct)).Code;
+            tokens[booking.Id] = (await sources.Codes.MintForBookingAsync(booking, grace, ct)).Code;
         }
 
         return tokens;
     }
 }
+
+/// <summary>What a legacy roster is read and minted from — bundled, so the builders stay inside the six-parameter gate.</summary>
+public sealed record LegacyRosterSources(MainframeDbContext Db, AccessCodeService Codes);
+
+/// <summary>What a v1 roster is read from: the bookings, who plays them, and each player's code row.</summary>
+public sealed record RosterSources(MainframeDbContext Db, IBookingPlayers Players, MemberCodeService MemberCodes);
