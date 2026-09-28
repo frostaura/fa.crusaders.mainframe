@@ -281,11 +281,13 @@ public static class AdminBulkBookingEndpoints
             user_id = payerId,
             total_credits = quote.TotalCredits,
             balance_credits = quote.BalanceCredits,
+            spendable_credits = quote.SpendableCredits,
+            held_credits = quote.HeldCredits,
             balance_after_credits = quote.BalanceCredits - quote.TotalCredits,
             // True exactly when the batch sent WITHOUT the flag would halt on
             // insufficient_balance. Prices are never negative, so the running balance first
             // falls short of an item's price iff the balance is below the whole total.
-            overdraws = anyBookable && quote.BalanceCredits < quote.TotalCredits,
+            overdraws = anyBookable && quote.SpendableCredits < quote.TotalCredits,
             items = quote.Lines.Select((l, index) => new
             {
                 index,

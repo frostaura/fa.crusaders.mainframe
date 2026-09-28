@@ -252,9 +252,11 @@ public static class BookingEndpoints
         var quote = await svc.QuoteAsync(query.CourtId, payer, query.StartsAt, query.Slices, ct);
         if (quote.PriceCredits is not { } price) return ToHttpResult(quote.Refusal!, ctx);
 
-        // Spendable: shares the member holds for their partners are not the desk's to book against (D11).
+        // balance_credits is the raw balance, as everywhere; the guard is on SPENDABLE — shares the
+        // member holds for their partners are not the desk's to book against (D11).
         var held = await ledger.GetHeldAsync(payerId, ct);
-        var balance = await ledger.GetBalanceAsync(payerId, ct) - held.Held;
+        var balance = await ledger.GetBalanceAsync(payerId, ct);
+        var spendable = balance - held.Held;
         return Results.Ok(new
         {
             user_id = payerId,
@@ -266,10 +268,11 @@ public static class BookingEndpoints
             price_credits = price,
             balance_credits = balance,
             balance_after_credits = balance - price,
+            spendable_credits = spendable,
             held_credits = held.Held,
-            // Exactly the guard CreateAsync applies, `balance < totalCost`, so "overdraws" is
+            // Exactly the guard CreateAsync applies, `spendable < totalCost`, so "overdraws" is
             // true precisely when the POST without the flag would answer 402.
-            overdraws = balance < price,
+            overdraws = spendable < price,
         });
     }
 

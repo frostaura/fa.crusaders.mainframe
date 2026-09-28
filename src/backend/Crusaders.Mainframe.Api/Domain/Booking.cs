@@ -167,5 +167,15 @@ public sealed class Booking : ITenantScoped
     /// </summary>
     public Guid? DisplacedByBookingId { get; set; }
 
+    /// <summary>
+    /// D11 — the instant after which no share of this booking can be paid, changed or returned
+    /// without an admin: the SOLD end plus <c>share_lapse_hours</c>, stamped ONCE, when the booking
+    /// first gets players, from the setting at that moment. Null for a booking nobody added
+    /// players to. Everything that asks "is this game still open" reads the stamp, so a club
+    /// raising the lapse hours later cannot reopen a game whose held shares were already released
+    /// and spent (<c>PlayerSettings.ShareDeadline</c>).
+    /// </summary>
+    public DateTimeOffset? ShareDeadlineAt { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

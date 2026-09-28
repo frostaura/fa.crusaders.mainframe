@@ -101,11 +101,19 @@ public static class PlayerSettings
         Math.Clamp(s.MemberNotificationRetentionDays, MinNotificationRetentionDays, MaxNotificationRetentionDays);
 
     /// <summary>
-    /// The instant after which a seat's share can no longer be paid: the SOLD end plus the lapse
-    /// hours. Sold rather than <c>EndsAt</c>, because the no-show sweep truncates <c>EndsAt</c>
-    /// and a partner's deadline must not move because the organiser did not turn up.
+    /// The instant after which a seat's share can no longer be paid: the booking's stamped
+    /// deadline, else (no players yet) the SOLD end plus the lapse hours. Sold rather than
+    /// <c>EndsAt</c>, because the no-show sweep truncates <c>EndsAt</c> and a partner's deadline
+    /// must not move because the organiser did not turn up.
     /// </summary>
     public static DateTimeOffset ShareDeadline(Domain.Booking booking, TenantSettingsView s) =>
+        booking.ShareDeadlineAt ?? DeadlineFromSettings(booking, s);
+
+    /// <summary>
+    /// The deadline the club's CURRENT setting would give — what <see cref="Domain.Booking.ShareDeadlineAt"/>
+    /// is stamped with when the booking first gets players, and never read again once it is.
+    /// </summary>
+    public static DateTimeOffset DeadlineFromSettings(Domain.Booking booking, TenantSettingsView s) =>
         BookingService.OriginalEndsAt(booking).AddHours(ShareLapseHours(s));
 
     /// <summary>

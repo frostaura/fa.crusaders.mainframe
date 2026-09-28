@@ -438,6 +438,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateOnly?>("ScheduleOccurrenceDate")
                         .HasColumnType("date");
 
+                    b.Property<DateTimeOffset?>("ShareDeadlineAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("SliceCount")
                         .HasColumnType("integer");
 

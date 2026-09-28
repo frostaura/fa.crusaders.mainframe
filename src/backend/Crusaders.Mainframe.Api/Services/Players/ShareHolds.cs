@@ -43,12 +43,14 @@ public static class ShareHolds
     public static async Task<HeldCredits> ForAsync(
         MainframeDbContext db, Guid userId, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
     {
-        // A sold end is at most a day after the start, so this bounds the read to bookings whose
-        // deadline can still be ahead without computing the deadline in SQL.
+        // Bookings whose deadline can still be ahead: a stamped one that has not passed (the stamp
+        // is the deadline, whatever the setting says now), or an unstamped one that started
+        // within the current lapse hours plus a day (a sold end is at most a day after its start).
         var horizon = now.AddHours(-PlayerSettings.ShareLapseHours(settings)).AddDays(-1);
         var nets = await db.LedgerEntries.AsNoTracking()
             .Where(l => l.UserId == userId && l.Type == LedgerEntryType.ShareTransfer && l.RelatedBookingId != null)
-            .Join(db.Bookings.AsNoTracking().Where(b => b.StartsAt >= horizon), l => l.RelatedBookingId, b => (Guid?)b.Id,
+            .Join(db.Bookings.AsNoTracking().Where(b => b.ShareDeadlineAt > now || (b.ShareDeadlineAt == null && b.StartsAt >= horizon)),
+                l => l.RelatedBookingId, b => (Guid?)b.Id,
                 (l, b) => new { b.Id, l.AmountCredits })
             .GroupBy(x => x.Id)
             .Select(g => new { BookingId = g.Key, Net = g.Sum(x => x.AmountCredits) })
@@ -59,6 +61,11 @@ public static class ShareHolds
         var ids = nets.Select(n => n.BookingId).ToList();
         var bookings = await db.Bookings.AsNoTracking().Where(b => ids.Contains(b.Id)).ToDictionaryAsync(b => b.Id, ct);
 
+        // Cancelled bookings hold only what they will still hand back — read for all of them at
+        // once, not booking by booking (review (b)).
+        var pending = await PendingReturnsAsync(
+            db, bookings.Values.Where(b => b.Status == BookingStatus.Cancelled && ShareLedger.PayerOf(b) == userId).ToList(), settings, now, ct);
+
         decimal held = 0m;
         DateTimeOffset? releases = null;
         foreach (var n in nets)
@@ -68,9 +75,7 @@ public static class ShareHolds
             var deadline = PlayerSettings.ShareDeadline(booking, settings);
             if (now >= deadline) continue;
 
-            var amount = booking.Status == BookingStatus.Cancelled
-                ? await PendingReturnsAsync(db, booking, settings, now, ct)
-                : n.Net;
+            var amount = booking.Status == BookingStatus.Cancelled ? pending.GetValueOrDefault(booking.Id) : n.Net;
             if (amount <= 0m) continue;
             held += Math.Min(amount, n.Net);
             releases = releases is { } r && r <= deadline ? r : deadline;
@@ -78,21 +83,47 @@ public static class ShareHolds
         return new HeldCredits(held, releases);
     }
 
-    /// <summary>What a cancelled booking will still hand back to its partners at the next reconcile.</summary>
-    private static async Task<decimal> PendingReturnsAsync(
-        MainframeDbContext db, Booking booking, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
+    /// <summary>
+    /// What each cancelled booking will still hand back to its partners at the next reconcile —
+    /// three reads for all of them together: their partner seats, what their payers owe, and every
+    /// share row on them. The arithmetic is <see cref="ShareLedger"/>'s own, per seat.
+    /// </summary>
+    private static async Task<Dictionary<Guid, decimal>> PendingReturnsAsync(
+        MainframeDbContext db, List<Booking> cancelled, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
     {
+        var result = new Dictionary<Guid, decimal>();
+        if (cancelled.Count == 0) return result;
+        var ids = cancelled.Select(b => b.Id).ToList();
+
         var seats = await db.BookingParticipants.AsNoTracking()
-            .Where(p => p.BookingId == booking.Id && p.Seat > 1 && p.UserId != null)
+            .Where(p => ids.Contains(p.BookingId) && p.Seat > 1 && p.UserId != null)
             .ToListAsync(ct);
-        var owed = await ShareLedger.OwedOfAsync(db, booking, ct);
-        decimal pending = 0m;
-        foreach (var seat in seats)
+        var sums = await db.LedgerEntries.AsNoTracking()
+            .Where(l => l.RelatedBookingId != null && ids.Contains(l.RelatedBookingId.Value) && l.Type != LedgerEntryType.ShareTransfer)
+            .GroupBy(l => new { Booking = l.RelatedBookingId!.Value, l.UserId })
+            .Select(g => new { g.Key.Booking, g.Key.UserId, Sum = g.Sum(l => l.AmountCredits) })
+            .ToListAsync(ct);
+        var shareRows = await db.LedgerEntries.AsNoTracking()
+            .Where(l => l.RelatedBookingId != null && ids.Contains(l.RelatedBookingId.Value)
+                        && l.Type == LedgerEntryType.ShareTransfer && l.ExternalReference != null)
+            .Select(l => new { l.UserId, Reference = l.ExternalReference!, l.AmountCredits })
+            .ToListAsync(ct);
+
+        foreach (var booking in cancelled)
         {
-            var paid = await ShareLedger.PaidOfAsync(db, seat, ct);
-            var target = ShareLedger.TargetFor(booking, seat, owed, paid, ShareLedger.IsClosed(booking, seat, settings, now));
-            pending += Math.Max(0m, paid - target);
+            var payer = ShareLedger.PayerOf(booking);
+            var owed = Math.Max(0m, -sums.Where(x => x.Booking == booking.Id && x.UserId == payer).Sum(x => x.Sum));
+            decimal pending = 0m;
+            foreach (var seat in seats.Where(p => p.BookingId == booking.Id))
+            {
+                var prefix = ShareLedger.Prefix(seat.Id);
+                var paid = -shareRows.Where(r => r.UserId == seat.UserId && r.Reference.StartsWith(prefix, StringComparison.Ordinal))
+                    .Sum(r => r.AmountCredits);
+                var target = ShareLedger.TargetFor(booking, seat, owed, paid, ShareLedger.IsClosed(booking, seat, settings, now));
+                pending += Math.Max(0m, paid - target);
+            }
+            result[booking.Id] = pending;
         }
-        return pending;
+        return result;
     }
 }

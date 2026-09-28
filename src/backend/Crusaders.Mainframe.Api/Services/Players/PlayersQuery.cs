@@ -274,11 +274,13 @@ public sealed class PlayersQuery
             .ToListAsync(ct);
 
         var items = new List<object>();
+        // The caller's wallet once for the whole list, not once per invite (review (b)).
+        var wallet = await WalletAsync(me, ct);
         foreach (var x in rows.Where(x => now < PlayerSettings.ShareDeadline(x.Booking, settings)).OrderBy(x => x.Booking.StartsAt))
         {
             var unpaid = await _shares.UnpaidAsync(x.Booking, x.Seat, ct);
             if (x.Seat.Status == ParticipantStatus.Accepted && unpaid <= 0m) continue;
-            items.Add(await InviteViewAsync(x.Booking, x.Seat, me, settings, ct));
+            items.Add(await InviteViewAsync(x.Booking, x.Seat, me, settings, ct, wallet));
         }
         return items;
     }
@@ -288,16 +290,17 @@ public sealed class PlayersQuery
     /// Who is looking. An open link seat is priced and cap-checked as if <paramref name="viewer"/>
     /// had claimed it, while still reading <c>open_link: true</c>.
     /// </param>
+    /// <param name="wallet">The viewer's balance and hold, when the caller already read them for a list.</param>
     public async Task<object> InviteViewAsync(
-        Booking booking, BookingParticipant seat, Guid viewer, TenantSettingsView settings, CancellationToken ct)
+        Booking booking, BookingParticipant seat, Guid viewer, TenantSettingsView settings, CancellationToken ct, Wallet? wallet = null)
     {
         var openLink = seat.UserId is null;
         if (openLink) seat = AsClaimedBy(seat, viewer);
         var unpaid = await _shares.UnpaidAsync(booking, seat, ct);
-        // What the accept will check: the balance less anything this member holds for partners
-        // of their own (D11). Shown beside the total so the sheet can say why.
-        var held = await _ledger.GetHeldAsync(viewer, ct);
-        var balance = await _ledger.GetBalanceAsync(viewer, ct) - held.Held;
+        // The raw balance, and what the accept will check: that less anything this member holds
+        // for partners of their own (D11) — both shown, so the sheet can say why.
+        var (balance, held) = wallet ?? await WalletAsync(viewer, ct);
+        var spendable = balance - held.Held;
         var people = await MembersAsync([booking.UserId], ct);
         var court = await _db.Courts.AsNoTracking().Where(c => c.Id == booking.CourtId).Select(c => c.Name).FirstOrDefaultAsync(ct);
         var cap = seat.Status == ParticipantStatus.Invited && seat.UserId is { } me && booking.StartsAt > DateTimeOffset.UtcNow
@@ -323,13 +326,20 @@ public sealed class PlayersQuery
             to_pay_credits = unpaid,
             needs_consent = seat.Status == ParticipantStatus.Accepted && seat.ShareCredits > seat.ConsentedCredits,
             balance_credits = balance,
+            spendable_credits = spendable,
             held_credits = held.Held,
             balance_after_credits = balance - unpaid,
-            short_by_credits = Math.Max(0m, unpaid - balance),
+            short_by_credits = Math.Max(0m, unpaid - spendable),
             share_deadline = PlayerSettings.ShareDeadline(booking, settings),
             cap = cap is null ? null : PlayersService.CapFigures(cap),
         };
     }
+
+    /// <summary>A member's raw balance and what of it is held — read once, shown together.</summary>
+    public sealed record Wallet(decimal Balance, HeldCredits Held);
+
+    private async Task<Wallet> WalletAsync(Guid userId, CancellationToken ct) =>
+        new(await _ledger.GetBalanceAsync(userId, ct), await _ledger.GetHeldAsync(userId, ct));
 
     private static BookingParticipant AsClaimedBy(BookingParticipant seat, Guid viewer)
     {

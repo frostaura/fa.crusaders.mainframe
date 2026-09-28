@@ -79,10 +79,14 @@ public sealed class ShareSweep
     public async Task SweepAsync(DateTimeOffset now, CancellationToken ct)
     {
         var settings = await _settings.GetAsync(ct);
+        // A week past each booking's own deadline: the stamp where it has one (review H2), else the
+        // club's current lapse hours past the end.
         var horizon = now.AddHours(-(PlayerSettings.ShareLapseHours(settings) + (7 * 24)));
+        var stampedHorizon = now.AddDays(-7);
 
         var bookingIds = await _db.BookingParticipants.AsNoTracking()
-            .Where(p => p.Seat > 1 && _db.Bookings.Any(b => b.Id == p.BookingId && b.EndsAt >= horizon))
+            .Where(p => p.Seat > 1 && _db.Bookings.Any(b => b.Id == p.BookingId
+                && (b.ShareDeadlineAt >= stampedHorizon || (b.ShareDeadlineAt == null && b.EndsAt >= horizon))))
             .Select(p => p.BookingId)
             .Distinct()
             .ToListAsync(ct);

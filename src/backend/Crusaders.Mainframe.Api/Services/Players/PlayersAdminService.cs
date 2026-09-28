@@ -34,8 +34,27 @@ public sealed class PlayersAdminService
         _db = db; _tenant = tenant; _players = players; _shares = shares; _changes = changes;
     }
 
-    /// <summary>What one admin action is about: which booking, which seat, who, why.</summary>
-    public sealed record AdminAct(Guid BookingId, Guid? SeatId, Guid ActorId, string? Reason);
+    /// <summary>
+    /// What one admin action is about: which booking, which seat, who, why — and whether the desk
+    /// named the overdraft (<c>allowNegativeBalance</c>), which a hand-back after the share
+    /// deadline needs (review H1).
+    /// </summary>
+    public sealed record AdminAct(Guid BookingId, Guid? SeatId, Guid ActorId, string? Reason, bool AllowNegativeBalance = false);
+
+    /// <summary>
+    /// A remove or a settle-outside hands the seat's paid share back from the organiser. Before
+    /// the share deadline the organiser's hold covers it; after it the hold has been released
+    /// and may be spent, so the desk must say the overdraft by name — exactly as for a collect —
+    /// and it is on the change record. Without it: <c>400 overdraft_not_authorised</c>.
+    /// </summary>
+    private static PlayerOutcome? LateReturnRefusal(PlayersService.Game game, AdminAct act) =>
+        !act.AllowNegativeBalance && DateTimeOffset.UtcNow >= PlayerSettings.ShareDeadline(game.Booking, game.Settings)
+            ? PlayerOutcome.Refuse(400, PlayerErrors.OverdraftNotAuthorised)
+            : null;
+
+    /// <summary>The reconcile's authority for this act: the named overdraft lets this seat's return post whatever the organiser holds.</summary>
+    private static ReconcileOptions OptionsFor(AdminAct act, BookingParticipant seat) =>
+        new(act.ActorId, act.AllowNegativeBalance ? seat.Id : null);
 
     /// <summary>Adds a member or a guest. The member is invited (or placed, with <paramref name="accepted"/>) — never charged.</summary>
     public async Task<PlayerOutcome> AddAsync(AdminAct act, PlayerSpec spec, bool accepted, CancellationToken ct)
@@ -70,9 +89,11 @@ public sealed class PlayersAdminService
         if (game is null) return PlayerOutcome.BookingNotFound;
         var seat = game.Seats.FirstOrDefault(s => s.Id == act.SeatId && s.Seat > 1 && s.IsLive);
         if (seat is null) return PlayerOutcome.PlayerNotFound;
+        if (LateReturnRefusal(game, act) is { } late) return late;
 
-        await RecordAsync(AdminChangeActions.BookingPlayerRemoved, act, seat, new { status = "removed" }, ct);
-        return await _players.RemoveSeatAsync(game, seat.Id, DateTimeOffset.UtcNow, ct);
+        await RecordAsync(AdminChangeActions.BookingPlayerRemoved, act, seat,
+            new { status = "removed", overdraft_authorised = act.AllowNegativeBalance }, ct);
+        return await _players.RemoveSeatAsync(game, seat.Id, DateTimeOffset.UtcNow, ct, OptionsFor(act, seat));
     }
 
     /// <summary>Marks an invited member as playing. Records no consent, so collects nothing.</summary>
@@ -102,14 +123,15 @@ public sealed class PlayersAdminService
         var (game, seat) = await SeatAsync(act, ct);
         if (seat is null || seat.UserId is null) return PlayerOutcome.PlayerNotFound;
         if (seat.Status != ParticipantStatus.Accepted) return PlayerOutcome.Refuse(409, PlayerErrors.NotAccepted);
+        if (LateReturnRefusal(game!, act) is { } late) return late;
 
         var paid = await _shares.PaidAsync(seat, ct);
         seat.SettledOutsideAt = StorableTime.UtcNow;
         seat.RespondedAt ??= StorableTime.UtcNow;
         seat.UpdatedAt = StorableTime.UtcNow;
         await RecordAsync(AdminChangeActions.BookingShareSettledOutside, act, seat,
-            new { share_credits = seat.ShareCredits, paid_in_app_credits = paid }, ct);
-        return await SaveAndSettleAsync(game!, seat, ct);
+            new { share_credits = seat.ShareCredits, paid_in_app_credits = paid, overdraft_authorised = act.AllowNegativeBalance }, ct);
+        return await SaveAndSettleAsync(game!, seat, ct, OptionsFor(act, seat));
     }
 
     /// <summary>
@@ -163,7 +185,8 @@ public sealed class PlayersAdminService
         return (game, seat);
     }
 
-    private async Task<PlayerOutcome> SaveAndSettleAsync(PlayersService.Game game, BookingParticipant seat, CancellationToken ct)
+    private async Task<PlayerOutcome> SaveAndSettleAsync(
+        PlayersService.Game game, BookingParticipant seat, CancellationToken ct, ReconcileOptions? options = null)
     {
         try
         {
@@ -174,7 +197,7 @@ public sealed class PlayersAdminService
             _db.ChangeTracker.Clear();
             return PlayerOutcome.Refuse(409, PlayerErrors.Conflict);
         }
-        await _shares.ReconcileAsync(game.Booking.Id, ct);
+        await _shares.ReconcileAsync(game.Booking.Id, ct, options);
         return PlayerOutcome.Ok(new { participant_id = seat.Id, status = PlayerViews.StatusName(seat.Status) });
     }
 

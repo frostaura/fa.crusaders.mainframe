@@ -227,9 +227,14 @@ public sealed partial class PlayersService
         }
     }
 
+    /// <summary>
+    /// The accept's answer. <c>balance_credits</c> is the RAW balance, as on every route; what the
+    /// partner may spend and what they hold for partners of their own sit beside it (review (a)).
+    /// </summary>
     private async Task<object> AnswerAsync(BookingParticipant seat, CancellationToken ct)
     {
         var balance = seat.UserId is { } u ? await _p.Ledger.GetBalanceAsync(u, ct) : 0m;
+        var held = seat.UserId is { } h ? await _p.Ledger.GetHeldAsync(h, ct) : HeldCredits.None;
         return new
         {
             participant_id = seat.Id,
@@ -239,6 +244,8 @@ public sealed partial class PlayersService
             consented_credits = seat.ConsentedCredits,
             paid_credits = await _p.Shares.PaidAsync(seat, ct),
             balance_credits = balance,
+            spendable_credits = balance - held.Held,
+            held_credits = held.Held,
         };
     }
 

@@ -276,7 +276,7 @@ public static class PlayersEndpoints
     private static Guid Me(HttpContext ctx) => ctx.User.Id() ?? Guid.Empty;
 
     private static PlayersAdminService.AdminAct Act(Guid bookingId, Guid participantId, HttpContext ctx, AdminPlayerRequest? req) =>
-        new(bookingId, participantId, Me(ctx), req?.Reason);
+        new(bookingId, participantId, Me(ctx), req?.Reason, req?.AllowNegativeBalance ?? false);
 
     private static async Task<IResult> Run(Task<PlayerOutcome> outcome) => ToResult(await outcome);
 
@@ -311,5 +311,9 @@ public sealed record AdminAddPlayerRequest(Guid? UserId = null, string? GuestNam
 /// </summary>
 public sealed record AcceptRequest(decimal? ExpectedShareCredits = null);
 
-/// <summary>An admin acting on one seat. The reason is required; the overdraft flag only means anything on collect.</summary>
+/// <summary>
+/// An admin acting on one seat. The reason is required. The overdraft flag is required on a
+/// collect, and on a remove or settle-outside after the share deadline (the hand-back is then no
+/// longer covered by the organiser's hold).
+/// </summary>
 public sealed record AdminPlayerRequest(string? Reason = null, bool AllowNegativeBalance = false);

@@ -398,11 +398,18 @@ public class CourtActivationService
     /// D11: a split booking is never re-assigned to one payer at the box — the partners' shares
     /// were paid to the organiser, and moving the whole price to somebody else would leave them
     /// paid to a person who no longer bore the court. The scan still checks the player in.
+    ///
+    /// <para>
+    /// "Split" is <see cref="BookingPlayerQueries.IsSplitAsync"/>: a live partner seat asked for a
+    /// share, OR any share row on the booking. A live seat alone missed the booking whose partner
+    /// had come off with their return still to be posted — the override then moved the court, and
+    /// the return owed on it, onto the volunteer (review M1).
+    /// </para>
     /// </summary>
     private async Task<Guid?> OverrideUnlessSplitAsync(Guid bookingId, Guid? payerOverrideUserId, CancellationToken ct)
     {
         if (payerOverrideUserId is null) return null;
-        return await BookingPlayerQueries.HasLivePartnerSeatAsync(_db, bookingId, ct) ? null : payerOverrideUserId;
+        return await BookingPlayerQueries.IsSplitAsync(_db, bookingId, ct) ? null : payerOverrideUserId;
     }
 
     /// <summary>A repeat scan of a live session still records THIS player's arrival, once.</summary>

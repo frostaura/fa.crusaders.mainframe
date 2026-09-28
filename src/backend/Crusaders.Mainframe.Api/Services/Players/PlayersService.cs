@@ -180,9 +180,16 @@ public sealed partial class PlayersService
     /// The desk's add: may invite again a member who declined or was taken off, and is not held to
     /// the club's per-booking invite cap. Both are on the admin change record.
     /// </param>
+    ///
+    /// <remarks>
+    /// <b>Under the booking's own lock</b>, taken before anything is read: the invite cap counts
+    /// every seat the booking was ever given, and two adds that both counted before either wrote
+    /// would both squeeze under it. The lock ends at the commit; the reconcile runs after it.
+    /// </remarks>
     public async Task<PlayerOutcome> AddAsync(
         Guid bookingId, Guid organiserId, PlayersRequest req, CancellationToken ct, Guid? actorId = null, bool asAdmin = false)
     {
+        await using var bookingLock = await PayerLock.BeginAsync(_db, _tenant.TenantId, bookingId, _p.Outbox, ct);
         var now = DateTimeOffset.UtcNow;
         var game = await LoadAsync(bookingId, ct);
         if (OrganiserGate(game, organiserId, now) is { } refused) return refused;
@@ -202,8 +209,11 @@ public sealed partial class PlayersService
             return bad;
         }
 
-        return await AddSeatsAsync(game, req with { SplitMode = mode }, actorId ?? organiserId, now, ct);
+        return await AddSeatsAsync(new AddWork(game, req with { SplitMode = mode }, actorId ?? organiserId, now, bookingLock), ct);
     }
+
+    /// <summary>One add, decided: the game, the players (mode resolved), who, when, and the lock to commit.</summary>
+    private sealed record AddWork(Game Game, PlayersRequest Req, Guid ActorId, DateTimeOffset Now, PayerLock Lock);
 
     /// <summary>
     /// The organiser's invite loop, closed (review finding 7): a member who said no to this game,
@@ -229,10 +239,12 @@ public sealed partial class PlayersService
     }
 
     /// <param name="req">The players, with <see cref="PlayersRequest.SplitMode"/> already resolved.</param>
-    private async Task<PlayerOutcome> AddSeatsAsync(Game game, PlayersRequest req, Guid actorId, DateTimeOffset now, CancellationToken ct)
+    private async Task<PlayerOutcome> AddSeatsAsync(AddWork work, CancellationToken ct)
     {
+        var (game, req, actorId, now) = (work.Game, work.Req, work.ActorId, work.Now);
         var (specs, mode, organiserWeight) = (req.Players!, req.SplitMode!, req.OrganiserWeight);
         EnsureOrganiserSeat(game, now);
+        StampDeadline(game);
         var plan = PlanSeats(specs, game.Live.Select(s => s.Seat).ToList())!;
         var added = new List<(BookingParticipant Seat, string? Token)>();
         for (var i = 0; i < specs.Count; i++) added.Add(NewSeat(game, specs[i], plan[i], actorId, now));
@@ -245,10 +257,11 @@ public sealed partial class PlayersService
         {
             var invite = await PlayerNotices.InviteAsync(_db, game.Booking, seat, game.Settings, ct);
             MemberNotices.Stage(_db, _tenant.TenantId,
-                await PlayerNotices.CollapsedAsync(_db, invite, PlayerNotices.InvitedKeyPrefix, game.Settings, ct), game.Settings);
+                await PlayerNotices.CollapsedAsync(_db, invite, PlayerNotices.InvitedKeyPrefix, game.Settings, ct, game.Booking), game.Settings);
         }
 
         if (await SaveAsync(ct) is { } conflict) return conflict;
+        await work.Lock.CommitAsync(ct);
         await AfterAsync(game.Booking.Id, added.Where(a => a.Seat.UserId is not null).Select(a => a.Seat.UserId!.Value), ct);
         return PlayerOutcome.Ok(new
         {
@@ -265,6 +278,23 @@ public sealed partial class PlayersService
                 invite_path = a.Token is null ? null : InviteTokens.PathFor(a.Token),
             }).ToList(),
         });
+    }
+
+    /// <summary>
+    /// Freezes the booking's share deadline the first time it gets players (review H2): the SOLD
+    /// end plus <c>share_lapse_hours</c> as the club has it NOW. A later change to the setting
+    /// moves no deadline already stamped — raising it would otherwise reopen a game whose held
+    /// shares were released and spent. Saved with the seats, under the booking's version token.
+    /// </summary>
+    private void StampDeadline(Game game)
+    {
+        if (game.Booking.ShareDeadlineAt is not null) return;
+        var deadline = PlayerSettings.DeadlineFromSettings(game.Booking, game.Settings).Storable();
+        // The request that just created the booking already tracks it; stamp that instance.
+        var tracked = _db.ChangeTracker.Entries<Booking>().FirstOrDefault(e => e.Entity.Id == game.Booking.Id)?.Entity;
+        if (tracked is null) _db.Bookings.Attach(game.Booking);
+        (tracked ?? game.Booking).ShareDeadlineAt = deadline;
+        game.Booking.ShareDeadlineAt = deadline;
     }
 
     /// <summary>Seat 1, written the first time a booking gets a second player. Nothing is backfilled before that.</summary>
@@ -356,7 +386,8 @@ public sealed partial class PlayersService
         return await RemoveSeatAsync(game!, seatId, now, ct);
     }
 
-    internal async Task<PlayerOutcome> RemoveSeatAsync(Game game, Guid seatId, DateTimeOffset now, CancellationToken ct)
+    /// <param name="options">The admin's authority for the return, when an admin removes (review H1); null for the organiser.</param>
+    internal async Task<PlayerOutcome> RemoveSeatAsync(Game game, Guid seatId, DateTimeOffset now, CancellationToken ct, ReconcileOptions? options = null)
     {
         var seat = game.Seats.FirstOrDefault(s => s.Id == seatId && s.Seat > 1 && s.IsLive);
         if (seat is null) return PlayerOutcome.PlayerNotFound;
@@ -372,7 +403,7 @@ public sealed partial class PlayersService
         }
 
         if (await SaveAsync(ct) is { } conflict) return conflict;
-        await AfterAsync(game.Booking.Id, seat.UserId is { } u ? [u] : [], ct);
+        await AfterAsync(game.Booking.Id, seat.UserId is { } u ? [u] : [], ct, options);
         return PlayerOutcome.Ok(new { participant_id = seat.Id, status = PlayerViews.StatusName(seat.Status) });
     }
 
@@ -509,12 +540,12 @@ public sealed partial class PlayersService
     }
 
     /// <summary>The consequence of any committed seat change: the shares follow, and the badge moves.</summary>
-    private async Task AfterAsync(Guid bookingId, IEnumerable<Guid> notified, CancellationToken ct)
+    private async Task AfterAsync(Guid bookingId, IEnumerable<Guid> notified, CancellationToken ct, ReconcileOptions? options = null)
     {
         IReadOnlyList<ShareMove> moves = [];
         try
         {
-            moves = await _p.Shares.ReconcileAsync(bookingId, ct);
+            moves = await _p.Shares.ReconcileAsync(bookingId, ct, options);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

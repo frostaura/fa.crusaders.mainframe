@@ -250,6 +250,19 @@ public sealed class ShareLedger
             return null;
         }
 
+        // A return after the share deadline is no longer covered by the organiser's hold — it was
+        // released, and may be spent (review H1). It posts only if their spendable credits cover
+        // it; otherwise it waits, and the next reconcile (the sweep, the hook, a desk adjustment
+        // naming the booking) makes it once they do. Never a silent overdraft: only the desk's
+        // named overdraft (OverdraftSeatId) posts it regardless. The returns that follow a fall
+        // in what the organiser owes are covered by the credit that caused them.
+        if (!collecting && options.OverdraftSeatId != seatId
+            && DateTimeOffset.UtcNow >= PlayerSettings.ShareDeadline(now.Booking, await _settings.GetAsync(ct))
+            && await _ledger.GetSpendableAsync(debited, ct) < -now.Delta)
+        {
+            return null;
+        }
+
         var seq = await NextSeqAsync(seatId, partner, ct);
         var move = new ShareMove(seatId, partner, PayerOf(now.Booking), now.Delta, seq);
         await StageReceiptsAsync(now.Booking, move, ct);

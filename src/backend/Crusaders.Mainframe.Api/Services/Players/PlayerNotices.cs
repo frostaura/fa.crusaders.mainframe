@@ -32,11 +32,26 @@ public static class PlayerNotices
     /// booking inside the club's reminder cadence (<c>share_reminder_hours</c>). A remove-and-invite
     /// loop therefore mails a member at most once of each per cadence; the inbox keeps every line,
     /// and a collapsed invite is still mailed by the club's own reminder when the cadence ends.
+    ///
+    /// <para>
+    /// <b>An invite is collapsed only when that reminder will come</b> (<paramref name="invitedTo"/>
+    /// names its booking): reminders on (<c>share_reminder_max</c> &gt; 0) and the first one due
+    /// before the share deadline. Otherwise nothing would ever mail the member about a seat they
+    /// now hold, so it is mailed at once.
+    /// </para>
     /// </summary>
     public static async Task<MemberNotice> CollapsedAsync(
-        MainframeDbContext db, MemberNotice notice, string keyPrefix, TenantSettingsView settings, CancellationToken ct)
+        MainframeDbContext db, MemberNotice notice, string keyPrefix, TenantSettingsView settings, CancellationToken ct,
+        Booking? invitedTo = null)
     {
-        var since = DateTimeOffset.UtcNow.AddHours(-PlayerSettings.ShareReminderHours(settings));
+        var now = DateTimeOffset.UtcNow;
+        if (invitedTo is not null
+            && (PlayerSettings.ShareReminderMax(settings) == 0
+                || now.AddHours(PlayerSettings.ShareReminderHours(settings)) >= PlayerSettings.ShareDeadline(invitedTo, settings)))
+        {
+            return notice;
+        }
+        var since = now.AddHours(-PlayerSettings.ShareReminderHours(settings));
         var told = await db.MemberNotifications.AsNoTracking().AnyAsync(n =>
             n.BookingId == notice.BookingId && n.UserId == notice.UserId && n.CreatedAt > since && n.DedupeKey.StartsWith(keyPrefix), ct);
         return told ? notice with { Email = false } : notice;
