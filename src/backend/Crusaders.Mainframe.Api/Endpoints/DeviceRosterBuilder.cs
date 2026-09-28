@@ -140,14 +140,58 @@ public static class DeviceRosterBuilder
         MainframeDbContext db, AccessCodeService codes, Device device, TenantSettingsView settings,
         DateTimeOffset now, CancellationToken ct)
     {
-        if (device.CourtNumbers.Count == 0) return [];
+        return await BuildAsync(db, codes, device, settings, now, mint: true, ct);
+    }
+
+    /// <summary>
+    /// The LEGACY roster: each booking named by its access code. <paramref name="mint"/> is false
+    /// once the club has cut over to member codes (§8): bookings no longer get codes, so a board
+    /// still on legacy firmware is sent only the codes that already exist.
+    /// </summary>
+    public static async Task<List<string>> BuildAsync(
+        MainframeDbContext db, AccessCodeService codes, Device device, TenantSettingsView settings,
+        DateTimeOffset now, bool mint, CancellationToken ct)
+    {
+        var (bookings, numberOf, cue) = await BookingsAsync(db, device, settings, now, ct);
+        if (bookings.Count == 0) return [];
+
+        var tokens = await TokensForAsync(db, codes, bookings, settings, now, ct, mint);
+
+        return Format(
+            bookings.Where(b => tokens.ContainsKey(b.Id)).Select(b => new Candidate(b, numberOf[b.CourtId], tokens[b.Id])),
+            device.CourtNumbers, now, cue);
+    }
+
+    /// <summary>
+    /// The V1 roster (member-code §5.3): each booking named by its players' REFs, in the same
+    /// order, under the same cap and from the same query as the legacy one — one element per
+    /// booking, never both.
+    /// </summary>
+    public static async Task<List<MemberCodeEntry>> BuildV1Async(
+        MainframeDbContext db, IBookingPlayers players, MemberCodeService memberCodes, Device device,
+        TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
+    {
+        var (bookings, numberOf, cue) = await BookingsAsync(db, device, settings, now, ct);
+        var ordered = bookings
+            .OrderBy(b => b.StartsAt).ThenBy(b => b.Id)
+            .Select(b => (Booking: b, Relay: RelayOf(device.CourtNumbers, numberOf[b.CourtId])))
+            .Where(x => x.Relay is >= 0 and <= 3)
+            .Take(RosterMaxEntries)
+            .ToList();
+        return await MemberCodeHeartbeat.EntriesAsync(ordered, cue, now, players, memberCodes, ct);
+    }
+
+    private static async Task<(List<Booking> Bookings, Dictionary<Guid, int> NumberOf, TimeSpan Cue)> BookingsAsync(
+        MainframeDbContext db, Device device, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
+    {
+        var cue = TimeSpan.FromMinutes(BookingCodeWindow.CueMinutes(settings));
+        if (device.CourtNumbers.Count == 0) return ([], [], cue);
 
         // Both windows clamped on read, through the same functions the door and the phone
         // read them with — see BookingCodeWindow. TenantSettingsAccessor bounds nothing on the
         // way in, so a hand-edited roster_window_minutes: -600 put `latestStart` ten hours in
         // the past and emptied every box's cache in the club on a clean 200, with no error and
         // no log; a negative cue moved the roster's own opens_in the wrong way.
-        var cue = TimeSpan.FromMinutes(BookingCodeWindow.CueMinutes(settings));
         var courtNumbers = device.CourtNumbers;
         var courts = await db.Courts.AsNoTracking()
             .Where(c => courtNumbers.Contains(c.CourtNumber) && c.IsActive)
@@ -170,22 +214,14 @@ public static class DeviceRosterBuilder
                         // still waiting — is not on the cached roster either. Without this,
                         // suspension holds only while the box can reach the API, and the
                         // one window in which a club most wants it to hold is the one where
-                        // nobody is watching. `!= Active` rather than `== Suspended`: see
-                        // MembershipAccess for why the rule is stated that way round.
-                        // Ruling 15: an ACTIVE row, not merely the absence of a non-active one.
-                        // The old shape let a booking with NO membership row through, which is
-                        // the same conflation that opened a door — see MembershipAccess.
+                        // nobody is watching. Ruling 15: an ACTIVE row, not merely the absence
+                        // of a non-active one — see MembershipAccess.
                         && db.Memberships.Any(m => m.UserId == b.UserId && m.Status == MembershipStatus.Active))
             .OrderBy(b => b.StartsAt)
             .Take(RosterMaxEntries)
             .ToListAsync(ct);
-        if (bookings.Count == 0) return [];
 
-        var tokens = await TokensForAsync(db, codes, bookings, settings, now, ct);
-
-        return Format(
-            bookings.Select(b => new Candidate(b, numberOf[b.CourtId], tokens[b.Id])),
-            courtNumbers, now, cue);
+        return (bookings, numberOf, cue);
     }
 
     /// <summary>
@@ -203,7 +239,7 @@ public static class DeviceRosterBuilder
     /// </summary>
     public static async Task<Dictionary<Guid, string>> TokensForAsync(
         MainframeDbContext db, AccessCodeService codes, List<Booking> bookings, TenantSettingsView settings,
-        DateTimeOffset now, CancellationToken ct)
+        DateTimeOffset now, CancellationToken ct, bool mint = true)
     {
         var ids = bookings.Select(b => b.Id).ToList();
         var live = await db.AccessCodes.AsNoTracking()
@@ -219,7 +255,7 @@ public static class DeviceRosterBuilder
         var grace = TimeSpan.FromMinutes(settings.GraceWindowMinutes);
         foreach (var booking in bookings)
         {
-            if (tokens.ContainsKey(booking.Id)) continue;
+            if (tokens.ContainsKey(booking.Id) || !mint) continue;
             tokens[booking.Id] = (await codes.MintForBookingAsync(booking, grace, ct)).Code;
         }
 

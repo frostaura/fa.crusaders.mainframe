@@ -152,6 +152,18 @@ public sealed class RetentionWorker : BackgroundService
                 _logger.LogInformation("Retention purged {Count} expired access codes for tenant {Slug}", staleCodes.Count, tenant.Slug);
             }
 
+            // Member-code uses (§4.4). A code is worth nothing ninety seconds after it was shown and
+            // an uploaded event older than a day is re-checked against an empty table — which is
+            // the forgery check's own window, not a hole: a day is past every step it searches.
+            // Deleted, like the access codes above: a table of every scan is a table of movements.
+            var useCutoff = DateTimeOffset.UtcNow.Subtract(MemberCodeService.UseRetention);
+            var staleUses = await db.MemberCodeUses.Where(u => u.UsedAt < useCutoff).ToListAsync(ct);
+            if (staleUses.Count > 0)
+            {
+                db.MemberCodeUses.RemoveRange(staleUses);
+                await db.SaveChangesAsync(ct);
+            }
+
             if (totalAnonymised > 0)
             {
                 db.AuditLogs.Add(new AuditLog

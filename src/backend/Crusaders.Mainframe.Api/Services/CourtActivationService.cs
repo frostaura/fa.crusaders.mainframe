@@ -189,6 +189,50 @@ public class CourtActivationService
     }
 
     /// <summary>
+    /// The booking an OFFLINE v1 activation was evidence for (member-code §7): found by member,
+    /// court and time — never by <c>EndsAt</c>, which the no-show sweep truncates, but by the
+    /// window the booking was SOLD for, opened a cue window early and held open for the grace
+    /// window after, which is the same window a box's roster admitted from.
+    ///
+    /// <para>
+    /// Every status a settlement path can act on is a candidate — <c>Booked</c>, <c>Completed</c>,
+    /// a <c>NoShow</c> the upload will reverse, a <c>Cancelled</c> row whose lit time is owed — and
+    /// a live one is preferred over a cancelled one, then the earliest. The member may be the
+    /// organiser or an accepted partner: <see cref="IBookingPlayers"/> decides, and until P11 that
+    /// is the organiser alone.
+    /// </para>
+    /// </summary>
+    public async Task<Booking?> FindForEvidenceAsync(
+        Guid courtId, Guid userId, DateTimeOffset at, IBookingPlayers players, CancellationToken ct)
+    {
+        var settings = await _settings.GetAsync(ct);
+        var cue = BookingCodeWindow.CueMinutes(settings);
+        var grace = settings.GraceWindowMinutes;
+        var earliestStart = at.AddMinutes(-(24 * 60));
+        var latestStart = at.AddMinutes(cue);
+
+        var candidates = await _db.Bookings
+            .Where(b => b.CourtId == courtId
+                        && b.UserId != null
+                        && (b.Status == BookingStatus.Booked || b.Status == BookingStatus.Completed
+                            || b.Status == BookingStatus.NoShow || b.Status == BookingStatus.Cancelled)
+                        && b.StartsAt >= earliestStart
+                        && b.StartsAt <= latestStart)
+            .OrderBy(b => b.StartsAt)
+            .ToListAsync(ct);
+
+        Booking? cancelled = null;
+        foreach (var b in candidates)
+        {
+            if (BookingService.OriginalEndsAt(b).AddMinutes(grace) < at) continue;
+            if (!await players.IsPlayerAsync(b, userId, ct)) continue;
+            if (b.Status != BookingStatus.Cancelled) return b;
+            cancelled ??= b;
+        }
+        return cancelled;
+    }
+
+    /// <summary>
     /// Charges, checks in and cues the lights — in that order. The identification happened
     /// now; see the overload for one that happened earlier.
     ///

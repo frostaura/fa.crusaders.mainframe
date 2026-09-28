@@ -51,6 +51,9 @@ public sealed class DoorAuditActionsTests
         // namespace because they are about boards. They are written to admin_notifications and
         // never to audit_log, so no door surface reads them. See AdminEventCatalogue.
         "device.offline", "device.recovered", "device.fault_spike",
+
+        // The member-code rollout's notice kind — likewise an admin notice, never an audit row.
+        "device.codes_capability_lost",
     ];
 
     private static string ApiSourceRoot()

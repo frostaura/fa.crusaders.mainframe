@@ -704,7 +704,9 @@ public class WalkUpBookingTests
         f.Scope.ServiceProvider.GetRequiredService<IdentificationResolver>(),
         f.Scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>(),
         f.Ledger,
-        f.Scope.ServiceProvider.GetRequiredService<DeviceFaultSink>());
+        f.Scope.ServiceProvider.GetRequiredService<DeviceFaultSink>(),
+        f.Scope.ServiceProvider.GetRequiredService<AccessCodeService>(),
+        f.Scope.ServiceProvider.GetRequiredService<MemberCodeService>());
 
     private static async Task<string> CodeAsync(Fixture f) =>
         (await f.Scope.ServiceProvider.GetRequiredService<AccessCodeService>()

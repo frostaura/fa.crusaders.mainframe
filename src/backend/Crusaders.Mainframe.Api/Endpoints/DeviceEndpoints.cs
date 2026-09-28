@@ -58,7 +58,7 @@ public static class DeviceEndpoints
         ILoggerFactory logs,
         CancellationToken ct)
     {
-        var (db, tenant, settings, registry, codes, _, _, _, faults) = services;
+        var (db, tenant, settings, registry, codes, _, _, _, faults, _, _, _) = services;
 
         // Validated BEFORE the MAC is resolved, so a firmware that believes in a device kind
         // this server does not have is told so whether or not its row already exists. The
@@ -105,11 +105,20 @@ public static class DeviceEndpoints
         // between two heartbeats — into the club's error log. See NoteCounterRows.
         NoteCounterRows(services, device!, req, now);
 
+        // What the board says it speaks, from THIS heartbeat — replaced wholesale, an absent
+        // `caps` meaning "nothing", because that is exactly what an image from before member
+        // codes sends (member-code §5.1). The cut-over and this beat's answer both key on it.
+        MemberCodeRollout.NoteCapabilities(device!, req.Caps, now);
+
         device!.LastIpAddress = ctx.Connection.RemoteIpAddress?.ToString();
         if (req.EffectiveRunningVersion is { } running) device.RunningVersion = running;
         if (!string.IsNullOrWhiteSpace(req.MegaVersion)) device.MegaVersion = req.MegaVersion.Trim();
 
         await db.SaveChangesAsync(ct);
+
+        // The club's cut-over (§8), judged with this board's capabilities already on its row.
+        // Re-read when it moved, so this very answer is the first one in the new phase.
+        if (await services.Rollout.EvaluateAsync(device, s, now, ct)) s = await settings.GetAsync(ct);
 
         // A gate answers a different shape entirely — no court numbers, no relay config, no
         // button map, because a door has none of them. Branched on the ROW's kind rather than
@@ -149,9 +158,16 @@ public static class DeviceEndpoints
             // Checked here and not inside BuildAsync, which deliberately takes no Device: two
             // NAMED gates on one club are still handed the identical list, and that sentence
             // is pinned. This is a gate on whether the board is asked at all.
-            var gateRoster = string.IsNullOrWhiteSpace(device.GateKey)
+            if (device.SpeaksMemberCodes)
+            {
+                return Results.Ok(await GateBodyWithCodesAsync(services, device, s, now, ct));
+            }
+
+            // A door on legacy firmware: the legacy roster while legacy codes are honoured at
+            // all, minted only while the club has not cut over, and nothing once they are not.
+            var gateRoster = string.IsNullOrWhiteSpace(device.GateKey) || !MemberCodeSettings.LegacyAccepted(s)
                 ? []
-                : await DeviceGateRosterBuilder.BuildAsync(db, codes, s, now, ct);
+                : await DeviceGateRosterBuilder.BuildAsync(db, codes, s, now, MemberCodeSettings.MintsBookingCodes(s), ct);
 
             return Results.Ok(GateHeartbeatView.Of(
                 // HeartbeatCadence.Effective, not the raw setting. A stored 3600 used to be
@@ -166,7 +182,19 @@ public static class DeviceEndpoints
         // Always present, even when empty: the firmware replaces its cache wholesale on
         // every push, and a cancelled booking is expressed by its absence from the next
         // one — an omitted key would leave a stale roster live. See DeviceRosterBuilder.
-        var roster = await DeviceRosterBuilder.BuildAsync(db, codes, device, s, now, ct);
+        var v1 = device.SpeaksMemberCodes && MemberCodeSettings.RostersCarryPlayers(s);
+        var entries = v1
+            ? await DeviceRosterBuilder.BuildV1Async(db, services.Players, services.MemberCodes, device, s, now, ct)
+            : [];
+        var roster = v1
+            ? [.. entries.Select(e => e.Element)]
+            : MemberCodeSettings.LegacyAccepted(s)
+                ? await DeviceRosterBuilder.BuildAsync(db, codes, device, s, now, MemberCodeSettings.MintsBookingCodes(s), ct)
+                : [];
+        var sync = device.SpeaksMemberCodes
+            ? MemberCodeHeartbeat.Sync(entries, v1 && MemberCodeHeartbeat.Acknowledged(device),
+                MemberCodeWire.CourtBoxKeyCap, services.MemberCodes, MemberCodeMath.ZoneOf(s.Timezone), now)
+            : null;
 
         // GOAL item 17. Settled BEFORE the response is composed, because the previous beat's
         // outcome and this beat's answer are one decision: a box that just told us it restored
@@ -181,7 +209,38 @@ public static class DeviceEndpoints
         // sends somebody to a dark court believing the software said otherwise.
         await PublishRestoredAsync(services, relays, ct);
 
-        return Results.Ok(CourtBoxView(device, tenant.TenantSlug, s, roster, relays, now));
+        return Results.Ok(MemberCodeHeartbeat.Fit(
+            codes => CourtBoxView(device, tenant.TenantSlug, s, roster, relays, now, codes),
+            sync, MemberCodeWire.CourtBoxMaxBytes));
+    }
+
+    /// <summary>
+    /// A <c>codes:m1</c> door's answer (member-code §5.2–§5.3): v1 elements and keys once the club
+    /// has cut over, the legacy roster with the clock and empty arrays before it. An un-named door
+    /// gets no roster and no keys either way.
+    /// </summary>
+    private static async Task<Dictionary<string, object?>> GateBodyWithCodesAsync(
+        HeartbeatServices services, Device device, TenantSettingsView s, DateTimeOffset now, CancellationToken ct)
+    {
+        var named = !string.IsNullOrWhiteSpace(device.GateKey);
+        var v1 = MemberCodeSettings.RostersCarryPlayers(s);
+        var entries = named && v1
+            ? await DeviceGateRosterBuilder.BuildV1Async(services.Db, services.Players, services.MemberCodes, s, now, ct)
+            : [];
+        IReadOnlyList<string> roster = !named
+            ? []
+            : v1
+                ? [.. entries.Select(e => e.Element)]
+                : await DeviceGateRosterBuilder.BuildAsync(services.Db, services.Codes, s, now, mint: true, ct);
+        var sync = MemberCodeHeartbeat.Sync(
+            entries, v1 && MemberCodeHeartbeat.Acknowledged(device), MemberCodeWire.GateKeyCap,
+            services.MemberCodes, MemberCodeMath.ZoneOf(s.Timezone), now);
+
+        return MemberCodeHeartbeat.Fit(
+            codes => GateHeartbeatView.WithCodes(
+                device, services.Tenant.TenantSlug, HeartbeatCadence.Effective(s.HeartbeatSeconds),
+                GateAccess.UnlockSecondsFor(s), roster, now, codes),
+            sync, MemberCodeWire.GateMaxBytes);
     }
 
     /// <summary>
@@ -219,9 +278,10 @@ public static class DeviceEndpoints
     /// charges the rest of the file to a global pseudo-function and trips the length gate.
     /// </para>
     /// </summary>
-    private static object CourtBoxView(
+    internal static Dictionary<string, object?> CourtBoxView(
         Device device, string tenantSlug, TenantSettingsView s,
-        IReadOnlyList<string> roster, IReadOnlyList<string>? relays, DateTimeOffset now)
+        IReadOnlyList<string> roster, IReadOnlyList<string>? relays, DateTimeOffset now,
+        MemberCodeSync? codes = null)
     {
         var body = new Dictionary<string, object?>
         {
@@ -257,14 +317,19 @@ public static class DeviceEndpoints
             // Effective, not raw. See the gate branch above for what the raw value did.
             ["heartbeat_seconds"] = HeartbeatCadence.Effective(s.HeartbeatSeconds),
             ["config"] = ConfigView(device, s),
-            ["roster"] = roster,
         };
 
         // ABSENT when the club has switched restore off, EMPTY when nothing should be on, and
         // the two mean different things to the firmware: absent is "this API does not do
         // restore" and the box stops waiting for one; empty is "nothing should be on", which
-        // is information at boot. Neither ever switches anything off.
+        // is information at boot. Neither ever switches anything off. Written BEFORE the
+        // roster, which is the order both corpora pin (the firmware scans by key and does not
+        // care; the byte-for-byte vectors do).
         if (relays is not null) body["relays"] = relays;
+        body["roster"] = roster;
+
+        // The member-code sync, after the roster (§5.2), for a board that said `codes:m1`.
+        codes?.WriteTo(body);
 
         return body;
     }
@@ -734,7 +799,13 @@ public sealed record HeartbeatServices(
     IServiceScopeFactory Scopes,
     ILoggerFactory Logs,
     /// <summary>The refusal sites' fault recorder. See <see cref="DeviceFaultSink"/>.</summary>
-    DeviceFaultSink Faults);
+    DeviceFaultSink Faults,
+    /// <summary>REFs and per-day keys for the member-code sync (§5).</summary>
+    MemberCodeService MemberCodes,
+    /// <summary>Who plays on a booking — the seam P11 extends with accepted partners.</summary>
+    IBookingPlayers Players,
+    /// <summary>Capabilities and the club's cut-over (§8).</summary>
+    MemberCodeRollout Rollout);
 
 /// <summary>
 /// What a court box reports about itself. Only <c>mac</c> is required — it is the board's
@@ -862,7 +933,12 @@ public sealed record HeartbeatRequest(
     /// running the current firmware.
     /// </para>
     /// </summary>
-    [property: JsonPropertyName("relay_state")] string[]? RelayState = null)
+    [property: JsonPropertyName("relay_state")] string[]? RelayState = null,
+    /// <summary>
+    /// What this image speaks — <c>["codes:m1"]</c> for the member-code firmware, sent LAST on
+    /// every heartbeat (member-code §5.1). Absent from every older image, which reads as "nothing".
+    /// </summary>
+    [property: JsonPropertyName("caps")] string?[]? Caps = null)
 {
     /// <summary>The reported version under either name, trimmed — or null when neither was sent.</summary>
     public string? EffectiveRunningVersion

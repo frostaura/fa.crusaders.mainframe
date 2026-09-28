@@ -420,6 +420,26 @@ public sealed class Device : ITenantScoped
     public DateTimeOffset? NoPushReportedAt { get; set; }
 
     /// <summary>
+    /// What the board said it speaks on its LATEST heartbeat — <c>caps</c>, e.g.
+    /// <c>codes:m1</c> (<c>docs/specs/member-code.md</c> §5.1). Empty for a board that named
+    /// nothing, which is every image flashed before member codes.
+    ///
+    /// <para>
+    /// <b>Latest, replaced wholesale, never merged.</b> Two things key on it: what the next
+    /// heartbeat answer carries for this board, and the club's automatic cut-over, which waits
+    /// until every enabled board reports <c>codes:m1</c>. A spare flashed back to old firmware
+    /// has to be seen as NOT speaking it the moment it says so, which a merged set would hide.
+    /// </para>
+    /// </summary>
+    public List<string> Capabilities { get; set; } = [];
+
+    /// <summary>When <see cref="Capabilities"/> was last written — the instant of the heartbeat it came from.</summary>
+    public DateTimeOffset? CapabilitiesReportedAt { get; set; }
+
+    /// <summary>Whether the latest heartbeat named the member-code capability.</summary>
+    public bool SpeaksMemberCodes => Capabilities.Contains(Services.MemberCodeWire.Capability);
+
+    /// <summary>
     /// When this board was last SERVED a non-empty power-dip restore that it has not yet
     /// answered for — null when there is nothing outstanding.
     ///

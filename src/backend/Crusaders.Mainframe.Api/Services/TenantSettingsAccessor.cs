@@ -194,6 +194,16 @@ public sealed class TenantSettingsAccessor
             // decides what an unprintable stored value means. It governs RAND only — the
             // reasoning, and the incident behind it, are in that file.
             CurrencySymbol = TryString(root, CurrencySymbol.Key, CurrencySymbol.Default),
+
+            // The member-code rollout (D1, docs/specs/member-code.md §8). Raw here; the phase's
+            // meaning — an unknown value reads as `legacy`, the phase that refuses nothing — and
+            // the cut-off delay's bounds live in MemberCodeSettings, on the split every block
+            // above keeps. The two instants are SERVER-WRITTEN state: the automatic cut-over
+            // stamps them and the settings PUT never accepts them.
+            MemberCodePhase = TryString(root, MemberCodeSettings.PhaseKey, MemberCodeSettings.Legacy),
+            MemberCodeCutoverAt = TryInstant(root, MemberCodeSettings.CutoverAtKey),
+            MemberCodeCutoffAt = TryInstant(root, MemberCodeSettings.CutoffAtKey),
+            MemberCodeCutoffDays = TryInt(root, MemberCodeSettings.CutoffDaysKey, MemberCodeSettings.DefaultCutoffDays),
         };
     }
 
@@ -229,6 +239,14 @@ public sealed class TenantSettingsAccessor
     private static decimal TryDecimal(JsonElement root, string name, decimal fallback)
         => root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetDecimal(out var d)
             ? d : fallback;
+
+    private static DateTimeOffset? TryInstant(JsonElement root, string name)
+    {
+        if (!root.TryGetProperty(name, out var v) || v.ValueKind != JsonValueKind.String) return null;
+        return DateTimeOffset.TryParse(
+            v.GetString(), System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal, out var at) ? at : null;
+    }
 
     private static string TryString(JsonElement root, string name, string fallback)
         => root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? fallback : fallback;
@@ -528,6 +546,20 @@ public sealed record TenantSettingsView(
 
     /// <summary>Days a club keeps its error rows. Read via <see cref="MonitoringSettings.RetentionDays"/>.</summary>
     public int DeviceErrorRetentionDays { get; init; } = MonitoringSettings.DefaultRetentionDays;
+
+    // ---- The member-code rollout (D1) ----
+    //
+    // Raw as stored and read through MemberCodeSettings. The phase and the two instants are
+    // written by the server's automatic cut-over (and the phase by an admin's rollback); the
+    // delay is the club's.
+
+    public string MemberCodePhase { get; init; } = MemberCodeSettings.Legacy;
+
+    public DateTimeOffset? MemberCodeCutoverAt { get; init; }
+
+    public DateTimeOffset? MemberCodeCutoffAt { get; init; }
+
+    public int MemberCodeCutoffDays { get; init; } = MemberCodeSettings.DefaultCutoffDays;
 
     /// <summary>Distinct open rows one board may hold. Read via <see cref="MonitoringSettings.MaxOpenRows"/>.</summary>
     public int DeviceErrorMaxOpenRows { get; init; } = MonitoringSettings.DefaultMaxOpenRows;

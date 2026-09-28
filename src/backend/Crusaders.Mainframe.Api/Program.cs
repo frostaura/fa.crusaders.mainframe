@@ -60,6 +60,10 @@ builder.Services.AddCors(options =>
 // deployment that forgot Jwt__Secret booted clean and signed tokens with a value that is in
 // the repository. See JwtSecretPolicy.
 var jwtSecret = JwtSecretPolicy.Resolve(builder.Configuration, builder.Environment);
+// The member-code master key (member-code §3.1): the same refusal, for the second secret this
+// server holds. Production will not start without a real one; Development and Testing get the
+// published development key. See MemberCodeKeyPolicy.
+var memberCodeMasterKey = MemberCodeKeyPolicy.Resolve(builder.Configuration, builder.Environment);
 // The same two constants the issuer uses. They were duplicated as literals here and absent
 // there, so an API with no Jwt:Issuer configured minted tokens this middleware then refused.
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? JwtIssuer.DefaultIssuer;
@@ -288,6 +292,11 @@ builder.Services.AddScoped<TenantSettingsAccessor>();
 builder.Services.AddScoped<Crusaders.Mainframe.Api.Email.ClubIdentityResolver>();
 builder.Services.AddScoped<Crusaders.Mainframe.Api.Services.MemberApprovalService.MemberNotifier>();
 builder.Services.AddScoped<AccessCodeService>();
+builder.Services.AddSingleton(memberCodeMasterKey);
+builder.Services.AddScoped<MemberCodeService>();
+builder.Services.AddScoped<MemberCodeRollout>();
+// The seam P11 (players and splits) replaces: organiser-only until booking_participants exists.
+builder.Services.AddScoped<IBookingPlayers, OrganiserOnlyBookingPlayers>();
 builder.Services.AddScoped<IdentificationResolver>();
 builder.Services.AddScoped<DeviceRegistryService>();
 builder.Services.AddScoped<DeviceKeyResolver>();
@@ -588,6 +597,7 @@ app.MapAdminMemberDoorEndpoints();
 app.MapAdminBulkBookingEndpoints();
 app.MapAdminScheduleEndpoints();
 app.MapMeProfileEndpoints();
+app.MapMeCodeEndpoints();
 app.MapMePreferencesEndpoints();
 app.MapMeDoorEndpoints();
 app.MapWebhookEndpoints();

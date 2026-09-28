@@ -318,7 +318,8 @@ public class MemberLifecycleTests
         new MemberApprovalService.MemberNotifier(
             mail,
             scope.ServiceProvider.GetRequiredService<ILogger<MemberApprovalService>>(),
-            scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Email.ClubIdentityResolver>()));
+            scope.ServiceProvider.GetRequiredService<Crusaders.Mainframe.Api.Email.ClubIdentityResolver>()),
+        scope.ServiceProvider.GetRequiredService<MemberCodeService>());
 
     /// <summary>
     /// <b>Mail is a consequence of the transition, not part of it.</b>

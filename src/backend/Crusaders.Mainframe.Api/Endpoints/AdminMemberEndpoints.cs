@@ -126,7 +126,7 @@ public static class AdminMemberEndpoints
         g.MapPost("/{memberId:guid}/reset-password", async (
             Guid memberId, HttpContext ctx, MainframeDbContext db,
             IPasswordHasher hasher, IEmailService email, ClubIdentityResolver club,
-            ILoggerFactory loggerFactory, CancellationToken ct) =>
+            MemberCodeService memberCodes, ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
             var logger = loggerFactory.CreateLogger("AdminResetPassword");
             var actor = ctx.User.Id() ?? Guid.Empty;
@@ -149,6 +149,7 @@ public static class AdminMemberEndpoints
                 Action = "user.password_reset_by_admin",
                 DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { membership_id = memberId }),
             });
+            await memberCodes.StageRotationAsync(user.Id, actor, "password_reset_by_admin", ct);
             await db.SaveChangesAsync(ct);
 
             // `email_sent_to` used to be printed whether or not the send threw, so the one
@@ -168,6 +169,25 @@ public static class AdminMemberEndpoints
         });
 
         // Per-member spend drill-down (blueprint C.3) — month-bucketed credit movements for one member.
+        // Retires a member's rotating code (member-code §10): generation += 1, so every code
+        // their phone can compute stops working and the phone re-enrols on its next check. The
+        // desk's answer to "somebody photographed my code" or "I lost my phone".
+        g.MapPost("/{memberId:guid}/code/reset", async (
+            Guid memberId, HttpContext ctx, MainframeDbContext db, MemberCodeService memberCodes, CancellationToken ct) =>
+        {
+            var membership = await db.Memberships.AsNoTracking().FirstOrDefaultAsync(m => m.Id == memberId, ct);
+            if (membership is null) return Results.NotFound();
+
+            // Ensured first, so the answer is always a generation: a member who never enrolled has
+            // nothing live to retire, and rotating a fresh row is harmless.
+            await memberCodes.EnsureAsync(membership.UserId, ct);
+            await memberCodes.StageRotationAsync(membership.UserId, ctx.User.Id() ?? Guid.Empty, "admin_reset", ct);
+            await db.SaveChangesAsync(ct);
+
+            var row = await db.MemberCodes.AsNoTracking().FirstAsync(c => c.UserId == membership.UserId, ct);
+            return Results.Ok(new { rotated = true, generation = row.Generation });
+        });
+
         g.MapGet("/{memberId:guid}/spend", async (
             Guid memberId, DateTimeOffset? from, DateTimeOffset? to,
             MainframeDbContext db, CancellationToken ct) =>

@@ -66,6 +66,10 @@ public sealed class DeviceForbiddenMeansOutOfServiceTests
         $"{Prefix}/events",
         $"{Prefix}/walkup",
         $"{Prefix}/activate",
+
+        // D10's pay-for at the box (member-code §9): a sixth route, under the same one policy and
+        // the same out-of-service 403 as the five before it.
+        $"{Prefix}/pay-for",
     ];
 
     // ---- 1. The group's own metadata ----------------------------------------
@@ -83,7 +87,7 @@ public sealed class DeviceForbiddenMeansOutOfServiceTests
     /// </para>
     /// </summary>
     [SkippableFact]
-    public void The_device_group_is_five_routes_under_one_policy()
+    public void The_device_group_is_six_routes_under_one_policy()
     {
         Skip.IfNot(_pg.Available, Skipped);
 

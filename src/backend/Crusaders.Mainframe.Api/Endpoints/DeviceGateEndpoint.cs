@@ -41,7 +41,7 @@ public static class DeviceGateEndpoint
         [AsParameters] GateServices services,
         CancellationToken ct)
     {
-        var (db, tenant, codes, settingsAccessor) = services;
+        var (db, tenant, _, settingsAccessor, _) = services;
 
         var (device, refusal) = await DeviceIdentity.ResolveAsync(db, req.Mac, ct);
         if (refusal is not null) return refusal;
@@ -57,12 +57,35 @@ public static class DeviceGateEndpoint
         // A court box arriving here is a board flashed with the wrong image, not a member
         // being refused. Answered rather than 404'd so it shows a refusal and stops.
         var decision = device!.Kind == DeviceKind.Gate
-            ? await GateAccess.DecideAsync(db, codes, new GateContext(device, settings, req.Method, req.Token, now), ct)
+            ? await DecideAsync(services, device, settings, req, now, ct)
             : GateAccess.Refused(GateAccess.NotAGate);
 
         await AuditAsync(db, tenant, device, decision, req.Method, ct);
 
         return Results.Ok(new GateScanResponse(decision.Opened, decision.Reason, decision.UnlockSeconds));
+    }
+
+    /// <summary>
+    /// The door's decision for either code family. A v1 member code is CHECKED (member-code §4.3;
+    /// a door sends no <c>scan_age_ms</c>, it asks the moment it reads) and, when the door would
+    /// open, claims its one <c>door</c> use — a second open inside the step is <c>code_used</c>.
+    /// </summary>
+    private static async Task<GateDecision> DecideAsync(
+        GateServices services, Device device, TenantSettingsView settings, GateScanRequest req,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        if (!IdentificationResolver.CanIdentifyGlobally(req.Method)) return GateAccess.Refused(GateAccess.MethodNotSupported);
+
+        var (resolved, match) = await MemberCodeIdentity.ResolveAsync(
+            services.Codes, services.MemberCodes, req.Token, scanAgeMs: 0, settings, now, ct);
+        if (resolved is null) return GateAccess.Refused(GateAccess.NotRecognised);
+
+        var decision = await GateAccess.DecideAsync(
+            services.Db, services.Codes, new GateContext(device, settings, req.Method, req.Token, now, resolved), ct);
+        if (!decision.Opened || match is null) return decision;
+
+        var claim = await services.MemberCodes.TryClaimAsync(match, MemberCodeUseClass.Door, device.Id, "gate", ct);
+        return claim is null ? GateAccess.Refused(GateAccess.CodeUsed, resolved.UserId) : decision;
     }
 
     /// <summary>
@@ -132,7 +155,9 @@ public sealed record GateServices(
     MainframeDbContext Db,
     ITenantContext Tenant,
     AccessCodeService Codes,
-    TenantSettingsAccessor Settings);
+    TenantSettingsAccessor Settings,
+    /// <summary>The v1 member-code check and its use table (member-code §4).</summary>
+    MemberCodeService MemberCodes);
 
 /// <summary>
 /// What a gate sends when a scan needs the server. Three fields — there is no <c>court</c>,

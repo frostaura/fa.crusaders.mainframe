@@ -81,6 +81,15 @@ public class MainframeDbContext : DbContext
     /// <summary>The admin notice outbox (R23). See <see cref="AdminNotification"/>.</summary>
     public DbSet<AdminNotification> AdminNotifications => Set<AdminNotification>();
 
+    /// <summary>Each member's REF and code generation (D1). See <see cref="MemberCode"/>.</summary>
+    public DbSet<MemberCode> MemberCodes => Set<MemberCode>();
+
+    /// <summary>One row per acting use of a member code (§4.4). See <see cref="MemberCodeUse"/>.</summary>
+    public DbSet<MemberCodeUse> MemberCodeUses => Set<MemberCodeUse>();
+
+    /// <summary>D10 pay-for confirms by nonce. See <see cref="DevicePayFor"/>.</summary>
+    public DbSet<DevicePayFor> DevicePayFors => Set<DevicePayFor>();
+
     /// <summary>
     /// Builds the model, including the global query filter on every tenant-scoped entity.
     /// </summary>
@@ -168,6 +177,7 @@ public class MainframeDbContext : DbContext
         ConfigureDeviceErrors(modelBuilder);
         ConfigureUserPreferences(modelBuilder);
         ConfigureAdminNotifications(modelBuilder);
+        ConfigureMemberCodes(modelBuilder);
 
         modelBuilder.Entity<Court>(e =>
         {
@@ -431,6 +441,54 @@ public class MainframeDbContext : DbContext
     }
 
     /// <summary>
+    /// The three member-code tables (D1, D10). Every one is tenant-scoped and filtered, and each
+    /// carries the unique index its correctness rests on: one REF per member and per tenant, one
+    /// use per code per class, one payment per box per nonce.
+    /// </summary>
+    private void ConfigureMemberCodes(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<MemberCode>(e =>
+        {
+            e.ToTable("member_codes");
+            e.HasKey(c => c.Id);
+            e.HasIndex(c => new { c.TenantId, c.UserId }).IsUnique();
+            e.HasIndex(c => new { c.TenantId, c.Ref }).IsUnique();
+            e.Property(c => c.Generation).HasDefaultValue(1);
+            e.ToTable(t =>
+            {
+                t.HasCheckConstraint("ck_member_codes_ref", "\"Ref\" BETWEEN 1 AND 1048575");
+                t.HasCheckConstraint("ck_member_codes_generation", "\"Generation\" >= 1");
+            });
+            e.HasQueryFilter(c => c.TenantId == _tenant.TenantId);
+        });
+
+        modelBuilder.Entity<MemberCodeUse>(e =>
+        {
+            e.ToTable("member_code_uses");
+            e.HasKey(u => u.Id);
+            e.Property(u => u.UseClass).HasMaxLength(8).IsRequired();
+            e.Property(u => u.Kind).HasMaxLength(32).IsRequired();
+            e.HasIndex(u => new { u.TenantId, u.Ref, u.Step, u.UseClass }).IsUnique();
+            e.HasIndex(u => u.UsedAt);
+            e.ToTable(t => t.HasCheckConstraint(
+                "ck_member_code_uses_class", "\"UseClass\" IN ('door', 'court', 'money')"));
+            e.HasQueryFilter(u => u.TenantId == _tenant.TenantId);
+        });
+
+        modelBuilder.Entity<DevicePayFor>(e =>
+        {
+            e.ToTable("device_pay_fors");
+            e.HasKey(p => p.Id);
+            e.Property(p => p.Nonce).HasMaxLength(32).IsRequired();
+            e.Property(p => p.AmountLabel).HasMaxLength(16).IsRequired();
+            e.Property(p => p.AmountCredits).HasColumnType("numeric(10,2)");
+            e.Property(p => p.BalanceAfterCredits).HasColumnType("numeric(10,2)");
+            e.HasIndex(p => new { p.TenantId, p.DeviceId, p.Nonce }).IsUnique();
+            e.HasQueryFilter(p => p.TenantId == _tenant.TenantId);
+        });
+    }
+
+    /// <summary>
     /// The devices table, lifted out of <c>OnModelCreating</c>.
     ///
     /// <para>
@@ -460,6 +518,9 @@ public class MainframeDbContext : DbContext
             e.Property(d => d.LastIpAddress).HasMaxLength(64);
             e.Property(d => d.RunningVersion).HasMaxLength(32);
             e.Property(d => d.MegaVersion).HasMaxLength(32);
+            // Latest heartbeat's `caps` (member-code rollout). An empty array, never null, for a
+            // board that named nothing — see Device.Capabilities.
+            e.Property(d => d.Capabilities).HasColumnType("text[]").IsRequired().HasDefaultValueSql("'{}'::text[]");
             e.Property(d => d.Kind).HasConversion<int>();
             e.Property(d => d.Hardware).HasConversion<int>();
             e.HasQueryFilter(d => d.TenantId == _tenant.TenantId);

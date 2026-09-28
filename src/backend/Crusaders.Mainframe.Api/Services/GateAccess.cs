@@ -122,6 +122,14 @@ public static class GateAccess
     public const string NotACourtBox = "not_a_court_box";
 
     /// <summary>
+    /// A v1 member code the server already opened a door for inside its step (member-code §4.4).
+    /// A decision, not an outage. Kept OUT of <see cref="Reasons"/>: that list is pinned both ways
+    /// against the door corpus, which has no <c>gate-scan-response-code-used</c> vector yet — the
+    /// door firmware reads any reason off a 200 as a refusal, so it needs no new screen.
+    /// </summary>
+    public const string CodeUsed = MemberCodeIdentity.CodeUsed;
+
+    /// <summary>
     /// Every reason this decision can answer. Pinned against the corpus, in both directions,
     /// by <c>DeviceGateProtocolCorpusTests</c>: a reason with no vector is a refusal the
     /// firmware has no screen for, and a vector with no reason is a screen for a refusal that
@@ -169,7 +177,9 @@ public static class GateAccess
 
         // Tenant-filtered by the context's global query filter, so a code minted at another
         // club resolves to nothing here — the isolation is structural, not a claim compared.
-        var resolved = await codes.ResolveAsync(context.Token, context.Now, ct);
+        // A caller that has already resolved the token — the member-code path, which CHECKS a v1
+        // code rather than looking it up — hands the answer in; everything below is identical.
+        var resolved = context.Resolved ?? await codes.ResolveAsync(context.Token, context.Now, ct);
         if (resolved is null) return Refused(NotRecognised);
 
         // Not-Active rather than Suspended, and — ruling 15 — a user with NO membership row is
@@ -489,7 +499,8 @@ public static class GateAccess
 /// </para>
 /// </summary>
 public sealed record GateContext(
-    Device Device, TenantSettingsView Settings, string? Method, string? Token, DateTimeOffset Now);
+    Device Device, TenantSettingsView Settings, string? Method, string? Token, DateTimeOffset Now,
+    ResolvedAccessCode? Resolved = null);
 
 /// <summary>
 /// One door decision. <paramref name="SubjectUserId"/> is set as soon as the code resolved,

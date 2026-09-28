@@ -491,7 +491,9 @@ public sealed class ConcurrentDecisionTests
             upload.ServiceProvider.GetRequiredService<CourtLightStateService>(),
             upload.ServiceProvider.GetRequiredService<IServiceScopeFactory>(),
             upload.ServiceProvider.GetRequiredService<ILoggerFactory>(),
-            upload.ServiceProvider.GetRequiredService<DeviceFaultSink>());
+            upload.ServiceProvider.GetRequiredService<DeviceFaultSink>(),
+            upload.ServiceProvider.GetRequiredService<MemberCodeService>(),
+            upload.ServiceProvider.GetRequiredService<IBookingPlayers>());
 
         var outcome = await DeviceEventEndpoints.ActivateOrReverseAsync(
             services, new LateActivation(court, stale, club.MemberId, "offline", scannedAt, 2_700_000), default);
@@ -746,7 +748,9 @@ public sealed class ConcurrentDecisionTests
         scope.ServiceProvider.GetRequiredService<IdentificationResolver>(),
         scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>(),
         scope.ServiceProvider.GetRequiredService<LedgerService>(),
-        scope.ServiceProvider.GetRequiredService<DeviceFaultSink>());
+        scope.ServiceProvider.GetRequiredService<DeviceFaultSink>(),
+        scope.ServiceProvider.GetRequiredService<AccessCodeService>(),
+        scope.ServiceProvider.GetRequiredService<MemberCodeService>());
 
     private static (int Status, JsonElement Body) Unwrap(IResult result) => (
         (result as IStatusCodeHttpResult)?.StatusCode ?? StatusCodes.Status200OK,

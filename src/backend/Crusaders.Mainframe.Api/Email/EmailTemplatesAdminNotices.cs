@@ -29,6 +29,9 @@ public sealed record OverdraftNotice(
 /// <summary>A code a board accepted that the server could not have issued. Placeholder for P7.</summary>
 public sealed record ForgeryNotice(string DeviceCode, string? MemberName, string Detail, string ConsoleUrl);
 
+/// <summary>A board that reported firmware without the member-code capability after the club's cut-over.</summary>
+public sealed record BoardLostMemberCodes(string DeviceName, string DeviceCode, string? FirmwareVersion, string ConsoleUrl);
+
 /// <summary>
 /// The admin-attention messages R23 added: everything the notifier sends that no path in the
 /// product sent before it. The messages it MOVED onto the outbox — the registration notice, the
@@ -219,6 +222,29 @@ public static partial class EmailTemplates
                 new CallToAction("Open the Devices page", f.ConsoleUrl),
             ],
             WhyThis: WhyAdmin), highPriority: true);
+
+    /// <summary>
+    /// A board went back to firmware that cannot check member codes offline — a spare flashed
+    /// with an old image, usually. Online it still works; offline it now admits nobody on a code.
+    /// </summary>
+    public static EmailMessage AdminBoardLostMemberCodes(ClubIdentity club, string to, BoardLostMemberCodes b) =>
+        EmailChrome.Compose(club, to, new EmailContent(
+            Subject: $"A board stopped reading member codes — {b.DeviceCode}",
+            Preheader: "It still works while it can reach the club's system; offline it can no longer check codes.",
+            Heading: "A board is running firmware without member codes",
+            Blocks:
+            [
+                new Paragraph($"{club.Name} has switched to members' rotating codes, and a board has just reported firmware that cannot check them on its own."),
+                new Facts(
+                [
+                    new FactRow("Board", b.DeviceName),
+                    new FactRow("Code", b.DeviceCode),
+                    new FactRow("Firmware", b.FirmwareVersion ?? "Not reported"),
+                ]),
+                new Paragraph("While it can reach the club's system every code still works at it. If its connection drops, members will be refused there until it is reflashed with current firmware."),
+                new CallToAction("Open the Devices page", b.ConsoleUrl),
+            ],
+            WhyThis: WhyAdmin));
 
     /// <summary>
     /// What has and has not happened to the member's money, and whether anybody told them — per
