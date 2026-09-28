@@ -35,26 +35,45 @@ public sealed class ShareHook
     /// </summary>
     public async Task AfterCreditAsync(Guid tenantId, string? tenantSlug, IReadOnlyCollection<Guid> userIds, CancellationToken ct)
     {
+        List<Guid> waiting;
         try
         {
             using var scope = _scopes.CreateScope();
             scope.ServiceProvider.GetRequiredService<ITenantContext>().Set(tenantId, tenantSlug ?? "");
             var db = scope.ServiceProvider.GetRequiredService<Persistence.MainframeDbContext>();
             // Oldest waiting return first (stamp, then participant id): first come, first served.
-            var waiting = (await db.BookingParticipants.AsNoTracking()
+            waiting = (await db.BookingParticipants.AsNoTracking()
                 .Where(p => p.ReturnPendingSince != null)
                 .Join(db.Bookings.AsNoTracking(), p => p.BookingId, b => b.Id,
                     (p, b) => new { b.Id, Payer = b.PaidByUserId ?? b.UserId, p.ReturnPendingSince, Seat = p.Id })
                 .Where(x => x.Payer != null && userIds.Contains(x.Payer.Value))
                 .OrderBy(x => x.ReturnPendingSince).ThenBy(x => x.Seat)
                 .Select(x => x.Id).ToListAsync(ct)).Distinct().ToList();
-            if (waiting.Count == 0) return;
-            var sweep = scope.ServiceProvider.GetRequiredService<ShareSweep>();
-            foreach (var id in waiting) await sweep.SettleBookingAsync(id, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "Retrying waiting share returns after a credit failed; the sweep will retry");
+            _logger.LogError(ex, "Finding waiting share returns after a credit failed; the sweep will retry");
+            return;
+        }
+
+        // One booking at a time, as the settlement hook does (review round 7): one that throws is
+        // logged and marked due for the sweep, and the returns behind it are still retried.
+        foreach (var id in waiting) await SettleOneAsync(tenantId, tenantSlug, id, "after a credit", ct);
+    }
+
+    /// <summary>Reconciles one booking in its own scope; a failure is logged and marks it due. Never throws.</summary>
+    private async Task SettleOneAsync(Guid tenantId, string? tenantSlug, Guid bookingId, string after, CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            scope.ServiceProvider.GetRequiredService<ITenantContext>().Set(tenantId, tenantSlug ?? "");
+            await scope.ServiceProvider.GetRequiredService<ShareSweep>().SettleBookingAsync(bookingId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Share reconcile {After} failed for {Booking}; marked for the sweep", after, bookingId);
+            await MarkDueAsync(tenantId, tenantSlug, bookingId, ct);
         }
     }
 
@@ -67,20 +86,7 @@ public sealed class ShareHook
         // marked due (review round 5), so the next minute sweep makes it good however old the
         // booking is — the catch-up at start does not reach every kind of game, and a swallowed
         // failure used to be forgotten.
-        foreach (var id in ids)
-        {
-            try
-            {
-                using var scope = _scopes.CreateScope();
-                scope.ServiceProvider.GetRequiredService<ITenantContext>().Set(tenantId, tenantSlug ?? "");
-                await scope.ServiceProvider.GetRequiredService<ShareSweep>().SettleBookingAsync(id, ct);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogError(ex, "Share reconcile after settlement failed for {Booking}; marked for the sweep", id);
-                await MarkDueAsync(tenantId, tenantSlug, id, ct);
-            }
-        }
+        foreach (var id in ids) await SettleOneAsync(tenantId, tenantSlug, id, "after settlement", ct);
     }
 
     /// <summary>Leaves the durable "reconcile due" marker in a fresh scope. Best effort: logged if even that fails.</summary>

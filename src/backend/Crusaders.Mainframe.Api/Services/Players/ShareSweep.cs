@@ -50,6 +50,20 @@ public sealed class ShareSweep
                 .SetProperty(b => b.ShareReconcileLastAttemptAt, at), ct);
     }
 
+    /// <summary>
+    /// Reconciled: a "reconcile due" marker a failure left has been made good — but only one
+    /// recorded BEFORE this reconcile started. A failure recorded while it ran (a concurrent hook)
+    /// is newer than this answer and stays for the next sweep (review round 6).
+    /// </summary>
+    private Task<int> ClearMarkerAsync(Guid bookingId, DateTimeOffset started, CancellationToken ct) =>
+        _db.Bookings
+            .Where(b => b.Id == bookingId && b.ShareReconcileDueAt != null
+                        && (b.ShareReconcileLastAttemptAt == null || b.ShareReconcileLastAttemptAt <= started))
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(b => b.ShareReconcileDueAt, (DateTimeOffset?)null)
+                .SetProperty(b => b.ShareReconcileAttempts, 0)
+                .SetProperty(b => b.ShareReconcileLastAttemptAt, (DateTimeOffset?)null), ct);
+
     /// <summary>The longest a failing booking waits between retries.</summary>
     public static readonly TimeSpan MaxReconcileBackoff = TimeSpan.FromHours(1);
 
@@ -102,21 +116,18 @@ public sealed class ShareSweep
     {
         var started = DateTimeOffset.UtcNow.Storable();
         var seats = await _db.BookingParticipants.AsNoTracking().Where(p => p.BookingId == bookingId).ToListAsync(ct);
-        if (!seats.Any(p => p.Seat > 1)) return;
+        if (!seats.Any(p => p.Seat > 1))
+        {
+            // Nothing to reconcile — but a marker a failure left here is made good all the same,
+            // or no sweep would ever clear it (review round 7).
+            await ClearMarkerAsync(bookingId, started, ct);
+            return;
+        }
 
         var moves = await _shares.ReconcileAsync(bookingId, ct);
         var told = await TellCancelledAsync(bookingId, seats, ct);
 
-        // Reconciled: a "reconcile due" marker a failure left has been made good — but only one
-        // recorded BEFORE this reconcile started. A failure recorded while it ran (a concurrent
-        // hook) is newer than this answer and stays for the next sweep (review round 6).
-        await _db.Bookings
-            .Where(b => b.Id == bookingId && b.ShareReconcileDueAt != null
-                        && (b.ShareReconcileLastAttemptAt == null || b.ShareReconcileLastAttemptAt <= started))
-            .ExecuteUpdateAsync(u => u
-                .SetProperty(b => b.ShareReconcileDueAt, (DateTimeOffset?)null)
-                .SetProperty(b => b.ShareReconcileAttempts, 0)
-                .SetProperty(b => b.ShareReconcileLastAttemptAt, (DateTimeOffset?)null), ct);
+        await ClearMarkerAsync(bookingId, started, ct);
 
         var touched = moves.SelectMany(m => new[] { m.PartnerUserId, m.OrganiserUserId }).Concat(told);
         await MemberNotices.PublishUnreadAsync(_db, _bus, _tenant.TenantId, touched, ct);
@@ -208,16 +219,23 @@ public sealed class ShareSweep
             .ToListAsync(ct);
         var window = await _db.BookingParticipants.AsNoTracking()
             .Where(p => p.Seat > 1 && _db.Bookings.Any(b => b.Id == p.BookingId
-                && (b.ShareReconcileDueAt != null || b.ShareDeadlineAt >= stampedHorizon || (b.ShareDeadlineAt == null && b.EndsAt >= horizon))))
+                && (b.ShareDeadlineAt >= stampedHorizon || (b.ShareDeadlineAt == null && b.EndsAt >= horizon))))
             .Select(p => p.BookingId)
             .Distinct()
             .OrderBy(id => id)
+            .ToListAsync(ct);
+        // Marked bookings straight off the booking's own index — with or without partner seats
+        // (review round 7): a marker on a booking whose players all came off must still be cleared.
+        var marked = await _db.Bookings.AsNoTracking()
+            .Where(b => b.ShareReconcileDueAt != null)
+            .OrderBy(b => b.Id)
+            .Select(b => b.Id)
             .ToListAsync(ct);
 
         // One booking's failure is logged and marked, and the rest of the club's sweep goes on; a
         // marked booking still inside its backoff is left alone this pass (review round 6).
         var resting = await BackingOffAsync(now, ct);
-        foreach (var id in waiting.Concat(window).Distinct().Where(id => !resting.Contains(id))) await TrySettleAsync(id, ct);
+        foreach (var id in waiting.Concat(marked).Concat(window).Distinct().Where(id => !resting.Contains(id))) await TrySettleAsync(id, ct);
 
         await LapseAsync(now, settings, ct);
         await RemindAsync(now, settings, ct);
