@@ -103,13 +103,28 @@ booking for a week (returns still flow). Only an admin's explicit collect
 take a partner below zero. A collection checks the partner's **spendable** credits (§3a), not
 their balance.
 
-**Nor a debt the other way — a return must be COVERED.** A return posts only when the organiser's
-**coverage** pays for it: their balance less what they hold for their OTHER bookings
-(`LedgerService.GetCoverageAsync`). What they hold for this booking is what may go back from it, so
-an ordinary return is always covered. The rule is keyed on coverage, never on the deadline: a hold
-released at the deadline and spent, or a share a cancellation after check-in (S4) released at
-once and the organiser spent, is not covered, before the deadline or after. An uncovered return
-**waits**:
+**Nor a debt the other way — a return must be COVERED.** A return from booking X to seat s posts
+only when the organiser's **coverage** for it pays for it (`LedgerService.GetCoverageAsync`,
+`ShareHolds.CoverageAsync`):
+
+```
+coverage(X, s) = min( balance ,  held(X) + max(0, balance − held(all) − owed back to returns stamped BEFORE s) )
+```
+
+- **Held money is earmarked.** What the organiser holds for X is X's partners' money, so a return
+  up to X's own hold always covers: an ordinary return — a withdrawal, a lowered share — never
+  waits behind a return waiting on another game.
+- **Waiting returns queue, first come first served** by `ReturnPendingSince`, then participant id;
+  a return not yet stamped counts as the newest. The free balance goes to the oldest first, so two
+  waiting returns no longer block each other when it covers one.
+- **Never more than the balance.** An earmark is only as good as the money behind it: a desk
+  debit can take a balance below its holds, and a game cancelled after check-in "holds" exactly the
+  return being asked about although that share was spendable a moment before.
+
+The rule is keyed on coverage, never on the deadline: a hold released at the deadline and spent,
+or a share a cancellation after check-in (S4) released at once and the organiser spent, is not
+covered, before the deadline or after. Spend checks, by contrast, set aside EVERY waiting return
+(§3a). An uncovered return **waits**:
 
 - the seat is stamped `ReturnPendingSince` (indexed) and **both sides are told once**, under
   `players.return_waiting` — never again while it keeps waiting;
@@ -122,8 +137,15 @@ once and the organiser spent, is not covered, before the deadline or after. An u
   (§3a, `owed_back_credits`). Posting stays all-or-nothing, so credit arriving short of the whole
   return accumulates, unspendable, until it covers it — a top-up of 10 against a waiting 16 cannot
   buy an 8-credit court, and the next 6 pay the partner;
-- after an outage nothing strands: the worker's first pass after it starts reconciles every
-  booking a return may have fallen due on, whatever its age (`ShareSweep.CatchUpAsync`).
+- after an outage nothing strands: the worker's first pass after it starts reconciles, per club,
+  every booking on which a return is due and neither made nor stamped, whatever its age
+  (`ShareSweep.CatchUpAsync`) — chosen in SQL from seats whose target is certainly nothing (off the
+  game, settled by hand, or on a game cancelled before check-in) whose member has still paid
+  something net, so it is normally empty. A club whose catch-up fails is tried again on the next
+  pass. (No-show and cancelled-after-check-in returns follow the organiser's `Owed` through the
+  settlement hook and are not re-read on every start.)
+- a return starting or stopping waiting moves the organiser's spendable without a ledger row, so
+  their live wallet gets a `balance` frame with `delta_credits` 0 and the reason `share_set_aside`.
 
 **Chaining is not recursive.** When a waiting return posts it credits the partner, but a credit
 arriving as a share transfer does not itself retry that partner's own waiting returns — if Sam's

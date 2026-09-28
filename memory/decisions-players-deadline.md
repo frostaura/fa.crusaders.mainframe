@@ -8,7 +8,7 @@ last_verified: 2026-09-28
 # Live decisions — players: the deadline, and when money may go back
 
 Spec: `docs/specs/players-and-splits.md` §3, §3a, §7. From the three refuter rounds on the review
-fixes, 2026-09-28, pinned in `PlayersRefute{,2,3}HttpTests`.
+fixes, 2026-09-28, pinned in `PlayersRefute{,2,3,4}HttpTests`.
 
 - **The deadline is frozen per booking** — `bookings.ShareDeadlineAt`, stamped when a booking
   first gets players from the setting at that moment; everything (open, hold, lapse, reminders,
@@ -45,9 +45,17 @@ fixes, 2026-09-28, pinned in `PlayersRefute{,2,3}HttpTests`.
   so the minute sweep stays bounded); the lapse sweep takes every still-invited overdue seat, any age
   (partial index `IX_booking_participants_open_invites`). Accepted short seats past the week are
   closed by the clock anyway; only their lapse notice would be missed.
-- **Return chaining is not recursive — accepted** (round 3): a credit arriving as a share transfer
-  does not retry the receiver's own waiting returns; the next minute sweep does. *Why:* bounds each
-  retry to one level; *cost:* a minute's delay per link.
+- **Return chaining is not recursive — accepted** (round 3): a share-transfer credit does not retry
+  the receiver's own waiting returns; the next sweep does. Bounds retries to one level; costs a minute.
 - **Admin remove / settle-outside answer `return_waiting` + `return_credits`** (round 3): the
-  coverage pre-check is not under the organiser's lock, so a spend can race it; the desk is told
-  the money did not move rather than reading a bare 200.
+  unlocked pre-check can lose a race to a spend; the desk is told the money did not move.
+- **Coverage earmarks held money and queues waiting returns** (round 4, orchestrator decision):
+  coverage(X, s) = min(balance, held(X) + max(0, balance − held(all) − owed back stamped before s)).
+  *Why:* round 3 subtracted ALL owed-back, so an ordinary withdrawal waited behind an unrelated
+  waiting return and two waiting returns blocked each other. First come first served by stamp,
+  then participant id; unstamped is newest. Spend checks still subtract all of it. *The min(balance)
+  cap* (found fixing it): a desk debit below the holds, or an S4 game whose "hold" is the very
+  return asked about, must never pay out money that is not there.
+- **Catch-up is SQL-bounded and per club** (round 4): only seats whose target is surely 0 with
+  money still net paid; a failed club is retried next pass. No-show / S4 returns follow `Owed`.
+- **Stamping or clearing a wait publishes a wallet frame** (reason `share_set_aside`, delta 0).
