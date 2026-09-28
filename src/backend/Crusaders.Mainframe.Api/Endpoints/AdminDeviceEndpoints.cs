@@ -58,17 +58,13 @@ public static class AdminDeviceEndpoints
         TenantSettingsAccessor settingsAccessor, MainframeDbContext db, CancellationToken ct)
     {
         var s = await settingsAccessor.GetAsync(ct);
-        var boards = await db.Devices.AsNoTracking().Where(d => d.Enabled).OrderBy(d => d.DeviceCode).ToListAsync(ct);
-        var blocking = boards.Where(d => !d.SpeaksMemberCodes).Select(d => new
-        {
-            id = d.Id,
-            device_code = d.DeviceCode,
-            name = DeviceView.Named(d.Name),
-            kind = d.Kind.ToString(),
-            running_version = d.RunningVersion,
-            capabilities = d.Capabilities,
-            last_seen_at = d.LastSeenAt,
-        }).ToList();
+        var enabled = await db.Devices.AsNoTracking().Where(d => d.Enabled).OrderBy(d => d.DeviceCode).ToListAsync(ct);
+
+        // Only ACKNOWLEDGED boards vote on the cut-over (MemberCodeRollout.EveryEnabledBoardSpeaksAsync);
+        // the unacknowledged ones are listed apart so the page can say why they do not block.
+        var boards = enabled.Where(MemberCodeHeartbeat.Acknowledged).ToList();
+        var blocking = boards.Where(d => !d.SpeaksMemberCodes).Select(Row).ToList();
+        var unacknowledged = enabled.Where(d => !MemberCodeHeartbeat.Acknowledged(d)).Select(Row).ToList();
 
         return Results.Ok(new
         {
@@ -80,7 +76,25 @@ public static class AdminDeviceEndpoints
             enabled_boards = boards.Count,
             ready_boards = boards.Count - blocking.Count,
             blocking,
+
+            // An administrator's rollback holds the automatic rollout until they move forward
+            // again or clear it (MemberCodeSettings.HoldKey).
+            manual_hold = s.MemberCodeManualHold,
+            manual_hold_by = s.MemberCodeManualHoldBy,
+            manual_hold_at = s.MemberCodeManualHoldAt,
+            unacknowledged,
         });
+
+        static object Row(Device d) => new
+        {
+            id = d.Id,
+            device_code = d.DeviceCode,
+            name = DeviceView.Named(d.Name),
+            kind = d.Kind.ToString(),
+            running_version = d.RunningVersion,
+            capabilities = d.Capabilities,
+            last_seen_at = d.LastSeenAt,
+        };
     }
 
     /// <summary>

@@ -300,12 +300,28 @@ public sealed class AuthService
     /// moment it is replaced, and until then it unlocks nothing but this call.
     /// </para>
     /// </summary>
-    public async Task<PasswordChangeResult> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword, CancellationToken ct)
+    public async Task<PasswordChangeResult> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword, CancellationToken ct) =>
+        (await ChangePasswordAndReissueAsync(userId, currentPassword, newPassword, ct)).Result;
+
+    /// <summary>
+    /// <see cref="ChangePasswordAsync"/>, plus a fresh access token for the session that asked.
+    ///
+    /// <para>
+    /// The change is a rotation (member-code §10), and a rotation ends every session minted
+    /// before it — <see cref="User.SessionsValidAfter"/> — including the one making this call.
+    /// That is right for every OTHER session (whoever learned the old password may be signed in
+    /// somewhere) and wrong for the member at the keyboard, who would be signed out for doing
+    /// the responsible thing. So the caller is handed a token minted after the cut-off and
+    /// keeps its session; the token it presented stops working.
+    /// </para>
+    /// </summary>
+    public async Task<(PasswordChangeResult Result, string? AccessToken)> ChangePasswordAndReissueAsync(
+        Guid userId, string currentPassword, string newPassword, CancellationToken ct)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
-        if (user is null || user.PasswordHash is null) return PasswordChangeResult.NoPasswordSet;
-        if (!_hasher.Verify(currentPassword, user.PasswordHash)) return PasswordChangeResult.CurrentPasswordWrong;
-        if (_hasher.Verify(newPassword, user.PasswordHash)) return PasswordChangeResult.Unchanged;
+        if (user is null || user.PasswordHash is null) return (PasswordChangeResult.NoPasswordSet, null);
+        if (!_hasher.Verify(currentPassword, user.PasswordHash)) return (PasswordChangeResult.CurrentPasswordWrong, null);
+        if (_hasher.Verify(newPassword, user.PasswordHash)) return (PasswordChangeResult.Unchanged, null);
 
         user.PasswordHash = _hasher.Hash(newPassword);
         user.MustChangePassword = false;
@@ -317,13 +333,24 @@ public sealed class AuthService
             Action = "user.password_changed",
         });
 
-        // A new password retires the member's code (member-code §10): whoever learned the old
-        // password may have enrolled a phone with it. Staged, so both commit together.
+        // A new password retires the member's code and every open session (member-code §10):
+        // whoever learned the old password may have enrolled a phone with it, or be signed in.
+        // Staged, so both commit together.
         await _memberCodes.StageRotationAsync(user.Id, user.Id, "password_changed", ct);
         await _db.SaveChangesAsync(ct);
 
         await SendOrLogAsync(EmailTemplates.PasswordChanged(await _club.GetAsync(ct), user.Email), $"password-changed notice for {user.Email}", ct);
-        return PasswordChangeResult.Ok;
+
+        // Minted AFTER the cut-off was stamped, so it is the one session that survives it.
+        return (PasswordChangeResult.Ok, _jwt.IssueAccess(user.Id, user.TenantId, _tenant.TenantSlug, RolesOf(user)));
+    }
+
+    private static List<string> RolesOf(User user)
+    {
+        var roles = new List<string>();
+        if (user.IsAdmin) roles.Add("admin");
+        if (user.IsPlatformAdmin) roles.Add("platform_admin");
+        return roles;
     }
 
     public async Task<bool> VerifyEmailAsync(string token, CancellationToken ct)
@@ -486,10 +513,15 @@ public sealed class AuthService
     /// while the sign-in screen correctly refused them. Suspension has to end the session that
     /// is already open, not only the next one.
     /// </remarks>
-    public async Task<LoginResult> RefreshAsync(Guid userId, CancellationToken ct)
+    public async Task<LoginResult> RefreshAsync(Guid userId, DateTimeOffset? issuedAt, CancellationToken ct)
     {
         var user = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == userId, ct);
         if (user is null) return new LoginResult.InvalidCredentials();
+
+        // Read from the row, never the session cache: a refresh re-mints a token that would pass
+        // every later cut-off check, so a session a rotation ended must not be renewed inside the
+        // cache's fifteen seconds either (member-code §10, SessionCutoff).
+        if (SessionCutoff.Predates(issuedAt, user.SessionsValidAfter)) return new LoginResult.InvalidCredentials();
         if (!_tenant.IsResolved)
         {
             var tenant = await _db.Tenants.IgnoreQueryFilters().FirstAsync(t => t.Id == user.TenantId, ct);
@@ -521,7 +553,7 @@ public sealed class AuthService
         // session behind the forced-change gate a previous admin-side reset may have armed.
         user.MustChangePassword = false;
         await _db.SaveChangesAsync(ct);
-        return await RefreshAsync(user.Id, ct);
+        return await RefreshAsync(user.Id, DateTimeOffset.UtcNow, ct);
     }
 
     /// <summary>

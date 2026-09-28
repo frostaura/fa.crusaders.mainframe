@@ -194,14 +194,15 @@ internal sealed class MemberCodeClub
         return Device("/api/v1/device/pay-for", body);
     }
 
-    public HttpRequestMessage Events(string mac, long seq, string kind, int court, string subject, long bootId = 7)
+    /// <summary>One uploaded event. <paramref name="agoMs"/> is how long before the upload it happened; negative claims the future (a broken counter, which the server clamps).</summary>
+    public HttpRequestMessage Events(string mac, long seq, string kind, int court, string subject, long bootId = 7, long agoMs = 1_000)
     {
         return Device("/api/v1/device/events", new JsonObject
         {
-            ["mac"] = mac, ["boot_id"] = bootId, ["uptime_ms"] = 1_000_000,
+            ["mac"] = mac, ["boot_id"] = bootId, ["uptime_ms"] = 100_000_000,
             ["events"] = new JsonArray(new JsonObject
             {
-                ["seq"] = seq, ["uptime_ms"] = 999_000, ["kind"] = kind, ["court"] = court, ["method"] = "qr",
+                ["seq"] = seq, ["uptime_ms"] = 100_000_000 - agoMs, ["kind"] = kind, ["court"] = court, ["method"] = "qr",
                 ["subject"] = subject, ["duration_ms"] = 600_000,
             }),
         });
@@ -213,6 +214,26 @@ internal sealed class MemberCodeClub
         var client = app.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", club.TokenFor(user, role));
         return client;
+    }
+
+    /// <summary>A client carrying a bearer token, as the PWA holds one.</summary>
+    public HttpClient Bearer(WebApplicationFactory<Program> app, string token)
+    {
+        var client = app.CreateClient();
+        client.DefaultRequestHeaders.Host = $"{Slug}.crusaders.test";
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return client;
+    }
+
+    /// <summary>A real sign-in through <c>/auth/login</c> — the token the server itself mints. Every seeded person's password is <c>OldPass!123</c>.</summary>
+    public async Task<string> LoginAsync(WebApplicationFactory<Program> app, string handle, string password = "OldPass!123")
+    {
+        var client = app.CreateClient();
+        client.DefaultRequestHeaders.Host = $"{Slug}.crusaders.test";
+        var response = await client.PostAsync("/api/v1/auth/login", new StringContent(
+            new JsonObject { ["email"] = $"{handle}-{Slug}@test.local", ["password"] = password }.ToJsonString(), Encoding.UTF8, "application/json"));
+        response.EnsureSuccessStatusCode();
+        return (await JsonAsync(response)).GetProperty("access_token").GetString()!;
     }
 
     public static async Task<JsonElement> JsonAsync(HttpResponseMessage response) =>

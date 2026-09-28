@@ -204,6 +204,9 @@ public sealed class TenantSettingsAccessor
             MemberCodeCutoverAt = TryInstant(root, MemberCodeSettings.CutoverAtKey),
             MemberCodeCutoffAt = TryInstant(root, MemberCodeSettings.CutoffAtKey),
             MemberCodeCutoffDays = TryInt(root, MemberCodeSettings.CutoffDaysKey, MemberCodeSettings.DefaultCutoffDays),
+            MemberCodeManualHold = TryBool(root, MemberCodeSettings.HoldKey, false),
+            MemberCodeManualHoldBy = Guid.TryParse(TryString(root, MemberCodeSettings.HoldByKey, ""), out var holdBy) ? holdBy : null,
+            MemberCodeManualHoldAt = TryInstant(root, MemberCodeSettings.HoldAtKey),
         };
     }
 
@@ -560,6 +563,18 @@ public sealed record TenantSettingsView(
     public DateTimeOffset? MemberCodeCutoffAt { get; init; }
 
     public int MemberCodeCutoffDays { get; init; } = MemberCodeSettings.DefaultCutoffDays;
+
+    /// <summary>
+    /// An administrator moved the phase BACK and the automatic cut-over must not undo it — see
+    /// <see cref="MemberCodeSettings.HoldKey"/>. Cleared by the next forward move by hand.
+    /// </summary>
+    public bool MemberCodeManualHold { get; init; }
+
+    /// <summary>Who set the hold. Null when there is none.</summary>
+    public Guid? MemberCodeManualHoldBy { get; init; }
+
+    /// <summary>When the hold was set. Null when there is none.</summary>
+    public DateTimeOffset? MemberCodeManualHoldAt { get; init; }
 
     /// <summary>Distinct open rows one board may hold. Read via <see cref="MonitoringSettings.MaxOpenRows"/>.</summary>
     public int DeviceErrorMaxOpenRows { get; init; } = MonitoringSettings.DefaultMaxOpenRows;

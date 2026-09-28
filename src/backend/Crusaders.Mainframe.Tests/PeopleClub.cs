@@ -109,6 +109,7 @@ public sealed class PeopleClub
             new("tenant_id", TenantId.ToString()),
             new("tenant_slug", Slug),
             new("purpose", "access"),
+            new(Crusaders.Mainframe.Api.Security.SessionCutoff.IssuedAtMsClaim, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString()),
         };
         if (adminRole) claims.Add(new Claim(ClaimTypes.Role, "admin"));
 

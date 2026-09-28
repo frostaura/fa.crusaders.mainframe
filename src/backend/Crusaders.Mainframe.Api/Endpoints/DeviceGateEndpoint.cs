@@ -77,7 +77,7 @@ public static class DeviceGateEndpoint
         if (!IdentificationResolver.CanIdentifyGlobally(req.Method)) return GateAccess.Refused(GateAccess.MethodNotSupported);
 
         var (resolved, match) = await MemberCodeIdentity.ResolveAsync(
-            services.Codes, services.MemberCodes, req.Token, scanAgeMs: 0, settings, now, ct);
+            services.Codes, services.MemberCodes, new ScannedCode(req.Token, 0), settings, now, ct);
         if (resolved is null) return GateAccess.Refused(GateAccess.NotRecognised);
 
         var decision = await GateAccess.DecideAsync(

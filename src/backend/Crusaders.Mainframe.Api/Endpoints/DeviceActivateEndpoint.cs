@@ -75,7 +75,7 @@ public static class DeviceActivateEndpoint
         // legacy code resolves as it always has, until the club's cut-off refuses it.
         var settings = await services.Settings.GetAsync(ct);
         var (resolved, match) = await MemberCodeIdentity.ResolveAsync(
-            services.Codes, services.MemberCodes, req.Token, req.ScanAgeMs, settings, now, ct);
+            services.Codes, services.MemberCodes, new ScannedCode(req.Token, req.ScanAgeMs), settings, now, ct);
         if (resolved is null) return Refused("not_recognised");
 
         // Resolved ONCE, here, and carried onto every branch below including the refusals.
@@ -110,18 +110,29 @@ public static class DeviceActivateEndpoint
 
         // One acting use per code per class (§4.4): claimed before the court is lit, given back
         // below if it is not. A used code is a DECISION — `code_used` — never a second opinion.
-        Guid? claim = null;
+        MemberCodeClaim? claim = null;
         if (match is not null)
         {
             claim = await services.MemberCodes.TryClaimAsync(match, MemberCodeUseClass.Court, device.Id, "activate", ct);
             if (claim is null) return Refused(MemberCodeIdentity.CodeUsed, found.Court, display);
         }
 
-        var result = await services.Activation.ActivateAsync(
-            found.Court!, found.Booking!, resolved.UserId, payerOverrideUserId: null, req.Method!, ct);
+        // Given back if the activation THROWS, too: a claim stranded by a 500 refused the member's
+        // own code as `code_used` for the rest of its window, at a court that never lit.
+        ActivationResult result;
+        try
+        {
+            result = await services.Activation.ActivateAsync(
+                found.Court!, found.Booking!, resolved.UserId, payerOverrideUserId: null, req.Method!, ct);
+        }
+        catch
+        {
+            await services.MemberCodes.ReleaseAsync(claim);
+            throw;
+        }
 
         var answer = From(result, found.Court!, now, display);
-        if (!answer.Activated) await services.MemberCodes.ReleaseAsync(claim, ct);
+        if (!answer.Activated) await services.MemberCodes.ReleaseAsync(claim);
 
         // A scan the API would not act on, onto the club's monitoring page. Only from here
         // down: the refusals above this line are a board asking a question it should not have

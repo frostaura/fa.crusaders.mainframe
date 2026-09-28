@@ -98,16 +98,69 @@ public static class DevicePayForEndpoint
 
         if (!req.Confirm)
         {
+            await RecordQuoteAsync(device, req, decision.Booking!, services, now, ct);
             return Results.Ok(new PayForQuoteResponse(true, "ok", req.Court, WireCredits(decision.Amount), decision.Label));
         }
 
-        if (!string.Equals(req.AmountLabel, decision.Label, StringComparison.Ordinal))
+        // The confirm pays for the booking the glass ASKED about, or nothing. A label alone did
+        // not say which booking: a quote for the 17:00 slot confirmed a minute after 18:00 paid
+        // for the 18:00 member's court whenever the two cost the same. `price_changed` — the one
+        // reason the box already answers with "press the court again", which re-quotes — rather
+        // than a new reason no firmware knows (§13).
+        if (!string.Equals(req.AmountLabel, decision.Label, StringComparison.Ordinal)
+            || !await QuotedAsync(device, req, decision.Booking!, services, ct))
         {
             return Results.Ok(new PayForConfirmResponse(false, PriceChanged, req.Court, AmountLabel: decision.Label));
         }
 
         return await PayAsync(device, req, decision, services, settings, now, ct);
     }
+
+    /// <summary>
+    /// Pins the nonce to the booking this quote named (<see cref="DevicePayForQuote"/>). Upserted:
+    /// a box re-asking under the same nonce re-points it, and the confirm is held to the latest
+    /// question the glass put.
+    /// </summary>
+    private static async Task RecordQuoteAsync(
+        Device device, PayForRequest req, Booking booking, PayForServices services, DateTimeOffset now, CancellationToken ct)
+    {
+        var db = services.Db;
+        if (db.Database.IsRelational())
+        {
+            var id = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO device_pay_for_quotes ("Id", "TenantId", "DeviceId", "Nonce", "BookingId", "QuotedAt")
+                VALUES ({id}, {device.TenantId}, {device.Id}, {req.Nonce}, {booking.Id}, {now.Storable()})
+                ON CONFLICT ("TenantId", "DeviceId", "Nonce")
+                DO UPDATE SET "BookingId" = EXCLUDED."BookingId", "QuotedAt" = EXCLUDED."QuotedAt"
+                """, ct);
+            return;
+        }
+
+        var row = await db.DevicePayForQuotes.FirstOrDefaultAsync(q => q.DeviceId == device.Id && q.Nonce == req.Nonce, ct);
+        if (row is null)
+        {
+            db.DevicePayForQuotes.Add(new DevicePayForQuote
+            {
+                TenantId = device.TenantId,
+                DeviceId = device.Id,
+                Nonce = req.Nonce!,
+                BookingId = booking.Id,
+                QuotedAt = now,
+            });
+        }
+        else
+        {
+            row.BookingId = booking.Id;
+            row.QuotedAt = now;
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Whether this box's nonce was quoted for exactly this booking.</summary>
+    private static Task<bool> QuotedAsync(Device device, PayForRequest req, Booking booking, PayForServices services, CancellationToken ct) =>
+        services.Db.DevicePayForQuotes.AsNoTracking()
+            .AnyAsync(q => q.DeviceId == device.Id && q.Nonce == req.Nonce && q.BookingId == booking.Id, ct);
 
     /// <summary>Everything decided before any money: who pays, which booking, how much.</summary>
     private sealed record Judgement(
@@ -126,7 +179,7 @@ public static class DevicePayForEndpoint
         // A WALLET identity (§4.1): a v1 code, checked, or a legacy member-ident code. A legacy
         // booking code names a booking, not a payer — the same rule the walk-up keeps.
         var (resolved, match) = await MemberCodeIdentity.ResolveAsync(
-            services.Codes, services.MemberCodes, req.Token, req.ScanAgeMs, settings, now, ct);
+            services.Codes, services.MemberCodes, new ScannedCode(req.Token, req.ScanAgeMs), settings, now, ct);
         if (resolved is not { Purpose: AccessCodePurpose.MemberIdent }) return new Judgement(NotRecognised);
         var payer = resolved.UserId;
 
@@ -160,6 +213,15 @@ public static class DevicePayForEndpoint
         var currentPayer = booking.PaidByUserId ?? booking.UserId;
         if (currentPayer != booking.UserId || currentPayer == payer) return new Judgement(AlreadyPaid);
         if (await services.Players.IsSplitAsync(booking, ct)) return new Judgement(SplitBooking);
+
+        // D10 takes over a charge somebody already paid — a refund to them, a debit to the payer.
+        // A booking never charged (a row older than charge-at-booking) has nobody to refund, and
+        // the box's PAID glass says "Booker refunded" and both emails say so: every word of that
+        // would be false, and the glass is firmware this server cannot change. Refused as
+        // `not_chargeable` (SEE THE DESK), which is where such a row is settled. A booking
+        // costing nothing has nothing to pay.
+        if (booking.ChargedAt is null) return new Judgement(NotChargeable);
+        if (booking.AmountChargedCredits <= 0m) return new Judgement(AlreadyPaid);
 
         var amount = booking.AmountChargedCredits;
         var label = Label(amount);
@@ -204,19 +266,25 @@ public static class DevicePayForEndpoint
             return await ReplayAsync(device, req, services, now, ct) ?? InFlight();
         }
 
-        Guid? claim = null;
+        // Keyed by the nonce so a confirm retried while this one is still in flight re-enters
+        // the claim instead of reading `code_used` (it is then answered by the replay above).
+        MemberCodeClaim? claim = null;
         if (j.Match is not null)
         {
-            claim = await services.MemberCodes.TryClaimAsync(j.Match, MemberCodeUseClass.Money, device.Id, "pay_for", ct);
-            if (claim is null) return await UnclaimAsync(services, row, null, req, MemberCodeIdentity.CodeUsed, ct);
+            claim = await services.MemberCodes.TryClaimAsync(
+                j.Match, MemberCodeUseClass.Money, device.Id, "pay_for", ct, claimKey: "payfor:" + req.Nonce);
+            if (claim is null) return await AbandonAsync(services, row, null, req, MemberCodeIdentity.CodeUsed);
         }
 
-        var (outcome, granted) = await MoveMoneyAsync(req, j, services, settings, now, ct);
-        if (outcome is not null) return await UnclaimAsync(services, row, claim, req, outcome, ct);
-
+        // THE PAID STATE IS STAGED BEFORE THE MONEY, SO IT COMMITS WITH IT. The reassignment's
+        // own save — under the payer lock, inside its transaction — flushes this row and the
+        // audit record in the same commit as the refund and the debit. It used to be a second
+        // save after the money: a crash between the two left the ledger paid and the nonce
+        // pending, and every retry of it answered 503 for ever.
+        var granted = GrantFor(booking, settings, now);
         row.Paid = true;
         row.GrantedSeconds = granted;
-        row.BalanceAfterCredits = await services.Ledger.GetBalanceAsync(j.PayerUserId, ct);
+        row.BalanceAfterCredits = await services.Ledger.GetBalanceAsync(j.PayerUserId, ct) - j.Amount;
         db.AuditLogs.Add(new AuditLog
         {
             TenantId = device.TenantId,
@@ -234,7 +302,51 @@ public static class DevicePayForEndpoint
                 granted_seconds = granted,
             }),
         });
-        await db.SaveChangesAsync(ct);
+
+        string? outcome;
+        try
+        {
+            outcome = await MoveMoneyAsync(req, j, services, settings, now, ct);
+        }
+        catch
+        {
+            // Thrown after the money committed (the activation's own attendance save, say): the
+            // payment stands and its row says so, so the box is answered with it. Thrown before:
+            // nothing committed, the nonce and the use are given back, and the box's retry of
+            // this nonce — a 5xx is no decision — re-decides instead of meeting 503 for ever.
+            db.ChangeTracker.Clear();
+            if (await db.DevicePayFors.AsNoTracking().AnyAsync(p => p.Id == row.Id && p.Paid, CancellationToken.None))
+            {
+                return (await ReplayAsync(device, req, services, now, CancellationToken.None))!;
+            }
+            await AbandonAsync(services, row, claim, req, NotChargeable);
+            throw;
+        }
+
+        if (outcome is not null)
+        {
+            // A concurrent payer took the booking first: the reassignment matched no row under
+            // the booking's concurrency token and rolled back. That member's answer is
+            // "somebody already paid", which is now the truth, not a desk referral.
+            if (outcome == NotChargeable)
+            {
+                db.ChangeTracker.Clear();
+                if (await PaidBySomebodyAsync(services, booking.Id)) outcome = AlreadyPaid;
+            }
+            return await AbandonAsync(services, row, claim, req, outcome);
+        }
+
+        // The first answer's balance, read now the money has committed. The row already says
+        // paid; this only sharpens the figure, and losing it to a crash loses nothing but that.
+        try
+        {
+            row.BalanceAfterCredits = await services.Ledger.GetBalanceAsync(j.PayerUserId, ct);
+            await db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex) when (ex is DbUpdateException or OperationCanceledException)
+        {
+            services.Logs.CreateLogger(typeof(DevicePayForEndpoint)).LogWarning(ex, "Pay-for balance refresh failed for nonce {Nonce}", req.Nonce);
+        }
 
         await NotifyAsync(services, j, refunded, ct);
 
@@ -242,19 +354,31 @@ public static class DevicePayForEndpoint
             true, "ok", req.Court, WireCredits(j.Amount), j.Label, WireCredits(row.BalanceAfterCredits), false, granted));
     }
 
+    /// <summary>
+    /// The seconds a confirm lights the court for: the booking's remainder when nobody has
+    /// started it and its cue window is open — it is then ACTIVATED for the payer — else zero.
+    /// The cue window is <see cref="BookingCodeWindow.CueMinutes"/>, the clamped reading every
+    /// other path uses, so the quote's search and this decision cannot disagree.
+    /// </summary>
+    private static int GrantFor(Booking booking, TenantSettingsView settings, DateTimeOffset now)
+    {
+        var cueOpen = now >= booking.StartsAt.AddMinutes(-BookingCodeWindow.CueMinutes(settings));
+        if (booking.CheckedInAt is not null || !cueOpen || booking.EndsAt <= now) return 0;
+        return Math.Clamp((int)Math.Floor((booking.EndsAt - now).TotalSeconds), 1, RelayHardCap.Seconds);
+    }
+
     public const string PaidAction = "booking.paid_for_at_box";
 
     /// <summary>
     /// The money. A booking nobody has started, inside its cue window, is ACTIVATED with the
     /// payer as the new payer — attendance stamped for them, the court lit for its remainder.
-    /// Anything else is a straight reassignment and lights nothing.
+    /// Anything else is a straight reassignment and lights nothing. Null when it paid.
     /// </summary>
-    private static async Task<(string? Refusal, int Granted)> MoveMoneyAsync(
-        PayForRequest req, Judgement j, PayForServices services, TenantSettingsView settings,
-        DateTimeOffset now, CancellationToken ct)
+    private static async Task<string?> MoveMoneyAsync(
+        PayForRequest req, Judgement j, PayForServices services, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
     {
         var booking = j.Booking!;
-        var cueOpen = now >= booking.StartsAt.AddMinutes(-settings.ActivationCueWindowMinutes);
+        var cueOpen = now >= booking.StartsAt.AddMinutes(-BookingCodeWindow.CueMinutes(settings));
 
         if (booking.CheckedInAt is null && cueOpen)
         {
@@ -262,30 +386,50 @@ public static class DevicePayForEndpoint
                 j.Court!, booking, j.PayerUserId, j.PayerUserId, req.Method ?? "qr", ct);
             return result switch
             {
-                ActivationResult.Activated when booking.EndsAt > now => (null,
-                    Math.Clamp((int)Math.Floor((booking.EndsAt - now).TotalSeconds), 1, RelayHardCap.Seconds)),
-                ActivationResult.Activated => (null, 0),
-                ActivationResult.InsufficientBalance => (InsufficientBalance, 0),
-                _ => (NotChargeable, 0),
+                ActivationResult.Activated => null,
+                ActivationResult.InsufficientBalance => InsufficientBalance,
+                _ => NotChargeable,
             };
         }
 
         var charge = await services.Bookings.ChargeOnActivationAsync(booking.Id, j.PayerUserId, j.PayerUserId, ct);
         return charge switch
         {
-            ChargeResult.Ok => (null, 0),
-            ChargeResult.AlreadyCharged => (AlreadyPaid, 0),
-            ChargeResult.InsufficientBalance => (InsufficientBalance, 0),
-            _ => (NotChargeable, 0),
+            ChargeResult.Ok => null,
+            ChargeResult.AlreadyCharged => AlreadyPaid,
+            ChargeResult.InsufficientBalance => InsufficientBalance,
+            _ => NotChargeable,
         };
     }
 
-    private static async Task<IResult> UnclaimAsync(
-        PayForServices services, DevicePayFor row, Guid? claim, PayForRequest req, string reason, CancellationToken ct)
+    /// <summary>Whether the booking's charge has already moved off its organiser — read fresh, never from the tracker.</summary>
+    private static Task<bool> PaidBySomebodyAsync(PayForServices services, Guid bookingId) =>
+        services.Db.Bookings.AsNoTracking()
+            .AnyAsync(b => b.Id == bookingId && b.PaidByUserId != null && b.PaidByUserId != b.UserId);
+
+    /// <summary>
+    /// Undoes a confirm that did not pay: the nonce row deleted and the use given back, so the
+    /// box's next press re-decides. <b>The change tracker is cleared first</b> — a lost race
+    /// leaves the booking's modified payer, the staged ledger rows and this row's staged paid
+    /// state tracked, and saving anything through that context re-threw the concurrency failure
+    /// as a 500 and stranded the nonce at 503 for ever. The delete goes straight to the table.
+    /// Takes no cancellation: it runs on the way out, when the request's token may have fired.
+    /// </summary>
+    private static async Task<IResult> AbandonAsync(
+        PayForServices services, DevicePayFor row, MemberCodeClaim? claim, PayForRequest req, string reason)
     {
-        await services.MemberCodes.ReleaseAsync(claim, ct);
-        services.Db.DevicePayFors.Remove(row);
-        await services.Db.SaveChangesAsync(ct);
+        var db = services.Db;
+        db.ChangeTracker.Clear();
+        if (db.Database.IsRelational())
+        {
+            await db.DevicePayFors.Where(p => p.Id == row.Id).ExecuteDeleteAsync(CancellationToken.None);
+        }
+        else if (await db.DevicePayFors.FirstOrDefaultAsync(p => p.Id == row.Id) is { } tracked)
+        {
+            db.DevicePayFors.Remove(tracked);
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+        await services.MemberCodes.ReleaseAsync(claim);
         return Refuse(req, reason);
     }
 
@@ -299,10 +443,25 @@ public static class DevicePayForEndpoint
         var row = await services.Db.DevicePayFors.AsNoTracking()
             .FirstOrDefaultAsync(p => p.DeviceId == device.Id && p.Nonce == req.Nonce, ct);
         if (row is null) return null;
-        if (!row.Paid) return InFlight();
+        if (!row.Paid)
+        {
+            // The paid state commits WITH the money, so an unpaid row is a payment that has not
+            // happened: in flight in another request — or a claim a crash left behind. Past
+            // StaleClaimAfter it is the second, and it is cleared so this retry decides afresh;
+            // before it, it is no decision and the box asks again.
+            if (now - row.CreatedAt < StaleClaimAfter) return InFlight();
+            await ClearStaleClaimAsync(services, row.Id, now);
+            return null;
+        }
 
         // What is LEFT of the grant, never the original length from now (the walk-up's review
         // #20): a retry an hour later must not light a court over whoever holds it next.
+        //
+        // Left as it is by decision (P7 review L5): a replay re-grants the remainder even when the
+        // members switched the court off in between, so a late retry can light it again until the
+        // sold end. Bounded by the booking they paid for and by the relay's hard cap, and the
+        // same shape the walk-up's replay has; tightening it would need the box's release event,
+        // which a replay does not carry.
         var granted = 0;
         if (row.GrantedSeconds > 0)
         {
@@ -318,7 +477,36 @@ public static class DevicePayForEndpoint
             WireCredits(row.BalanceAfterCredits), true, granted));
     }
 
-    private static IResult InFlight() => Results.Json(new { error = "in_progress" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    /// <summary>
+    /// How old an unpaid nonce row must be before a retry treats it as abandoned. Far longer
+    /// than a confirm takes — it waits on one payer lock and two saves — and far shorter than a
+    /// member stands at a box.
+    /// </summary>
+    public static readonly TimeSpan StaleClaimAfter = TimeSpan.FromSeconds(60);
+
+    /// <summary>Deletes an abandoned unpaid claim — only if it is still unpaid and still stale, so a payment committing in the same instant is never undone.</summary>
+    private static async Task ClearStaleClaimAsync(PayForServices services, Guid id, DateTimeOffset now)
+    {
+        var db = services.Db;
+        var before = now - StaleClaimAfter;
+        if (db.Database.IsRelational())
+        {
+            await db.DevicePayFors.Where(p => p.Id == id && !p.Paid && p.CreatedAt < before).ExecuteDeleteAsync(CancellationToken.None);
+            return;
+        }
+        if (await db.DevicePayFors.FirstOrDefaultAsync(p => p.Id == id && !p.Paid && p.CreatedAt < before) is { } stale)
+        {
+            db.DevicePayFors.Remove(stale);
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+    }
+
+    // Block body for the lizard reason in memory/gotchas-build.md: an expression body holding
+    // braces is mis-scoped into a *global* pseudo-function the length of the file.
+    private static IResult InFlight()
+    {
+        return Results.Json(new { error = "in_progress" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
 
     private static IResult Refuse(PayForRequest req, string reason)
     {

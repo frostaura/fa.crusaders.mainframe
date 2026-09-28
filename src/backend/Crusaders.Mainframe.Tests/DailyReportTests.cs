@@ -435,6 +435,7 @@ public sealed class DailyReportTests
             new("tenant_id", tenantId.ToString()),
             new("tenant_slug", slug),
             new("purpose", "access"),
+            new(Crusaders.Mainframe.Api.Security.SessionCutoff.IssuedAtMsClaim, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString()),
             new(ClaimTypes.Role, "admin"),
         };
         return new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(

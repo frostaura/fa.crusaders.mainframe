@@ -29,7 +29,28 @@ public static class MeCodeEndpoints
         g.MapPost("/enrol", EnrolAsync).RequireRateLimiting(RateLimitPolicies.Auth);
         g.MapGet("/", StatusAsync);
 
+        // Sign out everywhere (§10): a rotation, so every session ends — this one included — and
+        // every code every phone can compute stops working. The member signs in again.
+        app.MapPost("/api/v1/me/sessions/revoke-all", RevokeAllAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting(RateLimitPolicies.Auth);
+
         return app;
+    }
+
+    /// <summary>
+    /// Ends every session of the caller, including the one asking, and rotates their code. 204;
+    /// the next request on any of their tokens is 401.
+    /// </summary>
+    private static async Task<IResult> RevokeAllAsync(
+        HttpContext ctx, MainframeDbContext db, MemberCodeService codes, CancellationToken ct)
+    {
+        var userId = ctx.User.Id() ?? Guid.Empty;
+        if (userId == Guid.Empty) return Results.Unauthorized();
+
+        await codes.StageRotationAsync(userId, userId, "sign_out_everywhere", ct);
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
     }
 
     private static async Task<IResult> EnrolAsync(
@@ -39,6 +60,11 @@ public static class MeCodeEndpoints
         var userId = ctx.User.Id() ?? Guid.Empty;
         if (userId == Guid.Empty) return Results.Unauthorized();
         NoStore(ctx);
+
+        // A session a rotation ended gets no secret — read from the row, not the fifteen-second
+        // cache the middleware answers from, because this is the one route whose whole purpose
+        // is handing out the credential the rotation just replaced (the lost-phone case).
+        if (await SessionCutoff.IsCutOffNowAsync(db, ctx.User, ct)) return Results.Unauthorized();
 
         // A member the club has barred gets no secret, with the same two codes the booking and
         // QR routes answer — one refusal, one sentence, wherever it surfaces.

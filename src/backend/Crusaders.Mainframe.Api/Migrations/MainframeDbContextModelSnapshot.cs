@@ -1031,6 +1031,39 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.ToTable("device_pay_fors", (string)null);
                 });
 
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.DevicePayForQuote", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BookingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Nonce")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset>("QuotedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("QuotedAt");
+
+                    b.HasIndex("TenantId", "DeviceId", "Nonce")
+                        .IsUnique();
+
+                    b.ToTable("device_pay_for_quotes", (string)null);
+                });
+
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.EnrolledTemplate", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1179,6 +1212,10 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<string>("ClaimKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<Guid?>("DeviceId")
                         .HasColumnType("uuid");
@@ -1563,6 +1600,9 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.Property<string>("PinHash")
                         .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("SessionsValidAfter")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Status")
                         .IsRequired()

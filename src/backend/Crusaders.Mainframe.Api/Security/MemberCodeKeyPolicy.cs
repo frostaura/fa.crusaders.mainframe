@@ -18,10 +18,12 @@ public sealed record MemberCodeMasterKey(byte[] Bytes, bool IsDevelopmentKey);
 ///
 /// <para>
 /// <b>Production refuses to start</b> when the key is absent, shorter than 32 bytes, not base64,
-/// or a known placeholder: a server that came up with a guessable master key would look entirely
-/// healthy while every phone in the club showed codes anybody could compute. Development and the
-/// test host get a key derived from a sentence that says it is a development key, so a local run
-/// works with nothing configured and can never be mistaken for a deployment.
+/// a known placeholder, a key published in this repository, or a key too regular to be random: a
+/// server that came up with a guessable master key would look entirely healthy while every phone
+/// in the club showed codes anybody could compute. Development gets a key derived from a sentence
+/// that says it is a development key, so a local run works with nothing configured and can never
+/// be mistaken for a deployment. Everything else — Production, and the test host, which injects
+/// a random key of its own — is held to the full rule.
 /// </para>
 ///
 /// <para>
@@ -40,17 +42,39 @@ public static class MemberCodeKeyPolicy
         "DEV_ONLY", "CHANGE-ME", "CHANGEME", "REPLACE_WITH", "REPLACE-WITH",
     ];
 
+    /// <summary>A key must hold at least this many distinct byte values — 32 random bytes hold about 29.</summary>
+    public const int MinimumDistinctBytes = 16;
+
     /// <summary>
     /// The published development key: SHA-256 of a sentence saying so. It authenticates nothing
-    /// anywhere, and it is refused outside Development and Testing whatever the configuration says.
+    /// anywhere, and it is refused outside Development whatever the configuration says.
     /// </summary>
     public static readonly MemberCodeMasterKey Development = new(
         SHA256.HashData(Encoding.ASCII.GetBytes("crusaders-mainframe DEVELOPMENT member-code master key - never deploy")),
         IsDevelopmentKey: true);
 
-    /// <summary>Resolves from configuration and environment. Throws — refusing to start — where §3.1 says to.</summary>
+    /// <summary>
+    /// Keys that are PUBLISHED — in this repository, byte for byte — and so compute every
+    /// member's code for anybody who reads the source: the development key, the fixed key the
+    /// test host once ran with, and the corpus's own fixture master key (<c>derivation.json</c>
+    /// <c>fixture_master_key_hex</c>, pinned by a test so the two cannot drift). Base64 of any
+    /// of them passes every length rule, which is exactly why they are refused by value.
+    /// </summary>
+    private static readonly byte[][] PublishedKeys =
+    [
+        Development.Bytes,
+        Encoding.ASCII.GetBytes("test-only member-code master key, 48 bytes long!"),
+        Convert.FromHexString("37ca19aed84cf9a6d932662805392b786b94110ed6324c676deb3f2e619baceb"),
+    ];
+
+    /// <summary>
+    /// Resolves from configuration and environment. Throws — refusing to start — where §3.1 says
+    /// to. <b>Lenient only in Development</b>: the test host is not a deployment, but a rule it is
+    /// exempt from is a rule no test ever proves, so it injects a random key of its own and runs
+    /// under the same policy Production does.
+    /// </summary>
     public static MemberCodeMasterKey Resolve(IConfiguration config, IHostEnvironment environment) =>
-        Resolve(config[ConfigKey], environment.IsDevelopment() || environment.IsEnvironment("Testing"));
+        Resolve(config[ConfigKey], environment.IsDevelopment());
 
     public static MemberCodeMasterKey Resolve(string? configured, bool lenient)
     {
@@ -89,6 +113,24 @@ public static class MemberCodeKeyPolicy
             throw new InvalidOperationException(
                 $"MemberCodes:MasterKey is {bytes.Length} bytes; it must be {MinimumBytes} to {MaximumBytes}. "
                 + "Generate it with `openssl rand -base64 48`.");
+        }
+
+        if (PublishedKeys.Any(k => CryptographicOperations.FixedTimeEquals(k, bytes)))
+        {
+            if (lenient) return Development;
+            throw new InvalidOperationException(
+                "MemberCodes:MasterKey is a key published in this repository (the development, test or corpus "
+                + "fixture key). Anybody with the source could compute every member's code. Set "
+                + "MemberCodes__MasterKey to `openssl rand -base64 48`.");
+        }
+
+        if (bytes.Distinct().Count() < MinimumDistinctBytes)
+        {
+            if (lenient) return Development;
+            throw new InvalidOperationException(
+                $"MemberCodes:MasterKey holds fewer than {MinimumDistinctBytes} distinct byte values — it is not "
+                + "random (a repeated byte, a counter, a short phrase padded out). Set MemberCodes__MasterKey to "
+                + "`openssl rand -base64 48`.");
         }
 
         return new MemberCodeMasterKey(bytes, IsDevelopmentKey: false);

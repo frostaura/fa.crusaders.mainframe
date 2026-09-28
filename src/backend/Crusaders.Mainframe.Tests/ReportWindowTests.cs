@@ -464,6 +464,7 @@ public sealed class ReportWindowTests
             new("tenant_id", seed.TenantId.ToString()),
             new("tenant_slug", seed.Slug),
             new("purpose", "access"),
+            new(Crusaders.Mainframe.Api.Security.SessionCutoff.IssuedAtMsClaim, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString()),
         };
         if (admin) claims.Add(new Claim(ClaimTypes.Role, "admin"));
         return new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(

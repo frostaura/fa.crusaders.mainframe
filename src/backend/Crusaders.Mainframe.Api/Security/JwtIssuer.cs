@@ -86,6 +86,9 @@ public sealed class JwtIssuer : IJwtIssuer
             new("tenant_id", tenantId.ToString()),
             new("tenant_slug", tenantSlug),
             new("purpose", purpose),
+            // Milliseconds, so a rotation's cut-off can tell a token re-issued in the same
+            // second from one minted before it — see SessionCutoff.
+            new(SessionCutoff.IssuedAtMsClaim, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(System.Globalization.CultureInfo.InvariantCulture)),
         };
         foreach (var role in roles) claims.Add(new Claim(ClaimTypes.Role, role));
 

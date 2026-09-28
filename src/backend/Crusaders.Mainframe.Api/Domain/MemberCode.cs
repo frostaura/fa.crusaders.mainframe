@@ -70,6 +70,18 @@ public sealed class MemberCodeUse : ITenantScoped
 
     /// <summary>What happened: <c>activate</c>, <c>gate</c>, <c>walkup</c>, <c>pay_for</c>, <c>activation_event</c>, <c>gate_open_event</c>.</summary>
     public required string Kind { get; set; }
+
+    /// <summary>
+    /// What made the claim, when the claimant has an idempotency key of its own: a walk-up's or a
+    /// pay-for's nonce. A second claim by the SAME device carrying the SAME key is the same act
+    /// retried, not a second use, so it re-enters this row instead of being refused
+    /// <c>code_used</c> — two identical retries in flight together used to answer one of them
+    /// "code used" for a purchase that had gone through. Null where the path has no such key.
+    /// </summary>
+    public string? ClaimKey { get; set; }
+
+    /// <summary>Longest <see cref="ClaimKey"/> accepted — a nonce is at most 32 characters.</summary>
+    public const int ClaimKeyMaxLength = 64;
 }
 
 /// <summary>The three things a code can be used for once each.</summary>
@@ -124,4 +136,27 @@ public sealed class DevicePayFor : ITenantScoped
     public bool Paid { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// One D10 pay-for QUOTE (<c>docs/specs/member-code.md</c> §9, §13): which booking the box's
+/// nonce was quoted for. A quote moves no money and writes no use; this row exists so the
+/// CONFIRM can refuse to pay for a different booking than the one the glass asked about — a
+/// quote at 17:59 for the 17:00 booking confirmed at 18:00 would otherwise have paid for the
+/// 18:00 member's court at the old member's price. Keyed like <see cref="DevicePayFor"/>, on
+/// (tenant, device, nonce); a re-quote under the same nonce re-points it. Purged after a day.
+/// </summary>
+public sealed class DevicePayForQuote : ITenantScoped
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public Guid DeviceId { get; set; }
+
+    /// <summary>The box's nonce, shared by the quote and its confirm.</summary>
+    public required string Nonce { get; set; }
+
+    /// <summary>The booking the glass asked the payer about.</summary>
+    public Guid BookingId { get; set; }
+
+    public DateTimeOffset QuotedAt { get; set; } = DateTimeOffset.UtcNow;
 }

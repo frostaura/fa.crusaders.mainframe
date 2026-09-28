@@ -15,7 +15,9 @@ namespace Crusaders.Mainframe.Api.Services;
 /// <b>The phase moves forward on its own and never back.</b> <c>legacy → v1</c> the first time
 /// every enabled board reports <c>codes:m1</c> on its latest heartbeat (and at least one board
 /// exists); <c>v1 → v1_only</c> once the club's cut-off delay has passed since the cut-over. Only an
-/// administrator moves it backwards, through the settings PUT. The transition is written with a
+/// administrator moves it backwards, through the settings PUT — and a backward move sets a HOLD
+/// the automatic moves respect until an administrator moves forward again (see
+/// <see cref="MemberCodeSettings.HoldKey"/>). The transition is written with a
 /// conditional JSON merge rather than a read-modify-write of the whole settings document, so a
 /// heartbeat and an admin saving the settings page in the same second cannot erase each other.
 /// </para>
@@ -67,6 +69,10 @@ public sealed class MemberCodeRollout
             await AdminNotices.RaiseAsync(_db, _tenant.TenantId, AdminNotices.CodesCapabilityLost(device, phase), now, ct);
         }
 
+        // An administrator rolled the club back and has not moved it forward since: the automatic
+        // road is closed until they do. See MemberCodeSettings.HoldKey for the incident.
+        if (settings.MemberCodeManualHold) return false;
+
         if (phase == MemberCodeSettings.Legacy && await EveryEnabledBoardSpeaksAsync(ct))
         {
             return await MoveAsync(MemberCodeSettings.Legacy, MemberCodeSettings.V1, MemberCodeSettings.CutoverAtKey, now, ct);
@@ -82,14 +88,46 @@ public sealed class MemberCodeRollout
         return false;
     }
 
-    /// <summary>Every enabled board of the club reports <c>codes:m1</c>, and there is at least one.</summary>
+    /// <summary>
+    /// Every enabled, ACKNOWLEDGED board of the club reports <c>codes:m1</c>, and there is at
+    /// least one.
+    ///
+    /// <para>
+    /// <b>Acknowledged only</b> — a court box an admin has acknowledged, a door with a
+    /// <c>gate_key</c> (<see cref="Endpoints.MemberCodeHeartbeat.Acknowledged"/>, the same test that
+    /// decides who is sent keys). An auto-registered board is any device that presented the club's
+    /// key and a MAC nobody has vouched for: counted, a spare on a bench running old firmware
+    /// blocked the whole club's cut-over forever, and — the other way round — a stranger flashing
+    /// <c>codes:m1</c> onto a board could be the vote that tipped it. A board nobody has
+    /// acknowledged is served no keys and no roster players, so it has no say in the phase either.
+    /// </para>
+    /// </summary>
     public async Task<bool> EveryEnabledBoardSpeaksAsync(CancellationToken ct)
     {
-        var boards = await _db.Devices.AsNoTracking()
-            .Where(d => d.Enabled)
-            .Select(d => d.Capabilities)
-            .ToListAsync(ct);
-        return boards.Count > 0 && boards.All(c => c.Contains(MemberCodeWire.Capability));
+        var boards = (await _db.Devices.AsNoTracking().Where(d => d.Enabled).ToListAsync(ct))
+            .Where(Endpoints.MemberCodeHeartbeat.Acknowledged)
+            .ToList();
+        return boards.Count > 0 && boards.All(d => d.SpeaksMemberCodes);
+    }
+
+    /// <summary>
+    /// Ends every legacy access code at the cut-off (§8 step 4): <c>v1_only</c> refuses them on
+    /// every path already, and this makes the table say so too, so nothing that reads a code row
+    /// directly can find a live one. The expiry is the cut-off INSTANT, not "now or earlier", so
+    /// offline evidence of a scan made before the cut-off still resolves at its own time.
+    /// </summary>
+    public static async Task ExpireLegacyCodesAsync(MainframeDbContext db, DateTimeOffset at, CancellationToken ct)
+    {
+        var instant = at.Storable();
+        if (db.Database.IsRelational())
+        {
+            await db.AccessCodes.Where(c => c.ExpiresAt > instant)
+                .ExecuteUpdateAsync(u => u.SetProperty(c => c.ExpiresAt, instant), ct);
+            return;
+        }
+
+        foreach (var code in await db.AccessCodes.Where(c => c.ExpiresAt > instant).ToListAsync(ct)) code.ExpiresAt = instant;
+        await db.SaveChangesAsync(ct);
     }
 
     private async Task<bool> MoveAsync(string from, string to, string stampKey, DateTimeOffset now, CancellationToken ct)
@@ -108,6 +146,7 @@ public sealed class MemberCodeRollout
             DetailsJson = JsonSerializer.Serialize(new { from, to, at = now, automatic = true }),
         });
         await _db.SaveChangesAsync(ct);
+        if (to == MemberCodeSettings.V1Only) await ExpireLegacyCodesAsync(_db, now, ct);
         return true;
     }
 
@@ -119,6 +158,7 @@ public sealed class MemberCodeRollout
                SET "SettingsJson" = "SettingsJson" || {patch}::jsonb, "UpdatedAt" = now()
              WHERE "TenantId" = {_tenant.TenantId}
                AND COALESCE("SettingsJson" ->> {MemberCodeSettings.PhaseKey}, {MemberCodeSettings.Legacy}) = {from}
+               AND ("SettingsJson" -> {MemberCodeSettings.HoldKey}) IS DISTINCT FROM 'true'::jsonb
             """, ct);
         return rows == 1;
     }
@@ -130,6 +170,7 @@ public sealed class MemberCodeRollout
         var doc = JsonNode.Parse(row.SettingsJson)?.AsObject() ?? [];
         var current = doc[MemberCodeSettings.PhaseKey]?.GetValue<string>() ?? MemberCodeSettings.Legacy;
         if (current != from) return false;
+        if (doc[MemberCodeSettings.HoldKey] is JsonValue hold && hold.TryGetValue<bool>(out var held) && held) return false;
         doc[MemberCodeSettings.PhaseKey] = to;
         doc[stampKey] = stamp;
         row.SettingsJson = doc.ToJsonString();

@@ -42,5 +42,14 @@ public sealed class User : ITenantScoped
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastLoginAt { get; set; }
 
+    /// <summary>
+    /// Every token minted before this instant is refused (member-code §10, §13): stamped by each
+    /// rotation — an admin's code reset, a password change or reset, a suspension, sign-out
+    /// everywhere — so a lost phone's open session cannot simply re-enrol and fetch the new
+    /// secret. Null for an account never rotated. Whole milliseconds; see
+    /// <see cref="Security.SessionCutoff"/>.
+    /// </summary>
+    public DateTimeOffset? SessionsValidAfter { get; set; }
+
     public Membership? Membership { get; set; }
 }

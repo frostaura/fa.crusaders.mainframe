@@ -20,9 +20,10 @@ public static class MemberCodeIdentity
     /// Null on every failure, one answer for all of them.
     /// </summary>
     public static async Task<(ResolvedAccessCode? Resolved, MemberCodeMatch? Match)> ResolveAsync(
-        AccessCodeService codes, MemberCodeService memberCodes, string? token, long? scanAgeMs,
+        AccessCodeService codes, MemberCodeService memberCodes, ScannedCode scan,
         TenantSettingsView settings, DateTimeOffset receivedAt, CancellationToken ct)
     {
+        var (token, scanAgeMs) = scan;
         if (MemberCodeMath.IsV1Shaped(token?.Trim()))
         {
             var match = await memberCodes.VerifyAsync(token!.Trim(), receivedAt, scanAgeMs, settings, ct);
@@ -35,3 +36,6 @@ public static class MemberCodeIdentity
         return (await codes.ResolveAsync(token, receivedAt, ct), null);
     }
 }
+
+/// <summary>What a device scanned, and how long ago it read it (<c>scan_age_ms</c>, §4.2; null means now).</summary>
+public sealed record ScannedCode(string? Token, long? ScanAgeMs);

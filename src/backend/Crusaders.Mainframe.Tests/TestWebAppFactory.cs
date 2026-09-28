@@ -86,9 +86,14 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
     /// </summary>
     public string? EnvironmentName { get; init; }
 
-    /// <summary>The member-code master key every factory host runs with — test-only, never deployed.</summary>
+    /// <summary>
+    /// The member-code master key every factory host runs with: 48 RANDOM bytes, drawn once per
+    /// test process. Random rather than a committed constant because the host runs under the same
+    /// key policy Production does (only Development is lenient) and that policy refuses every key
+    /// published in this repository — the constant this used to be among them.
+    /// </summary>
     public static readonly string TestMemberCodeMasterKey =
-        Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes("test-only member-code master key, 48 bytes long!"));
+        Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(48));
 
     private static readonly Dictionary<string, int> DefaultRateLimits = new()
     {

@@ -110,10 +110,12 @@ public static class MeProfileEndpoints
             if (req.NewPassword.Length < 8) return Results.BadRequest(new { error = "password_too_short" });
 
             var userId = ctx.User.Id() ?? Guid.Empty;
-            var result = await auth.ChangePasswordAsync(userId, req.CurrentPassword, req.NewPassword, ct);
+            // The change ends every session minted before it, this one included (member-code
+            // §10); `access_token` is this session's replacement and the client must adopt it.
+            var (result, reissued) = await auth.ChangePasswordAndReissueAsync(userId, req.CurrentPassword, req.NewPassword, ct);
             return result switch
             {
-                PasswordChangeResult.Ok => Results.Ok(new { changed = true }),
+                PasswordChangeResult.Ok => Results.Ok(new { changed = true, access_token = reissued }),
                 PasswordChangeResult.CurrentPasswordWrong => Results.BadRequest(new { error = "current_password_incorrect" }),
                 PasswordChangeResult.Unchanged => Results.BadRequest(new { error = "password_unchanged" }),
                 PasswordChangeResult.NoPasswordSet => Results.BadRequest(new { error = "no_password_set" }),

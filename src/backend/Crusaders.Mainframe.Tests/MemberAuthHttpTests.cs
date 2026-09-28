@@ -74,6 +74,7 @@ public sealed class MemberAuthHttpTests
             new("tenant_id", tenantId.ToString()),
             new("tenant_slug", slug),
             new("purpose", "access"),
+            new(Crusaders.Mainframe.Api.Security.SessionCutoff.IssuedAtMsClaim, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString()),
         };
         if (role is not null) claims.Add(new Claim(ClaimTypes.Role, role));
 
@@ -274,6 +275,12 @@ public sealed class MemberAuthHttpTests
 
         var changed = await member.PostAsJsonAsync("/api/v1/me/password", new { currentPassword = tempPassword, newPassword = "ChosenByMe1!" });
         Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
+
+        // The change is a rotation (member-code §10): the token the change was made with is
+        // ended, and the answer carries this session's replacement.
+        Assert.Equal(HttpStatusCode.Unauthorized, (await member.GetAsync("/api/v1/me/profile")).StatusCode);
+        using var changedDoc = JsonDocument.Parse(await changed.Content.ReadAsStringAsync());
+        member.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", changedDoc.RootElement.GetProperty("access_token").GetString());
 
         var afterwards = await member.GetAsync("/api/v1/me/profile");
         Assert.Equal(HttpStatusCode.OK, afterwards.StatusCode);

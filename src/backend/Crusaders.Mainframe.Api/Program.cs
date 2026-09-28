@@ -140,6 +140,18 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                     return;
                 }
 
+                // A rotation ends every session open when it happened (member-code §10): a lost
+                // phone's PWA must not be able to re-enrol and fetch the new generation's secret.
+                // Cached per account for LiveAdminRole's fifteen seconds, and evicted by the
+                // rotation itself, so it bites on the next request here. See SessionCutoff.
+                if (ctx.Principal is { } session
+                    && await ctx.HttpContext.RequestServices.GetRequiredService<SessionCutoff>()
+                        .IsCutOffAsync(session, ctx.HttpContext.RequestServices, ctx.HttpContext.RequestAborted))
+                {
+                    ctx.Fail("This session ended when the account's credentials were rotated.");
+                    return;
+                }
+
                 // The admin role in a token is what was true when it was minted. A demoted admin's
                 // token would otherwise keep every admin route open for the rest of its fifteen
                 // minutes, so the role is checked against the account here — cached, and only for
@@ -323,6 +335,7 @@ builder.Services.AddSingleton<AccessTokenRevocationList>();
 // Singleton, like the revocation list beside it: the cache it keeps is what makes the role
 // check nearly free, and the admin-role endpoint evicts from the same instance it reads.
 builder.Services.AddSingleton<LiveAdminRole>();
+builder.Services.AddSingleton<SessionCutoff>();
 builder.Services.AddScoped<LedgerService>();
 builder.Services.AddScoped<ScheduleService>();
 builder.Services.AddScoped<BookingRules>();
