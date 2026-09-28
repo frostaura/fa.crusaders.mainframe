@@ -15,8 +15,7 @@ namespace Crusaders.Mainframe.Tests;
 /// whether or not anything had been invalidated.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class LiveAdminRoleHttpTests
+public sealed class LiveAdminRoleHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

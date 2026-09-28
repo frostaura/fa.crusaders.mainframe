@@ -24,77 +24,7 @@ namespace Crusaders.Mainframe.Tests;
 /// production boot impossible before this was fixed.
 /// </para>
 /// </summary>
-public sealed class PostgresFixture : IAsyncLifetime
-{
-    private const string EnvVar = "API_BOUNDARY_TEST_CONNECTION_STRING";
-
-    public string? ConnectionString { get; private set; }
-    public bool Available => ConnectionString is not null;
-
-    private string? _databaseName;
-    private string? _adminConnectionString;
-
-    public async Task InitializeAsync()
-    {
-        var configured = Environment.GetEnvironmentVariable(EnvVar);
-
-        // These tests must never silently skip in the job that exists to run them,
-        // but they must skip cleanly everywhere else.
-        //
-        // Keying that on CI=true does not work: GitHub sets it in every job, including
-        // `backend`, which deliberately provisions no Postgres. So the integration job
-        // sets REQUIRE_BOUNDARY_TESTS explicitly — if that is on and the connection
-        // string is missing, the pipeline is broken and should say so.
-        if (string.IsNullOrWhiteSpace(configured))
-        {
-            var required = string.Equals(
-                Environment.GetEnvironmentVariable("REQUIRE_BOUNDARY_TESTS"), "true",
-                StringComparison.OrdinalIgnoreCase);
-
-            if (required)
-            {
-                throw new InvalidOperationException(
-                    $"REQUIRE_BOUNDARY_TESTS is set but {EnvVar} is not. These are the only " +
-                    "tests that exercise real SQL and real migrations — they must not be skipped here.");
-            }
-            return;
-        }
-
-        // Each run gets its own database, so a failed run cannot poison the next.
-        var builder = new NpgsqlConnectionStringBuilder(configured);
-        _adminConnectionString = new NpgsqlConnectionStringBuilder(configured) { Database = "postgres" }.ConnectionString;
-        _databaseName = $"boundary_{Guid.NewGuid():N}";
-
-        await using (var admin = new NpgsqlConnection(_adminConnectionString))
-        {
-            await admin.OpenAsync();
-            await using var cmd = admin.CreateCommand();
-            cmd.CommandText = $"CREATE DATABASE \"{_databaseName}\"";
-            await cmd.ExecuteNonQueryAsync();
-        }
-
-        builder.Database = _databaseName;
-        ConnectionString = builder.ConnectionString;
-    }
-
-    public async Task DisposeAsync()
-    {
-        if (_databaseName is null || _adminConnectionString is null)
-        {
-            return;
-        }
-
-        NpgsqlConnection.ClearAllPools();
-        await using var admin = new NpgsqlConnection(_adminConnectionString);
-        await admin.OpenAsync();
-        await using var cmd = admin.CreateCommand();
-        cmd.CommandText = $"DROP DATABASE IF EXISTS \"{_databaseName}\" WITH (FORCE)";
-        await cmd.ExecuteNonQueryAsync();
-    }
-}
-
-[Collection(HttpTestCollection.Name)]
-public sealed class ApiBoundaryTests
+public sealed class ApiBoundaryTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 
@@ -117,7 +47,11 @@ public sealed class ApiBoundaryTests
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
-        await using var factory = CreateFactory();
+        // An EMPTY database of its own. The class's fixture database is a clone of a template
+        // that is already migrated, so it could not tell a chain that applies from one that was
+        // applied somewhere else.
+        await using var empty = await PostgresDatabases.CreateEmptyAsync();
+        await using var factory = new TestWebAppFactory { ConnectionString = empty.ConnectionString };
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
 

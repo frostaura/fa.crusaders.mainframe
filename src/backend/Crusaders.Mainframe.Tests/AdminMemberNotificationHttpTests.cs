@@ -39,8 +39,7 @@ namespace Crusaders.Mainframe.Tests;
 /// precisely that the row was durable and the answer said otherwise.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminMemberNotificationHttpTests
+public sealed class AdminMemberNotificationHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

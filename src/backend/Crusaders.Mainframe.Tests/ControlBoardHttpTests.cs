@@ -319,8 +319,7 @@ public sealed class CountingCommandInterceptor : DbCommandInterceptor
 /// query per court.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class ControlBoardHttpTests
+public sealed class ControlBoardHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

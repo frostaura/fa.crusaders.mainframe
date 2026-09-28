@@ -28,8 +28,7 @@ namespace Crusaders.Mainframe.Tests;
 /// already named.</i>
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class TraceP3HttpTests
+public sealed class TraceP3HttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

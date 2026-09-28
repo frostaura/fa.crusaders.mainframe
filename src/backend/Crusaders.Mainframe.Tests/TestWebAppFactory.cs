@@ -103,65 +103,85 @@ public class TestWebAppFactory : WebApplicationFactory<Program>
         ["FirmwarePerMinute"] = 100_000,
     };
 
+    // Variables this factory used to SET to configure the app, and a developer shell might
+    // still export. Cleared once, to the same value by every factory, so a host with
+    // ConnectionString == null still means no database — see ConfigureWebHost.
+    private static readonly string[] FormerlyExportedVariables =
+    [
+        "Database__AutoMigrateOnStartup", "Jwt__Secret", "MemberCodes__MasterKey",
+        "ConnectionStrings__DefaultConnection", "Gateway__TrustedProxies", "Gateway__ForwardLimit",
+        "RateLimits__AuthPerMinute", "RateLimits__DevicePerMinute", "RateLimits__GlobalPerMinute",
+        "RateLimits__FirmwarePerMinute",
+    ];
+
+    static TestWebAppFactory()
+    {
+        foreach (var name in FormerlyExportedVariables)
+        {
+            Environment.SetEnvironmentVariable(name, null);
+        }
+
+        // No file watchers on appsettings*.json. Every host otherwise starts its own
+        // reload-on-change watchers, which cost about a third of a warm boot (145 ms -> 95 ms,
+        // measured 2026-09-28) across the thousands of hosts a run boots, and no test edits a
+        // configuration file under a running host. One value for the whole process.
+        Environment.SetEnvironmentVariable("DOTNET_hostBuilder__reloadConfigOnChange", "false");
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        // Program.cs reads builder.Configuration DURING its own execution — the
-        // connection string is captured at AddDbContext registration time. Under the
-        // minimal hosting model that happens before ConfigureAppConfiguration hooks
-        // fire, so layering config here does not reach it. Environment variables do,
-        // because WebApplication.CreateBuilder reads them when it builds.
-        Environment.SetEnvironmentVariable("Database__AutoMigrateOnStartup", ConnectionString is null ? "false" : "true");
-        Environment.SetEnvironmentVariable("Jwt__Secret", "test-only-signing-key-not-used-in-any-real-environment");
+        // Program.cs reads builder.Configuration DURING its own execution — the connection
+        // string is captured at AddDbContext registration time. Under the minimal hosting model
+        // that happens before ConfigureAppConfiguration hooks fire, so config layered on THERE
+        // does not reach it.
+        //
+        // UseSetting does. WebApplicationFactory hands these to WebApplication.CreateBuilder as
+        // host settings, applied before Program.cs's first read and outranking appsettings.json
+        // and environment variables (verified 2026-09-28: a UseSetting connection string is the
+        // one the registered DbContext carries). And they are PER HOST.
+        //
+        // This used to be done with Environment.SetEnvironmentVariable, which is process-wide:
+        // two factories booting at once raced, and the loser silently got the other's
+        // connection string, rate limits or proxy trust. That race is why every Postgres-backed
+        // class once ran in ONE serial xUnit collection (25-43 minutes). Nothing here may go
+        // back to an environment variable; TestWebAppFactoryIsolationTests boots factories
+        // concurrently and reads back what each one got.
+        //
+        // A null property sets nothing, so appsettings.json's value stands: no connection string
+        // override means the placeholder, which with AutoMigrateOnStartup off is never dialled.
+        builder.UseSetting("Database:AutoMigrateOnStartup", ConnectionString is null ? "false" : "true");
+        builder.UseSetting("Jwt:Secret", "test-only-signing-key-not-used-in-any-real-environment");
         // A REAL-shaped member-code master key (member-code §3.1), because a factory built with
         // EnvironmentName = "Production" must start: Production refuses the development key and
-        // every placeholder. Forty-eight bytes that say what they are, base64.
-        Environment.SetEnvironmentVariable("MemberCodes__MasterKey", TestMemberCodeMasterKey);
-        // Set on both branches, not just when present. These variables are process-wide
-        // and outlive the factory that set them: leaving a previous factory's value in
-        // place gave a deliberately database-free host a live connection string, so a
-        // test that should have failed fast on "no database" instead reached Postgres
-        // and failed somewhere unrecognisable. Clearing it is what makes ConnectionString
-        // == null actually mean no database.
-        Environment.SetEnvironmentVariable("ConnectionStrings__DefaultConnection", ConnectionString);
+        // every placeholder.
+        builder.UseSetting("MemberCodes:MasterKey", TestMemberCodeMasterKey);
 
-        // Same constraint as the connection string: Program.cs reads the gateway trust
-        // configuration while it builds, before ConfigureAppConfiguration hooks fire.
-        // Cleared rather than left when null, for the reason spelled out above — these
-        // variables are process-wide and outlive the factory that set them.
-        Environment.SetEnvironmentVariable("Gateway__TrustedProxies", TrustedProxies);
-        Environment.SetEnvironmentVariable("Gateway__ForwardLimit", ForwardLimit?.ToString());
+        if (ConnectionString is not null)
+        {
+            builder.UseSetting("ConnectionStrings:DefaultConnection", ConnectionString);
+        }
 
-        // Read by Program.cs at limiter-registration time, so this has the same
-        // must-be-an-environment-variable constraint as the connection string above.
+        // Program.cs reads the gateway trust configuration while it builds.
+        if (TrustedProxies is not null)
+        {
+            builder.UseSetting("Gateway:TrustedProxies", TrustedProxies);
+        }
+
+        if (ForwardLimit is { } forwardLimit)
+        {
+            builder.UseSetting("Gateway:ForwardLimit", forwardLimit.ToString());
+        }
+
+        // Read by Program.cs at limiter-registration time.
         foreach (var (key, fallback) in DefaultRateLimits)
         {
             var value = RateLimits is not null && RateLimits.TryGetValue(key, out var v) ? v : fallback;
-            Environment.SetEnvironmentVariable($"RateLimits__{key}", value.ToString());
+            builder.UseSetting($"RateLimits:{key}", value.ToString());
         }
 
         // "Testing" rather than "Development": Program.cs runs the Seeder under
         // IsDevelopment(), and the Seeder talks to the database.
         builder.UseEnvironment(EnvironmentName ?? "Testing");
-
-        builder.ConfigureAppConfiguration((_, config) =>
-        {
-            var settings = new Dictionary<string, string?>
-            {
-                // Off by default: most tests do not need a database, and the
-                // `backend` CI job does not provision one.
-                ["Database:AutoMigrateOnStartup"] = ConnectionString is null ? "false" : "true",
-                // Program.cs reads this at registration time, so it must be in place
-                // before the host is built rather than layered on afterwards.
-                ["Jwt:Secret"] = "test-only-signing-key-not-used-in-any-real-environment",
-            };
-
-            if (ConnectionString is not null)
-            {
-                settings["ConnectionStrings:DefaultConnection"] = ConnectionString;
-            }
-
-            config.AddInMemoryCollection(settings);
-        });
 
         builder.ConfigureServices(services =>
         {

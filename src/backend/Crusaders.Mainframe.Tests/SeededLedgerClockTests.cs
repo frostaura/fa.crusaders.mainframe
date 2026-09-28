@@ -25,8 +25,7 @@ namespace Crusaders.Mainframe.Tests;
 /// and does not go red twice a year in a club that keeps DST.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class SeededLedgerClockTests
+public sealed class SeededLedgerClockTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

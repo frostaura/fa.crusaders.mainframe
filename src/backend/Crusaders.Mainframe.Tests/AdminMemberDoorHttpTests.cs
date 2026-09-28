@@ -24,8 +24,7 @@ namespace Crusaders.Mainframe.Tests;
 /// question by parameter, answers exactly what it answered before.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminMemberDoorHttpTests
+public sealed class AdminMemberDoorHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

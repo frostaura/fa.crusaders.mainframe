@@ -27,8 +27,7 @@ namespace Crusaders.Mainframe.Tests;
 /// what stops a restart inside the token's lifetime from resurrecting a signed-out credential.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class SessionRevocationHttpTests
+public sealed class SessionRevocationHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

@@ -17,8 +17,7 @@ namespace Crusaders.Mainframe.Tests;
 /// reverted is a deploy that cannot be rolled back, and nothing else in the suite runs one.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class UserPreferencesMigrationTests
+public sealed class UserPreferencesMigrationTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 
@@ -57,7 +56,10 @@ public sealed class UserPreferencesMigrationTests
         }
         finally
         {
-            NpgsqlConnection.ClearAllPools();
+            // This database's pool only: ClearAllPools also closes the idle connections of every
+            // class running in parallel beside this one.
+            NpgsqlConnection.ClearPool(new NpgsqlConnection(
+                new NpgsqlConnectionStringBuilder(_pg.ConnectionString) { Database = name }.ConnectionString));
             await ExecAsync(admin, $"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)");
         }
     }

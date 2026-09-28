@@ -33,8 +33,7 @@ namespace Crusaders.Mainframe.Tests;
 /// with a charge behind it would be the same defect wearing a better response.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class BookingMembershipGateTests
+public sealed class BookingMembershipGateTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

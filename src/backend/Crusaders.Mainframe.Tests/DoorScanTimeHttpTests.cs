@@ -27,8 +27,7 @@ namespace Crusaders.Mainframe.Tests;
 /// been deleted.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class DoorScanTimeHttpTests
+public sealed class DoorScanTimeHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

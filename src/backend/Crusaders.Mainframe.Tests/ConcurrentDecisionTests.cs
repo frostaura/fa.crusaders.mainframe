@@ -40,8 +40,7 @@ namespace Crusaders.Mainframe.Tests;
 /// exist to catch. Written against it, they would have passed while proving the opposite.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class ConcurrentDecisionTests
+public sealed class ConcurrentDecisionTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

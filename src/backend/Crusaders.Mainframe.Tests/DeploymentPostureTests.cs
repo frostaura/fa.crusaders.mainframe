@@ -21,8 +21,7 @@ namespace Crusaders.Mainframe.Tests;
 /// obvious file" and that outcome.
 /// </para>
 /// </remarks>
-[Collection(HttpTestCollection.Name)]
-public sealed class DeploymentPostureTests
+public sealed class DeploymentPostureTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

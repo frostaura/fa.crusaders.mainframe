@@ -23,8 +23,7 @@ namespace Crusaders.Mainframe.Tests;
 /// member lookup.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminMemberTraceHttpTests
+public sealed class AdminMemberTraceHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

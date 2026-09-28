@@ -22,8 +22,7 @@ namespace Crusaders.Mainframe.Tests;
 /// about the rule that deletes rows in production.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class DeviceErrorRetentionTests
+public sealed class DeviceErrorRetentionTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

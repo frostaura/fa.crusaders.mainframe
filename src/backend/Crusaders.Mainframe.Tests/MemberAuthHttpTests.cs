@@ -25,8 +25,7 @@ namespace Crusaders.Mainframe.Tests;
 /// in-memory provider enforces an index at all.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class MemberAuthHttpTests
+public sealed class MemberAuthHttpTests : IClassFixture<PostgresFixture>
 {
     private const string Secret = "test-only-signing-key-not-used-in-any-real-environment";
 

@@ -28,8 +28,7 @@ namespace Crusaders.Mainframe.Tests;
 /// before this route, left a club half-shut on a failure with nothing saying which half.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminDoorFleetHttpTests
+public sealed class AdminDoorFleetHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

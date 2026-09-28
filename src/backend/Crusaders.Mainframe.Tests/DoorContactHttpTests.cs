@@ -31,8 +31,7 @@ namespace Crusaders.Mainframe.Tests;
 /// into an account oracle.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class DoorContactHttpTests
+public sealed class DoorContactHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

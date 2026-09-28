@@ -156,8 +156,7 @@ public sealed record ErrorRow
 /// is one row whose count climbs</b> rather than four hundred rows nobody scrolls past.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class MonitoringErrorsHttpTests
+public sealed class MonitoringErrorsHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 
@@ -773,8 +772,7 @@ public sealed class MonitoringErrorsHttpTests
 /// selected is a summary that changes when somebody clicks.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class MonitoringSummaryHttpTests
+public sealed class MonitoringSummaryHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 
@@ -954,8 +952,7 @@ public sealed class MonitoringSummaryHttpTests
 /// never all-or-nothing: the honest answer to a list of checkboxes is a list of outcomes.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class MonitoringResolveHttpTests
+public sealed class MonitoringResolveHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

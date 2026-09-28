@@ -26,8 +26,7 @@ namespace Crusaders.Mainframe.Tests;
 /// is about the wire, the refusals, the conflict list and the rows on disk.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminScheduleHttpTests
+public sealed class AdminScheduleHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

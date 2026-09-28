@@ -14,8 +14,7 @@ namespace Crusaders.Mainframe.Tests;
 /// table and its classes, window edges, cross-tenant isolation of the new tables, and IDOR on the
 /// admin reset. Pay-for, the heartbeat and the forgery path are in the sibling classes.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class MemberCodeHttpTests(PostgresFixture pg)
+public sealed class MemberCodeHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
     internal const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 

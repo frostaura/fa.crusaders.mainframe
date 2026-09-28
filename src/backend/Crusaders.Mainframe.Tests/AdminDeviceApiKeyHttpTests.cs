@@ -23,8 +23,7 @@ namespace Crusaders.Mainframe.Tests;
 /// claim code and an LCD ceremony to recover from.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminDeviceApiKeyHttpTests
+public sealed class AdminDeviceApiKeyHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

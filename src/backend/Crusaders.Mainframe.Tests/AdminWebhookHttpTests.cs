@@ -34,8 +34,7 @@ namespace Crusaders.Mainframe.Tests;
 /// are the contract that broke.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminWebhookHttpTests
+public sealed class AdminWebhookHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

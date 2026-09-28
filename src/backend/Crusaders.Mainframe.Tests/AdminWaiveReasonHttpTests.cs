@@ -33,8 +33,7 @@ namespace Crusaders.Mainframe.Tests;
 /// while demonstrating the failure it was meant to catch (<c>memory/gotchas.md</c>).
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminWaiveReasonHttpTests
+public sealed class AdminWaiveReasonHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

@@ -21,8 +21,7 @@ namespace Crusaders.Mainframe.Tests;
 /// about whether the batch is safe.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminBulkBookingHttpTests
+public sealed class AdminBulkBookingHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

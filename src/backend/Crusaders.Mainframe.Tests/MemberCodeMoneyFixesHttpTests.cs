@@ -18,8 +18,7 @@ namespace Crusaders.Mainframe.Tests;
 /// a confirm paying for a booking the glass never asked about, and identical walk-up retries in
 /// flight together.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg)
+public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
     private static async Task<(HttpStatusCode Status, JsonElement Body)> SendAsync(HttpClient device, HttpRequestMessage req)
     {

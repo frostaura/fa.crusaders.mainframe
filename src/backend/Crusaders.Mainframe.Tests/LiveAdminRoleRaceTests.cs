@@ -22,8 +22,7 @@ namespace Crusaders.Mainframe.Tests;
 /// write, and only a real command pipeline has that point.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class LiveAdminRoleRaceTests
+public sealed class LiveAdminRoleRaceTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

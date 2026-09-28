@@ -12,8 +12,7 @@ namespace Crusaders.Mainframe.Tests;
 /// the tenant filter and the Guid ordering are all the database's, and the in-memory provider
 /// would prove the loop runs and nothing about the order it runs in.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminMemberDetailHttpTests
+public sealed class AdminMemberDetailHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

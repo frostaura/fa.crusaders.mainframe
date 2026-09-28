@@ -21,8 +21,7 @@ namespace Crusaders.Mainframe.Tests;
 /// opposite of what it claims).
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class PayerLockPublishTests
+public sealed class PayerLockPublishTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

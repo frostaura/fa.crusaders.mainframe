@@ -19,14 +19,13 @@ namespace Crusaders.Mainframe.Tests;
 /// and every one of them across two clubs in one database.
 ///
 /// <para>
-/// <b>Every mail assertion is scoped to the club under test.</b> The tier shares one database,
-/// and a delivery pass claims whatever is due in it — including another class's club's notices,
+/// <b>Every mail assertion is scoped to the club under test.</b> Every test in this class shares
+/// its database, and a delivery pass claims whatever is due in it — including another test's club's notices,
 /// which then land in THIS test's mail stub. Counting them would make a test's verdict depend on
 /// what ran before it.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminNotificationHttpTests
+public sealed class AdminNotificationHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

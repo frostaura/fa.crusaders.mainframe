@@ -31,8 +31,7 @@ namespace Crusaders.Mainframe.Tests;
 /// <c>from_invalid</c> has always carried.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class DoorLogRangeHttpTests
+public sealed class DoorLogRangeHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

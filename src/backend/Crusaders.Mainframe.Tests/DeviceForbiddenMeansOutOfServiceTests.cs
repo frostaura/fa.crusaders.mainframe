@@ -45,8 +45,7 @@ namespace Crusaders.Mainframe.Tests;
 /// provoke — rather than asserting one example.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class DeviceForbiddenMeansOutOfServiceTests
+public sealed class DeviceForbiddenMeansOutOfServiceTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

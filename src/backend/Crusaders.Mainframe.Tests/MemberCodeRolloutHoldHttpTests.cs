@@ -12,8 +12,7 @@ namespace Crusaders.Mainframe.Tests;
 /// §13): a backward move sets a hold the automatic cut-over respects until an administrator moves
 /// forward again; and only ACKNOWLEDGED boards vote on the cut-over.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class MemberCodeRolloutHoldHttpTests(PostgresFixture pg)
+public sealed class MemberCodeRolloutHoldHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
     private static async Task BeatBothAsync(HttpClient device, MemberCodeClub club)
     {

@@ -28,8 +28,7 @@ namespace Crusaders.Mainframe.Tests;
 /// group would pass that defect (<c>memory/gotchas.md</c>, "green because of its FIXTURE").
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminGodModeHttpTests
+public sealed class AdminGodModeHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

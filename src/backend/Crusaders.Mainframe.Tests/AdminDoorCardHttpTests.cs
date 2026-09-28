@@ -29,8 +29,7 @@ namespace Crusaders.Mainframe.Tests;
 /// thing an admin who shut one door individually must be able to rely on.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminDoorCardHttpTests
+public sealed class AdminDoorCardHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

@@ -29,8 +29,7 @@ namespace Crusaders.Mainframe.Tests;
 /// <c>court</c> the relay when the fault is about one.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class DeviceFaultIngestHttpTests
+public sealed class DeviceFaultIngestHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

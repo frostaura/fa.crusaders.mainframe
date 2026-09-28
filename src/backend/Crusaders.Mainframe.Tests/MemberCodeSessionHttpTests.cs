@@ -13,8 +13,7 @@ namespace Crusaders.Mainframe.Tests;
 /// must not be able to re-enrol and fetch the new secret. A member changing their own password
 /// keeps the session they are in (a fresh token is handed back); sign-out-everywhere ends them all.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class MemberCodeSessionHttpTests(PostgresFixture pg)
+public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
     [SkippableFact]
     public async Task A_lost_phone_is_signed_out_by_the_desks_reset_cannot_enrol_and_its_old_codes_are_refused()

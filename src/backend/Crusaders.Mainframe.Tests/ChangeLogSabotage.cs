@@ -12,8 +12,8 @@ namespace Crusaders.Mainframe.Tests;
 /// <b>What it is for:</b> proving that a record and the change it records are one unit of work.
 /// A green happy path cannot tell "flushed together" from "flushed one after the other" — both
 /// leave both rows. Only a failure of the SECOND write shows whether the first one stayed. The
-/// trigger is scoped to one tenant and one action prefix, because the whole Postgres tier shares
-/// one database and a sibling test must never see its inserts refused.
+/// trigger is scoped to one tenant and one action prefix, because every test in a class shares
+/// that class's database and a sibling test must never see its inserts refused.
 /// </para>
 /// </summary>
 public sealed class ChangeLogSabotage : IAsyncDisposable

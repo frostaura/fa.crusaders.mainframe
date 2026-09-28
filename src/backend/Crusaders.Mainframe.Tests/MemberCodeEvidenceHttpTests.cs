@@ -11,8 +11,7 @@ namespace Crusaders.Mainframe.Tests;
 /// fallback of an online act, and a retried upload, flagged as forgery; an old generation honoured
 /// for ever; and a clamped clock turned into a forgery alarm.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg)
+public sealed class MemberCodeEvidenceHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
     private static Task<List<AdminNotification>> ForgeryNoticesAsync(MemberCodeClub club, Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> app) =>
         club.ReadAsync(app, db => db.AdminNotifications.IgnoreQueryFilters()

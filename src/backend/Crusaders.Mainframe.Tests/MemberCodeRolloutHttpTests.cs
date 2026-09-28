@@ -13,8 +13,7 @@ namespace Crusaders.Mainframe.Tests;
 /// rollout surface, and the forgery re-check of uploaded evidence (<c>docs/specs/member-code.md</c>
 /// §5, §7, §8) — over HTTP against Postgres.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg)
+public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
     private static async Task<JsonElement> BeatAsync(HttpClient device, MemberCodeClub club, string mac, bool m1, string? kind = null)
     {

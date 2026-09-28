@@ -19,8 +19,7 @@ namespace Crusaders.Mainframe.Tests;
 /// one after the other", because both leave both rows.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class BulkAndAdjustIntegrityHttpTests
+public sealed class BulkAndAdjustIntegrityHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 
