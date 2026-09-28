@@ -90,6 +90,9 @@ public class MainframeDbContext : DbContext
     /// <summary>D10 pay-for confirms by nonce. See <see cref="DevicePayFor"/>.</summary>
     public DbSet<DevicePayFor> DevicePayFors => Set<DevicePayFor>();
 
+    /// <summary>D10 pay-for quotes by nonce. See <see cref="DevicePayForQuote"/>.</summary>
+    public DbSet<DevicePayForQuote> DevicePayForQuotes => Set<DevicePayForQuote>();
+
     /// <summary>
     /// Builds the model, including the global query filter on every tenant-scoped entity.
     /// </summary>
@@ -468,6 +471,7 @@ public class MainframeDbContext : DbContext
             e.HasKey(u => u.Id);
             e.Property(u => u.UseClass).HasMaxLength(8).IsRequired();
             e.Property(u => u.Kind).HasMaxLength(32).IsRequired();
+            e.Property(u => u.ClaimKey).HasMaxLength(MemberCodeUse.ClaimKeyMaxLength);
             e.HasIndex(u => new { u.TenantId, u.Ref, u.Step, u.UseClass }).IsUnique();
             e.HasIndex(u => u.UsedAt);
             e.ToTable(t => t.HasCheckConstraint(
@@ -485,6 +489,16 @@ public class MainframeDbContext : DbContext
             e.Property(p => p.BalanceAfterCredits).HasColumnType("numeric(10,2)");
             e.HasIndex(p => new { p.TenantId, p.DeviceId, p.Nonce }).IsUnique();
             e.HasQueryFilter(p => p.TenantId == _tenant.TenantId);
+        });
+
+        modelBuilder.Entity<DevicePayForQuote>(e =>
+        {
+            e.ToTable("device_pay_for_quotes");
+            e.HasKey(q => q.Id);
+            e.Property(q => q.Nonce).HasMaxLength(32).IsRequired();
+            e.HasIndex(q => new { q.TenantId, q.DeviceId, q.Nonce }).IsUnique();
+            e.HasIndex(q => q.QuotedAt);
+            e.HasQueryFilter(q => q.TenantId == _tenant.TenantId);
         });
     }
 

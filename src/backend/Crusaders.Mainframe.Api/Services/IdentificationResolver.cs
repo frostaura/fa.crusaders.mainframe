@@ -30,8 +30,22 @@ namespace Crusaders.Mainframe.Api.Services;
 public sealed class IdentificationResolver
 {
     private readonly AccessCodeService _codes;
+    private readonly TenantSettingsAccessor _settings;
 
-    public IdentificationResolver(AccessCodeService codes) => _codes = codes;
+    public IdentificationResolver(AccessCodeService codes, TenantSettingsAccessor settings)
+    {
+        _codes = codes;
+        _settings = settings;
+    }
+
+    /// <summary>
+    /// Every code these two methods read is a LEGACY access code, and past the club's cut-off
+    /// (<c>v1_only</c>, member-code §8) a legacy code is refused everywhere — the courtside
+    /// kiosk's QR match and the biometric payer override included. They were the two paths that
+    /// forgot, so a legacy ident code went on buying court time after the cut-off said it could not.
+    /// </summary>
+    private async Task<bool> LegacyAcceptedAsync(CancellationToken ct) =>
+        MemberCodeSettings.LegacyAccepted(await _settings.GetAsync(ct));
 
     /// <summary>
     /// Methods that can identify a member without a booking to check against. <c>qr</c>
@@ -68,6 +82,7 @@ public sealed class IdentificationResolver
             return null;
         }
 
+        if (!await LegacyAcceptedAsync(ct)) return null;
         var resolved = await _codes.ResolveAsync(token, ct);
         return resolved?.Purpose == Domain.AccessCodePurpose.MemberIdent ? resolved.UserId : null;
     }
@@ -86,6 +101,7 @@ public sealed class IdentificationResolver
             return null;
         }
 
+        if (!await LegacyAcceptedAsync(ct)) return null;
         return await _codes.ResolveAsync(token, ct);
     }
 }

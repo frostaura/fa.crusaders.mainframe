@@ -419,7 +419,7 @@ public class MemberAuthRegressionTests
         await SetMembershipStatusAsync(host, host.PlayerUser.Id, MembershipStatus.Suspended);
 
         using var scope = host.NewScope();
-        var result = await Auth(scope).RefreshAsync(host.PlayerUser.Id, default);
+        var result = await Auth(scope).RefreshAsync(host.PlayerUser.Id, 0, default);
 
         var refused = Assert.IsType<LoginResult.NotApproved>(result);
         Assert.Equal(MembershipStatus.Suspended, refused.Status);
@@ -432,7 +432,7 @@ public class MemberAuthRegressionTests
         await using var host = await TestHost.CreateAsync();
 
         using var scope = host.NewScope();
-        Assert.IsType<LoginResult.Ok>(await Auth(scope).RefreshAsync(host.PlayerUser.Id, default));
+        Assert.IsType<LoginResult.Ok>(await Auth(scope).RefreshAsync(host.PlayerUser.Id, 0, default));
     }
 
     /// <summary>

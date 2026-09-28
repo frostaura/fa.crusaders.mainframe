@@ -156,6 +156,7 @@ public sealed class TestHost : IAsyncDisposable
         services.AddScoped<UserPreferencesService>();
         // Mirrors Program.cs: the role cache is a singleton so an eviction reaches the reader.
         services.AddSingleton<LiveAdminRole>();
+        services.AddSingleton<SessionEpochs>();
         services.AddScoped<AdminRoleService>();
         // Mirrors Program.cs: the admin notice outbox's two halves. Singletons over the scope
         // factory, exactly as the application registers them, so DeliverAdminNoticesAsync below

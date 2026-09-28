@@ -196,8 +196,9 @@ public class CourtActivationService
     ///
     /// <para>
     /// Every status a settlement path can act on is a candidate — <c>Booked</c>, <c>Completed</c>,
-    /// a <c>NoShow</c> the upload will reverse, a <c>Cancelled</c> row whose lit time is owed — and
-    /// a live one is preferred over a cancelled one, then the earliest. The member may be the
+    /// a <c>NoShow</c> the upload will reverse, a <c>Cancelled</c> row whose lit time is owed. A
+    /// booking whose sold window holds the scan is preferred over one only its grace tail reaches;
+    /// within each, a live one over a cancelled one, then the latest already started. The member may be the
     /// organiser or an accepted partner: <see cref="IBookingPlayers"/> decides, and until P11 that
     /// is the organiser alone.
     /// </para>
@@ -221,15 +222,32 @@ public class CourtActivationService
             .OrderBy(b => b.StartsAt)
             .ToListAsync(ct);
 
-        Booking? cancelled = null;
+        // The member's bookings whose window — sold, opened a cue early, held a grace late —
+        // reaches the scan at all.
+        var theirs = new List<Booking>();
         foreach (var b in candidates)
         {
             if (BookingService.OriginalEndsAt(b).AddMinutes(grace) < at) continue;
-            if (!await players.IsPlayerAsync(b, userId, ct)) continue;
-            if (b.Status != BookingStatus.Cancelled) return b;
-            cancelled ??= b;
+            if (await players.IsPlayerAsync(b, userId, ct)) theirs.Add(b);
         }
-        return cancelled;
+
+        // A booking whose SOLD window [StartsAt − cue, EndsAt] holds the scan beats one whose
+        // grace tail merely reaches it. Back-to-back 17:00 and 18:00 slots used to resolve an
+        // 18:02 scan to the 17:00 one — the earliest whose tail was still open — so the member
+        // who played at 18:00 was stamped on the slot that had ended and swept a no-show on the
+        // one they were standing on. Among those that hold it, the latest that has STARTED is
+        // the one being played; a scan inside only a cue window is the earliest upcoming.
+        var holding = theirs.Where(b => b.StartsAt.AddMinutes(-cue) <= at && at <= BookingService.OriginalEndsAt(b)).ToList();
+        return Pick(holding, at) ?? Pick(theirs.Except(holding).ToList(), at);
+    }
+
+    /// <summary>Live before cancelled; then the latest already started at <paramref name="at"/>; else the earliest.</summary>
+    private static Booking? Pick(List<Booking> bookings, DateTimeOffset at)
+    {
+        var live = bookings.Where(b => b.Status != BookingStatus.Cancelled).ToList();
+        var pool = live.Count > 0 ? live : bookings;
+        return pool.Where(b => b.StartsAt <= at).OrderByDescending(b => b.StartsAt).FirstOrDefault()
+            ?? pool.OrderBy(b => b.StartsAt).FirstOrDefault();
     }
 
     /// <summary>
@@ -289,7 +307,9 @@ public class CourtActivationService
         // member ahead of the cue window and uploaded the event once the window had
         // opened was reporting a scan that broke the rule, not one that kept it.
         var settings = await _settings.GetAsync(ct);
-        var cueOpensAt = booking.StartsAt.AddMinutes(-settings.ActivationCueWindowMinutes);
+        // The CLAMPED reading every other path uses (BookingCodeWindow.CueMinutes): a hand-edited
+        // value outside the PUT's bounds must not let the pay-for's search and this gate disagree.
+        var cueOpensAt = booking.StartsAt.AddMinutes(-BookingCodeWindow.CueMinutes(settings));
         if (!alreadyActive && occurredAt < cueOpensAt)
         {
             return new ActivationResult.TooEarly(booking, (int)Math.Ceiling((booking.StartsAt - occurredAt).TotalSeconds));

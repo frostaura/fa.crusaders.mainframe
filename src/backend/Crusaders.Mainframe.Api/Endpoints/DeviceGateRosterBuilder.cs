@@ -137,7 +137,7 @@ public static class DeviceGateRosterBuilder
         var (bookings, earlyEntry) = await BookingsAsync(db, settings, now, ct);
         if (bookings.Count == 0) return [];
 
-        var tokens = await DeviceRosterBuilder.TokensForAsync(db, codes, bookings, settings, now, ct, mint);
+        var tokens = await DeviceRosterBuilder.TokensForAsync(new LegacyRosterSources(db, codes), bookings, settings, now, ct, mint);
 
         return Format(bookings.Where(b => tokens.ContainsKey(b.Id)).Select(b => new GateCandidate(b, tokens[b.Id])), now, earlyEntry);
     }

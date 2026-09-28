@@ -4,7 +4,8 @@ namespace Crusaders.Mainframe.Api.Security;
 
 /// <summary>
 /// The <see cref="SseGuard"/> every admin-only stream runs under: the live admin role, re-asked
-/// before each frame (<see cref="LiveAdminRole.StillHoldsAsync"/>).
+/// before each frame (<see cref="LiveAdminRole.StillHoldsAsync"/>), and the session's epoch with it
+/// (<see cref="SessionEpochs.StillCurrentAsync"/>).
 ///
 /// <para>
 /// One place, so a third admin stream cannot be written with the check forgotten by copying the
@@ -18,8 +19,13 @@ public static class AdminStreamGuard
     public static SseGuard For(HttpContext ctx, TimeSpan keepAlive)
     {
         var live = ctx.RequestServices.GetRequiredService<LiveAdminRole>();
+        var epochs = ctx.RequestServices.GetRequiredService<SessionEpochs>();
         var services = ctx.RequestServices;
         var principal = ctx.User;
-        return new SseGuard(keepAlive, ct => live.StillHoldsAsync(principal, services, ct));
+
+        // The role AND the session: a rotation (member-code §10) ends every session, and a stream
+        // opened before it is one of them — it must close, not run until the connection drops.
+        return new SseGuard(keepAlive, async ct =>
+            await live.StillHoldsAsync(principal, services, ct) && await epochs.StillCurrentAsync(principal, services, ct));
     }
 }

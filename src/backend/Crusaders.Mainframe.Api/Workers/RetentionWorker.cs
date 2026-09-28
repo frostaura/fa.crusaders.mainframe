@@ -152,17 +152,7 @@ public sealed class RetentionWorker : BackgroundService
                 _logger.LogInformation("Retention purged {Count} expired access codes for tenant {Slug}", staleCodes.Count, tenant.Slug);
             }
 
-            // Member-code uses (§4.4). A code is worth nothing ninety seconds after it was shown and
-            // an uploaded event older than a day is re-checked against an empty table — which is
-            // the forgery check's own window, not a hole: a day is past every step it searches.
-            // Deleted, like the access codes above: a table of every scan is a table of movements.
-            var useCutoff = DateTimeOffset.UtcNow.Subtract(MemberCodeService.UseRetention);
-            var staleUses = await db.MemberCodeUses.Where(u => u.UsedAt < useCutoff).ToListAsync(ct);
-            if (staleUses.Count > 0)
-            {
-                db.MemberCodeUses.RemoveRange(staleUses);
-                await db.SaveChangesAsync(ct);
-            }
+            await PurgeMemberCodeRowsAsync(db, ct);
 
             if (totalAnonymised > 0)
             {
@@ -232,5 +222,33 @@ public sealed class RetentionWorker : BackgroundService
         _logger.LogInformation(
             "Retention purged {Rows} door rows and {Receipts} door receipts for tenant {Slug}",
             rows.Count, receipts.Count, tenant.Slug);
+    }
+
+    /// <summary>
+    /// The member-code tables' day-long rows (§4.4, §9): lifted out of the tenant loop for the
+    /// complexity gate. Runs inside the loop's tenant context, so the query filters scope it.
+    /// </summary>
+    private static async Task PurgeMemberCodeRowsAsync(MainframeDbContext db, CancellationToken ct)
+    {
+        // Member-code uses (§4.4). A code is worth nothing ninety seconds after it was shown and
+        // an uploaded event older than a day is re-checked against an empty table — which is
+        // the forgery check's own window, not a hole: a day is past every step it searches.
+        // Deleted, like the access codes above: a table of every scan is a table of movements.
+        var useCutoff = DateTimeOffset.UtcNow.Subtract(MemberCodeService.UseRetention);
+        var staleUses = await db.MemberCodeUses.Where(u => u.UsedAt < useCutoff).ToListAsync(ct);
+        if (staleUses.Count > 0)
+        {
+            db.MemberCodeUses.RemoveRange(staleUses);
+            await db.SaveChangesAsync(ct);
+        }
+
+        // Pay-for quotes (§9, §13): a quote is a question the glass asked for one choice
+        // window, and a day is past any confirm that could still answer it.
+        var staleQuotes = await db.DevicePayForQuotes.Where(q => q.QuotedAt < useCutoff).ToListAsync(ct);
+        if (staleQuotes.Count > 0)
+        {
+            db.DevicePayForQuotes.RemoveRange(staleQuotes);
+            await db.SaveChangesAsync(ct);
+        }
     }
 }

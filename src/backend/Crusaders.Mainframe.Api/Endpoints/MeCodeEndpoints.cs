@@ -4,6 +4,7 @@ using Crusaders.Mainframe.Api.Multitenancy;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Security;
 using Crusaders.Mainframe.Api.Services;
+using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Endpoints;
 
@@ -29,7 +30,33 @@ public static class MeCodeEndpoints
         g.MapPost("/enrol", EnrolAsync).RequireRateLimiting(RateLimitPolicies.Auth);
         g.MapGet("/", StatusAsync);
 
+        // Sign out everywhere (§10): a rotation, so every session ends — this one included — and
+        // every code every phone can compute stops working. The member signs in again.
+        app.MapPost("/api/v1/me/sessions/revoke-all", RevokeAllAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting(RateLimitPolicies.Auth);
+
         return app;
+    }
+
+    /// <summary>
+    /// Ends every session of the caller, including the one asking, and rotates their code; with
+    /// <c>revoke_passkeys: true</c> it deletes their passkeys too (default false — a member signing
+    /// out a forgotten tablet should not lose the passkey on the phone in their hand). 200 with
+    /// what was done; the next request on any of their tokens is 401.
+    /// </summary>
+    private static async Task<IResult> RevokeAllAsync(
+        RevokeSessionsRequest? req, HttpContext ctx, MainframeDbContext db, MemberCodeService codes, CancellationToken ct)
+    {
+        var userId = ctx.User.Id() ?? Guid.Empty;
+        if (userId == Guid.Empty) return Results.Unauthorized();
+
+        await codes.StageRotationAsync(userId, userId, "sign_out_everywhere", ct);
+        var revokePasskeys = req?.RevokePasskeys ?? false;
+        var removed = revokePasskeys ? await codes.StagePasskeyRevocationAsync(userId, userId, "sign_out_everywhere", ct) : 0;
+        await db.SaveChangesAsync(ct);
+        await codes.CompleteRotationsAsync(ct);
+        return Results.Ok(new { signed_out = true, passkeys_revoked = revokePasskeys, passkeys_removed = removed });
     }
 
     private static async Task<IResult> EnrolAsync(
@@ -44,7 +71,21 @@ public static class MeCodeEndpoints
         // QR routes answer — one refusal, one sentence, wherever it surfaces.
         if (await BookingMembershipGate.RefuseIfBarredAsync(db, userId, ct) is { } barred) return barred;
 
+        // Created (if new) BEFORE the transaction: its REF draw retries on a unique violation,
+        // which would abort a Postgres transaction it ran inside.
         var row = await codes.EnsureAsync(userId, ct);
+
+        // THE EPOCH AND THE GENERATION ARE READ UNDER ONE ROW LOCK. A session a rotation ended
+        // gets no secret — read from the row, never from the fifteen-second cache, because this is
+        // the one route whose whole purpose is handing out the credential the rotation replaced.
+        // The rotation raises the epoch (committed at once) before its new generation commits; the
+        // lock holds that increment off while this reads, so an old session sees either the old
+        // epoch AND the old generation, or the new epoch and is refused — never the new secret.
+        await using var tx = db.Database.IsRelational() ? await db.Database.BeginTransactionAsync(ct) : null;
+        var current = await LockedEpochAsync(db, userId, ct);
+        if (current is not { } epoch || SessionEpochs.EpochOf(ctx.User) < epoch) return Results.Unauthorized();
+        await db.Entry(row).ReloadAsync(ct);
+
         row.EnrolledAt = DateTimeOffset.UtcNow;
         db.AuditLogs.Add(new AuditLog
         {
@@ -55,12 +96,22 @@ public static class MeCodeEndpoints
             DetailsJson = JsonSerializer.Serialize(new { generation = row.Generation }),
         });
         await db.SaveChangesAsync(ct);
+        if (tx is not null) await tx.CommitAsync(ct);
 
         var s = await settings.GetAsync(ct);
         return Results.Ok(new MemberCodeEnrolment(
             1, MemberCodeMath.RefText(row.Ref), row.Generation, MemberCodeMath.Base64Url(codes.SecretOf(row)),
             MemberCodeMath.ZoneIdFor(s.Timezone), MemberCodeMath.StepSeconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             MemberCodeSettings.Phase(s)));
+    }
+
+    /// <summary>The account's session epoch, read under <c>FOR SHARE</c> so no rotation can raise it until the caller's transaction ends.</summary>
+    private static async Task<int?> LockedEpochAsync(MainframeDbContext db, Guid userId, CancellationToken ct)
+    {
+        if (!db.Database.IsRelational()) return await SessionEpochs.CurrentAsync(db, userId, ct);
+        var rows = await db.Database.SqlQuery<int>(
+            $"""SELECT "SessionEpoch" AS "Value" FROM users WHERE "Id" = {userId} FOR SHARE""").ToListAsync(ct);
+        return rows.Count == 1 ? rows[0] : null;
     }
 
     private static async Task<IResult> StatusAsync(
@@ -111,3 +162,10 @@ public sealed record MemberCodeStatus(
     [property: System.Text.Json.Serialization.JsonPropertyName("tz")] string Tz,
     [property: System.Text.Json.Serialization.JsonPropertyName("server_time_ms")] long ServerTimeMs,
     [property: System.Text.Json.Serialization.JsonPropertyName("phase")] string Phase);
+
+/// <summary>
+/// The optional body of <c>POST /api/v1/me/sessions/revoke-all</c> and of the admin's
+/// <c>POST /admin/members/{id}/code/reset</c>: whether the member's passkeys go too.
+/// </summary>
+public sealed record RevokeSessionsRequest(
+    [property: System.Text.Json.Serialization.JsonPropertyName("revoke_passkeys")] bool? RevokePasskeys = null);

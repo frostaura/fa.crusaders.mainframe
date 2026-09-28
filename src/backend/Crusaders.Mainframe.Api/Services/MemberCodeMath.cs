@@ -93,8 +93,11 @@ public static class MemberCodeMath
     // ---- Derivations (§3.2–§3.7) --------------------------------------------------------------
 
     /// <summary>The HKDF info string of one member at one generation.</summary>
-    public static string SecretInfo(Guid tenantId, Guid userId, int generation) =>
-        string.Create(CultureInfo.InvariantCulture, $"member-secret|{tenantId:D}|{userId:D}|{generation}");
+    // Block bodies here and on IsV1Shaped for the lizard reason in memory/gotchas-build.md.
+    public static string SecretInfo(Guid tenantId, Guid userId, int generation)
+    {
+        return string.Create(CultureInfo.InvariantCulture, $"member-secret|{tenantId:D}|{userId:D}|{generation}");
+    }
 
     /// <summary>S — never stored, derived on demand from the master key.</summary>
     public static byte[] MemberSecret(byte[] masterKey, Guid tenantId, Guid userId, int generation) =>
@@ -242,7 +245,10 @@ public static class MemberCodeMath
     // ---- The token (§3.8) -----------------------------------------------------------------------
 
     /// <summary>Whether a scanned string is to be treated as a v1 token at all: length alone (§3.8).</summary>
-    public static bool IsV1Shaped(string? token) => token is { Length: TokenLength };
+    public static bool IsV1Shaped(string? token)
+    {
+        return token is { Length: TokenLength };
+    }
 
     /// <summary>
     /// Parses a v1 token, or null when it is malformed. Exactly 19 characters, a literal <c>1</c>,

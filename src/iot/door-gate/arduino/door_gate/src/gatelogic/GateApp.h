@@ -343,6 +343,10 @@ private:
   /// and then the roster's by REF. `member` is filled for a v1 code.
   ScanDecision decideFromRoster(const char* token, uint32_t nowMs, memcode::Verdict& member);
 
+  /// Whether this door already acted on `token` inside its window — see
+  /// memcode::knownReplay. Asked before an online scan.
+  bool knownReplay(const char* token, uint32_t nowMs) const;
+
   /// Records a v1 code as used once the lock was actually given time: the
   /// offline verdict's step, or — for an open the SERVER decided — whatever
   /// this board can establish (memcode::recordOnlineUse).

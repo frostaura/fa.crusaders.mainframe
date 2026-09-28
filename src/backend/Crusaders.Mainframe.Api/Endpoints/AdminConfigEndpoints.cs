@@ -186,6 +186,9 @@ public static class AdminConfigEndpoints
                 member_code_cutover_at = defaults.MemberCodeCutoverAt,
                 member_code_cutoff_at = defaults.MemberCodeCutoffAt,
                 member_code_cutoff_days = MemberCodeSettings.CutoffDays(defaults),
+                member_code_manual_hold = defaults.MemberCodeManualHold,
+                member_code_manual_hold_by = defaults.MemberCodeManualHoldBy,
+                member_code_manual_hold_at = defaults.MemberCodeManualHoldAt,
             });
         });
 
@@ -385,7 +388,10 @@ public static class AdminConfigEndpoints
             WriteOptionalAdminSettings(doc, req);
             WriteOptionalMemberLimits(doc, req);
             WriteOptionalRealtime(doc, req);
-            WriteOptionalMemberCodeSettings(doc, req);
+            var phaseBefore = doc.TryGetValue(MemberCodeSettings.PhaseKey, out var storedPhase) && storedPhase.ValueKind == JsonValueKind.String
+                ? storedPhase.GetString()
+                : MemberCodeSettings.Legacy;
+            WriteOptionalMemberCodeSettings(doc, req, ctx.User.Id() ?? Guid.Empty, DateTimeOffset.UtcNow);
 
             // D2-B19 — the diff of CHANGED KEYS ONLY, before the document is replaced.
             //
@@ -418,6 +424,8 @@ public static class AdminConfigEndpoints
             }
 
             await db.SaveChangesAsync(ct);
+
+            await ApplyCutoffToLegacyCodesAsync(db, phaseBefore, req.MemberCodePhase?.Trim(), ct);
             return Results.Ok(new { saved = true, changed_keys = changed.After.Keys.ToList() });
         });
 
@@ -1141,20 +1149,85 @@ public static class AdminConfigEndpoints
     }
 
     /// <summary>
-    /// The rollout override. A phase moved forward by hand is stamped the way the automatic move
-    /// would have stamped it — without a cut-over instant a club set to <c>v1</c> by hand would
-    /// never reach its cut-off.
+    /// The rollout override (member-code §8, §13).
+    ///
+    /// <list type="bullet">
+    /// <item><b>Forward by hand</b> is stamped the way the automatic move would have stamped it —
+    /// without a cut-over instant a club set to <c>v1</c> by hand would never reach its cut-off —
+    /// and clears any hold: the administrator has said the road is open again.</item>
+    /// <item><b>Backward</b> sets the hold (who, when), which the heartbeat's automatic move
+    /// respects: before it, a club rolled back because v1 misbehaved was moved forward again by the
+    /// very next heartbeat, since every board still spoke <c>codes:m1</c>. Back to <c>v1</c>
+    /// restamps the cut-over at now and clears the cut-off, so the fourteen-day clock restarts
+    /// rather than firing at once; back to <c>legacy</c> clears both.</item>
+    /// <item><c>member_code_manual_hold</c> sets or clears the hold without moving the phase.</item>
+    /// </list>
     /// </summary>
-    private static void WriteOptionalMemberCodeSettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
+    private static void WriteOptionalMemberCodeSettings(
+        IDictionary<string, JsonElement> doc, UpdateSettingsRequest req, Guid actor, DateTimeOffset at)
     {
         if (req.MemberCodeCutoffDays is { } days) doc[MemberCodeSettings.CutoffDaysKey] = ToElement(days);
-        if (req.MemberCodePhase is not { } raw) return;
+        var now = ToElement(at.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture));
 
-        var phase = raw.Trim();
-        doc[MemberCodeSettings.PhaseKey] = ToElement(phase);
-        var now = ToElement(DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
-        if (phase != MemberCodeSettings.Legacy && !doc.ContainsKey(MemberCodeSettings.CutoverAtKey)) doc[MemberCodeSettings.CutoverAtKey] = now;
-        if (phase == MemberCodeSettings.V1Only && !doc.ContainsKey(MemberCodeSettings.CutoffAtKey)) doc[MemberCodeSettings.CutoffAtKey] = now;
+        if (req.MemberCodePhase is { } raw)
+        {
+            var phase = raw.Trim();
+            var before = doc.TryGetValue(MemberCodeSettings.PhaseKey, out var stored) && stored.ValueKind == JsonValueKind.String
+                ? stored.GetString()
+                : MemberCodeSettings.Legacy;
+            var from = MemberCodeSettings.Rank(MemberCodeSettings.IsKnownPhase(before) ? before : MemberCodeSettings.Legacy);
+            var to = MemberCodeSettings.Rank(phase);
+            doc[MemberCodeSettings.PhaseKey] = ToElement(phase);
+
+            if (to < from)
+            {
+                SetHold(doc, actor, now);
+                doc.Remove(MemberCodeSettings.CutoffAtKey);
+                if (phase == MemberCodeSettings.V1) doc[MemberCodeSettings.CutoverAtKey] = now;
+                else doc.Remove(MemberCodeSettings.CutoverAtKey);
+            }
+            else if (to > from)
+            {
+                ClearHold(doc);
+                if (phase != MemberCodeSettings.Legacy && !doc.ContainsKey(MemberCodeSettings.CutoverAtKey)) doc[MemberCodeSettings.CutoverAtKey] = now;
+                if (phase == MemberCodeSettings.V1Only && !doc.ContainsKey(MemberCodeSettings.CutoffAtKey)) doc[MemberCodeSettings.CutoffAtKey] = now;
+            }
+        }
+
+        if (req.MemberCodeManualHold is true) SetHold(doc, actor, now);
+        else if (req.MemberCodeManualHold is false) ClearHold(doc);
+    }
+
+    /// <summary>
+    /// The cut-off by hand ends every legacy code, as the automatic one does (§8 step 4); a
+    /// rollback OUT of <c>v1_only</c> gives back the ones it ended that are still in date.
+    /// </summary>
+    private static async Task ApplyCutoffToLegacyCodesAsync(
+        MainframeDbContext db, string? phaseBefore, string? phaseAfter, CancellationToken ct)
+    {
+        if (phaseAfter is null || phaseAfter == phaseBefore) return;
+        if (phaseAfter == MemberCodeSettings.V1Only)
+        {
+            await MemberCodeRollout.ExpireLegacyCodesAsync(db, DateTimeOffset.UtcNow, ct);
+        }
+        else if (phaseBefore == MemberCodeSettings.V1Only)
+        {
+            await MemberCodeRollout.RestoreLegacyCodesAsync(db, DateTimeOffset.UtcNow, ct);
+        }
+    }
+
+    private static void SetHold(IDictionary<string, JsonElement> doc, Guid actor, JsonElement now)
+    {
+        doc[MemberCodeSettings.HoldKey] = ToElement(true);
+        doc[MemberCodeSettings.HoldByKey] = ToElement(actor.ToString());
+        doc[MemberCodeSettings.HoldAtKey] = now;
+    }
+
+    private static void ClearHold(IDictionary<string, JsonElement> doc)
+    {
+        doc.Remove(MemberCodeSettings.HoldKey);
+        doc.Remove(MemberCodeSettings.HoldByKey);
+        doc.Remove(MemberCodeSettings.HoldAtKey);
     }
 
     /// <summary>Same omitted-means-unchanged rule as the economics keys, for the six device numbers.</summary>
@@ -1406,7 +1479,12 @@ public sealed record UpdateSettingsRequest(
     /// </summary>
     [property: JsonPropertyName("member_code_phase")] string? MemberCodePhase = null,
     /// <summary>Days from the cut-over to the cut-off, 14 to 365.</summary>
-    [property: JsonPropertyName("member_code_cutoff_days")] int? MemberCodeCutoffDays = null)
+    [property: JsonPropertyName("member_code_cutoff_days")] int? MemberCodeCutoffDays = null,
+    /// <summary>
+    /// Sets (true) or clears (false) the administrator's hold on the automatic rollout without
+    /// moving the phase. A backward phase move sets it on its own; a forward one clears it.
+    /// </summary>
+    [property: JsonPropertyName("member_code_manual_hold")] bool? MemberCodeManualHold = null)
 {
     /// <summary>The glyph set the club asked for, under either spelling.</summary>
     public string? EffectiveActionGlyphs => ActionGlyphs ?? ActionGlyphsSnake;

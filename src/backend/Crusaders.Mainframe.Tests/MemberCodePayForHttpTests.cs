@@ -84,6 +84,7 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg)
         await c.BookAsync(r.App, c.Olga, courtIndex: 1, startsInMinutes: -10, checkedIn: true);
         var code = c.Code(c.Pam);
 
+        await SendAsync(r, c.PayFor(code, 2, Nonce, confirm: false));
         var first = await SendAsync(r, c.PayFor(code, 2, Nonce, confirm: true, label: "32"));
         var again = await SendAsync(r, c.PayFor(code, 2, Nonce, confirm: true, label: "32"));
         var third = await SendAsync(r, c.PayFor(c.Code(c.Pam, stepOffset: 1), 2, Nonce, confirm: true, label: "32"));
@@ -109,6 +110,7 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg)
         await c.BookAsync(r.App, c.Olga, courtIndex: 1, startsInMinutes: -10, checkedIn: true);
         var code = c.Code(c.Pam);
 
+        await SendAsync(r, c.PayFor(code, 2, Nonce, confirm: false));
         var results = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => SendAsync(r, c.PayFor(code, 2, Nonce, confirm: true, label: "32"))));
 
         Assert.All(results, x => Assert.True(x.Status is HttpStatusCode.OK or HttpStatusCode.ServiceUnavailable, x.Body));
@@ -127,6 +129,7 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg)
         var c = r.Club;
         var booking = await c.BookAsync(r.App, c.Olga, courtIndex: 0, startsInMinutes: 2, minutes: 45);
 
+        await SendAsync(r, c.PayFor(c.Code(c.Pam), 1, Nonce, confirm: false));
         var paid = JsonDocument.Parse((await SendAsync(r, c.PayFor(c.Code(c.Pam), 1, Nonce, confirm: true, label: "24"))).Body).RootElement;
 
         Assert.True(paid.GetProperty("paid").GetBoolean());
@@ -197,6 +200,7 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg)
         await c.BookAsync(r.App, c.Olga, courtIndex: 2, startsInMinutes: -10, checkedIn: true);
         var code = c.Code(c.Pam);
 
+        await SendAsync(r, c.PayFor(code, 2, Nonce, confirm: false));
         Assert.Contains("\"paid\":true", (await SendAsync(r, c.PayFor(code, 2, Nonce, confirm: true, label: "32"))).Body);
 
         var again = JsonDocument.Parse((await SendAsync(r, c.PayFor(c.Code(c.Sid), 2, "1111111111111111", confirm: false))).Body).RootElement;
@@ -248,6 +252,8 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg)
         await b.BookAsync(app, b.Olga, 1, -10, checkedIn: true);
         var device = app.CreateClient();
 
+        await device.SendAsync(a.PayFor(a.Code(a.Pam), 2, Nonce, false));
+        await device.SendAsync(b.PayFor(b.Code(b.Pam), 2, Nonce, false));
         var pa = await (await device.SendAsync(a.PayFor(a.Code(a.Pam), 2, Nonce, true, "32"))).Content.ReadAsStringAsync();
         var pb = await (await device.SendAsync(b.PayFor(b.Code(b.Pam), 2, Nonce, true, "32"))).Content.ReadAsStringAsync();
 

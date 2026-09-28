@@ -158,38 +158,54 @@ public static class DeviceEndpoints
             // Checked here and not inside BuildAsync, which deliberately takes no Device: two
             // NAMED gates on one club are still handed the identical list, and that sentence
             // is pinned. This is a gate on whether the board is asked at all.
-            if (device.SpeaksMemberCodes)
-            {
-                return Results.Ok(await GateBodyWithCodesAsync(services, device, s, now, ct));
-            }
-
-            // A door on legacy firmware: the legacy roster while legacy codes are honoured at
-            // all, minted only while the club has not cut over, and nothing once they are not.
-            var gateRoster = string.IsNullOrWhiteSpace(device.GateKey) || !MemberCodeSettings.LegacyAccepted(s)
-                ? []
-                : await DeviceGateRosterBuilder.BuildAsync(db, codes, s, now, MemberCodeSettings.MintsBookingCodes(s), ct);
-
-            return Results.Ok(GateHeartbeatView.Of(
-                // HeartbeatCadence.Effective, not the raw setting. A stored 3600 used to be
-                // sent verbatim to a board that clamps to 300, while the console showed 300 —
-                // the exact failure HeartbeatCadence exists to prevent, reproduced on the one
-                // path that bypassed it.
-                device, tenant.TenantSlug, HeartbeatCadence.Effective(s.HeartbeatSeconds),
-                GateAccess.UnlockSecondsFor(s), gateRoster, now));
+            return Results.Ok(await GateBodyAsync(services, device, s, now, ct));
         }
 
+        return Results.Ok(await CourtBoxBodyAsync(services, device, req, s, now, ct));
+    }
+
+    /// <summary>
+    /// A door's answer: the member-code shape for a <c>codes:m1</c> door, else the legacy one.
+    /// Lifted out of <see cref="HeartbeatAsync"/> for the complexity gate; the reasoning for the
+    /// gate branch is in the comment at its call.
+    /// </summary>
+    private static async Task<object> GateBodyAsync(
+        HeartbeatServices services, Device device, TenantSettingsView s, DateTimeOffset now, CancellationToken ct)
+    {
+        if (device.SpeaksMemberCodes) return await GateBodyWithCodesAsync(services, device, s, now, ct);
+
+        // A door on legacy firmware: the legacy roster while legacy codes are honoured at
+        // all, minted only while the club has not cut over, and nothing once they are not.
+        var gateRoster = string.IsNullOrWhiteSpace(device.GateKey) || !MemberCodeSettings.LegacyAccepted(s)
+            ? []
+            : await DeviceGateRosterBuilder.BuildAsync(services.Db, services.Codes, s, now, MemberCodeSettings.MintsBookingCodes(s), ct);
+
+        return GateHeartbeatView.Of(
+            // HeartbeatCadence.Effective, not the raw setting. A stored 3600 used to be
+            // sent verbatim to a board that clamps to 300, while the console showed 300 —
+            // the exact failure HeartbeatCadence exists to prevent, reproduced on the one
+            // path that bypassed it.
+            device, services.Tenant.TenantSlug, HeartbeatCadence.Effective(s.HeartbeatSeconds),
+            GateAccess.UnlockSecondsFor(s), gateRoster, now);
+    }
+
+    /// <summary>A court box's answer: its roster, the member-code sync, and the restore. Lifted out of <see cref="HeartbeatAsync"/> for the complexity gate.</summary>
+    private static async Task<Dictionary<string, object?>> CourtBoxBodyAsync(
+        HeartbeatServices services, Device device, HeartbeatRequest req, TenantSettingsView s, DateTimeOffset now, CancellationToken ct)
+    {
+        var db = services.Db;
         // The bookings this box may admit on its own, as TOKEN|relay|opens_in|closes_in.
         // Always present, even when empty: the firmware replaces its cache wholesale on
         // every push, and a cancelled booking is expressed by its absence from the next
         // one — an omitted key would leave a stale roster live. See DeviceRosterBuilder.
         var v1 = device.SpeaksMemberCodes && MemberCodeSettings.RostersCarryPlayers(s);
         var entries = v1
-            ? await DeviceRosterBuilder.BuildV1Async(db, services.Players, services.MemberCodes, device, s, now, ct)
+            ? await DeviceRosterBuilder.BuildV1Async(new RosterSources(db, services.Players, services.MemberCodes), device, s, now, ct)
             : [];
         var roster = v1
             ? [.. entries.Select(e => e.Element)]
             : MemberCodeSettings.LegacyAccepted(s)
-                ? await DeviceRosterBuilder.BuildAsync(db, codes, device, s, now, MemberCodeSettings.MintsBookingCodes(s), ct)
+                ? await DeviceRosterBuilder.BuildAsync(new LegacyRosterSources(db, services.Codes), device, s, now, MemberCodeSettings.MintsBookingCodes(s), ct)
                 : [];
         var sync = device.SpeaksMemberCodes
             ? MemberCodeHeartbeat.Sync(entries, v1 && MemberCodeHeartbeat.Acknowledged(device),
@@ -209,10 +225,11 @@ public static class DeviceEndpoints
         // sends somebody to a dark court believing the software said otherwise.
         await PublishRestoredAsync(services, relays, ct);
 
-        return Results.Ok(MemberCodeHeartbeat.Fit(
-            codes => CourtBoxView(device, tenant.TenantSlug, s, roster, relays, now, codes),
-            sync, MemberCodeWire.CourtBoxMaxBytes));
+        return MemberCodeHeartbeat.Fit(
+            codes => CourtBoxView(device, services.Tenant.TenantSlug, s, new CourtBoxLists(roster, relays, codes), now),
+            sync, MemberCodeWire.CourtBoxMaxBytes);
     }
+
 
     /// <summary>
     /// A <c>codes:m1</c> door's answer (member-code §5.2–§5.3): v1 elements and keys once the club
@@ -238,8 +255,8 @@ public static class DeviceEndpoints
 
         return MemberCodeHeartbeat.Fit(
             codes => GateHeartbeatView.WithCodes(
-                device, services.Tenant.TenantSlug, HeartbeatCadence.Effective(s.HeartbeatSeconds),
-                GateAccess.UnlockSecondsFor(s), roster, now, codes),
+                device, services.Tenant.TenantSlug,
+                new GateTiming(HeartbeatCadence.Effective(s.HeartbeatSeconds), GateAccess.UnlockSecondsFor(s)), roster, now, codes),
             sync, MemberCodeWire.GateMaxBytes);
     }
 
@@ -279,10 +296,9 @@ public static class DeviceEndpoints
     /// </para>
     /// </summary>
     internal static Dictionary<string, object?> CourtBoxView(
-        Device device, string tenantSlug, TenantSettingsView s,
-        IReadOnlyList<string> roster, IReadOnlyList<string>? relays, DateTimeOffset now,
-        MemberCodeSync? codes = null)
+        Device device, string tenantSlug, TenantSettingsView s, CourtBoxLists lists, DateTimeOffset now)
     {
+        var (roster, relays, codes) = lists;
         var body = new Dictionary<string, object?>
         {
             // CLUB-LOCAL WALL TIME, as nineteen characters, and this is a correction rather
@@ -622,7 +638,10 @@ public static class DeviceEndpoints
         {
             Audit(services, device, "device.relay_restore_failed", new
             {
-                device_id = device.Id, device_code = device.DeviceCode, served, restored = 0,
+                device_id = device.Id,
+                device_code = device.DeviceCode,
+                served,
+                restored = 0,
             });
             DeviceErrorService.InBackground(
                 services.Scopes, services.Logs.CreateLogger(typeof(DeviceEndpoints)),
@@ -636,7 +655,10 @@ public static class DeviceEndpoints
 
         Audit(services, device, "device.relay_restore_confirmed", new
         {
-            device_id = device.Id, device_code = device.DeviceCode, served, restored,
+            device_id = device.Id,
+            device_code = device.DeviceCode,
+            served,
+            restored,
         });
 
         foreach (var item in plan)
@@ -950,3 +972,9 @@ public sealed record HeartbeatRequest(
         }
     }
 }
+
+/// <summary>
+/// The three lists a court box's heartbeat body carries — its roster, the relays to restore
+/// (null when the club has restore off) and the member-code sync — bundled for the parameter gate.
+/// </summary>
+internal sealed record CourtBoxLists(IReadOnlyList<string> Roster, IReadOnlyList<string>? Relays, MemberCodeSync? Codes = null);

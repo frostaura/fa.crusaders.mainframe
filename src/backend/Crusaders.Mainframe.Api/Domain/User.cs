@@ -42,5 +42,14 @@ public sealed class User : ITenantScoped
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastLoginAt { get; set; }
 
+    /// <summary>
+    /// The account's session epoch (member-code §10, §13): every token carries the epoch it was
+    /// minted under, and one below this is refused. Incremented — in SQL, atomically — by each
+    /// rotation: an admin's code reset, a password change or reset, an admin temporary password,
+    /// a suspension, sign out everywhere. So a lost phone's open session cannot simply re-enrol
+    /// and fetch the new secret. See <see cref="Security.SessionEpochs"/>.
+    /// </summary>
+    public int SessionEpoch { get; set; }
+
     public Membership? Membership { get; set; }
 }

@@ -151,6 +151,7 @@ public static class AdminMemberEndpoints
             });
             await memberCodes.StageRotationAsync(user.Id, actor, "password_reset_by_admin", ct);
             await db.SaveChangesAsync(ct);
+            await memberCodes.CompleteRotationsAsync(ct);
 
             // `email_sent_to` used to be printed whether or not the send threw, so the one
             // screen an admin reaches for when "email delivery is uncertain" asserted that
@@ -172,21 +173,7 @@ public static class AdminMemberEndpoints
         // Retires a member's rotating code (member-code §10): generation += 1, so every code
         // their phone can compute stops working and the phone re-enrols on its next check. The
         // desk's answer to "somebody photographed my code" or "I lost my phone".
-        g.MapPost("/{memberId:guid}/code/reset", async (
-            Guid memberId, HttpContext ctx, MainframeDbContext db, MemberCodeService memberCodes, CancellationToken ct) =>
-        {
-            var membership = await db.Memberships.AsNoTracking().FirstOrDefaultAsync(m => m.Id == memberId, ct);
-            if (membership is null) return Results.NotFound();
-
-            // Ensured first, so the answer is always a generation: a member who never enrolled has
-            // nothing live to retire, and rotating a fresh row is harmless.
-            await memberCodes.EnsureAsync(membership.UserId, ct);
-            await memberCodes.StageRotationAsync(membership.UserId, ctx.User.Id() ?? Guid.Empty, "admin_reset", ct);
-            await db.SaveChangesAsync(ct);
-
-            var row = await db.MemberCodes.AsNoTracking().FirstAsync(c => c.UserId == membership.UserId, ct);
-            return Results.Ok(new { rotated = true, generation = row.Generation });
-        });
+        g.MapPost("/{memberId:guid}/code/reset", ResetCodeAsync);
 
         g.MapGet("/{memberId:guid}/spend", async (
             Guid memberId, DateTimeOffset? from, DateTimeOffset? to,
@@ -255,6 +242,34 @@ public static class AdminMemberEndpoints
         });
 
         return app;
+    }
+
+    /// <summary>
+    /// Retires a member's rotating code and ends every session they have open (member-code §10,
+    /// §13) — the desk's answer to "I lost my phone". <c>revoke_passkeys</c> defaults to TRUE
+    /// here: the lost phone's passkey would otherwise sign straight back in under the new epoch
+    /// and enrol for the new secret. The answer says what went, so the desk can tell the member
+    /// to set a passkey up again.
+    /// </summary>
+    private static async Task<IResult> ResetCodeAsync(
+        Guid memberId, RevokeSessionsRequest? req, HttpContext ctx, MainframeDbContext db, MemberCodeService memberCodes,
+        CancellationToken ct)
+    {
+        var membership = await db.Memberships.AsNoTracking().FirstOrDefaultAsync(m => m.Id == memberId, ct);
+        if (membership is null) return Results.NotFound();
+
+        // Ensured first, so the answer is always a generation: a member who never enrolled has
+        // nothing live to retire, and rotating a fresh row is harmless.
+        var actor = ctx.User.Id() ?? Guid.Empty;
+        await memberCodes.EnsureAsync(membership.UserId, ct);
+        await memberCodes.StageRotationAsync(membership.UserId, actor, "admin_reset", ct);
+        var revokePasskeys = req?.RevokePasskeys ?? true;
+        var removed = revokePasskeys ? await memberCodes.StagePasskeyRevocationAsync(membership.UserId, actor, "admin_reset", ct) : 0;
+        await db.SaveChangesAsync(ct);
+        await memberCodes.CompleteRotationsAsync(ct);
+
+        var row = await db.MemberCodes.AsNoTracking().FirstAsync(c => c.UserId == membership.UserId, ct);
+        return Results.Ok(new { rotated = true, generation = row.Generation, passkeys_revoked = revokePasskeys, passkeys_removed = removed });
     }
 
     /// <summary>

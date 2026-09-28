@@ -173,6 +173,7 @@ public sealed class MemberApprovalService
         // quietly hand back a code the phone kept through the suspension.
         await _memberCodes.StageRotationAsync(user.Id, actorId, "suspended", ct);
         await _db.SaveChangesAsync(ct);
+        await _memberCodes.CompleteRotationsAsync(ct);
 
         var notified = await SendOrLogAsync(
             EmailTemplates.MembershipSuspended(await _club.GetAsync(ct), user.Email, membership.FullName, reason),

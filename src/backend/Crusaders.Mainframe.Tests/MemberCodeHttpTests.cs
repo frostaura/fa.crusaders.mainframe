@@ -125,6 +125,8 @@ public sealed class MemberCodeHttpTests(PostgresFixture pg)
         var changed = await phone.PostAsJsonAsync("/api/v1/me/password", new { currentPassword = "OldPass!123", newPassword = "NewPass!456" });
         Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
 
+        // The change ended the session it was made from; the answer carries its replacement.
+        phone = club.Bearer(app, (await MemberCodeClub.JsonAsync(changed)).GetProperty("access_token").GetString()!);
         var status = await MemberCodeClub.JsonAsync(await phone.GetAsync("/api/v1/me/code"));
         Assert.Equal(2, status.GetProperty("generation").GetInt32());
 

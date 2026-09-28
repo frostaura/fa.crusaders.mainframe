@@ -76,8 +76,10 @@ UUIDs are canonical lower-case 36-character strings. All labels are ASCII.
 ### 3.1 The master key
 
 `MemberCodes:MasterKey` — 32 to 64 random bytes, base64, server configuration only. The server
-refuses to start in Production when it is absent, shorter than 32 bytes, or a known placeholder
-(the `JwtSecretPolicy` rule). Changing it changes every member's secret at once (every phone
+refuses to start anywhere but Development when it is absent, shorter than 32 bytes, a known
+placeholder (the `JwtSecretPolicy` rule), a key published in the repository (the development key,
+the test host's old fixed key, `derivation.json`'s `fixture_master_key_hex`), or visibly not
+random (fewer than 16 distinct byte values). Changing it changes every member's secret at once (every phone
 re-enrols); there is no key identifier and no dual-key window in v1.
 
 ### 3.2 The member secret S (32 bytes)
@@ -551,8 +553,10 @@ keeping the instruction verbatim. Other refusals reuse the existing screens:
   Refresh at every step boundary; the countdown ring is `30000 − (now mod 30000)`.
   `derivation.json`, `token.json`, `totp.json`, `hmac.json` and `clubday.json` are its vectors.
 - **Rotation** — password change, suspension, admin reset (`POST /admin/members/{id}/code/reset`),
-  and sign-out-everywhere set `generation += 1` (audited `member_code.rotated`); the phone's next
-  status check re-enrols. **Logout wipes the phone's key and does not rotate** (founder default).
+  and sign-out-everywhere (`POST /api/v1/me/sessions/revoke-all`) set `generation += 1` (audited
+  `member_code.rotated`) **and end every session the member had open** (§13); the phone's next
+  status check re-enrols — from a session that survived the rotation. **Logout wipes the phone's
+  key and does not rotate** (founder default).
 
 ---
 
@@ -583,6 +587,7 @@ keeping the instruction verbatim. Other refusals reuse the existing screens:
 | Code sync grammar and the roster rules | `codesync.json` → `test_key_and_day_elements`, `test_code_sync_applies_a_whole_body_by_the_roster_rules` |
 | Court box bodies, capability, scan age, pay-for answers, the 2048 budget | `http.json` → `court-box/test/test_membercode` |
 | Offline v1 at the box: partner lights, subject = scanned token, CODE USED (arming nothing), throttling, re-scan guard | `court-box/test/test_membercode` (`test_offline_v1_*`) |
+| A code the device already acted on is refused locally, never asked about online | `test_a_code_this_box_acted_on_offline_is_not_asked_about_online`, `test_app_a_code_opened_offline_is_refused_locally_once_the_link_returns` |
 | The guess guard; online uses recorded on the device | `test_guess_guard_locks_after_five_wrong_codes_and_backs_off`, `test_verify_guarded_throttles_guessing_and_a_good_code_resets_it`, `test_an_online_use_is_recorded_so_the_code_cannot_be_used_offline_after`, `test_the_door_throttles_offline_guessing` |
 | `code_used` on activate and walk-up | `http.json` `activate-response-code-used`, `walkup-response-code-used` |
 | Every pay-for screen fits the safe subset at its widest | `test_every_screen_holds_the_layout_contract` |
@@ -617,22 +622,116 @@ Each is a server behaviour; none changes a byte the corpus holds.
   refusal, so no screen is owed, but `gate/` and `membercode/gate.json` hold no
   `gate-scan-response-code-used` case. `GateAccess.Reasons` (pinned both ways against the door
   corpus) therefore does not list it; it is `GateAccess.CodeUsed`. Owed to the contract lane.
+- **A rotation ends every session open when it happened — by a per-account SESSION EPOCH.** The
+  admin reset exists for "I lost my phone", and retiring the codes alone left the phone's
+  signed-in PWA free to call `/enrol` and be handed the new secret. Every token carries the epoch
+  it was minted under (claim `sep`; a token without one is epoch 0), and every rotation runs
+  `UPDATE users SET "SessionEpoch" = "SessionEpoch" + 1` — one statement, committed at once,
+  before the rotation's new generation commits. A token below its account's epoch is a 401 on
+  every route: checked in the bearer handler, cached per account for `LiveAdminRole`'s 15 s and
+  evicted by the increment. **Refresh** reads the row, refuses a presented epoch below it and
+  mints with the value it read; **enrolment** reads the epoch under `FOR SHARE` in the same
+  transaction as the code row, so a rotation's increment waits for it and an old session sees
+  either the old epoch and the old generation or the new epoch and a 401 — never the new secret.
+  *Why not a time:* the first version stamped a cut-off instant; a refresh inside the rotation
+  read no cut-off and minted a token dated after it, which survived and enrolled (refuted
+  2026-09-28). **The epoch is raised twice**: once before the caller's save (above), and again
+  once that save has committed. Between the two, the OLD password still verifies and a lost
+  phone's passkey still exists, so a sign-in in that gap is minted under the first raise; the
+  second ends it (refuted 2026-09-28). A member's own replacement token is minted from the
+  second value. The member's own password change keeps its session: `POST /me/password` answers
+  `{"changed":true,"access_token":…}` minted under the new epoch, and the presented token is
+  dead. **Open SSE streams** (wallet, control board, monitoring) re-ask the epoch before every
+  frame and keep-alive and close when their session is stale.
+- **Sign out everywhere and the desk's reset, with passkeys.** `POST /api/v1/me/sessions/revoke-all`
+  (optional body `{"revoke_passkeys": bool}`, default **false**) answers
+  `200 {"signed_out":true,"passkeys_revoked":…,"passkeys_removed":N}`. `POST
+  /admin/members/{id}/code/reset` takes the same optional body with the default **true** and adds
+  `passkeys_revoked`, `passkeys_removed` to `{"rotated":true,"generation":N}`. Revoking deletes
+  the member's WebAuthn credentials, audited `member.passkeys_revoked`. *Why true at the desk:* the
+  lost phone's passkey signs straight back in under the new epoch and enrols for the new secret;
+  *why false for oneself:* signing out a forgotten tablet should not cost the passkey on the phone
+  in hand. A member without a code row still has their sessions ended.
 - **Pay-for refusals beyond §9.2.** A price whose label would exceed six characters is refused as
   `amount_unshowable` (the box reads it as SEE THE DESK) rather than sent for the box to discard.
-  `not_chargeable` answers the rare booking the reassignment path will not touch. A confirm whose
-  nonce another request is still paying is `503 {"error":"in_progress"}` — no decision — so the box
-  retries the same payment and is answered with the first.
-- **Evidence is checked under the current AND the previous generation.** A board offline across a
-  rotation verified the old generation's codes honestly; flagging those as forgeries would page
-  every admin for a member whose password change landed during an outage. Online, only the current
+  `not_chargeable` answers a booking the reassignment path will not touch — including one **never
+  charged**: D10 takes over a paid charge, and the box's PAID glass ("Booker refunded") and both
+  emails would be false with nobody refunded; the glass is firmware, so the server refuses instead.
+  A booking costing nothing is `already_paid`. A confirm whose nonce another request is still
+  paying is `503 {"error":"in_progress"}` — no decision — so the box retries the same payment and
+  is answered with the first; an unpaid nonce row older than 60 s is a claim a crash abandoned and
+  the retry decides afresh.
+- **The confirm pays for the booking its quote named.** A quote records `(device, nonce) →
+  booking` (`device_pay_for_quotes`, purged after a day); a confirm whose nonce was quoted for a
+  different booking — the 17:00 slot ended between the presses and the 18:00 one costs the same —
+  or never quoted at all is `price_changed`, the reason the box already answers with "press the
+  court again", which re-quotes. No new reason; no corpus case changes. *(Corpus note for the
+  contract lane: a `pay-for-response-price-changed` vector for the wrong-booking case would pin it.)*
+- **Money commits once.** The nonce row's paid state, its audit row, the refund and the debit
+  flush in the reassignment's one transaction; a payer who loses the race for a booking (the
+  booking's concurrency token) is answered `already_paid`, never a 500, and its nonce and use are
+  given back so a retry decides again.
+- **A use claimed before an action that throws is given back** (`/activate`, `/walkup` unless its
+  purchase committed, `/pay-for`); a walk-up whose purchase committed keeps its use even when the
+  activation is then refused and the purchase voided — the use table records acts, and money
+  moved under that code; a claim keyed by the box's nonce (`walkup:`/`payfor:` + nonce,
+  `member_code_uses.ClaimKey`) is re-entered by the same device's identical retry, so twin retries
+  in flight together are one purchase and neither is `code_used`.
+- **Evidence and the previous generation.** Checked under the current generation, and under the
+  previous one only within six hours of the rotation (the roster's life, `ROSTER_MAX_AGE_MS`) and
+  only for a member active at the scan (active now and not re-decided since it). A board offline
+  across a rotation verified the old codes honestly; past that, or for a suspended member, the old
+  generation is a retired credential and its use raises the alarm. Online, only the current
   generation is accepted (§4.3), exactly as written.
-- **A second use of one code across devices is the use table's unique index**, whether the first
-  use was online or uploaded; the second upload is the `reused` forgery of §7.
+- **A second use of one code is a DIFFERENT board.** The use table's unique index finds the taken
+  row; the same device holding it is the same act — its fallback of an online grant whose answer
+  was lost, or its own upload retried after a failure — and is a plain receipt (attendance already
+  stamped, no alarm). Only another board's use is the `reused` forgery of §7. Precisely: an
+  evidence claim is keyed by its own event (`evt:<boot>:<seq>`), so a re-upload re-enters it;
+  the board's ONLINE claim (`activate`, `gate`) is the same act only when the event is at or
+  after it, less `SameActTolerance` (5 s — the server's own error in placing the event; the board
+  stamps its fallback event after the online call returned). An event clearly EARLIER than the
+  board's online claim is a second act: a door that opened offline, got its link back and was
+  shown a photo of the code before the open was uploaded (refuted 2026-09-28). **The devices
+  close that path too**: before asking the server about a v1 code, a door or a court box that can
+  already see it is a replay of a code it acted on (`memcode::knownReplay` against its ring)
+  refuses it locally, as the offline path would — `replayed` / CODE USED, no call.
+- **A clamped event time.** When the server had to clamp an event's time (a future or >30-day
+  claim), the step a v1 code was shown at is unknown: the event is never attendance or money, and
+  what the step decides is recorded `unverifiable` (audited `device.activation_unverifiable` /
+  `device.gate_open_unverifiable`, no notice) — an OFF that matched nowhere, or a genuine code.
+  What needs no step still raises `code.forgery_suspected`: another board holding the code's use
+  (`reused`), and an OFF that matched with an ON that did not (`on_mismatch`).
+- **Which booking evidence belongs to.** `FindForEvidenceAsync` prefers a booking whose sold window
+  `[StartsAt − cue, EndsAt]` holds the scan — the latest already started, else the earliest in its
+  cue window — and falls back to one whose grace tail reaches it only when none does. Before, an
+  18:02 scan between back-to-back 17:00 and 18:00 slots stamped the 17:00 one.
+- **Legacy codes after the cut-off, everywhere.** `v1_only` refuses them on the device paths, the
+  courtside `/court/{n}/qr/match` kiosk and the biometric payer override alike, and uploaded legacy
+  evidence is judged at the scan (honoured only before `member_code_cutoff_at`). The cut-off —
+  automatic or by hand — sets every live access code's expiry to the cut-off instant and marks it
+  (`CutoffExpiredAt`, `ExpiresAtBeforeCutoff`); an administrator's rollback out of `v1_only` gives
+  back every marked code whose own expiry is still ahead — a booking's code only while its booking
+  is still booked and not ended (a booking cancelled or displaced since stays dead) — and clears
+  the marks. *Why:* a club rolls
+  back because v1 misbehaved, and the legacy codes are exactly the fallback it rolled back to.
 - **A board losing `codes:m1` after cut-over** raises `device.codes_capability_lost` (non-security,
   once per board per firmware version).
 - **The court box's body writes `relays` before `roster`**, matching both corpora; the firmware
   scans by key and does not care.
 - **`member_code_phase`, `member_code_cutover_at`, `member_code_cutoff_at`,
-  `member_code_cutoff_days`** are tenant settings. The two instants are server-written; the PUT
-  accepts the phase (an administrator's rollback) and the delay (14–365). A phase moved forward by
-  hand is stamped as the automatic move would have been.
+  `member_code_cutoff_days`, `member_code_manual_hold` (+ `_by`, `_at`)** are tenant settings. The
+  instants are server-written; the PUT accepts the phase, the delay (14–365) and the hold. A phase
+  moved forward by hand is stamped as the automatic move would have been and clears the hold. **A
+  phase moved back by hand sets the hold**, which the heartbeat's automatic move respects until an
+  admin moves forward again or clears it — before it, every board still speaking `codes:m1` undid
+  a rollback on the next heartbeat. Back to `v1` restamps the cut-over at now and clears the
+  cut-off (the fourteen days restart); back to `legacy` clears both. `GET
+  /admin/devices/member-codes` carries `manual_hold`, `manual_hold_by`, `manual_hold_at`.
+- **Only acknowledged boards vote on the cut-over** (a court box an admin acknowledged, a door with
+  a `gate_key` — the test that decides who gets keys). An auto-registered board is any MAC that
+  presented the club's key: counted, a bench spare on old firmware blocked the club for ever, and a
+  stranger's board could cast the deciding vote. The rollout view lists them as `unacknowledged`.
+- **One cue window.** The pay-for's search, its activate-or-reassign choice and the activation
+  gate all read `BookingCodeWindow.CueMinutes` (clamped), so a hand-edited value cannot make them
+  disagree.

@@ -12,6 +12,18 @@ public static class MemberCodeSettings
     public const string CutoffAtKey = "member_code_cutoff_at";
     public const string CutoffDaysKey = "member_code_cutoff_days";
 
+    /// <summary>
+    /// The administrator's hold on the automatic rollout: set by a BACKWARD move by hand, and
+    /// while it is set the heartbeat never moves the phase forward. <b>Why it exists:</b> the
+    /// automatic cut-over fires the first time every board speaks <c>codes:m1</c>, and a club
+    /// that rolled back because v1 misbehaved still has every board speaking it — so the very
+    /// next heartbeat undid the rollback, within a minute, every time. Only an administrator
+    /// moving the phase forward again (or clearing the hold) lets the automatic move resume.
+    /// </summary>
+    public const string HoldKey = "member_code_manual_hold";
+    public const string HoldByKey = "member_code_manual_hold_by";
+    public const string HoldAtKey = "member_code_manual_hold_at";
+
     /// <summary>Per-booking codes and v1 codes both work; phones show legacy codes. The default.</summary>
     public const string Legacy = "legacy";
 
@@ -41,11 +53,23 @@ public static class MemberCodeSettings
 
     public static bool IsKnownPhase(string? phase) => phase is not null && Array.IndexOf(Phases, phase) >= 0;
 
+    /// <summary>A phase's position on the one-way road, <c>legacy</c> = 0; an unknown value is <c>legacy</c>'s.</summary>
+    public static int Rank(string? phase) => Math.Max(0, Array.IndexOf(Phases, phase ?? Legacy));
+
     /// <summary>Whether devices are sent players and keys (§5.2–§5.3): <c>v1</c> or <c>v1_only</c>.</summary>
     public static bool RostersCarryPlayers(TenantSettingsView s) => Phase(s) is V1 or V1Only;
 
     /// <summary>Whether a legacy code is still honoured anywhere: every phase but <c>v1_only</c>.</summary>
     public static bool LegacyAccepted(TenantSettingsView s) => Phase(s) != V1Only;
+
+    /// <summary>
+    /// Whether a legacy code was honoured at <paramref name="at"/> — for EVIDENCE, which is
+    /// judged at the scan, not the upload (settlement model): a box that admitted a legacy code
+    /// from a roster fetched before the cut-off reported something that was true then. After the
+    /// cut-off instant, or in <c>v1_only</c> with no instant recorded, it was not.
+    /// </summary>
+    public static bool LegacyAcceptedAt(TenantSettingsView s, DateTimeOffset at) =>
+        LegacyAccepted(s) || (s.MemberCodeCutoffAt is { } cutoff && at < cutoff);
 
     /// <summary>Whether bookings still mint per-booking codes: only in <c>legacy</c>.</summary>
     public static bool MintsBookingCodes(TenantSettingsView s) => Phase(s) == Legacy;

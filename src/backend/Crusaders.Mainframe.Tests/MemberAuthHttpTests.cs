@@ -252,15 +252,20 @@ public sealed class MemberAuthHttpTests
             tempPassword = doc.RootElement.GetProperty("temp_password").GetString()!;
         }
 
+        // The session the member signs in with. A token minted by hand here would carry no session
+        // epoch, and the admin's reset is a rotation that raised it (member-code §10).
+        string session;
         using (var anon = AnonymousClientFor(factory, club))
         {
             var login = await anon.PostAsJsonAsync("/api/v1/auth/login", new { email = club.MemberEmail, password = tempPassword });
             Assert.Equal(HttpStatusCode.OK, login.StatusCode);
             using var doc = JsonDocument.Parse(await login.Content.ReadAsStringAsync());
             Assert.True(doc.RootElement.GetProperty("must_change_password").GetBoolean());
+            session = doc.RootElement.GetProperty("access_token").GetString()!;
         }
 
-        using var member = ClientFor(factory, club, club.MemberId);
+        using var member = AnonymousClientFor(factory, club);
+        member.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", session);
 
         var blocked = await member.GetAsync("/api/v1/me/profile");
         Assert.Equal(HttpStatusCode.Forbidden, blocked.StatusCode);
@@ -274,6 +279,12 @@ public sealed class MemberAuthHttpTests
 
         var changed = await member.PostAsJsonAsync("/api/v1/me/password", new { currentPassword = tempPassword, newPassword = "ChosenByMe1!" });
         Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
+
+        // The change is a rotation (member-code §10): the token the change was made with is
+        // ended, and the answer carries this session's replacement.
+        Assert.Equal(HttpStatusCode.Unauthorized, (await member.GetAsync("/api/v1/me/profile")).StatusCode);
+        using var changedDoc = JsonDocument.Parse(await changed.Content.ReadAsStringAsync());
+        member.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", changedDoc.RootElement.GetProperty("access_token").GetString());
 
         var afterwards = await member.GetAsync("/api/v1/me/profile");
         Assert.Equal(HttpStatusCode.OK, afterwards.StatusCode);

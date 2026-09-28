@@ -550,6 +550,13 @@ public static class DeviceEventEndpoints
         /// </summary>
         public const string ForgerySuspected = "forgery_suspected";
 
+        /// <summary>
+        /// A v1 code on an event whose time had to be clamped (a broken uptime counter): the step
+        /// it was shown at is unknown, so it can be neither verified nor called forged.
+        /// Receipted, audited, not attendance, and no forgery alarm.
+        /// </summary>
+        public const string Unverifiable = "unverifiable";
+
         public const string Ok = "ok";
 
         /// <summary>
@@ -617,42 +624,12 @@ public static class DeviceEventEndpoints
     private static async Task<ActivationOutcome> ActivationOutcomeAsync(
         Device device, DeviceEventDto e, EventFacts time, DeviceEventServices services, CancellationToken ct)
     {
-        var (db, _, codes, _, _, _, _, _, _, _, _, _) = services;
+        var db = services.Db;
         var occurredAt = time.OccurredAt;
 
-        // A v1 member code: the subject is the SCANNED token, re-checked with ON before it is
-        // allowed to be anybody's attendance (member-code §7), and the booking is found by
-        // member, relay and time because the token names no booking.
-        Booking? booking;
-        Guid userId;
-        if (MemberCodeMath.IsV1Shaped(e.Subject?.Trim()))
-        {
-            var v1 = await V1EvidenceAsync(device, e, time, MemberCodeUseClass.Court, "activation_event", services, ct);
-            if (v1.Refusal is not null) return v1.Refusal;
-            userId = v1.UserId;
-
-            if (e.Court is not { } r || r < 0 || r >= device.CourtNumbers.Count) return new ActivationOutcome("wrong_court", null);
-            var onCourt = await db.Courts.FirstOrDefaultAsync(c => c.CourtNumber == device.CourtNumbers[r], ct);
-            booking = onCourt is null
-                ? null
-                : await services.Activation.FindForEvidenceAsync(onCourt.Id, userId, occurredAt, services.Players, ct);
-            if (booking is null) return new ActivationOutcome("unresolved", null, SubjectUserId: userId);
-        }
-        else
-        {
-            // Live at the scan, not at the upload: the roster token expires at the slot's end
-            // plus grace, and a box offline past that is precisely the box whose evidence
-            // matters most.
-            var resolved = await codes.ResolveAsync(e.Subject, occurredAt, ct);
-            if (resolved is null || resolved.Purpose != AccessCodePurpose.BookingActivation || resolved.BookingId is null)
-            {
-                return new ActivationOutcome("unresolved", null);
-            }
-
-            booking = await db.Bookings.FirstOrDefaultAsync(b => b.Id == resolved.BookingId, ct);
-            if (booking is null) return new ActivationOutcome("unresolved", null);
-            userId = resolved.UserId;
-        }
+        var (found, userId, refusal) = await EvidenceBookingAsync(device, e, time, services, ct);
+        if (refusal is not null) return refusal;
+        var booking = found!;
 
         var court = await db.Courts.FirstOrDefaultAsync(c => c.Id == booking.CourtId, ct);
         if (court is null) return new ActivationOutcome("unresolved", booking.Id);
@@ -696,6 +673,53 @@ public static class DeviceEventEndpoints
         }
 
         return new ActivationOutcome(settled.Code, booking.Id, ActivationKind, settled.RelatedBookingId);
+    }
+
+    /// <summary>
+    /// The booking an activation event is evidence for, and whose attendance it is — or the
+    /// outcome that refuses it. Lifted out of <see cref="ActivationOutcomeAsync"/> for the
+    /// complexity gate.
+    /// </summary>
+    private static async Task<(Booking? Booking, Guid UserId, ActivationOutcome? Refusal)> EvidenceBookingAsync(
+        Device device, DeviceEventDto e, EventFacts time, DeviceEventServices services, CancellationToken ct)
+    {
+        var (db, _, codes, _, _, _, _, _, _, _, _, _) = services;
+        var occurredAt = time.OccurredAt;
+
+        // A v1 member code: the subject is the SCANNED token, re-checked with ON before it is
+        // allowed to be anybody's attendance (member-code §7), and the booking is found by
+        // member, relay and time because the token names no booking.
+        if (MemberCodeMath.IsV1Shaped(e.Subject?.Trim()))
+        {
+            var v1 = await V1EvidenceAsync(device, e, time, MemberCodeUseClass.Court, "activation_event", services, ct);
+            if (v1.Refusal is not null) return (null, Guid.Empty, v1.Refusal);
+
+            if (e.Court is not { } r || r < 0 || r >= device.CourtNumbers.Count) return (null, Guid.Empty, new ActivationOutcome("wrong_court", null));
+            var onCourt = await db.Courts.FirstOrDefaultAsync(c => c.CourtNumber == device.CourtNumbers[r], ct);
+            var found = onCourt is null
+                ? null
+                : await services.Activation.FindForEvidenceAsync(onCourt.Id, v1.UserId, occurredAt, services.Players, ct);
+            return found is null
+                ? (null, Guid.Empty, new ActivationOutcome("unresolved", null, SubjectUserId: v1.UserId))
+                : (found, v1.UserId, null);
+        }
+
+        // Live at the scan, not at the upload: the roster token expires at the slot's end
+        // plus grace, and a box offline past that is precisely the box whose evidence
+        // matters most. Past the club's cut-off a legacy code is nobody (§8): judged at the
+        // scan too, so a roster fetched before the cut-off still reports honestly.
+        var resolved = MemberCodeSettings.LegacyAcceptedAt(await services.Settings.GetAsync(ct), occurredAt)
+            ? await codes.ResolveAsync(e.Subject, occurredAt, ct)
+            : null;
+        if (resolved is null || resolved.Purpose != AccessCodePurpose.BookingActivation || resolved.BookingId is null)
+        {
+            return (null, Guid.Empty, new ActivationOutcome("unresolved", null));
+        }
+
+        var booking = await db.Bookings.FirstOrDefaultAsync(b => b.Id == resolved.BookingId, ct);
+        return booking is null
+            ? (null, Guid.Empty, new ActivationOutcome("unresolved", null))
+            : (booking, resolved.UserId, null);
     }
 
     /// <summary>Stamps which relay a box used on a court whose belief another path has already moved.</summary>
@@ -906,7 +930,9 @@ public static class DeviceEventEndpoints
                 ActivationOutcome.Ok, BookingId: null, Kind: GateOpenKind, SubjectUserId: v1.UserId);
         }
 
-        var resolved = await services.Codes.ResolveAsync(e.Subject, occurredAt, ct);
+        var resolved = MemberCodeSettings.LegacyAcceptedAt(await services.Settings.GetAsync(ct), occurredAt)
+            ? await services.Codes.ResolveAsync(e.Subject, occurredAt, ct)
+            : null;
         return new ActivationOutcome(
             ActivationOutcome.Ok, BookingId: null, Kind: GateOpenKind, SubjectUserId: resolved?.UserId);
     }
@@ -932,11 +958,44 @@ public static class DeviceEventEndpoints
         var settings = await services.Settings.GetAsync(ct);
         var evidence = await services.MemberCodes.CheckEvidenceAsync(e.Subject!.Trim(), time.OccurredAt, settings, ct);
 
+        var outcomeKind = useClass == MemberCodeUseClass.Door ? GateOpenKind : ActivationKind;
+
+        // A clamped event time is not a time: the box's counter was broken, so the step the code
+        // was shown at is unknown. What that makes UNKNOWABLE is recorded `unverifiable` — never
+        // attendance, never money. What it does not: another board holding this code's use is a
+        // reuse whatever the clock says, and an OFF that matched with an ON that did not is
+        // somebody holding K_day without S. Those still raise the alarm (refuted 2026-09-28:
+        // suppressing them let a copied key or a double use through on a broken counter).
+        var clamped = time.ClampedFrom is not null;
+
         if (evidence is MemberCodeEvidence.Genuine genuine)
         {
-            var claim = await services.MemberCodes.TryClaimAsync(genuine.Match, useClass, device.Id, kind, ct);
-            if (claim is not null) return new V1Evidence(genuine.Match.UserId, null);
+            // Keyed by the event itself, so this very upload retried after a failure that left its
+            // claim behind re-enters it rather than reading as a second use.
+            var claim = await services.MemberCodes.TryClaimAsync(
+                genuine.Match, useClass, device.Id, kind, ct, claimKey: EvidenceClaimKey(time.BootId, e.Seq));
+
+            // Taken by an ONLINE act of this same board is the same act only when this event came
+            // AFTER it: a board whose online answer was lost falls back to its roster and stamps
+            // the event once the call has returned, so the event is at or after the claim. An
+            // event clearly EARLIER than the online claim is a second act — a door that opened
+            // offline, got its link back and was shown a photo of the code before the first open
+            // was uploaded (refuted 2026-09-28) — and is the `reused` forgery. Any other holder,
+            // including this board's own claim for a DIFFERENT event, is a second use too.
+            var same = claim is not null
+                       || IsSameOnlineAct(await services.MemberCodes.FindUseAsync(genuine.Match, useClass, ct), device, time.OccurredAt);
+            if (same)
+            {
+                return clamped
+                    ? new V1Evidence(Guid.Empty, UnverifiableOutcome(outcomeKind, genuine.Match.UserId))
+                    : new V1Evidence(genuine.Match.UserId, null);
+            }
             evidence = new MemberCodeEvidence.Forged("reused", genuine.Match.UserId, genuine.Match.Ref);
+        }
+
+        if (clamped && evidence is MemberCodeEvidence.Forged { Why: "off_mismatch" or "malformed" } unknowable)
+        {
+            return new V1Evidence(Guid.Empty, UnverifiableOutcome(outcomeKind, unknowable.UserId));
         }
 
         var forged = (MemberCodeEvidence.Forged)evidence;
@@ -944,9 +1003,40 @@ public static class DeviceEventEndpoints
             ? await services.Db.Memberships.AsNoTracking().Where(m => m.UserId == uid).Select(m => m.FullName).FirstOrDefaultAsync(ct)
             : null;
         var notice = AdminNotices.CodeForgerySuspected(device, time.BootId, e.Seq, name, forged.UserId, forged.Why);
-        var outcomeKind = useClass == MemberCodeUseClass.Door ? GateOpenKind : ActivationKind;
         return new V1Evidence(Guid.Empty, new ActivationOutcome(
             ActivationOutcome.ForgerySuspected, null, outcomeKind, SubjectUserId: forged.UserId, Notice: notice));
+    }
+
+    /// <summary>
+    /// How much earlier than the online claim an offline event may be estimated and still be the
+    /// same act. The board stamps its fallback event AFTER the online call returned, so the true
+    /// order is claim-then-event; the slack is the server's own error in placing the event — the
+    /// upload's latency and the millisecond-to-server-clock arithmetic of <see cref="TimeOf"/> —
+    /// which is well under a second on a LAN. Five seconds covers a slow upload several times
+    /// over while leaving no room for a second scan: a person cannot be shown a door's open,
+    /// walk back, and present a photo inside it.
+    /// </summary>
+    public static readonly TimeSpan SameActTolerance = TimeSpan.FromSeconds(5);
+
+    /// <summary>The claim key an uploaded event's use carries: its boot and sequence number.</summary>
+    private static string EvidenceClaimKey(long bootId, long seq)
+    {
+        return string.Create(System.Globalization.CultureInfo.InvariantCulture, $"evt:{bootId}:{seq}");
+    }
+
+    /// <summary>Whether <paramref name="taken"/> is this board's ONLINE act and the event came at or after it (less <see cref="SameActTolerance"/>).</summary>
+    private static bool IsSameOnlineAct(MemberCodeUse? taken, Device device, DateTimeOffset occurredAt)
+    {
+        return taken is not null
+               && taken.DeviceId == device.Id
+               && taken.Kind is "activate" or "gate"
+               && occurredAt >= taken.UsedAt - SameActTolerance;
+    }
+
+    /// <summary>A v1 event the server can neither verify nor refute: receipted, not attendance, no alarm.</summary>
+    private static ActivationOutcome UnverifiableOutcome(string kind, Guid? who)
+    {
+        return new ActivationOutcome(ActivationOutcome.Unverifiable, null, kind, SubjectUserId: who);
     }
 
     /// <summary>
@@ -1438,7 +1528,7 @@ public static class DeviceEventEndpoints
     public static async Task<IResult> WalkUpForDeviceAsync(
         Device device, WalkUpRequest req, WalkUpServices services, CancellationToken ct)
     {
-        var (db, bookings, activation, _, settingsAccessor, _, _, _, _) = services;
+        var (db, _, _, _, settingsAccessor, _, _, _, _) = services;
 
         var settings = await settingsAccessor.GetAsync(ct);
 
@@ -1469,11 +1559,7 @@ public static class DeviceEventEndpoints
         // Either code family (member-code §4.1). A v1 code is checked at the instant the box
         // read it — two presses ago, which is what scan_age_ms carries — and identifies its
         // member; a legacy code must be a member-ident code, as it always had to be.
-        var (resolved, match) = IdentificationResolver.CanIdentifyGlobally(req.Method)
-            ? await MemberCodeIdentity.ResolveAsync(
-                services.Codes, services.MemberCodes, req.Token, req.ScanAgeMs, settings, DateTimeOffset.UtcNow, ct)
-            : (null, null);
-        var userId = resolved?.Purpose == AccessCodePurpose.MemberIdent ? resolved.UserId : (Guid?)null;
+        var (userId, match) = await WalkUpBuyerAsync(req, services, settings, ct);
         if (userId is null) return Results.BadRequest(new { error = "not_recognised" });
 
         // A member the club has barred cannot buy court time here (finding K-F1). This was
@@ -1514,32 +1600,75 @@ public static class DeviceEventEndpoints
         // is held and sent after the activation instead, which is the only ordering in which
         // it describes what happened.
         // One money use per code (§4.4), claimed before anything is charged and given back on
-        // every path below that ends without a sale. AFTER the replay check above, so a box
-        // retrying its own nonce is answered with the first purchase, never `code_used`.
-        Guid? claim = null;
+        // every path below that ends without a sale — or that throws. AFTER the replay check
+        // above, so a box retrying its own nonce is answered with the first purchase, never
+        // `code_used`; and keyed by that nonce, so two identical retries IN FLIGHT together (both
+        // past the replay check before either committed) re-enter one claim instead of one of
+        // them reading CODE USED for a purchase that went through.
+        MemberCodeClaim? claim = null;
         if (match is not null)
         {
-            claim = await services.MemberCodes.TryClaimAsync(match, MemberCodeUseClass.Money, device.Id, "walkup", ct);
+            claim = await services.MemberCodes.TryClaimAsync(
+                match, MemberCodeUseClass.Money, device.Id, "walkup", ct, claimKey: "walkup:" + req.Nonce);
             if (claim is null) return Results.Conflict(new { error = MemberCodeIdentity.CodeUsed });
         }
 
-        var created = await bookings.CreateWalkUpAsync(
-            court.Id, userId.Value, userId.Value, req.Minutes, reference, ct);
+        return await SellAsync(new WalkUpSale(device, req, court, userId.Value, reference, claim), services, ct);
+    }
+
+    /// <summary>
+    /// Who is buying: the member a v1 code or a legacy member-ident code identifies, by a method
+    /// that identifies globally, and the match to claim the use against. Null user otherwise.
+    /// </summary>
+    private static async Task<(Guid? UserId, MemberCodeMatch? Match)> WalkUpBuyerAsync(
+        WalkUpRequest req, WalkUpServices services, TenantSettingsView settings, CancellationToken ct)
+    {
+        if (!IdentificationResolver.CanIdentifyGlobally(req.Method)) return (null, null);
+        var (resolved, match) = await MemberCodeIdentity.ResolveAsync(
+            services.Codes, services.MemberCodes, new ScannedCode(req.Token, req.ScanAgeMs), settings, DateTimeOffset.UtcNow, ct);
+        return resolved?.Purpose == AccessCodePurpose.MemberIdent ? (resolved.UserId, match) : (null, null);
+    }
+
+    /// <summary>One walk-up purchase, decided up to the point of selling it. See <see cref="SellAsync"/>.</summary>
+    private sealed record WalkUpSale(Device Device, WalkUpRequest Req, Court Court, Guid UserId, string Reference, MemberCodeClaim? Claim);
+
+    /// <summary>
+    /// The sale itself: the purchase, its activation, and the use given back on every path that
+    /// ends without one. Lifted out of <see cref="WalkUpForDeviceAsync"/> for the complexity gate.
+    /// </summary>
+    private static async Task<IResult> SellAsync(WalkUpSale sale, WalkUpServices services, CancellationToken ct)
+    {
+        var (device, req, court, userId, reference, claim) = sale;
+        var (db, bookings, activation, _, _, _, _, _, _) = services;
+
+        BookingResult created;
+        try
+        {
+            created = await bookings.CreateWalkUpAsync(
+                court.Id, userId, userId, req.Minutes, reference, ct);
+        }
+        catch
+        {
+            // Given back only if the purchase did NOT commit: a throw after the charge's save
+            // (a mail, a publish) is a sale made, and the use it stands for stays taken.
+            if (!await PurchaseCommittedAsync(db, reference)) await services.MemberCodes.ReleaseAsync(claim);
+            throw;
+        }
 
         // Two retries in flight together: the replay check above found nothing because the
         // other attempt had not committed yet, and the database refused this one — on the
         // reference's unique index, or on the slot the other attempt has just taken. Either
-        // way the purchase exists now, so re-read it and answer with it.
+        // way the purchase exists now, so re-read it and answer with it. The claim is KEPT: the
+        // purchase it stands for was made, under this very nonce.
         if (created is BookingResult.DuplicateRequest or BookingResult.SlotTaken
             && await ReplayAsync(reference, req, services, ct) is { } original)
         {
-            await services.MemberCodes.ReleaseAsync(claim, ct);
             return original;
         }
 
         if (created is not BookingResult.Ok ok)
         {
-            await services.MemberCodes.ReleaseAsync(claim, ct);
+            await services.MemberCodes.ReleaseAsync(claim);
             // A purchase the club would not sell, onto the monitoring page. The member is at
             // the box with their card out and the court did not come on, and the reason —
             // out of hours, no time available, the court already in use — is a fact about the
@@ -1549,17 +1678,21 @@ public static class DeviceEventEndpoints
         }
 
         // Straight into the one activation path, so attendance, the audit row and
-        // booking.lights_on all come from the place that is allowed to produce them.
+        // booking.lights_on all come from the place that is allowed to produce them. Not
+        // wrapped like the purchase above: past CreateWalkUpAsync's commit the money has moved,
+        // and a use that moved money keeps its row — the box's retry of this nonce is answered
+        // by the replay, never by a second purchase.
         var activated = await ActivateOnceAsync(db, activation,
-            new ActivationTarget(court, ok.Booking, userId.Value, req.Method ?? "qr", OccurredAt: null, DurationMs: 0), ct);
+            new ActivationTarget(court, ok.Booking, userId, req.Method ?? "qr", OccurredAt: null, DurationMs: 0), ct);
         if (activated is not ActivationResult.Activated live)
         {
             // The purchase is undone rather than left standing. Charged and un-checked-in on a
             // court nobody can now buy, it would be settled as a no-show at the grace deadline
             // and carry the club's penalty — for a member the API itself refused. No mail was
             // sent above, so nothing has yet told them a lie about it either.
+            // The use is KEPT: the purchase committed — money moved, and moved back — under this
+            // code, and the use table records acts, not outcomes. Refunded or not, it was one.
             await bookings.VoidUnstartedWalkUpAsync(ok.Booking, VoidReference(reference), ct);
-            await services.MemberCodes.ReleaseAsync(claim, ct);
             return Results.Conflict(new { error = "activation_refused" });
         }
 
@@ -1656,6 +1789,12 @@ public static class DeviceEventEndpoints
     /// member the desk.
     /// </para>
     /// </summary>
+    /// <summary>Whether a walk-up purchase under this reference committed — read fresh, outside the request's token.</summary>
+    private static Task<bool> PurchaseCommittedAsync(MainframeDbContext db, string reference)
+    {
+        return db.LedgerEntries.AsNoTracking().AnyAsync(l => l.ExternalReference == reference);
+    }
+
     private static async Task<IResult?> ReplayAsync(
         string reference, WalkUpRequest req, WalkUpServices services, CancellationToken ct)
     {

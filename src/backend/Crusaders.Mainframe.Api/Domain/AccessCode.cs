@@ -58,5 +58,17 @@ public sealed class AccessCode : ITenantScoped
     public DateTimeOffset ExpiresAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    /// <summary>
+    /// When the member-code cut-off (<c>v1_only</c>, member-code §8) ended this code early, else
+    /// null. With <see cref="ExpiresAtBeforeCutoff"/> it is what lets an administrator's ROLLBACK
+    /// out of <c>v1_only</c> give back the codes the cut-off took: without them, a club that rolled
+    /// back because v1 misbehaved found every member's legacy code — the one fallback it rolled
+    /// back to — already dead.
+    /// </summary>
+    public DateTimeOffset? CutoffExpiredAt { get; set; }
+
+    /// <summary>The expiry this code had before the cut-off ended it. Null unless <see cref="CutoffExpiredAt"/> is set.</summary>
+    public DateTimeOffset? ExpiresAtBeforeCutoff { get; set; }
+
     public bool IsLiveAt(DateTimeOffset now) => ExpiresAt > now;
 }

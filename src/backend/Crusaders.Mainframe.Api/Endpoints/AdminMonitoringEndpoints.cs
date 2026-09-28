@@ -536,7 +536,7 @@ public static class AdminMonitoringEndpoints
 
         var ticket = jwt.IssueOneTime(
             userId.Value, tenant.TenantId, tenant.TenantSlug,
-            TokenPurposes.MonitoringStream, TokenPurposes.WalletStreamTicketTtl, ["admin"]);
+            new TicketScope(TokenPurposes.MonitoringStream, TokenPurposes.WalletStreamTicketTtl), ["admin"], SessionEpochs.EpochOf(ctx.User));
 
         return Results.Ok(new
         {

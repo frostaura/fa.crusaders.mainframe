@@ -8,6 +8,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Crusaders.Mainframe.Api.Services;
 
+/// <summary>A claim on one acting use (§4.4). <paramref name="Fresh"/> is false for a claim re-entered by the same act retried.</summary>
+public sealed record MemberCodeClaim(Guid Id, bool Fresh);
+
 /// <summary>A v1 code the server checked and accepted: whose it is, and the step it was accepted at.</summary>
 public sealed record MemberCodeMatch(Guid UserId, int RefValue, string Ref, long Step, int Generation);
 
@@ -49,12 +52,14 @@ public sealed class MemberCodeService
     private readonly MainframeDbContext _db;
     private readonly ITenantContext _tenant;
     private readonly MemberCodeMasterKey _master;
+    private readonly SessionEpochs _sessions;
 
-    public MemberCodeService(MainframeDbContext db, ITenantContext tenant, MemberCodeMasterKey master)
+    public MemberCodeService(MainframeDbContext db, ITenantContext tenant, MemberCodeMasterKey master, SessionEpochs sessions)
     {
         _db = db;
         _tenant = tenant;
         _master = master;
+        _sessions = sessions;
     }
 
     // ---- Identity -------------------------------------------------------------------------------
@@ -127,13 +132,40 @@ public sealed class MemberCodeService
 
     /// <summary>
     /// Moves the member to a new generation — every code their phone can compute stops working,
-    /// and the phone's next status check re-enrols. <b>Staged, not saved</b>: the caller's own
-    /// change (a password, a suspension) and the rotation commit together or not at all.
-    /// A member who has never had a code row has never been handed a secret, so there is nothing
-    /// to rotate and nothing is written.
+    /// and the phone's next status check re-enrols — AND ends every session they had open, by
+    /// raising <see cref="User.SessionEpoch"/>.
+    ///
+    /// <para>
+    /// <b>The epoch moves NOW, in one SQL statement; the generation is staged.</b> The caller's own
+    /// change (a password, a suspension) and the new generation commit together. The epoch does
+    /// not wait for them: it is incremented atomically and committed first, so there is no instant
+    /// in which the new generation is visible and an old session is still current — which is the
+    /// ordering <c>/me/code/enrol</c>'s row lock relies on. A save that then fails has ended the
+    /// member's sessions without rotating their code: a sign-in, never a hole.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Why the sessions go with the code.</b> A rotation is the desk's answer to "I lost my
+    /// phone". Retiring the codes alone left the phone's signed-in PWA free to call
+    /// <c>/me/code/enrol</c> and be handed the new generation's secret. A member changing their own
+    /// password is re-issued a token under the new epoch (<see cref="AuthService.ChangePasswordAsync"/>).
+    /// </para>
+    ///
+    /// <para>
+    /// A member who has never had a code row has never been handed a secret, so there is no
+    /// generation to move and false is returned — but their sessions are still ended.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Every caller calls <see cref="CompleteRotationsAsync"/> after its own save commits</b> —
+    /// the second raise that ends a session signed in with the old credential in between.
+    /// </para>
     /// </summary>
     public async Task<bool> StageRotationAsync(Guid userId, Guid actorUserId, string reason, CancellationToken ct)
     {
+        var epoch = await RaiseSessionEpochAsync(userId, ct);
+        _awaitingSecondRaise.Add(userId);
+
         var row = await _db.MemberCodes.FirstOrDefaultAsync(c => c.UserId == userId, ct);
         if (row is null) return false;
 
@@ -145,10 +177,100 @@ public sealed class MemberCodeService
             ActorUserId = actorUserId,
             SubjectUserId = userId,
             Action = RotatedAction,
-            DetailsJson = JsonSerializer.Serialize(new { reason, generation = row.Generation }),
+            DetailsJson = JsonSerializer.Serialize(new { reason, generation = row.Generation, session_epoch = epoch }),
         });
         return true;
     }
+
+    /// <summary>
+    /// <c>SessionEpoch = SessionEpoch + 1</c> in one statement, committed at once, and the cache
+    /// evicted after it. A tracked copy of the user is brought up to the new value WITHOUT being
+    /// marked modified, so the caller's save can neither write it back down nor race another
+    /// rotation's increment. Returns the new epoch, or null for an unknown user.
+    /// </summary>
+    private async Task<int?> RaiseSessionEpochAsync(Guid userId, CancellationToken ct)
+    {
+        int? epoch;
+        Guid? tenantId;
+        if (_db.Database.IsRelational())
+        {
+            var raised = await _db.Database.SqlQuery<EpochRow>($"""
+                UPDATE users SET "SessionEpoch" = "SessionEpoch" + 1
+                 WHERE "Id" = {userId} AND "TenantId" = {_tenant.TenantId}
+                RETURNING "SessionEpoch", "TenantId"
+                """).ToListAsync(ct);
+            epoch = raised.Count == 1 ? raised[0].SessionEpoch : null;
+            tenantId = raised.Count == 1 ? raised[0].TenantId : null;
+        }
+        else
+        {
+            var row = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
+            if (row is not null)
+            {
+                row.SessionEpoch += 1;
+                await _db.SaveChangesAsync(ct);
+            }
+            epoch = row?.SessionEpoch;
+            tenantId = row?.TenantId;
+        }
+        if (epoch is not { } value || tenantId is not { } tenant) return null;
+
+        var tracked = _db.ChangeTracker.Entries<User>().FirstOrDefault(e => e.Entity.Id == userId);
+        if (tracked is not null)
+        {
+            tracked.Property(u => u.SessionEpoch).CurrentValue = value;
+            tracked.Property(u => u.SessionEpoch).OriginalValue = value;
+            tracked.Property(u => u.SessionEpoch).IsModified = false;
+        }
+        _sessions.Invalidate(tenant, userId);
+        return value;
+    }
+
+    private sealed record EpochRow(int SessionEpoch, Guid TenantId);
+
+    private readonly HashSet<Guid> _awaitingSecondRaise = [];
+
+    /// <summary>
+    /// The rotation's SECOND epoch raise, called by every rotating caller once its own save has
+    /// committed. <b>Why twice:</b> the first raise (in <see cref="StageRotationAsync"/>) must come
+    /// before the new generation commits, or a refresh in between keeps an old session alive; but
+    /// until the caller's save commits, the OLD password still verifies and a lost phone's passkey
+    /// still exists — a sign-in landing in that gap is minted under the NEW epoch and survived the
+    /// rotation (refuted 2026-09-28). Raising again after the commit ends it, and nothing can sign
+    /// in with the old credential after this point. A member's own replacement token (a password
+    /// change) is minted after this, from the second value. Evicts the cache each time.
+    /// </summary>
+    public async Task CompleteRotationsAsync(CancellationToken ct)
+    {
+        foreach (var userId in _awaitingSecondRaise.ToList())
+        {
+            await RaiseSessionEpochAsync(userId, ct);
+            _awaitingSecondRaise.Remove(userId);
+        }
+    }
+
+    /// <summary>
+    /// Deletes every passkey the member has registered (member-code §13): after a lost-phone reset
+    /// the phone's passkey still signs in and would mint a session under the NEW epoch — the reset
+    /// then changed nothing for whoever holds the phone. Staged with an audit row naming how many
+    /// went; the caller saves. Returns the count.
+    /// </summary>
+    public async Task<int> StagePasskeyRevocationAsync(Guid userId, Guid actorUserId, string reason, CancellationToken ct)
+    {
+        var passkeys = await _db.WebAuthnCredentials.Where(c => c.UserId == userId).ToListAsync(ct);
+        _db.WebAuthnCredentials.RemoveRange(passkeys);
+        _db.AuditLogs.Add(new AuditLog
+        {
+            TenantId = _tenant.TenantId,
+            ActorUserId = actorUserId,
+            SubjectUserId = userId,
+            Action = PasskeysRevokedAction,
+            DetailsJson = JsonSerializer.Serialize(new { reason, removed = passkeys.Count }),
+        });
+        return passkeys.Count;
+    }
+
+    public const string PasskeysRevokedAction = "member.passkeys_revoked";
 
     public const string RotatedAction = "member_code.rotated";
     public const string EnrolledAction = "member_code.enrolled";
@@ -205,11 +327,12 @@ public sealed class MemberCodeService
     /// for an OFF match under the member's K_day, then checks ON at that same step.
     ///
     /// <para>
-    /// The previous generation is searched as well as the current one. A board that was offline
-    /// across a rotation held the old generation's keys and verified the old generation's codes
-    /// honestly; calling that a forgery would page every administrator for a member whose
-    /// password change happened to land during an outage. A code that is genuine under neither is
-    /// what this exists to catch.
+    /// The previous generation is searched as well as the current one — but only within
+    /// <see cref="PreviousGenerationGrace"/> of the rotation and for a member active at the scan
+    /// (<see cref="PreviousGenerationHonestAtAsync"/>). A board that was offline across a rotation
+    /// held the old generation's keys and verified the old generation's codes honestly; calling
+    /// that a forgery would page every administrator for a member whose password change happened
+    /// to land during an outage. A code that is genuine under neither is what this exists to catch.
     /// </para>
     /// </summary>
     public async Task<MemberCodeEvidence> CheckEvidenceAsync(
@@ -224,7 +347,10 @@ public sealed class MemberCodeService
         var estimate = MemberCodeMath.StepOf(estimatedAt);
         var offOnly = false;
 
-        foreach (var generation in row.Generation > 1 ? new[] { row.Generation, row.Generation - 1 } : [row.Generation])
+        var generations = row.Generation > 1 && await PreviousGenerationHonestAtAsync(row, estimatedAt, ct)
+            ? new[] { row.Generation, row.Generation - 1 }
+            : [row.Generation];
+        foreach (var generation in generations)
         {
             var secret = SecretAt(row.UserId, generation);
             for (var d = 0; d <= EvidenceWindowSteps * 2; d++)
@@ -241,6 +367,34 @@ public sealed class MemberCodeService
         }
 
         return new MemberCodeEvidence.Forged(offOnly ? "on_mismatch" : "off_mismatch", row.UserId, parsed.Ref);
+    }
+
+    /// <summary>
+    /// How long after a rotation a board can honestly still verify the old generation: the life
+    /// of the roster that carried its keys (<c>ROSTER_MAX_AGE_MS</c>, six hours, §6.2). Past it
+    /// every board has either fetched the new keys or stopped verifying anybody.
+    /// </summary>
+    public static readonly TimeSpan PreviousGenerationGrace = TimeSpan.FromHours(6);
+
+    /// <summary>
+    /// Whether an old-generation code used at <paramref name="at"/> could have been verified
+    /// honestly: inside <see cref="PreviousGenerationGrace"/> of the rotation, and by a member who
+    /// was active then. <b>Why bounded:</b> accepted unbounded, a code from a phone the desk
+    /// retired — lost, stolen, a suspended member's — was genuine evidence forever, at any board
+    /// holding a stale key, and never raised the alarm the rotation exists to raise.
+    ///
+    /// <para>
+    /// "Active at <paramref name="at"/>" is read off the membership as it stands: active now and
+    /// not re-decided since <paramref name="at"/>. A membership decided after the scan (a
+    /// suspension lifted, say) cannot say what it was at the scan, so the old generation is not
+    /// honoured — the current one still is, and the alarm is the conservative mistake.
+    /// </para>
+    /// </summary>
+    private async Task<bool> PreviousGenerationHonestAtAsync(MemberCode row, DateTimeOffset at, CancellationToken ct)
+    {
+        if (row.RotatedAt is not { } rotated || at > rotated.Add(PreviousGenerationGrace)) return false;
+        return await _db.Memberships.AsNoTracking().AnyAsync(
+            m => m.UserId == row.UserId && m.Status == MembershipStatus.Active && (m.ReviewedAt == null || m.ReviewedAt <= at), ct);
     }
 
     // ---- The use table (§4.4) -------------------------------------------------------------------
@@ -261,56 +415,90 @@ public sealed class MemberCodeService
     /// so a claim neither flushes the caller's pending changes early nor poisons its context
     /// with a failed insert.
     /// </para>
+    ///
+    /// <para>
+    /// <b>Re-entrant for the same act.</b> When the caller has an idempotency key of its own — a
+    /// walk-up's or a pay-for's nonce — a taken row carrying the SAME device and the SAME key is
+    /// that act retried, and the claim is handed back as <see cref="MemberCodeClaim.Fresh"/> =
+    /// false rather than refused: two identical retries in flight together used to answer one of
+    /// them <c>code_used</c> for a purchase that went through. A re-entered claim is never
+    /// released by the request that re-entered it; it belongs to the one that made it.
+    /// </para>
     /// </summary>
-    public async Task<Guid?> TryClaimAsync(
-        MemberCodeMatch match, string useClass, Guid? deviceId, string kind, CancellationToken ct)
+    public async Task<MemberCodeClaim?> TryClaimAsync(
+        MemberCodeMatch match, string useClass, Guid? deviceId, string kind, CancellationToken ct, string? claimKey = null)
     {
         var id = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow.Storable();
+        var key = claimKey is { Length: > MemberCodeUse.ClaimKeyMaxLength } ? claimKey[..MemberCodeUse.ClaimKeyMaxLength] : claimKey;
 
+        bool inserted;
         if (!_db.Database.IsRelational())
         {
             // The in-memory test host has no unique index to lean on; the read stands in for it.
-            if (await IsUsedAsync(match, useClass, ct)) return null;
-            _db.MemberCodeUses.Add(new MemberCodeUse
+            inserted = !await IsUsedAsync(match, useClass, ct);
+            if (inserted)
             {
-                Id = id,
-                TenantId = _tenant.TenantId,
-                Ref = match.RefValue,
-                Step = match.Step,
-                UseClass = useClass,
-                UsedAt = now,
-                DeviceId = deviceId,
-                Kind = kind,
-            });
-            await _db.SaveChangesAsync(ct);
-            return id;
+                _db.MemberCodeUses.Add(new MemberCodeUse
+                {
+                    Id = id,
+                    TenantId = _tenant.TenantId,
+                    Ref = match.RefValue,
+                    Step = match.Step,
+                    UseClass = useClass,
+                    UsedAt = now,
+                    DeviceId = deviceId,
+                    Kind = kind,
+                    ClaimKey = key,
+                });
+                await _db.SaveChangesAsync(ct);
+            }
+        }
+        else
+        {
+            inserted = await _db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO member_code_uses ("Id", "TenantId", "Ref", "Step", "UseClass", "UsedAt", "DeviceId", "Kind", "ClaimKey")
+                VALUES ({id}, {_tenant.TenantId}, {match.RefValue}, {match.Step}, {useClass}, {now}, {deviceId}, {kind}, {key})
+                ON CONFLICT ("TenantId", "Ref", "Step", "UseClass") DO NOTHING
+                """, ct) == 1;
         }
 
-        var inserted = await _db.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO member_code_uses ("Id", "TenantId", "Ref", "Step", "UseClass", "UsedAt", "DeviceId", "Kind")
-            VALUES ({id}, {_tenant.TenantId}, {match.RefValue}, {match.Step}, {useClass}, {now}, {deviceId}, {kind})
-            ON CONFLICT ("TenantId", "Ref", "Step", "UseClass") DO NOTHING
-            """, ct);
-        return inserted == 1 ? id : null;
+        if (inserted) return new MemberCodeClaim(id, Fresh: true);
+        if (key is null || deviceId is null) return null;
+
+        var taken = await FindUseAsync(match, useClass, ct);
+        return taken is not null && taken.DeviceId == deviceId && taken.ClaimKey == key
+            ? new MemberCodeClaim(taken.Id, Fresh: false)
+            : null;
     }
 
-    /// <summary>Gives a claim back: the server decided not to act after all.</summary>
-    public async Task ReleaseAsync(Guid? claim, CancellationToken ct)
+    /// <summary>The use row this code already holds in this class, or null.</summary>
+    public Task<MemberCodeUse?> FindUseAsync(MemberCodeMatch match, string useClass, CancellationToken ct) =>
+        _db.MemberCodeUses.AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Ref == match.RefValue && u.Step == match.Step && u.UseClass == useClass, ct);
+
+    /// <summary>
+    /// Gives a claim back: the server decided not to act after all, or the action threw. Only a
+    /// FRESH claim is released — a re-entered one belongs to the request that made it. Takes no
+    /// cancellation from the caller on purpose: it runs on the way out of a failed or abandoned
+    /// request, which is exactly when that token has fired, and a claim left behind strands the
+    /// member's code for its whole window.
+    /// </summary>
+    public async Task ReleaseAsync(MemberCodeClaim? claim)
     {
-        if (claim is not { } id) return;
+        if (claim is not { Fresh: true, Id: var id }) return;
 
         if (!_db.Database.IsRelational())
         {
-            var row = await _db.MemberCodeUses.FirstOrDefaultAsync(u => u.Id == id, ct);
+            var row = await _db.MemberCodeUses.FirstOrDefaultAsync(u => u.Id == id);
             if (row is null) return;
             _db.MemberCodeUses.Remove(row);
-            await _db.SaveChangesAsync(ct);
+            await _db.SaveChangesAsync();
             return;
         }
 
         await _db.Database.ExecuteSqlInterpolatedAsync(
-            $"""DELETE FROM member_code_uses WHERE "Id" = {id} AND "TenantId" = {_tenant.TenantId}""", ct);
+            $"""DELETE FROM member_code_uses WHERE "Id" = {id} AND "TenantId" = {_tenant.TenantId}""");
     }
 
     private static bool IsUniqueViolation(DbUpdateException ex) =>

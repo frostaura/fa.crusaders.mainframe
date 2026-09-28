@@ -155,9 +155,7 @@ public static class QrEndpoints
 
         // Refused rather than silently treated as auto: a typo'd kind that quietly returned
         // a booking code is exactly the lockout this parameter was added to end.
-        var requested = ctx.Request.Query["kind"].ToString();
-        var kind = string.IsNullOrWhiteSpace(requested) ? KindAuto : requested.Trim().ToLowerInvariant();
-        if (kind is not (KindAuto or KindIdent))
+        if (KindOf(ctx) is not { } kind)
         {
             return Results.BadRequest(new { error = "kind_invalid", message = $"kind must be '{KindAuto}' or '{KindIdent}'." });
         }
@@ -181,16 +179,11 @@ public static class QrEndpoints
         // predicate, and they were two independent copies of it in two files. A door narrower
         // than this screen refuses a code the product has just handed somebody; a door wider
         // than it is a standing building key. See BookingCodeWindow and GateAccess.
-        var latestStart = BookingCodeWindow.LatestStart(now, BookingCodeWindow.DisplayHorizonMinutes(settings));
         // Once the club has cut over, bookings stop minting per-booking codes (member-code §8): the
         // screen answers with the short-lived ident code, which still works online until cut-off.
-        var booking = kind == KindIdent || !MemberCodeSettings.MintsBookingCodes(settings) ? null : await db.Bookings
-            .Where(b => b.UserId == userId
-                        && b.Status == BookingStatus.Booked
-                        && b.StartsAt <= latestStart
-                        && b.EndsAt >= now)
-            .OrderBy(b => b.StartsAt)
-            .FirstOrDefaultAsync(ct);
+        var booking = kind == KindIdent || !MemberCodeSettings.MintsBookingCodes(settings)
+            ? null
+            : await NextBookingAsync(db, userId, BookingCodeWindow.LatestStart(now, BookingCodeWindow.DisplayHorizonMinutes(settings)), now, ct);
 
         // Whether this club has a door at all, asked once for either branch. See DoorFacts.
         var doors = await db.Devices
@@ -234,6 +227,27 @@ public static class QrEndpoints
             door_opens_at = (DateTimeOffset?)null,
             door_closes_at = (DateTimeOffset?)null,
         });
+    }
+
+    /// <summary>The <c>?kind=</c> asked for — <c>auto</c> when absent — or null for one that is not a kind.</summary>
+    private static string? KindOf(HttpContext ctx)
+    {
+        var requested = ctx.Request.Query["kind"].ToString();
+        var kind = string.IsNullOrWhiteSpace(requested) ? KindAuto : requested.Trim().ToLowerInvariant();
+        return kind is KindAuto or KindIdent ? kind : null;
+    }
+
+    /// <summary>The member's earliest live booking starting by <paramref name="latestStart"/>.</summary>
+    private static Task<Booking?> NextBookingAsync(
+        MainframeDbContext db, Guid userId, DateTimeOffset latestStart, DateTimeOffset now, CancellationToken ct)
+    {
+        return db.Bookings
+            .Where(b => b.UserId == userId
+                        && b.Status == BookingStatus.Booked
+                        && b.StartsAt <= latestStart
+                        && b.EndsAt >= now)
+            .OrderBy(b => b.StartsAt)
+            .FirstOrDefaultAsync(ct);
     }
 
     /// <summary>
