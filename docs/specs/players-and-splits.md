@@ -117,7 +117,18 @@ once and the organiser spent, is not covered, before the deadline or after. An u
   the booking**, and at once by **any credit the organiser receives** — a top-up, a desk
   adjustment, a refund, anything but a share moving between players (`ShareHook.AfterCreditAsync`,
   after the commit);
-- the stamp clears when the return posts or is no longer due.
+- the stamp clears when the return posts or is no longer due;
+- **while it waits it is set aside** from what the organiser may spend, exactly like a hold
+  (§3a, `owed_back_credits`). Posting stays all-or-nothing, so credit arriving short of the whole
+  return accumulates, unspendable, until it covers it — a top-up of 10 against a waiting 16 cannot
+  buy an 8-credit court, and the next 6 pay the partner;
+- after an outage nothing strands: the worker's first pass after it starts reconciles every
+  booking a return may have fallen due on, whatever its age (`ShareSweep.CatchUpAsync`).
+
+**Chaining is not recursive.** When a waiting return posts it credits the partner, but a credit
+arriving as a share transfer does not itself retry that partner's own waiting returns — if Sam's
+refund from Olive would cover Sam's waiting refund to Jo, Jo is paid at the next minute sweep, not
+in the same breath. That bounds every retry to one level; the cost is a minute's delay down a chain.
 
 Nothing overdraws the organiser silently: only the desk's named overdraft — an admin remove or
 settle-outside sent with `allowNegativeBalance` (§7) — posts it regardless. In practice most late
@@ -134,6 +145,9 @@ reinstated). The settlement code itself is unchanged.
 
 **Lapse notices** go only for a game that was on (booked, completed, no-show). An invite on a
 cancelled or displaced game lapses silently — its players were already told the game was off.
+The lapse sweep reads accepted seats only in the week after the deadline (a paid seat never
+lapses), but every still-INVITED seat past its deadline whatever its age (a partial index holds only
+unanswered seats), so an invite outlives no worker outage.
 
 ## 3a. Held credits — shares are not spendable until the deadline
 
@@ -161,8 +175,13 @@ organiser receives as shares are **held**:
 - **One meaning for `balance_credits`: the raw balance, everywhere.** Wherever a balance is shown
   beside a spend — `GET /wallet`, the wallet SSE stream's opening frame and named `balance` frame,
   the invite view, the accept's answer, the admin booking quote and the admin bulk quote —
-  `spendable_credits` and `held_credits` sit beside it; `GET /wallet`, the stream and
-  `GET /me/profile` also carry `held_until` (the earliest release — a stamped deadline).
+  `spendable_credits`, `held_credits` and `owed_back_credits` sit beside it; `GET /wallet`, the
+  stream and `GET /me/profile` also carry `held_until` (the earliest release — a stamped deadline).
+- **`owed_back_credits`** is the other part that is not spendable: returns already due to
+  partners and WAITING for this member's credits (§3). Kept apart from `held_credits` because it
+  means something else — money that is going, not money that might — and it has no release date.
+  `spendable_credits = balance_credits − held_credits − owed_back_credits`, and every spend check
+  uses exactly that. A booking's own hold is not counted twice when it also has a waiting return.
 
 ## 4. Consent
 
@@ -288,7 +307,7 @@ Requests are camelCase, answers snake_case. Every refusal is `{ "error": "<code>
 
 **Wallet and profile (§3a)**: `GET /api/v1/wallet` adds `held_credits`, `spendable_credits`,
 `held_until`; the wallet SSE stream's opening frame and named `balance` frame carry the same three;
-`GET /api/v1/me/profile` adds `held_credits`, `held_until`. `held_until` is null when nothing is held.
+`GET /api/v1/me/profile` adds `held_credits`, `owed_back_credits`, `held_until`. `held_until` is null when nothing is held.
 The admin booking quote and the admin bulk quote add `spendable_credits` and `held_credits`;
 their `balance_credits` is raw and their `overdraws` is on spendable.
 
@@ -297,9 +316,9 @@ their `balance_credits` is raw and their `overdraws` is on spendable.
 | Route | Body → answer |
 | --- | --- |
 | `POST /api/v1/admin/bookings/{id}/players` | `{userId? \| guestName?, accepted?, reason?}` — neither: an open link seat. `accepted` places a member without their consent (collects nothing). → as the organiser's add |
-| `POST /api/v1/admin/bookings/{id}/players/{pid}/remove` | `{reason, allowNegativeBalance?}` → `{participant_id, status}`. `allowNegativeBalance: true` is required whenever the hand-back is not covered by the organiser's coverage (§3), whatever the deadline: `400 overdraft_not_authorised {return_credits, covered_credits}` |
+| `POST /api/v1/admin/bookings/{id}/players/{pid}/remove` | `{reason, allowNegativeBalance?}` → `{participant_id, status, return_waiting, return_credits}` — `return_waiting` is true (with `return_credits`, the amount due back) when the hand-back passed the coverage check but a spend raced it and the reconcile left it waiting (§3); `return_credits` is null otherwise. `allowNegativeBalance: true` is required whenever the hand-back is not covered by the organiser's coverage (§3), whatever the deadline: `400 overdraft_not_authorised {return_credits, covered_credits}` |
 | `POST …/{pid}/accept` | `{reason}` — accept on behalf; records no consent |
-| `POST …/{pid}/settle-outside` | `{reason, allowNegativeBalance?}` — paid by hand; anything collected in-app goes back. Accepted seats only: `409 player_not_accepted`. `allowNegativeBalance: true` is required whenever the hand-back is not covered, as for remove |
+| `POST …/{pid}/settle-outside` | `{reason, allowNegativeBalance?}` → as remove, with `return_waiting` / `return_credits` — paid by hand; anything collected in-app goes back. Accepted seats only: `409 player_not_accepted`. `allowNegativeBalance: true` is required whenever the hand-back is not covered, as for remove |
 | `POST …/{pid}/collect` | `{reason, allowNegativeBalance: true}` — the only path that may take a partner below zero, or collect from a lapsed seat → `{participant_id, collected_credits, balance_after_credits}`; `400 overdraft_not_authorised`, `409 nothing_to_collect`, `409 conflict_retry`. The consent, the change-log line (the figure actually posted) and the pair are one transaction under the partner's lock |
 
 Change-log actions: `booking.player_added`, `booking.player_removed`,

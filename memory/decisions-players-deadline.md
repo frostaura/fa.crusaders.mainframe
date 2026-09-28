@@ -1,14 +1,14 @@
 ---
 name: crusaders-mainframe-decisions-players-deadline
-description: "The share deadline is frozen per booking; a return posts only when the organiser's coverage pays for it, whatever the deadline — else it waits, stamped, told once, retried on any credit and by the sweep."
+description: "The share deadline is frozen per booking; a return posts only when the organiser's coverage pays for it — else it waits, set aside from spendable, told once, retried on credit, sweep and start-up."
 type: decision
 last_verified: 2026-09-28
 ---
 
 # Live decisions — players: the deadline, and when money may go back
 
-Spec: `docs/specs/players-and-splits.md` §3, §3a, §7. From the two refuter rounds on the review
-fixes, 2026-09-28, pinned in `PlayersRefuteHttpTests` and `PlayersRefute2HttpTests`.
+Spec: `docs/specs/players-and-splits.md` §3, §3a, §7. From the three refuter rounds on the review
+fixes, 2026-09-28, pinned in `PlayersRefute{,2,3}HttpTests`.
 
 - **The deadline is frozen per booking** — `bookings.ShareDeadlineAt`, stamped when a booking
   first gets players from the setting at that moment; everything (open, hold, lapse, reminders,
@@ -35,3 +35,19 @@ fixes, 2026-09-28, pinned in `PlayersRefuteHttpTests` and `PlayersRefute2HttpTes
   kind was optional and was NOT added: the partner and organiser mails say it; the admin feed does not.
 - **The lapse and reminder reads are bounded** to bookings whose deadline passed within a week /
   is still ahead (indexed on the stamp); they had read every accepted seat in history every minute.
+- **A waiting return is SET ASIDE from spendable** (round 3, orchestrator decision): spendable =
+  balance − held − owed back, in every spend check; reported as `owed_back_credits`, apart from
+  `held_credits` (going, not might-go; no release date). Posting stays all-or-nothing, so short
+  credit accumulates until it covers the return. *Why:* otherwise each short top-up was spendable
+  on a new court and the partner waited for ever. A booking's own hold is not counted twice.
+- **Nothing strands after an outage** (round 3): the worker's first pass after a start reconciles
+  every booking a return may have fallen due on, any age (`CatchUpAsync`, once — not every minute,
+  so the minute sweep stays bounded); the lapse sweep takes every still-invited overdue seat, any age
+  (partial index `IX_booking_participants_open_invites`). Accepted short seats past the week are
+  closed by the clock anyway; only their lapse notice would be missed.
+- **Return chaining is not recursive — accepted** (round 3): a credit arriving as a share transfer
+  does not retry the receiver's own waiting returns; the next minute sweep does. *Why:* bounds each
+  retry to one level; *cost:* a minute's delay per link.
+- **Admin remove / settle-outside answer `return_waiting` + `return_credits`** (round 3): the
+  coverage pre-check is not under the organiser's lock, so a spend can race it; the desk is told
+  the money did not move rather than reading a bare 200.
