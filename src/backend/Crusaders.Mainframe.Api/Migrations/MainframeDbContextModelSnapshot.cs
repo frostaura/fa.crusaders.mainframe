@@ -441,7 +441,13 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateTimeOffset?>("ShareDeadlineAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("ShareReconcileAttempts")
+                        .HasColumnType("integer");
+
                     b.Property<DateTimeOffset?>("ShareReconcileDueAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("ShareReconcileLastAttemptAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("SliceCount")

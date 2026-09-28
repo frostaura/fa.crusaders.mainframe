@@ -32,6 +32,9 @@ public sealed class ShareWorker : BackgroundService
     /// </summary>
     private readonly HashSet<Guid> _caughtUp = [];
 
+    /// <summary>Whether this process has caught <paramref name="tenantId"/> up (for tests and diagnostics).</summary>
+    internal bool IsCaughtUp(Guid tenantId) => _caughtUp.Contains(tenantId);
+
     public ShareWorker(IServiceScopeFactory scopes, ILogger<ShareWorker> logger)
     {
         _scopes = scopes; _logger = logger;

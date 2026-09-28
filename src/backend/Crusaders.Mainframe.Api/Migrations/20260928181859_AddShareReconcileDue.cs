@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -27,6 +27,10 @@ namespace Crusaders.Mainframe.Api.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            // Rolling back FORGETS every outstanding "reconcile due" marker: a booking whose
+            // reconcile failed and was never made good is then reached only by the sweep's week,
+            // or the start-up catch-up if it looks at such games. Check for marked rows first:
+            // SELECT "Id" FROM bookings WHERE "ShareReconcileDueAt" IS NOT NULL.
             migrationBuilder.DropIndex(
                 name: "IX_bookings_TenantId_ShareReconcileDueAt",
                 table: "bookings");

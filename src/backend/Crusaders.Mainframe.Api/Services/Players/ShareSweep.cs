@@ -36,41 +36,61 @@ public sealed class ShareSweep
     }
 
     /// <summary>
-    /// Marks a booking's shares "reconcile due" (<see cref="Booking.ShareReconcileDueAt"/>) — once,
-    /// keeping the first time — for the next minute sweep, whatever its age.
+    /// Records a failed reconcile of a booking's shares: marks it "reconcile due"
+    /// (<see cref="Booking.ShareReconcileDueAt"/>, keeping the first time) for the minute sweep,
+    /// whatever its age, and counts the attempt for the backoff (review round 6).
     /// </summary>
     public static Task<int> MarkReconcileDueAsync(MainframeDbContext db, Guid bookingId, CancellationToken ct)
     {
         var at = DateTimeOffset.UtcNow.Storable();
-        return db.Bookings.Where(b => b.Id == bookingId && b.ShareReconcileDueAt == null)
-            .ExecuteUpdateAsync(u => u.SetProperty(b => b.ShareReconcileDueAt, at), ct);
+        return db.Bookings.Where(b => b.Id == bookingId)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(b => b.ShareReconcileDueAt, b => b.ShareReconcileDueAt ?? at)
+                .SetProperty(b => b.ShareReconcileAttempts, b => b.ShareReconcileAttempts + 1)
+                .SetProperty(b => b.ShareReconcileLastAttemptAt, at), ct);
     }
 
+    /// <summary>The longest a failing booking waits between retries.</summary>
+    public static readonly TimeSpan MaxReconcileBackoff = TimeSpan.FromHours(1);
+
     /// <summary>
-    /// Reconciles one booking and never throws: a failure is logged, the booking is marked due for
-    /// the next sweep, and the caller goes on with the rest (review round 5) — one poisoned booking
-    /// must not stop a club's whole sweep. Answers whether it succeeded.
+    /// How long after its latest failure a marked booking waits before the sweep tries it again:
+    /// a minute, doubling with each failed attempt, capped at <see cref="MaxReconcileBackoff"/> —
+    /// so a booking that fails for good costs a retry an hour, not one a minute (review round 6).
     /// </summary>
-    private async Task<bool> TrySettleAsync(Guid bookingId, CancellationToken ct)
+    public static TimeSpan ReconcileBackoff(int attempts) =>
+        attempts <= 1 ? TimeSpan.FromMinutes(1)
+        : TimeSpan.FromMinutes(Math.Min(MaxReconcileBackoff.TotalMinutes, Math.Pow(2, Math.Min(attempts - 1, 10))));
+
+    /// <summary>What became of one booking's reconcile: made, or failed and marked due, or failed unmarked.</summary>
+    private enum Settled { Done, FailedMarked, FailedUnmarked }
+
+    /// <summary>
+    /// Reconciles one booking and never throws: a failure is logged — once per backoff step, as a
+    /// retry happens only once per step — the booking is marked due with the attempt counted, and
+    /// the caller goes on with the rest (review rounds 5 and 6).
+    /// </summary>
+    private async Task<Settled> TrySettleAsync(Guid bookingId, CancellationToken ct)
     {
         try
         {
             await SettleBookingAsync(bookingId, ct);
-            return true;
+            return Settled.Done;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _db.ChangeTracker.Clear();
-            _logger.LogError(ex, "Share reconcile of booking {Booking} failed; marked for the next sweep", bookingId);
+            _logger.LogError(ex, "Share reconcile of booking {Booking} failed; marked for the sweep with backoff", bookingId);
             try
             {
                 await MarkReconcileDueAsync(_db, bookingId, ct);
+                return Settled.FailedMarked;
             }
             catch (Exception mark) when (mark is not OperationCanceledException)
             {
-                _logger.LogError(mark, "Could not mark booking {Booking} for the next sweep", bookingId);
+                _logger.LogError(mark, "Could not mark booking {Booking} for the sweep", bookingId);
+                return Settled.FailedUnmarked;
             }
-            return false;
         }
     }
 
@@ -80,15 +100,23 @@ public sealed class ShareSweep
     /// </summary>
     public async Task SettleBookingAsync(Guid bookingId, CancellationToken ct)
     {
+        var started = DateTimeOffset.UtcNow.Storable();
         var seats = await _db.BookingParticipants.AsNoTracking().Where(p => p.BookingId == bookingId).ToListAsync(ct);
         if (!seats.Any(p => p.Seat > 1)) return;
 
         var moves = await _shares.ReconcileAsync(bookingId, ct);
         var told = await TellCancelledAsync(bookingId, seats, ct);
 
-        // Reconciled: a "reconcile due" marker a failure left has been made good.
-        await _db.Bookings.Where(b => b.Id == bookingId && b.ShareReconcileDueAt != null)
-            .ExecuteUpdateAsync(u => u.SetProperty(b => b.ShareReconcileDueAt, (DateTimeOffset?)null), ct);
+        // Reconciled: a "reconcile due" marker a failure left has been made good — but only one
+        // recorded BEFORE this reconcile started. A failure recorded while it ran (a concurrent
+        // hook) is newer than this answer and stays for the next sweep (review round 6).
+        await _db.Bookings
+            .Where(b => b.Id == bookingId && b.ShareReconcileDueAt != null
+                        && (b.ShareReconcileLastAttemptAt == null || b.ShareReconcileLastAttemptAt <= started))
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(b => b.ShareReconcileDueAt, (DateTimeOffset?)null)
+                .SetProperty(b => b.ShareReconcileAttempts, 0)
+                .SetProperty(b => b.ShareReconcileLastAttemptAt, (DateTimeOffset?)null), ct);
 
         var touched = moves.SelectMany(m => new[] { m.PartnerUserId, m.OrganiserUserId }).Concat(told);
         await MemberNotices.PublishUnreadAsync(_db, _bus, _tenant.TenantId, touched, ct);
@@ -144,14 +172,16 @@ public sealed class ShareSweep
             .Select(x => x.Booking.Id)
             .Distinct()
             .ToListAsync(ct);
-        // Every due booking is tried; a failure is marked for the sweep and reported after the rest,
-        // so the worker leaves this club not caught up and tries again next pass.
-        var failed = new List<Guid>();
+        // Every due booking is tried. One that fails is marked due — and the marker is what makes it
+        // good from then on, through the minute sweep with backoff — so the club IS caught up
+        // (review round 6); only a failure that could not even be marked is reported, and the
+        // catch-up is then retried on the next pass.
+        var unmarked = new List<Guid>();
         foreach (var id in due)
         {
-            if (!await TrySettleAsync(id, ct)) failed.Add(id);
+            if (await TrySettleAsync(id, ct) == Settled.FailedUnmarked) unmarked.Add(id);
         }
-        if (failed.Count > 0) throw new InvalidOperationException($"share catch-up failed for {failed.Count} booking(s): {string.Join(",", failed)}");
+        if (unmarked.Count > 0) throw new InvalidOperationException($"share catch-up could not mark {unmarked.Count} booking(s): {string.Join(",", unmarked)}");
         return due;
     }
 
@@ -184,8 +214,10 @@ public sealed class ShareSweep
             .OrderBy(id => id)
             .ToListAsync(ct);
 
-        // One booking's failure is logged and marked, and the rest of the club's sweep goes on.
-        foreach (var id in waiting.Concat(window).Distinct()) await TrySettleAsync(id, ct);
+        // One booking's failure is logged and marked, and the rest of the club's sweep goes on; a
+        // marked booking still inside its backoff is left alone this pass (review round 6).
+        var resting = await BackingOffAsync(now, ct);
+        foreach (var id in waiting.Concat(window).Distinct().Where(id => !resting.Contains(id))) await TrySettleAsync(id, ct);
 
         await LapseAsync(now, settings, ct);
         await RemindAsync(now, settings, ct);
@@ -207,6 +239,17 @@ public sealed class ShareSweep
         var recent = now.AddDays(-7);
         return b => (b.ShareDeadlineAt <= now && b.ShareDeadlineAt > recent)
                     || (b.ShareDeadlineAt == null && b.StartsAt < now && b.StartsAt >= unstampedFrom);
+    }
+
+    /// <summary>The marked bookings whose backoff has not run out at <paramref name="now"/> — a handful, on the marker's index.</summary>
+    private async Task<HashSet<Guid>> BackingOffAsync(DateTimeOffset now, CancellationToken ct)
+    {
+        var marked = await _db.Bookings.AsNoTracking()
+            .Where(b => b.ShareReconcileDueAt != null && b.ShareReconcileLastAttemptAt != null)
+            .Select(b => new { b.Id, b.ShareReconcileAttempts, b.ShareReconcileLastAttemptAt })
+            .ToListAsync(ct);
+        return marked.Where(b => now < b.ShareReconcileLastAttemptAt!.Value + ReconcileBackoff(b.ShareReconcileAttempts))
+            .Select(b => b.Id).ToHashSet();
     }
 
     /// <summary>

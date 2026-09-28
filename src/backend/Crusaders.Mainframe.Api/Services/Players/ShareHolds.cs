@@ -268,7 +268,11 @@ public sealed record HoldSnapshot(Dictionary<Guid, decimal> Held, DateTimeOffset
         var need = earlier.GroupBy(w => w.BookingId).ToDictionary(g => g.Key, g => g.Sum(w => w.Pending));
         var drawn = need.Sum(kv => Math.Min(kv.Value, EarmarkOf(kv.Key)));
         var excess = need.Sum(kv => Math.Max(0m, kv.Value - EarmarkOf(kv.Key)));
-        var held = Held.Values.Sum();
+        // Only EARMARKS stand between the balance and the free money. An S4 game's hold is its own
+        // pending returns — the very returns this arithmetic pays from free balance — so counting
+        // it here as well charged each such return twice: it posted only once the balance reached
+        // twice the return (review round 6). Spend checks still set the S4 hold aside (ForAsync).
+        var held = Held.Where(kv => !NotEarmarked.Contains(kv.Key)).Sum(kv => kv.Value);
 
         var mine = Math.Max(0m, EarmarkOf(bookingId) - need.GetValueOrDefault(bookingId));
         var backed = Math.Max(0m, Math.Min(balance, held) - drawn);

@@ -185,5 +185,15 @@ public sealed class Booking : ITenantScoped
     /// </summary>
     public DateTimeOffset? ShareReconcileDueAt { get; set; }
 
+    /// <summary>Failed reconciles since <see cref="ShareReconcileDueAt"/> was set — the backoff's step (review round 6).</summary>
+    public int ShareReconcileAttempts { get; set; }
+
+    /// <summary>
+    /// The latest failed reconcile. The sweep waits an exponentially growing interval after it
+    /// (capped at an hour) before trying again, and a reconcile clears the marker only when it
+    /// STARTED after this — so a failure recorded while it ran is not erased (review round 6).
+    /// </summary>
+    public DateTimeOffset? ShareReconcileLastAttemptAt { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
