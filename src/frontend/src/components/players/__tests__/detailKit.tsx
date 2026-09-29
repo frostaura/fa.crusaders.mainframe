@@ -92,6 +92,14 @@ export function adminView(overrides: Partial<BookingDetail> = {}): BookingDetail
   });
 }
 
+/** P12 — a booking nobody can record a result on yet (§6.1). */
+const NO_RESULT = {
+  booking_id: BOOKING, result: null,
+  permissions: { can_record: false, can_edit: false, can_confirm: false, can_dispute: false, can_withdraw: false },
+  not_recordable_reason: "not_checked_in", record_closes_at: null, candidates: [], default_sides: { a: [], b: [] },
+  default_format: "best_of_5",
+};
+
 /** The session and the shell reads every signed-in render makes, then the page's own routes. */
 export function serve(options: { admin?: boolean; detail?: unknown; extra?: StubRoute[] } = {}) {
   const session = signIn({ isAdmin: options.admin ?? false });
@@ -104,6 +112,9 @@ export function serve(options: { admin?: boolean; detail?: unknown; extra?: Stub
     { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
     { path: "/api/v1/me/notifications/unread-count", body: { unread_count: 0 } },
     detailRoute,
+    // P12 — the result card below attendance reads its own route. Answered with "not checked in",
+    // so the detail's longer-prefix route never answers it with a booking by accident.
+    { path: `${DETAIL_PATH}/result`, body: NO_RESULT },
     ...(options.extra ?? []),
   ]);
 }

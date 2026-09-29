@@ -57,6 +57,7 @@ const AREA_LABEL: Record<string, string> = {
   member: "Members",
   setting: "Club settings",
   device: "Boards and doors",
+  play: "Match results",
 };
 
 export function AdminChangeRecordPage() {

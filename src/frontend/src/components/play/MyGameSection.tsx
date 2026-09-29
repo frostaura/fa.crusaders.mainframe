@@ -1,0 +1,183 @@
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
+import { Alert } from "@/components/Alert";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { WarningCircle } from "@/components/ui/icons";
+import { Skeleton } from "@/components/ui/skeleton";
+import { StateBlock } from "@/components/ui/state-block";
+import { Switch } from "@/components/ui/switch";
+import { playEndpoints, type MyPlay } from "@/lib/playApi";
+import {
+  BADGES_COPY, CELEBRATIONS_SWITCH, GOAL_SHEET, MY_GAME, PLAY_REFUSAL, playRefusal, STATS_COPY, STREAK_COPY,
+} from "@/lib/playCopy";
+import { useToast } from "@/components/Toast";
+import { useAsyncAction } from "@/lib/useAsyncAction";
+import { BadgeGrid } from "./BadgeGrid";
+import { CourtTimeRing } from "./CourtTimeRing";
+import { FormAndPeople } from "./FormAndPeople";
+import { GoalSheet } from "./GoalSheet";
+import { clubYear } from "./playDates";
+import { StatsGrid } from "./StatsGrid";
+import { StreakCard } from "./StreakCard";
+import { useMyGame, type MyGameRead } from "./useMyGame";
+
+/**
+ * "My game" (§9.1) — the FIRST section on Profile, because a member opens Profile to see this
+ * far more often than to change a password. <b>Only you can see this.</b>
+ *
+ * <p>
+ * In order: the court-time ring, the weekly streak with its injury pause, the figures, form and
+ * people, the badges, and the celebrations switch at the foot. One read (`GET /me/play`), three
+ * states: a skeleton while it reads, a failure with its retry — never zeros, which would tell a
+ * regular they have never played — and the section.
+ * </p>
+ *
+ * <p>
+ * `/profile#my-game` (the badge notice's link) lands here once the section has content: the
+ * browser's own jump happens before the read answers, when there is nothing yet to jump to.
+ * </p>
+ */
+export function MyGameSection() {
+  const read = useMyGame();
+  const titleId = useId();
+  const ref = useRef<HTMLDivElement>(null);
+  useJumpHere(ref, read.data !== null);
+  return (
+    <Card ref={ref} id={MY_GAME.anchor} role="region" aria-labelledby={titleId} data-my-game="">
+      <CardHeader>
+        <CardTitle asChild><h2 id={titleId}>{MY_GAME.title}</h2></CardTitle>
+        <CardDescription>{MY_GAME.description}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-6">
+        <StateBlock
+          loading={!read.data && read.loading}
+          error={read.data ? null : read.error}
+          action={MY_GAME.readAction}
+          codes={PLAY_REFUSAL}
+          onRetry={read.reload}
+          skeleton={<MyGameSkeleton />}
+        >
+          {read.data ? <MyGameBody game={read.data} read={read} /> : null}
+        </StateBlock>
+      </CardContent>
+    </Card>
+  );
+}
+
+function useJumpHere(ref: React.RefObject<HTMLDivElement | null>, ready: boolean) {
+  const { hash } = useLocation();
+  const jumped = useRef(false);
+  useEffect(() => {
+    if (!ready || jumped.current || hash !== `#${MY_GAME.anchor}`) return;
+    jumped.current = true;
+    ref.current?.scrollIntoView?.({ block: "start" });
+  }, [ready, hash, ref]);
+}
+
+function MyGameSkeleton() {
+  return (
+    <div className="flex flex-col gap-6" aria-hidden="true">
+      <div className="flex items-center gap-4">
+        <Skeleton className="size-28 rounded-full" />
+        <div className="flex flex-1 flex-col gap-2">
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-3 w-24" />
+        </div>
+      </div>
+      <Skeleton className="h-6" />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-16 rounded-xl" />)}
+      </div>
+    </div>
+  );
+}
+
+/** One part of the section, headed — an `h3` under the card's `h2`. */
+function Part({ title, children, part }: { title?: string; children: ReactNode; part: string }) {
+  return (
+    <div data-my-game-part={part} className="flex flex-col gap-3 border-t border-border pt-5 first:border-0 first:pt-0">
+      {title ? <h3 className="text-base font-semibold text-text-primary">{title}</h3> : null}
+      {children}
+    </div>
+  );
+}
+
+function MyGameBody({ game, read }: { game: MyPlay; read: MyGameRead }) {
+  const [goalOpen, setGoalOpen] = useState(false);
+  const toast = useToast();
+  const year = clubYear(game.as_of, game.timezone);
+  return (
+    <>
+      {read.error ? <Alert tone="warning" live="polite">{MY_GAME.refreshFailed}</Alert> : null}
+      <Part part="ring">
+        <CourtTimeRing ring={game.ring} onEditGoal={() => setGoalOpen(true)} />
+      </Part>
+      <Part part="streak" title={STREAK_COPY.title}>
+        <StreakCard
+          streak={game.streak}
+          pause={game.pause}
+          year={year}
+          onPause={(pause) => { read.patch((g) => ({ ...g, pause })); read.reload(); }}
+        />
+      </Part>
+      <Part part="stats" title={STATS_COPY.title}>
+        <StatsGrid stats={game.stats} />
+      </Part>
+      <Part part="people">
+        <FormAndPeople form={game.form} partners={game.partners} opponents={game.opponents} />
+      </Part>
+      <Part part="badges" title={BADGES_COPY.title}>
+        <BadgeGrid badges={game.badges} timezone={game.timezone} />
+      </Part>
+      <Part part="celebrations">
+        <CelebrationsSwitch game={game} read={read} />
+      </Part>
+      <GoalSheet
+        open={goalOpen}
+        onOpenChange={setGoalOpen}
+        goalMinutes={game.settings.monthly_goal_minutes}
+        onSaved={(settings, removed) => {
+          setGoalOpen(false);
+          toast.push({ tone: "success", text: removed ? GOAL_SHEET.removed : GOAL_SHEET.saved });
+          read.patch((g) => ({ ...g, settings, ring: settings.monthly_goal_minutes === null ? null : g.ring }));
+          read.reload();
+        }}
+      />
+    </>
+  );
+}
+
+function CelebrationsSwitch({ game, read }: { game: MyPlay; read: MyGameRead }) {
+  const on = game.settings.celebrations_enabled;
+  const flip = useAsyncAction((next: boolean) => playEndpoints.saveSettings({ celebrationsEnabled: next }), {
+    optimistic: {
+      apply: (next) => read.patch((g) => ({ ...g, settings: { ...g.settings, celebrations_enabled: next } })),
+      rollback: (next) => read.patch((g) => ({ ...g, settings: { ...g.settings, celebrations_enabled: !next } })),
+    },
+    success: (settings) => read.patch((g) => ({ ...g, settings })),
+  });
+  return (
+    <div className="flex flex-col gap-2">
+      <Field controlId="celebrations-switch" className="grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <FieldLabel>{CELEBRATIONS_SWITCH.label}</FieldLabel>
+          <FieldDescription className="break-words">{CELEBRATIONS_SWITCH.hint}</FieldDescription>
+        </div>
+        <div className="col-start-2 row-span-full flex min-h-touch items-center">
+          <Switch
+            checked={on}
+            aria-busy={flip.pending || undefined}
+            onCheckedChange={(next) => { if (!flip.pending) void flip.run(next); }}
+          />
+        </div>
+      </Field>
+      {flip.error ? (
+        <p role="alert" className="flex items-start gap-1.5 text-sm font-medium text-danger-strong">
+          <WarningCircle size={16} weight="bold" aria-hidden="true" className="mt-0.5 shrink-0" />
+          <span className="min-w-0 break-words">{playRefusal(flip.error, CELEBRATIONS_SWITCH.action)}</span>
+        </p>
+      ) : null}
+    </div>
+  );
+}

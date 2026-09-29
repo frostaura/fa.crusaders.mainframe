@@ -4,6 +4,8 @@ import { endpoints } from "./api";
 import { adminEndpoints, type DeviceErrorCounts } from "./adminApi";
 import { useAuth } from "./auth";
 import { pendingApplicationsVersion, subscribePendingApplications } from "./pendingApplications";
+import { playEndpoints } from "./playApi";
+import { disputesAttentionLabel } from "./playCopy";
 import { refreshDoorsView, useDoorsStore } from "../components/doors/useDoorsChrome";
 
 /**
@@ -28,6 +30,11 @@ import { refreshDoorsView, useDoorsStore } from "../components/doors/useDoorsChr
  *   <b>Info is not counted</b>: a board records every boot at info (`DeviceErrorCodes.Boot`), and a
  *   badge that fires every time a board restarts is a badge an admin learns to ignore (A2.6). Layout
  *   passed 0 here because the fault store did not exist yet; it does now, so the number is real.</li>
+ *   <li><b>disputes</b> (P12) — `GET /admin/play/results/disputed/count`, read with the other two.
+ *   It badges Match results in the rail and nowhere else: <b>it is not in `total`</b>, the Admin
+ *   tab's badge, because a disputed squash score is not urgent (play.md §8 — admins are not even
+ *   mailed about it) and a tab badge is for what the club running needs. Its read failing is
+ *   silent (last good value kept, not in `failed`): no Overview card claims anything from it.</li>
  * </ul>
  *
  * <p>
@@ -49,6 +56,8 @@ export type AdminAttention = {
   doors: number;
   /** Open faults at warning severity or worse. */
   faults: number;
+  /** P12 — disputed match results waiting for the club. Not part of `total` (see the module note). */
+  disputes: number;
   /** pending + doors + faults — the Admin tab's single badge. */
   total: number;
   /** The whole of `total` as one sentence, "" at zero. The accessible name for that badge. */
@@ -132,16 +141,23 @@ export function openFaultCount(counts: DeviceErrorCounts | undefined): number {
   return (counts.critical ?? 0) + (counts.error ?? 0) + (counts.warning ?? 0);
 }
 
+/** Every count a nav badge can carry: the three attention sources, and P12's disputes. */
+export type BadgeSource = AttentionSource | "disputes";
+
+const BADGE_LABEL: Record<BadgeSource, (count: number) => string> = {
+  pending: pendingApplicationsLabel,
+  doors: doorsAttentionLabel,
+  faults: faultsAttentionLabel,
+  disputes: disputesAttentionLabel,
+};
+
 /** The count a badge key names, and the sentence that is its accessible name. */
 export function attentionBadge(
-  key: AttentionSource,
-  attention: Pick<AdminAttention, "pending" | "doors" | "faults">,
+  key: BadgeSource,
+  attention: Pick<AdminAttention, "pending" | "doors" | "faults"> & { disputes?: number },
 ): { count: number; label: string } {
-  const count = attention[key];
-  const label = key === "pending"
-    ? pendingApplicationsLabel(count)
-    : key === "doors" ? doorsAttentionLabel(count) : faultsAttentionLabel(count);
-  return { count, label };
+  const count = attention[key] ?? 0;
+  return { count, label: BADGE_LABEL[key](count) };
 }
 
 // --- the counts store (pending + faults) -------------------------------------------------
@@ -150,6 +166,7 @@ type Counted = { value: number; error: unknown; readAt: number | null };
 
 type CountsState = {
   pending: Counted;
+  disputes: Counted;
   faults: Counted & { breakdown: DeviceErrorCounts };
   /** Nothing has answered yet. */
   loading: boolean;
@@ -158,6 +175,7 @@ type CountsState = {
 
 const IDLE: CountsState = {
   pending: { value: 0, error: null, readAt: null },
+  disputes: { value: 0, error: null, readAt: null },
   faults: { value: 0, error: null, readAt: null, breakdown: {} },
   loading: true,
   inFlight: false,
@@ -206,7 +224,8 @@ export function refreshAttentionCounts(): Promise<void> {
   current = Promise.all([
     settle(endpoints.adminMembers("PendingApproval")),
     settle(adminEndpoints.monitoringSummary()),
-  ]).then(([pending, summary]) => {
+    settle(playEndpoints.adminDisputedCount()),
+  ]).then(([pending, summary, disputes]) => {
     if (mine !== generation) return;
     const now = Date.now();
     publish({
@@ -218,6 +237,9 @@ export function refreshAttentionCounts(): Promise<void> {
       faults: summary.ok
         ? { value: openFaultCount(summary.value.open), error: null, readAt: now, breakdown: summary.value.open ?? {} }
         : { ...state.faults, error: summary.error },
+      disputes: disputes.ok && typeof disputes.value?.count === "number"
+        ? { value: disputes.value.count, error: null, readAt: now }
+        : { ...state.disputes, error: disputes.ok ? null : disputes.error },
     });
   }).finally(() => {
     if (mine === generation) current = null;
@@ -292,6 +314,7 @@ export function useAdminAttention(options: { enabled?: boolean } = {}): AdminAtt
     pending,
     doors,
     faults,
+    disputes: counts.disputes.value,
     total: pending + doors + faults,
     label: adminAttentionLabel({ pending, doors, faults }),
     loading: !enabled || counts.loading || (doorsStore.loading && doorsStore.checkedAt === null),

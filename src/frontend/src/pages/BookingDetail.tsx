@@ -15,6 +15,7 @@ import { useOrganiserHands, type Notice } from "@/components/players/detail/useO
 import {
   adminActs, canNudge, canRemove, canShareLink, detailTitle, organiserName,
 } from "@/components/players/detail/detailModel";
+import { ResultCard } from "@/components/play/ResultCard";
 import { Button } from "@/components/ui/button";
 import { CalendarBlank } from "@/components/ui/icons";
 import { PageHeader, PageShell, Section } from "@/components/ui/page-shell";
@@ -124,6 +125,8 @@ function DetailView({ detail, reload, say }: { detail: BookingDetail; reload: ()
         <div className="flex flex-col gap-8">
           <PlayerPanel detail={detail} reload={reload} say={say} />
           <Attendance detail={detail} />
+          {/* P12 — the match result, below attendance: it can be recorded once the box saw the court. */}
+          <ResultCard bookingId={detail.booking_id} />
         </div>
       </div>
       <CancelPanel detail={detail} reload={reload} say={say} />

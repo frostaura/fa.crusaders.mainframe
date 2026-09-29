@@ -143,8 +143,19 @@ function alerts(settings: AdminSettings): string {
   return line || "Which alerts reach your inbox";
 }
 
+/** P12 — "results confirm after 48 hours, a rest week every 4 weeks played". */
+function play(settings: AdminSettings): string {
+  const confirm = num(settings, "result_autoconfirm_hours");
+  const every = num(settings, "streak_rest_every_weeks");
+  const cap = num(settings, "streak_rest_cap");
+  return join([
+    confirm !== null && `results confirm after ${plural(confirm, "hour")}`,
+    every !== null && cap !== null && (cap > 0 ? `a rest week every ${plural(every, "week")} played` : "no rest weeks"),
+  ]);
+}
+
 const SUMMARY: Record<SettingsSectionId, (settings: AdminSettings, currency: string) => string> = {
-  bookings, hours, cancellations, credits, schedules, boxes, screens, doors, records, monitoring, alerts,
+  bookings, hours, cancellations, credits, schedules, boxes, screens, doors, records, monitoring, alerts, play,
 };
 
 /** What a collapsed section says about itself. Never empty: an unserved section says so. */

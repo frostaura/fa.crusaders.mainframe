@@ -31,6 +31,9 @@ import { SIGN_OUT_EVERYWHERE_COPY } from "../lib/profileCopy";
 // P11 / D13 — the same two switches the welcome wizard's privacy step shows.
 import { PrivacySwitches } from "../components/players/privacy/PrivacySwitches";
 import { PRIVACY_COPY } from "../lib/playersCopy";
+// P12 / D14 — "My game", the FIRST section: a member opens Profile to see this far more often
+// than to change a password (play.md §9.1).
+import { MyGameSection } from "../components/play/MyGameSection";
 // item 16 — the guide's third recall point. See the note beside the link.
 import { GUIDE_LINK_LABEL, GUIDE_PATH, GUIDE_TILE_HINT } from "../lib/onboardingCopy";
 import {
@@ -133,6 +136,7 @@ function ProfileCard(props: { title: string; description?: ReactNode; children: 
 function ProfileSections({ profile }: { profile: MyProfile }) {
   return (
     <>
+      <MyGameSection />
       <ProfileCard title={DETAILS_TITLE}>
         <PhotoPicker profile={profile} />
         <div className="border-t border-border pt-4">
