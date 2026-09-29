@@ -18,7 +18,8 @@ import { CourtTimeRing } from "./CourtTimeRing";
 import { FormAndPeople } from "./FormAndPeople";
 import { GoalSheet } from "./GoalSheet";
 import { clubYear } from "./playDates";
-import { StatsGrid } from "./StatsGrid";
+import { STATS_GRID, StatsGrid, statSpan } from "./StatsGrid";
+import { cn } from "@/lib/utils";
 import { StreakCard } from "./StreakCard";
 import { useMyGame, type MyGameRead } from "./useMyGame";
 
@@ -86,8 +87,8 @@ function MyGameSkeleton() {
         </div>
       </div>
       <Skeleton className="h-6" />
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-16 rounded-xl" />)}
+      <div className={STATS_GRID}>
+        {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className={cn("h-16 rounded-xl", statSpan(i, 5))} />)}
       </div>
     </div>
   );

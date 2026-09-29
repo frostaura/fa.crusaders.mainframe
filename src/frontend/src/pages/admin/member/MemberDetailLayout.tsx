@@ -138,7 +138,8 @@ function MemberHeader(props: HeaderProps) {
     <>
       <PageHeader
         back={{ to: MEMBER_COPY.backTo, label: MEMBER_COPY.back }}
-        eyebrow={MEMBER_COPY.eyebrow}
+        // No "Member" eyebrow: the back link above already says "Members", and on a phone the
+        // repeated word cost a line of a header that pushed the tabs off the first screen (P10).
         title={name}
         description={subline}
         actions={(
@@ -157,7 +158,7 @@ function MemberHeader(props: HeaderProps) {
       ) : null}
       <section
         aria-label={`${name} — summary`}
-        className="flex flex-col gap-5 rounded-xl border border-border bg-bg-surface p-4 shadow-xs sm:p-6 md:flex-row md:items-center md:justify-between"
+        className="flex flex-col gap-4 rounded-xl border border-border bg-bg-surface p-4 shadow-xs sm:gap-5 sm:p-6 md:flex-row md:items-center md:justify-between"
       >
         <Identity detail={detail} name={name} state={state} />
         <BalancePanel detail={detail} name={name} onTopUp={onTopUp} />
@@ -168,12 +169,14 @@ function MemberHeader(props: HeaderProps) {
 
 function Identity({ detail, name, state }: { detail: MemberDetail; name: string; state: MemberDetailState }) {
   return (
-    <div className="flex min-w-0 items-center gap-4">
-      <Avatar size={56}>
+    // Compressed below `sm` (P10 walk): a 40px avatar and a tighter gap, so the tabs are not
+    // pushed below the fold of a phone by the header alone.
+    <div className="flex min-w-0 items-start gap-3 sm:items-center sm:gap-4">
+      <Avatar size={56} className="size-10 text-sm sm:size-14 sm:text-lg">
         {detail.photo_url ? <AvatarImage src={detail.photo_url} alt="" /> : null}
         <AvatarFallback name={name} />
       </Avatar>
-      <div className="flex min-w-0 flex-col gap-2">
+      <div className="flex min-w-0 flex-col gap-1.5 sm:gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone={statusTone(detail.status)}>
             {detail.status ? STATUS_WORD[detail.status] ?? detail.status : MEMBER_COPY.noMembership}
@@ -212,7 +215,9 @@ function MemberGroups({ detail, name, state }: { detail: MemberDetail; name: str
           title={ASSIGN_COPY.changeFor(name)}
           icon={<PencilSimple aria-hidden="true" />}
         >
-          {ASSIGN_COPY.change}{" "}
+          {/* Below `sm` the pencil sits beside the chips and the words are for the ear only, so
+              the control does not take a line of its own in an already tall header (P10 walk). */}
+          <span className="sr-only sm:not-sr-only">{ASSIGN_COPY.change}</span>{" "}
           <span className="sr-only">{`for ${name}`}</span>
         </Button>
       </div>
@@ -256,8 +261,8 @@ function BalanceParts({ detail, name }: { detail: MemberDetail; name: string }) 
   const owed = detail.owed_back_credits ?? 0;
   return (
     <>
-      {held > 0 ? <dd data-held-line="" className="text-xs text-text-secondary">{heldLine(held, detail.held_until ?? null, zoneNow())}</dd> : null}
-      {owed > 0 ? <dd data-owed-back-line="" className="max-w-xs text-xs text-text-secondary">{owedBackQuoteLine(owed, name)}</dd> : null}
+      {held > 0 ? <dd data-held-line="" className="basis-full text-xs text-text-secondary">{heldLine(held, detail.held_until ?? null, zoneNow())}</dd> : null}
+      {owed > 0 ? <dd data-owed-back-line="" className="max-w-xs basis-full text-xs text-text-secondary">{owedBackQuoteLine(owed, name)}</dd> : null}
     </>
   );
 }
@@ -266,16 +271,17 @@ function BalancePanel({ detail, name, onTopUp }: { detail: MemberDetail; name: s
   const overdrawn = detail.balance_credits < 0;
   const canBook = detail.status === "Active";
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between md:justify-end md:gap-6">
-      <dl className="flex flex-col">
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between md:justify-end md:gap-6">
+      {/* On a phone the label sits on the figure's baseline rather than a line above it (P10). */}
+      <dl className="flex flex-row flex-wrap items-baseline gap-x-2 sm:flex-col sm:items-start">
         <dt className={typography({ variant: "overline" })}>{MEMBER_COPY.balance}</dt>
         <dd
           data-testid="member-balance"
-          className={cn(typography({ variant: "display" }), "text-3xl sm:text-4xl", overdrawn && "text-danger-strong")}
+          className={cn(typography({ variant: "display" }), "text-2xl sm:text-4xl", overdrawn && "text-danger-strong")}
         >
           {formatCredits(detail.balance_credits)}
         </dd>
-        {overdrawn ? <dd className="text-xs text-danger-strong">{MEMBER_COPY.balanceOverdrawn}</dd> : null}
+        {overdrawn ? <dd className="basis-full text-xs text-danger-strong">{MEMBER_COPY.balanceOverdrawn}</dd> : null}
         <BalanceParts detail={detail} name={name} />
       </dl>
       <div className="flex flex-wrap gap-2">

@@ -134,7 +134,7 @@ describe("DatePicker", () => {
     fireEvent.click(screen.getByRole("button", { name: "Jump to a date: Wed 23 Sep" }));
     const sheet = screen.getByRole("dialog", { name: "Jump to a date" });
     // The calendar is its own lazily loaded chunk (P10); the sheet opens first.
-    await within(sheet).findByRole("button", { name: /next month/i });
+    await within(sheet).findByRole("button", { name: /next month/i }, { timeout: 10_000 });
     expect(dayButton(sheet, "2026-09-19")).toBeDisabled();
     // max is in this month, so there is nowhere to navigate to in either direction.
     expect(within(sheet).getByRole("button", { name: /next month/i })).toHaveAttribute("aria-disabled", "true");
@@ -154,7 +154,7 @@ describe("DatePicker on a wide screen", () => {
     render(<DatePicker label="Jump to a date" value="2026-09-23" timeZone={ZONE} onChange={onChange} />, strict);
     fireEvent.click(screen.getByRole("button", { name: "Jump to a date: Wed 23 Sep" }));
     const panel = screen.getByRole("dialog", { name: "Jump to a date" });
-    await within(panel).findByRole("button", { name: /next month/i });
+    await within(panel).findByRole("button", { name: /next month/i }, { timeout: 10_000 });
     expect(panel).toHaveAttribute("data-slot", "popover-content");
     fireEvent.click(dayButton(panel, "2026-09-24"));
     expect(onChange).toHaveBeenCalledWith("2026-09-24");
@@ -201,6 +201,16 @@ describe("TimeSelect", () => {
   it("shows the placeholder for a value that is not on the grid, rather than pretending", () => {
     render(<TimeSelect label="Start time" start="18:00" end="20:00" stepMinutes={30} value="18:10" onChange={() => undefined} />, strict);
     expect(screen.getByRole("combobox", { name: "Start time" })).toHaveTextContent("Choose a time");
+  });
+
+  it("clamps the value, not the icon + value row it sits in (the row stacked under the clamp)", () => {
+    render(<TimeSelect label="Start time" start="18:00" end="20:00" stepMinutes={30} value="19:30" onChange={() => undefined} />, strict);
+    const trigger = screen.getByRole("combobox", { name: "Start time" });
+    expect(trigger.className).not.toMatch(/line-clamp/);
+    const value = trigger.querySelector('[data-slot="select-value"]')!;
+    expect(value.className).toContain("line-clamp-1");
+    expect(value.parentElement!.className).toContain("flex");
+    expect(value.parentElement!.className).not.toMatch(/line-clamp/);
   });
 
   it("shows an aligned value", () => {

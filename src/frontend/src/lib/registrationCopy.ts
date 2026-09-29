@@ -152,6 +152,17 @@ export const VERIFY_FAIL_BODY = "Confirmation links can only be used once, and t
   + "opened this one, your address is confirmed and there's nothing more to do here — try signing in. If signing "
   + "in says your address still isn't confirmed, ask for a fresh link from that screen.";
 export const VERIFY_FAIL_PRIMARY = "Go to sign in";
+
+/**
+ * The confirmation call was RATE-LIMITED (429) — a different event from a bad link, and the
+ * page must not say the link is broken. The limiter answers before the token is looked at, so
+ * the link is untouched and still good: the one thing to do is wait and open it again. Found in
+ * the P10 walk, where a burst of opens read "That link didn't work" on a perfectly good link.
+ */
+export const VERIFY_LIMITED_HEADING = "Too many tries — wait a minute and open the link again";
+export const VERIFY_LIMITED_BODY = "Your link is still good: nothing was used up. The club's system is slowing down "
+  + "repeated attempts, so give it a minute and then try again.";
+export const VERIFY_LIMITED_RETRY = "Try again";
 export const VERIFY_BACK_TO_SIGN_IN = "Back to sign in";
 
 // --- the wait, as the sign-in screen states it ---------------------------------------

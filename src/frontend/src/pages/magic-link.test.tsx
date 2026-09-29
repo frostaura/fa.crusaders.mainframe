@@ -1,13 +1,15 @@
 import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import WelcomePage from "./Welcome";
 import VerifyEmailPage from "./VerifyEmail";
 import { AuthProvider } from "../lib/auth";
 import { signIn, signOut, stubFetch } from "../test/harness";
 import { WELCOME } from "../lib/authCopy";
-import { VERIFY_FAIL_HEADING, VERIFY_FAIL_PRIMARY, VERIFY_OK_HEADING } from "../lib/registrationCopy";
+import {
+  VERIFY_FAIL_HEADING, VERIFY_FAIL_PRIMARY, VERIFY_LIMITED_HEADING, VERIFY_LIMITED_RETRY, VERIFY_OK_HEADING,
+} from "../lib/registrationCopy";
 
 /**
  * The two links a member gets by email are single-use, and the screens that open them were
@@ -86,6 +88,36 @@ describe("a single-use link is spent exactly once", () => {
     expect(consumed(stub.calls, "/api/v1/auth/verify-email/")).toBe(1);
     // Never a dead end: the way on is a link to sign in (R10), not a button that navigates.
     expect(screen.getByRole("link", { name: /Back to sign in/ })).toHaveAttribute("href", "/login");
+  });
+
+  /**
+   * P10 — a rate-limited confirmation is not a broken link. The limiter answers 429 before the
+   * token is looked at, so the page says to wait and try again, never "That link didn't work",
+   * and trying again spends the same link once more.
+   */
+  it("says to wait, not that the link failed, when the confirmation was rate-limited — and retries", async () => {
+    const stub = stubFetch([
+      {
+        method: "POST", path: "/api/v1/auth/verify-email/", status: [429, 200], body: null,
+        sequence: [{ error: "rate_limited" }, { verified: true }],
+      },
+    ]);
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={["/verify-email/tok-busy"]}>
+          <Routes><Route path="/verify-email/:token" element={<VerifyEmailPage />} /></Routes>
+        </MemoryRouter>
+      </StrictMode>,
+    );
+
+    expect(await screen.findByRole("heading", { name: VERIFY_LIMITED_HEADING })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: VERIFY_FAIL_HEADING })).toBeNull();
+    expect(screen.getByText(/Your link is still good/)).toBeInTheDocument();
+    expect(consumed(stub.calls, "/api/v1/auth/verify-email/")).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: VERIFY_LIMITED_RETRY }));
+    expect(await screen.findByRole("heading", { name: VERIFY_OK_HEADING })).toBeInTheDocument();
+    expect(consumed(stub.calls, "/api/v1/auth/verify-email/")).toBe(2);
   });
 
   it("offers signing in first on a spent confirmation link, and never 'register again' alone", async () => {

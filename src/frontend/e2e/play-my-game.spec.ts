@@ -50,6 +50,30 @@ test.describe("My game", () => {
     expect(scroll, "the page scrolls sideways").toBeLessThanOrEqual(0);
   });
 
+  /**
+   * P10 walk — five stat tiles left an orphan cell (2 + 2 + 1 on a phone, 3 + 2 + a hole on a
+   * wide screen), and badge tiles were as tall as their own names. Every row of stats now ends at
+   * the grid's right edge, and every badge tile is the same height.
+   */
+  test("fills every row of stats, and keeps badge tiles one height", async ({ page }) => {
+    await open(page);
+    await page.goto("/profile");
+    const region = page.getByRole("region", { name: "My game" });
+    await expect(region.locator("[data-stats]")).toBeVisible();
+    const grid = (await region.locator("[data-stats]").boundingBox())!;
+    const rows = new Map<number, number>();
+    for (const tile of await region.locator("[data-stat]").all()) {
+      const box = (await tile.boundingBox())!;
+      const top = Math.round(box.y);
+      rows.set(top, Math.max(rows.get(top) ?? 0, box.x + box.width));
+    }
+    for (const [top, right] of rows) expect(Math.abs(right - (grid.x + grid.width)), `row at ${top}`).toBeLessThanOrEqual(1);
+
+    const heights = new Set<number>();
+    for (const tile of await region.locator("[data-badges] li").all()) heights.add(Math.round((await tile.boundingBox())!.height));
+    expect([...heights]).toHaveLength(1);
+  });
+
   for (const theme of ["light", "dark"] as const) {
     test(`passes axe (${theme})`, async ({ page }) => {
       await open(page, { theme });

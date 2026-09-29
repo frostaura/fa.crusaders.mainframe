@@ -70,6 +70,23 @@ test.describe("member detail", () => {
     await signIn(page);
   });
 
+  /**
+   * P10 walk — the member header was so tall on a phone that the section tabs sat below the
+   * fold. Compressed below `sm` (40px avatar, no repeated "Member" eyebrow, the balance label on
+   * the figure's line, an icon-only "Change groups"): on a 360×740 phone, with an admin badge and
+   * two groups showing, the tabs end above the fixed bottom tab bar. Measured: 718px before, the
+   * bar at 675, 664 after.
+   */
+  test("keeps the section tabs on a phone's first screen", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 740 });
+    await serveApi(page, routes([{ path: BASE, body: detail({ is_admin: true, admin_source: "granted" }) }]));
+    await page.goto(`/admin/members/${MEMBER_ID}`);
+    await expect(page.getByRole("heading", { level: 1, name: "Naledi Khumalo-Van der Merwe" })).toBeVisible();
+    const tabs = await page.getByRole("navigation", { name: MEMBER_COPY.tabsLabel }).boundingBox();
+    const bar = await page.locator("[data-primary-nav]").boundingBox();
+    expect(tabs!.y + tabs!.height, "the tabs end under the bottom tab bar").toBeLessThanOrEqual(bar!.y);
+  });
+
   test("never scrolls the page sideways, and every tab is a 44px link", async ({ page }) => {
     await serveApi(page, routes());
     await page.goto(`/admin/members/${MEMBER_ID}`);

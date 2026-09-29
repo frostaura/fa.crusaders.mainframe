@@ -40,7 +40,10 @@ export function BadgeMark({ badgeKey, size, earned }: { badgeKey: string; size: 
 
 export function BadgeGrid({ badges, timezone }: { badges: BadgeView[]; timezone?: string }) {
   return (
-    <ul data-badges="" className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+    // `auto-rows-fr`: every row as tall as the tallest, so a two-line name does not leave one row
+    // of tiles taller than the rest (P10 walk). The name clamps at two lines; the full name is in
+    // the tile's accessible name and its popover.
+    <ul data-badges="" className="grid auto-rows-fr grid-cols-2 gap-2 sm:grid-cols-3">
       {badges.map((badge) => <BadgeTile key={badge.key} badge={badge} timezone={timezone} />)}
     </ul>
   );
@@ -77,7 +80,7 @@ function BadgeTile({ badge, timezone }: { badge: BadgeView; timezone?: string })
             <BadgeMark badgeKey={badge.key} size={20} earned={badge.earned} />
           </span>
           <span className="flex min-w-0 flex-col" aria-hidden="true">
-            <span className={cn("break-words text-sm font-semibold", badge.earned ? "text-text-primary" : "text-text-secondary")}>
+            <span className={cn("line-clamp-2 break-words text-sm font-semibold", badge.earned ? "text-text-primary" : "text-text-secondary")}>
               {badge.name}
             </span>
             <span className="text-xs tabular-nums text-text-secondary">{status}</span>

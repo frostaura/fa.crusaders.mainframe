@@ -215,6 +215,8 @@ describe("the club door log", () => {
     const { stub } = open([doorLogFixture()], {}, ["/admin/monitoring/doors/log?range=day"]);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Which day/ }));
+    // The calendar is its own lazily loaded chunk (P10): let it arrive before walking it.
+    await screen.findByRole("button", { name: /next month/i }, { timeout: 10_000 });
     const target = "2026-09-20";
     for (let step = 0; step < 60 && !document.querySelector(`button[data-day="${target}"]`); step++) {
       // The calendar opens on today's month; walk to the fixture's day in whichever direction it lies.

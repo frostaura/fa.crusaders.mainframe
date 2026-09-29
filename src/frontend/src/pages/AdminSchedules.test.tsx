@@ -136,6 +136,8 @@ describe("creating one", () => {
    */
   async function pickDay(name: RegExp, day: string) {
     await userEvent.click(screen.getByRole("button", { name }));
+    // The calendar is its own lazily loaded chunk (P10): let it arrive before walking it.
+    await screen.findByRole("button", { name: /next month/i }, { timeout: 10_000 });
     for (let month = 0; month < 36; month++) {
       const button = document.querySelector<HTMLButtonElement>(`button[data-day="${day}"]`);
       if (button) {

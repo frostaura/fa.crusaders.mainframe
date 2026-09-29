@@ -18,7 +18,19 @@ import { fieldSurface } from "./input";
  */
 export const Select = SelectPrimitive.Root;
 export const SelectGroup = SelectPrimitive.Group;
-export const SelectValue = SelectPrimitive.Value;
+/**
+ * The chosen value, clamped to one line. The clamp lives HERE rather than on the trigger's
+ * `[&>span]`: a trigger whose child span is a layout wrapper (TimeSelect's icon + value row) had
+ * that wrapper turned into a `-webkit-box` by the clamp, which stacked the clock above the time.
+ */
+export function SelectValue({ className, ...props }: ComponentProps<typeof SelectPrimitive.Value>) {
+  // A wrapper because Radix's Value drops `className` (and `style`) on purpose.
+  return (
+    <span data-slot="select-value" className={cn("line-clamp-1 min-w-0", className)}>
+      <SelectPrimitive.Value {...props} />
+    </span>
+  );
+}
 
 export function SelectTrigger({ className, children, ...props }: ComponentProps<typeof SelectPrimitive.Trigger>) {
   const wired = useFieldControl(props);
@@ -28,7 +40,7 @@ export function SelectTrigger({ className, children, ...props }: ComponentProps<
       className={cn(
         fieldSurface,
         "flex h-touch items-center justify-between gap-2 whitespace-nowrap px-3 text-left",
-        "data-[placeholder]:text-text-muted [&>span]:line-clamp-1",
+        "data-[placeholder]:text-text-muted",
         className,
       )}
       {...wired}

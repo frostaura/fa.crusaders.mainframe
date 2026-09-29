@@ -260,6 +260,26 @@ test.describe("the page", () => {
     }
   });
 
+  /**
+   * P10 — the time select's clock and its value on ONE line. The select trigger clamped every
+   * child span to one line with `-webkit-box`, which turned TimeSelect's icon + value row into a
+   * box and stacked the clock above the time, in both themes and at every width.
+   */
+  test("draws a time select's clock beside its value, not above it", async ({ page }) => {
+    for (const theme of THEMES) {
+      await openGallery(page, "datetime", theme);
+      const trigger = page.getByRole("combobox", { name: "Start time" }).first();
+      const clock = await trigger.locator("svg").first().boundingBox();
+      const value = await trigger.locator('[data-slot="select-value"]').boundingBox();
+      expect(clock && value, "both parts render").toBeTruthy();
+      // Same row: the value's vertical middle sits within the clock's height.
+      const middle = value!.y + value!.height / 2;
+      expect(middle, theme).toBeGreaterThan(clock!.y);
+      expect(middle, theme).toBeLessThan(clock!.y + clock!.height);
+      expect(value!.x, theme).toBeGreaterThan(clock!.x + clock!.width);
+    }
+  });
+
   test("the theme switch repaints portaled overlays", async ({ page }) => {
     await openGallery(page, "overlays", "light");
     await page.getByRole("radio", { name: "Dark" }).click();
