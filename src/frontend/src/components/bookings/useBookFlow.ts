@@ -59,6 +59,8 @@ export type BookFlowInput = {
    * answer or a "taken" refusal is checked against the schedule before anything is said (F1.1).
    */
   reread?: Reread;
+  /** The club's late-cancellation terms, from the day — said on Confirm before anything is charged (F1.10). */
+  cancelTerms?: { penaltyPct: number; windowMinutes: number } | null;
 };
 
 export type Primary =

@@ -13,7 +13,7 @@ import { MemberCombobox } from "@/components/ui/member-combobox";
 import { RadioCard, RadioGroup } from "@/components/ui/radio-group";
 import { ApiError } from "@/lib/api";
 import { describeFailure } from "@/lib/errors";
-import { BOOK_SHEET, RESULTS_LABEL } from "@/lib/bookingsCopy";
+import { BOOK_SHEET, RESULTS_LABEL, cancelTermsLine } from "@/lib/bookingsCopy";
 import { useBalance } from "@/lib/balance";
 import { BOOK_PLAYERS, heldLine, owedBackLine, owedBackQuoteLine } from "@/lib/playersCopy";
 import { BulkResults } from "./BulkResults";
@@ -62,7 +62,9 @@ export type { BookedOutcome } from "./useBookFlow";
 type HeldNow = { held: number; owedBack: number; until: string | null };
 type Spendable = { spendable: number | null; held: HeldNow | null };
 
-type StepViewProps = { flow: BookFlow; isAdmin: boolean; reasonId: string; actorUserId: string | null };
+type StepViewProps = {
+  flow: BookFlow; isAdmin: boolean; reasonId: string; actorUserId: string | null; terms: BookSheetProps["cancelTerms"];
+};
 
 export type BookSheetProps = BookFlowInput & {
   open: boolean;
@@ -123,7 +125,7 @@ function BookFlowView(props: BookSheetProps & { onClose: () => void }) {
         <div className="flex flex-col gap-4">
           {flow.run
             ? <ResultView flow={flow} />
-            : <StepView flow={flow} isAdmin={props.isAdmin} reasonId={reasonId} actorUserId={props.actorUserId} />}
+            : <StepView flow={flow} isAdmin={props.isAdmin} reasonId={reasonId} actorUserId={props.actorUserId} terms={props.cancelTerms} />}
         </div>
       </DialogBody>
       <BookFooter flow={flow} onClose={props.onClose} reasonId={reasonId} />
@@ -147,7 +149,16 @@ function StepView(props: StepViewProps) {
       </>
     );
   }
-  return <ConfirmStep flow={flow} reasonId={reasonId} />;
+  return <ConfirmStep flow={flow} reasonId={reasonId} terms={props.terms} />;
+}
+
+/**
+ * F1.10 — what cancelling will cost, said before the booking is made: the member never read the
+ * 30% inside the window, or that nothing comes back once the lights are on, until they cancelled.
+ */
+function CancelTerms({ terms }: { terms: BookSheetProps["cancelTerms"] }) {
+  if (!terms) return null;
+  return <p data-cancel-terms="" className="px-1 text-xs text-text-secondary">{cancelTermsLine(terms.penaltyPct, terms.windowMinutes)}</p>;
 }
 
 /**
@@ -177,7 +188,7 @@ function QuoteOwedBack({ flow }: { flow: BookFlow }) {
   return <p data-owed-back-line="" className="-mt-2 px-1 text-xs text-text-secondary">{owedBackQuoteLine(owed, flow.memberName)}</p>;
 }
 
-function ConfirmStep({ flow, reasonId }: { flow: BookFlow; reasonId: string }) {
+function ConfirmStep({ flow, reasonId, terms }: { flow: BookFlow; reasonId: string; terms: BookSheetProps["cancelTerms"] }) {
   const failed = flow.action.status === "error" ? flow.action.error : null;
   const refused = flow.refusedSlots;
   return (
@@ -192,6 +203,7 @@ function ConfirmStep({ flow, reasonId }: { flow: BookFlow; reasonId: string }) {
       <ConfirmPlayers players={flow.players} />
       {flow.money ? <MoneyRows rows={flow.money} label={BOOK_SHEET.total} /> : null}
       <HeldNote flow={flow} />
+      {flow.hold ? null : <CancelTerms terms={terms} />}
       {flow.quote.state.status === "loading" ? <span role="status" className="sr-only">{BOOK_SHEET.quoteReading}</span> : null}
       {flow.godMode ? <GodModeNotice name={flow.godMode.name} balanceAfter={flow.godMode.balanceAfter} owedBack={flow.godMode.owedBack} /> : null}
       <QuoteOwedBack flow={flow} />

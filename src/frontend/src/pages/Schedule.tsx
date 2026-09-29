@@ -165,6 +165,7 @@ export default function BookingsPage() {
         isAdmin={isAdmin} actorUserId={actorUserId} balanceCredits={balance}
         bookAsUserId={bookAsUserId}
         onBooked={onBooked} onStale={() => void reconcile()} reread={reconcile}
+        cancelTerms={day ? { penaltyPct: day.penaltyPct, windowMinutes: day.penaltyWindowMinutes } : null}
       />
       <CancelSheet
         open={sheets.cancelOpen} onOpenChange={sheets.setCancelOpen} bookings={sheets.cancelBookings}

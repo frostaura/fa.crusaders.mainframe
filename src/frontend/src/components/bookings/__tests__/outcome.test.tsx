@@ -8,7 +8,7 @@ import { BalanceProvider } from "@/lib/balance";
 import type { BalanceTransport } from "@/lib/liveBalance";
 import type { ScheduleDay } from "@/lib/api";
 import { refuse, signIn, signOut, stubFetch, unreachable } from "@/test/harness";
-import { BOOK_SHEET, CANCEL_SHEET, GOD_MODE } from "@/lib/bookingsCopy";
+import { BOOK_SHEET, CANCEL_SHEET, GOD_MODE, cancelTermsLine } from "@/lib/bookingsCopy";
 import { UNSURE_TEXT, cancellationOutcome, describeBookingError } from "@/lib/bookingErrors";
 import { ApiError } from "@/lib/api";
 import { BookSheet, type BookSheetProps } from "../BookSheet";
@@ -268,5 +268,21 @@ describe("F1.5 — a group-window refusal names the rule, the day and who may ch
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
     expect(await screen.findByText(/Naledi's group \(Juniors\) can't book at all on Thursday/)).toBeTruthy();
     expect(screen.queryByText(BOOK_SHEET.fallback)).toBeNull();
+  });
+});
+
+describe("F1.10 — Confirm states the cancellation terms before anything is charged", () => {
+  it("says the window, the penalty and the lights-on rule", async () => {
+    stubFetch([]);
+    openBook({ cancelTerms: { penaltyPct: 30, windowMinutes: 15 } });
+    await toConfirm();
+    expect(screen.getByText(cancelTermsLine(30, 15))).toBeTruthy();
+    expect(cancelTermsLine(30, 15)).toBe(
+      "Cancel more than 15 min before the start and the full amount comes back; inside 15 min, 30% is kept. Once the lights have been on, nothing comes back.",
+    );
+  });
+
+  it("a club without a penalty says the plain rule", () => {
+    expect(cancelTermsLine(0, 15)).toContain("full amount comes back");
   });
 });
