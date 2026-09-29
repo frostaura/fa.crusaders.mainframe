@@ -31,10 +31,15 @@ function renderAccess(detail: MemberDetail, extra: StubRoute[] = [], userId = ME
 
 const roleSwitch = () => screen.findByRole("switch", { name: COPY.label });
 
+/** Every grant now carries its reason (F3.9). */
+function giveReason(dialog: HTMLElement) {
+  fireEvent.change(within(dialog).getByRole("textbox", { name: COPY.reason }), { target: { value: "Committee" } });
+}
+
 describe("AdminRoleSwitch", () => {
   beforeEach(() => { signOut(); });
 
-  it("grants only after a confirm, sends {grant:true}, and shows the server's answer", async () => {
+  it("grants only after a confirm WITH a reason (F3.9), sends it, and shows the server's answer", async () => {
     const stub = renderAccess(detailFixture(), [
       { method: "POST", path: ROLE, body: { user_id: MEMBER_ID, is_admin: true, admin_source: "granted", changed: true } },
       // The re-read after the change answers what the server now holds.
@@ -47,9 +52,14 @@ describe("AdminRoleSwitch", () => {
     const dialog = await screen.findByRole("dialog", { name: COPY.grantTitle("Thandi Mokoena") });
     // Pressing the switch changed nothing yet.
     expect(stub.calls.some((c) => c.path === ROLE)).toBe(false);
-    fireEvent.click(within(dialog).getByRole("button", { name: COPY.grantConfirm }));
+    const confirm = within(dialog).getByRole("button", { name: COPY.grantConfirm });
+    // Review round 1, F3.9 (contract §7): a grant says why, exactly as a revoke does.
+    expect(confirm).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole("textbox", { name: COPY.reason }), { target: { value: "Joined the committee" } });
+    fireEvent.click(confirm);
 
-    await waitFor(() => expect(stub.calls.find((c) => c.path === ROLE)?.body).toEqual({ grant: true }));
+    await waitFor(() => expect(stub.calls.find((c) => c.path === ROLE)?.body).toEqual({ grant: true, reason: "Joined the committee" }));
+    expect(dialog).not.toHaveTextContent(/at a loss/);
     await waitFor(() => expect(screen.getByRole("switch", { name: COPY.label })).toHaveAttribute("aria-checked", "true"));
   });
 
@@ -109,6 +119,7 @@ describe("AdminRoleSwitch", () => {
       renderAccess(detailFixture(), [{ method: "POST", path: ROLE, status: 409, body: { error: code } }]);
       fireEvent.click(await roleSwitch());
       const dialog = await screen.findByRole("dialog");
+      giveReason(dialog);
       fireEvent.click(within(dialog).getByRole("button", { name: COPY.grantConfirm }));
       expect(await within(dialog).findByRole("alert")).toHaveTextContent(ADMIN_ROLE_CODES[code]);
     },
@@ -118,6 +129,7 @@ describe("AdminRoleSwitch", () => {
     renderAccess(detailFixture(), [{ method: "POST", path: ROLE, status: 403, body: { error: "actor_not_admin" } }]);
     fireEvent.click(await roleSwitch());
     const dialog = await screen.findByRole("dialog");
+    giveReason(dialog);
     fireEvent.click(within(dialog).getByRole("button", { name: COPY.grantConfirm }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(ADMIN_ROLE_CODES.actor_not_admin);
   });

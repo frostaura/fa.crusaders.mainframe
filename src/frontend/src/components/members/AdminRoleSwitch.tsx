@@ -118,10 +118,10 @@ export function AdminRoleSwitch(props: AdminRoleSwitchProps) {
           returnFocus={() => control.current}
           {...dialogWords(mode, self, name)}
           codes={ADMIN_ROLE_CODES}
-          confirmDisabled={mode === "revoke" && !act.ready}
+          confirmDisabled={!act.ready(mode === "grant")}
           onConfirm={() => act.run(mode === "grant")}
         >
-          {mode === "revoke" ? <RevokeFields self={self} act={act} /> : null}
+          <ReasonFields grant={mode === "grant"} self={self} act={act} />
         </ConfirmDialog>
       ) : null}
     </>
@@ -131,16 +131,25 @@ export function AdminRoleSwitch(props: AdminRoleSwitchProps) {
 type RoleChange = ReturnType<typeof useRoleChange>;
 
 /** The reason, and — for yourself — the second yes. */
-function RevokeFields({ self, act }: { self: boolean; act: RoleChange }) {
+/**
+ * The reason, for BOTH directions (review round 1, F3.9 — contract §7). Granting admin rights
+ * asked for nothing while revoking them asked why, so the change record could say why somebody
+ * lost the console and never why they were given it.
+ */
+function ReasonFields({ grant, self, act }: { grant: boolean; self: boolean; act: RoleChange }) {
   const confirmId = useId();
   return (
     <>
       <Field controlId="admin-role-reason">
         <FieldLabel>{COPY.reason}</FieldLabel>
-        <Textarea value={act.reason} onChange={(e) => act.setReason(e.target.value)} placeholder={COPY.reasonPlaceholder} />
+        <Textarea
+          value={act.reason}
+          onChange={(e) => act.setReason(e.target.value)}
+          placeholder={grant ? COPY.grantReasonPlaceholder : COPY.reasonPlaceholder}
+        />
         <FieldDescription>{COPY.reasonHint}</FieldDescription>
       </Field>
-      {self ? (
+      {!grant && self ? (
         <div className="flex items-center gap-3">
           <Checkbox id={confirmId} checked={act.confirmSelf} onCheckedChange={(v) => act.setConfirmSelf(v === true)} />
           <label htmlFor={confirmId} className="text-sm font-medium text-text-primary">{COPY.confirmSelf}</label>
@@ -166,7 +175,7 @@ function useRoleChange(props: AdminRoleSwitchProps, self: boolean) {
   const run = async (grant: boolean) => {
     const result = await memberDetailEndpoints.setAdmin(userId, {
       grant,
-      ...(grant ? {} : { reason: reason.trim() }),
+      reason: reason.trim(),
       ...(!grant && self ? { confirmSelf } : {}),
     });
     toast.push({
@@ -179,7 +188,7 @@ function useRoleChange(props: AdminRoleSwitchProps, self: boolean) {
 
   return {
     reason, setReason, confirmSelf, setConfirmSelf, run,
-    ready: reason.trim().length > 0 && (!self || confirmSelf),
+    ready: (grant: boolean) => reason.trim().length > 0 && (grant || !self || confirmSelf),
     reset: () => { setReason(""); setConfirmSelf(false); },
   };
 }

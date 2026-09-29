@@ -134,8 +134,11 @@ test.describe("member detail", () => {
     await expect(dialog.getByRole("button", { name: "Close" })).toBeVisible();
     expect(posted).toHaveLength(0);
 
+    // F3.9: a grant says why, as a revoke does (contract §7).
+    await expect(dialog.getByRole("button", { name: ADMIN_ROLE_COPY.grantConfirm })).toBeDisabled();
+    await dialog.getByRole("textbox", { name: ADMIN_ROLE_COPY.reason }).fill("Joined the committee");
     await dialog.getByRole("button", { name: ADMIN_ROLE_COPY.grantConfirm }).click();
     await expect(dialog).toBeHidden();
-    expect(posted).toEqual([{ grant: true }]);
+    expect(posted).toEqual([{ grant: true, reason: "Joined the committee" }]);
   });
 });

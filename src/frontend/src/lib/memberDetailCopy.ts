@@ -366,7 +366,7 @@ export const ADMIN_ROLE_COPY = {
   notActive: "Only an active member can be made an administrator. Approve or reactivate them first.",
   grantTitle: (name: string) => `Make ${name} an administrator?`,
   grantBody: (name: string) =>
-    `${name} will be able to manage members, move credit, book at a loss, open doors and change settings. They and every other admin are emailed.`,
+    `${name} will be able to manage members, move credit, book courts for members even past what their balance covers, open doors and change settings. They and every other admin are emailed the reason.`,
   grantConfirm: "Make administrator",
   grantAction: "grant admin rights",
   granted: (name: string) => `${name} is now an administrator.`,
@@ -382,6 +382,8 @@ export const ADMIN_ROLE_COPY = {
   reason: "Reason",
   reasonHint: "Recorded in the change record and sent in the email.",
   reasonPlaceholder: "e.g. Stepped down from the committee",
+  /** A grant asks for its reason too (F3.9, contract §7): the change record says why either way. */
+  grantReasonPlaceholder: "e.g. Joined the committee as treasurer",
   confirmSelf: "Yes — remove my own admin rights",
   unchanged: (name: string, isAdmin: boolean) =>
     isAdmin ? `${name} was already an administrator.` : `${name} already wasn't an administrator.`,
