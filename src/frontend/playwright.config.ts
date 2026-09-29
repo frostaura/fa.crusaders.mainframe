@@ -41,6 +41,34 @@ const launchOptions = process.env.PLAYWRIGHT_CHROMIUM_PATH
   ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH }
   : {};
 
+/**
+ * The zone the BROWSER runs in — deliberately neither the club's nor this machine's.
+ *
+ * <p>
+ * Every fixture club is `Africa/Johannesburg`, and the developer's machine is too. So a screen
+ * that wrote a court time in the reader's zone instead of the club's rendered the right hour on
+ * every local run and went red only on CI, whose runner is UTC (run 36532040584: "16:00–16:45"
+ * for an 18:00 game). Pinning the browser here makes local and CI one run.
+ * </p>
+ *
+ * <p>
+ * <b>Why New York and not UTC.</b> UTC is where a second class of bug hides: a formatter that
+ * reads `getUTCHours()` or slices `toISOString()` for a date agrees with a UTC browser by
+ * construction, so under UTC it looks like "the reader's zone" and passes any fixture written in
+ * UTC. New York is west of UTC, six hours from the club (seven in its winter) and has DST, so the
+ * club's day, UTC's day and the reader's day all differ, and a court time that is not in the
+ * club's zone cannot coincide with the right answer at any hour.
+ * </p>
+ *
+ * <p>
+ * The Node side (fixture maths in the specs themselves) is pinned to UTC, CI's own zone, so a
+ * spec that builds a date with local-time methods computes the same thing here as on the runner.
+ * Set before any worker is spawned; workers inherit it.
+ * </p>
+ */
+const BROWSER_ZONE = "America/New_York";
+process.env.TZ = "UTC";
+
 const PORT = process.env.PW_PORT ?? "4173";
 const LOCAL_URL = `http://localhost:${PORT}`;
 
@@ -57,6 +85,7 @@ export default defineConfig({
   reporter: process.env.CI ? [["github"], ["list"]] : [["list"]],
   use: {
     baseURL: process.env.E2E_BASE_URL ?? LOCAL_URL,
+    timezoneId: BROWSER_ZONE,
     trace: "on-first-retry",
     video: "retain-on-failure",
   },

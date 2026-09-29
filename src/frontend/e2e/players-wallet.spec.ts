@@ -1,5 +1,5 @@
 import { expect, serveApi, signIn, test, type ApiRoute } from "./fixtures";
-import { BOOKING, COURT, ME, PEOPLE, SAM, detailFixture, memberShellRoutes, tomorrowAt } from "./playersKit";
+import { BOOKING, CLUB_ZONE, COURT, ME, PEOPLE, SAM, detailFixture, memberShellRoutes, tomorrowAt } from "./playersKit";
 import { HELD_EXPLAINER, heldLine } from "../src/lib/playersCopy";
 import { SHARE_LEDGER_COPY, spendableLine } from "../src/lib/walletCopy";
 import { LEDGER_TYPE_LABEL } from "../src/lib/creditAdjustment";
@@ -49,7 +49,9 @@ test.describe("P11: the wallet, with shares", () => {
     await page.goto("/wallet");
 
     const held = page.locator("[data-held-line]");
-    await expect(held).toContainText(heldLine(20, tomorrowAt(20, 45)));
+    // In the club's zone, which the page learns from /me/profile: the spec's own process is not
+    // in it, and a line built without it would expect the runner's clock face.
+    await expect(held).toContainText(heldLine(20, tomorrowAt(20, 45), CLUB_ZONE));
     await expect(held).toContainText(spendableLine(100));
     await expect(held).toContainText(HELD_EXPLAINER);
     // The chip's name carries it too; the figure stays the whole balance.

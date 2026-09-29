@@ -19,10 +19,19 @@ export const COURT = "c0000000-0000-0000-0000-000000000001";
 export const SESSION_MEMBER = { ...SESSION_ADMIN, user_id: ME, is_admin: false };
 export const SESSION_ADMIN_P11 = { ...SESSION_ADMIN, user_id: ME, is_admin: true };
 
+/**
+ * The club's IANA zone. Every member payload that is a cold entry point carries it, and the
+ * browser runs in a DIFFERENT zone (`playwright.config.ts`), so a screen that writes a court time
+ * in the reader's zone instead of the club's goes red here rather than on a member's phone.
+ */
+export const CLUB_ZONE = "Africa/Johannesburg";
+
 export const PROFILE_ME = {
   user_id: ME, email: "nomsa@club.review.test", is_admin: false, tenant_slug: "crusaders",
   full_name: "Nomsa Khumalo", membership_number: "P-1", photo_url: null, status: "Active",
   held_credits: 0, held_until: null,
+  // The club's zone, as the real /me/profile sends it: the app knows the club's day from boot.
+  timezone: CLUB_ZONE,
 };
 
 export const PEOPLE = {
@@ -80,6 +89,7 @@ export function detailFixture(overrides: Record<string, unknown> = {}): Record<s
       can_invite: true, can_change_split: true, can_cancel: true, can_accept: false, can_decline: false,
       can_withdraw: false, withdraw_closes_at: tomorrowAt(16),
     },
+    timezone: CLUB_ZONE,
     ...overrides,
   };
 }
@@ -92,7 +102,7 @@ export function inviteFixture(overrides: Record<string, unknown> = {}): Record<s
     starts_at: tomorrowAt(18), ends_at: tomorrowAt(18, 45),
     organiser: PEOPLE.me, players: 4, share_credits: 25, to_pay_credits: 25, needs_consent: false,
     balance_credits: 120, spendable_credits: 100, held_credits: 20, balance_after_credits: 75, short_by_credits: 0,
-    share_deadline: tomorrowAt(20, 45), cap: null,
+    share_deadline: tomorrowAt(20, 45), cap: null, timezone: CLUB_ZONE,
     ...overrides,
   };
 }
@@ -115,7 +125,7 @@ export function memberShellRoutes(options: { unread?: number; invites?: unknown[
     },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
     { path: "/api/v1/me/notifications/unread-count", body: { unread_count: options.unread ?? 0 } },
-    { path: "/api/v1/me/invites", body: { items: invites, count: invites.length } },
+    { path: "/api/v1/me/invites", body: { items: invites, count: invites.length, timezone: CLUB_ZONE } },
     { path: "/api/v1/me/door", body: { doors: true, doors_shut: "none" } },
   ];
 }

@@ -134,6 +134,11 @@ public sealed class PlayersQuery
                 players_checked_in = seats.Count(s => s.CheckedInAt is not null),
             },
             permissions = Permissions(booking, settings, role, mySeat),
+
+            // The club's zone, top level, so a member who opens this booking cold — a link in a
+            // mail, on a phone in another zone — reads its times in the club's day and not the
+            // phone's. The client learns it from any response that carries it (lib/clubZone).
+            timezone = DoorClock.ZoneOf(settings).Name,
         };
     }
 
@@ -333,6 +338,10 @@ public sealed class PlayersQuery
             short_by_credits = Math.Max(0m, unpaid - spendable),
             share_deadline = PlayerSettings.ShareDeadline(booking, settings),
             cap = cap is null ? null : PlayersService.CapFigures(cap),
+
+            // The answer to opening /j/{token} cold, from a mail: carries the club's zone like
+            // the booking detail does, so its court time is the club's and not the phone's.
+            timezone = DoorClock.ZoneOf(settings).Name,
         };
     }
 

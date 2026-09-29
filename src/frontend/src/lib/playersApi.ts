@@ -165,6 +165,8 @@ export type BookingDetail = {
     can_withdraw: boolean;
     withdraw_closes_at: string;
   };
+  /** The club's IANA zone — a cold entry point from a mail, so it names the club's day itself. Absent from an older API. */
+  timezone?: string;
 };
 
 /** The cap a yes would break (D12): slots or minutes, with the club day's figures. */
@@ -209,6 +211,8 @@ export type Invite = {
   short_by_credits: number;
   share_deadline: string;
   cap: PartnerCap | null;
+  /** The club's IANA zone — the link view is opened cold from a mail. Absent from an older API. */
+  timezone?: string;
 };
 
 /**
@@ -290,6 +294,8 @@ export type MemberNotificationPage = {
   items: MemberNotification[];
   unread_count: number;
   next_cursor: string | null;
+  /** The club's IANA zone. Absent from an older API. */
+  timezone?: string;
 };
 
 /* ─────────────────────────────── preferences (D13) ─────────────────────────────── */
@@ -346,7 +352,7 @@ export const playersEndpoints = {
   withdraw: (bookingId: string, participantId: string) => api.post<SeatAnswer>(`${seat(bookingId, participantId)}/withdraw`),
 
   /* invites */
-  myInvites: () => api.get<{ items: Invite[]; count: number }>("/api/v1/me/invites"),
+  myInvites: () => api.get<{ items: Invite[]; count: number; timezone?: string }>("/api/v1/me/invites"),
   invite: (token: string) => api.get<Invite>(`/api/v1/invites/${encodeURIComponent(token)}`),
   acceptLink: (token: string, expectedShareCredits: number) =>
     api.post<AcceptAnswer>(`/api/v1/invites/${encodeURIComponent(token)}/accept`, { expectedShareCredits }),

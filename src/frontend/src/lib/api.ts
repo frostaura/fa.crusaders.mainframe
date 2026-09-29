@@ -1214,6 +1214,12 @@ export type MyProfile = {
   /** P11 — credits owed back to partners, paid from the next credit in. Absent before P11. */
   owed_back_credits?: number;
   /**
+   * The club's IANA zone. Read at every app start, so `lib/clubZone` learns the club's day from
+   * boot and no screen — least of all one opened cold from a mail on a phone in another zone —
+   * writes a court time in the phone's. Absent from an API that predates it.
+   */
+  timezone?: string;
+  /**
    * The club's glyph set for confirm/decline buttons — `"thumbs"` or `"marks"`.
    *
    * <p>

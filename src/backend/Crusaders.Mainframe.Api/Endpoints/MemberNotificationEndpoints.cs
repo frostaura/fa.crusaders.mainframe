@@ -51,7 +51,8 @@ public static class MemberNotificationEndpoints
     }
 
     /// <summary>One page, newest first, keyset-paged on <c>(created_at, id)</c> — the admin feed's cursor.</summary>
-    private static async Task<IResult> ListAsync(string? cursor, int? limit, HttpContext ctx, MainframeDbContext db, CancellationToken ct)
+    private static async Task<IResult> ListAsync(
+        string? cursor, int? limit, HttpContext ctx, MainframeDbContext db, Services.TenantSettingsAccessor settings, CancellationToken ct)
     {
         var after = AdminChangeCursor.Parse(cursor);
         if (!string.IsNullOrWhiteSpace(cursor) && after is null) return Results.BadRequest(new { error = DoorLogQuery.CursorInvalid });
@@ -83,6 +84,9 @@ public static class MemberNotificationEndpoints
             }).ToList(),
             unread_count = await db.MemberNotifications.CountAsync(n => n.UserId == me && n.ReadAt == null, ct),
             next_cursor = more && rows.Count > 0 ? new AdminChangeCursor(rows[^1].CreatedAt, rows[^1].Id).Encode() : null,
+
+            // The bell is a cold entry point too: its lines carry instants, so the club's zone rides along.
+            timezone = Services.DoorClock.ZoneOf(await settings.GetAsync(ct)).Name,
         });
     }
 }

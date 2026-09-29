@@ -72,10 +72,12 @@ public static class PlayersEndpoints
         return view is null ? Results.NotFound(new { error = "booking_not_found" }) : Results.Ok(view);
     }
 
-    private static async Task<IResult> InvitesAsync(HttpContext ctx, PlayersQuery query, CancellationToken ct)
+    private static async Task<IResult> InvitesAsync(HttpContext ctx, PlayersQuery query, TenantSettingsAccessor settings, CancellationToken ct)
     {
         var items = await query.InvitesAsync(Me(ctx), ct);
-        return Results.Ok(new { items, count = items.Count });
+        // Top level as well as on each item: the client learns the club's zone from a top-level
+        // `timezone` only, and the Invites tab is a cold entry point from a mail.
+        return Results.Ok(new { items, count = items.Count, timezone = DoorClock.ZoneOf(await settings.GetAsync(ct)).Name });
     }
 
     /// <summary>

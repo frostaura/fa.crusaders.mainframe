@@ -58,6 +58,11 @@ public static class MeProfileEndpoints
                 // endpoint for one string, would be a round trip on the first paint.
                 currency_symbol = CurrencySymbol.For(clubSettings),
 
+                // The club's IANA zone. This payload is read at every app start, so the client
+                // knows the club's day from boot and no screen — least of all one opened cold
+                // from a mail on a phone in another zone — writes a court time in the phone's.
+                timezone = DoorClock.ZoneOf(clubSettings).Name,
+
                 // The same object GET /me/preferences answers, embedded so the first paint
                 // knows the theme before it draws anything — a separate round trip would flash
                 // the wrong theme on every cold load. Defaults when the member has never
