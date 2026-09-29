@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ActionsMenu, type ActionsMenuItem } from "@/components/admin/ActionsMenu";
-import { RevokePasskeysSwitch } from "@/components/member-code/RevokePasskeysSwitch";
+import { useResetMemberCodeConfirm } from "@/components/member-code/ResetMemberCodeDialog";
 import { useToast } from "@/components/Toast";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { ArrowCounterClockwise, Envelope, Key, Prohibit, UserMinus, UserPlus } from "@/components/ui/icons";
@@ -110,35 +110,11 @@ function useLifecycleItems({ detail, name, onChanged }: Props) {
   }
 }
 
-/**
- * Reset member code — the desk's answer to "I lost my phone" (member-code §10, §13). The code
- * rotates and every session ends; the passkeys go too unless the admin says otherwise, because a
- * lost phone's passkey signs straight back in and picks up the new code. Takes the MEMBERSHIP id,
- * like the lifecycle routes, so an account with none has no item.
- */
+/** Reset member code, behind the ⋯ — the shared confirm (D8), absent for an account with no membership. */
 function useResetCodeItem({ detail, name, onChanged }: Props): ActionsMenuItem | null {
-  const toast = useToast();
-  const [revokePasskeys, setRevokePasskeys] = useState(true);
-  const id = detail.membership_id;
-  if (!id) return null;
-  return {
-    label: COPY.resetCode, icon: <Key aria-hidden="true" />, danger: true,
-    confirm: {
-      title: COPY.resetCodeTitle(name), description: COPY.resetCodeBody, confirmLabel: COPY.resetCodeConfirm,
-      action: COPY.resetCodeAction,
-      children: (
-        <RevokePasskeysSwitch
-          label={COPY.revokePasskeys} hint={COPY.revokePasskeysHint} checked={revokePasskeys} onChange={setRevokePasskeys}
-        />
-      ),
-      onConfirm: async () => {
-        const r = await endpoints.adminResetMemberCode(id, revokePasskeys);
-        toast.push({ tone: "success", text: COPY.codeReset(name, r.passkeys_revoked, r.passkeys_removed) });
-        setRevokePasskeys(true);
-        await onChanged();
-      },
-    },
-  };
+  const confirm = useResetMemberCodeConfirm(name, detail.membership_id ?? "", onChanged);
+  if (!detail.membership_id) return null;
+  return { label: COPY.resetCode, icon: <Key aria-hidden="true" />, danger: true, confirm };
 }
 
 export function MemberActions(props: Props) {

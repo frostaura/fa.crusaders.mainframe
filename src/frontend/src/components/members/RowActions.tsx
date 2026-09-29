@@ -4,11 +4,12 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  ArrowCounterClockwise, CalendarBlank, ClockCounterClockwise, DotsThree, Envelope, Fingerprint, Key, Prohibit, UserCircle,
-  UsersThree,
+  ArrowCounterClockwise, CalendarBlank, ClockCounterClockwise, DotsThree, Envelope, Fingerprint, Key, Prohibit, QrCode,
+  UserCircle, UsersThree,
 } from "@/components/ui/icons";
 import { IconButton } from "@/components/ui/icon-button";
 import { ASSIGN_COPY } from "@/lib/groupsCopy";
+import { ACTIONS_COPY } from "@/lib/memberDetailCopy";
 import {
   ROW_ACTIONS as COPY, SUSPENDED_NOTE, bookForHref, memberHref, nightHref,
 } from "@/lib/membersCopy";
@@ -34,6 +35,8 @@ export type RowActionHandlers = {
   topUp: (m: MemberRow) => void;
   fingerprints: (m: MemberRow) => void;
   reset: (m: MemberRow) => void;
+  /** D8 — the member code reset, the same confirm the member's own page opens. */
+  resetCode: (m: MemberRow) => void;
   resend: (m: MemberRow) => Promise<unknown>;
   /** Opens GroupAssign — the member's groups carry their rate and peak say now (D2). */
   changeGroups: (m: MemberRow) => void;
@@ -42,6 +45,9 @@ export type RowActionHandlers = {
   /** How many fingerprints the member has, for the menu's wording. */
   fingerprintCount: (m: MemberRow) => number;
 };
+
+/** One label for the reset, wherever it is offered (D8). */
+const RESET_CODE_LABEL = ACTIONS_COPY.resetCode;
 
 export function RowActions({ row, handlers }: { row: MemberRow; handlers: RowActionHandlers }) {
   const approve = useAsyncAction(() => handlers.approve(row));
@@ -85,6 +91,11 @@ function MemberMenu({ row, handlers }: { row: MemberRow; handlers: RowActionHand
         <DropdownMenuItem onSelect={() => handlers.reset(row)}>
           <Key size={16} aria-hidden="true" />{COPY.reset}
         </DropdownMenuItem>
+        {row.membership_id ? (
+          <DropdownMenuItem onSelect={() => handlers.resetCode(row)}>
+            <QrCode size={16} aria-hidden="true" />{RESET_CODE_LABEL}
+          </DropdownMenuItem>
+        ) : null}
         {row.email_verified === false ? (
           <DropdownMenuItem onSelect={() => void handlers.resend(row)}>
             <Envelope size={16} aria-hidden="true" />{COPY.resend}

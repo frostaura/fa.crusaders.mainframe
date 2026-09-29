@@ -4,6 +4,7 @@ import { useLocation } from "react-router-dom";
 import AdminMembersPage from "./AdminMembers";
 import { memberFixture, renderPage, stubFetch, type StubRoute } from "../test/harness";
 import { ADMIN_BADGE, COLUMNS, GROUPS_COPY, MEMBERS_PAGE, ROW_ACTIONS } from "../lib/membersCopy";
+import { ACTIONS_COPY } from "../lib/memberDetailCopy";
 
 /**
  * The members list as a way INTO a member (P5) — the founder's "a person's night should be
@@ -69,6 +70,22 @@ describe("the row is the way into a member", () => {
     expect(within(menu).getByRole("menuitem", { name: ROW_ACTIONS.view })).toHaveAttribute("href", `/admin/members/${ADA.user_id}`);
     expect(within(menu).getByRole("menuitem", { name: ROW_ACTIONS.book })).toHaveAttribute("href", `/bookings?as=${ADA.user_id}`);
     expect(within(menu).getByRole("menuitem", { name: ROW_ACTIONS.night })).toHaveAttribute("href", `/admin/members/${ADA.user_id}/night`);
+  });
+
+  it("D8 — resets a member's code from the row ⋯, with the member page's own dialog", async () => {
+    const stub = render({ extra: [{
+      method: "POST", path: `/api/v1/admin/members/${ADA.membership_id}/code/reset`,
+      body: { rotated: true, generation: 2, passkeys_revoked: true, passkeys_removed: 1 },
+    }] });
+    fireEvent.pointerDown(await screen.findByRole("button", { name: ROW_ACTIONS.more("Ada Lovelace") }), POINTER);
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: ACTIONS_COPY.resetCode }));
+    const dialog = await screen.findByRole("dialog", { name: ACTIONS_COPY.resetCodeTitle("Ada Lovelace") });
+    expect(within(dialog).getByText(ACTIONS_COPY.resetCodeBody)).toBeInTheDocument();
+    expect(within(dialog).getByRole("switch", { name: ACTIONS_COPY.revokePasskeys })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(within(dialog).getByRole("button", { name: ACTIONS_COPY.resetCodeConfirm }));
+    await waitFor(() => expect(stub.calls.find((c) => c.path.endsWith("/code/reset"))?.body).toEqual({ revoke_passkeys: true }));
+    expect(await screen.findByText(ACTIONS_COPY.codeReset("Ada Lovelace", true, 1))).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: ACTIONS_COPY.resetCodeTitle("Ada Lovelace") })).toBeNull());
   });
 
   it("does not offer to book for an applicant, who cannot hold a court yet", async () => {

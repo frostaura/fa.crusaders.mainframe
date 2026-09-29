@@ -76,6 +76,7 @@ export default function AdminMembersPage() {
     topUp: credit.open,
     fingerprints: (member) => setDialog({ kind: "fingerprints", member }),
     reset: (member) => setDialog({ kind: "reset", member }),
+    resetCode: (member) => setDialog({ kind: "resetCode", member }),
     resend: lifecycle.resend,
     changeGroups: setAssigning,
     suspend: (member) => setDialog({ kind: "suspend", member }),
