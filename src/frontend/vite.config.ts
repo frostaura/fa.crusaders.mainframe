@@ -59,6 +59,22 @@ export default defineConfig({
       "/uploads": { target: process.env.VITE_API_TARGET ?? "http://localhost:5238", changeOrigin: true },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // React, its scheduler and the router change far less often than the app does, so they get
+        // a chunk of their own: a deploy then re-downloads the app, not the framework. Statically
+        // imported by the entry, so `index.html` names it and the service worker precaches it with
+        // the rest of the shell (an offline /my-code needs every byte of its first render). Nothing
+        // else is grouped by hand — a hand-made group pulls modules that only lazy routes use into
+        // the first load.
+        manualChunks(id) {
+          if (/node_modules\/(react|react-dom|scheduler|react-router|react-router-dom)\//.test(id)) return "react";
+          return undefined;
+        },
+      },
+    },
+  },
   test: {
     environment: "jsdom",
     globals: true,

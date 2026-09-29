@@ -1,14 +1,16 @@
 import * as React from "react";
-import { format } from "date-fns";
-import { TZDate } from "react-day-picker";
 import { CalendarBlank } from "@/components/ui/icons";
-import { Calendar } from "@/components/ui/calendar";
 import { fieldSurface } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useIsSmUp } from "@/components/ui/use-media-query";
 import { clubZone } from "@/lib/clubZone";
 import { cn } from "@/lib/utils";
+import { formatClubDayLabel } from "@/components/ui/date-picker-day";
+import { Skeleton } from "@/components/ui/skeleton";
+
+const loadCalendar = () => import("@/components/ui/date-picker-calendar");
+const DateCalendar = React.lazy(loadCalendar);
 
 /**
  * Pick a club day (design-system.md: calendar + date-picker).
@@ -44,37 +46,6 @@ export type DatePickerProps = {
   className?: string;
 };
 
-const DAY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
-
-/** `YYYY-MM-DD` → [year, monthIndex, day], or null for anything else. */
-function partsOf(day: string | null | undefined): [number, number, number] | null {
-  const match = day ? DAY_PATTERN.exec(day) : null;
-  if (!match) return null;
-  return [Number(match[1]), Number(match[2]) - 1, Number(match[3])];
-}
-
-/** The club day as the calendar's Date: midnight of that day IN the zone. */
-function toCalendarDate(day: string | null | undefined, zone: string | undefined): Date | undefined {
-  const parts = partsOf(day);
-  if (!parts) return undefined;
-  return zone ? new TZDate(parts[0], parts[1], parts[2], zone) : new Date(parts[0], parts[1], parts[2]);
-}
-
-/**
- * The calendar's Date back to the club day it names. A `TZDate`'s getters answer in its zone, so
- * `date-fns` reads the zone's calendar day; a plain Date (no zone known) reads the local one.
- */
-function toClubDay(date: Date): string {
-  return format(date, "yyyy-MM-dd");
-}
-
-/** "Tue 23 Sep". Pure calendar arithmetic on the day itself — no zone can move it. */
-export function formatClubDayLabel(day: string | null | undefined): string | null {
-  const parts = partsOf(day);
-  if (!parts) return null;
-  return format(new Date(parts[0], parts[1], parts[2]), "EEE d MMM");
-}
-
 type TriggerProps = React.ComponentProps<"button"> & { text: string | null; placeholder: string; label: string };
 
 function DateTrigger({ text, placeholder, label, className, ...props }: TriggerProps) {
@@ -93,29 +64,6 @@ function DateTrigger({ text, placeholder, label, className, ...props }: TriggerP
       <CalendarBlank size={16} aria-hidden="true" className="shrink-0 text-text-secondary" />
       <span className={cn(!text && "text-text-muted")}>{text ?? placeholder}</span>
     </button>
-  );
-}
-
-type PanelProps = Pick<DatePickerProps, "value" | "min" | "max"> & { zone: string | undefined; onPick: (day: string) => void };
-
-function DateCalendar({ value, min, max, zone, onPick }: PanelProps) {
-  const selected = toCalendarDate(value, zone);
-  const first = toCalendarDate(min, zone);
-  const last = toCalendarDate(max, zone);
-  const disabled = [first ? { before: first } : null, last ? { after: last } : null].filter((m) => m !== null);
-  return (
-    <Calendar
-      mode="single"
-      required
-      timeZone={zone}
-      selected={selected}
-      defaultMonth={selected ?? first}
-      startMonth={first}
-      endMonth={last}
-      disabled={disabled}
-      onSelect={(date: Date) => onPick(toClubDay(date))}
-      className="mx-auto"
-    />
   );
 }
 
@@ -139,9 +87,19 @@ function DatePicker(props: DatePickerProps) {
     setOpen(false);
   };
   const trigger = (
-    <DateTrigger text={formatClubDayLabel(value)} placeholder={placeholder} label={label} disabled={disabled} className={className} />
+    <DateTrigger
+      text={formatClubDayLabel(value)} placeholder={placeholder} label={label} disabled={disabled} className={className}
+      // Start fetching the calendar the moment a pointer or focus arrives, not on the tap.
+      onPointerEnter={() => void loadCalendar()} onFocus={() => void loadCalendar()}
+    />
   );
-  const calendar = <DateCalendar value={value} min={min} max={max} zone={zone} onPick={pick} />;
+  // Lazy (see date-picker-calendar.tsx); the fallback holds the calendar's footprint so the
+  // popover or sheet does not jump when it arrives.
+  const calendar = (
+    <React.Suspense fallback={<Skeleton aria-hidden="true" className="mx-auto h-72 w-64" />}>
+      <DateCalendar value={value} min={min} max={max} zone={zone} onPick={pick} />
+    </React.Suspense>
+  );
   if (wide) {
     return (
       <Popover open={open} onOpenChange={setOpen}>

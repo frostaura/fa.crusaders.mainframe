@@ -2,7 +2,7 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 import AdminLedgerPage from "./AdminLedger";
-import { formatClubDayLabel } from "../components/ui/date-picker";
+import { formatClubDayLabel } from "../components/ui/date-picker-day";
 import { LEDGER_TYPE_LABEL } from "../lib/creditAdjustment";
 import { ledgerRowFixture, renderPage, signIn, signOut, stubFetch } from "../test/harness";
 

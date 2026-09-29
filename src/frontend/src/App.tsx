@@ -1,4 +1,4 @@
-import { Suspense, lazy, type ReactNode } from "react";
+import { Suspense, lazy, type ComponentType, type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AuthProvider, readLastIdentity, useAuth } from "./lib/auth";
 import AppShell from "./components/shell/AppShell";
@@ -8,61 +8,15 @@ import { ProfileProvider } from "./lib/profile";
 import { ClubUiProvider } from "./lib/ClubUiProvider";
 import HomePage from "./pages/Home";
 import LoginPage from "./pages/Login";
-import RegisterPage from "./pages/Register";
-import VerifyEmailPage from "./pages/VerifyEmail";
-import ForgotPasswordPage from "./pages/ForgotPassword";
-import ResetPasswordPage from "./pages/ResetPassword";
-import ChangePasswordPage from "./pages/ChangePassword";
-import WelcomePage from "./pages/Welcome";
-import WalletPage from "./pages/Wallet";
-import SchedulePage from "./pages/Schedule";
-import AdminMembersPage from "./pages/AdminMembers";
-import TopUpPage from "./pages/TopUp";
-import TopUpStatusPage from "./pages/TopUpStatus";
-import AdminWebhooksPage from "./pages/AdminWebhooks";
-import AdminSettingsPage from "./pages/AdminSettings";
-import AdminLedgerPage from "./pages/AdminLedger";
-import ProfilePage from "./pages/Profile";
-import ProfileResultsPage from "./pages/ProfileResults";
 import MyCodePage from "./pages/MyCode";
-import HowItWorksPage from "./pages/HowItWorks";
-// P8 — the member welcome wizard, and the gate that offers it once to a newly approved member.
-import GetStartedPage from "./pages/GetStarted";
 import { FirstRunGate } from "./components/onboarding/FirstRunGate";
-import { AdminDevicesPage } from "./pages/AdminDevices";
-// doors: admin — the four doors routes and their pages, in one block.
 import { AdminDoorsPage } from "./pages/AdminDoors";
 import { AdminDoorsDetailPage } from "./pages/AdminDoorsDetail";
-import { AdminDoorsLogPage } from "./pages/AdminDoorsLog";
-import { AdminDoorsCardPage } from "./pages/AdminDoorsCard";
-// Monitoring — courts, hardware and control (R17): the control board, doors, boards, faults and
-// the change record. A person's night lives on the member now (P5); its old route asks who.
-import { ControlBoardPage } from "./pages/monitoring/ControlBoard";
-import { MonitoringFaultsPage } from "./pages/monitoring/MonitoringFaults";
-import { MemberNightPage } from "./pages/monitoring/MemberNight";
-import { AdminChangeRecordPage } from "./pages/monitoring/AdminChangeRecord";
-import { AdminSchedulesPage } from "./pages/AdminSchedules";
-import { AdminScheduleDetailPage } from "./pages/AdminScheduleDetail";
-import { AdminGroupsPage } from "./pages/AdminGroups";
-// P5 — a member's own page and its six tabs (Target IA → Member detail). Each tab is a URL.
-import MemberDetailLayout, {
-  MemberAccess, MemberBookings, MemberDoors, MemberNightTab, MemberOverview, MemberWallet,
-} from "./pages/admin/member";
-// P6 — the courts left Settings for a page of their own.
-import AdminCourtsPage from "./pages/admin/AdminCourts";
 import NotFoundPage from "./pages/NotFound";
-// P11 — players and splits (D11–D13): a booking's own page, invites (the tab, a shared link, and
-// the invite email's deep link) and the member's inbox.
-import BookingDetailPage from "./pages/BookingDetail";
-import InvitesPage from "./pages/Invites";
-import InviteLinkPage from "./pages/InviteLink";
-import InviteDeepLinkPage from "./pages/InviteDeepLink";
-import InboxPage from "./pages/Inbox";
 // `/reports` split in two (Target IA → Routes): club reports under Admin, a member's own under Wallet.
 import { ReportsRedirect } from "./pages/Reports";
 import AdminLayout from "./components/admin/AdminLayout";
 import AdminHomePage from "./pages/admin/AdminHome";
-import AdminResultsPage from "./pages/admin/AdminResults";
 import { RouteAnnouncer } from "./components/RouteAnnouncer";
 import { LANDING_PATH } from "./components/shell/nav";
 import { BootSplash, ConnectionLost, RouteSkeleton } from "./components/shell/SessionScreens";
@@ -80,6 +34,69 @@ import { BootSplash, ConnectionLost, RouteSkeleton } from "./components/shell/Se
  * </p>
  */
 const DevPrimitivesPage = import.meta.env.DEV ? lazy(() => import("./pages/DevPrimitives")) : null;
+
+/**
+ * Code-split routes (P10). The entry chunk carries what the first screen needs and what must
+ * work with no signal — the shell, the public landing, sign-in and My Code, the member's
+ * landing (the service worker precaches only what `index.html` names, so an offline /my-code
+ * cannot wait on a lazy chunk). Every other page loads when first opened, behind the
+ * page-shaped {@link RouteSkeleton}.
+ *
+ * <p>
+ * <b>The admin console's frame, its Overview and the two doors pages are NOT lazy,
+ * deliberately.</b> They read the club's doors through the shared doors store, which dedupes
+ * only while a read is in flight — a reader that mounts after a Suspense boundary resolves
+ * joins late and fires a second identical GET (E-L6: "one read on arrival, not one per
+ * reader"; `e2e/admin-doors.spec.ts` counts it). Every other admin page reads nothing from
+ * that store.
+ * </p>
+ */
+const named = <K extends string>(load: () => Promise<Record<K, ComponentType>>, name: K) =>
+  lazy(() => load().then((m) => ({ default: m[name] })));
+
+const RegisterPage = lazy(() => import("./pages/Register"));
+const VerifyEmailPage = lazy(() => import("./pages/VerifyEmail"));
+const ForgotPasswordPage = lazy(() => import("./pages/ForgotPassword"));
+const ResetPasswordPage = lazy(() => import("./pages/ResetPassword"));
+const WelcomePage = lazy(() => import("./pages/Welcome"));
+const ChangePasswordPage = lazy(() => import("./pages/ChangePassword"));
+const SchedulePage = lazy(() => import("./pages/Schedule"));
+const WalletPage = lazy(() => import("./pages/Wallet"));
+const TopUpPage = lazy(() => import("./pages/TopUp"));
+const TopUpStatusPage = lazy(() => import("./pages/TopUpStatus"));
+const ProfilePage = lazy(() => import("./pages/Profile"));
+const ProfileResultsPage = lazy(() => import("./pages/ProfileResults"));
+const HowItWorksPage = lazy(() => import("./pages/HowItWorks"));
+const GetStartedPage = lazy(() => import("./pages/GetStarted"));
+const BookingDetailPage = lazy(() => import("./pages/BookingDetail"));
+const InvitesPage = lazy(() => import("./pages/Invites"));
+const InviteLinkPage = lazy(() => import("./pages/InviteLink"));
+const InviteDeepLinkPage = lazy(() => import("./pages/InviteDeepLink"));
+const InboxPage = lazy(() => import("./pages/Inbox"));
+
+const AdminMembersPage = lazy(() => import("./pages/AdminMembers"));
+const MemberDetailLayout = lazy(() => import("./pages/admin/member"));
+const MemberOverview = named(() => import("./pages/admin/member"), "MemberOverview");
+const MemberWallet = named(() => import("./pages/admin/member"), "MemberWallet");
+const MemberBookings = named(() => import("./pages/admin/member"), "MemberBookings");
+const MemberDoors = named(() => import("./pages/admin/member"), "MemberDoors");
+const MemberNightTab = named(() => import("./pages/admin/member"), "MemberNightTab");
+const MemberAccess = named(() => import("./pages/admin/member"), "MemberAccess");
+const AdminGroupsPage = named(() => import("./pages/AdminGroups"), "AdminGroupsPage");
+const AdminResultsPage = lazy(() => import("./pages/admin/AdminResults"));
+const AdminLedgerPage = lazy(() => import("./pages/AdminLedger"));
+const ControlBoardPage = named(() => import("./pages/monitoring/ControlBoard"), "ControlBoardPage");
+const AdminDoorsLogPage = named(() => import("./pages/AdminDoorsLog"), "AdminDoorsLogPage");
+const AdminDoorsCardPage = named(() => import("./pages/AdminDoorsCard"), "AdminDoorsCardPage");
+const AdminDevicesPage = named(() => import("./pages/AdminDevices"), "AdminDevicesPage");
+const MonitoringFaultsPage = named(() => import("./pages/monitoring/MonitoringFaults"), "MonitoringFaultsPage");
+const AdminChangeRecordPage = named(() => import("./pages/monitoring/AdminChangeRecord"), "AdminChangeRecordPage");
+const MemberNightPage = named(() => import("./pages/monitoring/MemberNight"), "MemberNightPage");
+const AdminSchedulesPage = named(() => import("./pages/AdminSchedules"), "AdminSchedulesPage");
+const AdminScheduleDetailPage = named(() => import("./pages/AdminScheduleDetail"), "AdminScheduleDetailPage");
+const AdminCourtsPage = lazy(() => import("./pages/admin/AdminCourts"));
+const AdminSettingsPage = lazy(() => import("./pages/AdminSettings"));
+const AdminWebhooksPage = lazy(() => import("./pages/AdminWebhooks"));
 
 /**
  * The two report screens carry the chart library, so they load when first opened: a member who
@@ -155,71 +172,71 @@ export function AppRoutes() {
       <Route element={<AppShell />}>
         <Route path="/" element={<HomePage />} />
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
-        <Route path="/verify-email/:token" element={<VerifyEmailPage />} />
-        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-        <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
-        <Route path="/welcome/:token" element={<WelcomePage />} />
+        <Route path="/register" element={<Lazy><RegisterPage /></Lazy>} />
+        <Route path="/verify-email/:token" element={<Lazy><VerifyEmailPage /></Lazy>} />
+        <Route path="/forgot-password" element={<Lazy><ForgotPasswordPage /></Lazy>} />
+        <Route path="/reset-password/:token" element={<Lazy><ResetPasswordPage /></Lazy>} />
+        <Route path="/welcome/:token" element={<Lazy><WelcomePage /></Lazy>} />
 
         {/* R15 — My Code is the landing, then Bookings, then Wallet. */}
         <Route path="/my-code" element={<RequireAuth><MyCodePage /></RequireAuth>} />
-        <Route path="/bookings" element={<RequireAuth><SchedulePage /></RequireAuth>} />
+        <Route path="/bookings" element={<RequireAuth><Lazy><SchedulePage /></Lazy></RequireAuth>} />
         {/* P11. `/bookings/invites` is literal, so it outranks `/bookings/:bookingId`. */}
-        <Route path="/bookings/invites" element={<RequireAuth><InvitesPage /></RequireAuth>} />
-        <Route path="/bookings/:bookingId" element={<RequireAuth><BookingDetailPage /></RequireAuth>} />
+        <Route path="/bookings/invites" element={<RequireAuth><Lazy><InvitesPage /></Lazy></RequireAuth>} />
+        <Route path="/bookings/:bookingId" element={<RequireAuth><Lazy><BookingDetailPage /></Lazy></RequireAuth>} />
         {/* A shared invite link (`/j/{token}`, WhatsApp) and the invite email's deep link. Both
             signed-in: RequireAuth carries the link through /login and back. */}
-        <Route path="/j/:token" element={<RequireAuth><InviteLinkPage /></RequireAuth>} />
-        <Route path="/invites/:participantId" element={<RequireAuth><InviteDeepLinkPage /></RequireAuth>} />
-        <Route path="/inbox" element={<RequireAuth><InboxPage /></RequireAuth>} />
-        <Route path="/wallet" element={<RequireAuth><WalletPage /></RequireAuth>} />
-        <Route path="/wallet/topup" element={<RequireAuth><TopUpPage /></RequireAuth>} />
-        <Route path="/wallet/topup/:topupId" element={<RequireAuth><TopUpStatusPage /></RequireAuth>} />
+        <Route path="/j/:token" element={<RequireAuth><Lazy><InviteLinkPage /></Lazy></RequireAuth>} />
+        <Route path="/invites/:participantId" element={<RequireAuth><Lazy><InviteDeepLinkPage /></Lazy></RequireAuth>} />
+        <Route path="/inbox" element={<RequireAuth><Lazy><InboxPage /></Lazy></RequireAuth>} />
+        <Route path="/wallet" element={<RequireAuth><Lazy><WalletPage /></Lazy></RequireAuth>} />
+        <Route path="/wallet/topup" element={<RequireAuth><Lazy><TopUpPage /></Lazy></RequireAuth>} />
+        <Route path="/wallet/topup/:topupId" element={<RequireAuth><Lazy><TopUpStatusPage /></Lazy></RequireAuth>} />
         <Route path="/wallet/activity" element={<RequireAuth><Lazy><WalletActivityPage /></Lazy></RequireAuth>} />
-        <Route path="/profile" element={<RequireAuth><ProfilePage /></RequireAuth>} />
+        <Route path="/profile" element={<RequireAuth><Lazy><ProfilePage /></Lazy></RequireAuth>} />
         {/* P12 — the member's match history, from My game's "All results". */}
-        <Route path="/profile/results" element={<RequireAuth><ProfileResultsPage /></RequireAuth>} />
-        <Route path="/change-password" element={<RequireAuth><ChangePasswordPage /></RequireAuth>} />
+        <Route path="/profile/results" element={<RequireAuth><Lazy><ProfileResultsPage /></Lazy></RequireAuth>} />
+        <Route path="/change-password" element={<RequireAuth><Lazy><ChangePasswordPage /></Lazy></RequireAuth>} />
         {/* Deliberately NOT behind RequireAuth: an applicant waiting for approval and a member who
             cannot sign in are exactly the people wondering how any of this works (item 16). */}
-        <Route path="/how-it-works" element={<HowItWorksPage />} />
+        <Route path="/how-it-works" element={<Lazy><HowItWorksPage /></Lazy>} />
         {/* P8 — the welcome wizard. Signed-in only: every step is about the member's own account. */}
-        <Route path="/get-started" element={<RequireAuth><GetStartedPage /></RequireAuth>} />
+        <Route path="/get-started" element={<RequireAuth><Lazy><GetStartedPage /></Lazy></RequireAuth>} />
 
         {/* R16 — one Admin tab. Everything the gear menu held is in here now. */}
         <Route path="/admin" element={<RequireAuth admin><AdminLayout /></RequireAuth>}>
           <Route index element={<AdminHomePage />} />
-          <Route path="/admin/members" element={<AdminMembersPage />} />
+          <Route path="/admin/members" element={<Lazy><AdminMembersPage /></Lazy>} />
           {/* Absolute child paths, so every `path=` here is a whole URL the title table can name. */}
-          <Route path="/admin/members/:userId" element={<MemberDetailLayout />}>
-            <Route index element={<MemberOverview />} />
-            <Route path="/admin/members/:userId/wallet" element={<MemberWallet />} />
-            <Route path="/admin/members/:userId/bookings" element={<MemberBookings />} />
-            <Route path="/admin/members/:userId/doors" element={<MemberDoors />} />
-            <Route path="/admin/members/:userId/night" element={<MemberNightTab />} />
-            <Route path="/admin/members/:userId/access" element={<MemberAccess />} />
+          <Route path="/admin/members/:userId" element={<Lazy><MemberDetailLayout /></Lazy>}>
+            <Route index element={<Lazy><MemberOverview /></Lazy>} />
+            <Route path="/admin/members/:userId/wallet" element={<Lazy><MemberWallet /></Lazy>} />
+            <Route path="/admin/members/:userId/bookings" element={<Lazy><MemberBookings /></Lazy>} />
+            <Route path="/admin/members/:userId/doors" element={<Lazy><MemberDoors /></Lazy>} />
+            <Route path="/admin/members/:userId/night" element={<Lazy><MemberNightTab /></Lazy>} />
+            <Route path="/admin/members/:userId/access" element={<Lazy><MemberAccess /></Lazy>} />
           </Route>
-          <Route path="/admin/groups" element={<AdminGroupsPage />} />
+          <Route path="/admin/groups" element={<Lazy><AdminGroupsPage /></Lazy>} />
           {/* P12 — disputed results, and removing a wrong one. */}
-          <Route path="/admin/results" element={<AdminResultsPage />} />
-          <Route path="/admin/transactions" element={<AdminLedgerPage />} />
+          <Route path="/admin/results" element={<Lazy><AdminResultsPage /></Lazy>} />
+          <Route path="/admin/transactions" element={<Lazy><AdminLedgerPage /></Lazy>} />
           <Route path="/admin/reports" element={<Lazy><AdminReportsPage /></Lazy>} />
-          <Route path="/admin/monitoring" element={<ControlBoardPage />} />
+          <Route path="/admin/monitoring" element={<Lazy><ControlBoardPage /></Lazy>} />
           <Route path="/admin/monitoring/doors" element={<AdminDoorsPage />} />
-          <Route path="/admin/monitoring/doors/log" element={<AdminDoorsLogPage />} />
+          <Route path="/admin/monitoring/doors/log" element={<Lazy><AdminDoorsLogPage /></Lazy>} />
           <Route path="/admin/monitoring/doors/:id" element={<AdminDoorsDetailPage />} />
-          <Route path="/admin/monitoring/doors/:id/card" element={<AdminDoorsCardPage />} />
-          <Route path="/admin/monitoring/devices" element={<AdminDevicesPage />} />
-          <Route path="/admin/monitoring/faults" element={<MonitoringFaultsPage />} />
-          <Route path="/admin/monitoring/changes" element={<AdminChangeRecordPage />} />
+          <Route path="/admin/monitoring/doors/:id/card" element={<Lazy><AdminDoorsCardPage /></Lazy>} />
+          <Route path="/admin/monitoring/devices" element={<Lazy><AdminDevicesPage /></Lazy>} />
+          <Route path="/admin/monitoring/faults" element={<Lazy><MonitoringFaultsPage /></Lazy>} />
+          <Route path="/admin/monitoring/changes" element={<Lazy><AdminChangeRecordPage /></Lazy>} />
           {/* R17: a person's night lives on the member (`/admin/members/:userId/night`). The old
               route stays a picker so a bookmark still lands somewhere — it asks who, then goes there. */}
-          <Route path="/admin/monitoring/night" element={<MemberNightPage />} />
-          <Route path="/admin/schedules" element={<AdminSchedulesPage />} />
-          <Route path="/admin/schedules/:id" element={<AdminScheduleDetailPage />} />
-          <Route path="/admin/courts" element={<AdminCourtsPage />} />
-          <Route path="/admin/settings" element={<AdminSettingsPage />} />
-          <Route path="/admin/webhooks" element={<AdminWebhooksPage />} />
+          <Route path="/admin/monitoring/night" element={<Lazy><MemberNightPage /></Lazy>} />
+          <Route path="/admin/schedules" element={<Lazy><AdminSchedulesPage /></Lazy>} />
+          <Route path="/admin/schedules/:id" element={<Lazy><AdminScheduleDetailPage /></Lazy>} />
+          <Route path="/admin/courts" element={<Lazy><AdminCourtsPage /></Lazy>} />
+          <Route path="/admin/settings" element={<Lazy><AdminSettingsPage /></Lazy>} />
+          <Route path="/admin/webhooks" element={<Lazy><AdminWebhooksPage /></Lazy>} />
         </Route>
 
         {/* PERMANENT redirects — query and hash carried across (see `RedirectKeepingQuery`). */}

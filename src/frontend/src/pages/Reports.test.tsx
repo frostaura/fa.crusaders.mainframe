@@ -5,7 +5,7 @@ import { ReportsRedirect } from "./Reports";
 import AdminReportsPage from "./admin/AdminReports";
 import WalletActivityPage from "./WalletActivity";
 import { refuse, renderPage, signIn, signOut, stubFetch } from "../test/harness";
-import { formatClubDayLabel } from "../components/ui/date-picker";
+import { formatClubDayLabel } from "../components/ui/date-picker-day";
 import { clubToday, presetRange } from "../components/reports/range";
 
 /*

@@ -3,7 +3,8 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { TZDate } from "react-day-picker";
 import { Calendar } from "../calendar";
-import { DatePicker, formatClubDayLabel } from "../date-picker";
+import { DatePicker } from "../date-picker";
+import { formatClubDayLabel } from "../date-picker-day";
 import { TimeSelect, timeOptions } from "../time-select";
 import { SM_UP, useMediaQuery } from "../use-media-query";
 
@@ -127,11 +128,13 @@ describe("DatePicker", () => {
     );
   }
 
-  it("opens a sheet on a phone, bounds the days, and returns the chosen club day", () => {
+  it("opens a sheet on a phone, bounds the days, and returns the chosen club day", async () => {
     const onChange = vi.fn();
     render(<Jump onChange={onChange} />, strict);
     fireEvent.click(screen.getByRole("button", { name: "Jump to a date: Wed 23 Sep" }));
     const sheet = screen.getByRole("dialog", { name: "Jump to a date" });
+    // The calendar is its own lazily loaded chunk (P10); the sheet opens first.
+    await within(sheet).findByRole("button", { name: /next month/i });
     expect(dayButton(sheet, "2026-09-19")).toBeDisabled();
     // max is in this month, so there is nowhere to navigate to in either direction.
     expect(within(sheet).getByRole("button", { name: /next month/i })).toHaveAttribute("aria-disabled", "true");
@@ -145,12 +148,13 @@ describe("DatePicker", () => {
 });
 
 describe("DatePicker on a wide screen", () => {
-  it("opens a popover rather than a sheet", () => {
+  it("opens a popover rather than a sheet", async () => {
     desktop();
     const onChange = vi.fn();
     render(<DatePicker label="Jump to a date" value="2026-09-23" timeZone={ZONE} onChange={onChange} />, strict);
     fireEvent.click(screen.getByRole("button", { name: "Jump to a date: Wed 23 Sep" }));
     const panel = screen.getByRole("dialog", { name: "Jump to a date" });
+    await within(panel).findByRole("button", { name: /next month/i });
     expect(panel).toHaveAttribute("data-slot", "popover-content");
     fireEvent.click(dayButton(panel, "2026-09-24"));
     expect(onChange).toHaveBeenCalledWith("2026-09-24");

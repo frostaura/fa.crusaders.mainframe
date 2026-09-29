@@ -1074,6 +1074,8 @@ test.describe("The log a committee reads", () => {
     await page.getByRole("option", { name: "A specific day" }).click();
     // The club-day DatePicker (P3, R7): walk the calendar to the day and tap it.
     await page.getByRole("button", { name: /^Which day/ }).click();
+    // The calendar is its own lazily loaded chunk (P10): let it arrive before counting days.
+    await expect(page.getByRole("button", { name: /next month/i })).toBeVisible();
     for (let step = 0; step < 36 && (await page.locator('button[data-day="2026-09-19"]').count()) === 0; step++) {
       const back = new Date().toISOString().slice(0, 7) > "2026-09";
       await page.getByRole("button", { name: back ? /previous month/i : /next month/i }).click();
