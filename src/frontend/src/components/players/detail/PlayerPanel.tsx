@@ -10,9 +10,9 @@ import { Section } from "@/components/ui/page-shell";
 import { useBalance } from "@/lib/balance";
 import { formatCredits } from "@/lib/utils";
 import { playersEndpoints, type BookingDetail, type DetailPlayer } from "@/lib/playersApi";
-import { DETAIL_PLAYER, playersRefusal, playersWhen } from "@/lib/playersCopy";
+import { DETAIL_CANCELLED, DETAIL_PLAYER, playersRefusal, playersWhen } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
-import { mySeat } from "./detailModel";
+import { isCancelled, mySeat } from "./detailModel";
 import type { Notice } from "./useOrganiserHands";
 
 /**
@@ -28,6 +28,7 @@ export function PlayerPanel({ detail, reload, say }: Props) {
   const seat = mySeat(detail);
   const [asking, setAsking] = useState<Leave | null>(null);
   if (!seat || detail.viewer.role !== "player") return null;
+  if (isCancelled(detail)) return <CancelledShare seat={seat} />;
   const { permissions } = detail;
   return (
     <Section title={DETAIL_PLAYER.title}>
@@ -47,6 +48,17 @@ export function PlayerPanel({ detail, reload, say }: Props) {
       {asking ? (
         <LeaveDialog kind={asking} detail={detail} seat={seat} onClose={() => setAsking(null)} reload={reload} say={say} />
       ) : null}
+    </Section>
+  );
+}
+
+/** R1 F2.10 — a cancelled game asks nothing more: what they paid stands, or there is nothing to pay. */
+function CancelledShare({ seat }: { seat: DetailPlayer }) {
+  return (
+    <Section title={DETAIL_PLAYER.title}>
+      <p className="text-sm text-text-secondary" data-cancelled-share="">
+        {seat.paid_credits > 0 ? DETAIL_CANCELLED.partnerPaid(formatCredits(seat.paid_credits)) : DETAIL_CANCELLED.partnerNothing}
+      </p>
     </Section>
   );
 }

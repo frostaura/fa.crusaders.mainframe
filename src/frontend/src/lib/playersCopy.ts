@@ -54,6 +54,9 @@ export const STATUS_WORD: Record<string, string> = {
   settled_outside: "Settled by the club",
   guest: "Guest",
   open_link: "Waiting for someone",
+  /** R1 F2.10 — on a cancelled game: who was on it, and an invite nobody can answer any more. */
+  was_in: "Was in",
+  invite_closed: "Invite closed",
 };
 
 /** "Sam" from "Sam Petersen" — the grid's own rule: first names between members. */
@@ -502,6 +505,22 @@ export const DETAIL_MONEY = {
     `${name} hasn't paid yet — their share lapses to ${toWhom} if unpaid by ${when}.`,
   toYou: "you",
   notSplit: "This court isn't split — the organiser covers it all.",
+} as const;
+
+/**
+ * R1 F2.10 — a cancelled booking says only what is true: it was cancelled, who was on it, and
+ * where the money went. No deadline, no "not paid yet", no "all paid up", no result to record.
+ */
+export const DETAIL_CANCELLED = {
+  banner: "This game was cancelled.",
+  playersDescription: "Who was on the game when it was cancelled.",
+  moneyNote: "The booking was cancelled — this is where the money went.",
+  refunded: (who: string | null) => (who ? `Refunded to ${who}` : "Refunded to you"),
+  kept: (who: string | null) => (who ? `${who} paid in the end` : "You paid in the end"),
+  nothingToPay: "Nothing to pay",
+  paidRow: (paid: string) => `Paid ${paid}`,
+  partnerNothing: "The game was cancelled, so there's nothing for you to pay.",
+  partnerPaid: (paid: string) => `The game was cancelled after check-in, so the ${paid} you paid stands.`,
 } as const;
 
 /** A player's own share and their hand: withdraw, decline, review. */

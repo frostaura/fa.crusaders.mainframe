@@ -1,8 +1,8 @@
 import { Section } from "@/components/ui/page-shell";
 import { formatCredits } from "@/lib/utils";
 import type { BookingDetail, DetailPlayer } from "@/lib/playersApi";
-import { DETAIL_COPY, DETAIL_MONEY, playersWhen } from "@/lib/playersCopy";
-import { isLive, organiserName, seatName, statusKey } from "./detailModel";
+import { DETAIL_CANCELLED, DETAIL_COPY, DETAIL_MONEY, playersWhen } from "@/lib/playersCopy";
+import { isCancelled, isLive, organiserName, seatName, statusKey } from "./detailModel";
 
 /**
  * Who paid what. The organiser covered the court at booking; each partner is ASKED for a share,
@@ -15,6 +15,7 @@ import { isLive, organiserName, seatName, statusKey } from "./detailModel";
  * </p>
  */
 export function MoneyPanel({ detail }: { detail: BookingDetail }) {
+  if (isCancelled(detail)) return <CancelledMoney detail={detail} />;
   const { money } = detail;
   const who = organiserName(detail);
   const deadline = playersWhen(money.share_deadline);
@@ -83,5 +84,39 @@ function PerPlayer({ detail, deadline }: { detail: BookingDetail; deadline: stri
         </p>
       ))}
     </div>
+  );
+}
+
+/**
+ * R1 F2.10 — the money on a cancelled game: what came back and what was paid in the end. No
+ * deadline, no "not paid yet", no "Paid 0.00 of 40.00": nothing on it is still being asked.
+ */
+function CancelledMoney({ detail }: { detail: BookingDetail }) {
+  const { money } = detail;
+  const who = organiserName(detail);
+  const refunded = Math.max(0, money.price_credits - money.organiser_owed_credits);
+  const live = detail.players.filter((p) => isLive(p) && p.kind !== "organiser");
+  return (
+    <Section title={DETAIL_MONEY.title} description={DETAIL_CANCELLED.moneyNote}>
+      <dl className="grid gap-2 rounded-xl border border-border bg-bg-surface p-4 text-sm">
+        <Row term={DETAIL_MONEY.price} value={money.price_credits} />
+        {refunded > 0 ? <Row term={DETAIL_CANCELLED.refunded(who)} value={refunded} /> : null}
+        {money.organiser_owed_credits > 0 ? <Row term={DETAIL_CANCELLED.kept(who)} value={money.organiser_owed_credits} /> : null}
+        {money.shares_received_credits > 0 ? <Row term={DETAIL_MONEY.received} value={money.shares_received_credits} /> : null}
+        <Row term={DETAIL_MONEY.net(who)} value={money.organiser_net_credits} total />
+      </dl>
+      {live.length > 0 ? (
+        <ul className="grid gap-2 text-sm">
+          {live.map((p) => (
+            <li key={p.participant_id ?? `seat-${p.seat}`} className="flex items-baseline justify-between gap-4">
+              <span className="min-w-0 break-words font-medium text-text-primary">{seatName(p)}</span>
+              <span className="text-right tabular-nums text-text-secondary">
+                {p.paid_credits > 0 ? DETAIL_CANCELLED.paidRow(formatCredits(p.paid_credits)) : DETAIL_CANCELLED.nothingToPay}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </Section>
   );
 }

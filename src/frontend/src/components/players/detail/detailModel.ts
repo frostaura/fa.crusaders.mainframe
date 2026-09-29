@@ -16,32 +16,46 @@ export function isLive(p: DetailPlayer): boolean {
 
 const GONE = new Set<string>(["declined", "withdrawn", "removed"]);
 
-/** The STATUS_WORD key a chip shows — always a word, never colour alone. */
-export function statusKey(p: DetailPlayer): string {
+/** R1 F2.10 — a cancelled booking: nothing on it is still being asked of anyone. */
+export function isCancelled(d: Pick<BookingDetail, "status">): boolean {
+  return d.status === "cancelled";
+}
+
+/**
+ * The STATUS_WORD key a chip shows — always a word, never colour alone. On a cancelled game a
+ * live seat was in (or its invite closed): "In" and "Invited" would say the game is still on.
+ */
+export function statusKey(p: DetailPlayer, cancelled = false): string {
   if (p.kind === "organiser") return "organiser";
   if (p.settled_outside) return "settled_outside";
   if (GONE.has(p.status)) return p.status;
   if (p.lapsed || p.status === "lapsed") return "lapsed";
   if (p.kind === "guest") return "guest";
+  if (cancelled) return p.status === "accepted" ? "was_in" : "invite_closed";
   if (p.kind === "open_link") return "open_link";
   if (p.status === "invited") return "invited";
   if (p.needs_consent) return "needs_consent";
   return p.share_credits > 0 && p.unpaid_credits <= 0 && p.paid_credits > 0 ? "paid" : "accepted";
 }
 
-export function statusWord(p: DetailPlayer): string {
-  return STATUS_WORD[statusKey(p)] ?? p.status;
+export function statusWord(p: DetailPlayer, cancelled = false): string {
+  return STATUS_WORD[statusKey(p, cancelled)] ?? p.status;
 }
 
 export type ChipTone = "neutral" | "success" | "info" | "warning" | "brand";
 
 const TONE: Record<string, ChipTone> = {
   organiser: "brand", paid: "success", accepted: "info", needs_consent: "warning",
-  invited: "neutral", settled_outside: "info", guest: "neutral", open_link: "neutral",
+  invited: "neutral", settled_outside: "info", guest: "neutral", open_link: "neutral", was_in: "info",
 };
 
-export function statusTone(p: DetailPlayer): ChipTone {
-  return TONE[statusKey(p)] ?? "neutral";
+export function statusTone(p: DetailPlayer, cancelled = false): ChipTone {
+  return TONE[statusKey(p, cancelled)] ?? "neutral";
+}
+
+/** Only the game's own players are ever shown its result (§3.4) — and a cancelled game has none to record. */
+export function showsResult(d: BookingDetail): boolean {
+  return d.viewer.role !== "admin" && d.status !== "cancelled" && d.status !== "blocked";
 }
 
 /** A seat's name as a chip says it: first names between members, a guest as named, an open seat. */

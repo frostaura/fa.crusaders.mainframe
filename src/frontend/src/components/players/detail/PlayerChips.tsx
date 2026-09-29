@@ -5,7 +5,7 @@ import { CheckCircle, UserPlus } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
 import type { BookingDetail, DetailPlayer } from "@/lib/playersApi";
 import { DETAIL_COPY } from "@/lib/playersCopy";
-import { formerPlayers, positions, seatName, statusTone, statusWord, type SeatPosition } from "./detailModel";
+import { formerPlayers, isCancelled, positions, seatName, statusTone, statusWord, type SeatPosition } from "./detailModel";
 
 /**
  * The four seats, two a side: a photo, a first name and a status WORD on every chip (never colour
@@ -20,24 +20,27 @@ export function PlayerChips({ detail, actions }: Props) {
   const seats = positions(detail);
   const former = formerPlayers(detail);
   const mine = detail.viewer.participant_id;
+  const cancelled = isCancelled(detail);
   return (
     <div className="flex flex-col gap-6">
       <div className="grid gap-4 sm:grid-cols-2">
-        <Team label={DETAIL_COPY.teamA} seats={seats.slice(0, 2)} mine={mine} actions={actions} />
-        <Team label={DETAIL_COPY.teamB} seats={seats.slice(2, 4)} mine={mine} actions={actions} />
+        <Team label={DETAIL_COPY.teamA} seats={seats.slice(0, 2)} mine={mine} actions={actions} cancelled={cancelled} />
+        <Team label={DETAIL_COPY.teamB} seats={seats.slice(2, 4)} mine={mine} actions={actions} cancelled={cancelled} />
       </div>
       {former.length > 0 ? <Former players={former} actions={actions} /> : null}
     </div>
   );
 }
 
-function Team({ label, seats, mine, actions }: { label: string; seats: SeatPosition[]; mine: string | null; actions?: SeatActions }) {
+type TeamProps = { label: string; seats: SeatPosition[]; mine: string | null; actions?: SeatActions; cancelled: boolean };
+
+function Team({ label, seats, mine, actions, cancelled }: TeamProps) {
   return (
     <div className="flex flex-col gap-2">
       <h3 className="text-xs font-semibold uppercase tracking-overline text-text-secondary">{label}</h3>
       <ul className="flex flex-col gap-2">
         {seats.map((s) => (s.player
-          ? <SeatChip key={s.seat} player={s.player} isMe={s.player.participant_id !== null && s.player.participant_id === mine} actions={actions} />
+          ? <SeatChip key={s.seat} player={s.player} isMe={s.player.participant_id !== null && s.player.participant_id === mine} actions={actions} cancelled={cancelled} />
           : <FreeSeat key={s.seat} seat={s.seat} />))}
       </ul>
     </div>
@@ -67,10 +70,12 @@ function SeatAvatar({ player, name }: { player: DetailPlayer; name: string }) {
   );
 }
 
-function SeatChip({ player, isMe, actions }: { player: DetailPlayer; isMe: boolean; actions?: SeatActions }) {
+type ChipProps = { player: DetailPlayer; isMe: boolean; actions?: SeatActions; cancelled?: boolean };
+
+function SeatChip({ player, isMe, actions, cancelled = false }: ChipProps) {
   const name = seatName(player);
   const shown = isMe ? DETAIL_COPY.you(name) : name;
-  const word = statusWord(player);
+  const word = statusWord(player, cancelled);
   const extra = actions?.(player);
   return (
     <li
@@ -84,7 +89,7 @@ function SeatChip({ player, isMe, actions }: { player: DetailPlayer; isMe: boole
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="break-words text-sm font-semibold text-text-primary">{shown}</span>
           <span className="flex flex-wrap items-center gap-2">
-            <Badge tone={statusTone(player)}>{word}</Badge>
+            <Badge tone={statusTone(player, cancelled)}>{word}</Badge>
             <CheckedIn at={player.checked_in_at} />
           </span>
         </div>

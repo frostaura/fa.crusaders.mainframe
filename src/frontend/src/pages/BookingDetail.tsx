@@ -13,7 +13,7 @@ import { PlayerPanel } from "@/components/players/detail/PlayerPanel";
 import { useBookingDetail, type DetailRead } from "@/components/players/detail/useBookingDetail";
 import { useOrganiserHands, type Notice } from "@/components/players/detail/useOrganiserHands";
 import {
-  adminActs, canNudge, canRemove, canShareLink, detailTitle, organiserName,
+  adminActs, canNudge, canRemove, canShareLink, detailTitle, isCancelled, organiserName, showsResult,
 } from "@/components/players/detail/detailModel";
 import { ResultCard } from "@/components/play/ResultCard";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,7 @@ import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
 import { StateBlock } from "@/components/ui/state-block";
 import { useAuth } from "@/lib/auth";
 import type { BookingDetail, DetailPlayer } from "@/lib/playersApi";
-import { DETAIL_COPY, PLAYERS_REFUSAL } from "@/lib/playersCopy";
+import { DETAIL_CANCELLED, DETAIL_COPY, PLAYERS_REFUSAL } from "@/lib/playersCopy";
 
 /**
  * `/bookings/:bookingId` — the booking's own page (P11, D11–D13): the four seats and who is on
@@ -99,7 +99,8 @@ function DetailView({ detail, reload, say }: { detail: BookingDetail; reload: ()
   const isAdmin = auth.status === "authenticated" && auth.isAdmin;
   const organiser = useOrganiserHands(detail, reload, say);
   const admin = useAdminHands(detail, reload, say);
-  const canInvite = detail.permissions.can_invite;
+  const cancelled = isCancelled(detail);
+  const canInvite = detail.permissions.can_invite && !cancelled;
   const seatActions = (p: DetailPlayer) => {
     const own = canInvite && (canNudge(p) || canShareLink(p) || canRemove(p));
     const god = isAdmin && adminActs(p).length > 0;
@@ -113,9 +114,10 @@ function DetailView({ detail, reload, say }: { detail: BookingDetail; reload: ()
   };
   return (
     <>
+      {cancelled ? <Alert tone="info" live="off" data-cancelled="">{DETAIL_CANCELLED.banner}</Alert> : null}
       <Section
         title={DETAIL_COPY.playersTitle}
-        description={DETAIL_COPY.playersDescription}
+        description={cancelled ? DETAIL_CANCELLED.playersDescription : DETAIL_COPY.playersDescription}
         actions={canInvite ? <InviteButton hands={organiser} /> : null}
       >
         <PlayerChips detail={detail} actions={seatActions} />
@@ -124,9 +126,11 @@ function DetailView({ detail, reload, say }: { detail: BookingDetail; reload: ()
         <MoneyPanel detail={detail} />
         <div className="flex flex-col gap-8">
           <PlayerPanel detail={detail} reload={reload} say={say} />
-          <Attendance detail={detail} />
-          {/* P12 — the match result, below attendance: it can be recorded once the box saw the court. */}
-          <ResultCard bookingId={detail.booking_id} />
+          {/* A cancelled game nobody scanned has no attendance to report (R1 F2.10). */}
+          {cancelled && !detail.attendance.checked_in_at ? null : <Attendance detail={detail} />}
+          {/* P12 — the match result, below attendance: it can be recorded once the box saw the court.
+              Asked for only by the game's own players, and never on a cancelled game (R1 F2.15). */}
+          {showsResult(detail) ? <ResultCard bookingId={detail.booking_id} /> : null}
         </div>
       </div>
       <CancelPanel detail={detail} reload={reload} say={say} />
