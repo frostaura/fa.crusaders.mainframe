@@ -2,14 +2,13 @@
 name: crusaders-mainframe-gotchas-gates
 description: "Gates that report a red run as green or trip on a function nobody wrote: complexity exits 1 on stdout, lizard's C# and .tsx lexers mis-scope (one form of it no single member causes — split the file), ls-files misses untracked work."
 type: gotcha
-last_verified: 2026-09-22
+last_verified: 2026-09-29
 ---
 
 # Gotchas — the quality gates and their lint tooling
 
-The firmware toolchain underneath these has traps of its own:
-[`gotchas-build.md`](gotchas-build.md). Machine- and checkout-specific gate
-failures are in [`gotchas-env.md`](gotchas-env.md).
+Firmware toolchain traps: [`gotchas-build.md`](gotchas-build.md). Machine- and checkout-specific
+gate failures: [`gotchas-env.md`](gotchas-env.md).
 
 - **`make complexity` prints its warning to stdout and exits 1** — piping it through `tail` loses
   the exit code and reports a red gate as green. That is how a failing gate reached CI. Read `$?`.
@@ -39,14 +38,15 @@ failures are in [`gotchas-env.md`](gotchas-env.md).
 - **`git ls-files` only matches tracked files**, so a lint target built on it silently passes on new
   work (the iot target uses `-co --exclude-standard`); **`clang-format` is pinned** because its
   output varies by version and an OS build lets CI reject correctly-formatted code.
-- **`-Wswitch-enum` is not satisfied by a `default:` label.** Adding one silences the single warning
-  that catches a newly-added enum member; name every case and put the fallback after the brace.
-- **A migration file with a UTF-8 BOM fails `dotnet format` with `error CHARSET`.** `dotnet ef
-  migrations add` writes one and the `.Designer.cs` keeps it; a hand-edited `.cs` must not have one.
+- **`-Wswitch-enum` is not satisfied by a `default:` label** — it silences the one warning that
+  catches a new enum member; name every case and put the fallback after the brace.
+- **`make lint-backend` runs in CI since P10**, after 17 migrations rotted it: `dotnet ef migrations
+  add` writes a BOM (`error CHARSET`) — strip it from the new `.cs` (`.Designer.cs` is exempt).
+  Run it locally WITHOUT `MSBuildEnableWorkloadResolver=false`, or it exits 2 printing no finding.
+  It checks the API project only; the Tests project has ~700 findings.
 - **A *fresh remote* session has no `dotnet` and no `pio`** — install the .NET 10 SDK and the pinned
-  iot requirements before trusting any gate result there. Postgres starts without Docker from the
-  distro's `postgresql/16/bin`; the superuser on a locally-initialised cluster is **`crusaders`**,
-  and `pg_ctl` refuses to run as root.
+  iot requirements first. Postgres starts without Docker from the distro's `postgresql/16/bin`;
+  the local superuser is **`crusaders`**, and `pg_ctl` refuses to run as root.
 - **The purity gate's exclusions are HAL directory NAMES, in three places.** `arduino_hal`,
   `posix_hal`, `esp32_hal` and now `posix_gate_hal` are listed in the Makefile's `lint-iot`, in
   `ci.yml`'s purity step AND in `court-box/tools/strict_compile.sh` — each runs in a context the
