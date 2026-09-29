@@ -17,6 +17,7 @@ import type { BoardContext } from "../components/ScheduleCells";
 import { BookingBoard, BookingGridHeading, BookingGridSkeleton, SELECTION_ROOM_PX } from "../components/bookings/BookingGrid";
 import { BookSheet, type BookedOutcome } from "../components/bookings/BookSheet";
 import { BookingForBar } from "../components/bookings/BookingForBar";
+import { UpcomingGames } from "../components/bookings/UpcomingGames";
 import { CancelSheet, type CancelledOutcome } from "../components/bookings/CancelSheet";
 import { InvitesBadgeLink } from "../components/players/invites/InvitesBadgeLink";
 import type { GridBooking, SelectedSlot } from "../components/bookings/types";
@@ -85,7 +86,11 @@ export default function BookingsPage() {
   const [earlierShownFor, setEarlierShownFor] = useState<string | null>(null);
   const showEarlier = earlierShownFor === date;
 
+  // Bumped by every booking and cancellation, so the upcoming list re-reads (F1.12).
+  const [changes, setChanges] = useState(0);
+
   const onBooked = useCallback((outcome: BookedOutcome) => {
+    setChanges((n) => n + 1);
     if (selection.api.active) selection.api.leave();
     // Read off a fresh schedule after a lost reply (F1.1): the grid already has it, and nobody
     // stated the balance — ask for it.
@@ -99,6 +104,7 @@ export default function BookingsPage() {
   }, [setDay, applyBalance, refreshBalance, selection.api, reconcile]);
 
   const onCancelled = useCallback((outcome: CancelledOutcome) => {
+    setChanges((n) => n + 1);
     setDay((d) => (d ? { ...d, slots: d.slots.filter((s) => !s.bookingId || !outcome.cancelledIds.includes(s.bookingId)) } : d));
     if (outcome.ownMoneyMoved) void refreshBalance({ expectSelf: true });
     if (selection.api.active) selection.api.leave();
@@ -129,7 +135,9 @@ export default function BookingsPage() {
       {/* Room under the grid while the floating bar is up, so it never covers the last row —
           padding, not a spacer element, because a spacer would also take the shell's section gap. */}
       <div className="flex flex-col gap-4" style={selection.api.active ? { paddingBottom: SELECTION_ROOM_PX } : undefined}>
-        {bookAsUserId ? <BookingForBar userId={bookAsUserId} day={date} sliceMinutes={day?.sliceMinutes ?? 15} /> : null}
+        {bookAsUserId
+          ? <BookingForBar userId={bookAsUserId} day={date} sliceMinutes={day?.sliceMinutes ?? 15} />
+          : <UpcomingGames refreshKey={changes} fallbackZone={day?.timezone} />}
         <InvitesBadgeLink />
         <DayPicker schedule={schedule} isAdmin={isAdmin} quota={explainer.quotaPill} rateLine={explainer.rateLine} />
         <ScheduleNotices

@@ -1,4 +1,5 @@
 import { ApiError, NetworkError, type ScheduleDay, type ScheduleSlot } from "./api";
+import { isPartnerSlot } from "./bookingsApi";
 
 /**
  * What to believe when a booking or a cancellation got no answer (review round 1, F1.1/F1.2).
@@ -62,7 +63,7 @@ function isPayers(slot: ScheduleSlot, payer: Payer): boolean {
 
 /** A partner's seat on someone else's game is `isMine` too (contract §2) — but not their booking. */
 function isOrganiser(slot: ScheduleSlot): boolean {
-  return (slot as ScheduleSlot & { role?: string }).role !== "partner";
+  return !isPartnerSlot(slot);
 }
 
 /** Did `slot` land on the schedule in the payer's name? */

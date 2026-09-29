@@ -1,4 +1,5 @@
 import type { CSSProperties, MouseEvent, ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { IconButton } from "@/components/ui/icon-button";
 import { Interactable } from "@/components/ui/interactable";
@@ -9,9 +10,10 @@ import { cn, formatCredits } from "../lib/utils";
 import { cellVerdict, type CellFacts, type GridReason, type ViewerRules } from "../lib/gridRules";
 import { closedCellLabel, holdCellLabel, holdLiftLabel, pastCellLabel, quotaCellLabel, restrictionLabel, unavailableWhy } from "../lib/gridCopy";
 import {
-  CELL_TEXT, PENDING_CELL, bookCellLabel, bookedByLabel, continuesLabel, idleCellLabel,
-  mineCellLabel, minePastCellLabel, otherCellAdminLabel,
+  CELL_TEXT, PARTNER_CELL_WORD, PENDING_CELL, bookCellLabel, bookedByLabel, continuesLabel, idleCellLabel,
+  mineCellLabel, minePastCellLabel, otherCellAdminLabel, partnerCellLabel,
 } from "../lib/bookingsCopy";
+import { isPartnerSlot } from "../lib/bookingsApi";
 import {
   bookedKey, isPendingBooking, selectionKey, type GridCoord, type SelectionApi, type SelectionKey,
 } from "../lib/gridSelection";
@@ -138,6 +140,8 @@ function Block({ rows, children }: { rows: number; children: ReactNode }) {
   return <div data-block-rows={rows} className="absolute inset-x-0 top-0" style={{ height }}>{children}</div>;
 }
 
+const CELL_SCROLL_MARGIN = "calc(var(--app-bottom-bar-height, 0px) + var(--grid-bar-room, 0px) + 4px)";
+
 function Cell(props: {
   label: string; at: GridCoord; line: number; roving: boolean;
   /** No control inside: the cell itself is the focus target. */
@@ -148,7 +152,8 @@ function Cell(props: {
   children: ReactNode;
 }) {
   const { label, at, line, roving, selfFocus, selectKey, selected, selecting, passThrough, children } = props;
-  const style: CSSProperties = { gridRow: line, gridColumn: at.col + 2 };
+  // F1.14 — kept clear of the tab bar and the floating selection bar when a key brings it in.
+  const style: CSSProperties = { gridRow: line, gridColumn: at.col + 2, scrollMarginBottom: CELL_SCROLL_MARGIN };
   return (
     <div
       role="gridcell"
@@ -210,6 +215,7 @@ export function SlotCell(props: SlotCellProps) {
   if (!isHead) return <ContinuationCell {...props} slot={slot} />;
   if (isPendingBooking(slot.bookingId)) return <PendingCell {...props} slot={slot} />;
   if (slot.status === "adminblock") return <HoldCell {...props} slot={slot} />;
+  if (isPartnerSlot(slot) && !props.facts.isPast && slot.bookingId) return <PartnerCell {...props} slot={slot} />;
   if (slot.isMine) return <MyCell {...props} slot={slot} />;
   return <OtherCell {...props} slot={slot} />;
 }
@@ -470,9 +476,36 @@ function MyCell(props: SlotCellProps & { slot: ScheduleSlot }) {
   );
 }
 
+/**
+ * A game the viewer holds an accepted partner's seat on (review round 1, F1.12; contract §2).
+ * Theirs to OPEN — the booking page, where their share and the players are — never to cancel or
+ * to choose for a bulk cancel: the booking is the organiser's.
+ */
+function PartnerCell(props: SlotCellProps & { slot: ScheduleSlot }) {
+  const { ctx, slot, where, facts, startsAtUtc } = props;
+  const rows = spanOf(slot, startsAtUtc, facts.sliceMinutes, props.rowsLeft);
+  return (
+    <Cell label={where} selfFocus={false} at={props.at} line={props.line} roving={props.roving} selecting={ctx.selection.active}>
+      <Block rows={rows}>
+        <Interactable asChild surface="cell" watermark>
+          <Link
+            to={`/bookings/${slot.bookingId}`}
+            tabIndex={props.roving ? 0 : -1}
+            aria-label={partnerCellLabel(where)}
+            data-partner-cell=""
+            className={cn(SURFACE, PRESSABLE, TONE.mine, "items-start py-2", ctx.selection.active && RECEDED)}
+          >
+            <OwnerFace slot={slot} fallback={PARTNER_CELL_WORD} />
+          </Link>
+        </Interactable>
+      </Block>
+    </Cell>
+  );
+}
+
 /** Photo and first name only — the booking grid's invariant (CLAUDE.md). */
-function OwnerFace({ slot }: { slot: ScheduleSlot }) {
-  const name = slot.ownerFirstName ?? CELL_TEXT.reserved;
+function OwnerFace({ slot, fallback = CELL_TEXT.reserved }: { slot: ScheduleSlot; fallback?: string }) {
+  const name = slot.ownerFirstName ?? fallback;
   return (
     <span aria-hidden="true" className="flex min-w-0 items-center gap-1.5">
       <Avatar size={24} className="ring-2 ring-bg-surface">
