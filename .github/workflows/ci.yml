@@ -42,6 +42,12 @@ jobs:
           dotnet restore Crusaders.Mainframe.Api/Crusaders.Mainframe.Api.csproj
           dotnet restore Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj
 
+      # The same check as `make lint-backend` (whitespace, style and file encoding on the API
+      # project). It ran nowhere but by hand, so it rotted: 17 migrations carried the BOM
+      # `dotnet ef migrations add` writes and five files had drifted before P10 fixed them.
+      - name: Lint (dotnet format)
+        run: dotnet format --verify-no-changes --no-restore Crusaders.Mainframe.Api/Crusaders.Mainframe.Api.csproj
+
       - name: Build
         run: |
           dotnet build Crusaders.Mainframe.Api/Crusaders.Mainframe.Api.csproj --nologo -v q
