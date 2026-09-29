@@ -1,6 +1,7 @@
 import type { PickedPlayer } from "@/components/players/PlayerPicker";
 import { MAX_SEATS, type PlayerSpec, type PlayersPayload, type SplitMode, type SplitPreviewRequest } from "@/lib/playersApi";
-import { BOOK_PLAYERS, PLAYERS_COPY, firstName, type SentenceSeat } from "@/lib/playersCopy";
+import { BOOK_PLAYERS, firstName, type SentenceSeat } from "@/lib/playersCopy";
+import { BOOK_SEATS } from "@/lib/bookingsCopy";
 import { hasTwoPlaces, splitShares, type MathResult, type MathSeat } from "./splitMath";
 
 /**
@@ -27,19 +28,25 @@ export type PlayersDraft = {
 
 export const EMPTY_DRAFT: PlayersDraft = { seats: [], mode: "equal", organiserWeight: "1" };
 
-const PARTNER_SEATS = Array.from({ length: MAX_SEATS - 1 }, (_, i) => i + 2);
+/**
+ * The free seats in the order a player fills them: an opponent first (seat 3), then the member's
+ * partner (2), then the second opponent (4). Singles is the common game, and its one other
+ * player is the OPPONENT — seat 2 put them on the member's own side (review round 1, F1.9).
+ */
+const FILL_ORDER = [3, 2, 4].filter((s) => s <= MAX_SEATS);
 
 /** Seats 1–2 are team A, 3–4 team B. */
 export function seatTeam(seat: number): "A" | "B" {
   return seat <= 2 ? "A" : "B";
 }
 
+/** "Your side" / "Opponents" — which side of the court a seat is, from the organiser's view. */
 export function teamName(seat: number): string {
-  return seatTeam(seat) === "A" ? PLAYERS_COPY.teamA : PLAYERS_COPY.teamB;
+  return seatTeam(seat) === "A" ? BOOK_SEATS.yourTeam : BOOK_SEATS.otherTeam;
 }
 
 export function freeSeats(draft: PlayersDraft): number[] {
-  return PARTNER_SEATS.filter((s) => !draft.seats.some((d) => d.seat === s));
+  return FILL_ORDER.filter((s) => !draft.seats.some((d) => d.seat === s));
 }
 
 /** Puts a player in `seat` when it is free, otherwise the lowest free seat. Unchanged when full. */

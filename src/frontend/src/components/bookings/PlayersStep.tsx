@@ -5,15 +5,24 @@ import { IconButton } from "@/components/ui/icon-button";
 import { Export, Plus, User, X } from "@/components/ui/icons";
 import { RadioCard, RadioGroup } from "@/components/ui/radio-group";
 import { BOOK_PLAYERS, PLAYERS_COPY } from "@/lib/playersCopy";
+import { BOOK_SEATS } from "@/lib/bookingsCopy";
 import { cn } from "@/lib/utils";
-import { freeSeats, pickedUserIds, seatName, teamName, type DraftSeat } from "./playersDraft";
+import { pickedUserIds, seatName, teamName, type DraftSeat } from "./playersDraft";
 import type { PlayersStepState } from "./usePlayersStep";
 
 /**
  * The BookSheet's Players step (D11): "Just me", or up to three others on a court drawn as two
- * teams — seats 1–2 team A (seat 1 is you, fixed), 3–4 team B. Tapping an empty seat opens the
- * picker IN PLACE (a panel with Back in the footer, never a dialog inside the sheet); a filled
- * seat has a named × to take them off.
+ * sides — yours (seat 1 is you, fixed; seat 2 your partner) and the opponents' (3–4). Tapping an
+ * empty seat opens the picker IN PLACE (a panel with Back in the footer, never a dialog inside the
+ * sheet); a filled seat has a named × to take them off.
+ *
+ * <p>
+ * <b>Review round 1.</b> Choosing "With other players" only SHOWS the seats — it used to open the
+ * picker on seat 2 the moment the radio was reached, so a keyboard arrowing through the choice
+ * swapped the whole body and lost its focus (F1.15), and a singles opponent landed on the
+ * member's own side (F1.9). Each empty seat says which it is — "Add your partner", "Add an
+ * opponent" — and "Just me" shows no seats at all.
+ * </p>
  */
 
 export type PlayersStepProps = {
@@ -30,7 +39,7 @@ export function PlayersStep(props: PlayersStepProps) {
     return (
       <section aria-labelledby={headingId} className="grid gap-3" data-picker-panel="">
         <h3 id={headingId} className="text-base font-semibold text-text-primary">
-          {BOOK_PLAYERS.pickerTitle(players.picking, teamName(players.picking))}
+          {BOOK_SEATS.pickerTitle(players.picking)}
         </h3>
         <PlayerPicker onPick={players.pick} excludeUserIds={exclude} />
       </section>
@@ -39,24 +48,24 @@ export function PlayersStep(props: PlayersStepProps) {
   return (
     <>
       <WhoChoice players={players} />
-      <Court players={players} />
+      {players.withOthers ? <Court players={players} /> : null}
     </>
   );
 }
 
 function WhoChoice({ players }: { players: PlayersStepState }) {
   const labelId = useId();
-  const withOthers = players.draft.seats.length > 0;
+  // Selecting never navigates: an arrow key selects as it moves, and the focus must stay here.
   const choose = (value: string) => {
     if (value === "me") players.justMe();
-    else if (!withOthers) players.openPicker(freeSeats(players.draft)[0] ?? 2);
+    else players.chooseOthers();
   };
   return (
     <div className="grid gap-3">
       <p id={labelId} className="text-sm font-semibold text-text-primary">{BOOK_PLAYERS.label}</p>
-      <RadioGroup value={withOthers ? "others" : "me"} onValueChange={choose} aria-labelledby={labelId}>
+      <RadioGroup value={players.withOthers ? "others" : "me"} onValueChange={choose} aria-labelledby={labelId}>
         <RadioCard value="me" title={BOOK_PLAYERS.justMe} description={BOOK_PLAYERS.justMeHint} />
-        <RadioCard value="others" title={BOOK_PLAYERS.withOthers} description={BOOK_PLAYERS.withOthersHint} />
+        <RadioCard value="others" title={BOOK_PLAYERS.withOthers} description={BOOK_SEATS.withOthersHint} />
       </RadioGroup>
     </div>
   );
@@ -109,9 +118,10 @@ function SeatText({ name, hint }: { name: string; hint: string }) {
 }
 
 function hintFor(seat: DraftSeat): string {
-  if (seat.player.kind === "guest") return BOOK_PLAYERS.guestHint;
-  if (seat.player.kind === "link") return BOOK_PLAYERS.linkHint;
-  return BOOK_PLAYERS.memberHint;
+  const side = seat.seat <= 2 ? BOOK_SEATS.partner : BOOK_SEATS.opponent;
+  if (seat.player.kind === "guest") return `${side} · ${BOOK_PLAYERS.guestHint}`;
+  if (seat.player.kind === "link") return `${side} · ${BOOK_PLAYERS.linkHint}`;
+  return `${side} · ${BOOK_PLAYERS.memberHint}`;
 }
 
 function SeatAvatar({ seat }: { seat: DraftSeat }) {
@@ -137,7 +147,7 @@ function PartnerSeat({ seat, filled, players }: { seat: number; filled: DraftSea
       <button
         type="button"
         data-seat={seat}
-        aria-label={BOOK_PLAYERS.addToSeat(seat, teamName(seat))}
+        aria-label={BOOK_SEATS.addToSeat(seat)}
         onClick={() => players.openPicker(seat)}
         className={cn(
           ROW, "w-full border border-dashed border-control text-left text-accent-strong",
@@ -147,7 +157,7 @@ function PartnerSeat({ seat, filled, players }: { seat: number; filled: DraftSea
         <span aria-hidden="true" className="flex size-10 shrink-0 items-center justify-center rounded-full bg-accent-soft">
           <Plus size={20} />
         </span>
-        <span className="text-sm font-semibold">{BOOK_PLAYERS.addPlayer}</span>
+        <span className="text-sm font-semibold">{seat <= 2 ? BOOK_SEATS.addPartner : BOOK_SEATS.addOpponent}</span>
       </button>
     );
   }

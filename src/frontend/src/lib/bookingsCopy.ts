@@ -441,6 +441,22 @@ export function partnerCellLabel(where: string): string {
 
 export const PARTNER_CELL_WORD = "Your game";
 
+/**
+ * F1.9 — the seats as partner and opponents, not "Team A / Team B": a singles opponent landed on
+ * the member's own team because nothing said which side seat 2 was.
+ */
+export const BOOK_SEATS = {
+  yourTeam: "Your side",
+  otherTeam: "Opponents",
+  partner: "Your partner",
+  opponent: "Opponent",
+  addPartner: "Add your partner",
+  addOpponent: "Add an opponent",
+  addToSeat: (seat: number) => (seat <= 2 ? "Add your partner — on your side" : `Add an opponent — seat ${seat}, the other side`),
+  pickerTitle: (seat: number) => (seat <= 2 ? "Your partner" : `Opponent, seat ${seat}`),
+  withOthersHint: "Add an opponent, a partner, or both — then split the cost between you.",
+} as const;
+
 /** F1.13 — a split booking's cancel: what each partner gets back, and what the organiser keeps. */
 export const SPLIT_CANCEL = {
   partnerBack: (name: string) => `Back to ${name}`,

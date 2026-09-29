@@ -43,6 +43,8 @@ export function usePlayersStep(input: PlayersInput) {
   const { enabled, step, onEdit } = input;
   const [draft, setDraftState] = useState<PlayersDraft>(EMPTY_DRAFT);
   const [picking, setPicking] = useState<number | null>(null);
+  // "With other players" chosen, before anybody is seated: the seats show, nothing opens (F1.15).
+  const [others, setOthers] = useState(false);
   const priceKey = input.prices.join(",");
   const prices = useMemo(() => distinctPrices(priceKey.split(",").map(Number)), [priceKey]);
   const paying = enabled && hasPaying(draft);
@@ -56,6 +58,9 @@ export function usePlayersStep(input: PlayersInput) {
   const bulk = input.prices.length > 1;
   return {
     draft,
+    /** The seats are showing: "With other players" is chosen, or somebody is already seated. */
+    withOthers: others || draft.seats.length > 0,
+    chooseOthers: () => setOthers(true),
     paying,
     prices,
     bulk,
@@ -74,6 +79,7 @@ export function usePlayersStep(input: PlayersInput) {
     remove: (seat: number) => edit(removeSeat(draft, seat)),
     justMe: () => {
       setPicking(null);
+      setOthers(false);
       if (draft.seats.length) edit({ ...draft, seats: [] });
     },
     setMode: (mode: SplitMode) => edit(withMode(draft, mode, prices[0] ?? null)),

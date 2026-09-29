@@ -111,9 +111,12 @@ describe("splitShares — sums to the price exactly, always (5 000 generated spl
 });
 
 describe("the draft → request bodies", () => {
-  const draft = (): PlayersDraft => addPlayer(addPlayer(addPlayer(EMPTY_DRAFT, SAM), LINK, 3), JO);
+  const draft = (): PlayersDraft => addPlayer(addPlayer(addPlayer(EMPTY_DRAFT, SAM, 2), LINK, 3), JO, 4);
 
-  it("seats fill from 2 unless a seat is asked for, and at most three others", () => {
+  it("seats fill an opponent first (3), then the partner (2), then 4 — unless a seat is asked for", () => {
+    // Review round 1, F1.9: singles' one other player is the opponent, never the member's teammate.
+    const filled = addPlayer(addPlayer(addPlayer(EMPTY_DRAFT, SAM), LINK), JO);
+    expect(filled.seats.map((s) => [s.seat, s.player.kind])).toEqual([[2, "link"], [3, "member"], [4, "guest"]]);
     const d = draft();
     expect(d.seats.map((s) => [s.seat, s.player.kind])).toEqual([[2, "member"], [3, "link"], [4, "guest"]]);
     expect(addPlayer(d, ALEX)).toBe(d);
@@ -155,7 +158,7 @@ describe("the draft → request bodies", () => {
   it("guests alone are nothing to split: the mode goes as equal", () => {
     const d = { ...addPlayer(EMPTY_DRAFT, JO), mode: "amount" as const };
     expect(hasPaying(d)).toBe(false);
-    expect(playersPayload(d)).toEqual({ players: [{ guestName: "Jo", seat: 2 }], splitMode: "equal" });
+    expect(playersPayload(d)).toEqual({ players: [{ guestName: "Jo", seat: 3 }], splitMode: "equal" });
   });
 
   it("parses a figure as typed, and refuses what the server would", () => {
@@ -170,7 +173,7 @@ describe("the draft → request bodies", () => {
   });
 
   it("the local split says split_exceeds_price the moment the amounts pass the court", () => {
-    let d = withMode(addPlayer(addPlayer(EMPTY_DRAFT, SAM), ALEX), "amount", 100);
+    let d = withMode(addPlayer(addPlayer(EMPTY_DRAFT, SAM, 2), ALEX, 3), "amount", 100);
     d = updateSeat(d, 2, { amount: "60" });
     d = updateSeat(d, 3, { amount: "41" });
     expect(localSplit(100, d)).toEqual({ ok: false, error: "split_exceeds_price" });
@@ -185,28 +188,28 @@ describe("the Confirm sentence", () => {
   const shares = (...pairs: [number, number][]) => pairs.map(([seat, share_credits]) => ({ seat, share_credits }));
 
   it("names members by first name, groups an equal ask, and lets a guest play free", () => {
-    const d = addPlayer(addPlayer(addPlayer(EMPTY_DRAFT, SAM), ALEX), JO);
+    const d = addPlayer(addPlayer(addPlayer(EMPTY_DRAFT, SAM, 2), ALEX, 3), JO, 4);
     expect(confirmPlayersSentence(100, sentenceSeats(d, shares([1, 50], [2, 25], [3, 25], [4, 0]))))
       .toBe("You pay 100.00 cr now; Sam and Alex are asked for 25.00 cr each. Jo (guest) plays free.");
   });
 
   it("says who takes an open seat, and a single partner in the singular", () => {
-    const d = addPlayer(EMPTY_DRAFT, LINK);
+    const d = addPlayer(EMPTY_DRAFT, LINK, 2);
     expect(confirmPlayersSentence(100, sentenceSeats(d, shares([1, 50], [2, 50]))))
       .toBe("You pay 100.00 cr now; whoever takes your link is asked for 50.00 cr.");
-    const two = addPlayer(addPlayer(addPlayer(EMPTY_DRAFT, SAM), LINK), LINK);
+    const two = addPlayer(addPlayer(addPlayer(EMPTY_DRAFT, SAM, 2), LINK, 3), LINK, 4);
     expect(confirmPlayersSentence(100, sentenceSeats(two, shares([1, 34], [2, 33], [3, 33], [4, 33]))))
       .toBe("You pay 100.00 cr now; Sam and the 2 people who take your links are asked for 33.00 cr each.");
   });
 
   it("lists different asks one by one, and says 'each booking' for a batch", () => {
-    const d = addPlayer(addPlayer(EMPTY_DRAFT, SAM), LINK);
+    const d = addPlayer(addPlayer(EMPTY_DRAFT, SAM, 2), LINK, 3);
     expect(confirmPlayersSentence(100, sentenceSeats(d, shares([1, 50], [2, 30], [3, 20])), true))
       .toBe("On each booking you pay 100.00 cr now; Sam is asked for 30.00 cr and whoever takes your link for 20.00 cr.");
   });
 
   it("guests only: you pay, they play free", () => {
-    const d = addPlayer(addPlayer(EMPTY_DRAFT, JO), { kind: "guest", name: "Lee" });
+    const d = addPlayer(addPlayer(EMPTY_DRAFT, JO, 2), { kind: "guest", name: "Lee" }, 3);
     expect(confirmPlayersSentence(50, sentenceSeats(d, []))).toBe("You pay 50.00 cr now. Jo (guest) and Lee (guest) play free.");
   });
 });

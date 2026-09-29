@@ -8,7 +8,7 @@ import { AuthProvider } from "@/lib/auth";
 import { BalanceProvider } from "@/lib/balance";
 import type { BalanceTransport } from "@/lib/liveBalance";
 import { refuse, signIn, signOut, stubFetch, type StubCall, type StubRoute } from "@/test/harness";
-import { BOOK_SHEET } from "@/lib/bookingsCopy";
+import { BOOK_SEATS, BOOK_SHEET } from "@/lib/bookingsCopy";
 import { formatCredits } from "@/lib/utils";
 import {
   BOOK_CONFIRM, BOOK_PLAYERS, BOOK_SPLIT, PICKER, PLAYERS_REFUSAL, heldLine, owedBackLine,
@@ -94,9 +94,10 @@ async function tab(name: string) {
 /** Sam (a favourite) in seat 2, an open seat in seat 4. */
 async function addSamAndALink() {
   fireEvent.click(screen.getByRole("radio", { name: BOOK_PLAYERS.withOthers }));
-  expect(screen.getByRole("heading", { name: BOOK_PLAYERS.pickerTitle(2, "Team A") })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: BOOK_SEATS.addToSeat(2) }));
+  expect(screen.getByRole("heading", { name: BOOK_SEATS.pickerTitle(2) })).toBeTruthy();
   fireEvent.click(await screen.findByRole("button", { name: PICKER.add(SAM.name) }));
-  fireEvent.click(screen.getByRole("button", { name: BOOK_PLAYERS.addToSeat(4, "Team B") }));
+  fireEvent.click(screen.getByRole("button", { name: BOOK_SEATS.addToSeat(4) }));
   await tab(PICKER.link);
   fireEvent.click(screen.getByRole("button", { name: PICKER.linkAdd }));
 }
@@ -141,9 +142,9 @@ describe("BookSheet — Players", () => {
     const court = document.querySelector("[data-court]") as HTMLElement;
     expect(within(court).getByText("Sam")).toBeTruthy();
     expect(within(court).getByText(BOOK_PLAYERS.linkName)).toBeTruthy();
-    expect(within(court).getByRole("button", { name: BOOK_PLAYERS.addToSeat(3, "Team B") })).toBeTruthy();
+    expect(within(court).getByRole("button", { name: BOOK_SEATS.addToSeat(3) })).toBeTruthy();
     // No dialog inside the sheet: one dialog, with the panel inside it.
-    fireEvent.click(within(court).getByRole("button", { name: BOOK_PLAYERS.addToSeat(3, "Team B") }));
+    fireEvent.click(within(court).getByRole("button", { name: BOOK_SEATS.addToSeat(3) }));
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     // Sam is on it already, so the picker shows him as added.
     expect(await screen.findByRole("button", { name: `${SAM.name}, ${PICKER.added}` })).toBeTruthy();
@@ -153,10 +154,36 @@ describe("BookSheet — Players", () => {
     expect(screen.getByRole("list", { name: "Progress" })).toHaveTextContent(BOOK_SHEET.stepOf(1, 3, BOOK_SHEET.steps.players));
   });
 
+  it("F1.9/F1.15 — 'With other players' shows the seats and opens nothing; Just me shows none", async () => {
+    stubFetch([FAVOURITES]);
+    open();
+    expect(document.querySelector("[data-court]")).toBeNull();
+    const others = screen.getByRole("radio", { name: BOOK_PLAYERS.withOthers });
+    others.focus();
+    fireEvent.click(others);
+    // Choosing is not navigating: the choice keeps the focus, and no picker has opened.
+    expect(document.activeElement).toBe(others);
+    expect(document.querySelector("[data-picker-panel]")).toBeNull();
+    const court = document.querySelector("[data-court]") as HTMLElement;
+    expect(within(court).getByText(BOOK_SEATS.yourTeam)).toBeTruthy();
+    expect(within(court).getByText(BOOK_SEATS.otherTeam)).toBeTruthy();
+    expect(within(court).getByRole("button", { name: BOOK_SEATS.addToSeat(2) })).toHaveTextContent(BOOK_SEATS.addPartner);
+    expect(within(court).getByRole("button", { name: BOOK_SEATS.addToSeat(3) })).toHaveTextContent(BOOK_SEATS.addOpponent);
+    // An opponent picked is on the OTHER side, and says so.
+    fireEvent.click(within(court).getByRole("button", { name: BOOK_SEATS.addToSeat(3) }));
+    fireEvent.click(await screen.findByRole("button", { name: PICKER.add(SAM.name) }));
+    const seat3 = document.querySelector('[data-seat="3"]') as HTMLElement;
+    expect(seat3).toHaveTextContent("Sam");
+    expect(seat3).toHaveTextContent(BOOK_SEATS.opponent);
+    fireEvent.click(screen.getByRole("radio", { name: BOOK_PLAYERS.justMe }));
+    expect(document.querySelector("[data-court]")).toBeNull();
+  });
+
   it("a guest alone is nothing to split: no Split step, and the guest plays free", async () => {
     stubFetch([FAVOURITES]);
     open({ slots: [{ ...C1, priceCredits: 50 }] });
     fireEvent.click(screen.getByRole("radio", { name: BOOK_PLAYERS.withOthers }));
+    fireEvent.click(screen.getByRole("button", { name: BOOK_SEATS.addToSeat(3) }));
     await tab(PICKER.guest);
     fireEvent.change(screen.getByLabelText(PICKER.guestLabel), { target: { value: "Jo" } });
     fireEvent.click(screen.getByRole("button", { name: PICKER.guestAdd }));
@@ -286,6 +313,7 @@ describe("BookSheet — Confirm and the booking", () => {
     ]);
     open();
     fireEvent.click(screen.getByRole("radio", { name: BOOK_PLAYERS.withOthers }));
+    fireEvent.click(screen.getByRole("button", { name: BOOK_SEATS.addToSeat(3) }));
     await tab(PICKER.link);
     fireEvent.click(screen.getByRole("button", { name: PICKER.linkAdd }));
     await next();
@@ -308,6 +336,7 @@ describe("BookSheet — Confirm and the booking", () => {
     ]);
     open();
     fireEvent.click(screen.getByRole("radio", { name: BOOK_PLAYERS.withOthers }));
+    fireEvent.click(screen.getByRole("button", { name: BOOK_SEATS.addToSeat(3) }));
     fireEvent.click(await screen.findByRole("button", { name: PICKER.add(SAM.name) }));
     await next();
     await next();
@@ -323,6 +352,7 @@ describe("BookSheet — Confirm and the booking", () => {
     ]);
     const { onBooked } = open({ slots: [C1, C2] });
     fireEvent.click(screen.getByRole("radio", { name: BOOK_PLAYERS.withOthers }));
+    fireEvent.click(screen.getByRole("button", { name: BOOK_SEATS.addToSeat(3) }));
     fireEvent.click(await screen.findByRole("button", { name: PICKER.add(SAM.name) }));
     await next();
     expect(await screen.findByText(BOOK_SPLIT.eachBooking)).toBeTruthy();
@@ -331,7 +361,7 @@ describe("BookSheet — Confirm and the booking", () => {
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.primary(6, 200, null) }));
     expect(await screen.findByText(PLAYERS_REFUSAL.member_not_found)).toBeTruthy();
     const [call] = posts(stub.calls, "/api/v1/bookings/bulk");
-    expect(call.body).toMatchObject({ players: [{ userId: "sam", seat: 2 }], splitMode: "equal" });
+    expect(call.body).toMatchObject({ players: [{ userId: "sam", seat: 3 }], splitMode: "equal" });
     expect(onBooked).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: BOOK_SHEET.primary(6, 200, null) })).toBeTruthy();
   });

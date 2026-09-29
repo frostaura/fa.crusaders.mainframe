@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
 import { PEOPLE, SAM, memberShellRoutes } from "./playersKit";
-import { BOOK_SHEET, BOOKINGS_COPY } from "../src/lib/bookingsCopy";
+import { BOOK_SEATS, BOOK_SHEET, BOOKINGS_COPY } from "../src/lib/bookingsCopy";
 import {
   BOOK_CONFIRM, BOOK_PLAYERS, BOOK_SPLIT, PICKER, PLAYERS_REFUSAL,
 } from "../src/lib/playersCopy";
@@ -102,7 +102,8 @@ async function next(page: Page) {
 async function seatSamAndALink(page: Page, capture?: (name: string) => Promise<void>) {
   const sheet = page.getByRole("dialog");
   await sheet.getByRole("radio", { name: BOOK_PLAYERS.withOthers }).click();
-  await expect(sheet.getByRole("heading", { name: BOOK_PLAYERS.pickerTitle(2, "Team A") })).toBeVisible();
+  await sheet.getByRole("button", { name: BOOK_SEATS.addToSeat(2) }).click();
+  await expect(sheet.getByRole("heading", { name: BOOK_SEATS.pickerTitle(2) })).toBeVisible();
   await expect(sheet.getByRole("button", { name: PICKER.add(PEOPLE.sam.name) })).toBeVisible();
   await capture?.("picker-favourites");
   await sheet.getByRole("tab", { name: PICKER.recent }).click();
@@ -118,7 +119,7 @@ async function seatSamAndALink(page: Page, capture?: (name: string) => Promise<v
   await capture?.("picker-link");
   await sheet.getByRole("tab", { name: PICKER.favourites }).click();
   await sheet.getByRole("button", { name: PICKER.add(PEOPLE.sam.name) }).click();
-  await sheet.getByRole("button", { name: BOOK_PLAYERS.addToSeat(4, "Team B") }).click();
+  await sheet.getByRole("button", { name: BOOK_SEATS.addToSeat(4) }).click();
   await sheet.getByRole("tab", { name: PICKER.link }).click();
   await sheet.getByRole("button", { name: PICKER.linkAdd }).click();
   await expect(sheet.locator("[data-court]")).toContainText("Sam");
@@ -189,6 +190,7 @@ test.describe("booking with players", () => {
     await expect(summary).toContainText("100.00 cr");
 
     await sheet.getByRole("radio", { name: BOOK_PLAYERS.withOthers }).click();
+    await sheet.getByRole("button", { name: BOOK_SEATS.addToSeat(3) }).click();
     await expect(sheet.getByRole("button", { name: PICKER.add(PEOPLE.sam.name) })).toBeVisible();
     const top = async () => (await sheet.boundingBox())!.y;
     const first = await top();
@@ -226,6 +228,7 @@ test.describe("booking with players", () => {
     await page.getByRole("toolbar", { name: "Selected slots" }).getByRole("button", { name: BOOKINGS_COPY.bookSelection }).click();
     const sheet = page.getByRole("dialog", { name: BOOK_SHEET.title(2) });
     await sheet.getByRole("radio", { name: BOOK_PLAYERS.withOthers }).click();
+    await sheet.getByRole("button", { name: BOOK_SEATS.addToSeat(3) }).click();
     await sheet.getByRole("button", { name: PICKER.add(PEOPLE.sam.name) }).click();
     await next(page);
     await expect(sheet.getByText(BOOK_SPLIT.eachBooking)).toBeVisible();
