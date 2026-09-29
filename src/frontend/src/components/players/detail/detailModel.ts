@@ -32,11 +32,15 @@ export function statusKey(p: DetailPlayer, cancelled = false): string {
   if (p.lapsed || p.status === "lapsed") return "lapsed";
   if (p.kind === "guest") return "guest";
   if (cancelled) return p.status === "accepted" ? "was_in" : "invite_closed";
+  return liveKey(p);
+}
+
+/** A live seat on a game that is still on: waiting, asked again, agreed to nothing, in, or paid. */
+function liveKey(p: DetailPlayer): string {
   if (p.kind === "open_link") return "open_link";
   if (p.status === "invited") return "invited";
   // Accepted for them by the club (no consent recorded): nothing agreed, so nothing "asked again".
-  if (p.needs_consent && p.consented_credits <= 0) return "not_agreed";
-  if (p.needs_consent) return "needs_consent";
+  if (p.needs_consent) return p.consented_credits <= 0 ? "not_agreed" : "needs_consent";
   return p.share_credits > 0 && p.unpaid_credits <= 0 && p.paid_credits > 0 ? "paid" : "accepted";
 }
 

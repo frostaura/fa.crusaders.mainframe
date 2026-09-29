@@ -41,7 +41,6 @@ export function ResultCard({ bookingId }: { bookingId: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [params, setParams] = useSearchParams();
   const open = chosen ?? deepLinked(params.get("result"), read.data);
-  const gone = confirmGone(params.get("result"), read.data);
   const close = () => {
     setChosen(null);
     if (params.has("result")) {
@@ -75,7 +74,7 @@ export function ResultCard({ bookingId }: { bookingId: string }) {
       >
         {read.data ? <CardBody view={read.data} read={read} choose={setChosen} say={setNotice} /> : null}
       </StateBlock>
-      {gone ? <Alert tone="info" live="polite" data-result-gone="">{gone}</Alert> : null}
+      <ConfirmGone param={params.get("result")} view={read.data} />
       <p aria-live="polite" className="sr-only">{notice ?? ""}</p>
       {notice ? <Alert tone="success" live="off" data-result-notice="">{notice}</Alert> : null}
       {read.data ? <Sheets view={read.data} open={open} close={close} done={done} stale={read.reload} /> : null}
@@ -90,15 +89,6 @@ function deepLinked(param: string | null, view: BookingResultView | null): Open 
     return { kind: "confirm", mode: "confirm" };
   }
   return null;
-}
-
-/** The mail's "Is it right?" link, once the result is no longer waiting on this viewer (R1 F2.11). */
-function confirmGone(param: string | null, view: BookingResultView | null): string | null {
-  if (param !== "confirm" || !view) return null;
-  if (view.result?.status === "pending" && view.permissions.can_confirm) return null;
-  // Pending on somebody else (the viewer recorded it) is not "gone" — the card says who it waits on.
-  if (view.result?.status === "pending") return null;
-  return RESULT_CARD.confirmGone(view.result?.status ?? null);
 }
 
 type SheetsProps = {
@@ -277,4 +267,14 @@ function NoResultYet() {
       <p data-result-status="none" className="text-sm text-text-secondary">{RESULT_CARD.noneYet}</p>
     </Section>
   );
+}
+
+/**
+ * The mail's "Is it right?" link, opened once the result is no longer waiting on this viewer
+ * (R1 F2.11): say what happened, so an old inbox line is never read as a question still open.
+ * Pending on somebody else (the viewer recorded it) is not "gone" — the card says who it waits on.
+ */
+function ConfirmGone({ param, view }: { param: string | null; view: BookingResultView | null }) {
+  if (param !== "confirm" || !view || view.result?.status === "pending") return null;
+  return <Alert tone="info" live="polite" data-result-gone="">{RESULT_CARD.confirmGone(view.result?.status ?? null)}</Alert>;
 }
