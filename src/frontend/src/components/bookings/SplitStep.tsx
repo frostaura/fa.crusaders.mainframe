@@ -25,12 +25,17 @@ export function SplitStep({ players }: { players: PlayersStepState }) {
     <>
       <div className="grid gap-2">
         <p id={labelId} className="text-sm font-semibold text-text-primary">{BOOK_SPLIT.modeLabel}</p>
+        {/* A radio group in behaviour as well as in name (F1.18): the items were announced as
+            radios, but an arrow only moved focus, so a reader heard "Ratio, not checked" and
+            nothing changed. Focus now selects, as a radio's arrow does. */}
         <ToggleGroup
           type="single" variant="outline" value={draft.mode} onValueChange={pick}
-          aria-labelledby={labelId} className="grid w-full grid-cols-3"
+          role="radiogroup" aria-labelledby={labelId} className="grid w-full grid-cols-3"
         >
           {SPLIT_MODES.map((mode) => (
-            <ToggleGroupItem key={mode} value={mode}>{BOOK_SPLIT.modes[mode]}</ToggleGroupItem>
+            <ToggleGroupItem key={mode} value={mode} onFocus={() => { if (draft.mode !== mode) pick(mode); }}>
+              {BOOK_SPLIT.modes[mode]}
+            </ToggleGroupItem>
           ))}
         </ToggleGroup>
         <p className="text-sm text-text-secondary">{BOOK_SPLIT.modeHint[draft.mode]}</p>
