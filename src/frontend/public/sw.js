@@ -45,8 +45,9 @@
  * --------------
  *   1. Hashed build assets (/assets/*) — immutable by construction, Vite puts the content hash
  *      in the filename — cache-first, with the activate sweep removing what a new build no
- *      longer names. The ones `index.html` names are fetched at INSTALL time; see
- *      `precacheBuild` for why waiting for first use is not good enough.
+ *      longer names. The ones `index.html` names AND every chunk the build lists in
+ *      `/precache.json` (F4.3) are fetched at INSTALL time; see `precacheBuild` and
+ *      `buildChunks` for why waiting for first use is not good enough.
  *   2. Navigations — network-first with the cached shell as the fallback. Network-first because
  *      a stale index.html pointing at deleted asset hashes is a white screen, and a white
  *      screen is worse than a slow one.
@@ -161,8 +162,10 @@ async function precacheBuild() {
     const response = await fetch("/index.html", { cache: "no-cache" });
     if (!response.ok) return;
     const html = await response.text();
-    // Every /assets/ path the document names, in a `src`, an `href` or a modulepreload.
-    const named = html.match(/\/assets\/[A-Za-z0-9._-]+/g) || [];
+    // Every /assets/ path the document names, in a `src`, an `href` or a modulepreload — and
+    // (F4.3) every chunk the build emitted, so a page never opened with signal still opens
+    // without it.
+    const named = [...(html.match(/\/assets\/[A-Za-z0-9._-]+/g) || []), ...(await buildChunks())];
     await Promise.all([...new Set(named)].map(async (url) => {
       try {
         const asset = await fetch(url);
@@ -176,6 +179,29 @@ async function precacheBuild() {
   } catch {
     // Installed with no network, or behind a captive portal. There is nothing to precache and
     // nothing to be done about it; first use will fill the cache instead.
+  }
+}
+
+/**
+ * Every lazy route's chunk, from the build's own list (`precache.json`, written by the Vite
+ * config). (F4.3)
+ *
+ * WHY: the document names only the entry, so every page a member had not yet opened with signal
+ * had no code on the phone — and opening one with none ended on the generic "This page hit a
+ * problem". The names are content-hashed, so the list is exact for the build that wrote it. Only
+ * `/assets/` paths are taken from it, whatever else it says; an absent or unreadable list costs the
+ * offline pages and nothing else, and the page boundary then says "this page opens when you're
+ * back online" rather than crashing.
+ */
+async function buildChunks() {
+  try {
+    const response = await fetch("/precache.json", { cache: "no-cache" });
+    if (!response.ok) return [];
+    const body = await response.json();
+    const assets = body && Array.isArray(body.assets) ? body.assets : [];
+    return assets.filter((url) => typeof url === "string" && /^\/assets\/[A-Za-z0-9._-]+$/.test(url));
+  } catch {
+    return [];
   }
 }
 

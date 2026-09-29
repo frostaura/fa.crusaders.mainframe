@@ -165,6 +165,8 @@ export type SwSandbox = {
   networkCalls: SwRequest[];
   dispatchFetch(request: SwRequest): Promise<FakeFetchEvent>;
   dispatchMessage(data: unknown): Promise<FakeMessageEvent>;
+  /** Runs the worker's `install` handler to completion (precache included). */
+  install(): Promise<void>;
   activate(): Promise<void>;
   claimed: () => boolean;
 };
@@ -183,7 +185,9 @@ export function loadServiceWorker(routes: Record<string, () => Response> = {}): 
   const networkCalls: SwRequest[] = [];
   let claimed = false;
 
-  const fetchImpl = async (request: SwRequest): Promise<Response> => {
+  const fetchImpl = async (input: SwRequest | string): Promise<Response> => {
+    // The worker's own install fetches pass a bare path (`fetch("/index.html", …)`).
+    const request = typeof input === "string" ? swRequest(input) : input;
     networkCalls.push(request);
     const path = new URL(request.url, ORIGIN).pathname;
     const route = routes[path];
@@ -203,6 +207,9 @@ export function loadServiceWorker(routes: Record<string, () => Response> = {}): 
     self: self_,
     caches: cacheStorage,
     fetch: fetchImpl,
+    // `new Request("/assets/x.js")` resolves against the worker's origin in a browser; Node's
+    // Request refuses a relative URL, so the sandbox hands back the same shape `swRequest` makes.
+    Request: function SandboxRequest(url: string) { return swRequest(url); },
     URL,
     Response,
     Headers,
@@ -227,6 +234,7 @@ export function loadServiceWorker(routes: Record<string, () => Response> = {}): 
       return event;
     },
     dispatchMessage: (data) => dispatch("message", new FakeMessageEvent(data)),
+    install: async () => { await dispatch("install", new FakeExtendableEvent()); },
     activate: async () => { await dispatch("activate", new FakeExtendableEvent()); },
     claimed: () => claimed,
   };

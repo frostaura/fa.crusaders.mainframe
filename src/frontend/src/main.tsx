@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { ICON_DEFAULTS, IconContext } from "./components/ui/icons";
 import { registerServiceWorker } from "./lib/pwa";
+import { installChunkReload } from "./lib/chunkLoad";
 import { ThemeProvider } from "./lib/theme";
 import "./index.css";
 
@@ -19,3 +20,7 @@ createRoot(document.getElementById("root")!).render(
 // Production only. A service worker in front of the dev server hands back a stale module graph
 // after every edit, and the symptom is indistinguishable from a broken build.
 if (import.meta.env.PROD) registerServiceWorker();
+
+// F4.3 — a deploy under an open tab: Vite reports a lazy chunk's failed preload as an event, and
+// one reload picks up the new build (lib/chunkLoad says why only one).
+installChunkReload();

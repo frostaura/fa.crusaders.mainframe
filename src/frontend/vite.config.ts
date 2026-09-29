@@ -2,9 +2,33 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 import fs from "node:fs";
+import type { Plugin } from "vite";
+
+/**
+ * F4.3 — `precache.json`: every JS and CSS file the build emitted, for the service worker to fetch
+ * at install. The worker used to precache only what `index.html` names (the entry), so a page a
+ * member had never opened — every lazy route — had no code on the phone, and opening it with no
+ * signal ended on the generic error screen. Content-hashed names, so the list is exact per build;
+ * un-hashed itself and served `no-cache` like `index.html` (the worker asks with `cache: "no-cache"`).
+ * Source maps and the file itself are left out; fonts are not listed (a missing face renders in the
+ * fallback, and the worker caches them on first use).
+ */
+function precacheManifest(): Plugin {
+  return {
+    name: "crusaders-precache-manifest",
+    apply: "build",
+    generateBundle(_options, bundle) {
+      const assets = Object.keys(bundle)
+        .filter((file) => file.startsWith("assets/") && /\.(?:js|css)$/.test(file))
+        .sort()
+        .map((file) => `/${file}`);
+      this.emitFile({ type: "asset", fileName: "precache.json", source: JSON.stringify({ assets }) });
+    },
+  };
+}
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), precacheManifest()],
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },
   },

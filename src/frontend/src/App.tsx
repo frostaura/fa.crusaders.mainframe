@@ -1,4 +1,4 @@
-import { Suspense, lazy, type ComponentType, type ReactNode } from "react";
+import { Suspense, lazy as reactLazy, type ComponentType, type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AuthProvider, readLastIdentity, useAuth } from "./lib/auth";
 import AppShell from "./components/shell/AppShell";
@@ -20,6 +20,15 @@ import AdminHomePage from "./pages/admin/AdminHome";
 import { RouteAnnouncer } from "./components/RouteAnnouncer";
 import { LANDING_PATH } from "./components/shell/nav";
 import { BootSplash, ConnectionLost, RouteSkeleton } from "./components/shell/SessionScreens";
+import { loadChunk } from "./lib/chunkLoad";
+
+/**
+ * `React.lazy`, with the chunk's fetch going through `loadChunk` (F4.3): a stale deploy reloads
+ * once, and a chunk that cannot be fetched throws a `ChunkLoadError` the page boundary explains
+ * ("you're offline — this page opens when you're back online") instead of the generic failure.
+ * Named `lazy` so every route below still reads, and is still matched by the route guards, as one.
+ */
+const lazy: typeof reactLazy = (load) => reactLazy(() => loadChunk(load));
 
 /**
  * The primitives preview — development only, and dropped from the production bundle.

@@ -176,3 +176,55 @@ describe("the offline shell survives the fix", () => {
     expect(await (await offline.response())!.text()).toContain("Crusaders");
   });
 });
+
+/**
+ * F4.3 — every page's code is on the phone before it is needed.
+ *
+ * <p>
+ * The worker used to precache only what `index.html` names — the entry — so a page a member had
+ * never opened with signal had no code on the phone, and opening it with none crashed into the
+ * generic error screen. The build now writes `precache.json` (every JS and CSS chunk); install
+ * fetches it and caches every `/assets/` path it lists, and nothing else it might say.
+ * </p>
+ */
+describe("install precaches every chunk the build lists", () => {
+  const INDEX = '<script type="module" src="/assets/index-AAAA.js"></script><link rel="stylesheet" href="/assets/index-BBBB.css">';
+
+  it("caches the entry and every listed lazy chunk", async () => {
+    const sw = loadServiceWorker({
+      "/index.html": () => new Response(INDEX, { status: 200 }),
+      "/precache.json": () => new Response(JSON.stringify({
+        assets: ["/assets/Wallet-CCCC.js", "/assets/Schedule-DDDD.js", "/assets/Schedule-EEEE.css"],
+      }), { status: 200 }),
+    });
+    await sw.install();
+    const assets = await (await sw.caches.open("crusaders-assets-v3")).keys();
+    expect(assets.sort()).toEqual([
+      "/assets/Schedule-DDDD.js", "/assets/Schedule-EEEE.css", "/assets/Wallet-CCCC.js",
+      "/assets/index-AAAA.js", "/assets/index-BBBB.css",
+    ].map((p) => `${ORIGIN}${p}`).sort());
+  });
+
+  it("takes only /assets/ paths from the list, whatever else it names", async () => {
+    const sw = loadServiceWorker({
+      "/index.html": () => new Response(INDEX, { status: 200 }),
+      "/precache.json": () => new Response(JSON.stringify({
+        assets: ["/api/v1/wallet", "https://elsewhere.example/assets/x.js", "/assets/../sw.js", "/assets/Ok-1234.js"],
+      }), { status: 200 }),
+    });
+    await sw.install();
+    const stored = sw.caches.storedUrls();
+    expect(stored).toContain(`${ORIGIN}/assets/Ok-1234.js`);
+    expect(stored.some((u) => u.includes("/api/"))).toBe(false);
+    expect(stored.some((u) => u.includes("elsewhere") || u.endsWith("/sw.js"))).toBe(false);
+  });
+
+  it("still installs, with the entry, when the list is missing", async () => {
+    const sw = loadServiceWorker({
+      "/index.html": () => new Response(INDEX, { status: 200 }),
+      "/precache.json": () => new Response("not found", { status: 404 }),
+    });
+    await sw.install();
+    expect(sw.caches.storedUrls()).toContain(`${ORIGIN}/assets/index-AAAA.js`);
+  });
+});
