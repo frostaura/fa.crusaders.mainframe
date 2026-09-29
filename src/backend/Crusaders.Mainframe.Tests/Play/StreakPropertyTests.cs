@@ -4,27 +4,27 @@ namespace Crusaders.Mainframe.Tests.Play;
 
 /// <summary>
 /// Seeded random histories (<c>docs/specs/play.md</c> §5.2, §11) checked against a separately
-/// written model. 1,000 seeds by default; <c>PLAY_PROPERTY_SEEDS</c> asks for more.
+/// written model. 2,000 seeds by default; <c>PLAY_PROPERTY_SEEDS</c> asks for more.
 ///
 /// <para>
-/// <b>What is proved, and what the spec claimed that is not true.</b> §5.2 claims the streak is
-/// monotone in attendance and in pause weeks. With rest weeks on it is not (the capped, phase-
-/// dependent earn — pinned in <see cref="StreakMathTests"/>); it IS monotone with rest weeks off,
-/// and adding the current week is always monotone. Everything else §11 lists holds for every rule:
-/// current ≤ longest ≤ |A|, bank ≤ K, resumable from any prefix, independent of input order,
-/// paused-and-not-attended weeks per club year ≤ Y, and the zone moving only the week assignment.
+/// <b>The headline property: a member who plays more must never see a shorter streak.</b> With
+/// rest weeks ON, adding an attended week or a paused week anywhere never lowers the current
+/// streak. The first rule failed it (earns counted by the streak's remainder and lost to the cap);
+/// the rule as built accrues progress only below the cap. Also: current ≤ longest ≤ |A|,
+/// bank ≤ K, resumable from any prefix, independent of input order, paused-and-not-attended
+/// weeks per club year ≤ Y, and the zone moving only the week assignment.
 /// </para>
 /// </summary>
 public sealed class StreakPropertyTests
 {
     private static int Seeds =>
-        int.TryParse(Environment.GetEnvironmentVariable("PLAY_PROPERTY_SEEDS"), out var n) && n > 0 ? n : 1000;
+        int.TryParse(Environment.GetEnvironmentVariable("PLAY_PROPERTY_SEEDS"), out var n) && n > 0 ? n : 2000;
 
     private static readonly DateOnly Origin = new(2025, 12, 29);
 
     private sealed record History(HashSet<DateOnly> Attended, List<(DateOnly, DateOnly?)> Pauses, DateOnly Current, StreakRules Rules);
 
-    private static History Generate(int seed, bool restOff = false)
+    private static History Generate(int seed)
     {
         var rng = new Random(seed);
         var weeks = rng.Next(1, 90);
@@ -37,44 +37,44 @@ public sealed class StreakPropertyTests
             var start = Origin.AddDays(7 * rng.Next(0, weeks + 1) + rng.Next(0, 7));
             pauses.Add((start, rng.NextDouble() < 0.2 ? null : start.AddDays(rng.Next(0, 60))));
         }
-        var rules = new StreakRules(rng.Next(2, 13), restOff ? 0 : rng.Next(0, 5), rng.Next(0, 27));
+        var rules = new StreakRules(rng.Next(2, 13), rng.Next(0, 5), rng.Next(0, 27));
         return new History(attended, pauses, current, rules);
     }
 
     /// <summary>
-    /// The model: the same rule stated differently — earns are counted by attended weeks since the
-    /// last earn (not by the streak's remainder), and the week list is built by stepping a
-    /// <see cref="DateTime"/> rather than a key.
+    /// The model: the same rule stated as one credit number, <c>c = bank × E + progress</c> —
+    /// attend: <c>min(c + 1, K × E)</c>; miss: <c>c − E</c> when <c>c ≥ E</c>, else broken — over
+    /// weeks built by stepping a <see cref="DateTime"/> rather than a key.
     /// </summary>
     private static (int Current, int Longest, int Bank) Model(ISet<DateOnly> attended, ISet<DateOnly> paused, DateOnly current, StreakRules r)
     {
         var inRange = attended.Where(w => w <= current).ToList();
         if (inRange.Count == 0) return (0, 0, 0);
-        int run = 0, best = 0, bank = 0, sinceEarn = 0;
+        int run = 0, best = 0, credit = 0;
+        var ceiling = r.RestCap * r.RestEveryWeeks;
         for (var t = inRange.Min().ToDateTime(TimeOnly.MinValue); t <= current.ToDateTime(TimeOnly.MinValue); t = t.AddDays(7))
         {
             var w = DateOnly.FromDateTime(t);
             if (attended.Contains(w))
             {
                 run++;
-                sinceEarn++;
-                if (sinceEarn == r.RestEveryWeeks) { sinceEarn = 0; if (bank < r.RestCap) bank++; }
+                credit = Math.Min(credit + 1, ceiling);
                 best = Math.Max(best, run);
             }
             else if (paused.Contains(w) || w == current || run == 0)
             {
                 continue;
             }
-            else if (bank > 0)
+            else if (credit >= r.RestEveryWeeks)
             {
-                bank--;
+                credit -= r.RestEveryWeeks;
             }
             else
             {
-                run = 0; bank = 0; sinceEarn = 0;
+                run = 0; credit = 0;
             }
         }
-        return (run, best, bank);
+        return (run, best, credit / r.RestEveryWeeks);
     }
 
     [Fact]
@@ -155,22 +155,34 @@ public sealed class StreakPropertyTests
         }
     }
 
-    /// <summary>With rest weeks off, adding an attended week, or a paused week, anywhere never lowers the streak.</summary>
+    /// <summary>
+    /// A member who plays more must never see a shorter streak: with rest weeks ON (and every other
+    /// rule drawn at random), adding an attended week, or a paused week, anywhere — before the run,
+    /// inside it, or the current week — never lowers the current streak.
+    /// </summary>
     [Fact]
-    public void With_rest_weeks_off_the_streak_is_monotone_in_attendance_and_in_pauses()
+    public void Adding_an_attended_or_paused_week_anywhere_never_lowers_the_streak()
     {
         for (var seed = 0; seed < Seeds; seed++)
         {
-            var h = Generate(seed, restOff: true);
-            var paused = StreakMath.PausedWeeks(h.Pauses, h.Attended, h.Current, h.Rules.PauseWeeksPerYear).Paused.ToHashSet();
-            var baseline = StreakMath.Walk(h.Attended, paused, h.Current, h.Rules).State.Streak;
+            var h = Generate(seed);
+            var rules = h.Rules.RestCap == 0 ? h.Rules with { RestCap = 1 + (seed % 4) } : h.Rules;
+            var paused = StreakMath.PausedWeeks(h.Pauses, h.Attended, h.Current, rules.PauseWeeksPerYear).Paused.ToHashSet();
+            var baseline = StreakMath.Walk(h.Attended, paused, h.Current, rules).State.Streak;
+            var span = (h.Current.DayNumber - Origin.DayNumber) / 7;
             var rng = new Random(seed + 99);
-            var extra = h.Current.AddDays(-7 * rng.Next(0, 20));
+            for (var k = 0; k < 4; k++)
+            {
+                var extra = Origin.AddDays(7 * rng.Next(-3, span + 1));
+                var moreAttended = h.Attended.Append(extra).ToHashSet();
+                var attendedStreak = StreakMath.Walk(moreAttended, paused.Where(w => !moreAttended.Contains(w)).ToHashSet(), h.Current, rules).State.Streak;
+                Assert.True(attendedStreak >= baseline, $"seed {seed}: attending {extra} lowered {baseline} to {attendedStreak} ({rules})");
 
-            var moreAttended = h.Attended.Append(extra).ToHashSet();
-            var morePaused = paused.Append(extra).Where(w => !h.Attended.Contains(w)).ToHashSet();
-            Assert.True(StreakMath.Walk(moreAttended, paused.Where(w => !moreAttended.Contains(w)).ToHashSet(), h.Current, h.Rules).State.Streak >= baseline, $"seed {seed} attend {extra}");
-            Assert.True(StreakMath.Walk(h.Attended, morePaused, h.Current, h.Rules).State.Streak >= baseline, $"seed {seed} pause {extra}");
+                if (h.Attended.Contains(extra)) continue;
+                var morePaused = paused.Append(extra).ToHashSet();
+                var pausedStreak = StreakMath.Walk(h.Attended, morePaused, h.Current, rules).State.Streak;
+                Assert.True(pausedStreak >= baseline, $"seed {seed}: pausing {extra} lowered {baseline} to {pausedStreak} ({rules})");
+            }
         }
     }
 

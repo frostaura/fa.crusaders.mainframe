@@ -28,7 +28,13 @@ Spec: `docs/specs/play.md` (P12, written 2026-09-29, not yet built). This is the
   *Why:* never instant + 168 h (DST weeks are 167/169 h) and never (year, ISO week) — 2026 has
   a W53 running into 2027.
 - **Streak counts attended weeks; rest weeks are earned (1 per 4, cap 2) and spent silently;
-  the open week never breaks it.** Proved monotone in attendance by a seeded property test.
+  the open week never breaks it.** Progress towards a rest week accrues **only below the cap**
+  (2026-09-29, the coordinator's ruling after P12 found the defect). *Why:* a member who plays
+  more must never see a shorter streak. The first rule earned at `streak % 4 == 0` and lost an
+  earn to the cap depending on where the run began, so one extra early week could end a streak
+  the same history without it kept. As credit `c = bank·E + progress` the rule is attend →
+  `min(c+1, K·E)`, miss → `c−E` or broken — monotone by construction; a 2,000-seed property
+  test (rest weeks on) and the X/Y regression test hold it.
 - **Injury pause is a yearly allowance (8 weeks), not a per-pause maximum**, and never backdated.
   *Why:* a maximum is defeated by toggling off and on; nothing is public, so no anti-cheat.
 - **Recompute is staged with the change** (`bookings.PlayRecomputeDueAt` set in the save that

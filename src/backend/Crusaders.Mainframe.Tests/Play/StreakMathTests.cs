@@ -37,22 +37,25 @@ public sealed class StreakMathTests
             ("2026-11-30", WeekStates.Missed, 0), ("2026-12-07", WeekStates.Attended, 1),
         };
         Assert.Equal(expected.Select(e => (D(e.Week), e.State, e.Streak)), walk.Weeks.Select(w => (w.Week, w.State, w.StreakAfter)));
-        Assert.Equal(new StreakState(1, 8, 0), walk.State);
+        Assert.Equal(new StreakState(1, 8, 0, 1), walk.State);
     }
 
-    /// <summary>The bank after each week of example A — the table's own column.</summary>
+    /// <summary>The bank and the progress after each week of example A — the table's own columns.</summary>
     [Fact]
     public void Example_A_banks_one_rest_week_at_four_and_at_eight()
     {
         var s = StreakState.Empty;
         var banks = new List<int>();
+        var progress = new List<int>();
         foreach (var (attended, paused) in new[] { (true, false), (true, false), (true, false), (true, false), (false, false), (true, false),
                      (true, false), (true, false), (true, false), (false, true), (false, true), (false, false), (false, false), (true, false) })
         {
             s = StreakMath.Step(s, attended, paused, false, Defaults).State;
             banks.Add(s.Bank);
+            progress.Add(s.Progress);
         }
         Assert.Equal([0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0], banks);
+        Assert.Equal([1, 2, 3, 0, 0, 1, 2, 3, 0, 0, 0, 0, 0, 1], progress);
     }
 
     /// <summary>
@@ -87,7 +90,7 @@ public sealed class StreakMathTests
         Assert.Equal(2, walk.State.Streak);
     }
 
-    /// <summary>Example D: twelve straight weeks earn at 4, 8 and 12; the cap loses the third; rest, rest, broken.</summary>
+    /// <summary>Example D: twelve straight weeks earn at 4 and 8; at the cap weeks 9–12 build no progress; rest, rest, broken.</summary>
     [Fact]
     public void Example_D_the_cap_loses_the_third_earn()
     {
@@ -154,22 +157,43 @@ public sealed class StreakMathTests
     }
 
     /// <summary>
-    /// SPEC DEFECT, pinned (reported with P12): §5.2 claims adding an attended week anywhere never
-    /// lowers the current streak. Under the capped, phase-dependent rest rule it can. X attends weeks
-    /// 1–12, misses 13, attends 14, misses 15–16 and is broken; Y — identical but for missing week 1,
-    /// which at streak 0 costs nothing — earns its third rest week at its 12th attended week (week 14)
-    /// instead of losing it to the cap, and is still on a 12-week streak. This test states the rule
-    /// as built so a change to it is a decision, not an accident.
+    /// Regression (P12): a member who plays more must never see a shorter streak. Under the first
+    /// rule (earn at <c>streak % E == 0</c>, an earn at the cap thrown away) X — weeks 1–12, 14 —
+    /// ended at 0 while Y, identical but for missing week 1, ended on a 12-week streak. Progress
+    /// now accrues only below the cap, so where a run started decides nothing: X ≥ Y, and here both
+    /// break at week 16.
     /// </summary>
     [Fact]
-    public void An_extra_attended_week_can_lower_the_streak_under_the_capped_rest_rule()
+    public void An_extra_attended_week_never_lowers_the_streak_the_X_Y_regression()
     {
         var weeks = Mondays("2026-01-05", 16).ToList();
         var x = weeks.Take(12).Append(weeks[13]).ToHashSet();
         var y = weeks.Skip(1).Take(11).Append(weeks[13]).ToHashSet();
         var current = weeks[15].AddDays(7);
 
-        Assert.Equal(0, StreakMath.Walk(x, new HashSet<DateOnly>(), current, Defaults).State.Streak);
-        Assert.Equal(12, StreakMath.Walk(y, new HashSet<DateOnly>(), current, Defaults).State.Streak);
+        var sx = StreakMath.Walk(x, new HashSet<DateOnly>(), current, Defaults).State.Streak;
+        var sy = StreakMath.Walk(y, new HashSet<DateOnly>(), current, Defaults).State.Streak;
+        Assert.True(sx >= sy, $"X {sx} < Y {sy}");
+        Assert.Equal((0, 0), (sx, sy));
+
+        // Had X also played week 15, the rest week earned back would carry it through week 16.
+        Assert.Equal(14, StreakMath.Walk(x.Append(weeks[14]).ToHashSet(), new HashSet<DateOnly>(), current, Defaults).State.Streak);
+    }
+
+    /// <summary>At the cap an attended week builds no progress; progress resumes after a spend and a spend keeps it.</summary>
+    [Fact]
+    public void Progress_accrues_only_below_the_cap_and_survives_a_spend()
+    {
+        var s = StreakState.Empty;
+        for (var i = 0; i < 10; i++) s = StreakMath.Step(s, true, false, false, Defaults).State;
+        Assert.Equal(new StreakState(10, 10, 2, 0), s); // earned at 4 and 8; 9 and 10 built nothing
+        s = StreakMath.Step(s, false, false, false, Defaults).State;
+        Assert.Equal(new StreakState(10, 10, 1, 0), s);
+        for (var i = 0; i < 3; i++) s = StreakMath.Step(s, true, false, false, Defaults).State;
+        Assert.Equal(new StreakState(13, 13, 1, 3), s);
+        s = StreakMath.Step(s, false, false, false, Defaults).State;
+        Assert.Equal(new StreakState(13, 13, 0, 3), s); // the spend kept the progress
+        s = StreakMath.Step(s, true, false, false, Defaults).State;
+        Assert.Equal(new StreakState(14, 14, 1, 0), s);
     }
 }

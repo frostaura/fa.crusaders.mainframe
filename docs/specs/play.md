@@ -321,28 +321,39 @@ nag by construction. **A week counts when the member attended at least one sessi
 Inputs: the set of attended week keys `A`, the member's pauses, the current week `C`, and the
 club's `streak_rest_every_weeks` (`E`, 4), `streak_rest_cap` (`K`, 2) and
 `streak_pause_weeks_per_year` (`Y`, 8). State: `streak` (attended weeks in the current run),
-`counter` (attended weeks towards the next rest week), `bank` (rest weeks held). Walk every week
-from the first attended week to `C`, oldest first:
+`counter` (attended weeks of progress towards the next rest week — it accrues **only while
+`bank < K`**), `bank` (rest weeks held). Walk every week from the first attended week to `C`,
+oldest first:
 
 ```
-attended (w ∈ A)                 → streak += 1; counter += 1; if counter % E == 0: bank = min(K, bank + 1)
+attended (w ∈ A)                 → streak += 1; if bank < K: counter += 1; if counter == E: bank += 1, counter = 0
 paused (w is a paused week, §5.3) → nothing — neither counts nor breaks
 w == C, not attended             → nothing — the week is still open ("pending")
 missed, streak == 0              → nothing
-missed, bank > 0                 → bank -= 1   — a REST week, applied automatically; streak unchanged
+missed, bank > 0                 → bank -= 1   — a REST week, applied automatically; streak and counter unchanged
 missed, bank == 0                → streak = counter = bank = 0   — broken
 ```
 
 - The **current streak** is `streak` after the walk; the **longest** is its maximum along the way.
   A streak is counted in attended weeks: rest and paused weeks keep it alive but do not add to it.
-- **Rest weeks are earned, automatic and silent**: every `E` attended weeks in a run earn one, up
-  to `K` banked; a missed week spends one without the member doing anything. A break empties the
-  bank. `K = 0` turns rest weeks off.
+- **Rest weeks are earned, automatic and silent**: every `E` attended weeks of progress earn one,
+  up to `K` banked; a missed week spends one without the member doing anything. **At the cap an
+  attended week builds no progress**; progress resumes once a rest week is spent, and a spend
+  keeps whatever progress was made. A break empties the bank and the progress. `K = 0` turns rest
+  weeks off.
+- **Why progress stops at the cap — a member who plays more must never see a shorter streak.**
+  The first version earned at `counter % E == 0` with `counter` = the streak, and threw an earn
+  away at the cap, so where a run started decided which earns were lost: X, who played weeks 1–12
+  and 14, was broken at week 16, while Y — the same history minus week 1 — was still on a 12-week
+  streak (found by the P12 build; pinned as a regression test). Stated as one credit number
+  `c = bank × E + counter`, the rule is: attended → `c = min(c + 1, K × E)`; missed → `c − E` if
+  `c ≥ E`, else broken. Both are non-decreasing in `c` and a break needs `c < E`, so an extra
+  attended or paused week can only keep `c` — and the streak — at least as high.
 - **The current week never breaks a streak** — it is only judged once it has ended, at the next
   read. Nothing runs at midnight on Sunday, and nothing is sent: **no reminder, no "your streak is
   at risk" message, in any channel** (D14: no nagging).
-- **Property (tested, §11):** adding an attended week, or a paused week, anywhere never lowers the
-  current streak; the result is independent of the order the inputs arrive in; the walk is
+- **Property (tested, §11, rest weeks on, 2,000 seeds):** adding an attended week, or a paused
+  week, anywhere never lowers the current streak; the result is independent of the order the inputs arrive in; the walk is
   identical whether run in one pass or resumed from any intermediate state.
 
 **Week keys are DST- and year-safe by construction.** An instant becomes a club-local date through
@@ -379,15 +390,15 @@ must use it; Johannesburg has no DST and every fixture club otherwise runs UTC).
 | 2026-09-07 | played | 1 | 1 | 0 | |
 | 09-14 | played | 2 | 2 | 0 | |
 | 09-21 | played | 3 | 3 | 0 | |
-| 09-28 | played | 4 | 4 | 1 | rest week earned; badge `streak_4` |
+| 09-28 | played | 4 | 0 | 1 | rest week earned (counter back to 0); badge `streak_4` |
 | 10-05 | missed | 4 | 4 | 0 | rest week spent automatically |
-| 10-12 | played | 5 | 5 | 0 | |
-| 10-19 | played **Sun 25 Oct 23:30 GMT** | 6 | 6 | 0 | the clocks went back at 02:00 that morning; `2026-10-25T23:30Z` is Sunday 23:30 local → week of **19 Oct**. The week of 19 Oct is 169 hours long; "Monday 19 Oct 00:00 BST + 168 h" would have put this session in the next week |
-| 10-26 | played | 7 | 7 | 0 | |
-| 11-02 | played | 8 | 8 | 1 | rest week earned |
-| 11-09 | pause on Wed 11 Nov | 8 | 8 | 1 | paused (2026 allowance: 1 of 8 used) |
-| 11-16 | pause off Fri 20 Nov | 8 | 8 | 1 | paused (2 of 8) — the week it ended is still paused |
-| 11-23 | missed | 8 | 8 | 0 | rest week spent |
+| 10-12 | played | 5 | 1 | 0 | |
+| 10-19 | played **Sun 25 Oct 23:30 GMT** | 6 | 2 | 0 | the clocks went back at 02:00 that morning; `2026-10-25T23:30Z` is Sunday 23:30 local → week of **19 Oct**. The week of 19 Oct is 169 hours long; "Monday 19 Oct 00:00 BST + 168 h" would have put this session in the next week |
+| 10-26 | played | 7 | 3 | 0 | |
+| 11-02 | played | 8 | 0 | 1 | rest week earned |
+| 11-09 | pause on Wed 11 Nov | 8 | 0 | 1 | paused (2026 allowance: 1 of 8 used) |
+| 11-16 | pause off Fri 20 Nov | 8 | 0 | 1 | paused (2 of 8) — the week it ended is still paused |
+| 11-23 | missed | 8 | 0 | 0 | rest week spent |
 | 11-30 | missed | 0 | 0 | 0 | **broken** — no rest week left |
 | 12-07 | played | 1 | 1 | 0 | a new streak |
 
@@ -405,8 +416,10 @@ pauses on Wed 23 Dec has week 12-21 paused (8 of 8), week 12-28 **not** paused (
 counts as missed if they do not play, spending a rest week if they have one), and week 2027-01-04
 paused again (1 of 8 for 2027).
 
-**D — the cap.** Twelve straight weeks earn at weeks 4, 8 and 12; the bank is capped at 2, so the
-third earn is lost. Three missed weeks then follow: rest, rest, **broken**.
+**D — the cap.** Twelve straight weeks earn at weeks 4 and 8; the bank is then at the cap of 2, so
+weeks 9–12 build no progress. Three missed weeks then follow: rest, rest, **broken**. (Had week 13
+been played instead of missed after one rest, it would have built progress again — the bank was
+below the cap.)
 
 ### 5.5 The monthly court-time ring
 
