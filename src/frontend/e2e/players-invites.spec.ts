@@ -1,6 +1,7 @@
 import type { Page, Route } from "@playwright/test";
 import { expect, serveApi, signIn, test, type ApiRoute } from "./fixtures";
 import { BOOKING, COURT, PEOPLE, inviteFixture, memberShellRoutes } from "./playersKit";
+import { INVITES_COPY } from "../src/lib/playersCopy";
 
 /**
  * P11 — invites in a real browser, on a phone and a desktop: the Bookings badge into Invites and
@@ -116,7 +117,9 @@ test("a link that names nothing is answered in a sentence, with a way back", asy
   await open(page, [{ path: "/api/v1/invites/not-a-token", status: 404, body: { error: "invite_not_found" } }]);
   await page.goto("/j/not-a-token");
 
-  await expect(page.getByText("This link isn't for you or no longer works — ask for a fresh one.")).toBeVisible();
+  await expect(page.getByText(INVITES_COPY.linkNotFound)).toBeVisible();
+  // D5 — it may be another member's: the way to open it as them.
+  await expect(page.getByRole("button", { name: INVITES_COPY.signOutToOpen })).toBeVisible();
   await expect(page.getByRole("link", { name: "See your invites" })).toHaveAttribute("href", "/bookings/invites");
   await expect(page.getByRole("button", { name: /Accept/ })).toHaveCount(0);
 });
