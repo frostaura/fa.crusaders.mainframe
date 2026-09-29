@@ -59,8 +59,12 @@ public sealed class SplitCancelView
         var owedAfter = await _shares.OwedAsync(booking, ct) - netRefund;
         var cancelled = new Booking
         {
-            Id = booking.Id, TenantId = booking.TenantId, Status = BookingStatus.Cancelled, CheckedInAt = booking.CheckedInAt,
-            AmountChargedCredits = booking.AmountChargedCredits, CancellationReason = booking.CancellationReason,
+            Id = booking.Id,
+            TenantId = booking.TenantId,
+            Status = BookingStatus.Cancelled,
+            CheckedInAt = booking.CheckedInAt,
+            AmountChargedCredits = booking.AmountChargedCredits,
+            CancellationReason = booking.CancellationReason,
         };
         var settings = await _settings.GetAsync(ct);
         var paidBefore = new Dictionary<Guid, decimal>();
