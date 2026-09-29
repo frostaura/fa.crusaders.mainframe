@@ -128,7 +128,7 @@ describe("BookSheet — Players", () => {
     expect(screen.getByRole("radio", { name: BOOK_PLAYERS.justMe })).toHaveAttribute("aria-checked", "true");
     await next();
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.primary(3, 100, null) }));
-    await screen.findByText(BOOK_SHEET.bookedTitle(3, 3));
+    await screen.findByText(BOOK_SHEET.bookedTitle(1, 1));
     const [call] = posts(stub.calls, "/api/v1/bookings/");
     expect(call.raw).toBe(JSON.stringify({ courtId: "c1", startsAt: C1.startsAt, sliceCount: 3 }));
     expect(stub.calls.filter((c) => c.path.includes("split-preview"))).toHaveLength(0);
@@ -234,6 +234,20 @@ describe("BookSheet — Split", () => {
     expect(totals).toHaveTextContent(BOOK_SPLIT.youPayNow("100.00 cr", "75.00 cr"));
   });
 
+  it("F1.18 — the split method is a radio group that selects as the arrows move", async () => {
+    stubFetch([FAVOURITES, PREVIEW]);
+    open();
+    await addSamAndALink();
+    await next();
+    const group = screen.getByRole("radiogroup", { name: BOOK_SPLIT.modeLabel });
+    const ratio = within(group).getByRole("radio", { name: BOOK_SPLIT.modes.ratio });
+    // An arrow key moves the focus; reaching a radio selects it.
+    act(() => { ratio.focus(); });
+    expect(ratio).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByLabelText(BOOK_SPLIT.weightLabel("Sam"))).toBeTruthy();
+    expect(within(group).getByRole("radio", { name: BOOK_SPLIT.modes.equal })).toHaveAttribute("aria-checked", "false");
+  });
+
   it("says amounts past the price at once, asks the server nothing, and will not continue", async () => {
     const stub = stubFetch([FAVOURITES, PREVIEW]);
     open();
@@ -284,7 +298,7 @@ describe("BookSheet — Confirm and the booking", () => {
     expect(await screen.findByText(sentence)).toBeTruthy();
     expect(screen.getByRole("region", { name: BOOK_CONFIRM.playersLabel })).toHaveTextContent(BOOK_CONFIRM.playersLine(["Sam", BOOK_CONFIRM.linkInLine]));
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.primary(3, 100, null) }));
-    await screen.findByText(BOOK_SHEET.bookedTitle(3, 3));
+    await screen.findByText(BOOK_SHEET.bookedTitle(1, 1));
     expect(posts(stub.calls, "/api/v1/bookings/")[0].body).toEqual({
       courtId: "c1", startsAt: C1.startsAt, sliceCount: 3,
       players: [{ userId: "sam", seat: 2 }, { link: true, seat: 4 }], splitMode: "equal",

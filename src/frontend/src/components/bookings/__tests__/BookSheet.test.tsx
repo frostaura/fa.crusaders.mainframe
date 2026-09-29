@@ -6,7 +6,7 @@ import { ToastProvider } from "@/components/Toast";
 import { AuthProvider } from "@/lib/auth";
 import { BalanceProvider } from "@/lib/balance";
 import { refuse, stubFetch, type StubCall } from "@/test/harness";
-import { BOOK_SHEET, GOD_MODE, REFUSAL_REASON, RESULTS_LABEL } from "@/lib/bookingsCopy";
+import { BOOK_SHEET, GOD_MODE, REFUSAL_REASON, RESULTS_LABEL, bookedInBookings } from "@/lib/bookingsCopy";
 import { BOOK_PLAYERS, owedBackQuoteLine } from "@/lib/playersCopy";
 import { BookSheet, type BookSheetProps } from "../BookSheet";
 import { slotCount } from "../bookFlow";
@@ -123,7 +123,7 @@ describe("BookSheet — a member, one slot", () => {
     const book = screen.getByRole("button", { name: BOOK_SHEET.primary(S1, 50, null) });
     fireEvent.click(book);
     fireEvent.click(book);
-    expect(await screen.findByText(BOOK_SHEET.bookedTitle(S1, S1))).toBeTruthy();
+    expect(await screen.findByText(BOOK_SHEET.bookedTitle(1, 1))).toBeTruthy();
     expect(posts(stub.calls, "/api/v1/bookings/")).toHaveLength(1);
     expect(posts(stub.calls, "/api/v1/bookings/")[0].body).toEqual({ courtId: "c1", startsAt: C1.startsAt, sliceCount: 3 });
     expect(document.querySelector('[data-glyph="check"]')).not.toBeNull();
@@ -213,7 +213,7 @@ describe("BookSheet — a member, several slots (D8)", () => {
     expect(screen.getByRole("heading", { name: BOOK_SHEET.title(S12) })).toBeTruthy();
     await toConfirm();
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.primary(S12, 70, null) }));
-    expect(await screen.findByText(BOOK_SHEET.bookedTitle(S1, S12))).toBeTruthy();
+    expect(await screen.findByText(bookedInBookings(S1, S12, 1))).toBeTruthy();
     const [call] = posts(stub.calls, "/api/v1/bookings/bulk");
     const body = call.body as { idempotencyKey: string; items: unknown[] };
     expect(body.idempotencyKey).toMatch(/^mb_/);
@@ -293,7 +293,7 @@ describe("BookSheet — an admin (R19 god mode)", () => {
     // A double tap on Continue must not land its second half on the Book button.
     await new Promise((r) => setTimeout(r, 350));
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.primary(S1, 60, "Naledi") }));
-    await screen.findByText(BOOK_SHEET.bookedTitle(S1, S1));
+    await screen.findByText(BOOK_SHEET.bookedTitle(1, 1));
     const sent = posts(stub.calls, "/api/v1/admin/bookings/");
     expect(sent).toHaveLength(1);
     expect(sent[0].body).toEqual({ courtId: "c1", userId: NALEDI, startsAt: C1.startsAt, sliceCount: 3, allowNegativeBalance: true });
@@ -347,7 +347,7 @@ describe("BookSheet — an admin (R19 god mode)", () => {
     expect(gets(stub.calls, "/api/v1/admin/bookings/quote")[0].path).not.toContain("userId=");
     await new Promise((r) => setTimeout(r, 350));
     fireEvent.click(book);
-    await screen.findByText(BOOK_SHEET.bookedTitle(S1, S1));
+    await screen.findByText(BOOK_SHEET.bookedTitle(1, 1));
     expect(posts(stub.calls, "/api/v1/admin/bookings/")[0].body).toMatchObject({ userId: ME, allowNegativeBalance: false });
   });
 
@@ -378,7 +378,7 @@ describe("BookSheet — an admin (R19 god mode)", () => {
     ]);
     await new Promise((r) => setTimeout(r, 350));
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.primary(S1, 60, "Naledi") }));
-    await screen.findByText(BOOK_SHEET.bookedTitle(S1, S1));
+    await screen.findByText(BOOK_SHEET.bookedTitle(1, 1));
     const sent = stub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/admin/bookings/");
     expect(sent).toHaveLength(1);
     expect(sent[0].body).toEqual({ courtId: "c1", userId: NALEDI, startsAt: C1.startsAt, sliceCount: 3, allowNegativeBalance: false });
@@ -412,7 +412,7 @@ describe("BookSheet — an admin (R19 god mode)", () => {
     fireEvent.click(book);
     expect(await screen.findByText(BOOK_SHEET.haltedShortAdmin("Naledi Khumalo"))).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.bookRestAnyway }));
-    expect(await screen.findByText(BOOK_SHEET.bookedTitle(S12, S12))).toBeTruthy();
+    expect(await screen.findByText(bookedInBookings(S12, S12, 2))).toBeTruthy();
     const sent = stub.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/admin/bookings/bulk").map((c) => c.body as Record<string, unknown>);
     expect(sent).toHaveLength(2);
     expect(sent[0]).toMatchObject({ onBehalf: { userId: NALEDI }, allowNegativeBalance: false });
@@ -440,7 +440,7 @@ describe("BookSheet — an admin (R19 god mode)", () => {
     expect(screen.getByRole("heading", { name: BOOK_SHEET.holdTitle(S1) })).toBeTruthy();
     await new Promise((r) => setTimeout(r, 350));
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.holdPrimary(S1) }));
-    await screen.findByText(BOOK_SHEET.heldTitle(S1, S1));
+    await screen.findByText(BOOK_SHEET.heldTitle(1, 1));
     expect(stub.calls.filter((c) => c.path.includes("quote"))).toHaveLength(0);
     expect(posts(stub.calls, "/api/v1/admin/blocks/")[0].body).toEqual({ courtId: "c1", startsAt: C1.startsAt, sliceCount: 3, label: "League night" });
   });

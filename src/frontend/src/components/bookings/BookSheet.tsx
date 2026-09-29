@@ -13,7 +13,7 @@ import { MemberCombobox } from "@/components/ui/member-combobox";
 import { RadioCard, RadioGroup } from "@/components/ui/radio-group";
 import { ApiError } from "@/lib/api";
 import { describeFailure } from "@/lib/errors";
-import { BOOK_SHEET, RESULTS_LABEL, cancelTermsLine } from "@/lib/bookingsCopy";
+import { BOOK_SHEET, RESULTS_LABEL, bookedInBookings, cancelTermsLine } from "@/lib/bookingsCopy";
 import { useBalance } from "@/lib/balance";
 import { BOOK_PLAYERS, heldLine, owedBackLine, owedBackQuoteLine } from "@/lib/playersCopy";
 import { BulkResults } from "./BulkResults";
@@ -311,9 +311,7 @@ function ResultView({ flow }: { flow: BookFlow }) {
   // In grid slots, like the title — "All 3 booked" under a bar that ticked three.
   const booked = slotCount(run.booked);
   const total = Math.max(booked, slotCount(flow.sendable));
-  let heading: string;
-  if (booked === 0) heading = BOOK_SHEET.noneBookedTitle;
-  else heading = run.hold ? BOOK_SHEET.heldTitle(booked, total) : BOOK_SHEET.bookedTitle(booked, total);
+  const heading = resultHeading(booked, total, run);
   const forName = flow.who.kind === "member" ? flow.memberName : null;
   const admin = isAdminRun(flow);
   // The Done line reads the figure Confirm did — spendable, when anything is held (F1.3).
@@ -344,6 +342,17 @@ function ResultView({ flow }: { flow: BookFlow }) {
       {run.players ? <ResultPlayers outcome={run.players} face={flow.face} /> : null}
     </>
   );
+}
+
+/** In grid slots, and — when merged runs make the rows fewer than the slots — in bookings too (F1.20). */
+function resultHeading(booked: number, total: number, run: NonNullable<BookFlow["run"]>): string {
+  if (booked === 0) return BOOK_SHEET.noneBookedTitle;
+  const okRows = run.rows.filter((r) => r.ok).length;
+  const title = run.hold ? BOOK_SHEET.heldTitle : BOOK_SHEET.bookedTitle;
+  // One booking, all of it: "Court booked", whatever its length.
+  if (okRows === 1 && booked === total) return title(1, 1);
+  if (okRows > 0 && okRows !== booked) return bookedInBookings(booked, total, okRows, run.hold);
+  return title(booked, total);
 }
 
 function firstName(name: string | null): string | null {

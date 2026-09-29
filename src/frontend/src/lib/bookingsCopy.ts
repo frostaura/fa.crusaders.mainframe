@@ -414,9 +414,14 @@ export function cancelTermsLine(penaltyPct: number, windowMinutes: number): stri
   return `Cancel more than ${windowMinutes} min before the start and the full amount comes back; inside ${windowMinutes} min, ${penaltyPct}% is kept. Once the lights have been on, nothing comes back.`;
 }
 
-/** F1.20 — the Done heading counts what the list below it shows. */
-export function bookedInBookings(slots: number, bookings: number): string {
-  return `${slots} slots booked in ${bookings} ${bookings === 1 ? "booking" : "bookings"}`;
+/**
+ * F1.20 — the Done heading when the list under it has fewer rows than slots (adjacent slots on
+ * one court are one booking): "All 3 booked" above two rows read as a slot lost.
+ */
+export function bookedInBookings(done: number, total: number, rows: number, held = false): string {
+  const verb = held ? "held" : "booked";
+  const inRows = `in ${rows} ${rows === 1 ? "booking" : "bookings"}`;
+  return done === total ? `${total} slots ${verb} ${inRows}` : `${done} of ${total} slots ${verb} ${inRows}`;
 }
 
 /** F1.12 — the member's upcoming games, above the grid. */
