@@ -75,6 +75,11 @@ export type AdminAttention = {
   failed: readonly AttentionSource[];
   /** One sentence per door needing somebody, most urgent first (from the doors store). */
   doorReasons: readonly string[];
+  /**
+   * How many doors the club has at all (F3.13) — null until the doors store has answered. Zero
+   * doors is "none set up", never "every door is reporting".
+   */
+  doorsTotal: number | null;
   /** The open-fault breakdown by severity, as the server sent it. */
   faultCounts: DeviceErrorCounts;
   /** When the last read of every source answered successfully, or null. */
@@ -321,6 +326,7 @@ export function useAdminAttention(options: { enabled?: boolean } = {}): AdminAtt
     refreshing: counts.inFlight,
     failed: failedSources(counts, doorsStore.failed),
     doorReasons: doorsStore.chrome.attention,
+    doorsTotal: doorsStore.checkedAt === null ? null : doorsStore.chrome.total,
     faultCounts: counts.faults.breakdown,
     checkedAt: oldestRead(counts, doorsStore.checkedAt),
     refresh,

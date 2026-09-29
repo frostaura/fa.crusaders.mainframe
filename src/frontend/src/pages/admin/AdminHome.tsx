@@ -222,7 +222,7 @@ function AttentionGrid({ attention }: { attention: AdminAttention }) {
         tone="warning"
         copy={{
           title: doorsAttentionLabel(attention.doors),
-          clear: "Every door is reporting.",
+          clear: attention.doorsTotal === 0 ? "No doors set up yet." : "Every door is reporting.",
           cta: "Open Doors",
           detail: <DoorReasons reasons={attention.doorReasons} />,
         }}

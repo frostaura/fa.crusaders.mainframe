@@ -160,6 +160,15 @@ describe("the admin Overview", () => {
     expect(within(region).getAllByRole("link")).toHaveLength(1);
   });
 
+  it("says no doors are set up when the club has none, never that every door is reporting (F3.13)", async () => {
+    setup({ pending: 1, doors: doorsServer([]).routes });
+    renderHome();
+
+    const region = needsAttention();
+    expect(await within(region).findByText("No doors set up yet.")).toBeInTheDocument();
+    expect(within(region).queryByText("Every door is reporting.")).toBeNull();
+  });
+
   it("never says All clear over a failed read — it says what could not be read, and offers a retry", async () => {
     const stub = setup({ summary: FAILED });
     renderHome();
