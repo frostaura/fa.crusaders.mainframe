@@ -217,7 +217,7 @@ describe("the settings rows this release owes", () => {
     await waitFor(() => {
       const put = stub.calls.find((c) => c.method === "PUT");
       expect(put?.body).toEqual(expect.objectContaining({
-        lcdRevertSeconds: 20, memberMaxSlotsPerDay: 4, sseKeepaliveSeconds: 25, actionGlyphs: "thumbs",
+        lcdRevertSeconds: 20, memberMaxSlotsPerDay: 4, sseKeepaliveSeconds: 25,
         currencySymbol: "R",
       }));
     });
@@ -241,14 +241,12 @@ describe("the settings rows this release owes", () => {
     });
   });
 
-  it("offers the glyph set as a choice, defaulting to thumbs, and exempts destructive confirms in words", async () => {
+  it("offers no glyph-set choice: the thumbs are retired for every club (R8 / D5)", async () => {
     stubFetch(routes(ALL));
     renderPage(<AdminSettingsPage />);
 
-    // Ruling 4: Dean asked for thumbs and the club is South African, where a thumbs-up is
-    // unambiguously positive. A club that reads it otherwise flips one key.
-    expect(await findControl("Yes and no icons")).toHaveTextContent("Thumbs up and down");
-    expect(screen.getByText(/a thumbs-up on “Delete” would be wrong/)).toBeInTheDocument();
+    await screen.findByRole("heading", { name: "Monitoring & live updates" });
+    expect(screen.queryByText("Yes and no icons")).toBeNull();
   });
 
   /**

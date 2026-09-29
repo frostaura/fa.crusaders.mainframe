@@ -188,33 +188,6 @@ export const ECO_NUMERIC_RULES: readonly NumericSettingRule[] = [
 // ---------------------------------------------------------------------------------------
 
 /**
- * Which glyphs a confirm/decline pair wears — ruling 4.
- *
- * <p>
- * Thumbs by default, and that is a decision about this club rather than a default anybody
- * inherited: Dean asked for thumbs, and the club is South African, where a thumbs-up is
- * unambiguously positive. A club whose members read it otherwise flips one key.
- * </p>
- *
- * <p>
- * <b>Destructive confirms are exempt and the hint says so.</b> A thumbs-up on "Delete" is
- * wrong whatever the setting is: those keep the action's own icon — a bin, a lock — and the
- * danger treatment.
- * </p>
- */
-export const ACTION_GLYPH_CHOICES = ["thumbs", "marks"] as const;
-export type ActionGlyphs = typeof ACTION_GLYPH_CHOICES[number];
-
-export const ACTION_GLYPH_LABEL: Record<ActionGlyphs, string> = {
-  thumbs: "Thumbs up and down",
-  marks: "Tick and cross",
-};
-
-export const ACTION_GLYPHS_HINT
-  = "What yes and no look like on a confirm. Deleting and shutting keep their own icon and "
-  + "their own colour whichever is chosen — a thumbs-up on “Delete” would be wrong.";
-
-/**
  * The symbol the club's REAL MONEY figures wear.
  *
  * <p>
@@ -274,7 +247,6 @@ export function ecoSettingComplaints(settings: Record<string, unknown>): Setting
   return [
     ...numericComplaints(settings),
     ...bookingHorizonComplaint(settings),
-    ...glyphChoiceComplaint(settings),
     ...currencySymbolComplaint(settings),
   ];
 }
@@ -317,13 +289,6 @@ function bookingHorizonComplaint(settings: Record<string, unknown>): SettingComp
   }];
 }
 
-/** The one enum: a glyph set this build does not know how to draw. */
-function glyphChoiceComplaint(settings: Record<string, unknown>): SettingComplaint[] {
-  const glyphs = settings.action_glyphs;
-  if (typeof glyphs !== "string" || (ACTION_GLYPH_CHOICES as readonly string[]).includes(glyphs)) return [];
-  return [{ key: "action_glyphs", message: "Choose either thumbs or a tick and cross." }];
-}
-
 /**
  * The money symbol, bounded exactly as the server bounds it.
  *
@@ -353,7 +318,6 @@ function currencySymbolComplaint(settings: Record<string, unknown>): SettingComp
 /** The labels, for the page's own emptied-field message and its jump-to-field links. */
 export const ECO_SETTING_LABELS: Record<string, string> = Object.fromEntries([
   ...ECO_NUMERIC_RULES.map((rule) => [rule.key, rule.label] as const),
-  ["action_glyphs", "Yes and no icons"] as const,
   ["currency_symbol", CURRENCY_SYMBOL_LABEL] as const,
   ["member_trace_enabled", MEMBER_TRACE_LABEL] as const,
 ]);

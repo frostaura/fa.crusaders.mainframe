@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { ClubUiContext, readActionGlyphSet, type ClubUi } from "./clubUi";
+import { ClubUiContext, type ClubUi } from "./clubUi";
 import { readCurrencySymbol, setClubCurrencySymbol } from "./currency";
 import { useProfile } from "./profile";
 
@@ -9,7 +9,7 @@ import { useProfile } from "./profile";
  * <p>
  * <b>No new request.</b> `/me/profile` is fetched once per session by `ProfileProvider` and is
  * the only member-facing payload that is read on every route, so an optional
- * <code>action_glyphs</code> on it costs nothing. The alternative — a second endpoint for one
+ * <code>currency_symbol</code> on it costs nothing. The alternative — a second endpoint for one
  * string — would be a round trip on the critical path of the first paint, for a value whose
  * absence is already handled.
  * </p>
@@ -18,15 +18,9 @@ import { useProfile } from "./profile";
  * It sits INSIDE `ProfileProvider`. Before the profile lands, and for a signed-out screen that
  * has no profile at all, `profile` is null and every reader answers its default.
  * </p>
- *
- * <p>
- * <b>`action_glyphs` is read and carried but inert</b> (R8 / D5): the thumbs-up/down glyph set it
- * chose between is retired and nothing draws from it. See `ActionGlyphSet` in `clubUi.ts`.
- * </p>
  */
 export function ClubUiProvider({ children }: { children: React.ReactNode }) {
   const { profile } = useProfile();
-  const actionGlyphs = readActionGlyphSet(profile?.action_glyphs);
   const currencySymbol = readCurrencySymbol(profile?.currency_symbol);
 
   // The money formatters are pure functions reached from `lib/*Copy.ts`, which are not
@@ -43,7 +37,6 @@ export function ClubUiProvider({ children }: { children: React.ReactNode }) {
   // Memoised on the VALUES rather than on the profile object: `ProfileProvider` replaces the
   // object on every refresh, and a new context value re-renders every consumer of it — which
   // here is every button in the product.
-  const value = useMemo<ClubUi>(
-    () => ({ actionGlyphs, currencySymbol }), [actionGlyphs, currencySymbol]);
+  const value = useMemo<ClubUi>(() => ({ currencySymbol }), [currencySymbol]);
   return <ClubUiContext.Provider value={value}>{children}</ClubUiContext.Provider>;
 }

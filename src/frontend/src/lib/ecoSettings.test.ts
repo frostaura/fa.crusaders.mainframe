@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  ACTION_GLYPH_CHOICES, ECO_NUMERIC_RULES, ECO_SETTING_LABELS, ecoSettingComplaints,
+  ECO_NUMERIC_RULES, ECO_SETTING_LABELS, ecoSettingComplaints,
 } from "./ecoSettings";
 
 /**
@@ -122,13 +122,6 @@ describe("what the page refuses, and what it deliberately does not", () => {
   it("does not invent the cross-field rule out of one half of it", () => {
     expect(ecoSettingComplaints({ advance_booking_days: 90 })).toEqual([]);
     expect(ecoSettingComplaints({ schedule_materialisation_days: 60 })).toEqual([]);
-  });
-
-  it("refuses a glyph set that is not one of the two", () => {
-    for (const choice of ACTION_GLYPH_CHOICES) {
-      expect(ecoSettingComplaints({ action_glyphs: choice })).toEqual([]);
-    }
-    expect(ecoSettingComplaints({ action_glyphs: "emoji" })).toHaveLength(1);
   });
 
   /**

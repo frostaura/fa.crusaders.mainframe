@@ -1,7 +1,7 @@
 import type { AdminSettings } from "./api";
 import { GATE_ACCESS_POLICIES } from "./api";
 import {
-  ACTION_GLYPHS_HINT, ACTION_GLYPH_CHOICES, ACTION_GLYPH_LABEL, CAP_RULES, CURRENCY_SYMBOL_HINT,
+  CAP_RULES, CURRENCY_SYMBOL_HINT,
   CURRENCY_SYMBOL_LABEL, DEVICE_TIMING_RULES, MAX_CURRENCY_SYMBOL_LENGTH, MEMBER_TRACE_HINT,
   MEMBER_TRACE_LABEL, MONITORING_RULES, REALTIME_RULES, SCHEDULE_RULES, type NumericSettingRule,
 } from "./ecoSettings";
@@ -265,13 +265,6 @@ const BOOKINGS: SettingDef[] = [
   },
   fromRule(rule(CAP_RULES, "admin_bulk_max_items"), "bookings",
     "How many slots an admin may book or cancel in one press.", { advanced: true, unit: "slots" }),
-  {
-    key: "action_glyphs", section: "bookings", label: "Yes and no icons", kind: "select", advanced: true, optional: true,
-    description: "What yes and no look like on a confirm.",
-    help: ACTION_GLYPHS_HINT,
-    options: ACTION_GLYPH_CHOICES.map((choice) => ({ value: choice, label: ACTION_GLYPH_LABEL[choice] })),
-    defaultValue: "thumbs",
-  },
 ];
 
 const HOURS: SettingDef[] = [

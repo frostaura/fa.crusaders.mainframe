@@ -789,9 +789,6 @@ export type AdminSettings = {
   /** 30–3600, default 300. A full re-read, so a wall screen that missed one update is wrong
    *  for at most this long rather than for the rest of the evening. */
   control_board_resync_seconds?: number;
-  /** `thumbs` (default) or `marks` — ruling 4. Destructive confirms are exempt and keep the
-   *  action's own icon and the danger treatment whichever is chosen. */
-  action_glyphs?: "thumbs" | "marks";
   /** The symbol this club's REAL MONEY figures wear, default `R`. 1–4 letters or currency
    *  signs. It is NOT the credit unit — credits convert at `credits_per_zar_*` and keep a
    *  unit of their own; see `lib/currency.ts`. */
@@ -1220,24 +1217,11 @@ export type MyProfile = {
    */
   timezone?: string;
   /**
-   * The club's glyph set for confirm/decline buttons — `"thumbs"` or `"marks"`.
+   * The symbol this club's REAL MONEY figures wear — `R`, `R$`, `CHF`.
    *
    * <p>
    * A tenant setting, riding on the payload that already reaches every signed-in screen
    * rather than on a second request for one string. <b>Optional, and its absence is the
-   * commonest case</b>: an API that predates the key sends nothing, and
-   * <code>readActionGlyphSet</code> answers the default. Anything unrecognised is also the
-   * default — unknown is never "the other one".
-   * </p>
-   */
-  action_glyphs?: string;
-
-  /**
-   * The symbol this club's REAL MONEY figures wear — `R`, `R$`, `CHF`.
-   *
-   * <p>
-   * A tenant setting, riding on the payload that already reaches every signed-in screen for
-   * the same reason <code>action_glyphs</code> does. <b>Optional, and its absence is the
    * commonest case</b>: an API that predates the key sends nothing, and
    * <code>readCurrencySymbol</code> answers the default.
    * </p>
@@ -2248,7 +2232,6 @@ export const endpoints = {
     ...(req.realtime_fallback_after_failures !== undefined ? { realtimeFallbackAfterFailures: req.realtime_fallback_after_failures } : {}),
     ...(req.realtime_poll_seconds_control_board !== undefined ? { realtime_poll_seconds_control_board: req.realtime_poll_seconds_control_board } : {}),
     ...(req.control_board_resync_seconds !== undefined ? { control_board_resync_seconds: req.control_board_resync_seconds } : {}),
-    ...(req.action_glyphs !== undefined ? { actionGlyphs: req.action_glyphs } : {}),
     // The club's money symbol, on the same omitted-means-unchanged terms. Sent RAW, not
     // sanitised: the page refuses to save an unacceptable one, and quietly turning a typo
     // into an R here would be the client deciding a money question on the admin's behalf.

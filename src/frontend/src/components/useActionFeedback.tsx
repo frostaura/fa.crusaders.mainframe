@@ -13,9 +13,7 @@ import { motion } from "../lib/tokens";
  * </p>
  *
  * <p>
- * <b>No glyph at rest (R8 / D5).</b> The thumbs-up/down that affirm and decline once wore at rest
- * are retired, and so is the club's `action_glyphs` choice between thumbs and ✓/✕. A button at
- * rest is its word. Working is a spinner; a success is the hand-drawn `AnimatedCheck`; a failure
+ * <b>No glyph at rest (R8 / D5).</b> A button at rest is its word. Working is a spinner; a success is the hand-drawn `AnimatedCheck`; a failure
  * is `AnimatedAlert` plus the shake — `components/ui/feedback-marks.tsx`.
  * </p>
  *

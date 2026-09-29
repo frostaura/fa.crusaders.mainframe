@@ -9,7 +9,7 @@ import { motion } from "@/lib/tokens";
  * <p>
  * <b>Drawn, not faded.</b> Every path declares `pathLength={24}` and is dashed to that length, so
  * the one `fb-draw` keyframe (24 → 0) draws a circle and a tick identically whatever their real
- * geometry — the technique `components/ActionGlyph.tsx` established. The circle draws first; the
+ * geometry. The circle draws first; the
  * inner stroke follows one `in` later, while the whole mark arrives with `fb-pop`.
  * </p>
  *

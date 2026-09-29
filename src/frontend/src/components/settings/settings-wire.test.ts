@@ -25,7 +25,7 @@ const DOC = {
   lcd_revert_seconds: 10, member_max_slots_per_day: 4, admin_bulk_max_items: 50,
   schedule_materialisation_days: 60, schedule_max_rows_per_change: 500, device_error_retention_days: 30,
   device_error_max_open_rows: 200, sse_keepalive_seconds: 25, realtime_fallback_after_failures: 3,
-  realtime_poll_seconds_control_board: 10, control_board_resync_seconds: 300, action_glyphs: "thumbs",
+  realtime_poll_seconds_control_board: 10, control_board_resync_seconds: 300,
   currency_symbol: "R", member_trace_enabled: true,
   fault_spike_count: 5, fault_spike_minutes: 15, application_reminder_hours: 24, admin_notification_retention_days: 90,
   topup_failure_cooldown_minutes: 30,
