@@ -19,7 +19,7 @@ import { describeFailure } from "../../lib/errors";
 import { clubDayOf, shiftClubDay } from "../../lib/gridClock";
 import { memberDetailEndpoints, saveFile } from "../../lib/memberDetailApi";
 import { NIGHT_TAB_COPY } from "../../lib/memberDetailCopy";
-import { buildTimeline, burstOutcomes, durationInWords, hasApproximateTimes } from "../../lib/nightTimeline";
+import { buildTimeline, burstOutcomes, durationInWords, hasApproximateTimes, readableEvents } from "../../lib/nightTimeline";
 import {
   APPROXIMATE_EXPLANATION, NIGHT_EMPTY_HINT, NIGHT_EXPORT_NOTE,
   NIGHT_PRIVACY_NOTICE, actorClause, gapLine, isOnBehalf, nightEmptyNotice, nightWindowHint,
@@ -180,7 +180,7 @@ function useMemberNight(userId: string, day: string) {
 function nightView(view: TraceView | null, name: string | null) {
   const read = view ?? EMPTY_NIGHT;
   const timezone = read.timezone;
-  const events = read.events ?? [];
+  const events = readableEvents(read.events ?? []);
   return {
     timezone,
     events,
@@ -388,7 +388,7 @@ function TraceCard({ event, subjectName, timezone }: {
         <p className="min-w-0 break-words font-medium text-text-primary">
           {/* The server's sentence, rendered. Never one composed here from `kind` — that is
               the dictionary-drift defect this whole surface is written around. */}
-          {event.headline ?? (event.kind ?? "").replace(/_/g, " ")}
+          {event.headline ?? burstOutcomes([event])[0]}
         </p>
         {clause && (
           <span className={onBehalf ? "shrink-0 text-sm text-info-strong" : "shrink-0 text-sm text-text-muted"}>

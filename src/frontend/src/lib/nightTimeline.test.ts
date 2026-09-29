@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  BURST_SECONDS, buildTimeline, burstOutcomes, durationInWords, hasApproximateTimes,
+  BURST_SECONDS, buildTimeline, burstOutcomes, durationInWords, hasApproximateTimes, readableEvents,
 } from "./nightTimeline";
+import { ACCOUNT_EVENT_WORDS, UNKNOWN_ACCOUNT_EVENT } from "./nightCopy";
 import type { TraceEvent } from "./adminApi";
 
 /**
@@ -92,9 +93,9 @@ describe("bursts — three tries at a door are one story", () => {
     expect(rows.map((r) => r.kind)).toEqual(["event", "event", "event"]);
   });
 
-  it("names a kind the server has no word for, and never guesses a sentence for it", () => {
-    expect(burstOutcomes([event({ kind: "unrecognised", headline: null })])).toEqual(["unrecognised"]);
-    expect(burstOutcomes([event({ kind: "some.new_thing", headline: "" })])).toEqual(["some.new thing"]);
+  it("names a kind the server has no word for in words, never as a raw code (F3.6)", () => {
+    expect(burstOutcomes([event({ kind: "unrecognised", headline: null })])).toEqual([UNKNOWN_ACCOUNT_EVENT]);
+    expect(burstOutcomes([event({ kind: "some.new_thing", headline: "" })])).toEqual(["some new thing"]);
   });
 });
 
@@ -169,5 +170,36 @@ describe("approximate times", () => {
   it("is false when nothing says otherwise, which is the only claim available", () => {
     expect(hasApproximateTimes([event(), event()])).toBe(false);
     expect(hasApproximateTimes([event({ approximate: false })])).toBe(false);
+  });
+});
+
+describe("readableEvents — no raw codes on a member's night (F3.6)", () => {
+  const unknown = (raw: string, id: string): TraceEvent => ({
+    at: "2026-09-21T18:00:00.000Z", kind: "unrecognised", source: "audit_log", source_id: id,
+    headline: `Something this club's records have no word for (${raw})`,
+  });
+
+  it("puts every known account event into words", () => {
+    const out = readableEvents([
+      unknown("member.registered", "a1"), unknown("member.approved", "a2"), unknown("user.admin_granted", "a3"),
+      unknown("user.admin_revoked", "a4"), unknown("member_code.rotated", "a5"), unknown("member.passkeys_revoked", "a6"),
+    ]);
+    expect(out.map((e) => e.headline)).toEqual([
+      ACCOUNT_EVENT_WORDS["member.registered"], ACCOUNT_EVENT_WORDS["member.approved"],
+      ACCOUNT_EVENT_WORDS["user.admin_granted"], ACCOUNT_EVENT_WORDS["user.admin_revoked"],
+      ACCOUNT_EVENT_WORDS["member_code.rotated"], ACCOUNT_EVENT_WORDS["member.passkeys_revoked"],
+    ]);
+    expect(out.every((e) => !/[a-z]+[._][a-z]+/.test(e.headline ?? ""))).toBe(true);
+  });
+
+  it("shows a desk top-up once: the audit twin of the ledger movement is dropped", () => {
+    const ledger: TraceEvent = { at: "2026-09-21T18:00:00.000Z", kind: "wallet.topped_up_at_the_desk", source: "ledger", source_id: "l1", headline: "Topped up at the desk" };
+    const out = readableEvents([ledger, unknown("credit.adjusted", "a7"), { ...ledger }]);
+    expect(out).toHaveLength(1);
+    expect(out[0].headline).toBe("Topped up at the desk");
+  });
+
+  it("says a neutral sentence for an account event nobody has a word for", () => {
+    expect(readableEvents([unknown("member.something_new", "a8")])[0].headline).toBe(UNKNOWN_ACCOUNT_EVENT);
   });
 });

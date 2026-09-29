@@ -178,3 +178,30 @@ export const CHANGES_NO_DIFF = "What changed wasn't recorded for this row.";
 export const CHANGES_EXPORT_NOTE
   = "The download has members' names in it. Once it is on your computer it is outside the "
   + "club's own rules about how long any of this is kept.";
+
+/**
+ * Words for account events the night trace's server dictionary has no word for yet — review
+ * round 1, F3.6. The server renders them as "Something this club's records have no word for
+ * (member.registered)", which put raw codes on a member's Night tab. `null` means "not a row on
+ * this night at all": `credit.adjusted` is the audit twin of the ledger movement the money strand
+ * already shows, and printing both showed one desk top-up twice.
+ */
+export const ACCOUNT_EVENT_WORDS: Readonly<Record<string, string | null>> = {
+  "member.registered": "Applied to join the club",
+  "member.approved": "Their application was approved",
+  "member.rejected": "Their application was turned down",
+  "member.suspended": "Their membership was suspended",
+  "member.reactivated": "Their membership was reactivated",
+  "member.admin_granted": "Made an administrator",
+  "member.admin_revoked": "Administrator rights removed",
+  "user.admin_granted": "Made an administrator",
+  "user.admin_revoked": "Administrator rights removed",
+  "member_code.rotated": "Their member code was changed",
+  "member_code.reset": "Their member code was reset at the desk",
+  "member.passkeys_revoked": "Their passkeys were removed",
+  "member.password_reset": "Their password was reset",
+  "credit.adjusted": null,
+};
+
+/** Said for an account event the dictionaries above do not know — never the raw code. */
+export const UNKNOWN_ACCOUNT_EVENT = "Something changed on their account";

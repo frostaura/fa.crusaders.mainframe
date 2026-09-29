@@ -1,4 +1,5 @@
 import type { TraceEvent } from "./adminApi";
+import { ACCOUNT_EVENT_WORDS, UNKNOWN_ACCOUNT_EVENT } from "./nightCopy";
 
 /**
  * A night, reduced to what a person can read: bursts collapsed, gaps drawn, times qualified.
@@ -147,9 +148,8 @@ export function burstOutcomes(events: TraceEvent[]): string[] {
   return events.map((event) => {
     const headline = (event.headline ?? "").trim();
     if (headline) return headline;
-    // Never a guessed sentence for a kind the server has no word for: the raw kind, made
-    // readable, and nothing else. This is the `DoorAuditActions` rule.
-    return (event.kind ?? "unrecognised").replace(/_/g, " ");
+    // Never a raw code on a person's night (F3.6): the kind in words, or the neutral sentence.
+    return event.kind && event.kind !== "unrecognised" ? event.kind.replace(/[._]/g, " ") : UNKNOWN_ACCOUNT_EVENT;
   });
 }
 
@@ -161,4 +161,33 @@ export function burstOutcomes(events: TraceEvent[]): string[] {
  */
 export function hasApproximateTimes(events: TraceEvent[]): boolean {
   return events.some((event) => event.approximate === true);
+}
+
+/** The raw action behind an `unrecognised` row — the server appends it in brackets. */
+function rawActionOf(event: TraceEvent): string | null {
+  const said = /\(([a-z0-9_.]+)\)\s*$/.exec(event.headline ?? "");
+  return said ? said[1] : null;
+}
+
+/**
+ * The night's events as a person reads them (F3.6): an `unrecognised` row gets words from
+ * `ACCOUNT_EVENT_WORDS` or a neutral sentence — never its raw code — a row declared not to be
+ * part of the night is dropped, and a row the server sent twice (same source, same id) shows once.
+ */
+export function readableEvents(events: TraceEvent[]): TraceEvent[] {
+  const seen = new Set<string>();
+  const out: TraceEvent[] = [];
+  for (const event of events) {
+    const identity = event.source && event.source_id ? `${event.source}:${event.source_id}` : null;
+    if (identity) {
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+    }
+    if (event.kind !== "unrecognised") { out.push(event); continue; }
+    const raw = rawActionOf(event);
+    const words = raw !== null && raw in ACCOUNT_EVENT_WORDS ? ACCOUNT_EVENT_WORDS[raw] : UNKNOWN_ACCOUNT_EVENT;
+    if (words === null) continue;
+    out.push({ ...event, headline: words });
+  }
+  return out;
 }
