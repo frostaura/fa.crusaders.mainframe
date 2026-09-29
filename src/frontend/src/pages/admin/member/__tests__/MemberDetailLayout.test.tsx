@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { signOut, unreachable } from "@/test/harness";
-import { ACTIONS_COPY, MEMBER_COPY, MEMBER_TABS, OVERVIEW_COPY } from "@/lib/memberDetailCopy";
+import { ACTIONS_COPY, MEMBER_COPY, MEMBER_TABS, OVERVIEW_COPY, withPlayersLine } from "@/lib/memberDetailCopy";
 import { BASE, MEMBER_ID, baseRoutes, detailFixture, renderMember, serve } from "./memberKit";
+import { heldLine, owedBackQuoteLine } from "@/lib/playersCopy";
 
 /**
  * The member page's frame: who the person is, what they hold, and the six tabs — each a route.
@@ -40,6 +41,27 @@ describe("member detail — header and tabs", () => {
     expect(balance).toHaveTextContent("-16.00 cr");
     expect(balance.className).toMatch(/text-danger-strong/);
     expect(screen.getByText(MEMBER_COPY.balanceOverdrawn)).toBeInTheDocument();
+  });
+
+  it("D9 — says under the balance what is held for partners and what is owed back", async () => {
+    serve(baseRoutes(detailFixture({ balance_credits: 170, held_credits: 20, held_until: null, owed_back_credits: 5 })));
+    renderMember();
+    expect(await screen.findByTestId("member-balance")).toHaveTextContent("170.00 cr");
+    expect(screen.getByText(heldLine(20, null))).toBeInTheDocument();
+    expect(screen.getByText(owedBackQuoteLine(5, "Thandi Mokoena"))).toBeInTheDocument();
+  });
+
+  it("D9 — names the other players on a next booking", async () => {
+    serve(baseRoutes(detailFixture(), [{ path: "/api/v1/bookings/b1", body: {
+      booking_id: "b1", organiser: { user_id: MEMBER_ID, name: "Thandi Mokoena", photo_url: null },
+      players: [
+        { user_id: MEMBER_ID, name: "Thandi Mokoena" },
+        { user_id: "sam", name: "Sam Petersen" },
+        { user_id: null, name: null },
+      ],
+    } }]));
+    renderMember();
+    expect(await screen.findByText(withPlayersLine(["Sam"]))).toBeInTheDocument();
   });
 
   it("books for the member through a LINK to Bookings with the member chosen (R10: links navigate)", async () => {

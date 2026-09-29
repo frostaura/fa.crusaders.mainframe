@@ -7,11 +7,13 @@ import { StateBlock } from "@/components/ui/state-block";
 import { TextLink } from "@/components/ui/text-link";
 import { clubDate, clubInstant } from "@/lib/clubClock";
 import type { MemberDetail } from "@/lib/memberDetailApi";
-import { MEMBER_COPY, OVERVIEW_COPY as COPY, countOf } from "@/lib/memberDetailCopy";
+import { MEMBER_COPY, OVERVIEW_COPY as COPY, countOf, withPlayersLine } from "@/lib/memberDetailCopy";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { BookingLine, StatTile } from "./parts";
 import { zoneNow } from "./memberTime";
 import { useMemberDetail } from "./useMemberDetail";
+import { useOthersOnCourt, type OthersState } from "./useOthersOnCourt";
 
 /**
  * Overview — what a desk needs to know at a glance: when they are next on court, how the last
@@ -21,6 +23,7 @@ export function MemberOverview() {
   const { detail, userId } = useMemberDetail();
   const zone = zoneNow();
   const root = `/admin/members/${encodeURIComponent(userId)}`;
+  const people = useOthersOnCourt(detail.next_bookings.map((b) => b.booking_id), userId);
   return (
     <div className="flex flex-col gap-8">
       <Section
@@ -40,7 +43,9 @@ export function MemberOverview() {
           ) : null}
         >
           <ul className="flex flex-col gap-3">
-            {detail.next_bookings.map((row) => <BookingLine key={row.booking_id} row={row} zone={zone} />)}
+            {detail.next_bookings.map((row) => (
+              <BookingLine key={row.booking_id} row={row} zone={zone} people={<PeopleOn state={people[row.booking_id]} />} />
+            ))}
           </ul>
         </StateBlock>
       </Section>
@@ -61,6 +66,16 @@ export function MemberOverview() {
       </Section>
     </div>
   );
+}
+
+/**
+ * "with Sam" under a next booking (D9). Loading is a short skeleton; a booking with nobody else
+ * says nothing; a failed read also says nothing rather than implying the member plays alone.
+ */
+function PeopleOn({ state }: { state: OthersState | undefined }) {
+  if (!state || state === "loading") return <Skeleton className="inline-block h-3 w-16 align-middle" />;
+  if (state === "failed" || state.length === 0) return null;
+  return <>{withPlayersLine(state)}</>;
 }
 
 function Fact({ term, children, tone }: { term: string; children: ReactNode; tone?: "warning" }) {

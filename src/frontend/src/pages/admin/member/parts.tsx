@@ -23,7 +23,11 @@ function bookedByLine(row: MemberBookingRow): string {
  * One booking. A date tile, the court and the hours, who booked it, then its status, what it
  * cost and — where the caller offers one — the action. Stacks on a phone; one line on a desk.
  */
-export function BookingLine({ row, zone, action }: { row: MemberBookingRow; zone: string; action?: ReactNode }) {
+export function BookingLine({ row, zone, action, people }: {
+  row: MemberBookingRow; zone: string; action?: ReactNode;
+  /** D9 — who else is on the court ("with Sam"), when it has been read. */
+  people?: ReactNode;
+}) {
   const d = dayParts(row.starts_at, zone);
   const status = BOOKING_STATUS[row.status] ?? { word: row.status, tone: "neutral" as const };
   const court = row.court_name ?? COPY.unknownCourt;
@@ -50,6 +54,7 @@ export function BookingLine({ row, zone, action }: { row: MemberBookingRow; zone
           </p>
           <p className="flex flex-wrap items-center gap-x-2 text-sm text-text-secondary">
             <span>{bookedByLine(row)}</span>
+            {people ? <span data-booking-people="">{people}</span> : null}
             {row.checked_in_at ? (
               <span className="inline-flex items-center gap-1 text-success-strong">
                 <CheckCircle size={14} weight="bold" aria-hidden="true" />

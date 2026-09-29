@@ -142,6 +142,12 @@ function passkeySentence(revoked: boolean, removed: number): string {
 
 /* ═══════════════════════════════ OVERVIEW ═══════════════════════════════ */
 
+/** D9 — "with Sam" · "with Sam and Jo" · "with Sam, Jo and Alex", under a next booking. */
+export function withPlayersLine(names: readonly string[]): string {
+  if (names.length <= 1) return `with ${names[0] ?? ""}`.trim();
+  return `with ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
 export const OVERVIEW_COPY = {
   nextTitle: "Next bookings",
   nextDescription: "The courts this member is due on, soonest first.",

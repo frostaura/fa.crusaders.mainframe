@@ -79,6 +79,13 @@ export type MemberDetail = {
   /** D2: the top-up rate and peak standing those groups resolve to. Absent from an API that predates it. */
   tariff?: MemberTariff;
   balance_credits: number;
+  /**
+   * D9 — what of the balance is held for partners (D11 §3a) and owed back to them (P11), as the
+   * member's own wallet says it. Optional: an API that does not send them shows the balance alone.
+   */
+  held_credits?: number;
+  held_until?: string | null;
+  owed_back_credits?: number;
   passkey_count: number;
   fingerprints: { count: number; enrolments: FingerprintEnrolment[] };
   next_bookings: MemberBookingRow[];

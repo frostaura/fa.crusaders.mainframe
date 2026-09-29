@@ -17,9 +17,11 @@ import { errorCode } from "@/lib/api";
 import { ASSIGN_COPY, tariffLine } from "@/lib/groupsCopy";
 import type { MemberDetail } from "@/lib/memberDetailApi";
 import { MEMBER_COPY, MEMBER_TABS, STATUS_WORD, statusTone } from "@/lib/memberDetailCopy";
+import { heldLine, owedBackQuoteLine } from "@/lib/playersCopy";
 import { typography } from "@/lib/typography";
 import { cn, formatCredits } from "@/lib/utils";
 import { MemberActions } from "./MemberActions";
+import { zoneNow } from "./memberTime";
 import { displayName, useMemberDetailRead, type MemberDetailContext, type MemberDetailState } from "./useMemberDetail";
 import { useMemberTopUp } from "./useMemberTopUp";
 
@@ -244,6 +246,22 @@ function GroupChips({ groups }: { groups: MemberGroupChip[] }) {
   );
 }
 
+/**
+ * D9 — the parts of the balance that are not free to spend, in the member wallet's own words: a
+ * desk reading "170" could not see that 20 of it was held for partners' shares until the games
+ * were 48 hours past, or that some was owed back. Nothing when there is none of either.
+ */
+function BalanceParts({ detail, name }: { detail: MemberDetail; name: string }) {
+  const held = detail.held_credits ?? 0;
+  const owed = detail.owed_back_credits ?? 0;
+  return (
+    <>
+      {held > 0 ? <dd data-held-line="" className="text-xs text-text-secondary">{heldLine(held, detail.held_until ?? null, zoneNow())}</dd> : null}
+      {owed > 0 ? <dd data-owed-back-line="" className="max-w-xs text-xs text-text-secondary">{owedBackQuoteLine(owed, name)}</dd> : null}
+    </>
+  );
+}
+
 function BalancePanel({ detail, name, onTopUp }: { detail: MemberDetail; name: string; onTopUp: () => void }) {
   const overdrawn = detail.balance_credits < 0;
   const canBook = detail.status === "Active";
@@ -258,6 +276,7 @@ function BalancePanel({ detail, name, onTopUp }: { detail: MemberDetail; name: s
           {formatCredits(detail.balance_credits)}
         </dd>
         {overdrawn ? <dd className="text-xs text-danger-strong">{MEMBER_COPY.balanceOverdrawn}</dd> : null}
+        <BalanceParts detail={detail} name={name} />
       </dl>
       <div className="flex flex-wrap gap-2">
         <Button onClick={onTopUp} icon={<Plus weight="bold" aria-hidden="true" />} className="flex-1 sm:flex-none">
