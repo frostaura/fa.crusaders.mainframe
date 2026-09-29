@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { LANDING_PATH } from "@/components/shell/nav";
 import { useAuth } from "@/lib/auth";
-import { markOffered, shouldOfferWizard, wasOffered } from "@/lib/onboarding";
+import { arrivedFromSignIn, markOffered, shouldOfferWizard, wasOffered } from "@/lib/onboarding";
 import { GET_STARTED_PATH } from "@/lib/onboardingCopy";
 import { useOnboarding, useProfileOrNull } from "./useOnboarding";
 
@@ -18,7 +18,8 @@ import { useOnboarding, useProfileOrNull } from "./useOnboarding";
  * </p>
  *
  * <p>
- * <b>What it never does</b> (`shouldOfferWizard`): act on any route but the landing, so no task
+ * <b>What it never does</b> (`shouldOfferWizard`): act on any route but the landing a sign-in just
+ * delivered the member to (F4.8 — never on a My Code opened at the door), so no task
  * a member or admin chose is interrupted; act while offline or on a password-change session;
  * or act on "cannot tell" — an API without preferences, or a profile read that failed.
  * </p>
@@ -27,7 +28,7 @@ export function FirstRunGate() {
   const auth = useAuth();
   const profile = useProfileOrNull();
   const { memberDue, userId } = useOnboarding();
-  const { pathname } = useLocation();
+  const { pathname, state } = useLocation();
   const navigate = useNavigate();
 
   const offer = shouldOfferWizard({
@@ -35,6 +36,7 @@ export function FirstRunGate() {
     mustChangePassword: auth.status === "authenticated" && auth.mustChangePassword,
     pathname,
     landing: LANDING_PATH,
+    arrivedFromSignIn: arrivedFromSignIn(state),
     status: profile?.status,
     due: memberDue,
     alreadyOffered: wasOffered(userId),

@@ -153,7 +153,7 @@ describe("whether the admin tour is owed", () => {
 
 describe("the first-run gate", () => {
   const base = {
-    signedIn: true, mustChangePassword: false, pathname: "/my-code", landing: "/my-code",
+    signedIn: true, mustChangePassword: false, pathname: "/my-code", landing: "/my-code", arrivedFromSignIn: true,
     status: "active", due: true as boolean | null, alreadyOffered: false,
   };
 
@@ -163,6 +163,8 @@ describe("the first-run gate", () => {
 
   it.each([
     ["on any other route", { pathname: "/bookings" }],
+    // F4.8 — My Code opened directly is a member at a door, not a first arrival.
+    ["on a landing nobody signed in to reach", { arrivedFromSignIn: false }],
     ["on an admin route mid-task", { pathname: "/admin/members" }],
     ["when already offered in this tab", { alreadyOffered: true }],
     ["when it cannot tell", { due: null }],

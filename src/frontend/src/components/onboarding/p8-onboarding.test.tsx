@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import type { ReactNode } from "react";
 import GetStartedPage from "../../pages/GetStarted";
 import { ProfileProvider } from "../../lib/profile";
-import { ONBOARDING_STORAGE_KEY, type OnboardingPrefs } from "../../lib/onboarding";
+import { ONBOARDING_STORAGE_KEY, SIGNED_IN_ARRIVAL, type OnboardingPrefs } from "../../lib/onboarding";
 import { ADMIN_TOUR, CHECKLIST, GET_STARTED } from "../../lib/onboardingCopy";
 import { PRIVACY_COPY } from "../../lib/playersCopy";
 import { refuse, renderPage, signIn, signOut, stubFetch, type StubRoute } from "../../test/harness";
@@ -189,11 +189,16 @@ describe("the welcome wizard's steps", () => {
 });
 
 describe("the first-run gate", () => {
+  /**
+   * `/signed-in` stands for a sign-in's own navigation: it lands on My Code carrying the router
+   * state Login sends (F4.8). A bare `/my-code` entry is the member opening it at the door.
+   */
   function gateAt(entry: string) {
     return withProfile(
       <>
         <FirstRunGate />
         <Routes>
+          <Route path="/signed-in" element={<Navigate to="/my-code" replace state={SIGNED_IN_ARRIVAL} />} />
           <Route path="/my-code" element={<p>My code landing</p>} />
           <Route path="/bookings" element={<p>Bookings page</p>} />
           <Route path="/get-started" element={<p>Wizard page</p>} />
@@ -203,26 +208,28 @@ describe("the first-run gate", () => {
     );
   }
 
-  it("sends a newly approved member from the landing to the wizard", async () => {
+  it("sends a newly approved member from the landing to the wizard, straight after signing in", async () => {
     api();
-    gateAt("/my-code");
+    gateAt("/signed-in");
     expect(await screen.findByText("Wizard page")).toBeInTheDocument();
   });
 
   it("does it once per tab, not on every arrival at the landing", async () => {
     const { userId } = api();
     window.sessionStorage.setItem("crusaders.onboarding.offered", userId);
-    gateAt("/my-code");
+    gateAt("/signed-in");
     await waitFor(() => expect(screen.getByText("My code landing")).toBeInTheDocument());
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(screen.queryByText("Wizard page")).toBeNull();
   });
 
   it.each([
-    ["a member who finished it", { prefs: { member_onboarding_completed_at: "2026-09-01T10:00:00Z" } }, "/my-code"],
-    ["a member who dismissed it", { prefs: { member_onboarding_dismissed_at: "2026-09-01T10:00:00Z" } }, "/my-code"],
-    ["an API that sends no preferences", { prefs: null }, "/my-code"],
-    ["an account with no membership", { status: null }, "/my-code"],
+    ["a member who finished it", { prefs: { member_onboarding_completed_at: "2026-09-01T10:00:00Z" } }, "/signed-in"],
+    ["a member who dismissed it", { prefs: { member_onboarding_dismissed_at: "2026-09-01T10:00:00Z" } }, "/signed-in"],
+    ["an API that sends no preferences", { prefs: null }, "/signed-in"],
+    ["an account with no membership", { status: null }, "/signed-in"],
+    // F4.8 — the wizard owed, and My Code opened directly: the app's start URL, at a door.
+    ["a member who opened My Code at the door", {}, "/my-code"],
     ["a member who opened another page", {}, "/bookings"],
   ] as const)("leaves %s where they are", async (_why, setup, entry) => {
     const { stub } = api(setup as Setup);

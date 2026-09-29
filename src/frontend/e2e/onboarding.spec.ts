@@ -1,5 +1,6 @@
 import { SESSION_ADMIN, SESSION_ANON, serveApi, signIn, test, expect, type ApiRoute, memberCodeRoutes } from "./fixtures";
 import { ADMIN_TOUR, CHECKLIST, GET_STARTED, REPLAY_ADMIN_TOUR, REPLAY_WELCOME } from "../src/lib/onboardingCopy";
+import { LOGIN } from "../src/lib/authCopy";
 
 /**
  * Item 16 — "How it works", and the one card that is pushed.
@@ -240,12 +241,37 @@ function p8Routes(opts: { admin?: boolean; prefs?: Partial<typeof PREFS>; record
   ];
 }
 
+/**
+ * F4.8 — the wizard is offered on the landing a SIGN-IN delivers the member to, so these walks
+ * sign in through the form. A token planted before load is a member reopening the app — at a
+ * door, most likely — and that must land on the code.
+ */
+async function signInThroughForm(page: import("@playwright/test").Page) {
+  await page.goto("/login");
+  await page.getByLabel(LOGIN.email, { exact: true }).fill("thandi@review.test");
+  await page.getByLabel(LOGIN.password, { exact: true }).fill("correct horse");
+  await page.getByRole("button", { name: LOGIN.submit, exact: true }).click();
+}
+
+function loginRoute(): ApiRoute {
+  return { method: "POST", path: "/api/v1/auth/login", body: { access_token: "e2e-token", user_id: SESSION_MEMBER.user_id, is_admin: false } };
+}
+
 test.describe("P8: the welcome wizard", () => {
-  test("a newly approved member lands on it once, walks it, and finishes on My Code", async ({ page }) => {
+  test("never puts the wizard between a member and their code when My Code is opened directly", async ({ page }) => {
     const recorder: Recorder = { calls: [] };
     await signIn(page);
     await serveApi(page, p8Routes({ recorder }));
     await page.goto("/my-code");
+    await expect(page.getByRole("article", { name: "Your member pass" })).toBeVisible();
+    await expect(page.getByText(GET_STARTED.stepOf(1, 8))).toHaveCount(0);
+    await expect(page).toHaveURL(/\/my-code$/);
+  });
+
+  test("a newly approved member lands on it once, walks it, and finishes on My Code", async ({ page }) => {
+    const recorder: Recorder = { calls: [] };
+    await serveApi(page, p8Routes({ recorder, extra: [loginRoute()] }));
+    await signInThroughForm(page);
 
     await expect(page).toHaveURL(/\/get-started$/);
     await expect(page.getByRole("heading", { level: 1, name: GET_STARTED.title })).toBeVisible();
@@ -279,9 +305,8 @@ test.describe("P8: the welcome wizard", () => {
 
   test("can be skipped, which the club records as a dismissal", async ({ page }) => {
     const recorder: Recorder = { calls: [] };
-    await signIn(page);
-    await serveApi(page, p8Routes({ recorder }));
-    await page.goto("/my-code");
+    await serveApi(page, p8Routes({ recorder, extra: [loginRoute()] }));
+    await signInThroughForm(page);
     await expect(page).toHaveURL(/\/get-started$/);
 
     await page.getByRole("button", { name: GET_STARTED.skip }).click();

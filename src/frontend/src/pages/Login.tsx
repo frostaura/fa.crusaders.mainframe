@@ -14,6 +14,7 @@ import { TextLink } from "../components/ui/text-link";
 import { Envelope, Fingerprint, Phone } from "../components/ui/icons";
 import { AUTH_SUBLINE, FIELD_REQUIRED, LOGIN, LOGIN_REFUSAL } from "../lib/authCopy";
 import { LANDING_PATH } from "../components/shell/nav";
+import { SIGNED_IN_ARRIVAL } from "../lib/onboarding";
 
 // Seeded by Seeder.cs in Development. Hidden behind import.meta.env.DEV so it disappears in prod builds.
 const DEV_ADMIN_EMAIL = "any@frostaura.net";
@@ -241,7 +242,9 @@ function useSignIn(onRefused: (refusal: Refusal | null) => void, ending: Session
   const land = (userId?: string) => {
     auth.clearSessionExpired();
     const theirs = from.onlyFor === null || from.onlyFor === userId;
-    nav(theirs ? from.path : LANDING_PATH, { replace: true });
+    // F4.8 — the state is what lets the first-run gate offer the wizard HERE, after a sign-in,
+    // and never to a member who opened My Code at a door.
+    nav(theirs ? from.path : LANDING_PATH, { replace: true, state: SIGNED_IN_ARRIVAL });
   };
   const password = useAsyncAction((e: string, p: string) => auth.login(e, p), {
     success: land,

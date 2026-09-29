@@ -235,20 +235,36 @@ export function adminTourDue(prefs: OnboardingPrefs | null, local: LocalOnboardi
  * change. The landing is the only screen a member did not choose: sending somebody to a wizard
  * from a page they deliberately opened is taking them away from a task.
  * </p>
+ *
+ * <p>
+ * <b>And only on the landing a sign-in just delivered them to (F4.8).</b> The landing is My
+ * Code, which is also the installed app's start URL and what a member opens at a locked door —
+ * and "Step 1 of 8" there is a member who cannot get in. Opening `/my-code` directly (the app,
+ * a bookmark, a link) is never interrupted; the page's setup checklist offers the wizard instead.
+ * </p>
  */
 export function shouldOfferWizard(input: {
   signedIn: boolean;
   mustChangePassword: boolean;
   pathname: string;
   landing: string;
+  /** The landing was reached by a sign-in's own navigation (router state `signedIn`). */
+  arrivedFromSignIn: boolean;
   status: string | null | undefined;
   due: boolean | null;
   alreadyOffered: boolean;
 }): boolean {
   if (!input.signedIn || input.mustChangePassword) return false;
-  if (input.pathname !== input.landing) return false;
+  if (input.pathname !== input.landing || !input.arrivedFromSignIn) return false;
   if ((input.status ?? "").toLowerCase() !== "active") return false;
   return input.due === true && !input.alreadyOffered;
+}
+
+/** Router state a sign-in navigates with, so the gate can tell a fresh arrival from a door visit. */
+export const SIGNED_IN_ARRIVAL = { signedIn: true } as const;
+
+export function arrivedFromSignIn(state: unknown): boolean {
+  return !!state && typeof state === "object" && (state as { signedIn?: unknown }).signedIn === true;
 }
 
 /** "Offered in this tab already" — session storage, per user, so a new sign-in is a new session. */
