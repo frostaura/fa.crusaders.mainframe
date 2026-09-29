@@ -56,15 +56,11 @@ export function ResultCard({ bookingId }: { bookingId: string }) {
   };
   // 404 is an answer: this viewer is not a player of the booking (an admin looking in), and a
   // result is only ever shown to its players (§3.4). Nothing to say, so the card is not drawn.
-  // `result_not_found` is the one 404 that means something else — the booking is the viewer's
+  // `result_not_found` is the one 404 that means something else — the booking is one the viewer played
   // and simply has no result — so it reads as "no result yet", never as a hidden card.
   if (!read.data && read.error instanceof ApiError && read.error.status === 404) {
     if (read.error.code !== "result_not_found") return null;
-    return (
-      <Section title={RESULT_CARD.title} description={RESULT_CARD.description} data-result-card="">
-        <p data-result-status="none" className="text-sm text-text-secondary">{RESULT_CARD.noneYet}</p>
-      </Section>
-    );
+    return <NoResultYet />;
   }
   return (
     <Section title={RESULT_CARD.title} description={RESULT_CARD.description} data-result-card="">
@@ -261,5 +257,13 @@ function Withdraw({ result, read, say }: { result: MatchResult; read: ResultRead
         }
       }}
     />
+  );
+}
+
+function NoResultYet() {
+  return (
+    <Section title={RESULT_CARD.title} description={RESULT_CARD.description} data-result-card="">
+      <p data-result-status="none" className="text-sm text-text-secondary">{RESULT_CARD.noneYet}</p>
+    </Section>
   );
 }
