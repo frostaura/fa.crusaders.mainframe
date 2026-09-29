@@ -43,7 +43,11 @@ export type ResultPlayer = {
 
 export type NamedMember = { user_id: string; name: string };
 
-/** `result` (§6.1). `viewer_*` is null for someone not in the lineup (an organiser who sat out). */
+/**
+ * `result` (§6.1). `viewer_*` is null for someone not in the lineup (an organiser who sat out);
+ * `viewer_outcome` is computed whatever the status — only a confirmed one counts, so the card says
+ * it for `confirmed` alone. `confirm_due_at` is set only while `pending`.
+ */
 export type MatchResult = {
   result_id: string;
   booking_id: string;
@@ -80,9 +84,13 @@ export type ResultPermissions = {
   can_withdraw: boolean;
 };
 
-/** `GET /api/v1/bookings/{id}/result`. */
+/**
+ * `GET /api/v1/bookings/{id}/result`. `timezone` is the club's IANA zone — a cold entry point
+ * (the confirm mail links here), so the API client learns the club's day from it.
+ */
 export type BookingResultView = {
   booking_id: string;
+  timezone: string;
   result: MatchResult | null;
   permissions: ResultPermissions;
   not_recordable_reason: NotRecordableReason | null;
@@ -163,7 +171,7 @@ export type MyPlay = {
 
 /** A row of `GET /me/play/results`: the result, and where and when it was played. */
 export type MyResultRow = MatchResult & { court_name: string | null; starts_at: string };
-export type MyResultsPage = { items: MyResultRow[]; next_cursor: string | null };
+export type MyResultsPage = { timezone: string; items: MyResultRow[]; next_cursor: string | null };
 
 export type CelebrationKind = "badge" | "goal_reached";
 export type Celebration = {
@@ -174,6 +182,9 @@ export type Celebration = {
   goal_minutes: number | null;
   created_at: string;
 };
+
+/** `GET /me/play/celebrations` — unseen, oldest first, at most 10, with the club's zone. */
+export type CelebrationsPage = { timezone: string; items: Celebration[] };
 
 /* ─────────────────────────────── admin ─────────────────────────────── */
 
@@ -235,7 +246,7 @@ export const playEndpoints = {
   startPause: () => api.post<Pause>("/api/v1/me/play/pause", {}),
   endPause: () => api.del<Pause>("/api/v1/me/play/pause"),
   myResults: (cursor?: string | null, limit = 20) => api.get<MyResultsPage>(paged("/api/v1/me/play/results", { cursor, limit })),
-  celebrations: () => api.get<{ items: Celebration[] }>("/api/v1/me/play/celebrations"),
+  celebrations: () => api.get<CelebrationsPage>("/api/v1/me/play/celebrations"),
   celebrationsSeen: (ids: string[]) => api.post<{ seen: number }>("/api/v1/me/play/celebrations/seen", { ids }),
 
   /* admin (§6.3) — every write lands in the change record */

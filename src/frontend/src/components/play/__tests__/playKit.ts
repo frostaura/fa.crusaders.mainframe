@@ -41,7 +41,7 @@ const NO_HANDS = { can_record: false, can_edit: false, can_confirm: false, can_d
 
 export function view(overrides: Partial<BookingResultView> = {}): BookingResultView {
   return {
-    booking_id: BOOKING, result: null,
+    booking_id: BOOKING, timezone: "Africa/Johannesburg", result: null,
     permissions: { ...NO_HANDS, can_record: true },
     not_recordable_reason: null, record_closes_at: "2026-10-07T16:45:00Z",
     candidates: [NOMSA, SAM_P],

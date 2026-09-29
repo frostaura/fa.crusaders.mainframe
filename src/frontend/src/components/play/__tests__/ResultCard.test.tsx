@@ -65,6 +65,13 @@ describe("reading", () => {
     await waitFor(() => expect(stub.calls.some((c) => c.path === RESULT_PATH)).toBe(true));
     await waitFor(() => expect(card()).toBeNull());
   });
+
+  it("reads a 404 result_not_found as 'no result yet', never as a hidden card", async () => {
+    serve([{ path: RESULT_PATH, status: 404, body: { error: "result_not_found" } }]);
+    renderCard();
+    expect(await screen.findByText(RESULT_CARD.noneYet)).toBeInTheDocument();
+    expect(card()).not.toBeNull();
+  });
 });
 
 describe("every status", () => {

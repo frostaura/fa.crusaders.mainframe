@@ -66,7 +66,7 @@ test.describe("the celebration", () => {
     const state = { items: [celebrationFixture()] as Record<string, unknown>[], seen: [] as string[] };
     await open(page, {
       extra: [
-        { path: "/api/v1/me/play/celebrations", respond: () => ({ items: state.items }) },
+        { path: "/api/v1/me/play/celebrations", respond: () => ({ timezone: "Africa/Johannesburg", items: state.items }) },
         {
           method: "POST", path: "/api/v1/me/play/celebrations/seen",
           respond: ({ body }) => {
@@ -100,7 +100,7 @@ test.describe("the celebration", () => {
 
   test("appears at rest under reduced motion", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
-    await open(page, { extra: [{ path: "/api/v1/me/play/celebrations", body: { items: [celebrationFixture()] } }] });
+    await open(page, { extra: [{ path: "/api/v1/me/play/celebrations", body: { timezone: "Africa/Johannesburg", items: [celebrationFixture()] } }] });
     await page.goto("/profile");
     const medallion = page.locator("[data-celebration-medallion]");
     await expect(medallion).toBeVisible();

@@ -49,7 +49,7 @@ function renderAt(path: string, extra?: React.ReactNode) {
 
 function served(items: ReturnType<typeof celebration>[]) {
   return serve([
-    { path: LIST, body: { items } },
+    { path: LIST, body: { timezone: "Africa/Johannesburg", items } },
     { method: "POST", path: SEEN, respond: (req) => ({ seen: ((req.body as { ids: string[] }).ids).length }) },
   ]);
 }

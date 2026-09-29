@@ -35,7 +35,7 @@ export function resultFixture(overrides: Json = {}): Json {
 
 export function viewFixture(overrides: Json = {}): Json {
   return {
-    booking_id: BOOKING, result: null,
+    booking_id: BOOKING, timezone: "Africa/Johannesburg", result: null,
     permissions: { ...NO_HANDS, can_record: true },
     not_recordable_reason: null, record_closes_at: tomorrowAt(21),
     candidates: [NOMSA, SAM_P],

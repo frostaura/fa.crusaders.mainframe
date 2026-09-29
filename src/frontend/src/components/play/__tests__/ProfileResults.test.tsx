@@ -16,8 +16,8 @@ const row = (id: string, overrides = {}) => ({ ...result({ result_id: id, status
 describe("my results", () => {
   it("lists each match with its place, status and the member's own outcome, then pages on", async () => {
     const stub = serve([
-      { path: `${LIST}?limit=20`, body: { items: [row("r1")], next_cursor: "cur-2" } },
-      { path: `${LIST}?cursor=cur-2`, body: { items: [row("r2", { status: "disputed" })], next_cursor: null } },
+      { path: `${LIST}?limit=20`, body: { timezone: "Africa/Johannesburg", items: [row("r1")], next_cursor: "cur-2" } },
+      { path: `${LIST}?cursor=cur-2`, body: { timezone: "Africa/Johannesburg", items: [row("r2", { status: "disputed" })], next_cursor: null } },
     ]);
     renderPage(<ProfileResultsPage />);
     const list = await waitFor(() => {
@@ -36,7 +36,7 @@ describe("my results", () => {
   });
 
   it("says an empty history as empty, and a failed read as a failure", async () => {
-    serve([{ path: LIST, body: { items: [], next_cursor: null } }]);
+    serve([{ path: LIST, body: { timezone: "Africa/Johannesburg", items: [], next_cursor: null } }]);
     renderPage(<ProfileResultsPage />);
     expect(await screen.findByText(RESULTS_PAGE.emptyTitle)).toBeInTheDocument();
   });

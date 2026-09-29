@@ -442,6 +442,11 @@ export const PLAY_REFUSAL: Record<string, string> = {
   result_not_disputed: "That result isn't disputed any more. The list has the latest.",
   result_not_found: "That result isn't there any more.",
   booking_not_found: "That booking isn't there any more — or you're not on it.",
+  member_not_found: "That member isn't at this club any more.",
+  limit_invalid: "Something went wrong loading that. Try again.",
+  status_invalid: "Something went wrong loading that. Try again.",
+  ids_invalid: "Something went wrong sending that. Try again.",
+  settings_invalid: "Something went wrong saving that. Try again.",
 };
 
 const LINEUP_REASON: Record<string, string> = {

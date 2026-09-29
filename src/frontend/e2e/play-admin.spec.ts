@@ -33,7 +33,7 @@ async function open(page: Page, theme?: "light" | "dark") {
     { path: "/api/v1/admin/monitoring/summary", body: { open: {} } },
     { path: "/api/v1/admin/members", body: [] },
     { path: "/api/v1/me/notifications/unread-count", body: { unread_count: 0 } },
-    { path: "/api/v1/me/play/celebrations", body: { items: [] } },
+    { path: "/api/v1/me/play/celebrations", body: { timezone: "Africa/Johannesburg", items: [] } },
     { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
     { path: `${LIST}/disputed/count`, respond: () => ({ count: state.rows.length }) },
     { path: LIST, respond: () => ({ items: state.rows, next_cursor: null, count: state.rows.length }) },

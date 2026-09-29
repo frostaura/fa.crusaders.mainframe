@@ -128,6 +128,6 @@ export function memberShellRoutes(options: { unread?: number; invites?: unknown[
     { path: "/api/v1/me/invites", body: { items: invites, count: invites.length, timezone: CLUB_ZONE } },
     { path: "/api/v1/me/door", body: { doors: true, doors_shut: "none" } },
     // P12 — the celebration overlay asks on every signed-in screen; none waiting by default.
-    { path: "/api/v1/me/play/celebrations", body: { items: [] } },
+    { path: "/api/v1/me/play/celebrations", body: { timezone: CLUB_ZONE, items: [] } },
   ];
 }
