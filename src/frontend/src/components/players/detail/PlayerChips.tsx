@@ -24,23 +24,25 @@ export function PlayerChips({ detail, actions }: Props) {
   return (
     <div className="flex flex-col gap-6">
       <div className="grid gap-4 sm:grid-cols-2">
-        <Team label={DETAIL_COPY.teamA} seats={seats.slice(0, 2)} mine={mine} actions={actions} cancelled={cancelled} />
-        <Team label={DETAIL_COPY.teamB} seats={seats.slice(2, 4)} mine={mine} actions={actions} cancelled={cancelled} />
+        <Team label={DETAIL_COPY.teamA} seats={seats.slice(0, 2)} mine={mine} actions={actions} cancelled={cancelled} players={detail.players} />
+        <Team label={DETAIL_COPY.teamB} seats={seats.slice(2, 4)} mine={mine} actions={actions} cancelled={cancelled} players={detail.players} />
       </div>
-      {former.length > 0 ? <Former players={former} actions={actions} /> : null}
+      {former.length > 0 ? <Former players={former} all={detail.players} actions={actions} /> : null}
     </div>
   );
 }
 
-type TeamProps = { label: string; seats: SeatPosition[]; mine: string | null; actions?: SeatActions; cancelled: boolean };
+type TeamProps = {
+  label: string; seats: SeatPosition[]; mine: string | null; actions?: SeatActions; cancelled: boolean; players: readonly DetailPlayer[];
+};
 
-function Team({ label, seats, mine, actions, cancelled }: TeamProps) {
+function Team({ label, seats, mine, actions, cancelled, players }: TeamProps) {
   return (
     <div className="flex flex-col gap-2">
       <h3 className="text-xs font-semibold uppercase tracking-overline text-text-secondary">{label}</h3>
       <ul className="flex flex-col gap-2">
         {seats.map((s) => (s.player
-          ? <SeatChip key={s.seat} player={s.player} isMe={s.player.participant_id !== null && s.player.participant_id === mine} actions={actions} cancelled={cancelled} />
+          ? <SeatChip key={s.seat} player={s.player} isMe={s.player.participant_id !== null && s.player.participant_id === mine} actions={actions} cancelled={cancelled} players={players} />
           : <FreeSeat key={s.seat} seat={s.seat} />))}
       </ul>
     </div>
@@ -70,10 +72,12 @@ function SeatAvatar({ player, name }: { player: DetailPlayer; name: string }) {
   );
 }
 
-type ChipProps = { player: DetailPlayer; isMe: boolean; actions?: SeatActions; cancelled?: boolean };
+type ChipProps = {
+  player: DetailPlayer; isMe: boolean; actions?: SeatActions; cancelled?: boolean; players?: readonly DetailPlayer[];
+};
 
-function SeatChip({ player, isMe, actions, cancelled = false }: ChipProps) {
-  const name = seatName(player);
+function SeatChip({ player, isMe, actions, cancelled = false, players }: ChipProps) {
+  const name = seatName(player, players);
   const shown = isMe ? DETAIL_COPY.you(name) : name;
   const word = statusWord(player, cancelled);
   const extra = actions?.(player);
@@ -109,13 +113,13 @@ function CheckedIn({ at }: { at: string | null }) {
   );
 }
 
-function Former({ players, actions }: { players: DetailPlayer[]; actions?: SeatActions }) {
+function Former({ players, all, actions }: { players: DetailPlayer[]; all: readonly DetailPlayer[]; actions?: SeatActions }) {
   return (
     <div className="flex flex-col gap-2">
       <h3 className="text-xs font-semibold uppercase tracking-overline text-text-secondary">{DETAIL_COPY.formerTitle}</h3>
       <ul className="flex flex-col gap-2">
         {players.map((p) => (
-          <SeatChip key={p.participant_id ?? `former-${p.seat}`} player={p} isMe={false} actions={actions} />
+          <SeatChip key={p.participant_id ?? `former-${p.seat}`} player={p} isMe={false} actions={actions} players={all} />
         ))}
       </ul>
     </div>

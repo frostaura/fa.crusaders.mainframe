@@ -55,6 +55,7 @@ function lineFor(p: DetailPlayer): string {
     case "lapsed": return DETAIL_MONEY.lapsedRow;
     case "invited": case "open_link": return DETAIL_MONEY.invitedRow(share);
     case "needs_consent": return DETAIL_MONEY.askedAgainRow(share, formatCredits(p.consented_credits));
+    case "not_agreed": return DETAIL_MONEY.notAgreedRow(share);
     default: return p.unpaid_credits > 0 ? DETAIL_MONEY.unpaidRow(share) : DETAIL_MONEY.paidRow(formatCredits(p.paid_credits), share);
   }
 }
@@ -72,7 +73,8 @@ function PerPlayer({ detail, deadline }: { detail: BookingDetail; deadline: stri
         {live.map((p) => (
           <li key={p.participant_id ?? `seat-${p.seat}`} className="flex items-baseline justify-between gap-4">
             <span className="min-w-0 break-words font-medium text-text-primary">
-              {p.participant_id !== null && p.participant_id === detail.viewer.participant_id ? DETAIL_COPY.you(seatName(p)) : seatName(p)}
+              {p.participant_id !== null && p.participant_id === detail.viewer.participant_id
+                ? DETAIL_COPY.you(seatName(p, detail.players)) : seatName(p, detail.players)}
             </span>
             <span className="text-right tabular-nums text-text-secondary">{lineFor(p)}</span>
           </li>
@@ -80,7 +82,7 @@ function PerPlayer({ detail, deadline }: { detail: BookingDetail; deadline: stri
       </ul>
       {unpaid.map((p) => (
         <p key={`unpaid-${p.participant_id}`} className="text-sm text-text-secondary">
-          {DETAIL_MONEY.unpaidSentence(seatName(p), deadline, toWhom)}
+          {DETAIL_MONEY.unpaidSentence(seatName(p, detail.players), deadline, toWhom)}
         </p>
       ))}
     </div>
@@ -109,7 +111,7 @@ function CancelledMoney({ detail }: { detail: BookingDetail }) {
         <ul className="grid gap-2 text-sm">
           {live.map((p) => (
             <li key={p.participant_id ?? `seat-${p.seat}`} className="flex items-baseline justify-between gap-4">
-              <span className="min-w-0 break-words font-medium text-text-primary">{seatName(p)}</span>
+              <span className="min-w-0 break-words font-medium text-text-primary">{seatName(p, detail.players)}</span>
               <span className="text-right tabular-nums text-text-secondary">
                 {p.paid_credits > 0 ? DETAIL_CANCELLED.paidRow(formatCredits(p.paid_credits)) : DETAIL_CANCELLED.nothingToPay}
               </span>

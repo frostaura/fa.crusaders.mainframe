@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { refuse, signOut, type StubCall } from "@/test/harness";
-import { DETAIL_ADMIN, PLAYERS_REFUSAL } from "@/lib/playersCopy";
+import { DETAIL_ADMIN, DETAIL_MONEY, PLAYERS_REFUSAL, STATUS_WORD } from "@/lib/playersCopy";
 import { ALEX_SEAT, BOOKING, DETAIL_PATH, PID, adminView, renderDetail, seat, serve } from "./detailKit";
 
 vi.mock("@/components/players/PlayerPicker", () => ({ PlayerPicker: () => null, PlayerPickerDialog: () => null }));
@@ -39,7 +39,7 @@ describe("collect", () => {
     }] });
     const dialog = await openAct(DETAIL_ADMIN.collect);
     expect(dialog).toHaveTextContent(DETAIL_ADMIN.changeLog);
-    const box = within(dialog).getByRole("checkbox", { name: DETAIL_ADMIN.overdraftCollect("25.00 cr", "Alex") });
+    const box = within(dialog).getByRole("checkbox", { name: DETAIL_ADMIN.overdraftCollect("25.00 cr", "Alex Naidoo") });
     fireEvent.click(within(dialog).getByRole("button", { name: DETAIL_ADMIN.collectConfirm }));
     expect(within(dialog).getByText(DETAIL_ADMIN.reasonMissing)).toBeInTheDocument();
     expect(within(dialog).getByText(DETAIL_ADMIN.overdraftMissing)).toBeInTheDocument();
@@ -77,7 +77,7 @@ describe("remove and settle — the overdraft asked for by the server", () => {
     expect(within(dialog).queryByRole("checkbox")).not.toBeInTheDocument();
     reason(dialog, "Paid cash");
     fireEvent.click(within(dialog).getByRole("button", { name: confirm }));
-    const box = await within(dialog).findByRole("checkbox", { name: DETAIL_ADMIN.overdraftReturn("Sam") });
+    const box = await within(dialog).findByRole("checkbox", { name: DETAIL_ADMIN.overdraftReturn("Sam Petersen") });
     expect(within(dialog).getByText(DETAIL_ADMIN.overdraftAsked)).toBeInTheDocument();
     fireEvent.click(box);
     fireEvent.click(within(dialog).getByRole("button", { name: confirm }));
@@ -87,6 +87,46 @@ describe("remove and settle — the overdraft asked for by the server", () => {
       { reason: "Paid cash", allowNegativeBalance: false },
       { reason: "Paid cash", allowNegativeBalance: true },
     ]);
+  });
+});
+
+describe("R1 F2.13 — the go-ahead says who goes below zero, and by how much", () => {
+  it("names the organiser in full, the return, what is covered and the shortfall", async () => {
+    serve({ admin: true, detail: adminView(), extra: [{
+      method: "POST", path: `${ADMIN_SEAT}/settle-outside`, status: 400,
+      body: { error: "overdraft_not_authorised", return_credits: 40, covered_credits: 10 },
+    }] });
+    const dialog = await openAct(DETAIL_ADMIN.settle);
+    reason(dialog, "Paid cash");
+    fireEvent.click(within(dialog).getByRole("button", { name: DETAIL_ADMIN.settleConfirm }));
+    const sentence = DETAIL_ADMIN.overdraftReturn("Sam Petersen", { returned: "40.00 cr", covered: "10.00 cr", short: "30.00 cr", partner: "Alex Naidoo" });
+    expect(sentence).toMatch(/Sam Petersen/);
+    expect(sentence).toMatch(/30\.00 cr/);
+    expect(await within(dialog).findByRole("checkbox", { name: sentence })).toBeInTheDocument();
+  });
+
+  it("accepted by the club (no consent) reads as a share not agreed — never 'Asked again … said yes to 0.00'", async () => {
+    serve({ admin: true, detail: adminView({
+      players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), seat({ ...ALEX_SEAT, seat: 2, team: "A", status: "accepted", consented_credits: 0, needs_consent: true, unpaid_credits: 0 })],
+    }) });
+    renderDetail();
+    expect(await screen.findByText(DETAIL_MONEY.notAgreedRow("25.00 cr"))).toBeInTheDocument();
+    expect(screen.getByRole("listitem", { name: `Alex, ${STATUS_WORD.not_agreed}` })).toBeInTheDocument();
+    expect(screen.queryByText(/said yes to 0\.00/)).toBeNull();
+  });
+
+  it("two players who share a first name are told apart by their full names", async () => {
+    serve({ admin: true, detail: adminView({
+      players: [seat({ user_id: "u-sam", name: "Sam Petersen" }), seat({ ...ALEX_SEAT, seat: 2, team: "A", name: "Sam Naidoo", status: "accepted", consented_credits: 25, target_credits: 25 })],
+    }) });
+    renderDetail();
+    expect(await screen.findByRole("listitem", { name: /^Sam Petersen, / })).toBeInTheDocument();
+    expect(screen.getByRole("listitem", { name: /^Sam Naidoo, / })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: DETAIL_ADMIN.menu("Sam Naidoo") })).toBeInTheDocument();
+  });
+
+  it("a collect says the most it can take them below zero", () => {
+    expect(DETAIL_ADMIN.overdraftCollect("25.00 cr", "Alex Naidoo")).toBe("Take 25.00 cr from Alex Naidoo even if it puts them up to 25.00 cr below zero");
   });
 });
 

@@ -1,7 +1,8 @@
-import { playersEndpoints } from "@/lib/playersApi";
+import { ApiError } from "@/lib/api";
+import { playersEndpoints, type BookingDetail, type DetailPlayer } from "@/lib/playersApi";
 import { DETAIL_ADMIN } from "@/lib/playersCopy";
 import { formatCredits } from "@/lib/utils";
-import type { AdminAct } from "../detail/detailModel";
+import { collectable, type AdminAct } from "../detail/detailModel";
 
 /**
  * God mode on one seat, as data: what each act is called, what it says before it happens, the
@@ -73,10 +74,30 @@ export const ACTS: Record<AdminAct, ActSpec> = {
   },
 };
 
-/** The go-ahead's sentence: who may go below zero, and — for a collect — by taking how much. */
-export function overdraftSentence(act: AdminAct, seatName: string, amount: number, organiserName: string): string {
-  return act === "collect"
-    ? DETAIL_ADMIN.overdraftCollect(formatCredits(amount), seatName)
-    : DETAIL_ADMIN.overdraftReturn(organiserName);
+function fullName(name: string | null | undefined, fallback: string): string {
+  return (name ?? "").trim() || fallback;
+}
+
+/** The return and its cover, off the server's `overdraft_not_authorised`, when it sent them. */
+function returnFigures(refusal: unknown, partner: string) {
+  if (!(refusal instanceof ApiError)) return undefined;
+  const returned = refusal.detail("return_credits");
+  const covered = refusal.detail("covered_credits");
+  if (typeof returned !== "number" || typeof covered !== "number") return undefined;
+  return {
+    returned: formatCredits(returned), covered: formatCredits(covered), short: formatCredits(Math.max(0, returned - covered)), partner,
+  };
+}
+
+/**
+ * The go-ahead's sentence (R1 F2.13): WHO may go below zero, by full name — the desk must not
+ * guess between two Sams — and by how much: for a collect the most it can be (the whole amount),
+ * for a return the shortfall the server reported.
+ */
+export function overdraftSentence(act: AdminAct, player: DetailPlayer, detail: BookingDetail, refusal: unknown): string {
+  const partner = fullName(player.name, DETAIL_ADMIN.title);
+  if (act === "collect") return DETAIL_ADMIN.overdraftCollect(formatCredits(collectable(player)), partner);
+  const organiser = fullName(detail.organiser.name, DETAIL_ADMIN.title);
+  return DETAIL_ADMIN.overdraftReturn(organiser, returnFigures(refusal, partner));
 }
 

@@ -13,13 +13,20 @@ import { ACTS } from "./adminActs";
  * opens its own dialog, which asks for the reason and — where money may go below zero — the
  * explicit go-ahead.
  */
-export function AdminSeatMenu({ player, onAct }: { player: DetailPlayer; onAct: (act: AdminAct, player: DetailPlayer) => void }) {
+type Props = {
+  player: DetailPlayer;
+  onAct: (act: AdminAct, player: DetailPlayer) => void;
+  /** The booking's players — a shared first name is said in full (R1 F2.13). */
+  players?: readonly DetailPlayer[];
+};
+
+export function AdminSeatMenu({ player, onAct, players }: Props) {
   const acts = adminActs(player);
   if (acts.length === 0) return null;
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="outline" icon={<ShieldCheck aria-hidden="true" />} aria-label={DETAIL_ADMIN.menu(seatName(player))}>
+        <Button size="sm" variant="outline" icon={<ShieldCheck aria-hidden="true" />} aria-label={DETAIL_ADMIN.menu(seatName(player, players))}>
           {DETAIL_ADMIN.title}
         </Button>
       </DropdownMenuTrigger>

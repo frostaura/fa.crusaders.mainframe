@@ -34,6 +34,8 @@ export function statusKey(p: DetailPlayer, cancelled = false): string {
   if (cancelled) return p.status === "accepted" ? "was_in" : "invite_closed";
   if (p.kind === "open_link") return "open_link";
   if (p.status === "invited") return "invited";
+  // Accepted for them by the club (no consent recorded): nothing agreed, so nothing "asked again".
+  if (p.needs_consent && p.consented_credits <= 0) return "not_agreed";
   if (p.needs_consent) return "needs_consent";
   return p.share_credits > 0 && p.unpaid_credits <= 0 && p.paid_credits > 0 ? "paid" : "accepted";
 }
@@ -47,6 +49,7 @@ export type ChipTone = "neutral" | "success" | "info" | "warning" | "brand";
 const TONE: Record<string, ChipTone> = {
   organiser: "brand", paid: "success", accepted: "info", needs_consent: "warning",
   invited: "neutral", settled_outside: "info", guest: "neutral", open_link: "neutral", was_in: "info",
+  not_agreed: "warning",
 };
 
 export function statusTone(p: DetailPlayer, cancelled = false): ChipTone {
@@ -58,10 +61,22 @@ export function showsResult(d: BookingDetail): boolean {
   return d.viewer.role !== "admin" && d.status !== "cancelled" && d.status !== "blocked";
 }
 
-/** A seat's name as a chip says it: first names between members, a guest as named, an open seat. */
-export function seatName(p: DetailPlayer): string {
+/** Whether another member on the booking has the same first name (R1 F2.13). */
+function firstNameShared(p: DetailPlayer, players: readonly DetailPlayer[]): boolean {
+  const mine = firstName(p.name).toLowerCase();
+  return players.some((o) => o !== p && o.participant_id !== p.participant_id && o.kind !== "guest" && o.kind !== "open_link"
+    && (o.name ?? "").trim() !== (p.name ?? "").trim() && firstName(o.name).toLowerCase() === mine);
+}
+
+/**
+ * A seat's name as a chip says it: first names between members, a guest as named, an open seat.
+ * Given the booking's players, two members who share a first name are told apart by their full
+ * names (R1 F2.13) — "Sam" twice on one court says nothing about who paid.
+ */
+export function seatName(p: DetailPlayer, players?: readonly DetailPlayer[]): string {
   if (p.kind === "open_link") return PLAYERS_COPY.openSeat;
   if (p.kind === "guest") return (p.name ?? "").trim() || PLAYERS_COPY.guest;
+  if (players && firstNameShared(p, players)) return (p.name ?? "").trim() || PLAYERS_COPY.someone;
   return firstName(p.name);
 }
 
@@ -98,7 +113,9 @@ export function detailTitle(d: BookingDetail): string {
 
 /** The organiser's first name as the viewer reads it — null when the viewer IS the organiser. */
 export function organiserName(d: BookingDetail): string | null {
-  return d.viewer.role === "organiser" ? null : firstName(d.organiser.name);
+  if (d.viewer.role === "organiser") return null;
+  const seat = d.players.find((p) => p.kind === "organiser");
+  return seat ? seatName({ ...seat, name: d.organiser.name ?? seat.name }, d.players) : firstName(d.organiser.name);
 }
 
 /* ─────────────────────────────── the organiser's hands ─────────────────────────────── */

@@ -23,7 +23,7 @@ const USERPLUS_ICON = <UserPlus aria-hidden="true" />;
  * hears "Remind Alex", not four "Remind"s.
  */
 export function OrganiserSeatButtons({ player, hands }: { player: DetailPlayer; hands: OrganiserHands }) {
-  const name = seatName(player);
+  const name = seatName(player, hands.detail.players);
   return (
     <>
       {canNudge(player) ? (
@@ -89,7 +89,7 @@ export function OrganiserDialogs({ hands }: { hands: OrganiserHands }) {
 }
 
 function RemoveDialog({ hands, player }: { hands: OrganiserHands; player: DetailPlayer }) {
-  const name = seatName(player);
+  const name = seatName(player, hands.detail.players);
   const open = player.kind === "open_link";
   const error = hands.remove.error;
   return (

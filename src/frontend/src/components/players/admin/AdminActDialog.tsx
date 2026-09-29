@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { BookingDetail, DetailPlayer } from "@/lib/playersApi";
 import { DETAIL_ADMIN, firstName, playersRefusal, refusalCode } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
-import { collectable, seatName, type AdminAct } from "../detail/detailModel";
+import { seatName, type AdminAct } from "../detail/detailModel";
 import type { Notice } from "../detail/useOrganiserHands";
 import { ACTS, overdraftSentence } from "./adminActs";
 
@@ -42,14 +42,20 @@ function useActFlow(props: Props) {
   const [authorised, setAuthorised] = useState(false);
   const [asked, setAsked] = useState(spec.alwaysOverdraft);
   const [tried, setTried] = useState(false);
-  const name = seatName(player);
+  /** The server's `overdraft_not_authorised`, kept: its figures name the shortfall while the resend runs. */
+  const [lastRefusal, setLastRefusal] = useState<unknown>(null);
+  const name = seatName(player, detail.players);
   const run = useAsyncAction(
     () => spec.call({
       bookingId: detail.booking_id, participantId: player.participant_id ?? "", reason: reason.trim(), allowNegativeBalance: authorised,
     }),
     {
       success: (answer) => onDone({ tone: "success", text: spec.done(name, answer, firstName(detail.organiser.name)) }),
-      failure: (error) => { if (spec.mayOverdraft && refusalCode(error) === "overdraft_not_authorised") setAsked(true); },
+      failure: (error) => {
+        if (!spec.mayOverdraft || refusalCode(error) !== "overdraft_not_authorised") return;
+        setAsked(true);
+        setLastRefusal(error);
+      },
     },
   );
   const reasonMissing = tried && reason.trim() === "";
@@ -59,7 +65,7 @@ function useActFlow(props: Props) {
     if (reason.trim() === "" || (asked && !authorised)) return;
     void run.run();
   };
-  return { spec, name, reason, setReason, authorised, setAuthorised, asked, reasonMissing, authMissing, run, confirm };
+  return { spec, name, reason, setReason, authorised, setAuthorised, asked, reasonMissing, authMissing, run, confirm, lastRefusal };
 }
 
 type Flow = ReturnType<typeof useActFlow>;
@@ -111,7 +117,7 @@ function ReasonField({ flow }: { flow: Flow }) {
 function Overdraft(props: Props & { flow: Flow }) {
   const { flow, detail, player, act } = props;
   const id = useId();
-  const sentence = overdraftSentence(act, flow.name, collectable(player), firstName(detail.organiser.name));
+  const sentence = overdraftSentence(act, player, detail, flow.lastRefusal);
   return (
     <div data-god-mode="" className="flex flex-col gap-3 rounded-xl border border-warning-strong/30 bg-warning-soft p-4 text-warning-strong">
       <p className="flex items-start gap-3 text-sm">

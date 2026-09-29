@@ -108,7 +108,7 @@ function DetailView({ detail, reload, say }: { detail: BookingDetail; reload: ()
     return (
       <>
         {own ? <OrganiserSeatButtons player={p} hands={organiser} /> : null}
-        {god ? <AdminSeatMenu player={p} onAct={admin.act} /> : null}
+        {god ? <AdminSeatMenu player={p} onAct={admin.act} players={detail.players} /> : null}
       </>
     );
   };

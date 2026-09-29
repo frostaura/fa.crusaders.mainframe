@@ -57,6 +57,8 @@ export const STATUS_WORD: Record<string, string> = {
   /** R1 F2.10 — on a cancelled game: who was on it, and an invite nobody can answer any more. */
   was_in: "Was in",
   invite_closed: "Invite closed",
+  /** R1 F2.13 — in (the club accepted for them, or a zero share was raised) with no share agreed yet. */
+  not_agreed: "In · share not agreed",
 };
 
 /** "Sam" from "Sam Petersen" — the grid's own rule: first names between members. */
@@ -497,6 +499,8 @@ export const DETAIL_MONEY = {
   unpaidRow: (share: string) => `Not paid yet · ${share}`,
   invitedRow: (share: string) => `Asked for ${share}`,
   askedAgainRow: (share: string, consented: string) => `Asked again: ${share} (said yes to ${consented})`,
+  /** R1 F2.13 — nothing was ever agreed (accepted by the club): no "said yes to 0.00 cr". */
+  notAgreedRow: (share: string) => `Share of ${share} not agreed — nothing collected`,
   settledRow: "Settled with the club",
   coversRow: "Covers the court",
   guestRow: "Guest · no share",
@@ -634,8 +638,12 @@ export const DETAIL_ADMIN = {
   collectConfirm: "Collect share",
   collected: (name: string, amount: string) => `Collected ${amount} from ${name}.`,
   overdraftTitle: "This may go below zero",
-  overdraftCollect: (amount: string, name: string) => `Take ${amount} from ${name} even if it puts them below zero`,
-  overdraftReturn: (name: string) => `Go ahead even if it takes ${name} below zero`,
+  /** R1 F2.13 — who goes below zero, by full name, and the most it can be: the whole amount taken. */
+  overdraftCollect: (amount: string, name: string) => `Take ${amount} from ${name} even if it puts them up to ${amount} below zero`,
+  /** Who goes below zero, and — when the server said — by how much: the return less what covers it. */
+  overdraftReturn: (name: string, figures?: { returned: string; covered: string; short: string; partner: string }) => (figures
+    ? `Go ahead even if it takes ${name} below zero: ${figures.returned} goes back to ${figures.partner}, ${figures.covered} of it is covered, so ${name} goes up to ${figures.short} below zero`
+    : `Go ahead even if it takes ${name} below zero`),
   overdraftAsked: "The club's system needs your explicit go-ahead: this would take someone below zero.",
   overdraftMissing: "Tick the box to authorise it.",
   action: "do that",

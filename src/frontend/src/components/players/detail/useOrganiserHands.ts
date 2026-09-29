@@ -63,7 +63,7 @@ export function useOrganiserHands(detail: BookingDetail, reload: () => void, say
     },
     {
       success: (answer, p) => {
-        say({ tone: "success", text: DETAIL_ACTIONS.nudged(seatName(p), answer.nudges_left) });
+        say({ tone: "success", text: DETAIL_ACTIONS.nudged(seatName(p, detail.players), answer.nudges_left) });
         reload();
       },
       failure: (error) => say({ tone: "danger", text: playersRefusal(error, { action: DETAIL_ACTIONS.nudgeAction }) }),
@@ -75,7 +75,7 @@ export function useOrganiserHands(detail: BookingDetail, reload: () => void, say
     {
       success: (_answer, p) => {
         setRemoving(null);
-        say({ tone: "success", text: DETAIL_ACTIONS.removed(seatName(p)) });
+        say({ tone: "success", text: DETAIL_ACTIONS.removed(seatName(p, detail.players)) });
         reload();
         void refresh();
       },
@@ -97,7 +97,7 @@ export function useOrganiserHands(detail: BookingDetail, reload: () => void, say
     cancelRemove: () => setRemoving(null),
     remove,
     sharing,
-    share: (p: DetailPlayer) => setSharing({ name: seatName(p), participantId: p.participant_id, path: null }),
+    share: (p: DetailPlayer) => setSharing({ name: seatName(p, detail.players), participantId: p.participant_id, path: null }),
     closeShare: () => setSharing(null),
   };
 }
