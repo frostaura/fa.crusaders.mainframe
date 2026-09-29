@@ -1259,6 +1259,10 @@ def seed_and_tune(w: World) -> None:
     }
     expect_status(w.http.put("/api/v1/admin/settings", body, token=w.admin_token), 200, "settings PUT")
     after = expect_status(w.http.get("/api/v1/admin/settings", token=w.admin_token), 200, "settings GET")
+    # Every later leg reckons "today" in the club's zone. It was left at the zone read BEFORE this
+    # PUT moved the club, so late in a Johannesburg evening the club traded in daytime Los Angeles
+    # while the walk-up leg counted Johannesburg's last minute and refused itself (CI 36636067614).
+    w.tenant_tz = after.get("timezone") or zone
     REPORT.check(
         "setup", "tenant settings tuned via admin API (slice 15, grace 1, cue 10, roster 120, forward 240)",
         after["slice_minutes"] == 15 and after["grace_window_minutes"] == 1 and after["activation_cue_window_minutes"] == 10
