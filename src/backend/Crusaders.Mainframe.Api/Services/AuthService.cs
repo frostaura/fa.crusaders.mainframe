@@ -22,13 +22,16 @@ public sealed class AuthService
     private readonly ClubIdentityResolver _club;
 
     private readonly MemberCodeService _memberCodes;
+    private readonly RefreshSessions _refresh;
 
     public AuthService(MainframeDbContext db, ITenantContext tenant, IPasswordHasher hasher,
         IJwtIssuer jwt, IEmailService email, IConfiguration config, ILogger<AuthService> logger,
         MemberApprovalService memberships, AccessTokenRevocationList revocations,
-        InherentAdminService inherentAdmins, ClubIdentityResolver club, MemberCodeService memberCodes)
+        InherentAdminService inherentAdmins, ClubIdentityResolver club, MemberCodeService memberCodes,
+        RefreshSessions refresh)
     {
         _memberCodes = memberCodes;
+        _refresh = refresh;
         _db = db; _tenant = tenant; _hasher = hasher; _jwt = jwt;
         _email = email; _config = config; _logger = logger;
         _memberships = memberships; _revocations = revocations;
@@ -315,13 +318,13 @@ public sealed class AuthService
     /// keeps its session; the token it presented stops working.
     /// </para>
     /// </summary>
-    public async Task<(PasswordChangeResult Result, string? AccessToken)> ChangePasswordAndReissueAsync(
+    public async Task<(PasswordChangeResult Result, string? AccessToken, int SessionEpoch)> ChangePasswordAndReissueAsync(
         Guid userId, string currentPassword, string newPassword, CancellationToken ct)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
-        if (user is null || user.PasswordHash is null) return (PasswordChangeResult.NoPasswordSet, null);
-        if (!_hasher.Verify(currentPassword, user.PasswordHash)) return (PasswordChangeResult.CurrentPasswordWrong, null);
-        if (_hasher.Verify(newPassword, user.PasswordHash)) return (PasswordChangeResult.Unchanged, null);
+        if (user is null || user.PasswordHash is null) return (PasswordChangeResult.NoPasswordSet, null, 0);
+        if (!_hasher.Verify(currentPassword, user.PasswordHash)) return (PasswordChangeResult.CurrentPasswordWrong, null, 0);
+        if (_hasher.Verify(newPassword, user.PasswordHash)) return (PasswordChangeResult.Unchanged, null, 0);
 
         user.PasswordHash = _hasher.Hash(newPassword);
         user.MustChangePassword = false;
@@ -343,7 +346,7 @@ public sealed class AuthService
         await SendOrLogAsync(EmailTemplates.PasswordChanged(await _club.GetAsync(ct), user.Email), $"password-changed notice for {user.Email}", ct);
 
         // Minted under the epoch the rotation just raised, so it is the one session that survives it.
-        return (PasswordChangeResult.Ok, _jwt.IssueAccess(user.Id, user.TenantId, _tenant.TenantSlug, RolesOf(user), user.SessionEpoch));
+        return (PasswordChangeResult.Ok, _jwt.IssueAccess(user.Id, user.TenantId, _tenant.TenantSlug, RolesOf(user), user.SessionEpoch), user.SessionEpoch);
     }
 
     private static List<string> RolesOf(User user)
@@ -424,7 +427,7 @@ public sealed class AuthService
         if (user.IsPlatformAdmin) roles.Add("platform_admin");
 
         var token = _jwt.IssueAccess(user.Id, _tenant.TenantId, _tenant.TenantSlug, roles, user.SessionEpoch);
-        return new LoginResult.Ok(token, user.Id, user.IsAdmin, user.MustChangePassword);
+        return new LoginResult.Ok(token, user.Id, user.IsAdmin, user.MustChangePassword, user.SessionEpoch);
     }
 
     public async Task<bool> RequestPasswordResetAsync(string email, CancellationToken ct)
@@ -501,7 +504,7 @@ public sealed class AuthService
         var roles = new List<string>();
         if (user.IsAdmin) roles.Add("admin");
         var jwt = _jwt.IssueAccess(user.Id, _tenant.TenantId, _tenant.TenantSlug, roles, user.SessionEpoch);
-        return new LoginResult.Ok(jwt, user.Id, user.IsAdmin, user.MustChangePassword);
+        return new LoginResult.Ok(jwt, user.Id, user.IsAdmin, user.MustChangePassword, user.SessionEpoch);
     }
 
     /// <summary>
@@ -538,7 +541,40 @@ public sealed class AuthService
         if (user.IsAdmin) roles.Add("admin");
         if (user.IsPlatformAdmin) roles.Add("platform_admin");
         var token = _jwt.IssueAccess(user.Id, _tenant.TenantId, _tenant.TenantSlug, roles, user.SessionEpoch);
-        return new LoginResult.Ok(token, user.Id, user.IsAdmin, user.MustChangePassword);
+        return new LoginResult.Ok(token, user.Id, user.IsAdmin, user.MustChangePassword, user.SessionEpoch);
+    }
+
+    /// <summary>
+    /// Exchanges the refresh cookie for a new access token and the link's successor (B1).
+    ///
+    /// <para>
+    /// The link is SPENT first (<see cref="RefreshSessions.ClaimAsync"/>), then the same test a
+    /// bearer refresh applies runs against the account — epoch not raised since the link was
+    /// issued, membership still active — so a suspended member or a rotated account gets nothing,
+    /// and its family is revoked rather than left for the next presentation. The successor carries
+    /// the epoch the new access token was minted under, READ HERE: a rotation racing this exchange
+    /// leaves both below the account's epoch, never above it.
+    /// </para>
+    /// </summary>
+    public async Task<CookieRefresh> RefreshWithCookieAsync(string? cookie, CancellationToken ct)
+    {
+        if (!_tenant.IsResolved) return new CookieRefresh(new LoginResult.InvalidCredentials(), null);
+
+        var claim = await _refresh.ClaimAsync(cookie, _tenant.TenantId, ct);
+        if (claim is not RefreshClaim.Claimed { Row: var row })
+        {
+            return new CookieRefresh(new LoginResult.InvalidCredentials(), null, claim is RefreshClaim.Superseded);
+        }
+
+        var result = await RefreshAsync(row.UserId, row.SessionEpoch, ct);
+        if (result is not LoginResult.Ok ok)
+        {
+            await _refresh.RevokeFamilyAsync(row.TenantId, row.FamilyId, ct);
+            return new CookieRefresh(result, null);
+        }
+
+        var successor = await _refresh.IssueAsync(row.TenantId, row.UserId, ok.SessionEpoch, row.FamilyId, ct);
+        return new CookieRefresh(ok, successor);
     }
 
     /// <summary>
@@ -621,9 +657,18 @@ public enum PasswordChangeResult
     NoPasswordSet,
 }
 
+/// <summary>
+/// A cookie refresh's outcome, and the successor link to set when it succeeded.
+/// <paramref name="Superseded"/>: the link was spent a moment ago by a concurrent request — the
+/// browser's cookie jar already holds (or is about to hold) the successor, so the refusal must
+/// NOT clear the cookie.
+/// </summary>
+public sealed record CookieRefresh(LoginResult Result, IssuedRefresh? Successor, bool Superseded = false);
+
 public abstract record LoginResult
 {
-    public sealed record Ok(string AccessToken, Guid UserId, bool IsAdmin, bool MustChangePassword = false) : LoginResult;
+    /// <param name="SessionEpoch">The epoch the access token was minted under — a refresh link issued beside it carries the same.</param>
+    public sealed record Ok(string AccessToken, Guid UserId, bool IsAdmin, bool MustChangePassword = false, int SessionEpoch = 0) : LoginResult;
     public sealed record InvalidCredentials : LoginResult;
     public sealed record EmailNotVerified : LoginResult;
     public sealed record NotApproved(MembershipStatus Status) : LoginResult;

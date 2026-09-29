@@ -183,6 +183,7 @@ public partial class MainframeDbContext : DbContext
         ConfigureMemberCodes(modelBuilder);
         ConfigurePlayers(modelBuilder);
         ConfigurePlay(modelBuilder);
+        ConfigureSessions(modelBuilder);
 
         modelBuilder.Entity<Court>(e =>
         {

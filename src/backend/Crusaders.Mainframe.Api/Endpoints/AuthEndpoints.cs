@@ -49,12 +49,12 @@ public static class AuthEndpoints
         }).AllowAnonymous();
 
         g.MapPost("/login", async (
-            LoginRequest req, AuthService auth, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
+            LoginRequest req, HttpContext ctx, AuthService auth, TenantSettingsAccessor settingsAccessor, CancellationToken ct) =>
         {
             var result = await auth.LoginAsync(req.Email, req.Password, ct);
             return result switch
             {
-                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin, must_change_password = ok.MustChangePassword }),
+                LoginResult.Ok ok => await SessionCookies.SignedInAsync(ctx, ok, ct),
                 LoginResult.InvalidCredentials => Results.Unauthorized(),
                 // Was a bare 403 with an empty body, indistinguishable from not_approved — so the
                 // screen said "Your account isn't approved yet" to members who were approved and
@@ -101,36 +101,26 @@ public static class AuthEndpoints
             return ok ? Results.Ok(new { reset = true }) : Results.BadRequest(new { error = "invalid_or_expired" });
         }).AllowAnonymous();
 
-        g.MapPost("/magic-link/{token}", async (string token, AuthService auth, CancellationToken ct) =>
+        g.MapPost("/magic-link/{token}", async (string token, HttpContext ctx, AuthService auth, CancellationToken ct) =>
         {
             var result = await auth.ConsumeMagicLinkAsync(token, ct);
             return result switch
             {
-                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin, must_change_password = ok.MustChangePassword }),
+                LoginResult.Ok ok => await SessionCookies.SignedInAsync(ctx, ok, ct),
                 _ => Results.BadRequest(new { error = "invalid_or_expired" }),
             };
         }).AllowAnonymous();
 
-        // Refresh the access token for an already-authenticated user. Caller must present a still-valid
-        // JWT; we re-mint with a fresh expiry so an active session never silently expires under the user.
+        // Refresh the access token (B1). Either a still-valid bearer (as before) or — with no
+        // usable bearer — the httpOnly refresh cookie alone, which is what keeps a phone left idle
+        // past the access token's fifteen minutes signed in. See SessionCookies.RefreshAsync.
         //
         // A membership that is no longer Active comes back as `NotApproved` and falls into the 401
         // below, deliberately: 403 would be the more descriptive status, but the browser client
         // ends a session on 401 and merely reports a 403, so a suspended member's open tab would
         // keep running on the token it already holds until that token expired on its own. The
         // sentence they get is the sign-in screen's, where the reason is named properly.
-        g.MapPost("/refresh", async (HttpContext ctx, AuthService auth, CancellationToken ct) =>
-        {
-            var sub = ctx.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-                   ?? ctx.User.FindFirst("sub")?.Value;
-            if (!Guid.TryParse(sub, out var userId)) return Results.Unauthorized();
-            var result = await auth.RefreshAsync(userId, SessionEpochs.EpochOf(ctx.User), ct);
-            return result switch
-            {
-                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin, must_change_password = ok.MustChangePassword }),
-                _ => Results.Unauthorized(),
-            };
-        }).RequireAuthorization();
+        g.MapPost("/refresh", SessionCookies.RefreshAsync).AllowAnonymous();
 
         // Sign out, on the server as well as in the browser.
         //
@@ -142,17 +132,21 @@ public static class AuthEndpoints
         // Answers 204 whether or not there was anything to revoke. A member signing out has
         // nothing to do differently on a failure, and an endpoint that reported which tokens it
         // recognised would be an oracle for exactly the wrong audience.
-        g.MapPost("/logout", SignOutAsync).RequireAuthorization();
+        //
+        // Anonymous since B1: a member whose access token has already expired still has a refresh
+        // cookie, and "sign out" on a shared phone must end THAT. The presented cookie's family is
+        // revoked and the cookie cleared; a bearer, when there is one, is revoked as before.
+        g.MapPost("/logout", SignOutAsync).AllowAnonymous();
 
         // Dev-only shortcut: force-resets the seeded admin's password and returns a session token.
         // Keeps the "Sign in as seeded admin" UI button reliable even after password drift during tests.
-        g.MapPost("/dev/admin-login", async (AuthService auth, IHostEnvironment env, CancellationToken ct) =>
+        g.MapPost("/dev/admin-login", async (HttpContext ctx, AuthService auth, IHostEnvironment env, CancellationToken ct) =>
         {
             if (!env.IsDevelopment()) return Results.NotFound();
             var result = await auth.DevAdminLoginAsync(ct);
             return result switch
             {
-                LoginResult.Ok ok => Results.Ok(new { access_token = ok.AccessToken, user_id = ok.UserId, is_admin = ok.IsAdmin, must_change_password = ok.MustChangePassword }),
+                LoginResult.Ok ok => await SessionCookies.SignedInAsync(ctx, ok, ct),
                 _ => Results.Problem("Seeded admin not found"),
             };
         }).AllowAnonymous();
@@ -170,6 +164,7 @@ public static class AuthEndpoints
     /// </remarks>
     private static async Task<IResult> SignOutAsync(HttpContext ctx, AuthService auth, CancellationToken ct)
     {
+        await SessionCookies.EndAsync(ctx, ct);
         var userId = ctx.User.Id();
         var jti = ctx.User.FindFirstValue(JwtRegisteredClaimNames.Jti) ?? ctx.User.FindFirstValue("jti");
         if (userId is null || jti is null) return Results.NoContent();

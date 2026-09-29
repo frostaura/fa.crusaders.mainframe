@@ -154,6 +154,8 @@ public sealed class RetentionWorker : BackgroundService
 
             await PurgeMemberCodeRowsAsync(db, ct);
 
+            await PurgeRefreshTokensAsync(db, ct);
+
             await PurgeSeenCelebrationsAsync(db, settings, ct);
 
             if (totalAnonymised > 0)
@@ -237,6 +239,20 @@ public sealed class RetentionWorker : BackgroundService
         var seen = await db.PlayCelebrations.Where(c => c.SeenAt != null && c.SeenAt < cutoff).ToListAsync(ct);
         if (seen.Count == 0) return;
         db.PlayCelebrations.RemoveRange(seen);
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Refresh links a day past their own expiry (B1): an expired link mints nothing, and a replay
+    /// of one is refused as unknown, so nothing reads them. Deleted — a table of every sign-in is a
+    /// table of movements. Runs inside the loop's tenant context, so the query filter scopes it.
+    /// </summary>
+    private static async Task PurgeRefreshTokensAsync(MainframeDbContext db, CancellationToken ct)
+    {
+        var cutoff = DateTimeOffset.UtcNow.AddDays(-1);
+        var stale = await db.RefreshTokens.Where(t => t.ExpiresAt < cutoff).ToListAsync(ct);
+        if (stale.Count == 0) return;
+        db.RefreshTokens.RemoveRange(stale);
         await db.SaveChangesAsync(ct);
     }
 

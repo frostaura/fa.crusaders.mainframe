@@ -53,9 +53,12 @@ public sealed class MemberCodeService
     private readonly ITenantContext _tenant;
     private readonly MemberCodeMasterKey _master;
     private readonly SessionEpochs _sessions;
+    private readonly RefreshSessions _refresh;
 
-    public MemberCodeService(MainframeDbContext db, ITenantContext tenant, MemberCodeMasterKey master, SessionEpochs sessions)
+    public MemberCodeService(
+        MainframeDbContext db, ITenantContext tenant, MemberCodeMasterKey master, SessionEpochs sessions, RefreshSessions refresh)
     {
+        _refresh = refresh;
         _db = db;
         _tenant = tenant;
         _master = master;
@@ -223,6 +226,10 @@ public sealed class MemberCodeService
             tracked.Property(u => u.SessionEpoch).IsModified = false;
         }
         _sessions.Invalidate(tenant, userId);
+
+        // The refresh links die with the epoch anyway (an exchange refuses a link below it); they
+        // are stamped revoked as well so the table says what happened to them (B1).
+        await _refresh.RevokeUserAsync(tenant, userId, ct);
         return value;
     }
 

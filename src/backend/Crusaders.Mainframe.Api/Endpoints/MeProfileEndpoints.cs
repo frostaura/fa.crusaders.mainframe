@@ -118,10 +118,10 @@ public static class MeProfileEndpoints
             var userId = ctx.User.Id() ?? Guid.Empty;
             // The change ends every session minted before it, this one included (member-code
             // §10); `access_token` is this session's replacement and the client must adopt it.
-            var (result, reissued) = await auth.ChangePasswordAndReissueAsync(userId, req.CurrentPassword, req.NewPassword, ct);
+            var (result, reissued, epoch) = await auth.ChangePasswordAndReissueAsync(userId, req.CurrentPassword, req.NewPassword, ct);
             return result switch
             {
-                PasswordChangeResult.Ok => Results.Ok(new { changed = true, access_token = reissued }),
+                PasswordChangeResult.Ok => await PasswordChangedAsync(ctx, userId, reissued, epoch, ct),
                 PasswordChangeResult.CurrentPasswordWrong => Results.BadRequest(new { error = "current_password_incorrect" }),
                 PasswordChangeResult.Unchanged => Results.BadRequest(new { error = "password_unchanged" }),
                 PasswordChangeResult.NoPasswordSet => Results.BadRequest(new { error = "no_password_set" }),
@@ -172,6 +172,17 @@ public static class MeProfileEndpoints
         }).DisableAntiforgery();
 
         return app;
+    }
+
+    /// <summary>
+    /// The change raised the epoch, so the session's refresh cookie died with every other session
+    /// (B1); the replacement access token gets a new refresh family beside it, or the member at the
+    /// keyboard would be signed out at the next idle spell after doing the responsible thing.
+    /// </summary>
+    private static async Task<IResult> PasswordChangedAsync(HttpContext ctx, Guid userId, string? reissued, int epoch, CancellationToken ct)
+    {
+        await SessionCookies.StartAsync(ctx, userId, epoch, ct);
+        return Results.Ok(new { changed = true, access_token = reissued });
     }
 }
 
