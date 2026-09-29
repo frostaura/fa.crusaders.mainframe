@@ -90,7 +90,9 @@ public sealed class LiveAdminRoleHttpTests : IClassFixture<PostgresFixture>
     /// <summary>
     /// A token whose admin claim names a club the account is not an admin OF. The live check
     /// matches tenant and user together, so an admin at one club minted into another's slug
-    /// is not an admin there.
+    /// is not an admin there. Since 2026-09-29 the session check refuses it outright — the
+    /// account is not a member of that club at all, so it is no session there (401), rather
+    /// than a member session stripped of its role (403). See SessionEpochs.
     /// </summary>
     [SkippableFact]
     public async Task An_admin_of_one_club_holding_a_token_for_another_is_not_an_admin_there()
@@ -104,6 +106,6 @@ public sealed class LiveAdminRoleHttpTests : IClassFixture<PostgresFixture>
 
         var crossed = clubB.Client(factory, adminA, adminRole: true);
 
-        Assert.Equal(HttpStatusCode.Forbidden, (await crossed.GetAsync(AdminList)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await crossed.GetAsync(AdminList)).StatusCode);
     }
 }

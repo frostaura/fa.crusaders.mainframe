@@ -42,6 +42,19 @@ namespace Crusaders.Mainframe.Api.Security;
 /// the row (<see cref="CurrentAsync"/>, and enrolment under a row lock).
 /// A token with no epoch claim (minted before this existed) is epoch 0.
 /// </para>
+///
+/// <para>
+/// <b>A token whose subject has no account in its club is refused, not read as epoch 0.</b> The
+/// lookup is by user AND tenant, and it used to fall back to 0 when it found nothing — so after
+/// the local database was wiped, a browser's old token passed here and every route answered as
+/// if the account existed: <c>/me/profile</c> 404, <c>/me/door</c> and the notification count 200
+/// (headed walk, 2026-09-29). The same fallback admitted a real user id under ANOTHER club's
+/// tenant. No account, or an account in a different club, is the most stale a session can be;
+/// the answer is cached like any other (<see cref="CacheFor"/>). Nothing in the application
+/// deletes a user row or re-creates one under an old id (ids are fresh GUIDs), so there is no
+/// write to evict on: a row that reappears — a backup restored under a live token — is admitted
+/// once the entry expires. A token with no subject or tenant is refused for the same reason.
+/// </para>
 /// </summary>
 public sealed class SessionEpochs
 {
@@ -74,15 +87,16 @@ public sealed class SessionEpochs
     }
 
     /// <summary>
-    /// True when the principal's token predates its account's epoch — the request must be
-    /// refused. Cached per <see cref="CacheFor"/>; see the class remarks.
+    /// True when the principal's token predates its account's epoch, or names no account in its
+    /// club — the request must be refused. Cached per <see cref="CacheFor"/>; see the class remarks.
     /// </summary>
     public async Task<bool> IsStaleAsync(ClaimsPrincipal principal, IServiceProvider services, CancellationToken ct)
     {
-        if (principal.Id() is not { } userId) return false;
-        if (!Guid.TryParse(principal.FindFirst("tenant_id")?.Value, out var tenantId)) return false;
+        if (principal.Id() is not { } userId) return true;
+        if (!Guid.TryParse(principal.FindFirst("tenant_id")?.Value, out var tenantId)) return true;
 
-        return EpochOf(principal) < await CachedAsync(tenantId, userId, services, ct);
+        // No account in the club the token names: refused, never "epoch 0" — see the class remarks.
+        return await CachedAsync(tenantId, userId, services, ct) is not { } epoch || EpochOf(principal) < epoch;
     }
 
     /// <summary>
@@ -115,25 +129,29 @@ public sealed class SessionEpochs
         _cache.Remove(key);
     }
 
-    private async Task<int> CachedAsync(Guid tenantId, Guid userId, IServiceProvider services, CancellationToken ct)
+    /// <summary>The account's epoch in that club, or null when the club has no such account.</summary>
+    private async Task<int?> CachedAsync(Guid tenantId, Guid userId, IServiceProvider services, CancellationToken ct)
     {
         var key = Key(tenantId, userId);
-        if (_cache.TryGetValue(key, out int cached)) return cached;
+        if (_cache.TryGetValue(key, out Entry? cached) && cached is not null) return cached.Epoch;
 
         var generation = _generations.GetValueOrDefault(key);
         var db = services.GetRequiredService<MainframeDbContext>();
         var epoch = await db.Users.IgnoreQueryFilters().AsNoTracking()
             .Where(u => u.Id == userId && u.TenantId == tenantId)
-            .Select(u => u.SessionEpoch)
+            .Select(u => (int?)u.SessionEpoch)
             .FirstOrDefaultAsync(ct);
 
         if (_generations.GetValueOrDefault(key) == generation)
         {
-            _cache.Set(key, epoch, CacheFor);
+            _cache.Set(key, new Entry(epoch), CacheFor);
             if (_generations.GetValueOrDefault(key) != generation) _cache.Remove(key);
         }
         return epoch;
     }
+
+    /// <summary>One cached answer — boxed so "no such account" (null) is a value the cache can hold.</summary>
+    private sealed record Entry(int? Epoch);
 
     private static string Key(Guid tenantId, Guid userId)
     {

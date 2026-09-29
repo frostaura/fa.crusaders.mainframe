@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-member-code-rotation
 description: "Every rotation ends every open session by a per-user epoch (not a time), the desk's reset drops passkeys, streams close; a manual rollback holds the rollout and restores cut-off codes; acknowledged boards vote."
 type: decision
-last_verified: 2026-09-28
+last_verified: 2026-09-29
 ---
 
 # Live decisions — rotation, sessions and the rollout (P7 backend review fixes)
@@ -25,6 +25,13 @@ Oracle `docs/specs/member-code.md` §10, §13; code decisions beside this are
   refresh reads the row; enrolment reads the epoch `FOR SHARE` in the code row's transaction.**
   *Why:* the increment then waits for an enrolment in flight, so an old session gets the old
   secret or a 401, never the new one. Open SSE streams re-ask per frame and close.
+- **A token naming no account in its club is refused (401) by the same check** — row missing,
+  or the user id lives under another tenant; cached 15 s like any answer, no subject/tenant
+  claim is refused too, and a rejected `?ticket=` counts as a rejected bearer (401, not 400).
+  *Why:* the lookup's miss read as epoch 0, so after a local DB wipe an old token passed —
+  `/me/profile` 404, `/me/door` 200 (headed walk 2026-09-29) — and a cross-club token was a
+  member session. Nothing deletes a user row or reuses an id, so there is no eviction to add;
+  a future delete/erase path must call `SessionEpochs.Invalidate` after its commit.
 - **The desk's reset removes passkeys by default; sign-out-everywhere does not** (`revoke_passkeys`
   overrides both; answers say). *Why:* a lost phone's passkey signs back in under the new epoch;
   a member signing out a stray tablet should keep the passkey on the phone in hand.

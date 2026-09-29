@@ -143,12 +143,14 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 // A rotation ends every session open when it happened (member-code §10): a lost
                 // phone's PWA must not be able to re-enrol and fetch the new generation's secret.
                 // A token below the account's session epoch is refused; the epoch is cached for
-                // LiveAdminRole's fifteen seconds and evicted by the rotation. See SessionEpochs.
+                // LiveAdminRole's fifteen seconds and evicted by the rotation. A token naming no
+                // account in its club (a wiped database, another club's tenant) is refused by the
+                // same check, so every route answers 401 alike. See SessionEpochs.
                 if (ctx.Principal is { } session
                     && await ctx.HttpContext.RequestServices.GetRequiredService<SessionEpochs>()
                         .IsStaleAsync(session, ctx.HttpContext.RequestServices, ctx.HttpContext.RequestAborted))
                 {
-                    ctx.Fail("This session ended when the account's credentials were rotated.");
+                    ctx.Fail("This session has ended: the account's credentials were rotated or the account is gone.");
                     return;
                 }
 

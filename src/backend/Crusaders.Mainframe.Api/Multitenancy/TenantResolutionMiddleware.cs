@@ -145,12 +145,20 @@ public sealed class TenantResolutionMiddleware
     /// on an authenticated route as a session loss. A request carrying no token at all still gets
     /// <c>tenant_unresolved</c>, because for that caller it is the truth.
     /// </para>
+    /// <para>
+    /// A stream's <c>?ticket=</c> is the bearer credential on the routes that accept one
+    /// (<see cref="Security.TokenPurposes.AcceptsTicketInQuery"/>), so a rejected ticket is a
+    /// rejected token too: an EventSource whose account was gone got <c>400</c> on the LAN where
+    /// every other route of that session got <c>401</c>.
+    /// </para>
     /// </remarks>
     private static bool HasRejectedBearerToken(HttpContext context)
     {
         if (context.User?.Identity?.IsAuthenticated == true) return false;
         var header = context.Request.Headers.Authorization.ToString();
-        return header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) && header.Length > "Bearer ".Length;
+        if (header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) && header.Length > "Bearer ".Length) return true;
+        return Security.TokenPurposes.AcceptsTicketInQuery(context.Request.Path)
+            && !string.IsNullOrEmpty(context.Request.Query["ticket"].ToString());
     }
 
     /// <summary>

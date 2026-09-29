@@ -307,16 +307,14 @@ public sealed class UserPreferencesHttpTests : IClassFixture<PostgresFixture>
         var bView = await clubB.Client(factory, bongani, adminRole: false).GetFromJsonAsync<JsonElement>(Path);
         Assert.Equal("system", bView.GetProperty("theme").GetString());
 
-        // A token scoped to club B that names Alice's id: the read answers defaults (her row is
-        // in club A and invisible here), and the write is a 404 rather than a row created for
-        // a person club B has never heard of.
+        // A token scoped to club B that names Alice's id is no session at all: club B has no such
+        // account, so both calls are refused before they reach the endpoint (SessionEpochs) —
+        // not a read of defaults, and never a row created for a person club B has never heard of.
         var forged = clubB.Client(factory, alice, adminRole: false);
-        var forgedRead = await forged.GetFromJsonAsync<JsonElement>(Path);
-        Assert.Equal("system", forgedRead.GetProperty("theme").GetString());
-        Assert.False(forgedRead.GetProperty("findable").GetBoolean());
+        Assert.Equal(HttpStatusCode.Unauthorized, (await forged.GetAsync(Path)).StatusCode);
 
         var forgedWrite = await forged.PutAsJsonAsync(Path, new { theme = "light" });
-        Assert.Equal(HttpStatusCode.NotFound, forgedWrite.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, forgedWrite.StatusCode);
 
         var rows = await PeopleClub.ReadAsync(factory, db =>
             db.UserPreferences.IgnoreQueryFilters().Where(p => p.UserId == alice).ToListAsync());

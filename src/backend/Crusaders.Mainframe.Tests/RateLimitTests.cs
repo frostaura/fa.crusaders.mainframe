@@ -400,51 +400,35 @@ public sealed class RateLimitTests : IClassFixture<PostgresFixture>
         };
         var client = factory.CreateClient();
 
+        // Real members: a token naming no account in its club is not authenticated at all
+        // (SessionEpochs), so it would be partitioned on the address instead.
+        var club = await PeopleClub.SeedAsync(factory, "ratepart");
+        var members = new List<Guid>();
+        for (var i = 0; i < 5; i++) members.Add(await club.AddAsync(factory, $"Member {i}", isAdmin: false));
+
         // The courtside QR match is under the auth policy and admin-only: an ordinary
         // member's token is authenticated (so the limiter partitions on them) and then
         // refused by authorization, after the limiter.
         const string adminOnlyAuthPath = "/api/v1/court/1/qr/match";
 
         var statuses = new List<HttpStatusCode>();
-        foreach (var member in Enumerable.Range(0, 4).Select(_ => Guid.NewGuid()))
+        foreach (var member in members.Take(4))
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, adminOnlyAuthPath) { Content = JsonContent.Create(new { token = "x" }) };
-            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", MemberToken(member));
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", club.Token(member, adminRole: false));
             statuses.Add((await client.SendAsync(request)).StatusCode);
         }
         Assert.DoesNotContain(HttpStatusCode.TooManyRequests, statuses);
 
-        var same = Guid.NewGuid();
+        var same = members[4];
         HttpStatusCode? second = null;
         for (var i = 0; i < 2; i++)
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, adminOnlyAuthPath) { Content = JsonContent.Create(new { token = "x" }) };
-            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", MemberToken(same));
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", club.Token(same, adminRole: false));
             second = (await client.SendAsync(request)).StatusCode;
         }
         Assert.Equal(HttpStatusCode.TooManyRequests, second);
-    }
-
-    /// <summary>An access token for a member, signed with the factory's test secret.</summary>
-    private static string MemberToken(Guid subject)
-    {
-        var token = new System.IdentityModel.Tokens.Jwt.JwtSecurityToken(
-            issuer: "crusaders.mainframe",
-            audience: "crusaders.mainframe.app",
-            claims:
-            [
-                new System.Security.Claims.Claim(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub, subject.ToString()),
-                new System.Security.Claims.Claim("tenant_id", Guid.NewGuid().ToString()),
-                new System.Security.Claims.Claim("tenant_slug", "crusaders"),
-                new System.Security.Claims.Claim("purpose", "access"),
-            ],
-            notBefore: DateTime.UtcNow,
-            expires: DateTime.UtcNow.AddMinutes(10),
-            signingCredentials: new Microsoft.IdentityModel.Tokens.SigningCredentials(
-                new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(
-                    System.Text.Encoding.UTF8.GetBytes("test-only-signing-key-not-used-in-any-real-environment")),
-                Microsoft.IdentityModel.Tokens.SecurityAlgorithms.HmacSha256));
-        return new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().WriteToken(token);
     }
 
     /// <summary>The generous default must not fire during ordinary use.</summary>
