@@ -263,7 +263,8 @@ public sealed class ShareSweep
     private async Task<HashSet<Guid>> BackingOffAsync(DateTimeOffset now, CancellationToken ct)
     {
         var marked = await _db.Bookings.AsNoTracking()
-            .Where(b => b.ShareReconcileDueAt != null && b.ShareReconcileLastAttemptAt != null)
+            // A marker a settlement staged (round 8) counts no failure: due at the next sweep.
+            .Where(b => b.ShareReconcileDueAt != null && b.ShareReconcileLastAttemptAt != null && b.ShareReconcileAttempts > 0)
             .Select(b => new { b.Id, b.ShareReconcileAttempts, b.ShareReconcileLastAttemptAt })
             .ToListAsync(ct);
         return marked.Where(b => now < b.ShareReconcileLastAttemptAt!.Value + ReconcileBackoff(b.ShareReconcileAttempts))

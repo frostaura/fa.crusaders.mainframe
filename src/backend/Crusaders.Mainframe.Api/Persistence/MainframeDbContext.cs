@@ -928,7 +928,7 @@ public partial class MainframeDbContext : DbContext
     {
         BumpBookingVersions();
         StampAuditScanInstants();
-        return base.SaveChanges(acceptAllChangesOnSuccess);
+        return SaveStagingShareReconcile(acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(
@@ -936,6 +936,6 @@ public partial class MainframeDbContext : DbContext
     {
         BumpBookingVersions();
         StampAuditScanInstants();
-        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        return SaveStagingShareReconcileAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 }

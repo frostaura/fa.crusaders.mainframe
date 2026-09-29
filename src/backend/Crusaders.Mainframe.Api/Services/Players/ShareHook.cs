@@ -16,6 +16,15 @@ namespace Crusaders.Mainframe.Api.Services;
 /// been answered for — a reconcile that fails here is logged and left to <c>ShareWorker</c>'s
 /// next pass, never surfaced as a failed cancellation.
 /// </para>
+///
+/// <para>
+/// <b>It runs to completion whatever the caller's token says</b> (review round 8). The money has
+/// moved; the admin closing the tab or the request aborting must not abort the follow-up, so every
+/// entry point ignores the token it is handed and works on <see cref="CancellationToken.None"/>.
+/// And it is not the only line of defence: the settlement's own transaction staged the "reconcile
+/// due" marker beside the money (<c>MainframeDbContext.ShareStaging</c>), so a hook that never
+/// runs at all — a restart in between — is made good by the next minute sweep.
+/// </para>
 /// </summary>
 public sealed class ShareHook
 {
@@ -33,8 +42,9 @@ public sealed class ShareHook
     /// the partner is paid back the moment the organiser can cover it (review round 2, M1). One
     /// indexed read when nothing waits, which is almost always. Never throws.
     /// </summary>
-    public async Task AfterCreditAsync(Guid tenantId, string? tenantSlug, IReadOnlyCollection<Guid> userIds, CancellationToken ct)
+    public async Task AfterCreditAsync(Guid tenantId, string? tenantSlug, IReadOnlyCollection<Guid> userIds, CancellationToken requestAborted)
     {
+        var ct = FollowUp(requestAborted);
         List<Guid> waiting;
         try
         {
@@ -77,8 +87,9 @@ public sealed class ShareHook
         }
     }
 
-    public async Task AfterSettlementAsync(Guid tenantId, string? tenantSlug, IEnumerable<Guid?> bookingIds, CancellationToken ct)
+    public async Task AfterSettlementAsync(Guid tenantId, string? tenantSlug, IEnumerable<Guid?> bookingIds, CancellationToken requestAborted)
     {
+        var ct = FollowUp(requestAborted);
         var ids = bookingIds.Where(i => i is not null).Select(i => i!.Value).Distinct().ToList();
         if (ids.Count == 0) return;
 
@@ -87,6 +98,16 @@ public sealed class ShareHook
         // booking is — the catch-up at start does not reach every kind of game, and a swallowed
         // failure used to be forgotten.
         foreach (var id in ids) await SettleOneAsync(tenantId, tenantSlug, id, "after settlement", ct);
+    }
+
+    /// <summary>
+    /// The token the follow-up runs on: never the caller's. A cancelled request (or a worker
+    /// stopping) must not abandon money that has already moved half-way (review round 8).
+    /// </summary>
+    private static CancellationToken FollowUp(CancellationToken requestAborted)
+    {
+        _ = requestAborted;
+        return CancellationToken.None;
     }
 
     /// <summary>Leaves the durable "reconcile due" marker in a fresh scope. Best effort: logged if even that fails.</summary>
