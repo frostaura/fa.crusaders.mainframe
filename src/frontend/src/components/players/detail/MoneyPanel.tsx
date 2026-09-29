@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Section } from "@/components/ui/page-shell";
 import { formatCredits } from "@/lib/utils";
 import type { BookingDetail, DetailPlayer } from "@/lib/playersApi";
@@ -14,13 +15,13 @@ import { isCancelled, isLive, organiserName, seatName, statusKey } from "./detai
  * ruling, 2026-09-28): a split among friends is only fair if it is visible to all of them.
  * </p>
  */
-export function MoneyPanel({ detail }: { detail: BookingDetail }) {
+export function MoneyPanel({ detail, actions }: { detail: BookingDetail; actions?: ReactNode }) {
   if (isCancelled(detail)) return <CancelledMoney detail={detail} />;
   const { money } = detail;
   const who = organiserName(detail);
   const deadline = playersWhen(money.share_deadline);
   return (
-    <Section title={DETAIL_MONEY.title} description={money.is_split ? DETAIL_MONEY.deadline(deadline) : DETAIL_MONEY.notSplit}>
+    <Section title={DETAIL_MONEY.title} description={money.is_split ? DETAIL_MONEY.deadline(deadline) : DETAIL_MONEY.notSplit} actions={actions}>
       <dl className="grid gap-2 rounded-xl border border-border bg-bg-surface p-4 text-sm">
         <Row term={DETAIL_MONEY.price} value={money.price_credits} />
         <Row term={DETAIL_MONEY.organiserPaid(who)} value={money.organiser_owed_credits} />

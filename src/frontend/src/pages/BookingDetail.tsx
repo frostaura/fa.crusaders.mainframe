@@ -7,7 +7,9 @@ import { AdminSeatMenu } from "@/components/players/admin/AdminSeatMenu";
 import { Attendance, CancelPanel } from "@/components/players/detail/AttendanceAndCancel";
 import { DetailSkeleton } from "@/components/players/detail/DetailSkeleton";
 import { MoneyPanel } from "@/components/players/detail/MoneyPanel";
-import { InviteButton, OrganiserDialogs, OrganiserSeatButtons } from "@/components/players/detail/OrganiserActions";
+import {
+  ChangeSplitButton, InviteButton, OrganiserDialogs, OrganiserSeatButtons,
+} from "@/components/players/detail/OrganiserActions";
 import { PlayerChips } from "@/components/players/detail/PlayerChips";
 import { PlayerPanel } from "@/components/players/detail/PlayerPanel";
 import { useBookingDetail, type DetailRead } from "@/components/players/detail/useBookingDetail";
@@ -123,7 +125,7 @@ function DetailView({ detail, reload, say }: { detail: BookingDetail; reload: ()
         <PlayerChips detail={detail} actions={seatActions} />
       </Section>
       <div className="grid gap-8 lg:grid-cols-2">
-        <MoneyPanel detail={detail} />
+        <MoneyPanel detail={detail} actions={detail.viewer.role === "organiser" ? <ChangeSplitButton hands={organiser} /> : null} />
         <div className="flex flex-col gap-8">
           <PlayerPanel detail={detail} reload={reload} say={say} />
           {/* A cancelled game nobody scanned has no attendance to report (R1 F2.10). */}

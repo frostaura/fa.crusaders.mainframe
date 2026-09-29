@@ -7,6 +7,7 @@ import {
 import { DETAIL_ACTIONS, firstName, playersRefusal } from "@/lib/playersCopy";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { seatName } from "./detailModel";
+import { needsShareAsk } from "./splitEditor";
 import type { ShareTarget } from "./ShareLinkDialog";
 
 /**
@@ -18,10 +19,15 @@ export type Notice = { tone: "success" | "danger" | "info"; text: string };
 
 type Say = (notice: Notice) => void;
 
-function specOf(pick: PickedPlayer): PlayerSpec {
-  if (pick.kind === "member") return { userId: pick.userId };
+/** A figure the organiser named for the seat (R1 F2.1): an amount, or a ratio weight. */
+type Figure = Pick<PlayerSpec, "weight" | "amount">;
+
+type InviteRequest = { pick: PickedPlayer; figure?: Figure };
+
+function specOf(pick: PickedPlayer, figure: Figure = {}): PlayerSpec {
+  if (pick.kind === "member") return { userId: pick.userId, ...figure };
   if (pick.kind === "guest") return { guestName: pick.name };
-  return { link: true };
+  return { link: true, ...figure };
 }
 
 function addedSentence(pick: PickedPlayer): string {
@@ -43,11 +49,13 @@ export function useOrganiserHands(detail: BookingDetail, reload: () => void, say
   const [removing, setRemoving] = useState<DetailPlayer | null>(null);
   const [sharing, setSharing] = useState<ShareTarget | null>(null);
   const [nudgingId, setNudgingId] = useState<string | null>(null);
+  const [asking, setAsking] = useState<PickedPlayer | null>(null);
+  const [changingSplit, setChangingSplit] = useState(false);
 
   const invite = useAsyncAction(
-    (pick: PickedPlayer) => playersEndpoints.add(bookingId, { players: [specOf(pick)] }),
+    ({ pick, figure }: InviteRequest) => playersEndpoints.add(bookingId, { players: [specOf(pick, figure)] }),
     {
-      success: (answer, pick) => {
+      success: (answer, { pick }) => {
         say({ tone: "success", text: addedSentence(pick) });
         if (pick.kind === "link") setSharing(newLinkSeat(answer));
         reload();
@@ -88,7 +96,19 @@ export function useOrganiserHands(detail: BookingDetail, reload: () => void, say
     inviting,
     openInvite: () => { setInviting(true); },
     closeInvite: () => setInviting(false),
-    pick: (player: PickedPlayer) => { setInviting(false); void invite.run(player); },
+    /** On an amount or ratio split a paying seat is asked its share first (R1 F2.1). */
+    pick: (player: PickedPlayer) => {
+      setInviting(false);
+      if (needsShareAsk(detail, player)) setAsking(player);
+      else void invite.run({ pick: player });
+    },
+    asking,
+    ask: (player: PickedPlayer, figure: Figure) => { setAsking(null); void invite.run({ pick: player, figure }); },
+    cancelAsk: () => setAsking(null),
+    changingSplit,
+    openSplit: () => setChangingSplit(true),
+    closeSplit: () => setChangingSplit(false),
+    splitDone: (notice: Notice) => { setChangingSplit(false); say(notice); reload(); },
     invitePending: invite.pending,
     nudge,
     isNudging: (p: DetailPlayer) => nudge.pending && nudgingId === p.participant_id,

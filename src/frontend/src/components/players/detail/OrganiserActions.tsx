@@ -4,10 +4,12 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { Bell, ShareNetwork, UserMinus, UserPlus } from "@/components/ui/icons";
+import { Bell, ShareNetwork, SlidersHorizontal, UserMinus, UserPlus } from "@/components/ui/icons";
 import { MAX_SEATS, type DetailPlayer } from "@/lib/playersApi";
-import { DETAIL_ACTIONS, playersRefusal, playersWhen } from "@/lib/playersCopy";
-import { canNudge, canRemove, canShareLink, liveCount, seatName } from "./detailModel";
+import { CHANGE_SPLIT, DETAIL_ACTIONS, playersRefusal, playersWhen } from "@/lib/playersCopy";
+import { ChangeSplitDialog } from "./ChangeSplitDialog";
+import { canNudge, canRemove, canShareLink, isCancelled, isLive, liveCount, seatName } from "./detailModel";
+import { ShareAskDialog } from "./ShareAskDialog";
 import { ShareLinkDialog } from "./ShareLinkDialog";
 import type { OrganiserHands } from "./useOrganiserHands";
 
@@ -16,6 +18,7 @@ const BELL_ICON = <Bell aria-hidden="true" />;
 const SHARE_ICON = <ShareNetwork aria-hidden="true" />;
 const USERMINUS_ICON = <UserMinus aria-hidden="true" />;
 const USERPLUS_ICON = <UserPlus aria-hidden="true" />;
+const SPLIT_ICON = <SlidersHorizontal aria-hidden="true" />;
 
 /**
  * What the organiser can do to one seat, as buttons under its chip: Remind, Share link, Remove.
@@ -60,7 +63,18 @@ export function InviteButton({ hands }: { hands: OrganiserHands }) {
   );
 }
 
-/** The organiser's dialogs: the picker, the remove confirm, and the link. One open at a time. */
+/**
+ * "Change split" (R1 F2.1) — the organiser's, while the server allows it and somebody besides
+ * them is paying a share. A booking of guests alone has nothing to split.
+ */
+export function ChangeSplitButton({ hands }: { hands: OrganiserHands }) {
+  const { detail } = hands;
+  const paying = detail.players.some((p) => isLive(p) && (p.kind === "member" || p.kind === "open_link"));
+  if (!detail.permissions.can_change_split || !paying || isCancelled(detail)) return null;
+  return <Button variant="outline" icon={SPLIT_ICON} onClick={hands.openSplit}>{CHANGE_SPLIT.open}</Button>;
+}
+
+/** The organiser's dialogs: the picker, the share ask, the split, the remove confirm, and the link. One open at a time. */
 export function OrganiserDialogs({ hands }: { hands: OrganiserHands }) {
   const { detail } = hands;
   const exclude = detail.players.filter((p) => p.user_id).map((p) => p.user_id as string);
@@ -73,6 +87,8 @@ export function OrganiserDialogs({ hands }: { hands: OrganiserHands }) {
         excludeUserIds={exclude}
         onPick={hands.pick}
       />
+      {hands.asking ? <ShareAskDialog detail={detail} pick={hands.asking} onCancel={hands.cancelAsk} onAsk={hands.ask} /> : null}
+      {hands.changingSplit ? <ChangeSplitDialog detail={detail} onClose={hands.closeSplit} onDone={hands.splitDone} /> : null}
       {hands.removing ? <RemoveDialog hands={hands} player={hands.removing} /> : null}
       {hands.sharing ? (
         <ShareLinkDialog

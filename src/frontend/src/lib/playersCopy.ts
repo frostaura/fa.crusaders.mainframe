@@ -463,6 +463,31 @@ export const DETAIL_ACTIONS = {
   openSeatName: "Open seat",
 } as const;
 
+/** R1 F2.1 — the organiser changing the split of a booking that already stands. */
+export const CHANGE_SPLIT = {
+  open: "Change split",
+  title: "Change the split",
+  description: "Anyone whose share goes up is asked again before anything more is taken. A share that goes down comes back to them.",
+  save: "Save the split",
+  cancel: "Cancel",
+  done: "The split is changed.",
+  doneAskedAgain: "The split is changed. Anyone whose share went up has been asked again.",
+  action: "change the split",
+} as const;
+
+/** R1 F2.1 — a player added to an amount or ratio split is asked for a share the organiser names. */
+export const SHARE_ASK = {
+  title: (who: string) => `What should ${who} pay?`,
+  amountBody: (covered: string) => `You cover ${covered} now. What you ask for comes off that.`,
+  ratioBody: "Shares follow the weights. Give them a weight from 0 to 100.",
+  amountLabel: (who: string) => `Amount for ${who}`,
+  weightLabel: (who: string) => `Weight for ${who}`,
+  amountHint: "In credits, up to two decimal places. 0 means you cover them.",
+  weightHint: "A whole number from 0 to 100.",
+  confirm: (who: string) => `Invite ${who}`,
+  cancel: "Cancel",
+} as const;
+
 /** Sharing a seat's link — rotating makes a new one and the old one stops. */
 export const SHARE_LINK = {
   confirmTitle: (name: string) => `A new link for ${name}`,

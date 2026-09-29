@@ -1,0 +1,83 @@
+import { useMemo, useState } from "react";
+import { Alert } from "@/components/Alert";
+import { SplitStep } from "@/components/bookings/SplitStep";
+import { hasPaying, updateSeat, withMode, type PlayersDraft } from "@/components/bookings/playersDraft";
+import { useSplitPreview } from "@/components/bookings/useSplitPreview";
+import type { PlayersStepState } from "@/components/bookings/usePlayersStep";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import { useBalance } from "@/lib/balance";
+import { playersEndpoints, type BookingDetail, type SplitMode } from "@/lib/playersApi";
+import { CHANGE_SPLIT, playersRefusal } from "@/lib/playersCopy";
+import { useAsyncAction } from "@/lib/useAsyncAction";
+import { draftOf, splitChangeOf } from "./splitEditor";
+import type { Notice } from "./useOrganiserHands";
+
+/**
+ * R1 F2.1 — the organiser changes the split of a booking that already stands: Equal · Ratio ·
+ * Amount, each seat's figure, and the live totals — the BookSheet's own Split step, on a draft
+ * built from the live seats. Saving is `PUT /bookings/{id}/split`; the server asks again anyone
+ * whose share went up, and a share that went down comes back at its reconcile.
+ */
+type Props = { detail: BookingDetail; onClose: () => void; onDone: (notice: Notice) => void };
+
+/**
+ * The Split step's state over an existing booking — the same shape the BookSheet's players step
+ * hands it, with nothing to pick (the seats are the booking's own).
+ */
+function useSplitEditor(detail: BookingDetail): PlayersStepState & { setDraft: (d: PlayersDraft) => void } {
+  const [draft, setDraft] = useState<PlayersDraft>(() => draftOf(detail));
+  const prices = useMemo(() => [detail.money.price_credits], [detail.money.price_credits]);
+  const paying = hasPaying(draft);
+  const preview = useSplitPreview(prices, draft, paying);
+  const none = () => undefined;
+  return {
+    draft, setDraft, paying, prices, bulk: false, picking: null, preview,
+    problem: preview.state.status === "invalid" ? preview.state.error : null,
+    payload: null, lines: [],
+    openPicker: none, closePicker: none, pick: none, remove: none, justMe: none,
+    setMode: (mode: SplitMode) => setDraft(withMode(draft, mode, detail.money.price_credits)),
+    setWeight: (seat: number, weight: string) => setDraft(updateSeat(draft, seat, { weight })),
+    setAmount: (seat: number, amount: string) => setDraft(updateSeat(draft, seat, { amount })),
+    setOrganiserWeight: (organiserWeight: string) => setDraft({ ...draft, organiserWeight }),
+  };
+}
+
+export function ChangeSplitDialog({ detail, onClose, onDone }: Props) {
+  const editor = useSplitEditor(detail);
+  const { refresh } = useBalance();
+  const body = splitChangeOf(detail, editor.draft);
+  const save = useAsyncAction(
+    () => playersEndpoints.changeSplit(detail.booking_id, body ?? { mode: editor.draft.mode, seats: [] }),
+    {
+      success: (answer) => {
+        const askedAgain = answer.shares.some((s) => s.needs_consent);
+        onDone({ tone: "success", text: askedAgain ? CHANGE_SPLIT.doneAskedAgain : CHANGE_SPLIT.done });
+        void refresh({ expectSelf: true });
+      },
+    },
+  );
+  const blocked = body === null || editor.problem !== null || editor.preview.state.status !== "ready";
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open && !save.pending) onClose(); }}>
+      <DialogContent data-dialog="change-split">
+        <DialogHeader>
+          <DialogTitle>{CHANGE_SPLIT.title}</DialogTitle>
+          <DialogDescription>{CHANGE_SPLIT.description}</DialogDescription>
+        </DialogHeader>
+        <DialogBody className="flex flex-col gap-4 pb-4">
+          <SplitStep players={editor} />
+          {save.error ? <Alert tone="danger">{playersRefusal(save.error, { action: CHANGE_SPLIT.action })}</Alert> : null}
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>{CHANGE_SPLIT.cancel}</Button>
+          <Button pending={save.pending} disabled={blocked} onClick={() => void save.run()} data-save-split="">
+            {CHANGE_SPLIT.save}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
