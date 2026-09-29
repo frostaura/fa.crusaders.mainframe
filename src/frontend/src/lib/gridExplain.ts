@@ -73,7 +73,8 @@ export type GridExplainer = {
  */
 const HAIR_SPACE = String.fromCharCode(0x200A);
 
-export function useGridExplainer(day: ScheduleDay | null, rules: ViewerRules): GridExplainer {
+/** @param dayLabel "Thu 1 Oct" when the grid shows a day other than today, else null (F1.7). */
+export function useGridExplainer(day: ScheduleDay | null, rules: ViewerRules, dayLabel: string | null = null): GridExplainer {
   const [live, setLive] = useState("");
   const [shown, setShown] = useState("");
 
@@ -103,8 +104,8 @@ export function useGridExplainer(day: ScheduleDay | null, rules: ViewerRules): G
     const max = rules.maxSlotsPerDay;
     if (rules.adminExempt || booked === null || max === null || max <= 0 || booked <= 0) return null;
     // Approaching a limit is not a warning. Only arriving at it is.
-    return { text: quotaPill(booked, max), atLimit: booked >= max };
-  }, [rules]);
+    return { text: quotaPill(booked, max, dayLabel), atLimit: booked >= max };
+  }, [rules, dayLabel]);
 
   const rateLine = useMemo(
     () => (rules.known && !rules.adminExempt && rules.groups.length > 0 ? groupRateLine(rules.groups) : null),

@@ -110,8 +110,12 @@ export function quotaBannerBody(maxSlots: number): string {
  * `booked === max`.
  * </p>
  */
-export function quotaPill(booked: number, maxSlots: number): string {
-  return `${booked} of ${maxSlots} today`;
+/**
+ * "2 of 4 today" — or "2 of 4 on Thu 1 Oct" when the grid is showing another day (F1.7): the
+ * count is the SHOWN day's, and "today" under Thursday's strip was a different day's claim.
+ */
+export function quotaPill(booked: number, maxSlots: number, dayLabel: string | null = null): string {
+  return `${booked} of ${maxSlots} ${dayLabel ? `on ${dayLabel}` : "today"}`;
 }
 
 /* ─────────────────────────── Item 3 — groups, on the member's grid ─────────────────────────── */

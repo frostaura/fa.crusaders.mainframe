@@ -122,19 +122,15 @@ export function cancelSelectionLabel(bookings: number): string {
   return bookings === 1 ? "Cancel booking" : `Cancel ${bookings} bookings`;
 }
 
-/** "Mon 9 Sep · Court 1, Court 2 · 16:00–17:15" — the sanity check made without scrolling. */
-export function selectionDetail(dayLabel: string, courts: readonly string[], from: string, to: string): string {
-  const span = from === to ? from : `${from}–${to}`;
-  return [dayLabel, courts.join(", "), span].filter(Boolean).join(" · ");
-}
-
 /**
  * A member at their daily cap trying to take one more. States the rule, not the person, and
  * says what is still possible — the same three rules `lib/gridCopy` keeps for the banner.
  */
-export function selectionCapSentence(cap: number): string {
-  if (cap <= 0) return "You've booked your slots for today, so there's nothing more to choose.";
-  return `You can book ${cap} more ${cap === 1 ? "slot" : "slots"} today — that's the club's daily limit.`;
+export function selectionCapSentence(cap: number, dayLabel: string | null = null): string {
+  // F1.7 — the cap is the SHOWN day's; "today" is only true when that is today.
+  const when = dayLabel ? `on ${dayLabel}` : "today";
+  if (cap <= 0) return `You've booked your slots for ${dayLabel ?? "today"}, so there's nothing more to choose.`;
+  return `You can book ${cap} more ${cap === 1 ? "slot" : "slots"} ${when} — that's the club's daily limit.`;
 }
 
 /** The mobile court chip's name — it scrolls the grid to that court. */
@@ -393,5 +389,63 @@ export function cancelRowOutcome(refund: number, penalty: number): string {
   const line = `${formatCredits(Math.max(back, 0))} back`;
   return penalty > 0 ? `${line}, ${formatCredits(penalty)} penalty kept` : line;
 }
+
+/* ═══════════════════════════════ REVIEW ROUND 1 ═══════════════════════════════ */
+
+/** F1.6 — `/bookings?as=<member>`: whose booking this is, before the sheet says so. */
+export const BOOKING_FOR = {
+  label: "Booking for",
+  region: (name: string) => `Booking for ${name}`,
+  canSpend: (credits: number) => `can spend ${signedCredits(credits)}`,
+  price: (credits: number, sliceMinutes: number) => `pays ${formatCredits(credits)} / ${sliceMinutes} min`,
+  held: (credits: number) => `${formatCredits(credits)} held for or owed to partners`,
+  gridNote: "The grid shows your prices; the sheet charges theirs.",
+  reading: "Reading this member's details…",
+  failed: "Couldn't read this member's details. The sheet still books for them and shows their figures.",
+  retry: "Try again",
+  stop: "Book for myself instead",
+} as const;
+
+/** F1.10 — the cancellation terms, on Confirm, before anything is charged. */
+export function cancelTermsLine(penaltyPct: number, windowMinutes: number): string {
+  if (penaltyPct <= 0 || windowMinutes <= 0) {
+    return "Cancel any time before you check in and the full amount comes back. Once the lights have been on, nothing does.";
+  }
+  return `Cancel more than ${windowMinutes} min before the start and the full amount comes back; inside ${windowMinutes} min, ${penaltyPct}% is kept. Once the lights have been on, nothing comes back.`;
+}
+
+/** F1.20 — the Done heading counts what the list below it shows. */
+export function bookedInBookings(slots: number, bookings: number): string {
+  return `${slots} slots booked in ${bookings} ${bookings === 1 ? "booking" : "bookings"}`;
+}
+
+/** F1.12 — the member's upcoming games, above the grid. */
+export const UPCOMING = {
+  title: "Your upcoming games",
+  empty: "No games coming up. Pick a free slot below to book one.",
+  failed: "Couldn't load your upcoming games.",
+  retry: "Try again",
+  organiser: "You booked",
+  partner: "You're playing",
+  needsAction: "Needs you",
+  more: (n: number) => `Show ${n} more`,
+  less: "Show fewer",
+  open: (court: string, when: string) => `Open ${court}, ${when}`,
+  share: (credits: number) => `your share ${formatCredits(credits)}`,
+} as const;
+
+/** F1.12 — a partner's seat on the grid: theirs to open, never to cancel. */
+export function partnerCellLabel(where: string): string {
+  return `${where} — a game you're playing in. Open it`;
+}
+
+export const PARTNER_CELL_WORD = "Your game";
+
+/** F1.13 — a split booking's cancel: what each partner gets back, and what the organiser keeps. */
+export const SPLIT_CANCEL = {
+  partnerBack: (name: string) => `Back to ${name}`,
+  youKeep: "You keep",
+  note: "Partners get their shares back from what comes back to you.",
+} as const;
 
 /* ─────────────────────────────── end SHEETS ─────────────────────────────── */

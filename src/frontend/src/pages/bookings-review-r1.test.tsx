@@ -1,0 +1,127 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { forgetClubZone } from "../lib/clubZone";
+import { BOOKINGS_COPY, BOOKING_FOR, selectionCapSentence } from "../lib/bookingsCopy";
+import { quotaPill } from "../lib/gridCopy";
+import { describePlaces } from "../lib/bookingSpan";
+import { signOut } from "../test/harness";
+import { COURT_A, COURT_B, dayFixture, openBookings, resetSheets, sast } from "../test/bookingsKit";
+
+vi.mock("../components/bookings/BookSheet", async () => (await import("../test/fakeSheets")).bookSheetModule);
+vi.mock("../components/bookings/CancelSheet", async () => (await import("../test/fakeSheets")).cancelSheetModule);
+
+/**
+ * Review round 1 on the Bookings page itself (F1.6–F1.8): whose booking a `?as=` page is, which
+ * day the quota counts, and a selection line that claims only the span it has.
+ */
+vi.setConfig({ testTimeout: 20_000 });
+
+beforeEach(() => { forgetClubZone(); resetSheets(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); signOut(); forgetClubZone(); });
+
+const NALEDI = "55555555-5555-5555-5555-555555555555";
+
+describe("F1.6 — booking for a member says so before the sheet does", () => {
+  const memberRoutes = [
+    {
+      path: `/api/v1/admin/members/${NALEDI}/booking-rules`,
+      body: { slice_price_credits: 40, groups: [{ name: "Juniors" }] },
+    },
+    {
+      path: `/api/v1/admin/members/${NALEDI}`,
+      body: { full_name: "Naledi Khumalo", balance_credits: 215, held_credits: 90, owed_back_credits: 0 },
+    },
+  ];
+
+  it("names the member, what they can spend and their price — and hides the admin's own wallet", async () => {
+    const stub = openBookings({
+      isAdmin: true, balance: -100, routes: memberRoutes, at: `/bookings?date=2030-09-09&as=${NALEDI}`,
+    });
+    const bar = await screen.findByRole("region", { name: BOOKING_FOR.region("Naledi Khumalo") });
+    expect(bar).toHaveTextContent(`${BOOKING_FOR.label} Naledi Khumalo`);
+    expect(bar).toHaveTextContent("Juniors");
+    expect(bar).toHaveTextContent(BOOKING_FOR.canSpend(125));
+    expect(bar).toHaveTextContent(BOOKING_FOR.price(40, 15));
+    expect(bar).toHaveTextContent(BOOKING_FOR.held(90));
+    expect(within(bar).getByRole("link", { name: BOOKING_FOR.stop })).toHaveAttribute("href", "/bookings");
+    // The admin's own −100 is not this booking's wallet.
+    expect(document.body.textContent).not.toContain("Your balance is −100.00 cr");
+    const rules = stub.calls.find((c) => c.path.includes("/booking-rules"));
+    expect(rules?.path).toContain("day=2030-09-09");
+  });
+
+  it("says so when the member cannot be read, and retries", async () => {
+    openBookings({
+      isAdmin: true,
+      routes: [{ path: `/api/v1/admin/members/${NALEDI}`, status: 500, body: {} }],
+      at: `/bookings?date=2030-09-09&as=${NALEDI}`,
+    });
+    expect(await screen.findByText(BOOKING_FOR.failed)).toBeTruthy();
+    expect(screen.getByRole("button", { name: BOOKING_FOR.retry })).toBeTruthy();
+  });
+
+  it("is not there for an admin booking for themselves", async () => {
+    openBookings({ isAdmin: true });
+    await screen.findByRole("grid");
+    expect(document.querySelector("[data-booking-for]")).toBeNull();
+  });
+});
+
+describe("F1.7 — the daily quota names the day it counts", () => {
+  const rules = { max_slots_per_day: 4, booked_slots_today: 2, remaining_today: 2 };
+
+  it("says 'on Thu 12 Sep' under another day, never 'today'", async () => {
+    openBookings({ day: dayFixture({ date: "2030-09-12", rules }), at: "/bookings?date=2030-09-12" });
+    await screen.findByRole("grid");
+    expect(await screen.findByText(quotaPill(2, 4, "Thu 12 Sep"))).toBeTruthy();
+    expect(screen.queryByText(/2 of 4 today/)).toBeNull();
+  });
+
+  it("the cap sentence names the day too", () => {
+    expect(selectionCapSentence(1, "Thu 12 Sep")).toBe("You can book 1 more slot on Thu 12 Sep — that's the club's daily limit.");
+    expect(selectionCapSentence(0, "Thu 12 Sep")).toContain("for Thu 12 Sep");
+    expect(selectionCapSentence(1)).toContain("today");
+  });
+});
+
+describe("F1.8 — the selection line never claims a span it does not have", () => {
+  const parts = {
+    day: "Mon 9 Sep",
+    courtName: (id: string) => (id === COURT_A ? "Court 1" : "Court 2"),
+    clock: (ms: number) => new Date(ms).toISOString().slice(11, 16),
+  };
+  const slot = (courtId: string, hh: number, mm = 0) => {
+    const from = Date.parse(sast(hh, mm));
+    return { courtId, from, to: from + 15 * 60_000 };
+  };
+
+  it("lists two separate slots instead of one span over both", () => {
+    expect(describePlaces([slot(COURT_A, 11), slot(COURT_B, 12)], parts)).toBe("Mon 9 Sep · Court 1 09:00–09:15, Court 2 10:00–10:15");
+  });
+
+  it("keeps the span when it is one: the same times on every court, no gap", () => {
+    expect(describePlaces([slot(COURT_A, 11), slot(COURT_A, 11, 15), slot(COURT_B, 11), slot(COURT_B, 11, 15)], parts))
+      .toBe("Mon 9 Sep · Court 1, Court 2 · 09:00–09:30");
+  });
+
+  it("names each court's run when the runs differ", () => {
+    expect(describePlaces([slot(COURT_A, 16), slot(COURT_A, 16, 15), slot(COURT_B, 16, 30)], parts))
+      .toBe("Mon 9 Sep · Court 1 14:00–14:30, Court 2 14:30–14:45");
+  });
+
+  it("counts past three", () => {
+    const four = [slot(COURT_A, 11), slot(COURT_A, 12), slot(COURT_B, 13), slot(COURT_B, 14)];
+    expect(describePlaces(four, parts)).toBe("Mon 9 Sep · 4 slots on Court 1, Court 2");
+  });
+
+  it("the bar says it on the page", async () => {
+    openBookings();
+    await screen.findByRole("grid");
+    fireEvent.click(screen.getByRole("button", { name: BOOKINGS_COPY.selectOn }));
+    fireEvent.click(screen.getByRole("button", { name: /^Book Court 1 at 16:00/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Book Court 2 at 17:00/ }));
+    const bar = await screen.findByRole("toolbar", { name: BOOKINGS_COPY.actionBarLabel });
+    await waitFor(() => expect(bar).toHaveTextContent("Court 1 16:00–16:15, Court 2 17:00–17:15"));
+    expect(bar.textContent).not.toContain("16:00–17:15");
+  });
+});

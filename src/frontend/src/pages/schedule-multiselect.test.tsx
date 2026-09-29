@@ -119,8 +119,9 @@ describe("the floating action bar", () => {
     openBookings({ day: DAY });
     await select([/^Book Court 1 at 16:00/, /^Book Court 1 at 16:15/, /^Book Court 2 at 16:30/]);
     expect(within(bar()).getByText("3 slots · 150.00 cr")).toBeInTheDocument();
-    // The span runs to the END of the last slot (16:30 + 15 min), not to its start.
-    expect(within(bar()).getByText(/Mon 9 Sep · Court 1, Court 2 · 16:00–16:45/)).toBeInTheDocument();
+    // Each court's run to the END of its last slot — never one span over both courts, which
+    // read as 45 minutes on each (review round 1, F1.8).
+    expect(within(bar()).getByText(/Mon 9 Sep · Court 1 16:00–16:30, Court 2 16:30–16:45/)).toBeInTheDocument();
     // The count is announced politely, beside the toolbar rather than inside it.
     expect(screen.getAllByRole("status").some((s) => s.textContent === "3 slots · 150.00 cr")).toBe(true);
 
@@ -160,7 +161,8 @@ describe("a member's limits — D8", () => {
     openBookings({ day: CAPPED });
     await select([/^Book Court 1 at 16:00/, /^Book Court 1 at 16:15/, /^Book Court 1 at 16:30/]);
     expect(names()).toEqual(["Court 1 at 16:00", "Court 1 at 16:15"]);
-    expect(document.body.textContent).toContain(selectionCapSentence(2));
+    // The shown day is not the club's today: the sentence names it (review round 1, F1.7).
+    expect(document.body.textContent).toContain(selectionCapSentence(2, "Mon 9 Sep"));
   });
 
   it("caps a drag the same way", async () => {

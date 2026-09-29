@@ -16,13 +16,15 @@ import { ScheduleNotices } from "../components/ScheduleNotices";
 import type { BoardContext } from "../components/ScheduleCells";
 import { BookingBoard, BookingGridHeading, BookingGridSkeleton, SELECTION_ROOM_PX } from "../components/bookings/BookingGrid";
 import { BookSheet, type BookedOutcome } from "../components/bookings/BookSheet";
+import { BookingForBar } from "../components/bookings/BookingForBar";
 import { CancelSheet, type CancelledOutcome } from "../components/bookings/CancelSheet";
 import { InvitesBadgeLink } from "../components/players/invites/InvitesBadgeLink";
 import type { GridBooking, SelectedSlot } from "../components/bookings/types";
 import type { ScheduleCourt, ScheduleDay, ScheduleSlot } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useBalance } from "../lib/balance";
-import { BOOKINGS_COPY, cancelSelectionLabel, selectionCapSentence, selectionDetail, selectionHeadline } from "../lib/bookingsCopy";
+import { BOOKINGS_COPY, cancelSelectionLabel, selectionCapSentence, selectionHeadline } from "../lib/bookingsCopy";
+import { describePlaces, type Place } from "../lib/bookingSpan";
 import { clubClock } from "../lib/clubClock";
 import { useGridExplainer } from "../lib/gridExplain";
 import {
@@ -56,6 +58,8 @@ export default function BookingsPage() {
   const isAdmin = auth.status === "authenticated" && auth.isAdmin;
   const actorUserId = auth.status === "authenticated" ? auth.userId : null;
   const [params] = useSearchParams();
+  // `?as=<member>` from a member's page — the desk booking for them (an admin's only).
+  const bookAsUserId = isAdmin ? params.get("as") : null;
 
   const schedule = useScheduleDay(isAdmin, params.get("date"));
   const { date, day, setDay, rules, reconcile, today } = schedule;
@@ -64,10 +68,13 @@ export default function BookingsPage() {
   // strip is worse than a skeleton.
   const shown = day && day.date === date ? day : null;
 
-  const explainer = useGridExplainer(day, rules);
+  // F1.7 — the quota and the cap are the SHOWN day's: "today" only when it is.
+  const otherDay = date === today ? null : formatClubDayLabel(date) ?? null;
+  const explainer = useGridExplainer(day, rules, otherDay);
+  const capSentence = useCallback((cap: number) => selectionCapSentence(cap, otherDay), [otherDay]);
   const selection = useGridSelection({
     cap: isAdmin || rules.adminExempt ? null : rules.remainingToday,
-    announce: explainer.announce, capSentence: selectionCapSentence,
+    announce: explainer.announce, capSentence,
     onSentence: BOOKINGS_COPY.selectionOn, offSentence: BOOKINGS_COPY.selectionOff,
   });
   useClearOnDayChange(date, selection, explainer);
@@ -122,10 +129,11 @@ export default function BookingsPage() {
       {/* Room under the grid while the floating bar is up, so it never covers the last row —
           padding, not a spacer element, because a spacer would also take the shell's section gap. */}
       <div className="flex flex-col gap-4" style={selection.api.active ? { paddingBottom: SELECTION_ROOM_PX } : undefined}>
+        {bookAsUserId ? <BookingForBar userId={bookAsUserId} day={date} sliceMinutes={day?.sliceMinutes ?? 15} /> : null}
         <InvitesBadgeLink />
         <DayPicker schedule={schedule} isAdmin={isAdmin} quota={explainer.quotaPill} rateLine={explainer.rateLine} />
         <ScheduleNotices
-          notices={explainer.notices(balance, shown, isAdmin)} live={explainer.live} shown={explainer.shown}
+          notices={explainer.notices(bookAsUserId ? null : balance, shown, isAdmin)} live={explainer.live} shown={explainer.shown}
           onDismiss={explainer.dismiss} onNextDay={schedule.nextDay}
         />
         <BookingGridHeading />
@@ -155,7 +163,7 @@ export default function BookingsPage() {
         open={sheets.bookOpen} onOpenChange={sheets.setBookOpen} slots={sheets.bookSlots}
         timezone={day?.timezone ?? "UTC"} sliceMinutes={day?.sliceMinutes ?? 15}
         isAdmin={isAdmin} actorUserId={actorUserId} balanceCredits={balance}
-        bookAsUserId={isAdmin ? params.get("as") : null}
+        bookAsUserId={bookAsUserId}
         onBooked={onBooked} onStale={() => void reconcile()} reread={reconcile}
       />
       <CancelSheet
@@ -263,8 +271,6 @@ function SelectionBar(props: {
   );
 }
 
-type Place = { courtId: string; from: number; to: number };
-
 /** Where one selection key sits on the day: its court, its first instant and its end. */
 function placeOf(key: string, day: ScheduleDay): Place | null {
   const target = parseSelectionKey(key);
@@ -280,17 +286,17 @@ function placeOf(key: string, day: ScheduleDay): Place | null {
 /**
  * "Mon 9 Sep · Court 1, Court 2 · 16:00–16:45" — checkable without scrolling. The span runs to
  * the END of the last slot: three 15-minute slots from 16:00 are played until 16:45, and a bar
- * that said "16:00–16:30" would undersell what is about to be charged.
+ * that said "16:00–16:30" would undersell what is about to be charged. Slots that are not one
+ * span are listed instead (F1.8) — see `lib/bookingSpan`.
  */
 function describeSpan(keys: readonly string[], day: ScheduleDay | null): string | undefined {
   if (!day) return undefined;
   const places = keys.map((k) => placeOf(k, day)).filter((p): p is Place => p !== null);
-  if (places.length === 0) return undefined;
-  const courtIds = new Set(places.map((p) => p.courtId));
-  const courts = day.courts.filter((c) => courtIds.has(c.id)).map((c) => c.name);
-  const from = clubClock(Math.min(...places.map((p) => p.from)), day.timezone);
-  const to = clubClock(Math.max(...places.map((p) => p.to)), day.timezone);
-  return selectionDetail(formatClubDayLabel(day.date) ?? "", courts, from, to);
+  return describePlaces(places, {
+    day: formatClubDayLabel(day.date) ?? "",
+    courtName: (id) => day.courts.find((c) => c.id === id)?.name ?? "",
+    clock: (ms) => clubClock(ms, day.timezone),
+  });
 }
 
 /* ─────────────────────────────── state ─────────────────────────────── */
