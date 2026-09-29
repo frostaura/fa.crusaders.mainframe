@@ -9,6 +9,7 @@ import {
   STANDING_HEADING,
   STANDING_LOADING,
   type ReadFailure,
+  type StandingCodeState,
   asOfMayHaveChanged,
   describeStanding,
   offlineDetailsBody,
@@ -95,35 +96,7 @@ export function StandingLine(props: {
   const codeState = { hasLiveCode: props.hasLiveCode };
 
   if (door) {
-    const line = describeStanding(door, code, codeState);
-    return (
-      <section className="space-y-2">
-        <h2 className="text-sm font-medium">
-          {STANDING_HEADING}
-          {/*
-            D6. `useMemberDoor` keeps the last good answer when a later read fails, which is
-            right — throwing away a true answer because the next request did not land would
-            leave the member with less. What was wrong is that it went on being rendered in
-            the present tense with nothing to say it was from ten minutes ago, beside a code
-            card saying "this code has run out". A cached fact carries its age.
-          */}
-          {staleSince && (
-            <span className="font-normal text-text-muted"> — {asOfMayHaveChanged(clubClock(staleSince, door.timezone))}</span>
-          )}
-        </h2>
-        <p className="text-sm text-text-secondary">{line.body}</p>
-        {/* When the member's next booking lets them in, where the rule makes that worth saying. */}
-        {line.codeLine && <p className="text-sm text-text-secondary">{line.codeLine}</p>}
-        {/* B4 / E-H1: both halves of what a shut door does, and nothing promised. */}
-        {line.shutLine && <p className="text-sm text-warning-strong">{line.shutLine}</p>}
-        {line.action?.kind === "book_a_court" && !props.actionOfferedAbove && (
-          <Link to="/bookings" className={MEMBER_DOOR_ACTION_LINK}>
-            {line.action.label}
-          </Link>
-        )}
-        <OfflineHalf rosterMaxEntries={door.roster_max_entries} />
-      </section>
-    );
+    return <LiveStanding door={door} code={code} codeState={codeState} staleSince={staleSince} actionOfferedAbove={props.actionOfferedAbove} />;
   }
 
   // Loading before failed: the first load of a page opened in a corridor is not a failure
@@ -160,6 +133,46 @@ export function StandingLine(props: {
       </p>
       {cachedLine?.shutLine && <p className="text-sm text-warning-strong">{cachedLine.shutLine}</p>}
       {cachedLine && <OfflineHalf rosterMaxEntries={cached?.value.roster_max_entries ?? null} />}
+    </section>
+  );
+}
+
+/** The answer the club gave, live or kept from the last good read (split out for the complexity gate). */
+function LiveStanding(props: {
+  door: MemberDoor;
+  code: CodeOnScreen | null;
+  codeState: StandingCodeState;
+  staleSince: string | null;
+  actionOfferedAbove?: boolean;
+}) {
+  const { door, code, codeState, staleSince } = props;
+  const line = describeStanding(door, code, codeState);
+  return (
+    <section className="space-y-2">
+      <h2 className="text-sm font-medium">
+        {STANDING_HEADING}
+        {/*
+          D6. `useMemberDoor` keeps the last good answer when a later read fails, which is
+          right — throwing away a true answer because the next request did not land would
+          leave the member with less. What was wrong is that it went on being rendered in
+          the present tense with nothing to say it was from ten minutes ago, beside a code
+          card saying "this code has run out". A cached fact carries its age.
+        */}
+        {staleSince && (
+          <span className="font-normal text-text-muted"> — {asOfMayHaveChanged(clubClock(staleSince, door.timezone))}</span>
+        )}
+      </h2>
+      <p className="text-sm text-text-secondary">{line.body}</p>
+      {/* When the member's next booking lets them in, where the rule makes that worth saying. */}
+      {line.codeLine && <p className="text-sm text-text-secondary">{line.codeLine}</p>}
+      {/* B4 / E-H1: both halves of what a shut door does, and nothing promised. */}
+      {line.shutLine && <p className="text-sm text-warning-strong">{line.shutLine}</p>}
+      {line.action?.kind === "book_a_court" && !props.actionOfferedAbove && (
+        <Link to="/bookings" className={MEMBER_DOOR_ACTION_LINK}>
+          {line.action.label}
+        </Link>
+      )}
+      <OfflineHalf rosterMaxEntries={door.roster_max_entries} />
     </section>
   );
 }

@@ -128,6 +128,8 @@ test.describe("the always-reachable guide", () => {
     await serveApi(page, [{ path: "/api/v1/session", body: SESSION_ANON }, { path: "/api/v1/me/door", body: door() }]);
     await page.setViewportSize({ width: 320, height: 568 });
     await page.goto("/how-it-works");
+    // The guide is a lazy route (P10): measure the page, not the skeleton that holds its place.
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
     for (const root of [16, 32]) {
       await page.addStyleTag({ content: `html { font-size: ${root}px }` });

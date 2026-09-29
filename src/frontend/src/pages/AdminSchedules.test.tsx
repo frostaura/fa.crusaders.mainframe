@@ -8,6 +8,9 @@ import {
   sessionRoutes,
 } from "../test/scheduleFixtures";
 import { forgetClubZone } from "../lib/clubZone";
+// The date picker's calendar is a lazy chunk (P10). Loaded here, once, so opening a picker in a
+// test resolves from the module cache instead of racing a cold transform under a loaded runner.
+import "@/components/ui/date-picker-calendar";
 
 /**
  * A longer per-test timeout than the 5-second default, for this file only. Each case opens
@@ -137,7 +140,7 @@ describe("creating one", () => {
   async function pickDay(name: RegExp, day: string) {
     await userEvent.click(screen.getByRole("button", { name }));
     // The calendar is its own lazily loaded chunk (P10): let it arrive before walking it.
-    await screen.findByRole("button", { name: /next month/i }, { timeout: 10_000 });
+    await screen.findByRole("button", { name: /next month/i });
     for (let month = 0; month < 36; month++) {
       const button = document.querySelector<HTMLButtonElement>(`button[data-day="${day}"]`);
       if (button) {

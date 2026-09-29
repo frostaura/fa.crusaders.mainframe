@@ -7,6 +7,9 @@ import { DatePicker } from "../date-picker";
 import { formatClubDayLabel } from "../date-picker-day";
 import { TimeSelect, timeOptions } from "../time-select";
 import { SM_UP, useMediaQuery } from "../use-media-query";
+// The date picker's calendar is a lazy chunk (P10). Loaded here, once, so opening a picker in a
+// test resolves from the module cache instead of racing a cold transform under a loaded runner.
+import "@/components/ui/date-picker-calendar";
 
 const strict = { reactStrictMode: true };
 
@@ -134,7 +137,7 @@ describe("DatePicker", () => {
     fireEvent.click(screen.getByRole("button", { name: "Jump to a date: Wed 23 Sep" }));
     const sheet = screen.getByRole("dialog", { name: "Jump to a date" });
     // The calendar is its own lazily loaded chunk (P10); the sheet opens first.
-    await within(sheet).findByRole("button", { name: /next month/i }, { timeout: 10_000 });
+    await within(sheet).findByRole("button", { name: /next month/i });
     expect(dayButton(sheet, "2026-09-19")).toBeDisabled();
     // max is in this month, so there is nowhere to navigate to in either direction.
     expect(within(sheet).getByRole("button", { name: /next month/i })).toHaveAttribute("aria-disabled", "true");
@@ -154,7 +157,7 @@ describe("DatePicker on a wide screen", () => {
     render(<DatePicker label="Jump to a date" value="2026-09-23" timeZone={ZONE} onChange={onChange} />, strict);
     fireEvent.click(screen.getByRole("button", { name: "Jump to a date: Wed 23 Sep" }));
     const panel = screen.getByRole("dialog", { name: "Jump to a date" });
-    await within(panel).findByRole("button", { name: /next month/i }, { timeout: 10_000 });
+    await within(panel).findByRole("button", { name: /next month/i });
     expect(panel).toHaveAttribute("data-slot", "popover-content");
     fireEvent.click(dayButton(panel, "2026-09-24"));
     expect(onChange).toHaveBeenCalledWith("2026-09-24");

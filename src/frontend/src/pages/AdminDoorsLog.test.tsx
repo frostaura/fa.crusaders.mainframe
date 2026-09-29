@@ -5,6 +5,9 @@ import {
   SETTINGS_FIXTURE, doorFixture, doorLogFixture, doorsServer, renderPage, signIn, signOut,
   stubFetch,
 } from "../test/harness";
+// The date picker's calendar is a lazy chunk (P10). Loaded here, once, so opening a picker in a
+// test resolves from the module cache instead of racing a cold transform under a loaded runner.
+import "@/components/ui/date-picker-calendar";
 
 /**
  * The three filters are design-system Selects (P3, R7 — they were native selects), so a
@@ -216,7 +219,7 @@ describe("the club door log", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /^Which day/ }));
     // The calendar is its own lazily loaded chunk (P10): let it arrive before walking it.
-    await screen.findByRole("button", { name: /next month/i }, { timeout: 10_000 });
+    await screen.findByRole("button", { name: /next month/i });
     const target = "2026-09-20";
     for (let step = 0; step < 60 && !document.querySelector(`button[data-day="${target}"]`); step++) {
       // The calendar opens on today's month; walk to the fixture's day in whichever direction it lies.

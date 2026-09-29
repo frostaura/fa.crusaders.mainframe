@@ -29,7 +29,7 @@ const SURFACES = [
   "pages/monitoring",
   "components/monitoring",
   "components/members",
-  "components/StateBlock.tsx",
+  "components/ui/state-block.tsx",
   "lib/monitoringCopy.ts",
   "lib/deviceFaultCopy.ts",
   "lib/nightCopy.ts",

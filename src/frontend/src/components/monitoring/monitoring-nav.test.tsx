@@ -153,12 +153,13 @@ describe("every destination is a real page", () => {
     expect(app, "a placeholder is back under Monitoring").not.toContain("MonitoringPlaceholder");
     expect(app).toMatch(/<Route path="\/admin" element=\{<RequireAuth admin>/);
     for (const tab of MONITORING_TABS) {
-      const route = new RegExp(`path="${tab.to}"\\s+element=\\{<([A-Za-z]+)\\s*/>`);
+      // Eager (`<Page />`) or code-split (`<Lazy><Page /></Lazy>`, P10).
+      const route = new RegExp(`path="${tab.to}"\\s+element=\\{(?:<Lazy>)?<([A-Za-z]+)\\s*/>`);
       const found = app.match(route);
       expect(found, `${tab.to} does not render a page component`).not.toBeNull();
-      // A route is only as real as the import behind it.
+      // A route is only as real as the import behind it — a static import or a lazy one.
       expect(app, `${tab.to} renders <${found?.[1]}>, which nothing imports`)
-        .toMatch(new RegExp(`import \\{[^}]*\\b${found?.[1]}\\b`));
+        .toMatch(new RegExp(`import \\{[^}]*\\b${found?.[1]}\\b|const ${found?.[1]} = (?:lazy|named)\\(`));
     }
   });
 });

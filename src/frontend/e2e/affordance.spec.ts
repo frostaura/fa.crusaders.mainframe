@@ -141,6 +141,9 @@ test("the focus ring is the product's accent, not an undefined variable's fallba
   ]);
 
   await page.goto("/wallet");
+  // Wallet is a lazy route (P10): take the page's own button, not whatever the shell shows first.
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await expect(page.locator("main button:visible").first()).toBeVisible();
 
   // Keyboard focus specifically: the rule is :focus-visible, which a mouse click does not match.
   const focused = page.locator("button:visible").first();
