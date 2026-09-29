@@ -177,6 +177,28 @@ test.describe("booking with players", () => {
     await expect(sheet.getByRole("link", { name: BOOK_CONFIRM.seeBooking })).toHaveAttribute("href", "/bookings/bk-1");
   });
 
+  test("D12 — the sheet's top edge stays put as the picker's tabs change; D3 — the slot is named on Players", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await signIn(page);
+    await serveApi(page, routes());
+    await openSheet(page);
+    const sheet = page.getByRole("dialog");
+    // D3 — the court, the time and the price before Confirm.
+    const summary = sheet.getByRole("list", { name: BOOK_SHEET.summaryLabel });
+    await expect(summary).toContainText("Court 1");
+    await expect(summary).toContainText("100.00 cr");
+
+    await sheet.getByRole("radio", { name: BOOK_PLAYERS.withOthers }).click();
+    await expect(sheet.getByRole("button", { name: PICKER.add(PEOPLE.sam.name) })).toBeVisible();
+    const top = async () => (await sheet.boundingBox())!.y;
+    const first = await top();
+    for (const name of [PICKER.recent, PICKER.members, PICKER.link, PICKER.guest, PICKER.favourites]) {
+      await sheet.getByRole("tab", { name }).click();
+      await page.waitForTimeout(150);
+      expect(Math.abs((await top()) - first), `top edge after ${name}`).toBeLessThanOrEqual(1);
+    }
+  });
+
   test("Just me still books exactly as before", async ({ page }) => {
     let raw: unknown = null;
     await signIn(page);

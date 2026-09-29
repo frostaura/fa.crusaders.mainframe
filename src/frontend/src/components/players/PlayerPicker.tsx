@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import {
   Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import { TOP_ANCHORED_SHEET } from "@/components/ui/dialog-shape";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { PublicMember } from "@/lib/playersApi";
 import { PICKER } from "@/lib/playersCopy";
@@ -50,6 +51,13 @@ export type PlayerPickerProps = {
   allowLink?: boolean;
 };
 
+/**
+ * D12 — every tab's panel is at least this tall, so switching Favourites → Link → Guest does not
+ * resize the sheet around it; a centred dialog that changed height moved both its edges, and the
+ * whole sheet jumped under the member's finger. Longer lists still grow, and the sheet scrolls.
+ */
+const PANEL = "min-h-80";
+
 /** The picker as a panel, to sit inside a sheet that is already open (the BookSheet's Players step). */
 export function PlayerPicker(props: PlayerPickerProps) {
   const { onPick, excludeUserIds, allowGuest = true, allowLink = true } = props;
@@ -67,12 +75,12 @@ export function PlayerPicker(props: PlayerPickerProps) {
         {allowLink ? <TabsTrigger value="link">{PICKER.link}</TabsTrigger> : null}
         {allowGuest ? <TabsTrigger value="guest">{PICKER.guest}</TabsTrigger> : null}
       </TabsList>
-      <TabsContent value="favourites"><FavouritesTab {...tabProps} /></TabsContent>
-      <TabsContent value="recent"><RecentTab {...tabProps} /></TabsContent>
-      <TabsContent value="members"><MembersTab {...tabProps} /></TabsContent>
-      {allowLink ? <TabsContent value="link"><LinkTab onPick={() => onPick({ kind: "link" })} /></TabsContent> : null}
+      <TabsContent value="favourites" className={PANEL}><FavouritesTab {...tabProps} /></TabsContent>
+      <TabsContent value="recent" className={PANEL}><RecentTab {...tabProps} /></TabsContent>
+      <TabsContent value="members" className={PANEL}><MembersTab {...tabProps} /></TabsContent>
+      {allowLink ? <TabsContent value="link" className={PANEL}><LinkTab onPick={() => onPick({ kind: "link" })} /></TabsContent> : null}
       {allowGuest ? (
-        <TabsContent value="guest"><GuestTab onPick={(name) => onPick({ kind: "guest", name })} /></TabsContent>
+        <TabsContent value="guest" className={PANEL}><GuestTab onPick={(name) => onPick({ kind: "guest", name })} /></TabsContent>
       ) : null}
     </Tabs>
   );
@@ -90,7 +98,7 @@ export function PlayerPickerDialog(props: PlayerPickerDialogProps) {
   const { open, onOpenChange, title, ...picker } = props;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-dialog="player-picker">
+      <DialogContent data-dialog="player-picker" className={TOP_ANCHORED_SHEET}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{PICKER.dialogDescription}</DialogDescription>

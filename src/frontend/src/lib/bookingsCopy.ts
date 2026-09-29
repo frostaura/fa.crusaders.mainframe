@@ -186,6 +186,9 @@ export const BOOK_SHEET = {
   description: "Check the slots and the price, then book.",
   holdDescription: "A club hold charges nobody. The name you write shows on the grid.",
   steps: { slots: "Slots", players: "Players", split: "Split", confirm: "Confirm" },
+  /** D3 — the compact slot summary on the steps that are not the slot list. */
+  summaryLabel: "What you're booking",
+  summaryMore: (n: number) => `and ${n} more`,
   stepOf: (index: number, total: number, name: string) => `Step ${index} of ${total}: ${name}`,
 
   bookAs: "Book as",

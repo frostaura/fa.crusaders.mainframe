@@ -118,6 +118,33 @@ export function SlotList({ lines, label, refusedWord }: { lines: readonly SlotLi
   );
 }
 
+/**
+ * D3 — what is being booked, one compact line a slot, at the top of the steps that are not
+ * already the slot list (Players, Split). The sheet's subtitle says "Check the slots and the
+ * price", and on those steps there was neither until Confirm. At most `SUMMARY_ROWS` rows, then
+ * "and N more", so a twelve-slot run does not push the step off the screen.
+ */
+const SUMMARY_ROWS = 3;
+
+export function SlotSummary({ lines, label, more }: { lines: readonly SlotLine[]; label: string; more: (n: number) => string }) {
+  const shown = lines.slice(0, SUMMARY_ROWS);
+  const rest = lines.length - shown.length;
+  return (
+    <ul aria-label={label} data-slot-summary="" className="grid gap-1 rounded-xl border border-border bg-bg-surface px-3 py-2 text-sm">
+      {shown.map((line) => (
+        <li key={line.key} className="flex items-baseline justify-between gap-3">
+          <span className="min-w-0 break-words">
+            <span className="font-semibold text-text-primary">{line.courtName}</span>
+            <span className="text-text-secondary">{` · ${line.day} · ${line.time}`}</span>
+          </span>
+          <SlotPrice line={line} />
+        </li>
+      ))}
+      {rest > 0 ? <li className="text-text-secondary">{more(rest)}</li> : null}
+    </ul>
+  );
+}
+
 /* ─────────────────────────────── the money ─────────────────────────────── */
 
 export type MoneyRow = {

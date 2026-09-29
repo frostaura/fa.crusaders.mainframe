@@ -18,9 +18,10 @@ import { useBalance } from "@/lib/balance";
 import { BOOK_PLAYERS, heldLine, owedBackLine, owedBackQuoteLine } from "@/lib/playersCopy";
 import { BulkResults } from "./BulkResults";
 import { GodModeNotice } from "./GodModeNotice";
-import { MoneyRows, SlotList, Stepper } from "./SheetParts";
+import { MoneyRows, SlotList, SlotSummary, Stepper } from "./SheetParts";
 import { slotCount, type BookAs } from "./bookFlow";
 import { PlayersStep } from "./PlayersStep";
+import { TOP_ANCHORED_SHEET } from "@/components/ui/dialog-shape";
 import { ConfirmPlayers, ResultPlayers } from "./PlayersOutcomeView";
 import { SplitStep } from "./SplitStep";
 import { refusalSentence, useBookFlow, type BookFlow, type BookFlowInput } from "./useBookFlow";
@@ -72,7 +73,8 @@ export function BookSheet(props: BookSheetProps) {
   const { open, onOpenChange } = props;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-sheet="book">
+      {/* D12 — top-anchored on desktop: steps and picker tabs change its height. */}
+      <DialogContent data-sheet="book" className={TOP_ANCHORED_SHEET}>
         {props.slots.length > 0 ? <BookFlowView {...props} onClose={() => onOpenChange(false)} /> : null}
       </DialogContent>
     </Dialog>
@@ -133,8 +135,9 @@ function BookFlowView(props: BookSheetProps & { onClose: () => void }) {
 
 function StepView(props: StepViewProps) {
   const { flow, isAdmin, reasonId, actorUserId } = props;
-  if (flow.step === "players") return <PlayersStep players={flow.players} actorUserId={actorUserId} />;
-  if (flow.step === "split") return <SplitStep players={flow.players} />;
+  const summary = <SlotSummary lines={flow.lines} label={BOOK_SHEET.summaryLabel} more={BOOK_SHEET.summaryMore} />;
+  if (flow.step === "players") return <>{summary}<PlayersStep players={flow.players} actorUserId={actorUserId} /></>;
+  if (flow.step === "split") return <>{summary}<SplitStep players={flow.players} /></>;
   if (flow.step === "slots") {
     return (
       <>

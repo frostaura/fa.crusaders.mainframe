@@ -9,6 +9,7 @@ import { BalanceProvider } from "@/lib/balance";
 import type { BalanceTransport } from "@/lib/liveBalance";
 import { refuse, signIn, signOut, stubFetch, type StubCall, type StubRoute } from "@/test/harness";
 import { BOOK_SHEET } from "@/lib/bookingsCopy";
+import { formatCredits } from "@/lib/utils";
 import {
   BOOK_CONFIRM, BOOK_PLAYERS, BOOK_SPLIT, PICKER, PLAYERS_REFUSAL, heldLine, owedBackLine,
 } from "@/lib/playersCopy";
@@ -106,6 +107,20 @@ async function next() {
 }
 
 describe("BookSheet — Players", () => {
+  it("D3 — shows the court, the time and the price at the top of Players and of Split", async () => {
+    stubFetch([FAVOURITES, PREVIEW]);
+    open({ slots: [C1, C2] });
+    const summary = () => screen.getByRole("list", { name: BOOK_SHEET.summaryLabel });
+    expect(within(summary()).getByText("Court 1")).toBeTruthy();
+    expect(within(summary()).getByText("Court 2")).toBeTruthy();
+    expect(within(summary()).getAllByText(formatCredits(100))).toHaveLength(2);
+
+    await addSamAndALink();
+    await next();
+    expect(screen.getByRole("list", { name: BOOK_SHEET.summaryLabel })).toBeTruthy();
+    expect(within(summary()).getByText("Court 1")).toBeTruthy();
+  });
+
   it("opens on Just me, and Just me books exactly as before — no players on the wire", async () => {
     const stub = stubFetch([{ method: "POST", path: "/api/v1/bookings/", body: { booking_id: "bk-1", balance_after_credits: 400 } }]);
     open();
