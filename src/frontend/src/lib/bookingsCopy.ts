@@ -430,7 +430,6 @@ export const UPCOMING = {
   needsAction: "Needs you",
   more: (n: number) => `Show ${n} more`,
   less: "Show fewer",
-  open: (court: string, when: string) => `Open ${court}, ${when}`,
   share: (credits: number) => `your share ${formatCredits(credits)}`,
 } as const;
 

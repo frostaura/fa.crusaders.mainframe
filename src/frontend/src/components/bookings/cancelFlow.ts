@@ -3,6 +3,7 @@ import { endpoints, type BulkCancelResponse, type CancellationQuote } from "@/li
 import { formatMinutes } from "@/lib/utils";
 import { clubClock } from "@/lib/clubClock";
 import { UnsureOutcome, goneFrom, outcomeUnknown, type Reread } from "@/lib/bookingOutcome";
+import { splitCancelOf, type PartnerRefund } from "@/lib/bookingsApi";
 import { CANCEL_SHEET, cancelRowOutcome, refusalReason, RESULT_WORD } from "@/lib/bookingsCopy";
 import { clubDayLabel, newIdempotencyKey } from "./bookFlow";
 import type { BulkResultRow } from "./BulkResults";
@@ -57,11 +58,17 @@ export function useCancelQuotes(bookings: readonly GridBooking[]) {
 
 /* ─────────────────────────────── figures ─────────────────────────────── */
 
-/** What one booking's cancellation moves, with a waiver applied (the waiver returns the penalty). */
-export function netOf(quote: CancellationQuote, waived: boolean) {
-  if (quote.checkedIn) return { back: 0, penalty: 0 };
-  if (waived) return { back: quote.amountChargedCredits, penalty: 0 };
-  return { back: quote.refundCredits, penalty: quote.penaltyCredits };
+/**
+ * What one booking's cancellation moves, with a waiver applied (the waiver returns the penalty).
+ * On a split booking (contract §3) `back` is what the ORGANISER keeps after the partners' shares
+ * go back to them, and `partners` says who gets what (F1.13) — the whole refund used to be
+ * called "Back to you" while most of it was on its way to the partners.
+ */
+export function netOf(quote: CancellationQuote, waived: boolean): { back: number; penalty: number; partners: PartnerRefund[] } {
+  if (quote.checkedIn) return { back: 0, penalty: 0, partners: [] };
+  if (waived) return { back: quote.amountChargedCredits, penalty: 0, partners: [] };
+  const split = splitCancelOf(quote);
+  return { back: split ? split.net : quote.refundCredits, penalty: quote.penaltyCredits, partners: split?.partners ?? [] };
 }
 
 export type CancelTotals = { back: number; penalty: number; nothingBack: number; missing: number; anyPenalty: boolean };
@@ -111,7 +118,7 @@ export type CancelRequest = {
 };
 
 /** What one cancel moved. Null figures: it was cancelled, but the reply that said how much was lost. */
-export type CancelFigures = { refunded: number | null; penalty: number | null };
+export type CancelFigures = { refunded: number | null; penalty: number | null; split?: ReturnType<typeof splitCancelOf> };
 
 export type CancelRun = {
   rows: BulkResultRow[];
@@ -227,7 +234,7 @@ async function cancelSingle(b: GridBooking, req: CancelRequest): Promise<CancelR
   try {
     const r = await cancelOne(b, req);
     return { rows: [okRow(b, r.refunded_credits, r.penalty_credits)], cancelledIds: [b.bookingId],
-      single: { refunded: r.refunded_credits, penalty: r.penalty_credits } };
+      single: { refunded: r.refunded_credits, penalty: r.penalty_credits, split: splitCancelOf(r as Record<string, unknown>) } };
   } catch (error) {
     if (!outcomeUnknown(error) || !req.reread) throw error;
     const day = await req.reread();

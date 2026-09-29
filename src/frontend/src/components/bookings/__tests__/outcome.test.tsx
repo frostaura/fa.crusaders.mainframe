@@ -8,7 +8,7 @@ import { BalanceProvider } from "@/lib/balance";
 import type { BalanceTransport } from "@/lib/liveBalance";
 import type { ScheduleDay } from "@/lib/api";
 import { refuse, signIn, signOut, stubFetch, unreachable } from "@/test/harness";
-import { BOOK_SHEET, CANCEL_SHEET, GOD_MODE, cancelTermsLine } from "@/lib/bookingsCopy";
+import { BOOK_SHEET, CANCEL_SHEET, GOD_MODE, SPLIT_CANCEL, cancelTermsLine } from "@/lib/bookingsCopy";
 import { UNSURE_TEXT, cancellationOutcome, describeBookingError } from "@/lib/bookingErrors";
 import { ApiError } from "@/lib/api";
 import { BookSheet, type BookSheetProps } from "../BookSheet";
@@ -284,5 +284,38 @@ describe("F1.10 — Confirm states the cancellation terms before anything is cha
 
   it("a club without a penalty says the plain rule", () => {
     expect(cancelTermsLine(0, 15)).toContain("full amount comes back");
+  });
+});
+
+describe("F1.13 — a split booking's cancel says who gets what back", () => {
+  const split = { ...QUOTE, amountChargedCredits: 100, refundCredits: 100, net_credits: 50, partner_refunds: [{ name: "Sam", credits: 50 }] };
+
+  it("names each partner's share and what the organiser keeps — the quote's camelCase or snake_case", async () => {
+    stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: split }]);
+    openCancel();
+    await screen.findByText(CANCEL_SHEET.free(null));
+    const money = document.querySelector("dl")!;
+    expect(money).toHaveTextContent(`${SPLIT_CANCEL.partnerBack("Sam")}50.00 cr`);
+    expect(money).toHaveTextContent(`${SPLIT_CANCEL.youKeep}50.00 cr`);
+    expect(money).not.toHaveTextContent(`${CANCEL_SHEET.goesBack(null)}100.00 cr`);
+    expect(screen.getByText(SPLIT_CANCEL.note)).toBeTruthy();
+  });
+
+  it("the toast after it says the same", async () => {
+    stubFetch([
+      { path: "/api/v1/bookings/bk-1/cancellation-quote", body: { ...QUOTE, netCredits: 50, partnerRefunds: [{ name: "Sam", credits: 50 }] } },
+      { method: "POST", path: "/api/v1/bookings/bk-1/cancel", body: { refunded_credits: 100, penalty_credits: 0, net_credits: 50, partner_refunds: [{ name: "Sam", credits: 50 }] } },
+    ]);
+    openCancel();
+    await screen.findByText(`${SPLIT_CANCEL.youKeep}`);
+    fireEvent.click(screen.getByRole("button", { name: CANCEL_SHEET.confirm(1) }));
+    expect(await screen.findByText("Booking cancelled. 50.00 cr back to your credit; 50.00 cr to Sam.")).toBeTruthy();
+  });
+
+  it("a booking without players is unchanged", async () => {
+    stubFetch([{ path: "/api/v1/bookings/bk-1/cancellation-quote", body: QUOTE }]);
+    openCancel();
+    await screen.findByText(CANCEL_SHEET.free(null));
+    expect(document.querySelector("dl")).toHaveTextContent(`${CANCEL_SHEET.goesBack(null)}50.00 cr`);
   });
 });

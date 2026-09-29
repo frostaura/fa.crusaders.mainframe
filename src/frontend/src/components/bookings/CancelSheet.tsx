@@ -13,7 +13,7 @@ import { cancellationOutcome, describeBookingError, provesStaleGrid } from "@/li
 import { UnsureOutcome, type Reread } from "@/lib/bookingOutcome";
 import { describeFailure } from "@/lib/errors";
 import { useAsyncAction } from "@/lib/useAsyncAction";
-import { CANCEL_SHEET, RESULTS_LABEL } from "@/lib/bookingsCopy";
+import { CANCEL_SHEET, RESULTS_LABEL, SPLIT_CANCEL } from "@/lib/bookingsCopy";
 import { BulkResults } from "./BulkResults";
 import { MoneyRows, SlotList, type MoneyRow, type SlotLine } from "./SheetParts";
 import {
@@ -111,7 +111,8 @@ function useCancelFlow(props: CancelSheetProps & { onClose: () => void }) {
           return;
         }
         const [b] = bookings;
-        push?.({ tone: "success", text: cancellationOutcome(result.single.refunded, result.single.penalty, b.mine ? null : b.memberFirstName ?? "the member") });
+        const who = b.mine ? null : b.memberFirstName ?? "the member";
+        push?.({ tone: "success", text: cancellationOutcome(result.single.refunded, result.single.penalty, who, result.single.split) });
         onClose();
       },
       failure: (error) => { if (provesStaleGrid(error)) props.onStale?.(); },
@@ -208,7 +209,11 @@ function singleMoney(quote: CancellationQuote | null, waived: boolean, subject: 
       ? { term: CANCEL_SHEET.penaltyWaived, value: 0 }
       : { term: CANCEL_SHEET.penalty(quote.penaltyPct), value: quote.penaltyCredits, debit: true });
   }
-  rows.push({ term: CANCEL_SHEET.goesBack(subject), value: net?.back ?? null, total: true });
+  // F1.13 — each partner's share goes back to them; the organiser keeps the rest.
+  for (const p of net?.partners ?? []) rows.push({ term: SPLIT_CANCEL.partnerBack(p.name), value: p.credits });
+  const split = Boolean(net?.partners.length);
+  const term = split && !subject ? SPLIT_CANCEL.youKeep : CANCEL_SHEET.goesBack(subject);
+  rows.push({ term, value: net?.back ?? null, total: true });
   return rows;
 }
 
@@ -225,8 +230,15 @@ function SingleCancel({ flow, booking, quotes }: { flow: CancelFlow; booking: Gr
       {!loading && !quote ? <QuoteFailed retry={flow.quotes.retry} /> : null}
       {said ? <Alert tone={said.tone} live="polite">{said.text}</Alert> : null}
       {loading || quote ? <MoneyRows rows={singleMoney(quote, waived, subject)} label={CANCEL_SHEET.totalBack} /> : null}
+      <SplitNote quote={quote} waived={waived} />
     </>
   );
+}
+
+/** F1.13 — why "Back to you" is less than was paid on a split booking. */
+function SplitNote({ quote, waived }: { quote: CancellationQuote | null; waived: boolean }) {
+  if (!quote || netOf(quote, waived).partners.length === 0) return null;
+  return <p className="-mt-2 px-1 text-xs text-text-secondary">{SPLIT_CANCEL.note}</p>;
 }
 
 function QuoteFailed({ retry }: { retry: () => void }) {

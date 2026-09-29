@@ -1,5 +1,6 @@
 import { ApiError } from "./api";
 import { UnsureOutcome } from "./bookingOutcome";
+import type { SplitCancel } from "./bookingsApi";
 import { formatCredits } from "./utils";
 
 /**
@@ -306,7 +307,9 @@ export function provesStaleGrid(e: unknown): boolean {
  * the member never named. An admin acting for someone should be told whose credit moved.
  * </p>
  */
-export function cancellationOutcome(refunded: number | null, penalty: number | null, member?: string | null): string {
+export function cancellationOutcome(
+  refunded: number | null, penalty: number | null, member?: string | null, split?: SplitCancel | null,
+): string {
   const whose = member ? `${member}'s credit` : "your credit";
   // F1.1 — the schedule shows it gone but the reply with the figures was lost.
   if (refunded === null || penalty === null) {
@@ -317,9 +320,12 @@ export function cancellationOutcome(refunded: number | null, penalty: number | n
       ? `Booking cancelled. Nothing was refunded — ${member} had already checked in and the lights had been on.`
       : "Booking cancelled. Nothing was refunded — the lights had already been on.";
   }
+  // F1.13 — a split booking: what the organiser keeps, and each partner's share, by name.
+  const partners = split ? `; ${split.partners.map((p) => `${formatCredits(p.credits)} to ${p.name}`).join(", ")}` : "";
+  const back = split ? split.net : refunded - (penalty > 0 ? penalty : 0);
   if (penalty > 0) {
-    return `Booking cancelled. ${formatCredits(refunded - penalty)} back to ${whose}, `
+    return `Booking cancelled. ${formatCredits(back)} back to ${whose}${partners}, `
       + `${formatCredits(penalty)} kept as the late-cancellation penalty.`;
   }
-  return `Booking cancelled. ${formatCredits(refunded)} back to ${whose}.`;
+  return `Booking cancelled. ${formatCredits(split ? split.net : refunded)} back to ${whose}${partners}.`;
 }
