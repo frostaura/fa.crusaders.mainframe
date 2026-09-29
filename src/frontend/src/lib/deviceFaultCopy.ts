@@ -1,4 +1,5 @@
 import type { DeviceErrorRow, DeviceErrorSeverity } from "./adminApi";
+import { clubDayAndClock } from "./clubClock";
 
 /**
  * What a fault MEANS, and what somebody should do about it — in words a volunteer can act on.
@@ -181,6 +182,23 @@ const EXPLANATIONS: Record<string, FaultExplanation> = {
     means: "More boards have registered themselves than the club has looked at. New boards are being turned away until somebody checks.",
     doThis: "Open Boards and either name the boards that are meant to be there, or delete the ones that are not.",
   },
+  // --- the court box's critical codes (review round 1, F3.7: shown raw before) -----------
+  restore_not_confirmed: {
+    means: "After a power cut a court should have come back on, and the box has not said that it did. Somebody may be playing in the dark.",
+    doThis: "Go and look at the court. If its lights are off, switch them at the wall, then power the box off and on so it re-reads what should be lit.",
+  },
+  restore_failed: {
+    means: "After a power cut the box tried to switch a court's lights back on and could not.",
+    doThis: "Switch the court's lights at the wall for the players on it, then power the box off and on. If it happens again, the relay needs looking at.",
+  },
+  relay_cmd_dropped: {
+    means: "The box was told to switch a court's lights and the command never reached the relay.",
+    doThis: "Look at the court. If the lights are wrong, switch them at the wall and power the box off and on.",
+  },
+  mega_link_lost: {
+    means: "The two halves of the court box stopped talking. Its buttons, screen and relays may not respond.",
+    doThis: "Switch the box off at the plug, wait ten seconds and switch it back on. If it comes straight back, the board needs somebody who can open it.",
+  },
   error_log_overflow: {
     means: "This board is producing faults faster than the club's system will record them, so most of them are being counted rather than kept.",
     doThis: "A board in this state is in real trouble. The count below is how many were suppressed — go and look at the board itself.",
@@ -196,7 +214,7 @@ const EXPLANATIONS: Record<string, FaultExplanation> = {
  * a neutral sentence naming the raw code, never a guessed one, and never `undefined`.
  * </p>
  */
-export function explainFault(row: Pick<DeviceErrorRow, "code" | "headline" | "detail">): {
+export function explainFault(row: Pick<DeviceErrorRow, "code" | "headline" | "detail">, timezone?: string): {
   title: string;
   means: string;
   doThis: string;
@@ -204,12 +222,13 @@ export function explainFault(row: Pick<DeviceErrorRow, "code" | "headline" | "de
   unrecognised: boolean;
 } {
   const known = EXPLANATIONS[row.code];
-  const title = (row.headline ?? "").trim()
+  const headline = (row.headline ?? "").trim();
+  const title = headline
     || (known ? row.code.replace(/_/g, " ") : `An error the club's software does not have a name for (${row.code})`);
   if (known) return { title, means: known.means, doThis: known.doThis, unrecognised: false };
   return {
     title,
-    means: (row.detail ?? "").trim()
+    means: faultDetail(row.detail, timezone)
       || "The club's software does not have a name for this one, and the board did not say more.",
     doThis: `Pass the code "${row.code}" to whoever looks after the boards. Nothing on this page can interpret it.`,
     unrecognised: true,
@@ -272,4 +291,36 @@ export function faultsPartialNotice(reported: number, total: number, silent: str
   if (silent.length === 0) return null;
   const which = silent.length === 1 ? silent[0] : `${silent.length} boards`;
   return `${reported} of ${total} boards reported. ${which} hasn't called in, so anything wrong with it isn't here.`;
+}
+
+/**
+ * A board's name as a heading: its CODE as well as its name (F3.7). Every court box is called
+ * "Court box" out of the factory, so a page of faults headed by name alone was a page of
+ * identical headings.
+ */
+export function boardLabel(row: Pick<DeviceErrorRow, "device_code" | "device_name">): string {
+  const name = (row.device_name ?? "").trim();
+  const code = (row.device_code ?? "").trim();
+  if (name && code && name !== code) return `${name} (${code})`;
+  return name || code || "Unnamed board";
+}
+
+const ISO_INSTANT = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})\b/g;
+
+/**
+ * A fault's detail in words (F3.7): "served 4 relay(s), the box reported 0" said as a sentence,
+ * and any UTC instant the server wrote into it shown in the club's own time.
+ */
+export function faultDetail(detail: string | null | undefined, timezone: string | undefined): string {
+  const text = (detail ?? "").trim();
+  const relays = /^served (\d+) relay\(s\), the box reported (\d+)$/.exec(text);
+  if (relays) {
+    const served = Number(relays[1]);
+    const reported = Number(relays[2]);
+    const courts = served === 1 ? "1 court" : `${served} courts`;
+    return `The club's system expected ${courts} to be lit; the box reported ${reported === 0 ? "none" : reported}.`;
+  }
+  return text
+    .replace(ISO_INSTANT, (iso) => clubDayAndClock(iso, timezone))
+    .replace(/\b(\d+) relay\(s\)/g, (_m, n: string) => (n === "1" ? "1 relay" : `${n} relays`));
 }

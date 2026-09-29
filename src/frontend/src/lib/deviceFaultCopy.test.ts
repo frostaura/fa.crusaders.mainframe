@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEVICE_FAULT_CODES, SERVER_FAULT_CODES, SEVERITY_TONE, SEVERITY_WORD, explainFault,
-  faultsEmptyNotice, faultsPartialNotice, occurrenceLine, resolveConfirm, resolvedLine,
+  faultsEmptyNotice, faultsPartialNotice, occurrenceLine, resolveConfirm, resolvedLine, boardLabel, faultDetail,
 } from "./deviceFaultCopy";
 import { DEVICE_ERROR_SEVERITIES } from "./adminApi";
 
@@ -128,5 +128,27 @@ describe("what the page says about itself", () => {
     expect(resolvedLine("Priya Naidoo", "07:15", null)).toBe("Marked resolved by Priya Naidoo at 07:15.");
     expect(resolvedLine("Priya Naidoo", "07:15", "   ")).toBe("Marked resolved by Priya Naidoo at 07:15.");
     expect(resolvedLine(null, "07:15", null)).toBe("Marked resolved at 07:15.");
+  });
+});
+
+describe("review round 1, F3.7 — the faults page in words", () => {
+  it("heads a board by name AND code, because every box is called Court box", () => {
+    expect(boardLabel({ device_name: "Court box", device_code: "CB-01" })).toBe("Court box (CB-01)");
+    expect(boardLabel({ device_name: null, device_code: "CB-02" })).toBe("CB-02");
+  });
+
+  it("explains restore_not_confirmed instead of printing it", () => {
+    const said = explainFault({ code: "restore_not_confirmed", headline: "A court should be lit after a power cut and the box has not confirmed it", detail: null });
+    expect(said.unrecognised).toBe(false);
+    expect(`${said.title} ${said.means} ${said.doThis}`).not.toMatch(/restore_not_confirmed/);
+  });
+
+
+  it("says the relay detail as a sentence and a UTC instant in the club's time", () => {
+    expect(faultDetail("served 4 relay(s), the box reported 0", "Africa/Johannesburg"))
+      .toBe("The club's system expected 4 courts to be lit; the box reported none.");
+    const said = faultDetail("clock was 2026-09-21T16:05:00Z", "Africa/Johannesburg");
+    expect(said).not.toMatch(/T16:05|Z\b/);
+    expect(said).toMatch(/18:05/);
   });
 });

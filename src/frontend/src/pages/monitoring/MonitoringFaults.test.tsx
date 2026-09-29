@@ -33,7 +33,8 @@ describe("grouping, which is the shape of the trip somebody makes with this page
       deviceErrorFixture({ id: "c", device_id: "d1", device_name: "Box 1-4" }),
     ]);
     expect(groups).toHaveLength(2);
-    expect(groups.find((g) => g.name === "Box 1-4")!.rows).toHaveLength(2);
+    // Name AND code (F3.7): every court box is called "Court box" out of the factory.
+    expect(groups.find((g) => g.name === "Box 1-4 (CB-01)")!.rows).toHaveLength(2);
   });
 
   /**
@@ -54,7 +55,7 @@ describe("grouping, which is the shape of the trip somebody makes with this page
       deviceErrorFixture({ id: "a", device_id: "d1", device_name: "Old", last_seen_at: "2026-09-20T10:00:00Z" }),
       deviceErrorFixture({ id: "b", device_id: "d2", device_name: "New", last_seen_at: "2026-09-22T10:00:00Z" }),
     ]);
-    expect(groups.map((g) => g.name)).toEqual(["New", "Old"]);
+    expect(groups.map((g) => g.name)).toEqual(["New (CB-01)", "Old (CB-01)"]);
   });
 });
 

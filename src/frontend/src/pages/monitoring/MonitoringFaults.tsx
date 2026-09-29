@@ -24,8 +24,8 @@ import {
   type DeviceErrorPage, type DeviceErrorRow, type DeviceErrorSeverity, type DeviceErrorState,
 } from "../../lib/adminApi";
 import {
-  FAULTS_READ_FAILED, RESOLVE_MEANING, SEVERITY_TONE, SEVERITY_WORD, explainFault,
-  faultsEmptyNotice, occurrenceLine, resolveConfirm, resolvedLine,
+  FAULTS_READ_FAILED, RESOLVE_MEANING, SEVERITY_TONE, SEVERITY_WORD, boardLabel, explainFault,
+  faultDetail, faultsEmptyNotice, occurrenceLine, resolveConfirm, resolvedLine,
 } from "../../lib/deviceFaultCopy";
 
 /**
@@ -84,7 +84,7 @@ export function groupByBoard(rows: DeviceErrorRow[]): Board[] {
       inside the club's own board, which is the one place an admin would never look for them.
     */
     const name = row.device_id
-      ? (row.device_name ?? row.device_code ?? "Unnamed board")
+      ? boardLabel(row)
       : "Not from a board the club knows";
     const board = byKey.get(key) ?? { key, name, rows: [] };
     board.rows.push(row);
@@ -490,7 +490,7 @@ function FaultRow({ row, now, timezone, selected, onToggle, onResolve }: {
   onToggle: () => void;
   onResolve: (note: string) => void | string | Promise<void | string>;
 }) {
-  const said = explainFault(row);
+  const said = explainFault(row, timezone);
   const tone = SEVERITY_TONE[row.severity] ?? "info";
   const resolved = Boolean(row.resolved_at);
 
@@ -530,8 +530,8 @@ function FaultRow({ row, now, timezone, selected, onToggle, onResolve }: {
             <dt className="text-text-muted">What to do</dt>
             <dd className="min-w-0 break-words text-text-secondary">{said.doThis}</dd>
           </dl>
-          {row.detail && !said.unrecognised && (
-            <p className="min-w-0 break-words text-xs text-text-muted">{row.detail}</p>
+          {row.detail && !said.unrecognised && said.means !== faultDetail(row.detail, timezone) && (
+            <p className="min-w-0 break-words text-xs text-text-muted">{faultDetail(row.detail, timezone)}</p>
           )}
           {resolved && (
             <p className="text-sm text-success-strong">
