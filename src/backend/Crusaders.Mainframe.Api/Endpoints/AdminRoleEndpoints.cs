@@ -31,7 +31,10 @@ public static class AdminRoleEndpoints
             Guid userId, AdminRoleBody body, HttpContext ctx, AdminRoleService roles, CancellationToken ct) =>
         {
             if (body.Grant is not { } grant) return Results.BadRequest(new { error = "grant_required" });
-            if (!grant && string.IsNullOrWhiteSpace(body.Reason)) return Results.BadRequest(new { error = "reason_required" });
+            // Both ways since review round 1 (B10): making somebody an administrator is the change
+            // that decides who reads every other one, and "why was this person given the keys?"
+            // is asked as often as "why was I removed?".
+            if (string.IsNullOrWhiteSpace(body.Reason)) return Results.BadRequest(new { error = "reason_required" });
 
             var result = await roles.ChangeAsync(new AdminRoleRequest
             {

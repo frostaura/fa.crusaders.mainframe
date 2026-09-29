@@ -71,7 +71,7 @@ public sealed class AdminRoleHttpTests : IClassFixture<PostgresFixture>
         var colleague = await club.AddAsync(app, "Colin Colleague", isAdmin: true);
         var member = await club.AddAsync(app, "Mandla Member", isAdmin: false);
 
-        var response = await club.Client(app, actor, adminRole: true).PostAsJsonAsync(RolePath(member), new { grant = true });
+        var response = await club.Client(app, actor, adminRole: true).PostAsJsonAsync(RolePath(member), new { grant = true, reason = "runs the desk on Tuesdays" });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await JsonAsync(response);
@@ -128,7 +128,7 @@ public sealed class AdminRoleHttpTests : IClassFixture<PostgresFixture>
             _ => await club.AddAsync(factory, "Lulu Locked", false, userStatus: "suspended"),
         };
 
-        var response = await club.Client(factory, actor, adminRole: true).PostAsJsonAsync(RolePath(target), new { grant = true });
+        var response = await club.Client(factory, actor, adminRole: true).PostAsJsonAsync(RolePath(target), new { grant = true, reason = "runs the desk on Tuesdays" });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         Assert.Equal("not_active_member", await ErrorAsync(response));
@@ -144,7 +144,7 @@ public sealed class AdminRoleHttpTests : IClassFixture<PostgresFixture>
         var actor = await club.AddAsync(factory, "Desk Admin", isAdmin: true);
         var other = await club.AddAsync(factory, "Other Admin", isAdmin: true);
 
-        var response = await club.Client(factory, actor, adminRole: true).PostAsJsonAsync(RolePath(other), new { grant = true });
+        var response = await club.Client(factory, actor, adminRole: true).PostAsJsonAsync(RolePath(other), new { grant = true, reason = "runs the desk on Tuesdays" });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.False((await JsonAsync(response)).GetProperty("changed").GetBoolean());
@@ -156,6 +156,7 @@ public sealed class AdminRoleHttpTests : IClassFixture<PostgresFixture>
     [SkippableTheory]
     [InlineData("""{}""", "grant_required")]
     [InlineData("""{"grant":false}""", "reason_required")]
+    [InlineData("""{"grant":true}""", "reason_required")]
     [InlineData("""{"grant":false,"reason":"   "}""", "reason_required")]
     public async Task A_malformed_request_is_refused_before_anything_is_read(string json, string code)
     {
@@ -181,7 +182,7 @@ public sealed class AdminRoleHttpTests : IClassFixture<PostgresFixture>
         var club = await PeopleClub.SeedAsync(factory, "rolemem");
         var member = await club.AddAsync(factory, "Mo Member", isAdmin: false);
 
-        var response = await club.Client(factory, member, adminRole: false).PostAsJsonAsync(RolePath(member), new { grant = true });
+        var response = await club.Client(factory, member, adminRole: false).PostAsJsonAsync(RolePath(member), new { grant = true, reason = "runs the desk on Tuesdays" });
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         Assert.False(await IsAdminAsync(factory, member));
@@ -375,7 +376,7 @@ public sealed class AdminRoleHttpTests : IClassFixture<PostgresFixture>
         var adminB = await clubB.AddAsync(factory, "Admin Bravo", isAdmin: true);
         var clientB = clubB.Client(factory, adminB, adminRole: true);
 
-        var grant = await clientB.PostAsJsonAsync(RolePath(memberA), new { grant = true });
+        var grant = await clientB.PostAsJsonAsync(RolePath(memberA), new { grant = true, reason = "runs the desk on Tuesdays" });
         var revoke = await clientB.PostAsJsonAsync(RolePath(otherA), new { grant = false, reason = "hostile" });
 
         Assert.Equal(HttpStatusCode.NotFound, grant.StatusCode);

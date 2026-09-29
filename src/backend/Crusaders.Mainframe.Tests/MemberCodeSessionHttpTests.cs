@@ -28,7 +28,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
         var enrolled = await MemberCodeClub.JsonAsync(await lost.PostAsync("/api/v1/me/code/enrol", null));
         var oldSecret = MemberCodeMath.FromBase64Url(enrolled.GetProperty("secret").GetString()!)!;
 
-        var reset = await club.Member(app, club.AdminId, "admin").PostAsync($"/api/v1/admin/members/{club.OlgaMembership}/code/reset", null);
+        var reset = await club.Member(app, club.AdminId, "admin").PostAsJsonAsync($"/api/v1/admin/members/{club.OlgaMembership}/code/reset", new { reason = "lost phone" });
         Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
 
         // Every route the lost phone could reach is closed — and above all it cannot re-enrol.
@@ -239,7 +239,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
         await AddPasskeyAsync(club, app, club.Pam);
         var admin = club.Member(app, club.AdminId, "admin");
 
-        var reset = await MemberCodeClub.JsonAsync(await admin.PostAsync($"/api/v1/admin/members/{club.OlgaMembership}/code/reset", null));
+        var reset = await MemberCodeClub.JsonAsync(await admin.PostAsJsonAsync($"/api/v1/admin/members/{club.OlgaMembership}/code/reset", new { reason = "lost phone" }));
         Assert.True(reset.GetProperty("passkeys_revoked").GetBoolean());
         Assert.Equal(2, reset.GetProperty("passkeys_removed").GetInt32());
         Assert.Equal(0, await PasskeysAsync(club, app, club.Olga));
@@ -250,7 +250,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
         Assert.Equal(club.AdminId, audit.ActorUserId);
 
         await AddPasskeyAsync(club, app, club.Olga);
-        var kept = await MemberCodeClub.JsonAsync(await admin.PostAsJsonAsync($"/api/v1/admin/members/{club.OlgaMembership}/code/reset", new { revoke_passkeys = false }));
+        var kept = await MemberCodeClub.JsonAsync(await admin.PostAsJsonAsync($"/api/v1/admin/members/{club.OlgaMembership}/code/reset", new { reason = "lost phone", revoke_passkeys = false }));
         Assert.False(kept.GetProperty("passkeys_revoked").GetBoolean());
         Assert.Equal(1, await PasskeysAsync(club, app, club.Olga));
     }
@@ -300,7 +300,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
             Assert.StartsWith("data:", await reader.ReadLineAsync(cts.Token));
 
             var admin = club.Member(app, club.AdminId, "admin");
-            Assert.Equal(HttpStatusCode.OK, (await admin.PostAsync($"/api/v1/admin/members/{club.OlgaMembership}/code/reset", null)).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync($"/api/v1/admin/members/{club.OlgaMembership}/code/reset", new { reason = "lost phone" })).StatusCode);
 
             // The stream ENDS (null) — it does not ping on for ever.
             string? line;
@@ -370,7 +370,7 @@ public sealed class MemberCodeSessionHttpTests(PostgresFixture pg) : IClassFixtu
         Assert.Equal(HttpStatusCode.OK, (await kept.GetAsync("/api/v1/me/code")).StatusCode);
 
         // The desk's code reset (passkeys), then an admin temporary password.
-        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsync($"/api/v1/admin/members/{club.OlgaMembership}/code/reset", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync($"/api/v1/admin/members/{club.OlgaMembership}/code/reset", new { reason = "lost phone" })).StatusCode);
         Assert.Equal(4, await Epoch(club.Olga));
         Assert.Equal(HttpStatusCode.OK, (await admin.PostAsync($"/api/v1/admin/members/{club.OlgaMembership}/reset-password", null)).StatusCode);
         Assert.Equal(6, await Epoch(club.Olga));

@@ -164,8 +164,15 @@ public sealed record MemberCodeStatus(
     [property: System.Text.Json.Serialization.JsonPropertyName("phase")] string Phase);
 
 /// <summary>
-/// The optional body of <c>POST /api/v1/me/sessions/revoke-all</c> and of the admin's
-/// <c>POST /admin/members/{id}/code/reset</c>: whether the member's passkeys go too.
+/// The optional body of <c>POST /api/v1/me/sessions/revoke-all</c>: whether the member's passkeys go too.
 /// </summary>
 public sealed record RevokeSessionsRequest(
+    [property: System.Text.Json.Serialization.JsonPropertyName("revoke_passkeys")] bool? RevokePasskeys = null);
+
+/// <summary>
+/// The body of the admin's <c>POST /admin/members/{id}/code/reset</c>: the desk's <c>reason</c>
+/// (required since review round 1, B6) and whether the member's passkeys go too (default yes).
+/// </summary>
+public sealed record CodeResetRequest(
+    [property: System.Text.Json.Serialization.JsonPropertyName("reason")] string? Reason = null,
     [property: System.Text.Json.Serialization.JsonPropertyName("revoke_passkeys")] bool? RevokePasskeys = null);

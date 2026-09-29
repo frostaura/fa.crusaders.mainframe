@@ -71,7 +71,7 @@ public sealed class LiveAdminRoleHttpTests : IClassFixture<PostgresFixture>
         Assert.Equal(HttpStatusCode.Forbidden, (await memberClient.GetAsync(AdminList)).StatusCode);
 
         var promote = await club.Client(factory, actor, adminRole: true)
-            .PostAsJsonAsync($"/api/v1/admin/members/{member}/admin", new { grant = true });
+            .PostAsJsonAsync($"/api/v1/admin/members/{member}/admin", new { grant = true, reason = "runs the desk on Tuesdays" });
         Assert.Equal(HttpStatusCode.OK, promote.StatusCode);
 
         // The old token never claimed the role, and a database read never GRANTS one.

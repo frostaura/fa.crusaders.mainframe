@@ -98,6 +98,7 @@ internal static class EmailCatalogue
             ("MembershipRejected", EmailTemplates.MembershipRejected(club, to, "We could not match that membership number.")),
             ("MembershipSuspended", EmailTemplates.MembershipSuspended(club, to, "Thandi Mokoena", "Subscription unpaid since June.")),
             ("MembershipReactivated", EmailTemplates.MembershipReactivated(club, to, "Thandi Mokoena")),
+            ("MemberCodeReset", EmailTemplates.MemberCodeReset(club, to, "Thandi Mokoena", "Lost her phone at the club", passkeysRemoved: true)),
             ("AdminNewRegistration", EmailTemplates.AdminNewRegistration(club, to, "Jason Fourie", "jason@riverside.review.test", "RR-0412", ConsoleUrl)),
             ("PasswordReset", EmailTemplates.PasswordReset(club, to, LinkUrl)),
             ("AdminPasswordReset", EmailTemplates.AdminPasswordReset(club, to, "Thandi Mokoena", "Qm7-42xw")),

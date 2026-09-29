@@ -157,7 +157,7 @@ public sealed class MemberCodeHttpTests(PostgresFixture pg) : IClassFixture<Post
         Assert.Equal(HttpStatusCode.OK, suspend.StatusCode);
         Assert.Equal(2, await club.ReadAsync(app, db => db.MemberCodes.IgnoreQueryFilters().Where(c => c.UserId == club.Sid).Select(c => c.Generation).FirstAsync()));
 
-        var reset = await MemberCodeClub.JsonAsync(await admin.PostAsync($"/api/v1/admin/members/{club.OlgaMembership}/code/reset", null));
+        var reset = await MemberCodeClub.JsonAsync(await admin.PostAsJsonAsync($"/api/v1/admin/members/{club.OlgaMembership}/code/reset", new { reason = "lost phone" }));
         Assert.True(reset.GetProperty("rotated").GetBoolean());
         Assert.Equal(2, reset.GetProperty("generation").GetInt32());
 
@@ -177,10 +177,10 @@ public sealed class MemberCodeHttpTests(PostgresFixture pg) : IClassFixture<Post
         var home = await MemberCodeClub.SeedAsync(app, "idorhome");
         var away = await MemberCodeClub.SeedAsync(app, "idoraway");
 
-        var foreign = await away.Member(app, away.AdminId, "admin").PostAsync($"/api/v1/admin/members/{home.OlgaMembership}/code/reset", null);
+        var foreign = await away.Member(app, away.AdminId, "admin").PostAsJsonAsync($"/api/v1/admin/members/{home.OlgaMembership}/code/reset", new { reason = "lost phone" });
         Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
 
-        var member = await home.Member(app, home.Pam).PostAsync($"/api/v1/admin/members/{home.OlgaMembership}/code/reset", null);
+        var member = await home.Member(app, home.Pam).PostAsJsonAsync($"/api/v1/admin/members/{home.OlgaMembership}/code/reset", new { reason = "lost phone" });
         Assert.Equal(HttpStatusCode.Forbidden, member.StatusCode);
 
         Assert.Equal(1, await home.ReadAsync(app, db => db.MemberCodes.IgnoreQueryFilters().Where(c => c.UserId == home.Olga).Select(c => c.Generation).FirstAsync()));

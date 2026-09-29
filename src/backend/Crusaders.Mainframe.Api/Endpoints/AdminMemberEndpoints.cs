@@ -150,6 +150,10 @@ public static class AdminMemberEndpoints
                 DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { membership_id = memberId }),
             });
             await memberCodes.StageRotationAsync(user.Id, actor, "password_reset_by_admin", ct);
+            // Review round 1, B5: on the club's own change record, in the same save.
+            await ctx.RequestServices.GetRequiredService<AdminChangeRecorder>().StageAsync(new AdminChange(
+                Action: AdminChangeActions.MemberPasswordReset, ActorUserId: actor, SubjectKind: AdminChangeSubjects.User,
+                SubjectId: user.Id, SubjectLabel: membership.FullName, After: new { must_change_password = true }), ct);
             await db.SaveChangesAsync(ct);
             await memberCodes.CompleteRotationsAsync(ct);
 
@@ -251,10 +255,17 @@ public static class AdminMemberEndpoints
     /// and enrol for the new secret. The answer says what went, so the desk can tell the member
     /// to set a passkey up again.
     /// </summary>
+    /// <para>
+    /// Review round 1, B6: the desk must say WHY (<c>reason</c>, required — 400 <c>reason_required</c>),
+    /// the reset is written to the club's change record in the same save, and the member is emailed:
+    /// it is their access that just changed, and if they did not ask for it this is how they learn.
+    /// </para>
     private static async Task<IResult> ResetCodeAsync(
-        Guid memberId, RevokeSessionsRequest? req, HttpContext ctx, MainframeDbContext db, MemberCodeService memberCodes,
+        Guid memberId, CodeResetRequest? req, HttpContext ctx, MainframeDbContext db, MemberCodeService memberCodes,
         CancellationToken ct)
     {
+        var reason = req?.Reason?.Trim();
+        if (string.IsNullOrEmpty(reason)) return Results.BadRequest(new { error = "reason_required" });
         var membership = await db.Memberships.AsNoTracking().FirstOrDefaultAsync(m => m.Id == memberId, ct);
         if (membership is null) return Results.NotFound();
 
@@ -265,11 +276,44 @@ public static class AdminMemberEndpoints
         await memberCodes.StageRotationAsync(membership.UserId, actor, "admin_reset", ct);
         var revokePasskeys = req?.RevokePasskeys ?? true;
         var removed = revokePasskeys ? await memberCodes.StagePasskeyRevocationAsync(membership.UserId, actor, "admin_reset", ct) : 0;
+        await ctx.RequestServices.GetRequiredService<AdminChangeRecorder>().StageAsync(new AdminChange(
+            Action: AdminChangeActions.MemberCodeReset, ActorUserId: actor, SubjectKind: AdminChangeSubjects.User,
+            SubjectId: membership.UserId, SubjectLabel: membership.FullName, Reason: reason,
+            After: new { passkeys_removed = removed }), ct);
         await db.SaveChangesAsync(ct);
         await memberCodes.CompleteRotationsAsync(ct);
 
+        var notified = await TellMemberOfCodeResetAsync(ctx, db, membership, (reason, removed > 0), ct);
         var row = await db.MemberCodes.AsNoTracking().FirstAsync(c => c.UserId == membership.UserId, ct);
-        return Results.Ok(new { rotated = true, generation = row.Generation, passkeys_revoked = revokePasskeys, passkeys_removed = removed });
+        return Results.Ok(new
+        {
+            rotated = true,
+            generation = row.Generation,
+            passkeys_revoked = revokePasskeys,
+            passkeys_removed = removed,
+            member_notified = notified,
+        });
+    }
+
+    /// <summary>The member's mail about the desk's code reset (B6). A failed send is reported, never thrown: the reset has committed.</summary>
+    private static async Task<bool> TellMemberOfCodeResetAsync(
+        HttpContext ctx, MainframeDbContext db, Membership membership, (string Reason, bool PasskeysRemoved) what, CancellationToken ct)
+    {
+        var services = ctx.RequestServices;
+        var to = await db.Users.AsNoTracking().Where(u => u.Id == membership.UserId).Select(u => u.Email).FirstAsync(ct);
+        try
+        {
+            var club = await services.GetRequiredService<ClubIdentityResolver>().GetAsync(ct);
+            await services.GetRequiredService<IEmailService>()
+                .SendAsync(EmailTemplates.MemberCodeReset(club, to, membership.FullName, what.Reason, what.PasskeysRemoved), ct);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            services.GetRequiredService<ILoggerFactory>().CreateLogger("AdminCodeReset")
+                .LogWarning(ex, "Code-reset email failed for {UserId}", membership.UserId);
+            return false;
+        }
     }
 
     /// <summary>

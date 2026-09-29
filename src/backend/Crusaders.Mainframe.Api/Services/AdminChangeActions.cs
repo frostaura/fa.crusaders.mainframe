@@ -93,6 +93,13 @@ public static class AdminChangeActions
     public const string MemberPasswordReset = "member.password_reset";
 
     /// <summary>
+    /// The desk reset a member's rotating code — every code their phone could show is dead, every
+    /// session ended, passkeys removed unless kept (member-code §10). Review round 1, B6: it wrote
+    /// nothing here, so "who signed me out?" had no answer. Carries the desk's reason.
+    /// </summary>
+    public const string MemberCodeReset = "member.code_reset";
+
+    /// <summary>
     /// A member was made an administrator, or stopped being one (R20).
     ///
     /// <para>
@@ -180,7 +187,7 @@ public static class AdminChangeActions
         CreditAdjusted, CreditToppedUp,
         GroupCreated, GroupUpdated, GroupArchived, GroupMembersChanged, GroupDeleted,
         MemberApproved, MemberRejected, MemberSuspended, MemberReactivated,
-        MemberPasswordReset, MemberTraceViewed, MemberDoorHistoryViewed, MemberAdminGranted, MemberAdminRevoked,
+        MemberPasswordReset, MemberCodeReset, MemberTraceViewed, MemberDoorHistoryViewed, MemberAdminGranted, MemberAdminRevoked,
         SettingsUpdated, CourtCreated, CourtUpdated, CourtDeactivated, ChangesExported,
         DeviceUpdated, DeviceDeleted, DeviceApiKeyRegenerated, DoorsShutAll, DoorsReopenedAll, MonitoringErrorResolved,
         PlayResultVoided, PlayResultUpheld,
@@ -195,7 +202,7 @@ public static class AdminChangeActions
     [
         BookingsBulkCancelled, BookingCancelledByAdmin, ScheduleEnded, ScheduleOccurrenceSkipped,
         CreditAdjusted, CreditToppedUp, GroupArchived, MemberSuspended, MemberRejected, CourtDeactivated,
-        DeviceDeleted, MemberAdminRevoked,
+        DeviceDeleted, MemberAdminRevoked, MemberAdminGranted, MemberCodeReset,
         BookingPlayerRemoved, BookingPlayerAcceptedOnBehalf, BookingShareSettledOutside, BookingShareCollected,
         PlayResultVoided, PlayResultUpheld,
     ];
@@ -221,7 +228,7 @@ public static class AdminChangeActions
             GroupCreated or GroupUpdated or GroupArchived or GroupMembersChanged
                 or GroupDeleted => AdminChangeAreas.Group,
             MemberApproved or MemberRejected or MemberSuspended
-                or MemberReactivated or MemberPasswordReset or MemberTraceViewed
+                or MemberReactivated or MemberPasswordReset or MemberCodeReset or MemberTraceViewed
                 or MemberDoorHistoryViewed or MemberAdminGranted or MemberAdminRevoked => AdminChangeAreas.Member,
             SettingsUpdated or CourtCreated or CourtUpdated or CourtDeactivated
                 or ChangesExported => AdminChangeAreas.Setting,
@@ -280,7 +287,8 @@ public static class AdminChangeActions
             MemberRejected => $"Rejected an applicant{of}",
             MemberSuspended => $"Suspended a member{of}",
             MemberReactivated => $"Reactivated a member{of}",
-            MemberPasswordReset => $"Reset a member's password{of}",
+            MemberPasswordReset => $"Gave a member a temporary password{of}",
+            MemberCodeReset => $"Reset a member's code and signed them out everywhere{of}",
             MemberTraceViewed => $"Looked at one member's activity{of}",
             MemberDoorHistoryViewed => $"Looked at one member's door history{of}",
             MemberAdminGranted => $"Made a member an administrator{of}",

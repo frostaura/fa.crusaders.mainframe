@@ -62,12 +62,7 @@ public sealed class ScheduleService
 
         // B2 (review round 1): a game the viewer is an ACCEPTED partner on is theirs too — tappable
         // through to its booking — with the role saying which side of it they are on.
-        var bookingIds = bookings.Select(b => b.Id).ToList();
-        var partnerOn = viewingUserId is not { } viewer
-            ? []
-            : (await _db.BookingParticipants.AsNoTracking()
-                .Where(p => p.UserId == viewer && p.Seat > 1 && p.Status == ParticipantStatus.Accepted && bookingIds.Contains(p.BookingId))
-                .Select(p => p.BookingId).ToListAsync(ct)).ToHashSet();
+        var partnerOn = await PartnerOnAsync(bookings, viewingUserId, ct);
 
         var slots = new List<ScheduleSlot>(bookings.Count);
         foreach (var court in courts)
@@ -75,9 +70,8 @@ public sealed class ScheduleService
             foreach (var b in bookingsByCourt[court.Id])
             {
                 var member = b.UserId is { } u ? memberByUser.GetValueOrDefault(u) : null;
-                var isOrganiser = viewingUserId is not null && viewingUserId == b.UserId;
-                var isPartner = !isOrganiser && partnerOn.Contains(b.Id);
-                var isMine = isOrganiser || isPartner;
+                var role = RoleOf(b, viewingUserId, partnerOn);
+                var isMine = role is not null;
 
                 // Attendance and price are the booking OWNER's business, and the admin's.
                 // "The booking grid shows photo + name only" — no email, phone, membership
@@ -105,7 +99,7 @@ public sealed class ScheduleService
                     AmountChargedCredits: maySeeDetail ? b.AmountChargedCredits : null,
                     ScheduleId: b.ScheduleId,
                     ScheduleName: b.ScheduleId is { } sid ? scheduleNames.GetValueOrDefault(sid) : null,
-                    Role: isOrganiser ? "organiser" : isPartner ? "partner" : null));
+                    Role: role));
             }
         }
 
@@ -148,6 +142,23 @@ public sealed class ScheduleService
                 c.Id, c.CourtNumber, c.Name, c.SlicePriceCredits, c.IsActive)).ToList(),
             Slots: slots,
             Rules: rules);
+    }
+
+    /// <summary>The bookings among these the viewer holds an ACCEPTED partner seat on (B2).</summary>
+    private async Task<HashSet<Guid>> PartnerOnAsync(List<Booking> bookings, Guid? viewingUserId, CancellationToken ct)
+    {
+        if (viewingUserId is not { } viewer || bookings.Count == 0) return [];
+        var ids = bookings.Select(b => b.Id).ToList();
+        return (await _db.BookingParticipants.AsNoTracking()
+            .Where(p => p.UserId == viewer && p.Seat > 1 && p.Status == ParticipantStatus.Accepted && ids.Contains(p.BookingId))
+            .Select(p => p.BookingId).ToListAsync(ct)).ToHashSet();
+    }
+
+    /// <summary>The viewer's side of a booking: organiser, accepted partner, or none of theirs (null).</summary>
+    private static string? RoleOf(Booking b, Guid? viewingUserId, HashSet<Guid> partnerOn)
+    {
+        if (viewingUserId is not null && viewingUserId == b.UserId) return "organiser";
+        return partnerOn.Contains(b.Id) ? "partner" : null;
     }
 
     /// <summary>

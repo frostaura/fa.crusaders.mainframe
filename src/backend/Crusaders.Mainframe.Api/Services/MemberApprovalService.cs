@@ -43,6 +43,7 @@ public sealed class MemberApprovalService
     private readonly ILogger<MemberApprovalService> _logger;
 
     private readonly ClubIdentityResolver _club;
+    private readonly AdminChangeRecorder _changes;
 
     /// <summary>
     /// Everything it takes to tell somebody. Bundled rather than passed one by one because the
@@ -50,8 +51,12 @@ public sealed class MemberApprovalService
     /// which is the right pressure: what these three do together is one job, and the four
     /// arguments left are the four this class reasons about.
     /// </summary>
+    /// <para>
+    /// <see cref="Changes"/> joined it in review round 1 (B5): the club's own change record is one
+    /// more audience a decision about a membership is told to, in the decision's own save.
+    /// </para>
     public sealed record MemberNotifier(
-        IEmailService Email, ILogger<MemberApprovalService> Logger, ClubIdentityResolver Club);
+        IEmailService Email, ILogger<MemberApprovalService> Logger, ClubIdentityResolver Club, AdminChangeRecorder Changes);
 
     private readonly MemberCodeService _memberCodes;
 
@@ -61,7 +66,7 @@ public sealed class MemberApprovalService
     {
         _memberCodes = memberCodes;
         _db = db; _tenant = tenant; _config = config; _bus = bus;
-        _email = notifier.Email; _logger = notifier.Logger; _club = notifier.Club;
+        _email = notifier.Email; _logger = notifier.Logger; _club = notifier.Club; _changes = notifier.Changes;
     }
 
     public async Task<TransitionReport> ApproveAsync(Guid memberId, Guid actorId, CancellationToken ct)
@@ -91,6 +96,7 @@ public sealed class MemberApprovalService
             SubjectUserId = user.Id,
             Action = "member.approved",
         });
+        await StageChangeAsync(AdminChangeActions.MemberApproved, membership, actorId, null, ("pending_approval", "active"), ct);
 
         await _db.SaveChangesAsync(ct);
 
@@ -122,6 +128,7 @@ public sealed class MemberApprovalService
             Action = "member.rejected",
             DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason }),
         });
+        await StageChangeAsync(AdminChangeActions.MemberRejected, membership, actorId, reason, ("pending_approval", "rejected"), ct);
 
         await _db.SaveChangesAsync(ct);
 
@@ -172,6 +179,7 @@ public sealed class MemberApprovalService
         // A suspension retires the member's code (member-code §10), so a reactivation does not
         // quietly hand back a code the phone kept through the suspension.
         await _memberCodes.StageRotationAsync(user.Id, actorId, "suspended", ct);
+        await StageChangeAsync(AdminChangeActions.MemberSuspended, membership, actorId, reason, ("active", "suspended"), ct);
         await _db.SaveChangesAsync(ct);
         await _memberCodes.CompleteRotationsAsync(ct);
 
@@ -180,6 +188,27 @@ public sealed class MemberApprovalService
             $"suspension notice for {user.Email}", ct);
         await EmitAsync("member.suspended", membership, actorId, reason, ct);
         return new TransitionReport(MembershipTransition.Ok, notified);
+    }
+
+    /// <summary>
+    /// The club's own change record for a membership decision (review round 1, B5), staged on the
+    /// decision's unit of work so the two commit or vanish together. The actions were in the
+    /// vocabulary from the start and nothing wrote them, so the Change record page never showed
+    /// who approved, rejected, suspended or reactivated anybody.
+    /// </summary>
+    private Task StageChangeAsync(
+        string action, Membership membership, Guid actorId, string? reason, (string From, string To) status, CancellationToken ct)
+    {
+        // Block body: lizard mis-scopes an expression body containing braces (memory/gotchas-gates.md).
+        return _changes.StageAsync(new AdminChange(
+            Action: action,
+            ActorUserId: actorId,
+            SubjectKind: AdminChangeSubjects.User,
+            SubjectId: membership.UserId,
+            SubjectLabel: membership.FullName,
+            Reason: reason,
+            Before: new { status = status.From },
+            After: new { status = status.To }), ct);
     }
 
     /// <summary>
@@ -206,6 +235,7 @@ public sealed class MemberApprovalService
             SubjectUserId = user.Id,
             Action = "member.reactivated",
         });
+        await StageChangeAsync(AdminChangeActions.MemberReactivated, membership, actorId, null, ("suspended", "active"), ct);
         await _db.SaveChangesAsync(ct);
 
         var notified = await SendOrLogAsync(

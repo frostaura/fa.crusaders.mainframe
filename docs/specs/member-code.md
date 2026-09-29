@@ -659,8 +659,11 @@ Each is a server behaviour; none changes a byte the corpus holds.
 - **Sign out everywhere and the desk's reset, with passkeys.** `POST /api/v1/me/sessions/revoke-all`
   (optional body `{"revoke_passkeys": bool}`, default **false**) answers
   `200 {"signed_out":true,"passkeys_revoked":…,"passkeys_removed":N}`. `POST
-  /admin/members/{id}/code/reset` takes the same optional body with the default **true** and adds
-  `passkeys_revoked`, `passkeys_removed` to `{"rotated":true,"generation":N}`. Revoking deletes
+  /admin/members/{id}/code/reset` takes `{"reason": string, "revoke_passkeys": bool}` — `reason`
+  **required** since review round 1 (B6; `400 reason_required`), passkeys defaulting to **true** — and
+  adds `passkeys_revoked`, `passkeys_removed`, `member_notified` to `{"rotated":true,"generation":N}`.
+  The reset is written to the change record (`member.code_reset`, with the reason) in its own save
+  and the member is emailed that the club reset their code, why, and what to do next. Revoking deletes
   the member's WebAuthn credentials, audited `member.passkeys_revoked`. *Why true at the desk:* the
   lost phone's passkey signs straight back in under the new epoch and enrols for the new secret;
   *why false for oneself:* signing out a forgotten tablet should not cost the passkey on the phone

@@ -21,7 +21,7 @@ public enum AdminRoleOutcome
     ActorNotAdmin,
 }
 
-/// <summary>What the admin asked for. <see cref="Reason"/> is required on a revoke and ignored on a grant.</summary>
+/// <summary>What the admin asked for. <see cref="Reason"/> is required both ways (review round 1, B10).</summary>
 public sealed class AdminRoleRequest
 {
     public required Guid ActorUserId { get; init; }
@@ -210,7 +210,7 @@ public sealed class AdminRoleService
     /// </summary>
     private async Task StageRecordsAsync(User target, AdminRoleRequest request, CancellationToken ct)
     {
-        var reason = request.Grant ? null : request.Reason?.Trim();
+        var reason = request.Reason?.Trim();
         var self = target.Id == request.ActorUserId;
 
         _db.AuditLogs.Add(new AuditLog

@@ -261,6 +261,12 @@ public static class AdminMemberDoorEndpoints
         DoorHistoryDeps deps, HttpContext ctx, DoorMember member, Viewed viewed, CancellationToken ct)
     {
         var query = viewed.Query;
+        // B19: one pair of rows per view — an identical re-fetch inside the window is the same look.
+        if (!viewed.Exported && !ctx.RequestServices.GetRequiredService<ViewAuditOnce>()
+                .ShouldRecord(ctx, AdminChangeActions.MemberDoorHistoryViewed, member.UserId))
+        {
+            return;
+        }
         deps.Db.AuditLogs.Add(new AuditLog
         {
             TenantId = deps.Tenant.TenantId,

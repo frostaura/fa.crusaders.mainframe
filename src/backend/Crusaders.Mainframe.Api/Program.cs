@@ -385,6 +385,7 @@ builder.Services.AddScoped<InherentAdminService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<RefreshSessions>();
 builder.Services.AddSingleton<SignInAttempts>();
+builder.Services.AddSingleton<ViewAuditOnce>();
 builder.Services.AddScoped<MemberApprovalService>();
 // The club's undeletable admin change record. Every admin mutation in every lane writes
 // through this one service; see AdminChangeRecorder for why staging and recording differ.

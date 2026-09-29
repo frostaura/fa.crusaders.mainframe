@@ -221,6 +221,12 @@ public static class AdminMemberTraceEndpoints
         bool export, CancellationToken ct)
     {
         var query = asked.Query;
+        // B19: one row per view — an identical re-fetch inside the window is the same look.
+        if (!export && !ctx.RequestServices.GetRequiredService<ViewAuditOnce>()
+                .ShouldRecord(ctx, AdminChangeActions.MemberTraceViewed, asked.Member.UserId))
+        {
+            return Task.CompletedTask;
+        }
         return recorder.RecordAsync(new AdminChange(
             Action: AdminChangeActions.MemberTraceViewed,
             ActorUserId: ctx.User.Id() ?? Guid.Empty,
