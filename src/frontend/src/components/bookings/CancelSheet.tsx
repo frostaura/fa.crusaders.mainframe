@@ -10,6 +10,7 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError, type CancellationQuote } from "@/lib/api";
 import { cancellationOutcome, describeBookingError, provesStaleGrid } from "@/lib/bookingErrors";
+import { UnsureOutcome, type Reread } from "@/lib/bookingOutcome";
 import { describeFailure } from "@/lib/errors";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { CANCEL_SHEET, RESULTS_LABEL } from "@/lib/bookingsCopy";
@@ -54,6 +55,8 @@ export type CancelSheetProps = {
   onCancelled?: (outcome: CancelledOutcome) => void;
   /** A refusal proved the grid stale (booking gone, already started) — reload it behind the sheet. */
   onStale?: () => void;
+  /** Re-reads the day and returns it — an unanswered cancel is checked against it (F1.1). */
+  reread?: Reread;
 };
 
 export function CancelSheet(props: CancelSheetProps) {
@@ -76,9 +79,10 @@ function useOptionalPush() {
   }
 }
 
+/** Its own words — never the booking's "Nothing was booked" under a failed cancel (F1.2). */
 function failureSentence(error: unknown): string {
-  return error instanceof ApiError
-    ? describeBookingError(error, CANCEL_SHEET.fallback)
+  return error instanceof ApiError || error instanceof UnsureOutcome
+    ? describeBookingError(error, CANCEL_SHEET.fallback, { action: "cancel" })
     : describeFailure(error, { action: CANCEL_SHEET.failedAction });
 }
 
@@ -97,7 +101,7 @@ function useCancelFlow(props: CancelSheetProps & { onClose: () => void }) {
   const reasonNeeded = forOthers && (!single || waive);
 
   const action = useAsyncAction(
-    () => cancelBookings({ bookings, isAdmin, waive: forOthers && waive, reason, idempotencyKey: key }),
+    () => cancelBookings({ bookings, isAdmin, waive: forOthers && waive, reason, idempotencyKey: key, reread: props.reread }),
     {
       success: (result) => {
         const own = bookings.every((b) => b.mine);

@@ -40,8 +40,12 @@ export type ScheduleDayState = {
   loading: boolean;
   /** Read the day the picker is on, again. What Refresh does. */
   refresh: () => void;
-  /** Read it in the BACKGROUND after a write, and patch the grid from the answer. */
-  reconcile: () => Promise<void>;
+  /**
+   * Read it in the BACKGROUND after a write, and patch the grid from the answer. Resolves with
+   * the day it read — or null when the read failed — so a sheet whose write went unanswered can
+   * look at what is actually there (F1.1).
+   */
+  reconcile: () => Promise<ScheduleDay | null>;
   slotsByCourt: ReturnType<typeof groupSlotsByCourt>;
   timeSlices: ReturnType<typeof buildTimeSlices>;
   pastThresholdMs: number;
@@ -118,8 +122,8 @@ export function useScheduleDay(isAdmin: boolean, initialDate?: string | null): S
   // SUCCEEDED. Telling a member who has just booked and been charged that the schedule could
   // not be loaded would be alarming and untrue.
   const reconcile = useCallback(() => endpoints.schedule(date)
-    .then((fresh) => { loadedDate.current = fresh.date; setDay(fresh); setReadAt(Date.now()); })
-    .catch(() => { /* the optimistic view stands until something asks for the day again */ }),
+    .then((fresh): ScheduleDay => { loadedDate.current = fresh.date; setDay(fresh); setReadAt(Date.now()); return fresh; })
+    .catch(() => null /* the optimistic view stands until something asks for the day again */),
   [date]);
 
   const slotsByCourt = useMemo(() => groupSlotsByCourt(day), [day]);

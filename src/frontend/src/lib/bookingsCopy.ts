@@ -212,6 +212,13 @@ export const BOOK_SHEET = {
   balanceAfter: "Balance after",
   theirBalanceNow: (name: string) => `${name}'s balance`,
   theirBalanceAfter: "After this booking",
+  /**
+   * F1.3/F1.4 — with anything held for or owed back to partners, the figures are what may be
+   * SPENT, named so; the raw balance would disagree with the Done line and the god-mode notice.
+   */
+  availableNow: "Available now",
+  availableAfter: "Available after",
+  theirAvailableNow: (name: string) => `${name} can spend`,
   quoteReading: "Working out the price…",
   quoteAction: "work out the price",
   notBookable: "Can't be booked",
@@ -255,6 +262,13 @@ export const BOOK_SHEET = {
   noneBookedTitle: "Nothing was booked",
   balanceLine: (after: number, forName: string | null) =>
     forName ? `${forName}'s balance is now ${signedCredits(after)}.` : `Your balance is now ${signedCredits(after)}.`,
+  /** The same concept as Confirm's "Available after" (F1.3) — what is left to SPEND. */
+  availableLine: (after: number, forName: string | null) =>
+    forName ? `${forName} now has ${signedCredits(after)} to spend.` : `You now have ${signedCredits(after)} to spend.`,
+  /** F1.1 — the club's reply was lost; the outcome was read off the schedule. */
+  provenNote: "The club's reply didn't arrive, so this was read off the schedule. Your wallet is being re-read.",
+  confirmedFromSchedule: "On the schedule in this name.",
+  notOnSchedule: "Not on the schedule — not booked.",
   haltedShort:
     "You ran out of credit part-way, so the rest weren't tried. Top up, then try again — "
     + "the ones already booked won't be charged twice.",
@@ -287,9 +301,9 @@ export const REFUSAL_REASON: Record<string, string> = {
   peak_hours_league_only: "Peak hours are for league members until closer to the time.",
   per_day_cap_exceeded: "That's all your court time for that day.",
   per_day_slot_cap_exceeded: "That's all your slots for that day.",
-  group_window: "Outside the hours your group may book.",
+  group_window: "Outside the group's booking times.",
   crosses_midnight: "It would run past midnight.",
-  no_bookable_window: "Your groups have no hours in common that day.",
+  no_bookable_window: "The groups' booking times leave no time that day.",
   out_of_hours: "The club is closed then.",
   no_time_available: "There's no free time on that court.",
   invalid_duration: "That length of booking isn't allowed.",
@@ -366,6 +380,10 @@ export const CANCEL_SHEET = {
   noneCancelledTitle: "Nothing was cancelled",
   failedAction: "cancel that booking",
   fallback: "Couldn't cancel that booking. Try again in a moment.",
+  /** F1.1 — cancelled (the schedule shows it gone) but the reply with the figures was lost. */
+  provenRow: "Gone from the schedule — the refund shows on the wallet.",
+  unsureStillThere: "The club didn't answer, and it's still on the schedule.",
+  unsureRow: "The club didn't answer — check the schedule.",
 } as const;
 
 /** What a successful cancellation moved, per row. `refund` is GROSS, as the cancel routes answer it. */

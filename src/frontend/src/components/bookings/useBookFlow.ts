@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, endpoints } from "@/lib/api";
 import { describeBookingError, provesStaleGrid } from "@/lib/bookingErrors";
+import { UnsureOutcome, type Reread } from "@/lib/bookingOutcome";
 import { describeFailure } from "@/lib/errors";
 import { useAsyncAction } from "@/lib/useAsyncAction";
 import { BOOK_SHEET, refusalReason } from "@/lib/bookingsCopy";
@@ -13,6 +14,7 @@ import {
   type BookAs, type BookRun, type QuoteState, type StepId,
 } from "./bookFlow";
 import { usePlayersStep } from "./usePlayersStep";
+import { recoverBooking, worthRereading } from "./bookRecovery";
 
 /**
  * BookSheet's state machine, as one hook: which step, who pays, what the admin quote said, what
@@ -32,6 +34,11 @@ export type BookedOutcome = {
   /** The member an admin booked for, when it was one. */
   forMemberId: string | null;
   hold: boolean;
+  /**
+   * The outcome was read off a fresh schedule after the club's answer was lost (F1.1): the grid
+   * already shows it, and the balance was not stated — re-read it.
+   */
+  proven?: boolean;
 };
 
 export type BookFlowInput = {
@@ -47,6 +54,11 @@ export type BookFlowInput = {
   onStale?: () => void;
   /** What of a member's balance is held for partners (D11 §3a), for the line under the money. */
   held?: { held: number; owedBack?: number; until: string | null } | null;
+  /**
+   * Re-reads the day behind the sheet and returns it (null when that read fails). Given, a lost
+   * answer or a "taken" refusal is checked against the schedule before anything is said (F1.1).
+   */
+  reread?: Reread;
 };
 
 export type Primary =
@@ -100,29 +112,43 @@ function firstName(name: string | null): string | null {
 
 /* ─────────────────────────────── the figures ─────────────────────────────── */
 
+/**
+ * The desk's figures — the payer's SPENDABLE credits, never the raw balance (F1.4): shares held
+ * for partners are not the desk's to book against, and "After this booking 35.00" over a member
+ * who really stands at −90 was the quote contradicting its own god-mode notice.
+ */
 function adminMoney(quote: QuoteState, name: string | null): MoneyRow[] | null {
   if (quote.status === "error" || quote.status === "idle") return null;
   const q = quote.status === "ready" ? quote.quote : null;
+  const terms = adminTerms(name, q !== null && q.spendable !== q.balance);
   return [
     { term: BOOK_SHEET.total, value: q?.total ?? null },
-    { term: name ? BOOK_SHEET.theirBalanceNow(name) : BOOK_SHEET.balanceNow, value: q?.balance ?? null },
-    { term: name ? BOOK_SHEET.theirBalanceAfter : BOOK_SHEET.balanceAfter, value: q?.after ?? null, total: true },
+    { term: terms.now, value: q?.spendable ?? null },
+    { term: terms.after, value: q?.after ?? null, total: true },
   ];
+}
+
+function adminTerms(name: string | null, holding: boolean) {
+  if (name) return { now: holding ? BOOK_SHEET.theirAvailableNow(name) : BOOK_SHEET.theirBalanceNow(name), after: BOOK_SHEET.theirBalanceAfter };
+  return holding
+    ? { now: BOOK_SHEET.availableNow, after: BOOK_SHEET.availableAfter }
+    : { now: BOOK_SHEET.balanceNow, after: BOOK_SHEET.balanceAfter };
 }
 
 /**
  * A member's figures. Short, the last row is what they still need — never "Balance after −30.00
  * cr" in red: a member's balance cannot go below zero, so that figure is one their wallet can
- * never show (P4 walk).
+ * never show (P4 walk). With anything held for partners the rows say "Available", the figure
+ * every spend reads — and the Done line after the booking says the same figure (F1.3).
  */
-function memberMoney(total: number, balance: number | null, short: number | null): MoneyRow[] {
+function memberMoney(total: number, balance: number | null, short: number | null, holding: boolean): MoneyRow[] {
   if (balance === null) return [{ term: BOOK_SHEET.total, value: total, total: true }];
   return [
     { term: BOOK_SHEET.total, value: total },
-    { term: BOOK_SHEET.balanceNow, value: balance },
+    { term: holding ? BOOK_SHEET.availableNow : BOOK_SHEET.balanceNow, value: balance },
     short !== null
       ? { term: BOOK_SHEET.stillNeeded, value: short, total: true }
-      : { term: BOOK_SHEET.balanceAfter, value: balance - total, total: true },
+      : { term: holding ? BOOK_SHEET.availableAfter : BOOK_SHEET.balanceAfter, value: balance - total, total: true },
   ];
 }
 
@@ -141,12 +167,12 @@ function adminPrimary(quote: QuoteState, count: number, sendable: number, forNam
  * booking sent with players can be refused for the players (a split that cannot work, a member
  * who left); those codes are the players feature's sentences, everything else the booking's.
  */
-export function refusalSentence(error: unknown, withPlayers = false): string {
+export function refusalSentence(error: unknown, withPlayers = false, forName: string | null = null): string {
   if (withPlayers && error instanceof ApiError && error.code !== null && error.code in PLAYERS_REFUSAL) {
     return playersRefusal(error);
   }
-  return error instanceof ApiError
-    ? describeBookingError(error, BOOK_SHEET.fallback)
+  return error instanceof ApiError || error instanceof UnsureOutcome
+    ? describeBookingError(error, BOOK_SHEET.fallback, { action: "book", forName })
     : describeFailure(error, { action: BOOK_SHEET.failedAction });
 }
 
@@ -199,7 +225,7 @@ export function useBookFlow(input: BookFlowInput) {
     (allowNegativeBalance: boolean) => placeBooking({
       slots: sendable, who, isAdmin, actorUserId, idempotencyKey: key, allowNegativeBalance, face,
       players: isAdmin ? null : players.payload,
-    }),
+    }).catch((error: unknown) => recoverBooking(error, sendable, who, face, input.reread)),
     {
       success: (result) => {
         setRun(result);
@@ -209,9 +235,14 @@ export function useBookFlow(input: BookFlowInput) {
           ownBalanceAfter: viewerPaid ? result.balanceAfter : null,
           forMemberId: who.kind === "member" ? who.userId : null,
           hold: result.hold,
+          proven: result.proven,
         });
       },
-      failure: (error) => { if (provesStaleGrid(error)) input.onStale?.(); },
+      // A re-read already happened on the way here when there was one to make.
+      failure: (error) => {
+        const reread = Boolean(input.reread) && worthRereading(error);
+        if (!reread && provesStaleGrid(error)) input.onStale?.();
+      },
     },
   );
 
@@ -254,6 +285,8 @@ export function useBookFlow(input: BookFlowInput) {
   const refusedSlots = ready ? slotCount(slots.filter((_, i) => ready.refused.has(i))) : 0;
   const total = slots.reduce((n, s) => n + s.priceCredits, 0);
   const short = !isAdmin && balanceCredits !== null && balanceCredits < total ? total - balanceCredits : null;
+  const memberHeld = isAdmin ? null : input.held ?? null;
+  const memberReserved = memberHeld ? memberHeld.held + (memberHeld.owedBack ?? 0) : 0;
 
   const lines: SlotLine[] = slots.map((s, i) => {
     const f = slotFace(s, timezone, sliceMinutes);
@@ -276,7 +309,7 @@ export function useBookFlow(input: BookFlowInput) {
     money = adminMoney(quote.state, memberName);
     primary = adminPrimary(quote.state, count, slotCount(sendable), firstName(memberName));
   } else {
-    money = memberMoney(total, balanceCredits, short);
+    money = memberMoney(total, balanceCredits, short, memberReserved > 0);
     const label = BOOK_SHEET.primary(count, total, null);
     primary = short !== null ? { kind: "unavailable", label } : { kind: "book", label, allowNegativeBalance: false };
   }
@@ -289,7 +322,12 @@ export function useBookFlow(input: BookFlowInput) {
     godMode: ready?.overdraws ? { name: memberName, balanceAfter: ready.after, owedBack: ready.owedBack } : null,
     action, run,
     next, back, submit, face, timezone,
-    held: isAdmin ? null : input.held ?? null,
+    held: memberHeld,
+    /**
+     * What of the payer's balance cannot be spent — the member's held + owed back, or the
+     * desk's quote's difference — so the Done line says the SAME figure Confirm did (F1.3).
+     */
+    reserved: isAdmin ? (ready ? ready.balance - ready.spendable : 0) : memberReserved,
   };
 }
 

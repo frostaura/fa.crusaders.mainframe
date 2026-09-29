@@ -79,11 +79,17 @@ export default function BookingsPage() {
   const showEarlier = earlierShownFor === date;
 
   const onBooked = useCallback((outcome: BookedOutcome) => {
+    if (selection.api.active) selection.api.leave();
+    // Read off a fresh schedule after a lost reply (F1.1): the grid already has it, and nobody
+    // stated the balance — ask for it.
+    if (outcome.proven) {
+      if (!outcome.forMemberId && !outcome.hold) void refreshBalance({ expectSelf: true });
+      return;
+    }
     setDay((d) => withBooked(d, outcome));
     if (outcome.ownBalanceAfter !== null) applyBalance(outcome.ownBalanceAfter);
-    if (selection.api.active) selection.api.leave();
     void reconcile();
-  }, [setDay, applyBalance, selection.api, reconcile]);
+  }, [setDay, applyBalance, refreshBalance, selection.api, reconcile]);
 
   const onCancelled = useCallback((outcome: CancelledOutcome) => {
     setDay((d) => (d ? { ...d, slots: d.slots.filter((s) => !s.bookingId || !outcome.cancelledIds.includes(s.bookingId)) } : d));
@@ -150,11 +156,11 @@ export default function BookingsPage() {
         timezone={day?.timezone ?? "UTC"} sliceMinutes={day?.sliceMinutes ?? 15}
         isAdmin={isAdmin} actorUserId={actorUserId} balanceCredits={balance}
         bookAsUserId={isAdmin ? params.get("as") : null}
-        onBooked={onBooked} onStale={() => void reconcile()}
+        onBooked={onBooked} onStale={() => void reconcile()} reread={reconcile}
       />
       <CancelSheet
         open={sheets.cancelOpen} onOpenChange={sheets.setCancelOpen} bookings={sheets.cancelBookings}
-        isAdmin={isAdmin} onCancelled={onCancelled} onStale={() => void reconcile()}
+        isAdmin={isAdmin} onCancelled={onCancelled} onStale={() => void reconcile()} reread={reconcile}
       />
     </PageShell>
   );

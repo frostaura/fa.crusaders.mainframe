@@ -196,7 +196,7 @@ function ConfirmStep({ flow, reasonId }: { flow: BookFlow; reasonId: string }) {
       {flow.godMode ? <GodModeNotice name={flow.godMode.name} balanceAfter={flow.godMode.balanceAfter} owedBack={flow.godMode.owedBack} /> : null}
       <QuoteOwedBack flow={flow} />
       {flow.short !== null ? <ShortNotice shortBy={flow.short} reasonId={reasonId} /> : null}
-      {failed ? <Alert tone="danger">{refusalSentence(failed, Boolean(flow.players.payload))}</Alert> : null}
+      {failed ? <Alert tone="danger">{refusalSentence(failed, Boolean(flow.players.payload), firstName(flow.memberName))}</Alert> : null}
     </>
   );
 }
@@ -226,7 +226,7 @@ function QuoteProblem({ flow }: { flow: BookFlow }) {
   const state = flow.quote.state;
   if (state.status !== "error") return null;
   const sentence = state.error instanceof ApiError
-    ? refusalSentence(state.error)
+    ? refusalSentence(state.error, false, firstName(flow.memberName))
     : describeFailure(state.error, { action: BOOK_SHEET.quoteAction });
   return (
     <div className="grid justify-items-start gap-3">
@@ -304,6 +304,8 @@ function ResultView({ flow }: { flow: BookFlow }) {
   else heading = run.hold ? BOOK_SHEET.heldTitle(booked, total) : BOOK_SHEET.bookedTitle(booked, total);
   const forName = flow.who.kind === "member" ? flow.memberName : null;
   const admin = isAdminRun(flow);
+  // The Done line reads the figure Confirm did — spendable, when anything is held (F1.3).
+  const after = run.balanceAfter === null ? null : run.balanceAfter - flow.reserved;
   return (
     <>
       <div role="status" className="flex items-center gap-3">
@@ -312,11 +314,15 @@ function ResultView({ flow }: { flow: BookFlow }) {
           : <AnimatedAlert size={40} className="text-danger-strong" />}
         <span className="grid gap-0.5">
           <span className="text-base font-semibold text-text-primary">{heading}</span>
-          {run.balanceAfter !== null && !run.hold ? (
-            <span className="text-sm text-text-secondary">{BOOK_SHEET.balanceLine(run.balanceAfter, forName)}</span>
+          {after !== null && !run.hold ? (
+            <span className="text-sm text-text-secondary">
+              {flow.reserved > 0 ? BOOK_SHEET.availableLine(after, forName) : BOOK_SHEET.balanceLine(after, forName)}
+            </span>
           ) : null}
         </span>
       </div>
+      {after !== null && !run.hold ? <HeldNote flow={flow} /> : null}
+      {run.proven ? <Alert tone="info" live="polite">{BOOK_SHEET.provenNote}</Alert> : null}
       {run.halted === "insufficient_balance" ? (
         <Alert tone="warning" live="polite">
           {admin ? BOOK_SHEET.haltedShortAdmin(forName ?? BOOK_SHEET.you) : BOOK_SHEET.haltedShort}
@@ -326,6 +332,10 @@ function ResultView({ flow }: { flow: BookFlow }) {
       {run.players ? <ResultPlayers outcome={run.players} face={flow.face} /> : null}
     </>
   );
+}
+
+function firstName(name: string | null): string | null {
+  return name ? name.trim().split(/\s+/)[0] ?? name : null;
 }
 
 function isAdminRun(flow: BookFlow): boolean {

@@ -303,7 +303,8 @@ describe("BookSheet — an admin (R19 god mode)", () => {
   });
 
   it("P11: the god-mode notice names what the payer already owes back to partners", async () => {
-    stubFetch([{ path: "/api/v1/admin/bookings/quote", body: quote({ held_credits: 0, owed_back_credits: 16 }) }]);
+    // The server's own figures: spendable = 44 − 16 owed back = 28, so 60 takes her to −32 (F1.4).
+    stubFetch([{ path: "/api/v1/admin/bookings/quote", body: quote({ held_credits: 0, owed_back_credits: 16, spendable_credits: 28 }) }]);
     open({ isAdmin: true, members, bookAsUserId: NALEDI });
     fireEvent.click(screen.getByRole("button", { name: BOOK_SHEET.next }));
     const notice = await waitFor(() => {
@@ -311,7 +312,7 @@ describe("BookSheet — an admin (R19 god mode)", () => {
       expect(el).toBeTruthy();
       return el!;
     });
-    expect(notice).toHaveTextContent(GOD_MODE.body("Naledi Khumalo", -16));
+    expect(notice).toHaveTextContent(GOD_MODE.body("Naledi Khumalo", -32));
     expect(notice).toHaveTextContent(owedBackQuoteLine(16, "Naledi Khumalo"));
     // Said once: the quiet line under the money stays away while the notice carries it.
     expect(screen.getAllByText(owedBackQuoteLine(16, "Naledi Khumalo"))).toHaveLength(1);

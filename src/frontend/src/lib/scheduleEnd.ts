@@ -18,7 +18,7 @@ type Toast = { push: (t: { tone: "success" | "danger"; text: string }) => void }
 type Args = {
   day: ScheduleDay | null;
   setDay: React.Dispatch<React.SetStateAction<ScheduleDay | null>>;
-  reconcile: () => Promise<void>;
+  reconcile: () => Promise<unknown>;
   toast: Toast;
 };
 

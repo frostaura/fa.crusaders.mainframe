@@ -130,7 +130,17 @@ export function newIdempotencyKey(prefix: string): string {
  */
 export type SheetQuote = {
   total: number;
+  /** The payer's RAW balance — `balance_credits`, as everywhere. */
   balance: number;
+  /**
+   * What the payer may SPEND (D11 §3a): the raw balance less what is held for partners and owed
+   * back to them. Every figure the desk is shown before booking reads this (F1.4) — the raw one
+   * said "After this booking 35.00" to a member who would really stand at −90.
+   */
+  spendable: number;
+  /** Held for partners, for the line that explains why `spendable` is lower. */
+  held: number;
+  /** `spendable − total`. */
   after: number;
   overdraws: boolean;
   /** P11 — what the payer owes back to partners (0 against an older API). */
@@ -143,9 +153,18 @@ function owedBackOf(q: { owed_back_credits?: number }): number {
   return typeof q.owed_back_credits === "number" && q.owed_back_credits > 0 ? q.owed_back_credits : 0;
 }
 
+type HeldWire = { balance_credits: number; held_credits?: number; owed_back_credits?: number; spendable_credits?: number };
+
+/** The payer's spend figures off a quote; an older API without `spendable_credits` derives it. */
+function spendOf(q: HeldWire, total: number) {
+  const held = typeof q.held_credits === "number" && q.held_credits > 0 ? q.held_credits : 0;
+  const spendable = typeof q.spendable_credits === "number" ? q.spendable_credits : q.balance_credits - held - owedBackOf(q);
+  return { spendable, held, after: spendable - total };
+}
+
 function fromSingle(q: AdminBookingQuote): SheetQuote {
   return {
-    total: q.price_credits, balance: q.balance_credits, after: q.balance_after_credits,
+    total: q.price_credits, balance: q.balance_credits, ...spendOf(q, q.price_credits),
     overdraws: q.overdraws, owedBack: owedBackOf(q), prices: new Map([[0, q.price_credits]]), refused: new Map(),
   };
 }
@@ -158,7 +177,7 @@ function fromBulk(q: AdminBulkQuote): SheetQuote {
     else if (typeof item.price_credits === "number") prices.set(item.index, item.price_credits);
   }
   return {
-    total: q.total_credits, balance: q.balance_credits, after: q.balance_after_credits,
+    total: q.total_credits, balance: q.balance_credits, ...spendOf(q, q.total_credits),
     overdraws: q.overdraws, owedBack: owedBackOf(q), prices, refused,
   };
 }
@@ -235,6 +254,8 @@ export type BookRun = {
   hold: boolean;
   /** Set when the booking went out with players: the links to share, per booking. */
   players?: PlayersOutcome | null;
+  /** Read off the schedule after the club's answer was lost (`bookRecovery`), not from a reply. */
+  proven?: boolean;
 };
 
 type Face = (slot: SelectedSlot) => string;

@@ -1,4 +1,5 @@
 import { ApiError } from "./api";
+import { UnsureOutcome } from "./bookingOutcome";
 import { formatCredits } from "./utils";
 
 /**
@@ -73,8 +74,35 @@ const BOOKING_ERROR_TEXT: Record<string, string> = {
  * work. A 5xx is never the member's doing and there is nothing on the schedule for them to
  * fix.
  * </p>
+ *
+ * <p>
+ * <b>It never claims nothing happened</b> (review round 1, F1.1). A 504 after the club had
+ * already booked and charged was told "Nothing was booked and no credit was taken". The sheets
+ * re-read the day first and say what the schedule shows (`UNSURE_TEXT`); this is what is left
+ * for a caller that cannot look.
+ * </p>
  */
-const SERVER_DOWN_TEXT = "The club's system isn't answering right now. Nothing was booked and no credit was taken — try again in a minute.";
+export type BookingAction = "book" | "cancel";
+
+const SERVER_DOWN_TEXT: Record<BookingAction, string> = {
+  book: "The club's system didn't answer, so this may or may not have gone through. Check the schedule, then try again in a minute.",
+  cancel: "The club's system didn't answer, so the booking may or may not have been cancelled. Check the schedule, then try again in a minute.",
+};
+
+/**
+ * An unanswered write, after the sheet re-read the day and looked (see `lib/bookingOutcome`).
+ * `checked` — the schedule showed it had not landed; unchecked — even the look failed.
+ */
+export const UNSURE_TEXT: Record<BookingAction, { checked: string; unchecked: string }> = {
+  book: {
+    checked: "The club's system didn't answer, so we checked the schedule: the slot is still free — nothing was booked and no credit was taken. Try again in a minute.",
+    unchecked: "The club's system didn't answer and the schedule couldn't be read either, so we can't tell whether this was booked. Check the schedule and your wallet before trying again.",
+  },
+  cancel: {
+    checked: "The club's system didn't answer, so we checked the schedule: the booking is still there — nothing was cancelled and no credit moved. Try again in a minute.",
+    unchecked: "The club's system didn't answer and the schedule couldn't be read either, so we can't tell whether it was cancelled. Check the schedule and your wallet before trying again.",
+  },
+};
 
 /** The sign-out sentence. The 401 handler in `lib/api.ts` does the actual redirect. */
 export const SESSION_LOST_TEXT = "Your session has expired — sign in again to book.";
@@ -126,6 +154,52 @@ function describeOutOfHours(err: ApiError): string {
   return `The club is open ${opens}–${closes} that day. Pick a time inside those hours.`;
 }
 
+/** "Juniors", "Juniors and Seniors" — the groups a window refusal names. */
+function groupNames(err: ApiError): string | null {
+  const payload = err.payload as Record<string, unknown> | null | undefined;
+  const raw = payload && typeof payload === "object" ? payload.groups ?? payload.group_name : undefined;
+  const list = (Array.isArray(raw) ? raw : [raw]).filter((x): x is string => typeof x === "string" && x.trim() !== "");
+  if (list.length === 0) return null;
+  return list.length === 1 ? list[0] : `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
+}
+
+/**
+ * The member's groups leave no time at all that day (`no_bookable_window`) or not this time
+ * (`group_window`). Said about the MEMBER when an admin is booking for them (F1.5): the desk's
+ * booking follows that member's group times — god mode lifts the credit and the daily cap, never
+ * a group's window — so the sentence says that plainly, and where it can be changed.
+ */
+function describeGroupWindow(err: ApiError, forName: string | null | undefined): string {
+  const groups = groupNames(err);
+  const day = err.detail("day");
+  const onDay = typeof day === "string" ? ` on ${day}` : " that day";
+  const noun = groups?.includes(" and ") ? "groups" : "group";
+  const whose = (lead: boolean) => {
+    const owner = forName ? `${forName}'s` : lead ? "Your" : "your";
+    return groups ? `${owner} ${noun} (${groups})` : `${owner} groups`;
+  };
+  const override = forName
+    ? " Booking for a member follows their group's times and an admin can't override that — change the group's times on the Groups page, or book it as a club hold."
+    : " Speak to the club if that's wrong.";
+  if (err.code === "no_bookable_window") {
+    return `${whose(true)} can't book at all${onDay} — the booking times don't overlap.${override}`;
+  }
+  const windows = allowedWindows(err);
+  const when = windows ? ` ${forName ? "They" : "You"} can book ${windows}${onDay}.` : "";
+  return `That time is outside ${whose(false)} booking times.${when}${override}`;
+}
+
+function allowedWindows(err: ApiError): string | null {
+  const payload = err.payload as Record<string, unknown> | null | undefined;
+  const raw = payload && typeof payload === "object" ? payload.allowed_windows : undefined;
+  if (!Array.isArray(raw)) return null;
+  const spans = raw
+    .map((w) => (w && typeof w === "object" ? w as { start?: unknown; end?: unknown } : {}))
+    .filter((w): w is { start: string; end: string } => typeof w.start === "string" && typeof w.end === "string")
+    .map((w) => `${w.start}–${w.end}`);
+  return spans.length ? spans.join(", ") : null;
+}
+
 function describeInvalidDuration(err: ApiError): string {
   const max = err.detail("max_slices");
   return max === null
@@ -133,11 +207,31 @@ function describeInvalidDuration(err: ApiError): string {
     : `A booking can be 1 to ${max} slots long.`;
 }
 
+/** The refusals whose sentence carries the figures the refusal sent. */
+const FIGURED: Record<string, (e: ApiError, context: BookingErrorContext) => string> = {
+  peak_hours_league_only: describePeakHours,
+  per_day_cap_exceeded: describePerDayCap,
+  out_of_hours: describeOutOfHours,
+  invalid_duration: describeInvalidDuration,
+  no_time_available: () => "There's no free time on that court right now.",
+  group_window: (e, context) => describeGroupWindow(e, context.forName),
+  no_bookable_window: (e, context) => describeGroupWindow(e, context.forName),
+};
+
+/** Who the booking is for and what was being done — both change the sentence. */
+export type BookingErrorContext = {
+  action?: BookingAction;
+  /** The member's first name when an admin is acting for them. */
+  forName?: string | null;
+};
+
 /**
  * @param fallback what to say when the server gave nothing recognisable — phrase it as
  * something the member can do, never as "an error occurred".
  */
-export function describeBookingError(e: unknown, fallback: string): string {
+export function describeBookingError(e: unknown, fallback: string, context: BookingErrorContext = {}): string {
+  const action = context.action ?? "book";
+  if (e instanceof UnsureOutcome) return e.checked ? UNSURE_TEXT[action].checked : UNSURE_TEXT[action].unchecked;
   if (!(e instanceof ApiError)) return fallback;
 
   // A lapsed or missing session reaches here as 401 (the client's own handler signs the
@@ -145,16 +239,10 @@ export function describeBookingError(e: unknown, fallback: string): string {
   // 400 `tenant_unresolved` from the tenancy middleware before authorization ever runs.
   // Both mean the same thing to the person holding the phone.
   if (e.status === 401 || e.code === "tenant_unresolved") return SESSION_LOST_TEXT;
-  if (e.status >= 500) return SERVER_DOWN_TEXT;
+  if (e.status >= 500) return SERVER_DOWN_TEXT[action];
 
-  switch (e.code) {
-    case "peak_hours_league_only": return describePeakHours(e);
-    case "per_day_cap_exceeded": return describePerDayCap(e);
-    case "out_of_hours": return describeOutOfHours(e);
-    case "invalid_duration": return describeInvalidDuration(e);
-    case "no_time_available": return "There's no free time on that court right now.";
-    default: break;
-  }
+  const withFigures = e.code !== null ? FIGURED[e.code] : undefined;
+  if (withFigures) return withFigures(e, context);
 
   if (e.code !== null && e.code in BOOKING_ERROR_TEXT) return BOOKING_ERROR_TEXT[e.code];
   return fallback;
@@ -218,8 +306,12 @@ export function provesStaleGrid(e: unknown): boolean {
  * the member never named. An admin acting for someone should be told whose credit moved.
  * </p>
  */
-export function cancellationOutcome(refunded: number, penalty: number, member?: string | null): string {
+export function cancellationOutcome(refunded: number | null, penalty: number | null, member?: string | null): string {
   const whose = member ? `${member}'s credit` : "your credit";
+  // F1.1 — the schedule shows it gone but the reply with the figures was lost.
+  if (refunded === null || penalty === null) {
+    return `Booking cancelled. The club's reply didn't arrive, so the refund isn't shown here — it's on ${member ? `${member}'s` : "your"} wallet.`;
+  }
   if (refunded <= 0 && penalty <= 0) {
     return member
       ? `Booking cancelled. Nothing was refunded — ${member} had already checked in and the lights had been on.`

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { endpoints, type BulkCancelResponse, type CancellationQuote } from "@/lib/api";
 import { formatMinutes } from "@/lib/utils";
 import { clubClock } from "@/lib/clubClock";
+import { UnsureOutcome, goneFrom, outcomeUnknown, type Reread } from "@/lib/bookingOutcome";
 import { CANCEL_SHEET, cancelRowOutcome, refusalReason, RESULT_WORD } from "@/lib/bookingsCopy";
 import { clubDayLabel, newIdempotencyKey } from "./bookFlow";
 import type { BulkResultRow } from "./BulkResults";
@@ -105,13 +106,18 @@ export type CancelRequest = {
   waive: boolean;
   reason: string;
   idempotencyKey: string;
+  /** Re-reads the day behind the sheet — how an unanswered cancel learns what happened (F1.1). */
+  reread?: Reread;
 };
+
+/** What one cancel moved. Null figures: it was cancelled, but the reply that said how much was lost. */
+export type CancelFigures = { refunded: number | null; penalty: number | null };
 
 export type CancelRun = {
   rows: BulkResultRow[];
   cancelledIds: string[];
   /** Single cancellation's figures, for the toast. */
-  single: { refunded: number; penalty: number } | null;
+  single: CancelFigures | null;
 };
 
 function whenOf(b: GridBooking): string {
@@ -123,10 +129,10 @@ function nameOf(b: GridBooking): string {
   return b.mine || !b.memberFirstName ? b.courtName : `${b.courtName} · ${b.memberFirstName}`;
 }
 
-function okRow(b: GridBooking, refunded: number, penalty: number): BulkResultRow {
+function okRow(b: GridBooking, refunded: number | null, penalty: number | null): BulkResultRow {
   return {
-    key: b.bookingId, courtName: nameOf(b), when: whenOf(b), ok: true,
-    word: RESULT_WORD.cancelled, detail: cancelRowOutcome(refunded, penalty),
+    key: b.bookingId, courtName: nameOf(b), when: whenOf(b), ok: true, word: RESULT_WORD.cancelled,
+    detail: refunded === null || penalty === null ? CANCEL_SHEET.provenRow : cancelRowOutcome(refunded, penalty),
   };
 }
 
@@ -169,40 +175,90 @@ function fromBulk(res: BulkCancelResponse, bookings: readonly GridBooking[]): Ca
   return { rows, cancelledIds, single: null };
 }
 
+/**
+ * The rows the schedule proves for bookings whose cancel went unanswered: gone is cancelled
+ * (the reply with the figures was lost), still there is not, and a failed look says it cannot
+ * tell. Never "couldn't cancel" about a booking the club had cancelled and refunded (F1.1).
+ */
+async function proveCancels(unsure: readonly GridBooking[], reread: Reread | undefined) {
+  const day = reread ? await reread() : null;
+  const rows = new Map<string, BulkResultRow>();
+  const gone: string[] = [];
+  for (const b of unsure) {
+    if (day && goneFrom(day, b.bookingId)) {
+      gone.push(b.bookingId);
+      rows.set(b.bookingId, okRow(b, null, null));
+    } else {
+      rows.set(b.bookingId, { ...failedRow(b, null), detail: day ? CANCEL_SHEET.unsureStillThere : CANCEL_SHEET.unsureRow });
+    }
+  }
+  return { rows, gone };
+}
+
+function codeOf(error: unknown): string | null {
+  return error && typeof error === "object" && "code" in error ? (error as { code: string | null }).code : null;
+}
+
 /** Several of one's own bookings, one after another: each is its own refund behind its own lock. */
 async function cancelInTurn(req: CancelRequest): Promise<CancelRun> {
   const rows: BulkResultRow[] = [];
   const cancelledIds: string[] = [];
+  const unsure: GridBooking[] = [];
   for (const b of req.bookings) {
     try {
       const r = await cancelOne(b, req);
       rows.push(okRow(b, r.refunded_credits, r.penalty_credits));
       cancelledIds.push(b.bookingId);
     } catch (error) {
-      const code = error && typeof error === "object" && "code" in error ? (error as { code: string | null }).code : null;
-      rows.push(failedRow(b, code));
+      if (outcomeUnknown(error)) unsure.push(b);
+      rows.push(failedRow(b, codeOf(error)));
     }
   }
-  return { rows, cancelledIds, single: null };
+  if (unsure.length === 0) return { rows, cancelledIds, single: null };
+  const proven = await proveCancels(unsure, req.reread);
+  return {
+    rows: rows.map((r) => proven.rows.get(r.key) ?? r),
+    cancelledIds: [...cancelledIds, ...proven.gone],
+    single: null,
+  };
 }
 
-export async function cancelBookings(req: CancelRequest): Promise<CancelRun> {
-  const { bookings } = req;
-  if (bookings.length === 1) {
-    const [b] = bookings;
+async function cancelSingle(b: GridBooking, req: CancelRequest): Promise<CancelRun> {
+  try {
     const r = await cancelOne(b, req);
     return { rows: [okRow(b, r.refunded_credits, r.penalty_credits)], cancelledIds: [b.bookingId],
       single: { refunded: r.refunded_credits, penalty: r.penalty_credits } };
+  } catch (error) {
+    if (!outcomeUnknown(error) || !req.reread) throw error;
+    const day = await req.reread();
+    if (!day) throw new UnsureOutcome(error, false);
+    if (!goneFrom(day, b.bookingId)) throw new UnsureOutcome(error, true);
+    return { rows: [okRow(b, null, null)], cancelledIds: [b.bookingId], single: { refunded: null, penalty: null } };
   }
-  // A batch that touches somebody else's booking is the admin bulk route: one reason, recorded
-  // once for the batch and sent in every member's email.
-  if (req.isAdmin && bookings.some((b) => !b.mine)) {
+}
+
+/** The admin bulk route, with an unanswered batch read back off the schedule row by row. */
+async function cancelAsDesk(req: CancelRequest): Promise<CancelRun> {
+  const { bookings } = req;
+  try {
     const res = await endpoints.adminBulkCancel({
       idempotencyKey: req.idempotencyKey, reason: req.reason.trim(), waivePenalty: req.waive,
       items: bookings.map((b) => ({ bookingId: b.bookingId })),
     });
     return fromBulk(res, bookings);
+  } catch (error) {
+    if (!outcomeUnknown(error)) throw error;
+    const proven = await proveCancels(bookings, req.reread);
+    return { rows: bookings.map((b) => proven.rows.get(b.bookingId)!), cancelledIds: proven.gone, single: null };
   }
+}
+
+export async function cancelBookings(req: CancelRequest): Promise<CancelRun> {
+  const { bookings } = req;
+  if (bookings.length === 1) return cancelSingle(bookings[0], req);
+  // A batch that touches somebody else's booking is the admin bulk route: one reason, recorded
+  // once for the batch and sent in every member's email.
+  if (req.isAdmin && bookings.some((b) => !b.mine)) return cancelAsDesk(req);
   return cancelInTurn(req);
 }
 

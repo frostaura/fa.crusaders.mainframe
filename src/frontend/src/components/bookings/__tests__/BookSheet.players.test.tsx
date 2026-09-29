@@ -349,10 +349,10 @@ describe("BookSheet — Confirm and the booking", () => {
     await next();
     const money = await waitFor(() => {
       const dl = document.querySelector("dl")!;
-      expect(dl).toHaveTextContent(`${BOOK_SHEET.balanceNow}100.00 cr`);
+      expect(dl).toHaveTextContent(`${BOOK_SHEET.availableNow}100.00 cr`);
       return dl;
     });
-    expect(money).toHaveTextContent(`${BOOK_SHEET.balanceAfter}0.00 cr`);
+    expect(money).toHaveTextContent(`${BOOK_SHEET.availableAfter}0.00 cr`);
     expect(screen.getByText(heldLine(20, "2030-09-10T18:00:00Z", TZ))).toBeTruthy();
   });
 
@@ -369,7 +369,7 @@ describe("BookSheet — Confirm and the booking", () => {
     await next();
     const money = await waitFor(() => {
       const dl = document.querySelector("dl")!;
-      expect(dl).toHaveTextContent(`${BOOK_SHEET.balanceNow}−6.00 cr`);
+      expect(dl).toHaveTextContent(`${BOOK_SHEET.availableNow}−6.00 cr`);
       return dl;
     });
     // 100 to pay from −6: 106 still needed — the rows add up.
