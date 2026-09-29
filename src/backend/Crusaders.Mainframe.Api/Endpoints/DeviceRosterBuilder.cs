@@ -152,7 +152,7 @@ public static class DeviceRosterBuilder
         LegacyRosterSources sources, Device device, TenantSettingsView settings,
         DateTimeOffset now, bool mint, CancellationToken ct)
     {
-        var (bookings, numberOf, cue) = await BookingsAsync(sources.Db, device, settings, now, ct);
+        var (bookings, numberOf, cue) = await BookingsAsync(sources.Db, device, settings, now, partners: false, ct);
         if (bookings.Count == 0) return [];
 
         var tokens = await TokensForAsync(sources, bookings, settings, now, ct, mint);
@@ -170,7 +170,7 @@ public static class DeviceRosterBuilder
     public static async Task<List<MemberCodeEntry>> BuildV1Async(
         RosterSources sources, Device device, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
     {
-        var (bookings, numberOf, cue) = await BookingsAsync(sources.Db, device, settings, now, ct);
+        var (bookings, numberOf, cue) = await BookingsAsync(sources.Db, device, settings, now, partners: true, ct);
         var ordered = bookings
             .OrderBy(b => b.StartsAt).ThenBy(b => b.Id)
             .Select(b => (Booking: b, Relay: RelayOf(device.CourtNumbers, numberOf[b.CourtId])))
@@ -181,7 +181,7 @@ public static class DeviceRosterBuilder
     }
 
     private static async Task<(List<Booking> Bookings, Dictionary<Guid, int> NumberOf, TimeSpan Cue)> BookingsAsync(
-        MainframeDbContext db, Device device, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
+        MainframeDbContext db, Device device, TenantSettingsView settings, DateTimeOffset now, bool partners, CancellationToken ct)
     {
         var cue = TimeSpan.FromMinutes(BookingCodeWindow.CueMinutes(settings));
         if (device.CourtNumbers.Count == 0) return ([], [], cue);
@@ -203,24 +203,43 @@ public static class DeviceRosterBuilder
         // StartsAt ≤ now + roster + cue  ∧  EndsAt ≥ now — two constants the provider can
         // translate, the same rearrangement QrEndpoints uses.
         var latestStart = now.AddMinutes(BookingCodeWindow.RosterReachMinutes(settings)).Add(cue);
-        var bookings = await db.Bookings
+        var live = db.Bookings
             .Where(b => courtIds.Contains(b.CourtId)
                         && b.Status == BookingStatus.Booked
                         && b.UserId != null
                         && b.StartsAt <= latestStart
-                        && b.EndsAt >= now
-                        // A member the club has not approved — suspended, rejected, or
-                        // still waiting — is not on the cached roster either. Without this,
-                        // suspension holds only while the box can reach the API, and the
-                        // one window in which a club most wants it to hold is the one where
-                        // nobody is watching. Ruling 15: an ACTIVE row, not merely the absence
-                        // of a non-active one — see MembershipAccess.
-                        && db.Memberships.Any(m => m.UserId == b.UserId && m.Status == MembershipStatus.Active))
+                        && b.EndsAt >= now);
+        // A member the club has not approved — suspended, rejected, or still waiting — is not on
+        // the cached roster either. Without this, suspension holds only while the box can reach
+        // the API, and the one window in which a club most wants it to hold is the one where
+        // nobody is watching. See WithAnEligiblePlayer for the v1 roster's partners.
+        var bookings = await WithAnEligiblePlayer(db, live, partners)
             .OrderBy(b => b.StartsAt)
             .Take(RosterMaxEntries)
             .ToListAsync(ct);
 
         return (bookings, numberOf, cue);
+    }
+
+    /// <summary>
+    /// The bookings a cached roster may name: the organiser's membership is ACTIVE (Ruling 15 —
+    /// an active row, not merely the absence of a non-active one; see MembershipAccess) — or, on a
+    /// v1 roster (<paramref name="partners"/>), an ACCEPTED partner's is (D11). A v1 entry names
+    /// PEOPLE, and <see cref="IBookingPlayers.PlayersOfAsync"/> leaves every barred one out, so a
+    /// partner whose organiser was suspended is admitted offline exactly as online
+    /// (<c>CourtActivationService.CandidatesAsync</c>, <c>GateAccess</c>). A LEGACY entry names the
+    /// booking's own code, which is the organiser's credential, so it keeps the organiser test alone.
+    /// </summary>
+    internal static IQueryable<Booking> WithAnEligiblePlayer(MainframeDbContext db, IQueryable<Booking> bookings, bool partners)
+    {
+        if (!partners)
+        {
+            return bookings.Where(b => db.Memberships.Any(m => m.UserId == b.UserId && m.Status == MembershipStatus.Active));
+        }
+
+        var withPartners = BookingPlayerQueries.BookingsWithActivePartners(db);
+        return bookings.Where(b => db.Memberships.Any(m => m.UserId == b.UserId && m.Status == MembershipStatus.Active)
+                                   || withPartners.Contains(b.Id));
     }
 
     /// <summary>

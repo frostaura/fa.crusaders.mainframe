@@ -307,8 +307,9 @@ builder.Services.AddScoped<AccessCodeService>();
 builder.Services.AddSingleton(memberCodeMasterKey);
 builder.Services.AddScoped<MemberCodeService>();
 builder.Services.AddScoped<MemberCodeRollout>();
-// The seam P11 (players and splits) replaces: organiser-only until booking_participants exists.
-builder.Services.AddScoped<IBookingPlayers, OrganiserOnlyBookingPlayers>();
+// Who plays on a booking, for the member-code rosters, evidence and pay-for: the organiser and
+// P11's accepted partners (booking_participants).
+builder.Services.AddScoped<IBookingPlayers, ParticipantBookingPlayers>();
 builder.Services.AddScoped<IdentificationResolver>();
 builder.Services.AddScoped<DeviceRegistryService>();
 builder.Services.AddScoped<DeviceKeyResolver>();

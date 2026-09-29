@@ -123,11 +123,11 @@ public sealed class TestHost : IAsyncDisposable
         services.AddScoped<MemberApprovalService.MemberNotifier>();
         services.AddScoped<AccessCodeService>();
         // Mirrors Program.cs: the member-code key (the development one — this is a test host),
-        // the service over it, the rollout, and the organiser-only players seam.
+        // the service over it, the rollout, and the players seam over P11's participants.
         services.AddSingleton(MemberCodeKeyPolicy.Development);
         services.AddScoped<MemberCodeService>();
         services.AddScoped<MemberCodeRollout>();
-        services.AddScoped<IBookingPlayers, OrganiserOnlyBookingPlayers>();
+        services.AddScoped<IBookingPlayers, ParticipantBookingPlayers>();
         services.AddScoped<IdentificationResolver>();
         services.AddScoped<DeviceRegistryService>();
         // Mirrors Program.cs. A test host that lacks something the application registers is

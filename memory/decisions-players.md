@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-players
 description: "D11–D13: single-payer booking; shares move as ShareTransfer pairs via one idempotent reconcile off Owed; consent caps collection; no debts, and shares received are held to the deadline; Dean's two 2026-09-28 rulings."
 type: decision
-last_verified: 2026-09-28
+last_verified: 2026-09-29
 ---
 
 # Live decisions — players and splits (D11–D13)
@@ -48,7 +48,7 @@ The normative spec is `docs/specs/players-and-splits.md`; this is the why.
 - **D12 cap: accepted seats count against the partner's own cap**, checked on the first accept of a
   future game under the partner's lock (the cap's unit). Peak/windows/price bind the organiser only.
 - **A payer override on a split booking is silently ignored** (the scan still checks in); pay-for
-  (P7) must refuse with `split_pay_in_app` via `ShareLedger.IsSplitAsync`.
+  (P7) refuses with `split_booking` (the firmware's code) via `IBookingPlayers` → P11's predicate.
 - **Migration `AddBookingParticipants` Down refuses once a ShareTransfer exists** (dropping them would
   change balances) and deletes member-audience outbox rows (they would read as admin mail).
 - **Money moves and its record commit together** (review, 2026-09-28): an admin collect is one

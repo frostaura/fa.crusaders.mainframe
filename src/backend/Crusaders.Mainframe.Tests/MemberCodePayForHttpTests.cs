@@ -210,33 +210,7 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg)
         Assert.Equal("code_used", sameCode.GetProperty("reason").GetString());
     }
 
-    [SkippableFact]
-    public async Task A_split_booking_is_refused_through_the_seam_and_a_legacy_ident_code_can_pay()
-    {
-        Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
-        await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
-        var mail = new StubEmailService();
-        await using var app = MemberCodeClub.Wired(factory, mail).WithWebHostBuilder(b => b.ConfigureServices(s =>
-        {
-            Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.RemoveAll<IBookingPlayers>(s);
-            Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped<IBookingPlayers, SplitPlayers>(s);
-        }));
-        var c = await MemberCodeClub.SeedAsync(app, "paysplit");
-        await c.BookAsync(app, c.Olga, courtIndex: 1, startsInMinutes: -10, checkedIn: true);
-        var device = app.CreateClient();
-
-        var split = await (await device.SendAsync(c.PayFor(c.Code(c.Pam), 2, Nonce, confirm: false))).Content.ReadAsStringAsync();
-        Assert.Equal("""{"payable":false,"reason":"split_booking","court_number":2}""", split);
-
-        var ident = new AccessCode
-        {
-            TenantId = c.TenantId, Code = AccessCodeService.NewCode(), Purpose = AccessCodePurpose.MemberIdent,
-            UserId = c.Pam, ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5),
-        };
-        await c.WriteAsync(app, db => { db.AccessCodes.Add(ident); return Task.CompletedTask; });
-        var legacy = await (await device.SendAsync(c.PayFor(ident.Code, 2, Nonce, confirm: false))).Content.ReadAsStringAsync();
-        Assert.Contains("split_booking", legacy);
-    }
+    // The split refusal is proven against real P11 seats — PlayersMemberCodeSeamHttpTests.
 
     /// <summary>Two clubs' boxes may mint the same nonce; each pays its own court (cross-tenant for device_pay_fors).</summary>
     [SkippableFact]
@@ -265,13 +239,5 @@ public sealed class MemberCodePayForHttpTests(PostgresFixture pg)
         // And one club's box cannot confirm with the other's key: the MAC is not a board of that club.
         var cross = await device.SendAsync(a.PayFor(a.Code(a.Pam), 2, "3333333333333333", true, "32", mac: b.BoxMac));
         Assert.NotEqual(HttpStatusCode.OK, cross.StatusCode);
-    }
-
-    private sealed class SplitPlayers(Api.Persistence.MainframeDbContext db) : IBookingPlayers
-    {
-        private readonly OrganiserOnlyBookingPlayers _inner = new(db);
-        public Task<IReadOnlyDictionary<Guid, IReadOnlyList<Guid>>> PlayersOfAsync(IReadOnlyList<Booking> bookings, CancellationToken ct) => _inner.PlayersOfAsync(bookings, ct);
-        public Task<bool> IsPlayerAsync(Booking booking, Guid userId, CancellationToken ct) => _inner.IsPlayerAsync(booking, userId, ct);
-        public Task<bool> IsSplitAsync(Booking booking, CancellationToken ct) => Task.FromResult(true);
     }
 }

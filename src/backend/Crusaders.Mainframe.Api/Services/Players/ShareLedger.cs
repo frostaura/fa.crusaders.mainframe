@@ -156,13 +156,12 @@ public sealed class ShareLedger
     /// <summary>
     /// A booking whose court is being paid for by more than one member: any partner seat still
     /// asked for a share, or any share already moved. The pay-for-at-the-box path (P7) refuses
-    /// these with <c>split_pay_in_app</c> — a stranger paying the organiser's price would leave the
+    /// these with <c>split_booking</c> (<see cref="Endpoints.DevicePayForEndpoint.SplitBooking"/>, the
+    /// code the box firmware and the device corpus already pin — it paints SPLIT BOOKING / PAY IN
+    /// APP) — a stranger paying the organiser's price would leave the
     /// partners' shares paid to somebody who no longer bore the court.
     /// </summary>
     public Task<bool> IsSplitAsync(Guid bookingId, CancellationToken ct) => BookingPlayerQueries.IsSplitAsync(_db, bookingId, ct);
-
-    /// <summary>The stable code a pay-for refusal on a split booking answers with.</summary>
-    public const string SplitPayInApp = "split_pay_in_app";
 
     /// <summary>
     /// Brings every partner seat of this booking to its target. Safe to call at any time, any

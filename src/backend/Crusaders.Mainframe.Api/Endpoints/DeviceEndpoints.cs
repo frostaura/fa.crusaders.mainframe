@@ -824,7 +824,7 @@ public sealed record HeartbeatServices(
     DeviceFaultSink Faults,
     /// <summary>REFs and per-day keys for the member-code sync (§5).</summary>
     MemberCodeService MemberCodes,
-    /// <summary>Who plays on a booking — the seam P11 extends with accepted partners.</summary>
+    /// <summary>Who plays on a booking — organiser and accepted partners (<see cref="ParticipantBookingPlayers"/>).</summary>
     IBookingPlayers Players,
     /// <summary>Capabilities and the club's cut-over (§8).</summary>
     MemberCodeRollout Rollout);

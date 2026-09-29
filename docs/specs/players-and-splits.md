@@ -312,9 +312,12 @@ organiser receives as shares are **held**:
   never makes them the payer — **a payer override on a split booking is ignored**.
 - **At the door**: an accepted partner passes `GateAccess`'s booking-window test exactly as the
   organiser does. An invited seat admits nobody.
-- **Pay-for at the box (P7)** must refuse a split booking with `split_pay_in_app`. The predicate is
-  `ShareLedger.IsSplitAsync(bookingId)` (and the code `ShareLedger.SplitPayInApp`); the pay-for
-  route itself is P7's. Device rosters (the multi-REF entry) are P7's too. The payer override at
+- **Pay-for at the box (P7)** refuses a split booking with `split_booking` — the code the box
+  firmware and the device corpus pin (`SPLIT BOOKING` / `PAY IN APP`); an earlier draft of this
+  spec said `split_pay_in_app`, which no device reads. The predicate is
+  `BookingPlayerQueries.IsSplitAsync`, reached through P7's `IBookingPlayers` seam
+  (`ParticipantBookingPlayers`, `docs/specs/member-code.md` §13), which also puts each accepted
+  partner's REF on the booking's v1 roster entry. The payer override at
   the box uses the SAME predicate — a live partner seat with a share, OR any share row on the
   booking — so a booking whose partner came off with a return still to post is not handed, with
   that return, to a volunteer.

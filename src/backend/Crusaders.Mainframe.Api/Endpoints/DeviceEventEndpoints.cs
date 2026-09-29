@@ -2029,7 +2029,7 @@ public sealed record DeviceEventServices(
     DeviceFaultSink Faults,
     /// <summary>The member-code evidence re-check and use table (member-code §7).</summary>
     MemberCodeService MemberCodes,
-    /// <summary>Who plays on a booking — the seam P11 extends. See <see cref="IBookingPlayers"/>.</summary>
+    /// <summary>Who plays on a booking — organiser and accepted partners. See <see cref="IBookingPlayers"/>.</summary>
     IBookingPlayers Players);
 
 /// <summary>

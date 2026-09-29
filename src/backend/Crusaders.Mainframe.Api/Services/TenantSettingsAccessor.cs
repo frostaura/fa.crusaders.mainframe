@@ -61,7 +61,7 @@ public sealed class TenantSettingsAccessor
         // cancel it, or get it back.
         var operatingHours = OperatingHours.FromSettings(root);
 
-        return new TenantSettingsView(
+        var view = new TenantSettingsView(
             sliceMinutes, slicePrice, penaltyPct, graceMin, penaltyMin, advanceDays, tz,
             creditsPerZarRegular,
             topupBlockZar, topupMaxZarPerMember,
@@ -144,20 +144,6 @@ public sealed class TenantSettingsAccessor
             OverdraftCooldownMinutes = TryInt(
                 root, "overdraft_cooldown_minutes", AdminNotificationSettings.DefaultOverdraftCooldownMinutes),
 
-            // Players and splits (D11–D13). Raw here, bounded by PlayerSettings at each reader.
-            ShareLapseHours = TryInt(root, PlayerSettings.ShareLapseHoursKey, PlayerSettings.DefaultShareLapseHours),
-            ShareReminderHours = TryInt(root, PlayerSettings.ShareReminderHoursKey, PlayerSettings.DefaultShareReminderHours),
-            ShareReminderMax = TryInt(root, PlayerSettings.ShareReminderMaxKey, PlayerSettings.DefaultShareReminderMax),
-            PlayerNudgeLimit = TryInt(root, PlayerSettings.NudgeLimitKey, PlayerSettings.DefaultNudgeLimit),
-            DirectorySearchesPerMinute = TryInt(
-                root, PlayerSettings.DirectorySearchesPerMinuteKey, PlayerSettings.DefaultDirectorySearchesPerMinute),
-            MemberQuietStartMinute = TryInt(root, PlayerSettings.QuietStartMinuteKey, PlayerSettings.DefaultQuietStartMinute),
-            MemberQuietEndMinute = TryInt(root, PlayerSettings.QuietEndMinuteKey, PlayerSettings.DefaultQuietEndMinute),
-            RecentPartnerDays = TryInt(root, PlayerSettings.RecentPartnerDaysKey, PlayerSettings.DefaultRecentPartnerDays),
-            MemberNotificationRetentionDays = TryInt(
-                root, PlayerSettings.NotificationRetentionDaysKey, PlayerSettings.DefaultNotificationRetentionDays),
-            PlayerInvitesPerBooking = TryInt(root, PlayerSettings.InvitesPerBookingKey, PlayerSettings.DefaultInvitesPerBooking),
-
             SseKeepaliveSeconds = TryInt(root, "sse_keepalive_seconds", RealtimeSettings.DefaultKeepaliveSeconds),
             ControlBoardResyncSeconds = TryInt(root, "control_board_resync_seconds", RealtimeSettings.DefaultResyncSeconds),
             ControlBoardStaleMultiplier = TryInt(root, "control_board_stale_multiplier", RealtimeSettings.DefaultStaleMultiplier),
@@ -208,7 +194,37 @@ public sealed class TenantSettingsAccessor
             // decides what an unprintable stored value means. It governs RAND only — the
             // reasoning, and the incident behind it, are in that file.
             CurrencySymbol = TryString(root, CurrencySymbol.Key, CurrencySymbol.Default),
+        };
+        // Two blocks added by later lanes, each in a helper of its own so this method stays
+        // under the complexity gate's length bound (-L 200) — the rule is unchanged: raw here,
+        // bounded at each reader.
+        return WithMemberCodes(WithPlayers(view, root), root);
+    }
 
+    private static TenantSettingsView WithPlayers(TenantSettingsView view, JsonElement root)
+    {
+        return view with
+        {
+            // Players and splits (D11–D13). Raw here, bounded by PlayerSettings at each reader.
+            ShareLapseHours = TryInt(root, PlayerSettings.ShareLapseHoursKey, PlayerSettings.DefaultShareLapseHours),
+            ShareReminderHours = TryInt(root, PlayerSettings.ShareReminderHoursKey, PlayerSettings.DefaultShareReminderHours),
+            ShareReminderMax = TryInt(root, PlayerSettings.ShareReminderMaxKey, PlayerSettings.DefaultShareReminderMax),
+            PlayerNudgeLimit = TryInt(root, PlayerSettings.NudgeLimitKey, PlayerSettings.DefaultNudgeLimit),
+            DirectorySearchesPerMinute = TryInt(
+                root, PlayerSettings.DirectorySearchesPerMinuteKey, PlayerSettings.DefaultDirectorySearchesPerMinute),
+            MemberQuietStartMinute = TryInt(root, PlayerSettings.QuietStartMinuteKey, PlayerSettings.DefaultQuietStartMinute),
+            MemberQuietEndMinute = TryInt(root, PlayerSettings.QuietEndMinuteKey, PlayerSettings.DefaultQuietEndMinute),
+            RecentPartnerDays = TryInt(root, PlayerSettings.RecentPartnerDaysKey, PlayerSettings.DefaultRecentPartnerDays),
+            MemberNotificationRetentionDays = TryInt(
+                root, PlayerSettings.NotificationRetentionDaysKey, PlayerSettings.DefaultNotificationRetentionDays),
+            PlayerInvitesPerBooking = TryInt(root, PlayerSettings.InvitesPerBookingKey, PlayerSettings.DefaultInvitesPerBooking),
+        };
+    }
+
+    private static TenantSettingsView WithMemberCodes(TenantSettingsView view, JsonElement root)
+    {
+        return view with
+        {
             // The member-code rollout (D1, docs/specs/member-code.md §8). Raw here; the phase's
             // meaning — an unknown value reads as `legacy`, the phase that refuses nothing — and
             // the cut-off delay's bounds live in MemberCodeSettings, on the split every block

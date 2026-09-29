@@ -134,7 +134,7 @@ public static class DeviceGateRosterBuilder
         MainframeDbContext db, AccessCodeService codes, TenantSettingsView settings,
         DateTimeOffset now, bool mint, CancellationToken ct)
     {
-        var (bookings, earlyEntry) = await BookingsAsync(db, settings, now, ct);
+        var (bookings, earlyEntry) = await BookingsAsync(db, settings, now, partners: false, ct);
         if (bookings.Count == 0) return [];
 
         var tokens = await DeviceRosterBuilder.TokensForAsync(new LegacyRosterSources(db, codes), bookings, settings, now, ct, mint);
@@ -147,7 +147,7 @@ public static class DeviceGateRosterBuilder
         MainframeDbContext db, IBookingPlayers players, MemberCodeService memberCodes,
         TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
     {
-        var (bookings, earlyEntry) = await BookingsAsync(db, settings, now, ct);
+        var (bookings, earlyEntry) = await BookingsAsync(db, settings, now, partners: true, ct);
         var ordered = bookings.OrderBy(b => b.StartsAt).ThenBy(b => b.Id)
             .Take(GateRosterMaxEntries)
             .Select(b => (Booking: b, Relay: GateRelay))
@@ -156,7 +156,7 @@ public static class DeviceGateRosterBuilder
     }
 
     private static async Task<(List<Booking> Bookings, TimeSpan EarlyEntry)> BookingsAsync(
-        MainframeDbContext db, TenantSettingsView settings, DateTimeOffset now, CancellationToken ct)
+        MainframeDbContext db, TenantSettingsView settings, DateTimeOffset now, bool partners, CancellationToken ct)
     {
         // Clamped on read, through the one function the online decision reads it with. An
         // unclamped roster is the worse half of an unclamped door: it would admit from the
@@ -169,13 +169,13 @@ public static class DeviceGateRosterBuilder
         // roster_window_minutes: -600 once emptied every door's roster on a clean 200.
         var latestStart = now.AddMinutes(BookingCodeWindow.RosterReachMinutes(settings)).Add(earlyEntry);
 
-        var bookings = await db.Bookings
+        var live = db.Bookings
             .Where(b => b.Status == BookingStatus.Booked
                         && b.UserId != null
                         && b.StartsAt <= latestStart
-                        && b.EndsAt >= now
-                        // Ruling 15: an ACTIVE row, not merely the absence of a non-active one.
-                        && db.Memberships.Any(m => m.UserId == b.UserId && m.Status == MembershipStatus.Active))
+                        && b.EndsAt >= now);
+        // Ruling 15, and on a v1 roster D11's accepted partners — DeviceRosterBuilder.WithAnEligiblePlayer.
+        var bookings = await DeviceRosterBuilder.WithAnEligiblePlayer(db, live, partners)
             .OrderBy(b => b.StartsAt)
             .ThenBy(b => b.Id)
             .Take(GateRosterMaxEntries)

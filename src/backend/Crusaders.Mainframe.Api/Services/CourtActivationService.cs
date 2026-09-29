@@ -232,8 +232,7 @@ public class CourtActivationService
     /// a <c>NoShow</c> the upload will reverse, a <c>Cancelled</c> row whose lit time is owed. A
     /// booking whose sold window holds the scan is preferred over one only its grace tail reaches;
     /// within each, a live one over a cancelled one, then the latest already started. The member may be the
-    /// organiser or an accepted partner: <see cref="IBookingPlayers"/> decides, and until P11 that
-    /// is the organiser alone.
+    /// organiser or an accepted partner: <see cref="IBookingPlayers"/> decides.
     /// </para>
     /// </summary>
     public async Task<Booking?> FindForEvidenceAsync(

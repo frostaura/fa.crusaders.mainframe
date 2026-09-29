@@ -608,10 +608,23 @@ Each is a server behaviour; none changes a byte the corpus holds.
   `Endpoints/DevicePayForEndpoint.cs`. `MemberCodeCorpusTests` executes every `csharp` case in the
   manifest, including the three device-behaviour sections (`roster.decide`, `codesync.apply`,
   `gate.offline`) through a small test-side device model built on the server's own parsers.
-- **Players are the organiser alone until P11.** Every "organiser first, then accepted partners"
-  above goes through one seam, `IBookingPlayers` (`PlayersOfAsync`, `IsPlayerAsync`,
-  `IsSplitAsync`). Its registration today answers the organiser and never "split"; P11 replaces
-  the registration and nothing else.
+- **Players are the organiser and P11's accepted partners.** Every "organiser first, then accepted
+  partners" above goes through one seam, `IBookingPlayers` (`PlayersOfAsync`, `IsPlayerAsync`,
+  `IsSplitAsync`), registered as `ParticipantBookingPlayers` over `booking_participants`
+  (`docs/specs/players-and-splits.md` §5): a roster entry names the organiser (active membership)
+  then each ACCEPTED partner seat with an active membership, in seat order, at most four; an
+  invited, declined, withdrawn, removed or lapsed seat — or a guest seat, which names nobody — is
+  not a player. Evidence accepts an accepted partner's code whatever their membership is now
+  (the scan was judged at the scan). "Split" is `BookingPlayerQueries.IsSplitAsync` — a live
+  partner seat asked for a share, OR any share row on the booking — the same predicate that makes
+  the box's payer override a no-op, so pay-for's `split_booking` and the ignored override cannot
+  disagree. *Why that and not "any accepted partner":* a partner who came off with a return still
+  pending leaves no live seat, and paying for that booking would hand the return to the volunteer.
+- **A v1 roster admits a booking an ACCEPTED partner may play even when its organiser is barred.**
+  The v1 entry names people, and the barred organiser is simply left out of it — the offline
+  twin of `CandidatesAsync` and `GateAccess`, which already admit that partner online. The LEGACY
+  roster keeps the organiser-only test: its entry is the booking's own code, the organiser's
+  credential. (`DeviceRosterBuilder.WithAnEligiblePlayer`.)
 - **Status and enrolment carry one field more than §10**: `phase` (the club's
   `member_code_phase`: `legacy` | `v1` | `v1_only`), last. A phone shows v1 codes in every phase
   (they work online throughout) and uses the phase only to say whether boards can check them

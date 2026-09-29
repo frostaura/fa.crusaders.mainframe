@@ -13,8 +13,8 @@ namespace Crusaders.Mainframe.Api.Services;
 /// path (P7) all need "is this person on that booking", and each writing its own subquery over
 /// <c>booking_participants</c> is five readings of one rule that drift. They are composable
 /// <see cref="IQueryable{T}"/>s so EF still inlines them into each caller's single statement, and
-/// so the device-roster seam P7 is building (<c>IBookingPlayers</c>) can be wired to these with a
-/// one-line change.
+/// so the device-roster seam P7 built (<see cref="IBookingPlayers"/>) reads through them —
+/// <see cref="ParticipantBookingPlayers"/>.
 /// </para>
 /// </summary>
 public static class BookingPlayerQueries
@@ -35,17 +35,18 @@ public static class BookingPlayerQueries
                         && db.Memberships.Any(m => m.UserId == p.UserId && m.Status == MembershipStatus.Active))
             .Select(p => p.BookingId);
 
-    /// <summary>The accepted partners (active membership) of <paramref name="bookingIds"/>, as (booking, member) pairs.</summary>
+    /// <summary>The accepted partners (active membership) of <paramref name="bookingIds"/>, as (booking, member) pairs in seat order.</summary>
     public static IQueryable<BookingPlayer> ActivePartnersOf(MainframeDbContext db, IReadOnlyCollection<Guid> bookingIds) =>
         db.BookingParticipants.AsNoTracking()
             .Where(p => bookingIds.Contains(p.BookingId) && p.Seat > 1 && p.UserId != null
                         && p.Status == ParticipantStatus.Accepted
                         && db.Memberships.Any(m => m.UserId == p.UserId && m.Status == MembershipStatus.Active))
+            .OrderBy(p => p.Seat)
             .Select(p => new BookingPlayer(p.BookingId, p.UserId!.Value));
 
     /// <summary>
     /// A split booking — any partner seat still asked for a share, or any share already moved. The
-    /// pay-for-at-the-box path refuses these (<see cref="ShareLedger.SplitPayInApp"/>), and a payer
+    /// pay-for-at-the-box path refuses these (<c>split_booking</c>, <see cref="Endpoints.DevicePayForEndpoint.SplitBooking"/>), and a payer
     /// override at the box is ignored on them.
     /// </summary>
     public static async Task<bool> IsSplitAsync(MainframeDbContext db, Guid bookingId, CancellationToken ct)

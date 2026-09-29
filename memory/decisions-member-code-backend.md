@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-decisions-member-code-backend
-description: "D1/D10 server side: S never stored, one use per code per class claimed before acting, same-board reuse is a receipt, pay-for pinned to its quote and paid in one commit, players behind one seam P11 replaces."
+description: "D1/D10 server side: S never stored, one use per code per class claimed before acting, same-board reuse is a receipt, pay-for pinned to its quote and paid in one commit, players behind one seam wired to P11's accepted seats."
 type: decision
-last_verified: 2026-09-28
+last_verified: 2026-09-29
 ---
 
 # Live decisions — the member code on the server (P7 backend)
@@ -49,7 +49,10 @@ hold: `decisions-member-code-rotation.md`.
 - **From `v1` nothing mints per-booking codes; `v1_only` refuses legacy everywhere** — kiosk QR
   match, biometric payer override and legacy evidence (judged at the scan) included — and the
   cut-off expires every access code. *Why:* a code nobody will show is a live credential.
-- **Players come from `IBookingPlayers`** — organiser-only until P11 replaces the registration.
+- **`IBookingPlayers` is wired to P11** (2026-09-29): organiser then ACCEPTED active partners by
+  seat; split = P11's `IsSplitAsync`, the predicate the payer override reads, so the two cannot
+  disagree. Wire code stays `split_booking` (firmware pins it). A v1 roster admits a barred
+  organiser's game for its partner; legacy does not — its entry is the organiser's own code.
 - **Migration history rewritten on this unpushed branch** (`AddSessionEpochClaimKeysPayForQuotesAndCutoffMarks`
   replaced the round-0 migration): a dev DB migrated at `0bd49d2` must be reset (`make down-reset`).
 - **Left by decision:** a pay-for replay re-grants the remainder (review L5; bounded by the sold
