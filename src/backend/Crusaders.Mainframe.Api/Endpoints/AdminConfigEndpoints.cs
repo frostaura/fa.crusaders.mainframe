@@ -150,6 +150,15 @@ public static class AdminConfigEndpoints
                 member_notification_retention_days = PlayerSettings.NotificationRetentionDays(defaults),
                 player_invites_per_booking = PlayerSettings.InvitesPerBooking(defaults),
 
+                // Play (D14), from the clamped readers for the same reason.
+                result_autoconfirm_hours = PlaySettings.AutoConfirmHours(defaults),
+                result_record_days = PlaySettings.RecordDays(defaults),
+                streak_rest_every_weeks = PlaySettings.RestEveryWeeks(defaults),
+                streak_rest_cap = PlaySettings.RestCap(defaults),
+                streak_pause_weeks_per_year = PlaySettings.PauseWeeksPerYear(defaults),
+                play_early_bird_before_minute = PlaySettings.EarlyBirdBeforeMinute(defaults),
+                play_night_owl_from_minute = PlaySettings.NightOwlFromMinute(defaults),
+
                 sse_keepalive_seconds = (int)RealtimeSettings.KeepAlive(defaults).TotalSeconds,
                 control_board_resync_seconds = RealtimeSettings.ResyncSeconds(defaults),
                 control_board_stale_multiplier = RealtimeSettings.StaleMultiplier(defaults),
@@ -290,7 +299,7 @@ public static class AdminConfigEndpoints
             var realtimeError = ValidateRealtime(req);
             if (realtimeError is not null) return Results.BadRequest(realtimeError);
 
-            var liveError = ValidateLiveSettings(req) ?? ValidateNotifierSettings(req) ?? ValidatePlayerSettings(req);
+            var liveError = ValidateLiveSettings(req) ?? ValidateNotifierSettings(req) ?? ValidatePlayerSettings(req) ?? ValidatePlaySettings(req);
             if (liveError is not null) return Results.BadRequest(new { error = liveError });
             var adminError = ValidateAdminSettings(req);
             if (adminError is not null) return Results.BadRequest(new { error = adminError });
@@ -398,6 +407,7 @@ public static class AdminConfigEndpoints
             WriteOptionalLiveSettings(doc, req);
             WriteOptionalNotifierSettings(doc, req);
             WriteOptionalPlayerSettings(doc, req);
+            WriteOptionalPlaySettings(doc, req);
             WriteOptionalAdminSettings(doc, req);
             WriteOptionalMemberLimits(doc, req);
             WriteOptionalRealtime(doc, req);
@@ -850,6 +860,45 @@ public static class AdminConfigEndpoints
         ];
         var bad = bounds.FirstOrDefault(b => OutOfRange(b.Value, b.Min, b.Max));
         return bad.Key is null ? null : $"{bad.Key}_out_of_range";
+    }
+
+    /// <summary>
+    /// Bounds on the play seven (D14), from <see cref="PlaySettings"/>' own constants so the number
+    /// refused here and the number clamped on read cannot drift apart.
+    /// </summary>
+    private static string? ValidatePlaySettings(UpdateSettingsRequest req)
+    {
+        var values = PlayValues(req);
+        foreach (var (key, min, max) in PlaySettings.Bounds)
+        {
+            if (OutOfRange(values[key], min, max)) return $"{key}_out_of_range";
+        }
+        return null;
+    }
+
+    /// <summary>Same omitted-means-unchanged rule as the economics keys, for the play seven.</summary>
+    private static void WriteOptionalPlaySettings(IDictionary<string, JsonElement> doc, UpdateSettingsRequest req)
+    {
+        foreach (var (key, value) in PlayValues(req))
+        {
+            if (value is { } v) doc[key] = ToElement(v);
+        }
+    }
+
+    private static Dictionary<string, int?> PlayValues(UpdateSettingsRequest req)
+    {
+        // Block body for the lizard reason in memory/gotchas-build.md.
+        var values = new Dictionary<string, int?>
+        {
+            [PlaySettings.AutoConfirmHoursKey] = req.ResultAutoConfirmHours,
+            [PlaySettings.RecordDaysKey] = req.ResultRecordDays,
+            [PlaySettings.RestEveryWeeksKey] = req.StreakRestEveryWeeks,
+            [PlaySettings.RestCapKey] = req.StreakRestCap,
+            [PlaySettings.PauseWeeksPerYearKey] = req.StreakPauseWeeksPerYear,
+            [PlaySettings.EarlyBirdBeforeMinuteKey] = req.PlayEarlyBirdBeforeMinute,
+            [PlaySettings.NightOwlFromMinuteKey] = req.PlayNightOwlFromMinute,
+        };
+        return values;
     }
 
     /// <summary>Same omitted-means-unchanged rule as the economics keys, for the players ten.</summary>
@@ -1484,6 +1533,15 @@ public sealed record UpdateSettingsRequest(
     [property: JsonPropertyName("recent_partner_days")] int? RecentPartnerDays = null,
     [property: JsonPropertyName("member_notification_retention_days")] int? MemberNotificationRetentionDays = null,
     [property: JsonPropertyName("player_invites_per_booking")] int? PlayerInvitesPerBooking = null,
+
+    // Play (D14). Snake-case only, for the reason the blocks above give.
+    [property: JsonPropertyName("result_autoconfirm_hours")] int? ResultAutoConfirmHours = null,
+    [property: JsonPropertyName("result_record_days")] int? ResultRecordDays = null,
+    [property: JsonPropertyName("streak_rest_every_weeks")] int? StreakRestEveryWeeks = null,
+    [property: JsonPropertyName("streak_rest_cap")] int? StreakRestCap = null,
+    [property: JsonPropertyName("streak_pause_weeks_per_year")] int? StreakPauseWeeksPerYear = null,
+    [property: JsonPropertyName("play_early_bird_before_minute")] int? PlayEarlyBirdBeforeMinute = null,
+    [property: JsonPropertyName("play_night_owl_from_minute")] int? PlayNightOwlFromMinute = null,
 
     [property: JsonPropertyName("control_board_resync_seconds")] int? ControlBoardResyncSeconds = null,
     [property: JsonPropertyName("control_board_stale_multiplier")] int? ControlBoardStaleMultiplier = null,

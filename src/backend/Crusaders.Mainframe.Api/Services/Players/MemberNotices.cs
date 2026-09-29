@@ -15,6 +15,13 @@ public sealed record MemberNotice(
 {
     /// <summary>Mail it as well as showing it. Every player-affecting event does; a pure UI hint would not.</summary>
     public bool Email { get; init; } = true;
+
+    /// <summary>
+    /// The outbox's dedupe key when it is not the inbox line's (D14): an inbox line per event, but
+    /// at most one mail per <i>this</i> key — <c>play.result_to_confirm</c> mails once per (booking,
+    /// member) however often the result is edited or re-recorded. Null = the inbox line's key.
+    /// </summary>
+    public string? MailDedupeKey { get; init; }
 }
 
 /// <summary>
@@ -67,7 +74,7 @@ public static class MemberNotices
             Audience = NotificationAudience.Member,
             RecipientUserId = notice.UserId,
             Kind = notice.Kind,
-            DedupeKey = OutboxKey(key),
+            DedupeKey = OutboxKey(notice.MailDedupeKey is { } mailKey ? Clip(mailKey, MemberNotification.DedupeKeyMaxLength) : key),
             PayloadJson = JsonSerializer.Serialize(notice.Payload, notice.Payload.GetType(), AdminEventCatalogue.Json),
             Headline = Clip(notice.Headline, AdminNotification.HeadlineMaxLength),
             Link = notice.Link is null ? null : Clip(notice.Link, AdminNotification.LinkMaxLength),

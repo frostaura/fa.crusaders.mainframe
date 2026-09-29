@@ -1,0 +1,28 @@
+{
+  "spec": "docs/specs/play.md §4.3",
+  "rules": "PAR-11: first to 11, win by two after 10-all; best_of_3 or best_of_5; complete matches only. expected mirrors the wire: ok, or the refusal's {error, ...figures}.",
+  "vectors": [
+    {"id": 1, "format": "best_of_3", "games": [{"a": 11, "b": 7}, {"a": 11, "b": 9}], "expected": {"ok": true, "winner": "a", "games_won": {"a": 2, "b": 0}}},
+    {"id": 2, "format": "best_of_3", "games": [{"a": 11, "b": 7}, {"a": 9, "b": 11}, {"a": 12, "b": 10}], "expected": {"ok": true, "winner": "a", "games_won": {"a": 2, "b": 1}}},
+    {"id": 3, "format": "best_of_3", "games": [{"a": 5, "b": 11}, {"a": 11, "b": 13}], "expected": {"ok": true, "winner": "b", "games_won": {"a": 0, "b": 2}}},
+    {"id": 4, "format": "best_of_3", "games": [{"a": 11, "b": 7}, {"a": 11, "b": 9}, {"a": 11, "b": 3}], "expected": {"ok": false, "error": "games_after_decided", "game_index": 2}},
+    {"id": 5, "format": "best_of_3", "games": [{"a": 11, "b": 7}], "expected": {"ok": false, "error": "match_incomplete", "games_needed": 2}},
+    {"id": 6, "format": "best_of_3", "games": [], "expected": {"ok": false, "error": "match_incomplete", "games_needed": 2}},
+    {"id": 7, "format": "best_of_5", "games": [{"a": 11, "b": 0}, {"a": 11, "b": 0}, {"a": 11, "b": 0}], "expected": {"ok": true, "winner": "a", "games_won": {"a": 3, "b": 0}}},
+    {"id": 8, "format": "best_of_5", "games": [{"a": 11, "b": 9}, {"a": 10, "b": 12}, {"a": 14, "b": 12}, {"a": 7, "b": 11}, {"a": 11, "b": 5}], "expected": {"ok": true, "winner": "a", "games_won": {"a": 3, "b": 2}}},
+    {"id": 9, "format": "best_of_5", "games": [{"a": 11, "b": 5}, {"a": 11, "b": 5}], "expected": {"ok": false, "error": "match_incomplete", "games_needed": 3}},
+    {"id": 10, "format": "best_of_5", "games": [{"a": 11, "b": 5}, {"a": 5, "b": 11}, {"a": 11, "b": 5}, {"a": 5, "b": 11}, {"a": 11, "b": 5}, {"a": 11, "b": 5}], "expected": {"ok": false, "error": "games_after_decided", "game_index": 5}},
+    {"id": 11, "format": "best_of_5", "games": [{"a": 11, "b": 10}, {"a": 11, "b": 0}, {"a": 11, "b": 0}], "expected": {"ok": false, "error": "score_invalid", "game_index": 0, "reason": "not_two_clear"}},
+    {"id": 12, "format": "best_of_5", "games": [{"a": 12, "b": 11}, {"a": 11, "b": 0}, {"a": 11, "b": 0}], "expected": {"ok": false, "error": "score_invalid", "game_index": 0, "reason": "not_two_clear"}},
+    {"id": 13, "format": "best_of_5", "games": [{"a": 13, "b": 10}, {"a": 11, "b": 0}, {"a": 11, "b": 0}], "expected": {"ok": false, "error": "score_invalid", "game_index": 0, "reason": "overrun"}},
+    {"id": 14, "format": "best_of_5", "games": [{"a": 14, "b": 10}, {"a": 11, "b": 0}, {"a": 11, "b": 0}], "expected": {"ok": false, "error": "score_invalid", "game_index": 0, "reason": "overrun"}},
+    {"id": 15, "format": "best_of_5", "games": [{"a": 10, "b": 8}, {"a": 11, "b": 0}, {"a": 11, "b": 0}], "expected": {"ok": false, "error": "score_invalid", "game_index": 0, "reason": "below_eleven"}},
+    {"id": 16, "format": "best_of_5", "games": [{"a": 11, "b": 11}, {"a": 11, "b": 0}, {"a": 11, "b": 0}], "expected": {"ok": false, "error": "score_invalid", "game_index": 0, "reason": "tied"}},
+    {"id": 17, "format": "best_of_5", "games": [{"a": -1, "b": 11}, {"a": 11, "b": 0}, {"a": 11, "b": 0}], "expected": {"ok": false, "error": "score_invalid", "game_index": 0, "reason": "negative"}},
+    {"id": 18, "format": "best_of_5", "games": [{"a": 100, "b": 98}, {"a": 11, "b": 0}, {"a": 11, "b": 0}], "expected": {"ok": false, "error": "score_invalid", "game_index": 0, "reason": "too_high"}},
+    {"id": 19, "format": "best_of_5", "games": [{"a": 11, "b": 9}, {"a": 15, "b": 13}, {"a": 11, "b": 2}], "expected": {"ok": true, "winner": "a", "games_won": {"a": 3, "b": 0}}, "note": "15-13 is a legal tie-break"},
+    {"id": 20, "format": "best_of_5", "games": [{"a": 11, "b": 9}, {"a": 11, "b": 13}, {"a": 12, "b": 10}, {"a": 0, "b": 11}, {"a": 11, "b": 4}], "expected": {"ok": true, "winner": "a", "games_won": {"a": 3, "b": 2}}},
+    {"id": 21, "format": "best_of_7", "games": [{"a": 11, "b": 0}, {"a": 11, "b": 0}, {"a": 11, "b": 0}, {"a": 11, "b": 0}], "expected": {"ok": false, "error": "format_invalid"}},
+    {"id": 22, "format": "best_of_3", "games": [{"a": 11, "b": 9}, {"a": 11, "b": 10}], "expected": {"ok": false, "error": "score_invalid", "game_index": 1, "reason": "not_two_clear"}, "note": "the second game"}
+  ]
+}

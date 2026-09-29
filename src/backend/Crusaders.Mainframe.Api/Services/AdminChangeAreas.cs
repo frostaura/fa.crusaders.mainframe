@@ -16,7 +16,10 @@ public static class AdminChangeAreas
     public const string Setting = "setting";
     public const string Device = "device";
 
-    public static readonly string[] All = [Schedule, Booking, Credit, Group, Member, Setting, Device];
+    /// <summary>D14: match results an admin voided or upheld.</summary>
+    public const string Play = "play";
+
+    public static readonly string[] All = [Schedule, Booking, Credit, Group, Member, Setting, Device, Play];
 }
 
 /// <summary>
@@ -33,5 +36,8 @@ public static class AdminChangeSubjects
     public const string Setting = "setting";
     public const string Court = "court";
 
-    public static readonly string[] All = [User, Schedule, Booking, Group, Device, Setting, Court];
+    /// <summary>D14: one recorded match (<c>match_results</c>).</summary>
+    public const string MatchResult = "match_result";
+
+    public static readonly string[] All = [User, Schedule, Booking, Group, Device, Setting, Court, MatchResult];
 }

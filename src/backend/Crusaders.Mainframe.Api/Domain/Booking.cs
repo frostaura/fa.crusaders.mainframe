@@ -195,5 +195,14 @@ public sealed class Booking : ITenantScoped
     /// </summary>
     public DateTimeOffset? ShareReconcileLastAttemptAt { get; set; }
 
+    /// <summary>
+    /// D14 (<c>docs/specs/play.md</c> §2.7, §7.1): a change that may move a member's play record —
+    /// a check-in, a status, a seat's status or arrival, a result — happened on this booking and
+    /// its players have not been re-evaluated for badges since. Staged by the SAVE that makes the
+    /// change (<c>MainframeDbContext.PlayStaging</c>), never by a call site, and drained by
+    /// <c>PlayWorker</c> with a guarded clear.
+    /// </summary>
+    public DateTimeOffset? PlayRecomputeDueAt { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

@@ -59,48 +59,4 @@ public partial class MainframeDbContext
             .SetProperty(b => b.ShareReconcileDueAt, b => b.ShareReconcileDueAt ?? at)
             .SetProperty(b => b.ShareReconcileLastAttemptAt, at));
     }
-
-    /// <summary>
-    /// The save, with the marker staged beside it: inside the caller's transaction when there is
-    /// one, else inside one opened here. Providers without transactions (the in-memory unit
-    /// suites) and ExecuteUpdate save as before.
-    /// </summary>
-    private async Task<int> SaveStagingShareReconcileAsync(bool acceptAllChangesOnSuccess, CancellationToken ct)
-    {
-        var bookings = Database.IsRelational() ? BookingsOwedMayMove() : [];
-        if (bookings.Count == 0) return await base.SaveChangesAsync(acceptAllChangesOnSuccess, ct);
-
-        if (Database.CurrentTransaction is not null)
-        {
-            var saved = await base.SaveChangesAsync(acceptAllChangesOnSuccess, ct);
-            await StageShareReconcileAsync(bookings, ct);
-            return saved;
-        }
-
-        await using var transaction = await Database.BeginTransactionAsync(ct);
-        var written = await base.SaveChangesAsync(acceptAllChangesOnSuccess, ct);
-        await StageShareReconcileAsync(bookings, ct);
-        await transaction.CommitAsync(ct);
-        return written;
-    }
-
-    /// <summary>The synchronous spelling of <see cref="SaveStagingShareReconcileAsync"/>.</summary>
-    private int SaveStagingShareReconcile(bool acceptAllChangesOnSuccess)
-    {
-        var bookings = Database.IsRelational() ? BookingsOwedMayMove() : [];
-        if (bookings.Count == 0) return base.SaveChanges(acceptAllChangesOnSuccess);
-
-        if (Database.CurrentTransaction is not null)
-        {
-            var saved = base.SaveChanges(acceptAllChangesOnSuccess);
-            StageShareReconcile(bookings);
-            return saved;
-        }
-
-        using var transaction = Database.BeginTransaction();
-        var written = base.SaveChanges(acceptAllChangesOnSuccess);
-        StageShareReconcile(bookings);
-        transaction.Commit();
-        return written;
-    }
 }
