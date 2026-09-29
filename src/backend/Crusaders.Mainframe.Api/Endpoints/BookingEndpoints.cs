@@ -42,21 +42,8 @@ public static class BookingEndpoints
             return await CreateWithPlayersAsync(req, payer, ctx, svc, ct);
         });
 
-        g.MapGet("/{bookingId:guid}/cancellation-quote", async (Guid bookingId, HttpContext ctx, BookingService svc, CancellationToken ct) =>
-        {
-            var actorId = ctx.User.Id() ?? Guid.Empty;
-            var quote = await svc.QuoteCancellationAsync(bookingId, actorId, actorIsAdmin: ctx.User.IsInRole("admin"), ct);
-            return quote is null ? Results.NotFound(new { error = "booking_not_found" }) : Results.Ok(quote);
-        });
-
-        g.MapPost("/{bookingId:guid}/cancel", async (Guid bookingId, HttpContext ctx, BookingService svc, CancellationToken ct) =>
-        {
-            var actorId = ctx.User.Id() ?? Guid.Empty;
-            var result = await svc.CancelAsync(bookingId, actorId, actorIsAdmin: false, waivePenalty: false, ct);
-            // D11: the organiser's refund moved Owed; each partner's share follows it.
-            if (result is CancellationResult.Ok) await ctx.AfterSettlementAsync([bookingId], ct);
-            return ToHttpResult(result, ctx);
-        });
+        g.MapGet("/{bookingId:guid}/cancellation-quote", MemberCancelQuoteAsync);
+        g.MapPost("/{bookingId:guid}/cancel", MemberCancelAsync);
 
         // Admin: book on behalf + cancel-with-waive
         var admin = app.MapGroup("/api/v1/admin/bookings")
@@ -411,6 +398,44 @@ public static class BookingEndpoints
             CancellationResult.AlreadyStarted => Results.BadRequest(new { error = "already_started" }),
             _ => Unmapped(result, ctx),
         };
+    }
+
+    /// <summary>
+    /// The member's cancellation quote, with what the partners get back and what the organiser
+    /// keeps (review round 1, B3 — see <see cref="SplitCancelView"/>).
+    /// </summary>
+    private static async Task<IResult> MemberCancelQuoteAsync(
+        Guid bookingId, HttpContext ctx, BookingService svc, MainframeDbContext db, SplitCancelView split, CancellationToken ct)
+    {
+        var actorId = ctx.User.Id() ?? Guid.Empty;
+        var quote = await svc.QuoteCancellationAsync(bookingId, actorId, actorIsAdmin: ctx.User.IsInRole("admin"), ct);
+        if (quote is null) return Results.NotFound(new { error = "booking_not_found" });
+
+        var booking = await db.Bookings.AsNoTracking().FirstAsync(b => b.Id == bookingId, ct);
+        var refunds = await split.QuoteAsync(booking, quote.RefundCredits, ct);
+        return Results.Ok(quote with { NetCredits = quote.RefundCredits - refunds.Sum(r => r.Credits), PartnerRefunds = refunds });
+    }
+
+    /// <summary>
+    /// The member's cancellation. D11: the organiser's refund moved Owed, and each partner's share
+    /// follows it — so the answer names each partner's refund and the organiser's net (B3).
+    /// </summary>
+    private static async Task<IResult> MemberCancelAsync(Guid bookingId, HttpContext ctx, BookingService svc, SplitCancelView split, CancellationToken ct)
+    {
+        var actorId = ctx.User.Id() ?? Guid.Empty;
+        var paidBefore = await split.PaidByPartnerAsync(bookingId, ct);
+        var result = await svc.CancelAsync(bookingId, actorId, actorIsAdmin: false, waivePenalty: false, ct);
+        if (result is not CancellationResult.Ok ok) return ToHttpResult(result, ctx);
+
+        await ctx.AfterSettlementAsync([bookingId], ct);
+        var refunds = await split.AfterAsync(bookingId, paidBefore, ct);
+        return Results.Ok(new
+        {
+            refunded_credits = ok.RefundedCredits,
+            penalty_credits = ok.PenaltyCredits,
+            net_credits = ok.RefundedCredits - refunds.Sum(r => r.Credits),
+            partner_refunds = refunds,
+        });
     }
 
     /// <summary>

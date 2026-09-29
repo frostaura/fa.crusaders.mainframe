@@ -60,13 +60,24 @@ public sealed class ScheduleService
                 .Where(s => scheduleIds.Contains(s.Id))
                 .ToDictionaryAsync(s => s.Id, s => s.Name, ct);
 
+        // B2 (review round 1): a game the viewer is an ACCEPTED partner on is theirs too — tappable
+        // through to its booking — with the role saying which side of it they are on.
+        var bookingIds = bookings.Select(b => b.Id).ToList();
+        var partnerOn = viewingUserId is not { } viewer
+            ? []
+            : (await _db.BookingParticipants.AsNoTracking()
+                .Where(p => p.UserId == viewer && p.Seat > 1 && p.Status == ParticipantStatus.Accepted && bookingIds.Contains(p.BookingId))
+                .Select(p => p.BookingId).ToListAsync(ct)).ToHashSet();
+
         var slots = new List<ScheduleSlot>(bookings.Count);
         foreach (var court in courts)
         {
             foreach (var b in bookingsByCourt[court.Id])
             {
                 var member = b.UserId is { } u ? memberByUser.GetValueOrDefault(u) : null;
-                var isMine = viewingUserId is not null && viewingUserId == b.UserId;
+                var isOrganiser = viewingUserId is not null && viewingUserId == b.UserId;
+                var isPartner = !isOrganiser && partnerOn.Contains(b.Id);
+                var isMine = isOrganiser || isPartner;
 
                 // Attendance and price are the booking OWNER's business, and the admin's.
                 // "The booking grid shows photo + name only" — no email, phone, membership
@@ -93,7 +104,8 @@ public sealed class ScheduleService
                     CheckedIn: maySeeDetail ? b.CheckedInAt is not null : null,
                     AmountChargedCredits: maySeeDetail ? b.AmountChargedCredits : null,
                     ScheduleId: b.ScheduleId,
-                    ScheduleName: b.ScheduleId is { } sid ? scheduleNames.GetValueOrDefault(sid) : null));
+                    ScheduleName: b.ScheduleId is { } sid ? scheduleNames.GetValueOrDefault(sid) : null,
+                    Role: isOrganiser ? "organiser" : isPartner ? "partner" : null));
             }
         }
 
@@ -384,4 +396,10 @@ public sealed record ScheduleSlot(
     /// </para>
     /// </summary>
     Guid? ScheduleId = null,
-    string? ScheduleName = null);
+    string? ScheduleName = null,
+
+    /// <summary>
+    /// The viewer's side of a booking that is theirs (<see cref="IsMine"/>): <c>organiser</c> or
+    /// <c>partner</c> (an accepted seat — review round 1, B2). Null on everybody else's.
+    /// </summary>
+    string? Role = null);

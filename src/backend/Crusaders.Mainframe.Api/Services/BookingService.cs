@@ -2978,7 +2978,21 @@ public sealed record CancellationQuote(
     int PenaltyWindowMinutes,
     bool InsidePenaltyWindow,
     bool CheckedIn,
-    bool AlreadyStarted);
+    bool AlreadyStarted)
+{
+    /// <summary>
+    /// What the organiser keeps once each partner's share has followed the refund back to them
+    /// (review round 1, B3) — <see cref="RefundCredits"/> less <see cref="PartnerRefunds"/>.
+    /// Equal to <see cref="RefundCredits"/> on a booking with no paying partners.
+    /// </summary>
+    /// <remarks>Named on the wire as the round-1 contract names it; the record's older fields are camelCase.</remarks>
+    [System.Text.Json.Serialization.JsonPropertyName("net_credits")]
+    public decimal NetCredits { get; init; } = RefundCredits;
+
+    /// <summary>Each partner's share that goes back to them. Empty on a booking with no paying partners.</summary>
+    [System.Text.Json.Serialization.JsonPropertyName("partner_refunds")]
+    public IReadOnlyList<PartnerRefund> PartnerRefunds { get; init; } = [];
+}
 
 public abstract record CancellationResult
 {

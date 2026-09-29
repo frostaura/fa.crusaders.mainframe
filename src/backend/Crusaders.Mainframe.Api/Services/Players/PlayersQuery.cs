@@ -167,7 +167,7 @@ public sealed class PlayersQuery
         foreach (var s in d.Seats)
         {
             var paid = await _shares.PaidAsync(s, ct);
-            var open = s.IsPartner && s.IsLive ? await _shares.UnpaidAsync(d.Booking, s, ct) : 0m;
+            var open = await OpenAsync(d, s, ct);
             received += s.IsPartner ? paid : 0m;
             unpaid += open;
             if (!s.IsLive && (s.Seat == 1 || (d.Role == "player" && s.Id != d.MySeatId))) continue;
@@ -176,6 +176,21 @@ public sealed class PlayersQuery
         }
         if (d.Seats.Count == 0) players.Add(ImplicitOrganiser(d.Booking, d.People));
         return new DetailTable(players, received, unpaid);
+    }
+
+    /// <summary>
+    /// What one live partner seat still owes. An OPEN LINK SEAT (nobody has claimed it yet) owes
+    /// its whole share — whoever takes the link will be asked for it — until the seat closes
+    /// (review round 1, B4: "Shares not paid yet" read 80 on a booking where 120 was owed, because
+    /// the share rule gives an unclaimed seat no target at all).
+    /// </summary>
+    private async Task<decimal> OpenAsync(DetailContext d, BookingParticipant s, CancellationToken ct)
+    {
+        if (!s.IsPartner || !s.IsLive) return 0m;
+        if (s.UserId is not null) return await _shares.UnpaidAsync(d.Booking, s, ct);
+        var closed = ShareLedger.IsClosed(d.Booking, s, d.Settings, DateTimeOffset.UtcNow);
+        var live = d.Booking.Status is BookingStatus.Booked or BookingStatus.Completed;
+        return closed || !live ? 0m : s.ShareCredits;
     }
 
     private static object SeatView(BookingParticipant s, Dictionary<Guid, PublicMember> people, decimal paid, decimal target, decimal unpaid)
@@ -370,20 +385,24 @@ public sealed class PlayersQuery
 
     /// <summary>
     /// The people the caller actually played with in the last <c>recent_partner_days</c>: members
-    /// on an ACCEPTED seat of a booking the caller was also accepted on (or organised). Derived,
-    /// never stored — there is nothing to keep in step.
+    /// on an ACCEPTED seat of a booking the caller was also accepted on (or organised), that has
+    /// STARTED and that the court box checked in — a game that has not happened yet, or that nobody
+    /// turned up to, is not "played with" (review round 1, B11: "Played 2 times · last on Fri 2 Oct",
+    /// read on 29 Sep). Derived, never stored — there is nothing to keep in step.
     /// </summary>
     public async Task<List<object>> RecentAsync(Guid me, CancellationToken ct)
     {
         var settings = await _settings.GetAsync(ct);
-        var since = DateTimeOffset.UtcNow.AddDays(-PlayerSettings.RecentPartnerDays(settings));
+        var now = DateTimeOffset.UtcNow;
+        var since = now.AddDays(-PlayerSettings.RecentPartnerDays(settings));
         var mine = _db.BookingParticipants
             .Where(p => p.UserId == me && p.Status == ParticipantStatus.Accepted)
             .Select(p => p.BookingId);
 
         var rows = await _db.BookingParticipants.AsNoTracking()
             .Where(p => mine.Contains(p.BookingId) && p.UserId != null && p.UserId != me && p.Status == ParticipantStatus.Accepted)
-            .Join(_db.Bookings.Where(b => b.StartsAt >= since && b.Status != BookingStatus.Cancelled),
+            .Join(_db.Bookings.Where(b => b.StartsAt >= since && b.StartsAt <= now && b.CheckedInAt != null
+                                          && b.Status != BookingStatus.Cancelled && b.Status != BookingStatus.AdminBlock),
                 p => p.BookingId, b => b.Id, (p, b) => new { UserId = p.UserId!.Value, b.StartsAt })
             .ToListAsync(ct);
 

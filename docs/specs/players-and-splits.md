@@ -80,6 +80,13 @@ rule of its own:
 | no-show reversed (S6), live, played | the full share |
 | **closed** — the seat lapsed, or the share deadline passed | the above, but never more than already paid: a return is still made, a collection never is |
 
+**What the organiser is told on a split cancel (review round 1, B3).** The member's
+`GET /bookings/{id}/cancellation-quote` gains `net_credits` (the refund less what goes on to the
+partners) and `partner_refunds: [{user_id, name, credits}]`, each computed by the share rule above
+against the cancelled booking; `POST /bookings/{id}/cancel` answers `{refunded_credits,
+penalty_credits, net_credits, partner_refunds}`, each partner's figure measured against what they
+had paid before the cancel (so a return that waits for cover is still named).
+
 **Idempotent**: it posts only the difference, so running it twice — or from the hook and the worker
 in the same minute — writes nothing the second time. **Locked on the debited member only**: a
 collection locks the partner (their balance check is the one that counts), a return locks the
@@ -344,7 +351,8 @@ organiser receives as shares are **held**:
   photo only, a query of at least 2 characters (a LIKE wildcard is a literal), and a per-member
   budget of `directory_searches_per_minute`.
 - **Recent partners** are derived (accepted seats on the same bookings in the last
-  `recent_partner_days`), never stored; **favourites** are private to the member who starred them.
+  `recent_partner_days` that have started and were checked in at the box — a game still ahead is
+  not "played with"), never stored; **favourites** are private to the member who starred them.
 - **The inbox** (`member_notifications`) and member mail share the R23 outbox, generalised with an
   `Audience` (admins · member) and a `RecipientUserId`. Each notice is staged in the same save as
   its event — the inbox line and the outbox row together. Non-urgent kinds wait for the end of
@@ -375,7 +383,7 @@ Requests are camelCase, answers snake_case. Every refusal is `{ "error": "<code>
 | `POST /api/v1/bookings` | + optional `players: [{userId?, guestName?, link?, seat?, weight?, amount?}]`, `splitMode`, `organiserWeight`. Validated in full (against the quoted price) BEFORE booking. → `{booking_id, balance_after_credits, players: {booking_id, participants: [{participant_id, seat, user_id, guest_name, status, share_credits, invite_token, invite_path}]}, players_error}` |
 | `POST /api/v1/bookings/bulk` | + the same `players`/`splitMode`/`organiserWeight`, applied to every newly booked item → adds `players: [{booking_id, players, players_error}]`. The payload's shape is checked price-free, then the split against EVERY item's price, before anything is booked: any failure books nothing |
 | `POST /api/v1/players/split-preview` | `{priceCredits, splitMode, organiserWeight, players}` → `{price_credits, shares: [{seat, team, share_credits, weight}]}` — pure, for the live totals bar |
-| `GET /api/v1/bookings/{id}` | → the detail: `booking_id, court_id, court_name, starts_at, ends_at, sold_ends_at, status, split_mode, viewer {role: organiser\|player\|admin, participant_id}, organiser {user_id, name, photo_url}, players [ {participant_id, seat, team, kind: organiser\|member\|guest\|open_link, user_id, name, photo_url, status, share_credits, weight, consented_credits, paid_credits, target_credits, unpaid_credits, needs_consent, settled_outside, lapsed, checked_in_at, invited_at, responded_at} ], money {price_credits, organiser_owed_credits, shares_received_credits, organiser_net_credits, unpaid_credits, share_deadline, is_split}, attendance {checked_in_at, players_checked_in}, permissions {can_invite, can_change_split, can_cancel, can_accept, can_decline, can_withdraw, withdraw_closes_at}, timezone` (the club's IANA zone, top level — see below). 404 for anyone not on it and not an admin — a declined, withdrawn, removed or lapsed seat is not "on it". |
+| `GET /api/v1/bookings/{id}` | → the detail: `booking_id, court_id, court_name, starts_at, ends_at, sold_ends_at, status, split_mode, viewer {role: organiser\|player\|admin, participant_id}, organiser {user_id, name, photo_url}, players [ {participant_id, seat, team, kind: organiser\|member\|guest\|open_link, user_id, name, photo_url, status, share_credits, weight, consented_credits, paid_credits, target_credits, unpaid_credits, needs_consent, settled_outside, lapsed, checked_in_at, invited_at, responded_at} ], money {price_credits, organiser_owed_credits, shares_received_credits, organiser_net_credits, unpaid_credits, share_deadline, is_split} (`unpaid_credits` counts every live partner seat still owing, an unclaimed open link seat at its full share until the seat closes or the game is off — review round 1, B4), attendance {checked_in_at, players_checked_in}, permissions {can_invite, can_change_split, can_cancel, can_accept, can_decline, can_withdraw, withdraw_closes_at}, timezone` (the club's IANA zone, top level — see below). 404 for anyone not on it and not an admin — a declined, withdrawn, removed or lapsed seat is not "on it". |
 | `POST /api/v1/bookings/{id}/players` | organiser: `{players, splitMode?, organiserWeight?}` → as the create's `players`; `409 player_previously_declined` / `player_previously_removed {user_id}`, `409 player_invite_limit {limit, invites_made}` |
 | `DELETE /api/v1/bookings/{id}/players/{pid}` | organiser → `{participant_id, status}` |
 | `POST /api/v1/bookings/{id}/players/{pid}/nudge` | organiser → `{participant_id, nudges_left}`; `429 nudge_limit {limit, retry_after}`; `409 nothing_to_nudge` |
@@ -386,7 +394,8 @@ Requests are camelCase, answers snake_case. Every refusal is `{ "error": "<code>
 | `GET /api/v1/me/invites` | → `{items: [invite], count, timezone}` — the Invites tab and badge; each `invite` also carries `timezone` |
 | `GET /api/v1/invites/{token}` | → `invite`; 404 `invite_not_found`, 409 `invite_closed`, 409 `already_in_booking`, 409 `player_previously_removed` |
 | `POST /api/v1/invites/{token}/accept` · `…/decline` | as the seat routes (accept takes `{expectedShareCredits}`) |
-| `GET /api/v1/me/partners/recent` | → `{items: [{user_id, name, photo_url, last_played_at, games}]}` |
+| `GET /api/v1/me/partners/recent` | → `{items: [{user_id, name, photo_url, last_played_at, games}]}` — only games that have started AND the box checked in (review round 1, B11) |
+| `GET /api/v1/me/bookings/upcoming` | → `{timezone, items: [{booking_id, court_name, starts_at, ends_at, role: organiser\|partner, status, players [{name, photo_url, status}], my_share_credits, needs_action}]}` — every `Booked` game whose end is ahead where the caller is organiser or on an ACCEPTED partner seat, soonest first, at most 50 (review round 1, B2). `my_share_credits`: a partner's own share; the organiser's is the price less the live partners' shares. `needs_action`: a partner asked for more than they consented to, or still owing on an open seat. The schedule marks an accepted partner's game `isMine: true` with `role: "partner"` (`"organiser"` on the booker's own; null otherwise). |
 | `GET /api/v1/me/partners/favourites` · `PUT`/`DELETE /api/v1/me/partners/favourites/{userId}` | → `{items: [{user_id, name, photo_url}]}` / `{user_id, favourite}` |
 | `GET /api/v1/members/directory?q=` | → `{items: [{user_id, name, photo_url}]}`; `400 query_too_short`, `429 directory_rate_limited {retry_after_seconds}` |
 | `GET /api/v1/me/notifications?cursor&limit` | → `{items: [{id, kind, headline, link, booking_id, created_at, read_at}], unread_count, next_cursor, timezone}` |

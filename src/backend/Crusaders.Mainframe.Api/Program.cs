@@ -400,6 +400,8 @@ builder.Services.AddScoped<ShareSweep>();
 builder.Services.AddScoped<PlayersPlumbing>();
 builder.Services.AddScoped<PlayersService>();
 builder.Services.AddScoped<PlayersQuery>();
+builder.Services.AddScoped<SplitCancelView>();
+builder.Services.AddScoped<UpcomingGames>();
 builder.Services.AddScoped<PlayersAdminService>();
 builder.Services.AddSingleton<ShareHook>();
 builder.Services.AddSingleton<DirectoryRateLimiter>();

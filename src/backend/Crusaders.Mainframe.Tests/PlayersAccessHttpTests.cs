@@ -237,6 +237,26 @@ public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<P
         await club.Client(f, club.Sam).PostAsJsonAsync($"/api/v1/bookings/{bookingId}/players/{PlayersClub.SeatOf(body, 2)}/accept",
             new { expectedShareCredits = 32m });
 
+        // Accepted, but not played yet: a game still ahead is not "played with" (review round 1, B11).
+        Assert.Empty((await JsonAsync(await organiser.GetAsync("/api/v1/me/partners/recent"))).GetProperty("items").EnumerateArray());
+
+        // Its time comes and nobody scans in: still not played.
+        await club.WriteAsync(f, db =>
+        {
+            var b = db.Bookings.IgnoreQueryFilters().Single(x => x.Id == bookingId);
+            var length = b.EndsAt - b.StartsAt;
+            b.StartsAt = DateTimeOffset.UtcNow.AddHours(-1);
+            b.EndsAt = b.StartsAt + length;
+        });
+        Assert.Empty((await JsonAsync(await organiser.GetAsync("/api/v1/me/partners/recent"))).GetProperty("items").EnumerateArray());
+
+        // The box checked it in: now they played together.
+        await club.WriteAsync(f, db =>
+        {
+            var b = db.Bookings.IgnoreQueryFilters().Single(x => x.Id == bookingId);
+            b.CheckedInAt = b.StartsAt.AddMinutes(1);
+        });
+
         var recent = (await JsonAsync(await organiser.GetAsync("/api/v1/me/partners/recent"))).GetProperty("items").EnumerateArray().ToList();
         Assert.Equal(club.Sam, Assert.Single(recent).GetProperty("user_id").GetGuid());
         Assert.Equal(club.Organiser, Assert.Single((await JsonAsync(await club.Client(f, club.Sam).GetAsync("/api/v1/me/partners/recent")))

@@ -29,6 +29,7 @@ public static class PlayersEndpoints
         reads.MapGet("/me/invites", InvitesAsync);
         reads.MapGet("/invites/{token}", InviteAsync);
         reads.MapGet("/me/partners/recent", RecentAsync);
+        reads.MapGet("/me/bookings/upcoming", UpcomingAsync);
         reads.MapGet("/me/partners/favourites", FavouritesAsync);
         reads.MapGet("/members/directory", DirectoryAsync);
         reads.MapPost("/players/split-preview", SplitPreview);
@@ -118,6 +119,13 @@ public static class PlayersEndpoints
     private static async Task<IResult> RecentAsync(HttpContext ctx, PlayersQuery query, CancellationToken ct)
     {
         return Results.Ok(new { items = await query.RecentAsync(Me(ctx), ct) });
+    }
+
+    /// <summary>Every game still ahead of the caller, as organiser or accepted partner (review round 1, B2).</summary>
+    private static async Task<IResult> UpcomingAsync(HttpContext ctx, UpcomingGames games, TenantSettingsAccessor settings, CancellationToken ct)
+    {
+        var zone = DoorClock.ZoneOf(await settings.GetAsync(ct)).Name;
+        return Results.Ok(new { timezone = zone, items = await games.ForAsync(Me(ctx), DateTimeOffset.UtcNow, ct) });
     }
 
     private static async Task<IResult> FavouritesAsync(HttpContext ctx, PlayersQuery query, CancellationToken ct)
