@@ -24,20 +24,20 @@ import type { Notice } from "./useOrganiserHands";
 type Props = { detail: BookingDetail; onClose: () => void; onDone: (notice: Notice) => void };
 
 /**
- * The Split step's state over an existing booking — the same shape the BookSheet's players step
- * hands it, with nothing to pick (the seats are the booking's own).
+ * What the BookSheet's Split step reads of its players state — and all an existing booking can
+ * give it: the draft, the mode and figure setters, the live preview. There is nothing to pick
+ * (the seats are the booking's own), so the rest of the BookSheet's state is not faked here.
  */
-function useSplitEditor(detail: BookingDetail): PlayersStepState & { setDraft: (d: PlayersDraft) => void } {
+type SplitEditor = Pick<PlayersStepState, "draft" | "bulk" | "preview" | "setMode" | "setWeight" | "setAmount" | "setOrganiserWeight">
+  & { problem: string | null };
+
+function useSplitEditor(detail: BookingDetail): SplitEditor {
   const [draft, setDraft] = useState<PlayersDraft>(() => draftOf(detail));
   const prices = useMemo(() => [detail.money.price_credits], [detail.money.price_credits]);
-  const paying = hasPaying(draft);
-  const preview = useSplitPreview(prices, draft, paying);
-  const none = () => undefined;
+  const preview = useSplitPreview(prices, draft, hasPaying(draft));
   return {
-    draft, setDraft, paying, prices, bulk: false, picking: null, preview,
+    draft, bulk: false, preview,
     problem: preview.state.status === "invalid" ? preview.state.error : null,
-    payload: null, lines: [],
-    openPicker: none, closePicker: none, pick: none, remove: none, justMe: none,
     setMode: (mode: SplitMode) => setDraft(withMode(draft, mode, detail.money.price_credits)),
     setWeight: (seat: number, weight: string) => setDraft(updateSeat(draft, seat, { weight })),
     setAmount: (seat: number, amount: string) => setDraft(updateSeat(draft, seat, { amount })),
@@ -68,7 +68,8 @@ export function ChangeSplitDialog({ detail, onClose, onDone }: Props) {
           <DialogDescription>{CHANGE_SPLIT.description}</DialogDescription>
         </DialogHeader>
         <DialogBody className="flex flex-col gap-4 pb-4">
-          <SplitStep players={editor} />
+          {/* The step reads only the SplitEditor fields (asked of the bookings lane to narrow its prop to them). */}
+          <SplitStep players={editor as PlayersStepState} />
           {save.error ? <Alert tone="danger">{playersRefusal(save.error, { action: CHANGE_SPLIT.action })}</Alert> : null}
         </DialogBody>
         <DialogFooter>
