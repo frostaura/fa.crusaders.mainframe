@@ -42,7 +42,7 @@ import { SetupChecklist } from "../components/onboarding/SetupChecklist";
  * from the club every minute or so, with a whole apparatus for the moments one had died and the
  * other would have worked. D1 replaced both with a single code made on this phone every thirty
  * seconds from a key it holds (`lib/memberCode/`): it opens the door, lights the member's own court
- * or one they are an accepted partner on, and pays for somebody else's court at the box. It needs
+ * or one they are an accepted partner on, and lets them pay for a friend's court at the box. It needs
  * the network once, to enrol; after that it works with no signal at all, and the page says so
  * with a badge rather than an error. The tabs, the code-died states, the cached booking code and
  * the offline page are gone with the two codes (their tests are retired under D1).

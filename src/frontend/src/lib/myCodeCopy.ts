@@ -59,8 +59,8 @@ export function newCodeIn(seconds: number): string {
 export function codeUseLine(doors: boolean): string {
   if (!doors) {
     return "Show this to the scanner on the court box. It switches the lights on for your booking and marks you as arrived,"
-      + " and it pays for somebody else's court at the box.";
+      + " and lets you pay for a friend's court at the box, when you choose to.";
   }
   return "Show this at the club door or the scanner on a court box. At a court it switches the lights on and marks you as"
-    + " arrived; at a door it just lets you in. It also pays for somebody else's court at the box.";
+    + " arrived; at a door it just lets you in. It also lets you pay for a friend's court at the box, when you choose to.";
 }
