@@ -1,37 +1,32 @@
 # Design System — Crusaders Mainframe
 
 The product should feel like **a premium club app you are proud to open**: precise, calm, quick,
-sporty without being loud. It serves two very different moments — a member on a phone in the club
-foyer, and an admin running the desk for an evening — so it is dense where admins work and generous
-where members tap. It ships **light and dark** themes from day one.
+sporty without being loud. It serves a member on a phone in the club foyer and an admin running the
+desk for an evening, so it is dense where admins work and generous where members tap. It ships
+**light and dark** themes.
 
-This file is the reference every implementation lane builds against. `src/frontend/src/lib/tokens.ts`
-is the single source of truth for values; this file explains them. Where they disagree, the code is a
-bug or this file is stale — fix one, never live with both.
+`src/frontend/src/lib/tokens.ts` is the single source of truth for values; this file explains them.
+Where they disagree, one of them is wrong — fix it, never live with both.
 
 ## Foundations
 
 1. **Tokens, never literals.** Every colour, radius, shadow, duration, z-index and type size comes from
-   the token layer. A test bans hex in components/pages, raw Tailwind palette classes (`slate-*`,
-   `amber-*` …), arbitrary `z-[…]`, `text-[Npx]`, and stock shadcn class names. A repeated class string
-   becomes a component.
+   the token layer. A repeated class string becomes a component (or a shared constant).
 2. **Three tiers.** *Primitives* (ramps: navy, slate, ink, green, blue, amber, red, orange, tin) →
-   *semantic* roles per theme (`themes.light`, `themes.dark`, referencing primitives only) → *component*
-   tokens (slot states, watermark, button). Shapes are DTCG-compatible so a `tokens.dtcg.json` export can
-   be generated later; TypeScript stays authoritative because the tests import it.
+   *semantic* roles per theme (`themes.light`, `themes.dark`, referencing primitives only) →
+   *component* tokens (slot states, watermark, button). Shapes are DTCG-compatible; TypeScript stays
+   authoritative because the tests import it.
 3. **Colour reaches CSS as RGB channels.** A Tailwind `addBase` plugin emits every semantic role as
-   `--color-<role>: R G B` under `:root, .light` and `.dark`, and Tailwind consumes it as
+   `--color-<role>: R G B` under `:root, .light` and `.dark`, consumed as
    `rgb(var(--color-<role>) / <alpha-value>)`.
-   > **The channel form is load-bearing.** Tokens were once `var(--accent-soft, #E0F2FE)`; Tailwind
-   > cannot inject alpha into an opaque `var()`, so every `/opacity` modifier on them emitted **no CSS at
-   > all**. Never add a hex fallback inside `var()`.
-4. **Our vocabulary only.** shadcn components are restyled to these token names when added
+   > **The channel form is load-bearing.** A token written `var(--x, #hex)` cannot take alpha, and every
+   > `/opacity` modifier on it emits **no CSS at all**. Never put a hex fallback inside `var()`.
+4. **Our vocabulary only.** shadcn components are restyled to these names when added
    (`bg-background`→`bg-bg-app`, `text-muted-foreground`→`text-text-secondary`, `border-input`→
-   `border-control`, `bg-primary text-primary-foreground`→`bg-primary text-primary-ink`,
-   `destructive`→`danger`). Tailwind silently emits nothing for an unknown colour key — the same failure
-   as the `var()` bug — so a test forbids the stock names.
-5. **Mobile-first, 360px up.** Touch targets ≥ 44px (`min-h-touch`). WCAG 2.2 AA everywhere, in both
-   themes, measured by test.
+   `border-control`, `text-primary-foreground`→`text-primary-ink`, `destructive`→`danger`). Tailwind
+   silently emits nothing for an unknown colour key, so the stock names are banned by test.
+5. **Mobile-first, 320px up.** Touch targets ≥ 44px (`min-h-touch`). WCAG 2.2 AA in both themes,
+   measured by test.
 
 ## Colour roles
 
@@ -98,8 +93,9 @@ squash court's tin). Never as a state colour.
   stretch 112%, tabular, tight), `h1` (Archivo 700, 2xl→sm:3xl, stretch 108%), `h2` (Figtree 650 xl),
   `h3` (Figtree 600 lg), `body`, `ui` (500 sm), `label`, `caption` (xs muted), `overline`, `numeric`.
 - **Fonts:** Figtree Variable (UI/body — tabular figures; the layout tests measure it), Archivo Variable
-  with width axis (display/h1, semi-expanded), JetBrains Mono Variable (codes). Self-hosted via
-  `@fontsource-variable/*`. In git worktrees `vite.config.ts` must keep `server.fs.allow` including the
+  with its width axis (display/h1, semi-expanded), JetBrains Mono Variable (codes). Self-hosted via
+  `@fontsource-variable/*` only — there is no static-weight package. In git worktrees
+  `vite.config.ts` must keep `server.fs.allow` including the
   resolved `node_modules`, or every face 403s and tests measure a fallback.
 - **Radius (px):** sm 6 (checkbox) · md 8 (slot cells) · lg 10 (buttons, inputs, selects, toggles) ·
   xl 14 (cards, popovers, menus) · 2xl 20 (dialogs, sheet tops, pass card) · full (avatars, pills).
@@ -132,16 +128,19 @@ squash court's tin). Never as a state colour.
 
 ## Icons
 
-**Phosphor** (`@phosphor-icons/react`), imported **only** through `src/components/ui/icons.ts` (per-icon
-`dist/csr/<Name>` paths; ESLint `no-restricted-imports` forbids direct imports). Default weight regular,
-size 20. Sizes/weights by context: inline with xs text 14 bold · in buttons/inputs/badges/menus 16 ·
-icon buttons, list leading, page-header actions 20 · mobile tab bar 24 (fill when active) · selected
-toggle fill · empty states 40 duotone · onboarding tiles 64 duotone.
+**Phosphor**, imported **only** through the barrel `src/components/ui/icons.ts`: one line per icon,
+per-icon `dist/csr/<Name>` paths, exporting `<Name>Icon` and the bare `<Name>`. ESLint
+`no-restricted-imports` forbids `@phosphor-icons/react` (and `lucide-react`) everywhere else, and
+`icons.test` scans the tree for the same rule. `IconContext` defaults (`main.tsx`): regular, 20px,
+`currentColor`. Sizes by context: inline with xs text 14 bold · buttons, inputs, badges, menus 16 ·
+icon buttons, list leads, page-header actions 20 · mobile tab bar 24 (fill when active) · empty states
+40 duotone · onboarding tiles 64 duotone. Every weight of an icon ships with it, so add icons
+deliberately.
 
-**No glyph on buttons at rest.** Working = spinner; success = hand-drawn `AnimatedCheck` (stroked circle +
-tick, `pathLength`-animated, held for `hold`); failure = `AnimatedAlert` + shake. The old thumbs-up/down
-ActionGlyph and the `action_glyphs` club setting are retired. `Fingerprint` (the real icon) is reserved for
-genuine biometrics (passkey, capture).
+**No glyph on a button at rest.** Working is a spinner; success is the hand-drawn `AnimatedCheck`,
+failure `AnimatedAlert` plus a shake (`ui/feedback-marks.tsx`). `ConfirmButton` wears these phases
+through `useActionFeedback`; a destructive action never celebrates. `Fingerprint` (the real icon) is
+reserved for genuine biometrics (passkey, capture).
 
 ## The fingerprint watermark (the club's signature affordance)
 
@@ -170,96 +169,102 @@ clears 4.5:1 over the watermark at its maximum opacity.
 
 ## Components
 
-shadcn/ui "new-york" (Tailwind v3 flavour) on the unified `radix-ui` package, restyled to our vocabulary.
-Rules on adding each: rewrite colour classes; remove `outline-none` / `focus-visible:ring-*` (the house
-`:focus-visible` outline applies); use named durations and our keyframes; `border border-transparent` on
-controls (forced-colors); `min-h-touch`; `no-lift` on checkbox/switch/radio/tab/toggle/menuitem/option/
-calendar day; icons from the barrel. Not adopted: vaul (unmaintained), sonner (our Toast has proven
-live-region handling), next-themes, react-hook-form, Radix ScrollArea (native scrolling keeps sticky grid
-headers fast).
+`components/ui/` is the design-system layer: shadcn/ui "new-york" (Tailwind v3 flavour) on the unified
+`radix-ui` package, restyled to our vocabulary, plus our own primitives. Screens import from it
+directly — there are no compatibility re-exports. Rules for adding one: rewrite colour classes; no
+`outline-none` / `focus-visible:ring-*` (the house `:focus-visible` outline applies); named durations
+and our keyframes; `border border-transparent` on controls (forced colours); `min-h-touch`; `no-lift`
+on checkbox/switch/radio/tab/toggle/menuitem/option/calendar day; icons from the barrel. Not adopted:
+vaul, sonner, next-themes, react-hook-form, Radix ScrollArea.
 
 - **button** — variants `primary`, `secondary` (tonal), `outline`, `ghost`, `danger`, `danger-soft`;
-  **no link variant**. Sizes `sm` (36 visual, 44 hit area), `md` 44, `lg` 52, `icon-sm`, `icon` 44,
-  `icon-lg` 52. Props `block`, `pending` (spinner replaces leading icon, label stays, width locked,
-  `aria-busy` + `aria-disabled` so focus stays), `asChild`. Weight 600, radius lg.
+  **no link variant**. Sizes `sm` (36 visual, 44 hit), `md` 44, `lg` 52, `icon-sm`, `icon` 44,
+  `icon-lg` 52. `block`, `icon`, `pending` (spinner replaces the icon, label stays, width locked,
+  `aria-busy` + `aria-disabled` so focus stays), `asChild`. It is a fixed-height, no-wrap control: a
+  label that must wrap at a large root font adds `h-auto min-h-touch whitespace-normal py-2`.
 - **icon-button** — `label` required → aria-label + tooltip.
 - **field / input / textarea** — Label, Description, Error wired via `aria-describedby`/`aria-invalid`.
-- **select** (Radix) · **member-combobox** (cmdk in a Popover; full-height Sheet on small screens) ·
-  **calendar + date-picker** (react-day-picker, club time zone; Popover ≥sm, Sheet <sm; trigger reads
-  "Tue 23 Sep") · **time-select** (slice-aligned options, never free-typed) · **checkbox** (20px, radius
-  6, 2px control edge) · **radio-group** + **RadioCard** · **switch** (44×26).
-- **dialog** — CSS-responsive: bottom sheet below 640px, centred `max-w-md` above; **always a close ×**
-  (44px icon button, top-right); title (h2 lg 600) + description; body scrolls; footer
-  `flex-col-reverse gap-2 sm:flex-row sm:justify-end` (primary right on desktop, on top on mobile).
-  Clicking the scrim after typing keeps it open. **sheet** = Radix Dialog from bottom/right.
-- **popover · tooltip** (names icon buttons only — never explanations; tooltips don't exist on touch) ·
-  **info-popover** (an (i) button with guidance, for Settings) · **accordion** · **tabs** (`segmented`,
-  `underline`) · **toggle-group** · **skeleton** · **badge** (tones neutral/success/info/warning/danger/
-  brand; keeps an inner `min-w-0 break-words` span) · **card** (Header/Title/Description/Action/Content/
-  Footer) · **table** · **dropdown-menu** · **avatar** (24/32/40/56/96, initials fallback) · **progress** ·
-  **separator** · **spinner**.
-- **Ours:** `interactable`, `watermark`, `feedback-marks`, `page-shell` (PageShell, PageHeader, Section),
-  `refresh-button` + `freshness`, `week-strip`, `action-bar`, `text-link`, `countdown-ring`, `pass-card`,
-  `state-block`, `toast`.
+- **select** (Radix; `SelectValue` clamps the value to one line — never the trigger's other children) ·
+  **time-select** (slice-aligned options, never free-typed) · **member-combobox** (cmdk in a Popover;
+  full-height Sheet below `sm`) · **date-picker** (club days `YYYY-MM-DD`; Popover ≥ `sm`, Sheet
+  below; trigger reads "Tue 23 Sep" via `date-picker-day`; the react-day-picker **calendar** is a lazy
+  chunk fetched on pointer/focus intent) · **checkbox** · **radio-group** + **RadioCard** · **switch**.
+- **dialog** — bottom sheet below 640px, centred `max-w-md` above; **always a close ×** (44px);
+  h2 title + description; body scrolls; footer `flex-col-reverse gap-2 sm:flex-row sm:justify-end`.
+  An outside click after typing keeps it open. **sheet** = Radix Dialog from bottom/right.
+- **popover · tooltip** (names icon buttons only; none on touch) · **info-popover** · **accordion** ·
+  **tabs** (`segmented`, `underline`) · **toggle / toggle-group** · **dropdown-menu** · **command** ·
+  **skeleton** · **badge** (tones neutral/success/info/warning/danger/brand; inner `min-w-0 break-words`
+  span) · **card** (Header/Title/Description/Action/Content/Footer) and **Panel** (the card surface
+  with `p-4 sm:p-6` on the box, for free text, notices and action rows) · **table** · **avatar**
+  (24/32/40/56/96, initials fallback) · **progress** · **separator** · **spinner**.
+- **Ours, in `ui/`:** `interactable` + `watermark`, `feedback-marks`, `page-shell` (PageShell,
+  PageHeader, Section), `refresh-button` (+ `Freshness`), `state-block`, `week-strip`, `action-bar`,
+  `text-link`, `countdown-ring`, `pass-card`.
+- **Product composites outside `ui/`** (built on it): `ConfirmButton` (two-press, armed state),
+  `Toast` (live-region handling), `Alert`, `DataTable`, `SegmentedTabs` (legacy tabs, still in use),
+  `ScrollArea`, `Carousel`, `Charts`/`ChartFrame`, and the app shell in `components/shell/`.
 
 ## Patterns
 
 - **Page shell.** `PageShell width="narrow|content|wide"` owns gutters, top padding and section gap.
-  `PageHeader`: optional back link/eyebrow, the page's only `h1`, description (sm secondary,
-  `max-w-prose`), actions slot on the right, freshness slot. `Section`: `section[aria-labelledby]` with h2,
-  description, actions. No page sets its own root spacing/width.
-- **Refresh.** `RefreshButton` = icon button (ArrowsClockwise, "Refresh", 44px) spinning ≥400ms while
-  loading, beside `Freshness` ("Updated 12s ago", turns warning after 60s), always in the header's actions
-  slot on the right.
-- **Async actions.** `useAsyncAction(fn, {success, failure, optimistic, toast})` → `{run, pending, status,
-  error, reset}`; re-entry ignored; errors become outcomes. Every mutation button uses `pending`, never a
-  bare `disabled={busy}`. Read screens show a `Skeleton` that matches the layout (never "Loading…");
-  empty/error via `StateBlock`; optimistic updates on book/cancel/toggles; `Progress` n/N on bulk.
-- **Buttons vs links.** Navigation is a link; an action is a button. Inline `TextLink` (underlined,
-  accent) or standalone `TextLink` (semibold, trailing caret). A link may look like a button only as a
-  navigation CTA, via `<Button asChild><Link/></Button>`.
-- **Dialog copy.** Dismiss = "Cancel"; multi-step = "Back"; when the primary itself cancels something, the
-  dismiss names the outcome ("Keep booking"). Banned: "Keep looking", "Don't move any credit", "OK".
-- **Booking grid.** `48px repeat(N, minmax(104px,1fr))` mobile / `64px repeat(N, minmax(120px,1fr))` ≥md;
-  CSS `gap` 4px rows / 6px columns (no cell margins); cells `h-12 rounded-md`; selection rings are
-  **inset** and focus outlines fit inside the gap, so neighbours never touch; sticky court header row,
-  sticky time column; tin now-line; grid scrolls to now on first load. Mobile keeps courts side by side
-  (members compare courts at a time) with column scroll-snap and a court-chip row when there are >3 courts.
-- **Multiselect.** Enter via a toolbar icon button ("Select slots"), long-press (450ms, haptic tick),
-  hovering a selectable cell's checkbox on desktop, or dragging from a selectable cell; Shift-click/arrow
-  for ranges. In the mode only selectable cells show an 18px checkbox; selected = checkbox filled + inset
-  ring; non-selectable cells drop their fill (dashed, AA text kept, still explain themselves on tap). A
-  floating contextual **ActionBar** (above the tab bar on mobile, centred ≤640px on desktop): × exit ·
-  "3 selected" + span line · secondary actions · primary on the right; count announced politely; Esc
-  clears then exits.
-- **Day picker.** `WeekStrip` (ToggleGroup single, arrow keys): Mon–Sun chips 44×56 (weekday xs, day lg
-  tabular), dot on days with my bookings, today ringed, selected filled, past muted for members, prev/next
-  week buttons clamped to the booking window, today auto-selected; a calendar button opens `DatePicker`
-  to jump ahead.
-- **Pass card (My Code).** Boarding-pass anatomy: navy brand band (crest, club, "MEMBER", avatar),
-  perforation notches, QR panel always white with ≥4-module quiet zone, code in JetBrains Mono grouped
-  "482 913", `CountdownRing` for the rotating window, offline badge ("Offline · your code still works").
-  Centred in a `narrow` shell at every width; tap for full-screen (white, wake lock, brightness hint).
+  `PageHeader`: optional back link and eyebrow, the page's only `h1`, description, actions on the
+  right, freshness slot. `Section`: `section[aria-labelledby]` with h2, description, actions. No page
+  sets its own root spacing or width.
+- **Refresh.** `RefreshButton` (ArrowsClockwise, 44px, spins ≥ 400ms) beside `Freshness` ("Updated 12s
+  ago", warning after 60s), in the header's actions slot.
+- **Async.** `useAsyncAction(fn, …)` → `{run, pending, status, error, reset}`; re-entry ignored; a
+  mutation button uses `pending`, never a bare `disabled={busy}`. Reads show a layout-shaped
+  `Skeleton` (never "Loading…"); empty, failed and stale via `StateBlock` — a failed read is never
+  rendered as an empty one.
+- **Buttons vs links.** Navigation is a link; an action is a button. `TextLink` inline or standalone.
+  A link may look like a button only as a navigation CTA: `<Button asChild><Link/></Button>`.
+- **Dialog copy.** Dismiss = "Cancel"; multi-step = "Back"; when the primary itself cancels something,
+  the dismiss names the outcome ("Keep booking"). Banned: "Keep looking", "OK".
+- **Booking grid.** `48px repeat(N, minmax(104px,1fr))` mobile / `64px repeat(N, minmax(120px,1fr))`
+  ≥ md; `gap` 4px rows / 6px columns; cells `h-12 rounded-md`; inset selection rings; sticky court
+  header and time column; tin now-line; scrolls to now on first load; courts side by side on mobile
+  with column scroll-snap and a court-chip row above 3 courts.
+- **Multiselect.** Enter via the toolbar ("Select slots"), long-press (450ms), a desktop checkbox
+  hover, or a drag; Shift-click/arrow for ranges. A floating **ActionBar** (above the tab bar on
+  mobile): × exit · "3 selected" · secondary actions · primary right; Esc clears then exits.
+- **Day picker.** `WeekStrip` (Mon–Sun chips 44×56, dot on days with bookings, today ringed,
+  prev/next clamped to the booking window) plus a calendar button that opens `DatePicker`.
+- **Pass card (My Code).** Navy brand band (crest, club, "MEMBER", avatar), perforation notches, QR
+  panel always white with a ≥ 4-module quiet zone, code in JetBrains Mono, `CountdownRing` for the
+  rotating window, offline badge. Centred in a `narrow` shell; tap for full screen.
+- **Stat tiles.** Five figures fill their rows: two columns on a phone with an odd last tile spanning
+  both, a six-column track (3 + 2) from `sm`. Badge tiles are one row height (`auto-rows-fr`) with
+  names clamped at two lines.
+- **Code-splitting.** The entry chunk carries the shell, the public landing, sign-in and My Code (the
+  service worker precaches only what `index.html` names, so an offline /my-code cannot wait on a lazy
+  chunk). Every other page is `React.lazy` behind the page-shaped `RouteSkeleton` — except the admin
+  frame, Overview and the two doors pages, which read the shared doors store (it dedupes only in
+  flight). React + the router are a vendor chunk of their own; nothing else is grouped by hand.
 
 ## Guards (tests)
 
-`tokens.themes` (contrast matrix × both themes, hierarchy, ring ≥3:1, watermark composite, slot pairs) ·
-`theme-emission` (`:root` and `.dark` emit identical key sets) · `theme-vocabulary` (no stock shadcn
-names, raw palette, `dark:`, `z-[`, `text-[Npx]`, arbitrary spacing outside `ui/`) · `icons` · `watermark`
-· `dialog-anatomy` · `links-buttons` · `async-posture` · `page-shell` · no raw `<select>` / date / time /
-checkbox / radio inputs outside `components/ui`. Sweep guards use **ratcheting allow-lists**: they fail
-when a new file offends *and* when a listed file has been fixed but is still listed, so the list only
-shrinks and every phase stays green.
+`tokens` + `tokens.themes` (contrast matrix in both themes, hierarchy, control edge and ring ≥ 3:1) ·
+`theme-emission` (`:root` and `.dark` emit identical channel key sets; opacity modifiers produce CSS) ·
+`theme-vocabulary` (no stock shadcn names, raw palette, `dark:`, `z-[…]`, `text-[Npx]`, and no arbitrary
+spacing outside `ui/`) · `icons` (one barrel, per-icon paths, no thumbs) · `affordance` (one base
+hover/press/focus rule, `.no-lift` wins, nothing clickable is a bare div) · `ui/__tests__` (dialog
+anatomy and focus, page shell, watermark placement and opacities, pickers, the rest) ·
+`pwa-posture` and `production-posture`. The source-scanning guards use **ratcheting allow-lists**: they
+fail when a new file offends *and* when a listed file has been fixed but is still listed, so a list
+only ever shrinks. Browser-only facts (layout, forced colours, axe in both themes, the offline My Code
+on a production build) live in `e2e/`, the design-system gallery at `/dev/primitives` (dev only)
+among them.
 
 ## Charts
 
-Recharts. Series colours come from `chartColors()` reading the live theme tokens (charts re-render on
-theme change): accent, success, info, warning, danger strong. Flat, axis-labelled, legible at 360px;
-tooltips use the raised surface.
+Recharts, loaded only with the report screens. Series colours come from `chartColors()` reading the
+live theme tokens (charts re-render on theme change). Flat, axis-labelled, legible at 360px; tooltips
+use the raised surface.
 
 ## Accessibility floor
 
-WCAG 2.2 AA in both themes (measured, not eyeballed); 44px targets (24px hard floor with an extended hit
-area for dense admin controls); visible `:focus-visible` outline; explicit labels; colour never the only
-signal; reduced-motion and forced-colors honoured by every primitive; live regions for async outcomes;
-dialogs trap and restore focus; the route announcer names every page.
+WCAG 2.2 AA in both themes (measured, not eyeballed); 44px targets (24px hard floor with an extended
+hit area for dense admin controls); visible `:focus-visible` outline; explicit labels; colour never
+the only signal; reduced motion and forced colours honoured by every primitive; live regions for async
+outcomes; dialogs trap and restore focus; the route announcer names every page.
