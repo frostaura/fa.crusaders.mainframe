@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import InviteDeepLinkPage from "../../../pages/InviteDeepLink";
 import { renderPage, signIn, signOut, stubFetch, type FetchStub, type StubRoute } from "../../../test/harness";
-import { INVITES_COPY, acceptLabel } from "../../../lib/playersCopy";
+import { INVITES_COPY, acceptLabel, signedInAsLine } from "../../../lib/playersCopy";
+import LoginPage from "../../../pages/Login";
+import { tokenStore } from "../../../lib/api";
+import { LOGIN } from "../../../lib/authCopy";
+import { ProfileProvider } from "../../../lib/profile";
 
 /**
  * `/invites/:participantId` — the invite mail's link. Found in the member's open invites, it
@@ -55,6 +59,9 @@ describe("the invite mail's deep link", () => {
     expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.linkTitle })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: acceptLabel(25) }));
     expect(await screen.findByText(INVITES_COPY.acceptedTitle)).toBeInTheDocument();
+    // D6 — the heading follows the answer.
+    expect(screen.getByRole("heading", { level: 1, name: INVITES_COPY.acceptedTitle })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1, name: INVITES_COPY.linkTitle })).toBeNull();
     const posted = stub.calls.filter((c) => c.method === "POST" && c.path.endsWith("/accept"));
     expect(posted.map((c) => c.body)).toEqual([{ expectedShareCredits: 25 }]);
     // The re-read no longer lists the seat, and the confirmation stays.
@@ -68,4 +75,41 @@ describe("the invite mail's deep link", () => {
     expect(screen.getByRole("link", { name: INVITES_COPY.toInvites })).toHaveAttribute("href", "/bookings/invites");
     expect(screen.getByRole("link", { name: INVITES_COPY.toBookings })).toHaveAttribute("href", "/bookings");
   });
+
+  it("D5 — says which account is signed in, and signs out so the invited member can open it", async () => {
+    const stub = stubFetch([
+      { path: "/api/v1/me/invites", body: { items: [], count: 0 } },
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: "/api/v1/me/profile", body: {
+        user_id: "44444444-4444-4444-4444-444444444444", email: "olivia@club.review.test", is_admin: false, tenant_slug: "crusaders",
+        full_name: "Olivia Newton", membership_number: "MEM-2002", photo_url: null, status: "active",
+      } },
+      { path: "/api/v1/wallet", body: { balance_credits: 100, held_credits: 0, spendable_credits: 100, held_until: null, entries: [], total_entries: 0, offset: 0, limit: 10 } },
+      { method: "POST", path: "/api/v1/wallet/stream-ticket", status: 503, body: { error: "stream_unavailable" } },
+      { method: "POST", path: "/api/v1/auth/logout", status: 204, body: "" },
+      { method: "POST", path: "/api/v1/auth/login", body: { access_token: "sam.token", user_id: "77777777-7777-7777-7777-777777777777", is_admin: false } },
+    ]);
+    renderPage(
+      <ProfileProvider>
+        <Routes>
+          <Route path="/invites/:participantId" element={<InviteDeepLinkPage />} />
+          <Route path="/login" element={<LoginPage />} />
+        </Routes>
+      </ProfileProvider>,
+      { initialEntries: [`/invites/${SEAT}`] },
+    );
+    expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.deepLinkGone })).toBeInTheDocument();
+    expect(await screen.findByText(signedInAsLine("Olivia"))).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: INVITES_COPY.signOutToOpen }));
+    await waitFor(() => expect(tokenStore.get()).toBeNull());
+    expect(stub.calls.some((c) => c.path === "/api/v1/auth/logout")).toBe(true);
+
+    // The invited member signs in on /login and is taken back to the invite, not the landing.
+    fireEvent.change(await screen.findByLabelText(LOGIN.email), { target: { value: "sam@club.review.test" } });
+    fireEvent.change(screen.getByLabelText(LOGIN.password), { target: { value: "pw" } });
+    fireEvent.click(screen.getByRole("button", { name: LOGIN.submit }));
+    await waitFor(() => expect(stub.calls.filter((c) => c.path === "/api/v1/me/invites").length).toBeGreaterThan(1));
+  });
 });
+

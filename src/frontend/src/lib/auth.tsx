@@ -62,6 +62,11 @@ export type SessionEnding = {
   userId: string | null;
   /** What `/login` should say — "Sign out everywhere" passes its sentence here. */
   notice: string | null;
+  /**
+   * Where the NEXT person signing in should land, when the sign-out was asked for precisely so
+   * somebody else could open that page — an invite sent to another account (D5). Anyone's.
+   */
+  returnTo?: string | null;
 };
 
 type AuthCtx = AuthState & {
@@ -70,8 +75,11 @@ type AuthCtx = AuthState & {
   loginWithPasskey: () => Promise<string>;
   loginAsSeededAdmin: () => Promise<string>;
   setSessionFromMagicLink: (token: string) => Promise<string>;
-  /** Resolves once the server has been told; the local session is gone before it resolves. */
-  logout: () => Promise<void>;
+  /**
+   * Resolves once the server has been told; the local session is gone before it resolves.
+   * `returnTo` is for a sign-out asked for so that another member can open a page (D5).
+   */
+  logout: (options?: { returnTo?: string }) => Promise<void>;
   /**
    * After "Sign out everywhere": the server has already ended this session with every other, so
    * this is `logout`'s local half alone — the same stores wiped, the member code's key included,
@@ -468,25 +476,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const { login, loginWithPasskey, loginAsSeededAdmin, setSessionFromMagicLink } = useSignIns(setState, setSessionExpired, setSessionEnding);
 
-  const signedOutEverywhere = useCallback((notice?: string) => {
+  const endOnPurpose = useCallback((notice: string | null, returnTo: string | null) => {
     const userId = readLastIdentity();
     endLocally();
     // Signing out on purpose is not losing a session; /login should not commiserate about it.
     setSessionExpired(false);
-    setSessionEnding({ kind: "signed-out", userId, notice: notice ?? null });
+    setSessionEnding({ kind: "signed-out", userId, notice, returnTo });
     setState({ status: "anonymous" });
   }, []);
+  const signedOutEverywhere = useCallback((notice?: string) => endOnPurpose(notice ?? null, null), [endOnPurpose]);
 
-  const logout = useCallback(() => {
+  const logout = useCallback((options?: { returnTo?: string }) => {
     // Tell the server first, while the token is still in storage for the client to send: the
     // API puts that jti on its revocation list, so the credential stops working rather than
     // merely stopping being presented. A failure here is not worth blocking the sign-out —
     // the local half must happen either way — but it is worth attempting before the local half
     // rather than after, because after, there is nothing left to authenticate the call with.
     const ending = endpoints.logout().catch(() => undefined);
-    signedOutEverywhere();
+    endOnPurpose(null, options?.returnTo ?? null);
     return ending;
-  }, [signedOutEverywhere]);
+  }, [endOnPurpose]);
 
   // The refresh call answers with the flag too, so this is belt-and-braces — but a member who
   // has just replaced their password should not be held on the change screen by a stale flag

@@ -32,7 +32,7 @@ function DeepLinkFor({ participantId }: { participantId: string }) {
   );
 
   if (snapshot.gone) {
-    return <InviteGone title={INVITES_COPY.deepLinkGone} sentence={INVITES_COPY.deepLinkGoneHint} />;
+    return <InviteGone title={INVITES_COPY.deepLinkGone} sentence={INVITES_COPY.deepLinkGoneHint} otherAccount />;
   }
   if (!invite) return <InvitePanelSkeleton loading={snapshot.loading} error={snapshot.error} onRetry={snapshot.retry} />;
   return <InvitePanel invite={invite} port={port} />;

@@ -26,8 +26,12 @@ import type { AcceptFlow } from "./useAcceptFlow";
  * What they owe back to partners (P11) is subtracted too and named the same way.
  * </p>
  */
-export function AcceptBody({ flow, reasonId }: { flow: AcceptFlow; reasonId: string }) {
-  if (flow.outcome) return <OutcomeView flow={flow} />;
+export function AcceptBody({ flow, reasonId, headed = false }: {
+  flow: AcceptFlow; reasonId: string;
+  /** The page's own heading already names the outcome (D6), so the outcome does not repeat it. */
+  headed?: boolean;
+}) {
+  if (flow.outcome) return <OutcomeView flow={flow} headed={headed} />;
   return (
     <div className="flex flex-col gap-4">
       {/* The last answer first: a risen share or a refusal is the reason the sheet changed. */}
@@ -165,12 +169,12 @@ function Problem({ flow }: { flow: AcceptFlow }) {
 }
 
 /** The calm confirmation — no confetti (P12). */
-function OutcomeView({ flow }: { flow: AcceptFlow }) {
+function OutcomeView({ flow, headed }: { flow: AcceptFlow; headed: boolean }) {
   const name = organiserName(flow.invite);
   if (flow.outcome?.kind === "declined") {
     return (
       <div role="status" className="flex flex-col gap-1" data-outcome="declined">
-        <p className="text-base font-semibold text-text-primary">{INVITES_COPY.declinedTitle}</p>
+        {headed ? null : <p className="text-base font-semibold text-text-primary">{INVITES_COPY.declinedTitle}</p>}
         <p className="text-sm text-text-secondary">{declinedLine(name)}</p>
       </div>
     );
@@ -179,8 +183,8 @@ function OutcomeView({ flow }: { flow: AcceptFlow }) {
   return (
     <div className="flex flex-col items-start gap-3" data-outcome="accepted">
       <Alert tone="success" className="w-full">
-        <span className="font-semibold">{INVITES_COPY.acceptedTitle}</span>
-        {` — ${acceptedLine(answer?.paid_credits ?? 0, name)}`}
+        {headed ? null : <span className="font-semibold">{INVITES_COPY.acceptedTitle}</span>}
+        {headed ? acceptedLine(answer?.paid_credits ?? 0, name) : ` — ${acceptedLine(answer?.paid_credits ?? 0, name)}`}
       </Alert>
       <TextLink to={`/bookings/${answer?.booking_id ?? flow.invite.booking_id}`} variant="standalone">
         {INVITES_COPY.seeBooking}

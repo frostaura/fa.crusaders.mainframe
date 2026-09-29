@@ -668,14 +668,22 @@ export const INVITES_COPY = {
   acceptAction: "accept the invite",
   declineAction: "decline the invite",
   deepLinkGone: "This invite is no longer waiting for you",
-  deepLinkGoneHint: "It may have been answered, withdrawn, or its shares may have closed. Your invites and bookings have the latest.",
+  deepLinkGoneHint:
+    "It may have been answered, withdrawn, or its shares may have closed — or it was sent to a different account. Your invites and bookings have the latest.",
+  /** D5 — the invite may be another member's: the club will not say whose, so the page says who is signed in. */
+  signOutToOpen: "Sign out to open it as the invited member",
   refusedTitle: "This invite can't be opened",
-  linkNotFound: "This link isn't for you or no longer works — ask for a fresh one.",
+  linkNotFound: "This link isn't for this account or no longer works — if it was sent to someone else, they can open it; otherwise ask for a fresh one.",
   linkClosed: "This invite has closed — the game was cancelled, or its shares are settled.",
   linkAlreadyIn: "You're already on this game.",
   linkRemoved: "You were taken off this game, so this link can't put you back on it. Talk to whoever booked it.",
   readLinkAction: "open this invite",
 } as const;
+
+/** "You're signed in as Olivia." — beside an invite this account cannot open (D5). */
+export function signedInAsLine(name: string): string {
+  return `You're signed in as ${name}.`;
+}
 
 /** "Accept and pay 25.00 cr" — or plain "Accept" when nothing is collected now. */
 export function acceptLabel(toPay: number): string {

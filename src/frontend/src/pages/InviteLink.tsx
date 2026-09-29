@@ -43,6 +43,7 @@ function InviteLinkFor({ token }: { token: string }) {
         title={INVITES_COPY.refusedTitle}
         sentence={OPEN_REFUSAL[code]}
         bookingId={code === "already_in_booking" && typeof bookingId === "string" ? bookingId : null}
+        otherAccount={code === "invite_not_found"}
       />
     );
   }

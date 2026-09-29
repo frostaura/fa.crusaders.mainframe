@@ -132,11 +132,18 @@ type ReturnPath = { path: string; onlyFor: string | null };
  */
 function useReturnPath(ending: SessionEnding | null): ReturnPath {
   const location = useLocation();
-  const state = location.state as { from?: { pathname?: string; search?: string } } | null;
+  // …unless the sign-out was asked for so that somebody else could open a page (D5).
+  if (ending?.kind === "signed-out") return { path: ending.returnTo ?? LANDING_PATH, onlyFor: null };
+  const path = inAppPath(location.state as { from?: { pathname?: string; search?: string } } | null);
+  if (path === null) return { path: LANDING_PATH, onlyFor: null };
+  return { path, onlyFor: ending?.userId ?? null };
+}
+
+/** The guard's captured `from`, when it is an in-app path other than /login; otherwise null. */
+function inAppPath(state: { from?: { pathname?: string; search?: string } } | null): string | null {
   const path = state?.from?.pathname;
-  if (ending?.kind === "signed-out") return { path: LANDING_PATH, onlyFor: null };
-  if (!path || !path.startsWith("/") || path.startsWith("//") || path === "/login") return { path: LANDING_PATH, onlyFor: null };
-  return { path: `${path}${state?.from?.search ?? ""}`, onlyFor: ending?.userId ?? null };
+  if (!path || !path.startsWith("/") || path.startsWith("//") || path === "/login") return null;
+  return `${path}${state?.from?.search ?? ""}`;
 }
 
 /**
