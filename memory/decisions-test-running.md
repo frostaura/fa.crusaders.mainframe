@@ -48,11 +48,9 @@ where it had failed 8 cases at load ~19. CI has not been measured on the new pat
 5. A test that creates its own database uses `PostgresDatabases.CreateEmptyAsync()` or
    `CloneTemplateAsync()` and disposes it.
 
-**Seen during the lane and NOT caused by parallelism:** `MemberCodeRolloutHttpTests.The_club_cuts_over…`
-gets two code keys for one in the last hour before Johannesburg midnight, red with its class run
-alone; `MemberCodeMoneyFixesHttpTests.Racing_payers…` is red ~1 in 8 alone (`not_recognised`, a
-code step boundary crossed mid-test, likelier under load); walk-up price tests got pro-rata
-prices (195.73 for 192) at 23:48-00:00 — the midnight-close pattern.
+**Seen during the lane and NOT caused by parallelism**, fixed 2026-09-29 by pinning the clock
+(`gotchas-clock.md`): the cut-over test's two keys before Johannesburg midnight, the code-step
+races (`Racing_payers…`, the ±1 window) and the MemberCode walk-ups' pro-rata price at 23:48.
 Frontend flakes fixed 2026-09-29: MyCode's order test now awaits the QR's own draw; AdminSchedules
 pins `Date` (it would have broken after 2026-10-06); `statusRef` in `auth.tsx` is set in a layout
 effect so a cross-tab sign-out can't land first. See [`gotchas-clock.md`](gotchas-clock.md).

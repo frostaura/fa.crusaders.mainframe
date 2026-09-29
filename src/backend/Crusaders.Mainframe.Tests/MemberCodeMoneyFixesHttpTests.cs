@@ -62,7 +62,10 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
         await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
-        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        // Codes at steps −1, 0 and +1 of a pinned step: a boundary crossed mid-test turned the −1
+        // codes into not_recognised ~1 run in 8 (memory/gotchas-clock.md).
+        var clock = new PinnedClock();
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService(), clock);
         var club = await MemberCodeClub.SeedAsync(app, "payrace2");
         await TopUpAsync(club, app, club.AdminId, 200m);
         var device = app.CreateClient();
@@ -73,7 +76,7 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
         // Each payer's code at a different step per court: one code pays once (§4.4).
         var attempts = (from c in courts.Select((court, i) => (court, offset: i - 1))
                         from p in payers.Select((payer, j) => (payer, j))
-                        select (c.court, p.payer, token: club.Code(p.payer, stepOffset: c.offset), nonce: $"{c.court:x2}{p.j:x2}000000000000")).ToList();
+                        select (c.court, p.payer, token: club.Code(p.payer, at: clock.Now, stepOffset: c.offset), nonce: $"{c.court:x2}{p.j:x2}000000000000")).ToList();
         foreach (var a in attempts) Assert.Equal("ok", (await SendAsync(device, club.PayFor(a.token, a.court, a.nonce, confirm: false))).Body.GetProperty("reason").GetString());
 
         var answers = await Task.WhenAll(attempts.Select(async a => (a, answer: await SendAsync(device, club.PayFor(a.token, a.court, a.nonce, confirm: true, label: "32")))));
@@ -211,7 +214,8 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
         await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
         var mail = new StubEmailService();
-        await using var app = MemberCodeClub.Wired(factory, mail);
+        var clock = new PinnedClock();
+        await using var app = MemberCodeClub.Wired(factory, mail, clock);
         var club = await MemberCodeClub.SeedAsync(app, "uncharged");
         var legacy = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: -10, checkedIn: true);
         var free = await club.BookAsync(app, club.Olga, courtIndex: 2, startsInMinutes: -10, checkedIn: true);
@@ -222,11 +226,11 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
         });
         var device = app.CreateClient();
 
-        var quote = await SendAsync(device, club.PayFor(club.Code(club.Pam), 2, "0101010101010101", confirm: false));
+        var quote = await SendAsync(device, club.PayFor(club.Code(club.Pam, at: clock.Now), 2, "0101010101010101", confirm: false));
         Assert.Equal("not_chargeable", quote.Body.GetProperty("reason").GetString());
-        var confirm = await SendAsync(device, club.PayFor(club.Code(club.Pam, stepOffset: -1), 2, "0202020202020202", confirm: true, label: "32"));
+        var confirm = await SendAsync(device, club.PayFor(club.Code(club.Pam, at: clock.Now, stepOffset: -1), 2, "0202020202020202", confirm: true, label: "32"));
         Assert.Equal("not_chargeable", confirm.Body.GetProperty("reason").GetString());
-        Assert.Equal("already_paid", (await SendAsync(device, club.PayFor(club.Code(club.Pam), 3, "0303030303030303", confirm: false))).Body.GetProperty("reason").GetString());
+        Assert.Equal("already_paid", (await SendAsync(device, club.PayFor(club.Code(club.Pam, at: clock.Now), 3, "0303030303030303", confirm: false))).Body.GetProperty("reason").GetString());
 
         Assert.Equal(200m, await club.BalanceAsync(app, club.Pam));
         Assert.DoesNotContain(mail.Sent, m => m.Subject.Contains("paid for", StringComparison.OrdinalIgnoreCase));
@@ -307,7 +311,7 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
         await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
-        var club = await MemberCodeClub.SeedAsync(app, "walktwins");
+        var club = await MemberCodeClub.SeedAsync(app, "walktwins", MemberCodeClub.SettingsAtNoon());
         var device = app.CreateClient();
         var code = club.Code(club.Pam);
 
@@ -347,7 +351,7 @@ public sealed class MemberCodeMoneyFixesHttpTests(PostgresFixture pg) : IClassFi
             s.RemoveAll<CourtActivationService>();
             s.AddScoped<CourtActivationService, RefuseOnce>();
         }));
-        var club = await MemberCodeClub.SeedAsync(app, "walkvoid");
+        var club = await MemberCodeClub.SeedAsync(app, "walkvoid", MemberCodeClub.SettingsAtNoon());
         var code = club.Code(club.Pam);
 
         RefuseOnce.Remaining = 1;

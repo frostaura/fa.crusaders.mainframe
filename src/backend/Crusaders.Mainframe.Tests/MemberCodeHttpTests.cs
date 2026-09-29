@@ -218,10 +218,13 @@ public sealed class MemberCodeHttpTests(PostgresFixture pg) : IClassFixture<Post
     {
         Skip.IfNot(pg.Available, Skipped);
         await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
-        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        // The server's step is pinned to the one the code is built from: offset ±1 must mean ±1
+        // at the moment of the check, not ±1 give or take a boundary a slow runner crossed.
+        var clock = new PinnedClock();
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService(), clock);
         var club = await MemberCodeClub.SeedAsync(app, "window");
 
-        var json = await MemberCodeClub.JsonAsync(await app.CreateClient().SendAsync(club.Gate(club.Code(club.Pam, stepOffset: offset))));
+        var json = await MemberCodeClub.JsonAsync(await app.CreateClient().SendAsync(club.Gate(club.Code(club.Pam, at: clock.Now, stepOffset: offset))));
 
         Assert.Equal(opens, json.GetProperty("opened").GetBoolean());
         if (!opens) Assert.Equal("not_recognised", json.GetProperty("reason").GetString());
@@ -365,7 +368,7 @@ public sealed class MemberCodeHttpTests(PostgresFixture pg) : IClassFixture<Post
         Skip.IfNot(pg.Available, Skipped);
         await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
-        var club = await MemberCodeClub.SeedAsync(app, "walkv1");
+        var club = await MemberCodeClub.SeedAsync(app, "walkv1", MemberCodeClub.SettingsAtNoon());
         var device = app.CreateClient();
         var code = club.Code(club.Pam);
 

@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-gotchas-clock
-description: "Tests whose hidden input is the wall clock: red in the last half-hour of a UTC day, the door evening red for an hour after a seeded booking, AddHours(3) red every afternoon, and failures this Mac cannot reproduce by construction."
+description: "Clock traps: red in the last half-hour of a UTC day, a code step crossed mid-test, a zone-less member payload read in the phone's zone. Cold entry points carry the club timezone; Playwright runs in New York."
 type: gotcha
-last_verified: 2026-09-21
+last_verified: 2026-09-29
 ---
 
 # Gotchas — the wall clock as a hidden test input
@@ -35,3 +35,18 @@ last_verified: 2026-09-21
   and green here every time. Diagnosing it needs the CI log and a deliberately tick-offset fixture,
   not another local run. **`-v q` suppresses the assertion message in CI**, leaving only `[FAIL]`
   and a name; pass `-v n` when a CI-only failure has to be read rather than guessed.
+- **A member-code test that builds a code and then sends it races the 30 s step.** A ±1 offset
+  becomes ±2 when a boundary falls between (CI run of 2026-09-29, `offset: -1`). The door,
+  activation and pay-for take their instant from the DI `TimeProvider`; a test passes
+  `MemberCodeClub.Wired(…, clock)` with a `PinnedClock` and builds with `Code(…, at: clock.Now)`.
+  A test about something other than the club's midnight seeds `MemberCodeClub.SettingsAtNoon()`
+  (an `Etc/GMT±N` zone at local noon). **Still open:** the UTC-club midnight-close family in
+  `WalkUpBookingTests`/`DeviceEventHttpTests` (bullet one) — it needs every fixture's clock moved.
+- **Every member payload that is a cold entry point carries the club's `timezone` at top level;
+  Playwright's browser runs in `America/New_York`.** The client learns the zone from any
+  top-level `timezone` and until then formats in the reader's zone. The booking detail carried
+  none, so "Court 1 · 18:00" read 16:00 on a UTC runner and right on this SAST Mac (CI run
+  36532040584). `/me/profile` (read at boot), the booking detail, `/invites/{token}`,
+  `/me/invites` and `/me/notifications` now carry it. The browser zone is neither the club's
+  nor UTC, so a zone-less screen cannot coincide with the right answer; spec processes run in
+  UTC. An expectation built from a `lib/` formatter must pass `CLUB_ZONE` (`e2e/playersKit`).

@@ -53,7 +53,7 @@ public static class DeviceActivateEndpoint
     public static async Task<DeviceActivateResponse> ActivateForDeviceAsync(
         Device device, DeviceActivateRequest req, DeviceActivateServices services, CancellationToken ct)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = services.Clock.GetUtcNow();
 
         // A box asking this question is a box that is reporting (finding L-F5). Recorded
         // before the decision, and on every branch including the refusals — see
@@ -296,7 +296,9 @@ public sealed record DeviceActivateServices(
     /// <summary>Where a refused scan is recorded for the club's monitoring page. See <see cref="DeviceFaultSink"/>.</summary>
     DeviceFaultSink Faults,
     /// <summary>The v1 member-code check and its use table (member-code §4).</summary>
-    MemberCodeService MemberCodes);
+    MemberCodeService MemberCodes,
+    /// <summary>The instant the decision is taken at, and so the member-code step it checks — see <see cref="GateServices.Clock"/>.</summary>
+    TimeProvider Clock);
 
 /// <summary>
 /// What a box sends when a scan needs the server. <c>mac</c> names the board;

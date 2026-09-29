@@ -63,7 +63,12 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
         await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
         await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
-        var club = await MemberCodeClub.SeedAsync(app, "cutover");
+        // A club whose local noon is now. Everything below is about the cut-over, not the club's
+        // midnight — but a booking live at 23:05 Johannesburg runs into tomorrow, and a roster
+        // entry that reaches tomorrow rightly carries tomorrow's key as well, so this test used
+        // to be red for the last hour of every club day. Midnight is twelve hours away here at
+        // any hour it runs; the tomorrow-key rule has its own tests.
+        var club = await MemberCodeClub.SeedAsync(app, "cutover", MemberCodeClub.SettingsAtNoon());
         var booking = await club.BookAsync(app, club.Olga, courtIndex: 1, startsInMinutes: -5);
         var device = app.CreateClient();
 
@@ -82,7 +87,7 @@ public sealed class MemberCodeRolloutHttpTests(PostgresFixture pg) : IClassFixtu
 
         // …and the key is the member's real K_day for today: a code from their phone verifies against it.
         var parsed = MemberCodeWire.ParseKeyElement(key)!.Value;
-        var zone = MemberCodeMath.ZoneOf("Africa/Johannesburg");
+        var zone = MemberCodeMath.ZoneOf(club.Zone);
         var secret = MemberCodeMath.MemberSecret(MemberCodeClub.MasterKey, club.TenantId, club.Olga, 1);
         var step = MemberCodeMath.StepOf(DateTimeOffset.UtcNow);
         Assert.Equal(MemberCodeMath.Kday(secret, MemberCodeMath.ClubDay(step, zone)), parsed.Key);

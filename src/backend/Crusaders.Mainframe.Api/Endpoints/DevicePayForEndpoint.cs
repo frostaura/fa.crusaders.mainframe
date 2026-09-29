@@ -80,7 +80,7 @@ public static class DevicePayForEndpoint
     /// <summary>The decision for an already-resolved board. Public so tests can drive it without HTTP.</summary>
     public static async Task<IResult> DecideAsync(Device device, PayForRequest req, PayForServices services, CancellationToken ct)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = services.Clock.GetUtcNow();
         var settings = await services.Settings.GetAsync(ct);
         await DeviceSilenceLog.NoteContactAsync(services.Db, device, settings, now, ct);
 
@@ -580,7 +580,9 @@ public sealed record PayForServices(
     IBookingPlayers Players,
     IEmailService Email,
     ClubIdentityResolver Club,
-    ILoggerFactory Logs);
+    ILoggerFactory Logs,
+    /// <summary>The instant the decision is taken at, and so the member-code step it checks — see <see cref="GateServices.Clock"/>.</summary>
+    TimeProvider Clock);
 
 /// <summary>
 /// <c>POST /api/v1/device/pay-for</c> (§9.2). Field order is the firmware's:

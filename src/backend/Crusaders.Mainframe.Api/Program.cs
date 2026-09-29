@@ -334,6 +334,10 @@ builder.Services.AddScoped<DeviceErrorService>();
 builder.Services.AddScoped<DeviceFaultSink>();
 builder.Services.AddScoped<CourtLightStateService>();
 builder.Services.AddScoped<ControlBoardReader>();
+// The wall clock, as a service, for the device decisions that check a 30 s member-code step
+// (the door, activation and pay-for): a test pins it so a step boundary cannot fall between building a code
+// and the server checking it. Everything else still reads DateTimeOffset.UtcNow.
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<AccessTokenRevocationList>();
 // Singleton, like the revocation list beside it: the cache it keeps is what makes the role
 // check nearly free, and the admin-role endpoint evicts from the same instance it reads.

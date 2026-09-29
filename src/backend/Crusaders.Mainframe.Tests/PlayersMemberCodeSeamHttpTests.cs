@@ -81,7 +81,8 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
         await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
-        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        var clock = new PinnedClock();
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService(), clock);
         var g = await SplitGameAsync(app, "seamaccess");
         var c = g.Club;
         await c.SetAsync(app, GateAccessPolicies.Key, GateAccessPolicies.BookingWindow);
@@ -91,20 +92,20 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
         // The invited, the declined and the removed are strangers to this booking at both boards.
         foreach (var outsider in new[] { g.Invited, g.Declined, g.Removed })
         {
-            var shut = await MemberCodeClub.JsonAsync(await device.SendAsync(c.Gate(c.Code(outsider))));
+            var shut = await MemberCodeClub.JsonAsync(await device.SendAsync(c.Gate(c.Code(outsider, at: clock.Now))));
             Assert.False(shut.GetProperty("opened").GetBoolean());
             Assert.Equal(GateAccess.NoBooking, shut.GetProperty("reason").GetString());
-            var dark = await MemberCodeClub.JsonAsync(await device.SendAsync(c.Activate(c.Code(outsider))));
+            var dark = await MemberCodeClub.JsonAsync(await device.SendAsync(c.Activate(c.Code(outsider, at: clock.Now))));
             Assert.False(dark.GetProperty("activated").GetBoolean());
             Assert.Equal("no_booking", dark.GetProperty("reason").GetString());
         }
 
-        var gate = await MemberCodeClub.JsonAsync(await device.SendAsync(c.Gate(c.Code(c.Pam))));
+        var gate = await MemberCodeClub.JsonAsync(await device.SendAsync(c.Gate(c.Code(c.Pam, at: clock.Now))));
         Assert.True(gate.GetProperty("opened").GetBoolean());
 
         // A fresh code: the door's use of the last one is a different class, but a new step keeps
         // the assertion about the court and nothing else.
-        var lit = await MemberCodeClub.JsonAsync(await device.SendAsync(c.Activate(c.Code(c.Pam, stepOffset: -1))));
+        var lit = await MemberCodeClub.JsonAsync(await device.SendAsync(c.Activate(c.Code(c.Pam, at: clock.Now, stepOffset: -1))));
         Assert.True(lit.GetProperty("activated").GetBoolean());
         Assert.Equal(g.Booking.Id, lit.GetProperty("booking_id").GetGuid());
 
@@ -141,15 +142,16 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
     {
         Skip.IfNot(pg.Available, MemberCodeHttpTests.Skipped);
         await using var factory = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
-        await using var app = MemberCodeClub.Wired(factory, new StubEmailService());
+        var clock = new PinnedClock();
+        await using var app = MemberCodeClub.Wired(factory, new StubEmailService(), clock);
         var g = await SplitGameAsync(app, "seampay");
         var c = g.Club;
         var device = app.CreateClient();
         var sid = await c.BalanceAsync(app, c.Sid);
 
-        var split = await (await device.SendAsync(c.PayFor(c.Code(c.Sid), 2, Nonce, confirm: false))).Content.ReadAsStringAsync();
+        var split = await (await device.SendAsync(c.PayFor(c.Code(c.Sid, at: clock.Now), 2, Nonce, confirm: false))).Content.ReadAsStringAsync();
         Assert.Equal("""{"payable":false,"reason":"split_booking","court_number":2}""", split);
-        var confirm = await (await device.SendAsync(c.PayFor(c.Code(c.Sid, stepOffset: -1), 2, Nonce, confirm: true, label: "32"))).Content.ReadAsStringAsync();
+        var confirm = await (await device.SendAsync(c.PayFor(c.Code(c.Sid, at: clock.Now, stepOffset: -1), 2, Nonce, confirm: true, label: "32"))).Content.ReadAsStringAsync();
         Assert.Contains("\"reason\":\"split_booking\"", confirm);
 
         // A legacy ident code reaches the same refusal: the seam decides, not the credential.
@@ -166,7 +168,7 @@ public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassF
         // Pam, who is on court 2's game and not this one).
         var other = await c.BookAsync(app, c.Olga, courtIndex: 2, startsInMinutes: -5);
         await SeatsAsync(app, c, other.Id, (1, c.Olga, ParticipantStatus.Accepted, 24m), (2, g.Declined, ParticipantStatus.Declined, 8m));
-        var quote = JsonDocument.Parse(await (await device.SendAsync(c.PayFor(c.Code(c.Pam), 3, "3434343434343434", confirm: false))).Content.ReadAsStringAsync()).RootElement;
+        var quote = JsonDocument.Parse(await (await device.SendAsync(c.PayFor(c.Code(c.Pam, at: clock.Now), 3, "3434343434343434", confirm: false))).Content.ReadAsStringAsync()).RootElement;
         Assert.True(quote.GetProperty("payable").GetBoolean());
     }
 

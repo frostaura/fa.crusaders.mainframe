@@ -39,11 +39,43 @@ internal sealed class MemberCodeClub
     public required string DoorMac { get; init; }
     public required Dictionary<Guid, int> Refs { get; init; }
 
-    public static WebApplicationFactory<Program> Wired(TestWebAppFactory factory, StubEmailService mail) =>
+    /// <summary>The club's zone as seeded — what the server keys its day (and so every K_day) on.</summary>
+    public string Zone { get; init; } = "Africa/Johannesburg";
+
+    /// <summary>
+    /// <see cref="Settings"/> in a club whose local noon is now — for a test about something other
+    /// than the club's midnight. A booking or walk-up bought in the last hour of a club day runs
+    /// into the midnight close (pro-rata price) or into tomorrow's key, so a test that pins the
+    /// Johannesburg zone is red for part of every day for reasons that are not its subject.
+    /// </summary>
+    public static string SettingsAtNoon() => Settings.Replace("Africa/Johannesburg", ZoneWhoseNoonIsNow());
+
+    /// <summary>
+    /// A fixed-offset IANA zone (<c>Etc/GMT±N</c>) whose local hour is 12 at the current UTC hour,
+    /// so its midnight is at least eleven hours from any instant a test can reach. Note the tzdb's
+    /// inverted sign: <c>Etc/GMT-2</c> is UTC+2.
+    /// </summary>
+    public static string ZoneWhoseNoonIsNow()
+    {
+        var east = 12 - DateTimeOffset.UtcNow.Hour;
+        return east == 0 ? "Etc/GMT" : $"Etc/GMT{(east > 0 ? "-" : "+")}{Math.Abs(east)}";
+    }
+
+    /// <param name="clock">
+    /// Pins the instant the door and pay-for decide at — and so the 30 s code step they check.
+    /// A test that builds a code at <c>clock.Now</c> and sends it can then never have a step
+    /// boundary fall between the two (<c>memory/gotchas-clock.md</c>). Unset: the real clock.
+    /// </param>
+    public static WebApplicationFactory<Program> Wired(TestWebAppFactory factory, StubEmailService mail, PinnedClock? clock = null) =>
         factory.WithWebHostBuilder(b => b.ConfigureServices(s =>
         {
             s.RemoveAll<IEmailService>();
             s.AddSingleton<IEmailService>(mail);
+            if (clock is not null)
+            {
+                s.RemoveAll<TimeProvider>();
+                s.AddSingleton<TimeProvider>(clock);
+            }
         }));
 
     public static async Task<MemberCodeClub> SeedAsync(
@@ -108,6 +140,7 @@ internal sealed class MemberCodeClub
             TenantId = tenant.Id, Slug = slug, DeviceKey = tenant.DeviceApiKey!, AdminId = admin,
             Olga = olga, Pam = pam, Sid = sid, OlgaMembership = olgaM, SidMembership = sidM,
             Courts = [.. courts.Select(c => c.Id)], BoxMac = boxMac, DoorMac = doorMac, Refs = refMap,
+            Zone = JsonDocument.Parse(settings).RootElement.TryGetProperty("timezone", out var tz) ? tz.GetString()! : "UTC",
         };
     }
 
@@ -132,11 +165,12 @@ internal sealed class MemberCodeClub
     /// <summary>The master key the factory host runs with — see <see cref="TestWebAppFactory.TestMemberCodeMasterKey"/>.</summary>
     public static byte[] MasterKey => Convert.FromBase64String(TestWebAppFactory.TestMemberCodeMasterKey);
 
-    public string Code(Guid user, DateTimeOffset? at = null, int generation = 1, long stepOffset = 0, string tz = "Africa/Johannesburg")
+    /// <param name="tz">The zone whose day keys the OFF half. Unset: the club's own (<see cref="Zone"/>).</param>
+    public string Code(Guid user, DateTimeOffset? at = null, int generation = 1, long stepOffset = 0, string? tz = null)
     {
         var secret = MemberCodeMath.MemberSecret(MasterKey, TenantId, user, generation);
         var step = MemberCodeMath.StepOf(at ?? DateTimeOffset.UtcNow) + stepOffset;
-        return MemberCodeMath.Token(MemberCodeMath.RefText(Refs[user]), secret, step, MemberCodeMath.ZoneOf(tz));
+        return MemberCodeMath.Token(MemberCodeMath.RefText(Refs[user]), secret, step, MemberCodeMath.ZoneOf(tz ?? Zone));
     }
 
     /// <summary>The same code with its ON half garbled — what a holder of K_day but not S would make.</summary>
@@ -302,4 +336,18 @@ internal sealed class MemberCodeClub
         doc[MemberCodeSettings.CutoverAtKey] = (cutoverAt ?? DateTimeOffset.UtcNow).ToString("O");
         row.SettingsJson = doc.ToJsonString();
     });
+}
+
+/// <summary>
+/// A wall clock that stands still at <see cref="Now"/> — the instant a test built its codes at.
+/// Pinned to the real time at construction, so everything the server reads from
+/// <c>DateTimeOffset.UtcNow</c> (bookings, claims) stays seconds away from it.
+/// </summary>
+internal sealed class PinnedClock(DateTimeOffset now) : TimeProvider
+{
+    public PinnedClock() : this(DateTimeOffset.UtcNow) { }
+
+    public DateTimeOffset Now { get; } = now;
+
+    public override DateTimeOffset GetUtcNow() => Now;
 }

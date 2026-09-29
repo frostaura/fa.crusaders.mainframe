@@ -41,12 +41,12 @@ public static class DeviceGateEndpoint
         [AsParameters] GateServices services,
         CancellationToken ct)
     {
-        var (db, tenant, _, settingsAccessor, _) = services;
+        var (db, tenant, _, settingsAccessor, _, clock) = services;
 
         var (device, refusal) = await DeviceIdentity.ResolveAsync(db, req.Mac, ct);
         if (refusal is not null) return refusal;
 
-        var now = DateTimeOffset.UtcNow;
+        var now = clock.GetUtcNow();
         var settings = await settingsAccessor.GetAsync(ct);
 
         // A board asking this question is a board that is reporting, on every branch including
@@ -157,7 +157,14 @@ public sealed record GateServices(
     AccessCodeService Codes,
     TenantSettingsAccessor Settings,
     /// <summary>The v1 member-code check and its use table (member-code §4).</summary>
-    MemberCodeService MemberCodes);
+    MemberCodeService MemberCodes,
+    /// <summary>
+    /// The instant the decision is taken at — including the 30 s member-code step it checks
+    /// against. <see cref="TimeProvider.System"/> in production; a test pins it, because a step
+    /// boundary crossed between building a code and checking it is the wall clock deciding the
+    /// test (<c>memory/gotchas-clock.md</c>).
+    /// </summary>
+    TimeProvider Clock);
 
 /// <summary>
 /// What a gate sends when a scan needs the server. Three fields — there is no <c>court</c>,
