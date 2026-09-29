@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert } from "../../components/Alert";
+import { Button } from "../../components/ui/button";
 import { PageHeader, PageShell } from "../../components/ui/page-shell";
 import { Freshness, RefreshButton } from "../../components/ui/refresh-button";
 import { StateBlock } from "../../components/ui/state-block";
@@ -15,6 +16,8 @@ import {
 import {
   CHANGES_EMPTY, CHANGES_EXPORT_NOTE, CHANGES_NO_DIFF, CHANGES_STANDING_NOTICE,
 } from "../../lib/nightCopy";
+import { CHANGES_PAGE, changeFieldLabel, changeHeadline } from "../../lib/changeRecordCopy";
+import { describeFailure } from "../../lib/errors";
 
 /**
  * The admin change record — GOAL item 14's second half. `/admin/monitoring/changes`.
@@ -97,6 +100,22 @@ export function AdminChangeRecordPage() {
   const timezone = page?.timezone;
   const manual = useAsyncAction(() => load(area, period));
 
+  // F3.2 (contract §8): the server pages by cursor; the page used to show the first page and
+  // stop, with nothing saying there was more. "Load more" APPENDS — the rows already read keep
+  // their place — and a failed page leaves them standing with its own sentence.
+  const [moreError, setMoreError] = useState<unknown>(null);
+  const more = useAsyncAction(async () => {
+    const cursor = page?.cursor;
+    if (!cursor) return;
+    try {
+      const next = await adminEndpoints.adminChanges({ ...(area ? { area } : {}), period, cursor });
+      setPage((prev) => ({ ...next, rows: [...(prev?.rows ?? []), ...next.rows] }));
+      setMoreError(null);
+    } catch (err) {
+      setMoreError(err);
+    }
+  });
+
   return (
     <PageShell width="wide">
       <PageHeader
@@ -154,6 +173,19 @@ export function AdminChangeRecordPage() {
         <ul className="flex flex-col gap-3">
           {rows.map((row) => <ChangeRow key={row.id} row={row} timezone={timezone} />)}
         </ul>
+        <div className="mt-3 flex flex-col items-start gap-2">
+          {typeof page?.total === "number" ? (
+            <p className="text-sm text-text-muted" aria-live="polite">{CHANGES_PAGE.showing(rows.length, page.total)}</p>
+          ) : null}
+          {moreError !== null ? (
+            <Alert tone="danger" live="polite" announceKey="changes-more">
+              {describeFailure(moreError, { action: CHANGES_PAGE.loadMoreAction })}
+            </Alert>
+          ) : null}
+          {page?.cursor ? (
+            <Button variant="outline" onClick={() => void more.run()} pending={more.pending}>{CHANGES_PAGE.loadMore}</Button>
+          ) : null}
+        </div>
       </StateBlock>
     </PageShell>
   );
@@ -192,7 +224,7 @@ function ChangeRow({ row, timezone }: { row: AdminChangeRow; timezone: string | 
         <p className="min-w-0 break-words font-medium text-text-primary">
           {/* Server-composed, from a closed dictionary, with `unrecognised` for anything the
               dictionary has not got. Never a sentence assembled here out of `action`. */}
-          {row.headline ?? (row.action ?? "").replace(/[._]/g, " ")}
+          {changeHeadline(row)}
         </p>
         {row.actor?.name && <span className="shrink-0 text-sm text-text-muted">{row.actor.name}</span>}
       </div>
@@ -211,7 +243,7 @@ function ChangeRow({ row, timezone }: { row: AdminChangeRow; timezone: string | 
             <dd className="text-text-muted">After</dd>
             {diff.map((change) => (
               <div key={change.field} className="contents">
-                <dt className="min-w-0 break-words text-text-secondary">{change.field.replace(/_/g, " ")}</dt>
+                <dt className="min-w-0 break-words text-text-secondary">{changeFieldLabel(row, change)}</dt>
                 {/* An em dash, not an empty cell: a blank reads as "the page did not load it"
                     and a dash reads as "there was nothing there", which is the true one. */}
                 <dd className="min-w-0 break-words text-text-primary">{change.before ?? "—"}</dd>

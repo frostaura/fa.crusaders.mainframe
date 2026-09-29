@@ -424,7 +424,7 @@ export type AdminChangeRow = {
    * not its id. A volunteer reading their own audit trail cannot be handed minutes past
    * midnight.
    */
-  changes?: Array<{ field: string; before?: string | null; after?: string | null }> | null;
+  changes?: Array<{ field: string; label?: string | null; before?: string | null; after?: string | null }> | null;
 };
 
 export type AdminChangePage = {

@@ -3,6 +3,8 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { MemberNight, MemberNightPage } from "./MemberNight";
 import { AdminChangeRecordPage } from "./AdminChangeRecord";
+import { CHANGES_PAGE } from "../../lib/changeRecordCopy";
+import { settingDef } from "../../lib/settingsSchema";
 import { memberFixture, renderPage, signIn, stubFetch, unreachable, type StubRoute } from "../../test/harness";
 import type { TraceEvent, TraceView } from "../../lib/adminApi";
 import { rememberClubZone } from "../../lib/clubZone";
@@ -345,6 +347,41 @@ describe("the admin change record", () => {
     renderPage(<AdminChangeRecordPage />);
     expect(await screen.findByText("What changed wasn't recorded for this row.")).toBeInTheDocument();
     expect(screen.queryByText("Show what changed")).not.toBeInTheDocument();
+  });
+
+  /** F3.2 (contract §8): the server pages by cursor, and the page said nothing about the rest. */
+  it("says how many of the total it shows, and loads more on request, appending", async () => {
+    const second = { ...change, id: "c2", headline: "Reset a member's password — Sam" };
+    const stub = stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
+      { path: "/api/v1/admin/changes", body: { rows: [change], total: 2, cursor: "p2", timezone: "Africa/Johannesburg" } },
+      { path: "/api/v1/admin/changes?period=last_7d&cursor=p2", body: { rows: [second], total: 2, cursor: null, timezone: "Africa/Johannesburg" } },
+    ]);
+    renderPage(<AdminChangeRecordPage />);
+    expect(await screen.findByText("Showing 1 of 2.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: CHANGES_PAGE.loadMore }));
+    expect(await screen.findByText("Reset a member's password — Sam")).toBeInTheDocument();
+    expect(screen.getByText("Cancelled Thandi Mokoena's booking")).toBeInTheDocument();
+    expect(screen.getByText("Showing 2 of 2.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: CHANGES_PAGE.loadMore })).not.toBeInTheDocument();
+    expect(stub.calls.some((c) => c.path.includes("cursor=p2"))).toBe(true);
+  });
+
+  it("labels a setting with the Settings page's caption, never its stored key", async () => {
+    stubFetch(changeRoutes([{
+      ...change, area: "setting", action: "settings.updated", headline: "Changed the club's settings",
+      changes: [{ field: "slice_minutes", label: "Slice", before: "15", after: "30" }],
+    }]));
+    renderPage(<AdminChangeRecordPage />);
+    fireEvent.click(await screen.findByText("Show what changed"));
+    expect(screen.queryByText("slice minutes")).not.toBeInTheDocument();
+    expect(screen.getByText(settingDef("slice_minutes")!.label)).toBeInTheDocument();
+  });
+
+  it("puts an action the server has no sentence for into words, never a raw code", async () => {
+    stubFetch(changeRoutes([{ ...change, headline: null, action: "member_code.reset" }]));
+    renderPage(<AdminChangeRecordPage />);
+    expect(await screen.findByText("Member code reset")).toBeInTheDocument();
   });
 
   it("never renders an empty record over a failed read", async () => {

@@ -165,8 +165,9 @@ export const NIGHT_EMPTY_HINT
  * </p>
  */
 export const CHANGES_STANDING_NOTICE
-  = "Everything an admin does that affects a member or a court, in the order it happened. "
-  + "Nobody can delete these from the app, including admins and including the club's owner: "
+  // The page's own description already says "every admin action, in the order it happened";
+  // the banner said it again (F3.23). It carries the one thing the description does not.
+  = "Nobody can delete these from the app, including admins and including the club's owner: "
   + "there is no delete anywhere in the software, and the database refuses one outright.";
 
 export const CHANGES_EMPTY = "No changes recorded in this range.";
