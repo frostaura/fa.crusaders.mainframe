@@ -64,6 +64,13 @@ public partial class MainframeDbContext
             // "My invites", "my recent partners", the gate's and the court box's "is this person
             // on a live booking" — every reader asks by member.
             e.HasIndex(p => new { p.TenantId, p.UserId, p.Status });
+            // "This member's seat on this booking, in ANY status" — play's attendance read
+            // (AttendanceQuery.SessionsAsync) asks it once per candidate booking. The unique index
+            // above has the same columns but is partial on the live statuses, so it cannot answer a
+            // question that does not name a status; without this one Postgres walked every seat
+            // the member has ever held for every booking — 1.6M buffer hits and ~1.5 s for one
+            // /me/play at 2,000 bookings (P10 perf pass), 17k with it.
+            e.HasIndex(p => new { p.TenantId, p.BookingId, p.UserId }, "IX_booking_participants_TenantId_BookingId_UserId_any");
             // The sweep's retry of waiting returns: a handful of rows, found without a scan.
             e.HasIndex(p => new { p.TenantId, p.ReturnPendingSince }).HasFilter("\"ReturnPendingSince\" IS NOT NULL");
             // The lapse sweep's overdue invites, whatever their age: only unanswered seats are in it.

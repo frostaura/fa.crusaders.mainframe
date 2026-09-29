@@ -609,6 +609,8 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.HasIndex("TenantId", "UserId", "Status");
 
+                    b.HasIndex(new[] { "TenantId", "BookingId", "UserId" }, "IX_booking_participants_TenantId_BookingId_UserId_any");
+
                     b.ToTable("booking_participants", null, t =>
                         {
                             t.HasCheckConstraint("ck_booking_participants_guest", "\"GuestName\" IS NULL OR (\"UserId\" IS NULL AND \"ShareCredits\" = 0)");
