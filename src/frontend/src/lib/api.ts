@@ -130,6 +130,92 @@ export async function fetchWithTimeout(
 // credentials, and the unauthenticated whoami probe is allowed to come back 401.
 const UNAUTH_BYPASS = ["/api/v1/auth/login", "/api/v1/auth/webauthn/login", "/api/v1/whoami"];
 
+/** `POST /auth/refresh` — with no bearer, the httpOnly `crusaders_rt` cookie is the credential. */
+export const REFRESH_PATH = "/api/v1/auth/refresh";
+
+/**
+ * Paths whose 401 is never answered with a refresh (F4.1): the refresh itself — a refresh that
+ * refreshed on its own 401 is the loop — and sign-out, whose session is ending on purpose.
+ */
+const NO_REFRESH = [REFRESH_PATH, "/api/v1/auth/logout"];
+
+/**
+ * F4.1 — one cookie exchange at a time, in this tab (the promise) and across tabs (a Web Lock).
+ *
+ * <p>
+ * <b>Why single-flight matters here and not only for tidiness.</b> The refresh cookie ROTATES:
+ * spending it issues a successor and marks it used, and the server treats a second spend of a
+ * used link as a stolen token and revokes the whole family. Five screens that 401 together after
+ * a phone wakes, or two tabs doing the same, would each spend the same cookie and sign the member
+ * out everywhere — the outcome the cookie exists to prevent. So concurrent 401s share one
+ * exchange, and an exchange that finds the stored token already replaced (by another tab, or by a
+ * request that got there first) adopts it without spending anything.
+ * </p>
+ */
+let refreshInFlight: Promise<boolean> | null = null;
+
+/**
+ * Trade the refresh cookie for a new access token. Resolves `true` when a usable token is now
+ * stored; `false` when the session is over. Never throws.
+ *
+ * @param staleToken the access token the caller sent and was refused on — how an exchange tells
+ * "somebody already refreshed" from "nobody has".
+ */
+export function refreshSession(staleToken: string | null): Promise<boolean> {
+  refreshInFlight ??= withRefreshLock(() => exchangeCookie(staleToken)).finally(() => { refreshInFlight = null; });
+  return refreshInFlight;
+}
+
+function withRefreshLock(run: () => Promise<boolean>): Promise<boolean> {
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (!locks?.request) return run();
+  // `request` resolves with the callback's own resolved value; the DOM typing nests the promise.
+  return Promise.resolve(locks.request("crusaders.mainframe.refresh", run)).then((ok) => ok === true, () => false);
+}
+
+function replacedSince(staleToken: string | null): boolean {
+  const current = tokenStore.get();
+  return !!current && current !== staleToken;
+}
+
+async function exchangeCookie(staleToken: string | null): Promise<boolean> {
+  // Another tab (or an earlier exchange here) already did it: its token is in shared storage.
+  if (replacedSince(staleToken)) return true;
+  const first = await postRefreshCookie();
+  if (first === "superseded") {
+    // A concurrent spend from another tab won the race; the browser now holds its successor.
+    return replacedSince(staleToken) || (await postRefreshCookie()) === "ok";
+  }
+  return first === "ok";
+}
+
+async function postRefreshCookie(): Promise<"ok" | "superseded" | "ended"> {
+  let res: Response;
+  try {
+    // No bearer on purpose (contract §1): the cookie is the credential, and an expired bearer
+    // beside it is noise the server would have to reason about.
+    res = await fetchWithTimeout(REFRESH_PATH, { method: "POST", credentials: "include", headers: { "content-type": "application/json" } });
+  } catch {
+    return "ended";
+  }
+  const payload = parseFailureBody(await res.text());
+  if (!res.ok) return bodyErrorCode(payload) === "refresh_superseded" ? "superseded" : "ended";
+  const token = (payload as { access_token?: unknown } | null)?.access_token;
+  if (typeof token !== "string" || !token) return "ended";
+  tokenStore.set(token);
+  return "ok";
+}
+
+/**
+ * Whether a refused request may be retried after a refresh: a 401, on a request that carried a
+ * token, not already a retry, on a path that is not itself the refresh (F4.1). A token-less
+ * request never refreshes — a browser signed out while offline still holds a live cookie the
+ * server never heard about, and a refused anonymous request must not quietly resurrect it.
+ */
+function mayRefresh(status: number, sentToken: string | null, path: string, retried: boolean): boolean {
+  return status === 401 && !!sentToken && !retried && !NO_REFRESH.some((p) => path.startsWith(p));
+}
+
 let unauthorizedHandler: (() => void) | null = null;
 export function setUnauthorizedHandler(fn: (() => void) | null) { unauthorizedHandler = fn; }
 
@@ -228,13 +314,13 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   try { return await send<T>(method, path, body); } finally { listener?.("end"); }
 }
 
-async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const hadToken = !!tokenStore.get();
+async function send<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
+  const sentToken = tokenStore.get();
   const res = await fetchWithTimeout(path, {
     method,
     headers: {
       "content-type": "application/json",
-      ...(tokenStore.get() ? { authorization: `Bearer ${tokenStore.get()}` } : {}),
+      ...(sentToken ? { authorization: `Bearer ${sentToken}` } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
@@ -242,7 +328,13 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
   const text = await res.text();
   const payload = res.ok ? (text ? JSON.parse(text) : null) : parseFailureBody(text);
   // Read the body FIRST: the token-less refusal is only distinguishable by the code inside it.
-  if (isSessionEnded(res.status, hadToken, payload) && !UNAUTH_BYPASS.some((p) => path.startsWith(p))) {
+  if (isSessionEnded(res.status, !!sentToken, payload) && !UNAUTH_BYPASS.some((p) => path.startsWith(p))) {
+    // F4.1 — an expired access token is not an ended session while the refresh cookie lives:
+    // one exchange, then this request once more. A 401 was refused before the endpoint ran, so
+    // repeating a mutation cannot do it twice.
+    if (mayRefresh(res.status, sentToken, path, retried) && await refreshSession(sentToken)) {
+      return send<T>(method, path, body, true);
+    }
     // Session expired, revoked, or signed out in another tab — drop the token and let the
     // AuthProvider say so and redirect to /login.
     tokenStore.clear();

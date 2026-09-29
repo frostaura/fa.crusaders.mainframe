@@ -33,6 +33,8 @@ export type MemberCodePhase =
   | "needs-signal"
   /** The club's server has no member codes (it predates them). */
   | "unavailable"
+  /** Signed out (the session lapsed) and no key on this phone — only signing in can make one. */
+  | "signed-out"
   /** The club has barred the member; the key is gone. */
   | "barred"
   /** Anything else — a refusal we do not recognise, a bad answer, a phone that cannot do the maths. */
@@ -54,16 +56,27 @@ export type MemberCodeView = {
   error: unknown;
   /** Ask the club again now. Resolves when the exchange has settled. */
   resync: () => Promise<void>;
+  /**
+   * F4.1 — the session lapsed and the page is showing the code from the key on this phone for
+   * the member it last confirmed. Nothing is asked of the club (there is no session to ask with).
+   */
+  signedOut: boolean;
 };
 
 /** How stale the last exchange may be before a page coming back into view asks again. */
 const RESYNC_ON_VISIBLE_MS = 5 * 60_000;
 
-function useIdentity(): string | null {
+/**
+ * Whose key, and whether the club may be asked about it. Signed out, the member this device last
+ * confirmed — a lapsed session leaves the key on the phone (F4.1: only a sign-out wipes it) —
+ * with no exchange, because there is no session to make one with.
+ */
+function useIdentity(): { userId: string | null; canAsk: boolean; signedOut: boolean } {
   const auth = useAuth();
-  if (auth.status === "authenticated") return auth.userId;
-  if (auth.status === "offline") return readLastIdentity();
-  return null;
+  if (auth.status === "authenticated") return { userId: auth.userId, canAsk: true, signedOut: false };
+  if (auth.status === "offline") return { userId: readLastIdentity(), canAsk: true, signedOut: false };
+  if (auth.status === "anonymous") return { userId: readLastIdentity(), canAsk: false, signedOut: true };
+  return { userId: null, canAsk: false, signedOut: false };
 }
 
 function isOffline(): boolean {
@@ -74,10 +87,11 @@ function isOffline(): boolean {
  * The phase, derived rather than stored — so it cannot disagree with what the page holds.
  * A key wins over every failure except a bar, because a key makes a good code.
  */
-function phaseOf(record: MemberCodeRecord | null, failure: SyncFailure | null, computeFailed: boolean): MemberCodePhase {
+function phaseOf(record: MemberCodeRecord | null, failure: SyncFailure | null, computeFailed: boolean, signedOutEmpty = false): MemberCodePhase {
   if (failure?.kind === "barred") return "barred";
   if (computeFailed) return "failed";
   if (record) return "ready";
+  if (signedOutEmpty) return "signed-out";
   if (!failure) return "loading";
   if (failure.kind === "network") return "needs-signal";
   if (failure.kind === "unavailable") return "unavailable";
@@ -85,8 +99,10 @@ function phaseOf(record: MemberCodeRecord | null, failure: SyncFailure | null, c
 }
 
 /** The key and the exchange with the club: load, sync, re-sync on signal and on return. */
-function useKey(userId: string | null) {
+function useKey(userId: string | null, canAsk: boolean) {
   const [record, setRecord] = useState<MemberCodeRecord | null>(null);
+  /** The phone's store has been read for `userId` — until then "no key" is not known. */
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const [failure, setFailure] = useState<SyncFailure | null>(null);
   const [checking, setChecking] = useState(false);
   const inflight = useRef<Promise<void> | null>(null);
@@ -122,14 +138,15 @@ function useKey(userId: string | null) {
       if (!live) return;
       current.current = stored;
       setRecord(stored);
-      await sync(userId);
+      setLoadedFor(userId);
+      if (canAsk) await sync(userId);
     })();
     return () => { live = false; };
-  }, [userId, sync]);
+  }, [userId, canAsk, sync]);
 
   // Signal came back, or the member came back to the page after a while: ask again.
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || !canAsk) return;
     const onOnline = () => { void sync(userId); };
     const onVisible = () => {
       if (document.visibilityState === "visible" && Date.now() - lastSync.current > RESYNC_ON_VISIBLE_MS) void sync(userId);
@@ -140,10 +157,11 @@ function useKey(userId: string | null) {
       window.removeEventListener("online", onOnline);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [userId, sync]);
+  }, [userId, canAsk, sync]);
 
-  const resync = useCallback(() => (userId ? sync(userId) : Promise.resolve()), [userId, sync]);
-  return { record, failure, checking, resync };
+  const resync = useCallback(() => (userId && canAsk ? sync(userId) : Promise.resolve()), [userId, canAsk, sync]);
+  const signedOutEmpty = !canAsk && !record && userId !== null && loadedFor === userId;
+  return { record, failure, checking, resync, signedOutEmpty };
 }
 
 /**
@@ -175,8 +193,8 @@ function useSecondClock(offsetMs: number): number {
 }
 
 export function useMemberCode(): MemberCodeView {
-  const userId = useIdentity();
-  const { record, failure, checking, resync } = useKey(userId);
+  const { userId, canAsk, signedOut } = useIdentity();
+  const { record, failure, checking, resync, signedOutEmpty } = useKey(userId, canAsk);
   const now = useSecondClock(record?.offsetMs ?? 0);
   const corrected = now + (record?.offsetMs ?? 0);
   const step = stepAt(corrected);
@@ -201,7 +219,7 @@ export function useMemberCode(): MemberCodeView {
   const sameKey = !!record && !!computed && computed.record.key === record.key && computed.record.ref === record.ref;
   const code = sameKey ? computed!.code : null;
   return {
-    phase: phaseOf(record, failure, computeFailed),
+    phase: phaseOf(record, failure, computeFailed, signedOutEmpty),
     code,
     remainingMs: STEP_MS - (((corrected % STEP_MS) + STEP_MS) % STEP_MS),
     offline: !!record && (failure?.kind === "network" || isOffline()),
@@ -209,5 +227,6 @@ export function useMemberCode(): MemberCodeView {
     barredCode: failure?.kind === "barred" ? failure.code : null,
     error: failure?.kind === "failed" ? failure.error : null,
     resync,
+    signedOut,
   };
 }

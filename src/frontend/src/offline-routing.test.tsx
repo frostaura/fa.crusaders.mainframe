@@ -112,23 +112,53 @@ describe("what may render while the club cannot be reached", () => {
    * identity may talk the app out of it. Without this, the fix above would be a way of staying
    * signed in after being signed out.
    */
-  it("sends a refused token to /login even with a confirmed identity on the device", async () => {
-    tokenStore.set("member.jwt.value");
-    localStorage.setItem(LAST_IDENTITY_KEY, "44444444-4444-4444-4444-444444444444");
+  function refused() {
+    // Every call refused — whoami, and the refresh cookie's exchange too (F4.1).
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve({
       ok: false, status: 401,
       headers: { get: () => null },
       text: () => Promise.resolve(JSON.stringify({ error: "expired" })),
       json: () => Promise.resolve({ error: "expired" }),
     } as unknown as Response)));
+  }
+
+  it("sends a refused token to /login from every route but My Code", async () => {
+    tokenStore.set("member.jwt.value");
+    localStorage.setItem(LAST_IDENTITY_KEY, "44444444-4444-4444-4444-444444444444");
+    refused();
+
+    renderAt("/schedule");
+
+    // No route matches /login in this harness, so the redirect renders nothing — which is
+    // itself the assertion: the page is not what is on the screen.
+    await waitFor(() => expect(tokenStore.get(), "a refusal must clear the credential").toBeNull());
+    await waitFor(() => expect(screen.queryByText("the bookings page")).not.toBeInTheDocument());
+    expect(screen.queryByText(/Can't reach the club/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * F4.1 (the P7 decision: only an explicit sign-out wipes the key). A refusal still ends the
+   * session — the credential goes — but the member is still the member, and My Code is what they
+   * open at a door; it renders signed out, from the key on the phone, for the identity the club
+   * confirmed. The identity is what a sign-out clears, which is the next test's business.
+   */
+  it("keeps My Code for the confirmed member after the session lapsed", async () => {
+    tokenStore.set("member.jwt.value");
+    localStorage.setItem(LAST_IDENTITY_KEY, "44444444-4444-4444-4444-444444444444");
+    refused();
 
     renderAt("/my-code");
 
-    // No route matches /login in this harness, so the redirect renders nothing — which is
-    // itself the assertion: the member code page is not what is on the screen.
-    await waitFor(() => expect(screen.queryByText("the member code page")).not.toBeInTheDocument());
+    await waitFor(() => expect(tokenStore.get(), "a refusal must clear the credential").toBeNull());
+    expect(await screen.findByText("the member code page")).toBeInTheDocument();
+    expect(localStorage.getItem(LAST_IDENTITY_KEY), "a lapse is not a sign-out").toBe("44444444-4444-4444-4444-444444444444");
     expect(screen.queryByText(/Can't reach the club/i)).not.toBeInTheDocument();
-    expect(tokenStore.get(), "a refusal must clear the credential").toBeNull();
-    expect(localStorage.getItem(LAST_IDENTITY_KEY), "and the identity with it").toBeNull();
+  });
+
+  it("sends a device with no confirmed member from My Code to /login", async () => {
+    refused();
+    renderAt("/my-code");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.queryByText("the member code page")).not.toBeInTheDocument();
   });
 });

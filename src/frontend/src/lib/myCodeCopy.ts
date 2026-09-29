@@ -34,6 +34,16 @@ export const MY_CODE = {
     body: "This phone hasn't set up your code yet, and it can only do that while it can reach the club. "
       + "Open this page once with signal — after that your code works with no signal at all.",
   },
+  /**
+   * F4.1 — the session lapsed; the code is still made from the key on this phone. Said once,
+   * above the pass, with the way back in — never as an error, because the code is good.
+   */
+  signedOut: {
+    body: "You're signed out, but your code still works from this phone. Sign in to see your bookings and the door's latest.",
+    signIn: "Sign in",
+    /** No key on this phone and no session to make one with. */
+    noKey: "Sign in to set up your code on this phone.",
+  },
   unavailable: "Your club hasn't switched on member codes yet. Ask at the desk if you need to get in or onto a court.",
   barredNoCode: "There's no code to show while that is the case, because doors and court boxes would turn it away. "
     + "If the desk has just sorted it out, check again.",

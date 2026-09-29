@@ -311,22 +311,30 @@ describe("a session that ends takes the member's code key and last-known facts w
   });
 
   /**
-   * And when nobody pressed anything, which on a shared phone is most of the time: the token
-   * expires, is revoked, or an admin resets the password. `endSession` is that path.
+   * F4.1 — REVERSED from D3 by the P7 decision: only an explicit sign-out wipes the key. When
+   * nobody pressed anything (the token lapsed and the refresh cookie could not rescue it) the
+   * member is still the member, and My Code goes on making their code from the key. It used to
+   * wipe here, which turned "signed out after a while" into "locked out at the door". A
+   * different member signing in on this phone still wipes it (below).
    */
-  it("clears it when the session is taken away rather than given up", async () => {
+  it("keeps it when the session is taken away rather than given up", async () => {
     tokenStore.set("member.jwt.value");
-    stubFetch([{ method: "GET", path: "/api/v1/whoami", status: 401, body: { error: "expired" } }]);
+    stubFetch([
+      { method: "GET", path: "/api/v1/whoami", status: 401, body: { error: "expired" } },
+      { method: "POST", path: "/api/v1/auth/refresh", status: 401, body: { error: "session_ended" } },
+    ]);
+    localStorage.setItem("crusaders.mainframe.last-identity", WHOAMI.user_id);
 
-    // Stored BEFORE the provider mounts: the 401 lands on its first probe, and a fixture
-    // written after it would be racing the very wipe under test.
+    // Stored BEFORE the provider mounts: the 401 lands on its first probe.
     await storeACodeFor("BWDJ");
     render(<MemoryRouter><AuthProvider><SessionProbe /></AuthProvider></MemoryRouter>);
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"));
 
-    await waitFor(async () => expect(await heldRef()).toBeNull());
-    expect(readLastKnown().door).toBeNull();
-    expect(readLastIdentity()).toBeNull();
+    expect(tokenStore.get(), "the credential goes").toBeNull();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(await heldRef(), "the member's own key stays").toBe("BWDJ");
+    expect(readLastKnown().door).not.toBeNull();
+    expect(readLastIdentity()).toBe(WHOAMI.user_id);
   });
 
   /**

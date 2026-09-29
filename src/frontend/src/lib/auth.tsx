@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ApiError, endpoints, setPasswordChangeRequiredHandler, setUnauthorizedHandler, TOKEN_KEY, tokenStore } from "./api";
+import { ApiError, endpoints, refreshSession, setPasswordChangeRequiredHandler, setUnauthorizedHandler, TOKEN_KEY, tokenStore, type WhoAmI } from "./api";
 import { loginWithPasskey as runPasskeyLogin } from "./webauthn";
 import { clearOfflineCache } from "./pwa";
 import { forgetLastKnown } from "./lastKnown";
@@ -150,6 +150,24 @@ function isAuthRefusal(err: unknown): boolean {
   return err instanceof ApiError && (err.status === 401 || err.status === 403);
 }
 
+/**
+ * The bootstrap probe, given one refresh (F4.1). `whoami` is exempt from the api client's refresh
+ * (an anonymous probe is allowed its 401), so a phone opened after the access token lapsed would
+ * otherwise go straight to /login with a perfectly good refresh cookie in the jar. One exchange,
+ * one more probe; a second refusal is the answer.
+ */
+async function whoamiRefreshingOnce(token: string): Promise<WhoAmI> {
+  let first: WhoAmI;
+  try {
+    first = await endpoints.whoami();
+  } catch (err) {
+    if (!isAuthRefusal(err) || !(await refreshSession(token))) throw err;
+    return endpoints.whoami();
+  }
+  if (first.is_authenticated || !(await refreshSession(token))) return first;
+  return endpoints.whoami();
+}
+
 /** Retry schedule for the bootstrap probe while the club is unreachable: 1s, 2s, 4s … 30s. */
 function nextProbeDelayMs(attempt: number): number {
   return Math.min(1000 * 2 ** attempt, 30_000);
@@ -266,13 +284,14 @@ function rememberIdentity(userId: string): void {
 }
 
 /**
- * A session is over: the id goes, and everything the page stored under it goes with it.
+ * A session was given up: the id goes, and everything the page stored under it goes with it.
  *
  * <p>
- * Called from BOTH endings, and the second matters more than the first. `logout` is a member
- * pressing something; `endSession` is a token expiring, being revoked, or an admin resetting a
- * password — which on a shared club phone is how a session usually ends, with nobody pressing
- * anything at all.
+ * Called from the sign-outs only — `logout` and "Sign out everywhere". It used to run on an
+ * expiry too, on the argument that a shared club phone's session usually ends with nobody
+ * pressing anything. The refresh cookie changed that argument (a session now lapses only after
+ * 30 idle days or a server-side revocation), and the P7 decision settles the rest: only an
+ * explicit sign-out wipes the member code's key (F4.1, see `endTakenAway`).
  * </p>
  *
  * <p>
@@ -304,6 +323,25 @@ function endLocally(): void {
   tokenStore.clear();
   void clearOfflineCache();
   forgetIdentity();
+}
+
+/**
+ * The local half of a session TAKEN AWAY — an expiry the refresh cookie could not rescue, a
+ * revocation — as opposed to one given up (F4.1, the P7 decision).
+ *
+ * <p>
+ * <b>Only an explicit sign-out wipes the member code's key.</b> A member whose session lapses is
+ * still that member, standing at a door; the key on the phone still makes their code, and wiping
+ * it turned "signed out after a while" into "locked out until you find signal and sign in". So
+ * this drops the token and the offline caches and KEEPS the confirmed identity, the key, the
+ * last-known door facts and the club's zone — which is what lets `/my-code` go on showing the
+ * code signed out. A different member signing in on this phone still wipes all of it
+ * (`rememberIdentity`), and the sign-out buttons still call {@link endLocally}.
+ * </p>
+ */
+function endTakenAway(): void {
+  tokenStore.clear();
+  void clearOfflineCache();
 }
 
 type LoginAnswer = { access_token: string; user_id: string; is_admin: boolean; must_change_password?: boolean };
@@ -357,7 +395,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    */
   const endSession = useCallback(() => {
     setSessionEnding({ kind: "expired", userId: readLastIdentity(), notice: null });
-    endLocally(); // D3 — see forgetIdentity; this is the ending nobody presses anything for.
+    endTakenAway(); // F4.1 — the key stays; see endTakenAway.
     setSessionExpired(true);
     setState({ status: "anonymous" });
   }, []);
@@ -369,7 +407,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
-      const w = await endpoints.whoami();
+      const w = await whoamiRefreshingOnce(t);
       if (w.is_authenticated && w.user_id) {
         probeAttempt.current = 0;
         // D3 — the only place a confirmed identity is written, because this is the only place
@@ -422,9 +460,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUnauthorizedHandler(() => {
       if (statusRef.current === "anonymous") return;
       setSessionEnding({ kind: "expired", userId: readLastIdentity(), notice: null });
-      // Same reasoning as endSession: the session is over, so nothing this browser cached
-      // while it was alive may survive it.
-      void clearOfflineCache();
+      // Same as endSession: the refresh cookie could not rescue it (the api client tried once),
+      // so the token and the offline caches go — and the member code's key stays (F4.1).
+      endTakenAway();
       setSessionExpired(true);
       setState({ status: "anonymous" });
     });

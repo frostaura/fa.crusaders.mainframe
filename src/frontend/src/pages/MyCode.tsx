@@ -88,8 +88,10 @@ function boundaryInstants(door: MemberDoor | null): (string | null | undefined)[
 }
 
 /** Everything the page derives from the door read, out of the render for the complexity gate. */
-function useDoorFacts(resync: () => Promise<void>) {
-  const doorRead = useMemberDoor(true);
+function useDoorFacts(resync: () => Promise<void>, signedIn: boolean) {
+  // Signed out (F4.1), the door facts come from the last-known store alone: there is no session
+  // to read `/me/door` with, and a refused read would only put a failure beside a good code.
+  const doorRead = useMemberDoor(signedIn);
   const door = doorRead.door;
   /** Read once, before the first answer lands, so a no-signal cold start paints something. */
   const [cached] = useState(() => readLastKnown());
@@ -128,7 +130,7 @@ type DoorFacts = ReturnType<typeof useDoorFacts>;
 
 export default function MyCodePage() {
   const view = useMemberCode();
-  const facts = useDoorFacts(view.resync);
+  const facts = useDoorFacts(view.resync, !view.signedOut);
 
   if (view.phase === "barred") {
     return <BarredPage reason={barredReason(view.barredCode ?? "")} checking={view.checking} onCheckAgain={() => void view.resync()} />;
@@ -149,6 +151,7 @@ export default function MyCodePage() {
       */}
       <PageHeader title={MY_CODE.title} className="sr-only sm:not-sr-only" />
 
+      {view.signedOut && view.phase !== "signed-out" ? <SignedOutNotice /> : null}
       <CodeArea view={view} />
 
       {facts.decision && (
@@ -167,7 +170,7 @@ export default function MyCodePage() {
       <WhatsNextCard booking={facts.door?.next_booking} timezone={facts.door?.timezone} doors={facts.doorsKnowledge} />
       <Link to={GUIDE_PATH} className={MEMBER_DOOR_LINK_TAPPABLE}>{GUIDE_FROM_CODE}</Link>
 
-      <SetupChecklist />
+      {view.signedOut ? null : <SetupChecklist />}
 
       <DoorBlocks facts={facts} code={code} codeSecondsLeft={codeSecondsLeft} onRefreshCode={view.resync} />
       <DoorFooter doorsKnowledge={facts.doorsKnowledge} contact={facts.contact} />
@@ -185,6 +188,16 @@ export default function MyCodePage() {
  */
 function CodeArea({ view }: { view: MemberCodeView }) {
   if (view.phase === "ready" || view.phase === "loading") return <LivePass view={view} />;
+  if (view.phase === "signed-out") {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-start gap-3 pt-6">
+          <p className="text-sm text-text-secondary">{MY_CODE.signedOut.noKey}</p>
+          <SignInLink />
+        </CardContent>
+      </Card>
+    );
+  }
   if (view.phase === "needs-signal") {
     return (
       <Card>
@@ -200,6 +213,25 @@ function CodeArea({ view }: { view: MemberCodeView }) {
     return <p role="status" className="text-sm text-text-secondary">{MY_CODE.unavailable}</p>;
   }
   return <StateBlock error={view.error} action="set up your code" onRetry={() => void view.resync()} />;
+}
+
+/** Back to /login, and back here after it (RequireAuth's own `from` shape). */
+function SignInLink() {
+  return (
+    <Button asChild variant="outline">
+      <Link to="/login" state={{ from: { pathname: "/my-code" } }}>{MY_CODE.signedOut.signIn}</Link>
+    </Button>
+  );
+}
+
+/** F4.1 — signed out, code still good: one calm line and the way back in. */
+function SignedOutNotice() {
+  return (
+    <div role="status" className="flex flex-col items-start gap-3 rounded-lg bg-bg-muted px-4 py-3 text-sm text-text-secondary">
+      <p>{MY_CODE.signedOut.body}</p>
+      <SignInLink />
+    </div>
+  );
 }
 
 /** The pass, and the full-screen view it opens. */

@@ -382,7 +382,13 @@ export function RequireAuth({ children, admin = false }: { children: React.React
     if (!canCope) return <ConnectionLost onRetry={auth.retryConnection} />;
     return <>{children}</>;
   }
-  if (auth.status !== "authenticated") return <Navigate to="/login" replace state={{ from: location }} />;
+  if (auth.status !== "authenticated") {
+    // F4.1 — a session that LAPSED leaves the member's identity and code key on this phone (only
+    // a sign-out wipes them), so /my-code goes on showing the code, signed out, with a way back
+    // in. A device that never confirmed anybody, or whose member signed out, gets /login.
+    if (OFFLINE_CAPABLE.has(location.pathname) && readLastIdentity() !== null) return <>{children}</>;
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
   if (auth.mustChangePassword && location.pathname !== "/change-password") {
     return <Navigate to="/change-password" replace />;
   }
