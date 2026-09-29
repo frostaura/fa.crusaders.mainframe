@@ -143,9 +143,11 @@ export function ScheduleEditor({
   const dayEndMinute = settings?.day_end_minute ?? 24 * 60;
   const activeCourts = useMemo(() => (courts ?? []).filter((c) => c.is_active), [courts]);
 
-  const body: ScheduleBody = useMemo(() => ({
+  // Typed through the generic, not the variable: an annotation on the variable skips the
+  // excess-property check on the literal, which is how a misnamed field reached the wire (F3.1).
+  const body = useMemo<ScheduleBody>(() => ({
     name: name.trim(), label: label.trim(), days, start, end,
-    startDate, endDate: endDate || null, intervalWeeks, courtIds,
+    startDate, endDate: endDate || null, intervalWeeks, courts: courtIds,
   }), [name, label, days, start, end, startDate, endDate, intervalWeeks, courtIds]);
 
   const signature = JSON.stringify(body);

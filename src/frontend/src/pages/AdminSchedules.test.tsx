@@ -8,6 +8,7 @@ import {
   sessionRoutes,
 } from "../test/scheduleFixtures";
 import { forgetClubZone } from "../lib/clubZone";
+import { serverRecordFields } from "../test/serverContract";
 // The date picker's calendar is a lazy chunk (P10). Loaded here, once, so opening a picker in a
 // test resolves from the module cache instead of racing a cold transform under a loaded runner.
 import "@/components/ui/date-picker-calendar";
@@ -234,6 +235,31 @@ describe("creating one", () => {
       "Nothing is in the way. All 396 slots are free on all 11 Tuesdays.",
     )).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create the hold" })).toBeInTheDocument();
+  });
+
+  it("sends the sentence under the field names the server's ScheduleRequest binds", async () => {
+    // Review round 1 (F3.1): the screen sent `courtIds`, the server reads `courts`, and no
+    // repeating booking could be created. The names are read from the C# record, not restated.
+    const stub = stubFetch([
+      ...sessionRoutes(),
+      { path: SCHEDULES, body: { schedules: [] } },
+      ...editorPrerequisiteRoutes(),
+      { method: "POST", path: `${SCHEDULES}/preview`, body: previewFixture() },
+    ]);
+    renderPage(<AdminSchedulesPage />);
+    await screen.findByText("No repeating bookings yet.");
+    await openEditor();
+    await screen.findByRole("heading", { name: "A new repeating booking" });
+    await fillTheSentence();
+    await userEvent.click(screen.getByRole("button", { name: "Check 11 Tuesdays" }));
+    await screen.findByRole("button", { name: "Create the hold" });
+
+    const server = serverRecordFields("Endpoints/ScheduleRequestParsing.cs", "ScheduleRequest");
+    expect(server).toContain("courts");
+    const sent = stub.calls.find((c) => c.method === "POST" && c.path === `${SCHEDULES}/preview`);
+    const body = sent?.body as Record<string, unknown>;
+    expect(Object.keys(body).filter((k) => !server.includes(k))).toEqual([]);
+    expect([...(body.courts as string[])].sort()).toEqual([COURT_IDS.one, COURT_IDS.two, COURT_IDS.three].sort());
   });
 
   it("takes the Save away again the moment the sentence changes", async () => {

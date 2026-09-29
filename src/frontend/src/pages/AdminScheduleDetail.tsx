@@ -15,7 +15,7 @@ import { ArrowCounterClockwise, CalendarDots, PencilSimple } from "../components
 import { OccurrenceChange, type EditScope } from "../components/schedules/OccurrenceChange";
 import { ScheduleChangeList } from "../components/schedules/ScheduleChangeList";
 import {
-  adminEndpoints, type AdminChangePage, type ScheduleOccurrence, type ScheduleRow,
+  adminEndpoints, scheduleBodyOf, type AdminChangePage, type ScheduleOccurrence, type ScheduleRow,
 } from "../lib/adminApi";
 import { describeFailure } from "../lib/errors";
 import {
@@ -354,12 +354,14 @@ export function AdminScheduleDetailPage() {
   }
 
   function submitChange(date: string, choice: { scope: EditScope; start: string; end: string; reason: string }) {
+    if (!row) return;
     void runWrite(() => (choice.scope === "only"
       ? adminEndpoints.scheduleOccurrenceUpdate(id, date, {
         start: choice.start, end: choice.end, reason: choice.reason,
       })
       : adminEndpoints.scheduleUpdate(id, {
-        start: choice.start, end: choice.end, effectiveFrom: date,
+        ...scheduleBodyOf(row), start: choice.start, end: choice.end, effectiveFrom: date,
+        reason: choice.reason,
       })));
   }
 

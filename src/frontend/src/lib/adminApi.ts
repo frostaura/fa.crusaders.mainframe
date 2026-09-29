@@ -470,8 +470,35 @@ export type ScheduleBody = {
   startDate: string;
   endDate?: string | null;
   intervalWeeks?: number;
-  courtIds: string[];
+  /**
+   * The court ids, under the name the server's `ScheduleRequest` binds — `courts`, NOT
+   * `courtIds`. Review round 1 found the screen sending `courtIds` and every create refused;
+   * `AdminSchedules.test.tsx` now reads the C# record so the two cannot drift apart again.
+   */
+  courts: string[];
 };
+
+/**
+ * A this-and-future edit. The server parses it as a WHOLE rule (`ScheduleUpdateRequest` →
+ * `ScheduleRequest`), so every field travels, not just the one that changed — a body with only
+ * new hours is a rule with no name, and was refused as one.
+ */
+export type ScheduleUpdateBody = ScheduleBody & { effectiveFrom?: string; reason?: string };
+
+/** The rule a stored row describes, in the request's shape, for an edit to start from. */
+export function scheduleBodyOf(row: ScheduleRow): ScheduleBody {
+  return {
+    name: row.name,
+    label: row.label,
+    days: row.days ?? [],
+    start: row.start ?? "",
+    end: row.end ?? "",
+    startDate: row.start_date ?? "",
+    endDate: row.end_date ?? null,
+    intervalWeeks: row.interval_weeks ?? 1,
+    courts: (row.courts ?? []).map((c) => c.id),
+  };
+}
 
 export type ScheduleConflict = {
   occurrence_date: string;
@@ -777,7 +804,7 @@ export const adminEndpoints = {
    * This and future. `effectiveFrom` is clamped to never be earlier than the club's today —
    * an admin typing last Tuesday means "from now on" — and the response says it was clamped.
    */
-  scheduleUpdate: (id: string, body: Partial<ScheduleBody> & { effectiveFrom?: string }) =>
+  scheduleUpdate: (id: string, body: ScheduleUpdateBody) =>
     api.patch<ScheduleRow & { effective_from_clamped_to?: string }>(`/api/v1/admin/schedules/${id}`, body),
   /** Only this occurrence: skip it, or move its hours. A past date is refused, never rewritten. */
   scheduleOccurrenceUpdate: (

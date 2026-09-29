@@ -8,6 +8,7 @@ import {
   SCHEDULE_ID, changeRowFixture, occurrenceFixture, scheduleRowFixture, sessionRoutes,
 } from "../test/scheduleFixtures";
 import { forgetClubZone } from "../lib/clubZone";
+import { serverRecordFields } from "../test/serverContract";
 
 /**
  * A longer per-test timeout than the 5-second default, for this file only. Each case drives
@@ -210,6 +211,17 @@ describe("changing the hours", () => {
 
     const call = stub.calls.find((c) => c.method === "PATCH" && c.path === BASE);
     expect(call?.body).toMatchObject({ start: "19:00", end: "21:30", effectiveFrom: "2026-10-13" });
+    // Review round 1 (F3.1): the server parses the PATCH as a WHOLE rule (ScheduleUpdateRequest
+    // → ScheduleRequest), so a body carrying only the new hours was refused as a nameless rule.
+    // Every other part of the rule travels unchanged, under the server's own field names.
+    const server = serverRecordFields("Endpoints/ScheduleRequests.cs", "ScheduleUpdateRequest");
+    const body = call?.body as Record<string, unknown>;
+    expect(Object.keys(body).filter((k) => !server.includes(k))).toEqual([]);
+    expect(body).toMatchObject({
+      name: "Tuesday league", label: "League night", days: ["tue"], startDate: "2026-10-06",
+      endDate: "2026-12-15", intervalWeeks: 1, reason: "League starts later",
+    });
+    expect((body.courts as string[]).length).toBe(3);
   });
 
   it("says out loud when the server moved the date forward rather than refusing it", async () => {

@@ -276,10 +276,10 @@ describe.each(RUNNER_ZONES)("with the runner's own clock in %s", (runnerZone) =>
 
   describe("validating a sentence before it may be checked", () => {
     const ctx = { sliceMinutes: 15, dayStartMinute: 360, maxRows: 2000, activeCourtIds: ["c1", "c2", "c3"] };
-    const body: WeeklyRule & { name: string; label: string; courtIds: string[] } = {
+    const body: WeeklyRule & { name: string; label: string; courts: string[] } = {
       name: "Tuesday league", label: "League night", days: ["tue"],
       start: "18:00", end: "21:00", startDate: "2026-10-06", endDate: "2026-12-15",
-      intervalWeeks: 1, courtIds: ["c1", "c2", "c3"],
+      intervalWeeks: 1, courts: ["c1", "c2", "c3"],
     };
 
     const codes = (b: Partial<typeof body>) => validateRule({ ...body, ...b }, ctx).map((r) => r.code);
@@ -299,8 +299,8 @@ describe.each(RUNNER_ZONES)("with the runner's own clock in %s", (runnerZone) =>
       expect(codes({ intervalWeeks: 9 })).toContain("schedule_interval_out_of_range");
       expect(codes({ intervalWeeks: 0 })).toContain("schedule_interval_out_of_range");
       expect(codes({ endDate: "2026-10-05" })).toContain("schedule_date_range_invalid");
-      expect(codes({ courtIds: [] })).toContain("schedule_courts_invalid");
-      expect(codes({ courtIds: ["c1", "not-this-club"] })).toContain("schedule_courts_invalid");
+      expect(codes({ courts: [] })).toContain("schedule_courts_invalid");
+      expect(codes({ courts: ["c1", "not-this-club"] })).toContain("schedule_courts_invalid");
     });
 
     it("carries the number an admin needs with the refusal that mentions one", () => {

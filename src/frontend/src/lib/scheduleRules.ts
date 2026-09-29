@@ -406,7 +406,7 @@ function validateSpan(rule: WeeklyRule, ctx: ValidationContext, courtCount: numb
  * </p>
  */
 export function validateRule(body: ScheduleBody | (WeeklyRule & {
-  name: string; label: string; courtIds: readonly string[];
+  name: string; label: string; courts: readonly string[];
 }), ctx: ValidationContext): RuleRefusal[] {
   const out: RuleRefusal[] = [];
   const name = (body.name ?? "").trim();
@@ -419,7 +419,7 @@ export function validateRule(body: ScheduleBody | (WeeklyRule & {
 
   out.push(...validateTimes(body, ctx));
 
-  const courtIds = body.courtIds ?? [];
+  const courtIds = body.courts ?? [];
   const known = ctx.activeCourtIds;
   // Unknown is never false: with no court list we decline to judge the courts at all.
   if (courtIds.length === 0 || (known !== undefined && courtIds.some((id) => !known.includes(id)))) {
