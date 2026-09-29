@@ -10,12 +10,12 @@ import { MemberCombobox } from "../components/ui/member-combobox";
 import { useToast } from "../components/Toast";
 import { GroupCard } from "../components/groups/GroupCard";
 import { clubWeek } from "../components/groups/weekGrid";
-import type { ClubContext } from "../components/groups/groupDraft";
+import { courtPricesOf, type ClubContext } from "../components/groups/groupDraft";
 import { GroupMembers, type ClubMember, type GroupMemberRow } from "../components/groups/GroupMembers";
 import { GroupWeekPreview, MemberPreview } from "../components/groups/GroupPreview";
 import { GroupSheet, type GroupSheetTab } from "../components/groups/GroupSheet";
 import { GroupAssign } from "../components/members/GroupAssign";
-import { ApiError, endpoints } from "../lib/api";
+import { ApiError, endpoints, type AdminCourt } from "../lib/api";
 import {
   adminEndpoints, type AdminBulkResult, type MemberBookingRules, type MemberGroup,
   type MemberGroupBody, type Weekday,
@@ -81,13 +81,17 @@ const BLANK: MemberGroup = {
  * limited", which an admin would act on, and only the second is true.
  * </p>
  */
-function clubContextFrom(settings: Record<string, unknown> | null, club: ClubContext["club"]): ClubContext & { timezone?: string } {
+function clubContextFrom(
+  settings: Record<string, unknown> | null, club: ClubContext["club"], courts: AdminCourt[] | null,
+): ClubContext & { timezone?: string } {
   const numberOr = <T,>(key: string, fallback: T) =>
     typeof settings?.[key] === "number" ? (settings[key] as number) : fallback;
   return {
     club,
     sliceMinutes: numberOr("slice_minutes", 15),
-    courtPrice: numberOr("slice_price_credits", 0),
+    // Each court's own price (F3.3) — never the club-wide `slice_price_credits`, which is only
+    // the default a NEW court starts at.
+    courtPrices: courtPricesOf(courts),
     clubCaps: {
       slotCap: numberOr("member_max_slots_per_day", null),
       minuteCap: numberOr("member_per_day_max_minutes", null),
@@ -106,17 +110,20 @@ function usePageReads() {
   const [settings, setSettings] = useState<Record<string, unknown> | null>(null);
   const [groups, setGroups] = useState<MemberGroup[] | null>(null);
   const [clubMembers, setClubMembers] = useState<ClubMember[] | null>(null);
+  const [courts, setCourts] = useState<AdminCourt[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [readAt, setReadAt] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [groupsRead, settingsRead, membersRead] = await Promise.allSettled([
+    const [groupsRead, settingsRead, membersRead, courtsRead] = await Promise.allSettled([
       adminEndpoints.memberGroups(),
       endpoints.adminSettingsGet(),
       endpoints.adminMembers(),
+      endpoints.adminCourtsList(),
     ]);
+    if (courtsRead.status === "fulfilled") setCourts(courtsRead.value);
     if (groupsRead.status === "fulfilled") {
       setGroups(groupsRead.value.groups);
       setError(null);
@@ -135,7 +142,7 @@ function usePageReads() {
   // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
   useEffect(() => { void load(); }, [load]);
 
-  return { settings, groups, clubMembers, loading, error, readAt, load };
+  return { settings, groups, clubMembers, courts, loading, error, readAt, load };
 }
 
 /**
@@ -208,7 +215,7 @@ function useGroupWrites(load: () => Promise<void>, setSheet: (next: SheetState) 
 
 export function AdminGroupsPage() {
   const reads = usePageReads();
-  const { settings, groups, loading, error, load } = reads;
+  const { settings, groups, courts, loading, error, load } = reads;
   const [sheet, setSheet] = useState<SheetState>(null);
   const [draftKey, setDraftKey] = useState(0);
   const [weekPreviewId, setWeekPreviewId] = useState<string | null>(null);
@@ -216,7 +223,7 @@ export function AdminGroupsPage() {
   const writes = useGroupWrites(load, setSheet);
 
   const club = useMemo(() => clubWeek(settings ?? {}), [settings]);
-  const context = clubContextFrom(settings, club);
+  const context = clubContextFrom(settings, club, courts);
 
   /*
    * The club's hours as they were when the open preview was computed. Settings are edited on
@@ -430,7 +437,7 @@ function Cards(props: Parameters<typeof GroupList>[0] & { groups: MemberGroup[] 
           group={group}
           club={context.club}
           sliceMinutes={context.sliceMinutes}
-          courtPrice={context.courtPrice}
+          courtPrices={context.courtPrices}
           clubRate={context.clubRate}
           blockZar={context.blockZar}
           onEdit={() => onOpen(group.id, "settings")}

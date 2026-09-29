@@ -3,7 +3,7 @@ import {
   GROUP_REFUSAL_CODES, MOST_RESTRICTIVE_STANDING, addMembersLabel, addResultLine,
   capResolutionSentence, deleteRefusalSentence, emptyIntersectionSentence, explainGroupRefusal,
   groupChangeConsequence, memberCountLine, paintedRunAnnouncement, paintedWeekSentence,
-  misalignedWindowNote, previewSummary, ratePerBlockSentence, slicePriceLine,
+  misalignedWindowNote, previewSummary, ratePerBlockSentence, slicePriceLine, COURTS_UNREAD,
   ASSIGN_COPY, capsSummary, explainAssignRefusal, peakChangeLine, peakChip, peakChoiceOf, peakSayOf,
   rateChangeLine, rateChip, ratePreviewLine, rateProblemSentence, tariffLine, yourRateLine,
 } from "./groupsCopy";
@@ -227,22 +227,22 @@ describe("the per-day ceiling, said where it is set — item 19", () => {
 
 describe("what a slot costs, in the club's own units", () => {
   it("says the court's own price for a group that inherits", () => {
-    expect(slicePriceLine({ mode: "inherit_court", credits: 8, courtPrice: 8 }))
+    expect(slicePriceLine({ mode: "inherit_court", credits: [8], courtPrices: [8] }))
       .toBe("One slot costs what the court costs — 8 credits.");
   });
 
   it("says the multiplier AND the figure it produces", () => {
-    expect(slicePriceLine({ mode: "multiplier", credits: 6, courtPrice: 8, multiplierBps: 7_500 }))
+    expect(slicePriceLine({ mode: "multiplier", credits: [6], courtPrices: [8], multiplierBps: 7_500 }))
       .toBe("One slot costs 6 credits — 0.75× the court's 8.");
   });
 
   it("says a flat price is flat, because that is the part an admin misreads", () => {
-    expect(slicePriceLine({ mode: "flat_per_slice", credits: 12, courtPrice: 8 }))
+    expect(slicePriceLine({ mode: "flat_per_slice", credits: [12], courtPrices: [8] }))
       .toBe("One slot costs 12 credits, whatever the court charges.");
   });
 
   it("will not print a price the club's system has not sent", () => {
-    expect(slicePriceLine({ mode: "flat_per_slice", credits: 0, courtPrice: 8, unknown: true }))
+    expect(slicePriceLine({ mode: "flat_per_slice", credits: [], courtPrices: [8], unknown: true }))
       .toBe("The club's system hasn't said what one slot costs under this choice yet.");
   });
 
@@ -254,24 +254,40 @@ describe("what a slot costs, in the club's own units", () => {
    * screen it is about used to name `topup_block_zar` two different ways.
    */
   it("puts the rate in top-up blocks, with what that actually buys", () => {
-    expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrice: 50 }))
+    expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrices: [50] }))
       .toBe("R100.00 buys 160 credits — about 3 slots at today's prices.");
   });
 
   it("says one slot in the singular and none in words", () => {
-    expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrice: 160 }))
+    expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrices: [160] }))
       .toContain("about 1 slot");
-    expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrice: 400 }))
+    expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrices: [400] }))
       .toBe("R100.00 buys 160 credits — not enough for a single slot at today's prices.");
   });
 
   it("does not divide by a free court", () => {
-    expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrice: 0 }))
+    expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrices: [0] }))
       .toBe("R100.00 buys 160 credits. Courts cost nothing at the moment, so that buys any number of slots.");
   });
 
+  /** F3.3: each court carries its own price, and a club whose courts differ reads a range. */
+  it("quotes the courts' own prices, as a range when they differ", () => {
+    expect(slicePriceLine({ mode: "inherit_court", credits: [40, 60], courtPrices: [40, 60] }))
+      .toBe("One slot costs what the court costs — 40–60 credits, depending on the court.");
+    expect(slicePriceLine({ mode: "multiplier", credits: [30, 45], courtPrices: [40, 60], multiplierBps: 7_500 }))
+      .toBe("One slot costs 30–45 credits, depending on the court — 0.75× the court's 40–60.");
+    expect(ratePerBlockSentence({ creditsPerZar: 2.4, blockZar: 100, slicePrices: [40, 60] }))
+      .toBe("R100.00 buys 240 credits — about 4–6 slots at today's prices, depending on the court.");
+  });
+
+  it("names no price at all while the courts are unread, and no slot count for a blank flat price", () => {
+    expect(slicePriceLine({ mode: "inherit_court", credits: [], courtPrices: null })).toBe(COURTS_UNREAD);
+    expect(ratePerBlockSentence({ creditsPerZar: 1.6, blockZar: 100, slicePrices: null }))
+      .toBe("R100.00 buys 160 credits.");
+  });
+
   it("says nothing it does not know", () => {
-    expect(ratePerBlockSentence({ creditsPerZar: null, blockZar: 100, slicePrice: 50 }))
+    expect(ratePerBlockSentence({ creditsPerZar: null, blockZar: 100, slicePrices: [50] }))
       .toBe("The club's system hasn't said what a top-up buys.");
   });
 });

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { paintedToWindows, windowsToPainted } from "./weekGrid";
 import type { GroupPricingMode, MemberGroup, MemberGroupBody } from "../../lib/adminApi";
+import type { AdminCourt } from "../../lib/api";
 import { rateProblem, round2AwayFromZero } from "../../lib/groupRules";
 import {
   GROUP_SHEET, peakChoiceOf, peakSayOf, rateProblemSentence, type PaintedWeek, type PeakChoice,
@@ -41,7 +42,12 @@ export type Draft = {
 export type ClubContext = {
   club: PaintedWeek;
   sliceMinutes: number;
-  courtPrice: number;
+  /**
+   * The distinct slot prices of the club's courts in use, lowest first — null while the courts
+   * have not been read. Each court carries its own price; the club-wide `slice_price_credits`
+   * is only the default for a NEW court and quoting it here was review round 1's F3.3.
+   */
+  courtPrices: readonly number[] | null;
   clubCaps: { slotCap: number | null; minuteCap: number | null; advanceDays: number | null };
   clubRate: number | null | undefined;
   blockZar: number | null | undefined;
@@ -69,7 +75,30 @@ export function draftFrom(group: MemberGroup): Draft {
   };
 }
 
-/** What one slot costs under the choice currently on screen — the figure beside the choice. */
+/** The distinct prices of the courts in use, lowest first; null when the courts are unread. */
+export function courtPricesOf(courts: readonly AdminCourt[] | null): readonly number[] | null {
+  if (!courts) return null;
+  const prices = courts
+    .filter((c) => c.is_active)
+    .map((c) => c.slice_price_credits)
+    .filter((p): p is number => typeof p === "number" && Number.isFinite(p));
+  return [...new Set(prices)].sort((a, b) => a - b);
+}
+
+/**
+ * The figure beside the choice, once per court price: `unknown` when the choice cannot be
+ * priced (a multiplier or flat price mid-typing), and `credits` empty when the courts are unread.
+ */
+export function pricesOf(draft: Draft, courtPrices: readonly number[] | null): { credits: number[]; unknown: boolean } {
+  if (draft.mode === "flat_per_slice") {
+    const flat = priceOf(draft, 0);
+    return { credits: flat.unknown ? [] : [flat.credits], unknown: flat.unknown };
+  }
+  const each = (courtPrices ?? []).map((p) => priceOf(draft, p));
+  return { credits: each.map((p) => p.credits), unknown: each.some((p) => p.unknown) };
+}
+
+/** What one slot costs under the choice currently on screen, against ONE court price. */
 export function priceOf(draft: Draft, courtPrice: number): { credits: number; unknown: boolean } {
   if (draft.mode === "inherit_court") return { credits: courtPrice, unknown: false };
   if (draft.mode === "multiplier") {

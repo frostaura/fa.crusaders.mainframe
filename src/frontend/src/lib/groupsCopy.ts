@@ -303,28 +303,62 @@ export function creditsFace(credits: number): string {
 }
 
 /**
+ * A spread of credit figures as one face: "8" when every court agrees, "8–12" when they differ.
+ *
+ * <p>
+ * <b>Review round 1, F3.3.</b> Every figure on the Groups page used to be worked out from the
+ * club's retired `slice_price_credits` setting — 8 cr — while each court now carries its own
+ * price. "R100 buys 240 credits — about 30 slots" was arithmetic on a number no court charged.
+ * The page now reads the courts, and where they differ it says the range rather than picking one.
+ * </p>
+ */
+export function creditsRange(values: readonly number[]): string {
+  if (values.length === 0) return "?";
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+  return low === high ? creditsFace(low) : `${creditsFace(low)}–${creditsFace(high)}`;
+}
+
+/** Said instead of a price while the courts have not been read — never a figure invented. */
+export const COURTS_UNREAD = "The club's courts haven't been read yet, so what a slot costs isn't known.";
+
+/**
  * What one slice costs under this pricing choice, shown beside the choice.
  *
  * A mode picked with no figure beside it is three radio buttons an admin guesses at; the
- * consequence is what makes the choice readable.
+ * consequence is what makes the choice readable. `credits` holds one figure per distinct court
+ * price (F3.3), so a club whose courts differ reads a range, never one court's price.
  */
 export function slicePriceLine(input: {
   mode: GroupPricingMode;
-  credits: number;
-  courtPrice: number;
+  credits: readonly number[];
+  /** The distinct prices of the club's courts in use; null while they have not been read. */
+  courtPrices: readonly number[] | null;
   multiplierBps?: number | null;
   unknown?: boolean;
 }): string {
   if (input.unknown) return "The club's system hasn't said what one slot costs under this choice yet.";
+  if (input.mode === "flat_per_slice") {
+    return `One slot costs ${creditsRange(input.credits)} credits, whatever the court charges.`;
+  }
+  if (!input.courtPrices || input.courtPrices.length === 0) return COURTS_UNREAD;
+  const depends = input.courtPrices.length > 1 ? ", depending on the court" : "";
   if (input.mode === "inherit_court") {
-    return `One slot costs what the court costs — ${creditsFace(input.courtPrice)} credits.`;
+    return `One slot costs what the court costs — ${creditsRange(input.courtPrices)} credits${depends}.`;
   }
-  if (input.mode === "multiplier") {
-    const face = typeof input.multiplierBps === "number" ? multiplierFace(input.multiplierBps) : "?";
-    return `One slot costs ${creditsFace(input.credits)} credits — ${face}× the court's `
-      + `${creditsFace(input.courtPrice)}.`;
-  }
-  return `One slot costs ${creditsFace(input.credits)} credits, whatever the court charges.`;
+  const face = typeof input.multiplierBps === "number" ? multiplierFace(input.multiplierBps) : "?";
+  return `One slot costs ${creditsRange(input.credits)} credits${depends} — ${face}× the court's `
+    + `${creditsRange(input.courtPrices)}.`;
+}
+
+/** "about 3 slots" / "about 3–5 slots" / "not enough for a single slot" — from a price spread. */
+function slotsBought(credits: number, prices: readonly number[]): string {
+  const fewest = Math.floor(credits / Math.max(...prices));
+  const most = Math.floor(credits / Math.min(...prices));
+  if (most === 0) return " — not enough for a single slot at today's prices.";
+  if (fewest === most) return ` — about ${slotsWord(most)} at today's prices.`;
+  if (fewest === 0) return ` — up to ${slotsWord(most)} at today's prices, depending on the court.`;
+  return ` — about ${fewest}–${slotsWord(most)} at today's prices, depending on the court.`;
 }
 
 /**
@@ -334,13 +368,15 @@ export function slicePriceLine(input: {
  * R100 rather than per rand, because `topup_block_zar` is what a member hands over and "1.6"
  * means nothing to a volunteer. The consequence clause is the point: a number of credits is
  * only meaningful against what a court costs, and that is the arithmetic nobody should be doing
- * standing at a desk.
+ * standing at a desk. `slicePrices` is one figure per court price (F3.3); null when the price
+ * is not known — the courts unread, or a flat price not yet typed — and then no slot count is
+ * claimed at all (a blank flat price used to read "Courts cost nothing at the moment").
  * </p>
  */
 export function ratePerBlockSentence(input: {
   creditsPerZar: number | null | undefined;
   blockZar: number | null | undefined;
-  slicePrice: number;
+  slicePrices: readonly number[] | null;
 }): string {
   if (typeof input.creditsPerZar !== "number" || typeof input.blockZar !== "number") {
     // No amount invented here. The branch is reached when the BLOCK is unknown as well as
@@ -352,12 +388,12 @@ export function ratePerBlockSentence(input: {
   // Through the one formatter, so this sentence and the top-up screen — which quotes the
   // same `topup_block_zar` — cannot name the club's money two different ways.
   const head = `${formatMoney(input.blockZar)} buys ${creditsFace(credits)} credits`;
-  if (input.slicePrice <= 0) {
+  if (!input.slicePrices || input.slicePrices.length === 0) return `${head}.`;
+  const priced = input.slicePrices.filter((p) => p > 0);
+  if (priced.length === 0) {
     return `${head}. Courts cost nothing at the moment, so that buys any number of slots.`;
   }
-  const slots = Math.floor(credits / input.slicePrice);
-  if (slots === 0) return `${head} — not enough for a single slot at today's prices.`;
-  return `${head} — about ${slotsWord(slots)} at today's prices.`;
+  return `${head}${slotsBought(credits, priced)}`;
 }
 
 // ---------------------------------------------------------------------------------------

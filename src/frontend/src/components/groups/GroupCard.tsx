@@ -11,7 +11,7 @@ import {
 import { Textarea } from "../ui/textarea";
 import { priceForGroup } from "../../lib/groupRules";
 import {
-  ARCHIVE_COPY, GROUP_ACTIONS, GROUP_REFUSAL_CODES, SYSTEM_GROUP, capsSummary, creditsFace, memberCountLine,
+  ARCHIVE_COPY, GROUP_ACTIONS, GROUP_REFUSAL_CODES, SYSTEM_GROUP, capsSummary, creditsRange, memberCountLine,
   paintedWeekSentence, peakChip, rateChip, ratePreviewLine, slicePriceLine, type PaintedWeek,
 } from "../../lib/groupsCopy";
 import { windowsToPainted } from "./weekGrid";
@@ -41,7 +41,8 @@ export function GroupCard(props: {
   group: MemberGroup;
   club: PaintedWeek;
   sliceMinutes: number;
-  courtPrice: number;
+  /** The distinct prices of the courts in use; null while unread (F3.3). */
+  courtPrices: readonly number[] | null;
   clubRate: number | null | undefined;
   blockZar: number | null | undefined;
   onEdit: () => void;
@@ -136,23 +137,28 @@ export function GroupCard(props: {
 
 /** The four rules, one line each, with an icon beside each heading so a column of cards scans. */
 function GroupFacts(props: Parameters<typeof GroupCard>[0]) {
-  const { group, club, sliceMinutes, courtPrice, clubRate, blockZar } = props;
-  const price = priceForGroup(group, courtPrice);
+  const { group, club, sliceMinutes, courtPrices, clubRate, blockZar } = props;
+  const mode = group.pricing?.mode ?? "inherit_court";
+  // Flat needs no court price; the other two are worked out once per court price.
+  const each = mode === "flat_per_slice" ? [priceForGroup(group, 0)] : (courtPrices ?? []).map((p) => priceForGroup(group, p));
+  const unknown = each.some((p) => p === null);
+  const prices = each.filter((p): p is number => p !== null);
+  const positive = prices.filter((p) => p > 0);
   const rate = typeof group.credits_per_zar === "number" ? group.credits_per_zar : clubRate;
   return (
     <dl className="grid gap-3 sm:grid-cols-2">
       <Fact icon={<Tag size={16} aria-hidden="true" />} term="Court price">
         {slicePriceLine({
-          mode: group.pricing?.mode ?? "inherit_court",
-          credits: price ?? 0,
-          courtPrice,
+          mode,
+          credits: prices,
+          courtPrices,
           multiplierBps: group.pricing?.multiplier_bps,
-          unknown: price === null,
+          unknown,
         })}
       </Fact>
       <Fact icon={<Coins size={16} aria-hidden="true" />} term="Top-up">
         {typeof rate === "number"
-          ? `${ratePreviewLine(rate, blockZar)}${price !== null && price > 0 ? ` · ${creditsFace(price)} cr a slot` : ""}`
+          ? `${ratePreviewLine(rate, blockZar)}${!unknown && positive.length > 0 ? ` · ${creditsRange(positive)} cr a slot` : ""}`
           : "The club's system hasn't said what a top-up buys."}
       </Fact>
       <Fact icon={<Clock size={16} aria-hidden="true" />} term="Booking times">

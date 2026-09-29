@@ -90,8 +90,14 @@ const ROUTES = (
   settingsRoute,
   { path: "/api/v1/admin/members/", body: [memberFixture(), memberFixture({ user_id: "u2", full_name: "Thandi Nkosi", membership_number: "CR-0002" })] },
   ...(groups ? [{ path: "/api/v1/admin/member-groups", body: { groups } } as StubRoute] : []),
+  // F3.3: slot prices come from the courts, not the club's retired `slice_price_credits`.
+  ...(extra.some((r) => r.path === "/api/v1/admin/courts/") ? [] : [{ path: "/api/v1/admin/courts/", body: [court(8)] } as StubRoute]),
   ...extra,
 ];
+
+function court(price: number, n = 1) {
+  return { id: `c${n}`, court_number: n, name: `Court ${n}`, court_type: "Squash", slice_price_credits: price, is_active: true };
+}
 
 const OFF_PEAK = restrictedGroupFixture({
   id: "g-offpeak", name: "Off-peak", member_count: 37,
@@ -159,6 +165,14 @@ describe("the standing statement and the three honest reads", () => {
     expect(screen.getByText("37 members")).toBeInTheDocument();
     expect(screen.getByText(/Mondays to Fridays 06:00–16:00/)).toBeInTheDocument();
     expect(screen.getByText(/One slot costs what the court costs — 8 credits/)).toBeInTheDocument();
+  });
+
+  it("prices a slot from the courts themselves, never the club's retired default (F3.3)", async () => {
+    // The club default says 8; the courts say 40 and 60. Only the courts are true.
+    open([groupFixture()], [{ path: "/api/v1/admin/courts/", body: [court(40, 1), court(60, 2), { ...court(5, 3), is_active: false }] }]);
+    expect(await screen.findByText(/One slot costs what the court costs — 40–60 credits, depending on the court/)).toBeInTheDocument();
+    expect(screen.getByText(/40–60 cr a slot/)).toBeInTheDocument();
+    expect(screen.queryByText(/— 8 credits/)).not.toBeInTheDocument();
   });
 
   it("says what a top-up block buys, because “1.6” means nothing to a volunteer", async () => {

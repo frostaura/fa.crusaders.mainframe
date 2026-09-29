@@ -9,7 +9,7 @@ import { Textarea } from "../ui/textarea";
 import { typography } from "../../lib/typography";
 import { cn } from "../../lib/utils";
 import { WeekPainter } from "./WeekPainter";
-import { CAPS, draftProblems, priceOf, type ClubContext, type Draft, type SetDraft } from "./groupDraft";
+import { CAPS, draftProblems, pricesOf, type ClubContext, type Draft, type SetDraft } from "./groupDraft";
 import { GROUP_PRICING_MODES, type GroupPricingMode } from "../../lib/adminApi";
 import { rateProblem } from "../../lib/groupRules";
 import {
@@ -133,7 +133,7 @@ function Basics({ draft, set, problem }: { draft: Draft; set: SetDraft; problem?
 
 /** What a slot costs: three cards, the figure for the choice on screen stated under them. */
 function PricingChoice({ draft, set, context }: { draft: Draft; set: SetDraft; context: ClubContext }) {
-  const price = priceOf(draft, context.courtPrice);
+  const price = pricesOf(draft, context.courtPrices);
   return (
     <div className="flex flex-col gap-3">
       <RadioGroup
@@ -161,7 +161,7 @@ function PricingChoice({ draft, set, context }: { draft: Draft; set: SetDraft; c
           {slicePriceLine({
             mode: draft.mode,
             credits: price.credits,
-            courtPrice: context.courtPrice,
+            courtPrices: context.courtPrices,
             multiplierBps: Math.round(Number(draft.multiplier) * 10_000),
             unknown: price.unknown,
           })}
@@ -169,6 +169,12 @@ function PricingChoice({ draft, set, context }: { draft: Draft; set: SetDraft; c
       </Consequence>
     </div>
   );
+}
+
+/** The prices a top-up block is divided by — null when any of them is not known yet. */
+function blockPrices(draft: Draft, context: ClubContext): number[] | null {
+  const price = pricesOf(draft, context.courtPrices);
+  return price.unknown || price.credits.length === 0 ? null : price.credits;
 }
 
 /** The shaded "what this means" panel under a choice. */
@@ -217,7 +223,7 @@ function RateChoice(props: { draft: Draft; set: SetDraft; context: ClubContext; 
             {ratePreviewLine(effective, context.blockZar)}
           </p>
           <p className="text-text-secondary">
-            {ratePerBlockSentence({ creditsPerZar: effective, blockZar: context.blockZar ?? 100, slicePrice: priceOf(draft, context.courtPrice).credits })}
+            {ratePerBlockSentence({ creditsPerZar: effective, blockZar: context.blockZar ?? 100, slicePrices: blockPrices(draft, context) })}
           </p>
         </Consequence>
       ) : null}
