@@ -1,6 +1,5 @@
 import { ApiError } from "./api";
 import { formatCredits } from "./utils";
-import { describeFailure } from "./errors";
 
 /**
  * Booking refusals, turned into sentences a member can act on.
@@ -193,82 +192,6 @@ const STALE_GRID_CODES = new Set([
 
 export function provesStaleGrid(e: unknown): boolean {
   return e instanceof ApiError && e.code !== null && STALE_GRID_CODES.has(e.code);
-}
-
-/**
- * The same two membership refusals, said to a member standing in front of the code screen
- * rather than in front of the schedule — or null when this is not that refusal.
- *
- * <p>
- * `POST /me/qr/generate` refuses a barred member, because the screen it feeds promises the
- * code will "start a walk-up on a free court, or pay for someone else's time" and the box
- * refuses a barred member every one of those. Round 7 made the code inert without making
- * the screen say so, which left a member holding a QR nothing would honour.
- * </p>
- *
- * <p>
- * Its own sentences rather than {@link describeBookingError}'s, for the reason that file
- * already carries: one code, two audiences. The
- * schedule's version says "you can't book", which is the wrong half of the truth here —
- * nothing on this screen books anything — and `member_not_active`'s says "approve it on the
- * Members page", which is an instruction to a desk, on a screen only the member sees.
- * </p>
- *
- * <p>
- * <b>Null, not a fallback sentence.</b> The caller needs to tell a barred membership from a
- * flat battery: one is permanent and the screen must stop offering the code, the other
- * clears on its own and the screen should keep trying.
- * </p>
- */
-export function describeCourtCodeRefusal(e: unknown): string | null {
-  if (!(e instanceof ApiError) || e.status !== 403) return null;
-  if (e.code === "member_suspended") {
-    return "Your membership is suspended, so a court code would not open anything — the boxes turn one away. "
-      + "Speak to the club to have it restored.";
-  }
-  if (e.code === "member_not_active") {
-    return "Your membership isn't active yet, so a court code would not open anything — the boxes turn one away. "
-      + "The club has to approve it first.";
-  }
-  return null;
-}
-
-/**
- * What the court-code screen says when a fetch failed for a reason that is NOT the club
- * barring the member — i.e. every case {@link describeCourtCodeRefusal} answers null for.
- *
- * <p>
- * `screen` is which of the page's two cards is asking, and it exists because one of these
- * sentences names a control. The code card has "Refresh" on it and a code to refresh; the
- * barred card has neither — its only control is "Check again", and that card's test asserts
- * no control named Refresh is on it at all. A single shared string told a barred member
- * "Too many refreshes" on a card showing no code and offering no refresh; reproduced in a
- * real browser, not only in jsdom.
- * </p>
- *
- * <p>
- * The rate limit is reachable on both. `POST /me/qr/generate` sits behind the API's auth
- * bucket, which is shared with login, and neither button paces itself — `MIN_REFRESH_GAP_MS`
- * paces only the automatic pre-fetch. A member pressing the barred card's button while the
- * desk sorts their membership out is precisely who hits it.
- * </p>
- *
- * <p>
- * A plain function beside the copy it belongs with, for the reason the refusals above are:
- * a test can call it without rendering a page, and the two sentences stay where a reader
- * comparing them will find them together.
- * </p>
- */
-export function describeCourtCodeFetchFailure(e: unknown, screen: "code" | "barred"): string {
-  if (e instanceof ApiError && e.status === 429) {
-    return screen === "barred"
-      ? "That's a lot of checking at once. Give it a moment, then check again."
-      : "Too many refreshes. Give it a moment and try again.";
-  }
-  // Only a NetworkError is genuinely a connection problem; describeFailure enforces that.
-  // This returned the connection sentence for every non-429 failure, so a member whose club
-  // had no tenant row, or whose session had lapsed, was sent to check their WiFi.
-  return describeFailure(e, { action: "get a code" });
 }
 
 /**

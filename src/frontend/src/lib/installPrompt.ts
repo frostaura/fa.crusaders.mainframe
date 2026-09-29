@@ -101,10 +101,3 @@ export function useInstallState(): { canPrompt: boolean; installedNow: boolean; 
   useSyncExternalStore(subscribe, () => version, () => version);
   return { canPrompt: deferred !== null, installedNow, standalone: isStandalone(), ios: isIos() };
 }
-
-/** For tests: pretend the browser offered (or withdrew) its prompt. */
-export function setDeferredPromptForTest(event: BeforeInstallPromptEvent | null) {
-  deferred = event;
-  installedNow = false;
-  notify();
-}

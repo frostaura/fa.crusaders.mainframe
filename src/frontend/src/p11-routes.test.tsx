@@ -13,7 +13,7 @@ import { signIn, signOut, stubFetch } from "./test/harness";
  * the id, the query and the hash. The pages are stand-ins; each has its own suite.
  */
 
-vi.mock("./components/Layout", () => ({ default: () => <Outlet /> }));
+vi.mock("./components/shell/AppShell", () => ({ default: () => <Outlet /> }));
 const { page } = vi.hoisted(() => ({ page: (name: string) => ({ default: () => <h1>{name}</h1> }) }));
 vi.mock("./pages/Schedule", () => page("bookings page"));
 vi.mock("./pages/BookingDetail", () => page("booking page"));

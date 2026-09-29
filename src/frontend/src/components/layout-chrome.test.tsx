@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
-import Layout from "./Layout";
+import Layout from "./shell/AppShell";
 import { ProfileProvider } from "../lib/profile";
 import { doorFixture, doorsServer, renderPage, signIn, signOut, stubFetch } from "../test/harness";
 

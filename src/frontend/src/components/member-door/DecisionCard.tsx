@@ -227,10 +227,10 @@ export function DecisionCard(props: {
     // for it. Zero here would print "in the next 0 minutes" at a club that has no such rule.
     earlyEntryMinutes: door?.early_entry_minutes ?? null,
     contact,
-    // R3-6 — the two facts that turn "wait nine and a half hours" into "that was your
-    // booking code; this one works now".
+    // R3-6 — the two facts that turn "wait nine and a half hours" into "the code on this
+    // screen works now".
     memberCodeOpensDoor: memberCodeOpensDoorNow(door),
-    codeKind: code?.kind ?? null,
+    holdingCode: code !== null,
   };
   const copy = describeDecision(decision, { ...shared, countdown: seconds === null ? null : formatCountdown(seconds) });
   // The same sentence at whole-minute granularity, for the live region. A polite region

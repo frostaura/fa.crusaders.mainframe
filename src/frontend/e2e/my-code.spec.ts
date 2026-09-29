@@ -452,7 +452,7 @@ test("the code and the QR stay on the glass at a root font of 32px", async ({ pa
   // Not the document. At a root font of 32px the document still scrolls sideways by about
   // sixty pixels, and every element responsible is app chrome: the wallet chip and gear
   // cluster in the header, and the nav tab strip under it. That is the same overflow
-  // reviewers A and C found at 200% zoom (A10 / C14), it belongs to `components/Layout.tsx`,
+  // reviewers A and C found at 200% zoom (A10 / C14), it belongs to the app shell (`components/shell/`),
   // and a sibling lane owns it. Asserting on the document here would make this spec fail
   // for their defect and pass for mine — or, worse, tempt this lane into editing a shared
   // component two people are landing on.
@@ -709,7 +709,7 @@ test("the code is fully above the fold at 320x568, decision card and all", async
     At that root the symbol is NOT on the glass, and the arithmetic says why: the app header
     and tab strip take 306px of a 568px screen, leaving `<main>` 262px for a 254px symbol
     plus a heading plus every gap. That is reviewer B12's finding — "the header and tab bar
-    take 54% of a 320×568 screen at a 32px root" — it lives in `components/Layout.tsx`, and
+    take 54% of a 320×568 screen at a 32px root" — it lives in the app shell (`components/shell/`), and
     a sibling lane owns it. Asserting the viewport fold here would make this case fail for
     their defect and pass for mine.
 

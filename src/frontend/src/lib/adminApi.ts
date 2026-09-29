@@ -405,7 +405,6 @@ export const ADMIN_CHANGE_AREAS = [
   // P12 — `AdminChangeAreas.Play`: a match result voided or upheld (play.md §6.3).
   "play",
 ] as const;
-export type AdminChangeArea = typeof ADMIN_CHANGE_AREAS[number];
 
 export type AdminChangeRow = {
   id: string;

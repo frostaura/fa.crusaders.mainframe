@@ -8,16 +8,14 @@ import {
   OFFLINE_DETAILS_SUMMARY,
   STANDING_HEADING,
   STANDING_LOADING,
-  USE_MEMBER_CODE_INSTEAD,
   type ReadFailure,
   asOfMayHaveChanged,
   describeStanding,
   offlineDetailsBody,
   standingFailed,
 } from "../../lib/memberDoorCopy";
-import { Button } from "../ui/button";
 import { cn } from "../../lib/utils";
-import { MEMBER_DOOR_ACTION_LINK, MEMBER_DOOR_BUTTON, MEMBER_DOOR_LINK_TAPPABLE } from "./links";
+import { MEMBER_DOOR_ACTION_LINK, MEMBER_DOOR_LINK_TAPPABLE } from "./links";
 
 /**
  * "What opens the door for you right now" — the standing facts, below the QR.
@@ -57,7 +55,7 @@ export function StandingLine(props: {
    * </p>
    */
   failure: ReadFailure | null;
-  /** Which of the member's two codes is on screen, so a sentence can say which it is about. */
+  /** The member's code, while one is on screen (D1). */
   code: CodeOnScreen | null;
   /** When the answer on screen was read, for the staleness marker. ISO, or null while live. */
   staleSince: string | null;
@@ -73,8 +71,6 @@ export function StandingLine(props: {
    * </p>
    */
   hasLiveCode: boolean;
-  /** Switches the page to the member's own code. E-H2 (3). */
-  onUseMemberCode?: () => void;
   /**
    * Something ABOVE this section is already offering the same next act.
    *
@@ -95,7 +91,7 @@ export function StandingLine(props: {
    */
   actionOfferedAbove?: boolean;
 }) {
-  const { door, cached, cachedMinutesAgo, loading, failure, code, staleSince, onUseMemberCode } = props;
+  const { door, cached, cachedMinutesAgo, loading, failure, code, staleSince } = props;
   const codeState = { hasLiveCode: props.hasLiveCode };
 
   if (door) {
@@ -116,15 +112,10 @@ export function StandingLine(props: {
           )}
         </h2>
         <p className="text-sm text-text-secondary">{line.body}</p>
-        {/* E-H2 / D5: which code each sentence is about, and when its window runs. */}
+        {/* When the member's next booking lets them in, where the rule makes that worth saying. */}
         {line.codeLine && <p className="text-sm text-text-secondary">{line.codeLine}</p>}
         {/* B4 / E-H1: both halves of what a shut door does, and nothing promised. */}
         {line.shutLine && <p className="text-sm text-warning-strong">{line.shutLine}</p>}
-        {line.offerMemberCode && onUseMemberCode && (
-          <Button variant="outline" className={cn(MEMBER_DOOR_BUTTON, "w-full sm:w-auto")} onClick={onUseMemberCode}>
-            {USE_MEMBER_CODE_INSTEAD}
-          </Button>
-        )}
         {line.action?.kind === "book_a_court" && !props.actionOfferedAbove && (
           <Link to="/bookings" className={MEMBER_DOOR_ACTION_LINK}>
             {line.action.label}

@@ -114,11 +114,6 @@ export function quotaPill(booked: number, maxSlots: number): string {
   return `${booked} of ${maxSlots} today`;
 }
 
-/** The minutes cap, when it — and not the slot cap — is the rule that bound. */
-export function minuteQuotaBannerTitle(maxMinutes: number, day: string): string {
-  return `You've booked your ${maxMinutes} minutes of court time for ${weekdayName(day)}.`;
-}
-
 /* ─────────────────────────── Item 3 — groups, on the member's grid ─────────────────────────── */
 
 /**
@@ -190,13 +185,6 @@ export function emptyWindowSentence(groups: readonly string[], day: string): str
 export function groupRateLine(groups: readonly { name: string }[]): string | null {
   const first = groups[0]?.name;
   return first ? `You're booking as a ${withoutTrailingPlural(first).toLowerCase()}.` : null;
-}
-
-/** What the "(your rate)" affordance says when it is pressed. */
-export function groupRateSentence(groups: readonly { name: string }[], priceCredits: number, sliceMinutes: number): string {
-  const first = groups[0]?.name;
-  const who = first ? `You're a ${withoutTrailingPlural(first).toLowerCase()}.` : "This is your rate.";
-  return `${who} You pay ${formatCredits(priceCredits)} for ${sliceMinutes} minutes on this court.`;
 }
 
 /* ─────────────────────────── The wallet, before the member picks ─────────────────────────── */

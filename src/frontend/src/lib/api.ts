@@ -1547,11 +1547,6 @@ export type MemberDoorMembership = "active" | "not_active" | "none";
  */
 export type MemberDoorMembershipDetail = string;
 
-/** Every `membership_detail` this build has a sentence for. The API clamps to exactly these. */
-export const MEMBER_DOOR_MEMBERSHIP_DETAILS = [
-  "active", "pending_approval", "rejected", "suspended", "none",
-] as const;
-
 /**
  * The booking that bounds a door window, when there is one. UTC instants.
  *

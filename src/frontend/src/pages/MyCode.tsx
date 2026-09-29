@@ -62,7 +62,7 @@ import { SetupChecklist } from "../components/onboarding/SetupChecklist";
  */
 
 /** The single code, as the door copy's vocabulary has it: a member code, bounded by no booking. */
-const ONE_CODE: CodeOnScreen = { kind: "ident", doorOpensAt: null, doorClosesAt: null };
+const ONE_CODE: CodeOnScreen = { kind: "member" };
 
 function contactFrom(door: MemberDoor | null, remembered: LastKnown["door"]): ContactKnowledge {
   if (door) return liveContact(door.contact);

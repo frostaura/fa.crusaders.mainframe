@@ -38,7 +38,6 @@ const line = (actionOfferedAbove: boolean) => render(
       code={null}
       staleSince={null}
       hasLiveCode={false}
-      onUseMemberCode={() => {}}
       actionOfferedAbove={actionOfferedAbove}
     />
   </MemoryRouter>,

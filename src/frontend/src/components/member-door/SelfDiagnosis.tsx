@@ -9,7 +9,6 @@ import {
   type DiagnosisInput,
   type DiagnosisRow,
   type DiagnosisState,
-  USE_MEMBER_CODE_INSTEAD,
   buildDiagnosis,
 } from "../../lib/memberDoorCopy";
 import { CopySentence } from "./CopySentence";
@@ -86,10 +85,8 @@ export function SelfDiagnosis(props: {
   input: DiagnosisInput;
   busy: boolean;
   onHide: () => void;
-  /** Switches the page to the member's own code, when the club's rule would admit it. E-H2 (3). */
-  onUseMemberCode?: () => void;
 }) {
-  const { input, busy, onHide, onUseMemberCode } = props;
+  const { input, busy, onHide } = props;
   const container = useRef<HTMLDivElement | null>(null);
   useEffect(() => { container.current?.focus(); }, []);
 
@@ -112,14 +109,6 @@ export function SelfDiagnosis(props: {
           {/* D13: the club's number in here is a link, exactly as it is in the footer. */}
           <CopySentence sentence={conclusion} className="border-t border-border pt-3 text-sm" />
           <div className="flex flex-col sm:flex-row gap-3">
-            {/* E-H2 (3). The one thing on this phone that might work where the code on
-                screen did not, offered where the member is already looking for an answer
-                rather than behind a checkbox further down the page. */}
-            {input.offerMemberCode && onUseMemberCode && (
-              <Button variant="primary" className={cn(MEMBER_DOOR_BUTTON, "w-full sm:w-auto")} onClick={onUseMemberCode}>
-                {USE_MEMBER_CODE_INSTEAD}
-              </Button>
-            )}
             {input.policy === "booking_window" && !input.hasBooking && (
               <Link to="/bookings" className={MEMBER_DOOR_ACTION_LINK}>
                 Book a court

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { doorEndpoints, type DoorsView } from "../../lib/api";
 import { isOnline, offlineAfterSecondsFor } from "../../lib/deviceLiveness";
 import {
@@ -119,9 +119,7 @@ const NOTHING: DoorsChrome = {
  * <p>
  * Counted toward attention: silent, shut, unnamed, <b>and signals (A3)</b>. Signals were
  * excluded outright, so a door flagged "Refusing a lot" or "May not be releasing" was never
- * in the banner, never in the gear count, and sorted below the fold. A2.6 keeps signals off
- * admin HOME, which is a different screen and a different rule — see
- * {@link AdminDoorsHomeRow}, which still counts only the three.
+ * in the banner, never in the gear count, and sorted below the fold.
  * </p>
  */
 export function useDoorsChrome(enabled: boolean, _routeKey?: string): DoorsChrome {
@@ -363,39 +361,6 @@ export function useDoorsStore(enabled: boolean, intervalMs = DOORS_CHROME_INTERV
 export function storeCheckedSince(since: number | null): boolean {
   if (state.checkedAt === null) return false;
   return since === null || state.checkedAt > since;
-}
-
-/**
- * Hand the store a view somebody else already read — after an action, mostly.
- *
- * Kept because a write's own response is fresher than the next poll, and because the doors
- * page's actions call it. It publishes a SUCCESS, so it also clears a failure streak.
- */
-export function publishDoorsView(view: DoorsView) {
-  publish({
-    chrome: attributeShutChange(summarise(view)),
-    view,
-    loading: false,
-    failed: false,
-    failures: 0,
-    checkedAt: Date.now(),
-  });
-}
-
-/**
- * A reader that wants the same summary from a view it already has.
- *
- * The doors page renders from this rather than re-deriving shut counts of its own, which is
- * what makes "the banner, the summary and the result panel agree" a property of the code
- * rather than of three matching implementations.
- */
-export function summariseDoors(view: DoorsView): DoorsChrome {
-  return summarise(view);
-}
-
-/** A stable callback the page can hand to its poll without re-subscribing every render. */
-export function usePublishDoorsView() {
-  return useCallback((view: DoorsView) => publishDoorsView(view), []);
 }
 
 /**

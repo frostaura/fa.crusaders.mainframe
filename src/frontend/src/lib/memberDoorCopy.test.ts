@@ -20,18 +20,14 @@ import {
   OFFLINE_DETAILS_SUMMARY,
   STANDING_HEADING,
   STANDING_LOADING,
-  CODE_CHOICE_STICKY,
   TIME_UNCERTAIN_NOTE,
   UNNAMED_DOOR,
-  CODE_TABS_LABEL,
-  NO_BOOKING_CODE_REASON,
   CLUB_TIME_NOTE,
   DOOR_SECTION_UNKNOWN,
   asOfMayHaveChanged,
   buildDiagnosis,
   decisionAge,
   sentenceText,
-  codeExpiredDeadEnd,
   contactMissingNotice,
   contactUnknownNotice,
   liveContact,
@@ -49,9 +45,6 @@ import {
   historyOfflineLine,
   historyRetention,
   offlineDetailsBody,
-  offlineIdentDeadEnd,
-  offlineNoCode,
-  offlineWithCode,
   standingFailed,
 } from "./memberDoorCopy";
 import { memberCodeOpensDoorNow, normaliseDoorsShut } from "./memberDoorCopy";
@@ -114,13 +107,11 @@ describe("memberDoorCopy", () => {
     door_closes_at: "2026-09-19T18:05:00Z",
   };
 
-  /** The code on screen, in each of its two shapes. E-H2 (1), D5. */
-  const BOOKING_CODE = {
-    kind: "booking" as const,
-    doorOpensAt: "2026-09-19T16:30:00Z",
-    doorClosesAt: "2026-09-19T18:05:00Z",
-  };
-  const IDENT_CODE = { kind: "ident" as const, doorOpensAt: null, doorClosesAt: null };
+  /**
+   * The code on screen. D1: there is one shape now — the member's single rotating code —
+   * so the axis is that code or nothing drawn at all.
+   */
+  const MEMBER_CODE = { kind: "member" as const };
 
   /** A {@link Sentence} as the one string a reader sees — what every copy probe reads. */
   const flat = sentenceText;
@@ -196,12 +187,9 @@ describe("memberDoorCopy", () => {
       STANDING_HEADING, STANDING_LOADING, OFFLINE_DETAILS_SUMMARY, offlineDetailsBody(),
       DIAGNOSIS_TRIGGER, DIAGNOSIS_HEADING, CONTACT_LEAD, contactMissingNotice(),
       contactUnknownNotice(), DOOR_SECTION_CHECKING,
-      flat(codeExpiredDeadEnd("network", CONTACT)), flat(codeExpiredDeadEnd("server", NO_CONTACT)),
-      flat(codeExpiredDeadEnd("network", UNKNOWN_CONTACT)),
-      DOOR_SECTION_UNKNOWN, CODE_CHOICE_STICKY, CLUB_TIME_NOTE,
+      DOOR_SECTION_UNKNOWN, CLUB_TIME_NOTE,
       // R3-17, R3-30, R3-31: every sentence this round added, swept like every other.
-      // item 9: the three sentences the capsule tabs brought with them.
-      TIME_UNCERTAIN_NOTE, CODE_TABS_LABEL, NO_BOOKING_CODE_REASON,
+      TIME_UNCERTAIN_NOTE,
       historyGroupLabel(6, 1), historyGroupLabel(2, 47),
       historyOfflineLine("2026-09-19T06:09:00Z", undefined, "2026-09-19T06:30:00Z"),
       asOfMayHaveChanged("09:46"), decisionAge(0), decisionAge(1), decisionAge(12),
@@ -213,10 +201,6 @@ describe("memberDoorCopy", () => {
       standingFailed(null, "network"), standingFailed(null, "server"),
       standingFailed({ body: "cached sentence", minutesAgo: 4 }, "network"),
       standingFailed({ body: "cached sentence", minutesAgo: 4 }, "server"),
-      offlineWithCode({ fetchedAtClock: "06:02", minutesAgo: 7, kind: "booking" }),
-      offlineWithCode({ fetchedAtClock: "06:02", minutesAgo: 7, kind: "ident" }),
-      flat(offlineNoCode(CONTACT)), flat(offlineNoCode(NO_CONTACT)),
-      flat(offlineIdentDeadEnd(CONTACT)), flat(offlineIdentDeadEnd(NO_CONTACT)),
     ];
     // The reason axis includes `null`, which the endpoint returns for a non-release row
     // whose details would not parse, and the offline axis forks the open.
@@ -257,7 +241,7 @@ describe("memberDoorCopy", () => {
                 // sentence that only exists for a shut door is still a sentence this module
                 // can build and the ban list has to reach it.
                 for (const doors_shut of ["none", "some", "all"] as const) {
-                  for (const code of [null, BOOKING_CODE, IDENT_CODE]) {
+                  for (const code of [null, MEMBER_CODE]) {
                     const line = standingFor({
                       policy, membership, membership_detail: detail,
                       is_club_admin, early_entry_minutes, next_booking, doors_shut,
@@ -576,40 +560,6 @@ describe("memberDoorCopy", () => {
     expect(prose).not.toMatch(/\b48\b/);
   });
 
-  // --- the offline page -----------------------------------------------------------
-
-  it("says how old a cached code is and does not promise it works", () => {
-    const text = offlineWithCode({ fetchedAtClock: "06:02", minutesAgo: 7, kind: "booking" });
-    expect(text).toContain("06:02");
-    expect(text).toMatch(/7 minutes ago/);
-    expect(text).toMatch(/probably/i);
-  });
-
-  it("closes the door on a dead cached code rather than showing a hopeful one", () => {
-    const sentence = offlineNoCode(CONTACT);
-    expect(flat(sentence)).toMatch(/run out/i);
-    expect(flat(sentence)).toContain("021 555 0134");
-    // D13 — and it is a link here too, on the page a member reads with no signal at all.
-    expect(sentence.link).toEqual({ href: "tel:0215550134", text: "021 555 0134" });
-  });
-
-  /**
-   * D5, and the sharpest honest sentence on this surface. An ident code lives about a
-   * minute, and a door that has lost the club's network holds bookings and nothing else —
-   * so this member cannot get in, and the page owes them that rather than a QR.
-   */
-  it("tells a member holding only an ident code with no signal that it cannot open a cut-off door", () => {
-    const text = flat(offlineIdentDeadEnd(CONTACT));
-    expect(text).toMatch(/about a minute/i);
-    expect(text).toMatch(/a court booked/i);
-    expect(text).toContain("021 555 0134");
-  });
-
-  it("tells a member with no club contact where the only remaining answer is", () => {
-    expect(flat(offlineIdentDeadEnd(NO_CONTACT))).toMatch(/written on the door/i);
-    expect(flat(offlineNoCode(NO_CONTACT))).toMatch(/written on the door/i);
-  });
-
   // --- the self-diagnosis ----------------------------------------------------------
 
   const HEALTHY = {
@@ -625,12 +575,10 @@ describe("memberDoorCopy", () => {
     codeSecondsLeft: 58,
     connection: "ok" as const,
     contact: CONTACT,
-    // E-H2. The three inputs the check ignored, at their silent defaults: no particular
-    // code on screen, no window of its own, and nothing in the club's record.
-    codeKind: null,
-    codeWindow: null,
+    // E-H2, at their silent defaults: the member code not (yet) on screen, and nothing in
+    // the club's record.
+    holdingCode: false,
     lastRefusal: null,
-    offerMemberCode: false,
   };
 
   /** Every shape the self-check can be handed, for the sweeps that must reach all of them. */
@@ -645,17 +593,15 @@ describe("memberDoorCopy", () => {
       { ...HEALTHY, hasBooking: false, bookingStartsClock: null, doorWindowOpen: null, opensAtClock: null, opensInWords: null },
       { ...HEALTHY, doorWindowOpen: false },
       { ...HEALTHY, codeSecondsLeft: 0 },
-      { ...HEALTHY, policy: "active_member" as const, codeKind: "booking" as const },
+      { ...HEALTHY, policy: "active_member" as const, holdingCode: true },
       { ...HEALTHY, contact: NO_CONTACT },
       { ...HEALTHY, contact: UNKNOWN_CONTACT },
     ];
     const out: Parameters<typeof buildDiagnosis>[0][] = [];
     for (const shape of base) {
-      for (const codeWindow of [null, OPEN_CODE_WINDOW, SHUT_CODE_WINDOW]) {
-        for (const lastRefusal of [null, ...REFUSALS]) {
-          for (const offerMemberCode of [true, false]) {
-            out.push({ ...shape, codeWindow, lastRefusal, offerMemberCode });
-          }
+      for (const lastRefusal of [null, ...REFUSALS]) {
+        for (const holdingCode of [true, false]) {
+          out.push({ ...shape, lastRefusal, holdingCode });
         }
       }
     }
@@ -665,7 +611,7 @@ describe("memberDoorCopy", () => {
       multiplied into the product above, for the reason this file already learned once: the
       product is asked for fifteen times by the ban sweep alone, and multiplying it by eight
       pushed a single `it.each` case past vitest's five-second budget whenever the machine
-      was busy with another file. Neither axis interacts with `codeWindow` or `lastRefusal`
+      was busy with another file. Neither axis interacts with `lastRefusal`
       in any arm, so the cross-product buys nothing the base shapes do not.
     */
     for (const shape of base) {
@@ -674,10 +620,11 @@ describe("memberDoorCopy", () => {
           out.push({
             ...shape, doorsShut, memberCodeOpensDoor,
             doorsShutNames: doorsShut === "some" ? ["Front door"] : undefined,
-            // One refusal beside them, so the arm that names a booking code the member is
-            // already holding is reached rather than merely constructed.
+            // One refusal beside them, so the arm that tells a member already holding the
+            // member code that the refused one was a booking code is reached rather than
+            // merely constructed.
             lastRefusal: { atClock: "09:46", reason: "too_early" },
-            codeKind: "ident" as const,
+            holdingCode: true,
           });
         }
       }
@@ -685,8 +632,6 @@ describe("memberDoorCopy", () => {
     return out;
   }
 
-  const OPEN_CODE_WINDOW = { open: true, opensAtClock: "08:05", closesAtClock: "10:50" };
-  const SHUT_CODE_WINDOW = { open: false, opensAtClock: "08:05", closesAtClock: "10:50" };
   /** Including a token this build has never heard of, and a row with no reason at all. */
   const REFUSALS = [...Object.keys(DOOR_REFUSAL_REASONS), null, "some_new_token"]
     .map((reason) => ({ atClock: "09:46", reason }));
@@ -1079,7 +1024,6 @@ describe("memberDoorCopy", () => {
     // R3-5's other half: never the bare promise, and now never any promise at all.
     expect(line.body).not.toMatch(/live member code of yours opens/i);
     expect(line.suppressesCodeClause).toBe(true);
-    expect(line.offerMemberCode).toBe(false);
   });
 
   it("still applies the booking rule to a member with no membership row", () => {
@@ -1136,10 +1080,7 @@ describe("memberDoorCopy", () => {
    */
   it("never claims the door notice is the only way in when it could not read the club's number", () => {
     const shapes = [
-      offlineNoCode(UNKNOWN_CONTACT),
-      offlineIdentDeadEnd(UNKNOWN_CONTACT),
       buildDiagnosis({ ...HEALTHY, contact: UNKNOWN_CONTACT }).conclusion,
-      codeExpiredDeadEnd("network", UNKNOWN_CONTACT),
     ];
     for (const sentence of shapes) {
       expect(flat(sentence)).not.toMatch(/only way from here/i);
@@ -1281,9 +1222,9 @@ describe("memberDoorCopy", () => {
    */
   it("still names a missing membership when another arm wins the conclusion", () => {
     const shapes = [
-      // The code-window arm — Kayla's.
-      { codeWindow: { open: false, opensAtClock: "18:30", closesAtClock: "20:05" }, offerMemberCode: false },
-      // The club's own rule, which wins above it.
+      // D1 removed the code-window arm that was Kayla's (no booking code is ever on screen
+      // now); the rule survives on the arms that can still win.
+      // The club's own rule.
       { policy: "booking_window" as const, hasBooking: false, bookingStartsClock: null },
       // And a read that failed on a page holding the club's answer from a moment ago.
       { connection: "network" as const },
@@ -1327,19 +1268,6 @@ describe("memberDoorCopy", () => {
         expect(["passed", "neutral", "attention", "failed"]).toContain(row.state);
       }
     }
-  });
-
-  // --- D5: an expired code that cannot be renewed ---------------------------------------
-
-  it("says a code that has run out cannot be renewed, and why", () => {
-    const noSignal = flat(codeExpiredDeadEnd("network", CONTACT));
-    const serverDown = flat(codeExpiredDeadEnd("server", CONTACT));
-    expect(noSignal).toMatch(/run out/i);
-    expect(noSignal).toMatch(/signal/i);
-    expect(noSignal).not.toMatch(/refreshing/i);
-    expect(serverDown).not.toBe(noSignal);
-    expect(serverDown).toMatch(/answered with an error/i);
-    expect(noSignal).toContain("021 555 0134");
   });
 
   // --- D9: the door section says it is still looking ------------------------------------
@@ -1464,34 +1392,9 @@ describe("memberDoorCopy", () => {
       .toMatch(/live member code of yours/i);
   });
 
-  /**
-   * E-H2 (1), D5 — and this is the OTHER half of the rule above, not a contradiction of it.
-   *
-   * <p>
-   * The standing line's body stays about the club's rule and this member's standing, so it
-   * can never argue with whatever the code card has on it. What was missing is a sentence
-   * that says which code each fact is about: a member at an `active_member` club, holding a
-   * BOOKING code for tomorrow, read "a live code of yours opens the club door" directly
-   * above "this code opens the club door from 08:05", with nothing to say they were two
-   * different codes. That sentence is `codeLine`, and it is separate precisely so that the
-   * body still has nothing to do with what is on screen.
-   * </p>
-   */
-  it("says which code a window belongs to when a booking code is the one on screen", () => {
-    const line = standingFor({}, BOOKING_CODE);
-    expect(line.body).not.toMatch(/08:05|booking code on screen/i);
-    expect(line.codeLine).toMatch(/booking code on screen/i);
-    // Both edges of the CODE's own window, and the fact that makes it true everywhere.
-    expect(line.codeLine).toMatch(/whatever rule a club applies/i);
-    expect(line.offerMemberCode).toBe(true);
-    // The code card's own clause would be a second, vaguer copy of this. Suppressed.
-    expect(line.suppressesCodeClause).toBe(true);
-  });
-
   it("says nothing about a window when the member code is the one on screen", () => {
-    const line = standingFor({}, IDENT_CODE);
+    const line = standingFor({}, MEMBER_CODE);
     expect(line.codeLine).toBeNull();
-    expect(line.offerMemberCode).toBe(false);
   });
 
   /**
@@ -1502,7 +1405,7 @@ describe("memberDoorCopy", () => {
   it("tells a member at an any-active-member club when their next booking opens a door", () => {
     const line = standingFor({ next_booking: BOOKING });
     expect(line.codeLine).toMatch(/court/i);
-    expect(line.codeLine).toMatch(/booking code works at a door from/i);
+    expect(line.codeLine).toMatch(/door window opens at/i);
   });
 
   // --- B4 / E-H1: the club has shut its doors ---------------------------------------
@@ -1639,44 +1542,6 @@ describe("memberDoorCopy", () => {
     expect(flat(conclusion)).toMatch(/suspended/i);
   });
 
-  // --- E-H2 (1)/(3): the check is about the code ON SCREEN ----------------------------
-
-  it("judges the window of the booking code on screen, not the member's standing", () => {
-    const { rows } = buildDiagnosis({
-      ...HEALTHY, policy: "active_member" as const, codeKind: "booking" as const,
-      doorWindowOpen: null, opensAtClock: null, codeWindow: SHUT_CODE_WINDOW,
-    });
-    const window = rows.find((r) => r.key === "window")!;
-    expect(window.state).toBe("attention");
-    expect(window.value).toContain("08:05");
-    expect(window.value).not.toMatch(/no window to wait for/i);
-  });
-
-  it("does not tell a member holding a booking code that bookings are not needed, full stop", () => {
-    const { rows } = buildDiagnosis({
-      ...HEALTHY, policy: "active_member" as const, codeKind: "booking" as const,
-    });
-    const booking = rows.find((r) => r.key === "booking")!;
-    expect(booking.value).toMatch(/the code on screen belongs to one/i);
-  });
-
-  it("concludes with the code's own window when that is what is shut", () => {
-    const { conclusion } = buildDiagnosis({
-      ...HEALTHY, policy: "active_member" as const, codeKind: "booking" as const,
-      codeWindow: SHUT_CODE_WINDOW, offerMemberCode: true,
-    });
-    expect(flat(conclusion)).toContain("08:05");
-    expect(flat(conclusion)).toMatch(/whatever rule a club applies/i);
-    // item 9: every sentence that names a control names the TAB, which is always on the page.
-    expect(flat(conclusion)).toMatch(/"Member code" at the top of this screen/i);
-  });
-
-  it("offers the member code only where the club's rule would admit it", () => {
-    const { conclusion } = buildDiagnosis({
-      ...HEALTHY, codeKind: "booking" as const, codeWindow: SHUT_CODE_WINDOW, offerMemberCode: false,
-    });
-    expect(flat(conclusion)).not.toMatch(/use your member code instead/i);
-  });
 });
 
 /**
@@ -1722,9 +1587,9 @@ describe("memberDoorCopy — no state contradicts itself", () => {
     door_opens_at: "2026-09-19T16:30:00Z",
     door_closes_at: "2026-09-19T18:05:00Z",
   };
+  /** D1: the member's one rotating code on the glass, or nothing drawn yet. */
   const CODES = {
-    booking: { kind: "booking" as const, doorOpensAt: BOOKING.door_opens_at, doorClosesAt: BOOKING.door_closes_at },
-    ident: { kind: "ident" as const, doorOpensAt: null, doorClosesAt: null },
+    member: { kind: "member" as const },
     none: null,
   };
 
@@ -1739,7 +1604,7 @@ describe("memberDoorCopy — no state contradicts itself", () => {
     reason: string | null;
     released: boolean;
     offline: boolean;
-    codeKind: "booking" | "ident" | "none";
+    codeKind: "member" | "none";
     shut: "none" | "some" | "all" | undefined;
     connection: "ok" | "network" | "server";
     liveCode: boolean;
@@ -1750,20 +1615,22 @@ describe("memberDoorCopy — no state contradicts itself", () => {
     for (const policy of ["active_member", "booking_window"] as const) {
       for (const membership of ["active", "not_active", "none"] as const) {
         for (const reason of REASONS) {
-          for (const codeKind of ["booking", "ident", "none"] as const) {
-            for (const shut of SHUT_STATES) {
-              for (const connection of ["ok", "network", "server"] as const) {
-                for (const liveCode of [true, false]) {
-                  yield {
-                    policy, membership, reason,
-                    released: reason === "ok",
-                    // The offline axis forks the OPEN only, so it is swept where it bites.
-                    offline: reason === "ok" && !liveCode,
-                    codeKind, shut, connection, liveCode,
-                    // A booking is what `booking_window` turns on, so it travels with the
-                    // code kind rather than as a seventh axis nobody reads.
-                    hasBooking: codeKind === "booking",
-                  };
+          for (const codeKind of ["member", "none"] as const) {
+            // D1: a booking used to travel with the booking code on screen. That code is
+            // gone, so the booking is its own axis — otherwise `booking_window` with a
+            // booking, the state that rule turns on, would never be swept at all.
+            for (const hasBooking of [true, false]) {
+              for (const shut of SHUT_STATES) {
+                for (const connection of ["ok", "network", "server"] as const) {
+                  for (const liveCode of [true, false]) {
+                    yield {
+                      policy, membership, reason,
+                      released: reason === "ok",
+                      // The offline axis forks the OPEN only, so it is swept where it bites.
+                      offline: reason === "ok" && !liveCode,
+                      codeKind, shut, connection, liveCode, hasBooking,
+                    };
+                  }
                 }
               }
             }
@@ -1794,7 +1661,7 @@ describe("memberDoorCopy — no state contradicts itself", () => {
       {
         countdown: "9h 30m", opensAtClock: "06:30", bookingStartsClock: "07:00",
         earlyEntryMinutes: door.early_entry_minutes, contact: CONTACT,
-        memberCodeOpensDoor, codeKind: code?.kind ?? null,
+        memberCodeOpensDoor, holdingCode: code !== null,
       },
     );
     const diagnosis = buildDiagnosis({
@@ -1810,10 +1677,8 @@ describe("memberDoorCopy — no state contradicts itself", () => {
       codeSecondsLeft: state.liveCode ? 58 : 0,
       connection: state.connection,
       contact: CONTACT,
-      codeKind: code?.kind ?? null,
-      codeWindow: null,
+      holdingCode: code !== null,
       lastRefusal: null,
-      offerMemberCode: standing.offerMemberCode,
       doorsShut: normaliseDoorsShut(state.shut),
       doorsShutNames: door.doors_shut_names,
       memberCodeOpensDoor,
@@ -1866,7 +1731,10 @@ describe("memberDoorCopy — no state contradicts itself", () => {
    * checked below, and quoted from here by the doc comments that used to hold a literal.
    * </p>
    */
-  const EVERY_STATE = 2 * 3 * REASONS.length * 3 * SHUT_STATES.length * 3 * 2;
+  // D1 turned the three-way code axis (booking / ident / none) into two (member / none)
+  // and split `hasBooking` out as its own two-way axis, so the code-and-booking factor went
+  // from 3 to 2 × 2: 4,320 states became 5,760.
+  const EVERY_STATE = 2 * 3 * REASONS.length * 2 * 2 * SHUT_STATES.length * 3 * 2;
 
   it("sweeps every combination of the axes, and says how many that is", () => {
     expect([...everyState()]).toHaveLength(EVERY_STATE);
@@ -1951,7 +1819,7 @@ describe("memberDoorCopy — no state contradicts itself", () => {
   it("names the shut doors the wire named", () => {
     const { standing } = screenFor({
       policy: "active_member", membership: "active", reason: null, released: false, offline: false,
-      codeKind: "ident", shut: "some", connection: "ok", liveCode: true, hasBooking: false,
+      codeKind: "member", shut: "some", connection: "ok", liveCode: true, hasBooking: false,
     });
     expect(standing.shutLine).toContain("Front door");
   });
@@ -1975,7 +1843,7 @@ describe("memberDoorCopy — no state contradicts itself", () => {
   it("names the booking code, and the way out of it, where the member code works", () => {
     const { decision } = screenFor({
       policy: "active_member", membership: "active", reason: "too_early", released: false,
-      offline: false, codeKind: "ident", shut: "none", connection: "ok", liveCode: true, hasBooking: false,
+      offline: false, codeKind: "member", shut: "none", connection: "ok", liveCode: true, hasBooking: false,
     });
     expect(decision.headline).toMatch(/That was your booking code/);
     // Already holding it: nothing to switch to, and saying so is the whole point.
@@ -1983,19 +1851,21 @@ describe("memberDoorCopy — no state contradicts itself", () => {
     expect(decision.body).not.toMatch(/hold it up to the scanner again then/);
   });
 
-  it("offers the switch instead when a booking code is the one on the glass", () => {
+  it("points at the member code when it is not on the glass yet", () => {
     const { decision } = screenFor({
       policy: "active_member", membership: "active", reason: "too_early", released: false,
-      offline: false, codeKind: "booking", shut: "none", connection: "ok", liveCode: true, hasBooking: true,
+      offline: false, codeKind: "none", shut: "none", connection: "ok", liveCode: true, hasBooking: true,
     });
-    expect(decision.body).toMatch(/tap "Member code" at the top of this screen/);
+    expect(decision.body).toMatch(/member code isn't tied to a booking and opens the door now/);
+    expect(decision.body).toMatch(/it appears at the top of this screen/);
+    expect(decision.body).not.toMatch(/code on this screen now is your member code/);
   });
 
   /** And it stays the old sentence where there genuinely is nothing better to hold. */
   it("keeps the plain wait where no code of theirs opens the door yet", () => {
     const { decision } = screenFor({
       policy: "booking_window", membership: "active", reason: "too_early", released: false,
-      offline: false, codeKind: "booking", shut: "none", connection: "ok", liveCode: true, hasBooking: true,
+      offline: false, codeKind: "member", shut: "none", connection: "ok", liveCode: true, hasBooking: true,
     });
     expect(decision.headline).toMatch(/Too early/);
     expect(decision.body).toMatch(/hold it up to the scanner again then/);
@@ -2145,8 +2015,8 @@ describe("memberDoorCopy — no state contradicts itself", () => {
       standingKnown: true, membership: "none" as const, membership_detail: "none",
       policy: "active_member" as const, hasBooking: false, bookingStartsClock: null,
       doorWindowOpen: null, opensAtClock: null, opensInWords: null, codeSecondsLeft: 58,
-      connection: "ok" as const, contact: CONTACT, codeKind: null, codeWindow: null,
-      lastRefusal: null, offerMemberCode: false, doorsShut: "none" as const,
+      connection: "ok" as const, contact: CONTACT, holdingCode: false,
+      lastRefusal: null, doorsShut: "none" as const,
       memberCodeOpensDoor: true,
     };
     const text = flat(buildDiagnosis(healthy).conclusion);

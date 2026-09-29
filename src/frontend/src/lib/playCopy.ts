@@ -41,11 +41,6 @@ export function scoreLine(a: number, b: number): string {
   return `${a}–${b}`;
 }
 
-/** "(11–7, 9–11, 11–5, 11–8)" — the games in brackets, as the mail writes them. */
-export function gamesLine(games: readonly { a: number; b: number }[]): string {
-  return games.map((g) => scoreLine(g.a, g.b)).join(", ");
-}
-
 /** "Jo" / "Jo and Sam" for one side of a lineup. */
 export function sideNames(players: readonly { name: string }[]): string {
   return listNames(players.map((p) => p.name));

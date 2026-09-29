@@ -1306,29 +1306,6 @@ export function memberDoorsOnFixture(overrides: Record<string, unknown> = {}) {
 }
 
 /**
- * A club whose doors ARE its policy's other half: `booking_window`, with an early-entry
- * window on it. The pair moves together (WIRE-R2 §4) and spelling both at each call site is
- * how one of them ends up describing a shape the endpoint cannot emit.
- */
-export function memberDoorBookingPolicyFixture(overrides: Record<string, unknown> = {}) {
-  return memberDoorsOnFixture({ policy: "booking_window", early_entry_minutes: 30, ...overrides });
-}
-
-/**
- * A club in a zone that is NOT the runner's.
- *
- * <p>
- * `vite.config.ts` pins the runner to Africa/Johannesburg, which is also the club under
- * test's zone — so a clock assertion against the default fixture passes whether or not the
- * zone is threaded at all. This one is two hours behind, which is the only way to prove
- * that a member reading their own history from anywhere reads the CLUB's day. O1.
- * </p>
- */
-export function memberDoorAbroadFixture(overrides: Record<string, unknown> = {}) {
-  return memberDoorsOnFixture({ timezone: "Europe/London", ...overrides });
-}
-
-/**
  * One `last_decision`, as the endpoint shapes it.
  *
  * <p>

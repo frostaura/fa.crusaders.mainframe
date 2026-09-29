@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import Layout from "./Layout";
+import Layout from "./shell/AppShell";
 import { AuthProvider } from "../lib/auth";
 import { BalanceProvider } from "../lib/balance";
 import { ProfileProvider } from "../lib/profile";

@@ -24,7 +24,7 @@ import { RowActions, type RowActionHandlers } from "./RowActions";
  * `xl`, so a viewport breakpoint drew columns into a card that could not hold them; and a reader
  * who raises the browser's font size gets the same layout at a larger size — at a 24px root font a
  * 768px screen shows cards, rather than a table whose Name column has squeezed to nothing. Below
- * {@link TABLE_FROM} each row is a card (identity on top, status and balance side by side, the
+ * 48rem each row is a card (identity on top, status and balance side by side, the
  * actions along the bottom); from it, a fixed-layout table whose every column but Member is
  * declared on the spacing scale, so its total is a property of the CSS rather than of the club's
  * longest name. Below the table, cards pair up from 36rem. Columns arrive in this order as the
@@ -58,7 +58,6 @@ import { RowActions, type RowActionHandlers } from "./RowActions";
  * portalled out of it are left alone.
  * </p>
  */
-export const TABLE_FROM = "[@container(min-width:48rem)]";
 
 const FRAME = cn(
   "[@container(min-width:48rem)]:overflow-hidden [@container(min-width:48rem)]:rounded-xl",

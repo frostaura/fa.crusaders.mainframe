@@ -23,7 +23,7 @@ import { signIn, signOut, stubFetch, type StubRoute } from "../test/harness";
  * </p>
  */
 
-vi.mock("../components/Layout", () => ({ default: () => <Outlet /> }));
+vi.mock("../components/shell/AppShell", () => ({ default: () => <Outlet /> }));
 vi.mock("./MyCode", () => ({ default: () => <h1>my code page</h1> }));
 vi.mock("./Wallet", () => ({ default: () => <h1>wallet page</h1> }));
 

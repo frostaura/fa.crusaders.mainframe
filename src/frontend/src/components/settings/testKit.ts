@@ -16,9 +16,6 @@ export const control = (label: Matcher) => screen.getByLabelText(label, { select
 export const findControl = (label: Matcher) => screen.findByLabelText(label, { selector: CONTROLS });
 export const queryControl = (label: Matcher) => screen.queryByLabelText(label, { selector: CONTROLS });
 
-/** Type into a field the way the old tests did. */
-export const edit = (label: Matcher, value: string) => fireEvent.change(control(label), { target: { value } });
-
 /** Choose from a design-system Select (a Radix combobox) by the option's NAME, as an admin does. */
 export function choose(label: Matcher, option: string) {
   fireEvent.pointerDown(control(label), { button: 0, ctrlKey: false, pointerType: "mouse" });

@@ -8,7 +8,6 @@ import {
   type CodeOnScreen,
   DIAGNOSIS_TRIGGER,
   type ContactKnowledge,
-  describeStanding,
   memberCodeOpensDoorNow,
   normaliseDoorsShut,
 } from "../../lib/memberDoorCopy";
@@ -67,19 +66,17 @@ export function DoorSection(props: {
   contact: ContactKnowledge;
   /** Seconds left on the code the member is holding, or 0 when there is none. */
   codeSecondsLeft: number;
-  /** Which of the member's two codes is on screen. E-H2 (1). */
+  /** The member's code, while one is on screen (D1). */
   code: CodeOnScreen | null;
   /** When the door facts on screen were read, or null while they are live. D6. */
   staleSince: string | null;
   /** Fetches a fresh code and resolves when it has settled. */
   onRefreshCode: () => Promise<void>;
-  /** Switches the page to the member's own code. E-H2 (3). */
-  onUseMemberCode?: () => void;
   /** The decision card above is already offering "Book a court". See `StandingLine`. */
   actionOfferedAbove?: boolean;
 }) {
   const { door, cached, doorRead, contact, codeSecondsLeft, code, staleSince } = props;
-  const { onRefreshCode, onUseMemberCode } = props;
+  const { onRefreshCode } = props;
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   /**
@@ -101,11 +98,8 @@ export function DoorSection(props: {
   const opensIn = useCountdownSeconds(opensAt);
   const standing = (door ?? cached.door?.value) ?? null;
   const zone = standing?.timezone;
-  /** The window of the code ON SCREEN, which is a fact about the code and not about the member. */
-  const codeWindow = useCodeWindow(code, zone);
   /** R3-8. A screen with nothing on it for a door to read promises nothing about one. */
   const hasLiveCode = codeSecondsLeft > 0;
-  const line = standing ? describeStanding(standing, code, { hasLiveCode }) : null;
 
   /** Both reads forced, and the checklist rendered only once they settle — never a stale tick. */
   const run = async () => {
@@ -143,7 +137,6 @@ export function DoorSection(props: {
         code={code}
         staleSince={staleSince}
         hasLiveCode={hasLiveCode}
-        onUseMemberCode={onUseMemberCode}
         actionOfferedAbove={props.actionOfferedAbove}
       />
 
@@ -151,7 +144,6 @@ export function DoorSection(props: {
         <SelfDiagnosis
           busy={busy}
           onHide={() => setOpen(false)}
-          onUseMemberCode={onUseMemberCode}
           input={{
             // Has the club's answer landed at all — live, or from the last-known store?
             // With neither, the four rows only the club can answer say so instead of
@@ -175,18 +167,15 @@ export function DoorSection(props: {
             opensAtClock: opensAt ? clubClock(opensAt, zone) : null,
             opensInWords: opensIn !== null && opensIn > 0 ? spokenCountdown(opensIn) : null,
             codeSecondsLeft,
-            codeKind: code?.kind ?? null,
-            codeWindow,
+            holdingCode: code !== null,
             lastRefusal: refusal,
-            offerMemberCode: line?.offerMemberCode ?? false,
             // R3-5. The check had no idea the club had switched a door off, on a page whose
             // own standing line was saying so ten pixels above, and concluded that the
             // scanner might need a wipe. Read through `normaliseDoorsShut` so an absent
             // field stays "nobody told this screen" rather than becoming an answer.
             doorsShut: normaliseDoorsShut(standing?.doors_shut),
             doorsShutNames: standing?.doors_shut_names,
-            // R3-6. Distinct from `offerMemberCode`, which is false for the member who is
-            // ALREADY holding the code the club's rule admits — which was Lerato exactly.
+            // R3-6. Whether the club's rule admits the member's code now, whatever is on screen.
             memberCodeOpensDoor: memberCodeOpensDoorNow(standing),
             // Not `!failed`. A 500 from the club's API is a read that failed and a phone
             // whose line works perfectly, and scoring that row ✗ sent a member to look for
@@ -205,28 +194,4 @@ export function DoorSection(props: {
       )}
     </>
   );
-}
-
-/**
- * Where the booking code on screen stands against its own window, read off the clock.
- *
- * <p>
- * Never counted in ticks, for the reason every other clock on this surface is not: a phone
- * in a pocket fires none, and this is exactly the boundary it sleeps through. Null on a
- * member code, and null on a booking code the response sent no window for.
- * </p>
- */
-function useCodeWindow(code: CodeOnScreen | null, zone: string | undefined) {
-  const opens = code?.kind === "booking" ? code.doorOpensAt : null;
-  const closes = code?.kind === "booking" ? code.doorClosesAt : null;
-  const untilOpen = useCountdownSeconds(opens);
-  // BOTH edges. A window judged on its opening alone reports a code from this morning as
-  // open, which is the same class of error as judging it on its closing alone.
-  const untilClose = useCountdownSeconds(closes);
-  if (!opens || !closes) return null;
-  return {
-    open: (untilOpen ?? 0) <= 0 && (untilClose ?? 0) > 0,
-    opensAtClock: clubClock(opens, zone),
-    closesAtClock: clubClock(closes, zone),
-  };
 }

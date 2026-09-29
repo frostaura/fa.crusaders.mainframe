@@ -38,9 +38,6 @@ export type OnboardingPrefs = {
 /** The profile, as the API sends it now: it embeds the preferences object. */
 export type ProfileWithPreferences = MyProfile & { preferences?: Partial<OnboardingPrefs> | null };
 
-/** The server's own bound on a step name (`UserPreferencesRules.MaxStepLength`). */
-export const MAX_STEP_LENGTH = 64;
-
 // --- the steps -------------------------------------------------------------------------
 
 /**

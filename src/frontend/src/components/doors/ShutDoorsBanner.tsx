@@ -183,11 +183,6 @@ let lastAnnounced: string | null = null;
  */
 const ANNOUNCE_MS = 150;
 
-/** Tests get a fresh session. Nothing in the app calls this; a page load is the real reset. */
-export function resetShutBannerAnnouncements(): void {
-  lastAnnounced = null;
-}
-
 function Interruption({ text, when }: { text: string; when: boolean }) {
   const [said, setSaid] = useState("");
 

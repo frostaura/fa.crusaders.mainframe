@@ -20,7 +20,7 @@ import { signIn, signOut, stubFetch } from "../../test/harness";
  * </p>
  */
 
-vi.mock("../Layout", () => ({ default: () => <Outlet /> }));
+vi.mock("./AppShell", () => ({ default: () => <Outlet /> }));
 vi.mock("../admin/AdminLayout", () => ({
   default: () => <div data-admin-layout=""><p>admin rail</p><Outlet /></div>,
 }));

@@ -86,59 +86,6 @@ export const BANNED_IN_MEMBER_DOOR_COPY = [
  */
 export const UNNAMED_DOOR = "a club door";
 
-// --- item 9: the capsule tabs, and the offer that should not need them ------------------
-
-/**
- * <b>The set is TWO, and shipping three would have been a lie.</b> (GOAL item 9, D4 §5.1)
- *
- * <p>
- * The wire has two kinds: `MyQrKind` is `"booking" | "ident"`, and the generate call sends
- * `"ident"` or nothing at all. "Walk-up" is not a third code — it is one of the two things
- * the member code is FOR, the other being paying for somebody else's time. A third segment
- * would POST an identical request, receive an identical payload and draw an identical QR,
- * and a member would find out at a court box that two of the three tabs were the same tab.
- * So the member-code panel names both uses in words, which is what a twenty-pixel checkbox
- * labelled "Walk up / pay for someone" was trying to do from two screens below the fold.
- * </p>
- */
-export const CODE_TABS_LABEL = "Which code to show";
-export const BOOKING_CODE_TAB = "Booking code";
-export const MEMBER_CODE_TAB = "Member code";
-
-/**
- * Why the Booking code tab is dimmed — and note what it does NOT say.
- *
- * <p>
- * It quotes no window. The court's own activation window is not on this page's wire (the cue
- * window is a tenant setting no member endpoint carries), so "no booking starting in the next
- * two hours" would be the page inventing a number. What the page genuinely knows is that it
- * asked the server to choose and the server chose the member code — which is the server
- * saying, in the only way it can, that there is no booking code to show right now.
- * </p>
- */
-export const NO_BOOKING_CODE_REASON = "The club has no booking of yours to make a code for at the moment."
-  + " A booking code appears here when one is close enough to use.";
-
-/*
- * There is deliberately no MEMBER_CODE_PANEL sentence. The code card sitting inside the panel
- * already names both uses — "start on a free court now, or pay for someone else's time" — and
- * a caption above it introducing the tab in its own words is two spellings of one fact forty
- * pixels apart. The card IS the panel; see `CodeChoice`.
- */
-
-/**
- * <b>The choice's lifetime, stated as the tabs actually behave.</b>
- *
- * <p>
- * Shown only when the member has CHOSEN the member code, because that is the only choice
- * that is remembered: the booking tab sends "let the server decide", which is the absence of
- * a preference rather than the opposite one. See `lib/lastKnown.readWalkUpChoice` — same key,
- * same `"1" | "0"` values, so a member mid-session across this deploy keeps their choice.
- * </p>
- */
-export const CODE_CHOICE_STICKY = "You'll keep getting your member code for the rest of this visit, until you"
-  + " tap Booking code.";
-
 /** The three answers the wire can carry. Anything else is {@link normaliseDoorsShut}'s fourth. */
 const DOORS_SHUT_VALUES: readonly MemberDoorsShut[] = ["none", "some", "all"];
 
@@ -350,12 +297,6 @@ export function contactStaleNotice(minutesAgo: number): string {
   return `Couldn't reach the club just now. This is the number it gave ${ago}.`;
 }
 
-/** The club's contact, as one line of plain text, or null when there is nothing to say. */
-export function contactLine(contact: MemberDoorContact): string | null {
-  const parts = [contact.phone, contact.email].filter((p): p is string => !!p);
-  return parts.length ? parts.join(" · ") : null;
-}
-
 /**
  * A sentence with at most one thing in it a thumb can press. D13.
  *
@@ -459,8 +400,8 @@ export type DecisionContext = {
    * </p>
    */
   memberCodeOpensDoor?: boolean;
-  /** Which of the member's two codes is on screen right now. Null when there is none. */
-  codeKind?: "booking" | "ident" | null;
+  /** Is the member's code on screen right now? False while it is still being made or enrolled. */
+  holdingCode?: boolean;
 };
 
 export type MemberDecisionCopy = {
@@ -544,12 +485,12 @@ function armTooEarly(ctx: DecisionContext): Arm {
     answering a question about a credential as though it were a question about a person.
   */
   if (ctx.memberCodeOpensDoor) {
-    const holding = ctx.codeKind === "ident"
+    const holding = ctx.holdingCode
       // She is ALREADY holding the right one. There is nothing to switch to and nothing to
       // wait for; what she needs is to be told the code on screen is not the refused one.
       ? "The code on this screen now is your member code, which this club's doors do open — hold that one up."
-      : `Your member code isn't tied to a booking and opens the door now — tap "${MEMBER_CODE_TAB}" at the`
-        + " top of this screen.";
+      : "Your member code isn't tied to a booking and opens the door now — it appears at the top of this"
+        + " screen.";
     return {
       tone: "info",
       headline: "That was your booking code, which isn't live yet.",
@@ -948,16 +889,6 @@ export type StandingLine = {
    * </p>
    */
   shutLine: string | null;
-  /**
-   * Would the club's own rule let this member's MEMBER code through right now? E-H2 (3).
-   *
-   * <p>
-   * The offer to switch codes is worth making only when there is something better to switch
-   * to. A member under `booking_window` with no booking gains nothing from an ident code,
-   * and offering it would send them to a door that will refuse that one too.
-   * </p>
-   */
-  offerMemberCode: boolean;
   /** Does this sentence carry a clock window of its own? */
   hasClockWindow: boolean;
   /**
@@ -1084,7 +1015,6 @@ function standingNotActive(rule: string, detail: MemberDoorMembershipDetail): St
     body: `${rule} The club has yours as ${word}, so no code of yours opens a door until they change that.`,
     codeLine: null,
     shutLine: null,
-    offerMemberCode: false,
     hasClockWindow: false,
     // The contradiction arm: the code card must not promise a window over this sentence.
     suppressesCodeClause: true,
@@ -1116,7 +1046,6 @@ function standingClubAdmin(shut: MemberDoorsShutKnowledge, names?: readonly stri
     shutLine: shutLineFor(shut, names),
     // Under this policy the member code is admitted by the carve-out itself, so offering a
     // switch to it buys nothing the member does not already have.
-    offerMemberCode: false,
     hasClockWindow: false,
     // No clock window to duplicate, and nothing to contradict: a door does open for this
     // member, so the code card's clause is the only place the times can come from.
@@ -1149,7 +1078,6 @@ function standingBooking(
     body: `${BOOKING_RULE} Yours is at ${starts}${court}, and ${window}`,
     codeLine: null,
     shutLine: shutLineFor(shut, names),
-    offerMemberCode: false,
     hasClockWindow: true,
     suppressesCodeClause: true,
     action: null,
@@ -1179,41 +1107,18 @@ function isClubToday(iso: string, zone: string | undefined): boolean {
   return day(at) === day(Date.now());
 }
 
-/** What the code ON SCREEN is, so a sentence can say which code it is about. E-H2, D5. */
-export type CodeOnScreen = {
-  kind: "booking" | "ident";
-  /** Both edges of a booking code's own door window; null on a member code. */
-  doorOpensAt: string | null;
-  doorClosesAt: string | null;
-};
-
 /**
- * The second sentence: what the code on screen does at a door, said as a fact about THAT
- * code rather than about the member's day. E-H2 (1), D5.
- *
- * <p>
- * Silent on a member code, where the standing line above already is the whole answer, and
- * silent on a booking code the response sent no window for — an invented window is worse
- * than a missing sentence.
- * </p>
+ * The code ON SCREEN (D1): the member's single rotating code, which is bounded by no booking.
+ * The page passes it while one is drawn and null while it is not.
  */
-function codeLineFor(code: CodeOnScreen | null, offerMemberCode: boolean, zone: string | undefined): string | null {
-  if (!code || code.kind !== "booking" || !code.doorOpensAt || !code.doorClosesAt) return null;
-  const from = bookingClock(code.doorOpensAt, zone);
-  const until = bookingClock(code.doorClosesAt, zone);
-  const swap = offerMemberCode
-    ? ` Your member code isn't tied to a booking — tap "${MEMBER_CODE_TAB}" at the top of this screen.`
-    : "";
-  return `The booking code on screen is bounded by its own window whatever rule a club applies: it works at a`
-    + ` door from ${from} until ${until}, and not outside that.${swap}`;
-}
+export type CodeOnScreen = { kind: "member" };
 
 /**
- * When the door will open for a booking the member has but is not holding the code for.
+ * When the door window opens for a booking the member has, while no code is on screen.
  *
  * <p>
  * The LOW note behind it: a member with a court tomorrow, at a club that opens for any
- * active member, was never told when that booking's own code starts working — the standing
+ * active member, was never told when that booking's door window opens — the standing
  * line had no reason to mention a booking under this policy, and the code card was showing
  * a member code. `next_booking` reaches further than the door's horizon now, so the page
  * can answer it.
@@ -1221,8 +1126,8 @@ function codeLineFor(code: CodeOnScreen | null, offerMemberCode: boolean, zone: 
  */
 function nextBookingLine(booking: MemberDoorBooking, zone: string | undefined): string {
   const court = booking.court_number === null ? "" : ` on court ${booking.court_number}`;
-  return `You have a court at ${bookingClock(booking.starts_at, zone)}${court}. Its own booking code works at a`
-    + ` door from ${bookingClock(booking.door_opens_at, zone)}.`;
+  return `You have a court at ${bookingClock(booking.starts_at, zone)}${court}. Its door window opens at`
+    + ` ${bookingClock(booking.door_opens_at, zone)}.`;
 }
 
 /** Everything the endpoint sends that bears on what opens a door for this member. */
@@ -1306,7 +1211,6 @@ export function describeStanding(
         + " won't open for you.",
       codeLine: null,
       shutLine: shutLineFor(shut, names),
-      offerMemberCode: false,
       hasClockWindow: false,
       // The other contradiction arm. An ident code's clause reads "whenever the club's
       // door rules allow", directly over a sentence saying a door will not open at all.
@@ -1377,9 +1281,6 @@ function standingActiveMember(
   shut: MemberDoorsShutKnowledge,
   codeState: StandingCodeState,
 ): StandingLine {
-  // The club's rule would let this member's MEMBER code through: there is genuinely
-  // something better to offer somebody holding a booking code outside its window.
-  const offerMemberCode = code?.kind === "booking";
   // Three states, and `none` gets its own rather than borrowing either neighbour's.
   // "Yours is active" would be as false as "yours is not active" — the club has nothing on
   // file at all — and what the door does about that is its own sentence (ruling 15).
@@ -1401,7 +1302,7 @@ function standingActiveMember(
         ? " Nothing about your membership stands in the way at the ones the club has left open."
         : " A live member code of yours opens the club door.";
   const nextBooking = !code && door.next_booking ? nextBookingLine(door.next_booking, door.timezone) : null;
-  const codeLine = codeLineFor(code, offerMemberCode, door.timezone) ?? nextBooking;
+  const codeLine = nextBooking;
   /*
     Ruling 15. With no membership on file the club has to move first, exactly as it does for a
     membership it has switched off — so this arm behaves like `standingNotActive`: no window,
@@ -1413,7 +1314,6 @@ function standingActiveMember(
       body: `${ACTIVE_MEMBER_RULE} ${standing}`,
       codeLine: null,
       shutLine: null,
-      offerMemberCode: false,
       hasClockWindow: false,
       suppressesCodeClause: true,
       action: null,
@@ -1423,7 +1323,6 @@ function standingActiveMember(
     body: `${ACTIVE_MEMBER_RULE} ${standing}${consequence}`,
     codeLine,
     shutLine: shutLineFor(shut, door.doors_shut_names),
-    offerMemberCode,
     hasClockWindow: false,
     // The one arm where the code card's clause EARNS its place: this line has no clock
     // times and the code card does. It is suppressed only when this line has grown a clock
@@ -1534,32 +1433,6 @@ export const DOOR_SECTION_CHECKING = "Checking whether this club's doors need an
 export const DOOR_SECTION_UNKNOWN = "This screen can't tell you what its doors need from you — or whether this"
   + " club has any. Whatever is written on the door is the way in until it can.";
 
-/*
- * `WALK_UP_STICKY_HINT` lived here — "Stays on for the rest of this visit, until you turn it
- * off." It described a checkbox, and the checkbox is gone (item 9). The same fact, in the
- * words the tabs actually behave in, is `CODE_CHOICE_STICKY` at the top of this file; keeping
- * a second spelling beside it is how two sentences about one rule come to disagree.
- */
-
-/**
- * D5 — a code that has run out and could not be replaced.
- *
- * <p>
- * The page drew the dead symbol at forty per cent opacity under the label "Expired —
- * refreshing" and left it there for minutes. Forty per cent is still a scannable QR: a
- * member held a dead code up to a scanner in the dark, repeatedly, while a screen promised
- * a refresh that could not happen. Reduced opacity is a decoration, not a sentence, and
- * "refreshing" was not true.
- * </p>
- */
-export function codeExpiredDeadEnd(failure: ReadFailure, contact: ContactKnowledge): Sentence {
-  const why = failure === "network"
-    ? "This code has run out and can't be renewed without signal."
-    : "This code has run out, and the club's system answered with an error when this screen asked for"
-      + " another — that part is not your phone.";
-  return withReach(`${why} There's nothing on this screen for a door or a court box to read.`, contact);
-}
-
 // --- the offline half of the conditional (P6) ------------------------------------------
 
 export const OFFLINE_DETAILS_SUMMARY = "What if the door is offline?";
@@ -1607,42 +1480,6 @@ export function offlineDetailsBody(rosterMaxEntries?: number | null): string {
     + " court booked soon, even at a club whose doors normally open for any active member; and your booking"
     + ` has to be near the front of that list, which holds the next ${cap} bookings due to start. A door the`
     + " club is still setting up is sent no list at all, so it opens nothing while it is cut off.";
-}
-
-// --- the offline page -------------------------------------------------------------------
-
-/** A code the page still holds, with its age said out loud and no promise attached. */
-export function offlineWithCode(input: { fetchedAtClock: string; minutesAgo: number; kind: "booking" | "ident" }): string {
-  const age = input.minutesAgo <= 1 ? "a minute ago" : `${input.minutesAgo} minutes ago`;
-  const outlook = input.kind === "booking"
-    ? "A booking code stays good until a while after your court ends, so it will probably still work."
-    : "A code like this one lasts about a minute, so it has probably run out already.";
-  return `Your phone can't reach the club. This is the code it last managed to get, at ${input.fetchedAtClock}`
-    + ` — ${age}. ${outlook} If the door says no, the number below is the way in.`;
-}
-
-/** No live code and no way to get one. No QR is drawn: a dead QR in the dark is cruelty. */
-export function offlineNoCode(contact: ContactKnowledge): Sentence {
-  return withReach("Your phone can't reach the club, and the code it last had has run out. There's nothing this"
-    + " screen can do from here.", contact);
-}
-
-/**
- * D5 — the sharpest honest sentence on this surface, and the one nothing in the contract
- * covers.
- *
- * <p>
- * A member at an `active_member` club with no booking holds an ident code, which lives
- * about a minute. With no signal they cannot get a fresh one, and a door that has also
- * lost the network holds bookings and nothing else — so the code in their hand cannot
- * work at a cut-off door however new it is. The page owes them that sentence rather than
- * a hopeful QR.
- * </p>
- */
-export function offlineIdentDeadEnd(contact: ContactKnowledge): Sentence {
-  return withReach("Your phone can't reach the club. The code on this screen lasts about a minute, and a door"
-    + " that has also lost the network only opens for members with a court booked — which you don't have right"
-    + " now.", contact);
 }
 
 // --- the self-diagnosis --------------------------------------------------------------
@@ -1752,24 +1589,10 @@ export type DiagnosisInput = {
   opensAtClock: string | null;
   opensInWords: string | null;
   codeSecondsLeft: number;
+  /** Is the member's code on screen right now (D1: the one rotating code)? */
+  holdingCode: boolean;
   connection: DiagnosisConnection;
   contact: ContactKnowledge;
-  /**
-   * Which of the member's two codes is on screen RIGHT NOW. E-H2 (1).
-   *
-   * <p>
-   * <b>The check ignored it, and that was the whole of the Lerato finding.</b> A member at a
-   * club that opens for any active member, holding a BOOKING code for the following day, was
-   * told "Your booking — not needed at this club", "The door's window — no window to wait
-   * for" and "whatever went wrong is at the door", beside seventeen `too_early` refusals in
-   * the club's own record. Every row was true of her membership and none was true of the
-   * twelve characters she had held up: a booking code is bounded by its own window under
-   * every one of a club's door rules, and that window was the answer.
-   * </p>
-   */
-  codeKind: "booking" | "ident" | null;
-  /** The window of the code on screen, when it is a booking code the API sent one for. */
-  codeWindow: { open: boolean; opensAtClock: string; closesAtClock: string } | null;
   /**
    * The club's OWN record of a recent refusal, which outranks anything this phone can see.
    *
@@ -1781,8 +1604,6 @@ export type DiagnosisInput = {
    * </p>
    */
   lastRefusal: { atClock: string; reason: string | null } | null;
-  /** Would the club's rule admit this member's MEMBER code right now? E-H2 (3). */
-  offerMemberCode: boolean;
   /**
    * How much of the club's door estate is shut, as far as this screen has been told. R3-5.
    *
@@ -1808,13 +1629,6 @@ export type DiagnosisInput = {
    * Would this club's rule admit the member's MEMBER code right now, whatever is on screen?
    * R3-6.
    *
-   * <p>
-   * Distinct from {@link offerMemberCode}, which is "there is a better code to SWITCH to"
-   * and is therefore false for the member already holding it. That distinction was the whole
-   * of the Lerato finding: she held an ident code at a club that admits one, had been refused
-   * on her booking code, and the check — seeing nothing to offer her — cited the irrelevant
-   * booking and finished with "Phone the club".
-   * </p>
    */
   memberCodeOpensDoor?: boolean;
 };
@@ -1830,11 +1644,7 @@ function row(key: DiagnosisKey, state: DiagnosisState, value: string, stateWord?
  */
 function bookingRow(input: DiagnosisInput): DiagnosisRow {
   if (input.policy === "active_member") {
-    // A club that asks for no booking still hands out booking codes, and one of them may be
-    // the code on screen. "Not needed at this club" full stop reads as "this cannot be it".
-    return input.codeKind === "booking"
-      ? row("booking", "neutral", "not needed at this club — but the code on screen belongs to one")
-      : row("booking", "neutral", "not needed at this club");
+    return row("booking", "neutral", "not needed at this club");
   }
   if (!input.hasBooking) return row("booking", "failed", "none starting soon");
   return row("booking", "passed", input.bookingStartsClock ?? "one coming up");
@@ -1851,12 +1661,6 @@ function bookingRow(input: DiagnosisInput): DiagnosisRow {
  * </p>
  */
 function windowRow(input: DiagnosisInput): DiagnosisRow {
-  const code = input.codeWindow;
-  if (code) {
-    return code.open
-      ? row("window", "passed", `this booking code works at a door until ${code.closesAtClock}`)
-      : row("window", "attention", `this booking code works at a door from ${code.opensAtClock}`);
-  }
   if (input.doorWindowOpen === null) return row("window", "neutral", "no window to wait for");
   if (input.doorWindowOpen) return row("window", "passed", "open for you now");
   return row("window", "attention", `opens for you at ${input.opensAtClock ?? "a time the club sets"}`);
@@ -1989,18 +1793,13 @@ function concludeFromRefusal(input: DiagnosisInput, refusal: NonNullable<Diagnos
     ?? "The club's record doesn't say why in a way this screen understands.";
   const lead = `The club's own record says the last code held up at a door, at ${refusal.atClock}, was refused:`
     + ` ${line}`;
-  if (input.offerMemberCode) {
-    // The one thing on this phone that might work, and the member has to be told it exists.
-    return plain(`${lead} Your member code isn't bounded by a booking — "${MEMBER_CODE_TAB}" at the top of`
-      + " this screen shows it.");
-  }
   /*
     R3-6, the other half. A member already holding the code this club's rule admits has
-    nothing to switch to, so `offerMemberCode` is false — and the conclusion fell through to
-    "Phone the club" while the answer was in her hand. The refusal was a BOOKING code's; the
+    nothing to switch to — and the conclusion fell through to "Phone the club" while the
+    answer was in her hand. The refusal was a BOOKING code's; the
     code on screen is not that code.
   */
-  if (input.memberCodeOpensDoor && input.codeKind === "ident") {
+  if (input.memberCodeOpensDoor && input.holdingCode) {
     return plain(`${lead} That was a booking code. The one on this screen now is your member code, which this`
       + " club's doors do open — hold that one up.");
   }
@@ -2070,16 +1869,6 @@ function concludeFrom(input: DiagnosisInput): Sentence {
   if (input.policy === "booking_window" && !input.hasBooking) {
     return plain("This club's doors open only for members with a court booked, and you have none starting soon."
       + " Book one from the schedule.");
-  }
-  // Then the twelve characters on screen, and this is the Lerato arm: at a club whose doors
-  // open for any active member all day, a BOOKING code is still bounded by its own window,
-  // and that window was the whole answer the check could not see. E-H2 (1).
-  if (input.codeWindow && !input.codeWindow.open) {
-    const swap = input.offerMemberCode
-      ? ` Your member code isn't bounded by a booking — "${MEMBER_CODE_TAB}" at the top of this screen shows it.`
-      : "";
-    return plain(`The booking code on screen doesn't work at a door until ${input.codeWindow.opensAtClock}, and`
-      + ` a booking code has that window whatever rule a club applies.${swap}`);
   }
   if (input.doorWindowOpen === false) {
     const when = input.opensAtClock ? ` at ${input.opensAtClock}` : "";
@@ -2228,45 +2017,6 @@ export const HISTORY_REFRESH = "Refresh";
  * </p>
  */
 export const HISTORY_LINK_LABEL = "Your door history";
-
-// --- item 9: the door offer that used to point at a checkbox ----------------------------
-
-/**
- * What the page says when the booking code on screen has stopped opening a door.
- *
- * <p>
- * <b>The escape hatch existed and nothing pointed at it.</b> A member whose booking's door
- * window has closed is holding a code that will be refused at the door, with a switch
- * lower down the page — a sixteen-pixel checkbox labelled for a court errand — as the only
- * way to the code that might still work. Nothing connected the two, so the member who most
- * needs the switch is the one least likely to find it.
- * </p>
- */
-export const BOOKING_DOOR_WINDOW_CLOSED = "Your booking's door window has closed, so this booking code won't"
-  + " open a club door now.";
-
-/**
- * The button three cards offer, <b>named after the tab it moves to</b>. (item 9)
- *
- * <p>
- * It used to read "Use your member code instead", and the sentences beside it quoted that
- * string as the thing to look for. Two names for one act, on a page whose audience the goal
- * note describes as not good with technology. The tab is now the persistent control and the
- * one every sentence names; this button is the same act offered where the member is already
- * reading, so it wears the same words.
- * </p>
- *
- * <p>
- * <b>The way BACK is the tab, which is why R3-30's second label is gone.</b> That finding
- * was that "Use your member code instead" was a one-way door: three controls offered it and
- * none said how to undo it, because the only way back was a checkbox two screens down
- * labelled for a court errand. The Booking code tab is at the top of the page, is named for
- * what it shows, and states which code is on screen at all times — so `BACK_TO_BOOKING_CODE`
- * and `WALK_UP_ON_NOTICE` described a mechanism that no longer exists and are deleted rather
- * than left to fire with stale authority. {@link CODE_CHOICE_STICKY} carries the lifetime.
- * </p>
- */
-export const USE_MEMBER_CODE_INSTEAD = `Switch to ${MEMBER_CODE_TAB}`;
 
 /** The offline marker on a row: the door decided from the list it had already downloaded. */
 export const HISTORY_OFFLINE_LINE = "From the door's own list — it couldn't reach the club at the time.";

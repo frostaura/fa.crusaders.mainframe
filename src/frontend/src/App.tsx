@@ -1,7 +1,7 @@
 import { Suspense, lazy, type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AuthProvider, readLastIdentity, useAuth } from "./lib/auth";
-import Layout from "./components/Layout";
+import AppShell from "./components/shell/AppShell";
 import { ToastProvider } from "./components/Toast";
 import { BalanceProvider } from "./lib/balance";
 import { ProfileProvider } from "./lib/profile";
@@ -113,8 +113,8 @@ export default function App() {
       <RouteAnnouncer />
       <AuthProvider>
         <ProfileProvider>
-        {/* Inside ProfileProvider, because that is where the club's glyph choice arrives, and
-            outside everything that draws one. */}
+        {/* Inside ProfileProvider, because that is where the club's money symbol arrives, and
+            outside everything that formats money. */}
         <ClubUiProvider>
         <BalanceProvider>
         <ToastProvider>
@@ -152,7 +152,7 @@ export default function App() {
 export function AppRoutes() {
   return (
     <Routes>
-      <Route element={<Layout />}>
+      <Route element={<AppShell />}>
         <Route path="/" element={<HomePage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />

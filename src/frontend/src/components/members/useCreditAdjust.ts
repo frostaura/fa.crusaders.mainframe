@@ -108,5 +108,3 @@ export function useCreditAdjust(setMembers: Dispatch<SetStateAction<MemberRow[] 
 
   return { target, booking, setBooking, bookingError, busy, open, close, apply };
 }
-
-export type CreditAdjust = ReturnType<typeof useCreditAdjust>;

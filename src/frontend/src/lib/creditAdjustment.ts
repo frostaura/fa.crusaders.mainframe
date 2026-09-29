@@ -42,25 +42,6 @@ export const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 export function isGuid(value: string) { return GUID.test(value); }
 
 /**
- * What is wrong with the form, in the desk's words, or null when nothing is.
- *
- * <p>
- * The GUID check is here rather than left to the server because the endpoint binds
- * <code>RelatedBookingId</code> as a <code>Guid?</code> and answers a bare 400 with no
- * body for anything that is not one — a refusal an admin cannot act on. The two refusals
- * the endpoint <em>does</em> explain are handled after the round trip, in
- * {@link relatedBookingRefusal}.
- * </p>
- */
-export function validateAdjustment(amountText: string, reason: string, bookingId: string): string | null {
-  const amount = parseFloat(amountText);
-  if (isNaN(amount) || amount === 0) return "Enter a non-zero amount.";
-  if (!reason.trim()) return "A reason is required.";
-  if (bookingId && !isGuid(bookingId)) return "That booking ID is not one — it should look like 8-4-4-4-12 hex characters. Pick one from the list or leave it blank.";
-  return null;
-}
-
-/**
  * The two ways the server refuses the booking a hand adjustment names (settlement-model
  * I4), told apart.
  *

@@ -32,16 +32,6 @@ export const NIGHT_PRIVACY_NOTICE
   + "settle a question: a disputed charge, a door that did not open, a light that did not come "
   + "on. It is not here to browse.";
 
-/**
- * And the other half, which most designs leave out: what happens when the read FAILS.
- *
- * The server writes its audit row on a 200. If the page said "opening it is recorded" and
- * then failed, the notice above would be a lie about the one thing this surface promises.
- */
-export const NIGHT_READ_FAILED
-  = "Couldn't read that night. Nothing was recorded about this look-up, because the club's "
-  + "system never answered.";
-
 export const NIGHT_EXPORT_NOTE
   = "The download has the member's name in it, and it writes another line in the change record "
   + "saying you took it. Once it is on your computer it is outside the club's own rules about "
@@ -151,8 +141,6 @@ export const NIGHT_EMPTY_HINT
   = "Boxes and doors that were offline that night may not have uploaded yet — it is worth "
   + "looking again tomorrow.";
 
-export const NIGHT_NO_MEMBER_YET = "Pick a member first. There is nothing to show until you do.";
-
 // ---------------------------------------------------------------------------------------
 // The admin change record
 // ---------------------------------------------------------------------------------------
@@ -182,9 +170,6 @@ export const CHANGES_STANDING_NOTICE
   + "there is no delete anywhere in the software, and the database refuses one outright.";
 
 export const CHANGES_EMPTY = "No changes recorded in this range.";
-export const CHANGES_READ_FAILED
-  = "Couldn't read the change record. That does not mean nothing happened — it means the club's "
-  + "system did not answer.";
 
 /** A row whose writer predates the before/after convention. An honest gap, not a blank. */
 export const CHANGES_NO_DIFF = "What changed wasn't recorded for this row.";

@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
-import Layout from "../Layout";
+import Layout from "../shell/AppShell";
 import { ProfileProvider } from "../../lib/profile";
-import { AdminDoorsHomeRow } from "./AdminDoorsHomeRow";
 import { markOwnDoorsAction, useDoorsStore } from "./useDoorsChrome";
 import { SETTINGS_FIXTURE, doorFixture, doorsServer, renderPage, signIn, signOut, stubFetch } from "../../test/harness";
 
@@ -473,112 +472,6 @@ describe("the club-wide shut banner", () => {
     // was reading, because they are the one who caused it.
     expect(await shutBanner()).toHaveTextContent("1 of 1 door shut");
     expect(heard).toEqual([]);
-  });
-});
-
-describe("the admin Home row", () => {
-  /*
-   * Rendered on its own. The P2 home rebuild (R15: My Code is the landing) no longer places
-   * this row on Home, and admin Overview carries its own "Needs attention" cards — so what is
-   * held here is the component's own contract (A2.6's narrowing, the shut wording), whichever
-   * screen places it next. "Book a court" was the old Home's heading and is no longer a thing
-   * to wait for; the tests wait for the doors read instead.
-   */
-  function home(doors: Record<string, unknown>[], options: Parameters<typeof doorsServer>[1] = {}) {
-    signIn({ isAdmin: true });
-    const server = doorsServer(doors, options);
-    const stub = stubFetch(server.routes);
-    renderPage(<AdminDoorsHomeRow />, { initialEntries: ["/admin"] });
-    return stub;
-  }
-
-  /**
-   * <b>On a normal day Home says nothing at all about doors.</b> P7 is a rule about email and
-   * it is the right rule for a home screen too: a panel that is always there is one an admin
-   * skims past, so it is worth nothing on the morning it matters — and "all 3 doors
-   * reporting" would be a standing claim of exactly the kind the chip refuses to make.
-   */
-  it("is absent when every door is reporting, named and open", async () => {
-    await doorsReadSettled(home([doorFixture()]));
-
-    expect(screen.queryByText("Admin · Doors")).toBeNull();
-  });
-
-  it("names the door and what is wrong with it when one is silent", async () => {
-    home([doorFixture({ name: "Side door", last_seen_at: ago(3600) })]);
-
-    expect(await screen.findByText("Admin · Doors")).toBeInTheDocument();
-    expect(screen.getByText("Side door has not been heard from.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Admin · Doors/ })).toHaveAttribute("href", "/admin/monitoring/doors");
-  });
-
-  it("says a shut door is shut rather than that it has gone quiet", async () => {
-    home([doorFixture({ name: "Side door", enabled: false, last_seen_at: ago(12) })]);
-
-    expect(await screen.findByText("Side door is shut. Nobody gets in through it.")).toBeInTheDocument();
-  });
-
-  /**
-   * C2's family. This fixture is a door that has NEVER called in — so "Nobody gets in
-   * through it" is a claim about a machine the club has never heard from, which is exactly
-   * the overstatement the banner was rewritten to stop making.
-   */
-  it("does not claim nobody gets in through a shut door it has never heard from", async () => {
-    home([doorFixture({ name: "Side door", enabled: false, last_seen_at: null })]);
-
-    // R3-1: and it does not claim the opposite either. With no `shut_heard_at` on the row
-    // the page says it cannot tell — the previous sentence ("it may not have been told") was
-    // derived from an age that the shut itself froze, and was printed over boards that had
-    // heard the refusal inside one heartbeat.
-    expect(await screen.findByText(/Side door is shut, and the club has not heard from it since/))
-      .toHaveTextContent("this page cannot say whether it was told");
-  });
-
-  /**
-   * <b>R3-1 on the row an admin meets without going looking.</b>
-   *
-   * Home is the screen somebody sees on a visit that was about something else, so a door
-   * described there as possibly still admitting people is a door somebody drives to the club
-   * for. `shut_heard_at` settles it and Home says which.
-   */
-  it("says a shut door has been told, where the server says so", async () => {
-    home([doorFixture({
-      name: "Side door", enabled: false, last_seen_at: null,
-      shut_heard_at: "2026-09-21T06:09:00Z",
-    })]);
-
-    expect(await screen.findByText(/Side door is shut and has been told/))
-      .toHaveTextContent("Nobody gets in through it");
-  });
-
-  it("names one door and counts the others", async () => {
-    home([
-      doorFixture({ name: "Side door", last_seen_at: ago(3600) }),
-      doorFixture({ id: "99999999-9999-9999-9999-99999999aaaa", name: "Front door", gate_key: null }),
-      doorFixture({ id: "99999999-9999-9999-9999-99999999bbbb", name: "Back door", gate_key: "back", enabled: false }),
-    ]);
-
-    expect(await screen.findByText(/Side door has not been heard from\. 2 other doors need attention\./))
-      .toBeInTheDocument();
-  });
-
-  /** Never for a signal or a count — those are operational detail, and belong on the door. */
-  it("says nothing about a refusal spike", async () => {
-    await doorsReadSettled(home([doorFixture()], {
-      rows: { "99999999-9999-9999-9999-999999999999": { signals: [{ kind: "refusal_spike", since: ago(1200), until: ago(0), scans: 11 }] } },
-    }));
-
-    expect(screen.queryByText("Admin · Doors")).toBeNull();
-    expect(document.body.textContent).not.toContain("Refusing a lot");
-  });
-
-  it("renders no row when the doors read fails", async () => {
-    signIn({ isAdmin: true });
-    const stub = stubFetch([{ path: "/api/v1/admin/doors", status: 503, body: {} }]);
-    renderPage(<AdminDoorsHomeRow />, { initialEntries: ["/admin"] });
-
-    await doorsReadSettled(stub);
-    expect(screen.queryByText("Admin · Doors")).toBeNull();
   });
 });
 

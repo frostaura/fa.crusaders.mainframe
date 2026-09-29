@@ -253,12 +253,3 @@ export function useActionFeedback(intent: ActionIntent): ActionFeedback {
     glyph,
   };
 }
-
-/**
- * What a failed action says out loud, when the call site has not said something better.
- *
- * Named rather than inlined because it is a claim about the world — "nothing was changed" is
- * the same promise `Toast`'s {@link NOTHING_CHANGED} makes — and because a sentence written at
- * two call sites becomes two sentences.
- */
-export const ACTION_FAILED_ANNOUNCEMENT = "That didn't work. Nothing was changed — you can try again.";
