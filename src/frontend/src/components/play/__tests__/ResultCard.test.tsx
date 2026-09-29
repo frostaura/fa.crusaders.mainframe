@@ -188,6 +188,19 @@ describe("the mail's deep link", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("R1 F2.11: ?result=confirm on a result that was withdrawn says there is nothing to confirm", async () => {
+    serve([{ path: RESULT_PATH, body: view({ result: null }) }]);
+    renderCard("?result=confirm");
+    expect(await screen.findByText(RESULT_CARD.confirmGone(null))).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("R1 F2.11: ?result=confirm on a result the other side already confirmed says so", async () => {
+    serve([{ path: RESULT_PATH, body: view({ result: result({ status: "confirmed" }), permissions: { ...view().permissions, can_record: false } }) }]);
+    renderCard("?result=confirm");
+    expect(await screen.findByText(RESULT_CARD.confirmGone("confirmed"))).toBeInTheDocument();
+  });
+
   it("?result=record opens the record sheet", async () => {
     serve([{ path: RESULT_PATH, body: view() }]);
     renderCard("?result=record");

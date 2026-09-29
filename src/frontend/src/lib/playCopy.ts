@@ -107,6 +107,16 @@ export const RESULT_CARD = {
   retry: "Try again",
   loading: "Loading the result",
   action: "change the result",
+  /**
+   * R1 F2.11 — the mail's "Is it right?" link, opened after the result moved on: say what
+   * happened, so an old inbox line is never read as a question still waiting.
+   */
+  confirmGone: (status: ResultStatus | null) => {
+    if (status === "confirmed") return "That result has already been confirmed — nothing is waiting for you.";
+    if (status === "disputed") return "That result has already been disputed — the club will look at it.";
+    if (status === "voided") return "The club removed that result — there's nothing to confirm.";
+    return "That result was withdrawn — there's nothing to confirm.";
+  },
 } as const;
 
 export function notRecordableLine(reason: NotRecordableReason | null): string | null {
