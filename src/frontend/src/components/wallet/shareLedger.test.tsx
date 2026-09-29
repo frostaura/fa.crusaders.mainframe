@@ -103,6 +103,23 @@ describe("the wallet ledger's share lines", () => {
   });
 });
 
+describe("R1 F2.14 — a refunded share", () => {
+  it("nets to zero in neutral ink, never the green of money in, and the whole line opens it", async () => {
+    stubFetch([{ path: "/api/v1/bookings/b1", body: detail({ organiser: { user_id: SAM, name: "Sam Petersen", photo_url: null } }) }]);
+    renderPage(<LedgerTable rows={[
+      row("s2", { signedAmountCredits: 25, at: "2026-09-30T11:00:00Z", actorUserId: SAM }),
+      row("s1", { signedAmountCredits: -25, from: "Nomsa Khumalo", to: "Club treasury", actorUserId: ME }),
+    ]} label="Wallet ledger" groupShares />);
+    const toggle = await screen.findByRole("button", { name: /paid and returned/ });
+    const line = toggle.closest("tr") as HTMLElement;
+    const amount = within(line).getByText("0.00 cr", { exact: false });
+    expect(amount.className).not.toMatch(/text-success/);
+    // The disclosure is stretched over its line (a phone shows only the words and the amount).
+    expect(toggle.className).toMatch(/after:absolute/);
+    expect(line.className).toMatch(/relative/);
+  });
+});
+
 describe("the share sentences", () => {
   const place = { courtName: "Court 1", startsAt: "2026-09-30T16:00:00Z" };
   it("never speaks of debt: shares move, and come back", () => {
@@ -114,6 +131,10 @@ describe("the share sentences", () => {
 
   it("says a paid-and-returned booking plainly", () => {
     expect(shareGroupSentence({ side: "organiser", net: 0, place, partners: 1 })).toBe("Shares for Court 1 · Wed 30 Sep — paid and returned");
+  });
+
+  it("R1 F2.14: a partner's share that came back in full says so, too", () => {
+    expect(shareGroupSentence({ side: "partner", net: 0, place, partners: null })).toBe("Your share · Court 1 · Wed 30 Sep — paid and returned");
   });
 });
 

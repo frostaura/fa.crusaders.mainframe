@@ -207,7 +207,9 @@ export type ShareGroupInput = {
 export function shareGroupSentence(input: ShareGroupInput): string {
   const where = sharePlace(input.place, input.timezone);
   if (input.side === "partner") {
-    return where ? `Your share · ${where}` : "Your share of a split booking";
+    const own = where ? `Your share · ${where}` : "Your share of a split booking";
+    // R1 F2.14 — a share that came back in full nets to 0.00: say why, or it reads as a glitch.
+    return input.net === 0 ? `${own} — paid and returned` : own;
   }
   const head = where ? `Shares for ${where}` : "Shares for a split booking";
   if (input.net === 0) return `${head} — paid and returned`;

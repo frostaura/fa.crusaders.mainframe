@@ -62,7 +62,8 @@ export function ShareGroupRows(props: ShareGroupRowsProps) {
 
   return (
     <>
-      <TableRow data-share-group={group.bookingId}>
+      {/* `relative`: the disclosure stretches over the whole line, so a tap on the amount opens it too (R1 F2.14). */}
+      <TableRow data-share-group={group.bookingId} className="relative">
         {columns.map((column) => <Fragment key={column}>{GROUP_CELL[column](head)}</Fragment>)}
       </TableRow>
       {group.rows.map((row, i) => (
@@ -105,7 +106,8 @@ const GROUP_CELL: Record<Column, (h: Head) => ReactNode> = {
   ),
   comment: (h) => <GroupComment head={h} />,
   amount: (h) => (
-    <TableCell className={cn(CELL_CLASS.amount, amountInk(h.group.net))}>
+    // Netted to nothing is neither money in nor out: neutral ink, never the green of a credit (R1 F2.14).
+    <TableCell className={cn(CELL_CLASS.amount, h.group.net === 0 ? "text-text-secondary" : amountInk(h.group.net))}>
       {formatSignedCredits(h.group.net)}
       <span className="block text-xs font-normal text-text-muted sm:hidden">{COPY.movements(h.group.rows.length)}</span>
     </TableCell>
@@ -124,6 +126,8 @@ function GroupComment({ head }: { head: Head }) {
         onClick={head.onToggle}
         className={cn(
           "no-lift -mx-1 inline-flex min-h-touch items-start gap-1.5 rounded-md px-1 py-2 text-left font-semibold text-text-primary",
+          // Stretched over the line (its row is `relative`); the booking link sits above it.
+          "after:absolute after:inset-0 after:content-['']",
           "transition-colors duration-fast ease-standard hover:text-accent-strong motion-reduce:transition-none",
         )}
       >
@@ -132,7 +136,7 @@ function GroupComment({ head }: { head: Head }) {
         <span className="sr-only">{`, ${COPY.movements(head.group.rows.length)}`}</span>
       </button>
       <span className="block">
-        <TextLink to={`/bookings/${head.group.bookingId}`} className="inline-flex min-h-touch items-center text-sm">
+        <TextLink to={`/bookings/${head.group.bookingId}`} className="relative z-10 inline-flex min-h-touch items-center text-sm">
           {COPY.viewBooking}
           <span className="sr-only">{`: ${head.sentence}`}</span>
         </TextLink>

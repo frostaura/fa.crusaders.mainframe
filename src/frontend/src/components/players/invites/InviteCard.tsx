@@ -38,7 +38,7 @@ export function InviteCard({ invite, onOpen }: { invite: Invite; onOpen: (invite
             </span>
             <Badge tone={status.tone}>{status.text}</Badge>
           </span>
-          <span className="text-xs text-text-muted">{payByLine(invite.share_deadline)}</span>
+          {invite.share_credits > 0 ? <span className="text-xs text-text-muted">{payByLine(invite.share_deadline)}</span> : null}
         </span>
       </button>
     </Interactable>

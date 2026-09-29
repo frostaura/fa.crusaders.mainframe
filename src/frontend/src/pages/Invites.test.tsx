@@ -231,6 +231,16 @@ describe("the accept sheet", () => {
     expect(acceptCalls(stub)).toHaveLength(0);
   });
 
+  it("R1 F2.14: a share of nothing names no deadline — nothing can lapse — on the card or the sheet", async () => {
+    openInvites({ invites: [invite({ share_credits: 0, to_pay_credits: 0 })] });
+    const card = await screen.findByRole("button", { name: /Sam invited you to play/ });
+    expect(card).not.toHaveTextContent(/Pay by/);
+    const sheet = await openSheet();
+    expect(sheet.querySelector("[data-deadline]")).toBeNull();
+    expect(sheet).not.toHaveTextContent(/lapses/);
+    expect(INVITES_COPY.spendable).toBe("Available to spend");
+  });
+
   it("an accepted seat asked again reads what is still to pay", async () => {
     openInvites({ invites: [invite({ status: "accepted", needs_consent: true, share_credits: 30, to_pay_credits: 5 })] });
     fireEvent.click(await screen.findByRole("button", { name: /Sam invited you to play/ }));

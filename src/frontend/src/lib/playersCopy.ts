@@ -654,7 +654,7 @@ export const INVITES_COPY = {
   players: "Players",
   yourShare: "Your share",
   toPayNow: "To pay now",
-  spendable: "You have to spend",
+  spendable: "Available to spend",
   balanceAfter: "Balance after",
   heldHint: "Why some isn't spendable",
   capCounts: "This game counts toward your own daily limit on court.",

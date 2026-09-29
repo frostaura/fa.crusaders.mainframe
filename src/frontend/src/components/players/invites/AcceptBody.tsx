@@ -41,9 +41,12 @@ export function AcceptBody({ flow, reasonId, headed = false }: {
       <MoneyFacts flow={flow} />
       {flow.blocked === "short" ? <ShortNotice shortBy={flow.money.shortBy} reasonId={reasonId} /> : null}
       <CapEffect flow={flow} reasonId={reasonId} />
-      <p className="text-sm text-text-secondary" data-deadline="">
-        {deadlineLine(flow.invite.share_deadline, organiserName(flow.invite))}
-      </p>
+      {/* A share of nothing has nothing to pay by and nothing to lapse (R1 F2.14). */}
+      {flow.invite.share_credits > 0 ? (
+        <p className="text-sm text-text-secondary" data-deadline="">
+          {deadlineLine(flow.invite.share_deadline, organiserName(flow.invite))}
+        </p>
+      ) : null}
     </div>
   );
 }
