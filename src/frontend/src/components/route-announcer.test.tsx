@@ -342,6 +342,81 @@ describe("RouteAnnouncer", () => {
  * it. Found in Chromium: the router's fragment jump focused the heading AFTER the settings page
  * had focused the button, so `/admin/settings#settings-doors` left the keyboard on a heading.
  */
+/**
+ * F4.6 — the member page renders "Member" while it reads, then swaps in its own header. The old
+ * `<h1>` left the document with focus on it (focus fell to `<body>`), and the page was announced
+ * and titled only as "Member". Focus now follows the heading to its replacement, and a page about
+ * one record is named from it.
+ */
+function LoadingThenNamed({ placeholder, name }: { placeholder: string; name: string }) {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <main id="main-content" tabIndex={-1}>
+      {loaded ? <header><h1>{name}</h1></header> : <div><h1>{placeholder}</h1></div>}
+      <button type="button" onClick={() => setLoaded(true)}>finish reading</button>
+    </main>
+  );
+}
+
+describe("a heading replaced after focus landed (F4.6)", () => {
+  function renderMember() {
+    render(
+      <MemoryRouter initialEntries={["/admin/members"]}>
+        <RouteAnnouncer />
+        <Nav to="/admin/members/u-1" />
+        <Routes>
+          <Route path="/admin/members" element={<Page title="Members" />} />
+          <Route path="/admin/members/:userId" element={<LoadingThenNamed placeholder="Member" name="Thandi Probe" />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    act(() => { screen.getByRole("button", { name: "Go" }).click(); });
+  }
+
+  it("follows the heading to its replacement instead of dropping focus on the body", async () => {
+    renderMember();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Member" })).toHaveFocus());
+    act(() => { screen.getByRole("button", { name: "finish reading" }).click(); });
+    // The click itself put focus on the button in a browser; jsdom does not, so the old heading
+    // left the document holding focus — exactly the measured case.
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Thandi Probe" })).toHaveFocus());
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("names the member in the tab and the announcement once the page says who", async () => {
+    renderMember();
+    await waitFor(() => expect(screen.getByTestId("route-announcer").textContent).toBe("Member"));
+    act(() => { screen.getByRole("button", { name: "finish reading" }).click(); });
+    await waitFor(() => expect(document.title).toBe("Thandi Probe — Member — Crusaders Mainframe"));
+    expect(screen.getByTestId("route-announcer").textContent).toBe("Thandi Probe — Member");
+  });
+
+  it("does not take focus back from something the person moved to meanwhile", async () => {
+    renderMember();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Member" })).toHaveFocus());
+    const finish = screen.getByRole("button", { name: "finish reading" });
+    act(() => { finish.focus(); finish.click(); });
+    await new Promise((r) => setTimeout(r, 250));
+    expect(finish).toHaveFocus();
+  });
+
+  it("leaves a page that is not about one record named by the table", async () => {
+    render(
+      <MemoryRouter initialEntries={["/bookings"]}>
+        <RouteAnnouncer />
+        <Nav to="/wallet" />
+        <Routes>
+          <Route path="/bookings" element={<Page title="Bookings" />} />
+          <Route path="/wallet" element={<Page title="Your wallet" />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    act(() => { screen.getByRole("button", { name: "Go" }).click(); });
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Your wallet" })).toHaveFocus());
+    expect(document.title).toBe("Wallet — Crusaders Mainframe");
+  });
+});
+
 describe("a fragment that names an accordion header", () => {
   it("focuses the header's button rather than the heading around it", () => {
     render(

@@ -154,17 +154,44 @@ function segmentsOf(path: string): string[] {
  * </p>
  */
 export function routePageName(pathname: string): string {
+  const found = bestMatch(pathname);
+  return found ? found[1] : NOT_FOUND_PAGE_NAME;
+}
+
+function bestMatch(pathname: string): readonly [string, string] | undefined {
   const literalSegments = (pattern: string) =>
     segmentsOf(pattern).filter((segment) => !segment.startsWith(":")).length;
-  const found = ROUTE_PAGE_NAMES
+  return ROUTE_PAGE_NAMES
     .filter(([pattern]) => matches(pattern, pathname))
     .sort((a, b) => literalSegments(b[0]) - literalSegments(a[0]))[0];
-  return found ? found[1] : NOT_FOUND_PAGE_NAME;
 }
 
 /** The whole tab title: the page, then the product. */
 export function routeTitle(pathname: string): string {
   return `${routePageName(pathname)} — ${APP_NAME}`;
+}
+
+/**
+ * F4.6 — a route that shows ONE record (`/admin/members/:userId`, `/bookings/:bookingId`): its
+ * table name ("Member") says what kind of page it is and not whose, so the tab and the
+ * announcement take the record's name from the page's own `<h1>` once it has rendered.
+ */
+export function isEntityRoute(pathname: string): boolean {
+  return bestMatch(pathname)?.[0].includes("/:") ?? false;
+}
+
+/**
+ * Whether a heading is still the page's loading placeholder rather than the record's name — the
+ * member page says "Member" while it reads, which is the start of its own table name.
+ */
+export function isPlaceholderHeading(text: string, pathname: string): boolean {
+  const trimmed = text.trim().toLowerCase();
+  return trimmed === "" || routePageName(pathname).toLowerCase().startsWith(trimmed);
+}
+
+/** "Thandi Probe — Member wallet & ledger" — the record first, then what the page is. */
+export function entityPageName(heading: string, pathname: string): string {
+  return `${heading.trim()} — ${routePageName(pathname)}`;
 }
 
 /** Every pattern the table names, for the test that reconciles it against `App.tsx`. */

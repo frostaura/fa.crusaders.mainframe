@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { focusFragmentTarget, focusHeading, routePageName, routeTitle } from "../lib/routeAnnouncer";
+import {
+  APP_NAME, entityPageName, focusFragmentTarget, focusHeading, isEntityRoute, isPlaceholderHeading, routePageName, routeTitle,
+} from "../lib/routeAnnouncer";
 import { resetStandingAnnouncements } from "../lib/announce";
 
 /**
@@ -98,7 +100,7 @@ export function RouteAnnouncer() {
     // The NAME, only where the name has changed. A fragment jump inside one page would
     // otherwise announce the page the person is already on.
     if (pathChanged) setAnnouncement(name);
-    return takeFocus(location.hash);
+    return takeFocus(location.hash, nameTheRecord(location.pathname, pathChanged ? setAnnouncement : null));
   }, [location.pathname, location.search, location.hash, location.key]);
 
   /**
@@ -150,29 +152,80 @@ export function RouteAnnouncer() {
  * gone from the document, and the heading gets it.
  * </p>
  */
-function takeFocus(hash: string): () => void {
+function takeFocus(hash: string, onHeading: (heading: HTMLElement) => void): () => void {
   let attempts = 0;
-  let timer: number | undefined;
+  const timer: { id?: number } = {};
 
   const attempt = () => {
     attempts += 1;
-    const landed = inUse(document.activeElement)
-      ? false
-      : (hash ? focusFragmentTarget(hash) : focusPageHeading());
-    if (landed) return;
-    if (attempts < 10) timer = window.setTimeout(attempt, 100);
+    if (!inUse(document.activeElement)) {
+      if (hash && focusFragmentTarget(hash)) return;
+      const heading = hash ? null : focusPageHeading();
+      if (heading) {
+        onHeading(heading);
+        watchHeading(heading, onHeading, timer);
+        return;
+      }
+    }
+    if (attempts < 10) timer.id = window.setTimeout(attempt, 100);
   };
 
   attempt();
-  return () => { if (timer !== undefined) window.clearTimeout(timer); };
+  return () => { if (timer.id !== undefined) window.clearTimeout(timer.id); };
+}
+
+/**
+ * F4.6 — the heading focus landed on can be REPLACED a moment later, and focus goes with it.
+ *
+ * <p>
+ * A page that says "Member" while it reads and then renders the member's own header swaps its
+ * `<h1>` for a new node; the old one leaves the document with focus on it, and focus falls to
+ * `<body>` — measured on the member page. For three seconds after landing, a heading that has
+ * gone is followed to its replacement: focus moves to it when focus fell to the body (never off
+ * anything else the person has moved to since), and the page is named again from it.
+ * </p>
+ */
+function watchHeading(landed: HTMLElement, onHeading: (heading: HTMLElement) => void, timer: { id?: number }) {
+  let checks = 0;
+  const check = () => {
+    checks += 1;
+    if (!landed.isConnected) {
+      const next = document.querySelector<HTMLElement>("#main-content h1");
+      if (next) {
+        const active = document.activeElement;
+        if (!active || active === document.body) focusHeading(next, false);
+        onHeading(next);
+        watchHeading(next, onHeading, timer);
+        return;
+      }
+    }
+    if (checks < 30) timer.id = window.setTimeout(check, 100);
+  };
+  timer.id = window.setTimeout(check, 100);
+}
+
+/**
+ * F4.6 — on a page about one record, the tab and the announcement name the record from its
+ * `<h1>` ("Thandi Probe — Member"), not only the kind of page ("Member"). A heading that is still
+ * the page's loading placeholder names nothing; `announce` is null when only the hash moved.
+ */
+function nameTheRecord(pathname: string, announce: ((text: string) => void) | null) {
+  return (heading: HTMLElement) => {
+    if (!isEntityRoute(pathname)) return;
+    const text = heading.textContent ?? "";
+    if (isPlaceholderHeading(text, pathname)) return;
+    const name = entityPageName(text, pathname);
+    document.title = `${name} — ${APP_NAME}`;
+    announce?.(name);
+  };
 }
 
 /** The page's own `<h1>`, if it has rendered one yet. No scroll: the page is already at its top. */
-function focusPageHeading(): boolean {
+function focusPageHeading(): HTMLElement | null {
   const heading = document.querySelector<HTMLElement>("#main-content h1");
-  if (!heading) return false;
+  if (!heading) return null;
   focusHeading(heading, false);
-  return true;
+  return heading;
 }
 
 /**
