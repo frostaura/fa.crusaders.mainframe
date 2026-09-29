@@ -192,7 +192,9 @@ export function WeekStrip(props: WeekStripProps) {
   return (
     <div data-week-strip="" className={cn("flex flex-col gap-2", className)}>
       <div className="flex items-center gap-1">
-        <p className="min-w-0 flex-1 truncate text-sm font-semibold text-text-primary">{monthLabel(start, end)}</p>
+        {/* Wraps rather than truncating (F1.16): at twice the text size "September – October
+            2026" was cut to "Septem…", the one line saying which month the chips are in. */}
+        <p data-month="" className="min-w-0 flex-1 break-words text-sm font-semibold text-text-primary">{monthLabel(start, end)}</p>
         <WeekNav direction="prev" blocked={start <= floor} onGo={() => go(-1)} />
         <WeekNav direction="next" blocked={end >= max} onGo={() => go(1)} />
         {trailing}
@@ -202,7 +204,10 @@ export function WeekStrip(props: WeekStripProps) {
         value={value}
         onValueChange={(next) => { if (next) onChange(next); }}
         aria-label={label}
-        className="grid grid-cols-7 gap-0.5 sm:gap-1"
+        // F1.16 — as many chips per row as fit whole (at least 2.25rem each), never seven
+        // squeezed into a row they overflow: at 200% text on a 390px phone the chips overlapped.
+        // At the ordinary size seven fit even a 320px screen.
+        className="grid grid-cols-[repeat(auto-fit,minmax(2.25rem,1fr))] gap-0.5 sm:gap-1"
       >
         {days.map((day) => (
           <DayChip key={day.date} day={day} markedLabel={markedLabel} mutePast={disablePast} />

@@ -33,6 +33,7 @@ import {
 } from "../lib/gridSelection";
 import { useScheduleDay } from "../lib/scheduleDay";
 import { useHoldLift } from "../lib/scheduleEnd";
+import { useSheetHistory } from "../lib/bookingSheetHistory";
 
 /**
  * Bookings — the week strip, the grid and the two sheets it opens (R1–R6, D8).
@@ -318,6 +319,9 @@ function useSheets() {
   const [cancelOpen, setCancelOpen] = useState(false);
   const openBook = useCallback((slots: SelectedSlot[]) => { setBookSlots(slots); setBookOpen(true); }, []);
   const openCancel = useCallback((bookings: GridBooking[]) => { setCancelBookings(bookings); setCancelOpen(true); }, []);
+  // F1.19 — the system Back closes an open sheet instead of leaving Bookings.
+  useSheetHistory(bookOpen, () => setBookOpen(false), "book");
+  useSheetHistory(cancelOpen, () => setCancelOpen(false), "cancel");
   return { bookSlots, bookOpen, setBookOpen, cancelBookings, cancelOpen, setCancelOpen, openBook, openCancel };
 }
 

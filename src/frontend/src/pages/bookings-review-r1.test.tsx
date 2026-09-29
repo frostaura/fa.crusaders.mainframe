@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { forgetClubZone } from "../lib/clubZone";
-import { BOOKINGS_COPY, BOOKING_FOR, selectionCapSentence } from "../lib/bookingsCopy";
+import { BOOKINGS_COPY, BOOKING_FOR, UPCOMING, partnerCellLabel, selectionCapSentence } from "../lib/bookingsCopy";
 import { quotaPill } from "../lib/gridCopy";
 import { describePlaces } from "../lib/bookingSpan";
 import { signOut } from "../test/harness";
-import { COURT_A, COURT_B, dayFixture, openBookings, resetSheets, sast } from "../test/bookingsKit";
+import { COURT_A, COURT_B, dayFixture, openBookings, resetSheets, sast, slotRow } from "../test/bookingsKit";
 
 vi.mock("../components/bookings/BookSheet", async () => (await import("../test/fakeSheets")).bookSheetModule);
 vi.mock("../components/bookings/CancelSheet", async () => (await import("../test/fakeSheets")).cancelSheetModule);
@@ -123,5 +123,89 @@ describe("F1.8 — the selection line never claims a span it does not have", () 
     const bar = await screen.findByRole("toolbar", { name: BOOKINGS_COPY.actionBarLabel });
     await waitFor(() => expect(bar).toHaveTextContent("Court 1 16:00–16:15, Court 2 17:00–17:15"));
     expect(bar.textContent).not.toContain("16:00–17:15");
+  });
+});
+
+describe("F1.12 — upcoming games above the grid, and a partner's game on it", () => {
+  const game = (overrides: Record<string, unknown>) => ({
+    booking_id: "bk-org", court_name: "Court 1", starts_at: sast(18), ends_at: sast(18, 45), role: "organiser",
+    status: "booked", players: [{ name: "Sam Petersen", photo_url: null, status: "accepted" }],
+    my_share_credits: 75, needs_action: false, ...overrides,
+  });
+
+  it("lists every upcoming game, soonest first, each opening its booking", async () => {
+    openBookings({
+      routes: [{
+        path: "/api/v1/me/bookings/upcoming",
+        body: { timezone: "Africa/Johannesburg", items: [game({}), game({ booking_id: "bk-partner", court_name: "Court 2", role: "partner", needs_action: true })] },
+      }],
+    });
+    const list = await screen.findByRole("region", { name: UPCOMING.title });
+    const links = within(list).getAllByRole("link");
+    expect(links.map((l) => l.getAttribute("href"))).toEqual(["/bookings/bk-org", "/bookings/bk-partner"]);
+    expect(links[0]).toHaveTextContent(UPCOMING.organiser);
+    expect(links[0]).toHaveTextContent("Mon 9 Sep · 18:00–18:45");
+    expect(links[0]).toHaveTextContent(UPCOMING.share(75));
+    expect(links[1]).toHaveTextContent(UPCOMING.partner);
+    expect(links[1]).toHaveTextContent(UPCOMING.needsAction);
+  });
+
+  it("a failed read says so with a retry, never 'no games'", async () => {
+    openBookings({ routes: [{ path: "/api/v1/me/bookings/upcoming", status: 500, body: {} }] });
+    expect(await screen.findByText(UPCOMING.failed)).toBeTruthy();
+    expect(screen.getByRole("button", { name: UPCOMING.retry })).toBeTruthy();
+  });
+
+  it("draws a partner's seat as their game, opening the booking — never the cancel sheet, never choosable", async () => {
+    const partner = slotRow({
+      courtId: COURT_A, startsAtUtc: sast(17), endsAtUtc: sast(17, 30), ownerUserId: "org",
+      ownerFirstName: "Thandi", isMine: true, role: "partner", bookingId: "bk-partner",
+    });
+    openBookings({ day: dayFixture({ slots: [partner] }) });
+    const cell = await screen.findByRole("link", { name: partnerCellLabel("Court 1 at 17:00") });
+    expect(cell).toHaveAttribute("href", "/bookings/bk-partner");
+    fireEvent.click(screen.getByRole("button", { name: BOOKINGS_COPY.selectOn }));
+    // In selection mode it is not a choice: a partner cannot cancel the organiser's booking.
+    const gridcell = cell.closest('[role="gridcell"]')!;
+    expect(gridcell.getAttribute("data-select-key")).toBeNull();
+  });
+});
+
+describe("F1.17 — the grid's keyboard: a screenful, the ends, a named corner", () => {
+  it("PageDown / PageUp move eight rows; Ctrl+End and Ctrl+Home reach the grid's last and first cell", async () => {
+    openBookings();
+    await screen.findByRole("grid");
+    const first = screen.getByRole("button", { name: /^Book Court 1 at 16:00/ });
+    first.focus();
+    await act(async () => { fireEvent.keyDown(first, { key: "PageDown" }); });
+    // The day is 16:00–18:00 in 15-minute rows: eight rows on is the last one, 17:45.
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Book Court 1 at 17:45/ }));
+    await act(async () => { fireEvent.keyDown(document.activeElement!, { key: "PageUp" }); });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Book Court 1 at 16:00/ }));
+    await act(async () => { fireEvent.keyDown(document.activeElement!, { key: "End", ctrlKey: true }); });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Book Court 2 at 17:45/ }));
+    await act(async () => { fireEvent.keyDown(document.activeElement!, { key: "Home", ctrlKey: true }); });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Book Court 1 at 16:00/ }));
+  });
+
+  it("names the time column's header in text", async () => {
+    openBookings();
+    await screen.findByRole("grid");
+    expect(screen.getByRole("columnheader", { name: BOOKINGS_COPY.timeHeader }).textContent).toBe(BOOKINGS_COPY.timeHeader);
+  });
+
+  it("a new day puts the tab stop back at its first live row, not where the last day left it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2030-09-09T10:00:00.000Z"));
+    const asked = (path: string) => new URL(path, "http://x").searchParams.get("date");
+    openBookings({ routes: [{ path: "/api/v1/schedule", respond: ({ path }) => dayFixture({ date: asked(path) }) }] });
+    await screen.findByRole("grid");
+    const first = screen.getByRole("button", { name: /^Book Court 1 at 16:00/ });
+    first.focus();
+    await act(async () => { fireEvent.keyDown(first, { key: "End", ctrlKey: true }); });
+    expect(screen.getByRole("button", { name: /^Book Court 2 at 17:45/ })).toHaveAttribute("tabindex", "0");
+    await act(async () => { fireEvent.click(document.querySelector('[data-date="2030-09-10"]')!); });
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toContain("2030-09-10"));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Book Court 1 at 16:00/ })).toHaveAttribute("tabindex", "0"));
   });
 });

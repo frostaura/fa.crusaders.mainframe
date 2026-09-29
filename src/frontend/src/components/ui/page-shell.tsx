@@ -73,6 +73,14 @@ function BackLink({ to, label }: { to: string; label: string }) {
  * The page's header and its ONLY `<h1>`.
  *
  * <p>
+ * <b>A word is never broken to keep the actions beside it</b> (review round 1, F1.16). On a phone
+ * the row wraps: the title's basis is its LONGEST WORD, so the actions sit beside it while that
+ * fits and drop under it when it does not — at twice the text size "Bookings" was broken
+ * "Booki / ngs" to hold a refresh button in place. `break-words` stays as the last resort for a
+ * single word wider than the screen.
+ * </p>
+ *
+ * <p>
  * The `h1` carries `data-route-heading` from the start: `RouteAnnouncer` finds
  * `#main-content h1` on every navigation and moves focus to it (`lib/routeAnnouncer.ts`
  * `focusHeading` adds `tabindex="-1"` and the same attribute), and `index.css` hangs the
@@ -80,11 +88,11 @@ function BackLink({ to, label }: { to: string; label: string }) {
  * </p>
  *
  * <p>
- * <b>The title row never loses its icon actions.</b> The actions column is `auto` and the title
- * column is `minmax(0, 1fr)` — it yields and the title wraps (`break-words`), so a refresh button
- * stays beside the title on a 360px phone; a wider cluster wraps inside its own column. No rem
- * floor on the title: at a 32px root font a 12rem floor alone is wider than a 320px screen, and
- * the header pushed the page sideways (e2e/admin-devices, admin-doors, large-text).
+ * <b>The title row keeps its icon actions while the title's longest word fits beside them.</b>
+ * The title wraps between words to make room (a refresh button stays beside it on a 360px phone);
+ * a wider action cluster wraps inside its own box. No rem floor on the title: at a 32px root font
+ * a 12rem floor alone is wider than a 320px screen, and the header pushed the page sideways
+ * (e2e/admin-devices, admin-doors, large-text). From `sm` it is a three-column grid.
  * </p>
  */
 export function PageHeader(props: PageHeaderProps) {
@@ -94,15 +102,15 @@ export function PageHeader(props: PageHeaderProps) {
     <header data-page-header="" className={cn("-mb-2 flex flex-col gap-2", className)}>
       {back ? <BackLink to={back.to} label={back.label} /> : null}
       {eyebrow ? <p className={typography({ variant: "overline" })}>{eyebrow}</p> : null}
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
-        <h1 data-route-heading="" className={cn(typography({ variant: "h1" }), "col-start-1 row-start-1 min-w-0 break-words")}>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 sm:grid sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+        <h1 data-route-heading="" className={cn(typography({ variant: "h1" }), "min-w-0 flex-[1_1_min-content] break-words sm:col-start-1 sm:row-start-1")}>
           {title}
         </h1>
         {freshness ? (
-          <div className="col-span-2 col-start-1 row-start-2 sm:col-span-1 sm:col-start-2 sm:row-start-1">{freshness}</div>
+          <div className="order-last basis-full sm:order-none sm:col-start-2 sm:row-start-1">{freshness}</div>
         ) : null}
         {actions ? (
-          <div data-page-actions="" className="col-start-2 row-start-1 flex flex-wrap items-center justify-end gap-2 sm:col-start-3">
+          <div data-page-actions="" className="ml-auto flex flex-wrap items-center justify-end gap-2 sm:col-start-3 sm:row-start-1">
             {actions}
           </div>
         ) : null}

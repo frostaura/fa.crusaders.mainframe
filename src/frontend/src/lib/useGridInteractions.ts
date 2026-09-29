@@ -32,7 +32,15 @@ type Args = {
   firstRow: number;
   /** Where the tab stop starts: the first row that has not started. */
   initialRow: number;
+  /**
+   * What the grid is showing — the day. A new one puts the tab stop back at `initialRow` (F1.17):
+   * a stop carried over from another day left a keyboard starting at a past 06:00.
+   */
+  resetKey?: string;
 };
+
+/** How far PageUp / PageDown move: about a screenful of rows on a phone. */
+const PAGE_ROWS = 8;
 
 function coordOf(target: EventTarget | null): GridCoord | null {
   const el = (target as HTMLElement | null)?.closest?.("[data-row][data-col]") as HTMLElement | null;
@@ -45,12 +53,46 @@ function coordOf(target: EventTarget | null): GridCoord | null {
 /** The element that takes focus for a cell: its control, else the cell. */
 function focusTarget(grid: HTMLElement | null, at: GridCoord): HTMLElement | null {
   const cell = grid?.querySelector<HTMLElement>(`[role="gridcell"][data-row="${at.row}"][data-col="${at.col}"]`);
-  return cell?.querySelector<HTMLElement>("button") ?? cell ?? null;
+  return cell?.querySelector<HTMLElement>("button, a[href]") ?? cell ?? null;
 }
 
+/**
+ * Focus without the browser's own jump, then bring the cell in NEAREST — which honours the
+ * scroller's padding (the sticky court header, the time column) and the cell's bottom margin
+ * (the tab bar, the selection bar), so a cell reached by keyboard is never under any of them
+ * (F1.14).
+ */
+function focusInView(el: HTMLElement | null) {
+  if (!el) return;
+  el.focus({ preventScroll: true });
+  // The CELL carries the margins (a control inside a booking block is taller than its row).
+  const cell = el.closest<HTMLElement>('[role="gridcell"]') ?? el;
+  if (typeof cell.scrollIntoView === "function") cell.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+type Move = (here: GridCoord, ctx: { rows: number; cols: number; first: number; ctrl: boolean }) => GridCoord;
+
+/**
+ * The APG grid keys, as a table rather than a switch (the complexity gate). Home/End stay in the
+ * row; with Ctrl they go to the grid's first and last cell. PageUp/PageDown move a screenful.
+ */
+const MOVES: Record<string, Move> = {
+  ArrowDown: (h) => ({ row: h.row + 1, col: h.col }),
+  ArrowUp: (h) => ({ row: h.row - 1, col: h.col }),
+  ArrowRight: (h) => ({ row: h.row, col: h.col + 1 }),
+  ArrowLeft: (h) => ({ row: h.row, col: h.col - 1 }),
+  PageDown: (h) => ({ row: h.row + PAGE_ROWS, col: h.col }),
+  PageUp: (h) => ({ row: h.row - PAGE_ROWS, col: h.col }),
+  Home: (h, c) => (c.ctrl ? { row: c.first, col: 0 } : { row: h.row, col: 0 }),
+  End: (h, c) => (c.ctrl ? { row: c.rows - 1, col: c.cols - 1 } : { row: h.row, col: c.cols - 1 }),
+};
+
 export function useGridInteractions(args: Args) {
-  const { gridRef, selection, rowCount, colCount, firstRow, initialRow } = args;
-  const [roving, setRoving] = useState<GridCoord>({ row: initialRow, col: 0 });
+  const { gridRef, selection, rowCount, colCount, firstRow, initialRow, resetKey = "" } = args;
+  const [held, setHeld] = useState<GridCoord & { key: string }>({ row: initialRow, col: 0, key: resetKey });
+  // Derived, not synced: a stop from another day is not this day's stop.
+  const roving: GridCoord = held.key === resetKey ? held : { row: initialRow, col: 0 };
+  const setRoving = useCallback((at: GridCoord) => setHeld({ ...at, key: resetKey }), [resetKey]);
   // Clamped at read, so a collapse or a shorter day can never strand the only tab stop.
   const stop = {
     row: Math.min(Math.max(roving.row, firstRow), Math.max(firstRow, rowCount - 1)),
@@ -74,33 +116,27 @@ export function useGridInteractions(args: Args) {
 
   const moveTo = useCallback((next: GridCoord) => {
     setRoving(next);
-    focusTarget(gridRef.current, next)?.focus();
-  }, [gridRef]);
+    focusInView(focusTarget(gridRef.current, next));
+  }, [gridRef, setRoving]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    const here = coordOf(e.target) ?? stop;
-    const clamp = (row: number, col: number) => ({
-      row: Math.min(rowCount - 1, Math.max(firstRow, row)),
-      col: Math.min(colCount - 1, Math.max(0, col)),
-    });
-    const go = (next: GridCoord) => {
+    if (e.key === "Escape") {
+      if (!selection.active) return undefined;
       e.preventDefault();
-      if (e.shiftKey) extendTo(here, next);
-      moveTo(next);
-    };
-    switch (e.key) {
-      case "ArrowDown": return go(clamp(here.row + 1, here.col));
-      case "ArrowUp": return go(clamp(here.row - 1, here.col));
-      case "ArrowRight": return go(clamp(here.row, here.col + 1));
-      case "ArrowLeft": return go(clamp(here.row, here.col - 1));
-      case "Home": return go(clamp(here.row, 0));
-      case "End": return go(clamp(here.row, colCount - 1));
-      case "Escape":
-        if (!selection.active) return undefined;
-        e.preventDefault();
-        return selection.count ? selection.clearAll() : selection.leave();
-      default: return undefined;
+      return selection.count ? selection.clearAll() : selection.leave();
     }
+    const move = MOVES[e.key];
+    if (!move) return undefined;
+    const here = coordOf(e.target) ?? stop;
+    const to = move(here, { rows: rowCount, cols: colCount, first: firstRow, ctrl: e.ctrlKey || e.metaKey });
+    const next = {
+      row: Math.min(rowCount - 1, Math.max(firstRow, to.row)),
+      col: Math.min(colCount - 1, Math.max(0, to.col)),
+    };
+    e.preventDefault();
+    if (e.shiftKey) extendTo(here, next);
+    moveTo(next);
+    return undefined;
   };
 
   // Clicking or tabbing into a cell makes it the stop, so Tab back in lands where you were.

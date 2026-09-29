@@ -53,7 +53,7 @@ export function BookingBoard(props: BoardProps) {
   const { scroller, gridRef, chips } = useBoardScroll(firstLive, `${day.date}|${collapsedRows}`, day.courts.length);
   const interactions = useGridInteractions({
     gridRef, selection: ctx.selection, rowCount: timeSlices.length, colCount: day.courts.length,
-    firstRow: collapsedRows, initialRow: firstLive < 0 ? collapsedRows : firstLive,
+    firstRow: collapsedRows, initialRow: firstLive < 0 ? collapsedRows : firstLive, resetKey: day.date,
   });
 
   // Rows: 1 = court headers, 2 = the "Earlier today" disclosure when there is one, then the day.
@@ -71,7 +71,7 @@ export function BookingBoard(props: BoardProps) {
           ref={scroller}
           data-grid-scroller=""
           className="snap-x snap-proximity overflow-auto overscroll-contain md:snap-none"
-          style={{ maxHeight: scrollerMaxHeight(ctx.selection.active) }}
+          style={scrollerStyle(ctx.selection.active)}
         >
           <div
             ref={gridRef}
@@ -136,6 +136,22 @@ function scrollerMaxHeight(selecting: boolean): string {
   return `max(280px, calc(100dvh - var(--app-chrome-height, 56px) - var(--app-bottom-bar-height, 0px) - ${reserve}px))`;
 }
 
+/**
+ * F1.14 — a cell reached by keyboard lands clear of the sticky court header and the sticky time
+ * column: the scroller's padding is their MEASURED size (`--grid-head`, `--grid-time`, set by
+ * `useBoardScroll`, so a 200% text size is covered too). `--grid-bar-room` is what a cell's own
+ * bottom margin keeps free for the floating selection bar (see `ScheduleCells`).
+ */
+function scrollerStyle(selecting: boolean): CSSProperties {
+  return {
+    maxHeight: scrollerMaxHeight(selecting),
+    scrollPaddingTop: "var(--grid-head, 64px)",
+    scrollPaddingLeft: "var(--grid-time, 56px)",
+    // The floating bar sits 12px above the bottom edge; its room, that gap and a little air.
+    ["--grid-bar-room" as string]: selecting ? `${SELECTION_ROOM_PX + 20}px` : "0px",
+  };
+}
+
 function firstLiveIndex(slices: TimeSlice[], from: number, pastThresholdMs: number): number {
   return slices.findIndex((t, i) => i >= from && Date.parse(t.utc) > pastThresholdMs);
 }
@@ -152,8 +168,12 @@ function HeaderRow({ courts, sliceMinutes, yourRate }: { courts: ScheduleCourt[]
           rows scrolling up never show through the gaps between the court headers. */}
       <div aria-hidden="true" style={{ gridRow: 1, gridColumn: "1 / -1" }}
         className="sticky top-0 z-sticky -mx-2 -mb-1 border-b border-border bg-bg-surface" />
-      <div role="columnheader" aria-label={BOOKINGS_COPY.timeHeader} style={{ gridRow: 1, gridColumn: 1 }}
-        className="sticky left-0 top-0 z-sticky-corner -ml-2 -mr-1.5 bg-bg-surface" />
+      {/* F1.17 — the corner header's name is TEXT (visually hidden), not an aria-label on an
+          empty box, which some readers skip. */}
+      <div role="columnheader" style={{ gridRow: 1, gridColumn: 1 }}
+        className="sticky left-0 top-0 z-sticky-corner -ml-2 -mr-1.5 bg-bg-surface">
+        <span className="sr-only">{BOOKINGS_COPY.timeHeader}</span>
+      </div>
       {courts.map((c, i) => (
         <div key={c.id} role="columnheader" data-court-col={i} style={{ gridRow: 1, gridColumn: i + 2 }}
           className={cn(HEADER_CELL, "flex min-w-0 snap-start scroll-ml-16 flex-col justify-end px-1 pb-2 pt-3 md:scroll-ml-20")}>
@@ -301,7 +321,13 @@ function useBoardScroll(firstLive: number, key: string, courts: number) {
     const box = scroller.current;
     if (!box) return undefined;
     const headers = () => [...(gridRef.current?.querySelectorAll<HTMLElement>("[data-court-col]") ?? [])];
-    const measure = () => setOverflow(box.scrollWidth > box.clientWidth + 1);
+    const measure = () => {
+      setOverflow(box.scrollWidth > box.clientWidth + 1);
+      const head = gridRef.current?.querySelector<HTMLElement>("[data-court-col]");
+      const time = gridRef.current?.querySelector<HTMLElement>("[data-time-row]");
+      if (head) box.style.setProperty("--grid-head", `${head.offsetHeight + 4}px`);
+      if (time) box.style.setProperty("--grid-time", `${time.offsetLeft + time.offsetWidth + 6}px`);
+    };
     const onScroll = () => {
       const all = headers();
       const edge = box.scrollLeft + (all[0]?.offsetLeft ?? 0) + 4;

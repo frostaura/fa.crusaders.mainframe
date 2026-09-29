@@ -54,9 +54,11 @@ describe("PageHeader", () => {
     const actions = document.querySelector<HTMLElement>("[data-page-actions]")!;
     expect(within(actions).getByRole("button", { name: "Refresh" })).toBeInTheDocument();
     expect(actions.className).toContain("justify-end");
-    // The icon actions share the title's row on a phone: both are in grid row 1.
-    expect(actions.className).toContain("row-start-1");
-    expect(screen.getByRole("heading", { level: 1 }).className).toContain("row-start-1");
+    // From `sm` both are in grid row 1; on a phone the row wraps, and the title's basis is its
+    // longest word — the actions drop under it rather than a word being broken (R1 F1.16).
+    expect(actions.className).toContain("sm:row-start-1");
+    expect(screen.getByRole("heading", { level: 1 }).className).toContain("sm:row-start-1");
+    expect(screen.getByRole("heading", { level: 1 }).className).toContain("flex-[1_1_min-content]");
     expect(screen.getByText("Updated 12s ago")).toBeInTheDocument();
   });
 
