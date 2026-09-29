@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ActionsMenu, type ActionsMenuItem } from "@/components/admin/ActionsMenu";
-import { useResetMemberCodeConfirm } from "@/components/member-code/ResetMemberCodeDialog";
+import { useResetMemberCodeConfirm } from "@/components/member-code/useResetMemberCodeConfirm";
 import { useToast } from "@/components/Toast";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { ArrowCounterClockwise, Envelope, Key, Prohibit, UserMinus, UserPlus } from "@/components/ui/icons";
