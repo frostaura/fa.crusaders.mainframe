@@ -8,6 +8,7 @@ import { Link } from "react-router-dom";
 import { AcceptSheet } from "@/components/players/invites/AcceptSheet";
 import { InviteCard, InviteListSkeleton } from "@/components/players/invites/InviteCard";
 import { useMyInvites } from "@/components/players/invites/useMyInvites";
+import { usePendingLinkInvite } from "@/components/players/invites/usePendingLinkInvite";
 import type { Invite } from "@/lib/playersApi";
 import { INVITES_COPY } from "@/lib/playersCopy";
 
@@ -19,6 +20,9 @@ import { INVITES_COPY } from "@/lib/playersCopy";
 export default function InvitesPage() {
   const invites = useMyInvites();
   const sheet = useSheet(invites.items);
+  // R1 F2.5 — a link the member opened and has not answered (an open seat is nobody's until it is
+  // accepted, so the club's list cannot hold it): offered first, as a link back to it.
+  const pending = usePendingLinkInvite(invites.items);
   const { refresh } = invites;
   const reread = useCallback(() => refresh(), [refresh]);
   return (
@@ -35,7 +39,7 @@ export default function InvitesPage() {
         error={invites.items === null ? invites.error : null}
         action={INVITES_COPY.readAction}
         onRetry={() => void refresh()}
-        empty={invites.items !== null && invites.items.length === 0}
+        empty={invites.items !== null && invites.items.length === 0 && !pending}
         emptyTitle={INVITES_COPY.emptyTitle}
         emptyHint={INVITES_COPY.emptyHint}
         emptyIcon={Envelope}
@@ -47,6 +51,11 @@ export default function InvitesPage() {
         skeleton={<InviteListSkeleton />}
       >
         <ul aria-label={INVITES_COPY.listLabel} className="flex flex-col gap-3">
+          {pending ? (
+            <li key={`pending-${pending.token}`}>
+              <InviteCard invite={pending.invite} to={pending.path} note={INVITES_COPY.pendingFrom} />
+            </li>
+          ) : null}
           {(invites.items ?? []).map((invite) => (
             <li key={invite.participant_id}>
               <InviteCard invite={invite} onOpen={sheet.openFor} />

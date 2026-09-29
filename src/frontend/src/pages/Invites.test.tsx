@@ -6,13 +6,14 @@ import {
   INVITES_COPY, INVITE_REFUSAL, OWED_BACK_EXPLAINER, acceptLabel, owedBackLine, playersRefusal, shortByLine,
 } from "../lib/playersCopy";
 import { ApiError } from "../lib/api";
+import { savePendingInvite } from "../lib/playersPending";
 
 /**
  * Invites (`/bookings/invites`) and its accept sheet: the list and its three states, the figures
  * the sheet shows (on SPENDABLE credits), what Accept sends, and every way it can be refused.
  */
 vi.setConfig({ testTimeout: 20_000 });
-afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+afterEach(() => { vi.unstubAllGlobals(); signOut(); window.localStorage.clear(); });
 
 const BOOKING = "b0000000-0000-0000-0000-000000000001";
 const SEAT = "p0000000-0000-0000-0000-000000000003";
@@ -57,6 +58,9 @@ async function openSheet() {
   return screen.findByRole("dialog", { name: INVITES_COPY.sheetTitle });
 }
 
+/** R1 F2.5 — the top-up carries the way back to the invite. */
+const TOP_UP = `/wallet/topup?returnTo=${encodeURIComponent("/bookings/invites")}`;
+
 const acceptCalls = (stub: FetchStub) => stub.calls.filter((c) => c.method === "POST" && c.path === ACCEPT);
 
 describe("the list", () => {
@@ -75,6 +79,17 @@ describe("the list", () => {
     expect(cards[2]).toHaveTextContent("Accepted — 10.00 cr still to pay");
     // First names between members — never the surname.
     expect(list).not.toHaveTextContent("Petersen");
+  });
+
+  it("R1 F2.5: an open seat from a link the member opened (short of credit) is offered first, as a link back to it", async () => {
+    savePendingInvite("tok123", "44444444-4444-4444-4444-444444444444");
+    openInvites({ invites: [], routes: [
+      { path: "/api/v1/invites/tok123", body: invite({ participant_id: "p-open", open_link: true }) },
+    ] });
+    const card = await screen.findByRole("link", { name: /Sam invited you to take a seat/ });
+    expect(card).toHaveAttribute("href", "/j/tok123");
+    expect(card).toHaveTextContent(INVITES_COPY.pendingFrom);
+    expect(screen.queryByText(INVITES_COPY.emptyTitle)).toBeNull();
   });
 
   it("says plainly when nothing is waiting, and how invites arrive", async () => {
@@ -212,7 +227,7 @@ describe("the accept sheet", () => {
     const accept = within(sheet).getByRole("button", { name: acceptLabel(25) });
     expect(accept).toHaveAttribute("aria-disabled", "true");
     expect(accept).toHaveAccessibleDescription(new RegExp(shortByLine(15).replace(/\./g, "\\.")));
-    expect(within(sheet).getByRole("link", { name: INVITES_COPY.topUp })).toHaveAttribute("href", "/wallet/topup");
+    expect(within(sheet).getByRole("link", { name: INVITES_COPY.topUp })).toHaveAttribute("href", TOP_UP);
     // No "balance after" below zero — the accept never overdraws.
     expect(within(sheet).queryByText(INVITES_COPY.balanceAfter)).toBeNull();
     fireEvent.click(accept);
@@ -295,7 +310,7 @@ describe("the accept sheet", () => {
     expect(await within(sheet).findByText(expected)).toBeInTheDocument();
     expect(sheet).not.toHaveTextContent(code);
     if (code === "insufficient_balance") {
-      expect(within(sheet).getByRole("link", { name: INVITES_COPY.topUp })).toHaveAttribute("href", "/wallet/topup");
+      expect(within(sheet).getByRole("link", { name: INVITES_COPY.topUp })).toHaveAttribute("href", TOP_UP);
     }
   });
 });

@@ -738,6 +738,26 @@ export const INVITES_COPY = {
   linkAlreadyIn: "You're already on this game.",
   linkRemoved: "You were taken off this game, so this link can't put you back on it. Talk to whoever booked it.",
   readLinkAction: "open this invite",
+  /** R1 F2.3 / F2.4 — an invite opened signed out. The club shows a game only to a member, so the page says what it can. */
+  signedOutTitle: "You've been invited to a game",
+  signedOutBody: "Sign in to see who asked you, when it is and your share — then say yes or no.",
+  signedOutSignIn: "Sign in to answer",
+  signedOutJoin: "Join the club",
+  signedOutJoinHint: "New here? Join the club — once you're approved and signed in, this invite will be waiting for you.",
+  /** R1 F2.7 — a link this account opened before, now closed: never "sign out". */
+  linkNoLongerOpen: "This invite is no longer open — the game may have been cancelled, or its seat was answered or closed.",
+  /** R1 F2.7 / F2.8 — the mail's link, once the invite has moved on: what happened to it. */
+  fateInTitle: "You're in",
+  fateInBody: "You've already said yes to this game.",
+  fateCancelledTitle: "This game was cancelled",
+  fateCancelledBody: "Nothing more is needed from you. The booking shows what happened to any share.",
+  fateGoneTitle: "You're no longer on this game",
+  fateGoneBody: "You declined it, pulled out or were taken off it — or its invite lapsed. Your bookings have the latest.",
+  /** R1 F2.5 — an invite link opened and not yet answered (a short balance, a sign-in between), resurfaced. */
+  pendingFrom: "From a link you opened",
+  pendingNote: "You've been invited to a game. Join the club, and once you're approved and signed in, the invite will be waiting for you.",
+  pendingNoteVerified: "Your invite is waiting — once the club approves you, sign in and we'll take you to it.",
+  pendingOpen: "Open your invite",
 } as const;
 
 /** "You're signed in as Olivia." — beside an invite this account cannot open (D5). */

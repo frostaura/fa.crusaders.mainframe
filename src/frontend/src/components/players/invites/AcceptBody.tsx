@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Alert } from "@/components/Alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -144,8 +144,18 @@ function CapEffect({ flow, reasonId }: { flow: AcceptFlow; reasonId: string }) {
   return <p className="text-sm text-text-secondary" data-cap-counts="">{INVITES_COPY.capCounts}</p>;
 }
 
+/**
+ * The top-up link, carrying the way back to this invite (R1 F2.5): `returnTo` for the top-up
+ * screens to offer. The invite is also remembered, so Invites resurfaces it whatever they do.
+ */
+function useTopUpPath(): string {
+  const { pathname, search } = useLocation();
+  return `/wallet/topup?returnTo=${encodeURIComponent(`${pathname}${search}`)}`;
+}
+
 /** Short of the share: what they need, and the way to get it. The sentence describes Accept. */
 function ShortNotice({ shortBy, reasonId }: { shortBy: number; reasonId: string }) {
+  const topUp = useTopUpPath();
   return (
     <div role="status" data-short="" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-warning-strong/30 bg-warning-soft p-3 text-warning-strong">
       <Warning size={20} weight="bold" aria-hidden="true" className="shrink-0" />
@@ -154,7 +164,7 @@ function ShortNotice({ shortBy, reasonId }: { shortBy: number; reasonId: string 
         <span>{INVITES_COPY.shortBody}</span>
       </p>
       <Button asChild variant="outline" size="sm" className="ml-auto shrink-0">
-        <Link to="/wallet/topup">{INVITES_COPY.topUp}</Link>
+        <Link to={topUp}>{INVITES_COPY.topUp}</Link>
       </Button>
     </div>
   );
@@ -162,6 +172,7 @@ function ShortNotice({ shortBy, reasonId }: { shortBy: number; reasonId: string 
 
 /** The last answer that was not a yes: a risen share asks again; a short balance offers a top-up. */
 function Problem({ flow }: { flow: AcceptFlow }) {
+  const topUp = useTopUpPath();
   if (!flow.error) return null;
   const action = flow.declineAction.error ? INVITES_COPY.declineAction : INVITES_COPY.acceptAction;
   const sentence = inviteRefusal(flow.error, action);
@@ -169,7 +180,7 @@ function Problem({ flow }: { flow: AcceptFlow }) {
   return (
     <div className="flex flex-col items-start gap-2">
       <Alert tone="danger" className="w-full">{sentence}</Alert>
-      {flow.errorCode === "insufficient_balance" ? <TextLink to="/wallet/topup" variant="standalone">{INVITES_COPY.topUp}</TextLink> : null}
+      {flow.errorCode === "insufficient_balance" ? <TextLink to={topUp} variant="standalone">{INVITES_COPY.topUp}</TextLink> : null}
     </div>
   );
 }

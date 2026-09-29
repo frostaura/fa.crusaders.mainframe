@@ -4,6 +4,7 @@ import { CaretRight, Envelope } from "@/components/ui/icons";
 import { invitesWaitingLabel } from "@/lib/playersCopy";
 import { cn } from "@/lib/utils";
 import { useMyInvites } from "./useMyInvites";
+import { usePendingLinkInvite } from "./usePendingLinkInvite";
 
 /**
  * "2 invites waiting" — the Bookings page's way into Invites. Shown only at one or more: a badge
@@ -12,7 +13,10 @@ import { useMyInvites } from "./useMyInvites";
  * button's clothes; the visible words ARE its accessible name.
  */
 export function InvitesBadgeLink({ className }: { className?: string }) {
-  const { count } = useMyInvites();
+  const { items, count: listed } = useMyInvites();
+  // R1 F2.3 / F2.5 — a link opened and not answered counts too: it is waiting on Invites.
+  const pending = usePendingLinkInvite(items);
+  const count = listed + (pending ? 1 : 0);
   if (count < 1) return null;
   const label = invitesWaitingLabel(count);
   return (

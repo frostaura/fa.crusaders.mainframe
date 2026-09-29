@@ -6,6 +6,7 @@ import { Button } from "../components/ui/button";
 import { Spinner } from "../components/ui/spinner";
 import { TextLink } from "../components/ui/text-link";
 import { Clock, LinkBreak, SealCheck } from "../components/ui/icons";
+import { PendingInviteNote } from "../components/players/invites/PendingInviteNote";
 import {
   REGISTER, VERIFY_BACK_TO_SIGN_IN, VERIFY_FAIL_BODY, VERIFY_FAIL_HEADING, VERIFY_FAIL_PRIMARY,
   VERIFY_LIMITED_BODY, VERIFY_LIMITED_HEADING, VERIFY_LIMITED_RETRY, VERIFY_OK_BODY, VERIFY_OK_HEADING,
@@ -55,6 +56,8 @@ export default function VerifyEmailPage() {
     return (
       <AuthShell className="my-auto" subline={REGISTER.verifySubline} mark={<AuthMark icon={SealCheck} tone="success" />}
         title={VERIFY_OK_HEADING} lead={VERIFY_OK_BODY}>
+        {/* R1 F2.3 — arrived by an invite link: it waits for the first sign-in after approval. */}
+        <div className="mb-4"><PendingInviteNote stage="verified" /></div>
         <Button asChild block><Link to="/login">{VERIFY_BACK_TO_SIGN_IN}</Link></Button>
       </AuthShell>
     );

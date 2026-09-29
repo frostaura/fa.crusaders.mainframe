@@ -1,17 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, within } from "@testing-library/react";
-import { Route, Routes } from "react-router-dom";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { Route, Routes, useLocation } from "react-router-dom";
 import InviteLinkPage from "./InviteLink";
 import { refuse, renderPage, signIn, signOut, stubFetch, type FetchStub, type StubRoute } from "../test/harness";
 import { ApiError } from "../lib/api";
 import { INVITES_COPY, acceptLabel, invitedLine, playersRefusal } from "../lib/playersCopy";
+import { pendingInvite, savePendingInvite } from "../lib/playersPending";
 
 /**
  * `/j/:token` — a shared link, opened as a page: the same accept body as the sheet, answered
  * through the link's own routes, and every refusal on opening as a sentence with a way back.
  */
 vi.setConfig({ testTimeout: 20_000 });
-afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+afterEach(() => { vi.unstubAllGlobals(); signOut(); window.localStorage.clear(); });
 
 const TOKEN = "AbCdEfGhIjKlMnOpQrStUv";
 const BOOKING = "b0000000-0000-0000-0000-000000000001";
@@ -117,3 +118,80 @@ describe("a link that cannot be opened", () => {
     expect(screen.queryByRole("button", { name: /Accept/ })).toBeNull();
   });
 });
+
+const ME = "44444444-4444-4444-4444-444444444444"; // the harness's signed-in user
+
+describe("R1 F2.3 / F2.4 — opened signed out", () => {
+  function openSignedOut() {
+    stubFetch([]);
+    renderPage(
+      <Routes>
+        <Route path="/j/:token" element={<InviteLinkPage />} />
+        <Route path="/login" element={<FromProbe />} />
+        <Route path="/register" element={<p>The join page</p>} />
+      </Routes>,
+      { initialEntries: [`/j/${TOKEN}`], reactStrictMode: true },
+    );
+  }
+
+  it("says an invite is waiting, and offers sign-in and joining — asking the club nothing", async () => {
+    openSignedOut();
+    expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.signedOutTitle })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: INVITES_COPY.signedOutSignIn })).toHaveAttribute("href", "/login");
+    expect(screen.getByRole("link", { name: INVITES_COPY.signedOutJoin })).toHaveAttribute("href", "/register");
+    expect(screen.getByText(INVITES_COPY.signedOutJoinHint)).toBeInTheDocument();
+  });
+
+  it("signing in carries the link through /login and back", async () => {
+    openSignedOut();
+    fireEvent.click(await screen.findByRole("link", { name: INVITES_COPY.signedOutSignIn }));
+    expect(await screen.findByTestId("from")).toHaveTextContent(`/j/${TOKEN}`);
+  });
+
+  it("keeps the link for whoever signs in next — so joining the club does not lose it", async () => {
+    openSignedOut();
+    await screen.findByRole("heading", { level: 1, name: INVITES_COPY.signedOutTitle });
+    expect(pendingInvite("u-new-member")?.token).toBe(TOKEN);
+  });
+});
+
+describe("R1 F2.5 / F2.7 — the link is remembered until it is answered", () => {
+  it("opened and not answered (short of credit), it is kept for this member", async () => {
+    openLink([{ path: OPEN, body: invite({ spendable_credits: 5, balance_credits: 5 }) }]);
+    await screen.findByText(invitedLine("Nomsa", true));
+    await waitForPending(TOKEN);
+    expect(pendingInvite(ME)?.userId).toBe(ME);
+    expect(screen.getByRole("link", { name: INVITES_COPY.topUp }).getAttribute("href"))
+      .toBe(`/wallet/topup?returnTo=${encodeURIComponent(`/j/${TOKEN}`)}`);
+  });
+
+  it("an accept forgets it", async () => {
+    savePendingInvite(TOKEN, ME);
+    openLink([
+      { path: OPEN, body: invite() },
+      { method: "POST", path: `${OPEN}/accept`, body: {
+        participant_id: "p4", booking_id: BOOKING, status: "accepted", share_credits: 25, consented_credits: 25, paid_credits: 25, balance_credits: 55,
+      } },
+    ]);
+    fireEvent.click(await screen.findByRole("button", { name: acceptLabel(25) }));
+    expect(await screen.findByText(INVITES_COPY.acceptedTitle)).toBeInTheDocument();
+    expect(pendingInvite(ME)).toBeNull();
+  });
+
+  it("a link this account opened before, now gone, says so — never 'sign out'", async () => {
+    savePendingInvite(TOKEN, ME);
+    openLink([{ path: OPEN, status: 404, body: { error: "invite_not_found" } }]);
+    expect(await screen.findByText(INVITES_COPY.linkNoLongerOpen)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: INVITES_COPY.signOutToOpen })).toBeNull();
+    expect(pendingInvite(ME)).toBeNull();
+  });
+});
+
+async function waitForPending(token: string) {
+  await waitFor(() => expect(pendingInvite(ME)?.token).toBe(token));
+}
+
+function FromProbe() {
+  const state = useLocation().state as { from?: { pathname?: string } } | null;
+  return <output data-testid="from">{state?.from?.pathname ?? ""}</output>;
+}

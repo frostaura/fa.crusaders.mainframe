@@ -13,6 +13,7 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "../components/u
 import { Input } from "../components/ui/input";
 import { TextLink } from "../components/ui/text-link";
 import { Envelope } from "../components/ui/icons";
+import { PendingInviteNote } from "../components/players/invites/PendingInviteNote";
 import {
   INBOX_HEADING, INBOX_PATIENCE, INBOX_STEPS, PHOTO_PREPARING, PHOTO_REQUIRED, REGISTER, REGISTER_FIELD,
   REGISTER_MESSAGES, VERIFY_BACK_TO_SIGN_IN,
@@ -75,6 +76,8 @@ function Submitted() {
         ))}
       </ol>
       <p className="mt-5 rounded-lg bg-bg-muted px-4 py-3 text-sm text-text-secondary">{INBOX_PATIENCE}</p>
+      {/* R1 F2.3 — arrived by an invite link: it is kept for after approval. */}
+      <div className="mt-4"><PendingInviteNote stage="verified" /></div>
       {/* R10 — somewhere else to go is a link, dressed as the one call to action on the screen. */}
       <Button asChild variant="outline" block className="mt-6">
         <Link to="/login">{VERIFY_BACK_TO_SIGN_IN}</Link>
@@ -185,6 +188,7 @@ export default function RegisterPage() {
       footer={<>{REGISTER.haveAccount}{" "}<TextLink to="/login" className="py-3">{REGISTER.signIn}</TextLink></>}
     >
       <form onSubmit={submit} noValidate className="flex flex-col gap-5">
+        <PendingInviteNote stage="join" />
         <TextField id="fullName" label={REGISTER.fullName} error={errors.fullName} ref={fullNameRef}
           input={{ value: values.fullName, onChange: form.set("fullName"), autoComplete: "name" }} />
         <TextField id="email" label={REGISTER.email} error={errors.email} ref={emailRef}
