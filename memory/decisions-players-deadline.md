@@ -43,8 +43,11 @@ Spec: `docs/specs/players-and-splits.md` §3, §3a, §7. From the refuter rounds
   not recoverable, so the targeted admin-remove and goodwill tests carry those cases.
 - **A waiting return that grows keeps its original stamp** (round 7, accepted): the extra is served
   ahead of returns stamped in between. *Why:* simplicity — one stamp per seat — and the amount
-  belongs to the same seat's claim.
+  belongs to the same seat's claim. Its one `return_waiting` notice keeps the ORIGINAL amount
+  (round 8, accepted): growth is not re-announced; the receipt shows the full figure.
 - **The property test must catch the FCFS and S4 double-count mutants on its own** (round 7):
   partners funded 100, liveness + final top-up, overdraft at every return row, FCFS per step,
   spend / S4 / lower / concurrent steps, a `debt` bias with a squeeze (two late returns, bigger
   first, then a top-up of 4). Both mutants fail in the default 150; 2,040 seeds run once locally.
+  Round 8 adds games 10–40 days old and an old-game squeeze, so the sweep's stamped-seat read is
+  the only retry path — its removal (mutant D) now fails in the default seeds too.

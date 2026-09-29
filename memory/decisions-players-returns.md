@@ -50,4 +50,10 @@ Spec: `docs/specs/players-and-splits.md` §3, §3a. When a return may post at al
   retried. *Why:* one try around the loop let one poisoned game strand every later return unmarked.
   A marked booking with NO partner seats is still visited (the sweep reads marked bookings off
   `bookings`, not off seats) and cleared — else its marker sat there, read every minute, for ever.
+- **The marker is staged WITH the money** (round 8, orchestrator): any save adding a non-share
+  ledger row naming a booking, or changing its status / check-in, sets the marker in the same
+  transaction (partner seats only; no attempt counted, so no backoff); the hook's reconcile clears
+  it. Hooks run on `CancellationToken.None`. *Why:* a desk credit on a game past the sweep window
+  whose hook never ran (dropped connection, restart) stranded the return for good; one save-level
+  rule covers every settlement site, present and future, instead of each call site remembering.
 - **Stamping or clearing a wait publishes a wallet frame** (reason `share_set_aside`, delta 0).

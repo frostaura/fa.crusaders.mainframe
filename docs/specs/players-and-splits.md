@@ -130,7 +130,9 @@ coverage(X, s) = min( max(0, earmark(X) − need(X)) ,  max(0, min(balance, earm
   A waiting return that grows (a partial refund, then a desk remove on the same seat) **keeps its
   original stamp**, so the extra is served ahead of returns stamped in between — deliberately: the
   amount belongs to the same seat's claim, and one stamp per seat keeps the queue simple (review
-  round 7).
+  round 7). Its single `players.return_waiting` notice likewise stays the one sent when it first
+  waited, showing the amount owed back THEN — the growth is not re-announced; the receipt when it
+  posts carries the full figure (accepted, review round 8).
 - **A game cancelled after check-in earmarks nothing.** Every share on it stays owed in full, so it
   held nothing and the organiser could spend it; its "hold" appears only once a return falls due on
   it — the very return being asked about. Its returns are payable from the free balance only (and
@@ -147,13 +149,16 @@ coverage(X, s) = min( max(0, earmark(X) − need(X)) ,  max(0, min(balance, earm
   `return_waiting`. `PlayersPropertyHttpTests` holds this, and every rule in this section, over
   seeded random scenarios (150 seeds in CI; `PLAYERS_PROPERTY_SEEDS` for more,
   `PLAYERS_PROPERTY_FIRST_SEED` to move the window, `PLAYERS_PROPERTY_BIAS` = `mixed` | `debt` |
-  `balanced`). Partners are funded 100; the steps are withdraw, organiser and desk remove,
+  `balanced`). Some played games are dated 10–40 days back, past the sweep's window (so a return
+waiting on one is reached only by the sweep's read of stamped seats). Partners are funded 100; the steps are withdraw, organiser and desk remove,
   settle-outside, cancel, goodwill credit, top-up, correction debit, deadline passing, random-order
   reconciles, an organiser spend (allowed exactly when the model's spendable covers it), check-in
   then cancel (S4), lowering a share, a concurrent burst (every reconcile, the sweep, a desk credit
   and a desk remove together), and — on debt seeds — a squeeze: free balance thinned below zero, the
   biggest share withdrawn after its deadline, the smallest on another game likewise, then a top-up
-  of 4. After every step it checks the balance never ran negative at any return row, **liveness**
+  of 4 — and, on a seed with an old game, an old-game squeeze: the free balance pushed down, a
+  goodwill 16 naming the old game (its returns wait), a top-up leaving the first short by less than
+  a young game's hold, then that game's deadline passing, so only the sweep can pay it. After every step it checks the balance never ran negative at any return row, **liveness**
   (a balance covering every earmark plus every waiting return leaves nothing waiting), and FCFS
   across the step (a return paid while an earlier-stamped one still waits took no more than its
   own game's earmark); at the end it tops the organiser up to exactly earmarks plus waiting returns
@@ -195,6 +200,16 @@ covered, before the deadline or after. Spend checks, by contrast, set aside EVER
   (review round 7). A club's start-up catch-up counts as done once every booking it failed on is
   marked (the marker makes it good); only a failure it could not even mark is retried next pass.
   Rolling the marker migrations back forgets outstanding markers (their `Down` says so).
+- **the marker is staged with the money** (review round 8): every save that may move a booking's
+  `Owed` — a ledger row naming it other than a share transfer (a refund, a penalty, a desk credit
+  or debit naming it), or a change to its status or check-in — sets `ShareReconcileDueAt` on it, when
+  it has partner seats, in the SAME transaction (`MainframeDbContext.ShareStaging`), counting no
+  failed attempt, so the sweep takes it at its next pass without backing off. The hook's
+  reconcile, starting after the commit, clears it (the guarded clear). A settlement whose hook
+  never runs — the admin's connection dropped, a restart in between — is therefore made good by the
+  next minute sweep however old the game; before, a desk credit on a game past the sweep's window
+  stranded the partner's return for good. And the hook itself runs on `CancellationToken.None`,
+  whatever token its caller hands it: a request's cancellation must not abort money follow-up.
 - a return starting or stopping waiting moves the organiser's spendable without a ledger row, so
   their live wallet gets a `balance` frame with `delta_credits` 0 and the reason `share_set_aside`.
 
@@ -424,7 +439,7 @@ Every number is a `tenant_settings` key — clamped on read, bounded on `PUT /ad
 | The target rule | `Services/Players/ShareRules.cs` |
 | Held credits, spendable | `Services/Players/ShareHolds.cs`, `Services/LedgerService.cs` — `GetHeldAsync`, `GetSpendableAsync` |
 | The one writer of `ShareTransfer` | `Services/Players/ShareLedger.cs` |
-| After settlement / the minute sweep | `Services/Players/ShareHook.cs`, `ShareSweep.cs`, `Workers/ShareWorker.cs` |
+| After settlement / the minute sweep | `Services/Players/ShareHook.cs`, `ShareSweep.cs`, `Workers/ShareWorker.cs`; the marker staged with the money: `Persistence/MainframeDbContext.ShareStaging.cs` |
 | Partner cap (D12) | `Services/BookingRules.cs` — `PartnerCapRefusalAsync`, `HeldAsync` |
 | Partner at the court / door | `Services/CourtActivationService.cs`, `Services/GateAccess.cs`, `Endpoints/PinEndpoints.cs`, `Biometric/BiometricService.cs` |
 | Member notices | `Services/Players/MemberNotices.cs`, `MemberEventCatalogue.cs`, `Email/EmailTemplatesPlayers.cs`, `Services/AdminNotificationDispatcher.cs` |
@@ -432,5 +447,5 @@ Every number is a `tenant_settings` key — clamped on read, bounded on `PUT /ad
 
 Pinning tests: `SplitCalculatorTests`, `ShareRulesTests`, `PlayerSettingsTests`, `PlayersHttpTests`,
 `PlayersAccessHttpTests`, `PlayersReviewHttpTests` (the adversarial review's findings, one test each),
-`PlayersRefuteHttpTests` … `PlayersRefute7HttpTests` (the refuter's rounds on those fixes),
+`PlayersRefuteHttpTests` … `PlayersRefute8HttpTests` (the refuter's rounds on those fixes),
 `PlayersPropertyHttpTests` (the seeded property search).
