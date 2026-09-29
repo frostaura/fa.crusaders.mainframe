@@ -167,5 +167,33 @@ public sealed class Booking : ITenantScoped
     /// </summary>
     public Guid? DisplacedByBookingId { get; set; }
 
+    /// <summary>
+    /// D11 — the instant after which no share of this booking can be paid, changed or returned
+    /// without an admin: the SOLD end plus <c>share_lapse_hours</c>, stamped ONCE, when the booking
+    /// first gets players, from the setting at that moment. Null for a booking nobody added
+    /// players to. Everything that asks "is this game still open" reads the stamp, so a club
+    /// raising the lapse hours later cannot reopen a game whose held shares were already released
+    /// and spent (<c>PlayerSettings.ShareDeadline</c>).
+    /// </summary>
+    public DateTimeOffset? ShareDeadlineAt { get; set; }
+
+    /// <summary>
+    /// D11 (review round 5): a reconcile of this booking's shares failed — the post-settlement hook
+    /// threw, or the sweep did on this booking — so the next minute sweep must reconcile it,
+    /// however old it is; cleared by a reconcile that succeeds. The durable half of "the hook
+    /// never throws": a swallowed failure is remembered, not lost.
+    /// </summary>
+    public DateTimeOffset? ShareReconcileDueAt { get; set; }
+
+    /// <summary>Failed reconciles since <see cref="ShareReconcileDueAt"/> was set — the backoff's step (review round 6).</summary>
+    public int ShareReconcileAttempts { get; set; }
+
+    /// <summary>
+    /// The latest failed reconcile. The sweep waits an exponentially growing interval after it
+    /// (capped at an hour) before trying again, and a reconcile clears the marker only when it
+    /// STARTED after this — so a failure recorded while it ran is not erased (review round 6).
+    /// </summary>
+    public DateTimeOffset? ShareReconcileLastAttemptAt { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

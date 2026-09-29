@@ -199,6 +199,15 @@ public sealed class AdminNotificationDispatcher
         if (tenant is null) return await FinishAsync(db, row, AdminNotificationState.Failed, now, "tenant_missing", ct);
         scope.ServiceProvider.GetRequiredService<ITenantContext>().Set(tenant.Id, tenant.Slug);
 
+        var settings = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(ct);
+
+        // D11: the same outbox carries mail for ONE member. Its recipient is the row's, its
+        // composer is the member catalogue's, and it may be held back until quiet hours end.
+        if (row.Audience == NotificationAudience.Member)
+        {
+            return await DeliverToMemberAsync(new MemberDelivery(scope.ServiceProvider, db, row, tenant, settings), now, ct);
+        }
+
         var kind = AdminEventCatalogue.Find(row.Kind);
         if (kind is null)
         {
@@ -206,7 +215,6 @@ public sealed class AdminNotificationDispatcher
             return await FinishAsync(db, row, AdminNotificationState.Failed, now, "unknown_kind", ct);
         }
 
-        var settings = await scope.ServiceProvider.GetRequiredService<TenantSettingsAccessor>().GetAsync(ct);
         if (await CooledDownAsync(db, row, Cooldown(row.Kind, settings), ct))
         {
             return await FinishAsync(db, row, AdminNotificationState.Suppressed, now, null, ct);
@@ -220,6 +228,63 @@ public sealed class AdminNotificationDispatcher
         var error = await SendAllAsync(delivery, ct);
         if (error is null) return await FinishAsync(db, row, AdminNotificationState.Sent, now, null, ct);
         return await BackOffAsync(db, row, now, error, ct);
+    }
+
+    /// <summary>What one member row needs to be judged and sent.</summary>
+    private sealed record MemberDelivery(
+        IServiceProvider Services, MainframeDbContext Db, AdminNotification Row, Tenant Tenant, TenantSettingsView Settings);
+
+    /// <summary>
+    /// Delivers one member row (D11): quiet hours first, then the one recipient, then the send.
+    ///
+    /// <para>
+    /// <b>Quiet hours are re-checked here</b>, not only at staging: a row that failed at 20:59 and
+    /// backed off must not go out at 23:00. Deferring is not an attempt, so the claim's count is
+    /// handed back. A member whose account is no longer active, or whose address is unconfirmed,
+    /// is not mailed — the row finishes <c>sent</c> to nobody, which the feed reads honestly.
+    /// </para>
+    /// </summary>
+    private async Task<bool> DeliverToMemberAsync(MemberDelivery d, DateTimeOffset now, CancellationToken ct)
+    {
+        var (db, row) = (d.Db, d.Row);
+        if (!MemberEventCatalogue.IsKnown(row.Kind))
+        {
+            _logger.LogError("Member notice {Id} names kind '{Kind}', which this build does not know", row.Id, row.Kind);
+            return await FinishAsync(db, row, AdminNotificationState.Failed, now, "unknown_kind", ct);
+        }
+
+        var sendable = PlayerSettings.NextSendable(now, d.Settings);
+        if (!MemberEventCatalogue.IsUrgent(row.Kind) && sendable > now)
+        {
+            row.DueAt = sendable.Storable();
+            row.LockedUntil = null;
+            row.Attempts = Math.Max(0, row.Attempts - 1);
+            await db.SaveChangesAsync(ct);
+            return false;
+        }
+
+        var to = await db.Users.AsNoTracking()
+            .Where(u => u.Id == row.RecipientUserId && u.Status == "active" && u.EmailVerified)
+            .Select(u => u.Email)
+            .FirstOrDefaultAsync(ct);
+        if (to is null) return await FinishAsync(db, row, AdminNotificationState.Sent, now, null, ct);
+
+        try
+        {
+            var baseUrl = d.Services.GetRequiredService<IConfiguration>()["App:PublicBaseUrl"] ?? "http://localhost:8088";
+            var message = MemberEventCatalogue.Compose(
+                new MemberMailContext(ClubIdentityResolver.For(d.Tenant, d.Settings), to, row, baseUrl, d.Settings));
+            await d.Services.GetRequiredService<IEmailService>().SendAsync(message, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Member notice {Id} ({Kind}) failed", row.Id, row.Kind);
+            return await BackOffAsync(db, row, now, $"{ex.GetType().Name}: {ex.Message}", ct);
+        }
+
+        row.DeliveredToJson = JsonSerializer.Serialize(new[] { row.RecipientUserId });
+        row.RecipientCount = 1;
+        return await FinishAsync(db, row, AdminNotificationState.Sent, now, null, ct);
     }
 
     /// <summary>

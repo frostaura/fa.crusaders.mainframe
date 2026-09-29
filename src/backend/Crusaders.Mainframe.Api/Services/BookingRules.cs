@@ -338,12 +338,7 @@ public sealed class BookingRules
 
         var (dayStart, dayEnd) = ClubClock.DayWindow(settings, day);
 
-        var held = await _db.Bookings
-            .Where(b => b.UserId == subject.UserId
-                     && b.Status != BookingStatus.Cancelled
-                     && b.StartsAt < dayEnd && b.EndsAt > dayStart)
-            .Select(b => new { b.Id, b.SliceCount, b.StartsAt, b.EndsAt })
-            .ToListAsync(ct);
+        var held = await HeldAsync(subject.UserId, dayStart, dayEnd, ct);
 
         var bookedSlots = held.Sum(b => b.SliceCount);
         var bookedMinutes = (int)held.Sum(b => (b.EndsAt - b.StartsAt).TotalMinutes);
@@ -365,6 +360,45 @@ public sealed class BookingRules
         return overSlots
             ? SlotRefusal(subject, settings, day, slotCap, bookedSlots, slot.SliceCount)
             : MinuteRefusal(subject, settings, day, minuteCap, bookedMinutes, attemptedMinutes);
+    }
+
+    private sealed record HeldSlot(int SliceCount, DateTimeOffset StartsAt, DateTimeOffset EndsAt);
+
+    /// <summary>
+    /// The court time this member holds on one club day. D12: a game somebody else booked and
+    /// this member ACCEPTED a seat in is court time they occupy, so it counts against their cap
+    /// exactly as their own booking would. Seat 1 is the organiser, whose booking already counts
+    /// through <c>UserId</c>.
+    /// </summary>
+    private async Task<List<HeldSlot>> HeldAsync(Guid userId, DateTimeOffset dayStart, DateTimeOffset dayEnd, CancellationToken ct)
+    {
+        var partnerOn = BookingPlayerQueries.PartnerBookingIds(_db, userId);
+        return await _db.Bookings
+            .Where(b => (b.UserId == userId || partnerOn.Contains(b.Id))
+                     && b.Status != BookingStatus.Cancelled
+                     && b.StartsAt < dayEnd && b.EndsAt > dayStart)
+            .Select(b => new HeldSlot(b.SliceCount, b.StartsAt, b.EndsAt))
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// D12 — may this member ACCEPT a seat in somebody else's game without going over their own
+    /// daily cap? The cap is the only rule a partner is held to: peak hours, group windows and
+    /// pricing bind the organiser, who booked. Answered with the same refusal the member would
+    /// meet booking the slot themselves (minus the same-day relaxation, which exists to fill an
+    /// EMPTY court and this one is not), or null.
+    /// </summary>
+    public async Task<BookingResult?> PartnerCapRefusalAsync(
+        Guid partnerId, Booking booking, TenantSettingsView settings, CancellationToken ct)
+    {
+        var day = ClubClock.DateOf(settings, booking.StartsAt);
+        var subject = new RuleSubject(
+            partnerId, partnerId, ActorIsAdmin: false, new PeakAccess(true, []),
+            await GroupsForAsync(partnerId, day.DayOfWeek, settings, ct));
+        var slot = new RuleSlot(
+            booking.CourtId, booking.StartsAt, BookingService.OriginalEndsAt(booking), booking.SliceCount,
+            0m, IsWalkUp: false);
+        return await CapRefusalAsync(subject, slot, settings, day, ct);
     }
 
     /// <summary>

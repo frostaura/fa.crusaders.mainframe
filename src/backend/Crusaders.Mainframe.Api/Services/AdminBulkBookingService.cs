@@ -377,8 +377,12 @@ public sealed class AdminBulkBookingService
         }
 
         var total = lines.Where(l => l.Bookable).Sum(l => l.PriceCredits);
+        // The raw balance and the hold beside it: the quote's `overdraws` is on SPENDABLE, for the
+        // reason CommitAsync gives — shares a member holds for their partners are not the desk's to
+        // book against (D11, ShareHolds) — so it is the POST's refusal exactly.
         var balance = await _ledger.GetBalanceAsync(payer.UserId, ct);
-        return new BulkQuote(lines, total, balance);
+        var held = await _ledger.GetHeldAsync(payer.UserId, ct);
+        return new BulkQuote(lines, total, balance, held.Held, held.OwedBack);
     }
 
     /// <summary>Every name and court title one batch's result rows need, in two reads rather than 2n.</summary>

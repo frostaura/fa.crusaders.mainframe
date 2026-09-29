@@ -40,6 +40,7 @@ internal static class EmailCatalogue
 
     private const string ConsoleUrl = "https://riverside.review.test/admin/devices";
     private const string LinkUrl = "https://riverside.review.test/verify-email/T0k3n-abc_123";
+    private const string GameUrl = "https://riverside.review.test/bookings/5d1c0b5e-43a5-4c8e-9b38-2f0a1f3e9c11";
 
     /// <summary>
     /// A money symbol that cannot be confused with prose, for the catalogue-wide unit sweep.
@@ -149,6 +150,23 @@ internal static class EmailCatalogue
             ("YouPaidForACourt", EmailTemplates.YouPaidForACourt(club, to, new PaidForCourt("Court 3", "Tue 29 Sep, 18:00", 24m, "Thandi Mokoena"))),
             ("YourCourtWasPaidFor", EmailTemplates.YourCourtWasPaidFor(club, to, new PaidForCourt("Court 3", "Tue 29 Sep, 18:00", 24m, "Jason Fourie"))),
             ("AdminBoardLostMemberCodes", EmailTemplates.AdminBoardLostMemberCodes(club, to, new BoardLostMemberCodes("Court box 1-4", "box-2ad001", "2.0.0", ConsoleUrl))),
+
+            // D11's players messages.
+            ("PlayerInvite", EmailTemplates.PlayerInvite(club, to, new PlayerInviteNotice("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12m, GameUrl))),
+            ("PlayerInviteCovered", EmailTemplates.PlayerInvite(club, to, new PlayerInviteNotice("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 0m, GameUrl))),
+            ("ShareMoved", EmailTemplates.ShareMoved(club, to, new ShareMovement(ShareDirection.Paid, "Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12m, GameUrl))),
+            ("ShareMovedReceived", EmailTemplates.ShareMoved(club, to, new ShareMovement(ShareDirection.Received, "Thandi Mokoena", "Court 3", "Tue 29 Sep, 18:00", 12m, GameUrl))),
+            ("ShareMovedRefunded", EmailTemplates.ShareMoved(club, to, new ShareMovement(ShareDirection.Refunded, "Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12m, GameUrl))),
+            ("ShareMovedReturned", EmailTemplates.ShareMoved(club, to, new ShareMovement(ShareDirection.Returned, "Thandi Mokoena", "Court 3", "Tue 29 Sep, 18:00", 12m, GameUrl))),
+            ("ShareReminder", EmailTemplates.ShareReminder(club, to, new ShareReminderNotice("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12m, "Thu 01 Oct, 18:45", false, GameUrl))),
+            ("ShareReminderNudge", EmailTemplates.ShareReminder(club, to, new ShareReminderNotice("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12m, "Thu 01 Oct, 18:45", true, GameUrl))),
+            ("ShareLapsed", EmailTemplates.ShareLapsed(club, to, new ShareLapsedNotice("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12m, false, GameUrl))),
+            ("ShareLapsedOrganiser", EmailTemplates.ShareLapsed(club, to, new ShareLapsedNotice("Thandi Mokoena", "Court 3", "Tue 29 Sep, 18:00", 12m, true, GameUrl))),
+            ("PlayersBookingCancelled", EmailTemplates.PlayersBookingCancelled(club, to, "Jason Fourie", "Court 3", "Tue 29 Sep, 18:00")),
+            ("PlayersChanged", EmailTemplates.PlayersChanged(club, to, new PlayersChange("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", true, null, false, GameUrl))),
+            ("PlayersChangedShare", EmailTemplates.PlayersChanged(club, to, new PlayersChange("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", false, 16m, true, GameUrl))),
+            ("ShareReturnWaiting", EmailTemplates.ShareReturnWaiting(club, to, new ShareReturnWaitingNotice("Thandi Mokoena", "Court 3", "Tue 29 Sep, 18:00", 12m, false, GameUrl))),
+            ("ShareReturnWaitingOrganiser", EmailTemplates.ShareReturnWaiting(club, to, new ShareReturnWaitingNotice("Jason Fourie", "Court 3", "Tue 29 Sep, 18:00", 12m, true, GameUrl))),
         ];
     }
 

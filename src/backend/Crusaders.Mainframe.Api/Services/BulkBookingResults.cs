@@ -74,5 +74,11 @@ public sealed record BulkQuoteLine(
 /// A whole batch, priced. <paramref name="TotalCredits"/> sums the bookable lines only;
 /// <paramref name="BalanceCredits"/> is the payer's balance now.
 /// </summary>
+/// <param name="BalanceCredits">The payer's raw balance.</param>
+/// <param name="HeldCredits">What of it the payer holds for partners (D11).</param>
+/// <param name="OwedBackCredits">What of it is due back to partners and waiting (D11); the guard is on what is left.</param>
 public sealed record BulkQuote(
-    IReadOnlyList<BulkQuoteLine> Lines, decimal TotalCredits, decimal BalanceCredits);
+    IReadOnlyList<BulkQuoteLine> Lines, decimal TotalCredits, decimal BalanceCredits, decimal HeldCredits = 0m, decimal OwedBackCredits = 0m)
+{
+    public decimal SpendableCredits => BalanceCredits - HeldCredits - OwedBackCredits;
+}

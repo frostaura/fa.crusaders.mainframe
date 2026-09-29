@@ -28,6 +28,7 @@ public static class WalletEndpoints
             var take = Math.Clamp(limit ?? 100, 1, 500);
             var skip = Math.Max(offset ?? 0, 0);
             var balance = await ledger.GetBalanceAsync(userId, ct);
+            var held = await ledger.GetHeldAsync(userId, ct);
             var total = await db.LedgerEntries.CountAsync(l => l.UserId == userId, ct);
             var entries = await ledger.GetEntriesAsync(userId, DateTimeOffset.MinValue, DateTimeOffset.UtcNow.AddDays(1), ct, skip, take);
 
@@ -57,6 +58,13 @@ public static class WalletEndpoints
             return Results.Ok(new
             {
                 balance_credits = balance,
+                // D11: shares received as an organiser, held for the partners' possible returns
+                // until the earliest share deadline among them (ShareHolds). Part of the balance,
+                // not spendable — every booking and payment checks spendable_credits.
+                held_credits = held.Held,
+                owed_back_credits = held.OwedBack,
+                spendable_credits = balance - held.Reserved,
+                held_until = held.ReleasesAt,
                 entries = rows,
                 total_entries = total,
                 offset = skip,
@@ -117,6 +125,25 @@ public static class WalletEndpoints
     /// has no delta to animate — it has a number to show.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// The opening frame: the balance, plus (D11) what of it is held for the member's partners
+    /// and until when — additive fields, so a client that reads only <c>balance_credits</c> is
+    /// unchanged.
+    /// </summary>
+    private static async Task<string> OpeningFrameAsync(LedgerService ledger, Guid userId, CancellationToken ct)
+    {
+        var balance = await ledger.GetBalanceAsync(userId, ct);
+        var held = await ledger.GetHeldAsync(userId, ct);
+        return JsonSerializer.Serialize(new
+        {
+            balance_credits = balance,
+            held_credits = held.Held,
+            owed_back_credits = held.OwedBack,
+            spendable_credits = balance - held.Reserved,
+            held_until = held.ReleasesAt,
+        });
+    }
+
     private static async Task StreamAsync(
         HttpContext ctx,
         LedgerService ledger,
@@ -149,7 +176,7 @@ public static class WalletEndpoints
                     ctx,
                     new RealtimeMessage(
                         string.Empty,
-                        JsonSerializer.Serialize(new { balance_credits = await ledger.GetBalanceAsync(userId, ct) })),
+                        await OpeningFrameAsync(ledger, userId, ct)),
                     ct));
 
             // The session is re-asked before every frame and keep-alive: a rotation (member-code
@@ -283,6 +310,12 @@ public static class WalletEndpoints
 
         var (entry, balanceAfter) = (posted.Entry, posted.BalanceAfter);
         balanceBefore = posted.BalanceBefore;
+
+        // D11: an adjustment naming a booking moves the organiser's Owed, so the partners' shares
+        // follow — here, after the commit, however old the booking is. ShareWorker's sweep only
+        // looks back share_lapse_hours + 7 days, so a correction to an older game was never
+        // reconciled at all. The hook never throws; a failure is left to the log.
+        if (req.RelatedBookingId is { } adjustedBooking) await ctx.AfterSettlementAsync([adjustedBooking], ct);
 
         // "Every player-affecting event sends an email" — and an admin moving a member's balance
         // by hand is about as player-affecting as it gets. Nothing was sent, so the first a

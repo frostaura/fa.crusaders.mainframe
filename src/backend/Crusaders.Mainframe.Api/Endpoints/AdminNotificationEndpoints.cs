@@ -55,7 +55,9 @@ public static class AdminNotificationEndpoints
         }
 
         var take = Math.Clamp(limit ?? DefaultLimit, 1, MaxLimit);
-        var query = db.AdminNotifications.AsNoTracking();
+        // The club's ADMIN notices only. The outbox also carries mail for single members (D11),
+        // which is theirs — it is on their own inbox, never on the admins' feed.
+        var query = db.AdminNotifications.AsNoTracking().Where(n => n.Audience == NotificationAudience.Admins);
         if (after is not null)
         {
             var at = after.At;

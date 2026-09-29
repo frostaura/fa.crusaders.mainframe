@@ -158,6 +158,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<int>("Attempts")
                         .HasColumnType("integer");
 
+                    b.Property<int>("Audience")
+                        .HasColumnType("integer");
+
                     b.Property<string>("CooldownScope")
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
@@ -209,6 +212,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<int>("RecipientCount")
                         .HasColumnType("integer");
 
+                    b.Property<Guid?>("RecipientUserId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset?>("SentAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -236,6 +242,8 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.ToTable("admin_notifications", null, t =>
                         {
                             t.HasCheckConstraint("ck_admin_notifications_attempts", "\"Attempts\" >= 0");
+
+                            t.HasCheckConstraint("ck_admin_notifications_audience", "(\"Audience\" = 0 AND \"RecipientUserId\" IS NULL) OR (\"Audience\" = 1 AND \"RecipientUserId\" IS NOT NULL)");
 
                             t.HasCheckConstraint("ck_admin_notifications_state", "\"State\" BETWEEN 0 AND 3");
                         });
@@ -436,6 +444,18 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<DateOnly?>("ScheduleOccurrenceDate")
                         .HasColumnType("date");
 
+                    b.Property<DateTimeOffset?>("ShareDeadlineAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("ShareReconcileAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("ShareReconcileDueAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("ShareReconcileLastAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("SliceCount")
                         .HasColumnType("integer");
 
@@ -460,6 +480,12 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("TenantId", "ShareDeadlineAt")
+                        .HasFilter("\"ShareDeadlineAt\" IS NOT NULL");
+
+                    b.HasIndex("TenantId", "ShareReconcileDueAt")
+                        .HasFilter("\"ShareReconcileDueAt\" IS NOT NULL");
+
                     b.HasIndex("TenantId", "CourtId", "StartsAt");
 
                     b.HasIndex("TenantId", "ScheduleId", "StartsAt");
@@ -467,6 +493,126 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.HasIndex("TenantId", "UserId", "StartsAt");
 
                     b.ToTable("bookings", (string)null);
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.BookingParticipant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BookingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("CheckedInAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("ConsentedCredits")
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("GuestName")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("InviteTokenHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("InvitedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("InvitedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("LapsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("LastNudgedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("LastReminderAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("NudgeCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ReminderCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("RespondedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("ReturnPendingSince")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Seat")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("SettledOutsideAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("ShareCredits")
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<int>("ShareWeight")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SplitMode")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InviteTokenHash")
+                        .IsUnique()
+                        .HasFilter("\"InviteTokenHash\" IS NOT NULL");
+
+                    b.HasIndex("TenantId", "BookingId")
+                        .HasDatabaseName("IX_booking_participants_open_invites")
+                        .HasFilter("\"Status\" = 0 AND \"LapsedAt\" IS NULL");
+
+                    b.HasIndex("TenantId", "ReturnPendingSince")
+                        .HasFilter("\"ReturnPendingSince\" IS NOT NULL");
+
+                    b.HasIndex("TenantId", "BookingId", "Seat")
+                        .IsUnique()
+                        .HasFilter("\"Status\" IN (0, 1)");
+
+                    b.HasIndex("TenantId", "BookingId", "UserId")
+                        .IsUnique()
+                        .HasFilter("\"Status\" IN (0, 1) AND \"UserId\" IS NOT NULL");
+
+                    b.HasIndex("TenantId", "UserId", "Status");
+
+                    b.ToTable("booking_participants", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_booking_participants_guest", "\"GuestName\" IS NULL OR (\"UserId\" IS NULL AND \"ShareCredits\" = 0)");
+
+                            t.HasCheckConstraint("ck_booking_participants_money", "\"ShareCredits\" >= 0 AND \"ConsentedCredits\" >= 0 AND \"ShareWeight\" >= 0");
+
+                            t.HasCheckConstraint("ck_booking_participants_seat", "\"Seat\" BETWEEN 1 AND 4");
+
+                            t.HasCheckConstraint("ck_booking_participants_status", "\"Status\" BETWEEN 0 AND 5");
+                        });
                 });
 
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.BookingSchedule", b =>
@@ -1164,7 +1310,7 @@ namespace Crusaders.Mainframe.Api.Migrations
 
                     b.ToTable("ledger_entries", null, t =>
                         {
-                            t.HasCheckConstraint("ck_ledger_entries_type_range", "\"Type\" BETWEEN 0 AND 8");
+                            t.HasCheckConstraint("ck_ledger_entries_type_range", "\"Type\" BETWEEN 0 AND 9");
                         });
                 });
 
@@ -1403,6 +1549,59 @@ namespace Crusaders.Mainframe.Api.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.MemberNotification", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("BookingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DedupeKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Headline")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Link")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTimeOffset?>("ReadAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "DedupeKey")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "UserId")
+                        .HasFilter("\"ReadAt\" IS NULL");
+
+                    b.HasIndex("TenantId", "UserId", "CreatedAt", "Id");
+
+                    b.ToTable("member_notifications", (string)null);
+                });
+
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.Membership", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1453,6 +1652,35 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("memberships", (string)null);
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.PartnerFavourite", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("PartnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "UserId", "PartnerUserId")
+                        .IsUnique();
+
+                    b.ToTable("partner_favourites", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_partner_favourites_not_self", "\"UserId\" <> \"PartnerUserId\"");
+                        });
                 });
 
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.PendingTopup", b =>
@@ -1662,6 +1890,11 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasDefaultValue(1);
 
                     b.Property<bool>("RatingOptIn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("ShareResults")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);

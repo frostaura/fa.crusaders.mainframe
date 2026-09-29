@@ -48,6 +48,27 @@ public enum LedgerEntryType
     /// </para>
     /// </summary>
     AdminTopUp = 8,
+
+    /// <summary>
+    /// A partner's share of a split booking moving between the partner and the organiser (D11).
+    ///
+    /// <para>
+    /// <b>Always a pair, and the pair nets to zero club-wide</b> — one row debits one member and
+    /// the other credits another, under <c>share:{participant}:{seq}:out</c> and <c>:in</c>,
+    /// posted in one save. So no club total moves: revenue, spend, refunds and penalties are
+    /// exactly what they were, and a per-booking sum (<c>Owed</c>, the utilisation report) is
+    /// unchanged because both legs name the same booking. What moves is who, between the
+    /// players, bore the court — a member's "net court spend" is their spend less the shares
+    /// they received plus the shares they paid.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Its own bucket, <see cref="LedgerEntryTypes.Transfer"/></b>, because it is none of the
+    /// others: not spend (the organiser already spent), not a refund (the club gave nothing
+    /// back), not an adjustment (no admin decided it).
+    /// </para>
+    /// </summary>
+    ShareTransfer = 9,
 }
 
 /// <summary>
@@ -101,6 +122,12 @@ public static class LedgerEntryTypes
     /// <summary>A payment clawed back after the fact.</summary>
     public static readonly LedgerEntryType[] Reversal = [LedgerEntryType.PaymentReversal];
 
+    /// <summary>
+    /// Credits moving between two members for one split booking (D11). Nets to zero across the
+    /// club by construction, which is why no club report reads it.
+    /// </summary>
+    public static readonly LedgerEntryType[] Transfer = [LedgerEntryType.ShareTransfer];
+
     /// <summary>Every bucket, for the coverage test that keeps this honest.</summary>
     public static readonly IReadOnlyList<(string Name, LedgerEntryType[] Members)> All =
     [
@@ -110,6 +137,7 @@ public static class LedgerEntryTypes
         (nameof(Penalty), Penalty),
         (nameof(Adjustment), Adjustment),
         (nameof(Reversal), Reversal),
+        (nameof(Transfer), Transfer),
     ];
 }
 

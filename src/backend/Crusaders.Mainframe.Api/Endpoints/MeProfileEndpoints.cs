@@ -16,7 +16,7 @@ public static class MeProfileEndpoints
 
         g.MapGet("/profile", async (
             HttpContext ctx, ITenantContext tenant, MainframeDbContext db,
-            TenantSettingsAccessor settings, UserPreferencesService prefs, CancellationToken ct) =>
+            TenantSettingsAccessor settings, UserPreferencesService prefs, LedgerService ledger, CancellationToken ct) =>
         {
             var userId = ctx.User.Id() ?? Guid.Empty;
             var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId, ct);
@@ -24,6 +24,7 @@ public static class MeProfileEndpoints
             var membership = await db.Memberships.AsNoTracking().FirstOrDefaultAsync(m => m.UserId == userId, ct);
             var clubSettings = await settings.GetAsync(ct);
             var tariff = await MemberTariffs.ForAsync(db, userId, clubSettings, ct);
+            var held = await ledger.GetHeldAsync(userId, ct);
             return Results.Ok(new
             {
                 user_id = user.Id,
@@ -62,6 +63,12 @@ public static class MeProfileEndpoints
                 // the wrong theme on every cold load. Defaults when the member has never
                 // changed one; reading never creates the row.
                 preferences = await prefs.GetAsync(user.Id, ct),
+
+                // D11: credits received as an organiser's shares, held for the partners until the
+                // earliest share deadline — so the first paint can say "12 cr held until …".
+                held_credits = held.Held,
+                owed_back_credits = held.OwedBack,
+                held_until = held.ReleasesAt,
             });
         });
 

@@ -356,6 +356,11 @@ public static class DeviceEventEndpoints
         // that genuinely restarted says so with a new boot id and never lands here.
         await NoteSeqRegressionAsync(services, device!, events, batch.BootId, ct);
 
+        // D11: every booking whose money an event moved, so the partners' shares follow it once
+        // the batch is done. Reversal-displaced and release-reinstated bookings are reached by
+        // ShareWorker's next pass.
+        var settledBookings = new List<Guid?>();
+
         foreach (var e in events.OrderBy(e => e.Seq))
         {
             // A retry of something already taken is acknowledged, not re-recorded — which
@@ -407,6 +412,12 @@ public static class DeviceEventEndpoints
                     _ => null,
                 };
 
+                if (outcome is { BookingId: not null } && kind is ActivationKind or ReleaseKind)
+                {
+                    settledBookings.Add(outcome.BookingId);
+                    settledBookings.Add(outcome.RelatedBookingId);
+                }
+
                 if (await RecordAsync(services, device!, e, time, outcome, ct))
                 {
                     recorded++;
@@ -431,6 +442,15 @@ public static class DeviceEventEndpoints
             }
 
             acceptedThrough = e.Seq;
+        }
+
+        if (settledBookings.Count > 0 && services.Scopes is { } scopes)
+        {
+            using var hookScope = scopes.CreateScope();
+            if (hookScope.ServiceProvider.GetService<ShareHook>() is { } shares)
+            {
+                await shares.AfterSettlementAsync(services.Tenant.TenantId, services.Tenant.TenantSlug, settledBookings, ct);
+            }
         }
 
         // Recorded AGAIN, at the end, with a fresh instant.

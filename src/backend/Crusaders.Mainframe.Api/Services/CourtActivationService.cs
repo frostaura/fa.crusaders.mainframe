@@ -154,6 +154,7 @@ public class CourtActivationService
     public async Task<List<Booking>> CandidatesAsync(Guid courtId, DateTimeOffset now, CancellationToken ct)
     {
         var (start, end) = await WindowAsync(now, ct);
+        var withPartners = BookingPlayerQueries.BookingsWithActivePartners(_db);
 
         return await _db.Bookings
             .Where(b => b.CourtId == courtId
@@ -162,9 +163,38 @@ public class CourtActivationService
                         // Ruling 15: an ACTIVE row, not merely the absence of a non-active one.
                         // The old shape let a booking with NO membership row through, which is
                         // the same conflation that opened a door — see MembershipAccess.
-                        && _db.Memberships.Any(m => m.UserId == b.UserId && m.Status == MembershipStatus.Active))
+                        && (_db.Memberships.Any(m => m.UserId == b.UserId && m.Status == MembershipStatus.Active)
+                            // D11: a booking an accepted partner may activate is a candidate even
+                            // when the organiser's own membership is not active — the partner's is.
+                            || withPartners.Contains(b.Id)))
             .OrderBy(b => b.StartsAt)
             .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Every person who may activate one of <paramref name="candidates"/>, earliest booking first:
+    /// the organiser (active membership) and each ACCEPTED partner (active membership) — D11. The
+    /// PIN and biometric paths identify a PERSON against this list, so a partner's own PIN or
+    /// finger finds the game they accepted a seat in.
+    /// </summary>
+    public async Task<IReadOnlyList<(Guid UserId, Booking Booking)>> PlayersOfAsync(
+        IReadOnlyList<Booking> candidates, CancellationToken ct)
+    {
+        var ids = candidates.Select(b => b.Id).ToList();
+        var partners = await BookingPlayerQueries.ActivePartnersOf(_db, ids).ToListAsync(ct);
+        var organiserIds = candidates.Where(b => b.UserId != null).Select(b => b.UserId!.Value).Distinct().ToList();
+        var organisers = await _db.Memberships.AsNoTracking()
+            .Where(m => m.Status == MembershipStatus.Active && organiserIds.Contains(m.UserId))
+            .Select(m => m.UserId)
+            .ToListAsync(ct);
+
+        var players = new List<(Guid, Booking)>();
+        foreach (var b in candidates)
+        {
+            if (b.UserId is { } organiser && organisers.Contains(organiser)) players.Add((organiser, b));
+            players.AddRange(partners.Where(p => p.BookingId == b.Id).Select(p => (p.UserId, b)));
+        }
+        return players;
     }
 
     /// <summary>
@@ -175,15 +205,18 @@ public class CourtActivationService
     {
         var (start, end) = await WindowAsync(now, ct);
 
+        // D11: the member's OWN booking, or one they accepted a seat in. The membership asked about
+        // is the identified member's — for an organiser that is the booking's user, as before.
+        var partnerOn = BookingPlayerQueries.PartnerBookingIds(_db, userId);
         return await _db.Bookings
             .Where(b => b.CourtId == courtId
-                        && b.UserId == userId
+                        && (b.UserId == userId || partnerOn.Contains(b.Id))
                         && b.Status == BookingStatus.Booked
                         && b.StartsAt < end && b.EndsAt > start
                         // Ruling 15: an ACTIVE row, not merely the absence of a non-active one.
                         // The old shape let a booking with NO membership row through, which is
                         // the same conflation that opened a door — see MembershipAccess.
-                        && _db.Memberships.Any(m => m.UserId == b.UserId && m.Status == MembershipStatus.Active))
+                        && _db.Memberships.Any(m => m.UserId == userId && m.Status == MembershipStatus.Active))
             .OrderBy(b => b.StartsAt)
             .FirstOrDefaultAsync(ct);
     }
@@ -315,6 +348,8 @@ public class CourtActivationService
             return new ActivationResult.TooEarly(booking, (int)Math.Ceiling((booking.StartsAt - occurredAt).TotalSeconds));
         }
 
+        payerOverrideUserId = await OverrideUnlessSplitAsync(booking.Id, payerOverrideUserId, ct);
+
         // Charge first. Everything below this line is a consequence of it having worked.
         var charge = await _bookings.ChargeOnActivationAsync(
             bookingId: booking.Id,
@@ -353,13 +388,16 @@ public class CourtActivationService
         if (alreadyActive)
         {
             // A second scan of a live session. Idempotent: no second charge (the charge
-            // service refuses one), no second event, no re-stamp.
+            // service refuses one), no second event, no re-stamp — except the scanning player's
+            // OWN arrival (D11), which is theirs to record once whoever lit the court first.
+            await RecordRepeatArrivalAsync(booking.Id, identifiedUserId, occurredAt, ct);
             return new ActivationResult.Activated(booking, payerUserId, amount, AlreadyActive: true);
         }
 
         // Attendance is when the member identified, which for an uploaded event is the
         // scan and not the upload.
         booking.CheckedInAt = occurredAt;
+        await StampPlayerArrivalAsync(booking.Id, identifiedUserId, occurredAt, ct);
         booking.LightsOnCuedAt ??= occurredAt;
 
         _db.AuditLogs.Add(new AuditLog
@@ -418,6 +456,44 @@ public class CourtActivationService
         await _bus.EmitAsync(LightsOnEvent(court, booking, payerUserId, method, now), ct);
 
         return new ActivationResult.Activated(booking, payerUserId, amount, AlreadyActive: false);
+    }
+
+    /// <summary>
+    /// D11: a split booking is never re-assigned to one payer at the box — the partners' shares
+    /// were paid to the organiser, and moving the whole price to somebody else would leave them
+    /// paid to a person who no longer bore the court. The scan still checks the player in.
+    ///
+    /// <para>
+    /// "Split" is <see cref="BookingPlayerQueries.IsSplitAsync"/>: a live partner seat asked for a
+    /// share, OR any share row on the booking. A live seat alone missed the booking whose partner
+    /// had come off with their return still to be posted — the override then moved the court, and
+    /// the return owed on it, onto the volunteer (review M1).
+    /// </para>
+    /// </summary>
+    private async Task<Guid?> OverrideUnlessSplitAsync(Guid bookingId, Guid? payerOverrideUserId, CancellationToken ct)
+    {
+        if (payerOverrideUserId is null) return null;
+        return await BookingPlayerQueries.IsSplitAsync(_db, bookingId, ct) ? null : payerOverrideUserId;
+    }
+
+    /// <summary>A repeat scan of a live session still records THIS player's arrival, once.</summary>
+    private async Task RecordRepeatArrivalAsync(Guid bookingId, Guid userId, DateTimeOffset at, CancellationToken ct)
+    {
+        if (await StampPlayerArrivalAsync(bookingId, userId, at, ct)) await _db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// The identified player's own <c>CheckedInAt</c> on their seat, when the booking has seats
+    /// and theirs is not yet stamped. Staged, not saved. Answers whether anything changed.
+    /// </summary>
+    private async Task<bool> StampPlayerArrivalAsync(Guid bookingId, Guid userId, DateTimeOffset at, CancellationToken ct)
+    {
+        var seat = await _db.BookingParticipants.FirstOrDefaultAsync(
+            p => p.BookingId == bookingId && p.UserId == userId && p.Status == ParticipantStatus.Accepted, ct);
+        if (seat is null || seat.CheckedInAt is not null) return false;
+        seat.CheckedInAt = at;
+        seat.UpdatedAt = StorableTime.UtcNow;
+        return true;
     }
 
     /// <summary>

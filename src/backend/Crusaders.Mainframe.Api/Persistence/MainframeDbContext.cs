@@ -10,7 +10,7 @@ namespace Crusaders.Mainframe.Api.Persistence;
 /// tenant via global query filter; bypass requires <c>IgnoreQueryFilters()</c> and is reserved
 /// for platform-admin operations + onboarding.
 /// </summary>
-public class MainframeDbContext : DbContext
+public partial class MainframeDbContext : DbContext
 {
     private readonly ITenantContext _tenant;
 
@@ -181,6 +181,7 @@ public class MainframeDbContext : DbContext
         ConfigureUserPreferences(modelBuilder);
         ConfigureAdminNotifications(modelBuilder);
         ConfigureMemberCodes(modelBuilder);
+        ConfigurePlayers(modelBuilder);
 
         modelBuilder.Entity<Court>(e =>
         {
@@ -394,6 +395,7 @@ public class MainframeDbContext : DbContext
             e.Property(p => p.ShowInLeaderboards).HasDefaultValue(false);
             e.Property(p => p.RatingOptIn).HasDefaultValue(false);
             e.Property(p => p.WeeklyRecap).HasDefaultValue(false);
+            e.Property(p => p.ShareResults).HasDefaultValue(false);
             e.Property(p => p.AdminNotificationOptoutsJson)
                 .HasColumnType("jsonb").IsRequired().HasDefaultValueSql("'[]'::jsonb");
             // The database has the last word on a theme, for the D2-B06 reason: a validator in
@@ -423,6 +425,10 @@ public class MainframeDbContext : DbContext
             {
                 t.HasCheckConstraint("ck_admin_notifications_state", "\"State\" BETWEEN 0 AND 3");
                 t.HasCheckConstraint("ck_admin_notifications_attempts", "\"Attempts\" >= 0");
+                // A member row must name its member; an admin row must not name one.
+                t.HasCheckConstraint(
+                    "ck_admin_notifications_audience",
+                    "(\"Audience\" = 0 AND \"RecipientUserId\" IS NULL) OR (\"Audience\" = 1 AND \"RecipientUserId\" IS NOT NULL)");
             });
             e.HasKey(n => n.Id);
             e.Property(n => n.Kind).HasMaxLength(AdminNotification.KindMaxLength).IsRequired();
@@ -434,6 +440,7 @@ public class MainframeDbContext : DbContext
             e.Property(n => n.LastError).HasMaxLength(AdminNotification.LastErrorMaxLength);
             e.Property(n => n.DeliveredToJson).HasColumnType("jsonb").IsRequired().HasDefaultValueSql("'[]'::jsonb");
             e.Property(n => n.State).HasConversion<int>();
+            e.Property(n => n.Audience).HasConversion<int>();
 
             e.HasIndex(n => new { n.TenantId, n.DedupeKey }).IsUnique();
             e.HasIndex(n => new { n.TenantId, n.CreatedAt, n.Id });
@@ -662,6 +669,10 @@ public class MainframeDbContext : DbContext
             e.HasKey(b => b.Id);
             e.HasIndex(b => new { b.TenantId, b.CourtId, b.StartsAt });
             e.HasIndex(b => new { b.TenantId, b.UserId, b.StartsAt });
+            // D11: the players sweeps (holds, lapse, reminders) select bookings by their frozen deadline.
+            e.HasIndex(b => new { b.TenantId, b.ShareDeadlineAt }).HasFilter("\"ShareDeadlineAt\" IS NOT NULL");
+            // ...and the bookings a failed reconcile left due: a handful, found without a scan.
+            e.HasIndex(b => new { b.TenantId, b.ShareReconcileDueAt }).HasFilter("\"ShareReconcileDueAt\" IS NOT NULL");
             e.Property(b => b.AmountChargedCredits).HasColumnType("numeric(10,2)");
             e.Property(b => b.Status).HasConversion<int>();
             // How "edit this and future" finds an occurrence's rows, and how the grid learns
@@ -854,6 +865,16 @@ public class MainframeDbContext : DbContext
                 entry.Entity.Version++;
             }
         }
+
+        // The same guarantee for a booking's seats (D11): an accept, a withdrawal and an
+        // organiser's removal race on one row, and the loser must match nothing.
+        foreach (var entry in ChangeTracker.Entries<BookingParticipant>())
+        {
+            if (entry.State == EntityState.Modified)
+            {
+                entry.Entity.Version++;
+            }
+        }
     }
 
     /// <summary>
@@ -982,7 +1003,7 @@ public class MainframeDbContext : DbContext
     {
         BumpBookingVersions();
         StampAuditScanInstants();
-        return base.SaveChanges(acceptAllChangesOnSuccess);
+        return SaveStagingShareReconcile(acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(
@@ -990,6 +1011,6 @@ public class MainframeDbContext : DbContext
     {
         BumpBookingVersions();
         StampAuditScanInstants();
-        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        return SaveStagingShareReconcileAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 }

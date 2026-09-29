@@ -113,7 +113,10 @@ public static class PinEndpoints
             // no-show sweep. It was hardcoded at 30 minutes here while the sweep used 5,
             // so a member could be inside this window and already marked a no-show.
             var candidateBookings = await activation.CandidatesAsync(court.Id, now, ct);
-            var candidateUserIds = candidateBookings.Select(b => b.UserId).Distinct().ToList();
+            // Every player who may activate a candidate — the organiser and each accepted partner
+            // (D11) — earliest booking first, so a partner's own PIN finds the game they joined.
+            var players = await activation.PlayersOfAsync(candidateBookings, ct);
+            var candidateUserIds = players.Select(p => (Guid?)p.UserId).Distinct().ToList();
 
             var candidates = await db.Users
                 .Where(u => candidateUserIds.Contains(u.Id) && u.PinHash != null)
@@ -124,7 +127,7 @@ public static class PinEndpoints
             {
                 if (c.PinHash is null || !hasher.Verify(req.Pin, c.PinHash)) continue;
 
-                var booking = candidateBookings.FirstOrDefault(b => b.UserId == c.Id);
+                var booking = players.Where(p => p.UserId == c.Id).Select(p => p.Booking).FirstOrDefault();
                 if (booking is null) continue;
 
                 var result = await activation.ActivateAsync(

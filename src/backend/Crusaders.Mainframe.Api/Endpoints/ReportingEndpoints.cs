@@ -246,6 +246,10 @@ public static class ReportingEndpoints
                     // carried `reversals_credits` since it was made to reconcile; the club's
                     // had not, so the two screens disagreed by exactly the reversals.
                     reversals_credits = le.Where(x => LedgerEntryTypes.Reversal.Contains(x.Type)).Sum(x => x.AmountCredits),
+                    // D11: shares moving between two members. Club-wide the pairs net to zero,
+                    // so this reads 0 on every real day; it is here so the buckets still sum to
+                    // net_movement_credits whatever the ledger holds.
+                    share_transfers_credits = le.Where(x => LedgerEntryTypes.Transfer.Contains(x.Type)).Sum(x => x.AmountCredits),
                     // The day's movement, summed WITHOUT looking at the type — the same
                     // arithmetic `net_movement_credits` uses on the member's own report, so
                     // the two screens cannot mean different things by "net".
@@ -464,6 +468,8 @@ public static class ReportingEndpoints
         var penaltiesTotal = -entries.Where(e => LedgerEntryTypes.Penalty.Contains(e.Type)).Sum(e => e.AmountCredits);
         var adjustments = entries.Where(e => LedgerEntryTypes.Adjustment.Contains(e.Type)).Sum(e => e.AmountCredits);
         var reversals = entries.Where(e => LedgerEntryTypes.Reversal.Contains(e.Type)).Sum(e => e.AmountCredits);
+        // D11: shares paid to (−) or received from (+) other players for split bookings.
+        var shares = entries.Where(e => LedgerEntryTypes.Transfer.Contains(e.Type)).Sum(e => e.AmountCredits);
         // A penalty is a debit. A reversed no-show posts a positive row of the same type
         // to give the money back, and that row is not a second penalty.
         var penalties = entries.Count(e => LedgerEntryTypes.Penalty.Contains(e.Type) && e.AmountCredits < 0);
@@ -477,6 +483,11 @@ public static class ReportingEndpoints
             penalties_credits = penaltiesTotal,
             adjustments_credits = adjustments,
             reversals_credits = reversals,
+            share_transfers_credits = shares,
+            // What court time actually cost this member once the players settled up: spend,
+            // less refunds, plus penalties, less the shares others paid them (plus the shares
+            // they paid others). The club's figures are unchanged; this is the member's own.
+            net_court_spend_credits = spent - refunds + penaltiesTotal - shares,
             net_movement_credits = entries.Sum(e => e.AmountCredits),
             penalty_count = penalties,
             attended_bookings = attendedBookings,

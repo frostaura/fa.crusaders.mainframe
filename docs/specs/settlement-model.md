@@ -654,6 +654,12 @@ booking, so it is paired by device, relay and time:
 - **Top-ups and payment reversals.** They fund the wallet; they name no booking.
 - **The payer override** (`I'll pay` at the court). It moves the whole charge from one member
   to another as a refund/charge pair; `Owed(b)` is unchanged, only `u` is.
+- **Share transfers between players (D11).** A `ShareTransfer` pair names the booking but moves
+  credits between two members, never between a member and the club; `Owed(b)` is computed over
+  the payer's non-transfer rows, and a partner's share is a fraction of it
+  (`players-and-splits.md` §3). The shares an organiser receives are **held** — not spendable —
+  until the share deadline (`players-and-splits.md` §3a); that is a derived limit on spending,
+  not a ledger row, so neither `Owed(b)` nor the wallet's balance moves for it.
 - **An admin adjustment that names no booking.** Goodwill, corrections of a mis-keyed top-up,
   anything the desk does that is not about one booking.
 - **The wallet going below zero.** `feature-spec.md` §8 lets an admin book on behalf of a

@@ -358,6 +358,19 @@ builder.Services.AddScoped<AdminChangeRecorder>();
 // Items 5 + 13 — the per-item, never-transactional bulk cancel and bulk book.
 builder.Services.AddScoped<AdminBulkBookingService>();
 builder.Services.AddScoped<MemberBulkBookingService>();
+
+// D11–D13 players and splits: the share ledger (the one writer of ShareTransfer), the seats, the
+// reads, admin god mode, the post-settlement hook and the minute sweep.
+builder.Services.AddScoped<ShareLedger>();
+builder.Services.AddScoped<ShareSweep>();
+builder.Services.AddScoped<PlayersPlumbing>();
+builder.Services.AddScoped<PlayersService>();
+builder.Services.AddScoped<PlayersQuery>();
+builder.Services.AddScoped<PlayersAdminService>();
+builder.Services.AddSingleton<ShareHook>();
+builder.Services.AddSingleton<DirectoryRateLimiter>();
+builder.Services.AddSingleton<Crusaders.Mainframe.Api.Workers.ShareWorker>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Crusaders.Mainframe.Api.Workers.ShareWorker>());
 // Item 14 — repeating schedules, materialised as real AdminBlock rows so the GiST
 // exclusion constraint is what actually reserves the court.
 builder.Services.AddScoped<BookingScheduleService>();
@@ -597,6 +610,8 @@ app.MapScheduleEndpoints();
 app.MapMemberGroupEndpoints();
 app.MapBookingEndpoints();
 app.MapMemberBulkBookingEndpoints();
+app.MapPlayersEndpoints();
+app.MapMemberNotificationEndpoints();
 app.MapAdminConfigEndpoints();
 app.MapAdminDeviceEndpoints();
 app.MapAdminDoorEndpoints();

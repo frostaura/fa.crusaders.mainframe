@@ -56,13 +56,35 @@ public static class MemberBulkBookingEndpoints
         // about any slot, so asking it per item would only repeat the answer.
         if (await BookingMembershipGate.RefuseIfBarredAsync(deps.Db, userId, ct) is { } barred) return barred;
 
+        // D11: a players payload is checked in full before anything is booked — its shape on its
+        // own, then the split against EVERY item's own price. A batch whose players or split
+        // cannot work on any one item books nothing; there is no half-split batch.
+        if (req.Players is { Count: > 0 } && await PlayersRefusalAsync(ctx, userId, req, items, ct) is { } badPlayers)
+        {
+            return badPlayers;
+        }
+
         var before = await deps.Ledger.GetBalanceAsync(userId, ct);
         var outcome = await deps.Bulk.BookAsync(
             items.Select(i => new BulkBookItem(i.CourtId, i.StartsAt, i.SliceCount)).ToList(),
             new MemberBulkRequest(userId, ctx.User.IsInRole("admin"), req.IdempotencyKey!.Trim()), ct);
         var after = await deps.Ledger.GetBalanceAsync(userId, ct);
 
-        return Results.Ok(Body(outcome, before, after));
+        // D11: the same players on every NEWLY booked item. A replayed item already has its seats
+        // from the first attempt, and adding them again would invite everybody twice.
+        var players = new List<object>();
+        if (req.Players is { Count: > 0 })
+        {
+            var svc = ctx.RequestServices.GetRequiredService<PlayersService>();
+            var spec = new PlayersRequest(req.Players, req.SplitMode, req.OrganiserWeight);
+            foreach (var r in outcome.Results.Where(r => r.Status == MemberBulkStatuses.Booked && !r.Replayed && r.BookingId is not null))
+            {
+                var added = await svc.AddAsync(r.BookingId!.Value, userId, spec, ct);
+                players.Add(new { booking_id = r.BookingId, players = added.IsOk ? added.Body : null, players_error = added.IsOk ? null : added.Error });
+            }
+        }
+
+        return Results.Ok(Body(outcome, before, after, players));
     }
 
     /// <summary>
@@ -70,7 +92,7 @@ public static class MemberBulkBookingEndpoints
     /// a retried batch answers the same total; <c>charged_now_credits</c> is what THIS request
     /// debited, which is what the balance pair beside it moved by. Block body for the lizard reason.
     /// </summary>
-    private static object Body(MemberBulkOutcome outcome, decimal before, decimal after)
+    private static object Body(MemberBulkOutcome outcome, decimal before, decimal after, List<object> players)
     {
         var booked = outcome.Results.Where(r => r.Status == MemberBulkStatuses.Booked).ToList();
         return new
@@ -85,6 +107,7 @@ public static class MemberBulkBookingEndpoints
             halted_at = outcome.HaltedAt,
             halted_reason = outcome.HaltedReason,
             results = outcome.Results.Select(Row).ToList(),
+            players,
         };
     }
 
@@ -104,6 +127,31 @@ public static class MemberBulkBookingEndpoints
             amount_credits = r.AmountCredits,
             replayed = r.Replayed,
         };
+    }
+
+    /// <summary>
+    /// The players payload against the whole batch: its shape once, price-free, then the split
+    /// against each item the rules will price. An item that cannot be quoted is refused as an item
+    /// by the batch itself and is never split, so only its shape was ever at stake.
+    /// </summary>
+    private static async Task<IResult?> PlayersRefusalAsync(
+        HttpContext ctx, Guid userId, MemberBulkBookRequest req, IReadOnlyList<BulkBookRequestItem> items, CancellationToken ct)
+    {
+        var players = ctx.RequestServices.GetRequiredService<PlayersService>();
+        var spec = new PlayersRequest(req.Players, req.SplitMode, req.OrganiserWeight);
+        if (await players.ValidateAsync(userId, spec, null, ct) is { } shape) return PlayersEndpoints.ToResult(shape);
+
+        var bookings = ctx.RequestServices.GetRequiredService<BookingService>();
+        var payer = new BookingPayer(userId, userId, ActorIsAdmin: ctx.User.IsInRole("admin"));
+        // One after another: every quote reads through the request's one DbContext.
+        var checkedPrices = new HashSet<decimal>();
+        foreach (var item in items)
+        {
+            var price = (await bookings.QuoteAsync(item.CourtId, payer, item.StartsAt, item.SliceCount, ct)).PriceCredits;
+            if (price is not { } p || !checkedPrices.Add(p)) continue;
+            if (await players.ValidateAsync(userId, spec, p, ct) is { } bad) return PlayersEndpoints.ToResult(bad);
+        }
+        return null;
     }
 
     /// <summary>The admin bulk's two request bounds, with the admin bulk's refusal codes.</summary>
@@ -126,4 +174,6 @@ public static class MemberBulkBookingEndpoints
 /// A member's ticked slots. There is no payer, no on-behalf and no overdraft field — the payer is
 /// the caller, and a member has no way to ask to be overdrawn.
 /// </summary>
-public sealed record MemberBulkBookRequest(string? IdempotencyKey, IReadOnlyList<BulkBookRequestItem>? Items = null);
+public sealed record MemberBulkBookRequest(
+    string? IdempotencyKey, IReadOnlyList<BulkBookRequestItem>? Items = null,
+    IReadOnlyList<PlayerSpec>? Players = null, string? SplitMode = null, int? OrganiserWeight = null);

@@ -91,6 +91,9 @@ public static class AdminBulkBookingEndpoints
 
         var succeeded = outcome.Results.Count(r => r.Succeeded);
 
+        // D11: each cancelled booking's partners are refunded their shares.
+        await ctx.AfterSettlementAsync(outcome.Results.Where(r => r.Succeeded).Select(r => (Guid?)r.BookingId), ct);
+
         // ONE row per BATCH, not per item. The batch row is the INTENT — the admin's own words
         // about why a list of courts went away — and CancelAsync's per-booking audit_log rows
         // are the EFFECTS, which the night trace reads. Recording the intent per item would
@@ -278,11 +281,14 @@ public static class AdminBulkBookingEndpoints
             user_id = payerId,
             total_credits = quote.TotalCredits,
             balance_credits = quote.BalanceCredits,
+            spendable_credits = quote.SpendableCredits,
+            held_credits = quote.HeldCredits,
+            owed_back_credits = quote.OwedBackCredits,
             balance_after_credits = quote.BalanceCredits - quote.TotalCredits,
             // True exactly when the batch sent WITHOUT the flag would halt on
             // insufficient_balance. Prices are never negative, so the running balance first
             // falls short of an item's price iff the balance is below the whole total.
-            overdraws = anyBookable && quote.BalanceCredits < quote.TotalCredits,
+            overdraws = anyBookable && quote.SpendableCredits < quote.TotalCredits,
             items = quote.Lines.Select((l, index) => new
             {
                 index,

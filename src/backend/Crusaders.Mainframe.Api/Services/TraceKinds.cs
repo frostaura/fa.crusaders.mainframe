@@ -216,6 +216,13 @@ public static class TraceKinds
     public const string WalletReversed = "wallet.reversed";
 
     /// <summary>
+    /// A partner's share of a split booking moved between two members (D11) — paid to the
+    /// organiser, or handed back. Its own word, because it is none of the club's: the club took
+    /// nothing and gave nothing back.
+    /// </summary>
+    public const string WalletShareMoved = "wallet.share_moved";
+
+    /// <summary>
     /// A row this server wrote that this vocabulary has no word for.
     ///
     /// <para>
@@ -237,7 +244,7 @@ public static class TraceKinds
         CourtCheckedIn, CourtRefused,
         LightsOn, LightsOff,
         WalletToppedUp, WalletToppedUpAtTheDesk, WalletSpent, WalletRefunded, WalletPenalised,
-        WalletAdjustedByAdmin, WalletReversed,
+        WalletAdjustedByAdmin, WalletReversed, WalletShareMoved,
         Unrecognised,
     ];
 
@@ -400,6 +407,7 @@ public static class TraceKinds
             LedgerEntryType.NoShowPenalty or LedgerEntryType.LateCancellationPenalty => WalletPenalised,
             LedgerEntryType.AdminAdjustment => WalletAdjustedByAdmin,
             LedgerEntryType.PaymentReversal => WalletReversed,
+            LedgerEntryType.ShareTransfer => WalletShareMoved,
             _ => Unrecognised,
         };
     }
@@ -465,6 +473,7 @@ public static class TraceKinds
             WalletPenalised => Penalised(facts),
             WalletAdjustedByAdmin => AdjustedByAdmin(facts),
             WalletReversed => $"A payment of {Credits(facts)} credits was reversed",
+            WalletShareMoved => $"A share of a split booking moved: {Credits(facts)} credits",
 
             _ => $"Something this club's records have no word for ({facts.RawAction ?? kind})",
         };
