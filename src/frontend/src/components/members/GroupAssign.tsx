@@ -20,7 +20,7 @@ import {
   adminEndpoints, type MemberGroup, type MemberGroupChip, type MemberGroupPreview, type MemberGroupsSetResult,
 } from "@/lib/adminApi";
 import {
-  ASSIGN_COPY, explainAssignRefusal, peakChangeLine, peakChip, rateChangeLine, rateChip, tariffLine,
+  ASSIGN_COPY, explainAssignRefusal, peakChangeLine, peakChip, rateChangeLine, rateChip, rulesChangeLines, tariffLine,
 } from "@/lib/groupsCopy";
 import { memberDetailEndpoints } from "@/lib/memberDetailApi";
 import { cn } from "@/lib/utils";
@@ -375,6 +375,7 @@ function PreviewLines({ preview, groups }: { preview: MemberGroupPreview; groups
   if (typeof sliceBefore === "number" && typeof sliceAfter === "number" && sliceBefore !== sliceAfter) {
     lines.push(`A slot costs ${sliceAfter} cr instead of ${sliceBefore}.`);
   }
+  lines.push(...rulesChangeLines(preview.current, preview.would_be));
   const stranded = preview.would_be.empty_window_groups;
   return (
     <>

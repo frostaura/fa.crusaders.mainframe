@@ -963,3 +963,52 @@ export function yourRateLine(rate: number, rateGroup: { name: string } | null | 
   if (rateGroup === null) return `Your rate: the club's standard rate — ${rateFace(rate)}`;
   return `Your rate: ${rateGroup.name} — ${rateFace(rate)}`;
 }
+
+// ---------------------------------------------------------------------------------------
+// The rest of what a change of groups changes (review round 1, F3.12)
+// ---------------------------------------------------------------------------------------
+
+type RulesForLines = {
+  allowed_windows?: Array<{ start: string; end: string }> | null;
+  max_slots_per_day?: number | null;
+  max_minutes_per_day?: number | null;
+  advance_booking_days?: number | null;
+};
+
+function windowsFace(windows: RulesForLines["allowed_windows"]): string | null {
+  if (!windows) return null;
+  if (windows.length === 0) return "no times at all";
+  return windows.map((w) => `${w.start}–${w.end}`).join(", ");
+}
+
+/** A cap in words: a positive number, or "no limit" for the 0 / null the server uses for none. */
+function capFace(value: number | null | undefined, unit: (n: number) => string): string | null {
+  if (value === undefined) return null;
+  return value === null || value <= 0 ? "no limit" : unit(value);
+}
+
+/**
+ * The booking times and daily limits a change of groups changes — the preview named only the
+ * rate, the peak say and the slot price, so an admin could move somebody into a group that halved
+ * what they may book and read "nothing else changes". Only the lines that DIFFER are returned,
+ * and a figure the server did not send on either side is not compared.
+ */
+export function rulesChangeLines(before: RulesForLines, after: RulesForLines): string[] {
+  const lines: string[] = [];
+  const wBefore = windowsFace(before.allowed_windows);
+  const wAfter = windowsFace(after.allowed_windows);
+  if (wBefore !== null && wAfter !== null && wBefore !== wAfter) {
+    lines.push(`Today they could book ${wAfter} instead of ${wBefore}.`);
+  }
+  const pairs: Array<[number | null | undefined, number | null | undefined, string, (n: number) => string]> = [
+    [before.max_slots_per_day, after.max_slots_per_day, "Slots a day", (n) => slotsWord(n)],
+    [before.max_minutes_per_day, after.max_minutes_per_day, "Minutes a day", (n) => `${n} minutes`],
+    [before.advance_booking_days, after.advance_booking_days, "Booking ahead", (n) => (n === 1 ? "1 day" : `${n} days`)],
+  ];
+  for (const [was, will, label, unit] of pairs) {
+    const a = capFace(was, unit);
+    const b = capFace(will, unit);
+    if (a !== null && b !== null && a !== b) lines.push(`${label}: ${b} instead of ${a}.`);
+  }
+  return lines;
+}

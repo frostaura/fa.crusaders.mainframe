@@ -3,7 +3,7 @@ import {
   GROUP_REFUSAL_CODES, MOST_RESTRICTIVE_STANDING, addMembersLabel, addResultLine,
   capResolutionSentence, deleteRefusalSentence, emptyIntersectionSentence, explainGroupRefusal,
   groupChangeConsequence, memberCountLine, paintedRunAnnouncement, paintedWeekSentence,
-  misalignedWindowNote, previewSummary, ratePerBlockSentence, slicePriceLine, COURTS_UNREAD,
+  misalignedWindowNote, previewSummary, ratePerBlockSentence, slicePriceLine, COURTS_UNREAD, rulesChangeLines,
   ASSIGN_COPY, capsSummary, explainAssignRefusal, peakChangeLine, peakChip, peakChoiceOf, peakSayOf,
   rateChangeLine, rateChip, ratePreviewLine, rateProblemSentence, tariffLine, yourRateLine,
 } from "./groupsCopy";
@@ -531,5 +531,18 @@ describe("the D2 refusals the group endpoints add", () => {
       .toBe("A top-up rate has to be more than 0 and at most 1000, with at most 4 decimal places.");
     expect(explainGroupRefusal(new ApiError(400, { error: "group_peak_priority_invalid" })))
       .toMatch(/grants, withholds or no say/);
+  });
+});
+
+describe("rulesChangeLines — the times and limits a change of groups changes (F3.12)", () => {
+  it("says only what differs, and reads 0 as no limit", () => {
+    expect(rulesChangeLines(
+      { allowed_windows: [{ start: "06:00", end: "22:00" }], max_slots_per_day: 0, max_minutes_per_day: 60, advance_booking_days: 14 },
+      { allowed_windows: [{ start: "06:00", end: "22:00" }], max_slots_per_day: 3, max_minutes_per_day: 60, advance_booking_days: 7 },
+    )).toEqual(["Slots a day: 3 slots instead of no limit.", "Booking ahead: 7 days instead of 14 days."]);
+  });
+
+  it("compares nothing the server did not send on both sides", () => {
+    expect(rulesChangeLines({}, { max_slots_per_day: 2, allowed_windows: [] })).toEqual([]);
   });
 });

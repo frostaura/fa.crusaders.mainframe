@@ -39,8 +39,14 @@ describe("member detail — groups in the header", () => {
         method: "POST",
         path: "/api/v1/admin/member-groups/preview",
         body: {
-          current: { tariff: { top_up_credits_per_zar: 2.4, rate_group_id: "g-league", peak_priority: true, peak_withheld_by: [] } },
-          would_be: { tariff: saved },
+          current: {
+            tariff: { top_up_credits_per_zar: 2.4, rate_group_id: "g-league", peak_priority: true, peak_withheld_by: [] },
+            allowed_windows: [{ start: "06:00", end: "22:00" }], max_slots_per_day: 4, advance_booking_days: 14,
+          },
+          would_be: {
+            tariff: saved,
+            allowed_windows: [{ start: "14:00", end: "18:00" }], max_slots_per_day: 2, advance_booking_days: 14,
+          },
         },
       },
       {
@@ -60,6 +66,10 @@ describe("member detail — groups in the header", () => {
 
     // The loss is said before the save, naming the group that causes it.
     expect(await within(dialog).findByText("Loses peak priority — Juniors withholds it.")).toBeInTheDocument();
+    // F3.12: the booking times and the daily limit move too, and the preview says so.
+    expect(within(dialog).getByText("Today they could book 14:00–18:00 instead of 06:00–22:00.")).toBeInTheDocument();
+    expect(within(dialog).getByText("Slots a day: 2 slots instead of 4 slots.")).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Booking ahead/)).toBeNull();
     fireEvent.click(within(dialog).getByRole("button", { name: ASSIGN_COPY.saveLabel("Thandi", 2) }));
 
     await waitFor(() => expect(stub.calls.find((c) => c.method === "PUT")?.body).toEqual({ groupIds: ["g-league", "g-juniors"] }));
