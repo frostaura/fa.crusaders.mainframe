@@ -166,8 +166,8 @@ export default function AppShell() {
           <PageErrorBoundary resetKey={location.pathname}><Outlet /></PageErrorBoundary>
         </div>
       </main>
-      {/* P12 — a badge or a goal, once. It keeps its own rules about where it may appear (§9.3). */}
-      {signedIn ? <CelebrationOverlay /> : null}
+      {/* P12 — a badge or a goal, once. It keeps its own rules: signed in only, and never over the pass (§9.3). */}
+      <CelebrationOverlay />
     </div>
   );
 }
