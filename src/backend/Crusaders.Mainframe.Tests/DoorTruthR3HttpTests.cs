@@ -35,8 +35,7 @@ namespace Crusaders.Mainframe.Tests;
 /// migration.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class DoorTruthR3HttpTests
+public sealed class DoorTruthR3HttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

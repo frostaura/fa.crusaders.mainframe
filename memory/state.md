@@ -14,13 +14,14 @@ of the latest run on `main`, and the Actions secrets inventory, unchecked since 
 
 **The branches, and there is now only one.** **PR #3 merged into `main` on 2026-09-23**, and its
 remote branch was deleted. **All three PRs are MERGED and none is open.** `origin` carries
-`main` and nothing else; the 76 local lane branches and 27 lane worktrees were removed after
-`git branch --no-merged origin/main` returned **zero**. Delivery was one branch, one PR by
-founder decision; that line is now simply `main`.
+`main` and nothing else; the lane branches and worktrees of that era were removed after
+`git branch --no-merged origin/main` returned **zero**.
 
 **Work goes directly onto `main` by founder decision (2026-09-23)** — no branch, no PR — so
 every push runs the release half of CI as well as the gates. `git rev-list --left-right --count
-origin/main...HEAD` answering `0 0` is the check before claiming anything is safe.
+origin/main...HEAD` answering `0 0` is the check before claiming anything is safe. **Integration
+line `main-work` (local, UNPUSHED, 2026-09-29)** carries P7 member code, P11 players (seam wired)
+and the parallel test path; the P11/P7 UI lanes sit uncommitted in its tree under `src/frontend`.
 
 **What CI does on `main`.** Every gate runs **and the release half runs too**: the six image
 jobs and three manifest steps are gated on a push to `main`, so unlike a pull request they are
@@ -29,8 +30,7 @@ redeploy job was removed 2026-09-19, so nothing is redeployed automatically.
 **A failing job SKIPS every job behind it**, which for several runs hid the state of
 `backend-integration`, `e2e-device` and Security Scan entirely — count the skips before reading
 a run as mostly-passing, and see [`gotchas-ci-jobs.md`](gotchas-ci-jobs.md) for why a timeout
-reports as *cancelled*. Take the current answer from `gh run list --branch main`, never from
-this paragraph.
+reports as *cancelled*. Take the current answer from `gh run list --branch main`.
 
 **What the product does now.** The court-light headline flow — book online, scan at the box,
 lights on — exists end to end and is pinned by `make test-e2e-device`. **The door gate now exists

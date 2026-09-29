@@ -18,8 +18,7 @@ namespace Crusaders.Mainframe.Tests;
 /// overwrite each other's limits.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class RateLimitTests
+public sealed class RateLimitTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

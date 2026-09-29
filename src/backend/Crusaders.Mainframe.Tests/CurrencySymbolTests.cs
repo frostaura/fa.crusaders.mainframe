@@ -37,8 +37,7 @@ namespace Crusaders.Mainframe.Tests;
 /// reintroduce it with a settings key attached.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class CurrencySymbolTests
+public sealed class CurrencySymbolTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

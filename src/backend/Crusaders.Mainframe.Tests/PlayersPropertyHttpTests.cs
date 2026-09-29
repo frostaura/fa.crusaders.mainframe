@@ -57,13 +57,8 @@ namespace Crusaders.Mainframe.Tests;
 /// appends every seed's steps and answers there.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class PlayersPropertyHttpTests
+public sealed class PlayersPropertyHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private readonly PostgresFixture _pg;
-
-    public PlayersPropertyHttpTests(PostgresFixture pg) => _pg = pg;
-
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
     /// <summary>Seeds the refuter's search found the round-6 defect with; always run.</summary>
@@ -79,8 +74,8 @@ public sealed class PlayersPropertyHttpTests
     [SkippableFact]
     public async Task Players_money_holds_its_invariants_across_random_scenarios()
     {
-        Skip.IfNot(_pg.Available, Skipped);
-        await using var f = new TestWebAppFactory { ConnectionString = _pg.ConnectionString };
+        Skip.IfNot(pg.Available, Skipped);
+        await using var f = new TestWebAppFactory { ConnectionString = pg.ConnectionString };
         var seeds = Seeds();
         foreach (var seed in seeds)
         {

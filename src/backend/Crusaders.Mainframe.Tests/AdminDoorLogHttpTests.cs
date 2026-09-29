@@ -21,8 +21,7 @@ namespace Crusaders.Mainframe.Tests;
 /// spellings through the route and asserts the answer is byte-identical.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminDoorLogHttpTests
+public sealed class AdminDoorLogHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

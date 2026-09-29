@@ -14,16 +14,11 @@ namespace Crusaders.Mainframe.Tests;
 /// every new table, the opt-in directory, the member inbox and its mail, admin god mode, and the
 /// settings and preferences the feature added.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class PlayersAccessHttpTests
+public sealed class PlayersAccessHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private readonly PostgresFixture _pg;
-
-    public PlayersAccessHttpTests(PostgresFixture pg) => _pg = pg;
-
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
 
     private static async Task<JsonElement> JsonAsync(HttpResponseMessage response) =>
         await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -47,7 +42,7 @@ public sealed class PlayersAccessHttpTests
     [SkippableFact]
     public async Task The_organiser_and_the_players_see_the_booking_and_nobody_else_does()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var (club, bookingId, _) = await GameAsync(f, "pldetail");
         var path = $"/api/v1/bookings/{bookingId}";
@@ -84,7 +79,7 @@ public sealed class PlayersAccessHttpTests
     [SkippableFact]
     public async Task A_booking_nobody_added_players_to_is_just_the_booker()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "plsolo");
         var bookingId = await club.InsertBookingAsync(f, PlayersClub.Tomorrow());
@@ -103,7 +98,7 @@ public sealed class PlayersAccessHttpTests
     [SkippableFact]
     public async Task Only_the_organiser_can_change_the_players()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var (club, bookingId, body) = await GameAsync(f, "plidor");
         var samSeat = PlayersClub.SeatOf(body, 2);
@@ -135,7 +130,7 @@ public sealed class PlayersAccessHttpTests
     [SkippableFact]
     public async Task Nothing_of_one_club_reaches_another()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var (home, _, _) = await GameAsync(f, "plxhome");
         var (away, awayBooking, awayBody) = await GameAsync(f, "plxaway");
@@ -188,7 +183,7 @@ public sealed class PlayersAccessHttpTests
     [SkippableFact]
     public async Task The_directory_finds_only_members_who_opted_in_and_says_only_their_name_and_photo()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "pldir");
         await FindableAsync(club, f, club.Sam);
@@ -214,7 +209,7 @@ public sealed class PlayersAccessHttpTests
     [SkippableFact]
     public async Task The_directory_is_rate_limited_per_member_by_the_clubs_setting()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "pldirrl", PlayersClub.Settings.Replace("}", ""","directory_searches_per_minute":5}"""));
         var me = club.Client(f, club.Organiser);
@@ -233,7 +228,7 @@ public sealed class PlayersAccessHttpTests
     [SkippableFact]
     public async Task Recent_partners_come_from_accepted_games_and_favourites_are_private_and_idempotent()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var (club, bookingId, body) = await GameAsync(f, "plrecent");
         var organiser = club.Client(f, club.Organiser);
@@ -262,7 +257,7 @@ public sealed class PlayersAccessHttpTests
     [SkippableFact]
     public async Task A_member_reads_their_own_inbox_and_the_mail_goes_to_them_alone()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var factory = CreateFactory();
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
@@ -300,7 +295,7 @@ public sealed class PlayersAccessHttpTests
     [SkippableFact]
     public async Task Non_urgent_member_mail_waits_for_quiet_hours_to_end()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var factory = CreateFactory();
         var mail = new CapturingMail();
         var f = CapturingMail.On(factory, mail);
@@ -329,7 +324,7 @@ public sealed class PlayersAccessHttpTests
     [SkippableFact]
     public async Task A_nudge_is_limited_per_day_and_reminders_follow_the_clubs_cadence()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var (club, bookingId, body) = await GameAsync(f, "plnudge");
         var samSeat = PlayersClub.SeatOf(body, 2);
@@ -363,7 +358,7 @@ public sealed class PlayersAccessHttpTests
     [SkippableFact]
     public async Task An_admin_never_debits_a_partner_by_implication()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var (club, bookingId, body) = await GameAsync(f, "plgod");
         var samSeat = PlayersClub.SeatOf(body, 2);
@@ -403,7 +398,7 @@ public sealed class PlayersAccessHttpTests
     [SkippableFact]
     public async Task An_admin_adds_and_removes_players_on_the_record()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var (club, bookingId, _) = await GameAsync(f, "plgodadd");
         var admin = club.Client(f, club.Admin, admin: true);
@@ -427,7 +422,7 @@ public sealed class PlayersAccessHttpTests
     [SkippableFact]
     public async Task Every_social_flag_is_off_until_the_member_turns_it_on()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "plprefs");
         var me = club.Client(f, club.Sam);
@@ -447,7 +442,7 @@ public sealed class PlayersAccessHttpTests
     [SkippableFact]
     public async Task The_players_settings_are_bounded_on_the_put_and_rendered_from_the_clamped_values()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "plsettings");
         var admin = club.Client(f, club.Admin, admin: true);

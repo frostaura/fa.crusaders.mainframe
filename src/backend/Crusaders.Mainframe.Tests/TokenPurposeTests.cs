@@ -38,8 +38,7 @@ namespace Crusaders.Mainframe.Tests;
 /// claim. That is what makes them a test of the check rather than of the signature.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class TokenPurposeTests
+public sealed class TokenPurposeTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

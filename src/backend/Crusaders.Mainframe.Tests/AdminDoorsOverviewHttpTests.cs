@@ -21,8 +21,7 @@ namespace Crusaders.Mainframe.Tests;
 /// test below pins.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminDoorsOverviewHttpTests
+public sealed class AdminDoorsOverviewHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

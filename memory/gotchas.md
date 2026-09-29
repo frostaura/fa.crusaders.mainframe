@@ -49,10 +49,10 @@ Why a green suite is not evidence at all is a decision, not a gotcha:
 - **A mutation that does not apply looks exactly like a passing gate.** Shell escaping inside a
   `python3 -c` one-liner silently made an edit a no-op, so good tests appeared to prove nothing.
   Use a heredoc and confirm the mutant is present before believing the result.
-- **`Program.cs` captures the connection string at `AddDbContext` registration**, which under the
-  minimal hosting model runs *before* `ConfigureAppConfiguration` hooks fire. Config layered on by
-  `WebApplicationFactory` never reaches it; environment variables do. That is why the test factory
-  sets them — do not "simplify" it back.
+- **`Program.cs` captures the connection string at `AddDbContext` registration**, before any
+  `ConfigureAppConfiguration` hook fires, so config layered on there never reaches it.
+  `builder.UseSetting` does, per host — never an environment variable, which races across
+  parallel classes ([`decisions-test-running.md`](decisions-test-running.md)).
 - **`BackgroundService.StartAsync` no longer runs `ExecuteAsync` inline on .NET 10.** It schedules
   it, and an immediate `StopAsync` can return before the task is even assigned. A test that starts a
   hosted service and asserts on what it did must poll with a deadline; asserting straight after

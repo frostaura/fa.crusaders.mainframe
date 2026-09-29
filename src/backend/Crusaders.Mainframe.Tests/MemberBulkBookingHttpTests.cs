@@ -20,8 +20,7 @@ namespace Crusaders.Mainframe.Tests;
 /// hour, the default per-day cap — cost 32.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class MemberBulkBookingHttpTests
+public sealed class MemberBulkBookingHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

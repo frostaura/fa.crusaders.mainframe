@@ -15,8 +15,7 @@ namespace Crusaders.Mainframe.Tests;
 /// PUT that replaced the class endpoint, the admin reads that replaced <c>member_class</c>, the
 /// peak refusal a group withholds — and another club reaching none of it.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class GroupTariffHttpTests
+public sealed class GroupTariffHttpTests : IClassFixture<PostgresFixture>
 {
     private const string Groups = "/api/v1/admin/member-groups";
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";

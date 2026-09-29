@@ -72,13 +72,15 @@ make install        # restore backend + frontend
 make lint           # dotnet format + eslint/tsc
 make build          # lint, then build both
 make test           # unit
-make test-integration
+make test-integration # needs API_BOUNDARY_TEST_CONNECTION_STRING (a server; each class clones its own DB)
 make arduino-export # regenerate every firmware project's arduino/ from the PlatformIO sources
 make arduino-check  # regenerate and fail if the committed sketches are stale
 make up / make down / make down-reset / make clean
 ```
 
 MailHog serves local mail on `:8025`. There is no `scripts/` directory — the `Makefile` is the entry point.
+
+**Backend test classes run in parallel.** A Postgres-backed class is `IClassFixture<PostgresFixture>` (its own cloned database) and never joins a `[Collection]`; a test host is configured with `UseSetting`, never an environment variable. The method and the rules new tests must keep: `MEMORY.md`'s test-running decision.
 
 ## Where docs live
 

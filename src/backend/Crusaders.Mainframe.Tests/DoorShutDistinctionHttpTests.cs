@@ -21,8 +21,7 @@ namespace Crusaders.Mainframe.Tests;
 /// itself is the defect.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class DoorShutDistinctionHttpTests
+public sealed class DoorShutDistinctionHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

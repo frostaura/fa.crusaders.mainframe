@@ -14,19 +14,14 @@ namespace Crusaders.Mainframe.Tests;
 /// COVERED to post — whatever the deadline — a waiting return is never stranded, and the deadline
 /// backfill reads the setting exactly as the app does. Each test failed on the code it follows.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class PlayersRefute2HttpTests
+public sealed class PlayersRefute2HttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private readonly PostgresFixture _pg;
-
-    public PlayersRefute2HttpTests(PostgresFixture pg) => _pg = pg;
-
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
     /// <summary>The kind the partner and the organiser are told a return is waiting under.</summary>
     private const string ReturnWaitingKind = "players.return_waiting";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
 
     private static async Task<JsonElement> JsonAsync(HttpResponseMessage response) =>
         await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -106,7 +101,7 @@ public sealed class PlayersRefute2HttpTests
     [InlineData("settle-outside")]
     public async Task An_uncovered_admin_return_needs_the_overdraft_even_before_the_deadline(string action)
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, $"r2adm{action.Length}");
         var (bookingId, seat) = await SpentS4GameAsync(club, f);
@@ -127,7 +122,7 @@ public sealed class PlayersRefute2HttpTests
     [SkippableFact]
     public async Task An_uncovered_return_waits_even_before_the_deadline()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r2wait");
         var (bookingId, seat) = await SpentS4GameAsync(club, f);
@@ -149,7 +144,7 @@ public sealed class PlayersRefute2HttpTests
     [SkippableFact]
     public async Task A_waiting_return_is_swept_however_old_the_booking()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r2old");
         var (bookingId, seat) = await WaitingReturnAsync(club, f, daysAgo: 10);
@@ -170,7 +165,7 @@ public sealed class PlayersRefute2HttpTests
     [SkippableFact]
     public async Task A_credit_to_the_organiser_pays_a_waiting_return_at_once()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r2credit");
         await WaitingReturnAsync(club, f, daysAgo: 10);
@@ -190,7 +185,7 @@ public sealed class PlayersRefute2HttpTests
     [SkippableFact]
     public async Task A_waiting_return_is_told_once_to_both_sides()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r2told");
         var (bookingId, _) = await WaitingReturnAsync(club, f, daysAgo: 10);
@@ -226,7 +221,7 @@ public sealed class PlayersRefute2HttpTests
     [InlineData("true")]
     public async Task The_deadline_backfill_reads_the_setting_exactly_as_the_app_does(string value)
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r2fill", PlayersClub.Settings.Replace("}", $",\"share_lapse_hours\":{value}}}"));
         var bookingId = await club.InsertBookingAsync(f, DateTimeOffset.UtcNow.AddDays(-1));

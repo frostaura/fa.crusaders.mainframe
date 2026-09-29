@@ -17,16 +17,11 @@ namespace Crusaders.Mainframe.Tests;
 /// The club's court is 8 credits a slice; the standard game is four slices — 32 credits.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class PlayersReviewHttpTests
+public sealed class PlayersReviewHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private readonly PostgresFixture _pg;
-
-    public PlayersReviewHttpTests(PostgresFixture pg) => _pg = pg;
-
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
 
     private static async Task<JsonElement> JsonAsync(HttpResponseMessage response) =>
         await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -63,7 +58,7 @@ public sealed class PlayersReviewHttpTests
     [SkippableFact]
     public async Task An_open_link_seat_is_claimed_only_through_its_link()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "rvlink");
         await club.CreditAsync(f, club.Organiser, 100m);
@@ -95,7 +90,7 @@ public sealed class PlayersReviewHttpTests
     [SkippableFact]
     public async Task A_member_off_the_booking_no_longer_sees_it_and_a_removed_one_cannot_rejoin()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "rvdead");
         await club.CreditAsync(f, club.Organiser, 100m);
@@ -143,7 +138,7 @@ public sealed class PlayersReviewHttpTests
     [InlineData("late_cancel")]
     public async Task A_share_the_organiser_received_is_held_so_giving_it_back_never_overdraws_them(string scenario)
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, $"rvhold{scenario.Length}");
         await club.CreditAsync(f, club.Sam, 50m);
@@ -207,7 +202,7 @@ public sealed class PlayersReviewHttpTests
     [SkippableFact]
     public async Task A_share_that_lapsed_unpaid_is_never_collected_by_the_sweep()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "rvlapse");
         var start = DateTimeOffset.UtcNow.AddHours(-50);
@@ -251,7 +246,7 @@ public sealed class PlayersReviewHttpTests
     [SkippableFact]
     public async Task An_accept_consents_only_to_the_share_the_partner_saw()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "rvconsent");
         await club.CreditAsync(f, club.Organiser, 100m);
@@ -293,7 +288,7 @@ public sealed class PlayersReviewHttpTests
     [SkippableFact]
     public async Task A_bulk_whose_split_cannot_work_on_any_item_books_nothing()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "rvbulk");
         await club.CreditAsync(f, club.Organiser, 100m);
@@ -342,7 +337,7 @@ public sealed class PlayersReviewHttpTests
     [SkippableFact]
     public async Task An_organiser_cannot_mail_a_member_in_a_loop()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "rvloop",
             PlayersClub.Settings.Replace("}", ",\"player_invites_per_booking\":4}"));
@@ -383,7 +378,7 @@ public sealed class PlayersReviewHttpTests
     [SkippableFact]
     public async Task The_invite_cap_is_a_bounded_club_setting()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "rvcapset");
         var admin = club.Client(f, club.Admin, admin: true);
@@ -421,7 +416,7 @@ public sealed class PlayersReviewHttpTests
     [SkippableFact]
     public async Task A_lost_accept_race_is_not_a_yes_to_a_share_that_has_since_risen()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "rvrace");
         await club.CreditAsync(f, club.Organiser, 100m);
@@ -447,7 +442,7 @@ public sealed class PlayersReviewHttpTests
     [SkippableFact]
     public async Task An_admin_collect_that_moves_nothing_records_nothing()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "rvcollect");
         await club.CreditAsync(f, club.Organiser, 100m);
@@ -478,7 +473,7 @@ public sealed class PlayersReviewHttpTests
     [SkippableFact]
     public async Task Settling_outside_needs_a_seat_the_member_accepted()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "rvsettle");
         await club.CreditAsync(f, club.Organiser, 100m);
@@ -500,7 +495,7 @@ public sealed class PlayersReviewHttpTests
     [SkippableFact]
     public async Task An_invite_on_a_cancelled_game_lapses_without_a_word()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "rvquiet");
         var start = DateTimeOffset.UtcNow.AddHours(-50);
@@ -529,7 +524,7 @@ public sealed class PlayersReviewHttpTests
     [SkippableFact]
     public async Task An_adjustment_naming_an_old_booking_reconciles_its_shares_at_once()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "rvadjust");
         var bookingId = await club.InsertBookingAsync(f, DateTimeOffset.UtcNow.AddDays(-30));

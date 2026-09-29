@@ -26,8 +26,7 @@ namespace Crusaders.Mainframe.Tests;
 /// and the third test below is what holds it there.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class TraceDoorKindHttpTests
+public sealed class TraceDoorKindHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

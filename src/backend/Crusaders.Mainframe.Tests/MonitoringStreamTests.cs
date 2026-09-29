@@ -28,8 +28,7 @@ namespace Crusaders.Mainframe.Tests;
 /// and nothing else, and the role is still checked inside the handler.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class MonitoringStreamTests
+public sealed class MonitoringStreamTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

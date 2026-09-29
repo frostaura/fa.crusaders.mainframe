@@ -10,6 +10,15 @@ import { SETTINGS_SECTIONS } from "../lib/settingsSchema";
 import { SETTINGS_COPY, SETTINGS_INTRO_KEY } from "../lib/settingsCopy";
 
 /**
+ * A longer per-test timeout than the 5-second default, for this file only. Each case drives
+ * the whole settings page, every section and its save bar in jsdom — 1-2 s on a quiet machine,
+ * past 5 s when the suite shares the machine with a parallel backend run or another build
+ * (measured 2026-09-28: seven AdminSchedules cases timed out that way with nothing wrong).
+ * The assertions are untouched; only the time allowed to render them is.
+ */
+vi.setConfig({ testTimeout: 20_000 });
+
+/**
  * The settings screen as a DOCUMENT rather than as a form (C12–C14), and the R13 rebuild that
  * made it navigable: ten sections that open and close, a search, live summaries, "unsaved"
  * marks, a save bar that appears when there is something to save, and a guard on leaving.

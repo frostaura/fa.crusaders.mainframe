@@ -17,8 +17,7 @@ namespace Crusaders.Mainframe.Tests;
 /// to microseconds.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class UserPreferencesHttpTests
+public sealed class UserPreferencesHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

@@ -6,6 +6,17 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <RootNamespace>Crusaders.Mainframe.Tests</RootNamespace>
+
+    <!-- Runtime settings for the TEST HOST (they land in this assembly's runtimeconfig.json,
+         which is what vstest's testhost runs under; the API's own runtime is untouched).
+         Nearly every Postgres-backed test boots a whole WebApplicationFactory host, and most of
+         what a boot costs is JIT and allocation for code that runs once per host. Measured on
+         the Door* subset (397 tests, parallel classes, same machine, 2026-09-28): default
+         143 s; TieredPGO off 81 s; TieredPGO off + server GC 63 s, with user CPU halved.
+         Dynamic PGO instruments hot methods for a re-JIT that a test host never lives long
+         enough to profit from; server GC keeps parallel classes from queueing on one heap. -->
+    <TieredPGO>false</TieredPGO>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,6 +28,12 @@
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
     <PackageReference Include="Xunit.SkippableFact" Version="1.5.61" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Parallelism across test classes: every Postgres-backed class has its own database
+         (PostgresFixture), so classes are independent collections. See xunit.runner.json. -->
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

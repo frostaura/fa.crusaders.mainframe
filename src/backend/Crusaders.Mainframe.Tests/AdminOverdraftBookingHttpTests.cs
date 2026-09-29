@@ -27,8 +27,7 @@ namespace Crusaders.Mainframe.Tests;
 /// route reads it, and the fact that the member's own endpoint cannot.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminOverdraftBookingHttpTests
+public sealed class AdminOverdraftBookingHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

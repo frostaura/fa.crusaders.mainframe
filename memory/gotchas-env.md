@@ -20,8 +20,8 @@ Verified on the founder's Mac 2026-09-11: the system `python3` is below gcovr's 
   **a green run here is partly luck about timing.** What makes it deterministic: a keeper loop for
   the life of the suite (`while true; do chflags -R nohidden src/backend; sleep 1; done &`)
   **together with** exporting `Media__StoragePath` and `Biometric__TemplateStorePath` as environment
-  variables, which no file provider can lose. Do **not** also export `RateLimits__*` or `Gateway__*`
-  — those outrank what those tests inject and turn a dozen of them red. The main checkout is
+  variables, which no file provider can lose. (`RateLimits__*`/`Gateway__*` once turned a dozen
+  tests red; the factory clears them and its `UseSetting` outranks them now.) The main checkout is
   unaffected because its files were never under a dot-directory.
 - **A fresh worktree has no `node_modules` and no `src/iot/.venv`**, and the relative symlink used
   for the first has been one level short before now, so vitest resolved against the home directory

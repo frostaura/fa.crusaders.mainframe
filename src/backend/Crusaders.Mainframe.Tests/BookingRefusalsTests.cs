@@ -92,8 +92,7 @@ public sealed class BookingRefusalsTests
 /// The same refused item, sent down all four booking paths — the single member route, the member
 /// bulk book, the admin bulk book and the admin bulk quote — answers the same word on each.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class BookingRefusalPathsHttpTests
+public sealed class BookingRefusalPathsHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

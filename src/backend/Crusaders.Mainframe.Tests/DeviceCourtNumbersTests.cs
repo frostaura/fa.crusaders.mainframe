@@ -27,8 +27,7 @@ namespace Crusaders.Mainframe.Tests;
 /// now held on the PATCH an admin uses to correct what the box guessed.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class DeviceCourtNumbersTests
+public sealed class DeviceCourtNumbersTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

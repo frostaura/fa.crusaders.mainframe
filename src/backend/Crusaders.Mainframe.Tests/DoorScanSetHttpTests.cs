@@ -25,8 +25,7 @@ namespace Crusaders.Mainframe.Tests;
 /// four drift in the first place.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class DoorScanSetHttpTests
+public sealed class DoorScanSetHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

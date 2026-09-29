@@ -26,8 +26,7 @@ namespace Crusaders.Mainframe.Tests;
 /// not do before either of them ran.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class SecurityRegressionTests
+public sealed class SecurityRegressionTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

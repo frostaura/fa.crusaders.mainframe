@@ -219,8 +219,26 @@ test-iot-asan: sweep-icloud
 # Tests — integration. Runs the WHOLE suite with Postgres reachable: the
 # Postgres-backed classes gate themselves on API_BOUNDARY_TEST_CONNECTION_STRING,
 # and a class-name filter here is how the postgres-http tier silently ran nowhere.
+#
+# REQUIRE_BOUNDARY_TESTS=true is set here, so a missing connection string FAILS the
+# target instead of skipping half the suite green.
+#
+# Parallel by design: each Postgres-backed class gets its own database, cloned from
+# one template migrated once per run (PostgresFixture), and xUnit runs the classes at
+# once. Only the server, user and password of the connection string are used — the
+# database it names is never touched — so two runs, or two agents, can point at the
+# same server. TEST_DB_PREFIX (default `boundary`) names their databases so you can
+# tell them apart in pg_database; TEST_PARALLEL caps how many classes run at once
+# (0 = one per core).
+#
+#   API_BOUNDARY_TEST_CONNECTION_STRING="Host=localhost;Port=5440;Database=postgres;Username=crusaders;Password=..." \
+#     TEST_DB_PREFIX=mine make test-integration
+TEST_PARALLEL ?= 0
 test-integration:
-	cd src/backend && dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q
+	@test -n "$$API_BOUNDARY_TEST_CONNECTION_STRING" \
+	  || (echo "API_BOUNDARY_TEST_CONNECTION_STRING is not set — this target needs a Postgres server." && exit 1)
+	cd src/backend && REQUIRE_BOUNDARY_TESTS=true dotnet test Crusaders.Mainframe.Tests/Crusaders.Mainframe.Tests.csproj --nologo -v q \
+	  -- xUnit.MaxParallelThreads=$(TEST_PARALLEL)
 
 # Regenerate everything generated from the wire contract and fail if a committed
 # copy is stale. Nothing else runs these generators, so an edited generator with

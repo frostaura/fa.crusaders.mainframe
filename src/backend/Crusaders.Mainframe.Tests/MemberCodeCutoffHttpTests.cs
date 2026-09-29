@@ -12,8 +12,7 @@ namespace Crusaders.Mainframe.Tests;
 /// the courtside QR kiosk, the biometric payer override and uploaded legacy evidence were the
 /// paths that forgot — and the cut-off ends every legacy code in the table.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class MemberCodeCutoffHttpTests(PostgresFixture pg)
+public sealed class MemberCodeCutoffHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
     private static AccessCode Code(MemberCodeClub club, Guid user, AccessCodePurpose purpose, Guid? booking = null) => new()
     {

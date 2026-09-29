@@ -32,8 +32,7 @@ namespace Crusaders.Mainframe.Tests;
 /// a trip to the club.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class DeviceEventHttpTests
+public sealed class DeviceEventHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

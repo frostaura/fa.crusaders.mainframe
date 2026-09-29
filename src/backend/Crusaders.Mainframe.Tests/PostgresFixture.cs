@@ -1,0 +1,275 @@
+using System.Text.RegularExpressions;
+using Npgsql;
+
+namespace Crusaders.Mainframe.Tests;
+
+/// <summary>
+/// A Postgres database of this test CLASS's own: a clone of one migrated template, created
+/// before the class's first test and dropped after its last.
+///
+/// <para>
+/// <b>Use it as a class fixture</b> — <c>public sealed class FooHttpTests(PostgresFixture pg)
+/// : IClassFixture&lt;PostgresFixture&gt;</c> — and do NOT put the class in a
+/// <c>[Collection]</c>. Each class is then its own xUnit collection, xUnit runs collections in
+/// parallel, and because every class has its own database nothing one class writes can be read
+/// by another. This replaced a single <c>postgres-http</c> collection that ran all ~90
+/// Postgres-backed classes one after another against one shared database (25–43 minutes).
+/// </para>
+///
+/// <para>
+/// Why a clone and not a fresh database per class: migrating an empty database costs seconds;
+/// <c>CREATE DATABASE … TEMPLATE</c> of an already-migrated one is a file copy. The template is
+/// migrated ONCE per test process through the real startup path (<see cref="PostgresDatabases"/>),
+/// so "the migrations apply cleanly to an empty database" is proven by every run before any
+/// class starts, and a broken migration fails every Postgres-backed test loudly rather than one.
+/// A test that needs an EMPTY database — a migration test — asks for one with
+/// <see cref="PostgresDatabases.CreateEmptyAsync"/>.
+/// </para>
+///
+/// <para>
+/// Skips cleanly when <c>API_BOUNDARY_TEST_CONNECTION_STRING</c> is absent, and throws when
+/// <c>REQUIRE_BOUNDARY_TESTS=true</c> says it must not be absent — see
+/// <see cref="PostgresDatabases.ServerConnectionString"/>.
+/// </para>
+/// </summary>
+public sealed class PostgresFixture : IAsyncLifetime
+{
+    public string? ConnectionString { get; private set; }
+    public bool Available => ConnectionString is not null;
+
+    private TestDatabase? _database;
+
+    public async Task InitializeAsync()
+    {
+        if (PostgresDatabases.ServerConnectionString() is null)
+        {
+            return;
+        }
+
+        _database = await PostgresDatabases.CloneTemplateAsync();
+        ConnectionString = _database.ConnectionString;
+    }
+
+    public async Task DisposeAsync()
+    {
+        if (_database is not null)
+        {
+            await _database.DisposeAsync();
+        }
+    }
+}
+
+/// <summary>A database this process created and will drop. Dispose it to drop it.</summary>
+public sealed class TestDatabase(string name, string connectionString) : IAsyncDisposable
+{
+    public string Name { get; } = name;
+    public string ConnectionString { get; } = connectionString;
+
+    public ValueTask DisposeAsync() => new(PostgresDatabases.DropAsync(Name, ConnectionString));
+}
+
+/// <summary>
+/// Creates and drops the suite's databases on the server named by
+/// <c>API_BOUNDARY_TEST_CONNECTION_STRING</c>. Only the server, user and password of that string
+/// are used — the database it names is never touched, so two runs pointed at the same string
+/// cannot collide.
+///
+/// <para>
+/// Every name starts with <c>TEST_DB_PREFIX</c> (default <c>boundary</c>): the template is
+/// <c>{prefix}_tpl_{guid}</c> and each class's clone <c>{prefix}_{guid}</c>. Give concurrent
+/// agents or runs different prefixes when you want to tell their databases apart in
+/// <c>pg_database</c>; the GUIDs already keep them from colliding.
+/// </para>
+/// </summary>
+public static partial class PostgresDatabases
+{
+    public const string ConnectionStringVariable = "API_BOUNDARY_TEST_CONNECTION_STRING";
+    public const string PrefixVariable = "TEST_DB_PREFIX";
+
+    private static readonly object TemplateGate = new();
+    private static Task<string>? _template;
+
+    // CREATE DATABASE … TEMPLATE refuses while any other session is connected to the template.
+    // Clones are taken one at a time so that no two ever overlap on it — a clone is a file copy
+    // of a small database, so serialising them costs little and removes the question.
+    private static readonly SemaphoreSlim CloneGate = new(1, 1);
+
+    [GeneratedRegex("^[a-z][a-z0-9_]{0,30}$")]
+    private static partial Regex PrefixShape();
+
+    public static string Prefix
+    {
+        get
+        {
+            var configured = Environment.GetEnvironmentVariable(PrefixVariable);
+            if (string.IsNullOrWhiteSpace(configured))
+            {
+                return "boundary";
+            }
+
+            // Interpolated into DDL, so its shape is checked rather than trusted.
+            return PrefixShape().IsMatch(configured)
+                ? configured
+                : throw new InvalidOperationException(
+                    $"{PrefixVariable}='{configured}' must be lower-case letters, digits and underscores, " +
+                    "starting with a letter, at most 31 characters.");
+        }
+    }
+
+    /// <summary>
+    /// The configured server, or null when none is configured and none is required.
+    ///
+    /// <para>
+    /// These tests must never silently skip in the job that exists to run them, but they must
+    /// skip cleanly everywhere else. Keying that on <c>CI=true</c> does not work: GitHub sets it
+    /// in every job, including <c>backend</c>, which deliberately provisions no Postgres. So the
+    /// integration job sets <c>REQUIRE_BOUNDARY_TESTS</c> explicitly — if that is on and the
+    /// connection string is missing, the pipeline is broken and should say so.
+    /// </para>
+    /// </summary>
+    public static string? ServerConnectionString()
+    {
+        var configured = Environment.GetEnvironmentVariable(ConnectionStringVariable);
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return configured;
+        }
+
+        var required = string.Equals(
+            Environment.GetEnvironmentVariable("REQUIRE_BOUNDARY_TESTS"), "true",
+            StringComparison.OrdinalIgnoreCase);
+
+        return required
+            ? throw new InvalidOperationException(
+                $"REQUIRE_BOUNDARY_TESTS is set but {ConnectionStringVariable} is not. These are the only " +
+                "tests that exercise real SQL and real migrations — they must not be skipped here.")
+            : null;
+    }
+
+    /// <summary>A new database cloned from the migrated template.</summary>
+    public static async Task<TestDatabase> CloneTemplateAsync()
+    {
+        var template = await TemplateAsync();
+        var name = $"{Prefix}_{Guid.NewGuid():N}";
+
+        await CloneGate.WaitAsync();
+        try
+        {
+            await ExecAsync(AdminConnectionString(), $"CREATE DATABASE \"{name}\" TEMPLATE \"{template}\"");
+        }
+        finally
+        {
+            CloneGate.Release();
+        }
+
+        return new TestDatabase(name, ConnectionStringFor(name));
+    }
+
+    /// <summary>
+    /// A new, EMPTY database — no schema, no migrations history. For the tests whose subject is
+    /// the migrations themselves.
+    /// </summary>
+    public static async Task<TestDatabase> CreateEmptyAsync()
+    {
+        var name = $"{Prefix}_{Guid.NewGuid():N}";
+        await ExecAsync(AdminConnectionString(), $"CREATE DATABASE \"{name}\"");
+        return new TestDatabase(name, ConnectionStringFor(name));
+    }
+
+    public static async Task DropAsync(string name, string connectionString)
+    {
+        // This database's pool only. ClearAllPools would also close every idle connection of
+        // every class running beside this one.
+        NpgsqlConnection.ClearPool(new NpgsqlConnection(connectionString));
+        await ExecAsync(AdminConnectionString(), $"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)");
+    }
+
+    public static string ConnectionStringFor(string database)
+    {
+        var builder = new NpgsqlConnectionStringBuilder(Required()) { Database = database };
+
+        // Durability buys a test database nothing, and every commit otherwise waits for an
+        // fsync. Per SESSION, so it changes nothing about the shared server anyone else uses,
+        // and nothing a test can observe: visibility and locking are identical.
+        builder.Options = string.IsNullOrWhiteSpace(builder.Options)
+            ? "-c synchronous_commit=off"
+            : builder.Options + " -c synchronous_commit=off";
+        return builder.ConnectionString;
+    }
+
+    private static string Required() =>
+        ServerConnectionString()
+        ?? throw new InvalidOperationException($"{ConnectionStringVariable} is not set.");
+
+    // Block body for lizard: an expression-bodied `=> new X { … }` makes it mis-scope the file
+    // (memory/gotchas-gates.md).
+    private static string AdminConnectionString()
+    {
+        var builder = new NpgsqlConnectionStringBuilder(Required()) { Database = "postgres", Pooling = false };
+        return builder.ConnectionString;
+    }
+
+    // Built once per process. A FAULTED build is cached too, deliberately: every class then fails
+    // with the same migration error instead of each re-running a migration known to be broken.
+    private static Task<string> TemplateAsync()
+    {
+        lock (TemplateGate)
+        {
+            return _template ??= Task.Run(BuildTemplateAsync);
+        }
+    }
+
+    private static async Task<string> BuildTemplateAsync()
+    {
+        var name = $"{Prefix}_tpl_{Guid.NewGuid():N}";
+        var admin = AdminConnectionString();
+        await ExecAsync(admin, $"CREATE DATABASE \"{name}\"");
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => DropOnExit(admin, name);
+
+        var connectionString = ConnectionStringFor(name);
+        try
+        {
+            // The real startup path: Database:AutoMigrateOnStartup is on whenever the factory
+            // has a connection string, so booting the host IS `MigrateAsync` against an empty
+            // database — exactly what a club's first deployment does.
+            await using var factory = new TestWebAppFactory { ConnectionString = connectionString };
+            _ = factory.Services;
+        }
+        finally
+        {
+            NpgsqlConnection.ClearPool(new NpgsqlConnection(connectionString));
+        }
+
+        // Nothing may connect to the template once it is migrated: a stray session makes every
+        // later CREATE DATABASE … TEMPLATE fail with "source database is being accessed".
+        await ExecAsync(admin, $"ALTER DATABASE \"{name}\" WITH ALLOW_CONNECTIONS false");
+        return name;
+    }
+
+    private static void DropOnExit(string admin, string name)
+    {
+        try
+        {
+            using var conn = new NpgsqlConnection(admin);
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)";
+            cmd.ExecuteNonQuery();
+        }
+        catch (NpgsqlException)
+        {
+            // The process is exiting; a template left behind is named with the prefix and a
+            // GUID, holds no data, and is dropped by hand. Throwing here would only hide the
+            // run's real result.
+        }
+    }
+
+    private static async Task ExecAsync(string connectionString, string sql)
+    {
+        await using var conn = new NpgsqlConnection(connectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        await cmd.ExecuteNonQueryAsync();
+    }
+}

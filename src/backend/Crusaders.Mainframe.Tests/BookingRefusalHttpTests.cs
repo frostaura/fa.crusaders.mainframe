@@ -36,8 +36,7 @@ namespace Crusaders.Mainframe.Tests;
 /// demonstrating the failure it was meant to catch (see <c>memory/gotchas.md</c>).
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class BookingRefusalHttpTests
+public sealed class BookingRefusalHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

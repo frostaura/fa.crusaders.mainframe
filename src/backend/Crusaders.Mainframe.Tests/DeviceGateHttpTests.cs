@@ -31,8 +31,7 @@ namespace Crusaders.Mainframe.Tests;
 /// index, and the cross-tenant cases below turn on exactly those.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class DeviceGateHttpTests
+public sealed class DeviceGateHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

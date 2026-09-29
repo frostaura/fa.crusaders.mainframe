@@ -44,8 +44,7 @@ namespace Crusaders.Mainframe.Tests;
 /// that regresses on one endpoint cannot hide behind another.
 /// </para>
 /// </remarks>
-[Collection(HttpTestCollection.Name)]
-public sealed class ReportWindowTests
+public sealed class ReportWindowTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

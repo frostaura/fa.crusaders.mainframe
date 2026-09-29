@@ -13,16 +13,11 @@ namespace Crusaders.Mainframe.Tests;
 /// a smaller later return on another game waits behind an older one (first come first served).
 /// The first two failed on the code they follow; the third pins the FCFS rule against its mutant.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class PlayersRefute7HttpTests
+public sealed class PlayersRefute7HttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private readonly PostgresFixture _pg;
-
-    public PlayersRefute7HttpTests(PostgresFixture pg) => _pg = pg;
-
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
 
     /// <summary>A played game past its deadline whose 16 return to <paramref name="partner"/> waits on an organiser at 0.</summary>
     private static async Task<Guid> WaitingAsync(PlayersClub club, TestWebAppFactory f, Guid partner, int daysAgo)
@@ -62,7 +57,7 @@ public sealed class PlayersRefute7HttpTests
     [SkippableFact]
     public async Task The_credit_hook_goes_on_past_a_poisoned_booking_and_marks_it()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r7credit");
         var sams = await WaitingAsync(club, f, club.Sam, daysAgo: 10);
@@ -88,7 +83,7 @@ public sealed class PlayersRefute7HttpTests
     [SkippableFact]
     public async Task A_marker_on_a_booking_without_partner_seats_is_cleared_by_the_sweep()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r7noseats");
         var bare = await club.InsertBookingAsync(f, DateTimeOffset.UtcNow.AddDays(-30));
@@ -121,7 +116,7 @@ public sealed class PlayersRefute7HttpTests
     [SkippableFact]
     public async Task A_smaller_later_return_on_another_game_waits_behind_an_older_one()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r7fcfs");
         await club.CreditAsync(f, club.Sam, 50m);

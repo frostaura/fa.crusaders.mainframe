@@ -21,8 +21,7 @@ namespace Crusaders.Mainframe.Tests;
 /// exists.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminRoleHttpTests
+public sealed class AdminRoleHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 
@@ -93,8 +92,8 @@ public sealed class AdminRoleHttpTests
 
         // The mail is an admin notice committed with the change (R23), and goes when the outbox
         // runs. Twice, because a second pass must not mail anybody again.
-        // Scoped to this club's addresses: the Postgres tier shares one database, so a pass also
-        // delivers whatever another class left pending for ITS club.
+        // Scoped to this club's addresses: a class's tests share one database, so a pass also
+        // delivers whatever another test left pending for ITS club.
         bool Ours(EmailMessage m) => m.To.EndsWith($"@{club.Slug}.test", StringComparison.Ordinal);
         Assert.DoesNotContain(mail.Sent, Ours);
         await PeopleClub.DeliverAdminNoticesAsync(app);

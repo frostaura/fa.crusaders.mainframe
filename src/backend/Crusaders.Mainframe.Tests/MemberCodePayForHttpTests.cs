@@ -12,8 +12,7 @@ namespace Crusaders.Mainframe.Tests;
 /// HTTP against Postgres: the decision table, the money (a refund and a debit of the same amount,
 /// posted together, nothing else), the nonce's idempotent replay, and both emails.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class MemberCodePayForHttpTests(PostgresFixture pg)
+public sealed class MemberCodePayForHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
     private const string Nonce = "9f2a4c6e8b0d1f3a";
 

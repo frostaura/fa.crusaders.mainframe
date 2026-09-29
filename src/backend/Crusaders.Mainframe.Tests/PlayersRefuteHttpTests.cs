@@ -13,16 +13,11 @@ namespace Crusaders.Mainframe.Tests;
 /// The refuter's round on the P11 review fixes (D11–D13), on Postgres: the defects that survived
 /// them, each pinned by the probe that proved it. Every test here failed on the code it follows.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class PlayersRefuteHttpTests
+public sealed class PlayersRefuteHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private readonly PostgresFixture _pg;
-
-    public PlayersRefuteHttpTests(PostgresFixture pg) => _pg = pg;
-
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
 
     private static async Task<JsonElement> JsonAsync(HttpResponseMessage response) =>
         await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -75,7 +70,7 @@ public sealed class PlayersRefuteHttpTests
     [InlineData("settle-outside")]
     public async Task After_the_deadline_an_admin_return_needs_the_overdraft_said_by_name(string action)
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, $"rfadm{action.Length}");
         var (bookingId, seat) = await SpentGameAsync(club, f);
@@ -103,7 +98,7 @@ public sealed class PlayersRefuteHttpTests
     [SkippableFact]
     public async Task A_return_after_the_hold_ended_never_overdraws_the_organiser_silently()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "rfret");
         var (bookingId, seat) = await SpentGameAsync(club, f);
@@ -131,7 +126,7 @@ public sealed class PlayersRefuteHttpTests
     [SkippableFact]
     public async Task Changing_the_lapse_hours_moves_no_deadline_already_set()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "rffreeze");
         await club.CreditAsync(f, club.Sam, 50m);
@@ -168,7 +163,7 @@ public sealed class PlayersRefuteHttpTests
     [SkippableFact]
     public async Task A_payer_override_is_ignored_while_a_share_is_still_on_the_booking()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "rfpayfor");
         await club.CreditAsync(f, club.Sam, 50m);
@@ -201,7 +196,7 @@ public sealed class PlayersRefuteHttpTests
     [SkippableFact]
     public async Task Balance_credits_is_the_raw_balance_with_spendable_and_held_beside_it()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "rfbal");
         await club.CreditAsync(f, club.Organiser, 100m);
@@ -241,7 +236,7 @@ public sealed class PlayersRefuteHttpTests
     [InlineData("\"share_reminder_hours\":168")]
     public async Task A_repeated_invite_is_mailed_when_no_reminder_will_follow(string setting)
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "rfmail", With(PlayersClub.Settings, setting));
         await club.CreditAsync(f, club.Organiser, 100m);
@@ -261,7 +256,7 @@ public sealed class PlayersRefuteHttpTests
     [SkippableFact]
     public async Task The_invite_cap_holds_under_concurrent_adds()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "rfcap", With(PlayersClub.Settings, "\"player_invites_per_booking\":4"));
         await club.CreditAsync(f, club.Organiser, 100m);
@@ -279,7 +274,7 @@ public sealed class PlayersRefuteHttpTests
         // and are made to overlap for certain: a table lock that lets every read through but
         // holds every insert until all three have counted.
         HttpResponseMessage[] answers;
-        await using (var gate = new Npgsql.NpgsqlConnection(_pg.ConnectionString))
+        await using (var gate = new Npgsql.NpgsqlConnection(pg.ConnectionString))
         {
             await gate.OpenAsync();
             await using var tx = await gate.BeginTransactionAsync();

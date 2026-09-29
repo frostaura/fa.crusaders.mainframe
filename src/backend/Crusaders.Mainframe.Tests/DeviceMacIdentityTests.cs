@@ -176,8 +176,7 @@ public class DeviceMacIdentityTests
 /// against real Postgres — and it is the one that decides a race between two heartbeats
 /// from a box that has just been switched on.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class DeviceMacIndexTests
+public sealed class DeviceMacIndexTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

@@ -13,8 +13,8 @@ namespace Crusaders.Mainframe.Tests;
 /// the schema BEFORE it — the only way to prove what a migration does to live rows.
 ///
 /// <para>
-/// <b>Its own database, not the collection's.</b> Migrating DOWN a shared boundary database would
-/// pull the schema out from under every other test in the run, so this creates
+/// <b>Its own database, not the class fixture's.</b> Migrating DOWN a shared boundary database would
+/// pull the schema out from under every other test in the class, so this creates
 /// <c>d2_migration_*</c>, migrates it to the previous migration, seeds four clubs in raw SQL
 /// against THAT schema, and drops it at the end.
 /// </para>
@@ -35,8 +35,7 @@ namespace Crusaders.Mainframe.Tests;
 /// priority their class gave them).
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class GroupsReplaceClassMigrationTests
+public sealed class GroupsReplaceClassMigrationTests : IClassFixture<PostgresFixture>
 {
     private const string Before = "20260923103338_AddUserPreferences";
     private const string Target = "20260923161528_GroupsReplaceClass";
@@ -76,7 +75,9 @@ public sealed class GroupsReplaceClassMigrationTests
         }
         finally
         {
-            NpgsqlConnection.ClearAllPools();
+            // This database's pool only: ClearAllPools also closes the idle connections of every
+            // class running in parallel beside this one.
+            NpgsqlConnection.ClearPool(new NpgsqlConnection(conn));
             await ExecAsync(admin, $"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)");
         }
     }

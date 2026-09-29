@@ -22,8 +22,7 @@ namespace Crusaders.Mainframe.Tests;
 /// only wanted for an on-behalf booking or an overdraft.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class BookingHotPathQueryTests
+public sealed class BookingHotPathQueryTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

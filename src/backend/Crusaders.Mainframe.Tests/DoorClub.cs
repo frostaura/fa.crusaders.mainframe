@@ -24,8 +24,8 @@ namespace Crusaders.Mainframe.Tests;
 /// </para>
 ///
 /// <para>
-/// Every helper takes the slug prefix, because the whole Postgres-backed tier shares one
-/// database: an xUnit collection fixture is created once, not once per test.
+/// Every helper takes the slug prefix, because every test in a Postgres-backed class shares that
+/// class's database: a <see cref="PostgresFixture"/> is created once per class, not once per test.
 /// </para>
 /// </summary>
 public sealed record DoorClub(

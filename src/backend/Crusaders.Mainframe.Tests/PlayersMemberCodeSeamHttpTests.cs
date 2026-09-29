@@ -18,8 +18,7 @@ namespace Crusaders.Mainframe.Tests;
 /// own attendance, with nobody's money moved; pay-for at the box refuses a split booking with
 /// <c>split_booking</c>; and an invited, declined or removed member gets none of it.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg)
+public sealed class PlayersMemberCodeSeamHttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
     private const string Nonce = "5e7a9c1b3d5f7a9c";
 

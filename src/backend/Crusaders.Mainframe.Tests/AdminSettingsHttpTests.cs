@@ -28,8 +28,7 @@ namespace Crusaders.Mainframe.Tests;
 /// member's bill.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminSettingsHttpTests
+public sealed class AdminSettingsHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

@@ -15,8 +15,7 @@ namespace Crusaders.Mainframe.Tests;
 /// because the change record is only trustworthy if the row flushes in the same transaction as
 /// the change it describes, and the in-memory provider has no transactions.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminChangeRecordGapsHttpTests
+public sealed class AdminChangeRecordGapsHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

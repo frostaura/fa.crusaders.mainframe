@@ -25,8 +25,7 @@ namespace Crusaders.Mainframe.Tests;
 /// test in the other file.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class CourtsideEndpointTests
+public sealed class CourtsideEndpointTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

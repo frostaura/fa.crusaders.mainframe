@@ -25,8 +25,7 @@ namespace Crusaders.Mainframe.Tests;
 /// decision, and the residual is recorded rather than engineered around.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminChangeLogBoundaryTests
+public sealed class AdminChangeLogBoundaryTests : IClassFixture<PostgresFixture>
 {
     /// <summary>Postgres' own code for insufficient privilege, which is what the function raises with.</summary>
     private const string InsufficientPrivilege = "42501";

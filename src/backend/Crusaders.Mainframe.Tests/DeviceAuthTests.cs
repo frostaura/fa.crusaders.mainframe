@@ -92,8 +92,7 @@ public class DeviceApiKeyTests
 /// migrations and does not enforce the unique index that keeps two clubs' boxes apart.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class DeviceAuthHttpTests
+public sealed class DeviceAuthHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

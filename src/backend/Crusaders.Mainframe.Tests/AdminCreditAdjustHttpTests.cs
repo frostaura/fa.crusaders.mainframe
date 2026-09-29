@@ -33,8 +33,7 @@ namespace Crusaders.Mainframe.Tests;
 /// nothing.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminCreditAdjustHttpTests
+public sealed class AdminCreditAdjustHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

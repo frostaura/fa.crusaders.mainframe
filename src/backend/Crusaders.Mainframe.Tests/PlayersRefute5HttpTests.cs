@@ -14,16 +14,11 @@ namespace Crusaders.Mainframe.Tests;
 /// still hold money, a failed post-settlement reconcile leaves a durable marker, and one poisoned
 /// booking stops nothing else. Each test failed on the code it follows.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class PlayersRefute5HttpTests
+public sealed class PlayersRefute5HttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private readonly PostgresFixture _pg;
-
-    public PlayersRefute5HttpTests(PostgresFixture pg) => _pg = pg;
-
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
 
     private static async Task<JsonElement> JsonAsync(HttpResponseMessage response) =>
         await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -64,7 +59,7 @@ public sealed class PlayersRefute5HttpTests
     [SkippableFact]
     public async Task A_game_cancelled_after_check_in_earmarks_nothing_for_its_own_returns()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r5s4");
         await club.CreditAsync(f, club.Sam, 50m);
@@ -108,7 +103,7 @@ public sealed class PlayersRefute5HttpTests
     [InlineData(true)]
     public async Task Waiting_returns_are_first_come_first_served_even_while_games_still_hold(bool oneGame)
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, oneGame ? "r5fcfs1" : "r5fcfs2");
         await club.CreditAsync(f, club.Alex, 50m);
@@ -161,7 +156,7 @@ public sealed class PlayersRefute5HttpTests
     [SkippableFact]
     public async Task A_failed_settlement_hook_is_made_good_by_the_next_sweep_however_old_the_booking()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r5marker");
         var bookingId = await club.InsertBookingAsync(f, DateTimeOffset.UtcNow.AddDays(-30));
@@ -252,7 +247,7 @@ public sealed class PlayersRefute5HttpTests
     [SkippableFact]
     public async Task A_poisoned_booking_does_not_stop_the_rest_of_the_sweep()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r5poison");
         var a = await DueAsync(club, f, club.Sam, DateTimeOffset.UtcNow.AddHours(-3));
@@ -282,7 +277,7 @@ public sealed class PlayersRefute5HttpTests
     [SkippableFact]
     public async Task A_failing_catch_up_does_not_stop_the_clubs_minute_sweep()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r5worker");
         var old = await DueAsync(club, f, club.Sam, DateTimeOffset.UtcNow.AddDays(-30));

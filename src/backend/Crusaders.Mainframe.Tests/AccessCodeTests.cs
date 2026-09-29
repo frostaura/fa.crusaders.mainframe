@@ -71,8 +71,7 @@ internal static class TestAccessCodes
 /// here. The last two are what stop a photographed screen being a permanent key.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AccessCodeTests
+public sealed class AccessCodeTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

@@ -30,8 +30,7 @@ namespace Crusaders.Mainframe.Tests;
 /// were invisible to a suite that stopped at the provider's own boundary.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class TopUpFlowTests
+public sealed class TopUpFlowTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

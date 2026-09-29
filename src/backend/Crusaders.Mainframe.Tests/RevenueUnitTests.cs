@@ -30,8 +30,7 @@ namespace Crusaders.Mainframe.Tests;
 /// a single rate cannot pass it.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class RevenueUnitTests
+public sealed class RevenueUnitTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

@@ -28,8 +28,7 @@ namespace Crusaders.Mainframe.Tests;
 /// This file varies it.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class TopUpItnIdempotencyTests
+public sealed class TopUpItnIdempotencyTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

@@ -5,6 +5,15 @@ import { SETTINGS_FIXTURE, renderPage, stubFetch } from "../test/harness";
 import { captionOf, control, describedBy, findControl, saveButton } from "../components/settings/testKit";
 
 /**
+ * A longer per-test timeout than the 5-second default, for this file only. Each case drives
+ * the whole settings page, every section and its save bar in jsdom — 1-2 s on a quiet machine,
+ * past 5 s when the suite shares the machine with a parallel backend run or another build
+ * (measured 2026-09-28: seven AdminSchedules cases timed out that way with nothing wrong).
+ * The assertions are untouched; only the time allowed to render them is.
+ */
+vi.setConfig({ testTimeout: 20_000 });
+
+/**
  * B5 / C11 / B10 / C12 / A9 — the settings screen's validation, as a person meets it.
  *
  * <p>

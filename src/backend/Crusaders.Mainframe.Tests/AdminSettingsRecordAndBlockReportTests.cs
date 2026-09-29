@@ -26,8 +26,7 @@ namespace Crusaders.Mainframe.Tests;
 /// wrong.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class AdminSettingsRecordAndBlockReportTests
+public sealed class AdminSettingsRecordAndBlockReportTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

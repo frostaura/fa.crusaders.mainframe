@@ -15,16 +15,11 @@ namespace Crusaders.Mainframe.Tests;
 /// aside from what the organiser may spend, nothing strands after a worker outage, and the desk is
 /// told when its hand-back is left waiting. Each test failed on the code it follows.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class PlayersRefute3HttpTests
+public sealed class PlayersRefute3HttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private readonly PostgresFixture _pg;
-
-    public PlayersRefute3HttpTests(PostgresFixture pg) => _pg = pg;
-
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
 
     private static async Task<JsonElement> JsonAsync(HttpResponseMessage response) =>
         await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -75,7 +70,7 @@ public sealed class PlayersRefute3HttpTests
     [SkippableFact]
     public async Task A_waiting_return_is_set_aside_from_what_the_organiser_may_spend()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r3aside");
         await ReturnDueAsync(club, f, daysAgo: 10, reconcile: true);
@@ -105,7 +100,7 @@ public sealed class PlayersRefute3HttpTests
     [SkippableFact]
     public async Task The_locked_spend_check_counts_a_return_that_started_waiting_after_the_pre_check()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r3locked");
         var (_, seat) = await ReturnDueAsync(club, f, daysAgo: 10, reconcile: false);
@@ -137,7 +132,7 @@ public sealed class PlayersRefute3HttpTests
     [SkippableFact]
     public async Task An_invite_whose_deadline_passed_long_ago_still_lapses()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r3lapse");
         var bookingId = await club.InsertBookingAsync(f, DateTimeOffset.UtcNow.AddDays(-16));
@@ -166,7 +161,7 @@ public sealed class PlayersRefute3HttpTests
     [SkippableFact]
     public async Task A_return_due_during_an_outage_is_found_when_the_worker_starts()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r3outage");
         var (bookingId, seat) = await ReturnDueAsync(club, f, daysAgo: 12, reconcile: false);
@@ -187,7 +182,7 @@ public sealed class PlayersRefute3HttpTests
     [SkippableFact]
     public async Task An_admin_remove_says_so_when_its_return_was_left_waiting()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r3told");
         await club.CreditAsync(f, club.Organiser, 32m);

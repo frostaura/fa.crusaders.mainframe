@@ -25,8 +25,7 @@ namespace Crusaders.Mainframe.Tests;
 /// code otherwise, for walk-ups and the payer override.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class QrEndpointHttpTests
+public sealed class QrEndpointHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

@@ -22,8 +22,7 @@ namespace Crusaders.Mainframe.Tests;
 /// covered for it indefinitely. A stream with no test is a stream nobody has watched connect.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class ControlBoardStreamTests
+public sealed class ControlBoardStreamTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

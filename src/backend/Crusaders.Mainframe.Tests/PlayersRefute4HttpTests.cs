@@ -17,16 +17,11 @@ namespace Crusaders.Mainframe.Tests;
 /// the start-up catch-up is bounded and retried per club, and the wallet is told when what is
 /// set aside moves. Each test failed on the code it follows.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class PlayersRefute4HttpTests
+public sealed class PlayersRefute4HttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private readonly PostgresFixture _pg;
-
-    public PlayersRefute4HttpTests(PostgresFixture pg) => _pg = pg;
-
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
 
     /// <summary>
     /// A played game past its deadline on which <paramref name="partner"/> paid 16; the organiser
@@ -77,7 +72,7 @@ public sealed class PlayersRefute4HttpTests
     [SkippableFact]
     public async Task A_return_up_to_its_own_bookings_hold_never_waits_behind_another_booking()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r4earmark");
         await ReturnDueAsync(club, f, club.Sam);                       // Y: 16 waiting to Sam, organiser 0
@@ -109,7 +104,7 @@ public sealed class PlayersRefute4HttpTests
     [SkippableFact]
     public async Task Waiting_returns_are_paid_first_come_first_served()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r4fcfs");
         await ReturnDueAsync(club, f, club.Sam);
@@ -135,7 +130,7 @@ public sealed class PlayersRefute4HttpTests
     [SkippableFact]
     public async Task The_catch_up_reconciles_only_bookings_with_a_return_due()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r4bound");
         var (due, _) = await ReturnDueAsync(club, f, club.Sam, reconcile: false);
@@ -164,7 +159,7 @@ public sealed class PlayersRefute4HttpTests
     [SkippableFact]
     public async Task A_club_whose_catch_up_failed_is_caught_up_on_the_next_pass()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r4retry");
         var (bookingId, seat) = await ReturnDueAsync(club, f, club.Sam, reconcile: false, daysAgo: 12);
@@ -192,7 +187,7 @@ public sealed class PlayersRefute4HttpTests
     [SkippableFact]
     public async Task The_wallet_is_told_when_a_return_starts_waiting()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r4frame");
         var (bookingId, _) = await ReturnDueAsync(club, f, club.Sam, reconcile: false);

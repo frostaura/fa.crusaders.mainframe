@@ -33,8 +33,7 @@ namespace Crusaders.Mainframe.Tests;
 /// onto the ledger's clock has to argue with a test rather than with a reviewer.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class DailyReportTests
+public sealed class DailyReportTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

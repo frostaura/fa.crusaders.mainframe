@@ -30,8 +30,7 @@ namespace Crusaders.Mainframe.Tests;
 /// absent from a response a board in a cupboard reads with a heapless scanner.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class DeviceRelayRestoreHttpTests
+public sealed class DeviceRelayRestoreHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

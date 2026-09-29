@@ -15,16 +15,11 @@ namespace Crusaders.Mainframe.Tests;
 /// behind a poisoned booking, the "reconcile due" marker backs off, is not erased by a reconcile
 /// that started before a failure, and stays inside its club. Each test failed on the code it follows.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class PlayersRefute6HttpTests
+public sealed class PlayersRefute6HttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private readonly PostgresFixture _pg;
-
-    public PlayersRefute6HttpTests(PostgresFixture pg) => _pg = pg;
-
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
 
     private static async Task<JsonElement> JsonAsync(HttpResponseMessage response) =>
         await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -61,7 +56,7 @@ public sealed class PlayersRefute6HttpTests
     [SkippableFact]
     public async Task An_admin_remove_on_a_game_cancelled_after_check_in_pays_when_the_free_balance_covers_it()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r6remove");
         var (x, sam) = await SpentS4Async(club, f, 16m);
@@ -83,7 +78,7 @@ public sealed class PlayersRefute6HttpTests
     [SkippableFact]
     public async Task A_goodwill_credit_naming_a_game_cancelled_after_check_in_releases_its_return()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r6goodwill");
         var (x, sam) = await SpentS4Async(club, f, 24m);
@@ -143,7 +138,7 @@ public sealed class PlayersRefute6HttpTests
     [SkippableFact]
     public async Task A_catch_up_that_marked_its_failures_counts_as_caught_up()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r6caught");
         var old = await DueAsync(club, f, club.Sam, DateTimeOffset.UtcNow.AddDays(-30));
@@ -166,7 +161,7 @@ public sealed class PlayersRefute6HttpTests
     [SkippableFact]
     public async Task A_booking_that_keeps_failing_is_retried_on_a_backoff()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r6backoff");
         var poisoned = await DueAsync(club, f, club.Sam, DateTimeOffset.UtcNow.AddHours(-3));
@@ -197,7 +192,7 @@ public sealed class PlayersRefute6HttpTests
     [SkippableFact]
     public async Task A_reconcile_does_not_erase_a_failure_recorded_after_it_started()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r6clear");
         var booking = await DueAsync(club, f, club.Sam, DateTimeOffset.UtcNow.AddHours(-3));
@@ -226,7 +221,7 @@ public sealed class PlayersRefute6HttpTests
     [SkippableFact]
     public async Task One_clubs_sweep_never_touches_another_clubs_marked_booking()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var home = await PlayersClub.SeedAsync(f, "r6home");
         var away = await PlayersClub.SeedAsync(f, "r6away");

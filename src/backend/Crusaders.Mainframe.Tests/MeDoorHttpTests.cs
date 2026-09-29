@@ -28,8 +28,7 @@ namespace Crusaders.Mainframe.Tests;
 /// which is why it is a separate field rather than an empty history.
 /// </para>
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class MeDoorHttpTests
+public sealed class MeDoorHttpTests : IClassFixture<PostgresFixture>
 {
     private readonly PostgresFixture _pg;
 

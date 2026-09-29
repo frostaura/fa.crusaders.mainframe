@@ -13,16 +13,11 @@ namespace Crusaders.Mainframe.Tests;
 /// process restarted — must not strand the partners' returns on a game older than the sweep's
 /// window. Both failed on the code they follow.
 /// </summary>
-[Collection(HttpTestCollection.Name)]
-public sealed class PlayersRefute8HttpTests
+public sealed class PlayersRefute8HttpTests(PostgresFixture pg) : IClassFixture<PostgresFixture>
 {
-    private readonly PostgresFixture _pg;
-
-    public PlayersRefute8HttpTests(PostgresFixture pg) => _pg = pg;
-
     private const string Skipped = "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING";
 
-    private TestWebAppFactory CreateFactory() => new() { ConnectionString = _pg.ConnectionString };
+    private TestWebAppFactory CreateFactory() => new() { ConnectionString = pg.ConnectionString };
 
     /// <summary>
     /// A 32-credit game played 20 days ago (deadline long passed, far outside the sweep's window):
@@ -89,7 +84,7 @@ public sealed class PlayersRefute8HttpTests
     [SkippableFact]
     public async Task A_credit_committed_without_its_hook_is_paid_back_by_the_next_sweep()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r8nohook");
         var bookingId = await PlayedAndCreditedAsync(club, f);
@@ -109,7 +104,7 @@ public sealed class PlayersRefute8HttpTests
     [SkippableFact]
     public async Task A_hook_handed_a_cancelled_token_still_pays_the_return()
     {
-        Skip.IfNot(_pg.Available, Skipped);
+        Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await PlayersClub.SeedAsync(f, "r8cancel");
         var bookingId = await PlayedAndCreditedAsync(club, f);
