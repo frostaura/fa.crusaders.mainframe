@@ -2,7 +2,7 @@
 name: crusaders-mainframe-decisions-test-running
 description: "How the backend suite runs since 2026-09-28: every Postgres-backed class on its own clone of one migrated template, classes in parallel, hosts configured per host with UseSetting. 30 min became 6-9; the rules new tests must keep."
 type: decision
-last_verified: 2026-09-28
+last_verified: 2026-09-29
 ---
 
 # Live decisions — how the test suites run
@@ -53,8 +53,7 @@ gets two code keys for one in the last hour before Johannesburg midnight, red wi
 alone; `MemberCodeMoneyFixesHttpTests.Racing_payers…` is red ~1 in 8 alone (`not_recognised`, a
 code step boundary crossed mid-test, likelier under load); walk-up price tests got pro-rata
 prices (195.73 for 192) at 23:48-00:00 — the midnight-close pattern.
-Frontend: `MyCode.test.tsx` "puts the code before every explanation" intermittently finds no QR
-image; `AdminSchedules` picks fixed dates in 2026 by walking FORWARD from today, so it breaks
-once the real date passes 2026-10-06. See [`gotchas-clock.md`](gotchas-clock.md).
-
+Frontend flakes fixed 2026-09-29: MyCode's order test now awaits the QR's own draw; AdminSchedules
+pins `Date` (it would have broken after 2026-10-06); `statusRef` in `auth.tsx` is set in a layout
+effect so a cross-tab sign-out can't land first. See [`gotchas-clock.md`](gotchas-clock.md).
 **Locally `dotnet` needs `MSBuildEnableWorkloadResolver=false`** or builds die on MSB4242.
