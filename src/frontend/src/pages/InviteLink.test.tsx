@@ -89,6 +89,7 @@ describe("an open link", () => {
     ]);
     expect(await screen.findByText(invitedLine("Nomsa", false))).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: INVITES_COPY.decline }));
+    fireEvent.click(screen.getByRole("button", { name: INVITES_COPY.declineConfirm }));
     expect(await screen.findByText(INVITES_COPY.declinedTitle)).toBeInTheDocument();
     // The confirmation stands although the link now answers "closed".
     expect(stub.calls.some((c) => c.path === `${OPEN}/decline`)).toBe(true);

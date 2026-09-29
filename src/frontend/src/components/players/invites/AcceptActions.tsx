@@ -4,7 +4,7 @@ import { INVITES_COPY, acceptLabel } from "@/lib/playersCopy";
 import type { AcceptFlow } from "./useAcceptFlow";
 
 /**
- * Accept · Decline · the way out. Source order is dismiss first, primary last, so the dialog
+ * Accept · Decline · the way out — and, once Decline is pressed, its confirmation (it is final). Source order is dismiss first, primary last, so the dialog
  * footer's `flex-col-reverse` puts Accept on top on a phone and on the right on a desktop.
  *
  * <p>
@@ -14,6 +14,15 @@ import type { AcceptFlow } from "./useAcceptFlow";
  */
 export function AcceptActions({ flow, reasonId, dismiss }: { flow: AcceptFlow; reasonId: string; dismiss: ReactNode }) {
   if (flow.outcome) return <>{dismiss}</>;
+  // R1 F2.6 — one question at a time: "decline for good?" replaces the three buttons until answered.
+  if (flow.askingDecline) {
+    return (
+      <>
+        <Button variant="outline" onClick={flow.keepInvite}>{INVITES_COPY.declineKeep}</Button>
+        <Button variant="danger" onClick={flow.confirmDecline} data-decline-confirm="">{INVITES_COPY.declineConfirm}</Button>
+      </>
+    );
+  }
   return (
     <>
       {dismiss}

@@ -659,6 +659,11 @@ export const INVITES_COPY = {
   heldHint: "Why some isn't spendable",
   capCounts: "This game counts toward your own daily limit on court.",
   decline: "Decline",
+  /** R1 F2.6 — Decline is final, so it asks once before it goes. */
+  declineConfirm: "Decline for good",
+  declineKeep: "Keep the invite",
+  declineFinal: (organiser: string) =>
+    `Declining is final — ${organiser} is told, and can't ask you into this game again.`,
   cancel: "Cancel",
   done: "Done",
   topUp: "Top up",

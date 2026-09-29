@@ -36,6 +36,9 @@ export function AcceptBody({ flow, reasonId, headed = false }: {
     <div className="flex flex-col gap-4">
       {/* The last answer first: a risen share or a refusal is the reason the sheet changed. */}
       <Problem flow={flow} />
+      {flow.askingDecline ? (
+        <Alert tone="warning" live="polite" data-decline-final="">{INVITES_COPY.declineFinal(organiserName(flow.invite))}</Alert>
+      ) : null}
       {flow.blocked === "rereading" ? <p role="status" id={reasonId} className="text-sm text-text-secondary">{flow.readingAgain}</p> : null}
       <GameFacts flow={flow} />
       <MoneyFacts flow={flow} />

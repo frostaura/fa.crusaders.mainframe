@@ -255,9 +255,24 @@ describe("the accept sheet", () => {
     const stub = openInvites({ routes: [{ method: "POST", path: DECLINE, body: { participant_id: SEAT, status: "declined" } }] });
     const sheet = await openSheet();
     fireEvent.click(within(sheet).getByRole("button", { name: INVITES_COPY.decline }));
+    fireEvent.click(within(sheet).getByRole("button", { name: INVITES_COPY.declineConfirm }));
     expect(await within(sheet).findByText(INVITES_COPY.declinedTitle)).toBeInTheDocument();
     expect(stub.calls.some((c) => c.method === "POST" && c.path === DECLINE)).toBe(true);
     expect(acceptCalls(stub)).toHaveLength(0);
+  });
+
+  it("R1 F2.6: Decline asks first — it is final — and keeping the invite sends nothing", async () => {
+    const stub = openInvites({ routes: [{ method: "POST", path: DECLINE, body: { participant_id: SEAT, status: "declined" } }] });
+    const sheet = await openSheet();
+    fireEvent.click(within(sheet).getByRole("button", { name: INVITES_COPY.decline }));
+    expect(stub.calls.some((c) => c.path === DECLINE)).toBe(false);
+    expect(within(sheet).getByText(INVITES_COPY.declineFinal("Sam"))).toBeInTheDocument();
+    // Accept is not offered beside a pending "decline for good" — one question at a time.
+    expect(within(sheet).queryByRole("button", { name: acceptLabel(25) })).toBeNull();
+    fireEvent.click(within(sheet).getByRole("button", { name: INVITES_COPY.declineKeep }));
+    expect(within(sheet).getByRole("button", { name: acceptLabel(25) })).toBeInTheDocument();
+    expect(within(sheet).queryByText(INVITES_COPY.declineFinal("Sam"))).toBeNull();
+    expect(stub.calls.some((c) => c.path === DECLINE)).toBe(false);
   });
 
   const REFUSALS: [number, Record<string, unknown>][] = [

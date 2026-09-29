@@ -41,7 +41,12 @@ export type AcceptFlow = {
   acceptAction: AsyncAction<[number], AcceptAnswer>;
   declineAction: AsyncAction<[], SeatAnswer>;
   accept: () => void;
+  /** The first tap: asks whether to decline for good (R1 F2.6). Nothing is sent. */
   decline: () => void;
+  /** Declining is final, so it waits for this second, explicit tap. */
+  askingDecline: boolean;
+  confirmDecline: () => void;
+  keepInvite: () => void;
   /** The sentence while Accept is waiting on a re-read. */
   readingAgain: string;
 };
@@ -50,6 +55,7 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
   const balance = useBalance();
   const [outcome, setOutcome] = useState<AcceptOutcome>(null);
   const [rereading, setRereading] = useState(false);
+  const [askingDecline, setAskingDecline] = useState(false);
 
   const afterRefusal = useCallback(async (failure: unknown) => {
     // Only the API's own answers mean the invite moved; a dropped connection changed nothing.
@@ -86,13 +92,19 @@ export function useAcceptFlow(invite: Invite, port: AcceptPort): AcceptFlow {
   }, [blocked, runAccept, invite.share_credits, declineAction]);
   const decline = useCallback(() => {
     acceptAction.reset();
+    setAskingDecline(true);
+  }, [acceptAction]);
+  const confirmDecline = useCallback(() => {
+    setAskingDecline(false);
     void runDecline();
-  }, [runDecline, acceptAction]);
+  }, [runDecline]);
+  const keepInvite = useCallback(() => setAskingDecline(false), []);
 
   return {
     invite, money, blocked, outcome, error, errorCode: codeOf(error),
     canDecline: Boolean(port.decline) && invite.status === "invited" && !invite.open_link,
-    acceptAction, declineAction, accept, decline, readingAgain: INVITES_COPY.readingAgain,
+    acceptAction, declineAction, accept, decline, askingDecline, confirmDecline, keepInvite,
+    readingAgain: INVITES_COPY.readingAgain,
   };
 }
 
