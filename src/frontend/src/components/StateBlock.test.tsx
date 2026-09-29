@@ -65,6 +65,27 @@ describe("StateBlock — what a screen may claim", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(/isn't set up/i);
   });
 
+  /**
+   * F4.4 — a transient 5xx says "Try again shortly", so it must carry the button that does. It
+   * used to be treated as a deployment fault (every status ≥ 500), which left the sentence
+   * asking for a retry the screen did not offer. Only the configuration codes drop it.
+   */
+  it.each([500, 502, 503, 504])("offers a retry beside a transient %i", (status) => {
+    const retry = vi.fn();
+    render(<StateBlock error={new ApiError(status, { error: "server_error" })} action="read the list" onRetry={retry} />);
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["tenant_not_found", new ApiError(404, { error: "tenant_not_found" })],
+    ["tenant_unresolved", new ApiError(400, { error: "tenant_unresolved" })],
+    ["a 500 carrying tenant_not_found", new ApiError(500, { error: "tenant_not_found" })],
+  ])("still offers no retry for %s", (_label, err) => {
+    render(<StateBlock error={err} onRetry={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
   it("names what it is waiting for, in a region a screen reader is given", () => {
     render(<StateBlock loading action="the club's plans" />);
     expect(screen.getByRole("status")).toHaveTextContent("Reading the club's plans…");
