@@ -26,15 +26,34 @@ namespace Crusaders.Mainframe.Api.Persistence;
 /// </summary>
 public partial class MainframeDbContext
 {
-    /// <summary>The bookings this save may move a play record on. Read before the save; states change after it.</summary>
-    private List<Guid> BookingsPlayMayMove()
+    /// <summary>
+    /// Stages the marker for this save: on a booking this context is ALREADY writing (added, or
+    /// modified) by setting the property, so the marker rides in that row's own INSERT or UPDATE;
+    /// and answers the other bookings — reached through a seat or a result — which need an
+    /// <c>UPDATE</c> of their own in the save's transaction. Read before the save.
+    ///
+    /// <para>
+    /// <b>Why not one UPDATE for everything.</b> A walk-up inserts a checked-in booking, and an
+    /// extra statement against that row, in a transaction opened only for it, turned six racing
+    /// identical walk-ups (<c>MemberCodeMoneyFixesHttpTests</c>) from serialised into deadlocked
+    /// ~1 in 2. Riding the row's own write adds no statement and no transaction.
+    /// </para>
+    /// </summary>
+    private List<Guid> StageOnTrackedAndListTheRest()
     {
-        var fromBooking = ChangeTracker.Entries<Booking>()
-            .Where(e => e.Entity.UserId != null
-                        && ((e.State == EntityState.Modified
-                             && (e.Property(b => b.Status).IsModified || e.Property(b => b.CheckedInAt).IsModified))
-                            || (e.State == EntityState.Added && e.Entity.CheckedInAt != null)))
-            .Select(e => e.Entity.Id);
+        var at = DateTimeOffset.UtcNow.Storable();
+        var riding = new HashSet<Guid>();
+        foreach (var e in ChangeTracker.Entries<Booking>())
+        {
+            if (e.Entity.UserId is null) continue;
+            var moves = (e.State == EntityState.Modified
+                         && (e.Property(b => b.Status).IsModified || e.Property(b => b.CheckedInAt).IsModified))
+                        || (e.State == EntityState.Added && e.Entity.CheckedInAt != null);
+            if (!moves) continue;
+            e.Entity.PlayRecomputeDueAt = at;
+            riding.Add(e.Entity.Id);
+        }
+
         var fromSeat = ChangeTracker.Entries<BookingParticipant>()
             .Where(e => e.State == EntityState.Added
                         || (e.State == EntityState.Modified
@@ -43,7 +62,17 @@ public partial class MainframeDbContext
         var fromResult = ChangeTracker.Entries<MatchResult>()
             .Where(e => e.State is EntityState.Added or EntityState.Modified)
             .Select(e => e.Entity.BookingId);
-        return fromBooking.Concat(fromSeat).Concat(fromResult).Distinct().ToList();
+        var tracked = ChangeTracker.Entries<Booking>().Where(e => e.State is EntityState.Added or EntityState.Modified)
+            .Select(e => e.Entity.Id).ToHashSet();
+        foreach (var id in fromSeat.Concat(fromResult).Where(tracked.Contains).ToList())
+        {
+            // A booking this save is writing anyway: the marker rides its row.
+            var entry = ChangeTracker.Entries<Booking>().First(e => e.Entity.Id == id);
+            if (entry.Entity.UserId is null) continue;
+            entry.Entity.PlayRecomputeDueAt = at;
+            riding.Add(id);
+        }
+        return fromSeat.Concat(fromResult).Where(id => !riding.Contains(id) && !tracked.Contains(id)).Distinct().ToList();
     }
 
     /// <summary>Only a member's booking has players to evaluate; an admin block has none.</summary>
@@ -71,7 +100,7 @@ public partial class MainframeDbContext
     {
         var relational = Database.IsRelational();
         var owed = relational ? BookingsOwedMayMove() : [];
-        var play = relational ? BookingsPlayMayMove() : [];
+        var play = relational ? StageOnTrackedAndListTheRest() : [];
         if (owed.Count == 0 && play.Count == 0) return await base.SaveChangesAsync(acceptAllChangesOnSuccess, ct);
 
         if (Database.CurrentTransaction is not null) return await SaveAndStageAsync(owed, play, acceptAllChangesOnSuccess, ct);
@@ -95,7 +124,7 @@ public partial class MainframeDbContext
     {
         var relational = Database.IsRelational();
         var owed = relational ? BookingsOwedMayMove() : [];
-        var play = relational ? BookingsPlayMayMove() : [];
+        var play = relational ? StageOnTrackedAndListTheRest() : [];
         if (owed.Count == 0 && play.Count == 0) return base.SaveChanges(acceptAllChangesOnSuccess);
 
         if (Database.CurrentTransaction is not null) return SaveAndStage(owed, play, acceptAllChangesOnSuccess);

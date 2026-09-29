@@ -68,7 +68,7 @@ public sealed class PlayWorkerHttpTests(PostgresFixture pg) : IClassFixture<Post
         Assert.Contains(await BadgesAsync(f, club.Organiser), b => b.BadgeKey == BadgeCatalogue.FirstSession);
     }
 
-    /// <summary>A seat's own arrival, a status change and an admin block: the first two stage the marker, the block has no players.</summary>
+    /// <summary>A seat's own arrival, a status change and a booking born checked in stage the marker; an admin block, with no players, never does.</summary>
     [SkippableFact]
     public async Task Seat_changes_stage_the_marker_and_an_admin_block_never_does()
     {
@@ -85,6 +85,16 @@ public sealed class PlayWorkerHttpTests(PostgresFixture pg) : IClassFixture<Post
         await ClearMarkerAsync(f, booking);
         await club.WriteAsync(f, db => db.BookingParticipants.IgnoreQueryFilters().First(p => p.BookingId == booking && p.UserId == club.Sam).NudgeCount = 3);
         Assert.Null(await MarkerAsync(f, booking));
+
+        // A booking born checked in (a walk-up) carries the marker in its own INSERT.
+        var walkUp = new Booking
+        {
+            TenantId = club.TenantId, CourtId = club.CourtId, UserId = club.Jo, BookedByUserId = club.Jo, PaidByUserId = club.Jo, ActorUserId = club.Jo,
+            StartsAt = DateTimeOffset.UtcNow.AddDays(-2), EndsAt = DateTimeOffset.UtcNow.AddDays(-2).AddMinutes(30), SliceMinutes = 15, SliceCount = 2,
+            CheckedInAt = DateTimeOffset.UtcNow.AddDays(-2).Storable(),
+        };
+        await club.WriteAsync(f, db => db.Bookings.Add(walkUp));
+        Assert.NotNull(await MarkerAsync(f, walkUp.Id));
 
         var block = new Booking
         {
