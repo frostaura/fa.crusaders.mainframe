@@ -111,6 +111,10 @@ public sealed class PlayersPropertyHttpTests
         private readonly Random _rng = new(seed);
         private PlayersClub _club = null!;
         private readonly List<Game> _games = [];
+
+        /// <summary>Games dated older than the sweep's window (round 8): only its stamped-seat read reaches them.</summary>
+        private readonly HashSet<Guid> _old = [];
+        private bool _oldSqueezed;
         private decimal _organiserFloor;
         private int _spends;
 
@@ -208,8 +212,26 @@ public sealed class PlayersPropertyHttpTests
                 await _club.WriteAsync(f, db => db.Bookings.IgnoreQueryFilters().First(b => b.Id == id).CheckedInAt = DateTimeOffset.UtcNow);
                 Assert.True((await Organiser.PostAsJsonAsync($"/api/v1/bookings/{id}/cancel", new { })).IsSuccessStatusCode);
             }
+            // Some played games are OLD (round 8): 10–40 days ago, deadline long passed, so the
+            // minute sweep's window no longer reaches them — a return waiting on one is retried by
+            // the sweep only through its read of stamped seats (the refuter's mutant D).
+            var old = !s4 && _rng.NextDouble() < 0.35;
+            if (old)
+            {
+                var daysAgo = 10 + (index * 9) + _rng.Next(0, 8);   // one 8-day band per game: no overlap
+                await _club.WriteAsync(f, db =>
+                {
+                    var b = db.Bookings.IgnoreQueryFilters().First(x => x.Id == id);
+                    var length = b.EndsAt - b.StartsAt;
+                    b.StartsAt = b.StartsAt.AddDays(-daysAgo - 1);
+                    b.EndsAt = b.StartsAt + length;
+                    b.Status = BookingStatus.Completed;
+                    b.ShareDeadlineAt = b.EndsAt.AddHours(48);
+                });
+                _old.Add(id);
+            }
             _games.Add(new Game(id, who.Select((w, i) => (seats[i], w)).ToList()));
-            Log.Add($"game {index}: {id} s4={s4} partners={string.Join(",", amounts)}");
+            Log.Add($"game {index}: {id} s4={s4} old={old} partners={string.Join(",", amounts)}");
         }
 
         // -------------------------------------------------------------- steps
@@ -217,6 +239,7 @@ public sealed class PlayersPropertyHttpTests
         private async Task<string> StepAsync()
         {
             if (_script.Count > 0) return await _script.Dequeue()();
+            if (!_oldSqueezed && _old.Count > 0 && _rng.NextDouble() < 0.5 && await OldSqueezeAsync() is { } squeezed) return squeezed;
             if (_debt && _rng.NextDouble() < 0.3)
             {
                 // The squeeze, four steps, each checked on its own: the free balance thinned just
@@ -292,6 +315,40 @@ public sealed class PlayersPropertyHttpTests
             var m = await ModelAsync();
             var free = m.Balance - m.Earmarked - m.OwedBack(m.Waiting());
             return Math.Max(4m, Math.Ceiling(free / 4m) * 4m + _rng.Next(1, 6) * 4m);
+        }
+
+        /// <summary>
+        /// The old-game squeeze, four steps, each checked on its own (round 8): the free balance
+        /// pushed to −24; a goodwill 16 naming an OLD game, whose pro-rata returns then wait; a
+        /// top-up leaving the first waiting return short by less than a young game's hold; then that
+        /// game's deadline passes. Its hold stops being earmarked, the waiting return is covered —
+        /// and no credit arrived, so only the minute sweep's read of stamped seats can pay it.
+        /// </summary>
+        private async Task<string?> OldSqueezeAsync()
+        {
+            var m = await ModelAsync();
+            var old = _games.FirstOrDefault(g => _old.Contains(g.Id) && m.Seats.Any(s => s.Seat.BookingId == g.Id && s.Paid > 0m));
+            var young = _games.Where(g => !_old.Contains(g.Id) && m.EarmarkOf(g.Id) > 0m && !m.PastDeadline.Contains(g.Id))
+                .OrderByDescending(g => m.EarmarkOf(g.Id)).FirstOrDefault();
+            if (old is null || young is null) return null;
+            _oldSqueezed = true;
+            _script.Enqueue(() => DeskAsync(16m, old.Id, "goodwill"));
+            _script.Enqueue(async () =>
+            {
+                var now = await ModelAsync();
+                var first = now.Waiting().FirstOrDefault();
+                if (first is null) return "old squeeze: nothing waits";
+                var free = now.Balance - now.Earmarked;
+                var topUp = first.Pending - now.EarmarkOf(young.Id) - free;
+                return topUp > 0m ? await DeskAsync(topUp, null, "top_up_cash") : "old squeeze: no top-up needed";
+            });
+            _script.Enqueue(async () =>
+            {
+                await _club.WriteAsync(f, db => db.Bookings.IgnoreQueryFilters().First(b => b.Id == young.Id).ShareDeadlineAt = DateTimeOffset.UtcNow.AddMinutes(-1));
+                return $"old squeeze: deadline passes on {young.Id}";
+            });
+            var debit = m.Balance - m.Earmarked - m.OwedBack(m.Waiting()) + 24m;
+            return debit > 0m ? "old squeeze: " + await DeskAsync(-debit, null, "correction") : "old squeeze: already short";
         }
 
         /// <summary>
