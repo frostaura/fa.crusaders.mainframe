@@ -50,6 +50,32 @@ function armByPressing(button: HTMLElement) {
   });
 }
 
+describe("ConfirmButton — a double-click is one decision, not two (F3.14)", () => {
+  it("arms on the first click and ignores the second click of the same gesture", () => {
+    const onConfirm = vi.fn();
+    render(<ConfirmButton idleLabel="Add 1.00 cr" confirmLabel="Add 1.00 cr to Sam?" onConfirm={onConfirm} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add 1.00 cr" }), { detail: 1 });
+    const go = document.querySelector<HTMLButtonElement>("[data-confirm='go']")!;
+    // The second click of the double-click lands on whatever is under the pointer now.
+    fireEvent.click(go, { detail: 2 });
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel/ }), { detail: 2 });
+
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /^Cancel/ })).toBeInTheDocument();
+  });
+
+  it("still honours a deliberate second press, by pointer or by keyboard", async () => {
+    const onConfirm = vi.fn();
+    render(<ConfirmButton idleLabel="Remove" confirmLabel="Remove the passkey?" onConfirm={onConfirm} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }), { detail: 1 });
+    // A keyboard activation is detail 0.
+    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-confirm='go']")!, { detail: 0 });
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(1));
+  });
+});
+
 describe("ConfirmButton — the armed state", () => {
   /**
    * B6 (HIGH). The armed control set `aria-pressed=true`, so VoiceOver said "pressed" on a

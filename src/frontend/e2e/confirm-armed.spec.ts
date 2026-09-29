@@ -778,3 +778,28 @@ test.describe("under forced colours", () => {
     console.log(`[B5] forced colours: go ${go.width}px ${go.style} · stop ${stop.width}px ${stop.style}`);
   });
 });
+
+/**
+ * F3.14 (review round 1): a double-click on the trigger armed it with the first click and
+ * committed with the second, because the armed pair renders where the trigger was. Driven with
+ * a real double-click at the point where the confirm now sits, so the second click of the
+ * gesture lands ON the confirm — the worst case — and nothing may be removed.
+ */
+test("a double-click arms the confirm and never commits it", async ({ page }) => {
+  await open(page, "/profile", 0);
+  await expect(page.getByText("iPhone 15").first()).toBeVisible();
+  const deletes: string[] = [];
+  page.on("request", (r) => { if (r.method() === "DELETE") deletes.push(r.url()); });
+
+  const wrapper = page.locator(CONFIRMS).first();
+  // First click of the gesture: count 1, on the trigger.
+  await wrapper.locator("> button").first().click();
+  // Second click of the SAME gesture: count 2, wherever the confirm now is.
+  const box = (await wrapper.locator("[data-confirm='go']").boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down({ clickCount: 2 });
+  await page.mouse.up({ clickCount: 2 });
+
+  await expect(wrapper.locator("> button")).toHaveCount(2);
+  expect(deletes).toEqual([]);
+});

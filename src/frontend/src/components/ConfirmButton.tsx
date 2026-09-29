@@ -558,6 +558,24 @@ function GlyphLabel({ glyph, children }: { glyph: React.ReactNode; children: Rea
   );
 }
 
+/**
+ * Whether this click is the second (or later) click of ONE double-click or double-tap.
+ *
+ * <p>
+ * <b>Review round 1, F3.14.</b> A double-click on the idle trigger armed it with the first
+ * click and committed with the second, because the armed pair renders where the trigger was
+ * and the second click lands on whatever is now under the pointer — an admin double-clicking
+ * "Top up" added 1.00 cr, and a double-click removed a passkey, with no confirmation at all.
+ * The browser already knows the difference: `detail` is the click count of the gesture (the
+ * platform's own double-click and double-tap counting), 1 for a single press and 0 for a
+ * keyboard activation. So a deliberate second press is always honoured and a reflexive
+ * double-click never is — without a timer that would also swallow a fast, intended confirm.
+ * </p>
+ */
+export function secondClickOfOne(e: { detail: number }): boolean {
+  return e.detail >= 2;
+}
+
 export function ConfirmButton({
   idleLabel,
   confirmLabel = "Tap to confirm",
@@ -891,7 +909,7 @@ export function ConfirmButton({
             disabled={pending}
             data-confirm="stop"
             aria-label={`${cancelLabel} — ${confirmSubject(subject, ariaLabel, idleText)}`}
-            onClick={(e) => { e.stopPropagation(); cancel(); }}
+            onClick={(e) => { e.stopPropagation(); if (!secondClickOfOne(e)) cancel(); }}
             // The outline look AFTER the control's own transparent edge would lose to it (both are
             // border colours, and tailwind-merge keeps the later), so the edge is restated last.
             className={cn(look("outline"), CONTROL_CLASS, "border-control")}
@@ -925,7 +943,7 @@ export function ConfirmButton({
             // "about to". This is not a toggle either: the confirm is a different button, not
             // the off half of the first. The prompt is ANNOUNCED instead, below.
             aria-busy={pending}
-            onClick={(e) => { e.stopPropagation(); void confirm(); }}
+            onClick={(e) => { e.stopPropagation(); if (!secondClickOfOne(e)) void confirm(); }}
             /*
               Item 12 — `feedback.className` LAST, and that ordering is the whole of it.
               `tailwind-merge` keeps the later of two conflicting utilities, so the outcome's
