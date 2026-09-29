@@ -27,7 +27,10 @@ public sealed class PlayBadgesHttpTests(PostgresFixture pg) : IClassFixture<Post
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await SeedAsync(f, "bd-retro");
-        var start = DateTimeOffset.UtcNow.AddDays(-120).Storable();
+        // Noon, not "now minus 120 days": the history's time of day is the wall clock's, and from
+        // 21:00 UTC it earned night owl retroactively — silently — so the fresh night owl below
+        // had nothing left to celebrate (red 21:00–24:00 UTC, found by a synthetic-clock sweep).
+        var start = new DateTimeOffset(DateTime.UtcNow.Date.AddDays(-120).AddHours(12), TimeSpan.Zero);
         for (var i = 0; i < 10; i++) await club.GameAsync(f, start.AddDays(i * 3), club.Organiser, [club.Sam]);
 
         await PlayKit.TickAsync(f, DateTimeOffset.UtcNow); // the catch-up: the first run from history
@@ -59,7 +62,10 @@ public sealed class PlayBadgesHttpTests(PostgresFixture pg) : IClassFixture<Post
         Skip.IfNot(pg.Available, Skipped);
         await using var f = CreateFactory();
         var club = await SeedAsync(f, "bd-race");
-        await club.GameAsync(f, DateTimeOffset.UtcNow.AddHours(-3).Storable(), club.Organiser, [club.Sam]);
+        // Yesterday noon rather than three hours ago: a session before 07:00 or from 21:00 club
+        // time also earns early bird or night owl, a second celebration, and the Single()s below
+        // went red from 00:00 to 10:00 UTC. Still well inside the fresh window.
+        await club.GameAsync(f, new DateTimeOffset(DateTime.UtcNow.Date.AddDays(-1).AddHours(12), TimeSpan.Zero), club.Organiser, [club.Sam]);
 
         var runs = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => EvaluateAsync(club, f, club.Sam)));
         Assert.Single(await BadgesAsync(f, club.Sam), b => b.BadgeKey == BadgeCatalogue.FirstSession);
