@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Alert } from "@/components/Alert";
+import { useToast } from "@/components/Toast";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -100,17 +101,21 @@ const LEAVE = {
 type LeaveProps = Props & { kind: Leave; seat: DetailPlayer; onClose: () => void };
 
 function LeaveDialog(props: LeaveProps) {
-  const { kind, detail, seat, onClose, reload, say } = props;
+  const { kind, detail, seat, onClose } = props;
   const copy = LEAVE[kind];
   const { refresh } = useBalance();
+  const toast = useToast();
+  const navigate = useNavigate();
   const leave = useAsyncAction(
     () => (kind === "withdraw" ? playersEndpoints.withdraw : playersEndpoints.decline)(detail.booking_id, seat.participant_id ?? ""),
     {
+      // R1 F2.9 — off the game, this page is a 404 to them: re-reading it put "Booking not found"
+      // beside the success. Back to Bookings instead, with the outcome said there.
       success: () => {
         onClose();
-        say({ tone: "success", text: copy.done });
+        toast.push({ tone: "success", text: copy.done });
         void refresh();
-        reload();
+        navigate("/bookings", { replace: true });
       },
     },
   );

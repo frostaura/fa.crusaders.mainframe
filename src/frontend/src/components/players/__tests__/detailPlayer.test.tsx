@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { refuse, signOut } from "@/test/harness";
 import { ApiError } from "@/lib/api";
 import { DETAIL_COPY, DETAIL_PLAYER, PLAYERS_REFUSAL, playersRefusal } from "@/lib/playersCopy";
@@ -16,7 +16,6 @@ beforeEach(() => { signOut(); });
 afterEach(() => { vi.unstubAllGlobals(); });
 
 const SEAT = `${DETAIL_PATH}/players/${PID.alex}`;
-const notice = () => document.querySelector("[data-detail-notice]");
 
 /** Alex has said yes and paid; the game is far enough off to pull out. */
 function inView() {
@@ -27,7 +26,7 @@ function inView() {
 }
 
 describe("pull out", () => {
-  it("confirms, pulls out, and then reads the 404 a former player gets — with the outcome said above it", async () => {
+  it("R1 F2.9: confirms, pulls out, and goes back to Bookings saying so — never 'Booking not found' beside the success", async () => {
     // The server's own rule: once pulled out, the detail is a 404 to them.
     let gone = false;
     const stub = serve({
@@ -39,8 +38,9 @@ describe("pull out", () => {
     const dialog = screen.getByRole("dialog", { name: DETAIL_PLAYER.withdrawTitle });
     expect(dialog).toHaveTextContent(DETAIL_PLAYER.withdrawBody);
     fireEvent.click(within(dialog).getByRole("button", { name: DETAIL_PLAYER.withdrawConfirm }));
-    await waitFor(() => expect(notice()).toHaveTextContent(DETAIL_PLAYER.withdrawn));
-    expect(await screen.findByText(DETAIL_COPY.notFoundTitle)).toBeInTheDocument();
+    expect(await screen.findByText("The bookings grid")).toBeInTheDocument();
+    expect(await screen.findByText(DETAIL_PLAYER.withdrawn)).toBeInTheDocument();
+    expect(screen.queryByText(DETAIL_COPY.notFoundTitle)).toBeNull();
     expect(stub.calls.some((c) => c.method === "POST" && c.path === `${SEAT}/withdraw`)).toBe(true);
   });
 
@@ -70,7 +70,9 @@ describe("decline", () => {
     fireEvent.click(await screen.findByRole("button", { name: DETAIL_PLAYER.decline }));
     const dialog = screen.getByRole("dialog", { name: DETAIL_PLAYER.declineTitle });
     fireEvent.click(within(dialog).getByRole("button", { name: DETAIL_PLAYER.declineConfirm }));
-    await waitFor(() => expect(notice()).toHaveTextContent(DETAIL_PLAYER.declined));
+    // A decline takes the member off the game, so the page would 404: back to Bookings, saying so.
+    expect(await screen.findByText("The bookings grid")).toBeInTheDocument();
+    expect(await screen.findByText(DETAIL_PLAYER.declined)).toBeInTheDocument();
     expect(stub.calls.some((c) => c.method === "POST" && c.path === `${SEAT}/decline`)).toBe(true);
   });
 
