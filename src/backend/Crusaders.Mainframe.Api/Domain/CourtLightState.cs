@@ -169,10 +169,6 @@ public sealed class CourtLightState : ITenantScoped
     /// </summary>
     public LightState ConfirmedState { get; set; } = LightState.Unknown;
 
-    /// <summary>Whether the box's own report still stands as evidence at <paramref name="now"/>, given how long a silence the club tolerates.</summary>
-    public bool ConfirmedWithin(DateTimeOffset now, int seconds) =>
-        ConfirmedAt is { } at && (now - at).TotalSeconds <= seconds;
-
     /// <summary>
     /// Seconds left on the grant at <paramref name="now"/>, floored at zero, or null when the
     /// lights are not believed on or the grant has no end.

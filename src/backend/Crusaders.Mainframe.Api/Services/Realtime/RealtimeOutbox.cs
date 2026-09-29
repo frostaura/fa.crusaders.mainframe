@@ -36,9 +36,6 @@ public sealed class RealtimeOutbox
     private int _depth;
     private bool _poisoned;
 
-    /// <summary>True while a transaction owns the boundary and publication must wait for it.</summary>
-    public bool IsDeferring => _depth > 0;
-
     /// <summary>How much work is waiting. For tests, and for the assertion that a rollback published nothing.</summary>
     public int PendingCount => _pending.Count;
 

@@ -84,8 +84,4 @@ public sealed class DeviceOutage : ITenantScoped
     /// </para>
     /// </summary>
     public bool EndedByContact { get; set; } = true;
-
-    /// <summary>Whether this outage covers <paramref name="instant"/>.</summary>
-    public bool Covers(DateTimeOffset instant) =>
-        instant >= StartedAt && (EndedAt is null || instant < EndedAt);
 }

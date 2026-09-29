@@ -309,7 +309,4 @@ public sealed class ButtonMap
             .Select(a => a is ButtonAction.SelectCourt c && c.CourtIndex >= courtCount ? new ButtonAction.None() : a)
             .ToList());
     }
-
-    /// <summary>Value equality on the wire form — two maps are the same map when they say the same thing.</summary>
-    public bool SameAs(ButtonMap? other) => other is not null && ToWire().SequenceEqual(other.ToWire());
 }

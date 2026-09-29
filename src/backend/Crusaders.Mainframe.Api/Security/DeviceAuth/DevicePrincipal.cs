@@ -23,7 +23,4 @@ public static class DevicePrincipal
 {
     public static Guid? DeviceTenantId(this ClaimsPrincipal? principal)
         => Guid.TryParse(principal?.FindFirstValue("tenant_id"), out var id) ? id : null;
-
-    public static bool IsDevice(this ClaimsPrincipal? principal)
-        => principal?.IsInRole(DeviceAuthenticationHandler.DeviceRole) ?? false;
 }

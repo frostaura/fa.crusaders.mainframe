@@ -450,16 +450,6 @@ public sealed class DeviceRegistryService
     public Task<bool> DeviceCodeTakenAsync(string deviceCode, Guid exceptDeviceId, CancellationToken ct) =>
         _db.Devices.AnyAsync(d => d.DeviceCode == deviceCode && d.Id != exceptDeviceId, ct);
 
-    /// <summary>
-    /// The row that already owns this physical board, if any. Tenant-filtered like every
-    /// other read here: a board registered by another club is not this club's to recognise.
-    /// </summary>
-    public Task<Device?> FindByMacAddressAsync(string macAddress, CancellationToken ct)
-    {
-        var normalised = macAddress.Trim().ToLowerInvariant();
-        return _db.Devices.FirstOrDefaultAsync(d => d.MacAddress == normalised, ct);
-    }
-
     /// <summary>Error code when a hand-typed MAC is not twelve hex characters.</summary>
     public const string MacAddressInvalid = "mac_address_invalid";
 

@@ -81,8 +81,4 @@ public static class AdminCreditReasons
             _ => null,
         };
     }
-
-    /// <summary>Whether a code posts an <see cref="LedgerEntryType.AdminTopUp"/>, for the tests that care.</summary>
-    public static bool IsTopUp(string code)
-        => code is TopUpCash or TopUpEft or TopUpCardOffline;
 }
