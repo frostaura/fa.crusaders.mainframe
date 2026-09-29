@@ -8,6 +8,7 @@ import { TextLink } from "../ui/text-link";
 import { CaretDown, CaretRight } from "../ui/icons";
 import { CELL } from "./ledgerCells";
 import { CELL_CLASS, amountInk, type Column } from "./ledgerColumns";
+import { ledgerCategory } from "@/lib/ledgerCopy";
 import { PhoneTime, ToName } from "./LedgerCellParts";
 import { shareSide, type LedgerItem, type ShareSide } from "./shareGroups";
 import type { ShareBooking } from "./useShareBookings";
@@ -105,6 +106,9 @@ const GROUP_CELL: Record<Column, (h: Head) => ReactNode> = {
     </TableCell>
   ),
   comment: (h) => <GroupComment head={h} />,
+  // F3.8's admin-only columns: a share group is one kind of movement, made by its members.
+  category: (h) => <TableCell className={CELL_CLASS.category}>{ledgerCategory(h.group.rows[0])}</TableCell>,
+  actor: () => <TableCell className={CELL_CLASS.actor} />,
   amount: (h) => (
     // Netted to nothing is neither money in nor out: neutral ink, never the green of a credit (R1 F2.14).
     <TableCell className={cn(CELL_CLASS.amount, h.group.net === 0 ? "text-text-secondary" : amountInk(h.group.net))}>

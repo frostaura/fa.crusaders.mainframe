@@ -1,8 +1,10 @@
 import { Fragment, useMemo, useState } from "react";
 import type { LedgerRow } from "../lib/api";
-import { cn } from "../lib/utils";
-import { TableBody, TableHead, TableHeader, TableRow } from "./ui/table";
-import { CaretDown, CaretUp, CaretUpDown } from "./ui/icons";
+import { cn, formatSignedCredits } from "../lib/utils";
+import { ledgerCategory, ledgerDoneBy, LEDGER_COPY } from "../lib/ledgerCopy";
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
+import { Button } from "./ui/button";
+import { CaretDown, CaretRight, CaretUp, CaretUpDown } from "./ui/icons";
 import { ScrollArea } from "./ScrollArea";
 import { CELL } from "./wallet/ledgerCells";
 import type { Column } from "./wallet/ledgerColumns";
@@ -35,6 +37,8 @@ type LedgerTableProps = {
    * Off for the club's book and an admin's view of a member: the sentences say "your share".
    */
   groupShares?: boolean;
+  /** F3.8: when given, every row opens its detail — a "Details" button per row, and the row. */
+  onOpen?: (row: LedgerRow) => void;
 };
 
 type Sort = { key: Column; dir: SortDir };
@@ -46,6 +50,8 @@ function sortValue(row: LedgerRow, key: Column): string | number {
     case "to": return row.to;
     case "amount": return row.signedAmountCredits;
     case "comment": return row.comment ?? "";
+    case "category": return ledgerCategory(row);
+    case "actor": return ledgerDoneBy(row);
   }
 }
 
@@ -85,6 +91,7 @@ function nextSort(current: Sort, key: Column): Sort {
 export function LedgerTable(props: LedgerTableProps) {
   // Destructured in the body: lizard counts every destructured name as a parameter (gate: 6).
   const { rows, columns = DEFAULT_COLUMNS, emptyText = "No movements yet.", fill = false, label, groupShares = false } = props;
+  const { onOpen } = props;
   const [sort, setSort] = useState<Sort>({ key: "time", dir: "desc" });
   const sorted = useMemo(() => sortRows(rows, sort), [rows, sort]);
   const items = useMemo(() => (groupShares ? groupShareRows(sorted) : sorted.map((row) => ({ kind: "row" as const, row }))), [groupShares, sorted]);
@@ -106,11 +113,12 @@ export function LedgerTable(props: LedgerTableProps) {
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             {columns.map((column) => <Fragment key={column}>{headerFor(column)}</Fragment>)}
+            {onOpen ? <TableHead className="sticky top-0 z-sticky"><span className="sr-only">{LEDGER_COPY.detailsHeader}</span></TableHead> : null}
           </TableRow>
         </TableHeader>
         <TableBody>
           {items.map((item) => (item.kind === "row"
-            ? <LedgerLine key={item.row.id} row={item.row} columns={columns} />
+            ? <LedgerLine key={item.row.id} row={item.row} columns={columns} onOpen={onOpen} />
             : <ShareGroupRows key={`shares-${item.bookingId}`} group={item} columns={columns} booking={bookings[item.bookingId]} />))}
         </TableBody>
       </table>
@@ -118,10 +126,28 @@ export function LedgerTable(props: LedgerTableProps) {
   );
 }
 
-function LedgerLine({ row, columns }: { row: LedgerRow; columns: Column[] }) {
+function LedgerLine({ row, columns, onOpen }: { row: LedgerRow; columns: Column[]; onOpen?: (row: LedgerRow) => void }) {
   return (
-    <TableRow>
+    <TableRow
+      // The whole row is a pointer target; the button in the last cell is the keyboard's and
+      // the screen reader's way in, so the row itself needs no role or tab stop.
+      onClick={onOpen ? () => onOpen(row) : undefined}
+      className={onOpen ? "cursor-pointer" : undefined}
+    >
       {columns.map((column) => <Fragment key={column}>{CELL[column](row)}</Fragment>)}
+      {onOpen ? (
+        <TableCell className="w-0 align-top">
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={LEDGER_COPY.openRow(`${ledgerCategory(row)}, ${formatSignedCredits(row.signedAmountCredits)}`)}
+            onClick={(e) => { e.stopPropagation(); onOpen(row); }}
+            icon={<CaretRight aria-hidden="true" />}
+          >
+            <span className="sr-only sm:not-sr-only">{LEDGER_COPY.detailsHeader}</span>
+          </Button>
+        </TableCell>
+      ) : null}
     </TableRow>
   );
 }
@@ -133,6 +159,8 @@ const HEADER: Record<Column, HeaderLook> = {
   from: { label: "From", hideOnMobile: true },
   to: { label: "To", hideOnMobile: true },
   comment: { label: "Comment" },
+  category: { label: LEDGER_COPY.categoryHeader, hideOnMobile: true },
+  actor: { label: LEDGER_COPY.actorHeader, hideOnMobile: true },
   amount: { label: "Amount", align: "right" },
 };
 

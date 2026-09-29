@@ -4,6 +4,7 @@ import { useLocation } from "react-router-dom";
 import AdminLedgerPage from "./AdminLedger";
 import { formatClubDayLabel } from "../components/ui/date-picker-day";
 import { LEDGER_TYPE_LABEL } from "../lib/creditAdjustment";
+import { LEDGER_COPY } from "../lib/ledgerCopy";
 import { ledgerRowFixture, renderPage, signIn, signOut, stubFetch } from "../test/harness";
 
 /**
@@ -309,3 +310,42 @@ function SearchProbe() {
 function search() {
   return screen.getByTestId("router-search").textContent ?? "";
 }
+
+/** Review round 1, F3.8: who made each movement, what kind it was, and every row opens. */
+describe("Admin ledger — done by, category, and a detail per row", () => {
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  const DESK = ledgerRowFixture({
+    id: "d1", comment: "R200 cash, receipt 0412", type: "AdminAdjustment", signedAmountCredits: 40, amountCredits: 40,
+    actorUserId: "admin-1", actorName: "Review Admin", relatedBookingId: "b-77",
+  });
+  const OWN = ledgerRowFixture({ id: "o1", comment: "Booking charge", signedAmountCredits: -24, amountCredits: 24 });
+
+  function open() {
+    stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: true }) },
+      { path: "/api/v1/admin/ledger", body: [DESK, { ...OWN, actorUserId: OWN.subjectUserId, actor_name: null }] },
+    ]);
+    renderPage(<AdminLedgerPage />);
+  }
+
+  it("names the admin who made a desk movement, and the member for their own", async () => {
+    open();
+    await screen.findByText("R200 cash, receipt 0412");
+    expect(screen.getByRole("columnheader", { name: /Done by/ })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /Category/ })).toBeInTheDocument();
+    expect(screen.getAllByText("Review Admin").length).toBeGreaterThan(0);
+    expect(screen.getByText(LEDGER_COPY.themselves)).toBeInTheDocument();
+    expect(screen.getAllByText(LEDGER_TYPE_LABEL.AdminAdjustment).length).toBeGreaterThan(0);
+  });
+
+  it("opens a row's whole story, with its booking", async () => {
+    open();
+    await screen.findByText("R200 cash, receipt 0412");
+    fireEvent.click(screen.getByRole("button", { name: /Details — Admin adjustment, \+40\.00 cr/ }));
+    const sheet = await screen.findByRole("dialog");
+    expect(sheet).toHaveTextContent("Review Admin");
+    expect(sheet).toHaveTextContent("R200 cash, receipt 0412");
+    expect(screen.getByRole("link", { name: LEDGER_COPY.openBooking })).toHaveAttribute("href", "/bookings/b-77");
+  });
+});

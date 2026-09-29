@@ -1,5 +1,11 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { LedgerTable } from "@/components/LedgerTable";
+import { LedgerDetailSheet } from "@/components/admin/LedgerDetailSheet";
+import type { Column } from "@/components/wallet/ledgerColumns";
+import type { LedgerRow } from "@/lib/api";
+
+/** F3.8: who made each movement and what kind it was, and every row opens. */
+const COLUMNS: Column[] = ["time", "category", "actor", "comment", "amount"];
 import { Button } from "@/components/ui/button";
 import { Plus, Receipt } from "@/components/ui/icons";
 import { Section } from "@/components/ui/page-shell";
@@ -30,6 +36,7 @@ export function MemberWallet() {
   const load = useCallback(() => endpoints.adminLedger({ userId, limit: LEDGER_LIMIT }), [userId]);
   const [ledger, retry] = useRead(`${userId}:${detail.balance_credits}:${readAt ?? 0}`, load);
   const rows = ledger.data ?? [];
+  const [opened, setOpened] = useState<LedgerRow | null>(null);
 
   return (
     // Top up lives on the header right above this tab, once; a second copy here would be two
@@ -49,10 +56,11 @@ export function MemberWallet() {
         skeleton={<TableSkeleton rows={5} />}
       >
         <div className="overflow-hidden rounded-xl border border-border bg-bg-surface">
-          <LedgerTable rows={rows} label={COPY.label(name)} />
+          <LedgerTable rows={rows} columns={COLUMNS} onOpen={setOpened} label={COPY.label(name)} />
         </div>
         {rows.length >= LEDGER_LIMIT ? <p className="text-sm text-text-muted">{COPY.showingLatest(rows.length)}</p> : null}
       </StateBlock>
+      <LedgerDetailSheet row={opened} onClose={() => setOpened(null)} />
     </Section>
   );
 }

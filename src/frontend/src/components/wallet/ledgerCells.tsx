@@ -5,6 +5,7 @@ import { cn, formatSignedCredits } from "@/lib/utils";
 import { TableCell } from "../ui/table";
 import { CELL_CLASS, amountInk, type Column } from "./ledgerColumns";
 import { PhoneTime, ToName } from "./LedgerCellParts";
+import { ledgerCategory, ledgerDoneBy } from "@/lib/ledgerCopy";
 
 /**
  * One renderer per column, so the order is the caller's `columns` and nothing else.
@@ -39,6 +40,11 @@ export const CELL: Record<Column, (r: LedgerRow, note?: string) => ReactNode> = 
       <PhoneTime at={r.at} />
     </TableCell>
   ),
+  category: (r) => <TableCell className={CELL_CLASS.category}>{ledgerCategory(r)}</TableCell>,
+  actor: (r) => {
+    const who = ledgerDoneBy(r);
+    return <TableCell className={CELL_CLASS.actor} title={who}>{who}</TableCell>;
+  },
   amount: (r) => {
     const credit = r.signedAmountCredits >= 0;
     return (

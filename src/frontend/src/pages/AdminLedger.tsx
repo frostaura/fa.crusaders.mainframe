@@ -14,6 +14,11 @@ import { StateBlock } from "../components/ui/state-block";
 import { MagnifyingGlass } from "../components/ui/icons";
 import { FilterBar, FilterDate, FilterSelect, TableSkeleton, type FilterOption } from "../components/monitoring/parts";
 import { LEDGER_TYPE_LABEL } from "../lib/creditAdjustment";
+import { LedgerDetailSheet } from "../components/admin/LedgerDetailSheet";
+import type { Column } from "../components/wallet/ledgerColumns";
+
+/** F3.8: the admin reads who made each movement and what kind it was, and opens any row. */
+const ADMIN_COLUMNS: Column[] = ["time", "from", "to", "category", "actor", "comment", "amount"];
 
 // Derived from the union in api.ts rather than hand-maintained here. This was a
 // literal array with no connection to the type, so a ledger type added on the
@@ -54,6 +59,7 @@ export default function AdminLedgerPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [readAt, setReadAt] = useState<number | null>(null);
+  const [opened, setOpened] = useState<LedgerRow | null>(null);
 
   const from = params.get("from") ?? isoDate(daysAgo(DEFAULT_FROM_DAYS));
   const to = params.get("to") ?? isoDate(daysAgo(-1));
@@ -224,9 +230,16 @@ export default function AdminLedgerPage() {
             <Stat label="Debits" value={formatSignedCredits(-totals.debits)} tone={toneOf(-totals.debits)} />
             <Stat label="Net" value={formatSignedCredits(totals.net)} tone={toneOf(totals.net)} />
           </CardContent>
-          <LedgerTable rows={filtered} emptyText="No movements match these filters." label="Club ledger" />
+          <LedgerTable
+            rows={filtered}
+            columns={ADMIN_COLUMNS}
+            onOpen={setOpened}
+            emptyText="No movements match these filters."
+            label="Club ledger"
+          />
         </Card>
       </StateBlock>
+      <LedgerDetailSheet row={opened} onClose={() => setOpened(null)} />
     </PageShell>
   );
 }
