@@ -113,3 +113,51 @@ describe("the invite mail's deep link", () => {
   });
 });
 
+
+describe("R1 F2.7 / F2.8 — the mail's link after the invite moved on", () => {
+  const NOTICES = { path: "/api/v1/me/notifications", body: { items: [
+    { id: "n1", kind: "players.invited", headline: "Sam invited you", link: `/invites/${SEAT}`, booking_id: BOOKING, created_at: "2026-09-28T08:00:00Z", read_at: null },
+  ], unread_count: 1, next_cursor: null } };
+  const DETAIL = `/api/v1/bookings/${BOOKING}`;
+  const detail = (status: string, seatStatus: string) => ({
+    booking_id: BOOKING, status, players: [{ participant_id: SEAT, status: seatStatus }],
+  });
+
+  it("already said yes: \"You're in\" with the way to the booking — never 'sign out'", async () => {
+    openDeepLink([{ path: "/api/v1/me/invites", body: { items: [], count: 0 } }, NOTICES, { path: DETAIL, body: detail("booked", "accepted") }]);
+    expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.fateInTitle })).toBeInTheDocument();
+    expect(screen.getByText(INVITES_COPY.fateInBody)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: INVITES_COPY.seeBooking })).toHaveAttribute("href", `/bookings/${BOOKING}`);
+    expect(screen.queryByRole("button", { name: INVITES_COPY.signOutToOpen })).toBeNull();
+  });
+
+  it("the game was cancelled: it says so, with the way to the booking", async () => {
+    openDeepLink([{ path: "/api/v1/me/invites", body: { items: [], count: 0 } }, NOTICES, { path: DETAIL, body: detail("cancelled", "invited") }]);
+    expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.fateCancelledTitle })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: INVITES_COPY.seeBooking })).toHaveAttribute("href", `/bookings/${BOOKING}`);
+    expect(screen.queryByRole("button", { name: INVITES_COPY.signOutToOpen })).toBeNull();
+  });
+
+  it("off the game (the booking is a 404 to them): says so, with no link to a page they cannot open", async () => {
+    openDeepLink([
+      { path: "/api/v1/me/invites", body: { items: [], count: 0 } }, NOTICES,
+      { path: DETAIL, status: 404, body: { error: "booking_not_found" } },
+    ]);
+    expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.fateGoneTitle })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: INVITES_COPY.seeBooking })).toBeNull();
+    expect(screen.queryByRole("button", { name: INVITES_COPY.signOutToOpen })).toBeNull();
+  });
+});
+
+describe("R1 F2.4 — the mail's link opened signed out", () => {
+  it("says an invite is waiting and offers sign-in that returns here", async () => {
+    stubFetch([]);
+    renderPage(<Routes><Route path="/invites/:participantId" element={<InviteDeepLinkPage />} /></Routes>, {
+      initialEntries: [`/invites/${SEAT}`],
+    });
+    expect(await screen.findByRole("heading", { level: 1, name: INVITES_COPY.signedOutTitle })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: INVITES_COPY.signedOutSignIn })).toHaveAttribute("href", "/login");
+    // An addressed invite is a member's: there is no "join the club" on it.
+    expect(screen.queryByRole("link", { name: INVITES_COPY.signedOutJoin })).toBeNull();
+  });
+});
