@@ -55,7 +55,11 @@ export function noticeAge(iso: string, now: number, timezone?: string): string {
   return clubDayAndClock(iso, timezone).replace(/\bSept\b/, "Sep");
 }
 
+/** Where an admin chooses which alerts reach their inbox — linked from the Overview (F3.11). */
+export const EMAIL_ALERTS_HREF = "/admin/settings#settings-alerts";
+
 export const EMAIL_ALERTS_COPY = {
+  chooseLink: "Choose which of these you're emailed about",
   settingsTitle: "Your email alerts",
   profileTitle: "Email alerts",
   description: "Which of the club’s alerts reach your inbox. Only for you — other admins keep their own. Each"
@@ -69,7 +73,18 @@ export const EMAIL_ALERTS_COPY = {
   switchedOff: (title: string) => `You won’t be emailed about ${lower(title)} any more.`,
   saveFailed: (title: string) => `Couldn’t change the ${lower(title)} email. Nothing changed — try again.`,
   notOptional: (title: string) => `${title} can’t be switched off — every admin is always told.`,
+  /** Said AT the switch once it is off (F3.11): who, if anybody, is still emailed. */
+  nobodyTold: "Nobody is emailed about this now — every admin has switched it off. It still shows under Recent alerts.",
+  othersTold: (n: number) => `${n === 1 ? "1 other admin is" : `${n} other admins are`} still emailed about this.`,
+  othersUnknown: "Other admins choose for themselves. If they have all switched this off too, nobody is emailed — it still shows under Recent alerts.",
 } as const;
+
+/** The line under a switched-off alert: nobody / N others / not known. */
+export function whoIsStillTold(othersReceiving: number | undefined): { text: string; nobody: boolean } {
+  if (othersReceiving === undefined) return { text: EMAIL_ALERTS_COPY.othersUnknown, nobody: false };
+  if (othersReceiving <= 0) return { text: EMAIL_ALERTS_COPY.nobodyTold, nobody: true };
+  return { text: EMAIL_ALERTS_COPY.othersTold(othersReceiving), nobody: false };
+}
 
 /**
  * Why a kind nobody may switch off is locked on — said beside the lock, not behind it, because a

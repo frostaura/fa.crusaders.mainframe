@@ -9,7 +9,8 @@ import { Switch } from "@/components/ui/switch";
 import { ApiError } from "@/lib/api";
 import { describeFailure } from "@/lib/errors";
 import { notificationsEndpoints, type AdminNoticeKind } from "@/lib/notificationsApi";
-import { EMAIL_ALERTS_COPY as COPY, lockedBecause } from "@/lib/notificationsCopy";
+import { EMAIL_ALERTS_COPY as COPY, lockedBecause, whoIsStillTold } from "@/lib/notificationsCopy";
+import { cn } from "@/lib/utils";
 import { useRead } from "@/lib/useRead";
 
 /**
@@ -137,6 +138,7 @@ function KindRow({ kind, on, pending, onChange }: KindRowProps) {
               <span>{`${COPY.alwaysOn}. ${lockedBecause(kind.kind)}`}</span>
             </p>
           )}
+          {kind.optional && !on ? <StillTold othersReceiving={kind.others_receiving} /> : null}
         </div>
         <div className="col-start-2 row-span-full flex min-h-touch items-center gap-2">
           {pending ? <Spinner className="text-text-secondary" label={COPY.saving} /> : null}
@@ -154,6 +156,20 @@ function KindRow({ kind, on, pending, onChange }: KindRowProps) {
         </div>
       </Field>
     </li>
+  );
+}
+
+/** F3.11: switching an alert off says, at the switch, whether anybody is still emailed it. */
+function StillTold({ othersReceiving }: { othersReceiving: number | undefined }) {
+  const said = whoIsStillTold(othersReceiving);
+  return (
+    <p
+      data-still-told={said.nobody ? "nobody" : ""}
+      role={said.nobody ? "status" : undefined}
+      className={cn("mt-1 text-sm", said.nobody ? "font-medium text-warning-strong" : "text-text-secondary")}
+    >
+      {said.text}
+    </p>
   );
 }
 

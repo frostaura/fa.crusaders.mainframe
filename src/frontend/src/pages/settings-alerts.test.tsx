@@ -266,6 +266,32 @@ describe("Settings → Admin alerts: your email alerts", () => {
     expect(stub.calls.some((call) => call.method === "PUT" && call.path.startsWith("/api/v1/admin/settings"))).toBe(false);
   });
 
+  /** Review round 1, F3.11: switching an alert off said nothing about who else is told. */
+  it("warns at the switch when switching it off leaves nobody emailed", async () => {
+    const kinds = KINDS_FIXTURE.map((k) => (k.kind === "member.registered" ? { ...k, others_receiving: 0 } : k));
+    stubFetch(routes({}, [
+      { path: "/api/v1/admin/notifications/kinds", body: { kinds } },
+      { method: "PUT", path: "/api/v1/me/preferences", body: { admin_notification_optouts: [] } },
+    ]));
+    renderPage(<AdminSettingsPage />);
+    const section = await openAlerts();
+    expect(within(section).queryByText(EMAIL_ALERTS_COPY.nobodyTold)).toBeNull();
+
+    fireEvent.click(await within(section).findByRole("switch", { name: "New membership applications" }));
+    const row = section.querySelector("[data-alert-kind='member.registered']") as HTMLElement;
+    expect(await within(row).findByText(EMAIL_ALERTS_COPY.nobodyTold)).toBeInTheDocument();
+  });
+
+  it("says what it cannot know when the server does not say who else is told", async () => {
+    stubFetch(routes());
+    renderPage(<AdminSettingsPage />);
+    const section = await openAlerts();
+    // device.offline is already off in the fixture, with no count from the server.
+    await within(section).findByRole("switch", { name: "Court box or door stopped reporting" });
+    const row = section.querySelector("[data-alert-kind='device.offline']") as HTMLElement;
+    expect(within(row).getByText(EMAIL_ALERTS_COPY.othersUnknown)).toBeInTheDocument();
+  });
+
   it("puts a refused flip back, says nothing changed, and re-reads what the server holds", async () => {
     const stub = stubFetch(routes({}, [
       { method: "PUT", path: "/api/v1/me/preferences", respond: () => refuse(503, { error: "upstream_unavailable" }) },

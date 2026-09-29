@@ -18,7 +18,8 @@ import { Freshness, RefreshButton } from "@/components/ui/refresh-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RecentAlerts } from "@/components/notifications/RecentAlerts";
 import { useRecentAlerts } from "@/components/notifications/useRecentAlerts";
-import { RECENT_ALERTS_COPY } from "@/lib/notificationsCopy";
+import { EMAIL_ALERTS_COPY, EMAIL_ALERTS_HREF, RECENT_ALERTS_COPY } from "@/lib/notificationsCopy";
+import { TextLink } from "@/components/ui/text-link";
 
 /**
  * `/admin` — the console's Overview: what needs an admin right now, what every admin was recently
@@ -387,6 +388,10 @@ export default function AdminHome() {
       </Section>
       <Section title={RECENT_ALERTS_COPY.title} description={RECENT_ALERTS_COPY.description}>
         <RecentAlerts feed={alerts} />
+        {/* F3.11: the switches lived only in Profile as far as anyone could find them. */}
+        <TextLink variant="standalone" to={EMAIL_ALERTS_HREF} className="self-start text-sm">
+          {EMAIL_ALERTS_COPY.chooseLink}
+        </TextLink>
       </Section>
       <Section title="Console" description="Every section, and what it is for.">
         <QuickLinks attention={attention} />

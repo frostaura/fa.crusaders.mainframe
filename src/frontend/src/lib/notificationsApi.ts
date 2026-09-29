@@ -51,6 +51,11 @@ export type AdminNoticeKind = {
   description: string;
   optional: boolean;
   opted_out: boolean;
+  /**
+   * How many OTHER active admins are still emailed this kind (review round 1, F3.11). Absent from
+   * an API that does not send it — then the switch says what it cannot know rather than guessing.
+   */
+  others_receiving?: number;
 };
 
 /** The feed's page size. Twenty is the server's own default; asked for explicitly so both agree. */

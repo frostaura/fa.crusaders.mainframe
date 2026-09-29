@@ -6,7 +6,7 @@ import {
   doorFixture, doorsServer, memberFixture, refuse, renderPage, signIn, signOut, stubFetch, type StubRoute,
 } from "@/test/harness";
 import { noticeFixture } from "@/components/notifications/fixtures";
-import { RECENT_ALERTS_COPY } from "@/lib/notificationsCopy";
+import { EMAIL_ALERTS_COPY, EMAIL_ALERTS_HREF, RECENT_ALERTS_COPY } from "@/lib/notificationsCopy";
 
 /**
  * The console's Overview: "Needs attention", then every section.
@@ -257,7 +257,14 @@ describe("the Overview's Recent alerts (R23)", () => {
     renderHome();
 
     expect(await within(alerts()).findByText("A thing happened")).toBeInTheDocument();
-    expect(within(alerts()).queryAllByRole("link")).toHaveLength(0);
+    // The one link in the section is the way to the email switches (F3.11), not the notice.
+    expect(within(alerts()).queryAllByRole("link").filter((a) => a.getAttribute("href") !== EMAIL_ALERTS_HREF)).toHaveLength(0);
+  });
+
+  it("links to the email alert switches from the alerts themselves (F3.11)", async () => {
+    setup();
+    renderHome();
+    expect(await within(alerts()).findByRole("link", { name: EMAIL_ALERTS_COPY.chooseLink })).toHaveAttribute("href", EMAIL_ALERTS_HREF);
   });
 
   it("says there are none only when the read answered with none", async () => {
