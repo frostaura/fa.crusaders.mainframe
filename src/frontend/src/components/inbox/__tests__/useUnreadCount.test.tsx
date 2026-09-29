@@ -14,7 +14,7 @@ const balance = vi.hoisted(() => ({
   state: "loading" as "loading" | "live" | "degraded" | "unavailable",
   noteUnread: vi.fn(),
 }));
-const auth = vi.hoisted(() => ({ status: "authenticated", mustChangePassword: false }));
+const auth = vi.hoisted(() => ({ status: "authenticated", mustChangePassword: false, userId: "member-a" }));
 
 vi.mock("@/lib/balance", () => ({ useBalance: () => balance }));
 vi.mock("@/lib/auth", () => ({ useAuth: () => auth }));
@@ -48,7 +48,7 @@ beforeEach(() => {
   vi.spyOn(document, "visibilityState", "get").mockImplementation(() => (hidden ? "hidden" : "visible"));
   Object.assign(balance, { unreadCount: null, state: "loading" });
   balance.noteUnread.mockReset();
-  Object.assign(auth, { status: "authenticated", mustChangePassword: false });
+  Object.assign(auth, { status: "authenticated", mustChangePassword: false, userId: "member-a" });
   resetUnread();
 });
 
@@ -68,6 +68,23 @@ function deferred<T>() {
 }
 
 describe("the unread count store", () => {
+  it("D2 — re-reads, and forgets the last member's figure, when a sign-in changes who is signed in", async () => {
+    const spy = vi.spyOn(playersEndpoints, "unreadCount").mockResolvedValueOnce({ unread_count: 3 });
+    const view = render(<Probe />);
+    await flush();
+    expect(count()).toBe("3");
+
+    const next = deferred<{ unread_count: number }>();
+    spy.mockReturnValueOnce(next.promise);
+    auth.userId = "member-b";
+    view.rerender(<Probe />);
+    await flush();
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(count()).toBe("none");
+    await act(async () => { next.resolve({ unread_count: 9 }); await next.promise; });
+    expect(count()).toBe("9");
+  });
+
   it("reads once when a session starts", async () => {
     const spy = vi.spyOn(playersEndpoints, "unreadCount").mockResolvedValue({ unread_count: 3 });
     render(<Probe />);

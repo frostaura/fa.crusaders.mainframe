@@ -275,12 +275,21 @@ export type LiveBalance = {
 
 export function useLiveBalance({
   enabled,
+  identity = null,
   transport,
   policy: given,
   random = Math.random,
 }: {
   /** Authenticated, and not held behind the forced-password-change gate. */
   enabled: boolean;
+  /**
+   * WHO the balance belongs to (D1/D2). A sign-in moves this without moving `enabled`
+   * ("authenticated" to "authenticated"), and before it was a dependency the chip went on
+   * showing the previous identity's figure — a red "0.00 cr" for a stale token's deleted member
+   * — and its stream stayed on the previous member's ticket. A change starts over: no figure,
+   * loading, a fresh read and a fresh stream.
+   */
+  identity?: string | null;
   transport?: BalanceTransport;
   policy?: LiveBalancePolicy;
   random?: () => number;
@@ -298,6 +307,8 @@ export function useLiveBalance({
   const [unreadCount, setUnreadCount] = useState<number | null>(null);
 
   const inflight = useRef(false);
+  /** Bumped on every identity change, so a read that answers for the previous one is dropped. */
+  const generation = useRef(0);
   /**
    * The figure the last movement was measured from.
    *
@@ -338,18 +349,20 @@ export function useLiveBalance({
     if (!enabled) return;
     if (inflight.current) return;
     inflight.current = true;
+    const asked = generation.current;
     if (options?.expectSelf) expectSelf.current = true;
     try {
       const w = await endpoints.wallet();
+      if (asked !== generation.current) return;
       setHeldFigures(heldFrom(w));
       record(w.balance_credits);
       setState((current) => (current === "degraded" ? "degraded" : "live"));
     } catch {
       // Silent: the chip keeps the figure it has. What it must NOT do is claim that figure is
       // live, which is what the degraded state below is for.
-      setState((current) => (current === "loading" ? "unavailable" : current));
+      if (asked === generation.current) setState((current) => (current === "loading" ? "unavailable" : current));
     } finally {
-      inflight.current = false;
+      if (asked === generation.current) inflight.current = false;
     }
   }, [enabled, record]);
 
@@ -369,21 +382,23 @@ export function useLiveBalance({
   // Initial read, and on the gate coming down. Kept separate from the stream effect: an HTTP
   // read is one round trip and a stream negotiation is several, and the member is looking at
   // the chip now.
+  //
+  // Every change of identity starts from nothing — the previous member's figure is not this
+  // member's, and a figure carried across a sign-in is how a chip showed a red zero that
+  // belonged to nobody who was signed in (D1).
   useEffect(() => {
-    if (!enabled) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears a stale balance on sign-out
-      setBalance(null);
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- ditto
-      setHeldFigures(null);
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- ditto
-      setUnreadCount(null);
-      previous.current = null;
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- ditto
-      setState("loading");
-      return;
-    }
-    void refresh();
-  }, [enabled, refresh]);
+    generation.current += 1;
+    inflight.current = false;
+    expectSelf.current = false;
+    previous.current = null;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears a stale balance on sign-out or a change of member
+    setBalance(null);
+    setHeldFigures(null);
+    setUnreadCount(null);
+    setDelta(null);
+    setState("loading");
+    if (enabled) void refresh();
+  }, [enabled, identity, refresh]);
 
   // Refresh when the tab comes back — a manual top-up in another tab, a phone waking up in a
   // squash club. `visibilitychange` as well as `focus`, because a backgrounded PWA that is
@@ -527,7 +542,7 @@ export function useLiveBalance({
       stopPolling();
       drop();
     };
-  }, [enabled, transport, policy, random, record, refresh]);
+  }, [enabled, identity, transport, policy, random, record, refresh]);
 
   return {
     balance,

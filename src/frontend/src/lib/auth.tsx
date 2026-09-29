@@ -37,11 +37,39 @@ type AuthState =
       mustChangePassword: boolean;
     };
 
+/**
+ * How the last session in this tab ended, until `/login` has read it. (D7, D11)
+ *
+ * <p>
+ * <b>Held here, not in router state, because router state lost the race.</b> "Sign out
+ * everywhere" used to hand its sentence to `/login` through `navigate(..., { state })`, and in
+ * the real app the auth reset re-rendered the guarded page first: `RequireAuth` redirected to
+ * `/login` carrying `{ from }` and the notice never arrived. A unit test with a bare `/profile`
+ * route had no guard to race and stayed green. The provider outlives every route, so nothing can
+ * overtake it.
+ * </p>
+ *
+ * <p>
+ * <b>It also decides whose "return to" a `from` is.</b> After a deliberate sign-out the next
+ * person at the keyboard is not asked to land on the last person's page — they were landing on
+ * `/profile` because the guard had captured it on the way out. After a session was taken away
+ * (an expiry, a revocation) the page is kept, but only for the SAME member signing back in.
+ * </p>
+ */
+export type SessionEnding = {
+  kind: "signed-out" | "expired";
+  /** Who the ended session belonged to, as far as this browser ever confirmed; null if never. */
+  userId: string | null;
+  /** What `/login` should say — "Sign out everywhere" passes its sentence here. */
+  notice: string | null;
+};
+
 type AuthCtx = AuthState & {
-  login: (email: string, password: string) => Promise<void>;
-  loginWithPasskey: () => Promise<void>;
-  loginAsSeededAdmin: () => Promise<void>;
-  setSessionFromMagicLink: (token: string) => Promise<void>;
+  /** Each sign-in resolves with the id of the member now signed in. */
+  login: (email: string, password: string) => Promise<string>;
+  loginWithPasskey: () => Promise<string>;
+  loginAsSeededAdmin: () => Promise<string>;
+  setSessionFromMagicLink: (token: string) => Promise<string>;
   /** Resolves once the server has been told; the local session is gone before it resolves. */
   logout: () => Promise<void>;
   /**
@@ -49,7 +77,10 @@ type AuthCtx = AuthState & {
    * this is `logout`'s local half alone — the same stores wiped, the member code's key included,
    * and no server call, because the token it would send is already dead.
    */
-  signedOutEverywhere: () => void;
+  signedOutEverywhere: (notice?: string) => void;
+  /** See {@link SessionEnding}. Null once `/login` has taken it, and after any sign-in. */
+  sessionEnding: SessionEnding | null;
+  clearSessionEnding: () => void;
   /** The forced change is done — clears the flag without a whole re-bootstrap. */
   /** After the member's own password change: adopt the fresh token (the one sent is now dead). */
   passwordChanged: (accessToken?: string) => void;
@@ -267,9 +298,37 @@ function endLocally(): void {
   forgetIdentity();
 }
 
+type LoginAnswer = { access_token: string; user_id: string; is_admin: boolean; must_change_password?: boolean };
+
+/**
+ * The four ways in, which all end the same way: store the token, forget how the last session
+ * ended, and become that member. Each resolves with the member's id so `/login` can decide
+ * whether a remembered "return to" page is theirs (D11). Out of the provider for the length gate.
+ */
+function useSignIns(
+  setState: (next: AuthState) => void,
+  setSessionExpired: (expired: boolean) => void,
+  setSessionEnding: (ending: SessionEnding | null) => void,
+) {
+  const adopt = useCallback((r: LoginAnswer) => {
+    tokenStore.set(r.access_token);
+    setSessionExpired(false);
+    setSessionEnding(null);
+    setState({ status: "authenticated", userId: r.user_id, isAdmin: r.is_admin, mustChangePassword: r.must_change_password === true });
+    return r.user_id;
+  }, [setState, setSessionExpired, setSessionEnding]);
+  return useMemo(() => ({
+    login: async (email: string, password: string) => adopt(await endpoints.login(email, password)),
+    loginWithPasskey: async () => adopt(await runPasskeyLogin()),
+    loginAsSeededAdmin: async () => adopt(await endpoints.devAdminLogin()),
+    setSessionFromMagicLink: async (token: string) => adopt(await endpoints.magicLink(token)),
+  }), [adopt]);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ status: "loading" });
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [sessionEnding, setSessionEnding] = useState<SessionEnding | null>(null);
   const refreshTimer = useRef<number | null>(null);
   const probeTimer = useRef<number | null>(null);
   // The current status, readable from callbacks that were registered once — the api client's
@@ -289,6 +348,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * away rather than signing out.
    */
   const endSession = useCallback(() => {
+    setSessionEnding({ kind: "expired", userId: readLastIdentity(), notice: null });
     endLocally(); // D3 — see forgetIdentity; this is the ending nobody presses anything for.
     setSessionExpired(true);
     setState({ status: "anonymous" });
@@ -353,6 +413,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setUnauthorizedHandler(() => {
       if (statusRef.current === "anonymous") return;
+      setSessionEnding({ kind: "expired", userId: readLastIdentity(), notice: null });
       // Same reasoning as endSession: the session is over, so nothing this browser cached
       // while it was alive may survive it.
       void clearOfflineCache();
@@ -405,38 +466,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return refreshFromToken();
   }, [refreshFromToken]);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const r = await endpoints.login(email, password);
-    tokenStore.set(r.access_token);
-    setSessionExpired(false);
-    setState({ status: "authenticated", userId: r.user_id, isAdmin: r.is_admin, mustChangePassword: r.must_change_password === true });
-  }, []);
+  const { login, loginWithPasskey, loginAsSeededAdmin, setSessionFromMagicLink } = useSignIns(setState, setSessionExpired, setSessionEnding);
 
-  const loginWithPasskey = useCallback(async () => {
-    const r = await runPasskeyLogin();
-    tokenStore.set(r.access_token);
-    setSessionExpired(false);
-    setState({ status: "authenticated", userId: r.user_id, isAdmin: r.is_admin, mustChangePassword: r.must_change_password === true });
-  }, []);
-
-  const loginAsSeededAdmin = useCallback(async () => {
-    const r = await endpoints.devAdminLogin();
-    tokenStore.set(r.access_token);
-    setSessionExpired(false);
-    setState({ status: "authenticated", userId: r.user_id, isAdmin: r.is_admin, mustChangePassword: r.must_change_password === true });
-  }, []);
-
-  const setSessionFromMagicLink = useCallback(async (token: string) => {
-    const r = await endpoints.magicLink(token);
-    tokenStore.set(r.access_token);
-    setSessionExpired(false);
-    setState({ status: "authenticated", userId: r.user_id, isAdmin: r.is_admin, mustChangePassword: r.must_change_password === true });
-  }, []);
-
-  const signedOutEverywhere = useCallback(() => {
+  const signedOutEverywhere = useCallback((notice?: string) => {
+    const userId = readLastIdentity();
     endLocally();
     // Signing out on purpose is not losing a session; /login should not commiserate about it.
     setSessionExpired(false);
+    setSessionEnding({ kind: "signed-out", userId, notice: notice ?? null });
     setState({ status: "anonymous" });
   }, []);
 
@@ -462,10 +499,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clearSessionExpired = useCallback(() => setSessionExpired(false), []);
+  const clearSessionEnding = useCallback(() => setSessionEnding(null), []);
 
   const value = useMemo<AuthCtx>(
-    () => ({ ...state, login, loginWithPasskey, loginAsSeededAdmin, setSessionFromMagicLink, logout, signedOutEverywhere, passwordChanged, sessionExpired, clearSessionExpired, retryConnection }),
-    [state, login, loginWithPasskey, loginAsSeededAdmin, setSessionFromMagicLink, logout, signedOutEverywhere, passwordChanged, sessionExpired, clearSessionExpired, retryConnection],
+    () => ({ ...state, login, loginWithPasskey, loginAsSeededAdmin, setSessionFromMagicLink, logout, signedOutEverywhere, passwordChanged, sessionExpired, clearSessionExpired, sessionEnding, clearSessionEnding, retryConnection }),
+    [state, login, loginWithPasskey, loginAsSeededAdmin, setSessionFromMagicLink, logout, signedOutEverywhere, passwordChanged, sessionExpired, clearSessionExpired, sessionEnding, clearSessionEnding, retryConnection],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

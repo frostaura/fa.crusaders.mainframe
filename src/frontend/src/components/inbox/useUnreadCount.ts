@@ -70,7 +70,9 @@ function getSnapshot(): Snapshot {
 export function resetUnread() {
   version += 1;
   inFlight = null;
+  if (snapshot === EMPTY) return;
   snapshot = EMPTY;
+  for (const listener of [...listeners]) listener();
 }
 
 /** A figure somebody authoritative just stated — the stream, a page read, an optimistic mark. */
@@ -124,17 +126,23 @@ export function useUnreadCountDriver(): void {
   const auth = useAuth();
   const { unreadCount: pushed, state } = useBalance();
   const enabled = auth.status === "authenticated" && !auth.mustChangePassword;
+  // D2 — whose inbox. A sign-in moves this without moving `enabled`, and the bell went on
+  // showing the previous member's count until something happened to re-read it.
+  const identity = auth.status === "authenticated" ? auth.userId : null;
   const live = state === "live";
 
+  // The first read of a session — and of every change of member, forgetting the last one's.
+  useEffect(() => {
+    if (!enabled) return;
+    resetUnread();
+    void readUnread();
+  }, [enabled, identity]);
+
   // The stream's figure, whenever it changes. It outranks any read that is still out.
+  // Declared AFTER the reset above, so a figure pushed in the same pass is not wiped by it.
   useEffect(() => {
     if (enabled && pushed !== null) setUnread(pushed);
   }, [enabled, pushed]);
-
-  // The first read of a session.
-  useEffect(() => {
-    if (enabled) void readUnread();
-  }, [enabled]);
 
   // Back in view: one read, live or not — the stream only pushes CHANGES, not the figure.
   useEffect(() => {

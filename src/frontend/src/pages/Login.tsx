@@ -1,6 +1,6 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useAuth } from "../lib/auth";
+import { useAuth, type SessionEnding } from "../lib/auth";
 import { ApiError, endpoints, errorCode } from "../lib/api";
 import { isPasskeySupported } from "../lib/webauthn";
 import { useAsyncAction } from "../lib/useAsyncAction";
@@ -103,25 +103,52 @@ function RefusalContact({ contact }: { contact: Contact }) {
 }
 
 /**
+ * How the last session in this tab ended, taken ONCE when the page opens and then cleared from
+ * the provider (D7, D11). Held in the page's own state so the notice survives the clear, and
+ * cleared so a LATER redirect to /login in the same visit — an anonymous member opening a
+ * shared invite link — carries its `from` as it always did.
+ */
+function useCapturedEnding(): SessionEnding | null {
+  const auth = useAuth();
+  const [ending] = useState(() => auth.sessionEnding);
+  const { sessionEnding, clearSessionEnding } = auth;
+  useEffect(() => { if (sessionEnding) clearSessionEnding(); }, [sessionEnding, clearSessionEnding]);
+  return ending;
+}
+
+/** Where to land after signing in, and — when the page was someone's — whose it was. */
+type ReturnPath = { path: string; onlyFor: string | null };
+
+/**
  * The page the member actually asked for, captured by `RequireAuth` when it turned them away.
  * Only ever an in-app path: a `from` carrying an absolute URL would make this an open redirect.
+ *
+ * <p>
+ * <b>D11 — never the last person's page.</b> After a deliberate sign-out the guard still
+ * captured the page being left, and the next person to sign in on that phone landed on the
+ * previous member's `/profile`. A sign-out drops the `from`; an expiry keeps it only for the
+ * member whose session it was.
+ * </p>
  */
-function useReturnPath(): string {
+function useReturnPath(ending: SessionEnding | null): ReturnPath {
   const location = useLocation();
   const state = location.state as { from?: { pathname?: string; search?: string } } | null;
   const path = state?.from?.pathname;
-  if (!path || !path.startsWith("/") || path.startsWith("//") || path === "/login") return LANDING_PATH;
-  return `${path}${state?.from?.search ?? ""}`;
+  if (ending?.kind === "signed-out") return { path: LANDING_PATH, onlyFor: null };
+  if (!path || !path.startsWith("/") || path.startsWith("//") || path === "/login") return { path: LANDING_PATH, onlyFor: null };
+  return { path: `${path}${state?.from?.search ?? ""}`, onlyFor: ending?.userId ?? null };
 }
 
 /**
  * The sentence "Sign out everywhere" hands over (member-code §10): that session ended on purpose,
  * on every device, so this page says so rather than presenting a blank form — and says it as a
- * fact, not as the "your session ended" commiseration an expiry gets.
+ * fact, not as the "your session ended" commiseration an expiry gets. From the provider first
+ * (see {@link useCapturedEnding}); router state is kept as a second source.
  */
-function useSignedOutNotice(): string | null {
+function useSignedOutNotice(ending: SessionEnding | null): string | null {
   const location = useLocation();
   const notice = (location.state as { signedOutNotice?: unknown } | null)?.signedOutNotice;
+  if (ending?.notice) return ending.notice;
   return typeof notice === "string" ? notice : null;
 }
 
@@ -200,13 +227,14 @@ function DevShortcut({ onLanded, onRefused }: { onLanded: () => void; onRefused:
 }
 
 /** Two ways in, one at a time. Re-entry from any of them is ignored while another runs. */
-function useSignIn(onRefused: (refusal: Refusal | null) => void) {
+function useSignIn(onRefused: (refusal: Refusal | null) => void, ending: SessionEnding | null) {
   const auth = useAuth();
   const nav = useNavigate();
-  const from = useReturnPath();
-  const land = () => {
+  const from = useReturnPath(ending);
+  const land = (userId?: string) => {
     auth.clearSessionExpired();
-    nav(from, { replace: true });
+    const theirs = from.onlyFor === null || from.onlyFor === userId;
+    nav(theirs ? from.path : LANDING_PATH, { replace: true });
   };
   const password = useAsyncAction((e: string, p: string) => auth.login(e, p), {
     success: land,
@@ -228,8 +256,9 @@ export default function LoginPage() {
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
-  const signIn = useSignIn(setRefusal);
-  const signedOut = useSignedOutNotice();
+  const ending = useCapturedEnding();
+  const signIn = useSignIn(setRefusal, ending);
+  const signedOut = useSignedOutNotice(ending);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();

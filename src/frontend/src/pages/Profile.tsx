@@ -62,8 +62,10 @@ function useStalled(missing: boolean): [boolean, () => void] {
 }
 
 export default function ProfilePage() {
-  const { profile, loading, refresh } = useProfile();
-  const [failed, clearFailed] = useStalled(!profile && !loading);
+  const { profile, loading, failed: readFailed, refresh } = useProfile();
+  const [stalled, clearFailed] = useStalled(!profile && !loading);
+  // The provider says so when the read failed (D2); the stall is kept for a read never asked.
+  const failed = stalled || (readFailed && !profile && !loading);
 
   return (
     <PageShell width="narrow">

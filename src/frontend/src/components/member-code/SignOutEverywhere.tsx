@@ -31,7 +31,9 @@ export function SignOutEverywhere() {
   const confirm = async () => {
     const r = await endpoints.revokeAllSessions(revokePasskeys);
     const state: SignedOutNotice = { signedOutNotice: COPY.done(r.passkeys_revoked, r.passkeys_removed) };
-    auth.signedOutEverywhere();
+    // The sentence rides on the provider (D7): in the real app the auth reset re-renders the
+    // guarded page first and its redirect to /login overtook router state every time.
+    auth.signedOutEverywhere(state.signedOutNotice);
     navigate("/login", { replace: true, state });
   };
 

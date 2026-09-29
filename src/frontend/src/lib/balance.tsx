@@ -228,6 +228,8 @@ export function BalanceProvider({ children, transport, policy }: {
   const gated = auth.status === "authenticated" && auth.mustChangePassword;
   const live = useLiveBalance({
     enabled: auth.status === "authenticated" && !gated,
+    // D1/D2 — whose balance it is. A sign-in changes this without changing `enabled`.
+    identity: auth.status === "authenticated" ? auth.userId : null,
     transport,
     policy,
   });

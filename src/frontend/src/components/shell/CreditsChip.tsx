@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Wallet } from "@/components/ui/icons";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useBalance, walletHref, walletLabel, walletTone } from "@/lib/balance";
 import { useCountUp, usePrefersReducedMotion } from "@/lib/useCountUp";
 import { useZeroBalanceEntice } from "@/lib/zeroBalanceEntice";
@@ -70,6 +71,16 @@ function chipTitle(state: string, loading: boolean, heldCredits: number, owedBac
   return heldCredits > 0 || owedBack > 0 ? chipHeldTitle(heldCredits, owedBack) : "Wallet balance — tap to top up";
 }
 
+/**
+ * The figure — or, while it is loading, a neutral placeholder the width of one (D1). Never a
+ * zero: a loading chip once painted a red "0.00 cr" that belonged to nobody signed in.
+ * aria-hidden: the label says the number in words; "cr" is not a word. Never truncated.
+ */
+function ChipFigure({ balance, loading, displayed }: { balance: number | null; loading: boolean; displayed: number }) {
+  if (balance === null && loading) return <Skeleton className="h-4 w-14 rounded-full bg-border" />;
+  return <span aria-hidden="true">{balance === null ? "— cr" : formatCredits(displayed)}</span>;
+}
+
 export function CreditsChip() {
   const { balance, loading, state, delta, held } = useBalance();
   // D11 §3a — the figure stays the whole balance; the name and title say what of it is held.
@@ -111,8 +122,7 @@ export function CreditsChip() {
         )}
       >
         <Wallet size={16} weight="fill" aria-hidden="true" className={cn("shrink-0", ICON_TONE[tone])} />
-        {/* aria-hidden: the label says the number in words; "cr" is not a word. Never truncated. */}
-        <span aria-hidden="true">{balance === null ? "— cr" : formatCredits(displayed)}</span>
+        <ChipFigure balance={balance} loading={loading} displayed={displayed} />
         {entice.showWord ? <span aria-hidden="true">· Top up</span> : null}
         {state === "degraded" ? (
           <span aria-hidden="true" className="ml-0.5 inline-block size-1 rounded-full border border-current opacity-70" />
