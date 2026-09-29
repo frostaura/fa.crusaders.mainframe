@@ -355,7 +355,7 @@ public static class PlayCursor
 
     public static (DateTimeOffset At, Guid Id)? Parse(string? cursor)
     {
-        if (string.IsNullOrWhiteSpace(cursor) || cursor.Length > 64) return null;
+        if (string.IsNullOrWhiteSpace(cursor) || cursor.Length > 128) return null;
         try
         {
             var padded = cursor.Replace('-', '+').Replace('_', '/');
