@@ -154,6 +154,8 @@ public sealed class RetentionWorker : BackgroundService
 
             await PurgeMemberCodeRowsAsync(db, ct);
 
+            await PurgeSeenCelebrationsAsync(db, settings, ct);
+
             if (totalAnonymised > 0)
             {
                 db.AuditLogs.Add(new AuditLog
@@ -222,6 +224,20 @@ public sealed class RetentionWorker : BackgroundService
         _logger.LogInformation(
             "Retention purged {Rows} door rows and {Receipts} door receipts for tenant {Slug}",
             rows.Count, receipts.Count, tenant.Slug);
+    }
+
+    /// <summary>
+    /// Play celebrations (D14) the member has acknowledged, on the inbox's own horizon — one number
+    /// for "how long a read notice lives". Unseen ones are never pruned. Loaded and removed rather
+    /// than ExecuteDelete, like every purge here: the unit suites run this on the in-memory provider.
+    /// </summary>
+    private static async Task PurgeSeenCelebrationsAsync(MainframeDbContext db, TenantSettingsView settings, CancellationToken ct)
+    {
+        var cutoff = DateTimeOffset.UtcNow.AddDays(-PlayerSettings.NotificationRetentionDays(settings));
+        var seen = await db.PlayCelebrations.Where(c => c.SeenAt != null && c.SeenAt < cutoff).ToListAsync(ct);
+        if (seen.Count == 0) return;
+        db.PlayCelebrations.RemoveRange(seen);
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>

@@ -438,6 +438,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.Property<Guid?>("PaidByUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("PlayRecomputeDueAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid?>("ScheduleId")
                         .HasColumnType("uuid");
 
@@ -479,6 +482,9 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "PlayRecomputeDueAt")
+                        .HasFilter("\"PlayRecomputeDueAt\" IS NOT NULL");
 
                     b.HasIndex("TenantId", "ShareDeadlineAt")
                         .HasFilter("\"ShareDeadlineAt\" IS NOT NULL");
@@ -1314,6 +1320,222 @@ namespace Crusaders.Mainframe.Api.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.MatchResult", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("AutoConfirmed")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("BookingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CloseReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTimeOffset?>("ClosedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ClosedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ConfirmDueAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("ConfirmedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ConfirmedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DisputeNote")
+                        .HasMaxLength(280)
+                        .HasColumnType("character varying(280)");
+
+                    b.Property<DateTimeOffset?>("DisputedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DisputedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("EditedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Format")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("GamesJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<short>("GamesWonA")
+                        .HasColumnType("smallint");
+
+                    b.Property<short>("GamesWonB")
+                        .HasColumnType("smallint");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("RecordedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTimeOffset>("SubmittedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("SubmittedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.Property<string>("WinnerSide")
+                        .IsRequired()
+                        .HasColumnType("character(1)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BookingId");
+
+                    b.HasIndex("TenantId", "BookingId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_match_results_live_per_booking")
+                        .HasFilter("\"Status\" IN ('pending','confirmed','disputed')");
+
+                    b.HasIndex("TenantId", "ConfirmDueAt")
+                        .HasFilter("\"Status\" = 'pending'");
+
+                    b.HasIndex("TenantId", "DisputedAt")
+                        .HasFilter("\"Status\" = 'disputed'");
+
+                    b.HasIndex("TenantId", "BookingId", "CreatedAt");
+
+                    b.HasIndex("TenantId", "RecordedByUserId", "IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "Status", "CreatedAt");
+
+                    b.ToTable("match_results", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_match_results_format", "\"Format\" IN ('best_of_3','best_of_5')");
+
+                            t.HasCheckConstraint("ck_match_results_games_won", "\"GamesWonA\" <> \"GamesWonB\"");
+
+                            t.HasCheckConstraint("ck_match_results_status", "\"Status\" IN ('pending','confirmed','disputed','voided','withdrawn')");
+
+                            t.HasCheckConstraint("ck_match_results_winner", "\"WinnerSide\" IN ('a','b')");
+                        });
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.MatchResultPlayer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("GuestName")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid?>("ParticipantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<short>("Position")
+                        .HasColumnType("smallint");
+
+                    b.Property<Guid>("ResultId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Side")
+                        .IsRequired()
+                        .HasColumnType("character(1)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ResultId", "UserId")
+                        .IsUnique()
+                        .HasFilter("\"UserId\" IS NOT NULL");
+
+                    b.HasIndex("TenantId", "UserId");
+
+                    b.HasIndex("ResultId", "Side", "Position")
+                        .IsUnique();
+
+                    b.ToTable("match_result_players", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_match_result_players_position", "\"Position\" IN (1, 2)");
+
+                            t.HasCheckConstraint("ck_match_result_players_side", "\"Side\" IN ('a','b')");
+
+                            t.HasCheckConstraint("ck_match_result_players_who", "(\"UserId\" IS NOT NULL AND \"GuestName\" IS NULL AND \"ParticipantId\" IS NULL) OR (\"UserId\" IS NULL AND \"GuestName\" IS NOT NULL AND \"ParticipantId\" IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.MemberBadge", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("AwardedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("BadgeKey")
+                        .IsRequired()
+                        .HasMaxLength(48)
+                        .HasColumnType("character varying(48)");
+
+                    b.Property<Guid?>("BookingId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ResultId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "UserId", "BadgeKey")
+                        .IsUnique();
+
+                    b.ToTable("member_badges", (string)null);
+                });
+
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.MemberCode", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1602,6 +1824,78 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.ToTable("member_notifications", (string)null);
                 });
 
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.MemberPlayProfile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("CelebrationsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("EvaluatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("EvaluatorVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("MonthlyGoalMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("member_play_profiles", (string)null);
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.MemberStreakPause", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("EndedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "UserId")
+                        .IsUnique()
+                        .HasFilter("\"EndedAt\" IS NULL");
+
+                    b.ToTable("member_streak_pauses", (string)null);
+                });
+
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.Membership", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1742,6 +2036,53 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.HasIndex("TenantId", "UserId", "CreatedAt");
 
                     b.ToTable("pending_topups", (string)null);
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.PlayCelebration", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BadgeKey")
+                        .HasMaxLength(48)
+                        .HasColumnType("character varying(48)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DedupeKey")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<string>("Month")
+                        .HasMaxLength(7)
+                        .HasColumnType("character varying(7)");
+
+                    b.Property<DateTimeOffset?>("SeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "UserId")
+                        .HasFilter("\"SeenAt\" IS NULL");
+
+                    b.HasIndex("TenantId", "UserId", "DedupeKey")
+                        .IsUnique();
+
+                    b.ToTable("play_celebrations", (string)null);
                 });
 
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.Tenant", b =>
@@ -2110,6 +2451,24 @@ namespace Crusaders.Mainframe.Api.Migrations
                     b.ToTable("webhook_endpoints", (string)null);
                 });
 
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.MatchResult", b =>
+                {
+                    b.HasOne("Crusaders.Mainframe.Api.Domain.Booking", null)
+                        .WithMany()
+                        .HasForeignKey("BookingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.MatchResultPlayer", b =>
+                {
+                    b.HasOne("Crusaders.Mainframe.Api.Domain.MatchResult", null)
+                        .WithMany("Players")
+                        .HasForeignKey("ResultId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.Membership", b =>
                 {
                     b.HasOne("Crusaders.Mainframe.Api.Domain.User", "User")
@@ -2119,6 +2478,11 @@ namespace Crusaders.Mainframe.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.MatchResult", b =>
+                {
+                    b.Navigation("Players");
                 });
 
             modelBuilder.Entity("Crusaders.Mainframe.Api.Domain.User", b =>

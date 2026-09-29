@@ -158,6 +158,10 @@ public static class AdminChangeActions
     public const string DoorsReopenedAll = "doors.reopened_all";
     public const string MonitoringErrorResolved = "monitoring.error_resolved";
 
+    // Play (D14). A result the club removed, and a disputed result the club kept.
+    public const string PlayResultVoided = "play.result_voided";
+    public const string PlayResultUpheld = "play.result_upheld";
+
     /// <summary>
     /// What a row whose action this vocabulary does not know renders as. Not stored — a writer
     /// always names a real action — but returned by <see cref="Headline"/> so a console never
@@ -179,6 +183,7 @@ public static class AdminChangeActions
         MemberPasswordReset, MemberTraceViewed, MemberDoorHistoryViewed, MemberAdminGranted, MemberAdminRevoked,
         SettingsUpdated, CourtCreated, CourtUpdated, CourtDeactivated, ChangesExported,
         DeviceUpdated, DeviceDeleted, DeviceApiKeyRegenerated, DoorsShutAll, DoorsReopenedAll, MonitoringErrorResolved,
+        PlayResultVoided, PlayResultUpheld,
     ];
 
     /// <summary>
@@ -192,6 +197,7 @@ public static class AdminChangeActions
         CreditAdjusted, CreditToppedUp, GroupArchived, MemberSuspended, MemberRejected, CourtDeactivated,
         DeviceDeleted, MemberAdminRevoked,
         BookingPlayerRemoved, BookingPlayerAcceptedOnBehalf, BookingShareSettledOutside, BookingShareCollected,
+        PlayResultVoided, PlayResultUpheld,
     ];
 
     /// <summary>The area an action belongs to, or null when the action is not one of ours.</summary>
@@ -221,6 +227,7 @@ public static class AdminChangeActions
                 or ChangesExported => AdminChangeAreas.Setting,
             DeviceUpdated or DeviceDeleted or DeviceApiKeyRegenerated or DoorsShutAll
                 or DoorsReopenedAll or MonitoringErrorResolved => AdminChangeAreas.Device,
+            PlayResultVoided or PlayResultUpheld => AdminChangeAreas.Play,
             _ => null,
         };
     }
@@ -291,6 +298,9 @@ public static class AdminChangeActions
             DoorsShutAll => "Shut every door at once",
             DoorsReopenedAll => "Reopened the doors",
             MonitoringErrorResolved => $"Marked a device fault as resolved{of}",
+
+            PlayResultVoided => $"Removed a match result{of}",
+            PlayResultUpheld => $"Kept a disputed match result{of}",
 
             _ => $"Did something this club's records have no word for ({action})",
         };

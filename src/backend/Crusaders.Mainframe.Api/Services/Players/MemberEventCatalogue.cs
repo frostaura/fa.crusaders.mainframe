@@ -23,6 +23,10 @@ public sealed record ReturnWaitingPayload(
 
 public sealed record GameCancelledPayload(Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal);
 
+/// <summary>D14: a result the reader is asked to confirm, frozen at the first recording (§8).</summary>
+public sealed record ResultToConfirmPayload(
+    Guid BookingId, string SubmitterName, string CourtName, string WhenLocal, string ScoreLine, string ConfirmDueLocal);
+
 public sealed record GameChangedPayload(
     Guid BookingId, string OrganiserName, string CourtName, string StartsAtLocal, bool Removed, decimal? NewShareCredits, bool NeedsConsent);
 
@@ -68,8 +72,27 @@ public static class MemberEventCatalogue
     /// </summary>
     public const string Response = "players.response";
 
-    /// <summary>The kinds that are mailed. <see cref="Response"/> is inbox-only and never reaches the outbox.</summary>
-    public static readonly IReadOnlyList<string> All = [Invited, ShareMoved, Reminder, Lapsed, GameCancelled, GameChanged, ReturnWaiting];
+    // ---- Play (D14, docs/specs/play.md §8). Only the first is mailed — the one kind that asks the
+    // member to do something by a deadline; the rest are inbox lines. ----
+
+    /// <summary>A result the reader's side is asked to confirm. Mailed once per (booking, member), never urgent.</summary>
+    public const string ResultToConfirm = "play.result_to_confirm";
+
+    /// <summary>A result was confirmed — by the other side, or by silence. Inbox only.</summary>
+    public const string ResultConfirmed = "play.result_confirmed";
+
+    /// <summary>The other side disputed a result. Inbox only.</summary>
+    public const string ResultDisputed = "play.result_disputed";
+
+    /// <summary>The club removed a result. Inbox only.</summary>
+    public const string ResultVoided = "play.result_voided";
+
+    /// <summary>A badge earned while it was still news. Inbox only.</summary>
+    public const string BadgeEarned = "play.badge_earned";
+
+    /// <summary>The kinds that are mailed. <see cref="Response"/> and the inbox-only play kinds never reach the outbox.</summary>
+    public static readonly IReadOnlyList<string> All =
+        [Invited, ShareMoved, Reminder, Lapsed, GameCancelled, GameChanged, ReturnWaiting, ResultToConfirm];
 
     private static readonly HashSet<string> Urgent = new(StringComparer.Ordinal) { ShareMoved, GameCancelled };
 
@@ -95,6 +118,8 @@ public static class MemberEventCatalogue
                 return ComposeChanged(c);
             case ReturnWaiting:
                 return ComposeReturnWaiting(c);
+            case ResultToConfirm:
+                return ComposeResultToConfirm(c);
             default:
                 throw new InvalidOperationException($"no message for member notice kind '{c.Row.Kind}'");
         }
@@ -139,6 +164,13 @@ public static class MemberEventCatalogue
         var p = c.Payload<ReturnWaitingPayload>();
         return EmailTemplates.ShareReturnWaiting(c.Club, c.To, new ShareReturnWaitingNotice(
             p.OtherName, p.CourtName, p.StartsAtLocal, p.AmountCredits, p.ToOrganiser, c.BookingUrl(p.BookingId)));
+    }
+
+    private static EmailMessage ComposeResultToConfirm(MemberMailContext c)
+    {
+        var p = c.Payload<ResultToConfirmPayload>();
+        return EmailTemplates.ResultToConfirm(c.Club, c.To, new ResultToConfirmNotice(
+            p.SubmitterName, p.CourtName, p.WhenLocal, p.ScoreLine, p.ConfirmDueLocal, $"{c.BookingUrl(p.BookingId)}?result=confirm"));
     }
 
     private static EmailMessage ComposeChanged(MemberMailContext c)

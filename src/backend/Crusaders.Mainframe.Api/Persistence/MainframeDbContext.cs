@@ -182,6 +182,7 @@ public partial class MainframeDbContext : DbContext
         ConfigureAdminNotifications(modelBuilder);
         ConfigureMemberCodes(modelBuilder);
         ConfigurePlayers(modelBuilder);
+        ConfigurePlay(modelBuilder);
 
         modelBuilder.Entity<Court>(e =>
         {
@@ -673,6 +674,8 @@ public partial class MainframeDbContext : DbContext
             e.HasIndex(b => new { b.TenantId, b.ShareDeadlineAt }).HasFilter("\"ShareDeadlineAt\" IS NOT NULL");
             // ...and the bookings a failed reconcile left due: a handful, found without a scan.
             e.HasIndex(b => new { b.TenantId, b.ShareReconcileDueAt }).HasFilter("\"ShareReconcileDueAt\" IS NOT NULL");
+            // D14: the play recompute markers a change staged — a handful, drained without a scan.
+            e.HasIndex(b => new { b.TenantId, b.PlayRecomputeDueAt }).HasFilter("\"PlayRecomputeDueAt\" IS NOT NULL");
             e.Property(b => b.AmountChargedCredits).HasColumnType("numeric(10,2)");
             e.Property(b => b.Status).HasConversion<int>();
             // How "edit this and future" finds an occurrence's rows, and how the grid learns
@@ -875,6 +878,23 @@ public partial class MainframeDbContext : DbContext
                 entry.Entity.Version++;
             }
         }
+
+        // And for a match result (D14): a confirm, a dispute, the auto-confirm sweep and an admin
+        // void race on one row; the version is also the client's expectedVersion.
+        foreach (var entry in ChangeTracker.Entries<MatchResult>())
+        {
+            if (entry.State == EntityState.Modified)
+            {
+                entry.Entity.Version++;
+            }
+        }
+        foreach (var entry in ChangeTracker.Entries<MemberPlayProfile>())
+        {
+            if (entry.State == EntityState.Modified)
+            {
+                entry.Entity.Version++;
+            }
+        }
     }
 
     /// <summary>
@@ -1003,7 +1023,7 @@ public partial class MainframeDbContext : DbContext
     {
         BumpBookingVersions();
         StampAuditScanInstants();
-        return SaveStagingShareReconcile(acceptAllChangesOnSuccess);
+        return SaveStaging(acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(
@@ -1011,6 +1031,6 @@ public partial class MainframeDbContext : DbContext
     {
         BumpBookingVersions();
         StampAuditScanInstants();
-        return SaveStagingShareReconcileAsync(acceptAllChangesOnSuccess, cancellationToken);
+        return SaveStagingAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 }

@@ -374,6 +374,16 @@ builder.Services.AddSingleton<ShareHook>();
 builder.Services.AddSingleton<DirectoryRateLimiter>();
 builder.Services.AddSingleton<Crusaders.Mainframe.Api.Workers.ShareWorker>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Crusaders.Mainframe.Api.Workers.ShareWorker>());
+
+// D14 play: results, the evaluator (badges and celebrations), the per-club sweep and its in-process
+// minute worker — no cron, no CI schedule — and the hook that evaluates a member's own taps at once.
+builder.Services.AddScoped<ResultService>();
+builder.Services.AddScoped<PlayQuery>();
+builder.Services.AddScoped<PlayEvaluator>();
+builder.Services.AddScoped<PlaySweep>();
+builder.Services.AddSingleton<PlayHook>();
+builder.Services.AddSingleton<Crusaders.Mainframe.Api.Workers.PlayWorker>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Crusaders.Mainframe.Api.Workers.PlayWorker>());
 // Item 14 — repeating schedules, materialised as real AdminBlock rows so the GiST
 // exclusion constraint is what actually reserves the court.
 builder.Services.AddScoped<BookingScheduleService>();
@@ -614,6 +624,8 @@ app.MapMemberGroupEndpoints();
 app.MapBookingEndpoints();
 app.MapMemberBulkBookingEndpoints();
 app.MapPlayersEndpoints();
+app.MapPlayEndpoints();
+app.MapAdminPlayEndpoints();
 app.MapMemberNotificationEndpoints();
 app.MapAdminConfigEndpoints();
 app.MapAdminDeviceEndpoints();

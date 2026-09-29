@@ -198,7 +198,7 @@ public sealed class TenantSettingsAccessor
         // Two blocks added by later lanes, each in a helper of its own so this method stays
         // under the complexity gate's length bound (-L 200) — the rule is unchanged: raw here,
         // bounded at each reader.
-        return WithMemberCodes(WithPlayers(view, root), root);
+        return WithPlay(WithMemberCodes(WithPlayers(view, root), root), root);
     }
 
     private static TenantSettingsView WithPlayers(TenantSettingsView view, JsonElement root)
@@ -218,6 +218,21 @@ public sealed class TenantSettingsAccessor
             MemberNotificationRetentionDays = TryInt(
                 root, PlayerSettings.NotificationRetentionDaysKey, PlayerSettings.DefaultNotificationRetentionDays),
             PlayerInvitesPerBooking = TryInt(root, PlayerSettings.InvitesPerBookingKey, PlayerSettings.DefaultInvitesPerBooking),
+        };
+    }
+
+    private static TenantSettingsView WithPlay(TenantSettingsView view, JsonElement root)
+    {
+        return view with
+        {
+            // Play (D14, docs/specs/play.md §6.4). Raw here, bounded by PlaySettings at each reader.
+            ResultAutoConfirmHours = TryInt(root, PlaySettings.AutoConfirmHoursKey, PlaySettings.DefaultAutoConfirmHours),
+            ResultRecordDays = TryInt(root, PlaySettings.RecordDaysKey, PlaySettings.DefaultRecordDays),
+            StreakRestEveryWeeks = TryInt(root, PlaySettings.RestEveryWeeksKey, PlaySettings.DefaultRestEveryWeeks),
+            StreakRestCap = TryInt(root, PlaySettings.RestCapKey, PlaySettings.DefaultRestCap),
+            StreakPauseWeeksPerYear = TryInt(root, PlaySettings.PauseWeeksPerYearKey, PlaySettings.DefaultPauseWeeksPerYear),
+            PlayEarlyBirdBeforeMinute = TryInt(root, PlaySettings.EarlyBirdBeforeMinuteKey, PlaySettings.DefaultEarlyBirdBeforeMinute),
+            PlayNightOwlFromMinute = TryInt(root, PlaySettings.NightOwlFromMinuteKey, PlaySettings.DefaultNightOwlFromMinute),
         };
     }
 
@@ -644,6 +659,16 @@ public sealed record TenantSettingsView(
     public int RecentPartnerDays { get; init; } = PlayerSettings.DefaultRecentPartnerDays;
     public int MemberNotificationRetentionDays { get; init; } = PlayerSettings.DefaultNotificationRetentionDays;
     public int PlayerInvitesPerBooking { get; init; } = PlayerSettings.DefaultInvitesPerBooking;
+
+    // ---- Play (D14). Raw here, bounded by PlaySettings at each reader. ----
+
+    public int ResultAutoConfirmHours { get; init; } = PlaySettings.DefaultAutoConfirmHours;
+    public int ResultRecordDays { get; init; } = PlaySettings.DefaultRecordDays;
+    public int StreakRestEveryWeeks { get; init; } = PlaySettings.DefaultRestEveryWeeks;
+    public int StreakRestCap { get; init; } = PlaySettings.DefaultRestCap;
+    public int StreakPauseWeeksPerYear { get; init; } = PlaySettings.DefaultPauseWeeksPerYear;
+    public int PlayEarlyBirdBeforeMinute { get; init; } = PlaySettings.DefaultEarlyBirdBeforeMinute;
+    public int PlayNightOwlFromMinute { get; init; } = PlaySettings.DefaultNightOwlFromMinute;
 
     // ---- The live streams' seven numbers ----
 
