@@ -4,6 +4,7 @@ import { ApiError } from "@/lib/api";
 import { adminEndpoints, type AdjustReasonCode } from "@/lib/adminApi";
 import { isGuid, newIdempotencyKey, relatedBookingRefusal } from "@/lib/creditAdjustment";
 import { RELATED_BOOKING } from "@/lib/membersCopy";
+import { adjustRefusal } from "@/lib/topUpCopy";
 import { patchRow, type MemberRow } from "./membersModel";
 
 /**
@@ -62,7 +63,7 @@ export function useCreditAdjust(setMembers: Dispatch<SetStateAction<MemberRow[] 
    * rather than being closed out from under the person reading it.
    */
   const apply = useCallback(async (
-    amount: number, reasonCode: AdjustReasonCode, reason: string,
+    amount: number, reasonCode: AdjustReasonCode, reason: string, zarReceived?: number,
   ): Promise<{ balanceAfterCredits: number } | null> => {
     if (!target || inFlight.current) return null;
     const bookingId = booking.trim();
@@ -80,6 +81,7 @@ export function useCreditAdjust(setMembers: Dispatch<SetStateAction<MemberRow[] 
         reasonCode,
         reason,
         ...(bookingId ? { relatedBookingId: bookingId } : {}),
+        ...(zarReceived !== undefined ? { zarReceived } : {}),
         idempotencyKey: key.current,
       });
       // The row follows the server's answer at once — no refetch that would re-sort the table.
@@ -95,7 +97,7 @@ export function useCreditAdjust(setMembers: Dispatch<SetStateAction<MemberRow[] 
       const refused = err instanceof ApiError && err.status >= 400 && err.status < 500;
       toast.push({
         tone: "danger",
-        text: refused ? "The club refused that adjustment." : "Couldn't reach the club.",
+        text: adjustRefusal(err) ?? (refused ? "The club refused that adjustment." : "Couldn't reach the club."),
         unchanged: refused,
         durationMs: 8000,
       });

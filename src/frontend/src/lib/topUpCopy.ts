@@ -1,5 +1,8 @@
-import { formatCredits } from "./utils";
+import { formatCredits, formatMoney } from "./utils";
 import type { AdjustReasonCode } from "./adminApi";
+import { parseAmount } from "./amount";
+import { amountProblemSentence } from "./amountCopy";
+import { ApiError } from "./api";
 
 /**
  * The admin's hand movement of a member's credit, in words.
@@ -80,10 +83,15 @@ export function countsAsRevenue(code: AdjustReasonCode): boolean {
   return code === "top_up_cash" || code === "top_up_eft" || code === "top_up_card_offline";
 }
 
-export function revenueNote(code: AdjustReasonCode): string {
-  return countsAsRevenue(code)
-    ? "This counts as money the club took, and appears in the club's revenue."
-    : "This does not count as money the club took, so it stays out of the club's revenue.";
+export function revenueNote(code: AdjustReasonCode, zarReceived?: number | null): string {
+  if (!countsAsRevenue(code)) {
+    return "This does not count as money the club took, so it stays out of the club's revenue.";
+  }
+  // F3.4: the revenue figure is the rand the desk says it RECEIVED, never the credits — a
+  // promise of revenue with no rand beside it was a sentence the reports could not keep.
+  return typeof zarReceived === "number"
+    ? `${formatMoney(zarReceived)} counts as money the club took, and appears in the club's revenue.`
+    : "This counts as money the club took — say how much was received, and that is what the club's revenue shows.";
 }
 
 // ---------------------------------------------------------------------------------------
@@ -146,6 +154,17 @@ export function confirmConsequence(
 }
 
 /** The receipt, which stays on screen rather than being a four-second toast. */
+/**
+ * The header over the receipt, frozen at the press (F3.5) — past tense, from the balance the
+ * admin confirmed against, never re-derived from the balance the server has since sent back.
+ */
+export function receiptHeader(name: string, before: number | null, amount: number, direction: CreditDirection): string {
+  const movement = `${direction === "add" ? "+" : "−"}${formatCredits(amount)}`;
+  if (before === null) return `${movement} for ${name}.`;
+  const after = before + (direction === "add" ? amount : -amount);
+  return `${name} had ${formatCredits(before)}. ${movement} → ${formatCredits(after)}.`;
+}
+
 export function doneSentence(name: string, balanceAfter: number): string {
   return `Done. ${name} now has ${formatCredits(balanceAfter)}.`;
 }
@@ -166,14 +185,61 @@ export const LIVE_PUSH_NOTE
  * no field anywhere in this flow whose sign is a decision. That is the whole of D3-B08.
  * </p>
  */
+/**
+ * The largest by-hand movement the server accepts — `WalletEndpoints.MaxAdjustmentCredits`.
+ * Said at the field (F3.17): 99999999999 used to be accepted here and refused vaguely later.
+ */
+export const ADJUST_MAX_CREDITS = 99_999_999.99;
+
+/** The typed credits as a number, or null — through the one shared parser (F3.18). */
+export function parseCredits(text: string): number | null {
+  const parsed = parseAmount(text, { max: ADJUST_MAX_CREDITS });
+  return parsed.ok ? parsed.value : null;
+}
+
 export function validateAmount(text: string): string | null {
-  const trimmed = text.trim();
-  if (trimmed === "") return "Enter an amount.";
-  if (trimmed.startsWith("-") || trimmed.startsWith("−")) return MINUS_REFUSED;
-  const amount = Number(trimmed);
-  if (!Number.isFinite(amount) || amount <= 0) return "Enter an amount greater than zero.";
-  if (Math.round(amount * 100) !== amount * 100) return "Credits go to two decimal places.";
-  return null;
+  const parsed = parseAmount(text, { max: ADJUST_MAX_CREDITS });
+  if (parsed.ok) return null;
+  // The desk's own sentence for a minus: this flow has a way to take credit back.
+  if (parsed.problem.kind === "negative") return MINUS_REFUSED;
+  return amountProblemSentence(parsed.problem, "credits");
+}
+
+/** The rand the desk says it received, for a top-up that counts as revenue (F3.4). */
+export const ZAR_RECEIVED = {
+  label: "How much money was received?",
+  help: "In rand, exactly as handed over or paid in. This is what the club's revenue shows.",
+  placeholder: "e.g. 150",
+  row: "Money received",
+} as const;
+
+export function parseZar(text: string): number | null {
+  const parsed = parseAmount(text);
+  return parsed.ok ? parsed.value : null;
+}
+
+export function validateZar(text: string): string | null {
+  const parsed = parseAmount(text);
+  return parsed.ok ? null : amountProblemSentence(parsed.problem, "rand");
+}
+
+/**
+ * What a refused adjustment says, by the server's code — or null for the generic sentence.
+ * `amount_out_of_range` carries the ceiling (`max_credits`, or `max` per the round-1 contract).
+ */
+export function adjustRefusal(err: unknown): string | null {
+  if (!(err instanceof ApiError) || typeof err.payload !== "object" || err.payload === null) return null;
+  const payload = err.payload as Record<string, unknown>;
+  switch (payload.error) {
+    case "amount_out_of_range": {
+      const max = typeof payload.max_credits === "number" ? payload.max_credits
+        : typeof payload.max === "number" ? payload.max : ADJUST_MAX_CREDITS;
+      return `That is more than one movement can be — the most is ${formatCredits(max)}. Nothing was changed.`;
+    }
+    case "amount_not_whole_cents": return "Credits go to two decimal places. Nothing was changed.";
+    case "zar_received_required": return "Say how much money was received — a top-up that counts as revenue needs it. Nothing was changed.";
+    default: return null;
+  }
 }
 
 export function validateReason(code: AdjustReasonCode | null, freeText: string): string | null {

@@ -874,6 +874,8 @@ export const adminEndpoints = {
       reasonCode: AdjustReasonCode;
       reason: string;
       relatedBookingId?: string;
+      /** Rand the desk received, for a top-up that counts as revenue (round-1 contract §5). */
+      zarReceived?: number;
       idempotencyKey?: string;
     },
   ) => api.post<AdminAdjustResult>(`/api/v1/admin/credit/${userId}/adjust`, {
@@ -881,6 +883,7 @@ export const adminEndpoints = {
     reasonCode: body.reasonCode,
     reason: body.reason,
     ...(body.relatedBookingId ? { relatedBookingId: body.relatedBookingId } : {}),
+    ...(body.zarReceived !== undefined ? { zarReceived: body.zarReceived } : {}),
     // Names THIS movement, so every retry of one intended adjustment is the same movement.
     // A changed payload under a reused key is a 409, not a silent replay of the old figure:
     // the admin corrected the amount and pressed Apply, and discarding the correction is the

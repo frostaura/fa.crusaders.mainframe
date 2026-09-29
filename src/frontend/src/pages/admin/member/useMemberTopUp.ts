@@ -4,6 +4,7 @@ import { ApiError } from "@/lib/api";
 import { isGuid, newIdempotencyKey, relatedBookingRefusal } from "@/lib/creditAdjustment";
 import { adminEndpoints, type AdjustReasonCode } from "@/lib/adminApi";
 import { TOP_UP_COPY } from "@/lib/memberDetailCopy";
+import { adjustRefusal } from "@/lib/topUpCopy";
 
 /**
  * One hand movement of credit from the member's page — the members list's idempotency
@@ -44,7 +45,7 @@ export function useMemberTopUp(userId: string, onApplied: (balanceAfter: number)
   const setBooking = useCallback((next: string) => { setBookingState(next); setBookingError(null); }, []);
 
   const apply = useCallback(async (
-    amount: number, reasonCode: AdjustReasonCode, reason: string,
+    amount: number, reasonCode: AdjustReasonCode, reason: string, zarReceived?: number,
   ): Promise<{ balanceAfterCredits: number } | null> => {
     if (inFlight.current) return null;
     const bookingId = booking.trim();
@@ -60,6 +61,7 @@ export function useMemberTopUp(userId: string, onApplied: (balanceAfter: number)
       const r = await adminEndpoints.adjustCredit(userId, {
         amountCredits: amount, reasonCode, reason,
         ...(bookingId ? { relatedBookingId: bookingId } : {}),
+        ...(zarReceived !== undefined ? { zarReceived } : {}),
         idempotencyKey: key.current,
       });
       key.current = null;
@@ -72,7 +74,7 @@ export function useMemberTopUp(userId: string, onApplied: (balanceAfter: number)
       const refusal = relatedBookingRefusal(err);
       if (refusal) { setBookingError(refusal); return null; }
       const refused = err instanceof ApiError && err.status >= 400 && err.status < 500;
-      toast.push({ tone: "danger", text: refused ? TOP_UP_COPY.refused : TOP_UP_COPY.unreachable, unchanged: refused, durationMs: 8000 });
+      toast.push({ tone: "danger", text: adjustRefusal(err) ?? (refused ? TOP_UP_COPY.refused : TOP_UP_COPY.unreachable), unchanged: refused, durationMs: 8000 });
       return null;
     } finally {
       inFlight.current = false;

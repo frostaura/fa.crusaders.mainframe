@@ -16,6 +16,7 @@ import { Skeleton } from "../components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
 import { ArrowDown, Coins } from "../components/ui/icons";
 import { Alert } from "../components/Alert";
+import { parseAmount } from "../lib/amount";
 
 /**
  * Why an amount is not acceptable, or null when it is.
@@ -37,19 +38,22 @@ import { Alert } from "../components/Alert";
  * registers R1000 and the ledger agrees — but a rand field that silently accepts
  * programmer notation will mislead the next person who reads this, and a member who
  * meant 13 and typed 1e3 is quoted eighty times what they meant with nothing to say so.
- * A rand amount is digits, optionally a decimal point and more digits, and nothing else;
- * the leading minus is allowed through so a typed "-100" still gets the sentence about
- * zero rather than the one about digits.
+ * A rand amount is what `lib/amount.ts` accepts (digits, one decimal point or comma) and
+ * nothing else; a leading minus still gets the sentence about zero rather than the one
+ * about digits.
  * </p>
  */
-const PLAIN_RAND = /^-?\d+(\.\d+)?$/;
+function randValue(text: string): number | null {
+  // F3.18: the one shared parser — a decimal comma is a member's own notation, an exponent never is.
+  const parsed = parseAmount(text, { allowZero: true });
+  if (parsed.ok) return parsed.value;
+  return parsed.problem.kind === "negative" ? -1 : null;
+}
 
 function amountProblem(text: string, o: TopUpOptions | null): string | null {
-  const trimmed = text.trim();
-  if (trimmed === "") return "Enter an amount in rand.";
-  if (!PLAIN_RAND.test(trimmed)) return "That isn't a number — enter an amount in rand.";
-  const value = Number(trimmed);
-  if (!Number.isFinite(value)) return "That isn't a number — enter an amount in rand.";
+  if (text.trim() === "") return "Enter an amount in rand.";
+  const value = randValue(text);
+  if (value === null) return "That isn't a number — enter an amount in rand.";
   if (!o) return null;
   if (value <= 0) return "Enter an amount greater than zero.";
   if (value > o.max_zar) return `The most you can top up at once is ${formatMoney(o.max_zar)}.`;
@@ -232,7 +236,7 @@ function TopUpForm(props: FormProps) {
   const [restated, setRestated] = useState<RestatedQuote | null>(null);
 
   const problem = amountProblem(amount, options);
-  const value = Number(amount.trim());
+  const value = randValue(amount) ?? Number.NaN;
   const canSubmit = problem === null;
   const creditsPreview = canSubmit ? value * options.conversion_rate : null;
 

@@ -16,11 +16,11 @@ import { type AdjustReasonCode } from "@/lib/adminApi";
 import { TOP_UP_SHEET as COPY, signedAmount } from "@/lib/membersCopy";
 import {
   ADD_LINK, LIVE_PUSH_NOTE, MINUS_REFUSED, TAKE_BACK_CONSEQUENCE, TAKE_BACK_LINK,
-  balanceSentence, confirmConsequence, doneSentence, overdraftWarning, reasonChoicesFor,
-  reasonLabel, revenueNote, sheetTitle, validateAmount, validateReason,
-  type CreditDirection,
+  ZAR_RECEIVED, balanceSentence, confirmConsequence, countsAsRevenue, doneSentence, overdraftWarning,
+  parseCredits, parseZar, reasonChoicesFor, reasonLabel, receiptHeader, revenueNote, sheetTitle, validateAmount,
+  validateReason, validateZar, type CreditDirection,
 } from "@/lib/topUpCopy";
-import { formatCredits } from "@/lib/utils";
+import { formatCredits, formatMoney } from "@/lib/utils";
 
 /**
  * Add credit to a member, or take it back — two flows, never one signed field. (D3-B08, P5)
@@ -50,6 +50,13 @@ import { formatCredits } from "@/lib/utils";
  */
 type Applied = { balanceAfterCredits: number };
 
+/**
+ * The receipt, frozen at the press (F3.5): the balance BEFORE and the movement as they were when
+ * the admin confirmed. The row's balance prop follows the server's answer, so a header worked
+ * out from it read "has 250 · After +50: 300" above "now has 250".
+ */
+type Receipted = Applied & { before: number | null; amount: number };
+
 export type TopUpSheetProps = {
   name: string;
   /** What the member has now, or null where the read failed. Null is NOT zero. */
@@ -58,7 +65,9 @@ export type TopUpSheetProps = {
   /** The one refusal that belongs at a field rather than in a banner. */
   bookingError: string | null;
   /** Signed: this component decides the sign from the DIRECTION — no field in the flow carries one. */
-  onApply: (amountCredits: number, reasonCode: AdjustReasonCode, reason: string) => Promise<Applied | null>;
+  onApply: (
+    amountCredits: number, reasonCode: AdjustReasonCode, reason: string, zarReceived?: number,
+  ) => Promise<Applied | null>;
   onClose: () => void;
   /** The "for a booking" field, rendered on the reason step. */
   renderBookingField?: () => ReactNode;
@@ -74,10 +83,13 @@ function useTopUpFlow() {
   const [amountText, setAmountText] = useState("");
   const [reasonCode, setReasonCode] = useState<AdjustReasonCode | null>(null);
   const [reasonText, setReasonText] = useState("");
+  const [zarText, setZarText] = useState("");
   const [complaint, setComplaint] = useState<string | null>(null);
-  const [done, setDone] = useState<Applied | null>(null);
+  const [done, setDone] = useState<Receipted | null>(null);
 
-  const valid = validateAmount(amountText) === null ? Number(amountText.trim()) : null;
+  const valid = parseCredits(amountText);
+  const asksZar = direction === "add" && reasonCode !== null && countsAsRevenue(reasonCode);
+  const zar = asksZar ? parseZar(zarText) : null;
 
   /**
    * Switching direction resets the amount and the reason, deliberately: carrying "100" across
@@ -88,6 +100,7 @@ function useTopUpFlow() {
     setAmountText("");
     setReasonCode(null);
     setReasonText("");
+    setZarText("");
     setComplaint(null);
     setStep(1);
   };
@@ -105,14 +118,14 @@ function useTopUpFlow() {
   };
 
   const toCheck = () => {
-    const said = validateReason(reasonCode, reasonText);
+    const said = validateReason(reasonCode, reasonText) ?? (asksZar ? validateZar(zarText) : null);
     setComplaint(said);
     if (!said) setStep(3);
   };
 
   return {
     direction, step, setStep, amountText, typeAmount, reasonCode, setReasonCode, reasonText, setReasonText,
-    complaint, setComplaint, done, setDone, valid, flip, toReason, toCheck,
+    zarText, setZarText, asksZar, zar, complaint, setComplaint, done, setDone, valid, flip, toReason, toCheck,
   };
 }
 
@@ -125,7 +138,11 @@ export function TopUpSheet(props: TopUpSheetProps) {
       <SheetContent side={wide ? "right" : "bottom"} data-sheet="top-up">
         <SheetHeader>
           <SheetTitle>{sheetTitle(flow.direction, name)}</SheetTitle>
-          <SheetDescription>{balanceSentence(name, props.balance, flow.valid, flow.direction)}</SheetDescription>
+          <SheetDescription>
+            {flow.done
+              ? receiptHeader(name, flow.done.before, flow.done.amount, flow.direction)
+              : balanceSentence(name, props.balance, flow.valid, flow.direction)}
+          </SheetDescription>
           {flow.done ? null : <Stepper names={COPY.steps} current={flow.step - 1} />}
         </SheetHeader>
         <SheetBody className="flex flex-col gap-4 pb-4">
@@ -211,7 +228,7 @@ function ReasonStep({ flow, bookingError, renderBookingField }: {
           </SelectContent>
         </Select>
         <FieldDescription>
-          {flow.reasonCode ? `${COPY.reasonDescription} ${revenueNote(flow.reasonCode)}` : COPY.reasonDescription}
+          {flow.reasonCode ? `${COPY.reasonDescription} ${revenueNote(flow.reasonCode, flow.zar)}` : COPY.reasonDescription}
         </FieldDescription>
         <FieldError>{missingCode ? flow.complaint : null}</FieldError>
       </Field>
@@ -223,8 +240,22 @@ function ReasonStep({ flow, bookingError, renderBookingField }: {
           placeholder={COPY.detailPlaceholder}
           onChange={(e) => { flow.setReasonText(e.target.value); flow.setComplaint(null); }}
         />
-        <FieldError>{missingCode ? null : flow.complaint}</FieldError>
+        <FieldError>{missingCode || flow.asksZar ? null : flow.complaint}</FieldError>
       </Field>
+      {flow.asksZar ? (
+        <Field>
+          <FieldLabel>{ZAR_RECEIVED.label}</FieldLabel>
+          <Input
+            inputMode="decimal"
+            autoComplete="off"
+            value={flow.zarText}
+            placeholder={ZAR_RECEIVED.placeholder}
+            onChange={(e) => { flow.setZarText(e.target.value); flow.setComplaint(null); }}
+          />
+          <FieldDescription>{ZAR_RECEIVED.help}</FieldDescription>
+          <FieldError>{missingCode ? null : flow.complaint}</FieldError>
+        </Field>
+      ) : null}
       {renderBookingField?.()}
       {bookingError ? <Alert tone="danger">{bookingError}</Alert> : null}
     </>
@@ -246,9 +277,15 @@ function CheckStep({ flow, balance, bookingError }: { flow: Flow; balance: numbe
         <dd className="text-right font-semibold tabular-nums text-text-primary">
           {balance === null ? COPY.serverWorksItOut : formatCredits(balance + signed)}
         </dd>
+        {flow.zar !== null ? (
+          <>
+            <dt className="text-text-secondary">{ZAR_RECEIVED.row}</dt>
+            <dd className="text-right tabular-nums text-text-primary">{formatMoney(flow.zar)}</dd>
+          </>
+        ) : null}
       </dl>
       <p className="text-sm text-text-secondary">{COPY.reasonLine(reasonLabel(flow.reasonCode), flow.reasonText.trim())}</p>
-      <p className="text-sm text-text-muted">{revenueNote(flow.reasonCode)}</p>
+      <p className="text-sm text-text-muted">{revenueNote(flow.reasonCode, flow.zar)}</p>
       {flow.direction === "take_back" ? <p className="text-sm text-warning-strong">{TAKE_BACK_CONSEQUENCE}</p> : null}
       <p className="text-sm text-text-muted">{LIVE_PUSH_NOTE}</p>
       {bookingError ? <Alert tone="danger">{bookingError}</Alert> : null}
@@ -307,9 +344,12 @@ function ApplyControls({ flow, name, balance, busy, onApply }: TopUpSheetProps &
         idleClassName={direction === "add" ? buttonVariants({ variant: "primary" }) : undefined}
         disabled={busy}
         onConfirm={async () => {
-          const applied = await onApply(direction === "add" ? valid : -valid, reasonCode, flow.reasonText.trim());
+          const before = balance;
+          const applied = await onApply(
+            direction === "add" ? valid : -valid, reasonCode, flow.reasonText.trim(), flow.zar ?? undefined,
+          );
           if (!applied) return COPY.failed;
-          flow.setDone(applied);
+          flow.setDone({ ...applied, before, amount: valid });
           return doneSentence(name, applied.balanceAfterCredits);
         }}
         className="min-h-touch"
