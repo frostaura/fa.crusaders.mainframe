@@ -207,6 +207,48 @@ public sealed class PlayResultsHttpTests(PostgresFixture pg) : IClassFixture<Pos
         Assert.Equal(1, await PlayersClub.ReadAsync(f, db => db.MatchResults.IgnoreQueryFilters().CountAsync(r => r.BookingId == booking)));
     }
 
+    /// <summary>
+    /// One live result per booking is the DATABASE's rule, not only the service's: a second live row
+    /// is refused by the partial unique index, and two members recording at once get one result
+    /// and one <c>result_exists</c>.
+    /// </summary>
+    [SkippableFact]
+    public async Task One_live_result_per_booking_holds_under_a_race_and_in_the_database()
+    {
+        Skip.IfNot(pg.Available, Skipped);
+        await using var f = CreateFactory();
+        var club = await SeedAsync(f, "pr-onelive");
+        var booking = await club.GameAsync(f, Earlier(), club.Organiser, [club.Sam]);
+
+        var answers = await Task.WhenAll(
+            RecordAsync(club.Client(f, club.Organiser), booking, [U(club.Organiser)], [U(club.Sam)]),
+            RecordAsync(club.Client(f, club.Sam), booking, [U(club.Sam)], [U(club.Organiser)]),
+            RecordAsync(club.Client(f, club.Organiser), booking, [U(club.Organiser)], [U(club.Sam)]));
+        Assert.Single(answers, a => a.StatusCode == HttpStatusCode.Created);
+        foreach (var refused in answers.Where(a => a.StatusCode != HttpStatusCode.Created))
+        {
+            Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+            Assert.Equal("result_exists", (await refused.JsonAsync()).GetProperty("error").GetString());
+        }
+        Assert.Equal(1, await PlayersClub.ReadAsync(f, db => db.MatchResults.IgnoreQueryFilters().CountAsync(r => r.BookingId == booking)));
+
+        var live = (await ResultRowAsync(f, booking))!;
+        var second = new MatchResult
+        {
+            TenantId = club.TenantId, BookingId = booking, Status = MatchResultStatus.Disputed, GamesJson = "[]", GamesWonA = 3, GamesWonB = 0,
+            SubmittedByUserId = club.Sam, RecordedByUserId = club.Sam, IdempotencyKey = "direct", SubmittedAt = DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        await Assert.ThrowsAsync<DbUpdateException>(() => club.WriteAsync(f, db => db.MatchResults.Add(second)));
+        await club.WriteAsync(f, db => db.MatchResults.IgnoreQueryFilters().First(r => r.Id == live.Id).Status = MatchResultStatus.Voided);
+        await club.WriteAsync(f, db => db.MatchResults.Add(new MatchResult
+        {
+            TenantId = club.TenantId, BookingId = booking, Status = MatchResultStatus.Disputed, GamesJson = "[]", GamesWonA = 3, GamesWonB = 0,
+            SubmittedByUserId = club.Sam, RecordedByUserId = club.Sam, IdempotencyKey = "direct-2", SubmittedAt = DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+        }));
+    }
+
     [SkippableFact]
     public async Task Scores_are_refused_with_the_corpus_reasons()
     {
