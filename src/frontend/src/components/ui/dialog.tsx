@@ -19,6 +19,16 @@ import { cn } from "@/lib/utils";
  * </p>
  *
  * <p>
+ * <b>Focus goes back where it came from (F4.5).</b> Radix returns focus on close only to a
+ * `DialogTrigger`, and almost no dialog here has one — they open from a grid cell, a row, a menu
+ * or a state change — so eleven of them dropped focus on `<body>`: a keyboard user back at the top
+ * of the document, a screen-reader user in silence. The surface records what had focus when it
+ * opened and returns it there; when that element has gone (a menu item, a re-rendered row) it
+ * falls back to the page's `<main>`, never to `<body>`. A call site's own `onCloseAutoFocus` that
+ * prevents the default (ConfirmDialog, MemberDialogs) still wins.
+ * </p>
+ *
+ * <p>
  * <b>A mis-tap on the scrim never discards typing.</b> Mirrors `components/Modal.tsx` (D3-B05):
  * once anything inside has fired `input` or `change`, a pointer-down outside is refused and a polite
  * live region says so. Escape still closes — Escape is a deliberate gesture, a mis-tap is not.
@@ -100,6 +110,24 @@ function CloseButton({ label }: { label: string }) {
   );
 }
 
+/**
+ * What had focus when the surface opened — read in a layout effect, which runs before Radix's
+ * focus scope moves focus inside (a passive effect), so it is the opener and not the dialog.
+ */
+function useOpener() {
+  const opener = React.useRef<Element | null>(null);
+  React.useLayoutEffect(() => {
+    opener.current = document.activeElement;
+  }, []);
+  return opener;
+}
+
+/** Where focus goes on close: the opener while it is still in the page, else `<main>`. */
+function returnFocusTarget(opener: Element | null): HTMLElement | null {
+  if (opener instanceof HTMLElement && opener !== document.body && opener.isConnected) return opener;
+  return document.getElementById("main-content") ?? document.querySelector<HTMLElement>("main");
+}
+
 type SurfaceProps = React.ComponentProps<typeof DialogPrimitive.Content> & {
   /** Refuse outside clicks once something inside has been typed into. Default `true`. */
   guardTyped?: boolean;
@@ -125,6 +153,7 @@ function DialogSurface(props: SurfaceProps) {
     className,
     children,
     onOpenAutoFocus,
+    onCloseAutoFocus,
     onPointerDownOutside,
     onInteractOutside,
     onInputCapture,
@@ -132,6 +161,14 @@ function DialogSurface(props: SurfaceProps) {
     ...rest
   } = props;
   const guard = useTypedGuard(guardTyped);
+  const opener = useOpener();
+  const returnFocus = (event: Event) => {
+    if (event.defaultPrevented) return; // the call site placed focus itself
+    const target = returnFocusTarget(opener.current);
+    if (!target) return;
+    event.preventDefault();
+    target.focus({ preventScroll: true });
+  };
   const focusInitial = (event: Event) => {
     const target = initialFocus?.();
     if (!target) return;
@@ -142,6 +179,7 @@ function DialogSurface(props: SurfaceProps) {
     <DialogPrimitive.Content
       className={cn("fixed z-modal flex flex-col border border-border bg-bg-raised text-text-primary shadow-lg", className)}
       onOpenAutoFocus={composed(onOpenAutoFocus, focusInitial)}
+      onCloseAutoFocus={composed(onCloseAutoFocus, returnFocus)}
       onPointerDownOutside={composed(onPointerDownOutside, (e: Event) => guard.refuse(e, true))}
       onInteractOutside={composed(onInteractOutside, (e: Event) => guard.refuse(e, false))}
       onInputCapture={composed(onInputCapture, guard.markTyped)}
