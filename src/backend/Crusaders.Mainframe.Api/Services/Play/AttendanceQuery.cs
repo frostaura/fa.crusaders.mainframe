@@ -81,7 +81,12 @@ public static class AttendanceQuery
         var rows = candidates
             .Select(b => new
             {
-                b.Id, b.UserId, b.StartsAt, b.EndsAt, b.CancelledAt, b.CheckedInAt,
+                b.Id,
+                b.UserId,
+                b.StartsAt,
+                b.EndsAt,
+                b.CancelledAt,
+                b.CheckedInAt,
                 Own = ownCheckIn.TryGetValue(b.Id, out var own) ? own : (DateTimeOffset?)null,
             })
             .Where(x => x.Own != null || (x.CheckedInAt != null && (x.UserId == userId || acceptedOn.Contains(x.Id))))
