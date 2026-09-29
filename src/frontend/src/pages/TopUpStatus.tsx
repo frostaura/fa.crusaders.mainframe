@@ -118,7 +118,8 @@ export default function TopUpStatusPage() {
         setLoadFailed(false);
         if (snap.status === "Completed" && !refreshedOnce.current) {
           refreshedOnce.current = true;
-          refreshBalanceRef.current();
+          // The member's own top-up, and this page says so (D4) — not a toast about the club.
+          void refreshBalanceRef.current({ expectSelf: true });
         }
         // Anything but Pending is final; there is nothing left to ask about.
         if (snap.status !== "Pending") return;

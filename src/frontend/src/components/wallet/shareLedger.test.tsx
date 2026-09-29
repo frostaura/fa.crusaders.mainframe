@@ -52,7 +52,8 @@ describe("the wallet ledger's share lines", () => {
     renderPage(<LedgerTable rows={[row("s1"), TOPUP, row("s2", { actorUserId: ALEX, actorName: "Alex Naidoo", at: "2026-09-30T11:00:00Z" })]} label="Wallet ledger" groupShares />);
 
     const expected = shareGroupSentence({ side: "organiser", net: 50, place: { courtName: "Court 1", startsAt: "2026-09-30T16:00:00Z" }, partners: 2 });
-    expect(expected).toBe("Shares for Court 1 · Wed 30 Sep: +50.00 cr from 2 partners");
+    // D10 — no amount in the sentence: the Amount column carries it.
+    expect(expected).toBe("Shares for Court 1 · Wed 30 Sep from 2 partners");
     const toggle = await screen.findByRole("button", { name: new RegExp(`^${escape(expected)}`) });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
 
@@ -78,7 +79,12 @@ describe("the wallet ledger's share lines", () => {
     stubFetch([{ path: "/api/v1/bookings/b1", body: detail({ organiser: { user_id: SAM, name: "Sam Petersen", photo_url: null } }) }]);
     renderPage(<LedgerTable rows={[row("s1", { signedAmountCredits: -25, from: "Nomsa Khumalo", to: "Club treasury", actorUserId: ME })]} label="Wallet ledger" groupShares />);
 
-    const toggle = await screen.findByRole("button", { name: /^Your share · Court 1 · Wed 30 Sep: −25\.00 cr/ });
+    const toggle = await screen.findByRole("button", { name: /^Your share · Court 1 · Wed 30 Sep, / });
+    // D10 — the amount is said once, in its column; the To column names the organiser.
+    expect(toggle).not.toHaveTextContent("25.00");
+    const line = document.querySelector("[data-share-group]") as HTMLElement;
+    expect(within(line).getByText(SHARE_LEDGER_COPY.organiserNamed("Sam Petersen"))).toBeInTheDocument();
+    expect(within(line).getByText("−25.00 cr")).toBeInTheDocument();
     fireEvent.click(toggle);
     expect(screen.getByText(/^25\.00 cr moved to Sam for your share of Court 1/)).toBeInTheDocument();
   });
@@ -86,7 +92,7 @@ describe("the wallet ledger's share lines", () => {
   it("still makes sense when the booking cannot be read (a partner who pulled out reads it as a stranger)", async () => {
     stubFetch([{ path: "/api/v1/bookings/b1", status: 404, body: { error: "booking_not_found" } }]);
     renderPage(<LedgerTable rows={[row("s1", { signedAmountCredits: -25 })]} label="Wallet ledger" groupShares />);
-    expect(await screen.findByRole("button", { name: /^Your share of a split booking: −25\.00 cr/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^Your share of a split booking, / })).toBeInTheDocument();
   });
 
   it("is off unless asked for: the club's book shows every row as it is", () => {
@@ -107,7 +113,7 @@ describe("the share sentences", () => {
   });
 
   it("says a paid-and-returned booking plainly", () => {
-    expect(shareGroupSentence({ side: "organiser", net: 0, place, partners: 1 })).toBe("Shares for Court 1 · Wed 30 Sep: 0.00 cr — paid and returned");
+    expect(shareGroupSentence({ side: "organiser", net: 0, place, partners: 1 })).toBe("Shares for Court 1 · Wed 30 Sep — paid and returned");
   });
 });
 

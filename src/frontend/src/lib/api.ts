@@ -194,7 +194,41 @@ function isSessionEnded(status: number, hadToken: boolean, payload: unknown): bo
   return code === "tenant_unresolved";
 }
 
+/**
+ * D4 — this tab's own money-moving requests, announced to whoever listens (the live balance).
+ *
+ * <p>
+ * The wallet stream's frame for a member's own booking can land BEFORE the booking's HTTP answer
+ * — the server publishes it straight after the commit — so marking the movement as the member's
+ * own once the answer arrives was too late, and the chip raised "The club took 50.00 credits off
+ * your wallet" over the page's own confirmation. Bracketing the request itself closes that race
+ * for every spend path at once: book, bulk book, a share accepted, a top-up started, a cancel, and
+ * an admin crediting their own wallet — rather than each screen remembering to say so.
+ * </p>
+ *
+ * <p>
+ * Mutations only, and only on the routes that can move this member's money. The stream ticket, the
+ * inbox and preferences are POSTs too, and bracketing them would silence a partner's payment that
+ * happened to land while the organiser was marking a notification read.
+ * </p>
+ */
+const MONEY_PATHS = ["/api/v1/bookings", "/api/v1/invites/", "/api/v1/admin/bookings", "/api/v1/admin/credit/", "/api/v1/credit/topup"];
+export type MoneyRequestPhase = "start" | "end";
+let moneyRequestListener: ((phase: MoneyRequestPhase) => void) | null = null;
+export function setMoneyRequestListener(fn: ((phase: MoneyRequestPhase) => void) | null) { moneyRequestListener = fn; }
+
+function movesMoney(method: string, path: string): boolean {
+  return method !== "GET" && MONEY_PATHS.some((p) => path.startsWith(p));
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  if (!movesMoney(method, path)) return send<T>(method, path, body);
+  const listener = moneyRequestListener;
+  listener?.("start");
+  try { return await send<T>(method, path, body); } finally { listener?.("end"); }
+}
+
+async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
   const hadToken = !!tokenStore.get();
   const res = await fetchWithTimeout(path, {
     method,

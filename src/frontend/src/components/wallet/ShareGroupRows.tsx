@@ -55,7 +55,10 @@ export function ShareGroupRows(props: ShareGroupRowsProps) {
   const side = shareSide(group);
   const sentence = shareGroupSentence({ side, net: group.net, place: booking, partners: payingPartners(booking) });
   const childIds = group.rows.map((_, i) => `${baseId}-share-${i}`);
-  const head = { group, side, sentence, open, onToggle: () => setOpen((o) => !o), controls: childIds.join(" ") };
+  const head = {
+    group, side, sentence, open, onToggle: () => setOpen((o) => !o), controls: childIds.join(" "),
+    organiser: booking?.organiserName ?? null,
+  };
 
   return (
     <>
@@ -75,7 +78,16 @@ export function ShareGroupRows(props: ShareGroupRowsProps) {
   );
 }
 
-type Head = { group: Group; side: ShareSide; sentence: string; open: boolean; onToggle: () => void; controls: string };
+type Head = {
+  group: Group; side: ShareSide; sentence: string; open: boolean; onToggle: () => void; controls: string;
+  /** The booking's organiser, once read — the partner line's To (D10). */
+  organiser: string | null;
+};
+
+/** "Olivia Newton (organiser)" — or "Organiser" while the booking is read, or when it cannot be. */
+function partnerTo(organiser: string | null): string {
+  return organiser ? COPY.organiserNamed(organiser) : COPY.organiser;
+}
 
 const GROUP_CELL: Record<Column, (h: Head) => ReactNode> = {
   time: (h) => {
@@ -88,7 +100,7 @@ const GROUP_CELL: Record<Column, (h: Head) => ReactNode> = {
   },
   to: (h) => (
     <TableCell className={CELL_CLASS.to}>
-      <ToName name={h.side === "organiser" ? h.group.rows[0].subjectName : COPY.organiser} />
+      <ToName name={h.side === "organiser" ? h.group.rows[0].subjectName : partnerTo(h.organiser)} />
     </TableCell>
   ),
   comment: (h) => <GroupComment head={h} />,

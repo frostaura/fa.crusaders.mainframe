@@ -6,7 +6,9 @@ import { useBalance, walletHref, walletLabel, walletTone } from "@/lib/balance";
 import { useCountUp, usePrefersReducedMotion } from "@/lib/useCountUp";
 import { useZeroBalanceEntice } from "@/lib/zeroBalanceEntice";
 import { cn, formatCredits } from "@/lib/utils";
-import { chipHeldTitle } from "@/lib/walletCopy";
+import { chipHeldTitle, movementSentence } from "@/lib/walletCopy";
+import { useAuth } from "@/lib/auth";
+import { namedShareMovement } from "./shareMovement";
 import { useToast } from "../Toast";
 
 /**
@@ -31,14 +33,6 @@ import { useToast } from "../Toast";
 /** 6 000 ms, not the 4 000 default. Money deserves reading time, and it is dismissible. */
 const MONEY_TOAST_MS = 6_000;
 
-/** Both halves of the club-movement sentence, in one place. No "just now": it may be 30s old. */
-function clubMovementSentence(amount: number): string {
-  const credits = Math.abs(amount).toFixed(2);
-  return amount > 0
-    ? `The club added ${credits} credits to your wallet.`
-    : `The club took ${credits} credits off your wallet.`;
-}
-
 const TONE = {
   zero: "bg-danger-soft text-danger-strong hover:bg-danger-soft/80",
   low: "bg-warning-soft text-warning-strong hover:bg-warning-soft/80",
@@ -47,8 +41,15 @@ const TONE = {
 
 const ICON_TONE = { zero: "", low: "", fine: "text-success-strong" } as const;
 
+/**
+ * One toast for a movement this tab did not cause (D4) — worded from the frame's reason, and for
+ * a share with the names in it. A movement of the member's own (`source: "self"`) raises none: the
+ * page that caused it has already said what happened.
+ */
 function useClubMovementToast() {
   const { delta, clearDelta } = useBalance();
+  const auth = useAuth();
+  const me = auth.status === "authenticated" ? auth.userId : null;
   const toast = useToast();
   const announced = useRef<number | null>(null);
   useEffect(() => {
@@ -56,12 +57,18 @@ function useClubMovementToast() {
     if (announced.current === delta.at) return;
     announced.current = delta.at;
     if (delta.source === "club") {
-      toast.push({ tone: delta.amount > 0 ? "success" : "info", text: clubMovementSentence(delta.amount), durationMs: MONEY_TOAST_MS });
+      const say = (text: string) => toast.push({ tone: delta.amount > 0 ? "success" : "info", text, durationMs: MONEY_TOAST_MS });
+      const plain = movementSentence(delta.amount, delta.reason);
+      if (delta.reason === "share_transfer") {
+        namedShareMovement(delta.amount, me).then((named) => say(named ?? plain), () => say(plain));
+      } else {
+        say(plain);
+      }
     }
     // The flyout lives 900 ms; clearing after it keeps a re-render from replaying it.
     const t = window.setTimeout(clearDelta, 1_000);
     return () => window.clearTimeout(t);
-  }, [delta, toast, clearDelta]);
+  }, [delta, toast, clearDelta, me]);
 }
 
 /** The chip's hover title: the stream's health first, then what is held, then the plain one. */

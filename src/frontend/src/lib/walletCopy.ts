@@ -1,7 +1,7 @@
 import type { LedgerEntryType } from "./api";
 import type { WalletTone } from "./balance";
 import { firstName, playersWhen } from "./playersCopy";
-import { formatCredits, formatSignedCredits } from "./utils";
+import { formatCredits } from "./utils";
 
 /**
  * The wallet's own words, and the one distinction the product kept getting wrong.
@@ -120,6 +120,28 @@ export function creditLeftSentence(amount: number, entryType: LedgerEntryType | 
   }
 }
 
+/**
+ * D4 — the chip's one toast for a movement this tab did not cause, worded from the stream frame's
+ * `reason` rather than always blaming "the club". "The club took 20.00 credits off your wallet"
+ * was said to an organiser whose PARTNER had paid them, and about money the club never touched.
+ * `share_transfer` gets a named sentence from the ledger where it can be read (see the chip);
+ * this is the sentence for every other reason, and the fallback for that one.
+ */
+export function movementSentence(amount: number, reason: string | undefined): string {
+  const credits = `${Math.abs(amount).toFixed(2)} credits`;
+  const up = amount > 0;
+  switch (reason) {
+    case "top_up": return up ? `Your top-up landed: ${credits} are in your wallet.` : `${credits} of a top-up were taken back.`;
+    case "booking_charge": return up ? `${credits} came back from a booking.` : `${credits} went on a court booking.`;
+    case "cancellation_refund": return `A cancelled booking put ${credits} back in your wallet.`;
+    case "penalty": return `${credits} went on a late-cancellation or no-show charge.`;
+    case "lights_purchase": return `${credits} went on court time at the box.`;
+    case "share_transfer": return up ? `A share of a split booking moved ${credits} into your wallet.` : `${credits} went on a share of a split booking.`;
+    case "correction": return up ? `A payment was reversed: ${credits} are back in your wallet.` : `A payment was reversed: ${credits} left your wallet.`;
+    default: return up ? `The club added ${credits} to your wallet.` : `The club took ${credits} off your wallet.`;
+  }
+}
+
 /** Said once under the ledger, not on every row — the same rule the door history follows. */
 export const LEDGER_CLOCK_NOTE = "Times are the club's own.";
 
@@ -174,19 +196,23 @@ export type ShareGroupInput = {
 
 /**
  * The one line a booking's shares collapse under.
- * Organiser: "Shares for Court 1 · Tue 30 Sep: +50.00 cr from 2 partners".
- * Partner: "Your share · Court 1 · Tue 30 Sep: −25.00 cr".
+ * Organiser: "Shares for Court 1 · Tue 30 Sep from 2 partners".
+ * Partner: "Your share · Court 1 · Tue 30 Sep".
+ *
+ * <p>
+ * D10 — no amount: the line sits in the ledger's own row, whose Amount column already carries
+ * the net, and "Your share · Court 1 · Tue 29 Sep: −20.00 cr" beside "−20.00 cr" said it twice.
+ * </p>
  */
 export function shareGroupSentence(input: ShareGroupInput): string {
   const where = sharePlace(input.place, input.timezone);
-  const amount = formatSignedCredits(input.net);
   if (input.side === "partner") {
-    return where ? `Your share · ${where}: ${amount}` : `Your share of a split booking: ${amount}`;
+    return where ? `Your share · ${where}` : "Your share of a split booking";
   }
   const head = where ? `Shares for ${where}` : "Shares for a split booking";
-  if (input.net === 0) return `${head}: ${amount} — paid and returned`;
-  if (input.partners === null || input.partners === 0) return `${head}: ${amount}`;
-  return `${head}: ${amount} from ${input.partners} partner${input.partners === 1 ? "" : "s"}`;
+  if (input.net === 0) return `${head} — paid and returned`;
+  if (input.partners === null || input.partners === 0) return head;
+  return `${head} from ${input.partners} partner${input.partners === 1 ? "" : "s"}`;
 }
 
 export type ShareRowInput = {
@@ -217,6 +243,8 @@ export const SHARE_LEDGER_COPY = {
   viewBooking: "View booking",
   partners: "Partners",
   organiser: "Organiser",
+  /** D10 — the To column of a partner's share line names the person: "Olivia (organiser)". */
+  organiserNamed: (name: string) => `${name} (organiser)`,
   /** The disclosure's state, spoken after the line itself. */
   movements: (n: number) => `${n} movement${n === 1 ? "" : "s"}`,
 } as const;

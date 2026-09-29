@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, endpoints, STREAM_SILENCE_MS, tokenStore } from "./api";
+import { ApiError, endpoints, setMoneyRequestListener, STREAM_SILENCE_MS, tokenStore } from "./api";
 
 /**
  * Item 8 — the live balance, as a POLICY that knows nothing about the transport.
@@ -158,6 +158,14 @@ export const LIVE_BALANCE_POLICY = {
  * a number. A test that halves an interval to keep a fake clock short would not type-check
  * against it, which is the opposite of what a settings object is for.
  */
+/**
+ * How long after this tab's own money-moving request settles a movement is still taken as its
+ * own (D4). The frame is published after the commit, so it normally arrives within a few hundred
+ * milliseconds of the answer either side; three seconds covers a slow outbox without swallowing
+ * a genuinely separate movement for long.
+ */
+export const SELF_GRACE_MS = 3_000;
+
 export type LiveBalancePolicy = { -readonly [K in keyof typeof LIVE_BALANCE_POLICY]: number };
 
 /**
@@ -326,6 +334,21 @@ export function useLiveBalance({
    * flagged read cannot silence the movement after it.
    */
   const expectSelf = useRef(false);
+  /**
+   * D4 — this tab has a money-moving request out, or had one settle a moment ago. The stream's
+   * frame for it can overtake the HTTP answer (see `setMoneyRequestListener`), so the whole
+   * bracket, plus {@link SELF_GRACE_MS} after it, counts as the member's own doing.
+   */
+  const selfInFlight = useRef(0);
+  const selfUntil = useRef(0);
+  useEffect(() => {
+    setMoneyRequestListener((phase) => {
+      if (phase === "start") { selfInFlight.current += 1; return; }
+      selfInFlight.current = Math.max(0, selfInFlight.current - 1);
+      selfUntil.current = Date.now() + SELF_GRACE_MS;
+    });
+    return () => setMoneyRequestListener(null);
+  }, []);
 
   const record = useCallback((credits: number, frame?: BalanceFrame) => {
     const before = previous.current;
@@ -336,10 +359,11 @@ export function useLiveBalance({
     // A first read is not a movement: `null -> 400.00` is the first time the member has been
     // told, not money arriving. Neither is a re-read that confirms what we already had.
     if (before === null || Math.abs(amount) < 0.01) { expectSelf.current = false; return; }
+    const own = expectSelf.current || selfInFlight.current > 0 || Date.now() < selfUntil.current;
     setDelta({
       amount,
       at: Date.now(),
-      source: expectSelf.current ? "self" : "club",
+      source: own ? "self" : "club",
       reason: frame?.reason,
     });
     expectSelf.current = false;

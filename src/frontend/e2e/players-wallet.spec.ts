@@ -61,7 +61,7 @@ test.describe("P11: the wallet, with shares", () => {
     await serveApi(page, walletRoutes());
     await page.goto("/wallet");
 
-    const organiser = page.getByRole("button", { name: /^Shares for Court 1 · .*: \+25\.00 cr from 1 partner/ });
+    const organiser = page.getByRole("button", { name: /^Shares for Court 1 · .* from 1 partner/ });
     await expect(organiser).toBeVisible();
     await expect(organiser).toHaveAttribute("aria-expanded", "false");
     const rows = page.locator(`[data-share-group="${BOOKING}"] ~ [data-share-row]`).first();
@@ -72,7 +72,7 @@ test.describe("P11: the wallet, with shares", () => {
     await expect(page.getByText(/^Sam paid you 25\.00 cr for their share of Court 1/)).toBeVisible();
 
     // The partner's side of another booking reads as their share, not as a debt.
-    const partner = page.getByRole("button", { name: /^Your share · Court 2 · .*: −25\.00 cr/ });
+    const partner = page.getByRole("button", { name: /^Your share · Court 2 · / });
     await expect(partner).toBeVisible();
     await partner.click();
     await expect(page.getByText(/^25\.00 cr moved to Jo for your share of Court 2/)).toBeVisible();
