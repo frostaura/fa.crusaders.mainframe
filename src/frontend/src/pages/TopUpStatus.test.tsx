@@ -439,3 +439,62 @@ describe("Top-up status — the first read", () => {
     expect(screen.getByRole("link", { name: "View wallet" })).toHaveAttribute("href", "/wallet");
   });
 });
+
+/**
+ * F4.2 — the member pressed Cancel at PayFast and came back to `?cancelled=1`.
+ *
+ * <p>
+ * PayFast sends no ITN for a cancel, so the row stays Pending on the server and the page used to
+ * poll it for six minutes under "Waiting for confirmation from PayFast…" — for a payment the
+ * member had just walked away from. The return URL's flag is the answer the page had all along.
+ * </p>
+ */
+describe("Top-up status — back from PayFast after cancelling", () => {
+  const ID = "cccc1111-0000-0000-0000-000000000009";
+
+  beforeEach(() => {
+    vi.stubGlobal("EventSource", class {
+      close() {}
+      addEventListener() {}
+      removeEventListener() {}
+    } as unknown as typeof EventSource);
+  });
+  afterEach(() => { vi.unstubAllGlobals(); signOut(); });
+
+  function show(status: string, search = "?cancelled=1") {
+    const stub = stubFetch([
+      { path: "/api/v1/whoami", body: signIn({ isAdmin: false }) },
+      { path: `/api/v1/credit/topup/${ID}`, body: { id: ID, status, amount_zar: 200, conversion_rate: 1, failure_code: null } },
+      { path: "/api/v1/wallet", body: { balance_credits: 0, entries: [], total_entries: 0, offset: 0, limit: 100 } },
+      { method: "POST", path: "/api/v1/wallet/stream-ticket", body: { ticket: "t", expires_in_seconds: 60 } },
+    ]);
+    renderPage(
+      <BalanceProvider>
+        <Routes><Route path="/wallet/topup/:topupId" element={<TopUpStatusPage />} /></Routes>
+      </BalanceProvider>,
+      { initialEntries: [`/wallet/topup/${ID}${search}`] },
+    );
+    return stub;
+  }
+
+  it("says the payment was cancelled instead of waiting on PayFast, and stops asking", async () => {
+    const stub = show("Pending");
+    expect(await screen.findByText(/You cancelled this payment, so nothing was charged/)).toBeInTheDocument();
+    expect(screen.queryByText(/Waiting for confirmation from PayFast/)).not.toBeInTheDocument();
+    expect(screen.getByText("Cancelled")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Try again" })).toHaveAttribute("href", "/wallet/topup");
+    await new Promise((r) => setTimeout(r, 2_300));
+    expect(stub.calls.filter((c) => c.path.startsWith(`/api/v1/credit/topup/${ID}`))).toHaveLength(1);
+  }, 10_000);
+
+  it("still believes the club when the payment went through after all", async () => {
+    show("Completed");
+    expect(await screen.findByText("Your wallet has been credited.")).toBeInTheDocument();
+    expect(screen.queryByText(/You cancelled this payment/)).not.toBeInTheDocument();
+  });
+
+  it("keeps waiting for a Pending payment when the flag is absent (the fixture, varied)", async () => {
+    show("Pending", "");
+    expect(await screen.findByText(/Waiting for confirmation from PayFast/)).toBeInTheDocument();
+  });
+});

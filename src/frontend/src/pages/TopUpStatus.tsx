@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ApiError, endpoints, type TopUpStatus } from "../lib/api";
 import { useBalance } from "../lib/balance";
 import { formatMoney } from "../lib/utils";
@@ -63,8 +63,24 @@ function pollDelayMs(attempt: number): number | null {
   return null;
 }
 
+/**
+ * F4.2 — what the page shows for a snapshot, given how the member came back from PayFast.
+ *
+ * <p>
+ * PayFast sends no ITN for a cancel, so the row stays Pending on the server; its cancel URL is
+ * the only word the page gets (`TopUpEndpoints.cs` sets `?cancelled=1`). A Pending snapshot on
+ * that return is the member's own cancel — shown as Cancelled, and not polled for six minutes
+ * under "Waiting for confirmation". Anything final the club reports still wins over the flag.
+ * </p>
+ */
+function shownStatus(snap: TopUpStatus, cancelledReturn: boolean): TopUpStatus {
+  return cancelledReturn && snap.status === "Pending" ? { ...snap, status: "Cancelled" } : snap;
+}
+
 export default function TopUpStatusPage() {
   const { topupId } = useParams<{ topupId: string }>();
+  const [search] = useSearchParams();
+  const cancelledReturn = search.get("cancelled") === "1";
   const [s, setS] = useState<TopUpStatus | null>(null);
   /* Whether the LAST attempt to read the status failed. Not the sentence — the two places
      that report it say different things, because "we could not reach the club" means something
@@ -110,7 +126,7 @@ export default function TopUpStatusPage() {
 
     const tick = async () => {
       try {
-        const snap = await endpoints.topupStatus(topupId);
+        const snap = shownStatus(await endpoints.topupStatus(topupId), cancelledReturn);
         if (cancelled) return;
         settled();
         setS(snap);
@@ -141,7 +157,7 @@ export default function TopUpStatusPage() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [topupId, round]);
+  }, [topupId, round, cancelledReturn]);
 
   const checkAgain = () => {
     setChecking(true);
