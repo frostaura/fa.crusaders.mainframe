@@ -88,6 +88,12 @@ export function RecentTab(props: MemberTabProps) {
   );
 }
 
+/** What the live region says: nothing while typing or reading, then the count — or no one. */
+function searchAnnouncement(state: { status: string } | null, count: number): string {
+  if (state?.status !== "ready") return "";
+  return count > 0 ? PICKER.searchFound(count) : PICKER.searchNoneFound;
+}
+
 /**
  * The club directory (D13): nothing is asked below two characters or while still typing (300 ms
  * after the last key), and an empty answer says WHY it may be empty — only members who opted in
@@ -120,6 +126,8 @@ export function MembersTab(props: MemberTabProps) {
         </div>
         {short ? <FieldDescription>{PICKER.searchHint}</FieldDescription> : null}
       </Field>
+      {/* Always mounted, so the count is ANNOUNCED when it changes rather than arriving silently with the list (a11y). */}
+      <p aria-live="polite" className="sr-only">{searchAnnouncement(short || search.typing ? null : state, rows.length)}</p>
       <div id={resultsId}>
         {short ? null : (
           <StateBlock

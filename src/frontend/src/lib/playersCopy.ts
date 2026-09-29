@@ -304,6 +304,9 @@ export const PICKER = {
   searchAction: "search the members",
   searchReading: "Searching…",
   searchEmpty: "No one found",
+  /** The polite live region's words once a search has answered (a11y): a count, or no one. */
+  searchFound: (count: number) => (count === 1 ? "1 member found" : `${count} members found`),
+  searchNoneFound: "No one found.",
   searchEmptyHint:
     "Only members who've chosen to be findable appear here. Anyone else can join through a share link.",
   linkTitle: "An open seat",

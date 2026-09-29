@@ -143,6 +143,17 @@ describe("PlayerPicker — the club directory (D13)", () => {
     expect(screen.getByText(PICKER.searchEmptyHint)).toBeTruthy();
   });
 
+  it("announces what a search found in a polite live region — a count, or no one (a11y)", async () => {
+    routes([{ path: "/api/v1/members/directory?q=jo", body: { items: [JO] } }, { path: "/api/v1/members/directory?q=zz", body: { items: [] } }]);
+    show();
+    await openTab(PICKER.members);
+    fireEvent.change(screen.getByLabelText(PICKER.searchLabel), { target: { value: "jo" } });
+    const region = await screen.findByText(PICKER.searchFound(1));
+    expect(region.closest("[aria-live='polite']")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(PICKER.searchLabel), { target: { value: "zz" } });
+    await waitFor(() => expect(region.textContent).toBe(PICKER.searchNoneFound));
+  });
+
   it("says the rate limit as a sentence, with its wait", async () => {
     const body = { error: "directory_rate_limited", retry_after_seconds: 12 };
     routes([{ path: "/api/v1/members/directory", status: 429, body }]);
