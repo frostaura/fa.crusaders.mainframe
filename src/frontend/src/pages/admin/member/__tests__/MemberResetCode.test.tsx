@@ -32,6 +32,11 @@ async function openReset(routes: StubRoute[]) {
   return { stub, dialog };
 }
 
+/** Round-1 contract §7: the desk says why before the reset can go. */
+function giveReason(dialog: HTMLElement) {
+  fireEvent.change(within(dialog).getByRole("textbox", { name: COPY.resetCodeReason }), { target: { value: "Lost phone" } });
+}
+
 /** Holds the reset's answer until released, so the pending state can be looked at. */
 function holdReset() {
   const stubbed = globalThis.fetch;
@@ -51,6 +56,9 @@ describe("member detail — reset member code", () => {
     expect(within(dialog).getByText(COPY.resetCodeBody)).toBeInTheDocument();
     expect(within(dialog).getByRole("switch", { name: COPY.revokePasskeys })).toHaveAttribute("aria-checked", "true");
     expect(within(dialog).getByText(COPY.revokePasskeysHint)).toBeInTheDocument();
+    // No reason, no reset (contract §7): the change record and the member's email both quote it.
+    expect(within(dialog).getByRole("button", { name: COPY.resetCodeConfirm })).toBeDisabled();
+    giveReason(dialog);
     expect(within(dialog).getByRole("button", { name: COPY.resetCodeConfirm })).toBeEnabled();
     expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
   });
@@ -58,6 +66,7 @@ describe("member detail — reset member code", () => {
   it("sends revoke_passkeys:true by default, shows pending, toasts the count and re-reads the member", async () => {
     const { stub, dialog } = await openReset([{ method: "POST", path: RESET, body: answer(true, 2) }]);
     const release = holdReset();
+    giveReason(dialog);
     const confirm = within(dialog).getByRole("button", { name: COPY.resetCodeConfirm });
     fireEvent.click(confirm);
 
@@ -65,7 +74,7 @@ describe("member detail — reset member code", () => {
     const readsBefore = stub.calls.filter((c) => c.path === BASE).length;
     release();
     // Recorded once the held call reaches the stub.
-    await waitFor(() => expect(stub.calls.find((c) => c.path === RESET)?.body).toEqual({ revoke_passkeys: true }));
+    await waitFor(() => expect(stub.calls.find((c) => c.path === RESET)?.body).toEqual({ revoke_passkeys: true, reason: "Lost phone" }));
 
     expect(await screen.findByText(COPY.codeReset(NAME, true, 2))).toBeInTheDocument();
     expect(COPY.codeReset(NAME, true, 2)).toContain("2 passkeys removed");
@@ -78,15 +87,17 @@ describe("member detail — reset member code", () => {
     const toggle = within(dialog).getByRole("switch", { name: COPY.revokePasskeys });
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "false");
+    giveReason(dialog);
     fireEvent.click(within(dialog).getByRole("button", { name: COPY.resetCodeConfirm }));
 
-    await waitFor(() => expect(stub.calls.find((c) => c.path === RESET)?.body).toEqual({ revoke_passkeys: false }));
+    await waitFor(() => expect(stub.calls.find((c) => c.path === RESET)?.body).toEqual({ revoke_passkeys: false, reason: "Lost phone" }));
     expect(await screen.findByText(COPY.codeReset(NAME, false, 0))).toBeInTheDocument();
     expect(COPY.codeReset(NAME, false, 0)).toContain("Their passkeys were kept.");
   });
 
   it("keeps the dialog open with the refusal in it, and claims nothing", async () => {
     const { dialog } = await openReset([{ method: "POST", path: RESET, status: 500, body: { error: "boom" } }]);
+    giveReason(dialog);
     fireEvent.click(within(dialog).getByRole("button", { name: COPY.resetCodeConfirm }));
 
     const alert = await within(dialog).findByRole("alert");

@@ -867,6 +867,14 @@ export const adminEndpoints = {
    * same wave.
    * </p>
    */
+  /**
+   * Reset a member's code (the desk's "I lost my phone"). Round-1 contract §7: the request
+   * carries the desk's REASON, which the change record keeps and the member's email quotes.
+   * Takes the MEMBERSHIP id.
+   */
+  memberCodeReset: (membershipId: string, body: { revokePasskeys: boolean; reason: string }) =>
+    api.post<{ rotated: boolean; generation: number; passkeys_revoked: boolean; passkeys_removed: number }>(
+      `/api/v1/admin/members/${membershipId}/code/reset`, { revoke_passkeys: body.revokePasskeys, reason: body.reason }),
   adjustCredit: (
     userId: string,
     body: {

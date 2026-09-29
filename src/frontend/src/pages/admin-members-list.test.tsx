@@ -82,8 +82,9 @@ describe("the row is the way into a member", () => {
     const dialog = await screen.findByRole("dialog", { name: ACTIONS_COPY.resetCodeTitle("Ada Lovelace") });
     expect(within(dialog).getByText(ACTIONS_COPY.resetCodeBody)).toBeInTheDocument();
     expect(within(dialog).getByRole("switch", { name: ACTIONS_COPY.revokePasskeys })).toHaveAttribute("aria-checked", "true");
+    fireEvent.change(within(dialog).getByRole("textbox", { name: ACTIONS_COPY.resetCodeReason }), { target: { value: "Lost phone" } });
     fireEvent.click(within(dialog).getByRole("button", { name: ACTIONS_COPY.resetCodeConfirm }));
-    await waitFor(() => expect(stub.calls.find((c) => c.path.endsWith("/code/reset"))?.body).toEqual({ revoke_passkeys: true }));
+    await waitFor(() => expect(stub.calls.find((c) => c.path.endsWith("/code/reset"))?.body).toEqual({ revoke_passkeys: true, reason: "Lost phone" }));
     expect(await screen.findByText(ACTIONS_COPY.codeReset("Ada Lovelace", true, 1))).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("dialog", { name: ACTIONS_COPY.resetCodeTitle("Ada Lovelace") })).toBeNull());
   });

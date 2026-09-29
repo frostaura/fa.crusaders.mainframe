@@ -127,6 +127,9 @@ export const ACTIONS_COPY = {
   revokePasskeys: "Also remove their passkeys",
   revokePasskeysHint:
     "Leave this on for a lost phone — a passkey on it could otherwise sign straight back in and pick up the new code.",
+  resetCodeReason: "Reason",
+  resetCodeReasonHint: "Kept in the change record, and quoted in the email the member gets about the reset.",
+  resetCodeReasonPlaceholder: "e.g. Lost their phone at the club",
   resetCodeConfirm: "Reset code",
   resetCodeAction: "reset the member code",
   codeReset: (name: string, passkeysRevoked: boolean, passkeysRemoved: number) =>
