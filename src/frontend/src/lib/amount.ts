@@ -44,7 +44,7 @@ export type AmountRules = {
   allowZero?: boolean;
 };
 
-const SPACES = /[\s   ]/g;
+const SPACES = /[\s\u00a0\u202f\u2009]/g;
 const PLAIN = /^\d+(?:[.,]\d+)?$/;
 const MINUS = /^[-−–]/;
 
