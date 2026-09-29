@@ -1264,6 +1264,22 @@ export type MyProfile = {
   topup_failure_cooldown_minutes?: number;
   /** 1–240, default 15. One admin overdrawing one member inside this window is one email. */
   overdraft_cooldown_minutes?: number;
+
+  // P12 — play (play.md §6.4), snake_case both ways. Bounds live in `settingsSchema.ts`.
+  /** 12–168, default 48. */
+  result_autoconfirm_hours?: number;
+  /** 1–30, default 7. */
+  result_record_days?: number;
+  /** 2–12, default 4. */
+  streak_rest_every_weeks?: number;
+  /** 0–4, default 2. */
+  streak_rest_cap?: number;
+  /** 0–26, default 8. */
+  streak_pause_weeks_per_year?: number;
+  /** 0–720, default 420 (07:00). */
+  play_early_bird_before_minute?: number;
+  /** 720–1439, default 1260 (21:00). */
+  play_night_owl_from_minute?: number;
 };
 
 /** A group as a member row names it (D2) — the same shape `adminApi.MemberGroupChip` types. */

@@ -402,6 +402,8 @@ export type TraceView = {
 
 export const ADMIN_CHANGE_AREAS = [
   "schedule", "booking", "credit", "group", "member", "setting", "device",
+  // P12 — `AdminChangeAreas.Play`: a match result voided or upheld (play.md §6.3).
+  "play",
 ] as const;
 export type AdminChangeArea = typeof ADMIN_CHANGE_AREAS[number];
 

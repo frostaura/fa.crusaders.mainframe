@@ -1,5 +1,5 @@
 import {
-  ChartBar, ClockCounterClockwise, Cpu, Door, Gauge, Gear, Racquet, Receipt, Repeat, SquaresFour, Users,
+  ChartBar, ClockCounterClockwise, Cpu, Door, Gauge, Gear, Racquet, Receipt, Repeat, SquaresFour, Trophy, Users,
   UsersThree, Warning, WebhooksLogo, type Icon,
 } from "@/components/ui/icons";
 
@@ -20,7 +20,7 @@ import {
  */
 
 /** Which attention count a destination carries. See `lib/adminAttention.ts` for each source. */
-export type AdminBadgeKey = "pending" | "doors" | "faults";
+export type AdminBadgeKey = "pending" | "doors" | "faults" | "disputes";
 
 export type AdminNavItem = {
   /** Stable id for tests and keys — never shown. */
@@ -73,6 +73,11 @@ export const ADMIN_NAV: readonly AdminNavGroup[] = [
       {
         id: "groups", label: "Groups", path: "/admin/groups", icon: UsersThree,
         description: "Who may book when, and the limits each group plays under.",
+      },
+      {
+        // P12 (play.md §9.4). Badged by the disputes waiting for the club.
+        id: "results", label: "Match results", path: "/admin/results", icon: Trophy, badge: "disputes",
+        description: "Disputed match results, and removing a result that is wrong.",
       },
     ],
   },

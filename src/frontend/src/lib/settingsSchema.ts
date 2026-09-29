@@ -48,7 +48,7 @@ import {
 
 export type SettingsSectionId =
   | "bookings" | "hours" | "cancellations" | "credits" | "schedules"
-  | "boxes" | "screens" | "doors" | "records" | "monitoring" | "alerts";
+  | "boxes" | "screens" | "doors" | "records" | "monitoring" | "alerts" | "play";
 
 /** What a help, a bound or a lede may depend on: the working copy and the club's money symbol. */
 export type SettingContext = { settings: AdminSettings; currency: string };
@@ -185,6 +185,16 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
     lede: "When every admin is emailed, and how long alerts stay on the Overview. Which of them reach your own"
       + " inbox is your choice, below — it saves as you switch and changes nothing for other admins.",
     searchTerms: ["email", "alert", "notification", "inbox", "remind", "application", "cooldown", "quiet"],
+  },
+  {
+    // P12 (play.md §6.4). Every number is the club's; changing a streak one re-reads every
+    // member's streak next time they look — it can move a streak, never a badge already earned.
+    id: "play",
+    title: "Match results & streaks",
+    lede: "How long players have to record and confirm a result, how weekly streaks rest and pause, and when the"
+      + " early-bird and night-owl badges start. A streak change shows on each member's next look; a badge already"
+      + " earned is never taken back.",
+    searchTerms: ["result", "score", "match", "streak", "badge", "pause", "injury", "play", "dispute"],
   },
 ];
 
@@ -575,10 +585,60 @@ const ALERTS: SettingDef[] = [
   },
 ];
 
+// P12 — the play numbers (play.md §6.4). Snake_case on the wire, as every key since R23: the
+// settings PUT binds them by `JsonPropertyName`. Bounds are `PlaySettings.cs`' own.
+const PLAY_KEY = { section: "play", integer: true, range: true, optional: true, wire: "snake" } as const;
+
+const PLAY: SettingDef[] = [
+  {
+    ...PLAY_KEY, kind: "number", key: "result_autoconfirm_hours", label: "Result confirms itself after (hours)", unit: "h",
+    description: "A recorded result nobody answers is confirmed after this long.",
+    help: "12–168. Silence is consent to the score shown: an edit restarts the clock. A disputed result never confirms"
+      + " itself — it waits for an admin.",
+    min: 12, max: 168, defaultValue: 48,
+  },
+  {
+    ...PLAY_KEY, kind: "number", key: "result_record_days", label: "Results can be recorded for (days)", unit: "days",
+    description: "How long after a game its players can still record the result.",
+    help: "1–30, counted from the booking's end. Recording opens the moment the court is checked in at the box.",
+    min: 1, max: 30, defaultValue: 7,
+  },
+  {
+    ...PLAY_KEY, kind: "number", key: "streak_rest_every_weeks", label: "A rest week every (weeks played)", unit: "weeks",
+    description: "Weeks played in a row that earn one rest week.",
+    help: "2–12. A missed week spends a banked rest week automatically, so the streak carries on.",
+    min: 2, max: 12, defaultValue: 4,
+  },
+  {
+    ...PLAY_KEY, kind: "number", key: "streak_rest_cap", label: "Rest weeks a member can bank", unit: "weeks",
+    description: "The most rest weeks held at once. 0 turns rest weeks off.",
+    help: "0–4. A rest week earned past this is not kept.",
+    min: 0, max: 4, defaultValue: 2,
+  },
+  {
+    ...PLAY_KEY, kind: "number", key: "streak_pause_weeks_per_year", label: "Injury pause weeks a year", unit: "weeks",
+    description: "How many weeks a year a member's injury pause can hold their streak. 0 turns pausing off.",
+    help: "0–26, per calendar year. Past it the pause stays on but the weeks count again.",
+    min: 0, max: 26, defaultValue: 8,
+  },
+  {
+    ...PLAY_KEY, kind: "minuteOfDay", key: "play_early_bird_before_minute", label: "Early bird: sessions starting before",
+    description: "A session starting before this time earns the Early bird badge.",
+    help: "Midnight to midday (00:00–12:00). A badge already earned stays when this changes.",
+    min: 0, max: 720, defaultValue: 420,
+  },
+  {
+    ...PLAY_KEY, kind: "minuteOfDay", key: "play_night_owl_from_minute", label: "Night owl: sessions starting from",
+    description: "A session starting at or after this time earns the Night owl badge.",
+    help: "Midday to 23:59 (12:00–23:59). A badge already earned stays when this changes.",
+    min: 720, max: 1439, defaultValue: 1260,
+  },
+];
+
 /** Every setting on the page, in page order. */
 export const SETTINGS: readonly SettingDef[] = [
   ...BOOKINGS, ...HOURS, ...CANCELLATIONS, ...CREDITS, ...SCHEDULES, ...BOXES, ...SCREENS, ...DOORS, ...RECORDS,
-  ...MONITORING, ...ALERTS,
+  ...MONITORING, ...ALERTS, ...PLAY,
 ];
 
 const BY_KEY = new Map(SETTINGS.map((def) => [def.key, def]));

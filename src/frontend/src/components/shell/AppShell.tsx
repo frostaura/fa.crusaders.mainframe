@@ -5,6 +5,7 @@ import { tokenStore } from "@/lib/api";
 import { useAdminAttention } from "@/lib/adminAttention";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { CelebrationOverlay } from "../play/CelebrationOverlay";
 import { ShutDoorsBanner } from "../doors/ShutDoorsBanner";
 import { useDoorsChrome } from "../doors/useDoorsChrome";
 import { AccountMenu } from "./AccountMenu";
@@ -165,6 +166,8 @@ export default function AppShell() {
           <PageErrorBoundary resetKey={location.pathname}><Outlet /></PageErrorBoundary>
         </div>
       </main>
+      {/* P12 — a badge or a goal, once. It keeps its own rules: signed in only, and never over the pass (§9.3). */}
+      <CelebrationOverlay />
     </div>
   );
 }

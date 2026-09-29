@@ -17,6 +17,7 @@ import {
   type StubRoute,
 } from "../test/harness";
 import { forgetLastKnown } from "../lib/lastKnown";
+import { myPlay } from "@/components/play/__tests__/playKit";
 
 /**
  * "My door history" on /profile — W1.8.
@@ -50,6 +51,8 @@ describe("My door history", () => {
       { path: "/api/v1/me/profile", body: PROFILE },
       { path: "/api/v1/me/webauthn/credentials", body: [] },
       { path: "/api/v1/me/preferences", body: { findable: false, show_in_leaderboards: false } },
+      // P12 — My game is Profile's first section; answered, so its own retry is not on the page.
+      { path: "/api/v1/me/play", body: myPlay() },
       ...routes,
     ]);
     return render(

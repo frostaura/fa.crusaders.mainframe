@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { MemberPlayCard } from "@/components/play/admin/MemberPlayCard";
 import { Button } from "@/components/ui/button";
 import { CalendarBlank } from "@/components/ui/icons";
 import { Section } from "@/components/ui/page-shell";
@@ -57,6 +58,9 @@ export function MemberOverview() {
           <StatTile label={COPY.noShows} value={detail.counts_30d.no_shows} hint={COPY.noShowsHint} tone="danger" />
         </dl>
       </Section>
+
+      {/* P12 — counts only: the member's partners, opponents and badges stay theirs (play.md §9.4). */}
+      <MemberPlayCard userId={userId} />
 
       <Section
         title={COPY.accountTitle}

@@ -19,7 +19,7 @@ describe("the admin IA", () => {
     expect(ADMIN_NAV.map((g) => g.label)).toEqual(["Overview", "People", "Money", "Courts & hardware", "Setup"]);
     expect(ADMIN_NAV_ITEMS.map((i) => i.label)).toEqual([
       "Overview",
-      "Members", "Groups",
+      "Members", "Groups", "Match results",
       "Transactions", "Reports",
       "Control board", "Doors", "Boards", "Faults", "Change record", "Repeating bookings", "Courts",
       "Settings", "Webhooks",
@@ -37,9 +37,9 @@ describe("the admin IA", () => {
     }
   });
 
-  it("puts the three badges on Members, Doors and Faults and nowhere else", () => {
+  it("puts the four badges on Members, Match results, Doors and Faults and nowhere else", () => {
     const badged = ADMIN_NAV_ITEMS.filter((i) => i.badge).map((i) => [i.id, i.badge]);
-    expect(badged).toEqual([["members", "pending"], ["doors", "doors"], ["faults", "faults"]]);
+    expect(badged).toEqual([["members", "pending"], ["results", "disputes"], ["doors", "doors"], ["faults", "faults"]]);
   });
 
   it.each([
@@ -53,6 +53,7 @@ describe("the admin IA", () => {
     ["/admin/members/7f1c/night", "members"],
     ["/admin/courts", "courts"],
     ["/admin/groups", "groups"],
+    ["/admin/results", "results"],
     ["/admin/transactions", "transactions"],
     ["/admin/reports", "reports"],
     ["/admin/monitoring", "control-board"],
@@ -145,5 +146,12 @@ describe("the attention wording", () => {
     expect(attentionBadge("pending", counts)).toEqual({ count: 2, label: "2 membership applications awaiting review" });
     expect(attentionBadge("doors", counts)).toEqual({ count: 1, label: "1 door needs attention" });
     expect(attentionBadge("faults", counts)).toEqual({ count: 5, label: "5 faults need attention" });
+  });
+
+  it("counts P12's disputes for Match results, and reads zero when a caller never had them", () => {
+    expect(attentionBadge("disputes", { pending: 0, doors: 0, faults: 0, disputes: 1 }))
+      .toEqual({ count: 1, label: "1 disputed match result" });
+    expect(attentionBadge("disputes", { pending: 0, doors: 0, faults: 0, disputes: 3 }).label).toBe("3 disputed match results");
+    expect(attentionBadge("disputes", { pending: 2, doors: 1, faults: 5 })).toEqual({ count: 0, label: "0 disputed match results" });
   });
 });

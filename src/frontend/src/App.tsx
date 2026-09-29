@@ -23,6 +23,7 @@ import AdminWebhooksPage from "./pages/AdminWebhooks";
 import AdminSettingsPage from "./pages/AdminSettings";
 import AdminLedgerPage from "./pages/AdminLedger";
 import ProfilePage from "./pages/Profile";
+import ProfileResultsPage from "./pages/ProfileResults";
 import MyCodePage from "./pages/MyCode";
 import HowItWorksPage from "./pages/HowItWorks";
 // P8 — the member welcome wizard, and the gate that offers it once to a newly approved member.
@@ -61,6 +62,7 @@ import InboxPage from "./pages/Inbox";
 import { ReportsRedirect } from "./pages/Reports";
 import AdminLayout from "./components/admin/AdminLayout";
 import AdminHomePage from "./pages/admin/AdminHome";
+import AdminResultsPage from "./pages/admin/AdminResults";
 import { RouteAnnouncer } from "./components/RouteAnnouncer";
 import { LANDING_PATH } from "./components/shell/nav";
 import { BootSplash, ConnectionLost, RouteSkeleton } from "./components/shell/SessionScreens";
@@ -175,6 +177,8 @@ export function AppRoutes() {
         <Route path="/wallet/topup/:topupId" element={<RequireAuth><TopUpStatusPage /></RequireAuth>} />
         <Route path="/wallet/activity" element={<RequireAuth><Lazy><WalletActivityPage /></Lazy></RequireAuth>} />
         <Route path="/profile" element={<RequireAuth><ProfilePage /></RequireAuth>} />
+        {/* P12 — the member's match history, from My game's "All results". */}
+        <Route path="/profile/results" element={<RequireAuth><ProfileResultsPage /></RequireAuth>} />
         <Route path="/change-password" element={<RequireAuth><ChangePasswordPage /></RequireAuth>} />
         {/* Deliberately NOT behind RequireAuth: an applicant waiting for approval and a member who
             cannot sign in are exactly the people wondering how any of this works (item 16). */}
@@ -196,6 +200,8 @@ export function AppRoutes() {
             <Route path="/admin/members/:userId/access" element={<MemberAccess />} />
           </Route>
           <Route path="/admin/groups" element={<AdminGroupsPage />} />
+          {/* P12 — disputed results, and removing a wrong one. */}
+          <Route path="/admin/results" element={<AdminResultsPage />} />
           <Route path="/admin/transactions" element={<AdminLedgerPage />} />
           <Route path="/admin/reports" element={<Lazy><AdminReportsPage /></Lazy>} />
           <Route path="/admin/monitoring" element={<ControlBoardPage />} />

@@ -60,6 +60,8 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   ["/wallet/topup/:topupId", "Top-up status"],
   ["/wallet/activity", "Wallet activity"],
   ["/profile", "Profile"],
+  // P12 — the member's own match history.
+  ["/profile/results", "My results"],
   ["/change-password", "Change password"],
   // item 16 — the always-reachable guide.
   ["/how-it-works", "How it works"],
@@ -76,6 +78,8 @@ const ROUTE_PAGE_NAMES: ReadonlyArray<readonly [string, string]> = [
   ["/admin/members/:userId/night", "Member's night"],
   ["/admin/members/:userId/access", "Member sign-in & biometrics"],
   ["/admin/groups", "Groups"],
+  // P12 — disputed results and removing a wrong one.
+  ["/admin/results", "Match results"],
   ["/admin/transactions", "Transactions"],
   ["/admin/reports", "Reports"],
   // Monitoring (R17: courts, hardware and control). The section index is the control board, so

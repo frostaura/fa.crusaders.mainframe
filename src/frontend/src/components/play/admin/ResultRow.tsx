@@ -1,0 +1,104 @@
+import { useState } from "react";
+import { ConfirmDialog } from "@/components/admin/ConfirmDialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { Textarea } from "@/components/ui/textarea";
+import { playEndpoints, type AdminResult } from "@/lib/playApi";
+import { ADMIN_RESULTS, FORMAT_LABEL, PLAY_REFUSAL, playWhen, STATUS_WORD } from "@/lib/playCopy";
+import { ResultScore } from "../ResultScore";
+import { STATUS_TONE } from "../resultFacts";
+
+/**
+ * One result on the admin's Match results list (§9.4): when and where, the lineup and score,
+ * who recorded it, who disputed it and what they said — and the two decisions, each with a
+ * required reason that goes on the change record: `Remove result` (danger; the dismiss is
+ * `Keep it`) and, on a disputed row, `Keep result`.
+ *
+ * <p>
+ * No watermark and no card affordance: a row that holds a destructive action is never dressed
+ * as a tappable surface (design-system.md, the watermark's "never" list).
+ * </p>
+ */
+export type ResultRowProps = {
+  row: AdminResult;
+  /** The row's decision landed: the list drops it and the badge re-reads. */
+  onDecided: (row: AdminResult, text: string) => void;
+};
+
+export function ResultRow({ row, onDecided }: ResultRowProps) {
+  const removable = row.status === "pending" || row.status === "disputed" || row.status === "confirmed";
+  return (
+    <li data-admin-result={row.result_id} data-status={row.status} className="flex flex-col gap-3 rounded-xl border border-border bg-bg-surface p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-text-primary">{placeLine(row)}</p>
+        <Badge tone={STATUS_TONE[row.status]}>{STATUS_WORD[row.status]}</Badge>
+      </div>
+      <ResultScore result={row} />
+      <Facts row={row} />
+      {removable ? (
+        <div className="flex flex-wrap gap-2">
+          {row.status === "disputed" ? <Decision row={row} kind="uphold" onDecided={onDecided} /> : null}
+          <Decision row={row} kind="void" onDecided={onDecided} />
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+function placeLine(row: AdminResult): string {
+  const when = playWhen(row.starts_at);
+  return row.court_name ? `${row.court_name} · ${when}` : when;
+}
+
+function Facts({ row }: { row: AdminResult }) {
+  return (
+    <div className="flex flex-col gap-1 text-sm text-text-secondary">
+      <p>{`${FORMAT_LABEL[row.format]} · ${ADMIN_RESULTS.recordedBy(row.submitted_by.name)} · ${playWhen(row.submitted_at)}`}</p>
+      {row.disputed_by ? <p>{ADMIN_RESULTS.disputedBy(row.disputed_by.name)}</p> : null}
+      {row.dispute_note ? (
+        <blockquote data-dispute-note="" className="border-l-2 border-warning-strong pl-3 text-text-primary">{row.dispute_note}</blockquote>
+      ) : null}
+    </div>
+  );
+}
+
+type DecisionProps = { row: AdminResult; kind: "void" | "uphold"; onDecided: ResultRowProps["onDecided"] };
+
+/** The confirm step with its required reason. Both outcome-named; `Remove result` is danger. */
+function Decision({ row, kind, onDecided }: DecisionProps) {
+  const [reason, setReason] = useState("");
+  const voiding = kind === "void";
+  const act = async () => {
+    const text = reason.trim();
+    const answer = voiding ? await playEndpoints.adminVoid(row.result_id, text) : await playEndpoints.adminUphold(row.result_id, text);
+    onDecided(answer, voiding ? ADMIN_RESULTS.removed : ADMIN_RESULTS.kept);
+  };
+  return (
+    <ConfirmDialog
+      trigger={<Button variant={voiding ? "danger-soft" : "outline"}>{voiding ? ADMIN_RESULTS.remove : ADMIN_RESULTS.keep}</Button>}
+      title={voiding ? ADMIN_RESULTS.removeTitle : ADMIN_RESULTS.keepTitle}
+      description={voiding ? ADMIN_RESULTS.removeBody : ADMIN_RESULTS.keepBody}
+      confirmLabel={voiding ? ADMIN_RESULTS.remove : ADMIN_RESULTS.keep}
+      cancelLabel={voiding ? ADMIN_RESULTS.removeKeep : ADMIN_RESULTS.keepCancel}
+      tone={voiding ? "danger" : "primary"}
+      action={voiding ? ADMIN_RESULTS.removeAction : ADMIN_RESULTS.keepAction}
+      codes={PLAY_REFUSAL}
+      onConfirm={act}
+      confirmDisabled={reason.trim() === ""}
+    >
+      <Field controlId={`reason-${kind}-${row.result_id}`}>
+        <FieldLabel>{ADMIN_RESULTS.reasonLabel}</FieldLabel>
+        <Textarea
+          rows={2}
+          required
+          maxLength={ADMIN_RESULTS.reasonMax}
+          value={reason}
+          placeholder={ADMIN_RESULTS.reasonPlaceholder}
+          onChange={(e) => setReason(e.target.value)}
+        />
+        <FieldDescription>{ADMIN_RESULTS.reasonHint}</FieldDescription>
+      </Field>
+    </ConfirmDialog>
+  );
+}

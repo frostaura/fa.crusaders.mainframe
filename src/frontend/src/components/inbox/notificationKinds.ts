@@ -1,7 +1,9 @@
 import {
-  ArrowCounterClockwise, ClockCounterClockwise, Coins, Clock, Envelope, HandWaving, PencilSimple, XCircle, type Icon,
+  ArrowCounterClockwise, CheckCircle, ClockCounterClockwise, Coins, Clock, Envelope, HandWaving, Medal, PencilSimple,
+  Prohibit, Trophy, Warning, XCircle, type Icon,
 } from "@/components/ui/icons";
 import { clubClock, clubRowTime } from "@/lib/clubClock";
+import { PLAY_KIND_WORD } from "@/lib/playCopy";
 import { INBOX_COPY, INBOX_KIND_WORD, playersWhen } from "@/lib/playersCopy";
 
 /** Each kind's mark — a cue beside the headline, never instead of it. Unknown kinds get the bell. */
@@ -14,11 +16,17 @@ export const KIND_ICON: Record<string, Icon> = {
   "players.game_changed": PencilSimple,
   "players.response": HandWaving,
   "players.return_waiting": ArrowCounterClockwise,
+  // P12 — play (play.md §8). Only the first is mailed; all five are inbox lines.
+  "play.result_to_confirm": Trophy,
+  "play.result_confirmed": CheckCircle,
+  "play.result_disputed": Warning,
+  "play.result_voided": Prohibit,
+  "play.badge_earned": Medal,
 };
 
 /** What the kind is, in words, or null for a kind this build does not know. */
 export function kindWord(kind: string): string | null {
-  return INBOX_KIND_WORD[kind] ?? null;
+  return INBOX_KIND_WORD[kind] ?? PLAY_KIND_WORD[kind] ?? null;
 }
 
 /**
