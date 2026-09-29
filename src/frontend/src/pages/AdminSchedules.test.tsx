@@ -33,7 +33,16 @@ vi.setConfig({ testTimeout: 20_000 });
 
 const SCHEDULES = "/api/v1/admin/schedules";
 
+/**
+ * The clock the fixtures were written against. The create flow picks FIXED dates in October
+ * 2026 by walking the day picker forward from today, and the picker refuses past days — so on
+ * the real clock this file went red for good once 2026-10-06 was behind us. Only `Date` is
+ * faked: user-event under fake timers deadlocks here (memory/gotchas-frontend.md).
+ */
+const PINNED_NOW = new Date("2026-09-29T08:00:00+02:00");
+
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"], now: PINNED_NOW });
   signIn({ isAdmin: true });
   forgetClubZone();
 });
@@ -41,6 +50,7 @@ beforeEach(() => {
 afterEach(() => {
   signOut();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("the list", () => {

@@ -363,3 +363,35 @@ describe("a fragment that names an accordion header", () => {
     expect(heading).toHaveAttribute("tabindex", "-1");
   });
 });
+
+/**
+ * D13 — after a keyboard sign-in the route announcer's focus on the page `h1` matched
+ * `:focus-visible` (typing counts as keyboard modality) and drew a heavy box round "Your code".
+ * What the app focuses FOR a person — a `tabindex="-1"` heading, landmark or panel — carries no
+ * ring; a control parked at -1 (a menu item, a tab) keeps it.
+ */
+describe("the ring on programmatically focused elements (D13)", () => {
+  const css = readFileSync(join(SRC, "index.css"), "utf8");
+  const rule = /(\[tabindex="-1"\]:not\([^{]*\):focus)\s*\{\s*outline:\s*none;/.exec(css);
+
+  it("has one rule that turns the outline off for a focused tabindex=-1 non-control", () => {
+    expect(rule).not.toBeNull();
+  });
+
+  it("covers headings and landmarks, and spares controls that park at -1", () => {
+    const selector = rule![1].replace(/:focus$/, "");
+    const el = (html: string) => {
+      const host = document.createElement("div");
+      host.innerHTML = html;
+      return host.firstElementChild as Element;
+    };
+    expect(el('<h1 tabindex="-1">Your code</h1>').matches(selector)).toBe(true);
+    expect(el('<main tabindex="-1"></main>').matches(selector)).toBe(true);
+    expect(el('<div role="region" tabindex="-1"></div>').matches(selector)).toBe(true);
+    expect(el('<div role="menuitem" tabindex="-1"></div>').matches(selector)).toBe(false);
+    expect(el('<button tabindex="-1"></button>').matches(selector)).toBe(false);
+    expect(el('<button role="tab" tabindex="-1"></button>').matches(selector)).toBe(false);
+    expect(el('<h1 tabindex="0">Not parked</h1>').matches(selector)).toBe(false);
+  });
+});
+

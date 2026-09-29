@@ -155,23 +155,25 @@
   }
 
   /*
-   * The heading the router moves focus to on a route change: a ring for the keyboard user who
-   * needs to see where focus went, none for the mouse user who did not ask. `scroll-margin-top`
-   * reads the chrome height `Layout` measures, so a fragment target lands below a sticky header
-   * on a phone as well as on a desktop.
+   * The heading the router moves focus to on a route change. `scroll-margin-top` reads the
+   * chrome height `Layout` measures, so a fragment target lands below a sticky header on a phone
+   * as well as on a desktop.
    */
   [data-route-heading],
   :target {
     scroll-margin-top: calc(var(--app-chrome-height, 5rem) + 12px);
   }
 
-  [data-route-heading]:focus {
+  /*
+   * D13 — no ring on what was focused FOR the person rather than BY them. A `tabindex="-1"`
+   * heading, landmark or panel is a place the app put focus (the route announcer, a fragment
+   * target, a result panel) and never a tab stop, so it is not a control. The browser still
+   * matched `:focus-visible` on it after a keyboard sign-in — the typing counted as keyboard
+   * modality — and drew the house ring as a heavy box around "Your code". Controls that park at
+   * -1 (a roving menu item, a tab, a radio) are excluded by role and keep their ring.
+   */
+  [tabindex="-1"]:not(a, button, input, select, textarea, summary, [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], [role="tab"], [role="radio"], [role="checkbox"], [role="switch"], [role="button"], [role="link"], [role="gridcell"], [role="slider"], [role="treeitem"]):focus {
     outline: none;
-  }
-
-  [data-route-heading]:focus-visible {
-    outline: 2px solid rgb(var(--color-accent-strong));
-    outline-offset: 2px;
   }
 
   /*
