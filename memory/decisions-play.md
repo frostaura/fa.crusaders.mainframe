@@ -7,7 +7,8 @@ last_verified: 2026-09-29
 
 # Live decisions — play (D14 MVP)
 
-Spec: `docs/specs/play.md` (P12, written 2026-09-29, not yet built). This is the why.
+Spec: `docs/specs/play.md` (P12). Built by two lanes and merged on `main-work` 2026-09-29.
+This is the why.
 
 - **Attendance is `CheckedInAt`, never a door scan**: a member attended when their own seat was
   scanned, or the booking was checked in and they are a player of it. *Why:* one scan lights the
@@ -47,5 +48,8 @@ Spec: `docs/specs/play.md` (P12, written 2026-09-29, not yet built). This is the
 - **Everything is private**: no public profile, no webhook for play events, admin sees counts
   only. `show_in_leaderboards` / `share_results` stay reserved for the future programme.
 - **Celebrations never cover `/my-code`** or an open sheet; acknowledged on dismissal, not display.
+- **The result card tells two 404s apart.** `booking_not_found` (a non-player, e.g. an admin
+  looking in) hides the card; `result_not_found` reads as "no result yet". *Why:* the backend
+  lane added the second code, and one 404 rule would hide a member's own card.
 - **Open for Dean** (spec §14, defaults in use): My game on by default; unfinished matches not
   recordable; admin card shows the W–L record.

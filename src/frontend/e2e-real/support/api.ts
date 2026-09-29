@@ -59,17 +59,26 @@ function toSession(body: LoginBody): Session {
 }
 
 let adminSession: Promise<Session> | null = null;
+let adminSessionAt = 0;
+
+/**
+ * How long a cached admin session is trusted. The access token lives longer than this, but a
+ * walk that waits for a box's cue window can outlast it; a fresh login costs one call.
+ */
+const ADMIN_SESSION_REUSE_MS = 5 * 60_000;
 
 /**
  * The seeded admin's session, via the Development-only `/api/v1/auth/dev/admin-login`.
  *
  * <p>
- * Cached for the life of the worker: every call burns one of the ten anonymous auth calls a
- * minute. The endpoint answers 404 outside Development, which is reported as such rather than
+ * Cached for a few minutes (`ADMIN_SESSION_REUSE_MS`): every call burns one of the ten
+ * anonymous auth calls a minute, and a session held for the life of the worker expired mid-walk. The endpoint answers 404 outside Development, which is reported as such rather than
  * as a generic failure.
  * </p>
  */
 export function devAdminSession(request: APIRequestContext): Promise<Session> {
+  if (adminSession && Date.now() - adminSessionAt > ADMIN_SESSION_REUSE_MS) adminSession = null;
+  if (!adminSession) adminSessionAt = Date.now();
   adminSession ??= (async () => {
     const res = await postWithBackoff(request, "/api/v1/auth/dev/admin-login", {});
     if (res.status() === 404) {
