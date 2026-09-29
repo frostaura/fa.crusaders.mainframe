@@ -120,7 +120,7 @@ function OtherAccount() {
   return (
     <div className="flex w-full flex-col items-start gap-2" data-other-account="">
       {name ? <p className="text-sm text-text-secondary">{signedInAsLine(name)}</p> : null}
-      <Button type="button" variant="outline" icon={<SignOut weight="bold" />} onClick={signOut}>
+      <Button type="button" variant="outline" onClick={signOut} icon={<SignOut weight="bold" />}>
         {INVITES_COPY.signOutToOpen}
       </Button>
     </div>
