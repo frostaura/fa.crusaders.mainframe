@@ -82,6 +82,7 @@ public static class AdminMemberDetailEndpoints
         var membership = await db.Memberships.AsNoTracking().FirstOrDefaultAsync(m => m.UserId == userId, ct);
         var now = DateTimeOffset.UtcNow;
         var tariff = await MemberTariffs.ForAsync(db, userId, await settings.GetAsync(ct), ct);
+        var held = await ledger.GetHeldAsync(userId, ct);
 
         return Results.Ok(new
         {
@@ -114,6 +115,11 @@ public static class AdminMemberDetailEndpoints
                 peak_withheld_by = tariff.PeakWithheldBy,
             },
             balance_credits = await ledger.GetBalanceAsync(userId, ct),
+            // D11: the same held / owed-back figures the member's own wallet shows, so the desk
+            // sees that part of a balance belongs to partners before it acts on it.
+            held_credits = held.Held,
+            owed_back_credits = held.OwedBack,
+            held_until = held.ReleasesAt,
             passkey_count = await db.WebAuthnCredentials.AsNoTracking().CountAsync(c => c.UserId == userId, ct),
             fingerprints = await FingerprintsAsync(db, userId, ct),
             next_bookings = await NextBookingsAsync(db, userId, now, ct),

@@ -144,6 +144,11 @@ public sealed class AdminMemberDetailHttpTests : IClassFixture<PostgresFixture>
         Assert.False(body.GetProperty("is_admin").GetBoolean());
         Assert.Equal(JsonValueKind.Null, body.GetProperty("admin_source").ValueKind);
         Assert.Equal(120m, body.GetProperty("balance_credits").GetDecimal());
+        // The member wallet's held / owed-back figures travel with the desk's view too (the same
+        // LedgerService.GetHeldAsync); nothing is shared here, so both are zero and nothing releases.
+        Assert.Equal(0m, body.GetProperty("held_credits").GetDecimal());
+        Assert.Equal(0m, body.GetProperty("owed_back_credits").GetDecimal());
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("held_until").ValueKind);
         Assert.Equal(1, body.GetProperty("passkey_count").GetInt32());
 
         var groups = body.GetProperty("groups").EnumerateArray().ToList();
