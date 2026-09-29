@@ -284,7 +284,7 @@ public sealed class CurrencySymbolTests : IClassFixture<PostgresFixture>
     // ---- The member's channel ---------------------------------------------
 
     /// <summary>
-    /// The symbol rides on <c>/me/profile</c> beside <c>action_glyphs</c>, for the reason
+    /// The symbol rides on <c>/me/profile</c>, for the reason
     /// stated there: it is a club-wide value a MEMBER needs, and the settings surface is
     /// admin-only. A member cannot supply an id, so it is their own club's by construction.
     /// </summary>

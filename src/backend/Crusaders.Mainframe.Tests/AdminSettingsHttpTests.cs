@@ -5,6 +5,7 @@ using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Crusaders.Mainframe.Api.Domain;
 using Crusaders.Mainframe.Api.Persistence;
 using Crusaders.Mainframe.Api.Services;
@@ -36,6 +37,7 @@ public sealed class AdminSettingsHttpTests : IClassFixture<PostgresFixture>
 
     private const string Secret = "test-only-signing-key-not-used-in-any-real-environment";
     private const string SettingsPath = "/api/v1/admin/settings/";
+    private const string ProfilePath = "/api/v1/me/profile";
 
     private sealed record Seeded(Guid TenantId, string Slug, Guid AdminUserId);
 
@@ -1462,77 +1464,38 @@ public sealed class AdminSettingsHttpTests : IClassFixture<PostgresFixture>
     }
 
     /// <summary>
-    /// GOAL item 12 / ruling 4: which glyph pair a confirm/decline button wears. Thumbs by
-    /// default — the founder asked for them by name and the club is South African, where a
-    /// thumbs-up reads as plain agreement.
+    /// The thumbs/marks glyph choice (GOAL item 12) is retired (P10): the PWA draws no glyph on
+    /// a button at rest, so the setting decided nothing. It is no longer served — here or on
+    /// <c>/me/profile</c> — and a save that still carries it, under either spelling and whatever
+    /// it holds, is accepted and ignored, because an older PWA sends the whole page back and
+    /// refusing it would lock that club out of every other setting on the page.
     /// </summary>
     [SkippableTheory]
-    [InlineData("actionGlyphs")]
-    [InlineData("action_glyphs")]
-    public async Task The_glyph_set_is_served_and_binds_under_either_spelling(string field)
+    [InlineData("actionGlyphs", "marks")]
+    [InlineData("action_glyphs", "thumbs")]
+    [InlineData("actionGlyphs", "hieroglyphs")]
+    [InlineData("action_glyphs", "")]
+    public async Task The_retired_glyph_set_is_not_served_and_a_save_carrying_it_is_ignored(string field, string value)
     {
         Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
 
         await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
+        var seeded = await SeedAsync(factory, """{"action_glyphs":"marks"}""");
         var client = AdminClient(factory, seeded);
 
-        Assert.Equal("thumbs",
-            (await client.GetFromJsonAsync<JsonElement>(SettingsPath)).GetProperty("action_glyphs").GetString());
+        Assert.False((await client.GetFromJsonAsync<JsonElement>(SettingsPath)).TryGetProperty("action_glyphs", out _));
+        Assert.False((await client.GetFromJsonAsync<JsonElement>(ProfilePath)).TryGetProperty("action_glyphs", out _));
 
         var body = Baseline();
-        body[field] = "marks";
+        body[field] = value;
         Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(SettingsPath, body)).StatusCode);
 
-        Assert.Equal("marks",
-            (await client.GetFromJsonAsync<JsonElement>(SettingsPath)).GetProperty("action_glyphs").GetString());
-
-        // Omitted means unchanged.
-        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync(SettingsPath, Baseline())).StatusCode);
-        Assert.Equal("marks",
-            (await client.GetFromJsonAsync<JsonElement>(SettingsPath)).GetProperty("action_glyphs").GetString());
-    }
-
-    /// <summary>
-    /// Refused rather than coerced, which is what lets the GET render the RESOLVED value
-    /// honestly — the same posture gate_access_policy takes.
-    /// </summary>
-    [SkippableTheory]
-    [InlineData("Thumbs")]
-    [InlineData("emoji")]
-    [InlineData("")]
-    public async Task A_glyph_set_outside_the_closed_pair_is_refused(string value)
-    {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory);
-        var client = AdminClient(factory, seeded);
-
-        var body = Baseline();
-        body["actionGlyphs"] = value;
-        var save = await client.PutAsJsonAsync(SettingsPath, body);
-
-        Assert.Equal(HttpStatusCode.BadRequest, save.StatusCode);
-        Assert.Equal("action_glyphs_invalid",
-            (await save.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
-    }
-
-    /// <summary>
-    /// And a hand-edited nonsense value falls back to thumbs rather than to a button nobody can
-    /// draw — unlike a door policy, this decides an ICON, so failing closed would cost a club a
-    /// screen it cannot use for no safety gained.
-    /// </summary>
-    [SkippableFact]
-    public async Task A_hand_edited_glyph_set_falls_back_rather_than_breaking_the_button()
-    {
-        Skip.IfNot(_pg.Available, "Postgres not configured — set API_BOUNDARY_TEST_CONNECTION_STRING");
-
-        await using var factory = CreateFactory();
-        var seeded = await SeedAsync(factory, """{"action_glyphs":"hieroglyphs"}""");
-        var client = AdminClient(factory, seeded);
-
-        Assert.Equal("thumbs",
-            (await client.GetFromJsonAsync<JsonElement>(SettingsPath)).GetProperty("action_glyphs").GetString());
+        // Ignored, not written: the stored document still holds what it held before the save.
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MainframeDbContext>();
+        var stored = JsonNode.Parse((await db.TenantSettings.IgnoreQueryFilters()
+            .SingleAsync(t => t.TenantId == seeded.TenantId)).SettingsJson)!;
+        Assert.Equal("marks", stored["action_glyphs"]!.GetValue<string>());
+        Assert.False((await client.GetFromJsonAsync<JsonElement>(SettingsPath)).TryGetProperty("action_glyphs", out _));
     }
 }

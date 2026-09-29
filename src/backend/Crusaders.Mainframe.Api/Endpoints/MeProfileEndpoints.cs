@@ -44,18 +44,12 @@ public static class MeProfileEndpoints
                 top_up_credits_per_zar = tariff.TopUpRate,
                 peak_priority = tariff.PeakPriority,
 
-                // GOAL item 12: which glyph pair this club's confirm/decline buttons wear. Here
-                // rather than on a settings route because this is the one club-wide value a
-                // MEMBER needs and the settings surface is admin-only. It is their own club's by
-                // construction — the accessor resolves the tenant from the caller's own token, so
-                // there is no id a member could supply to read another club's.
-                action_glyphs = ActionGlyphs.For(clubSettings),
-
-                // The club's money symbol, on this payload for exactly the same two reasons —
-                // a member needs it (the top-up screens are theirs) and the settings surface is
-                // admin-only — and safe for the same third: it is resolved from the caller's own
-                // token, so no member can ask for another club's. The alternative, a second
-                // endpoint for one string, would be a round trip on the first paint.
+                // The club's money symbol, on this payload because it is the one club-wide
+                // value a MEMBER needs (the top-up screens are theirs) and the settings surface
+                // is admin-only. It is their own club's by construction — the accessor resolves
+                // the tenant from the caller's own token, so no member can ask for another
+                // club's. The alternative, a second endpoint for one string, would be a round
+                // trip on the first paint. (action_glyphs rode here until P10 retired it.)
                 currency_symbol = CurrencySymbol.For(clubSettings),
 
                 // The club's IANA zone. This payload is read at every app start, so the client

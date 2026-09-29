@@ -192,13 +192,8 @@ public static class AdminConfigEndpoints
                 walk_up_honours_day_cap = defaults.WalkUpHonoursDayCap,
                 member_groups_enabled = defaults.MemberGroupsEnabled,
 
-                // GOAL item 12. Rendered from the RESOLVED value, like operating_hours and
-                // gate_access_policy: a settings page that showed a glyph set the product does
-                // not draw would report a choice that is not in force.
-                action_glyphs = ActionGlyphs.For(defaults),
-
                 // The club's money symbol. Rendered from the RESOLVED value, like
-                // action_glyphs and gate_access_policy: a settings page that showed a symbol
+                // operating_hours and gate_access_policy: a settings page that showed a symbol
                 // the product will not print would report a choice that is not in force.
                 currency_symbol = CurrencySymbol.For(defaults),
 
@@ -309,13 +304,6 @@ public static class AdminConfigEndpoints
 
             var codesError = ValidateMemberCodeSettings(req);
             if (codesError is not null) return Results.BadRequest(new { error = codesError });
-
-            // Refused rather than coerced, which is what lets the READ side above render the
-            // resolved value honestly — the same posture gate_access_policy takes.
-            if (req.EffectiveActionGlyphs is { } glyphs && !ActionGlyphs.IsKnown(glyphs.Trim()))
-            {
-                return Results.BadRequest(new { error = "action_glyphs_invalid", valid = ActionGlyphs.All });
-            }
 
             // Refused rather than coerced, on the same argument. A club that types an essay
             // into the symbol box is told so, rather than saving and silently getting an R.
@@ -1186,7 +1174,6 @@ public static class AdminConfigEndpoints
         if (req.EffectiveRealtimeFallbackAfterFailures is { } failures) doc["realtime_fallback_after_failures"] = ToElement(failures);
         if (req.EffectiveRealtimeFallbackWindowSeconds is { } window) doc["realtime_fallback_window_seconds"] = ToElement(window);
         if (req.EffectiveRealtimePollSecondsWallet is { } poll) doc["realtime_poll_seconds_wallet"] = ToElement(poll);
-        if (req.EffectiveActionGlyphs is { } glyphs) doc[ActionGlyphs.Key] = ToElement(glyphs.Trim());
         if (req.EffectiveCurrencySymbol is { } symbol) doc[CurrencySymbol.Key] = ToElement(symbol.Trim());
     }
 
@@ -1597,6 +1584,11 @@ public sealed record UpdateSettingsRequest(
     [property: JsonPropertyName("realtime_fallback_after_failures")] int? RealtimeFallbackAfterFailuresSnake = null,
     [property: JsonPropertyName("realtime_fallback_window_seconds")] int? RealtimeFallbackWindowSecondsSnake = null,
     [property: JsonPropertyName("realtime_poll_seconds_wallet")] int? RealtimePollSecondsWalletSnake = null,
+    /// <summary>
+    /// RETIRED (P10) — the thumbs/marks glyph choice the PWA no longer draws. Still bound, and
+    /// ignored whatever it holds, so an older PWA that sends it back with the rest of the page
+    /// saves the page instead of being refused for a setting that no longer exists.
+    /// </summary>
     string? ActionGlyphs = null,
     [property: JsonPropertyName("action_glyphs")] string? ActionGlyphsSnake = null,
     string? CurrencySymbol = null,
@@ -1614,9 +1606,6 @@ public sealed record UpdateSettingsRequest(
     /// </summary>
     [property: JsonPropertyName("member_code_manual_hold")] bool? MemberCodeManualHold = null)
 {
-    /// <summary>The glyph set the club asked for, under either spelling.</summary>
-    public string? EffectiveActionGlyphs => ActionGlyphs ?? ActionGlyphsSnake;
-
     /// <summary>The money symbol the club asked for, under either spelling.</summary>
     public string? EffectiveCurrencySymbol => CurrencySymbol ?? CurrencySymbolSnake;
 

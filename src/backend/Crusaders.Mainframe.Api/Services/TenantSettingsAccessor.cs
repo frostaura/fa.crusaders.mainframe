@@ -186,10 +186,6 @@ public sealed class TenantSettingsAccessor
             WalkUpHonoursDayCap = TryBool(root, "walk_up_honours_day_cap", false),
             MemberGroupsEnabled = TryBool(root, "member_groups_enabled", true),
 
-            // GOAL item 12's glyph set. Read RAW, like every other key; ActionGlyphs is what
-            // decides what an unrecognised stored value means.
-            ActionGlyphs = TryString(root, ActionGlyphs.Key, ActionGlyphs.Thumbs),
-
             // The club's money symbol. Read RAW for the same reason; CurrencySymbol is what
             // decides what an unprintable stored value means. It governs RAND only — the
             // reasoning, and the incident behind it, are in that file.
@@ -732,13 +728,6 @@ public sealed record TenantSettingsView(
     /// </para>
     /// </summary>
     public bool MemberGroupsEnabled { get; init; } = true;
-
-    /// <summary>
-    /// Which glyph pair a confirm/decline button wears — <c>thumbs</c> or <c>marks</c>. Read via
-    /// <see cref="Services.ActionGlyphs.For"/>, which is where an unrecognised stored value is
-    /// decided rather than obeyed.
-    /// </summary>
-    public string ActionGlyphs { get; init; } = Services.ActionGlyphs.Thumbs;
 
     /// <summary>
     /// The symbol the club's REAL MONEY figures wear — <c>R</c>, <c>R$</c>, <c>CHF</c>. Read via

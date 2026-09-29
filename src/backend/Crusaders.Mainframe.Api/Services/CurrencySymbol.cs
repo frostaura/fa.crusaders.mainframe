@@ -39,9 +39,9 @@ namespace Crusaders.Mainframe.Api.Services;
 /// </para>
 ///
 /// <para>
-/// Unrecognised values fall back to the default rather than failing closed, on the same
-/// argument <see cref="ActionGlyphs"/> makes: unlike a door policy this decides a GLYPH. A club
-/// with a typo in this key gets a rand sign and a working screen, not a screen it cannot use.
+/// Unrecognised values fall back to the default rather than failing closed: unlike a door
+/// policy this decides a GLYPH. A club with a typo in this key gets a rand sign and a working
+/// screen, not a screen it cannot use.
 /// </para>
 /// </summary>
 public static class CurrencySymbol
