@@ -1,8 +1,8 @@
 ---
 name: crusaders-mainframe-gotchas-frontend
-description: "React and browser-harness traps: renderPage(<StrictMode>…) is INERT, user-event's keyboard path hangs under jsdom 28, only the repo's own Chromium registers a service worker, and a worktree serves no webfonts so layout tests measure the wrong typeface."
+description: "React and harness traps: renderPage(<StrictMode>…) is INERT, user-event typing hangs under jsdom 28, only the repo's Chromium registers a SW, worktrees serve no webfonts, lazy chunks race tests, Select.Value drops className."
 type: gotcha
-last_verified: 2026-09-23
+last_verified: 2026-09-29
 ---
 
 # Gotchas — frontend, vitest and the browser harness
@@ -13,11 +13,9 @@ last_verified: 2026-09-23
   Measured with a probe: bare `render(<StrictMode><Probe/></StrictMode>)` logs mount → cleanup →
   mount; the wrapped form logs only "mount". **The working form is the render OPTION:**
   `renderPage(ui, { reactStrictMode: true })`, which RTL applies outside its wrapper.
-- **StrictMode's mount → cleanup → mount has produced two real defects here that unit tests could
-  not see** — a `mounted` ref written only on cleanup is already false before the first click, which
-  left a confirm button stuck on "Working…" after a successful booking (the founder reported it)
-  and, later, an outage screen's retry button dead for the life of the tab. A test that renders the
-  component without StrictMode cannot reproduce either.
+- **StrictMode's mount → cleanup → mount has produced two real defects unit tests could not see**:
+  a `mounted` ref written only on cleanup is false before the first click — a confirm stuck on
+  "Working…" after a booking, and an outage screen's retry dead for the life of the tab.
 - **`@testing-library/user-event`'s keyboard and typing paths never settle under jsdom 28 +
   vitest 4 here.** `user.type()` / `user.keyboard()` hang to the test timeout and read as a
   component ignoring input. `user.click` is fine. Use `fireEvent.change` / `fireEvent.keyDown`
@@ -33,10 +31,8 @@ last_verified: 2026-09-23
   another. `PLAYWRIGHT_CHROMIUM_PATH` is read by `playwright.config.ts`; without it
   `npx playwright test` cannot launch on this Mac, because the cached revision and the one
   Playwright wants differ.
-- **Playwright refuses a browser revision it did not pin**, so a CI runner that already ships
-  Chromium is unusable unless `executablePath` points at it — otherwise every run re-downloads
-  hundreds of megabytes to get a build differing by a revision number. The same config key handles
-  it and is a no-op when unset.
+- **Playwright refuses a browser revision it did not pin**; the same `executablePath` key lets a CI
+  runner use the Chromium it ships (a no-op when unset).
 - **vitest has no `localStorage` under Node ≥25 + jsdom 28** — jsdom defers to Node's flag-gated
   built-in, which is undefined without the flag. An in-memory `Storage` polyfill in the frontend
   test setup file covers it; **keep it if that file is ever rewritten**, or the app test fails on
@@ -50,12 +46,14 @@ last_verified: 2026-09-23
   run and failed on CI. `server.fs.allow` in `vite.config.ts` names the resolved path;
   **do not "simplify" it away.**
 - **Text directly inside a flex container cannot be made to shrink.** It becomes an ANONYMOUS
-  flex item no selector can reach, so `min-width: auto` floors it at min-content — the whole of
-  an unbroken word — and `break-words` on the container never breaks anything. `min-w-0` on the
-  parent does not help: wrap the children in a real element and put `min-w-0 break-words`
-  there. `Badge` in `components/Button.tsx` carries the working shape.
-- **Accessibility defects hide in hand-rolled primitives.** Tests written against existing
-  components found a confirm button whose accessible name was every copy of its label concatenated,
-  and a settings `Field` rendering a label with no `htmlFor`, leaving every input on that page
-  unlabelled. The primitives are hand-rolled here by omission, not by design — see
-  [`watch.md`](watch.md).
+  flex item floored at min-content; `min-w-0` on the parent does not help. Wrap the children in
+  a real element with `min-w-0 break-words` — `ui/badge.tsx` carries the working shape.
+- **Radix `Select.Value` silently drops `className` and `style`**, and a parent rule like
+  `[&>span]:line-clamp-1` hits ANY child span: it turned TimeSelect's clock + value row into a
+  `-webkit-box` and stacked the clock above the time (P10). `ui/select`'s `SelectValue` wraps the
+  Radix value in its own clamped span; clamp there, never on the trigger's children.
+- **A lazily loaded chunk races every test that opens it** (P10: routes, the date picker's
+  calendar). `findBy` waits 1 s and a cold import under a loaded runner (load 45) took longer
+  than the 5 s test timeout — so a suite that opens a lazy part imports that module at the top
+  (the module cache makes the lazy load instant); an e2e waits for the part before counting.
+  Guards that read `App.tsx` as text must accept `<Lazy><Page /></Lazy>` and `lazy(`/`named(`.

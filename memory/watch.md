@@ -2,7 +2,7 @@
 name: crusaders-mainframe-watch
 description: "Unpaid debts, worst first: .env holds live JWT, database, SMTP and device secrets unencrypted and unbacked-up; the redeploy is manual and nothing checks the stack before it; charge-at-booking is unsigned-off."
 type: watch
-last_verified: 2026-09-11
+last_verified: 2026-09-29
 ---
 
 # Watch list
@@ -10,7 +10,7 @@ last_verified: 2026-09-11
 Ordered by risk. [`safety-relays.md`](safety-relays.md) outranks all of these; the doors have
 their own list, [`watch-doors.md`](watch-doors.md). Each item is expanded, with the consequence
 of skipping it, in `docs/go-live-checklist.md`. Item 2 was re-checked against `ci.yml` on
-2026-09-19; the rest carry the dates written into them.
+2026-09-19 and item 6 on 2026-09-29; the rest carry the dates written into them.
 
 1. **`.env` holds several classes of live secret, not just the mailbox password.** Re-read
    2026-09-16, **variable names only** — never transcribe a value into a file, a report or a
@@ -49,11 +49,12 @@ of skipping it, in `docs/go-live-checklist.md`. Item 2 was re-checked against `c
    `peripheral_outage`, so the club gives away a court whose lights ran and the ledger looks
    correct. It used to fall on the member, who would have complained; nobody will complain about
    this. Accepted knowingly — a half-built ring that replays a stale activation charges twice.
-6. **The frontend deviation is still unwaivered.** Re-verified 2026-09-16: no `components.json`,
-   no `@radix-ui/*`, no Redux Toolkit — every primitive is hand-rolled, against the parent
-   mandate. **Owner: Dean** — a parent-controlled stack call held at division level, not this
-   repo's to close; the measured cross-repo table is
-   [`../../../memory/frontend-fracture.md`](../../../memory/frontend-fracture.md). Adopt or record
-   a rationale; the primitives having tests is a mitigation and not a waiver.
+6. **Half of the frontend deviation is closed; Redux Toolkit is the half left.** Verified
+   2026-09-29 after P10: `components.json` exists, primitives are shadcn/ui (new-york) on the
+   unified `radix-ui` package in `components/ui/`, icons are Phosphor through one barrel, and the
+   P1 compat shims and `lucide-react` are deleted — the shadcn/Radix half of the mandate is met.
+   State is still React context, **no Redux Toolkit**, unwaivered — **Owner: Dean** (a parent
+   stack call held at division level); adopt or record a rationale. The division's table ([`../../../memory/frontend-fracture.md`](../../../memory/frontend-fracture.md))
+   still shows this repo with no Radix and is owed a re-measure.
 7. **No architecture document exists for the backend.** The specs cover features and the iot
    READMEs the hardware; nothing describes the API's own shape but `Program.cs` and `Endpoints/`.
