@@ -77,3 +77,20 @@ export function CardFooter({ className, ...props }: ComponentProps<"div">) {
     />
   );
 }
+
+/**
+ * A padded card with no parts — the card surface (elevation 1, radius xl) with `p-4 sm:p-6` on
+ * the box itself. For panels that hold free text, notices, feeds and a row of actions rather
+ * than a titled card anatomy (the doors console, the member's door answers, the onboarding
+ * "what's next"), where wrapping everything in `CardContent` would be structure for its own
+ * sake. A titled card uses `Card` and its parts.
+ */
+export function Panel({ className, ...props }: ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="card"
+      className={cn("min-w-0 rounded-xl border border-border bg-bg-surface p-4 text-text-primary shadow-xs sm:p-6", className)}
+      {...props}
+    />
+  );
+}

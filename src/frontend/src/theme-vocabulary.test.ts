@@ -93,8 +93,6 @@ function scan(): Record<string, Rule[]> {
  * A phase that rebuilds a screen removes its entry in the same commit.
  */
 const ALLOW: Record<string, Rule[]> = {
-  "components/Button.tsx": ["arbitrary-spacing"],
-  "components/Card.tsx": ["arbitrary-spacing"],
   "components/ConfirmButton.tsx": ["arbitrary-spacing"],
   "components/Toast.tsx": ["arbitrary-spacing"],
   "components/doors/PrintSheet.tsx": ["arbitrary-spacing"],

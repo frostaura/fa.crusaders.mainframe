@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { Panel as Card } from "./Panel";
+import { Panel as Card } from "../ui/card";
 import { doorMayNotBeReleasingNotice, doorRefusalSpikeNotice } from "../../lib/doorsCopy";
 import { type DoorSignal } from "../../lib/api";
 

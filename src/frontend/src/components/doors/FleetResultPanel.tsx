@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { Panel as Card } from "./Panel";
+import { Panel as Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { relative } from "../../lib/deviceLiveness";
 import {

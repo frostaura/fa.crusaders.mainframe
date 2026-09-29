@@ -1,4 +1,4 @@
-import { StateBlock } from "../StateBlock";
+import { StateBlock } from "../ui/state-block";
 import { clubDayAndClock } from "../../lib/clubClock";
 import { CHANGES_HEADING, CHANGES_UNDELETABLE } from "../../lib/scheduleCopy";
 import type { AdminChangePage } from "../../lib/adminApi";

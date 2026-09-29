@@ -69,3 +69,9 @@ export const MEMBER_DOOR_ACTION_LINK = cn(
   buttonVariants({ variant: "primary" }),
   "!h-auto min-h-touch whitespace-normal py-2 text-center w-full sm:w-auto",
 );
+
+/**
+ * The same wrap rule for a door-page `Button` (the action, not the link): a floor of 44 px, not a
+ * fixed height, and a label that breaks rather than pushing the row sideways at a 32 px root.
+ */
+export const MEMBER_DOOR_BUTTON = "h-auto min-h-touch whitespace-normal py-2 text-center";

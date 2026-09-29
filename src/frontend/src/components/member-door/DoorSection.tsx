@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button } from "../Button";
+import { Button } from "../ui/button";
 import { endpoints, type MemberDoor } from "../../lib/api";
 import type { LastKnown } from "../../lib/lastKnown";
 import { minutesSince } from "../../lib/lastKnown";
@@ -13,6 +13,7 @@ import {
   normaliseDoorsShut,
 } from "../../lib/memberDoorCopy";
 import { SelfDiagnosis } from "./SelfDiagnosis";
+import { MEMBER_DOOR_BUTTON } from "./links";
 import { StandingLine } from "./StandingLine";
 import type { MemberDoorRead } from "./useMemberDoor";
 import { spokenCountdown, useCountdownSeconds } from "./useCountdownSeconds";
@@ -198,7 +199,7 @@ export function DoorSection(props: {
         // PERMANENT, not revealed by a refusal. An unknown or malformed token names
         // nobody, so the commonest refusal of all can never arrive by polling — and a
         // page that says nothing is the same dead end wearing better manners.
-        <Button variant="outline" className="w-full" onClick={() => void run()}>
+        <Button variant="outline" block className={MEMBER_DOOR_BUTTON} onClick={() => void run()}>
           {DIAGNOSIS_TRIGGER}
         </Button>
       )}

@@ -264,7 +264,7 @@ describe("FullScreenQr", () => {
   it("keeps Done at a size a cold thumb can find", () => {
     renderHost();
     open();
-    expect(screen.getByRole("button", { name: "Done" }).className).toContain("min-h-11");
+    expect(screen.getByRole("button", { name: "Done" }).className).toContain("min-h-touch");
   });
 
   /** Nineteen tracked monospace characters are wider than a phone once the root font is up. */

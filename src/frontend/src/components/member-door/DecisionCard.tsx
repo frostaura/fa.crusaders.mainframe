@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Card } from "../Card";
-import { Button } from "../Button";
+import { Panel } from "../ui/card";
+import { Button } from "../ui/button";
 import { cn } from "../../lib/utils";
 import { formatCountdown } from "../../lib/countdown";
 import { clubClock } from "../../lib/clubClock";
@@ -21,7 +21,7 @@ import {
   memberCodeOpensDoorNow,
 } from "../../lib/memberDoorCopy";
 import { spokenCountdown, useCountdownSeconds, useMinutesSince } from "./useCountdownSeconds";
-import { MEMBER_DOOR_ACTION_LINK } from "./links";
+import { MEMBER_DOOR_ACTION_LINK, MEMBER_DOOR_BUTTON } from "./links";
 
 /**
  * The member's own last door decision, as advice with one next action.
@@ -260,7 +260,7 @@ export function DecisionCard(props: {
       // A collapsed card is five minutes old and is a record rather than news, so it gets no
       // pin: R3-29 is about the member who has just been refused, not about the one who has
       // had the answer on screen since before they walked round the building.
-      <Card
+      <Panel
         id={DECISION_ANCHOR}
         className={cn("flex flex-wrap items-center justify-between gap-2 py-2", TONE_CHROME[copy.tone])}
         role="status"
@@ -269,15 +269,15 @@ export function DecisionCard(props: {
           <span className={TONE_TEXT[copy.tone]}>{copy.headline}</span>{" "}
           <span className="text-text-muted">{stamp}</span>
         </p>
-        <Button variant="outline" className="px-3 text-xs" onClick={onDismiss}>{DECISION_DISMISS}</Button>
-      </Card>
+        <Button variant="outline" size="sm" onClick={onDismiss}>{DECISION_DISMISS}</Button>
+      </Panel>
     );
   }
 
   return (
     <div ref={setNode}>
     {offScreen && <DecisionPeek headline={copy.headline} tone={copy.tone} />}
-    <Card
+    <Panel
       id={DECISION_ANCHOR}
       className={cn("space-y-3 scroll-mt-20", TONE_CHROME[copy.tone])}
       role="status"
@@ -318,11 +318,11 @@ export function DecisionCard(props: {
       <div className="flex flex-col sm:flex-row gap-3">
         {copy.actions.map((action) => <ActionControl key={action.kind} action={action} />)}
         {refresh && (
-          <Button variant="primary" className="w-full sm:w-auto" onClick={onRefreshCode}>{refresh.label}</Button>
+          <Button variant="primary" className={cn(MEMBER_DOOR_BUTTON, "w-full sm:w-auto")} onClick={onRefreshCode}>{refresh.label}</Button>
         )}
-        <Button variant="outline" className="w-full sm:w-auto" onClick={onDismiss}>{DECISION_DISMISS}</Button>
+        <Button variant="outline" className={cn(MEMBER_DOOR_BUTTON, "w-full sm:w-auto")} onClick={onDismiss}>{DECISION_DISMISS}</Button>
       </div>
-    </Card>
+    </Panel>
     </div>
   );
 }

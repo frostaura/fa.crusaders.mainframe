@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Panel as Card } from "../components/doors/Panel";
+import { Panel as Card } from "../components/ui/card";
 import { Alert } from "../components/Alert";
 import { Button } from "../components/ui/button";
 import { DatePicker } from "../components/ui/date-picker";

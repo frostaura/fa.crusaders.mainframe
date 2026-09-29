@@ -1,6 +1,8 @@
 import { type Locator, type Page } from "@playwright/test";
 import { SESSION_ADMIN, serveApi, signIn, test, expect, type ApiRoute } from "./fixtures";
-import { BUTTON_VARIANT_CLASS } from "../src/components/Button";
+
+/** The design-system button's variants (`components/ui/button.tsx`). */
+const BUTTON_VARIANTS = ["primary", "secondary", "outline", "ghost", "danger", "danger-soft"];
 
 /**
  * B5 / C2 / C3 / C7 — the armed confirm, measured rather than looked at.
@@ -655,7 +657,11 @@ test.describe("under forced colours", () => {
     await open(page, "/admin/settings", 0);
     await expect(page.getByRole("button", { name: "Door gates" })).toBeVisible();
 
-    const variants = Object.entries(BUTTON_VARIANT_CLASS);
+    // Every variant's class string, from the design-system button itself — loaded through the dev
+    // server, which resolves the module the way the app does (a string, so the test runner's own
+    // transform leaves the dynamic import alone).
+    const variants = await page.evaluate<[string, string][]>(`import("/src/components/ui/button.tsx").then(({ buttonVariants }) =>
+      ${JSON.stringify(BUTTON_VARIANTS)}.map((variant) => [variant, buttonVariants({ variant })]))`);
     expect(variants.length, "the variant table is empty — nothing was measured").toBeGreaterThan(0);
 
     // One button per variant, in a real page so the real stylesheet applies, left in place

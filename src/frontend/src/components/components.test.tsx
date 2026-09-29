@@ -13,78 +13,13 @@ import userEvent from "@testing-library/user-event";
  * honest.
  */
 const setup = () => userEvent.setup({ delay: null });
-import { Badge, Button, Input, Label } from "./Button";
-import { Card } from "./Card";
 import { ConfirmButton } from "./ConfirmButton";
 import { DataTable, type DataColumn } from "./DataTable";
-import { Modal } from "./Modal";
 
 /**
- * The hand-rolled primitives.
- *
- * <p>
- * Every one of these is written from scratch — there is no shadcn/ui and no Radix in
- * this repo, which <code>CLAUDE.md</code> records as drift rather than as a decision.
- * That is precisely why they need tests: a library primitive comes with its
- * accessibility behaviour and its edge cases already exercised by somebody else, and
- * these do not.
- * </p>
- *
- * <p>
- * So the assertions here are about the things a component library would have given
- * for free: does the destructive action need two presses, does the modal close on
- * Escape, does the table say something useful when it is empty.
- * </p>
+ * The two composite controls that are ours rather than shadcn's: the two-press ConfirmButton and
+ * the DataTable. The `ui/*` primitives have their own suites in `ui/__tests__/`.
  */
-
-describe("Button", () => {
-  it("calls its handler and can be disabled", async () => {
-    const user = setup();
-    const onClick = vi.fn();
-
-    const { rerender } = render(<Button onClick={onClick}>Save</Button>);
-    await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(onClick).toHaveBeenCalledTimes(1);
-
-    rerender(<Button onClick={onClick} disabled>Save</Button>);
-    await user.click(screen.getByRole("button", { name: "Save" }));
-    // Still once. A disabled button that still fires is how a double-submit charges
-    // a member twice.
-    expect(onClick).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("Input and Label", () => {
-  it("associates a label with its input", async () => {
-    const user = setup();
-    render(
-      <>
-        <Label htmlFor="court">Court number</Label>
-        <Input id="court" />
-      </>,
-    );
-
-    // getByLabelText only finds it if the association is real, which is what a screen
-    // reader depends on.
-    const input = screen.getByLabelText("Court number");
-    await user.type(input, "3");
-    expect(input).toHaveValue("3");
-  });
-});
-
-describe("Badge", () => {
-  it("renders its content", () => {
-    render(<Badge tone="danger">revoked</Badge>);
-    expect(screen.getByText("revoked")).toBeInTheDocument();
-  });
-});
-
-describe("Card", () => {
-  it("renders children and keeps caller classes", () => {
-    render(<Card className="p-5"><p>Inside</p></Card>);
-    expect(screen.getByText("Inside")).toBeInTheDocument();
-  });
-});
 
 describe("ConfirmButton", () => {
   /**
@@ -206,33 +141,6 @@ describe("ConfirmButton", () => {
     const settled = await screen.findByRole("button", { name: "Revoke" });
     expect(settled).toHaveAttribute("aria-busy", "false");
     expect(settled).toBeEnabled();
-  });
-});
-
-describe("Modal", () => {
-  it("closes on Escape", () => {
-    const onClose = vi.fn();
-
-    render(<Modal onClose={onClose} title="Connect"><p>Body</p></Modal>);
-    expect(screen.getByText("Body")).toBeInTheDocument();
-
-    // Escape is the one dismissal every dialog is expected to honour, and the one a
-    // hand-rolled modal most often forgets — leaving a keyboard user with no way out.
-    // fireEvent rather than user.keyboard: user-event's keyboard path never settles
-    // under jsdom 28 + vitest 4 here and the test times out looking like a component
-    // that ignores Escape. The event dispatched is the same one the browser sends.
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(onClose).toHaveBeenCalled();
-  });
-
-  it("restores page scrolling when it goes away", () => {
-    const { unmount } = render(<Modal onClose={() => {}} title="Connect"><p>Body</p></Modal>);
-    expect(document.body.style.overflow).toBe("hidden");
-
-    // A modal that locks the body and does not unlock it leaves the whole app
-    // unscrollable, which reads as a frozen page rather than as a modal bug.
-    unmount();
-    expect(document.body.style.overflow).not.toBe("hidden");
   });
 });
 

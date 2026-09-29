@@ -1,9 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { Button } from "./Button";
+import { Button } from "./ui/button";
 import { ConfirmButton, confirmSubject } from "./ConfirmButton";
-import { glyphKindFor, outcomeClassName, pressClassName, useActionFeedback } from "./useActionFeedback";
-import { CLUB_UI_FALLBACK, ClubUiContext, readActionGlyphSet } from "../lib/clubUi";
+import { glyphKindFor, outcomeClassName, pressClassName, useActionFeedback, type ActionIntent } from "./useActionFeedback";
 
 /** The marks a button shows, by name — never the hidden spinner the primitive keeps for width. */
 const marks = (root: ParentNode) => [...root.querySelectorAll("[data-glyph]")].map((el) => el.getAttribute("data-glyph"));
@@ -12,48 +11,37 @@ const working = (button: HTMLElement) =>
   !button.querySelector('[data-slot="button-pending"]')!.className.includes("opacity-0");
 
 /**
- * Item 12 — the system-wide action feedback theme.
+ * Item 12 — the action feedback theme (`useActionFeedback`), which `ConfirmButton` wears.
  *
  * <p>
- * The tests that matter here are the ones about what the theme does NOT do. It is installed
- * inside two primitives with well over a hundred call sites across four lanes editing in
- * parallel, so the assertions worth having are: a neutral button is byte-identical to what it
- * was, a deletion does not celebrate, the hook renders no live region, and a rejected action
- * reaches a failure phase instead of the console.
+ * The tests that matter are the ones about what the theme does NOT do: a deletion does not
+ * celebrate, nothing is drawn at rest, the hook renders no live region, and a rejected action
+ * reaches a failure phase instead of the console. {@link Themed} is the smallest button that
+ * wears the hook the way `ConfirmButton` does — the design-system `Button` with the hook's
+ * props, classes and mark.
  * </p>
  */
+function Themed({ intent, work, children }: { intent: ActionIntent; work?: () => unknown; children: string }) {
+  const fb = useActionFeedback(intent);
+  const outcome = fb.phase === "success" || fb.phase === "failure" ? fb.glyph : null;
+  return (
+    <Button
+      {...fb.props}
+      variant="secondary"
+      pending={fb.phase === "working"}
+      icon={outcome}
+      className={fb.className}
+      onClick={work ? () => { void fb.run(work); } : undefined}
+    >
+      {children}
+    </Button>
+  );
+}
 
-describe("a neutral button is exactly the button it was", () => {
-  it("renders the same classes with no intent as with intent=neutral", () => {
-    const { container: bare } = render(<Button>Save</Button>);
-    const { container: neutral } = render(<Button intent="neutral">Save</Button>);
-    expect(neutral.querySelector("button")!.className)
-      .toBe(bare.querySelector("button")!.className);
-  });
-
-  it("carries no data-fb, so the e2e count of acting controls stays meaningful", () => {
-    render(<Button>Save</Button>);
-    expect(screen.getByRole("button", { name: "Save" })).not.toHaveAttribute("data-fb");
-  });
-
-  it("draws no mark at all", () => {
-    const { container } = render(<Button intent="neutral">Save</Button>);
-    expect(marks(container)).toEqual([]);
-    // The primitive keeps a spinner in its hidden, width-locking pending layer; that is the only
-    // svg, and it is not on show.
-    expect(container.querySelectorAll("svg")).toHaveLength(1);
-    expect(working(screen.getByRole("button", { name: "Save" }))).toBe(false);
-  });
-});
-
-/**
- * R8 / D5 — the thumbs are retired. A button at rest is its word; the thumbs-up/down that affirm
- * and decline once wore at rest are gone for every club, and the club's `action_glyphs` choice
- * between thumbs and ✓/✕ is read but has no effect.
- */
+/** R8 / D5 — the thumbs are retired. A button at rest is its word, for every club. */
 describe("no glyph at rest (R8)", () => {
   it.each(["affirm", "decline", "destructive"] as const)("an %s button at rest wears no mark", (intent) => {
-    const { container } = render(<Button intent={intent}>Book for 50.00 cr</Button>);
+    const { container } = render(<Themed intent={intent}>Book for 50.00 cr</Themed>);
     expect(marks(container)).toEqual([]);
     // WCAG 2.5.3: the name is the words.
     expect(screen.getByRole("button", { name: "Book for 50.00 cr" })).toBeInTheDocument();
@@ -65,21 +53,6 @@ describe("no glyph at rest (R8)", () => {
       expect(glyphKindFor(intent, "press")).toBeNull();
     }
   });
-
-  it("ignores the club's retired glyph setting: the same button under either value", () => {
-    const under = (actionGlyphs: "thumbs" | "marks") => render(
-      <ClubUiContext.Provider value={{ ...CLUB_UI_FALLBACK, actionGlyphs }}>
-        <Button intent="affirm">Book</Button>
-      </ClubUiContext.Provider>,
-    ).container.innerHTML;
-    expect(under("marks")).toBe(under("thumbs"));
-  });
-
-  /** Still tolerant, so an old payload parses — unknown is the default, never "the other one". */
-  it.each([undefined, null, "", "THUMBS", "check_cross", 1, {}, []])(
-    "still reads %p as the default, and nothing draws from it",
-    (raw) => { expect(readActionGlyphSet(raw)).toBe("thumbs"); },
-  );
 });
 
 describe("a destructive action never celebrates", () => {
@@ -94,9 +67,7 @@ describe("a destructive action never celebrates", () => {
   });
 
   it("shows no tick when a deletion lands", async () => {
-    const { container } = render(
-      <Button intent="destructive" feedbackAnnouncement="Deleted." onAction={() => {}}>Delete</Button>,
-    );
+    const { container } = render(<Themed intent="destructive" work={() => {}}>Delete</Themed>);
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Delete/ })); });
     expect(screen.getByRole("button", { name: /Delete/ })).toHaveAttribute("data-fb", "success");
     expect(marks(container)).toEqual([]);
@@ -128,17 +99,9 @@ describe("a destructive action never celebrates", () => {
 describe("the outcome phases", () => {
   it("passes press -> working -> success", async () => {
     let release: () => void = () => {};
-    render(
-      <Button intent="affirm" feedbackAnnouncement="Saved." onAction={() => new Promise<void>((r) => { release = r; })}>
-        Save
-      </Button>,
-    );
+    render(<Themed intent="affirm" work={() => new Promise<void>((r) => { release = r; })}>Save</Themed>);
     const button = screen.getByRole("button", { name: /Save/ });
     expect(button).toHaveAttribute("data-fb", "rest");
-    // Through the compat shim the pending layer takes no room at rest (B12 widths), and is laid
-    // out only while working — asserted as the class, since jsdom has no layout.
-    const RESTING = "[&_[data-slot=button-pending]]:hidden";
-    expect(button.className).toContain(RESTING);
 
     act(() => { fireEvent.pointerDown(button); });
     expect(button).toHaveAttribute("data-fb", "press");
@@ -148,7 +111,6 @@ describe("the outcome phases", () => {
     expect(button).toHaveAttribute("aria-busy", "true");
     // Working = the spinner, and nothing else (R8).
     expect(working(button)).toBe(true);
-    expect(button.className).not.toContain(RESTING);
     expect(marks(button)).toEqual([]);
 
     await act(async () => { release(); });
@@ -162,7 +124,7 @@ describe("the outcome phases", () => {
   it("ignores a second press while it is working, so the work never runs twice", async () => {
     let release: () => void = () => {};
     const work = vi.fn(() => new Promise<void>((r) => { release = r; }));
-    render(<Button intent="affirm" feedbackAnnouncement="Saved." onAction={work}>Save</Button>);
+    render(<Themed intent="affirm" work={work}>Save</Themed>);
     const button = screen.getByRole("button", { name: /Save/ });
     act(() => { fireEvent.click(button); });
     act(() => { fireEvent.click(button); });
@@ -177,7 +139,7 @@ describe("the outcome phases", () => {
   it("does not stay compressed waiting for a pointerup that never comes", async () => {
     vi.useFakeTimers();
     try {
-      render(<Button intent="affirm">Save</Button>);
+      render(<Themed intent="affirm">Save</Themed>);
       const button = screen.getByRole("button", { name: "Save" });
       act(() => { fireEvent.pointerDown(button); });
       expect(button).toHaveAttribute("data-fb", "press");
@@ -189,11 +151,7 @@ describe("the outcome phases", () => {
   });
 
   it("reaches failure on a rejection rather than letting it reach the button's caller", async () => {
-    render(
-      <Button intent="affirm" feedbackAnnouncement="Saved." onAction={() => Promise.reject(new Error("nope"))}>
-        Save
-      </Button>,
-    );
+    render(<Themed intent="affirm" work={() => Promise.reject(new Error("nope"))}>Save</Themed>);
     const button = screen.getByRole("button", { name: /Save/ });
     await act(async () => { fireEvent.click(button); });
     await waitFor(() => expect(button).toHaveAttribute("data-fb", "failure"));
@@ -240,50 +198,11 @@ describe("the outcome phases", () => {
 });
 
 describe("the theme is not what speaks", () => {
-  it("renders no live region of its own on a themed button with nothing to say", () => {
-    const { container } = render(<Button intent="affirm">Book</Button>);
+  it("renders no live region of its own", () => {
+    const { container } = render(<Themed intent="affirm" work={() => {}}>Book</Themed>);
     expect(container.querySelectorAll("[aria-live]")).toHaveLength(0);
     expect(container.querySelectorAll('[role="status"]')).toHaveLength(0);
     expect(container.querySelectorAll('[role="alert"]')).toHaveLength(0);
-  });
-
-  it("renders exactly one polite region — never a status landmark — when it does speak", async () => {
-    const { container } = render(
-      <Button intent="affirm" feedbackAnnouncement="Saved." onAction={() => {}}>Save</Button>,
-    );
-    expect(container.querySelectorAll("[aria-live]")).toHaveLength(1);
-    // `role="status"` is the same live region plus a landmark. A screen of these would put a
-    // dozen empty landmarks in the tree — `getByRole("status")` on the doors overview once
-    // found eleven.
-    expect(container.querySelectorAll('[role="status"]')).toHaveLength(0);
-
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Save/ })); });
-    expect(container.querySelector("[aria-live]")!.textContent).toBe("Saved.");
-  });
-
-  it("stays silent where something else announces", () => {
-    const { container } = render(
-      <Button intent="affirm" announcedElsewhere onAction={() => {}}>Book</Button>,
-    );
-    expect(container.querySelectorAll("[aria-live]")).toHaveLength(0);
-  });
-
-  /**
-   * A silent visual success is a success a blind member is never told about. This can only
-   * fire on code being written now — `intent` is new and defaults to neutral — which is when
-   * it is a one-line fix rather than a finding in a review.
-   */
-  it("refuses, in development, to do work with no announcer of any kind", () => {
-    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      expect(() => render(<Button intent="affirm" onAction={() => {}}>Book</Button>)).toThrow(/blind member/);
-    } finally {
-      quiet.mockRestore();
-    }
-  });
-
-  it("allows an intent with no work at all — a button that navigates announces nothing", () => {
-    expect(() => render(<Button intent="affirm">Go to the wallet</Button>)).not.toThrow();
   });
 });
 

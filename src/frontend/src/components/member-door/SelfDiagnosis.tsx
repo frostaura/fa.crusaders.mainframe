@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { Card } from "../Card";
-import { Button } from "../Button";
+import { Panel } from "../ui/card";
+import { Button } from "../ui/button";
 import { cn } from "../../lib/utils";
 import {
   DIAGNOSIS_HEADING,
@@ -13,7 +13,7 @@ import {
   buildDiagnosis,
 } from "../../lib/memberDoorCopy";
 import { CopySentence } from "./CopySentence";
-import { MEMBER_DOOR_ACTION_LINK } from "./links";
+import { MEMBER_DOOR_ACTION_LINK, MEMBER_DOOR_BUTTON } from "./links";
 
 /**
  * "The door didn't open" — the self-diagnosis, expanded in place.
@@ -96,10 +96,10 @@ export function SelfDiagnosis(props: {
   const { rows, conclusion } = buildDiagnosis(input);
 
   return (
-    // The focusable wrapper is a plain div rather than the Card: `Card` is a bare
+    // The focusable wrapper is a plain div rather than the Panel: `Panel` is a bare
     // function component that spreads HTMLAttributes, and a ref is not one of those.
     <div ref={container} tabIndex={-1} role="group" aria-label={DIAGNOSIS_HEADING}>
-    <Card className="space-y-3">
+    <Panel className="space-y-3">
       <h2 className="text-base font-medium">{DIAGNOSIS_HEADING}</h2>
       {busy ? (
         // The checklist renders AFTER both reads settle, so it never reports a stale tick.
@@ -116,7 +116,7 @@ export function SelfDiagnosis(props: {
                 screen did not, offered where the member is already looking for an answer
                 rather than behind a checkbox further down the page. */}
             {input.offerMemberCode && onUseMemberCode && (
-              <Button variant="primary" className="w-full sm:w-auto" onClick={onUseMemberCode}>
+              <Button variant="primary" className={cn(MEMBER_DOOR_BUTTON, "w-full sm:w-auto")} onClick={onUseMemberCode}>
                 {USE_MEMBER_CODE_INSTEAD}
               </Button>
             )}
@@ -125,11 +125,11 @@ export function SelfDiagnosis(props: {
                 Book a court
               </Link>
             )}
-            <Button variant="outline" className="w-full sm:w-auto" onClick={onHide}>{DIAGNOSIS_HIDE}</Button>
+            <Button variant="outline" className={cn(MEMBER_DOOR_BUTTON, "w-full sm:w-auto")} onClick={onHide}>{DIAGNOSIS_HIDE}</Button>
           </div>
         </>
       )}
-    </Card>
+    </Panel>
     </div>
   );
 }

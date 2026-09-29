@@ -15,9 +15,9 @@ import {
   offlineDetailsBody,
   standingFailed,
 } from "../../lib/memberDoorCopy";
-import { Button } from "../Button";
+import { Button } from "../ui/button";
 import { cn } from "../../lib/utils";
-import { MEMBER_DOOR_ACTION_LINK, MEMBER_DOOR_LINK_TAPPABLE } from "./links";
+import { MEMBER_DOOR_ACTION_LINK, MEMBER_DOOR_BUTTON, MEMBER_DOOR_LINK_TAPPABLE } from "./links";
 
 /**
  * "What opens the door for you right now" — the standing facts, below the QR.
@@ -121,7 +121,7 @@ export function StandingLine(props: {
         {/* B4 / E-H1: both halves of what a shut door does, and nothing promised. */}
         {line.shutLine && <p className="text-sm text-warning-strong">{line.shutLine}</p>}
         {line.offerMemberCode && onUseMemberCode && (
-          <Button variant="outline" className="w-full sm:w-auto" onClick={onUseMemberCode}>
+          <Button variant="outline" className={cn(MEMBER_DOOR_BUTTON, "w-full sm:w-auto")} onClick={onUseMemberCode}>
             {USE_MEMBER_CODE_INSTEAD}
           </Button>
         )}

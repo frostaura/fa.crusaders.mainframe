@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Button } from "../Button";
+import { Button } from "../ui/button";
 
 /**
  * The code, full-bleed, at the largest area the screen can give it.
@@ -433,7 +433,7 @@ export function FullScreenQr(props: {
         <span>{countdown}</span>
         {hint ? <span>{hint}</span> : null}
       </p>
-      <Button variant="outline" className="shrink-0 min-h-11" onClick={(e) => { e.stopPropagation(); dismiss(); }}>
+      <Button variant="outline" className="shrink-0" onClick={(e) => { e.stopPropagation(); dismiss(); }}>
         Done
       </Button>
     </div>,

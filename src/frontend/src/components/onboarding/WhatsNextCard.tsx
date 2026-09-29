@@ -1,11 +1,11 @@
 import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
-import { CalendarCheck } from "lucide-react";
+import { CalendarCheck } from "../ui/icons";
 import type { MemberDoorBooking } from "../../lib/api";
 import { clubClock } from "../../lib/clubClock";
 import { useCountdownSeconds } from "../member-door/useCountdownSeconds";
-import { Button } from "../Button";
-import { Card } from "../Card";
+import { Button } from "../ui/button";
+import { Panel } from "../ui/card";
 import {
   GUIDE_PATH, WHATS_NEXT_DISMISS, WHATS_NEXT_DISMISS_KEY, WHATS_NEXT_MORE, WHATS_NEXT_TITLE,
   whatsNextSteps,
@@ -105,9 +105,9 @@ export function WhatsNextCard({ booking, timezone, doors, unlockSeconds }: Whats
   );
 
   return (
-    <Card className="space-y-3 border-l-4 border-accent-strong">
+    <Panel className="space-y-3 border-l-4 border-accent-strong">
       <h2 className="flex items-center gap-2 text-base font-medium">
-        <CalendarCheck size={18} className="shrink-0 text-accent-strong" aria-hidden="true" />
+        <CalendarCheck size={20} className="shrink-0 text-accent-strong" aria-hidden="true" />
         {WHATS_NEXT_TITLE}
       </h2>
       {/* An ordered list with real list items, because a stepper is a list. No `aria-current`,
@@ -121,9 +121,7 @@ export function WhatsNextCard({ booking, timezone, doors, unlockSeconds }: Whats
         ))}
       </ol>
       <div className="flex flex-wrap gap-3">
-        {/* `affirm`: "Got it" acknowledges the steps, it does not refuse them. A thumbs-down
-            under a list of instructions reads as "no, I don't want to know". */}
-        <Button intent="affirm" variant="outline" onClick={dismiss} className="w-full sm:w-auto">{WHATS_NEXT_DISMISS}</Button>
+        <Button variant="outline" onClick={dismiss} className="w-full sm:w-auto">{WHATS_NEXT_DISMISS}</Button>
         <Link
           to={GUIDE_PATH}
           className="inline-flex min-h-11 items-center text-sm text-accent-strong underline underline-offset-2 hover:no-underline"
@@ -131,6 +129,6 @@ export function WhatsNextCard({ booking, timezone, doors, unlockSeconds }: Whats
           {WHATS_NEXT_MORE}
         </Link>
       </div>
-    </Card>
+    </Panel>
   );
 }

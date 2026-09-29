@@ -27,14 +27,14 @@ import { expect, serveApi, SESSION_ADMIN, signIn, test } from "./fixtures";
  * whose <code>node_modules</code> resolves outside Vite's serving root, so the dev server
  * answers 403 for every Figtree file and the browser falls back to the platform sans. Measuring
  * a label against a font the product does not ship would make this spec agree with itself and
- * with nothing else, so the real Figtree 400 is injected from the package the app builds
- * against. On a normal checkout Vite serves the identical face and this declaration is a
+ * with nothing else, so the real Figtree variable face is injected from the package the app
+ * builds against. On a normal checkout Vite serves the identical face and this declaration is a
  * harmless duplicate.
  * </p>
  */
 
-const FIGTREE_400 = readFileSync(
-  new URL("../node_modules/@fontsource/figtree/files/figtree-latin-400-normal.woff2", import.meta.url),
+const FIGTREE = readFileSync(
+  new URL("../node_modules/@fontsource-variable/figtree/files/figtree-latin-wght-normal.woff2", import.meta.url),
 ).toString("base64");
 
 /**
@@ -63,7 +63,7 @@ async function openReports(page: Parameters<typeof serveApi>[0]) {
 
   await page.goto("/reports");
   await page.addStyleTag({
-    content: `@font-face{font-family:'Figtree';font-style:normal;font-weight:400;font-display:block;src:url(data:font/woff2;base64,${FIGTREE_400}) format('woff2');}`,
+    content: `@font-face{font-family:'Figtree Variable';font-style:normal;font-weight:300 900;font-display:block;src:url(data:font/woff2;base64,${FIGTREE}) format('woff2');}`,
   });
   await page.evaluate(() => document.fonts.ready);
   // The frames render only once they have been measured, and the axis relays out when the

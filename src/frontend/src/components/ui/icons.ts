@@ -137,3 +137,4 @@ export { TargetIcon, TargetIcon as Target } from "@phosphor-icons/react/dist/csr
 export { PauseIcon, PauseIcon as Pause } from "@phosphor-icons/react/dist/csr/Pause";
 export { SunHorizonIcon, SunHorizonIcon as SunHorizon } from "@phosphor-icons/react/dist/csr/SunHorizon";
 export { MoonStarsIcon, MoonStarsIcon as MoonStars } from "@phosphor-icons/react/dist/csr/MoonStars";
+export { CalendarCheckIcon, CalendarCheckIcon as CalendarCheck } from "@phosphor-icons/react/dist/csr/CalendarCheck";

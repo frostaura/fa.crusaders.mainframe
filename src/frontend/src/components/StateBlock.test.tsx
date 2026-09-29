@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { StateBlock } from "./StateBlock";
+import { StateBlock } from "./ui/state-block";
 import { ApiError, NetworkError } from "../lib/api";
 
 /**

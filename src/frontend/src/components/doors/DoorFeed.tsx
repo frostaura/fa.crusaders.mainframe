@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Panel as Card } from "./Panel";
+import { Panel as Card } from "../ui/card";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
 import { DoorFeedRow } from "./DoorFeedRow";

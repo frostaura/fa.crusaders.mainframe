@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Panel as Card } from "../components/doors/Panel";
+import { Panel as Card } from "../components/ui/card";
 import { Alert } from "../components/Alert";
 import { Button } from "../components/ui/button";
 import { PageHeader, PageShell } from "../components/ui/page-shell";
