@@ -40,10 +40,9 @@ gate failures: [`gotchas-env.md`](gotchas-env.md).
   output varies by version and an OS build lets CI reject correctly-formatted code.
 - **`-Wswitch-enum` is not satisfied by a `default:` label** — it silences the one warning that
   catches a new enum member; name every case and put the fallback after the brace.
-- **`make lint-backend` runs in CI since P10**, after 17 migrations rotted it: `dotnet ef migrations
-  add` writes a BOM (`error CHARSET`) — strip it from the new `.cs` (`.Designer.cs` is exempt).
-  Run it locally WITHOUT `MSBuildEnableWorkloadResolver=false`, or it exits 2 printing no finding.
-  It checks the API project only; the Tests project has ~700 findings.
+- **`dotnet format` runs in CI since P10** (a migration's BOM is `error CHARSET`; strip it). Locally
+  run it as CI does — `--no-restore`: a failed restore also exits non-zero with NO finding, so a red
+  run proves nothing until you read the output. API project only (Tests has ~700 findings).
 - **A *fresh remote* session has no `dotnet` and no `pio`** — install the .NET 10 SDK and the pinned
   iot requirements first. Postgres starts without Docker from the distro's `postgresql/16/bin`;
   the local superuser is **`crusaders`**, and `pg_ctl` refuses to run as root.
