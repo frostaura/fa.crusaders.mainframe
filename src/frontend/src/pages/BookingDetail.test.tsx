@@ -57,6 +57,14 @@ describe("booking detail — the organiser's view", () => {
     expect(money).not.toHaveTextContent(/debt|owe/i);
   });
 
+  it("R1 F2.2: 'Shares not paid yet' is the server's unpaid figure — open link seats included (contract §4)", async () => {
+    // Alex (member, 25) and the open seat (25) are both unpaid: the server says 50, and so does the page.
+    serve({ detail: detail({ money: { ...detail().money, unpaid_credits: 50 } }) });
+    renderDetail();
+    const money = await screen.findByRole("region", { name: DETAIL_MONEY.title });
+    expect(within(money).getByText(DETAIL_MONEY.stillToCome).nextSibling).toHaveTextContent("50.00 cr");
+  });
+
   it("marks who has checked in, per seat and in total", async () => {
     serve({ detail: detail({
       players: [seat({ checked_in_at: "2026-09-30T15:58:00Z" }), SAM_SEAT, ALEX_SEAT, OPEN_SEAT],

@@ -151,6 +151,10 @@ export type BookingDetail = {
     organiser_owed_credits: number;
     shares_received_credits: number;
     organiser_net_credits: number;
+    /**
+     * Every seat still owing, INCLUDING open link seats nobody has claimed yet (R1 contract §4).
+     * The page shows this figure as it is — never a sum of the member seats it can see.
+     */
     unpaid_credits: number;
     share_deadline: string;
     is_split: boolean;
