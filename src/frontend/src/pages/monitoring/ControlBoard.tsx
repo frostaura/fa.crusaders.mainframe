@@ -170,7 +170,7 @@ export function ControlBoardPage() {
         // Only when there is nothing at all to fall back on. With tiles in hand the band
         // above has already said what is wrong, and StateBlock would replace them with it.
         error={courts.length > 0 ? null : error}
-        action="the club's courts"
+        action="read the club's courts"
         failedCaveat="Nothing here is being updated while that is true."
         onRetry={() => void manual.run()}
         empty={!loading && !error && courts.length === 0}

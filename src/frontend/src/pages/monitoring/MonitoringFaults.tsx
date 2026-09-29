@@ -298,7 +298,7 @@ function FaultBoards(props: FaultBoardsProps) {
     <StateBlock
       loading={read.loading}
       error={read.rows.length > 0 ? null : read.error}
-      action="the fault list"
+      action="read the fault list"
       failedCaveat="That does not mean there are none."
       onRetry={onRetry}
       empty={!read.loading && !read.error && read.rows.length === 0}

@@ -94,9 +94,10 @@ describe("the list", () => {
 
     await screen.findByText(/That does not mean the club has none\./);
     expect(screen.queryByText("No repeating bookings yet.")).not.toBeInTheDocument();
-    // And no retry: `isDeploymentFault` treats a 5xx as something the reader cannot act on,
-    // so offering "Try again" here would be inviting an admin to press a button forever.
-    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    // A plain 500 is transient (review round 1, F4.4): the sentence says "try again shortly",
+    // so the button to do it is there. And the sentence has its verb (F3.19).
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.getByText(/^Couldn't read the club's repeating bookings/)).toBeInTheDocument();
   });
 
   it("does not claim a series has finished because the next date is missing", async () => {

@@ -357,7 +357,7 @@ export default function AdminWebhooksPage() {
         <CardContent>
           {loadError ? <ListFailed error={loadError} retrying={loading} onRetry={retry} /> : null}
           <StateBlock
-            action="the webhook endpoints"
+            action="read the webhook endpoints"
             loading={!loadError && loading && list.length === 0}
             skeleton={<div className="flex flex-col gap-3">{[0, 1].map((i) => <Skeleton key={i} className="h-20 w-full" />)}</div>}
             empty={!loadError && list.length === 0}

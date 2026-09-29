@@ -174,7 +174,7 @@ export function AdminSchedulesPage() {
         <StateBlock
           loading={loading}
           error={error}
-          action="the club's repeating bookings"
+          action="read the club's repeating bookings"
           codes={codes}
           failedCaveat={LIST_FAILED_CAVEAT}
           onRetry={load}

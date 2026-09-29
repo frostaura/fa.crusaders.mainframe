@@ -142,7 +142,7 @@ export function AdminChangeRecordPage() {
       <StateBlock
         loading={loading}
         error={error}
-        action="the change record"
+        action="read the change record"
         failedCaveat="That does not mean nothing happened."
         onRetry={() => void manual.run()}
         empty={!loading && !error && rows.length === 0}

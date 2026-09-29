@@ -378,7 +378,7 @@ export function AdminScheduleDetailPage() {
         <StateBlock
           loading={scheduleRead.loading}
           error={scheduleRead.error}
-          action="this repeating booking"
+          action="read this repeating booking"
           codes={codes}
           onRetry={reloadSchedule}
           skeleton={<DetailSkeleton />}
@@ -421,7 +421,7 @@ export function AdminScheduleDetailPage() {
         <StateBlock
           loading={occurrencesRead.loading}
           error={occurrencesRead.error}
-          action="the dates this holds"
+          action="read the dates this holds"
           codes={codes}
           failedCaveat="That does not mean it holds none."
           onRetry={reloadOccurrences}

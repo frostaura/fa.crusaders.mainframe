@@ -193,7 +193,7 @@ export default function AdminLedgerPage() {
       <StateBlock
         loading={loading && rows === null}
         error={loadError}
-        action="those movements"
+        action="read those movements"
         failedCaveat="Check the dates and try again."
         onRetry={() => void load()}
         skeleton={<TableSkeleton rows={6} />}

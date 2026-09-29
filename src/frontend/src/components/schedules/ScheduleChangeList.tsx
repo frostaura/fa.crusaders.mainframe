@@ -43,7 +43,7 @@ export function ScheduleChangeList({
       <StateBlock
         loading={loading}
         error={error}
-        action="this repeating booking's change record"
+        action="read this repeating booking's change record"
         failedCaveat="That does not mean nothing has been changed."
         onRetry={onRetry}
         empty={!loading && !error && rows.length === 0}

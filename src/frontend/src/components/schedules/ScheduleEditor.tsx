@@ -244,7 +244,7 @@ export function ScheduleEditor({
       <StateBlock
         loading={setupLoading}
         error={setupError}
-        action="the club's courts and settings"
+        action="read the club's courts and settings"
         failedCaveat="Nothing can be held until they can be read."
         onRetry={() => setSetupNonce((n) => n + 1)}
         skeleton={<EditorSkeleton />}

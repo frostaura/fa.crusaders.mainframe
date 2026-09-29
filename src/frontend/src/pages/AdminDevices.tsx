@@ -1120,7 +1120,7 @@ export function AdminDevicesPage() {
         <StateBlock
           loading={loading}
           error={loadError}
-          action="the club's boards"
+          action="read the club's boards"
           failedCaveat="That does not mean none have called in."
           onRetry={() => void retryLoad()}
           /* A club may own only doors: a gate registers itself on this list exactly as a box

@@ -319,7 +319,7 @@ function NightResult(props: {
     <StateBlock
       loading={loading}
       error={error}
-      action="that night"
+      action="read that night"
       // The one sentence most designs leave out. The server writes its audit row on a
       // 200, so a failed read that still claimed "opening this is recorded" would make
       // the notice above a lie about the only thing this surface promises.
